@@ -7,6 +7,7 @@ on:
       - Dockerfile
       - docker-compose.yml
       - pyproject.toml
+      - uv.lock
       - tools/verify_docker_integration.sh
       - src/frame_compare/render/**
       - src/frame_compare/vs/**

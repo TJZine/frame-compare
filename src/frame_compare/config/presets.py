@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 import tomli_w
 from pydantic import ValidationError
@@ -17,12 +17,10 @@ from frame_compare.config.errors import (
     PresetNameInvalidError,
     PresetNotFoundError,
 )
+from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.utils import deep_merge
 from frame_compare.errors import normalize_pydantic_errors
 from frame_compare.utils.atomic_write import write_text_atomic
-
-if TYPE_CHECKING:
-    from frame_compare.config.schema import ConfigSchema
 
 DEFAULT_PRESETS_DIR = Path("config/presets")
 
@@ -102,8 +100,6 @@ def apply_preset(
     merged with the config. Missing optional keys (excluded due to None) are
     filled with schema defaults during validation.
     """
-    from frame_compare.config.schema import ConfigSchema
-
     preset_data = load_preset(preset_name, presets_dir=presets_dir)
     base_dict = config.model_dump()
     merged = deep_merge(base_dict, preset_data)

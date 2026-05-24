@@ -2,6 +2,7 @@ import typing
 from pathlib import Path
 
 from frame_compare.render.types import (
+    BatchRenderOptions,
     EncoderSettings,
     OverlayConfig,
     OverlayMode,
@@ -88,3 +89,11 @@ def test_screenshot_result_creation() -> None:
 
 def test_renderer_literal_values() -> None:
     assert typing.get_args(Renderer) == ("vapoursynth", "ffmpeg", "auto")
+
+
+def test_batch_render_options_defaults() -> None:
+    options = BatchRenderOptions()
+    assert options.renderer == "auto"
+    assert options.overlay_mode == OverlayMode.STANDARD
+    assert options.reporter is None
+    assert options.ffmpeg_runner is None

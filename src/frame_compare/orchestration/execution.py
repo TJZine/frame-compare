@@ -7,6 +7,10 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from functools import partial
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from frame_compare.vs.loader import VSLoader
 
 import httpx
 
@@ -26,13 +30,23 @@ from frame_compare.orchestration.phase_tasks import (
 )
 from frame_compare.orchestration.phases import Phase
 from frame_compare.orchestration.types import (
+    AlignPhaseOutput,
+    AnalyzePhaseOutput,
+    DoviPhaseOutput,
     ExecutionPhasePlan,
     ExecutionState,
+    FramePlanPhaseOutput,
+    MetadataPhaseOutput,
+    MetadataPrefetch,
+    PhaseOutput,
     PrepState,
+    PublishPhaseOutput,
+    RenderPhaseOutput,
+    ReportPhaseOutput,
     RunDependencies,
     RunRequest,
 )
-from frame_compare.render.ffmpeg import FFmpegRunner
+from frame_compare.render.backend.ffmpeg import FFmpegRunner
 from frame_compare.utils.types import WorkspacePaths
 
 __all__ = [
@@ -48,7 +62,8 @@ def _create_timed_phase(
     name: str,
     timing_key: str,
     skip_condition: Callable[[ConfigSchema], bool] | None,
-    executor: Callable[[RunContext], None | Awaitable[None]],
+    executor: Callable[[RunContext], PhaseOutput | Awaitable[PhaseOutput]],
+    state: ExecutionState,
     clock: Callable[[], datetime],
     phase_timings: dict[str, float],
     warnings: list[str],
@@ -61,7 +76,10 @@ def _create_timed_phase(
         try:
             maybe_awaitable = executor(ctx)
             if inspect.isawaitable(maybe_awaitable):
-                await maybe_awaitable
+                output = await maybe_awaitable
+            else:
+                output = maybe_awaitable
+            _apply_phase_output(ctx=ctx, state=state, output=output)
         except Exception as exc:
             if warn_only:
                 warnings.append(f"{name}: {exc}")
@@ -80,6 +98,29 @@ def _create_timed_phase(
     )
 
 
+def _apply_phase_output(*, ctx: RunContext, state: ExecutionState, output: PhaseOutput) -> None:
+    if isinstance(output, FramePlanPhaseOutput):
+        state.selected_frames[:] = output.selected_frames
+    elif isinstance(output, AnalyzePhaseOutput):
+        state.selected_frames[:] = output.selected_frames
+        state.artifacts.metrics_cache_hit = output.metrics_cache_hit
+        ctx.selection_breakdown = output.selection_breakdown
+    elif isinstance(output, AlignPhaseOutput):
+        ctx.reference = output.reference
+        ctx.comparisons = output.comparisons
+        state.selected_frames[:] = output.selected_frames
+    elif isinstance(output, RenderPhaseOutput):
+        state.artifacts.render = output.render
+    elif isinstance(output, MetadataPhaseOutput):
+        state.artifacts.resolved_metadata = output.resolved_metadata
+    elif isinstance(output, DoviPhaseOutput):
+        state.warnings.append(output.warning)
+    elif isinstance(output, PublishPhaseOutput):
+        state.artifacts.slowpics_url = output.slowpics_url
+    else:
+        state.artifacts.report_path = output.report_path
+
+
 def build_phases_before_align(
     *,
     request: RunRequest,
@@ -87,13 +128,15 @@ def build_phases_before_align(
     state: ExecutionState,
     input_videos: list[Path],
     workspace: WorkspacePaths,
+    vs_loader: VSLoader | None = None,
 ) -> list[Phase]:
     return [
         _create_timed_phase(
             "frame_plan",
             "frame_plan",
             None,
-            partial(select_initial_frame_plan, selected_frames=state.selected_frames),
+            select_initial_frame_plan,
+            state=state,
             clock=clock,
             phase_timings=state.phase_timings,
             warnings=state.warnings,
@@ -106,9 +149,9 @@ def build_phases_before_align(
                 run_analyze_phase,
                 input_videos=input_videos,
                 workspace=workspace,
-                selected_frames=state.selected_frames,
-                artifacts=state.artifacts,
+                vs_loader=vs_loader,
             ),
+            state=state,
             clock=clock,
             phase_timings=state.phase_timings,
             warnings=state.warnings,
@@ -120,6 +163,7 @@ def build_phases_before_align(
             "align",
             lambda config: not config.audio_alignment.enable,
             partial(run_align_phase, selected_frames=state.selected_frames),
+            state=state,
             clock=clock,
             phase_timings=state.phase_timings,
             warnings=state.warnings,
@@ -135,8 +179,24 @@ def build_phases_after_align(
     ffmpeg_runner: FFmpegRunner,
     http_client: httpx.AsyncClient | None,
     state: ExecutionState,
-    metadata_prefetched: bool,
+    metadata_prefetch: MetadataPrefetch,
 ) -> list[Phase]:
+    async def _run_publish_with_current_artifacts(ctx: RunContext) -> PublishPhaseOutput:
+        return await run_publish_phase(
+            ctx,
+            client=http_client,
+            metadata=state.artifacts.resolved_metadata,
+        )
+
+    def _run_report_with_current_artifacts(ctx: RunContext) -> ReportPhaseOutput:
+        return run_report_phase(
+            ctx,
+            frames=state.selected_frames,
+            render=state.artifacts.render,
+            metadata=state.artifacts.resolved_metadata,
+            slowpics_url=state.artifacts.slowpics_url,
+        )
+
     return [
         _create_timed_phase(
             "render",
@@ -146,8 +206,8 @@ def build_phases_after_align(
                 run_render_phase,
                 frames=state.selected_frames,
                 runner=ffmpeg_runner,
-                artifacts=state.artifacts,
             ),
+            state=state,
             clock=clock,
             phase_timings=state.phase_timings,
             warnings=state.warnings,
@@ -159,10 +219,9 @@ def build_phases_after_align(
             partial(
                 run_metadata_phase,
                 client=http_client,
-                prefetched_metadata=state.artifacts.resolved_metadata,
-                metadata_prefetched=metadata_prefetched,
-                artifacts=state.artifacts,
+                metadata_prefetch=metadata_prefetch,
             ),
+            state=state,
             clock=clock,
             phase_timings=state.phase_timings,
             warnings=state.warnings,
@@ -172,7 +231,8 @@ def build_phases_after_align(
             "dovi",
             "dovi",
             lambda config: request.skip_dovi,
-            partial(record_dovi_not_implemented_warning, warnings=state.warnings),
+            record_dovi_not_implemented_warning,
+            state=state,
             clock=clock,
             phase_timings=state.phase_timings,
             warnings=state.warnings,
@@ -182,11 +242,8 @@ def build_phases_after_align(
             "publish",
             "publish",
             lambda config: not config.slowpics.auto_upload,
-            partial(
-                run_publish_phase,
-                client=http_client,
-                artifacts=state.artifacts,
-            ),
+            _run_publish_with_current_artifacts,
+            state=state,
             clock=clock,
             phase_timings=state.phase_timings,
             warnings=state.warnings,
@@ -196,11 +253,8 @@ def build_phases_after_align(
             "report",
             "report",
             lambda config: not config.report.enable,
-            partial(
-                run_report_phase,
-                frames=state.selected_frames,
-                artifacts=state.artifacts,
-            ),
+            _run_report_with_current_artifacts,
+            state=state,
             clock=clock,
             phase_timings=state.phase_timings,
             warnings=state.warnings,
@@ -227,6 +281,7 @@ def build_execution_phase_plan(
         state=state,
         input_videos=prep.input_videos,
         workspace=prep.workspace,
+        vs_loader=deps.vs_loader,
     )
 
     ffmpeg_runner = deps.ffmpeg_runner
@@ -239,7 +294,7 @@ def build_execution_phase_plan(
         ffmpeg_runner=ffmpeg_runner,
         http_client=deps.http_client,
         state=state,
-        metadata_prefetched=prep.metadata_prefetched,
+        metadata_prefetch=prep.metadata_prefetch,
     )
     return ExecutionPhasePlan(
         before_align=before_align,

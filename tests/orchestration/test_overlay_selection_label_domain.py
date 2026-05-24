@@ -15,8 +15,8 @@ from frame_compare.orchestration.context import (
     RunContext,
 )
 from frame_compare.orchestration.execution import run_render_phase
-from frame_compare.orchestration.types import RunArtifacts
 from frame_compare.utils.types import WorkspacePaths
+from frame_compare.vs.types import HDRMetadata
 
 
 class FakeFFmpegRunner:
@@ -24,9 +24,7 @@ class FakeFFmpegRunner:
         output.parent.mkdir(parents=True, exist_ok=True)
         Image.new("RGB", (10, 10), color=(0, 0, 0)).save(output, format="PNG")
 
-    def probe_hdr(self, _video: Path):  # type: ignore[override]
-        from frame_compare.vs.types import HDRMetadata
-
+    def probe_hdr(self, _video: Path) -> HDRMetadata | None:
         return HDRMetadata(
             mastering_display=None,
             max_cll=None,
@@ -86,13 +84,10 @@ def test_selection_labels_are_looked_up_in_reference_source_frame_domain_after_t
         selection_breakdown=SelectionBreakdown(quantile_dark=[10]),
     )
 
-    artifacts = RunArtifacts()
-
     run_render_phase(
         ctx=ctx,
         frames=[0],
         runner=FakeFFmpegRunner(),
-        artifacts=artifacts,
     )
 
     assert captured_labels == ["Dark"]

@@ -94,7 +94,7 @@ class TestCheckVapoursynth:
             return original_import(name, *args, **kwargs)
 
         with (
-            patch("frame_compare.orchestration.doctor.register_windows_dll_dirs") as register_dirs,
+            patch("frame_compare.vs.env.register_windows_dll_dirs") as register_dirs,
             patch("builtins.__import__", side_effect=_fake_import),
         ):
             result = vs_check.check_fn()
@@ -189,7 +189,7 @@ class TestCheckLsmas:
         with (
             patch.dict(sys.modules, {"vapoursynth": mock_vs}),
             patch(
-                "frame_compare.orchestration.doctor._candidate_lsmas_plugin_paths",
+                "frame_compare.vs.env.candidate_lsmas_plugin_paths",
                 return_value=["C:/bundle/vs/plugins/libvslsmashsource.dll"],
             ),
             patch("os.path.isfile", return_value=True),

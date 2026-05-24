@@ -8,13 +8,9 @@ from pathlib import Path
 import structlog
 
 import frame_compare.analysis.cache_io as cache_io
+from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.config.overrides import apply_cli_overrides
 from frame_compare.config.schema import ConfigSchema
-from frame_compare.errors import (
-    CacheCorruptionError,
-    CacheVersionMismatchError,
-    MetricsCalculationError,
-)
 from frame_compare.orchestration.context import (
     ClipFingerprint,
     ClipProbeSnapshot,
@@ -22,14 +18,17 @@ from frame_compare.orchestration.context import (
 )
 from frame_compare.orchestration.phase_tasks import resolve_run_metadata
 from frame_compare.orchestration.preflight import discover_inputs, prepare_preflight
-from frame_compare.orchestration.probing import (
-    compute_preserved_frame_props,
+from frame_compare.orchestration.probing.probe_cache import (
     compute_probe_cache_key,
-    compute_tonemap_prop_keys,
     load_clip_probe_cache,
     save_clip_probe_cache,
 )
+from frame_compare.orchestration.probing.probe_props import (
+    compute_preserved_frame_props,
+    compute_tonemap_prop_keys,
+)
 from frame_compare.orchestration.types import (
+    MetadataPrefetch,
     PrepState,
     RunArtifacts,
     RunDependencies,
@@ -47,6 +46,7 @@ from frame_compare.services.run_folder import (
     get_existing_run_folders,
     reserve_run_folder,
 )
+from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 from frame_compare.utils.types import WorkspacePaths
 
 log = structlog.get_logger()
@@ -105,19 +105,19 @@ async def _resolve_run_directory(
     workspace: WorkspacePaths,
     config: ConfigSchema,
     input_videos: list[Path],
-    artifacts: RunArtifacts,
     deps: RunDependencies,
-) -> tuple[WorkspacePaths, bool]:
-    metadata_prefetched = False
+) -> tuple[WorkspacePaths, MetadataPrefetch]:
+    metadata = None
+    was_attempted = False
     if config.paths.use_run_folders:
         if deps.http_client is not None and config.tmdb.enabled and not request.skip_metadata:
             try:
-                artifacts.resolved_metadata = await resolve_run_metadata(
+                metadata = await resolve_run_metadata(
                     filenames=[input_videos[0].name],
                     config=config,
                     client=deps.http_client,
                 )
-                metadata_prefetched = True
+                was_attempted = True
             except (MetadataError, TmdbError, TmdbRateLimitedError) as exc:
                 log.warning(
                     "metadata_prefetch_degraded",
@@ -126,7 +126,6 @@ async def _resolve_run_directory(
                     error=str(exc),
                     exc_info=exc,
                 )
-                artifacts.resolved_metadata = None
 
         filenames = [video.name for video in input_videos]
         if request.from_cache_only:
@@ -136,11 +135,11 @@ async def _resolve_run_directory(
             run_dir = reserve_run_folder(
                 input_dir=workspace.input_dir,
                 filenames=filenames,
-                tmdb_metadata=artifacts.resolved_metadata,
+                tmdb_metadata=metadata,
             )
             new_workspace = workspace.with_run_dir(run_dir)
-        return new_workspace, metadata_prefetched
-    return workspace, metadata_prefetched
+        return new_workspace, MetadataPrefetch(metadata=metadata, was_attempted=was_attempted)
+    return workspace, MetadataPrefetch(metadata=None, was_attempted=False)
 
 
 def _validate_cache_state(
@@ -254,17 +253,16 @@ async def execute_prep(
     workspace = preflight.workspace
     config = apply_cli_overrides(
         preflight.config,
-        cli_args=request.cli_override_args(),
+        cli_args=request.cli_config_overrides(),
     )
     input_videos = discover_inputs(workspace.input_dir)
     artifacts = RunArtifacts()
 
-    workspace, metadata_prefetched = await _resolve_run_directory(
+    workspace, metadata_prefetch = await _resolve_run_directory(
         request=request,
         workspace=workspace,
         config=config,
         input_videos=input_videos,
-        artifacts=artifacts,
         deps=deps,
     )
 
@@ -287,7 +285,7 @@ async def execute_prep(
         input_videos=input_videos,
         clips=clips,
         artifacts=artifacts,
-        metadata_prefetched=metadata_prefetched,
+        metadata_prefetch=metadata_prefetch,
         preflight_warnings=preflight.warnings,
         preflight_duration=preflight_duration,
         load_sources_start=load_sources_start,

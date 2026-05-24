@@ -6,17 +6,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from frame_compare.errors import (
-    FFmpegNotFoundError,
-    FrameExtractionError,
-    RenderError,
-)
 from frame_compare.render.encoders import (
     _clip_to_rgb24_for_pillow,
     apply_overlay_to_file,
     render_frame,
 )
+from frame_compare.render.errors import FrameExtractionError, RenderError
 from frame_compare.render.types import EncoderSettings, OverlayConfig, OverlayMode, RenderRequest
+from frame_compare.utils.ffmpeg_errors import FFmpegNotFoundError
 from frame_compare.vs.errors import SourceLoadError
 
 
@@ -39,7 +36,9 @@ def mock_render_vs(monkeypatch):
 @pytest.fixture
 def mock_ffmpeg_runner(monkeypatch):
     mock = MagicMock()
-    monkeypatch.setattr("frame_compare.render.ffmpeg.DefaultFFmpegRunner.extract_frame", mock)
+    monkeypatch.setattr(
+        "frame_compare.render.backend.ffmpeg.DefaultFFmpegRunner.extract_frame", mock
+    )
     return mock
 
 

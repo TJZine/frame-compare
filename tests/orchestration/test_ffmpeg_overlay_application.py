@@ -14,8 +14,8 @@ from frame_compare.orchestration.context import (
     RunContext,
 )
 from frame_compare.orchestration.execution import run_render_phase
-from frame_compare.orchestration.types import RunArtifacts
 from frame_compare.utils.types import WorkspacePaths
+from frame_compare.vs.types import HDRMetadata
 
 
 class FakeFFmpegRunner:
@@ -27,9 +27,7 @@ class FakeFFmpegRunner:
         Image.new("RGB", (10, 10), color=(0, 0, 0)).save(output, format="PNG")
         self.calls.append((_video, _frame_num, output))
 
-    def probe_hdr(self, _video: Path):  # type: ignore[override]
-        from frame_compare.vs.types import HDRMetadata
-
+    def probe_hdr(self, _video: Path) -> HDRMetadata | None:
         return HDRMetadata(
             mastering_display=None,
             max_cll=None,
@@ -87,17 +85,15 @@ def test_ffmpeg_extraction_applies_overlay_post_process(
         reporter=None,
     )
 
-    artifacts = RunArtifacts()
     runner = FakeFFmpegRunner()
 
-    run_render_phase(
+    output = run_render_phase(
         ctx=ctx,
         frames=[0, 1],
         runner=runner,
-        artifacts=artifacts,
     )
 
-    assert artifacts.screenshot_dir == workspace.screenshots_dir
-    assert "Reference" in artifacts.screenshots_by_label
-    assert len(artifacts.screenshots_by_label["Reference"]) == 2
-    assert applied == artifacts.screenshots_by_label["Reference"]
+    assert output.render.screenshot_dir == workspace.screenshots_dir
+    assert "Reference" in output.render.screenshots_by_label
+    assert len(output.render.screenshots_by_label["Reference"]) == 2
+    assert applied == output.render.screenshots_by_label["Reference"]

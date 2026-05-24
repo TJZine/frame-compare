@@ -5,18 +5,21 @@ from __future__ import annotations
 import asyncio
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
 import frame_compare.analysis.cache_io as cache_io
-from frame_compare.errors import MetricsCalculationError
+from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.orchestration import preparation
-from frame_compare.orchestration.probing import load_clip_probe_cache
+from frame_compare.orchestration.probing.probe_cache import load_clip_probe_cache
 from frame_compare.orchestration.types import RunDependencies, RunRequest
 from frame_compare.services.alignment import CACHE_FILE_NAME
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.vs.types import SourceInfo
+
+if TYPE_CHECKING:
+    import vapoursynth as vs
 
 MINIMAL_CONFIG = """\
 [paths]
@@ -96,7 +99,7 @@ class FakeVSLoader:
             hdr_metadata=None,
         )
 
-    def ensure_core(self) -> None:
+    def ensure_core(self) -> vs.Core:
         raise AssertionError("Preparation probing should not request the VS core directly")
 
 

@@ -1,21 +1,20 @@
 from pathlib import Path
-from threading import Event
+from threading import Event, Thread
 from unittest.mock import MagicMock, patch
 
 import pytest
 from structlog.testing import capture_logs
 
 from frame_compare.config.schema import ColorConfig, ConfigSchema
-from frame_compare.errors import (
-    RenderError,
-)
 from frame_compare.render.batch.orchestrator import (
     ProgressReporter,
     render_batch,
     render_screenshots,
     render_screenshots_from_batch,
 )
+from frame_compare.render.errors import RenderError
 from frame_compare.render.types import (
+    BatchRenderOptions,
     EncoderSettings,
     RenderRequest,
     ScreenshotBatchRequest,
@@ -350,8 +349,10 @@ def test_render_screenshots_from_batch_rejects_mismatched_frame_metadata(tmp_pat
             batch_requests=[request],
             output_dir=tmp_path,
             config=config,
-            overlay_mode=config.screenshots.overlay_mode,
-            ffmpeg_runner=ffmpeg_runner,
+            options=BatchRenderOptions(
+                overlay_mode=config.screenshots.overlay_mode,
+                ffmpeg_runner=ffmpeg_runner,
+            ),
         )
 
     ffmpeg_runner.extract_frame.assert_not_called()
@@ -390,8 +391,10 @@ def test_render_screenshots_from_batch_rejects_duplicate_labels(tmp_path) -> Non
             batch_requests=[req1, req2],
             output_dir=tmp_path,
             config=config,
-            overlay_mode=config.screenshots.overlay_mode,
-            ffmpeg_runner=ffmpeg_runner,
+            options=BatchRenderOptions(
+                overlay_mode=config.screenshots.overlay_mode,
+                ffmpeg_runner=ffmpeg_runner,
+            ),
         )
 
     ffmpeg_runner.extract_frame.assert_not_called()
@@ -430,8 +433,10 @@ def test_render_screenshots_from_batch_rejects_duplicate_output_names_after_sani
             batch_requests=[req1, req2],
             output_dir=tmp_path,
             config=config,
-            overlay_mode=config.screenshots.overlay_mode,
-            ffmpeg_runner=ffmpeg_runner,
+            options=BatchRenderOptions(
+                overlay_mode=config.screenshots.overlay_mode,
+                ffmpeg_runner=ffmpeg_runner,
+            ),
         )
 
     ffmpeg_runner.extract_frame.assert_not_called()
@@ -459,19 +464,24 @@ def test_render_screenshots_from_batch_rejects_unknown_hdr_for_ffmpeg_tonemap(
             batch_requests=[request],
             output_dir=tmp_path,
             config=config,
-            overlay_mode=config.screenshots.overlay_mode,
-            renderer="ffmpeg",
-            ffmpeg_runner=ffmpeg_runner,
+            options=BatchRenderOptions(
+                overlay_mode=config.screenshots.overlay_mode,
+                renderer="ffmpeg",
+                ffmpeg_runner=ffmpeg_runner,
+            ),
         )
 
     ffmpeg_runner.extract_frame.assert_not_called()
 
 
 def test_render_batch_parallel_waits_for_in_flight_work_before_raising() -> None:
-    import time
-
     slow_started = Event()
+    slow_blocked = Event()
+    failure_raised = Event()
+    release_slow = Event()
     slow_finished = Event()
+    render_done = Event()
+    render_exceptions: list[BaseException] = []
 
     requests = [
         RenderRequest(
@@ -494,17 +504,38 @@ def test_render_batch_parallel_waits_for_in_flight_work_before_raising() -> None
     def side_effect(r):
         if r.frame_number == 0:
             slow_started.set()
-            time.sleep(0.5)
+            slow_blocked.set()
+            assert release_slow.wait(timeout=1.0)
             slow_finished.set()
             return r.output_path
-        assert slow_started.wait(timeout=1.0)
+        assert slow_blocked.wait(timeout=1.0)
+        failure_raised.set()
         raise RuntimeError("Failed immediately")
 
-    with patch("frame_compare.render.batch.orchestrator.render_frame", side_effect=side_effect):
-        with pytest.raises(RuntimeError, match="Failed immediately"):
+    def run_render() -> None:
+        try:
             render_batch(requests, parallelism=2)
-        assert slow_started.is_set()
-        assert slow_finished.is_set()
+        except BaseException as exc:
+            render_exceptions.append(exc)
+        finally:
+            render_done.set()
+
+    with patch("frame_compare.render.batch.orchestrator.render_frame", side_effect=side_effect):
+        thread = Thread(target=run_render, daemon=True)
+        thread.start()
+        try:
+            assert slow_started.wait(timeout=1.0)
+            assert failure_raised.wait(timeout=1.0)
+            assert not render_done.is_set()
+        finally:
+            release_slow.set()
+            thread.join(timeout=1.0)
+
+    assert not thread.is_alive()
+    assert slow_finished.is_set()
+    assert len(render_exceptions) == 1
+    assert isinstance(render_exceptions[0], RuntimeError)
+    assert str(render_exceptions[0]) == "Failed immediately"
 
 
 def test_render_screenshots_from_batch_happy_path(tmp_path) -> None:
@@ -545,9 +576,11 @@ def test_render_screenshots_from_batch_happy_path(tmp_path) -> None:
             batch_requests=[req1, req2],
             output_dir=tmp_path,
             config=config,
-            overlay_mode=config.screenshots.overlay_mode,
-            renderer="ffmpeg",
-            ffmpeg_runner=ffmpeg_runner,
+            options=BatchRenderOptions(
+                overlay_mode=config.screenshots.overlay_mode,
+                renderer="ffmpeg",
+                ffmpeg_runner=ffmpeg_runner,
+            ),
         )
 
         assert "label1" in results
@@ -591,9 +624,11 @@ def test_render_screenshots_from_batch_renderer_auto_path(tmp_path) -> None:
                 batch_requests=[req],
                 output_dir=tmp_path,
                 config=config,
-                overlay_mode=config.screenshots.overlay_mode,
-                renderer="auto",
-                ffmpeg_runner=ffmpeg_runner,
+                options=BatchRenderOptions(
+                    overlay_mode=config.screenshots.overlay_mode,
+                    renderer="auto",
+                    ffmpeg_runner=ffmpeg_runner,
+                ),
             )
 
             assert results["label1"] == [tmp_path / "label1_00010.png"]

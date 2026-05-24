@@ -9,6 +9,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -16,12 +17,14 @@ from frame_compare.vspreview.adapter import (
     VSPreviewAvailability,
     VSPreviewAvailabilityStatus,
     VSPreviewConfig,
+    VSPreviewSessionRequest,
     launch_alignment_verification_session,
 )
 from frame_compare.vspreview.errors import VSPreviewError
 from frame_compare.vspreview.session_script import (
+    _build_helpers_section,
     _build_script_content,
-    _generate_vspreview_script,
+    write_vspreview_session_script,
 )
 
 
@@ -50,10 +53,12 @@ def test_launch_alignment_verification_session_respects_timeout(
     cfg = VSPreviewConfig(enabled=True, timeout_seconds=1.0)
     with pytest.raises(VSPreviewError, match="timed out"):
         launch_alignment_verification_session(
-            reference=Path("ref.mkv"),
-            comparisons=[Path("a.mkv")],
-            suggested_offsets_by_key={},
-            cache_dir=tmp_path,
+            request=VSPreviewSessionRequest(
+                reference=Path("ref.mkv"),
+                comparisons=[Path("a.mkv")],
+                suggested_offsets_by_key={},
+                cache_dir=tmp_path,
+            ),
             config=cfg,
         )
 
@@ -77,10 +82,12 @@ def test_launch_alignment_verification_session_redacts_probe_failure_details(
 
     with pytest.raises(VSPreviewError) as excinfo:
         launch_alignment_verification_session(
-            reference=Path("ref.mkv"),
-            comparisons=[Path("a.mkv")],
-            suggested_offsets_by_key={},
-            cache_dir=tmp_path,
+            request=VSPreviewSessionRequest(
+                reference=Path("ref.mkv"),
+                comparisons=[Path("a.mkv")],
+                suggested_offsets_by_key={},
+                cache_dir=tmp_path,
+            ),
             config=cfg,
         )
 
@@ -117,10 +124,12 @@ def test_launch_alignment_verification_session_redacts_non_zero_exit_output(
 
     with pytest.raises(VSPreviewError) as excinfo:
         launch_alignment_verification_session(
-            reference=Path("ref.mkv"),
-            comparisons=[Path("a.mkv")],
-            suggested_offsets_by_key={},
-            cache_dir=tmp_path,
+            request=VSPreviewSessionRequest(
+                reference=Path("ref.mkv"),
+                comparisons=[Path("a.mkv")],
+                suggested_offsets_by_key={},
+                cache_dir=tmp_path,
+            ),
             config=cfg,
         )
 
@@ -162,6 +171,58 @@ def test_build_script_content_warns_when_comparison_overlay_fails() -> None:
     assert script.count(warning) == 2
 
 
+def test_build_script_content_uses_narrow_stream_reconfigure_helper() -> None:
+    script = _build_script_content(
+        reference=Path("ref.mkv"),
+        comparisons=[Path("a.mkv")],
+        suggested_offsets_by_key={},
+        bootstrap_paths=[Path("/workspace"), Path("/workspace/src")],
+    )
+
+    assert "def _reconfigure_text_stream(stream):" in script
+    assert "_reconfigure_text_stream(sys.stdout)" in script
+    assert "_reconfigure_text_stream(sys.stderr)" in script
+    assert 'getattr(stream, "reconfigure", None)' in script
+    assert (
+        "except (AttributeError, LookupError, OSError, TypeError, UnicodeError, ValueError):"
+        not in script
+    )
+    assert 'failure_reason = f"{type(error).__name__}: {error}"' in script
+    assert "return failure_reason is None" in script
+    assert 'sys.stdout.reconfigure(encoding="utf-8", errors="replace")' not in script
+    assert "except Exception:\n    pass  # Best-effort on Windows" not in script
+    assert (
+        "except (AttributeError, LookupError, OSError, TypeError, UnicodeError, ValueError)"
+        " as error:\n        return" not in script
+    )
+
+
+def test_generated_stream_reconfigure_helper_is_best_effort_for_known_stream_failures() -> None:
+    class StreamWithoutReconfigure:
+        def write(self, _text: str) -> None:
+            return
+
+        def flush(self) -> None:
+            return
+
+    class StreamWithEncodingFailure:
+        def reconfigure(self, **_kwargs: object) -> None:
+            raise UnicodeError("encoding unavailable")
+
+        def write(self, _text: str) -> None:
+            return
+
+        def flush(self) -> None:
+            return
+
+    fake_sys = SimpleNamespace(
+        stdout=StreamWithoutReconfigure(),
+        stderr=StreamWithEncodingFailure(),
+    )
+
+    exec(_build_helpers_section(), {"sys": fake_sys})
+
+
 def test_build_script_content_resolves_lwlibavsource_with_lsmas_then_lw_fallback() -> None:
     script = _build_script_content(
         reference=Path("ref.mkv"),
@@ -201,7 +262,7 @@ core = _Core()
     cache_dir = tmp_path / "generated" / "cache"
     cache_dir.mkdir(parents=True)
 
-    script_path = _generate_vspreview_script(
+    script_path = write_vspreview_session_script(
         reference=reference,
         comparisons=[comparison],
         suggested_offsets_by_key={},
@@ -231,7 +292,7 @@ def test_generate_vspreview_script_bootstraps_nested_legacy_workspace(tmp_path: 
     (workspace_root / "config").mkdir(parents=True)
     cache_dir.mkdir(parents=True)
 
-    script_path = _generate_vspreview_script(
+    script_path = write_vspreview_session_script(
         reference=Path("ref.mkv"),
         comparisons=[Path("a.mkv")],
         suggested_offsets_by_key={},
@@ -254,7 +315,7 @@ def test_generate_vspreview_script_bootstraps_run_folder_workspace(tmp_path: Pat
     (workspace_root / "config").mkdir(parents=True)
     cache_dir.mkdir(parents=True)
 
-    script_path = _generate_vspreview_script(
+    script_path = write_vspreview_session_script(
         reference=Path("ref.mkv"),
         comparisons=[Path("a.mkv")],
         suggested_offsets_by_key={},
@@ -280,7 +341,7 @@ def test_generate_vspreview_script_uses_atomic_write(
 
     monkeypatch.setattr("frame_compare.vspreview.session_script.write_text_atomic", _fake_write)
 
-    script_path = _generate_vspreview_script(
+    script_path = write_vspreview_session_script(
         reference=Path("ref.mkv"),
         comparisons=[Path("a.mkv")],
         suggested_offsets_by_key={},
@@ -315,7 +376,7 @@ def test_generate_vspreview_script_handles_collision(
     second_path.touch()
 
     # Call the generator
-    script_path = _generate_vspreview_script(
+    script_path = write_vspreview_session_script(
         reference=Path("ref.mkv"),
         comparisons=[Path("a.mkv")],
         suggested_offsets_by_key={},

@@ -27,16 +27,16 @@ class NullProgressReporter:
     """No-op progress reporter."""
 
     def start_phase(self, name: str, total: int) -> None:
-        pass
+        del name, total
 
     def advance(self, amount: int = 1) -> None:
-        pass
+        del amount
 
     def set_description(self, desc: str) -> None:
-        pass
+        del desc
 
     def complete_phase(self) -> None:
-        pass
+        del self
 
 
 class RichProgressReporter:
@@ -136,7 +136,7 @@ class LogProgressReporter:
 
     def set_description(self, desc: str) -> None:
         """No-op for log reporter."""
-        pass
+        del desc
 
     def complete_phase(self) -> None:
         """Log phase completion."""

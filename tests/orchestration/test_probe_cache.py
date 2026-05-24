@@ -10,7 +10,7 @@ import pytest
 import tomli_w
 
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot
-from frame_compare.orchestration.probing import (
+from frame_compare.orchestration.probing.probe_cache import (
     compute_probe_cache_key,
     load_clip_probe_cache,
     save_clip_probe_cache,
@@ -181,10 +181,15 @@ def test_load_clip_probe_cache_ignores_unknown_fields_and_skips_invalid_entries(
     with f.open("wb") as out:
         tomli_w.dump(data, out)
 
-    cache = load_clip_probe_cache(f)
+    with patch("frame_compare.orchestration.probing.probe_cache.log.warning") as warning:
+        cache = load_clip_probe_cache(f)
+
     assert len(cache) == 1
     assert "valid_key" in cache
     assert cache["valid_key"].width == 100
+    warning.assert_called_once()
+    assert warning.call_args.args[0] == "probe_cache_invalid_entry"
+    assert warning.call_args.kwargs["key"] == "invalid_key"
 
 
 def test_load_clip_probe_cache_skips_entry_with_non_table_hdr_metadata(tmp_path: Path):

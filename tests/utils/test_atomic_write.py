@@ -57,6 +57,23 @@ def test_write_text_atomic_rejects_none_and_cleans_up(tmp_path: Path) -> None:
     assert list(tmp_path.glob(".out.txt.*")) == []
 
 
+def test_write_text_atomic_cleans_up_on_fsync_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "out.txt"
+
+    def _boom(_fd: int) -> None:
+        raise OSError("fsync failed")
+
+    monkeypatch.setattr("frame_compare.utils.atomic_write.os.fsync", _boom)
+
+    with pytest.raises(OSError, match="fsync failed"):
+        write_text_atomic(target, "content", encoding="utf-8")
+
+    assert not target.exists()
+    assert list(tmp_path.glob(".out.txt.*")) == []
+
+
 def test_write_bytes_atomic_creates_parent_dirs(tmp_path: Path) -> None:
     target = tmp_path / "nested" / "data.bin"
 
@@ -111,6 +128,30 @@ def test_write_text_atomic_does_not_replace_target_on_os_replace_failure(
 
     assert target.read_text(encoding="utf-8") == "old"
     assert list(tmp_path.glob(".out.toml.*")) == []
+
+
+def test_write_text_atomic_does_not_mask_replace_failure_when_cleanup_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "out.toml"
+    target.write_text("old", encoding="utf-8")
+
+    def _fail_replace(_src: str, _dst: Path) -> None:
+        raise OSError("replace failed")
+
+    def _fail_cleanup(self: Path, *, missing_ok: bool = False) -> None:
+        if self.name.startswith(".out.toml."):
+            raise PermissionError("cleanup failed")
+        self.unlink(missing_ok=missing_ok)
+
+    monkeypatch.setattr("frame_compare.utils.atomic_write.os.replace", _fail_replace)
+    monkeypatch.setattr("frame_compare.utils.atomic_write.Path.unlink", _fail_cleanup)
+
+    with pytest.raises(OSError, match="replace failed") as exc_info:
+        write_text_atomic(target, "new", encoding="utf-8")
+
+    assert target.read_text(encoding="utf-8") == "old"
+    assert "cleanup failed" in "\n".join(exc_info.value.__notes__)
 
 
 def test_write_bytes_atomic_does_not_replace_target_on_os_replace_failure(

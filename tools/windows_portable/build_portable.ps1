@@ -9,7 +9,10 @@ Param(
   [string]$CacheDir = (Join-Path $PWD ".portable_cache"),
 
   [Parameter(Mandatory = $false)]
-  [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\\..")).Path
+  [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\\..")).Path,
+
+  [Parameter(Mandatory = $false)]
+  [switch]$RequireReleasePublicKey
 )
 
 $ErrorActionPreference = "Stop"
@@ -80,6 +83,12 @@ function Assert-LastExitCode([string]$CommandLabel) {
   if ($LASTEXITCODE -ne 0) {
     throw "$CommandLabel failed with exit code $LASTEXITCODE"
   }
+}
+
+function Assert-ReleasePublicKey() {
+  $validator = Join-Path $PSScriptRoot "validate_update_public_key.ps1"
+  $publicKey = Join-Path $PSScriptRoot "update_public_key.xml"
+  & $validator -PublicKeyPath $publicKey
 }
 
 function Download-Artifact([pscustomobject]$Artifact) {
@@ -540,6 +549,10 @@ function Consolidate-VapourSynthPlugins([string]$BundleRoot) {
 }
 
 function Main() {
+  if ($RequireReleasePublicKey) {
+    Assert-ReleasePublicKey
+  }
+
   Ensure-Directory -Path $CacheDir
   if (Test-Path -LiteralPath $OutDir) {
     Remove-Item -Recurse -Force -LiteralPath $OutDir

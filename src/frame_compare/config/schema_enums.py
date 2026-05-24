@@ -1,0 +1,90 @@
+"""Configuration schema enums."""
+
+from __future__ import annotations
+
+from enum import Enum
+
+# Most enums use lowercase string values (Pydantic accepts lowercase only).
+# Exception: LogLevel uses uppercase values per standard Python logging convention.
+
+
+class SelectionMode(str, Enum):
+    """Frame selection strategy for choosing representative comparison frames."""
+
+    QUANTILE = "quantile"
+    MOTION = "motion"
+    RANDOM = "random"
+    MIXED = "mixed"
+
+
+class OverlayMode(str, Enum):
+    """Overlay verbosity level for rendered screenshots."""
+
+    MINIMAL = "minimal"
+    STANDARD = "standard"
+    DIAGNOSTIC = "diagnostic"
+    NONE = "none"
+
+
+class TonemapPreset(str, Enum):
+    """Named tonemap preset applied when tonemapping HDR to SDR."""
+
+    REFERENCE = "reference"
+    FILMIC = "filmic"
+    CONTRAST = "contrast"
+    BT2390_SPEC = "bt2390_spec"
+    SPLINE = "spline"
+    BRIGHT_LIFT = "bright_lift"
+    HIGHLIGHT_GUARD = "highlight_guard"
+
+
+class ToneCurve(str, Enum):
+    """Tone curve algorithm used by the tonemap implementation."""
+
+    BT2390 = "bt2390"
+    SPLINE = "spline"
+    REINHARD = "reinhard"
+
+
+class Visibility(str, Enum):
+    """slow.pics gallery visibility setting."""
+
+    PUBLIC = "public"
+    UNLISTED = "unlisted"
+
+
+class ViewerMode(str, Enum):
+    """Default comparison viewer mode for generated HTML reports."""
+
+    SLIDER = "slider"
+    OVERLAY = "overlay"
+    DIFF = "diff"
+    BLINK = "blink"
+
+
+class LogLevel(str, Enum):
+    """Log level using uppercase values per Python logging convention."""
+
+    DEBUG = "DEBUG"
+    INFO = "INFO"
+    WARNING = "WARNING"
+    ERROR = "ERROR"
+
+
+class LogFormat(str, Enum):
+    """Logging output format."""
+
+    JSON = "json"
+    CONSOLE = "console"
+
+
+__all__ = [
+    "LogFormat",
+    "LogLevel",
+    "OverlayMode",
+    "SelectionMode",
+    "ToneCurve",
+    "TonemapPreset",
+    "ViewerMode",
+    "Visibility",
+]

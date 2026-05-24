@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import shutil
-import subprocess
+import subprocess  # nosec B404
 import sys
 from dataclasses import dataclass
 from enum import Enum
@@ -142,20 +142,22 @@ class VSPreviewConfig:
     auto_close: bool = True
 
 
+@dataclass(frozen=True)
+class VSPreviewSessionRequest:
+    """Inputs needed to build an alignment VSPreview session."""
+
+    reference: Path
+    comparisons: list[Path]
+    suggested_offsets_by_key: dict[str, int]
+    cache_dir: Path
+
+
 def launch_alignment_verification_session(
-    reference: Path,
-    comparisons: list[Path],
-    suggested_offsets_by_key: dict[str, int],
-    cache_dir: Path,
+    request: VSPreviewSessionRequest,
     config: VSPreviewConfig,
 ) -> Path:
     """Generate and optionally launch a VSPreview session script."""
-    script_path = write_vspreview_session_script(
-        reference=reference,
-        comparisons=comparisons,
-        suggested_offsets_by_key=suggested_offsets_by_key,
-        cache_dir=cache_dir,
-    )
+    script_path = _write_vspreview_session_script(request)
 
     if not config.enabled:
         log.info(
@@ -179,37 +181,19 @@ def launch_alignment_verification_session(
     print(f"Launch command: {' '.join(command)}")
 
     try:
-        result = subprocess.run(
+        # command is a list from _resolve_launch_command; shell=True is never used.
+        result = subprocess.run(  # nosec B603
             command,
             check=False,
             capture_output=True,
             text=True,
             timeout=config.timeout_seconds,
         )
-
-        if result.returncode != 0:
-            public_reason = f"launch exited with code {result.returncode}"
-            log.warning(
-                "vspreview_launch_failed",
-                reason=public_reason,
-                returncode=result.returncode,
-                hint="Re-run with verbose mode to capture full output",
-            )
-            log.debug(
-                "vspreview_launch_failed_debug",
-                returncode=result.returncode,
-                stderr=result.stderr[:500] if result.stderr else None,
-                stdout=result.stdout[:500] if result.stdout else None,
-            )
-            raise VSPreviewError(public_reason)
-
     except subprocess.TimeoutExpired as e:
         raise VSPreviewError(f"launch timed out after {config.timeout_seconds}s") from e
     except FileNotFoundError as e:
         raise VSPreviewError("launcher command was not found") from e
     except Exception as e:
-        if isinstance(e, (VSPreviewError, VSPreviewNotFoundError)):
-            raise
         log.debug(
             "vspreview_launch_unexpected_debug",
             exception_type=type(e).__name__,
@@ -217,7 +201,32 @@ def launch_alignment_verification_session(
         )
         raise VSPreviewError(f"unexpected launch error ({type(e).__name__})") from e
 
+    if result.returncode != 0:
+        public_reason = f"launch exited with code {result.returncode}"
+        log.warning(
+            "vspreview_launch_failed",
+            reason=public_reason,
+            returncode=result.returncode,
+            hint="Re-run with verbose mode to capture full output",
+        )
+        log.debug(
+            "vspreview_launch_failed_debug",
+            returncode=result.returncode,
+            stderr=result.stderr[:500] if result.stderr else None,
+            stdout=result.stdout[:500] if result.stdout else None,
+        )
+        raise VSPreviewError(public_reason)
+
     return script_path
+
+
+def _write_vspreview_session_script(request: VSPreviewSessionRequest) -> Path:
+    return write_vspreview_session_script(
+        reference=request.reference,
+        comparisons=request.comparisons,
+        suggested_offsets_by_key=request.suggested_offsets_by_key,
+        cache_dir=request.cache_dir,
+    )
 
 
 def _resolve_launch_command(script_path: Path) -> list[str]:

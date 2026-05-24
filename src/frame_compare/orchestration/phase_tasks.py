@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 
@@ -22,8 +23,19 @@ from frame_compare.orchestration.context import (
     ClipState,
     RunContext,
 )
-from frame_compare.orchestration.types import RunArtifacts
-from frame_compare.render.ffmpeg import FFmpegRunner
+from frame_compare.orchestration.types import (
+    AlignPhaseOutput,
+    AnalyzePhaseOutput,
+    DoviPhaseOutput,
+    FramePlanPhaseOutput,
+    MetadataPhaseOutput,
+    MetadataPrefetch,
+    PublishPhaseOutput,
+    RenderArtifacts,
+    RenderPhaseOutput,
+    ReportPhaseOutput,
+)
+from frame_compare.render.backend.ffmpeg import FFmpegRunner
 from frame_compare.services.alignment import align_clips, calculate_alignment_trims
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.metadata import resolve_metadata
@@ -32,6 +44,9 @@ from frame_compare.services.report.entry import generate_report
 from frame_compare.services.report.payload import ReportData, clip_info_from_state
 from frame_compare.services.types import AlignmentConfig, MetadataConfig, TmdbMetadata
 from frame_compare.utils.types import WorkspacePaths
+
+if TYPE_CHECKING:
+    from frame_compare.vs.loader import VSLoader
 
 
 def build_metadata_config(config: ConfigSchema) -> MetadataConfig:
@@ -56,8 +71,8 @@ async def resolve_run_metadata(
     )
 
 
-def select_initial_frame_plan(ctx: RunContext, *, selected_frames: list[int]) -> None:
-    selected_frames.extend(
+def select_initial_frame_plan(ctx: RunContext) -> FramePlanPhaseOutput:
+    return FramePlanPhaseOutput(
         create_frame_plan(
             num_frames=ctx.reference.effective_num_frames(),
             count=ctx.config.analysis.frame_count,
@@ -71,21 +86,24 @@ def run_analyze_phase(
     *,
     input_videos: list[Path],
     workspace: WorkspacePaths,
-    selected_frames: list[int],
-    artifacts: RunArtifacts,
-) -> None:
+    vs_loader: VSLoader | None = None,
+) -> AnalyzePhaseOutput:
     fingerprint = cache_io.compute_cache_key(input_videos, ctx.config.analysis)
     cache_result = cache_io.load_cached_metrics(workspace.cache_dir, fingerprint, clips=[])
-    artifacts.metrics_cache_hit = cache_result.success and cache_result.metrics is not None
+    metrics_cache_hit = cache_result.success and cache_result.metrics is not None
     metrics = calculate_metrics(
         video_paths=input_videos,
         config=ctx.config.analysis,
         cache_dir=workspace.cache_dir,
         reporter=ctx.reporter,
+        vs_loader=vs_loader,
     )
     selection = select_frames(metrics=metrics, config=ctx.config.analysis)
-    selected_frames[:] = selection.frames
-    ctx.selection_breakdown = selection.breakdown
+    return AnalyzePhaseOutput(
+        selected_frames=list(selection.frames),
+        selection_breakdown=selection.breakdown,
+        metrics_cache_hit=metrics_cache_hit,
+    )
 
 
 def selection_label_for_frame(frame: int, breakdown: SelectionBreakdown | None) -> str | None:
@@ -102,9 +120,13 @@ def selection_label_for_frame(frame: int, breakdown: SelectionBreakdown | None) 
     return None
 
 
-def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> None:
+def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhaseOutput:
     if not ctx.comparisons:
-        return
+        return AlignPhaseOutput(
+            reference=ctx.reference,
+            comparisons=list(ctx.comparisons),
+            selected_frames=list(selected_frames),
+        )
     alignment_config = AlignmentConfig(
         enable=ctx.config.audio_alignment.enable,
         sample_rate=ctx.config.audio_alignment.sample_rate,
@@ -142,23 +164,28 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> None:
         ],
         comp_num_frames=[comp.probe.num_frames for comp in updated_comparisons],
     )
-    ctx.reference = ctx.reference.with_trim(
+    reference = ctx.reference.with_trim(
         trim_start_frames=ref_trim[0],
         trim_end_frame_inclusive=ref_trim[1],
     )
-    ctx.comparisons = [
+    comparisons = [
         comp.with_trim(
             trim_start_frames=comp_trim[0],
             trim_end_frame_inclusive=comp_trim[1],
         )
         for comp, comp_trim in zip(updated_comparisons, comp_trims, strict=True)
     ]
-    selected_frames[:] = _normalize_selected_frames_for_trimmed_domain(
+    normalized_selected_frames = _normalize_selected_frames_for_trimmed_domain(
         selected_frames=selected_frames,
-        reference=ctx.reference,
-        comparisons=ctx.comparisons,
+        reference=reference,
+        comparisons=comparisons,
         requested_count=ctx.config.analysis.frame_count,
         seed=ctx.config.analysis.random_seed,
+    )
+    return AlignPhaseOutput(
+        reference=reference,
+        comparisons=comparisons,
+        selected_frames=normalized_selected_frames,
     )
 
 
@@ -167,10 +194,9 @@ def run_render_phase(
     *,
     frames: list[int],
     runner: FFmpegRunner,
-    artifacts: RunArtifacts,
-) -> None:
+) -> RenderPhaseOutput:
     from frame_compare.render.batch.orchestrator import render_screenshots_from_batch
-    from frame_compare.render.types import ScreenshotBatchRequest
+    from frame_compare.render.types import BatchRenderOptions, ScreenshotBatchRequest
 
     clips_state = [ctx.reference, *ctx.comparisons]
     output_dir = ctx.workspace.screenshots_dir
@@ -209,41 +235,40 @@ def run_render_phase(
         batch_requests=batch_requests,
         output_dir=output_dir,
         config=ctx.config,
-        overlay_mode=overlay_mode,
-        ffmpeg_runner=runner,
-        reporter=ctx.reporter,
+        options=BatchRenderOptions(
+            overlay_mode=overlay_mode,
+            ffmpeg_runner=runner,
+            reporter=ctx.reporter,
+        ),
     )
 
-    artifacts.screenshots_by_label = rendered
-    artifacts.screenshot_dir = output_dir
+    return RenderPhaseOutput(
+        render=RenderArtifacts(screenshots_by_label=rendered, screenshot_dir=output_dir)
+    )
 
 
 async def run_metadata_phase(
     ctx: RunContext,
     *,
     client: httpx.AsyncClient | None,
-    prefetched_metadata: TmdbMetadata | None,
-    metadata_prefetched: bool,
-    artifacts: RunArtifacts,
-) -> None:
-    if metadata_prefetched:
-        artifacts.resolved_metadata = prefetched_metadata
-        return
+    metadata_prefetch: MetadataPrefetch,
+) -> MetadataPhaseOutput:
+    if metadata_prefetch.was_attempted:
+        return MetadataPhaseOutput(resolved_metadata=metadata_prefetch.metadata)
 
     if client is None or not ctx.config.tmdb.enabled:
-        artifacts.resolved_metadata = None
-        return
+        return MetadataPhaseOutput(resolved_metadata=None)
     metadata = await resolve_run_metadata(
         filenames=[ctx.reference.path.name],
         config=ctx.config,
         client=client,
     )
-    artifacts.resolved_metadata = metadata
+    return MetadataPhaseOutput(resolved_metadata=metadata)
 
 
-def record_dovi_not_implemented_warning(_ctx: RunContext, *, warnings: list[str]) -> None:
-    warnings.append(
-        "dovi: DOVI processing is not implemented yet; continuing without Dolby Vision extraction."
+def record_dovi_not_implemented_warning(_ctx: RunContext) -> DoviPhaseOutput:
+    return DoviPhaseOutput(
+        warning="dovi: DOVI processing is not implemented yet; continuing without Dolby Vision extraction."
     )
 
 
@@ -251,43 +276,43 @@ async def run_publish_phase(
     ctx: RunContext,
     *,
     client: httpx.AsyncClient | None,
-    artifacts: RunArtifacts,
-) -> None:
+    metadata: TmdbMetadata | None,
+) -> PublishPhaseOutput:
     if client is None:
-        artifacts.slowpics_url = None
-        return
+        return PublishPhaseOutput(slowpics_url=None)
     result = await publish_to_slowpics(
         screenshot_dir=ctx.workspace.screenshots_dir,
         config=ctx.config.slowpics,
         client=client,
-        metadata=artifacts.resolved_metadata,
+        metadata=metadata,
         progress=ctx.reporter,
     )
-    artifacts.slowpics_url = result.url
+    return PublishPhaseOutput(slowpics_url=result.url)
 
 
 def run_report_phase(
     ctx: RunContext,
     *,
     frames: list[int],
-    artifacts: RunArtifacts,
-) -> None:
-    if not artifacts.screenshots_by_label:
-        artifacts.report_path = None
-        return
+    render: RenderArtifacts | None,
+    metadata: TmdbMetadata | None,
+    slowpics_url: str | None,
+) -> ReportPhaseOutput:
+    if render is None or not render.screenshots_by_label:
+        return ReportPhaseOutput(report_path=None)
 
     clips = [ctx.reference, *ctx.comparisons]
     clip_info = [
-        clip_info_from_state(clip, artifacts.screenshots_by_label[clip.label]) for clip in clips
+        clip_info_from_state(clip, render.screenshots_by_label[clip.label]) for clip in clips
     ]
     report_data = ReportData(
         clips=clip_info,
         frames=frames,
-        metadata=artifacts.resolved_metadata,
-        slowpics_url=artifacts.slowpics_url,
+        metadata=metadata,
+        slowpics_url=slowpics_url,
     )
     report_path = generate_report(report_data, ctx.config.report)
-    artifacts.report_path = report_path
+    return ReportPhaseOutput(report_path=report_path)
 
 
 def _normalize_selected_frames_for_trimmed_domain(

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from frame_compare.config.errors import ConfigNotFoundError
-from frame_compare.errors import (
+from frame_compare.orchestration.errors import (
     DirectoryNotFoundError,
     NoVideosFoundError,
 )
@@ -170,7 +170,7 @@ class TestDiscoverInputs:
         """Given a path that raises OSError on listdir/iterdir → raises InputDiscoveryError."""
         from unittest.mock import patch
 
-        from frame_compare.errors import InputDiscoveryError
+        from frame_compare.orchestration.errors import InputDiscoveryError
 
         with (
             patch.object(Path, "iterdir", side_effect=OSError("Permission denied")),

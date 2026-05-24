@@ -22,7 +22,7 @@ from frame_compare.orchestration.types import (
     RunRequest,
     RunResult,
 )
-from frame_compare.render.ffmpeg import DefaultFFmpegRunner
+from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 from frame_compare.vs.loader import DefaultVSLoader
 
 __all__ = ["RunDependencies", "RunRequest", "RunResult", "execute_run"]
@@ -40,7 +40,7 @@ def _assemble_run_result(
     """Helper to assemble a RunResult from collected state."""
     return RunResult(
         success=True,
-        screenshot_dir=artifacts.screenshot_dir,
+        screenshot_dir=None if artifacts.render is None else artifacts.render.screenshot_dir,
         slowpics_url=artifacts.slowpics_url,
         report_path=artifacts.report_path,
         frame_count=len(selected_frames),

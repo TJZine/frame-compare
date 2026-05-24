@@ -27,7 +27,7 @@ from frame_compare.orchestration.context import (
     ClipState,
     RunContext,
 )
-from frame_compare.orchestration.types import RunArtifacts
+from frame_compare.orchestration.types import MetadataPrefetch, RenderArtifacts, RunArtifacts
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.publishers import PublishResult
 from frame_compare.services.types import AlignmentResult, MetadataConfig, TmdbMetadata
@@ -173,10 +173,11 @@ def test_select_initial_frame_plan_uses_effective_reference_domain(tmp_path: Pat
     ctx.reference = ctx.reference.with_trim(trim_start_frames=10, trim_end_frame_inclusive=19)
     selected_frames: list[int] = []
 
-    phase_tasks.select_initial_frame_plan(ctx, selected_frames=selected_frames)
+    output = phase_tasks.select_initial_frame_plan(ctx)
 
-    assert len(selected_frames) == 3
-    assert all(0 <= frame < 10 for frame in selected_frames)
+    assert selected_frames == []
+    assert len(output.selected_frames) == 3
+    assert all(0 <= frame < 10 for frame in output.selected_frames)
 
 
 def test_run_analyze_phase_records_cache_hit_and_selection_breakdown(
@@ -217,35 +218,34 @@ def test_run_analyze_phase_records_cache_hit_and_selection_breakdown(
     monkeypatch.setattr(phase_tasks.cache_io, "load_cached_metrics", _fake_load_cached_metrics)
     monkeypatch.setattr(phase_tasks, "calculate_metrics", _fake_calculate_metrics)
     monkeypatch.setattr(phase_tasks, "select_frames", _fake_select_frames)
-    artifacts = RunArtifacts()
     selected_frames: list[int] = []
 
-    phase_tasks.run_analyze_phase(
+    output = phase_tasks.run_analyze_phase(
         ctx,
         input_videos=input_videos,
         workspace=ctx.workspace,
-        selected_frames=selected_frames,
-        artifacts=artifacts,
     )
 
-    assert artifacts.metrics_cache_hit is True
-    assert selected_frames == [1, 8, 13]
-    assert ctx.selection_breakdown == breakdown
+    assert output.metrics_cache_hit is True
+    assert output.selected_frames == [1, 8, 13]
+    assert output.selection_breakdown == breakdown
+    assert selected_frames == []
+    assert ctx.selection_breakdown is None
     assert calls["calculate"]["video_paths"] == input_videos
     assert calls["calculate"]["cache_dir"] == ctx.workspace.cache_dir
     assert calls["select"] == {"metrics": metrics, "config": ctx.config.analysis}
 
 
-def test_run_artifacts_legacy_render_accessors_keep_mutations() -> None:
+def test_run_artifacts_uses_render_artifacts_carrier() -> None:
     artifacts = RunArtifacts()
+    assert artifacts.render is None
+
     screenshot = Path("screenshots/reference_1.png")
+    artifacts.render = RenderArtifacts(
+        screenshots_by_label={"Reference": [screenshot]},
+        screenshot_dir=Path("screenshots"),
+    )
 
-    artifacts.screenshots_by_label["Reference"] = [screenshot]
-    artifacts.screenshot_dir = Path("screenshots")
-
-    assert artifacts.screenshots_by_label == {"Reference": [screenshot]}
-    assert artifacts.screenshot_dir == Path("screenshots")
-    assert artifacts.render is not None
     assert artifacts.render.screenshots_by_label == {"Reference": [screenshot]}
     assert artifacts.render.screenshot_dir == Path("screenshots")
 
@@ -261,8 +261,10 @@ def test_run_align_phase_no_comparisons_is_noop(
 
     monkeypatch.setattr(phase_tasks, "align_clips", _unexpected_align)
 
-    phase_tasks.run_align_phase(ctx, selected_frames=selected_frames)
+    output = phase_tasks.run_align_phase(ctx, selected_frames=selected_frames)
 
+    assert output.selected_frames == [2, 4]
+    assert output.comparisons == []
     assert selected_frames == [2, 4]
     assert ctx.comparisons == []
 
@@ -291,7 +293,7 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
 
     monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
 
-    phase_tasks.run_align_phase(ctx, selected_frames=selected_frames)
+    output = phase_tasks.run_align_phase(ctx, selected_frames=selected_frames)
 
     assert captured["reference"] == ctx.reference.path
     assert captured["comparisons"] == [comparison.path]
@@ -300,11 +302,14 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     assert captured["config"].max_offset_seconds == 4.5
     assert captured["config"].use_vspreview is True
     assert captured["config"].cache_results is False
-    assert ctx.reference.trim.trim_start_frames == 2
-    assert ctx.comparisons[0].trim.trim_start_frames == 0
-    assert ctx.comparisons[0].alignment is not None
-    assert ctx.comparisons[0].alignment.relative_offset_frames == 2
-    assert selected_frames == [0, 48, 97]
+    assert output.reference.trim.trim_start_frames == 2
+    assert output.comparisons[0].trim.trim_start_frames == 0
+    assert output.comparisons[0].alignment is not None
+    assert output.comparisons[0].alignment.relative_offset_frames == 2
+    assert output.selected_frames == [0, 48, 97]
+    assert ctx.reference.trim.trim_start_frames == 0
+    assert ctx.comparisons[0].alignment is None
+    assert selected_frames == [0, 2, 50, 99]
 
 
 def test_run_align_phase_raises_when_alignment_leaves_no_overlap(
@@ -355,21 +360,18 @@ async def test_run_metadata_phase_resolves_when_enabled_and_client_present(
         return expected
 
     monkeypatch.setattr(phase_tasks, "resolve_run_metadata", _fake_resolve_run_metadata)
-    artifacts = RunArtifacts()
 
     async with httpx.AsyncClient() as client:
-        await phase_tasks.run_metadata_phase(
+        output = await phase_tasks.run_metadata_phase(
             ctx,
             client=client,
-            prefetched_metadata=None,
-            metadata_prefetched=False,
-            artifacts=artifacts,
+            metadata_prefetch=MetadataPrefetch(None, False),
         )
         assert captured["client"] is client
 
     assert captured["filenames"] == ["reference.mkv"]
     assert captured["config"] == ctx.config
-    assert artifacts.resolved_metadata == expected
+    assert output.resolved_metadata == expected
 
 
 async def test_run_publish_phase_sets_url_from_publish_result(
@@ -383,7 +385,6 @@ async def test_run_publish_phase_sets_url_from_publish_result(
         year=2004,
         media_type="movie",
     )
-    artifacts = RunArtifacts(resolved_metadata=metadata)
     captured: dict[str, Any] = {}
 
     async def _fake_publish_to_slowpics(**kwargs: object) -> PublishResult:
@@ -397,13 +398,13 @@ async def test_run_publish_phase_sets_url_from_publish_result(
     monkeypatch.setattr(phase_tasks, "publish_to_slowpics", _fake_publish_to_slowpics)
 
     async with httpx.AsyncClient() as client:
-        await phase_tasks.run_publish_phase(ctx, client=client, artifacts=artifacts)
+        output = await phase_tasks.run_publish_phase(ctx, client=client, metadata=metadata)
         assert captured["client"] is client
 
     assert captured["screenshot_dir"] == ctx.workspace.screenshots_dir
     assert captured["config"] == ctx.config.slowpics
     assert captured["metadata"] == metadata
-    assert artifacts.slowpics_url == "https://slow.pics/c/collateral"
+    assert output.slowpics_url == "https://slow.pics/c/collateral"
 
 
 def test_run_report_phase_builds_report_data_and_records_path(
@@ -411,11 +412,15 @@ def test_run_report_phase_builds_report_data_and_records_path(
 ) -> None:
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
     ctx = _context(tmp_path, comparisons=[comparison])
-    artifacts = RunArtifacts(
+    render = RenderArtifacts(
         screenshots_by_label={
             "Reference": [tmp_path / "screenshots" / "reference_1.png"],
             "Encode 1": [tmp_path / "screenshots" / "encode_1.png"],
         },
+        screenshot_dir=tmp_path / "screenshots",
+    )
+    artifacts = RunArtifacts(
+        render=render,
         slowpics_url="https://slow.pics/c/example",
     )
     captured: dict[str, Any] = {}
@@ -428,13 +433,20 @@ def test_run_report_phase_builds_report_data_and_records_path(
 
     monkeypatch.setattr(phase_tasks, "generate_report", _fake_generate_report)
 
-    phase_tasks.run_report_phase(ctx, frames=[5], artifacts=artifacts)
+    output = phase_tasks.run_report_phase(
+        ctx,
+        frames=[5],
+        render=artifacts.render,
+        metadata=artifacts.resolved_metadata,
+        slowpics_url=artifacts.slowpics_url,
+    )
 
     report_data = captured["report_data"]
-    assert artifacts.report_path == expected_path
+    assert output.report_path == expected_path
+    assert artifacts.report_path is None
     assert report_data.frames == [5]
-    assert report_data.clips[0].screenshots == artifacts.screenshots_by_label["Reference"]
-    assert report_data.clips[1].screenshots == artifacts.screenshots_by_label["Encode 1"]
+    assert report_data.clips[0].screenshots == render.screenshots_by_label["Reference"]
+    assert report_data.clips[1].screenshots == render.screenshots_by_label["Encode 1"]
     assert report_data.slowpics_url == "https://slow.pics/c/example"
     assert [(clip.name, clip.resolution, clip.fps) for clip in report_data.clips] == [
         ("Reference", (1920, 1080), 24.0),
@@ -447,9 +459,16 @@ def test_run_report_phase_without_screenshots_clears_existing_report_path(tmp_pa
     ctx = _context(tmp_path)
     artifacts = RunArtifacts(report_path=tmp_path / "stale.html")
 
-    phase_tasks.run_report_phase(ctx, frames=[1], artifacts=artifacts)
+    output = phase_tasks.run_report_phase(
+        ctx,
+        frames=[1],
+        render=artifacts.render,
+        metadata=artifacts.resolved_metadata,
+        slowpics_url=artifacts.slowpics_url,
+    )
 
-    assert artifacts.report_path is None
+    assert output.report_path is None
+    assert artifacts.report_path == tmp_path / "stale.html"
 
 
 @dataclass(frozen=True)
@@ -465,7 +484,6 @@ def test_run_render_phase_maps_aligned_frames_to_source_frames(
     ctx.reference = ctx.reference.with_trim(trim_start_frames=3, trim_end_frame_inclusive=20)
     ctx.comparisons = [comparison.with_trim(trim_start_frames=1, trim_end_frame_inclusive=18)]
     ctx.selection_breakdown = SelectionBreakdown(quantile_dark=[4])
-    artifacts = RunArtifacts()
     captured: dict[str, Any] = {}
 
     def _fake_render_screenshots_from_batch(**kwargs: object) -> dict[str, list[Path]]:
@@ -477,11 +495,11 @@ def test_run_render_phase_maps_aligned_frames_to_source_frames(
         _fake_render_screenshots_from_batch,
     )
 
-    phase_tasks.run_render_phase(
+    runner = cast(Any, _RenderRunner())
+    output = phase_tasks.run_render_phase(
         ctx,
         frames=[1],
-        runner=cast(Any, _RenderRunner()),
-        artifacts=artifacts,
+        runner=runner,
     )
 
     requests = captured["batch_requests"]
@@ -490,5 +508,11 @@ def test_run_render_phase_maps_aligned_frames_to_source_frames(
     assert requests[0].selection_labels == ["Dark"]
     assert requests[1].source_frames == [2]
     assert captured["output_dir"] == ctx.workspace.screenshots_dir
-    assert artifacts.screenshots_by_label == {"Reference": [tmp_path / "reference.png"]}
-    assert artifacts.screenshot_dir == ctx.workspace.screenshots_dir
+    options = captured["options"]
+    assert options.overlay_mode == ctx.config.screenshots.overlay_mode
+    assert options.ffmpeg_runner is runner
+    assert options.reporter is ctx.reporter
+    assert output.render == RenderArtifacts(
+        screenshots_by_label={"Reference": [tmp_path / "reference.png"]},
+        screenshot_dir=ctx.workspace.screenshots_dir,
+    )

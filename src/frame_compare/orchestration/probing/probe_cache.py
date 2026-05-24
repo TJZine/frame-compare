@@ -6,6 +6,7 @@ import hashlib
 import json
 import tomllib
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, TypeGuard, cast
@@ -19,6 +20,17 @@ from frame_compare.vs.types import HDRMetadata
 log = structlog.get_logger()
 
 type PrimitiveFrameProp = str | int | float
+
+
+@dataclass(frozen=True)
+class _CacheEntryLoadOutcome:
+    snapshot: ClipProbeSnapshot | None
+    warning: str | None = None
+
+
+@dataclass(frozen=True)
+class _CacheWriteOutcome:
+    error: str | None = None
 
 
 def _mapping_has_only_str_keys(mapping: Mapping[object, object]) -> bool:
@@ -106,6 +118,50 @@ def _require_bool(entry: Mapping[str, object], field: str) -> bool:
     return value
 
 
+def _load_cache_entry(entry_raw: object) -> _CacheEntryLoadOutcome:
+    if not _is_str_key_mapping(entry_raw):
+        return _CacheEntryLoadOutcome(
+            snapshot=None,
+            warning="entry must be a table",
+        )
+    entry = entry_raw
+
+    try:
+        fingerprint = ClipFingerprint(
+            path=Path(str(entry["path"])),
+            size_bytes=_require_int(entry, "size_bytes"),
+            mtime_ns=_require_int(entry, "mtime_ns"),
+        )
+
+        is_hdr = _require_bool(entry, "is_hdr")
+        hdr_metadata: HDRMetadata | None = None
+        if is_hdr:
+            hdr_table_raw = entry.get("hdr_metadata")
+            if hdr_table_raw is None:
+                raise TypeError("hdr_metadata must be a table when is_hdr is true")
+            if not _is_str_key_mapping(hdr_table_raw):
+                raise TypeError("hdr_metadata must be a table")
+            hdr_metadata = _sanitize_hdr_metadata(hdr_table_raw)
+
+        return _CacheEntryLoadOutcome(
+            snapshot=ClipProbeSnapshot(
+                fingerprint=fingerprint,
+                width=_require_int(entry, "width"),
+                height=_require_int(entry, "height"),
+                num_frames=_require_int(entry, "num_frames"),
+                fps=Fraction(_require_int(entry, "fps_num"), _require_int(entry, "fps_den")),
+                is_hdr=is_hdr,
+                hdr_metadata=hdr_metadata,
+                preserved_frame_props=_sanitize_preserved_frame_props(
+                    entry.get("preserved_frame_props")
+                ),
+                tonemap_prop_keys=_sanitize_tonemap_prop_keys(entry.get("tonemap_prop_keys")),
+            )
+        )
+    except (KeyError, TypeError, ValueError) as e:
+        return _CacheEntryLoadOutcome(snapshot=None, warning=str(e))
+
+
 def compute_probe_cache_key(fingerprint: ClipFingerprint) -> str:
     """Return a stable key for clip probe cache entries.
 
@@ -122,10 +178,8 @@ def compute_probe_cache_key(fingerprint: ClipFingerprint) -> str:
         "schema_version": 1,
     }
 
-    # Serialize canonically using json.dumps to ensure cross-platform determinism
     serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
-    # Generate a stable hash using blake2s
     return hashlib.blake2s(serialized.encode("utf-8")).hexdigest()
 
 
@@ -162,48 +216,26 @@ def load_clip_probe_cache(cache_path: Path) -> dict[str, ClipProbeSnapshot]:
         if key == "version":
             continue
 
-        if not _is_str_key_mapping(entry_raw):
-            log.warning("probe_cache_invalid_entry", key=key, error="entry must be a table")
+        outcome = _load_cache_entry(entry_raw)
+        if outcome.snapshot is None:
+            log.warning("probe_cache_invalid_entry", key=key, error=outcome.warning)
             continue
-        entry = entry_raw
 
-        try:
-            # Reconstruct fingerprint (needed for snapshot)
-            fingerprint = ClipFingerprint(
-                path=Path(str(entry["path"])),
-                size_bytes=_require_int(entry, "size_bytes"),
-                mtime_ns=_require_int(entry, "mtime_ns"),
-            )
-
-            # Reconstruct HDR metadata if present (from nested hdr_metadata table)
-            is_hdr = _require_bool(entry, "is_hdr")
-            hdr_metadata: HDRMetadata | None = None
-            if is_hdr:
-                hdr_table_raw = entry.get("hdr_metadata")
-                if hdr_table_raw is None:
-                    raise TypeError("hdr_metadata must be a table when is_hdr is true")
-                if not _is_str_key_mapping(hdr_table_raw):
-                    raise TypeError("hdr_metadata must be a table")
-                hdr_metadata = _sanitize_hdr_metadata(hdr_table_raw)
-
-            snapshots[key] = ClipProbeSnapshot(
-                fingerprint=fingerprint,
-                width=_require_int(entry, "width"),
-                height=_require_int(entry, "height"),
-                num_frames=_require_int(entry, "num_frames"),
-                fps=Fraction(_require_int(entry, "fps_num"), _require_int(entry, "fps_den")),
-                is_hdr=is_hdr,
-                hdr_metadata=hdr_metadata,
-                preserved_frame_props=_sanitize_preserved_frame_props(
-                    entry.get("preserved_frame_props")
-                ),
-                tonemap_prop_keys=_sanitize_tonemap_prop_keys(entry.get("tonemap_prop_keys")),
-            )
-        except (KeyError, TypeError, ValueError) as e:
-            log.warning("probe_cache_invalid_entry", key=key, error=str(e))
-            continue
+        snapshots[key] = outcome.snapshot
 
     return snapshots
+
+
+def _write_cache_file(cache_path: Path, output: Mapping[str, Any]) -> _CacheWriteOutcome:
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with cache_path.open("wb") as f:
+            tomli_w.dump(output, f)
+    except OSError as e:
+        return _CacheWriteOutcome(error=str(e))
+
+    return _CacheWriteOutcome()
 
 
 def save_clip_probe_cache(
@@ -215,12 +247,10 @@ def save_clip_probe_cache(
     """
     output: dict[str, Any] = {"version": "1"}
 
-    # Sort keys for deterministic output
     for key in sorted(entries_by_key.keys()):
         snapshot = entries_by_key[key]
         fp = snapshot.fingerprint
 
-        # Invariant check
         if snapshot.is_hdr and snapshot.hdr_metadata is None:
             raise ValueError(f"Snapshot {key} is_hdr=True but hdr_metadata is None")
 
@@ -237,7 +267,6 @@ def save_clip_probe_cache(
             "tonemap_prop_keys": list(snapshot.tonemap_prop_keys),
         }
 
-        # Sanitize preserved_frame_props (str|int|float only)
         # We perform runtime validation to ensure only TOML-safe primitives are persisted,
         # even if the in-memory type hint was bypassed.
         safe_props: dict[str, str | int | float] = {}
@@ -264,7 +293,6 @@ def save_clip_probe_cache(
                 dropped_props=dropped_props,
             )
 
-        # If HDR, include nested hdr_metadata table; otherwise, omit
         # TOML doesn't support None values, so we only include non-None fields
         if snapshot.is_hdr and snapshot.hdr_metadata:
             md = snapshot.hdr_metadata
@@ -273,7 +301,6 @@ def save_clip_probe_cache(
                 "transfer": md.transfer,
                 "matrix": md.matrix,
             }
-            # Only add optional fields if they are not None
             if md.mastering_display is not None:
                 hdr_dict["mastering_display"] = md.mastering_display
             if md.max_cll is not None:
@@ -284,11 +311,6 @@ def save_clip_probe_cache(
 
         output[key] = entry
 
-    try:
-        # Ensure parent directories exist before writing
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-
-        with cache_path.open("wb") as f:
-            tomli_w.dump(output, f)
-    except OSError as e:
-        log.warning("probe_cache_write_error", path=str(cache_path), error=str(e))
+    outcome = _write_cache_file(cache_path, output)
+    if outcome.error is not None:
+        log.warning("probe_cache_write_error", path=str(cache_path), error=outcome.error)

@@ -282,3 +282,62 @@ def test_load_missing_key_returns_corrupted(tmp_path: Path) -> None:
     result = load_cached_metrics(tmp_path, "fp", [])
     assert result.success is False
     assert result.reason == "corrupted"
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("luminance", "not-a-list"),
+        ("motion", [False]),
+        ("metadata.fps", "not-a-fraction"),
+        ("metadata.version", "3"),
+        ("metadata.clips.0.path", 123),
+        ("metadata.clips.0.size", True),
+        ("metadata.clips.0.mtime", False),
+        ("metadata.clips.0.sha1", 123),
+    ],
+)
+def test_load_malformed_nested_payload_returns_corrupted(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    payload: dict[str, object] = {
+        "version": CACHE_VERSION,
+        "fingerprint": "fp",
+        "luminance": [0.1],
+        "motion": [0.2],
+        "metadata": {
+            "frame_count": 1,
+            "fps": "24",
+            "config_fingerprint": "fp",
+            "clips": [{"path": "video.mkv", "size": 10, "mtime": 1.0, "sha1": None}],
+            "version": CACHE_VERSION,
+        },
+    }
+    _set_payload_field(payload, field, value)
+    (tmp_path / "cache.compframes").write_text(json.dumps(payload), encoding="utf-8")
+
+    result = load_cached_metrics(tmp_path, "fp", [])
+
+    assert result.success is False
+    assert result.reason == "corrupted"
+
+
+def _set_payload_field(payload: dict[str, object], field: str, value: object) -> None:
+    current: object = payload
+    parts = field.split(".")
+    for part in parts[:-1]:
+        if isinstance(current, dict):
+            current = current[part]
+            continue
+        if isinstance(current, list):
+            current = current[int(part)]
+            continue
+        raise AssertionError(f"unsupported payload path: {field}")
+
+    if isinstance(current, dict):
+        current[parts[-1]] = value
+        return
+    if isinstance(current, list):
+        current[int(parts[-1])] = value
+        return
+    raise AssertionError(f"unsupported payload path: {field}")

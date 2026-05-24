@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner, FFmpegRunner
 from frame_compare.render.naming import generate_screenshot_name, generate_screenshot_path
 from frame_compare.render.prepare import prepare_clip_for_render
 from frame_compare.render.types import (
@@ -13,10 +14,10 @@ from frame_compare.render.types import (
     RenderRequest,
     ScreenshotBatchRequest,
 )
+from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 
 if TYPE_CHECKING:
     from frame_compare.config.schema import ConfigSchema
-    from frame_compare.render.ffmpeg import FFmpegRunner
 
 
 def _validate_batch_request_lengths(request: ScreenshotBatchRequest) -> None:
@@ -46,8 +47,6 @@ def validate_ffmpeg_batch_tonemap_gate(
     if renderer != "ffmpeg" or not config.color.enable_tonemap:
         return
 
-    from frame_compare.vs.errors import TonemapRequiresVapourSynthError
-
     if any(req.probe_is_hdr is not False for req in batch_requests):
         raise TonemapRequiresVapourSynthError()
 
@@ -55,8 +54,6 @@ def validate_ffmpeg_batch_tonemap_gate(
 def resolve_batch_ffmpeg_runner(ffmpeg_runner: FFmpegRunner | None) -> FFmpegRunner:
     if ffmpeg_runner is not None:
         return ffmpeg_runner
-
-    from frame_compare.render.ffmpeg import DefaultFFmpegRunner
 
     return DefaultFFmpegRunner()
 
@@ -138,15 +135,15 @@ def expand_batch_render_requests(
         start_idx += num_frames_for_req
 
         for idx, source_frame in enumerate(req.source_frames):
-            aligned_frame = req.display_frames[idx]
+            display_frame = req.display_frames[idx]
             selection_label = req.selection_labels[idx]
 
-            output_path = generate_screenshot_path(output_dir, req.label, aligned_frame)
+            output_path = generate_screenshot_path(output_dir, req.label, display_frame)
             overlay = _build_overlay_config(
                 req,
                 overlay_mode=overlay_mode,
                 source_frame=source_frame,
-                display_frame=aligned_frame,
+                display_frame=display_frame,
                 selection_label=selection_label,
                 resolution=(width, height),
                 hdr_info=resolved_hdr_info,

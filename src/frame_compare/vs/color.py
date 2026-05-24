@@ -7,7 +7,57 @@ from typing import TYPE_CHECKING
 from frame_compare.vs.types import ColorProps
 
 if TYPE_CHECKING:
-    import vapoursynth as vs  # type: ignore
+    import vapoursynth as vs
+
+
+_UNSPECIFIED = 2
+_LIMITED_RANGE = 1
+_BT709 = 1
+_SMPTE170M = 6
+_BT2020 = 9
+_HDR_TRANSFERS = frozenset({16, 18})
+
+
+def _normalize_color_range(color_range: int) -> int:
+    return _LIMITED_RANGE if color_range == _UNSPECIFIED else color_range
+
+
+def _is_unspecified(value: int) -> bool:
+    return value == _UNSPECIFIED
+
+
+def _uses_hdr_defaults(primaries: int, transfer: int) -> bool:
+    return transfer in _HDR_TRANSFERS or primaries == _BT2020
+
+
+def _bt2020_matrix_constant() -> int:
+    # Prefer MATRIX_BT2020_CL, then MATRIX_BT2020_NCL, then the raw constant.
+    import vapoursynth as vs
+
+    return getattr(vs, "MATRIX_BT2020_CL", getattr(vs, "MATRIX_BT2020_NCL", _BT2020))
+
+
+def _height_default(clip: vs.VideoNode) -> int:
+    is_sd = clip.height > 0 and clip.height <= 576
+    return _SMPTE170M if is_sd else _BT709
+
+
+def _apply_sdr_height_defaults(
+    clip: vs.VideoNode,
+    *,
+    primaries: int,
+    transfer: int,
+    matrix: int,
+) -> tuple[int, int, int]:
+    if not any(_is_unspecified(value) for value in (primaries, transfer, matrix)):
+        return primaries, transfer, matrix
+
+    default_val = _height_default(clip)
+    return (
+        default_val if _is_unspecified(primaries) else primaries,
+        default_val if _is_unspecified(transfer) else transfer,
+        default_val if _is_unspecified(matrix) else matrix,
+    )
 
 
 def infer_color_props(clip: vs.VideoNode, props: ColorProps) -> ColorProps:
@@ -37,35 +87,23 @@ def infer_color_props(clip: vs.VideoNode, props: ColorProps) -> ColorProps:
     primaries = props.primaries
     transfer = props.transfer
     matrix = props.matrix
-    color_range = props.color_range
-
-    # Normalize range 2 -> 1
-    if color_range == 2:
-        color_range = 1
+    color_range = _normalize_color_range(props.color_range)
 
     # 1) HDR signal backfill
-    if transfer in (16, 18) or primaries == 9:
-        if transfer in (16, 18) and primaries == 2:
-            primaries = 9
+    if _uses_hdr_defaults(primaries, transfer):
+        if transfer in _HDR_TRANSFERS and _is_unspecified(primaries):
+            primaries = _BT2020
 
-        if matrix == 2:
-            # Prefer MATRIX_BT2020_CL, then MATRIX_BT2020_NCL, then 9
-            import vapoursynth as vs
-
-            matrix = getattr(vs, "MATRIX_BT2020_CL", getattr(vs, "MATRIX_BT2020_NCL", 9))  # type: ignore
+        if _is_unspecified(matrix):
+            matrix = _bt2020_matrix_constant()
 
     # 2) SDR backfill by height (if still unspecified)
-    if primaries == 2 or transfer == 2 or matrix == 2:
-        # Default to BT.709 (1) unless SD (<= 576)
-        is_sd = clip.height > 0 and clip.height <= 576
-        default_val = 6 if is_sd else 1
-
-        if primaries == 2:
-            primaries = default_val
-        if transfer == 2:
-            transfer = default_val
-        if matrix == 2:
-            matrix = default_val
+    primaries, transfer, matrix = _apply_sdr_height_defaults(
+        clip,
+        primaries=primaries,
+        transfer=transfer,
+        matrix=matrix,
+    )
 
     return ColorProps(
         primaries=primaries,

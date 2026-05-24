@@ -22,7 +22,7 @@
 | 🎨 **HDR→SDR Tonemapping** | libplacebo-powered with 7 presets (BT.2390, Spline, Reinhard) |
 | 🎵 **Audio Alignment** | Cross-correlation based synchronization for comparison clips |
 | 📸 **Screenshot Rendering** | VapourSynth/FFmpeg with customizable overlays |
-| 🌐 **slow.pics Publishing** | Automatic uploads with retry logic and rate limiting |
+| 🌐 **slow.pics Publishing** | Opt-in uploads with retry logic and rate limiting |
 | 📄 **HTML Reports** | Offline-friendly comparison viewer with 4 modes |
 | 🔧 **Zero-Config Docker** | Complete environment with single `docker compose up` |
 
@@ -206,12 +206,11 @@ docker run --rm -it \
   frame-compare:dev run \
     --root /workspace \
     --input /workspace/comparison_videos \
-    --no-upload \
     --frame-count 10
 ```
 
 > [!TIP]
-> For slow.pics uploads, omit `--no-upload` and ensure your config contains visibility settings.
+> slow.pics uploads are disabled by default. Enable `slowpics.auto_upload` in config when you want to publish screenshots.
 
 ---
 

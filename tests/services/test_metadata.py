@@ -120,14 +120,14 @@ def test_parse_filename_empty() -> None:
 def test_parse_filename_parsers_raise_falls_back_to_stem(mocker) -> None:
     """When both parsers raise, fall back to filename stem."""
     mocker.patch(
-        "frame_compare.services.metadata.guessit",
+        "frame_compare.services.metadata_parsing.guessit",
         side_effect=Exception("guessit error"),
     )
     mocker.patch(
-        "frame_compare.services.metadata.anitopy.parse",
+        "frame_compare.services.metadata_parsing.anitopy.parse",
         side_effect=Exception("anitopy error"),
     )
-    debug_log = mocker.patch("frame_compare.services.metadata.log.debug")
+    debug_log = mocker.patch("frame_compare.services.metadata_parsing.log.debug")
 
     result = parse_filename("Movie.Name.2024.BluRay.1080p.mkv")
 

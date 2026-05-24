@@ -48,10 +48,23 @@ jobs:
         shell: pwsh
         run: |
           $out = "dist/frame-compare-portable-win-x64"
-          pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/build_portable.ps1 `
-            -ManifestPath tools/windows_portable/manifest.windows-x64.json `
-            -OutDir $out `
-            -CacheDir ".portable_cache"
+          $buildArgs = @(
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            "tools/windows_portable/build_portable.ps1",
+            "-ManifestPath",
+            "tools/windows_portable/manifest.windows-x64.json",
+            "-OutDir",
+            $out,
+            "-CacheDir",
+            ".portable_cache"
+          )
+          if ("${{ github.event_name }}" -eq "release" -or "${{ github.event_name }}" -eq "workflow_dispatch") {
+            $buildArgs += "-RequireReleasePublicKey"
+          }
+          pwsh @buildArgs
 
       - name: Verify bundle workspace directories
         shell: pwsh

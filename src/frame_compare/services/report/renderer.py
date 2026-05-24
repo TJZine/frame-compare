@@ -49,7 +49,6 @@ def _json_for_script_tag(data: ReportPayload) -> str:
 
 
 def _render_frame_options(frames: list[ReportFramePayload]) -> str:
-    """Render frame selector options."""
     return "".join(
         f'<option value="{_esc_attr(i)}">Frame {_esc_text(frame["number"])}</option>'
         for i, frame in enumerate(frames)
@@ -57,7 +56,6 @@ def _render_frame_options(frames: list[ReportFramePayload]) -> str:
 
 
 def _render_clip_options(clips: list[ReportClipPayload], *, selected_index: int | None) -> str:
-    """Render clip selector options."""
     if selected_index is None:
         return "".join(
             f'<option value="{_esc_attr(i)}">{_esc_text(clip["label"])}</option>'
@@ -87,7 +85,6 @@ def _render_filmstrip(
     *,
     include_filmstrip: bool,
 ) -> str:
-    """Render the optional frame thumbnail filmstrip."""
     items = (
         "".join(
             f"""
@@ -118,7 +115,6 @@ def _render_header(
     clip_count: int,
     slowpics_link: str,
 ) -> str:
-    """Render report header section."""
     return f"""        <header class="rv-header">
             <div>
                 <div class="rv-title">{_esc_text(title)}</div>
@@ -135,7 +131,6 @@ def _render_controls(
     left_clip_options: str,
     right_clip_options: str,
 ) -> str:
-    """Render interactive toolbar controls."""
     return f"""    <div class="rv-controls" role="toolbar" aria-label="Viewer controls">
         <div class="rv-control-group">
                 <button id="btn-prev" aria-label="Previous frame">←</button>
@@ -176,7 +171,6 @@ def _render_controls(
 
 
 def _render_stage() -> str:
-    """Render comparison viewer canvas stage."""
     return """    <div class="rv-viewer-stage rv-mode-slider" role="img" aria-label="Comparison viewer">
         <div class="rv-canvas">
             <img src="data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=" alt="" class="rv-sizer" aria-hidden="true">
@@ -194,7 +188,6 @@ def _render_stage() -> str:
 
 
 def _render_help_modal() -> str:
-    """Render modal listing keyboard shortcuts."""
     return """    <div id="help-modal" class="rv-modal" aria-hidden="true" role="dialog" aria-label="Keyboard Shortcuts">
         <div class="rv-modal-content">
             <div class="rv-modal-title">Keyboard Shortcuts</div>
@@ -217,7 +210,6 @@ def _render_help_modal() -> str:
 
 
 def _render_footer(json_str: str) -> str:
-    """Render footer block and embed JSON state/JS bundle."""
     return f"""    <footer class="rv-footer">
         <div>Frame Compare v{REPORT_VERSION}</div>
         <div>Use arrow keys to navigate • S/O/D/B to change mode</div>

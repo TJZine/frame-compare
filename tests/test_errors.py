@@ -4,6 +4,7 @@ import pytest
 
 from frame_compare.analysis.errors import (
     InsufficientFramesError,
+    MetricsCalculationError,
     SelectionError,
 )
 from frame_compare.cli.errors import (
@@ -14,33 +15,33 @@ from frame_compare.cli.errors import (
 )
 from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.errors import (
-    CacheCorruptionError,
-    CacheVersionMismatchError,
-    DirectoryNotFoundError,
     DirectoryNotWritableError,
     DoviError,
     DoviToolNotFoundError,
-    EncodingError,
     ErrorContext,
-    FFmpegError,
-    FFmpegNotFoundError,
     FileTooLargeError,
     FrameCompareError,
-    FrameExtractionError,
     GenericInternalError,
     IncompatibleVideosError,
     InvariantViolationError,
-    MetricsCalculationError,
-    NoVideosFoundError,
-    OverlayError,
     PathEscapesRootError,
     ProcessingOutOfMemoryError,
     ProcessingTimeoutError,
     PythonVersionError,
-    RenderError,
     UnexpectedStateError,
     VideoCorruptError,
     VideoOpenError,
+)
+from frame_compare.orchestration.errors import (
+    DirectoryNotFoundError,
+    InputDiscoveryError,
+    NoVideosFoundError,
+)
+from frame_compare.render.errors import (
+    EncodingError,
+    FrameExtractionError,
+    OverlayError,
+    RenderError,
 )
 from frame_compare.services.errors import (
     AudioAlignmentError,
@@ -55,6 +56,8 @@ from frame_compare.services.errors import (
     TmdbError,
     TmdbRateLimitedError,
 )
+from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
+from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 from frame_compare.vs.errors import (
     LibplaceboError,
     PluginNotFoundError,
@@ -136,6 +139,27 @@ def test_exception_class_contract(error_class, args, expected_code):
     ctx_dict = error.context.to_dict()
     assert ctx_dict["code"] == expected_code
     assert "message" in ctx_dict
+
+
+@pytest.mark.parametrize(
+    "error_class,owner_module",
+    [
+        (MetricsCalculationError, "frame_compare.analysis.errors"),
+        (NoVideosFoundError, "frame_compare.orchestration.errors"),
+        (DirectoryNotFoundError, "frame_compare.orchestration.errors"),
+        (InputDiscoveryError, "frame_compare.orchestration.errors"),
+        (FrameExtractionError, "frame_compare.render.errors"),
+        (RenderError, "frame_compare.render.errors"),
+        (EncodingError, "frame_compare.render.errors"),
+        (OverlayError, "frame_compare.render.errors"),
+        (CacheCorruptionError, "frame_compare.utils.cache_errors"),
+        (CacheVersionMismatchError, "frame_compare.utils.cache_errors"),
+        (FFmpegNotFoundError, "frame_compare.utils.ffmpeg_errors"),
+        (FFmpegError, "frame_compare.utils.ffmpeg_errors"),
+    ],
+)
+def test_active_domain_errors_live_in_owner_modules(error_class, owner_module):
+    assert error_class.__module__ == owner_module
 
 
 def test_insufficient_frames_error_details_shape():
@@ -276,4 +300,6 @@ def test_format_error_json():
     error = RenderError()
     data = format_error_json(error)
     assert data["success"] is False
-    assert data["error"]["code"] == "FC-4004"
+    payload = data["error"]
+    assert isinstance(payload, dict)
+    assert payload["code"] == "FC-4004"

@@ -8,6 +8,7 @@ and path bootstrapping.
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -49,30 +50,29 @@ def write_vspreview_session_script(
         suffix = f"_{attempt}" if attempt > 0 else ""
         script_name = f"vspreview_{reference.stem}_{base_timestamp}{suffix}.py"
         candidate_path = sessions_dir / script_name
-        try:
-            # Atomically reserve path by exclusively creating it
-            with open(candidate_path, "x", encoding="utf-8"):
-                pass
+        if _reserve_empty_file(candidate_path):
             script_path = candidate_path
             break
-        except FileExistsError:
-            continue
 
     if script_path is None:
-        import uuid
-
         random_suffix = uuid.uuid4().hex[:8]
         script_name = f"vspreview_{reference.stem}_{base_timestamp}_{random_suffix}.py"
         script_path = sessions_dir / script_name
-        with open(script_path, "x", encoding="utf-8"):
-            pass
+        script_path.touch(exist_ok=False)
 
     write_text_atomic(script_path, script_content, encoding="utf-8")
     return script_path
 
 
-# Keep legacy private alias for tests
-_generate_vspreview_script = write_vspreview_session_script
+def _reserve_empty_file(path: Path) -> bool:
+    """Atomically reserve a path by exclusively creating an empty file."""
+    try:
+        path.touch(exist_ok=False)
+    except FileExistsError:
+        reserved = False
+    else:
+        reserved = True
+    return reserved
 
 
 def _resolve_bootstrap_paths(cache_dir: Path) -> list[Path]:
@@ -145,11 +145,23 @@ for _raw_path in _BOOTSTRAP_PATHS:
 def _build_helpers_section() -> str:
     return '''\
 # ─── Safe Print Helper ────────────────────────────────────────────────────────
-try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass  # Best-effort on Windows
+def _reconfigure_text_stream(stream):
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is None:
+        return False
+
+    failure_reason = None
+    try:
+        reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, LookupError, OSError, TypeError, UnicodeError, ValueError) as error:
+        failure_reason = f"{type(error).__name__}: {error}"
+    else:
+        return True
+    return failure_reason is None
+
+
+_reconfigure_text_stream(sys.stdout)
+_reconfigure_text_stream(sys.stderr)
 
 
 def safe_print(*args, **kwargs):

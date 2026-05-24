@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from frame_compare.orchestration.coordinator import (
     RunDependencies,
@@ -23,8 +24,6 @@ def run(request: RunRequest, dependencies: RunDependencies | None = None) -> Run
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        import logging
-
         logging.getLogger("frame_compare.runner").debug(
             "No running event loop detected; running via asyncio.run is safe."
         )
