@@ -53,6 +53,23 @@ For diffs, include `git diff --stat`, exact changed files, commands run, and obs
 
 For workflow/skills, include triggering examples, non-triggering examples, affected authority docs, and expected verification.
 
+For high-risk Frame Compare surfaces, add explicit review prompts instead of
+generic risk wording:
+
+- CLI/config: invalid inputs, Pydantic validation failures, exit code mapping,
+  stdout/stderr separation, JSON cleanliness, and traceback leakage.
+- VapourSynth/runtime/media metadata: malformed, missing, unknown, and explicitly
+  unspecified values; deterministic fallback behavior; lazy runtime imports.
+- Windows portable/release/workflows: explicit subprocess timeouts, semantic
+  PowerShell/YAML assertions, CI/local command parity, and documented-only
+  verification gaps.
+- Orchestration/hotspots: state transitions, partial failures, cleanup, and
+  typed result/union seams that were broadened to `object`, `Any`, or ad hoc
+  dicts.
+- Test-suite changes: brittle exact strings, call-order/log-shape assertions,
+  private seam justification, duplicate helpers, stale pragmas, broad fixtures,
+  undeclared markers, skipped runtime tests, and hidden external dependencies.
+
 ## Reviewer Prompt Rules
 
 Ask the reviewer to lead with findings ordered by severity, cite files and lines, separate blockers from optional improvements, identify missing tests or weak verification, check scope creep and owner-boundary violations, and say explicitly when no blocking findings are found.
@@ -60,6 +77,10 @@ Ask the reviewer to lead with findings ordered by severity, cite files and lines
 ## Defect Checklist
 
 Review for correctness, public contract drift, security/privacy, filesystem/data-loss risk, architecture boundary drift, maintainability, performance/resource leaks, insufficient verification, docs drift, and unrelated changes.
+
+When the target is a crucial PR/commit review or release-path change, ask the
+reviewer to explicitly close out each applicable high-risk prompt as either a
+finding, no material issue, verification gap, or out of scope with reason.
 
 ## After Review
 

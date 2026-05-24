@@ -70,14 +70,46 @@ This skill is based on official pytest, HTTPX, RESPX, Hypothesis, subprocess, Ty
 
 - Use subprocess tests only when process behavior is the contract: console entrypoints, packaging/module invocation, env isolation, cwd handling, stream encoding, timeout behavior, or exit status.
 - Prefer `sys.executable`, argument lists, explicit `cwd`, explicit `env`, `capture_output=True`, `text=True`, `timeout=...`, and `check=False` so tests can assert failure output.
+- Every direct `subprocess.run()`, `Popen`, PowerShell, FFmpeg, Docker, or
+  console-entrypoint invocation in tests must have an explicit timeout or call a
+  repo helper that applies one. Let `TimeoutExpired` fail clearly unless the test
+  is specifically exercising timeout translation.
 - For FFmpeg/VapourSynth/PowerShell/Docker paths, use the runbook's verification routing and mark or skip tests honestly when the local runtime is unavailable.
 
 ## Anti-Brittleness Rules
 
 - Do not compare entire help output, tracebacks, timestamps, random IDs, temp paths, unordered collections, or styled Rich output unless that exact output is the public contract.
 - Normalize dynamic values and assert stable structure or semantic fragments.
+- Prefer semantic command assertions over exact YAML/PowerShell line fragments
+  unless the literal text is itself the contract.
+- Avoid parsing code or scripts with regexes that depend on indentation,
+  one-line bodies, or brace columns. Use a small brace-depth/token helper or
+  semantic regex around the exact command being protected.
+- Avoid exact log event/call-shape assertions unless structured log fields are a
+  documented diagnostic contract. Prefer behavior assertions plus a warning/error
+  fired check for generic invalid-entry paths.
 - Avoid private probes. If a test needs internals, consider a public seam, a real collaborator, or a narrower owner extraction.
+- Private or underscore owner-seam patches are acceptable when they are the
+  repo's deliberate test seam and the public path cannot deterministically reach
+  the branch under test; record that reason in the test name or surrounding
+  context.
 - Do not hide cleanup in broad autouse fixtures unless the fixture's isolation contract is obvious and tested by use.
+- Scan changed tests for duplicate helper definitions, stale file-level Pyright
+  pragmas, undeclared markers, broad autouse fixtures, hidden network/runtime
+  dependencies, and skips that silently remove coverage.
+
+## Review Checklist For Test-Heavy Diffs
+
+When reviewing a test-heavy PR or cleanup, explicitly check:
+
+- Does each new assertion protect public behavior or an intentional owner seam?
+- Could harmless formatting, log wording, temp path spelling, ordering, or
+  capitalization break the test?
+- Are malformed/negative cases covered for the code paths changed by the PR?
+- Are runtime-dependent tests skipped honestly, and is the remaining unit
+  coverage still meaningful without the runtime?
+- Are all subprocess and shell invocations bounded by timeouts?
+- Did test cleanup remove a check that was documenting deterministic behavior?
 
 ## Verification
 

@@ -49,11 +49,21 @@ For CLI changes, update focused tests for the affected contract:
 
 - success path: `exit_code == 0`, expected stdout, and expected stderr
 - usage/error path: expected nonzero exit code and diagnostic stream
+- validation path: raw Pydantic `ValidationError` and config/schema failures are
+  translated to the documented `FrameCompareError`/exit-code contract
+- traceback path: expected user-facing failures do not leak a Python traceback
+  unless verbose/debug behavior explicitly says they should
 - help path: `--help` exits `0` and includes stable semantic fragments
 - JSON mode: `json.loads(result.stdout)`, stable keys/schema, no human text in stdout
 - option compatibility: canonical long option, documented aliases, and deprecated options if still supported
 - persistence path: `--write-config`, presets, relative paths, and runtime-only flags when touched
 - docs lockstep: update `docs/current-cli-contract.md` and `tests/test_cli_contract_docs.py` when public behavior changes
+
+For wizard, preset, config write, and TOML serialization paths, verify both the
+happy path and at least one invalid generated/configured value. Helpers that
+sound generic must either preserve unrelated sections recursively and handle
+`None` values intentionally, or be named/documented as wizard-specific/minimal
+serializers.
 
 ## Testing Rules
 
@@ -82,3 +92,7 @@ UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
 - Changing an option name without updating docs and contract tests
 - Treating help text as incidental when users rely on it
 - Letting CLI command bodies absorb runtime or config policy owned elsewhere
+- Catching only `FrameCompareError` around code paths that can raise raw
+  Pydantic validation errors
+- Treating a successful config write test as proof that invalid config/write
+  failures follow the CLI error contract
