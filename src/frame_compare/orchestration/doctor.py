@@ -38,6 +38,8 @@ _CHECK_ORDER: list[tuple[str, str]] = [
     ("tmdb_api_key", "network"),
 ]
 
+SLOWPICS_HEALTHCHECK_URL = "https://slow.pics/"
+
 
 @dataclass(frozen=True, slots=True)
 class CheckResult:
@@ -211,17 +213,16 @@ def _check_vspreview() -> CheckResult:
 def _check_slowpics() -> CheckResult:
     """Check slow.pics reachability per docs/current-architecture.md.
 
-    URL: https://slow.pics/
+    URL: SLOWPICS_HEALTHCHECK_URL
     Method: HEAD
     Timeout: 5.0 seconds
     Pass if status < 400; fail on status >= 400 or request errors.
     """
-    url = "https://slow.pics/"
     timeout = 5.0
 
     try:
         with httpx.Client(timeout=timeout) as client:
-            response = client.head(url)
+            response = client.head(SLOWPICS_HEALTHCHECK_URL)
             if response.status_code < 400:
                 return CheckResult(
                     passed=True,

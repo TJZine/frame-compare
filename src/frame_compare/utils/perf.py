@@ -11,6 +11,8 @@ import structlog
 
 log = structlog.get_logger()
 
+SECONDS_TO_MILLISECONDS = 1000.0
+
 
 def is_perf_enabled() -> bool:
     """Return True when perf timing logs are enabled.
@@ -37,5 +39,5 @@ def perf_span(name: str, **fields: object) -> Iterator[None]:
     try:
         yield
     finally:
-        elapsed_ms = (time.perf_counter() - start) * 1000.0
+        elapsed_ms = (time.perf_counter() - start) * SECONDS_TO_MILLISECONDS
         log.info("perf", span=name, elapsed_ms=round(elapsed_ms, 3), **fields)

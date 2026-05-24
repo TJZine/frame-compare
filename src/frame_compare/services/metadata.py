@@ -15,6 +15,7 @@ from frame_compare.services.errors import MetadataError, TmdbError, TmdbRateLimi
 from frame_compare.services.types import MetadataConfig, ParsedMetadata, TmdbMetadata
 
 TMDB_API_URL = "https://api.themoviedb.org/3/search/multi"
+TMDB_IMAGE_ORIGINAL_BASE_URL = "https://image.tmdb.org/t/p/original"
 TMDB_KEY_REGEX = re.compile(r"^[0-9a-fA-F]{32}$")
 log = structlog.get_logger()
 
@@ -254,7 +255,7 @@ async def _search_tmdb(
         def _get_url(path: str | None) -> str | None:
             if not path:
                 return None
-            return f"https://image.tmdb.org/t/p/original{path}"
+            return f"{TMDB_IMAGE_ORIGINAL_BASE_URL}{path}"
 
         mapped_results.append(
             TmdbMetadata(

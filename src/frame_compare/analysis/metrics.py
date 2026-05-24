@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 
     from frame_compare.config.schema import AnalysisConfig
     from frame_compare.vs.loader import VSLoader
+    from frame_compare.vs.types import SourceInfo
 
 
 log = structlog.get_logger()
@@ -42,6 +43,100 @@ ANALYZE_PROGRESS_TOTAL = 3
 
 def _y_plane_array(frame: vs.VideoFrame) -> npt.NDArray[np.generic]:
     return np.asarray(frame[0])
+
+
+def _clip_identities(video_paths: list[Path]) -> list[ClipIdentity]:
+    return [
+        ClipIdentity(
+            path=str(path),
+            size=path.stat().st_size,
+            mtime=path.stat().st_mtime,
+        )
+        for path in video_paths
+    ]
+
+
+def _cached_metrics(
+    cache_dir: Path,
+    fingerprint: str,
+    clips: list[ClipIdentity],
+    reporter: ProgressReporter | None,
+) -> FrameMetrics | None:
+    cache_result = load_cached_metrics(cache_dir, fingerprint, clips)
+    if not (cache_result.success and cache_result.metrics):
+        return None
+
+    if reporter:
+        reporter.set_description("Cache hit")
+        reporter.advance(ANALYZE_PROGRESS_TOTAL - 1)
+    return cache_result.metrics
+
+
+def _load_reference_source(reference_path: Path, vs_loader: VSLoader | None) -> SourceInfo:
+    loader = vs_loader or DefaultVSLoader()
+    try:
+        return loader.load(reference_path)
+    except (PluginNotFoundError, SourceLoadError):
+        raise
+    except Exception as e:
+        raise MetricsCalculationError(f"Failed to load reference video: {e}") from e
+
+
+def _calculate_clip_metrics(
+    source: SourceInfo, reporter: ProgressReporter | None
+) -> tuple[list[float], list[float]]:
+    clip = source.clip
+    if clip.num_frames == 0:
+        raise MetricsCalculationError("Reference clip has 0 frames")
+
+    total_frames = clip.num_frames
+    with perf_span("analysis.calculate_metrics", frames=total_frames):
+        luminance = _calculate_luminance(clip, reporter)
+        if reporter:
+            reporter.advance(1)
+        motion = _calculate_motion(clip, reporter=reporter)
+
+    return luminance, motion
+
+
+def _build_metrics(
+    *,
+    luminance: list[float],
+    motion: list[float],
+    source: SourceInfo,
+    fingerprint: str,
+    clips: list[ClipIdentity],
+) -> FrameMetrics:
+    return FrameMetrics(
+        luminance=luminance,
+        motion=motion,
+        metadata=MetricsMetadata(
+            frame_count=source.clip.num_frames,
+            fps=source.fps,
+            config_fingerprint=fingerprint,
+            clips=clips,
+            version=CACHE_VERSION,
+        ),
+    )
+
+
+def _save_metrics_cache_best_effort(
+    metrics: FrameMetrics,
+    cache_dir: Path,
+    reporter: ProgressReporter | None,
+) -> None:
+    if reporter:
+        reporter.start_phase("Saving analysis cache", total=1)
+    try:
+        save_metrics_cache(metrics, cache_dir)
+    except Exception as e:
+        if reporter:
+            reporter.set_description(f"Cache save failed: {e}")
+        log.warning("analysis_cache_save_failed", error=str(e), exc_info=True)
+    finally:
+        if reporter:
+            reporter.advance(1)
+            reporter.complete_phase()
 
 
 def calculate_metrics(
@@ -77,69 +172,24 @@ def calculate_metrics(
         raise MetricsCalculationError("No input video paths provided")
 
     fingerprint = compute_cache_key(video_paths, config)
+    clips = _clip_identities(video_paths)
 
-    # Attempt to load from cache
-    clips = [
-        ClipIdentity(
-            path=str(p),
-            size=p.stat().st_size,
-            mtime=p.stat().st_mtime,
-        )
-        for p in video_paths
-    ]
-
-    cache_result = load_cached_metrics(cache_dir, fingerprint, clips)
-    if cache_result.success and cache_result.metrics:
-        if reporter:
-            reporter.set_description("Cache hit")
-            reporter.advance(ANALYZE_PROGRESS_TOTAL - 1)
-        return cache_result.metrics
+    cached = _cached_metrics(cache_dir, fingerprint, clips, reporter)
+    if cached:
+        return cached
 
     # Cache miss or invalid - compute metrics for reference clip only
-    reference_path = video_paths[0]
-    loader = vs_loader or DefaultVSLoader()
-    try:
-        source = loader.load(reference_path)
-    except (PluginNotFoundError, SourceLoadError):
-        raise
-    except Exception as e:
-        raise MetricsCalculationError(f"Failed to load reference video: {e}") from e
-
-    clip = source.clip
-    if clip.num_frames == 0:
-        raise MetricsCalculationError("Reference clip has 0 frames")
-
-    total_frames = clip.num_frames
-    with perf_span("analysis.calculate_metrics", frames=total_frames):
-        luminance = _calculate_luminance(clip, reporter)
-        if reporter:
-            reporter.advance(1)
-        motion = _calculate_motion(clip, reporter=reporter)
-
-    metrics = FrameMetrics(
+    source = _load_reference_source(video_paths[0], vs_loader)
+    luminance, motion = _calculate_clip_metrics(source, reporter)
+    metrics = _build_metrics(
         luminance=luminance,
         motion=motion,
-        metadata=MetricsMetadata(
-            frame_count=clip.num_frames,
-            fps=source.fps,
-            config_fingerprint=fingerprint,
-            clips=clips,
-            version=CACHE_VERSION,
-        ),
+        source=source,
+        fingerprint=fingerprint,
+        clips=clips,
     )
 
-    if reporter:
-        reporter.start_phase("Saving analysis cache", total=1)
-    try:
-        save_metrics_cache(metrics, cache_dir)
-    except Exception as e:
-        if reporter:
-            reporter.set_description(f"Cache save failed: {e}")
-        log.warning("analysis_cache_save_failed", error=str(e), exc_info=True)
-    finally:
-        if reporter:
-            reporter.advance(1)
-            reporter.complete_phase()
+    _save_metrics_cache_best_effort(metrics, cache_dir, reporter)
 
     if reporter:
         reporter.advance(1)
