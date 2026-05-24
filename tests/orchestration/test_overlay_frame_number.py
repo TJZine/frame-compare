@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
+import frame_compare.vs.loader as vs_loader_module
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import (
     ClipFingerprint,
@@ -15,7 +16,10 @@ from frame_compare.orchestration.context import (
 )
 from frame_compare.orchestration.execution import run_render_phase
 from frame_compare.utils.types import WorkspacePaths
-from frame_compare.vs.types import SourceInfo
+from frame_compare.vs.types import HDRMetadata, SourceInfo
+
+if TYPE_CHECKING:
+    import vapoursynth as vs
 
 
 class FakeVSLoader:
@@ -32,7 +36,7 @@ class FakeVSLoader:
             hdr_metadata=None,
         )
 
-    def ensure_core(self):  # type: ignore[override]
+    def ensure_core(self) -> vs.Core:
         raise RuntimeError("ensure_core should not be called in tests")
 
 
@@ -40,9 +44,7 @@ class FakeFFmpegRunner:
     def extract_frame(self, _video: Path, _frame_num: int, _output: Path) -> None:
         raise AssertionError("FFmpeg extraction path is not exercised in this test")
 
-    def probe_hdr(self, _video: Path):  # type: ignore[override]
-        from frame_compare.vs.types import HDRMetadata
-
+    def probe_hdr(self, _video: Path) -> HDRMetadata | None:
         return HDRMetadata(
             mastering_display=None,
             max_cll=None,
@@ -63,7 +65,7 @@ def test_overlay_display_frame_number_matches_aligned_output_filename(
         return cast(Any, request).output_path
 
     monkeypatch.setattr("frame_compare.render.batch.orchestrator.render_frame", _fake_render_frame)
-    monkeypatch.setattr("frame_compare.vs.loader.DefaultVSLoader", FakeVSLoader)
+    monkeypatch.setattr(vs_loader_module, "DefaultVSLoader", FakeVSLoader)
 
     config = ConfigSchema()
 

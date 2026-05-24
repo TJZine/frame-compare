@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 import numpy as np
 from PIL import Image
@@ -25,6 +26,12 @@ if TYPE_CHECKING:
 
     from frame_compare.render.types import OverlayConfig
 
+type _ColorFramePropKey = Literal["_Matrix", "_Transfer", "_Primaries"]
+
+_VS_MATRIX_PROP: _ColorFramePropKey = "_Matrix"
+_VS_TRANSFER_PROP: _ColorFramePropKey = "_Transfer"
+_VS_PRIMARIES_PROP: _ColorFramePropKey = "_Primaries"
+
 _MATRIX_TO_ZIMG: dict[int, str] = {
     1: "709",
     4: "fcc",
@@ -35,6 +42,13 @@ _MATRIX_TO_ZIMG: dict[int, str] = {
     9: "2020ncl",
     10: "2020cl",
 }
+
+
+def _get_int_frame_prop(frame_props: Mapping[str, object], key: _ColorFramePropKey) -> int | None:
+    value = frame_props.get(key)
+    if isinstance(value, int):
+        return value
+    return None
 
 
 def render_frame(request: RenderRequest, renderer: Renderer = "auto") -> Path:
@@ -162,19 +176,19 @@ def _resolve_matrix_in_s(clip: vs.VideoNode) -> str:
     """
     # Read canonical color props from frame 0. VapourSynth usually caches hot frames,
     # so this metadata probe is typically low overhead relative to full rendering.
-    props = dict(clip.get_frame(0).props)
-    matrix_prop = props.get("_Matrix")
-    if isinstance(matrix_prop, int):
+    frame_props = dict(clip.get_frame(0).props)
+    matrix_prop = _get_int_frame_prop(frame_props, _VS_MATRIX_PROP)
+    if matrix_prop is not None:
         mapped = _MATRIX_TO_ZIMG.get(matrix_prop)
         if mapped is not None:
             return mapped
 
-    transfer_prop = props.get("_Transfer")
-    primaries_prop = props.get("_Primaries")
+    transfer_prop = _get_int_frame_prop(frame_props, _VS_TRANSFER_PROP)
+    primaries_prop = _get_int_frame_prop(frame_props, _VS_PRIMARIES_PROP)
     is_hdr = (
-        isinstance(transfer_prop, int)
+        transfer_prop is not None
         and transfer_prop in {16, 18}
-        and isinstance(primaries_prop, int)
+        and primaries_prop is not None
         and primaries_prop == 9
     )
     return "2020ncl" if is_hdr else "709"

@@ -141,6 +141,42 @@ async def test_publish_to_slowpics_timeout_raises_error(
 
 
 @pytest.mark.anyio
+async def test_publish_to_slowpics_request_error_exhaustion_raises_unavailable(
+    screenshot_dir: Path,
+    async_client: httpx.AsyncClient,
+    respx_mock,
+    mock_sleep,
+    mock_jitter,
+):
+    respx_mock.post("https://slow.pics/api/comparison").mock(
+        side_effect=httpx.ConnectError("connection failed")
+    )
+    config = SlowpicsConfig(max_retries=1)
+
+    with pytest.raises(SlowpicsUnavailableError):
+        await publish_to_slowpics(screenshot_dir, config, async_client)
+
+    assert mock_sleep.await_count == 1
+
+
+@pytest.mark.anyio
+async def test_publish_to_slowpics_malformed_json_response_raises_error(
+    screenshot_dir: Path,
+    async_client: httpx.AsyncClient,
+    respx_mock,
+):
+    respx_mock.post("https://slow.pics/api/comparison").mock(
+        return_value=httpx.Response(200, text="not json")
+    )
+    config = SlowpicsConfig()
+
+    with pytest.raises(SlowpicsError) as exc:
+        await publish_to_slowpics(screenshot_dir, config, async_client)
+
+    assert "Invalid response from slow.pics" in str(exc.value)
+
+
+@pytest.mark.anyio
 async def test_publish_to_slowpics_malformed_retry_after_uses_default_delay(
     screenshot_dir: Path,
     async_client: httpx.AsyncClient,

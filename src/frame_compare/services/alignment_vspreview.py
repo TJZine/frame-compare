@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import structlog
@@ -19,6 +20,126 @@ from frame_compare.vspreview.adapter import (
 from frame_compare.vspreview.errors import VSPreviewError
 
 log = structlog.get_logger()
+
+
+@dataclass(frozen=True)
+class _TTYStatus:
+    stdin: bool
+    stdout: bool
+    stderr: bool
+
+    @property
+    def has_any(self) -> bool:
+        return self.stdin or self.stdout or self.stderr
+
+
+@dataclass(frozen=True)
+class _LaunchDecision:
+    enabled: bool
+    no_tty: bool
+
+
+def _current_tty_status() -> _TTYStatus:
+    return _TTYStatus(
+        stdin=sys.stdin.isatty(),
+        stdout=sys.stdout.isatty(),
+        stderr=sys.stderr.isatty(),
+    )
+
+
+def _raise_for_forced_unavailable(availability: VSPreviewAvailabilityStatus) -> None:
+    if availability == VSPreviewAvailabilityStatus.PROBE_FAILED:
+        raise AudioAlignmentError(
+            "Interactive alignment requested but VSPreview availability probe failed."
+        )
+    raise AudioAlignmentError("Interactive alignment requested but VSPreview is not available.")
+
+
+def _launch_requested(config: AlignmentConfig) -> bool:
+    return bool(config.use_vspreview or config.force_interactive)
+
+
+def _ensure_forced_availability(
+    *,
+    status: VSPreviewAvailabilityStatus,
+    is_available: bool,
+    probe_failure_reason: str,
+) -> None:
+    if is_available:
+        return
+    if status == VSPreviewAvailabilityStatus.PROBE_FAILED:
+        raise AudioAlignmentError(
+            f"Interactive alignment requested but VSPreview {probe_failure_reason}."
+        )
+    _raise_for_forced_unavailable(status)
+
+
+def _log_optional_unavailable(
+    *,
+    status: VSPreviewAvailabilityStatus,
+    hint: str | None,
+    error_details: dict[str, str] | None,
+    use_vspreview: bool,
+    force_interactive: bool,
+    probe_failure_reason: str,
+    probe_failure_details: dict[str, str],
+) -> None:
+    if status == VSPreviewAvailabilityStatus.PROBE_FAILED:
+        log.warning(
+            "vspreview_availability_probe_failed",
+            reason=probe_failure_reason,
+            exception_type=probe_failure_details.get("exception_type"),
+            hint=hint,
+            use_vspreview=use_vspreview,
+            force_interactive=force_interactive,
+        )
+        if error_details:
+            log.debug(
+                "vspreview_availability_probe_failed_debug",
+                error_details=error_details,
+            )
+    elif use_vspreview and not force_interactive:
+        log.warning(
+            "vspreview_unavailable",
+            hint=hint,
+            use_vspreview=use_vspreview,
+            force_interactive=force_interactive,
+        )
+
+
+def _log_no_tty(script_path: Path, tty_status: _TTYStatus) -> None:
+    log.warning(
+        "vspreview_no_tty",
+        hint="Cannot launch VSPreview without an interactive terminal (TTY)",
+        script_path=str(script_path),
+        stdin_tty=tty_status.stdin,
+        stdout_tty=tty_status.stdout,
+        stderr_tty=tty_status.stderr,
+    )
+
+
+def _log_optional_launch_failed(exc: VSPreviewError, config: AlignmentConfig) -> None:
+    log.warning(
+        "vspreview_optional_launch_failed",
+        reason=exc.context.message,
+        code=exc.code,
+        force_interactive=config.force_interactive,
+        use_vspreview=config.use_vspreview,
+    )
+
+
+def _resolve_launch_decision(
+    *,
+    config: AlignmentConfig,
+    is_available: bool,
+    tty_status: _TTYStatus,
+) -> _LaunchDecision:
+    requested = _launch_requested(config)
+    enabled = bool(requested and is_available and tty_status.has_any)
+    return _LaunchDecision(
+        enabled=enabled,
+        no_tty=bool(requested and is_available and not tty_status.has_any),
+    )
 
 
 def maybe_launch_alignment_vspreview(
@@ -43,45 +164,30 @@ def maybe_launch_alignment_vspreview(
 
     availability = check_vspreview_availability()
 
-    if config.force_interactive and not availability.is_available:
-        if availability.status == VSPreviewAvailabilityStatus.PROBE_FAILED:
-            raise AudioAlignmentError(
-                "Interactive alignment requested but "
-                f"VSPreview {availability.public_probe_failure_reason()}."
-            )
-        raise AudioAlignmentError("Interactive alignment requested but VSPreview is not available.")
+    if config.force_interactive:
+        _ensure_forced_availability(
+            status=availability.status,
+            is_available=availability.is_available,
+            probe_failure_reason=availability.public_probe_failure_reason(),
+        )
 
     if not availability.is_available:
-        if availability.status == VSPreviewAvailabilityStatus.PROBE_FAILED:
-            public_details = availability.public_probe_failure_details()
-            log.warning(
-                "vspreview_availability_probe_failed",
-                reason=availability.public_probe_failure_reason(),
-                exception_type=public_details.get("exception_type"),
-                hint=availability.hint,
-                use_vspreview=config.use_vspreview,
-                force_interactive=config.force_interactive,
-            )
-            if availability.error_details:
-                log.debug(
-                    "vspreview_availability_probe_failed_debug",
-                    error_details=availability.error_details,
-                )
-        elif config.use_vspreview and not config.force_interactive:
-            log.warning(
-                "vspreview_unavailable",
-                hint=availability.hint,
-                use_vspreview=config.use_vspreview,
-                force_interactive=config.force_interactive,
-            )
+        _log_optional_unavailable(
+            status=availability.status,
+            hint=availability.hint,
+            error_details=availability.error_details,
+            use_vspreview=config.use_vspreview,
+            force_interactive=config.force_interactive,
+            probe_failure_reason=availability.public_probe_failure_reason(),
+            probe_failure_details=availability.public_probe_failure_details(),
+        )
 
-    stdin_tty = sys.stdin.isatty()
-    stdout_tty = sys.stdout.isatty()
-    stderr_tty = sys.stderr.isatty()
-    has_tty = stdin_tty or stdout_tty or stderr_tty
-
-    launch_requested = bool(config.use_vspreview or config.force_interactive)
-    should_launch = bool(launch_requested and availability.is_available and has_tty)
+    tty_status = _current_tty_status()
+    launch_decision = _resolve_launch_decision(
+        config=config,
+        is_available=availability.is_available,
+        tty_status=tty_status,
+    )
 
     if progress:
         progress.set_description("Alignment verification")
@@ -92,24 +198,11 @@ def maybe_launch_alignment_vspreview(
             comparisons=comparisons,
             suggested_offsets_by_key=offsets_by_key,
             cache_dir=cache_dir,
-            config=VSPreviewConfig(enabled=should_launch),
+            config=VSPreviewConfig(enabled=launch_decision.enabled),
         )
-        if launch_requested and availability.is_available and not has_tty:
-            log.warning(
-                "vspreview_no_tty",
-                hint="Cannot launch VSPreview without an interactive terminal (TTY)",
-                script_path=str(script_path),
-                stdin_tty=stdin_tty,
-                stdout_tty=stdout_tty,
-                stderr_tty=stderr_tty,
-            )
+        if launch_decision.no_tty:
+            _log_no_tty(script_path, tty_status)
     except VSPreviewError as exc:
         if config.force_interactive:
             raise
-        log.warning(
-            "vspreview_optional_launch_failed",
-            reason=exc.context.message,
-            code=exc.code,
-            force_interactive=config.force_interactive,
-            use_vspreview=config.use_vspreview,
-        )
+        _log_optional_launch_failed(exc, config)

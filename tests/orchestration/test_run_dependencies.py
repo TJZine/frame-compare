@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -13,7 +14,10 @@ from frame_compare.orchestration.coordinator import (
 )
 from frame_compare.orchestration.types import RunRequest
 from frame_compare.vs.loader import VSLoader
-from frame_compare.vs.types import HDRMetadata
+from frame_compare.vs.types import HDRMetadata, SourceInfo
+
+if TYPE_CHECKING:
+    import vapoursynth as vs
 
 
 class StopAfterDependencyInit(RuntimeError):
@@ -21,10 +25,10 @@ class StopAfterDependencyInit(RuntimeError):
 
 
 class DummyVSLoader:
-    def load(self, path: Path):  # type: ignore[override]
+    def load(self, path: Path) -> SourceInfo:
         raise RuntimeError("Not used in tests.")
 
-    def ensure_core(self):  # type: ignore[override]
+    def ensure_core(self) -> vs.Core:
         raise RuntimeError("Not used in tests.")
 
 

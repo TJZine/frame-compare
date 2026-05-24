@@ -22,20 +22,34 @@ def _open_temp_for_atomic_write(path: Path) -> tuple[int, str]:
     if hasattr(os, "O_BINARY"):
         flags |= os.O_BINARY
 
+    collisions = 0
     for _ in range(_TEMP_NAME_ATTEMPTS):
         tmp_path = path.parent / f".{path.name}.{secrets.token_hex(8)}"
         try:
             return os.open(tmp_path, flags, 0o666), str(tmp_path)
         except FileExistsError:
-            continue
+            collisions += 1
 
-    raise FileExistsError(f"could not create a unique temporary file for {path}")
+    raise FileExistsError(
+        f"could not create a unique temporary file for {path} after {collisions} collisions"
+    )
 
 
 def _preserve_existing_target_mode(path: Path, tmp_name: str) -> None:
     target_mode = _resolve_existing_target_mode(path)
     if target_mode is not None:
         os.chmod(tmp_name, target_mode)
+
+
+def _cleanup_temp_after_failure(tmp_name: str, original_error: BaseException) -> None:
+    tmp_path = Path(tmp_name)
+    try:
+        tmp_path.unlink(missing_ok=True)
+    except OSError as cleanup_error:
+        original_error.add_note(
+            f"Could not remove temporary file {tmp_path} after atomic write failure: "
+            f"{cleanup_error}"
+        )
 
 
 def write_text_atomic(path: Path, content: str, *, encoding: str = "utf-8") -> None:
@@ -49,8 +63,8 @@ def write_text_atomic(path: Path, content: str, *, encoding: str = "utf-8") -> N
             os.fsync(handle.fileno())
         _preserve_existing_target_mode(path, tmp_name)
         os.replace(tmp_name, path)
-    except Exception:
-        Path(tmp_name).unlink(missing_ok=True)
+    except Exception as original_error:
+        _cleanup_temp_after_failure(tmp_name, original_error)
         raise
 
 
@@ -65,6 +79,6 @@ def write_bytes_atomic(path: Path, content: bytes) -> None:
             os.fsync(handle.fileno())
         _preserve_existing_target_mode(path, tmp_name)
         os.replace(tmp_name, path)
-    except Exception:
-        Path(tmp_name).unlink(missing_ok=True)
+    except Exception as original_error:
+        _cleanup_temp_after_failure(tmp_name, original_error)
         raise

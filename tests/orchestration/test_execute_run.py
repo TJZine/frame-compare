@@ -7,7 +7,7 @@ import json
 from datetime import datetime
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import pytest
@@ -42,6 +42,9 @@ from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionM
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 from frame_compare.vs.types import HDRMetadata, SourceInfo
+
+if TYPE_CHECKING:
+    import vapoursynth as vs
 
 # Minimal valid TOML config content
 MINIMAL_CONFIG = """\
@@ -246,7 +249,7 @@ class FakeVSLoader:
             hdr_metadata=None,
         )
 
-    def ensure_core(self):  # type: ignore[override]
+    def ensure_core(self) -> vs.Core:
         raise RuntimeError("ensure_core should not be called in tests")
 
 
@@ -281,7 +284,7 @@ class FakeFFmpegRunner:
         Image.new("RGB", (10, 10), color=(0, 0, 0)).save(output, format="PNG")
         self.calls.append((video.name, frame_num, output.name))
 
-    def probe_hdr(self, video: Path):  # type: ignore[override]
+    def probe_hdr(self, video: Path) -> HDRMetadata | None:
         return HDRMetadata(
             mastering_display=None,
             max_cll=None,
@@ -1256,7 +1259,7 @@ def test_execute_run_uses_and_populates_probe_cache_without_reprobing(tmp_path: 
         def load(self, path: Path) -> SourceInfo:
             raise AssertionError(f"Fake VS loader should not be called: {path}")
 
-        def ensure_core(self):
+        def ensure_core(self) -> vs.Core:
             raise AssertionError("Fake VS core should not be requested when cache is warm")
 
     reuse_deps = RunDependencies(vs_loader=RaisingFakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
