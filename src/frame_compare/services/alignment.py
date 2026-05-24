@@ -2,32 +2,50 @@
 
 from __future__ import annotations
 
-import subprocess
-import tomllib
 from fractions import Fraction
 from pathlib import Path
-from typing import cast
 
-import numpy as np
 import structlog
-import tomli_w
 
+from frame_compare.services.alignment_audio import extract_audio, probe_fps
+from frame_compare.services.alignment_cache import (
+    CACHE_FILE_NAME,
+    CACHE_VERSION,
+    load_cached_offsets,
+    save_offsets_cache,
+)
+from frame_compare.services.alignment_math import (
+    calculate_alignment_trims,
+    cross_correlate,
+    samples_to_frames,
+)
 from frame_compare.services.alignment_vspreview import maybe_launch_alignment_vspreview
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentAlgorithm, AlignmentConfig, AlignmentResult
-from frame_compare.utils.atomic_write import write_bytes_atomic
+from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
-from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 from frame_compare.utils.progress_protocol import ProgressReporter
-from frame_compare.utils.subproc import run_subprocess
 from frame_compare.vspreview.overrides import load_manual_overrides
 
-CACHE_VERSION = "1"
-CACHE_FILE_NAME = "audio_offsets.toml"
-_FFPROBE_TIMEOUT_SECONDS = 15.0
-_FFMPEG_AUDIO_TIMEOUT_SECONDS = 120.0
-
 log = structlog.get_logger()
+
+_extract_audio = extract_audio
+_probe_fps = probe_fps
+_cross_correlate = cross_correlate
+_samples_to_frames = samples_to_frames
+
+__all__ = [
+    "CACHE_FILE_NAME",
+    "CACHE_VERSION",
+    "_cross_correlate",
+    "_extract_audio",
+    "_probe_fps",
+    "_samples_to_frames",
+    "align_clips",
+    "calculate_alignment_trims",
+    "check_alignment_cached",
+    "load_cached_offsets",
+    "save_offsets_cache",
+]
 
 
 def _build_offsets_map(
@@ -231,317 +249,3 @@ def check_alignment_cached(
             continue
         missing.append(key)
     return missing
-
-
-def _cached_entry_algorithm(entry_dict: dict[str, object]) -> AlignmentAlgorithm:
-    algorithm = entry_dict.get("algorithm")
-    if algorithm is None and "method" in entry_dict:
-        algorithm = entry_dict["method"]
-
-    if not isinstance(algorithm, str):
-        raise TypeError("algorithm must be str")
-    if algorithm != "cross_correlation":
-        raise ValueError("unsupported algorithm value")
-    return "cross_correlation"
-
-
-def _parse_cached_alignment_entry(entry_dict: dict[str, object]) -> AlignmentResult:
-    algorithm = _cached_entry_algorithm(entry_dict)
-    reference_clip = entry_dict["reference_clip"]
-    comparison_clip = entry_dict["comparison_clip"]
-    frame_offset = entry_dict["frame_offset"]
-    time_offset_seconds = entry_dict["time_offset_seconds"]
-    correlation_score = entry_dict["correlation_score"]
-
-    if not isinstance(reference_clip, str):
-        raise TypeError("reference_clip must be str")
-    if not isinstance(comparison_clip, str):
-        raise TypeError("comparison_clip must be str")
-    if not isinstance(frame_offset, int):
-        raise TypeError("frame_offset must be int")
-    if not isinstance(time_offset_seconds, int | float):
-        raise TypeError("time_offset_seconds must be number")
-    if not isinstance(correlation_score, int | float):
-        raise TypeError("correlation_score must be number")
-
-    return AlignmentResult(
-        reference_clip=reference_clip,
-        comparison_clip=comparison_clip,
-        frame_offset=frame_offset,
-        time_offset_seconds=float(time_offset_seconds),
-        correlation_score=float(correlation_score),
-        algorithm=algorithm,
-        source="cached",
-    )
-
-
-def _cache_entry_from_result(result: AlignmentResult) -> dict[str, object]:
-    return {
-        "reference_clip": result.reference_clip,
-        "comparison_clip": result.comparison_clip,
-        "frame_offset": result.frame_offset,
-        "time_offset_seconds": result.time_offset_seconds,
-        "correlation_score": result.correlation_score,
-        "algorithm": result.algorithm,
-    }
-
-
-def _normalize_legacy_cache_entries(data: dict[str, object]) -> None:
-    """Rewrite legacy cache keys to the current schema before saving."""
-    for key, entry in data.items():
-        if key == "version" or not isinstance(entry, dict):
-            continue
-        data[key] = _cache_entry_from_result(
-            _parse_cached_alignment_entry(cast(dict[str, object], entry))
-        )
-
-
-def load_cached_offsets(
-    cache_dir: Path,
-    clips: list[Path],
-) -> dict[str, AlignmentResult] | None:
-    """Load previously calculated offsets from cache."""
-    cache_path = cache_dir / CACHE_FILE_NAME
-    if not cache_path.exists():
-        return None
-
-    try:
-        with cache_path.open("rb") as f:
-            data = cast(dict[str, object], tomllib.load(f))
-    except (tomllib.TOMLDecodeError, OSError) as exc:
-        raise CacheCorruptionError(cache_path) from exc
-
-    if data.get("version") != CACHE_VERSION:
-        raise CacheVersionMismatchError(str(data.get("version")), CACHE_VERSION)
-
-    reference = clips[0]
-    comparisons = clips[1:]
-
-    results: dict[str, AlignmentResult] = {}
-    for comp in comparisons:
-        key = f"{reference.stem}:{comp.stem}"
-        if key in data:
-            entry = data[key]
-            if not isinstance(entry, dict):
-                raise CacheCorruptionError(cache_path)
-            entry_dict = cast(dict[str, object], entry)
-            try:
-                results[key] = _parse_cached_alignment_entry(entry_dict)
-            except (KeyError, TypeError, ValueError) as e:
-                raise CacheCorruptionError(cache_path) from e
-
-    return results
-
-
-def save_offsets_cache(
-    cache_dir: Path,
-    results: list[AlignmentResult],
-) -> None:
-    """Persist alignment results to cache."""
-    cache_path = cache_dir / CACHE_FILE_NAME
-
-    # Load existing cache to preserve other entries
-    data: dict[str, object] = {"version": CACHE_VERSION}
-    if cache_path.exists():
-        try:
-            with cache_path.open("rb") as f:
-                existing_data = cast(dict[str, object], tomllib.load(f))
-            _normalize_legacy_cache_entries(existing_data)
-            existing_data.pop("version", None)
-            data.update(existing_data)
-        except (tomllib.TOMLDecodeError, OSError, KeyError, TypeError, ValueError) as exc:
-            log.warning(
-                "audio_offsets_cache_corrupt_on_write",
-                path=str(cache_path),
-                cache_version=CACHE_VERSION,
-                action="overwrite_cache_and_discard_prior_entries",
-                error=str(exc),
-                exc_info=exc,
-            )
-
-    # Update with new results
-    for res in results:
-        key = f"{Path(res.reference_clip).stem}:{Path(res.comparison_clip).stem}"
-        data[key] = _cache_entry_from_result(res)
-
-    try:
-        write_bytes_atomic(cache_path, tomli_w.dumps(data).encode("utf-8"))
-    except OSError as exc:
-        log.warning(
-            "audio_offsets_cache_write_failed",
-            path=str(cache_path),
-            error=str(exc),
-            action="alignment_results_not_cached",
-            exc_info=exc,
-        )
-
-
-def _probe_fps(video_path: Path) -> Fraction:
-    """Probe video FPS using FFprobe."""
-    argv = [
-        "ffprobe",
-        "-v",
-        "quiet",
-        "-select_streams",
-        "v:0",
-        "-show_entries",
-        "stream=r_frame_rate",
-        "-of",
-        "csv=p=0",
-        str(video_path),
-    ]
-    try:
-        proc = run_subprocess(argv, timeout_seconds=_FFPROBE_TIMEOUT_SECONDS)
-        output = proc.stdout.decode("utf-8").strip()
-        if not output:
-            raise FFmpegError("ffprobe returned empty output", proc.returncode)
-        return Fraction(output)
-    except FileNotFoundError:
-        raise FFmpegNotFoundError() from None
-    except subprocess.TimeoutExpired as e:
-        raise FFmpegError("ffprobe timed out", 124) from e
-    except subprocess.CalledProcessError as e:
-        raise FFmpegError(e.stderr.decode("utf-8"), e.returncode) from e
-    except FFmpegError:
-        raise
-    except Exception as e:
-        raise FFmpegError(str(e), 1) from e
-
-
-def _extract_audio(video_path: Path, sample_rate: int) -> np.ndarray:
-    """Extract audio using FFmpeg."""
-
-    argv = [
-        "ffmpeg",
-        "-i",
-        str(video_path),
-        "-vn",
-        "-ac",
-        "1",
-        "-ar",
-        str(sample_rate),
-        "-f",
-        "f32le",
-        "-",
-    ]
-
-    try:
-        proc = run_subprocess(argv, timeout_seconds=_FFMPEG_AUDIO_TIMEOUT_SECONDS)
-    except FileNotFoundError:
-        raise FFmpegNotFoundError() from None
-    except subprocess.TimeoutExpired as e:
-        raise FFmpegError("ffmpeg audio extraction timed out", 124) from e
-    except subprocess.CalledProcessError as e:
-        raise FFmpegError(e.stderr.decode("utf-8"), e.returncode) from e
-    except Exception as e:
-        raise FFmpegError(str(e), 1) from e
-
-    if not proc.stdout:
-        raise AudioAlignmentError(f"empty audio track in {video_path.name}")
-
-    return np.frombuffer(proc.stdout, dtype=np.float32)
-
-
-def _cross_correlate(
-    reference: np.ndarray,
-    comparison: np.ndarray,
-    max_offset_samples: int | None = None,
-) -> tuple[int, float]:
-    """Find offset using cross-correlation."""
-    if reference.size == 0 or comparison.size == 0:
-        raise AudioAlignmentError("empty audio signal prevents correlation")
-
-    # FFT-based cross-correlation is substantially cheaper than direct O(n^2) correlation
-    # for long clips and keeps deterministic results.
-    correlation_size = reference.size + comparison.size - 1
-    fft_size = 1 << (correlation_size - 1).bit_length()
-
-    reference_fft = np.fft.rfft(reference, fft_size)
-    comparison_fft = np.fft.rfft(comparison, fft_size)
-    correlation_raw = np.fft.irfft(reference_fft * np.conj(comparison_fft), fft_size)
-    correlation = np.concatenate(
-        (
-            correlation_raw[-(comparison.size - 1) :],
-            correlation_raw[: reference.size],
-        )
-    )
-
-    if max_offset_samples is not None:
-        bounded = max(0, max_offset_samples)
-        center = reference.size - 1
-        start_idx = max(0, center - bounded)
-        end_idx = min(correlation.size, center + bounded + 1)
-        if start_idx >= end_idx:
-            raise AudioAlignmentError("max_offset_seconds produced an empty search window")
-        peak_idx = int(np.argmax(correlation[start_idx:end_idx])) + start_idx
-    else:
-        peak_idx = int(np.argmax(correlation))
-
-    offset = reference.size - 1 - peak_idx
-
-    norm_ref = np.linalg.norm(reference)
-
-    norm_comp = np.linalg.norm(comparison)
-
-    if norm_ref == 0 or norm_comp == 0:
-        raise AudioAlignmentError("zero-norm audio signal prevents correlation")
-
-    score = float(correlation[peak_idx] / (norm_ref * norm_comp))
-
-    return offset, score
-
-
-def _samples_to_frames(
-    sample_offset: int,
-    sample_rate: int,
-    fps: Fraction,
-) -> int:
-    """Convert sample offset to frame offset."""
-    time_offset = sample_offset / sample_rate
-    return int(round(time_offset * float(fps)))
-
-
-def calculate_alignment_trims(
-    ref_num_frames: int,
-    comp_offsets: list[int | None],
-    comp_num_frames: list[int],
-) -> tuple[tuple[int, int], list[tuple[int, int]]]:
-    """Calculate trim start and end (inclusive) frames for reference and comparisons.
-
-    Returns:
-        A tuple where the first element is (ref_trim_start, ref_trim_end)
-        and the second element is a list of (comp_trim_start, comp_trim_end) for each comparison.
-    """
-    if len(comp_offsets) != len(comp_num_frames):
-        raise ValueError(
-            "comp_offsets and comp_num_frames must have matching lengths "
-            f"({len(comp_offsets)} != {len(comp_num_frames)})"
-        )
-
-    offsets = [offset for offset in comp_offsets if offset is not None]
-    if not offsets:
-        return (0, ref_num_frames - 1), [(0, num - 1) for num in comp_num_frames]
-
-    baseline = max(0, max(offsets))
-    ref_len = ref_num_frames - baseline
-
-    trimmed_comp_lens: list[int] = []
-    trim_starts: list[int] = []
-    for offset, num_frames in zip(comp_offsets, comp_num_frames, strict=True):
-        relative_offset = offset if offset is not None else 0
-        trim_start = baseline - relative_offset
-        if trim_start < 0:
-            raise ValueError(f"trim_start_frames {trim_start} must be >= 0")
-        trim_starts.append(trim_start)
-        trimmed_comp_lens.append(num_frames - trim_start)
-
-    common_length = min([ref_len, *trimmed_comp_lens])
-    if common_length <= 0:
-        raise AudioAlignmentError("No overlapping frames after alignment normalization.")
-
-    ref_trim_start = baseline
-    ref_trim_end = baseline + common_length - 1
-
-    comp_trims = [(trim_start, trim_start + common_length - 1) for trim_start in trim_starts]
-
-    return (ref_trim_start, ref_trim_end), comp_trims

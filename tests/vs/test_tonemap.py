@@ -356,7 +356,7 @@ def test_convert_non_rgb_with_matrix_hint_preserves_existing_matrix_prop() -> No
     mock_clip.resize.Bicubic.assert_called_once_with(format=vs.RGBS)
 
 
-@patch("frame_compare.vs.tonemap.detect_hdr")
+@patch("frame_compare.vs.tonemap_conversion.detect_hdr")
 @patch("frame_compare.vs.tonemap.detect_plugins")
 @patch("frame_compare.vs.tonemap._libplacebo_runtime_usable", return_value=True)
 def test_apply_tonemap_detects_metadata_when_missing_libplacebo(
@@ -478,7 +478,7 @@ def test_apply_tonemap_retries_minimal_kwargs_on_any_typeerror(mock_runtime_usab
         assert "dst_prim" not in second_call.kwargs
 
 
-@patch("frame_compare.vs.tonemap.detect_hdr")
+@patch("frame_compare.vs.tonemap_fallback.detect_hdr")
 @patch("frame_compare.vs.tonemap.detect_plugins")
 def test_apply_tonemap_detects_metadata_when_missing_fallback(mock_detect, mock_detect_hdr):
     """Verify metadata extraction is attempted in fallback path if missing."""
