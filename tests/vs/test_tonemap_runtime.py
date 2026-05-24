@@ -7,11 +7,16 @@ from frame_compare.vs.tonemap_runtime import (
 )
 
 
-def test_libplacebo_runtime_require_env_forces_true_without_probe(monkeypatch) -> None:
-    """Require override should bypass the cached subprocess probe."""
-    monkeypatch.setenv("FRAME_COMPARE_REQUIRE_LIBPLACEBO", "1")
+def _clear_libplacebo_env(monkeypatch) -> None:
+    monkeypatch.delenv("FRAME_COMPARE_REQUIRE_LIBPLACEBO", raising=False)
     monkeypatch.delenv("FRAME_COMPARE_DISABLE_LIBPLACEBO", raising=False)
     monkeypatch.delenv("FRAME_COMPARE_LIBPLACEBO_PROBE", raising=False)
+
+
+def test_libplacebo_runtime_require_env_forces_true_without_probe(monkeypatch) -> None:
+    """Require override should bypass the cached subprocess probe."""
+    _clear_libplacebo_env(monkeypatch)
+    monkeypatch.setenv("FRAME_COMPARE_REQUIRE_LIBPLACEBO", "1")
 
     calls = 0
 
@@ -26,9 +31,8 @@ def test_libplacebo_runtime_require_env_forces_true_without_probe(monkeypatch) -
 
 def test_libplacebo_runtime_disable_env_forces_false_without_probe(monkeypatch) -> None:
     """Disable override should bypass the cached subprocess probe."""
+    _clear_libplacebo_env(monkeypatch)
     monkeypatch.setenv("FRAME_COMPARE_DISABLE_LIBPLACEBO", "1")
-    monkeypatch.delenv("FRAME_COMPARE_REQUIRE_LIBPLACEBO", raising=False)
-    monkeypatch.delenv("FRAME_COMPARE_LIBPLACEBO_PROBE", raising=False)
 
     calls = 0
 
@@ -43,9 +47,8 @@ def test_libplacebo_runtime_disable_env_forces_false_without_probe(monkeypatch) 
 
 def test_libplacebo_runtime_probe_env_forces_true_without_probe(monkeypatch) -> None:
     """Child probe processes should bypass the runtime probe recursion guard."""
+    _clear_libplacebo_env(monkeypatch)
     monkeypatch.setenv("FRAME_COMPARE_LIBPLACEBO_PROBE", "1")
-    monkeypatch.delenv("FRAME_COMPARE_REQUIRE_LIBPLACEBO", raising=False)
-    monkeypatch.delenv("FRAME_COMPARE_DISABLE_LIBPLACEBO", raising=False)
 
     calls = 0
 
@@ -60,9 +63,7 @@ def test_libplacebo_runtime_probe_env_forces_true_without_probe(monkeypatch) -> 
 
 def test_libplacebo_runtime_usable_caches_probe_result_for_state_lifetime(monkeypatch) -> None:
     """Probe results should be cached after the first non-overridden lookup."""
-    monkeypatch.delenv("FRAME_COMPARE_REQUIRE_LIBPLACEBO", raising=False)
-    monkeypatch.delenv("FRAME_COMPARE_DISABLE_LIBPLACEBO", raising=False)
-    monkeypatch.delenv("FRAME_COMPARE_LIBPLACEBO_PROBE", raising=False)
+    _clear_libplacebo_env(monkeypatch)
 
     state = LibplaceboRuntimeState()
     calls = 0
@@ -79,9 +80,7 @@ def test_libplacebo_runtime_usable_caches_probe_result_for_state_lifetime(monkey
 
 def test_libplacebo_runtime_override_does_not_mutate_cached_probe_result(monkeypatch) -> None:
     """Runtime overrides should bypass, but not rewrite, the cached probe result."""
-    monkeypatch.delenv("FRAME_COMPARE_REQUIRE_LIBPLACEBO", raising=False)
-    monkeypatch.delenv("FRAME_COMPARE_DISABLE_LIBPLACEBO", raising=False)
-    monkeypatch.delenv("FRAME_COMPARE_LIBPLACEBO_PROBE", raising=False)
+    _clear_libplacebo_env(monkeypatch)
 
     state = LibplaceboRuntimeState()
     calls = 0
@@ -101,9 +100,7 @@ def test_libplacebo_runtime_override_does_not_mutate_cached_probe_result(monkeyp
 
 def test_libplacebo_runtime_override_reads_current_environment(monkeypatch) -> None:
     """The override helper should reflect per-call environment changes."""
-    monkeypatch.delenv("FRAME_COMPARE_REQUIRE_LIBPLACEBO", raising=False)
-    monkeypatch.delenv("FRAME_COMPARE_DISABLE_LIBPLACEBO", raising=False)
-    monkeypatch.delenv("FRAME_COMPARE_LIBPLACEBO_PROBE", raising=False)
+    _clear_libplacebo_env(monkeypatch)
     assert libplacebo_runtime_override() is None
 
     monkeypatch.setenv("FRAME_COMPARE_DISABLE_LIBPLACEBO", "1")
