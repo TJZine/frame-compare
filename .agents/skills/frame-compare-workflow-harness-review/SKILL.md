@@ -34,6 +34,10 @@ Lead with findings ordered by severity. Prioritize:
 - missing or undefined delegated roles
 - missing language-specific workflow coverage for Python, Typer CLI, or pytest changes
 - instructions that would make agents overwrite user changes or claim unverified work
+- PR/review-loop gaps where high-risk files can be reviewed without explicit
+  checks for CLI validation errors, malformed runtime metadata, Windows
+  subprocess timeouts, brittle workflow/test assertions, or typed-seam
+  broadening in hotspots
 
 ## Output
 

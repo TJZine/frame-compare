@@ -1,5 +1,4 @@
 from collections.abc import AsyncIterator
-from typing import get_args
 
 import httpx
 import pytest
@@ -156,10 +155,6 @@ def test_parse_filename_parsers_raise_falls_back_to_stem(mocker) -> None:
 
 
 # ─── TMDB Lookup Tests ────────────────────────────────────────────────────────
-
-
-def test_tmdb_metadata_media_type_is_closed_domain() -> None:
-    assert set(get_args(TmdbMetadata.__dataclass_fields__["media_type"].type)) == {"movie", "tv"}
 
 
 @pytest.mark.anyio

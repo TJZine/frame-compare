@@ -26,7 +26,8 @@ def test_preset_apply_missing_preset_exits_with_error_code() -> None:
             ],
         )
         assert result.exit_code == 2
-        assert "FC-1004" in result.output
+        assert result.stdout == ""
+        assert "FC-1004" in result.stderr
 
 
 def test_preset_apply_invalid_name_exits_with_error_code() -> None:
@@ -46,7 +47,8 @@ def test_preset_apply_invalid_name_exits_with_error_code() -> None:
             ],
         )
         assert result.exit_code == 2
-        assert "FC-1006" in result.output
+        assert result.stdout == ""
+        assert "FC-1006" in result.stderr
 
 
 def test_preset_list_stub():

@@ -193,7 +193,7 @@ def test_save_offsets_cache_normalizes_legacy_method_keys(tmp_path: Path) -> Non
     assert content.count('algorithm = "cross_correlation"') == 2
 
 
-def test_save_offsets_cache_preserves_current_schema_version_when_merging_existing_cache(
+def test_save_offsets_cache_discards_stale_schema_version_when_writing_fresh_cache(
     tmp_path: Path,
 ) -> None:
     cache_file = tmp_path / "audio_offsets.toml"
@@ -228,7 +228,7 @@ def test_save_offsets_cache_preserves_current_schema_version_when_merging_existi
     content = cache_file.read_text(encoding="utf-8")
     assert 'version = "1"' in content
     assert 'version = "0"' not in content
-    assert '["ref:comp_a"]' in content
+    assert '["ref:comp_a"]' not in content
     assert '["ref:comp_b"]' in content
 
 

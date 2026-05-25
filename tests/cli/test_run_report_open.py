@@ -244,9 +244,9 @@ def test_run_reloads_config_after_runner_and_respects_mid_run_auto_open_change(
 
 
 def test_maybe_open_report_swallows_webbrowser_error(monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setattr("frame_compare.cli.entry.os", SimpleNamespace(name="posix"))
+    monkeypatch.setattr("frame_compare.cli.cli_helpers.os", SimpleNamespace(name="posix"))
     monkeypatch.setattr(
-        "frame_compare.cli.entry.webbrowser.open",
+        "frame_compare.cli.cli_helpers.webbrowser.open",
         lambda _uri: (_ for _ in ()).throw(webbrowser.Error("no browser")),
     )
 
@@ -259,9 +259,9 @@ def test_maybe_open_report_keeps_startfile_path_on_windows(monkeypatch: MonkeyPa
         name="nt",
         startfile=lambda value: called.setdefault("path", value),
     )
-    monkeypatch.setattr("frame_compare.cli.entry.os", fake_os)
+    monkeypatch.setattr("frame_compare.cli.cli_helpers.os", fake_os)
     monkeypatch.setattr(
-        "frame_compare.cli.entry.webbrowser.open",
+        "frame_compare.cli.cli_helpers.webbrowser.open",
         lambda _uri: (_ for _ in ()).throw(AssertionError("webbrowser.open should not be called")),
     )
 
@@ -278,9 +278,9 @@ def test_maybe_open_report_falls_back_to_webbrowser_when_startfile_fails(
         raise OSError("boom")
 
     fake_os = SimpleNamespace(name="nt", startfile=_raise_startfile)
-    monkeypatch.setattr("frame_compare.cli.entry.os", fake_os)
+    monkeypatch.setattr("frame_compare.cli.cli_helpers.os", fake_os)
     monkeypatch.setattr(
-        "frame_compare.cli.entry.webbrowser.open",
+        "frame_compare.cli.cli_helpers.webbrowser.open",
         lambda uri: called.setdefault("uri", uri),
     )
 

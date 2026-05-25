@@ -44,7 +44,7 @@ class AnalysisError(ProcessingError):
     """Marker base for analysis failures."""
 
 
-class MetricsCalculationError(ProcessingError):
+class MetricsCalculationError(AnalysisError):
     """Failed to calculate metrics (FC-4002)."""
 
     def __init__(self, reason: str) -> None:

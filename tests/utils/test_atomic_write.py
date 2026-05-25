@@ -135,6 +135,7 @@ def test_write_text_atomic_does_not_mask_replace_failure_when_cleanup_fails(
 ) -> None:
     target = tmp_path / "out.toml"
     target.write_text("old", encoding="utf-8")
+    original_unlink = Path.unlink
 
     def _fail_replace(_src: str, _dst: Path) -> None:
         raise OSError("replace failed")
@@ -142,7 +143,7 @@ def test_write_text_atomic_does_not_mask_replace_failure_when_cleanup_fails(
     def _fail_cleanup(self: Path, *, missing_ok: bool = False) -> None:
         if self.name.startswith(".out.toml."):
             raise PermissionError("cleanup failed")
-        self.unlink(missing_ok=missing_ok)
+        original_unlink(self, missing_ok=missing_ok)
 
     monkeypatch.setattr("frame_compare.utils.atomic_write.os.replace", _fail_replace)
     monkeypatch.setattr("frame_compare.utils.atomic_write.Path.unlink", _fail_cleanup)

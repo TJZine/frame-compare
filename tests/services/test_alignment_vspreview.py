@@ -33,15 +33,9 @@ def _call_maybe_launch(
 
 
 def _set_tty(monkeypatch: pytest.MonkeyPatch, is_tty: bool) -> None:
-    monkeypatch.setattr(
-        alignment_vspreview,
-        "_current_tty_status",
-        lambda: alignment_vspreview._TTYStatus(
-            stdin=is_tty,
-            stdout=is_tty,
-            stderr=is_tty,
-        ),
-    )
+    monkeypatch.setattr(alignment_vspreview.sys.stdin, "isatty", lambda: is_tty)
+    monkeypatch.setattr(alignment_vspreview.sys.stdout, "isatty", lambda: is_tty)
+    monkeypatch.setattr(alignment_vspreview.sys.stderr, "isatty", lambda: is_tty)
 
 
 def _availability(status: VSPreviewAvailabilityStatus) -> VSPreviewAvailability:
@@ -165,6 +159,28 @@ def test_available_without_tty_generates_script_disabled_and_logs_no_tty(
     assert warning_kwargs["stdin_tty"] is False
     assert warning_kwargs["stdout_tty"] is False
     assert warning_kwargs["stderr_tty"] is False
+
+
+def test_forced_available_without_tty_raises_without_launch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_tty(monkeypatch, is_tty=False)
+    monkeypatch.setattr(
+        alignment_vspreview,
+        "check_vspreview_availability",
+        MagicMock(return_value=_availability(VSPreviewAvailabilityStatus.AVAILABLE)),
+    )
+    mock_launch = MagicMock()
+    monkeypatch.setattr(alignment_vspreview, "launch_alignment_verification_session", mock_launch)
+
+    with pytest.raises(AudioAlignmentError, match="no interactive terminal"):
+        _call_maybe_launch(
+            tmp_path=tmp_path,
+            config=AlignmentConfig(use_vspreview=True, force_interactive=True),
+        )
+
+    mock_launch.assert_not_called()
 
 
 def test_optional_launch_error_logs_warning(

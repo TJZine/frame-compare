@@ -193,6 +193,11 @@ def maybe_launch_alignment_vspreview(
     if progress:
         progress.set_description("Alignment verification")
 
+    if config.force_interactive and launch_decision.no_tty:
+        raise AudioAlignmentError(
+            "Interactive alignment requested but no interactive terminal (TTY) is available."
+        )
+
     try:
         script_path = launch_alignment_verification_session(
             request=VSPreviewSessionRequest(

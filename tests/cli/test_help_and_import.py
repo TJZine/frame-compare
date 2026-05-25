@@ -1,6 +1,7 @@
+import pytest
 import typer.rich_utils as typer_rich_utils
-from _pytest.monkeypatch import MonkeyPatch
 from click import Group
+from pytest import MonkeyPatch
 from typer.main import get_command
 
 from frame_compare.cli.entry import _stabilize_typer_help_width, app
@@ -103,5 +104,8 @@ def test_import_does_not_mutate_terminal_width():
         "import typer.rich_utils as tru; "
         "assert tru.MAX_WIDTH is None, 'should not set MAX_WIDTH on import'; ",
     ]
-    res = subprocess.run(cmd, env=env, capture_output=True, text=True)
+    try:
+        res = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired as exc:
+        pytest.fail(f"CLI import subprocess timed out after {exc.timeout} seconds")
     assert res.returncode == 0, res.stderr

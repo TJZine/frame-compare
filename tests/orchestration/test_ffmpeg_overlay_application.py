@@ -22,12 +22,13 @@ class FakeFFmpegRunner:
     def __init__(self) -> None:
         self.calls: list[tuple[Path, int, Path]] = []
 
-    def extract_frame(self, _video: Path, _frame_num: int, output: Path) -> None:
+    def extract_frame(self, video: Path, frame_num: int, output: Path) -> None:
         output.parent.mkdir(parents=True, exist_ok=True)
         Image.new("RGB", (10, 10), color=(0, 0, 0)).save(output, format="PNG")
-        self.calls.append((_video, _frame_num, output))
+        self.calls.append((video, frame_num, output))
 
-    def probe_hdr(self, _video: Path) -> HDRMetadata | None:
+    def probe_hdr(self, video: Path) -> HDRMetadata | None:
+        _ = video
         return HDRMetadata(
             mastering_display=None,
             max_cll=None,

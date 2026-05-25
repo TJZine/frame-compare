@@ -118,6 +118,14 @@ def _require_bool(entry: Mapping[str, object], field: str) -> bool:
     return value
 
 
+def _load_fps(entry: Mapping[str, object]) -> Fraction:
+    fps_num = _require_int(entry, "fps_num")
+    fps_den = _require_int(entry, "fps_den")
+    if fps_den == 0:
+        raise ValueError("fps_den must be non-zero")
+    return Fraction(fps_num, fps_den)
+
+
 def _load_cache_entry(entry_raw: object) -> _CacheEntryLoadOutcome:
     if not _is_str_key_mapping(entry_raw):
         return _CacheEntryLoadOutcome(
@@ -149,7 +157,7 @@ def _load_cache_entry(entry_raw: object) -> _CacheEntryLoadOutcome:
                 width=_require_int(entry, "width"),
                 height=_require_int(entry, "height"),
                 num_frames=_require_int(entry, "num_frames"),
-                fps=Fraction(_require_int(entry, "fps_num"), _require_int(entry, "fps_den")),
+                fps=_load_fps(entry),
                 is_hdr=is_hdr,
                 hdr_metadata=hdr_metadata,
                 preserved_frame_props=_sanitize_preserved_frame_props(

@@ -223,9 +223,19 @@ Common false-positive patterns:
 
 Common true-positive patterns:
 - CLI flag/config/env behavior drift without doc/test updates
+- raw Pydantic `ValidationError` escaping user-facing CLI handlers instead of
+  mapping to typed config errors and documented exit codes
 - hidden runtime import of VS-heavy modules at CLI import time
 - weak path/subprocess/network safety
+- unbounded subprocess/PowerShell invocations in Windows portable, release-path,
+  or runtime-boundary tests
 - deterministic naming/output changes without contract tests
+- malformed frame props, metadata, or config values suppressing deterministic
+  fallback behavior just because a key is present
+- hotspot signatures broadened from named result/union types to `object`/`Any`
+  without an owner-boundary reason
+- tests that freeze incidental log/call/YAML/PowerShell formatting while missing
+  the behavior or command semantics they meant to protect
 - missing Docker/Windows verification for touched release/runtime paths
 
 ## PR Commit Review Calibration
@@ -243,3 +253,19 @@ Final net-diff sanity check priorities:
 - missing authority doc updates
 - incomplete Docker/Windows/runtime verification
 - accidental local cache/run artifacts committed
+
+Mandatory high-risk probes for costly PR commit reviews:
+- CLI/config groups: inspect invalid-input tests, error mapping, exit codes,
+  stdout/stderr separation, JSON cleanliness, no traceback leakage, and TOML
+  serialization helpers that may drop sections or preserve `None`.
+- `src/frame_compare/vs/**` groups: inspect missing/unspecified/malformed frame
+  props such as `_Matrix`, parseable byte/string values, deterministic fallback
+  branches, and lazy optional-runtime imports.
+- Windows portable/release groups: inspect every direct `subprocess.run()` and
+  PowerShell invocation for explicit timeouts; prefer semantic workflow/script
+  assertions over exact line formatting.
+- Orchestration hotspot groups: inspect typed result/union seams for broadening
+  to `object`, `Any`, casts, or ad hoc dictionaries that weaken static signal.
+- Test-heavy groups: scan for exact log/call-shape assertions, brittle parser
+  regexes, duplicate helpers, stale file-level pyright pragmas, hidden external
+  dependencies, broad fixtures, and skipped runtime tests being treated as proof.

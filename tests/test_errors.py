@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from frame_compare.analysis.errors import (
+    AnalysisError,
     InsufficientFramesError,
     MetricsCalculationError,
     SelectionError,
@@ -160,6 +161,10 @@ def test_exception_class_contract(error_class, args, expected_code):
 )
 def test_active_domain_errors_live_in_owner_modules(error_class, owner_module):
     assert error_class.__module__ == owner_module
+
+
+def test_metrics_calculation_error_is_analysis_error_marker() -> None:
+    assert isinstance(MetricsCalculationError("test"), AnalysisError)
 
 
 def test_insufficient_frames_error_details_shape():

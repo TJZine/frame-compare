@@ -23,7 +23,8 @@ if TYPE_CHECKING:
 
 
 class FakeVSLoader:
-    def load(self, _path: Path) -> SourceInfo:
+    def load(self, path: Path) -> SourceInfo:
+        _ = path
         return SourceInfo(
             clip=cast(Any, object()),
             width=1920,
@@ -41,10 +42,12 @@ class FakeVSLoader:
 
 
 class FakeFFmpegRunner:
-    def extract_frame(self, _video: Path, _frame_num: int, _output: Path) -> None:
+    def extract_frame(self, video: Path, frame_num: int, output: Path) -> None:
+        _, _, _ = video, frame_num, output
         raise AssertionError("FFmpeg extraction path is not exercised in this test")
 
-    def probe_hdr(self, _video: Path) -> HDRMetadata | None:
+    def probe_hdr(self, video: Path) -> HDRMetadata | None:
+        _ = video
         return HDRMetadata(
             mastering_display=None,
             max_cll=None,

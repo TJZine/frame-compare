@@ -122,11 +122,12 @@ def candidate_lsmas_plugin_paths() -> list[str]:
     seen: set[str] = set()
     unique_candidates: list[str] = []
     for candidate in candidates:
-        normalized = os.path.normcase(os.path.normpath(candidate))
+        absolute = os.path.abspath(os.path.normpath(candidate))
+        normalized = os.path.normcase(absolute)
         if normalized in seen:
             continue
         seen.add(normalized)
-        unique_candidates.append(candidate)
+        unique_candidates.append(absolute)
     return unique_candidates
 
 
@@ -142,7 +143,11 @@ def try_load_lsmas_plugin(core: object) -> str | None:
     for plugin_path in candidate_lsmas_plugin_paths():
         if not os.path.isfile(plugin_path):
             continue
-        load_plugin(path=plugin_path)
+        try:
+            load_plugin(path=plugin_path)
+        except Exception as exc:
+            log.debug("Skipping L-SMASH plugin candidate %s due to error: %s", plugin_path, exc)
+            continue
         return plugin_path
     return None
 

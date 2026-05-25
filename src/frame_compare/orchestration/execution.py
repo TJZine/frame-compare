@@ -99,26 +99,29 @@ def _create_timed_phase(
 
 
 def _apply_phase_output(*, ctx: RunContext, state: ExecutionState, output: PhaseOutput) -> None:
-    if isinstance(output, FramePlanPhaseOutput):
-        state.selected_frames[:] = output.selected_frames
-    elif isinstance(output, AnalyzePhaseOutput):
-        state.selected_frames[:] = output.selected_frames
-        state.artifacts.metrics_cache_hit = output.metrics_cache_hit
-        ctx.selection_breakdown = output.selection_breakdown
-    elif isinstance(output, AlignPhaseOutput):
-        ctx.reference = output.reference
-        ctx.comparisons = output.comparisons
-        state.selected_frames[:] = output.selected_frames
-    elif isinstance(output, RenderPhaseOutput):
-        state.artifacts.render = output.render
-    elif isinstance(output, MetadataPhaseOutput):
-        state.artifacts.resolved_metadata = output.resolved_metadata
-    elif isinstance(output, DoviPhaseOutput):
-        state.warnings.append(output.warning)
-    elif isinstance(output, PublishPhaseOutput):
-        state.artifacts.slowpics_url = output.slowpics_url
-    else:
-        state.artifacts.report_path = output.report_path
+    match output:
+        case FramePlanPhaseOutput() as phase_output:
+            state.selected_frames[:] = phase_output.selected_frames
+        case AnalyzePhaseOutput() as phase_output:
+            state.selected_frames[:] = phase_output.selected_frames
+            state.artifacts.metrics_cache_hit = phase_output.metrics_cache_hit
+            ctx.selection_breakdown = phase_output.selection_breakdown
+        case AlignPhaseOutput() as phase_output:
+            ctx.reference = phase_output.reference
+            ctx.comparisons = phase_output.comparisons
+            state.selected_frames[:] = phase_output.selected_frames
+        case RenderPhaseOutput() as phase_output:
+            state.artifacts.render = phase_output.render
+        case MetadataPhaseOutput() as phase_output:
+            state.artifacts.resolved_metadata = phase_output.resolved_metadata
+        case DoviPhaseOutput() as phase_output:
+            state.warnings.append(phase_output.warning)
+        case PublishPhaseOutput() as phase_output:
+            state.artifacts.slowpics_url = phase_output.slowpics_url
+        case ReportPhaseOutput() as phase_output:
+            state.artifacts.report_path = phase_output.report_path
+        case _:
+            raise TypeError(f"Unsupported phase output type: {output.__class__.__qualname__}")
 
 
 def build_phases_before_align(

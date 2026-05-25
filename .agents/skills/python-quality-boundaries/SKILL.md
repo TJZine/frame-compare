@@ -36,6 +36,10 @@ This skill is based on official documentation for Python 3.13 typing, Pyright co
 
 - Do not introduce `Any`, bare containers, untyped decorators, untyped callbacks, broad `dict[str, Any]`, or ignored diagnostics unless the diff includes a narrow reason and a safer alternative was considered.
 - Prefer `object` for unknown external values, then validate and narrow at the boundary.
+- Do not broaden an established internal domain type, union, dataclass, protocol,
+  or result DTO to `object`, `Any`, or an ad hoc dictionary merely to satisfy a
+  call site. In hotspot/orchestration code, preserving typed seams is part of the
+  design even when Pyright would accept the broader type.
 - Prefer Python 3.13-era typing: built-in generics, `type Alias = ...`, `collections.abc` protocols/ABCs, `NewType` for logically distinct IDs, and `typing.assert_never` for exhaustive branches.
 - Keep `TYPE_CHECKING` guards and lazy imports where the repo uses them to avoid heavy optional/runtime imports.
 - Use `typing.cast` only after a real runtime guard or source-backed library limitation; never use it to silence design ambiguity.
@@ -47,6 +51,12 @@ This skill is based on official documentation for Python 3.13 typing, Pyright co
 - External input: raw library value or `object` -> Pydantic `model_validate`, `TypeAdapter`, or a focused parser.
 - Internal data: dataclasses, protocols, typed aliases, explicit result types, and concrete return annotations.
 - Output: explicit DTO/serializer shape, not ad hoc dictionaries spread across callers.
+
+When reviewing typed seams, compare the changed signature against neighboring
+types and call sites. If a named type alias or union already represents the
+allowed outputs, use it on both producer and consumer sides and keep runtime
+guards for defensive checks. Passing Pyright is not enough if the diff weakens
+static exhaustiveness or hides an owner-boundary contract.
 
 ## Pydantic Rules
 
@@ -83,6 +93,8 @@ This skill is based on official documentation for Python 3.13 typing, Pyright co
 
 - Treating Pyright strict failures as noise instead of design feedback
 - Using `Any`, `cast`, or `type: ignore` before narrowing the boundary
+- Replacing a precise internal result/union type with `object` and assuming a
+  runtime `else: raise TypeError` fully replaces static checking
 - Letting Pydantic coercion hide config or file-format bugs
 - Creating internal logic that depends on raw HTTP, JSON, TOML, or CLI payload shapes
 - Eagerly importing optional heavy runtime dependencies from simple CLI paths

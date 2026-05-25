@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404
 from fractions import Fraction
 from pathlib import Path
 
@@ -77,5 +77,11 @@ def extract_audio(video_path: Path, sample_rate: int) -> np.ndarray:
 
     if not proc.stdout:
         raise AudioAlignmentError(f"empty audio track in {video_path.name}")
+
+    payload_len = len(proc.stdout)
+    if payload_len % np.dtype(np.float32).itemsize != 0:
+        raise AudioAlignmentError(
+            f"invalid audio payload from {video_path.name}: {payload_len} bytes"
+        )
 
     return np.frombuffer(proc.stdout, dtype=np.float32)
