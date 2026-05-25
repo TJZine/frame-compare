@@ -2,11 +2,16 @@
 
 Date: 2026-05-25
 
-Status: Research report only
+Status: Historical research report only. This audit was an input to the VapourSynth
+R76 dependency update and is no longer current authority for supported versions,
+runtime layout, plugin paths, or implementation status. Current truth lives in
+`docs/current-architecture.md`, `docs/current-cli-contract.md`, and the active
+plan `docs/plans/2026-05-25-vapoursynth-r76-dependency-update.md` while that plan
+remains active.
 
 Scope:
-- Audit the upstream VapourSynth changes from the project's current baseline (`R73`) to the current upstream line.
-- Map those changes onto Frame Compare's current codebase, runtime layout, bundle logic, tests, and release surfaces.
+- Audit the upstream VapourSynth changes from the project's then-current baseline (`R73`) to the upstream line available when the audit was written.
+- Map those changes onto Frame Compare's then-current codebase, runtime layout, bundle logic, tests, and release surfaces.
 - Identify compatibility-sensitive areas and open questions that must be answered before implementation planning.
 
 Out of scope:
@@ -17,9 +22,9 @@ Out of scope:
 
 ## Executive Summary
 
-As of 2026-05-25, Frame Compare is still materially aligned to a pre-R74 VapourSynth world.
+At the time this audit was written on 2026-05-25, Frame Compare was still materially aligned to a pre-R74 VapourSynth world.
 
-The current project baseline is anchored to `R73` in more than one place:
+The then-current project baseline was anchored to `R73` in more than one place:
 - Windows portable bundle manifest: `tools/windows_portable/manifest.windows-x64.json`
 - Docker build pin: `Dockerfile`
 - Locked Python dependency state: `uv.lock`
@@ -33,7 +38,7 @@ Upstream VapourSynth changed its distribution and runtime model substantially in
 
 `R75` on 2026-04-30 then continued that direction, including more changes to plugin packaging and portable behavior.
 
-The practical conclusion is that upgrading this repo to the current upstream line is not a "bump a version string" exercise. It is a cross-surface runtime audit involving:
+The practical conclusion was that upgrading this repo to the current upstream line was not a "bump a version string" exercise. It was a cross-surface runtime audit involving:
 - Windows portable bundle assembly
 - bundle launcher environment variables
 - plugin placement and discovery
@@ -44,14 +49,20 @@ The practical conclusion is that upgrading this repo to the current upstream lin
 
 This report does not prescribe the implementation. It is meant to establish the factual upgrade surface.
 
-## Upstream Status Snapshot
+## Historical Upstream Status Snapshot
 
-As of 2026-05-25:
-- Latest stable upstream release: `R75` (released 2026-04-30)
-- Latest upstream prerelease: `R76RC1` (released 2026-05-09)
-- Frame Compare current baseline: `R73` (released 2025-11-24)
+Original audit snapshot from early 2026-05-25, before the R76 update plan became
+the active authority:
 
-That means this repo is currently behind:
+- Latest stable upstream release observed by this audit: `R75` (released 2026-04-30)
+- Latest upstream prerelease observed by this audit: `R76RC1` (released 2026-05-09)
+- Frame Compare baseline observed by this audit: `R73` (released 2025-11-24)
+
+This section is historical evidence only. It must not be used to conclude that
+R75 is the latest stable VapourSynth release or that Frame Compare's current
+baseline is R73.
+
+At the time of this audit, that meant the repo was behind:
 - one major stable release transition (`R74`)
 - one additional stable release (`R75`)
 - one current prerelease line (`R76RC1`)
@@ -60,7 +71,7 @@ That means this repo is currently behind:
 
 ### `R73` (2025-11-24)
 
-`R73` is the project's current baseline and was the last release with Windows 7 support. It still belongs to the older portable/runtime model that Frame Compare currently assumes.
+`R73` was the project's baseline when this audit was written and was the last release with Windows 7 support. It belongs to the older portable/runtime model that Frame Compare assumed at that time.
 
 Relevant upstream notes:
 - last release with Windows 7 support
@@ -84,7 +95,7 @@ This is the release that changes the assumptions Frame Compare currently encodes
 
 ### `R75` (2026-04-30)
 
-`R75` is the latest stable release as of this audit.
+`R75` was the latest stable release observed when this audit snapshot was written.
 
 Relevant upstream notes:
 - plugins can ship multiple optimized copies for x64 and the best one is auto-selected
@@ -93,26 +104,31 @@ Relevant upstream notes:
 - `vsrepo` is installed by default again in the portable experience
 - forwarding `.bat` files were added to more closely match pre-R74 paths
 
-This matters because Frame Compare currently implements its own portable layout normalization and command shims. Upstream portable behavior moved again after `R74`, not back to the exact `R73` model.
+This mattered because Frame Compare implemented its own portable layout
+normalization and command shims at the time of this audit. Upstream portable
+behavior moved again after `R74`, not back to the exact `R73` model.
 
-### `R76RC1` (2026-05-09, prerelease)
+### `R76RC1` (2026-05-09, prerelease observed by this audit)
 
-`R76RC1` is not a stable release yet, but it indicates where upstream is moving now.
+`R76RC1` was not a stable release when this audit snapshot was written, but it
+indicated where upstream was moving at that time.
 
 Relevant upstream notes:
 - cache limits were reworked
 - thread-count behavior was changed to reduce memory pressure
 - config-location handling using `XDG_CONFIG_HOME` was corrected again
 
-This looks less disruptive for Frame Compare than `R74`, but it confirms that upstream runtime/config behavior is still evolving after the packaging transition.
+This looked less disruptive for Frame Compare than `R74`, but it confirmed that
+upstream runtime/config behavior was still evolving after the packaging transition.
 
-## Upstream Distribution Model Today
+## Historical Upstream Distribution Model Snapshot
 
-Upstream documentation for the current line now describes a different default installation model than the one Frame Compare currently bundles around.
+Upstream documentation available when this audit was written described a different
+default installation model than the one Frame Compare bundled around at that time.
 
 ### General installation
 
-Current official docs recommend:
+The official docs reviewed for this audit recommended:
 1. install Python 3.12+
 2. run `pip install vapoursynth`
 3. run `vapoursynth config`
@@ -129,7 +145,7 @@ Important implication:
 
 ### Portable installation
 
-Current official docs describe Windows portable setup through an automatic PowerShell script that sets up:
+The official docs reviewed for this audit described Windows portable setup through an automatic PowerShell script that sets up:
 - embedded Python
 - pip
 - VapourSynth
@@ -143,7 +159,7 @@ Important implication:
 
 ### Plugin autoloading
 
-Current official docs describe plugin autoloading from:
+The official docs reviewed for this audit described plugin autoloading from:
 - `<site-packages>/vapoursynth/plugins`
 
 They also document:
@@ -155,7 +171,7 @@ Important implication:
 
 ### Plugin packaging
 
-Current plugin-packaging docs explicitly encourage wheel-based packaging, with native plugin binaries installed into:
+The plugin-packaging docs reviewed for this audit explicitly encouraged wheel-based packaging, with native plugin binaries installed into:
 - `vapoursynth/plugins/` inside `site-packages`
 
 Important implication:
@@ -164,7 +180,7 @@ Important implication:
 
 ### VSRepo
 
-Current docs say VSRepo can simply be installed with:
+The docs reviewed for this audit said VSRepo could simply be installed with:
 - `pip install vsrepo`
 
 The `vsrepo` repository README still documents portable usage via:
@@ -174,11 +190,12 @@ Important implication:
 - upstream still supports portable-oriented VSRepo usage
 - but the distribution and installation expectations around VSRepo are now more packaging-centric than the old archive-centric model
 
-## Current Frame Compare State
+## Historical Frame Compare State Observed By This Audit
 
 ## 1. Hard pins to the old line
 
-Frame Compare is not only "using VapourSynth"; it is explicitly pinned to the old distribution model.
+At the time of this audit, Frame Compare was not only "using VapourSynth"; it was
+explicitly pinned to the old distribution model.
 
 Relevant local evidence:
 - `tools/windows_portable/manifest.windows-x64.json`
@@ -188,13 +205,14 @@ Relevant local evidence:
 - `Dockerfile`
   - `ARG VAPOURSYNTH_REF=R73`
 - `uv.lock`
-  - currently contains `vapoursynth==73`
+  - contained `vapoursynth==73`
 
 This means the portable bundle, Docker runtime, and Python lock state are not aligned to separate upstream generations by accident. They are intentionally pinned to the same old baseline.
 
 ## 2. Bundle layout assumptions
 
-The Windows portable build script assumes an older portable archive shape and then transforms it into Frame Compare's own layout.
+At the time of this audit, the Windows portable build script assumed an older
+portable archive shape and then transformed it into Frame Compare's own layout.
 
 Relevant local evidence:
 - `tools/windows_portable/manifest.windows-x64.json`
@@ -209,7 +227,8 @@ This is a strong signal that the project is not merely consuming upstream portab
 
 ## 3. Bundle launcher environment assumptions
 
-The generated bundle launcher configures VapourSynth through a hand-built set of environment variables and PATH entries.
+At the time of this audit, the generated bundle launcher configured VapourSynth
+through a hand-built set of environment variables and PATH entries.
 
 Relevant local evidence:
 - `tools/windows_portable/build_portable.ps1`
@@ -223,7 +242,8 @@ This is not a generic "use the official R74+ bootstrap". It is a custom runtime 
 
 ## 4. Python wheel installation assumptions
 
-The build script currently installs the VapourSynth Python module from a wheel extracted out of the pinned portable bundle.
+At the time of this audit, the build script installed the VapourSynth Python
+module from a wheel extracted out of the pinned portable bundle.
 
 Relevant local evidence:
 - `tools/windows_portable/build_portable.ps1`
@@ -242,7 +262,8 @@ Any of those assumptions may differ in the current upstream portable/bootstrap m
 
 ## 5. Runtime import and plugin detection assumptions
 
-The project's VS runtime helper module still reflects the current custom bundle model.
+At the time of this audit, the project's VS runtime helper module reflected the
+custom bundle model.
 
 Relevant local evidence:
 - `src/frame_compare/vs/env.py`
@@ -255,7 +276,8 @@ This creates a direct dependency between bundle layout and runtime import behavi
 
 ## 6. Doctor assumptions
 
-The doctor surface is tightly coupled to the current loader contract.
+At the time of this audit, the doctor surface was tightly coupled to the loader
+contract.
 
 Relevant local evidence:
 - `src/frame_compare/orchestration/doctor.py`

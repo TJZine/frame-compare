@@ -83,7 +83,7 @@ Frame Compare is designed so the same inputs produce the same outputs:
 | Python | 3.13+ | Required |
 | uv | Latest | Recommended (or pip) |
 | FFmpeg | Any recent | Must be on `PATH` |
-| VapourSynth | R72+ | Optional, for primary renderer |
+| VapourSynth | R76 | Optional, for primary renderer |
 
 ---
 

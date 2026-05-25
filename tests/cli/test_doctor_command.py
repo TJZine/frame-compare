@@ -46,7 +46,7 @@ def test_doctor_json_conforms_to_schema_shape(monkeypatch: MonkeyPatch) -> None:
 
     payload = json.loads(result.stdout)
     assert payload["success"] is True
-    assert payload["doctor"]["baseline_version"] == "R73"
+    assert payload["doctor"]["baseline_version"] == "R76"
     assert len(payload["doctor"]["checks"]) == 2
     first = payload["doctor"]["checks"][0]
     second = payload["doctor"]["checks"][1]

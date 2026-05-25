@@ -53,7 +53,7 @@ def doctor_report_json(report: DoctorReport) -> dict[str, JSONValue]:
         checks_payload.append(entry)
 
     doctor_payload: dict[str, JSONValue] = {
-        "baseline_version": "R73",
+        "baseline_version": "R76",
         "checks": checks_payload,
     }
     payload: dict[str, JSONValue] = {
