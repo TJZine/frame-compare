@@ -157,6 +157,32 @@ def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: 
     assert "libplacebo_runtime_usable=" in build_script
 
 
+def test_windows_portable_build_runtime_validation_restores_process_environment(
+    repo_root: Path,
+) -> None:
+    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    build_script = _read_text_or_fail(build_path)
+
+    assert "function Get-ProcessEnvironmentValue" in build_script
+    assert "function Restore-ProcessEnvironmentValue" in build_script
+    assert '$originalPath = Get-ProcessEnvironmentValue -Name "PATH"' in build_script
+    assert '$originalPythonUtf8 = Get-ProcessEnvironmentValue -Name "PYTHONUTF8"' in build_script
+    assert '$originalPythonPath = Get-ProcessEnvironmentValue -Name "PYTHONPATH"' in build_script
+    assert (
+        '$originalVsExtraPluginPath = Get-ProcessEnvironmentValue -Name '
+        '"VAPOURSYNTH_EXTRA_PLUGIN_PATH"'
+    ) in build_script
+    assert (
+        '$originalVsPluginPath = Get-ProcessEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH"'
+        in build_script
+    )
+    assert 'Restore-ProcessEnvironmentValue -Name "PATH" -Value $originalPath' in build_script
+    assert (
+        'Restore-ProcessEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH" '
+        "-Value $originalVsPluginPath"
+    ) in build_script
+
+
 def test_pyproject_defines_vspreview_optional_dependency(repo_root: Path) -> None:
     pyproject_path = repo_root / "pyproject.toml"
     pyproject = _read_text_or_fail(pyproject_path)

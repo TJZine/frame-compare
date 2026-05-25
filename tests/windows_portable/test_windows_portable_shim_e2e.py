@@ -124,3 +124,32 @@ def test_windows_portable_shim_missing_state_config_toml_skips_injection(
     assert len(parts) == 3
     assert parts[:3] == ["preset", "apply", "boost"]
     assert "--config" not in parts
+
+
+@pytest.mark.integration
+def test_windows_portable_shim_preserves_bundle_stdout(
+    tmp_path: Path, repo_root: Path
+) -> None:
+    exe = _powershell_exe()
+    if exe is None:
+        pytest.skip("pwsh/powershell not available")
+
+    _, shim_path, state_dir, bundle_dir = _setup_install_layout(
+        tmp_path=tmp_path, repo_root=repo_root
+    )
+    _write_valid_config_json(state_dir=state_dir, bundle_dir=bundle_dir, schema_version=1)
+
+    bundle_launcher = bundle_dir / "frame-compare.ps1"
+    bundle_launcher.write_text(
+        "\n".join(
+            [
+                'Write-Output "frame-compare 0.1.0"',
+                "exit 0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    proc = _run_shim(exe=exe, shim_path=shim_path, env=os.environ.copy(), args=["version"])
+    assert proc.returncode == 0, f"stdout:\n{proc.stdout}\n\nstderr:\n{proc.stderr}"
+    assert proc.stdout.strip() == "frame-compare 0.1.0"

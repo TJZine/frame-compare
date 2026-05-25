@@ -64,6 +64,12 @@ function Get-ConfigInjectionIndex([string[]]$ArgsValues) {
   return -1
 }
 
+$script:FrameCompareShimExitCode = 1
+
+function Set-FrameCompareShimExitCode([int]$ExitCode) {
+  $script:FrameCompareShimExitCode = $ExitCode
+}
+
 function Invoke-FrameCompareShim([object[]]$ArgsValues) {
   $ErrorActionPreference = "Stop"
   Set-StrictMode -Version Latest
@@ -84,18 +90,21 @@ function Invoke-FrameCompareShim([object[]]$ArgsValues) {
 
   if (!(Test-Path -LiteralPath $configPath)) {
     Write-Error -ErrorAction Continue "Config not found: $configPath`nRun install.cmd from the portable bundle."
-    return 10
+    Set-FrameCompareShimExitCode -ExitCode 10
+    return
   }
 
   try {
     $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
   } catch {
     Write-Error -ErrorAction Continue "Invalid config file: $configPath`nRun install.cmd from the portable bundle."
-    return 11
+    Set-FrameCompareShimExitCode -ExitCode 11
+    return
   }
   if ($null -eq $config) {
     Write-Error -ErrorAction Continue "Invalid config file: $configPath`nRun install.cmd from the portable bundle."
-    return 11
+    Set-FrameCompareShimExitCode -ExitCode 11
+    return
   }
 
   $schemaVersion = 0
@@ -105,36 +114,42 @@ function Invoke-FrameCompareShim([object[]]$ArgsValues) {
     $parsedSchemaVersion = 0
     if (-not [int]::TryParse($rawSchemaVersion, [ref]$parsedSchemaVersion)) {
       Write-Error -ErrorAction Continue "Unsupported config schema version '$rawSchemaVersion' in $configPath`nRun install.cmd from the portable bundle."
-      return 15
+      Set-FrameCompareShimExitCode -ExitCode 15
+      return
     }
     $schemaVersion = $parsedSchemaVersion
   }
   if ($schemaVersion -ne 1) {
     Write-Error -ErrorAction Continue "Unsupported config schema version '$schemaVersion' in $configPath`nRun install.cmd from the portable bundle."
-    return 15
+    Set-FrameCompareShimExitCode -ExitCode 15
+    return
   }
 
   $installType = [string]$config.install_type
   if ($installType -ne "portable_bundle") {
     Write-Error -ErrorAction Continue "Unsupported install_type '$installType' in $configPath"
-    return 16
+    Set-FrameCompareShimExitCode -ExitCode 16
+    return
   }
 
   $bundlePath = [string]$config.bundle_path
   if ([string]::IsNullOrWhiteSpace($bundlePath)) {
     Write-Error -ErrorAction Continue "bundle_path is missing in config: $configPath`nRun install.cmd from the portable bundle."
-    return 12
+    Set-FrameCompareShimExitCode -ExitCode 12
+    return
   }
 
   if (!(Test-Path -LiteralPath $bundlePath)) {
     Write-Error -ErrorAction Continue "Portable bundle directory not found: $bundlePath`nRun install.cmd from the bundle's current location."
-    return 13
+    Set-FrameCompareShimExitCode -ExitCode 13
+    return
   }
 
   $bundleLauncher = Join-Path $bundlePath "frame-compare.ps1"
   if (!(Test-Path -LiteralPath $bundleLauncher)) {
     Write-Error -ErrorAction Continue "Bundle launcher not found: $bundleLauncher`nRebuild or re-extract the portable bundle, then run install.cmd again."
-    return 14
+    Set-FrameCompareShimExitCode -ExitCode 14
+    return
   }
 
   $stateConfigToml = Join-Path $stateDir "config.toml"
@@ -164,9 +179,10 @@ function Invoke-FrameCompareShim([object[]]$ArgsValues) {
   } finally {
     Pop-Location
   }
-  return $exitCode
+  Set-FrameCompareShimExitCode -ExitCode $exitCode
 }
 
 if ($MyInvocation.InvocationName -ne ".") {
-  exit (Invoke-FrameCompareShim -ArgsValues $args)
+  Invoke-FrameCompareShim -ArgsValues $args
+  exit $script:FrameCompareShimExitCode
 }

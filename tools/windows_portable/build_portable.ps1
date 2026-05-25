@@ -509,6 +509,18 @@ function Set-BundleRuntimeEnvironment([string]$BundleRoot) {
   $env:PATH = (($existingEntries -join ";") + ";" + $env:PATH)
 }
 
+function Get-ProcessEnvironmentValue([string]$Name) {
+  return [Environment]::GetEnvironmentVariable($Name, "Process")
+}
+
+function Restore-ProcessEnvironmentValue([string]$Name, [AllowNull()][string]$Value) {
+  if ($null -eq $Value) {
+    Remove-Item -Path "Env:$Name" -ErrorAction SilentlyContinue
+    return
+  }
+  Set-Item -Path "Env:$Name" -Value $Value
+}
+
 function Write-BundleInfo([string]$BundleRoot, [string]$AppVersion) {
   $requirementsLockPath = Join-Path $BundleRoot "requirements.lock.txt"
   if (!(Test-Path -LiteralPath $requirementsLockPath)) {
@@ -566,17 +578,24 @@ function Assert-BundleRuntime([string]$BundleRoot) {
     throw "Embedded python not found for runtime validation: $python"
   }
 
+  $originalPath = Get-ProcessEnvironmentValue -Name "PATH"
+  $originalPythonUtf8 = Get-ProcessEnvironmentValue -Name "PYTHONUTF8"
+  $originalPythonPath = Get-ProcessEnvironmentValue -Name "PYTHONPATH"
+  $originalVsExtraPluginPath = Get-ProcessEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH"
+  $originalVsPluginPath = Get-ProcessEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH"
+
   Set-BundleRuntimeEnvironment -BundleRoot $BundleRoot
 
   $ffmpeg = Join-Path $BundleRoot "ffmpeg\\bin\\ffmpeg.exe"
   $mediaPath = Join-Path $BundleRoot "runtime-smoke.mp4"
-  if (Test-Path -LiteralPath $ffmpeg) {
-    & $ffmpeg -hide_banner -loglevel error -f lavfi -i "testsrc2=size=32x32:rate=1:duration=1" -frames:v 1 -pix_fmt yuv420p -y $mediaPath
-    Assert-LastExitCode -CommandLabel "ffmpeg tiny media generation"
-  }
-
   $smokePath = Join-Path $BundleRoot "runtime-smoke.py"
-  $smokeScript = @'
+  try {
+    if (Test-Path -LiteralPath $ffmpeg) {
+      & $ffmpeg -hide_banner -loglevel error -f lavfi -i "testsrc2=size=32x32:rate=1:duration=1" -frames:v 1 -pix_fmt yuv420p -y $mediaPath
+      Assert-LastExitCode -CommandLabel "ffmpeg tiny media generation"
+    }
+
+    $smokeScript = @'
 from __future__ import annotations
 
 import os
@@ -734,8 +753,7 @@ elif phase == "vspreview_pyqt6_import":
 else:
     raise AssertionError(f"unknown runtime proof phase: {phase}")
 '@
-  Set-Content -LiteralPath $smokePath -Value $smokeScript -Encoding UTF8
-  try {
+    Set-Content -LiteralPath $smokePath -Value $smokeScript -Encoding UTF8
     Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "package_imports" -MediaPath $mediaPath -Required $true
     Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "vapoursynth_environment" -MediaPath $mediaPath -Required $true
     Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "lwlibavsource_frame" -MediaPath $mediaPath -Required $true
@@ -746,6 +764,11 @@ else:
   } finally {
     Remove-Item -Force -LiteralPath $smokePath -ErrorAction SilentlyContinue
     Remove-Item -Force -LiteralPath $mediaPath -ErrorAction SilentlyContinue
+    Restore-ProcessEnvironmentValue -Name "PATH" -Value $originalPath
+    Restore-ProcessEnvironmentValue -Name "PYTHONUTF8" -Value $originalPythonUtf8
+    Restore-ProcessEnvironmentValue -Name "PYTHONPATH" -Value $originalPythonPath
+    Restore-ProcessEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH" -Value $originalVsExtraPluginPath
+    Restore-ProcessEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH" -Value $originalVsPluginPath
   }
 }
 
