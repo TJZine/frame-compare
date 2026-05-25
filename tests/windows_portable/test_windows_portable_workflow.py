@@ -79,14 +79,9 @@ def test_windows_portable_workflow_proves_r76_plugin_layout_and_runtime(repo_roo
     assert "app/site-packages/vapoursynth/plugins" in workflow
     assert "vs/extra-plugins" in workflow
     assert "lsmas/manifest.vs" in workflow
-    assert "VAPOURSYNTH_EXTRA_PLUGIN_PATH" in workflow
-    assert "Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH" in workflow
-    assert "getattr(version, 'release_major', None) == 76" in workflow
-    assert "core.lsmas.LWLibavSource" in workflow
-    assert "core.placebo.Tonemap" in workflow
-    assert "apply_tonemap" in workflow
-    assert "vspreview, PyQt6" in workflow
-    assert "WINDOWS_WORKFLOW_PROOF vapoursynth=R76" in workflow
+    assert "tools/windows_portable/build_portable.ps1" in workflow
+    assert "Smoke: VS clip + tonemap does not raise" not in workflow
+    assert "WINDOWS_WORKFLOW_PROOF" not in workflow
 
 
 def test_windows_portable_workflow_validates_update_public_key_on_release(repo_root: Path) -> None:

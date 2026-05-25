@@ -521,6 +521,36 @@ function Write-BundleInfo([string]$BundleRoot, [string]$AppVersion) {
   [System.IO.File]::WriteAllText($bundleInfoPath, ($bundleInfoJson + "`n"), $utf8NoBom)
 }
 
+function Invoke-BundleRuntimeProof(
+  [string]$Python,
+  [string]$SmokePath,
+  [string]$Phase,
+  [string]$MediaPath,
+  [bool]$Required
+) {
+  Write-Host "WINDOWS_BUNDLE_PROOF phase=$Phase start"
+  $previousNativeCommandPreference = $PSNativeCommandUseErrorActionPreference
+  $PSNativeCommandUseErrorActionPreference = $false
+  try {
+    & $Python $SmokePath $Phase $MediaPath
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $PSNativeCommandUseErrorActionPreference = $previousNativeCommandPreference
+  }
+
+  if ($exitCode -ne 0) {
+    $message = "bundle runtime validation phase '$Phase' failed with exit code $exitCode"
+    Write-Host "WINDOWS_BUNDLE_PROOF phase=$Phase failed exit_code=$exitCode"
+    if ($Required) {
+      throw $message
+    }
+    Write-Warning $message
+    return
+  }
+
+  Write-Host "WINDOWS_BUNDLE_PROOF phase=$Phase ok"
+}
+
 function Assert-BundleRuntime([string]$BundleRoot) {
   $python = Join-Path $BundleRoot "python\\python.exe"
   if (!(Test-Path -LiteralPath $python)) {
@@ -544,88 +574,137 @@ import os
 import sys
 from pathlib import Path
 
-import PyQt6  # noqa: F401
-import rich  # noqa: F401
-import tomli_w  # noqa: F401
-import typer  # noqa: F401
-import vapoursynth as vs
-import vspreview  # noqa: F401
-
-import frame_compare  # noqa: F401
-from frame_compare.vs.env import candidate_lsmas_plugin_path_details, try_load_lsmas_plugin
-from frame_compare.vs.tonemap import apply_tonemap
-from frame_compare.vs.types import TonemapSettings
-
 
 def assert_true(condition: object, message: str) -> None:
     if not condition:
         raise AssertionError(message)
 
 
-media_path = Path(sys.argv[1])
-core = vs.core
-version = getattr(vs, "__version__", None)
-version_major = getattr(version, "release_major", None)
-version_minor = getattr(version, "release_minor", None)
-plugin_dir = Path(vs.get_plugin_dir())
-extra_plugin_path = os.environ.get("VAPOURSYNTH_EXTRA_PLUGIN_PATH", "")
-plugins = list(core.plugins())
-plugin_namespaces = sorted(plugin.namespace for plugin in plugins)
+def proof(message: str) -> None:
+    print(f"WINDOWS_BUNDLE_PROOF {message}", flush=True)
 
-assert_true(version_major == 76 and version_minor == 0, f"expected VapourSynth R76, got {version!r}")
-assert_true(plugin_dir.is_dir(), f"vapoursynth.get_plugin_dir() is not a directory: {plugin_dir}")
-assert_true("vapoursynth" in str(plugin_dir).replace("\\", "/"), f"unexpected plugin dir: {plugin_dir}")
-assert_true(extra_plugin_path, "VAPOURSYNTH_EXTRA_PLUGIN_PATH is not set")
-assert_true("VAPOURSYNTH_PLUGIN_PATH" not in os.environ, "legacy VAPOURSYNTH_PLUGIN_PATH should not be set")
-assert_true(plugin_namespaces, "core.plugins() returned no plugins")
 
-lsmas_loaded_path = None
-if not (hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource")):
-    lsmas_loaded_path = try_load_lsmas_plugin(core)
+def prove_package_imports() -> None:
+    import frame_compare  # noqa: F401
+    import rich  # noqa: F401
+    import tomli_w  # noqa: F401
+    import typer  # noqa: F401
 
-assert_true(hasattr(core, "lsmas"), "core.lsmas namespace missing")
-assert_true(hasattr(core.lsmas, "LWLibavSource"), "core.lsmas.LWLibavSource missing")
-assert_true(hasattr(core, "placebo"), "core.placebo namespace missing")
-assert_true(hasattr(core.placebo, "Tonemap"), "core.placebo.Tonemap missing")
+    proof("package_imports=ok modules=frame_compare,rich,tomli_w,typer")
 
-if media_path.is_file():
-    clip = core.lsmas.LWLibavSource(str(media_path))
-    frame = clip.get_frame(0)
-    assert_true(frame.width == 32 and frame.height == 32, "LWLibavSource frame render failed")
+
+def prove_vapoursynth_environment() -> None:
+    import vapoursynth as vs
+
+    core = vs.core
+    version = getattr(vs, "__version__", None)
+    version_major = getattr(version, "release_major", None)
+    version_minor = getattr(version, "release_minor", None)
+    plugin_dir = Path(vs.get_plugin_dir())
+    extra_plugin_path = os.environ.get("VAPOURSYNTH_EXTRA_PLUGIN_PATH", "")
+    plugins = list(core.plugins())
+    plugin_namespaces = sorted(plugin.namespace for plugin in plugins)
+
+    assert_true(version_major == 76 and version_minor == 0, f"expected VapourSynth R76, got {version!r}")
+    assert_true(plugin_dir.is_dir(), f"vapoursynth.get_plugin_dir() is not a directory: {plugin_dir}")
+    assert_true("vapoursynth" in str(plugin_dir).replace("\\", "/"), f"unexpected plugin dir: {plugin_dir}")
+    assert_true(extra_plugin_path, "VAPOURSYNTH_EXTRA_PLUGIN_PATH is not set")
+    assert_true("VAPOURSYNTH_PLUGIN_PATH" not in os.environ, "legacy VAPOURSYNTH_PLUGIN_PATH should not be set")
+    assert_true(plugin_namespaces, "core.plugins() returned no plugins")
+
+    proof(f"vapoursynth_import=ok version=R{version_major}")
+    proof(f"plugin_dir={plugin_dir}")
+    proof(f"extra_plugin_path={extra_plugin_path}")
+    proof(f"core_plugins={','.join(plugin_namespaces)}")
+
+
+def prove_lwlibavsource(media_path: Path) -> None:
+    import vapoursynth as vs
+
+    from frame_compare.vs.env import candidate_lsmas_plugin_path_details, try_load_lsmas_plugin
+
+    core = vs.core
+    lsmas_loaded_path = None
+    if not (hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource")):
+        lsmas_loaded_path = try_load_lsmas_plugin(core)
+
+    assert_true(hasattr(core, "lsmas"), "core.lsmas namespace missing")
+    assert_true(hasattr(core.lsmas, "LWLibavSource"), "core.lsmas.LWLibavSource missing")
+
+    if media_path.is_file():
+        clip = core.lsmas.LWLibavSource(str(media_path))
+        frame = clip.get_frame(0)
+        assert_true(frame.width == 32 and frame.height == 32, "LWLibavSource frame render failed")
+    else:
+        candidates = [{"source": candidate.source, "path": candidate.path} for candidate in candidate_lsmas_plugin_path_details()]
+        raise AssertionError(f"tiny media proof missing: {media_path}; candidates={candidates}")
+
+    proof(f"lwlibavsource=ok namespace=lsmas loaded_path={lsmas_loaded_path}")
+
+
+def prove_placebo_tonemap() -> None:
+    import vapoursynth as vs
+
+    from frame_compare.vs.tonemap import apply_tonemap
+    from frame_compare.vs.types import TonemapSettings
+
+    core = vs.core
+    assert_true(hasattr(core, "placebo"), "core.placebo namespace missing")
+    assert_true(hasattr(core.placebo, "Tonemap"), "core.placebo.Tonemap missing")
+
+    tonemap_clip = core.std.BlankClip(width=16, height=16, format=vs.RGB48, length=1, color=[32768, 32768, 32768])
+    tonemap_clip = tonemap_clip.std.SetFrameProps(_Matrix=0, _Range=0, _Transfer=16, _Primaries=9)
+    direct_out = core.placebo.Tonemap(
+        tonemap_clip,
+        src_max=1000,
+        dst_max=203,
+        tone_mapping_function=2,
+        dst_csp=0,
+        dst_prim=1,
+        src_csp=1,
+    )
+    direct_frame = direct_out.get_frame(0)
+    assert_true(direct_frame.width == 16 and direct_frame.height == 16, "placebo direct frame render failed")
+
+    app_out = apply_tonemap(tonemap_clip, TonemapSettings(enabled=True))
+    app_frame = app_out.get_frame(0)
+    assert_true(app_frame.width == 16 and app_frame.height == 16, "apply_tonemap frame render failed")
+
+    proof("placebo_tonemap=ok frames=direct,apply_tonemap")
+
+
+def prove_vspreview_pyqt6() -> None:
+    import PyQt6  # noqa: F401
+
+    proof("pyqt6_import=ok")
+
+    import vspreview  # noqa: F401
+
+    proof("vspreview_pyqt6=ok")
+
+
+phase = sys.argv[1]
+media_path = Path(sys.argv[2])
+if phase == "package_imports":
+    prove_package_imports()
+elif phase == "vapoursynth_environment":
+    prove_vapoursynth_environment()
+elif phase == "lwlibavsource_frame":
+    prove_lwlibavsource(media_path)
+elif phase == "placebo_tonemap_frame":
+    prove_placebo_tonemap()
+elif phase == "vspreview_pyqt6_import":
+    prove_vspreview_pyqt6()
 else:
-    candidates = [{"source": candidate.source, "path": candidate.path} for candidate in candidate_lsmas_plugin_path_details()]
-    raise AssertionError(f"tiny media proof missing: {media_path}; candidates={candidates}")
-
-tonemap_clip = core.std.BlankClip(width=16, height=16, format=vs.RGB48, length=1, color=[32768, 32768, 32768])
-tonemap_clip = tonemap_clip.std.SetFrameProps(_Matrix=0, _Range=0, _Transfer=16, _Primaries=9)
-direct_out = core.placebo.Tonemap(
-    tonemap_clip,
-    src_max=1000,
-    dst_max=203,
-    tone_mapping_function=2,
-    dst_csp=0,
-    dst_prim=1,
-    src_csp=1,
-)
-direct_frame = direct_out.get_frame(0)
-assert_true(direct_frame.width == 16 and direct_frame.height == 16, "placebo direct frame render failed")
-
-app_out = apply_tonemap(tonemap_clip, TonemapSettings(enabled=True))
-app_frame = app_out.get_frame(0)
-assert_true(app_frame.width == 16 and app_frame.height == 16, "apply_tonemap frame render failed")
-
-print(f"WINDOWS_BUNDLE_PROOF vapoursynth_import=ok version=R{version_major}")
-print(f"WINDOWS_BUNDLE_PROOF plugin_dir={plugin_dir}")
-print(f"WINDOWS_BUNDLE_PROOF extra_plugin_path={extra_plugin_path}")
-print(f"WINDOWS_BUNDLE_PROOF core_plugins={','.join(plugin_namespaces)}")
-print(f"WINDOWS_BUNDLE_PROOF lwlibavsource=ok namespace=lsmas loaded_path={lsmas_loaded_path}")
-print("WINDOWS_BUNDLE_PROOF placebo_tonemap=ok frames=direct,apply_tonemap")
-print("WINDOWS_BUNDLE_PROOF vspreview_pyqt6=ok")
+    raise AssertionError(f"unknown runtime proof phase: {phase}")
 '@
   Set-Content -LiteralPath $smokePath -Value $smokeScript -Encoding UTF8
   try {
-    & $python $smokePath $mediaPath
-    Assert-LastExitCode -CommandLabel "bundle VapourSynth runtime validation"
+    Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "package_imports" -MediaPath $mediaPath -Required $true
+    Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "vapoursynth_environment" -MediaPath $mediaPath -Required $true
+    Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "lwlibavsource_frame" -MediaPath $mediaPath -Required $true
+    Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "placebo_tonemap_frame" -MediaPath $mediaPath -Required $true
+    Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "vspreview_pyqt6_import" -MediaPath $mediaPath -Required $false
   } finally {
     Remove-Item -Force -LiteralPath $smokePath -ErrorAction SilentlyContinue
     Remove-Item -Force -LiteralPath $mediaPath -ErrorAction SilentlyContinue

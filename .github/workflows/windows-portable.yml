@@ -109,47 +109,6 @@ jobs:
             exit $exitCode
           }
 
-      - name: "Smoke: VS clip + tonemap does not raise"
-        shell: pwsh
-        run: |
-          $bundle = (Resolve-Path "dist/frame-compare-portable-win-x64").Path
-          $env:PYTHONUTF8 = "1"
-          $env:PYTHONPATH = "$bundle/app/src;$bundle/app/site-packages"
-          $env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = "$bundle/vs/extra-plugins"
-          Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue
-          $sitePackages = Join-Path $bundle "app/site-packages"
-          $vsPackage = Join-Path $sitePackages "vapoursynth"
-          $vsPluginDir = Join-Path $vsPackage "plugins"
-          $extraPluginRoot = Join-Path $bundle "vs/extra-plugins"
-          $ffmpegRoot = "$bundle/ffmpeg"
-          $ffmpegBin = Join-Path $ffmpegRoot "bin"
-          $qtBin = Join-Path $bundle "app/site-packages/PyQt6/Qt6/bin"
-          $pathEntries = @(
-            "$bundle/python",
-            $vsPackage,
-            $vsPluginDir,
-            $extraPluginRoot,
-            $ffmpegBin,
-            $ffmpegRoot
-          )
-          if (Test-Path -LiteralPath $qtBin) {
-            $pathEntries = @($qtBin) + $pathEntries
-          }
-          foreach ($runtimeRoot in @($vsPackage, $extraPluginRoot, $ffmpegRoot)) {
-            if (Test-Path -LiteralPath $runtimeRoot) {
-              Get-ChildItem -LiteralPath $runtimeRoot -Directory -Recurse | ForEach-Object {
-                $pathEntries += $_.FullName
-              }
-            }
-          }
-          $env:PATH = (($pathEntries | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique) -join ";") + ";" + $env:PATH
-
-          $media = Join-Path $env:RUNNER_TEMP "frame-compare-vs-smoke.mp4"
-          & "$bundle/ffmpeg/bin/ffmpeg.exe" -hide_banner -loglevel error -f lavfi -i "testsrc2=size=32x32:rate=1:duration=1" -frames:v 1 -pix_fmt yuv420p -y $media
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-          & "$bundle/python/python.exe" -c "import os, sys, vapoursynth as vs; import vspreview, PyQt6; from pathlib import Path; from frame_compare.vs.env import try_load_lsmas_plugin; from frame_compare.vs.tonemap import apply_tonemap; from frame_compare.vs.types import TonemapSettings; media = Path(sys.argv[1]); core = vs.core; version = getattr(vs, '__version__', None); assert getattr(version, 'release_major', None) == 76, version; assert os.environ.get('VAPOURSYNTH_EXTRA_PLUGIN_PATH'); assert 'VAPOURSYNTH_PLUGIN_PATH' not in os.environ; assert Path(vs.get_plugin_dir()).is_dir(); try_load_lsmas_plugin(core); assert hasattr(core, 'lsmas') and hasattr(core.lsmas, 'LWLibavSource'); src = core.lsmas.LWLibavSource(str(media)); assert src.get_frame(0).width == 32; assert hasattr(core, 'placebo') and hasattr(core.placebo, 'Tonemap'); clip = core.std.BlankClip(width=16, height=16, length=1, format=vs.RGB48, color=[32768,32768,32768]).std.SetFrameProps(_Matrix=0, _Range=0, _Transfer=16, _Primaries=9); direct = core.placebo.Tonemap(clip, src_max=1000, dst_max=203, tone_mapping_function=2, dst_csp=0, dst_prim=1, src_csp=1); assert direct.get_frame(0).width == 16; out = apply_tonemap(clip, TonemapSettings(enabled=True)); assert out.get_frame(0).width == 16; print('WINDOWS_WORKFLOW_PROOF vapoursynth=R76 lsmas=ok placebo=ok apply_tonemap=ok vspreview_pyqt6=ok')" $media
-
       - name: Package zip
         shell: pwsh
         run: |

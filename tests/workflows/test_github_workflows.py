@@ -132,8 +132,8 @@ def test_windows_portable_workflow_keeps_python_313_release_path(repo_root: Path
 
     assert 'python-version: "3.13.13"' in workflow
     assert 'python-version: "3.14' not in workflow
-    assert "VAPOURSYNTH_EXTRA_PLUGIN_PATH" in workflow
-    assert "WINDOWS_WORKFLOW_PROOF vapoursynth=R76" in workflow
+    assert "tools/windows_portable/build_portable.ps1" in workflow
+    assert "WINDOWS_WORKFLOW_PROOF" not in workflow
 
 
 def test_windows_portable_workflow_limits_release_write_permissions(repo_root: Path) -> None:

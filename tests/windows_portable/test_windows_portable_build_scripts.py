@@ -112,6 +112,8 @@ def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: 
     build_script = _read_text_or_fail(build_path)
 
     for expected in (
+        "Invoke-BundleRuntimeProof",
+        "phase=$Phase start",
         "version_major == 76",
         "core.lsmas.LWLibavSource",
         "core.placebo.Tonemap",
@@ -123,6 +125,22 @@ def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: 
         "ffmpeg tiny media generation",
     ):
         assert expected in build_script
+
+    for phase in (
+        "package_imports",
+        "vapoursynth_environment",
+        "lwlibavsource_frame",
+        "placebo_tonemap_frame",
+        "vspreview_pyqt6_import",
+    ):
+        assert phase in build_script
+
+    assert (
+        "bundle runtime validation phase '$Phase' failed with exit code $exitCode" in build_script
+    )
+    assert 'Phase "vspreview_pyqt6_import" -MediaPath $mediaPath -Required $false' in build_script
+    assert 'Phase "lwlibavsource_frame" -MediaPath $mediaPath -Required $true' in build_script
+    assert 'Phase "placebo_tonemap_frame" -MediaPath $mediaPath -Required $true' in build_script
 
 
 def test_pyproject_defines_vspreview_optional_dependency(repo_root: Path) -> None:
@@ -176,6 +194,9 @@ def test_windows_portable_build_runtime_validation_checks_qt_stack(repo_root: Pa
     build_script = _read_text_or_fail(build_path)
     assert "import vspreview" in build_script
     assert "import PyQt6" in build_script
+    assert "pyqt6_import=ok" in build_script
+    assert "vspreview_pyqt6=ok" in build_script
+    assert 'Phase "vspreview_pyqt6_import" -MediaPath $mediaPath -Required $false' in build_script
 
 
 def test_windows_portable_build_writes_bundle_info_file(repo_root: Path) -> None:

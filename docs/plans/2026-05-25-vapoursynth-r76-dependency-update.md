@@ -229,18 +229,21 @@ The same gate ran Docker pytest for the configured integration surface with zero
 
 #### Slice 5 Windows Verification Evidence
 
-On 2026-05-25, Slice 5 local macOS proof was limited to static/script/workflow checks because the runbook Windows portable gate requires a Windows host. The builder and workflow were updated so a Windows run must prove:
+On 2026-05-25, Slice 5 local macOS proof was limited to static/script/workflow checks because the runbook Windows portable gate requires a Windows host. The builder was updated so a Windows run must hard-fail unless these required runtime phases pass:
 
 ```text
+WINDOWS_BUNDLE_PROOF package_imports=ok modules=frame_compare,rich,tomli_w,typer
 WINDOWS_BUNDLE_PROOF vapoursynth_import=ok version=R76
 WINDOWS_BUNDLE_PROOF plugin_dir=<app/site-packages/vapoursynth/plugins>
 WINDOWS_BUNDLE_PROOF extra_plugin_path=<bundle>/vs/extra-plugins
+WINDOWS_BUNDLE_PROOF core_plugins=<non-empty namespaces>
 WINDOWS_BUNDLE_PROOF lwlibavsource=ok namespace=lsmas loaded_path=<path or None>
 WINDOWS_BUNDLE_PROOF placebo_tonemap=ok frames=direct,apply_tonemap
-WINDOWS_BUNDLE_PROOF vspreview_pyqt6=ok
 ```
 
-The Windows host must run the runbook portable path and confirm `frame-compare.ps1 doctor --json`, R76 import/version, R74+ plugin directory, `VAPOURSYNTH_EXTRA_PLUGIN_PATH`, `core.lsmas.LWLibavSource` against generated tiny media, `core.placebo.Tonemap`, `apply_tonemap(...).get_frame(0)`, and `vspreview`/`PyQt6` import smoke. This remains documented-only until that Windows run passes.
+The `vspreview`/`PyQt6` import smoke now runs in an isolated optional subprocess after the required R76, `lsmas`, and placebo frame proofs. If it succeeds, it emits `WINDOWS_BUNDLE_PROOF pyqt6_import=ok` and `WINDOWS_BUNDLE_PROOF vspreview_pyqt6=ok`; if it exits nonzero or access-violates, the build emits a named `vspreview_pyqt6_import` failed marker and warning instead of masking the mandatory runtime proof. The workflow no longer repeats the long VS clip smoke because `build_portable.ps1` owns that proof contract.
+
+The Windows host must run the runbook portable path and confirm `frame-compare.ps1 doctor --json`, R76 import/version, R74+ plugin directory, `VAPOURSYNTH_EXTRA_PLUGIN_PATH`, `core.lsmas.LWLibavSource` against generated tiny media, `core.placebo.Tonemap`, and `apply_tonemap(...).get_frame(0)`. `vspreview`/`PyQt6` import status remains diagnostic evidence until the Windows access-violation source is confirmed. This remains documented-only until that Windows run passes.
 
 ### Held-Back Ledger
 
