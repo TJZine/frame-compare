@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+import frame_compare.vs.env as env_module
 from frame_compare.orchestration.doctor import (
     CheckResult,
     DoctorCheck,
@@ -77,41 +79,52 @@ class TestCheckLsmas:
             {"source": "bundle_vs_plugins", "path": "/bundle/vs/plugins/libvslsmashsource.so"},
         ]
 
-    def test_check_lsmas_plugin_fallback_loads_from_plugin_path(self) -> None:
-        """If autoload misses lsmas, fallback LoadPlugin path should recover."""
+    def test_check_lsmas_plugin_fallback_loads_from_nested_extra_plugin_root(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path,
+    ) -> None:
+        """If autoload misses lsmas, fallback loading should recover from nested extra-plugin dirs."""
 
-        class _Core:
-            pass
+        bundle_root = tmp_path / "bundle"
+        python_dir = bundle_root / "python"
+        python_dir.mkdir(parents=True)
+        executable = python_dir / "python.exe"
+        executable.write_text("")
+        extra_root = bundle_root / "vs" / "extra-plugins"
+        plugin_dir = extra_root / "lsmas"
+        plugin_dir.mkdir(parents=True)
+        plugin_path = plugin_dir / "libvslsmashsource.dll"
+        plugin_path.write_text("")
+        (plugin_dir / "manifest.vs").write_text("libvslsmashsource")
 
-        class _Std:
-            pass
+        monkeypatch.setattr(env_module.sys, "executable", str(executable))
+        monkeypatch.setattr(env_module, "import_vapoursynth_module", lambda: SimpleNamespace())
+        monkeypatch.setenv("VAPOURSYNTH_EXTRA_PLUGIN_PATH", str(extra_root))
+        monkeypatch.delenv("VAPOURSYNTH_PLUGIN_PATH", raising=False)
 
-        mock_core = _Core()
-        mock_std = _Std()
+        load_calls: list[str] = []
+        mock_core = SimpleNamespace()
 
         def _load_plugin(*, path: str) -> None:
+            load_calls.append(path)
             mock_core.lsmas = MagicMock()
 
-        mock_std.LoadPlugin = _load_plugin
-        mock_core.std = mock_std
+        mock_core.std = SimpleNamespace(LoadPlugin=_load_plugin)
         mock_vs = MagicMock()
         mock_vs.core = mock_core
 
         checks = collect_checks()
         lsmas_check = next(c for c in checks if c.name == "lsmas")
 
-        with (
-            patch.dict(sys.modules, {"vapoursynth": mock_vs}),
-            patch(
-                "frame_compare.vs.env.candidate_lsmas_plugin_paths",
-                return_value=["C:/bundle/vs/plugins/libvslsmashsource.dll"],
-            ),
-            patch("os.path.isfile", return_value=True),
+        with patch(
+            "frame_compare.orchestration.doctor.import_vapoursynth_module", return_value=mock_vs
         ):
             result = lsmas_check.check_fn()
 
         assert result.passed is True
-        assert result.details.get("plugin_path") == "C:/bundle/vs/plugins/libvslsmashsource.dll"
+        assert result.details.get("plugin_path") == str(plugin_path)
+        assert load_calls == [str(plugin_path)]
 
     def test_check_lsmas_failure_uses_sanitized_exception_details(self) -> None:
         """Unexpected lsmas errors should not expose raw exception text."""

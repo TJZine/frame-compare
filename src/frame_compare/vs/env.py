@@ -118,6 +118,10 @@ def _split_plugin_dirs(value: str) -> list[str]:
     return [plugin_dir for plugin_dir in value.split(os.pathsep) if plugin_dir]
 
 
+def _normalized_path_key(path: str) -> str:
+    return os.path.normcase(os.path.normpath(path))
+
+
 def _get_canonical_plugin_dir() -> str | None:
     try:
         vs_module = import_vapoursynth_module()
@@ -152,6 +156,73 @@ def _candidate_lsmas_filenames() -> list[str]:
     return filenames
 
 
+def _candidate_lsmas_manifest_entries(filenames: list[str]) -> set[str]:
+    manifest_entries = {os.path.splitext(filename)[0] for filename in filenames}
+    manifest_entries.update(filenames)
+    return manifest_entries
+
+
+def _manifest_references_lsmas_plugin(manifest_path: str, filenames: list[str]) -> bool:
+    if not os.path.isfile(manifest_path):
+        return False
+
+    expected_entries = _candidate_lsmas_manifest_entries(filenames)
+    try:
+        with open(manifest_path, encoding="utf-8") as manifest_file:
+            for raw_line in manifest_file:
+                line = raw_line.strip()
+                if not line or line.startswith("[") or line.startswith("#"):
+                    continue
+                if line in expected_entries:
+                    return True
+    except OSError as exc:
+        log.debug("Skipping manifest check for %s due to error: %s", manifest_path, exc)
+    return False
+
+
+def _contains_lsmas_plugin_artifacts(plugin_dir: str, filenames: list[str]) -> bool:
+    if any(os.path.isfile(os.path.join(plugin_dir, filename)) for filename in filenames):
+        return True
+    manifest_path = os.path.join(plugin_dir, "manifest.vs")
+    return _manifest_references_lsmas_plugin(manifest_path, filenames)
+
+
+def _iter_lsmas_search_dirs(plugin_dir: str, source: str, filenames: list[str]) -> list[str]:
+    """Expand plugin search dirs for explicit lsmas fallback loading.
+
+    ``VAPOURSYNTH_EXTRA_PLUGIN_PATH`` in the Windows portable bundle points at an
+    extra-plugin root. R75+ optimized plugin installs can place each plugin under
+    a nested directory with ``manifest.vs`` (for example ``extra-plugins/lsmas``),
+    so explicit fallback loading must consider those first-level child dirs in
+    addition to the root itself. Other discovery sources continue using their
+    configured directory directly.
+    """
+
+    search_dirs = [plugin_dir]
+    if source != "VAPOURSYNTH_EXTRA_PLUGIN_PATH":
+        return search_dirs
+
+    try:
+        with os.scandir(plugin_dir) as entries:
+            nested_dirs: list[str] = []
+            for entry in entries:
+                try:
+                    is_dir = entry.is_dir()
+                except OSError as exc:
+                    log.debug("Skipping extra-plugin entry %s due to error: %s", entry.path, exc)
+                    continue
+                if not is_dir or not _contains_lsmas_plugin_artifacts(entry.path, filenames):
+                    continue
+                nested_dirs.append(entry.path)
+    except OSError as exc:
+        log.debug("Skipping nested extra-plugin scan for %s due to error: %s", plugin_dir, exc)
+        return search_dirs
+
+    nested_dirs.sort(key=_normalized_path_key)
+    search_dirs.extend(nested_dirs)
+    return search_dirs
+
+
 def _iter_candidate_plugin_dirs() -> list[tuple[str, str]]:
     candidates: list[tuple[str, str]] = []
 
@@ -177,19 +248,24 @@ def candidate_lsmas_plugin_path_details() -> list[PluginPathCandidate]:
 
     VapourSynth R74+ exposes the canonical plugin directory through
     ``vapoursynth.get_plugin_dir()`` and uses ``VAPOURSYNTH_EXTRA_PLUGIN_PATH``
-    for supplemental plugin locations. The legacy ``VAPOURSYNTH_PLUGIN_PATH``
-    remains checked last as a migration bridge for existing bundles.
+    for supplemental plugin locations. When that extra-plugin path points at a
+    root containing nested manifest-based plugin dirs, first-level child dirs
+    are also expanded for explicit fallback loading. The legacy
+    ``VAPOURSYNTH_PLUGIN_PATH`` remains checked last as a migration bridge for
+    existing bundles.
     """
     seen: set[str] = set()
     unique_candidates: list[PluginPathCandidate] = []
+    filenames = _candidate_lsmas_filenames()
     for plugin_dir, source in _iter_candidate_plugin_dirs():
-        for filename in _candidate_lsmas_filenames():
-            absolute = os.path.abspath(os.path.normpath(os.path.join(plugin_dir, filename)))
-            normalized = os.path.normcase(absolute)
-            if normalized in seen:
-                continue
-            seen.add(normalized)
-            unique_candidates.append(PluginPathCandidate(path=absolute, source=source))
+        for search_dir in _iter_lsmas_search_dirs(plugin_dir, source, filenames):
+            for filename in filenames:
+                absolute = os.path.abspath(os.path.normpath(os.path.join(search_dir, filename)))
+                normalized = _normalized_path_key(absolute)
+                if normalized in seen:
+                    continue
+                seen.add(normalized)
+                unique_candidates.append(PluginPathCandidate(path=absolute, source=source))
     return unique_candidates
 
 

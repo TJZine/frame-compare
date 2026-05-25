@@ -218,6 +218,10 @@ def _first_candidate_by_source(result) -> dict[str, str]:
     return first_for_source
 
 
+def _paths_for_source(result, source: str) -> list[str]:
+    return [candidate.path for candidate in result if candidate.source == source]
+
+
 def test_candidate_lsmas_plugin_path_details_prefers_r74_discovery_order(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
@@ -256,6 +260,40 @@ def test_candidate_lsmas_plugin_path_details_prefers_r74_discovery_order(
         == _expected_lsmas_candidates(bundle_root / "vs" / "plugins")[0]
     )
     assert first_for_source["VAPOURSYNTH_PLUGIN_PATH"] == _expected_lsmas_candidates(legacy_dir)[0]
+
+
+def test_candidate_lsmas_plugin_path_details_expands_nested_extra_plugin_dirs_deterministically(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    bundle_root = tmp_path / "bundle"
+    python_dir = bundle_root / "python"
+    python_dir.mkdir(parents=True)
+    executable = python_dir / "python.exe"
+    executable.write_text("")
+    extra_root = tmp_path / "extra"
+    alpha_dir = extra_root / "alpha"
+    lsmas_dir = extra_root / "lsmas"
+    zebra_dir = extra_root / "zebra"
+    alpha_dir.mkdir(parents=True)
+    lsmas_dir.mkdir(parents=True)
+    zebra_dir.mkdir()
+    (alpha_dir / "libvslsmashsource.dll").write_text("")
+    (lsmas_dir / "manifest.vs").write_text("libvslsmashsource")
+    (zebra_dir / "manifest.vs").write_text("other-plugin")
+
+    monkeypatch.setattr(env_module.sys, "executable", str(executable))
+    monkeypatch.setattr(env_module, "import_vapoursynth_module", lambda: SimpleNamespace())
+    monkeypatch.setenv("VAPOURSYNTH_EXTRA_PLUGIN_PATH", str(extra_root))
+    monkeypatch.delenv("VAPOURSYNTH_PLUGIN_PATH", raising=False)
+
+    result = candidate_lsmas_plugin_path_details()
+
+    assert _paths_for_source(result, "VAPOURSYNTH_EXTRA_PLUGIN_PATH") == [
+        *_expected_lsmas_candidates(extra_root),
+        *_expected_lsmas_candidates(alpha_dir),
+        *_expected_lsmas_candidates(lsmas_dir),
+    ]
 
 
 @pytest.mark.parametrize(
