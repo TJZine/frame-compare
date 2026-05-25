@@ -10,13 +10,13 @@ FROM python:3.13.13-slim-trixie AS builder
 
 # Deterministic version pins (change these to update components)
 ARG VAPOURSYNTH_VERSION=76
-ARG VAPOURSYNTH_REF=R76
+ARG VAPOURSYNTH_SOURCE_COMMIT=aa7e83a0aaf87477b5e0fc13c5b97c5aa15a06b7
 ARG VAPOURSYNTH_X86_64_WHEEL_SHA256=94986f4399b3ea8ab775abfbf5986dc58b93829fbf3db2a37e3b9e6454baf898
 ARG VAPOURSYNTH_AARCH64_WHEEL_SHA256=c516b04c9fde70b7075266a067b611f9d8409a20a5380ae425c21e1bada10997
 ARG LSMASH_REF=v2.14.5
 ARG LSMASH_SHA256=e6f7c31de684f4b89ee27e5cd6262bf96f2a5b117ba938d2d606cf6220f05935
-ARG LSMASH_WORKS_REF=1282
-ARG FFMS2_REF=5.0
+ARG LSMASH_WORKS_COMMIT=0079a06ee384061ecdadd0de03df4e0493dd56ab
+ARG FFMS2_COMMIT=7ed5e4d039ca9a6236bd2ebdfdd656c4304fbe04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     autoconf \
@@ -46,9 +46,25 @@ RUN printf '%s\n' \
         > /tmp/vapoursynth-wheel-requirements.txt && \
     python -m pip install --no-cache-dir --require-hashes --only-binary=:all: \
         -r /tmp/vapoursynth-wheel-requirements.txt && \
+    checkout_source_commit() { \
+        repo_url="$1"; \
+        commit="$2"; \
+        dest="$3"; \
+        rm -rf "$dest"; \
+        git init "$dest" >/dev/null; \
+        cd "$dest"; \
+        git remote add origin "$repo_url"; \
+        git fetch --depth 1 origin "$commit"; \
+        git -c advice.detachedHead=false checkout --detach FETCH_HEAD; \
+        test "$(git rev-parse HEAD)" = "$commit"; \
+    }; \
     vs_include_dir="$(python -c 'import vapoursynth; print(vapoursynth.get_include())')" && \
-    git clone --depth 1 --branch "${VAPOURSYNTH_REF}" \
-        https://github.com/vapoursynth/vapoursynth.git /tmp/vapoursynth-src && \
+    checkout_source_commit \
+        "https://github.com/vapoursynth/vapoursynth.git" \
+        "${VAPOURSYNTH_SOURCE_COMMIT}" \
+        /tmp/vapoursynth-src && \
+    test -f /tmp/vapoursynth-src/include/VapourSynth.h && \
+    test -f /tmp/vapoursynth-src/include/VSHelper.h && \
     cp /tmp/vapoursynth-src/include/VapourSynth.h "${vs_include_dir}/" && \
     cp /tmp/vapoursynth-src/include/VSHelper.h "${vs_include_dir}/" && \
     rm -rf /tmp/vapoursynth-src
@@ -58,7 +74,7 @@ ENV LD_LIBRARY_PATH=/usr/local/lib/python3.13/site-packages/vapoursynth
 
 WORKDIR /build
 
-# Build L-SMASH (latest upstream tag)
+# Build L-SMASH from a pinned upstream tag archive.
 RUN LSMASH_DIR="l-smash-${LSMASH_REF#v}" && \
     curl -fsSL "https://github.com/l-smash/l-smash/archive/refs/tags/${LSMASH_REF}.tar.gz" \
         -o l-smash.tar.gz && \
@@ -73,9 +89,23 @@ RUN LSMASH_DIR="l-smash-${LSMASH_REF#v}" && \
     rm -rf "${LSMASH_DIR}" l-smash.tar.gz
 
 # Build L-SMASH-Works against the R76 wheel headers/pkg-config metadata.
-RUN git clone --depth 1 --branch "${LSMASH_WORKS_REF}" \
-    https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works.git && \
-    cd L-SMASH-Works/VapourSynth && \
+RUN checkout_source_commit() { \
+        repo_url="$1"; \
+        commit="$2"; \
+        dest="$3"; \
+        rm -rf "$dest"; \
+        git init "$dest" >/dev/null; \
+        cd "$dest"; \
+        git remote add origin "$repo_url"; \
+        git fetch --depth 1 origin "$commit"; \
+        git -c advice.detachedHead=false checkout --detach FETCH_HEAD; \
+        test "$(git rev-parse HEAD)" = "$commit"; \
+    }; \
+    checkout_source_commit \
+        "https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works.git" \
+        "${LSMASH_WORKS_COMMIT}" \
+        /build/L-SMASH-Works && \
+    cd /build/L-SMASH-Works/VapourSynth && \
     perl -0pi -e "s/  install: true,\\n  install_dir: join_paths\\(vapoursynth_dep\\.get_pkgconfig_variable\\('libdir'\\), 'vapoursynth'\\),\\n/  install: false,\\n/" meson.build && \
     meson setup build && \
     ninja -C build && \
@@ -85,8 +115,23 @@ RUN git clone --depth 1 --branch "${LSMASH_WORKS_REF}" \
         > /opt/vapoursynth-extra-plugins/lsmas/manifest.vs
 
 # Build ffms2 5.0 against the distro FFmpeg development libraries.
-RUN git clone --depth 1 --branch "${FFMS2_REF}" https://github.com/FFMS/ffms2.git && \
-    cd ffms2 && \
+RUN checkout_source_commit() { \
+        repo_url="$1"; \
+        commit="$2"; \
+        dest="$3"; \
+        rm -rf "$dest"; \
+        git init "$dest" >/dev/null; \
+        cd "$dest"; \
+        git remote add origin "$repo_url"; \
+        git fetch --depth 1 origin "$commit"; \
+        git -c advice.detachedHead=false checkout --detach FETCH_HEAD; \
+        test "$(git rev-parse HEAD)" = "$commit"; \
+    }; \
+    checkout_source_commit \
+        "https://github.com/FFMS/ffms2.git" \
+        "${FFMS2_COMMIT}" \
+        /build/ffms2 && \
+    cd /build/ffms2 && \
     ./autogen.sh && \
     ./configure --prefix=/usr/local && \
     make -j"$(nproc)" && \

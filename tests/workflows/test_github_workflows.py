@@ -73,6 +73,21 @@ def test_dockerfile_hash_verifies_docker_plugin_wheels(repo_root: Path) -> None:
         r"\s+\"vapoursynth==\$\{VAPOURSYNTH_VERSION\}\"",
         dockerfile,
     )
+    assert "git clone --depth 1 --branch" not in dockerfile
+    assert re.search(
+        r"ARG VAPOURSYNTH_SOURCE_COMMIT=[a-f0-9]{40}",
+        dockerfile,
+    )
+    assert re.search(
+        r"ARG LSMASH_WORKS_COMMIT=[a-f0-9]{40}",
+        dockerfile,
+    )
+    assert re.search(
+        r"ARG FFMS2_COMMIT=[a-f0-9]{40}",
+        dockerfile,
+    )
+    assert 'git fetch --depth 1 origin "$commit"' in dockerfile
+    assert 'test "$(git rev-parse HEAD)" = "$commit"' in dockerfile
 
 
 def test_dockerfile_uses_r76_wheel_plugin_layout(repo_root: Path) -> None:
@@ -84,6 +99,7 @@ def test_dockerfile_uses_r76_wheel_plugin_layout(repo_root: Path) -> None:
     assert "VAPOURSYNTH_EXTRA_PLUGIN_PATH=/opt/vapoursynth-extra-plugins" in dockerfile
     assert "manifest.vs" in dockerfile
     assert "VAPOURSYNTH_PLUGIN_PATH" not in dockerfile
+    assert "git remote add origin" in dockerfile
 
 
 def test_docker_verify_script_asserts_runtime_proof_items(repo_root: Path) -> None:
