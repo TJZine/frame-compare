@@ -8,6 +8,7 @@ import pytest
 
 import frame_compare.vs.env as env_module
 from frame_compare.vs.env import (
+    candidate_lsmas_plugin_path_details,
     candidate_lsmas_plugin_paths,
     detect_plugins,
     ensure_vs_environment,
@@ -155,6 +156,8 @@ def test_candidate_lsmas_plugin_paths_preserves_order_and_deduplicates(
     plugin_dir.mkdir()
 
     monkeypatch.setattr(env_module.sys, "executable", str(executable))
+    monkeypatch.setattr(env_module, "import_vapoursynth_module", lambda: SimpleNamespace())
+    monkeypatch.delenv("VAPOURSYNTH_EXTRA_PLUGIN_PATH", raising=False)
     monkeypatch.setenv(
         "VAPOURSYNTH_PLUGIN_PATH",
         os_pathsep_join([str(plugin_dir), str(plugin_dir), ""]),
@@ -163,8 +166,8 @@ def test_candidate_lsmas_plugin_paths_preserves_order_and_deduplicates(
     result = candidate_lsmas_plugin_paths()
 
     assert result == [
-        env_module.os.path.abspath(str(plugin_dir / "libvslsmashsource.dll")),
-        env_module.os.path.abspath(str(bundle_root / "vs" / "plugins" / "libvslsmashsource.dll")),
+        *_expected_lsmas_candidates(bundle_root / "vs" / "plugins"),
+        *_expected_lsmas_candidates(plugin_dir),
     ]
 
 
@@ -180,6 +183,8 @@ def test_candidate_lsmas_plugin_paths_normalizes_relative_paths(
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(env_module.sys, "executable", str(executable))
+    monkeypatch.setattr(env_module, "import_vapoursynth_module", lambda: SimpleNamespace())
+    monkeypatch.delenv("VAPOURSYNTH_EXTRA_PLUGIN_PATH", raising=False)
     monkeypatch.setenv(
         "VAPOURSYNTH_PLUGIN_PATH",
         os_pathsep_join(["plugins", str(tmp_path / "plugins" / ".." / "plugins")]),
@@ -187,12 +192,151 @@ def test_candidate_lsmas_plugin_paths_normalizes_relative_paths(
 
     result = candidate_lsmas_plugin_paths()
 
-    assert result[0] == env_module.os.path.abspath("plugins/libvslsmashsource.dll")
-    assert len(result) == 2
+    assert result[: len(_expected_lsmas_candidates(bundle_root / "vs" / "plugins"))] == (
+        _expected_lsmas_candidates(bundle_root / "vs" / "plugins")
+    )
+    assert len(result) == len(_expected_lsmas_candidates(tmp_path / "plugins")) + len(
+        _expected_lsmas_candidates(bundle_root / "vs" / "plugins")
+    )
 
 
 def os_pathsep_join(parts: list[str]) -> str:
     return env_module.os.pathsep.join(parts)
+
+
+def _expected_lsmas_candidates(plugin_dir) -> list[str]:
+    return [
+        env_module.os.path.abspath(str(plugin_dir / filename))
+        for filename in env_module._candidate_lsmas_filenames()
+    ]
+
+
+def _first_candidate_by_source(result) -> dict[str, str]:
+    first_for_source: dict[str, str] = {}
+    for candidate in result:
+        first_for_source.setdefault(candidate.source, candidate.path)
+    return first_for_source
+
+
+def test_candidate_lsmas_plugin_path_details_prefers_r74_discovery_order(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    bundle_root = tmp_path / "bundle"
+    python_dir = bundle_root / "python"
+    python_dir.mkdir(parents=True)
+    executable = python_dir / "python.exe"
+    executable.write_text("")
+    canonical_dir = tmp_path / "canonical"
+    extra_dir = tmp_path / "extra"
+    legacy_dir = tmp_path / "legacy"
+
+    monkeypatch.setattr(env_module.sys, "executable", str(executable))
+    monkeypatch.setattr(
+        env_module,
+        "import_vapoursynth_module",
+        lambda: SimpleNamespace(get_plugin_dir=lambda: str(canonical_dir)),
+    )
+    monkeypatch.setenv("VAPOURSYNTH_EXTRA_PLUGIN_PATH", str(extra_dir))
+    monkeypatch.setenv("VAPOURSYNTH_PLUGIN_PATH", str(legacy_dir))
+
+    result = candidate_lsmas_plugin_path_details()
+    first_for_source = _first_candidate_by_source(result)
+
+    assert (
+        first_for_source["vapoursynth.get_plugin_dir"]
+        == _expected_lsmas_candidates(canonical_dir)[0]
+    )
+    assert (
+        first_for_source["VAPOURSYNTH_EXTRA_PLUGIN_PATH"]
+        == _expected_lsmas_candidates(extra_dir)[0]
+    )
+    assert (
+        first_for_source["bundle_vs_plugins"]
+        == _expected_lsmas_candidates(bundle_root / "vs" / "plugins")[0]
+    )
+    assert first_for_source["VAPOURSYNTH_PLUGIN_PATH"] == _expected_lsmas_candidates(legacy_dir)[0]
+
+
+@pytest.mark.parametrize(
+    "vs_module_factory",
+    [
+        pytest.param(
+            lambda: SimpleNamespace(get_plugin_dir=lambda: (_ for _ in ()).throw(RuntimeError)),
+            id="get-plugin-dir-raises",
+        ),
+        pytest.param(
+            lambda: SimpleNamespace(get_plugin_dir=lambda: 42),
+            id="get-plugin-dir-non-path",
+        ),
+    ],
+)
+def test_candidate_lsmas_plugin_path_details_continues_when_canonical_dir_unusable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    vs_module_factory,
+) -> None:
+    bundle_root = tmp_path / "bundle"
+    python_dir = bundle_root / "python"
+    python_dir.mkdir(parents=True)
+    executable = python_dir / "python.exe"
+    executable.write_text("")
+    extra_dir = tmp_path / "extra"
+    legacy_dir = tmp_path / "legacy"
+
+    monkeypatch.setattr(env_module.sys, "executable", str(executable))
+    monkeypatch.setattr(env_module, "import_vapoursynth_module", vs_module_factory)
+    monkeypatch.setenv("VAPOURSYNTH_EXTRA_PLUGIN_PATH", str(extra_dir))
+    monkeypatch.setenv("VAPOURSYNTH_PLUGIN_PATH", str(legacy_dir))
+
+    result = candidate_lsmas_plugin_path_details()
+    first_for_source = _first_candidate_by_source(result)
+
+    assert "vapoursynth.get_plugin_dir" not in first_for_source
+    assert (
+        first_for_source["VAPOURSYNTH_EXTRA_PLUGIN_PATH"]
+        == _expected_lsmas_candidates(extra_dir)[0]
+    )
+    assert (
+        first_for_source["bundle_vs_plugins"]
+        == _expected_lsmas_candidates(bundle_root / "vs" / "plugins")[0]
+    )
+    assert first_for_source["VAPOURSYNTH_PLUGIN_PATH"] == _expected_lsmas_candidates(legacy_dir)[0]
+
+
+def test_candidate_lsmas_plugin_path_details_continues_when_vapoursynth_import_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    bundle_root = tmp_path / "bundle"
+    python_dir = bundle_root / "python"
+    python_dir.mkdir(parents=True)
+    executable = python_dir / "python.exe"
+    executable.write_text("")
+    extra_dir = tmp_path / "extra"
+    legacy_dir = tmp_path / "legacy"
+
+    def _raise_import_error() -> object:
+        raise ImportError("vapoursynth unavailable")
+
+    monkeypatch.setattr(env_module.sys, "executable", str(executable))
+    monkeypatch.setattr(env_module, "import_vapoursynth_module", _raise_import_error)
+    monkeypatch.setenv("VAPOURSYNTH_EXTRA_PLUGIN_PATH", str(extra_dir))
+    monkeypatch.setenv("VAPOURSYNTH_PLUGIN_PATH", str(legacy_dir))
+
+    result = candidate_lsmas_plugin_path_details()
+    first_for_source = _first_candidate_by_source(result)
+
+    assert "vapoursynth.get_plugin_dir" not in first_for_source
+    assert (
+        first_for_source["VAPOURSYNTH_EXTRA_PLUGIN_PATH"]
+        == _expected_lsmas_candidates(extra_dir)[0]
+    )
+    assert (
+        first_for_source["bundle_vs_plugins"]
+        == _expected_lsmas_candidates(bundle_root / "vs" / "plugins")[0]
+    )
+    assert first_for_source["VAPOURSYNTH_PLUGIN_PATH"] == _expected_lsmas_candidates(legacy_dir)[0]
 
 
 def test_try_load_lsmas_plugin_loads_first_existing_candidate(

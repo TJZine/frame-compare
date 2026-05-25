@@ -20,7 +20,11 @@ from frame_compare.config.loader import load_config
 from frame_compare.errors import JSONValue
 from frame_compare.orchestration.preflight import resolve_workspace
 from frame_compare.services.metadata import is_valid_tmdb_api_key
-from frame_compare.vs.env import import_vapoursynth_module, try_load_lsmas_plugin
+from frame_compare.vs.env import (
+    candidate_lsmas_plugin_path_details,
+    import_vapoursynth_module,
+    try_load_lsmas_plugin,
+)
 
 if TYPE_CHECKING:
     from frame_compare.utils.progress_protocol import ProgressReporter
@@ -102,6 +106,14 @@ def _check_vapoursynth() -> CheckResult:
         )
 
 
+def _lsmas_plugin_path_details() -> dict[str, JSONValue]:
+    candidates = [
+        {"source": candidate.source, "path": candidate.path}
+        for candidate in candidate_lsmas_plugin_path_details()
+    ]
+    return {"checked_plugin_paths": cast(JSONValue, candidates)}
+
+
 def _check_lsmas() -> CheckResult:
     """Check L-SMASH-Works plugin is available."""
     try:
@@ -128,6 +140,7 @@ def _check_lsmas() -> CheckResult:
             passed=False,
             message="L-SMASH-Works plugin not found",
             hint="Install L-SMASH-Works VapourSynth plugin",
+            details=_lsmas_plugin_path_details(),
         )
     except ImportError:
         return CheckResult(
@@ -138,8 +151,9 @@ def _check_lsmas() -> CheckResult:
     except Exception as e:
         return CheckResult(
             passed=False,
-            message=f"lsmas check failed: {e}",
+            message="lsmas check failed",
             hint="Check VapourSynth installation",
+            details={"exception_type": type(e).__name__},
         )
 
 

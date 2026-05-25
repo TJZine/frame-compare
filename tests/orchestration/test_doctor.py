@@ -13,6 +13,7 @@ from frame_compare.orchestration.doctor import (
     collect_checks,
     run_doctor,
 )
+from frame_compare.vs.env import PluginPathCandidate
 
 
 def _clear_tmdb_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -49,10 +50,32 @@ class TestCheckLsmas:
         checks = collect_checks()
         lsmas_check = next(c for c in checks if c.name == "lsmas")
 
-        with patch.dict(sys.modules, {"vapoursynth": mock_vs}):
+        with (
+            patch.dict(sys.modules, {"vapoursynth": mock_vs}),
+            patch(
+                "frame_compare.orchestration.doctor.candidate_lsmas_plugin_path_details",
+                return_value=[
+                    PluginPathCandidate(
+                        path="/opt/vs/plugins/libvslsmashsource.so",
+                        source="vapoursynth.get_plugin_dir",
+                    ),
+                    PluginPathCandidate(
+                        path="/bundle/vs/plugins/libvslsmashsource.so",
+                        source="bundle_vs_plugins",
+                    ),
+                ],
+            ),
+        ):
             result = lsmas_check.check_fn()
 
         assert result.passed is False
+        assert result.details["checked_plugin_paths"] == [
+            {
+                "source": "vapoursynth.get_plugin_dir",
+                "path": "/opt/vs/plugins/libvslsmashsource.so",
+            },
+            {"source": "bundle_vs_plugins", "path": "/bundle/vs/plugins/libvslsmashsource.so"},
+        ]
 
     def test_check_lsmas_plugin_fallback_loads_from_plugin_path(self) -> None:
         """If autoload misses lsmas, fallback LoadPlugin path should recover."""
@@ -89,6 +112,21 @@ class TestCheckLsmas:
 
         assert result.passed is True
         assert result.details.get("plugin_path") == "C:/bundle/vs/plugins/libvslsmashsource.dll"
+
+    def test_check_lsmas_failure_uses_sanitized_exception_details(self) -> None:
+        """Unexpected lsmas errors should not expose raw exception text."""
+        checks = collect_checks()
+        lsmas_check = next(c for c in checks if c.name == "lsmas")
+
+        with patch(
+            "frame_compare.orchestration.doctor.import_vapoursynth_module",
+            side_effect=RuntimeError("secret path /Users/example/private"),
+        ):
+            result = lsmas_check.check_fn()
+
+        assert result.passed is False
+        assert result.message == "lsmas check failed"
+        assert result.details == {"exception_type": "RuntimeError"}
 
     def test_check_lsmas_failure_included_in_critical_failures(self) -> None:
         """Mock lsmas core failure → DoctorReport.critical_failures includes 'lsmas'."""

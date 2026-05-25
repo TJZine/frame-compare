@@ -17,6 +17,7 @@ if isinstance(vs, MagicMock) or hasattr(vs, "_mock_methods"):
     pytest.skip("VapourSynth is mocked, skipping integration test", allow_module_level=True)
 
 from frame_compare.vs import (  # noqa: E402
+    detect_plugins,
     is_vapoursynth_available,
 )
 
@@ -90,7 +91,16 @@ def test_libplacebo_tonemap_succeeds_in_docker():
     `apply_tonemap` must fall back without raising.
 
     Set `FRAME_COMPARE_REQUIRE_LIBPLACEBO=1` to require libplacebo to succeed.
+    Local PyPI VapourSynth installs without bundled plugins skip this Docker
+    runtime proof unless the require flag is set.
     """
+    require_libplacebo = os.environ.get("FRAME_COMPARE_REQUIRE_LIBPLACEBO") == "1"
+    if not require_libplacebo and not bool(detect_plugins(vs.core).get("libplacebo")):
+        pytest.skip(
+            "libplacebo plugin unavailable in this local VapourSynth runtime; "
+            "Docker gate treats this as a required runtime proof"
+        )
+
     result = _run_vs_script(
         """
         import os
