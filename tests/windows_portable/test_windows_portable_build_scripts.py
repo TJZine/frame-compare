@@ -274,6 +274,12 @@ def test_windows_portable_manifest_vendored_license_files_exist_and_match_hashes
 ) -> None:
     manifest_path = repo_root / "tools" / "windows_portable" / "manifest.windows-x64.json"
     manifest = json.loads(_read_text_or_fail(manifest_path))
+    active_gitattributes_lines = {
+        line.strip()
+        for line in _read_text_or_fail(repo_root / ".gitattributes").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    assert "tools/windows_portable/licenses/**/*.txt text eol=lf" in active_gitattributes_lines
 
     licensed_artifacts = [
         artifact for artifact in manifest["artifacts"] if "files" in artifact["license"]
@@ -287,6 +293,8 @@ def test_windows_portable_manifest_vendored_license_files_exist_and_match_hashes
             relative_path = Path(license_file["path"])
             vendored_path = manifest_path.parent / relative_path
             assert vendored_path.is_file(), f"Missing vendored license file: {vendored_path}"
-            actual_hash = hashlib.sha256(vendored_path.read_bytes()).hexdigest()
+            license_bytes = vendored_path.read_bytes()
+            assert b"\r\n" not in license_bytes
+            actual_hash = hashlib.sha256(license_bytes).hexdigest()
             assert actual_hash == license_file["sha256"]
             assert license_file["source_url"].startswith("https://raw.githubusercontent.com/")
