@@ -28,6 +28,9 @@ def test_root_install_cmd_exists_and_calls_install_ps1(repo_root: Path) -> None:
     path = repo_root / "install.cmd"
     assert path.exists()
     text = _read_text_or_fail(path).lower()
+    assert "where pwsh" in text
+    assert "if %errorlevel% equ 0" in text
+    assert "pwsh" in text
     assert "powershell" in text
     assert "-noprofile" in text
     assert "-executionpolicy bypass" in text
