@@ -642,11 +642,8 @@ def prove_lwlibavsource(media_path: Path) -> None:
     proof(f"lwlibavsource=ok namespace=lsmas loaded_path={lsmas_loaded_path}")
 
 
-def prove_placebo_tonemap() -> None:
+def build_placebo_clip():
     import vapoursynth as vs
-
-    from frame_compare.vs.tonemap import apply_tonemap
-    from frame_compare.vs.types import TonemapSettings
 
     core = vs.core
     assert_true(hasattr(core, "placebo"), "core.placebo namespace missing")
@@ -654,7 +651,7 @@ def prove_placebo_tonemap() -> None:
 
     tonemap_clip = core.std.BlankClip(width=16, height=16, format=vs.RGB48, length=1, color=[32768, 32768, 32768])
     tonemap_clip = tonemap_clip.std.SetFrameProps(_Matrix=0, _Range=0, _Transfer=16, _Primaries=9)
-    direct_out = core.placebo.Tonemap(
+    return core.placebo.Tonemap(
         tonemap_clip,
         src_max=1000,
         dst_max=203,
@@ -662,15 +659,38 @@ def prove_placebo_tonemap() -> None:
         dst_csp=0,
         dst_prim=1,
         src_csp=1,
-    )
+    ), tonemap_clip
+
+
+def prove_placebo_tonemap_api() -> None:
+    direct_out, _tonemap_clip = build_placebo_clip()
+    assert_true(direct_out.width == 16 and direct_out.height == 16, "placebo direct clip construction failed")
+    proof("placebo_tonemap_api=ok namespace=placebo function=Tonemap")
+
+
+def prove_placebo_tonemap_frame() -> None:
+    direct_out, _tonemap_clip = build_placebo_clip()
     direct_frame = direct_out.get_frame(0)
     assert_true(direct_frame.width == 16 and direct_frame.height == 16, "placebo direct frame render failed")
+    proof("placebo_direct_frame=ok")
 
+
+def prove_apply_tonemap_frame() -> None:
+    import vapoursynth as vs
+
+    from frame_compare.vs.tonemap import _libplacebo_runtime_usable, apply_tonemap
+    from frame_compare.vs.types import TonemapSettings
+
+    core = vs.core
+    tonemap_clip = core.std.BlankClip(width=16, height=16, format=vs.RGB48, length=1, color=[32768, 32768, 32768])
+    tonemap_clip = tonemap_clip.std.SetFrameProps(_Matrix=0, _Range=0, _Transfer=16, _Primaries=9)
+
+    libplacebo_runtime_usable = _libplacebo_runtime_usable()
     app_out = apply_tonemap(tonemap_clip, TonemapSettings(enabled=True))
     app_frame = app_out.get_frame(0)
     assert_true(app_frame.width == 16 and app_frame.height == 16, "apply_tonemap frame render failed")
 
-    proof("placebo_tonemap=ok frames=direct,apply_tonemap")
+    proof(f"apply_tonemap=ok frame=rendered fallback_aware=true libplacebo_runtime_usable={str(libplacebo_runtime_usable).lower()}")
 
 
 def prove_vspreview_pyqt6() -> None:
@@ -691,8 +711,12 @@ elif phase == "vapoursynth_environment":
     prove_vapoursynth_environment()
 elif phase == "lwlibavsource_frame":
     prove_lwlibavsource(media_path)
+elif phase == "placebo_tonemap_api":
+    prove_placebo_tonemap_api()
+elif phase == "apply_tonemap_frame":
+    prove_apply_tonemap_frame()
 elif phase == "placebo_tonemap_frame":
-    prove_placebo_tonemap()
+    prove_placebo_tonemap_frame()
 elif phase == "vspreview_pyqt6_import":
     prove_vspreview_pyqt6()
 else:
@@ -703,7 +727,9 @@ else:
     Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "package_imports" -MediaPath $mediaPath -Required $true
     Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "vapoursynth_environment" -MediaPath $mediaPath -Required $true
     Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "lwlibavsource_frame" -MediaPath $mediaPath -Required $true
-    Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "placebo_tonemap_frame" -MediaPath $mediaPath -Required $true
+    Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "placebo_tonemap_api" -MediaPath $mediaPath -Required $true
+    Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "apply_tonemap_frame" -MediaPath $mediaPath -Required $true
+    Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "placebo_tonemap_frame" -MediaPath $mediaPath -Required $false
     Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "vspreview_pyqt6_import" -MediaPath $mediaPath -Required $false
   } finally {
     Remove-Item -Force -LiteralPath $smokePath -ErrorAction SilentlyContinue

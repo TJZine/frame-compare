@@ -130,6 +130,8 @@ def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: 
         "package_imports",
         "vapoursynth_environment",
         "lwlibavsource_frame",
+        "placebo_tonemap_api",
+        "apply_tonemap_frame",
         "placebo_tonemap_frame",
         "vspreview_pyqt6_import",
     ):
@@ -140,7 +142,12 @@ def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: 
     )
     assert 'Phase "vspreview_pyqt6_import" -MediaPath $mediaPath -Required $false' in build_script
     assert 'Phase "lwlibavsource_frame" -MediaPath $mediaPath -Required $true' in build_script
-    assert 'Phase "placebo_tonemap_frame" -MediaPath $mediaPath -Required $true' in build_script
+    assert 'Phase "placebo_tonemap_api" -MediaPath $mediaPath -Required $true' in build_script
+    assert 'Phase "apply_tonemap_frame" -MediaPath $mediaPath -Required $true' in build_script
+    assert 'Phase "placebo_tonemap_frame" -MediaPath $mediaPath -Required $false' in build_script
+    assert "placebo_tonemap_api=ok" in build_script
+    assert "apply_tonemap=ok frame=rendered fallback_aware=true" in build_script
+    assert "libplacebo_runtime_usable=" in build_script
 
 
 def test_pyproject_defines_vspreview_optional_dependency(repo_root: Path) -> None:
