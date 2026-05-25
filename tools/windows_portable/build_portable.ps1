@@ -34,6 +34,15 @@ function Get-Manifest() {
   return (Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json)
 }
 
+function Resolve-ManifestRelativePath([string]$RelativePath) {
+  $manifestDir = Split-Path -Parent $ManifestPath
+  $candidate = Join-Path $manifestDir $RelativePath
+  if (!(Test-Path -LiteralPath $candidate)) {
+    throw "Manifest-relative path not found: $RelativePath ($candidate)"
+  }
+  return (Resolve-Path -LiteralPath $candidate).Path
+}
+
 function Get-OptionalStringProperty([object]$Object, [string]$Name) {
   if ($null -eq $Object) {
     return ""
@@ -767,6 +776,31 @@ function Copy-PythonDistLicenses([string]$SitePackages, [string]$LicensesPythonD
   }
 }
 
+function Copy-ManifestLicenseFiles(
+  [string]$LicensesDir,
+  [string]$ArtifactId,
+  [string]$Spdx,
+  [object[]]$LicenseFiles
+) {
+  $multipleFiles = $LicenseFiles.Count -gt 1
+
+  foreach ($licenseFile in $LicenseFiles) {
+    $relativePath = Get-RequiredStringProperty -Object $licenseFile -Name "path" -Context "artifact '$ArtifactId' license file"
+    $expectedSha256 = Get-RequiredStringProperty -Object $licenseFile -Name "sha256" -Context "artifact '$ArtifactId' license file '$relativePath'"
+    $resolvedPath = Resolve-ManifestRelativePath -RelativePath $relativePath
+    Assert-Sha256 -FilePath $resolvedPath -ExpectedHex $expectedSha256
+
+    $baseName = [System.IO.Path]::GetFileName($resolvedPath)
+    $destName = if ($multipleFiles) {
+      "{0}-{1}--{2}" -f $ArtifactId, $Spdx, $baseName
+    } else {
+      "{0}-{1}{2}" -f $ArtifactId, $Spdx, [System.IO.Path]::GetExtension($baseName)
+    }
+
+    Copy-Item -Force -LiteralPath $resolvedPath -Destination (Join-Path $LicensesDir $destName)
+  }
+}
+
 function Copy-Licenses([string]$BundleRoot, [pscustomobject[]]$Artifacts) {
   $licensesDir = Join-Path $BundleRoot "licenses"
   Ensure-Directory -Path $licensesDir
@@ -791,7 +825,6 @@ function Copy-Licenses([string]$BundleRoot, [pscustomobject[]]$Artifacts) {
     $url = Get-RequiredStringProperty -Object $artifact -Name "url" -Context "artifact '$id'"
     $fileName = Split-Path -Leaf $url
     $license = Get-RequiredProperty -Object $artifact -Name "license" -Context "artifact '$id'"
-    $licenseUrl = Get-RequiredStringProperty -Object $license -Name "url" -Context "artifact '$id' license"
     $spdx = Get-RequiredStringProperty -Object $license -Name "spdx" -Context "artifact '$id' license"
 
     if ($fileName -like "*.zip") {
@@ -810,11 +843,9 @@ function Copy-Licenses([string]$BundleRoot, [pscustomobject[]]$Artifacts) {
       }
     }
 
-    # Download license text for artifacts that do not consistently ship one in the installed path.
-    if ($id -like "vapoursynth-*" -or $id -like "vs-plugin-*") {
-      $dest = Join-Path $licensesDir ("{0}-{1}.txt" -f $id, $spdx)
-      Write-Host "Fetching license for $id ($spdx)"
-      Invoke-WebRequest -Uri $licenseUrl -OutFile $dest | Out-Null
+    $manifestLicenseFiles = Get-OptionalProperty -Object $license -Name "files"
+    if ($null -ne $manifestLicenseFiles) {
+      Copy-ManifestLicenseFiles -LicensesDir $licensesDir -ArtifactId $id -Spdx $spdx -LicenseFiles @($manifestLicenseFiles)
     }
   }
 }

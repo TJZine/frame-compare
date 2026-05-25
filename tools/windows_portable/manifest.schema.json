@@ -45,24 +45,62 @@
           "properties": {
             "spdx": { "type": "string" },
             "url": { "type": "string", "format": "uri" },
+            "files": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/license_file" }
+            },
             "notes": { "type": "string" }
           },
           "additionalProperties": false
         },
-        "install": {
-          "type": "object",
-          "required": ["type", "destination"],
-          "properties": {
-            "type": { "type": "string", "enum": ["extract", "copy_file"] },
-            "destination": { "type": "string" },
-            "strip_prefix": { "type": "string" },
-            "source_path": { "type": "string" }
-          },
-          "additionalProperties": false
-        },
+        "install": { "$ref": "#/$defs/install" },
         "notes": { "type": "string" }
       },
       "additionalProperties": false
+    },
+    "license_file": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "source_url": { "type": "string", "format": "uri" }
+      },
+      "additionalProperties": false
+    },
+    "install": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "destination"],
+          "properties": {
+            "type": { "const": "extract" },
+            "destination": { "type": "string" },
+            "strip_prefix": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["type", "destination", "source_path"],
+          "properties": {
+            "type": { "const": "copy_file" },
+            "destination": { "type": "string" },
+            "source_path": { "type": "string" },
+            "manifest": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": { "const": "python_wheel" }
+          },
+          "additionalProperties": false
+        }
+      ]
     }
   },
   "additionalProperties": false

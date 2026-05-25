@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -105,6 +106,12 @@ def test_windows_portable_build_uses_r74_plus_plugin_layout(repo_root: Path) -> 
     assert "tar extract" in build_script
     assert "VAPOURSYNTH_PLUGIN_PATH =" not in build_script
     assert "Consolidate-VapourSynthPlugins" not in build_script
+    assert (
+        build_script.count(
+            'Get-ChildItem -LiteralPath $sitePackages -Filter "*.dll" -File -Recurse'
+        )
+        >= 2
+    )
 
 
 def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: Path) -> None:
@@ -232,3 +239,54 @@ def test_windows_portable_build_copies_dist_info_licenses_when_present(repo_root
     assert (
         re.search(r"dist-info\\\\licenses", build_script) or "dist-info\\licenses" in build_script
     )
+
+
+def test_windows_portable_build_uses_vendored_manifest_license_files(repo_root: Path) -> None:
+    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    build_script = _read_text_or_fail(build_path)
+    assert "function Resolve-ManifestRelativePath" in build_script
+    assert "function Copy-ManifestLicenseFiles" in build_script
+    assert "Assert-Sha256 -FilePath $resolvedPath -ExpectedHex $expectedSha256" in build_script
+    assert "Invoke-WebRequest -Uri $licenseUrl" not in build_script
+    assert (
+        "Copy-ManifestLicenseFiles -LicensesDir $licensesDir -ArtifactId $id -Spdx $spdx"
+        in build_script
+    )
+
+
+def test_windows_portable_manifest_schema_models_current_install_shapes(repo_root: Path) -> None:
+    schema_path = repo_root / "tools" / "windows_portable" / "manifest.schema.json"
+    schema = json.loads(_read_text_or_fail(schema_path))
+    install_def = schema["$defs"]["install"]
+    assert "oneOf" in install_def
+
+    variants = {variant["properties"]["type"]["const"]: variant for variant in install_def["oneOf"]}
+    assert set(variants) == {"extract", "copy_file", "python_wheel"}
+    assert variants["extract"]["required"] == ["type", "destination"]
+    assert variants["copy_file"]["required"] == ["type", "destination", "source_path"]
+    assert "manifest" in variants["copy_file"]["properties"]
+    assert variants["python_wheel"]["required"] == ["type"]
+    assert "destination" not in variants["python_wheel"]["properties"]
+
+
+def test_windows_portable_manifest_vendored_license_files_exist_and_match_hashes(
+    repo_root: Path,
+) -> None:
+    manifest_path = repo_root / "tools" / "windows_portable" / "manifest.windows-x64.json"
+    manifest = json.loads(_read_text_or_fail(manifest_path))
+
+    licensed_artifacts = [
+        artifact for artifact in manifest["artifacts"] if "files" in artifact["license"]
+    ]
+    assert licensed_artifacts
+
+    for artifact in licensed_artifacts:
+        license_info = artifact["license"]
+        assert license_info["url"].startswith("https://raw.githubusercontent.com/")
+        for license_file in license_info["files"]:
+            relative_path = Path(license_file["path"])
+            vendored_path = manifest_path.parent / relative_path
+            assert vendored_path.is_file(), f"Missing vendored license file: {vendored_path}"
+            actual_hash = hashlib.sha256(vendored_path.read_bytes()).hexdigest()
+            assert actual_hash == license_file["sha256"]
+            assert license_file["source_url"].startswith("https://raw.githubusercontent.com/")

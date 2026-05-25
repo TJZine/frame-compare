@@ -83,6 +83,11 @@ THIRD-PARTY LICENSES / SOURCE AVAILABILITY:
       .\licenses\
       .\licenses\python\
   - Python wheel license files are copied from installed *.dist-info metadata.
+  - Third-party runtime licenses that do not reliably ship in extracted bundle
+    paths are copied from manifest-declared, repo-tracked files under:
+      tools\windows_portable\licenses\
+    The build SHA256-verifies those vendored license texts before copying them
+    into the bundle.
   - Qt license/notice files (when present) are copied from:
       app\site-packages\PyQt6\Qt6\licenses
     Note: newer PyQt6 wheels may ship additional license texts under individual

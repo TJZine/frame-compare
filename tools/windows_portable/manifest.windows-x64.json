@@ -35,7 +35,14 @@
       "bytes": 15000063,
       "license": {
         "spdx": "LGPL-2.1-or-later",
-        "url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/master/COPYING.LESSER"
+        "url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/aa7e83a0aaf87477b5e0fc13c5b97c5aa15a06b7/COPYING.LESSER",
+        "files": [
+          {
+            "path": "licenses/common/LGPL-2.1.txt",
+            "sha256": "6f702d94a2ee265b2b80d9b1215dbdbad34a89c04532aec1088a2831018737dd",
+            "source_url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/aa7e83a0aaf87477b5e0fc13c5b97c5aa15a06b7/COPYING.LESSER"
+          }
+        ]
       },
       "install": {
         "type": "extract",
@@ -52,7 +59,19 @@
       "bytes": 29754280,
       "license": {
         "spdx": "ISC AND LGPL-2.1-or-later",
-        "url": "https://raw.githubusercontent.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/master/VapourSynth/LICENSE"
+        "url": "https://raw.githubusercontent.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/0079a06ee384061ecdadd0de03df4e0493dd56ab/VapourSynth/LICENSE",
+        "files": [
+          {
+            "path": "licenses/lsmash-works/VapourSynth-LICENSE.txt",
+            "sha256": "2e1252454a8fcc24144ce94173d6cf90cc7a10954007efd4a2a0f58eec4c73cb",
+            "source_url": "https://raw.githubusercontent.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/0079a06ee384061ecdadd0de03df4e0493dd56ab/VapourSynth/LICENSE"
+          },
+          {
+            "path": "licenses/common/LGPL-2.1.txt",
+            "sha256": "6f702d94a2ee265b2b80d9b1215dbdbad34a89c04532aec1088a2831018737dd",
+            "source_url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/aa7e83a0aaf87477b5e0fc13c5b97c5aa15a06b7/COPYING.LESSER"
+          }
+        ]
       },
       "install": {
         "type": "copy_file",
@@ -71,7 +90,14 @@
       "bytes": 6136385,
       "license": {
         "spdx": "LGPL-2.1-or-later",
-        "url": "https://raw.githubusercontent.com/Lypheo/vs-placebo/master/COPYING"
+        "url": "https://raw.githubusercontent.com/Lypheo/vs-placebo/ccb4beac9080510f2eb830d948449392e2e5c34a/COPYING",
+        "files": [
+          {
+            "path": "licenses/common/LGPL-2.1.txt",
+            "sha256": "6f702d94a2ee265b2b80d9b1215dbdbad34a89c04532aec1088a2831018737dd",
+            "source_url": "https://raw.githubusercontent.com/Lypheo/vs-placebo/ccb4beac9080510f2eb830d948449392e2e5c34a/COPYING"
+          }
+        ]
       },
       "install": {
         "type": "python_wheel"
