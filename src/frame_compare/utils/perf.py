@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 
 import structlog
@@ -25,7 +25,7 @@ def is_perf_enabled() -> bool:
 
 
 @contextmanager
-def perf_span(name: str, **fields: object) -> Iterator[None]:
+def perf_span(name: str, **fields: object) -> Generator[None]:
     """
     Record a timing span if enabled.
 

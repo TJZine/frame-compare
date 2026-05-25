@@ -106,6 +106,18 @@ _handle_json_output = handle_json_output
 _build_minimal_config = build_minimal_config
 _validate_config = validate_config
 
+if TYPE_CHECKING:
+
+    def _option[T](default: T, *param_decls: str) -> T:
+        return default
+
+    def _path_option(default: str, *param_decls: str) -> Path:
+        return Path(default)
+
+else:
+    _option = typer.Option
+    _path_option = typer.Option
+
 
 def _write_config_to(path: Path, config: ConfigSchema) -> None:
     write_config_to(path, config, text_writer=write_text_atomic)
@@ -133,28 +145,28 @@ def version() -> None:
 
 @app.command()
 def run(
-    root: Path = typer.Option(".", "--root", "-r"),
-    config: Path | None = typer.Option(None, "--config", "-c"),
-    input_dir: Path | None = typer.Option(None, "--input", "-i"),
-    no_cache: bool = typer.Option(False, "--no-cache"),
-    from_cache_only: bool = typer.Option(False, "--from-cache-only"),
-    no_upload: bool = typer.Option(False, "--no-upload"),
-    tm_preset: str | None = typer.Option(None, "--tm-preset"),
-    tm_target: int | None = typer.Option(None, "--tm-target"),
-    tm_curve: str | None = typer.Option(None, "--tm-curve"),
-    frame_count: int | None = typer.Option(None, "--frame-count", "-n"),
-    seed: int | None = typer.Option(None, "--seed"),
-    overlay: str | None = typer.Option(None, "--overlay"),
-    skip_analysis: bool = typer.Option(False, "--skip-analysis"),
-    skip_metadata: bool = typer.Option(False, "--skip-metadata"),
-    skip_dovi: bool = typer.Option(False, "--skip-dovi"),
-    force_interactive_alignment: bool = typer.Option(False, "--force-interactive-alignment"),
-    json_output: bool = typer.Option(False, "--json"),
-    no_color: bool = typer.Option(False, "--no-color"),
-    write_config: bool = typer.Option(False, "--write-config"),
-    diagnose_paths: bool = typer.Option(False, "--diagnose-paths"),
-    quiet: bool = typer.Option(False, "--quiet", "-q"),
-    verbose: bool = typer.Option(False, "--verbose", "-v"),
+    root: Path = _path_option(".", "--root", "-r"),
+    config: Path | None = _option(None, "--config", "-c"),
+    input_dir: Path | None = _option(None, "--input", "-i"),
+    no_cache: bool = _option(False, "--no-cache"),
+    from_cache_only: bool = _option(False, "--from-cache-only"),
+    no_upload: bool = _option(False, "--no-upload"),
+    tm_preset: str | None = _option(None, "--tm-preset"),
+    tm_target: int | None = _option(None, "--tm-target"),
+    tm_curve: str | None = _option(None, "--tm-curve"),
+    frame_count: int | None = _option(None, "--frame-count", "-n"),
+    seed: int | None = _option(None, "--seed"),
+    overlay: str | None = _option(None, "--overlay"),
+    skip_analysis: bool = _option(False, "--skip-analysis"),
+    skip_metadata: bool = _option(False, "--skip-metadata"),
+    skip_dovi: bool = _option(False, "--skip-dovi"),
+    force_interactive_alignment: bool = _option(False, "--force-interactive-alignment"),
+    json_output: bool = _option(False, "--json"),
+    no_color: bool = _option(False, "--no-color"),
+    write_config: bool = _option(False, "--write-config"),
+    diagnose_paths: bool = _option(False, "--diagnose-paths"),
+    quiet: bool = _option(False, "--quiet", "-q"),
+    verbose: bool = _option(False, "--verbose", "-v"),
 ) -> None:
     resolved_root, config_path = _resolve_root_and_config(root, config)
     args = RunCliRawArgs(
@@ -197,8 +209,8 @@ def run(
 
 @app.command()
 def wizard(
-    root: Path = typer.Option(".", "--root", "-r"),
-    config: Path | None = typer.Option(None, "--config", "-c"),
+    root: Path = _path_option(".", "--root", "-r"),
+    config: Path | None = _option(None, "--config", "-c"),
 ) -> None:
     resolved_root, config_path = _resolve_root_and_config(root, config)
     handle_wizard(
@@ -214,7 +226,7 @@ def wizard(
 
 
 @app.command()
-def doctor(json_output: bool = typer.Option(False, "--json")) -> None:
+def doctor(json_output: bool = _option(False, "--json")) -> None:
     handle_doctor(json_output, run_doctor=run_doctor)
 
 
@@ -224,8 +236,8 @@ app.add_typer(preset_app, name="preset")
 
 @preset_app.command("list")
 def preset_list(
-    root: Path = typer.Option(".", "--root", "-r"),
-    config: Path | None = typer.Option(None, "--config", "-c"),
+    root: Path = _path_option(".", "--root", "-r"),
+    config: Path | None = _option(None, "--config", "-c"),
 ) -> None:
     resolved_root, _ = _resolve_root_and_config(root, config)
     handle_preset_list(
@@ -238,8 +250,8 @@ def preset_list(
 @preset_app.command("apply")
 def preset_apply(
     name: str,
-    root: Path = typer.Option(".", "--root", "-r"),
-    config: Path | None = typer.Option(None, "--config", "-c"),
+    root: Path = _path_option(".", "--root", "-r"),
+    config: Path | None = _option(None, "--config", "-c"),
 ) -> None:
     resolved_root, config_path = _resolve_root_and_config(root, config)
     handle_preset_apply(
@@ -256,8 +268,8 @@ def preset_apply(
 @preset_app.command("save")
 def preset_save(
     name: str,
-    root: Path = typer.Option(".", "--root", "-r"),
-    config: Path | None = typer.Option(None, "--config", "-c"),
+    root: Path = _path_option(".", "--root", "-r"),
+    config: Path | None = _option(None, "--config", "-c"),
 ) -> None:
     resolved_root, config_path = _resolve_root_and_config(root, config)
     handle_preset_save(

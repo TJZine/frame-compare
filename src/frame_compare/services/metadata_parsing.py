@@ -4,7 +4,7 @@ import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypeVar, cast
+from typing import cast
 
 import anitopy
 import structlog
@@ -16,7 +16,6 @@ log = structlog.get_logger()
 
 type FilenameMetadataParser = Callable[[str], dict[str, object]]
 type _ParsedField = str | int
-_TParsedField = TypeVar("_TParsedField", bound=_ParsedField)
 
 
 @dataclass(frozen=True)
@@ -50,10 +49,10 @@ def _first_int(parser_result: dict[str, object], *keys: str) -> int | None:
     return None
 
 
-def _keep_existing(
-    existing: _TParsedField | None,
-    parsed: _TParsedField | None,
-) -> _TParsedField | None:
+def _keep_existing[TParsedField: _ParsedField](
+    existing: TParsedField | None,
+    parsed: TParsedField | None,
+) -> TParsedField | None:
     return existing if existing is not None else parsed
 
 

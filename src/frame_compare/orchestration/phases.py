@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 import structlog
 
@@ -19,7 +19,7 @@ from frame_compare.utils.progress_protocol import ProgressReporter
 log = structlog.get_logger()
 
 
-class PhaseStatus(str, Enum):
+class PhaseStatus(StrEnum):
     """Canonical phase execution status."""
 
     PENDING = "pending"
