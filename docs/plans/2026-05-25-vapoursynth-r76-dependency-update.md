@@ -242,11 +242,11 @@ WINDOWS_BUNDLE_PROOF placebo_tonemap_api=ok namespace=placebo function=Tonemap
 WINDOWS_BUNDLE_PROOF apply_tonemap=ok frame=rendered fallback_aware=true libplacebo_runtime_usable=<true|false>
 ```
 
-The direct `core.placebo.Tonemap(...).get_frame(0)` smoke now runs as an isolated optional diagnostic after the required R76, `lsmas`, placebo API, and application-level `apply_tonemap` proofs. If it succeeds, it emits `WINDOWS_BUNDLE_PROOF placebo_direct_frame=ok`; if the host lacks a compatible Vulkan driver and exits nonzero or access-violates, the build emits a named `placebo_tonemap_frame` failed marker and warning instead of failing the Windows portable build. This matches the production path because `apply_tonemap` uses the runtime probe/fallback boundary before asking libplacebo to render.
+The direct `core.placebo.Tonemap(...)` invocation and `get_frame(0)` smoke now run as an isolated optional diagnostic after the required R76, `lsmas`, placebo API availability, and application-level `apply_tonemap` proofs. If it succeeds, it emits `WINDOWS_BUNDLE_PROOF placebo_direct_frame=ok`; if the host lacks a compatible Vulkan driver and exits nonzero or access-violates, the build emits a named `placebo_tonemap_frame` failed marker and warning instead of failing the Windows portable build. This matches the production path because `apply_tonemap` uses the runtime probe/fallback boundary before asking libplacebo to render.
 
 The `vspreview`/`PyQt6` import smoke also runs in an isolated optional subprocess after the required runtime proofs. If it succeeds, it emits `WINDOWS_BUNDLE_PROOF pyqt6_import=ok` and `WINDOWS_BUNDLE_PROOF vspreview_pyqt6=ok`; if it exits nonzero or access-violates, the build emits a named `vspreview_pyqt6_import` failed marker and warning instead of masking the mandatory runtime proof. Docker remains the hard gate for direct raw placebo frame rendering with a compatible runtime, and the Windows workflow no longer repeats the long VS clip smoke because `build_portable.ps1` owns the Windows proof contract.
 
-The Windows host must run the runbook portable path and confirm `frame-compare.ps1 doctor --json`, R76 import/version, R74+ plugin directory, `VAPOURSYNTH_EXTRA_PLUGIN_PATH`, `core.lsmas.LWLibavSource` against generated tiny media, `core.placebo.Tonemap` API construction, and fallback-aware `apply_tonemap(...).get_frame(0)`. Direct raw placebo frame rendering and `vspreview`/`PyQt6` import status remain diagnostic evidence until a Windows host with compatible Vulkan/UI support proves them.
+The Windows host must run the runbook portable path and confirm `frame-compare.ps1 doctor --json`, R76 import/version, R74+ plugin directory, `VAPOURSYNTH_EXTRA_PLUGIN_PATH`, `core.lsmas.LWLibavSource` against generated tiny media, `core.placebo.Tonemap` API availability, and fallback-aware `apply_tonemap(...).get_frame(0)`. Direct `core.placebo.Tonemap(...)` invocation/frame rendering and `vspreview`/`PyQt6` import status remain diagnostic evidence until a Windows host with compatible Vulkan/UI support proves them.
 
 ### Held-Back Ledger
 
@@ -511,9 +511,9 @@ dist/frame-compare-portable-win-x64/frame-compare.ps1 doctor --json
 # Plus the bundle Python runtime proof from Slice 5:
 # - VapourSynth import/core/plugin directory discovery and core.plugins()
 # - lsmas/L-SMASH-Works LWLibavSource source loading against a tiny media file
-# - core.placebo.Tonemap API construction
+# - core.placebo.Tonemap API availability
 # - fallback-aware apply_tonemap(...).get_frame(0), with libplacebo runtime probe status in the marker
-# - optional direct core.placebo.Tonemap(...).get_frame(0) diagnostic when the Windows host has compatible Vulkan support
+# - optional direct core.placebo.Tonemap(...) invocation/get_frame(0) diagnostic when the Windows host has compatible Vulkan support
 ```
 
 Windows update package policy:
