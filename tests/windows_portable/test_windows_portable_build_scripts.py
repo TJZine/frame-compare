@@ -51,6 +51,78 @@ def test_windows_portable_ffmpeg_manifest_uses_reachable_pinned_asset_shape(
     assert ffmpeg["url"].endswith(".zip")
     assert len(ffmpeg["sha256"]) == 64
     assert ffmpeg["install"]["strip_prefix"].rstrip("/") in ffmpeg["url"]
+    assert ffmpeg["license"]["spdx"] == "LGPL-2.1-or-later"
+
+
+def test_windows_portable_manifest_tracks_r76_runtime_artifacts(repo_root: Path) -> None:
+    manifest_path = repo_root / "tools" / "windows_portable" / "manifest.windows-x64.json"
+    manifest = json.loads(_read_text_or_fail(manifest_path))
+    artifacts = {artifact["id"]: artifact for artifact in manifest["artifacts"]}
+
+    assert manifest["bundle"]["vs_ref"] == "R76"
+    assert manifest["bundle"]["python_version"].startswith("3.13.")
+    assert "3.14" not in manifest["bundle"]["python_version"]
+
+    python = artifacts["python-embed-amd64"]
+    assert python["version"].startswith("3.13.")
+    assert python["url"].endswith(f"python-{python['version']}-embed-amd64.zip")
+
+    vapoursynth = artifacts["vapoursynth-portable-r76"]
+    assert vapoursynth["version"] == "R76"
+    assert vapoursynth["url"].endswith("/R76/VapourSynth64-Portable-R76.zip")
+
+    lsmas = artifacts["vs-plugin-lsmas-1282"]
+    assert lsmas["version"] == "1282.0.0.0"
+    assert lsmas["install"]["destination"] == "vs/extra-plugins/lsmas/libvslsmashsource.dll"
+    assert lsmas["install"]["manifest"] == "libvslsmashsource"
+
+    placebo = artifacts["vs-plugin-vs-placebo-2.0.2-win-amd64-wheel"]
+    assert placebo["version"] == "2.0.2"
+    assert placebo["install"]["type"] == "python_wheel"
+    assert placebo["url"].endswith("-win_amd64.whl")
+
+
+def test_windows_portable_build_uses_r74_plus_plugin_layout(repo_root: Path) -> None:
+    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    build_script = _read_text_or_fail(build_path)
+
+    assert "VAPOURSYNTH_EXTRA_PLUGIN_PATH" in build_script
+    assert "Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue" in build_script
+    assert '$sitePackages = Join-Path $BundleRoot "app\\\\site-packages"' in build_script
+    assert '$vsPackage = Join-Path $sitePackages "vapoursynth"' in build_script
+    assert '$vsPluginDir = Join-Path $vsPackage "plugins"' in build_script
+    assert (
+        '$vsDllPackage = Join-Path $sitePackages "vapoursynth\\\\libvapoursynth.dll"'
+        in build_script
+    )
+    assert "expected R76 package layout" in build_script
+    assert 'Join-Path $sitePackages "vapoursynth.dll"' not in build_script
+    assert 'Join-Path $sitePackages "Lib\\\\site-packages\\\\vapoursynth.dll"' not in build_script
+    assert "manifest.vs" in build_script
+    assert "Install-PythonWheelArtifacts" in build_script
+    assert "Expand-ArchiveFile" in build_script
+    assert "7z extract" in build_script
+    assert "tar extract" in build_script
+    assert "VAPOURSYNTH_PLUGIN_PATH =" not in build_script
+    assert "Consolidate-VapourSynthPlugins" not in build_script
+
+
+def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: Path) -> None:
+    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    build_script = _read_text_or_fail(build_path)
+
+    for expected in (
+        "version_major == 76",
+        "core.lsmas.LWLibavSource",
+        "core.placebo.Tonemap",
+        "apply_tonemap",
+        "get_frame(0)",
+        "import vspreview",
+        "import PyQt6",
+        "WINDOWS_BUNDLE_PROOF",
+        "ffmpeg tiny media generation",
+    ):
+        assert expected in build_script
 
 
 def test_pyproject_defines_vspreview_optional_dependency(repo_root: Path) -> None:
@@ -66,6 +138,23 @@ def test_windows_portable_build_exports_vspreview_extra(repo_root: Path) -> None
     build_script = _read_text_or_fail(build_path)
     assert "--extra vspreview" in build_script
     assert "requirements.lock.txt" in build_script
+
+
+def test_windows_portable_build_installs_manifest_wheels_dependency_closed(
+    repo_root: Path,
+) -> None:
+    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    build_script = _read_text_or_fail(build_path)
+
+    assert 'Get-RequiredStringProperty -Object $artifact -Name "sha256"' in build_script
+    assert "Assert-Sha256 -FilePath $wheelPath -ExpectedHex $sha256" in build_script
+    assert re.search(
+        r"uv pip install --reinstall --strict --no-deps --target \$sitePackages \$wheelPath",
+        build_script,
+    )
+    assert "uv pip install --no-deps --only-binary :all: --target $sitePackages $vsWheel" in (
+        build_script
+    )
 
 
 def test_windows_portable_build_has_release_public_key_gate(repo_root: Path) -> None:

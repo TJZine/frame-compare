@@ -21,10 +21,10 @@ jobs:
           ref: ${{ github.event_name == 'release' && format('refs/tags/{0}', github.event.release.tag_name) || github.ref }}
           persist-credentials: false
 
-      - name: Setup Python 3.13.1
+      - name: Setup Python 3.13.13
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: "3.13.1"
+          python-version: "3.13.13"
 
       - name: Setup uv
         uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
@@ -72,12 +72,24 @@ jobs:
           $bundle = (Resolve-Path "dist/frame-compare-portable-win-x64").Path
           $bundleConfigDir = Join-Path $bundle "config"
           $bundleInputDir = Join-Path $bundle "comparison_videos"
+          $vsPackagePlugins = Join-Path $bundle "app/site-packages/vapoursynth/plugins"
+          $extraPluginRoot = Join-Path $bundle "vs/extra-plugins"
+          $lsmasManifest = Join-Path $extraPluginRoot "lsmas/manifest.vs"
 
           if (!(Test-Path -LiteralPath $bundleConfigDir -PathType Container)) {
             throw "Missing default workspace directory in bundle: $bundleConfigDir"
           }
           if (!(Test-Path -LiteralPath $bundleInputDir -PathType Container)) {
             throw "Missing default workspace directory in bundle: $bundleInputDir"
+          }
+          if (!(Test-Path -LiteralPath $vsPackagePlugins -PathType Container)) {
+            throw "Missing R74+ VapourSynth package plugin directory: $vsPackagePlugins"
+          }
+          if (!(Test-Path -LiteralPath $extraPluginRoot -PathType Container)) {
+            throw "Missing extra VapourSynth plugin directory: $extraPluginRoot"
+          }
+          if (!(Test-Path -LiteralPath $lsmasManifest -PathType Leaf)) {
+            throw "Missing L-SMASH manifest: $lsmasManifest"
           }
 
       - name: "Smoke: doctor --json"
@@ -103,40 +115,40 @@ jobs:
           $bundle = (Resolve-Path "dist/frame-compare-portable-win-x64").Path
           $env:PYTHONUTF8 = "1"
           $env:PYTHONPATH = "$bundle/app/src;$bundle/app/site-packages"
-          $env:VAPOURSYNTH_PLUGIN_PATH = "$bundle/vs/plugins"
-          $vsCore = "$bundle/vs/core"
+          $env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = "$bundle/vs/extra-plugins"
+          Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue
+          $sitePackages = Join-Path $bundle "app/site-packages"
+          $vsPackage = Join-Path $sitePackages "vapoursynth"
+          $vsPluginDir = Join-Path $vsPackage "plugins"
+          $extraPluginRoot = Join-Path $bundle "vs/extra-plugins"
           $ffmpegRoot = "$bundle/ffmpeg"
-          $vsRuntimeCandidates = @()
-          if (Test-Path -LiteralPath $vsCore) {
-            $vsRuntimeCandidates = @(Get-ChildItem -LiteralPath $vsCore -Filter "VSScript.dll" -File -Recurse)
-          }
-          $vsRuntimeDir = $null
-          if ($vsRuntimeCandidates.Count -gt 0) {
-            $vsRuntimeDir = Split-Path -Parent $vsRuntimeCandidates[0].FullName
-            $env:VAPOURSYNTH_HOME = $vsRuntimeDir
-          }
+          $ffmpegBin = Join-Path $ffmpegRoot "bin"
+          $qtBin = Join-Path $bundle "app/site-packages/PyQt6/Qt6/bin"
           $pathEntries = @(
             "$bundle/python",
-            $vsCore,
-            "$bundle/vs/plugins",
+            $vsPackage,
+            $vsPluginDir,
+            $extraPluginRoot,
+            $ffmpegBin,
             $ffmpegRoot
           )
-          if ($null -ne $vsRuntimeDir -and $vsRuntimeDir -ne "") {
-            $pathEntries = @($vsRuntimeDir) + $pathEntries
+          if (Test-Path -LiteralPath $qtBin) {
+            $pathEntries = @($qtBin) + $pathEntries
           }
-          if (Test-Path -LiteralPath $vsCore) {
-            Get-ChildItem -LiteralPath $vsCore -Directory -Recurse | ForEach-Object {
-              $pathEntries += $_.FullName
+          foreach ($runtimeRoot in @($vsPackage, $extraPluginRoot, $ffmpegRoot)) {
+            if (Test-Path -LiteralPath $runtimeRoot) {
+              Get-ChildItem -LiteralPath $runtimeRoot -Directory -Recurse | ForEach-Object {
+                $pathEntries += $_.FullName
+              }
             }
           }
-          if (Test-Path -LiteralPath $ffmpegRoot) {
-            Get-ChildItem -LiteralPath $ffmpegRoot -Directory -Recurse | ForEach-Object {
-              $pathEntries += $_.FullName
-            }
-          }
-          $env:PATH = (($pathEntries -join ";") + ";" + $env:PATH)
+          $env:PATH = (($pathEntries | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique) -join ";") + ";" + $env:PATH
 
-          & "$bundle/python/python.exe" -c "import vapoursynth as vs; from frame_compare.vs.tonemap import apply_tonemap; from frame_compare.vs.types import TonemapSettings; core = vs.core; clip = core.std.BlankClip(width=16, height=16, length=1, format=vs.RGBS); out = apply_tonemap(clip, TonemapSettings(enabled=True)); _ = out.get_frame(0); print('OK')"
+          $media = Join-Path $env:RUNNER_TEMP "frame-compare-vs-smoke.mp4"
+          & "$bundle/ffmpeg/bin/ffmpeg.exe" -hide_banner -loglevel error -f lavfi -i "testsrc2=size=32x32:rate=1:duration=1" -frames:v 1 -pix_fmt yuv420p -y $media
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          & "$bundle/python/python.exe" -c "import os, sys, vapoursynth as vs; import vspreview, PyQt6; from pathlib import Path; from frame_compare.vs.env import try_load_lsmas_plugin; from frame_compare.vs.tonemap import apply_tonemap; from frame_compare.vs.types import TonemapSettings; media = Path(sys.argv[1]); core = vs.core; version = getattr(vs, '__version__', None); assert getattr(version, 'release_major', None) == 76, version; assert os.environ.get('VAPOURSYNTH_EXTRA_PLUGIN_PATH'); assert 'VAPOURSYNTH_PLUGIN_PATH' not in os.environ; assert Path(vs.get_plugin_dir()).is_dir(); try_load_lsmas_plugin(core); assert hasattr(core, 'lsmas') and hasattr(core.lsmas, 'LWLibavSource'); src = core.lsmas.LWLibavSource(str(media)); assert src.get_frame(0).width == 32; assert hasattr(core, 'placebo') and hasattr(core.placebo, 'Tonemap'); clip = core.std.BlankClip(width=16, height=16, length=1, format=vs.RGB48, color=[32768,32768,32768]).std.SetFrameProps(_Matrix=0, _Range=0, _Transfer=16, _Primaries=9); direct = core.placebo.Tonemap(clip, src_max=1000, dst_max=203, tone_mapping_function=2, dst_csp=0, dst_prim=1, src_csp=1); assert direct.get_frame(0).width == 16; out = apply_tonemap(clip, TonemapSettings(enabled=True)); assert out.get_frame(0).width == 16; print('WINDOWS_WORKFLOW_PROOF vapoursynth=R76 lsmas=ok placebo=ok apply_tonemap=ok vspreview_pyqt6=ok')" $media
 
       - name: Package zip
         shell: pwsh

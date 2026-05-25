@@ -71,6 +71,24 @@ def test_windows_portable_workflow_verifies_workspace_directories(repo_root: Pat
     assert 'throw "Missing default workspace directory in bundle:' in workflow
 
 
+def test_windows_portable_workflow_proves_r76_plugin_layout_and_runtime(repo_root: Path) -> None:
+    workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
+    workflow = _read_text_or_fail(workflow_path)
+
+    assert "Setup Python 3.13.13" in workflow
+    assert "app/site-packages/vapoursynth/plugins" in workflow
+    assert "vs/extra-plugins" in workflow
+    assert "lsmas/manifest.vs" in workflow
+    assert "VAPOURSYNTH_EXTRA_PLUGIN_PATH" in workflow
+    assert "Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH" in workflow
+    assert "getattr(version, 'release_major', None) == 76" in workflow
+    assert "core.lsmas.LWLibavSource" in workflow
+    assert "core.placebo.Tonemap" in workflow
+    assert "apply_tonemap" in workflow
+    assert "vspreview, PyQt6" in workflow
+    assert "WINDOWS_WORKFLOW_PROOF vapoursynth=R76" in workflow
+
+
 def test_windows_portable_workflow_validates_update_public_key_on_release(repo_root: Path) -> None:
     workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
     workflow = _read_text_or_fail(workflow_path)

@@ -1,46 +1,39 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 0: Pinned Python dependency tooling
 # ─────────────────────────────────────────────────────────────────────────────
-FROM ghcr.io/astral-sh/uv:0.8.22 AS uv
+FROM ghcr.io/astral-sh/uv:0.11.16 AS uv
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 1: Build VapourSynth + plugins
+# Stage 1: Build supplemental VapourSynth plugins
 # ─────────────────────────────────────────────────────────────────────────────
-FROM python:3.13.1-slim-bookworm AS builder
+FROM python:3.13.13-slim-trixie AS builder
 
 # Deterministic version pins (change these to update components)
-ARG VAPOURSYNTH_REF=R73
-ARG ZIMG_REF=release-3.0.5
-ARG ZIMG_SHA256=a9a0226bf85e0d83c41a8ebe4e3e690e1348682f6a2a7838f1b8cbff1b799bcf
+ARG VAPOURSYNTH_VERSION=76
+ARG VAPOURSYNTH_REF=R76
+ARG VAPOURSYNTH_X86_64_WHEEL_SHA256=94986f4399b3ea8ab775abfbf5986dc58b93829fbf3db2a37e3b9e6454baf898
+ARG VAPOURSYNTH_AARCH64_WHEEL_SHA256=c516b04c9fde70b7075266a067b611f9d8409a20a5380ae425c21e1bada10997
 ARG LSMASH_REF=v2.14.5
 ARG LSMASH_SHA256=e6f7c31de684f4b89ee27e5cd6262bf96f2a5b117ba938d2d606cf6220f05935
-ARG LSMASH_WORKS_REF=20230716
-ARG LIBPLACEBO_REF=v7.349.0
-ARG VS_PLACEBO_REF=14083805df08cd478539c15464a7183da2c0032e
-ARG FFMS2_REF=45673149e9a2f5586855ad472e3059084eaa36b1
+ARG LSMASH_WORKS_REF=1282
+ARG FFMS2_REF=5.0
 
-# Complete build dependencies for Debian Bookworm (do NOT modify without plan revision)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     autoconf \
     automake \
     build-essential \
     ca-certificates \
-    cmake \
     curl \
     git \
-    glslang-tools \
-    liblzma-dev \
     libtool \
-    libvulkan-dev \
+    liblzma-dev \
     libxxhash-dev \
     meson \
     nasm \
     ninja-build \
     pkg-config \
     python3-dev \
-    python3-jinja2 \
     zlib1g-dev \
-    # FFmpeg development libraries (Bookworm versions)
     libavcodec-dev \
     libavformat-dev \
     libavutil-dev \
@@ -48,36 +41,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libswresample-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Ensure Python tooling for native builds (Cython for VapourSynth bindings).
-RUN python -m pip install --no-cache-dir "cython>=3.0,<4"
+RUN printf '%s\n' \
+        "vapoursynth==${VAPOURSYNTH_VERSION} --hash=sha256:${VAPOURSYNTH_X86_64_WHEEL_SHA256} --hash=sha256:${VAPOURSYNTH_AARCH64_WHEEL_SHA256}" \
+        > /tmp/vapoursynth-wheel-requirements.txt && \
+    python -m pip install --no-cache-dir --require-hashes --only-binary=:all: \
+        -r /tmp/vapoursynth-wheel-requirements.txt && \
+    vs_include_dir="$(python -c 'import vapoursynth; print(vapoursynth.get_include())')" && \
+    git clone --depth 1 --branch "${VAPOURSYNTH_REF}" \
+        https://github.com/vapoursynth/vapoursynth.git /tmp/vapoursynth-src && \
+    cp /tmp/vapoursynth-src/include/VapourSynth.h "${vs_include_dir}/" && \
+    cp /tmp/vapoursynth-src/include/VSHelper.h "${vs_include_dir}/" && \
+    rm -rf /tmp/vapoursynth-src
+
+ENV PKG_CONFIG_PATH=/usr/local/lib/python3.13/site-packages/vapoursynth/pkgconfig
+ENV LD_LIBRARY_PATH=/usr/local/lib/python3.13/site-packages/vapoursynth
 
 WORKDIR /build
 
-# Build zimg (pinned tag + checksum)
-RUN curl -fsSL "https://github.com/sekrit-twc/zimg/archive/refs/tags/${ZIMG_REF}.tar.gz" \
-        -o zimg.tar.gz && \
-    echo "${ZIMG_SHA256}  zimg.tar.gz" | sha256sum -c - && \
-    tar -xzf zimg.tar.gz && \
-    cd "zimg-${ZIMG_REF}" && \
-    ./autogen.sh && \
-    ./configure --prefix=/usr/local && \
-    make -j"$(nproc)" && \
-    make install && \
-    ldconfig && \
-    cd /build && \
-    rm -rf "zimg-${ZIMG_REF}" zimg.tar.gz
-
-# Build VapourSynth (pinned to R73 tag)
-RUN git clone --depth 1 --branch "${VAPOURSYNTH_REF}" \
-    https://github.com/vapoursynth/vapoursynth.git && \
-    cd vapoursynth && \
-    ./autogen.sh && \
-    ./configure --prefix=/usr/local && \
-    make -j"$(nproc)" && \
-    make install && \
-    ldconfig
-
-# Build L-SMASH (pinned tag)
+# Build L-SMASH (latest upstream tag)
 RUN LSMASH_DIR="l-smash-${LSMASH_REF#v}" && \
     curl -fsSL "https://github.com/l-smash/l-smash/archive/refs/tags/${LSMASH_REF}.tar.gz" \
         -o l-smash.tar.gz && \
@@ -91,63 +72,46 @@ RUN LSMASH_DIR="l-smash-${LSMASH_REF#v}" && \
     cd /build && \
     rm -rf "${LSMASH_DIR}" l-smash.tar.gz
 
-# Build L-SMASH-Works (pinned tag)
+# Build L-SMASH-Works against the R76 wheel headers/pkg-config metadata.
 RUN git clone --depth 1 --branch "${LSMASH_WORKS_REF}" \
     https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works.git && \
-    cd L-SMASH-Works && \
-    perl -0777 -i -pe 's/#include <emmintrin.h>/#if defined(__SSE2__) || defined(__x86_64__) || defined(__i386__)\n#include <emmintrin.h>\n#endif/' VapourSynth/video_output.c && \
-    perl -0777 -i -pe 's/(static inline __m128i _MM_PACKUS_EPI32[\s\S]*?\n}\n)/#if defined(__SSE2__) || defined(__x86_64__) || defined(__i386__)\n$1#endif\n/' VapourSynth/video_output.c && \
-    perl -0777 -i -pe 's/(\n\s*if\( vshp->input_pixel_format == AV_PIX_FMT_P010LE[\s\S]*?\n\s*else\n)(\s*sws_scale\([^;]+\);)/\n#if defined(__SSE2__) || defined(__x86_64__) || defined(__i386__)$1$2\n#else\n$2\n#endif/s' VapourSynth/video_output.c && \
-    cd VapourSynth && \
+    cd L-SMASH-Works/VapourSynth && \
+    perl -0pi -e "s/  install: true,\\n  install_dir: join_paths\\(vapoursynth_dep\\.get_pkgconfig_variable\\('libdir'\\), 'vapoursynth'\\),\\n/  install: false,\\n/" meson.build && \
     meson setup build && \
     ninja -C build && \
-    mkdir -p /usr/local/lib/vapoursynth && \
-    cp build/libvslsmashsource.so /usr/local/lib/vapoursynth/
+    mkdir -p /opt/vapoursynth-extra-plugins/lsmas && \
+    cp build/libvslsmashsource.so /opt/vapoursynth-extra-plugins/lsmas/ && \
+    printf '[VapourSynth Manifest V1]\nlibvslsmashsource\n' \
+        > /opt/vapoursynth-extra-plugins/lsmas/manifest.vs
 
-# Build libplacebo (headless, software rasterization; pinned to tag)
-RUN git clone --depth 1 --branch "${LIBPLACEBO_REF}" \
-    https://github.com/haasn/libplacebo.git && \
-    cd libplacebo && \
-    meson setup build \
-        -Dvulkan=enabled \
-        -Dopengl=disabled \
-        -Dshaderc=disabled \
-        -Ddemos=false && \
-    ninja -C build && \
-    ninja -C build install && \
-    ldconfig
-
-# Build vs-placebo plugin (pinned to commit SHA)
-# Initialize submodules after checkout so libp2p matches the pinned tree.
-RUN git clone https://github.com/Lypheo/vs-placebo.git && \
-    cd vs-placebo && \
-    git checkout "${VS_PLACEBO_REF}" && \
-    git submodule sync --recursive && \
-    git submodule update --init --recursive --depth 1 && \
-    meson setup build && \
-    ninja -C build && \
-    cp build/libvs_placebo.so /usr/local/lib/vapoursynth/
-
-# Build ffms2 (pinned to commit SHA for FFmpeg 5 compatibility)
-RUN git clone https://github.com/FFMS/ffms2.git && \
+# Build ffms2 5.0 against the distro FFmpeg development libraries.
+RUN git clone --depth 1 --branch "${FFMS2_REF}" https://github.com/FFMS/ffms2.git && \
     cd ffms2 && \
-    git checkout "${FFMS2_REF}" && \
     ./autogen.sh && \
     ./configure --prefix=/usr/local && \
     make -j"$(nproc)" && \
     make install && \
     ldconfig && \
-    cp src/core/.libs/libffms2.so /usr/local/lib/vapoursynth/
+    mkdir -p /opt/vapoursynth-extra-plugins/ffms2 && \
+    cp src/core/.libs/libffms2.so /opt/vapoursynth-extra-plugins/ffms2/ && \
+    printf '[VapourSynth Manifest V1]\nlibffms2\n' \
+        > /opt/vapoursynth-extra-plugins/ffms2/manifest.vs
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2: Runtime
 # ─────────────────────────────────────────────────────────────────────────────
-FROM python:3.13.1-slim-bookworm AS runtime
+FROM python:3.13.13-slim-trixie AS runtime
+
+ARG VAPOURSYNTH_VERSION=76
+ARG VS_PLACEBO_VERSION=2.0.2
+ARG VAPOURSYNTH_X86_64_WHEEL_SHA256=94986f4399b3ea8ab775abfbf5986dc58b93829fbf3db2a37e3b9e6454baf898
+ARG VAPOURSYNTH_AARCH64_WHEEL_SHA256=c516b04c9fde70b7075266a067b611f9d8409a20a5380ae425c21e1bada10997
+ARG VS_PLACEBO_X86_64_WHEEL_SHA256=cb44a42df2c7e78d614b4b0415e9b4d3c40659f9d57ac18d65076101f364fa8e
+ARG VS_PLACEBO_AARCH64_WHEEL_SHA256=25a94cde45bea9f2e2503040772a34a1355520a14b339a77009b233cf9457c2d
 
 COPY --from=uv /uv /uvx /usr/local/bin/
 
-# Runtime dependencies for Debian Bookworm (do NOT add build tools here)
-# Use ffmpeg meta-package for AV libs to avoid version-specific package names
+# Runtime dependencies for Debian Trixie (do NOT add build tools here)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -161,29 +125,14 @@ RUN apt-get update && \
         && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy VapourSynth from builder
-COPY --from=builder /usr/local/lib/libvapoursynth*.so* /usr/local/lib/
-COPY --from=builder /usr/local/lib/vapoursynth/ /usr/local/lib/vapoursynth/
-COPY --from=builder /usr/local/lib/python3.13/site-packages/vapoursynth* /usr/local/lib/python3.13/site-packages/
-COPY --from=builder /usr/local/include/vapoursynth/ /usr/local/include/vapoursynth/
-
-# Copy zimg from builder
-COPY --from=builder /usr/local/lib/libzimg*.so* /usr/local/lib/
-
-# Copy L-SMASH from builder
 COPY --from=builder /usr/local/lib/liblsmash*.so* /usr/local/lib/
-
-# Copy libplacebo from builder (Debian multiarch install path)
-COPY --from=builder /usr/local/lib/*-linux-gnu/libplacebo*.so* /usr/local/lib/
-
-# Copy ffms2 libraries (VS plugin auto-loaded from vapoursynth/)
 COPY --from=builder /usr/local/lib/libffms2*.so* /usr/local/lib/
+COPY --from=builder /opt/vapoursynth-extra-plugins/ /opt/vapoursynth-extra-plugins/
 
-# Update library cache
 RUN ldconfig
 
-# Set VapourSynth plugin path
-ENV VAPOURSYNTH_PLUGIN_PATH=/usr/local/lib/vapoursynth
+ENV VAPOURSYNTH_EXTRA_PLUGIN_PATH=/opt/vapoursynth-extra-plugins
+ENV LIBGL_ALWAYS_SOFTWARE=1
 
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash framecompare
@@ -194,7 +143,13 @@ WORKDIR /home/framecompare
 COPY --chown=framecompare:framecompare pyproject.toml uv.lock /home/framecompare/frame-compare/
 WORKDIR /home/framecompare/frame-compare
 RUN uv export --frozen --no-dev --no-emit-project --format requirements.txt --output-file /tmp/requirements.lock.txt && \
-    python -m pip install --no-cache-dir --user --require-hashes -r /tmp/requirements.lock.txt
+    python -m pip install --no-cache-dir --user --require-hashes -r /tmp/requirements.lock.txt && \
+    printf '%s\n' \
+        "vapoursynth==${VAPOURSYNTH_VERSION} --hash=sha256:${VAPOURSYNTH_X86_64_WHEEL_SHA256} --hash=sha256:${VAPOURSYNTH_AARCH64_WHEEL_SHA256}" \
+        "vs-placebo==${VS_PLACEBO_VERSION} --hash=sha256:${VS_PLACEBO_X86_64_WHEEL_SHA256} --hash=sha256:${VS_PLACEBO_AARCH64_WHEEL_SHA256}" \
+        > /tmp/docker-plugin-requirements.txt && \
+    python -m pip install --no-cache-dir --user --no-deps --require-hashes --only-binary=:all: \
+        -r /tmp/docker-plugin-requirements.txt
 
 # Copy application source
 COPY --chown=framecompare:framecompare . /home/framecompare/frame-compare/

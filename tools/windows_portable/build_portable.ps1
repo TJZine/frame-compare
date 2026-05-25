@@ -117,12 +117,32 @@ function Download-Artifact([pscustomobject]$Artifact) {
   return $dest
 }
 
-function Expand-Zip([string]$ZipPath, [string]$Destination) {
+function Expand-ArchiveFile([string]$ArchivePath, [string]$Destination) {
   if (Test-Path -LiteralPath $Destination) {
     Remove-Item -Recurse -Force -LiteralPath $Destination
   }
   Ensure-Directory -Path $Destination
-  Expand-Archive -LiteralPath $ZipPath -DestinationPath $Destination -Force
+
+  $extension = [System.IO.Path]::GetExtension($ArchivePath).ToLowerInvariant()
+  if ($extension -eq ".zip" -or $extension -eq ".whl") {
+    Expand-Archive -LiteralPath $ArchivePath -DestinationPath $Destination -Force
+    return
+  }
+  if ($extension -eq ".7z") {
+    if (Get-Command 7z -ErrorAction SilentlyContinue) {
+      7z x -y "-o$Destination" $ArchivePath | Out-Null
+      Assert-LastExitCode -CommandLabel "7z extract $ArchivePath"
+      return
+    }
+    if (Get-Command tar -ErrorAction SilentlyContinue) {
+      tar -xf $ArchivePath -C $Destination
+      Assert-LastExitCode -CommandLabel "tar extract $ArchivePath"
+      return
+    }
+    throw "7z or tar is required on PATH to extract .7z artifact: $ArchivePath"
+  }
+
+  throw "Unsupported archive extension '$extension' for $ArchivePath"
 }
 
 function Install-Artifact([string]$BundleRoot, [pscustomobject]$Artifact, [string]$DownloadedPath) {
@@ -130,6 +150,11 @@ function Install-Artifact([string]$BundleRoot, [pscustomobject]$Artifact, [strin
   $install = Get-RequiredProperty -Object $Artifact -Name "install" -Context "artifact '$artifactId'"
 
   $type = Get-RequiredStringProperty -Object $install -Name "type" -Context "artifact '$artifactId' install"
+
+  if ($type -eq "python_wheel") {
+    return
+  }
+
   $destRel = Get-RequiredStringProperty -Object $install -Name "destination" -Context "artifact '$artifactId' install"
   $dest = Join-Path $BundleRoot $destRel
 
@@ -137,7 +162,7 @@ function Install-Artifact([string]$BundleRoot, [pscustomobject]$Artifact, [strin
     $stripPrefix = Get-OptionalStringProperty -Object $install -Name "strip_prefix"
     if ($stripPrefix -ne "") {
       $tmp = Join-Path $CacheDir ("tmp_extract_" + $artifactId)
-      Expand-Zip -ZipPath $DownloadedPath -Destination $tmp
+      Expand-ArchiveFile -ArchivePath $DownloadedPath -Destination $tmp
       $stripPrefixNorm = ($stripPrefix -replace "/", "\\").TrimEnd("\\")
       $prefixPath = Join-Path $tmp $stripPrefixNorm
       if (!(Test-Path -LiteralPath $prefixPath)) {
@@ -149,7 +174,7 @@ function Install-Artifact([string]$BundleRoot, [pscustomobject]$Artifact, [strin
       }
       Remove-Item -Recurse -Force -LiteralPath $tmp
     } else {
-      Expand-Zip -ZipPath $DownloadedPath -Destination $dest
+      Expand-ArchiveFile -ArchivePath $DownloadedPath -Destination $dest
     }
     return
   }
@@ -157,7 +182,7 @@ function Install-Artifact([string]$BundleRoot, [pscustomobject]$Artifact, [strin
   if ($type -eq "copy_file") {
     $sourcePath = Get-RequiredStringProperty -Object $install -Name "source_path" -Context "artifact '$artifactId' install"
     $tmp = Join-Path $CacheDir ("tmp_extract_" + $artifactId)
-    Expand-Zip -ZipPath $DownloadedPath -Destination $tmp
+    Expand-ArchiveFile -ArchivePath $DownloadedPath -Destination $tmp
     $sourcePathNorm = ($sourcePath -replace "/", "\\").TrimStart("\\")
     $src = Join-Path $tmp $sourcePathNorm
     if (!(Test-Path -LiteralPath $src)) {
@@ -165,6 +190,12 @@ function Install-Artifact([string]$BundleRoot, [pscustomobject]$Artifact, [strin
     }
     Ensure-Directory -Path (Split-Path -Parent $dest)
     Copy-Item -Force -LiteralPath $src -Destination $dest
+    $manifestEntry = Get-OptionalStringProperty -Object $install -Name "manifest"
+    if ($manifestEntry -ne "") {
+      $manifestPath = Join-Path (Split-Path -Parent $dest) "manifest.vs"
+      $manifestContent = "[VapourSynth Manifest V1]`r`n$manifestEntry`r`n"
+      Set-Content -LiteralPath $manifestPath -Value $manifestContent -Encoding ASCII
+    }
     Remove-Item -Recurse -Force -LiteralPath $tmp
     return
   }
@@ -191,43 +222,42 @@ if (!(Test-Path -LiteralPath $python)) {
 
 $env:PYTHONUTF8 = "1"
 $env:PYTHONPATH = "$bundleRoot\\app\\src;$bundleRoot\\app\\site-packages"
-$env:VAPOURSYNTH_CONF_PATH = "$bundleRoot\\vs\\core\\portable.vs"
-$env:VAPOURSYNTH_PLUGIN_PATH = "$bundleRoot\\vs\\plugins"
-$vsCore = Join-Path $bundleRoot "vs\\core"
+$env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = "$bundleRoot\\vs\\extra-plugins"
+Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue
+$sitePackages = Join-Path $bundleRoot "app\\site-packages"
+$vsPackage = Join-Path $sitePackages "vapoursynth"
+$vsPluginDir = Join-Path $vsPackage "plugins"
+$extraPluginRoot = Join-Path $bundleRoot "vs\\extra-plugins"
 $ffmpegRoot = Join-Path $bundleRoot "ffmpeg"
+$ffmpegBin = Join-Path $ffmpegRoot "bin"
 $qtBin = Join-Path $bundleRoot "app\\site-packages\\PyQt6\\Qt6\\bin"
-$vsRuntimeCandidates = @()
-if (Test-Path -LiteralPath $vsCore) {
-  $vsRuntimeCandidates = @(Get-ChildItem -LiteralPath $vsCore -Filter "VSScript.dll" -File -Recurse)
-}
-$vsRuntimeDir = $null
-if ($vsRuntimeCandidates.Count -gt 0) {
-  $vsRuntimeDir = Split-Path -Parent $vsRuntimeCandidates[0].FullName
-  $env:VAPOURSYNTH_HOME = $vsRuntimeDir
-}
 $pathEntries = @(
   (Join-Path $bundleRoot "python"),
-  $vsCore,
-  (Join-Path $bundleRoot "vs\\plugins"),
+  $vsPackage,
+  $vsPluginDir,
+  $extraPluginRoot,
+  $ffmpegBin,
   $ffmpegRoot
 )
 if (Test-Path -LiteralPath $qtBin) {
   $pathEntries = @($qtBin) + $pathEntries
 }
-if ($null -ne $vsRuntimeDir -and $vsRuntimeDir -ne "") {
-  $pathEntries = @($vsRuntimeDir) + $pathEntries
-}
-if (Test-Path -LiteralPath $vsCore) {
-  Get-ChildItem -LiteralPath $vsCore -Directory -Recurse | ForEach-Object {
-    $pathEntries += $_.FullName
+foreach ($runtimeRoot in @($vsPackage, $extraPluginRoot, $ffmpegRoot)) {
+  if (Test-Path -LiteralPath $runtimeRoot) {
+    Get-ChildItem -LiteralPath $runtimeRoot -Directory -Recurse | ForEach-Object {
+      $pathEntries += $_.FullName
+    }
   }
 }
-if (Test-Path -LiteralPath $ffmpegRoot) {
-  Get-ChildItem -LiteralPath $ffmpegRoot -Directory -Recurse | ForEach-Object {
-    $pathEntries += $_.FullName
+if (Test-Path -LiteralPath $sitePackages) {
+  Get-ChildItem -LiteralPath $sitePackages -Filter "*.dll" -File -Recurse | ForEach-Object {
+    $runtimeDir = Split-Path -Parent $_.FullName
+    if ($pathEntries -notcontains $runtimeDir) {
+      $pathEntries += $runtimeDir
+    }
   }
 }
-$env:PATH = (($pathEntries -join ";") + ";" + $env:PATH)
+$env:PATH = (($pathEntries | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique) -join ";") + ";" + $env:PATH
 
 $exitCode = 0
 Push-Location $bundleRoot
@@ -394,19 +424,80 @@ function Install-PythonDeps([string]$BundleRoot, [string]$VsCoreRoot) {
     throw "Expected exactly one VapourSynth wheel in $wheelDir, found $($vsWheelCandidates.Count)"
   }
   $vsWheel = $vsWheelCandidates[0].FullName
-  uv pip install --only-binary :all: --target $sitePackages $vsWheel
+  uv pip install --no-deps --only-binary :all: --target $sitePackages $vsWheel
   Assert-LastExitCode -CommandLabel "uv pip install vapoursynth wheel"
 
-  # Some wheel layouts place vapoursynth.dll under Lib/site-packages; normalize it
-  # beside vapoursynth.pyd so default Windows DLL lookup resolves it reliably.
-  $vsDllRoot = Join-Path $sitePackages "vapoursynth.dll"
-  $vsDllNested = Join-Path $sitePackages "Lib\\site-packages\\vapoursynth.dll"
-  if ((Test-Path -LiteralPath $vsDllNested) -and !(Test-Path -LiteralPath $vsDllRoot)) {
-    Copy-Item -Force -LiteralPath $vsDllNested -Destination $vsDllRoot
+  # R76 wheels carry the runtime DLL inside the vapoursynth package directory.
+  # The launcher and validation PATH include this directory for Windows DLL lookup.
+  $vsDllPackage = Join-Path $sitePackages "vapoursynth\\libvapoursynth.dll"
+  if (!(Test-Path -LiteralPath $vsDllPackage)) {
+    throw "libvapoursynth.dll not found after wheel install in expected R76 package layout: $vsDllPackage"
   }
-  if (!(Test-Path -LiteralPath $vsDllRoot) -and !(Test-Path -LiteralPath $vsDllNested)) {
-    throw "vapoursynth.dll not found after wheel install in $sitePackages"
+}
+
+function Install-PythonWheelArtifacts([string]$BundleRoot, [pscustomobject[]]$Artifacts, [hashtable]$Downloaded) {
+  $sitePackages = Join-Path $BundleRoot "app\\site-packages"
+
+  foreach ($artifact in $Artifacts) {
+    $artifactId = Get-RequiredStringProperty -Object $artifact -Name "id" -Context "artifact"
+    $install = Get-RequiredProperty -Object $artifact -Name "install" -Context "artifact '$artifactId'"
+    $type = Get-RequiredStringProperty -Object $install -Name "type" -Context "artifact '$artifactId' install"
+    if ($type -ne "python_wheel") {
+      continue
+    }
+    $wheelPath = [string]$Downloaded[$artifactId]
+    if (!(Test-Path -LiteralPath $wheelPath)) {
+      throw "Python wheel artifact was not downloaded: $artifactId"
+    }
+    $sha256 = Get-RequiredStringProperty -Object $artifact -Name "sha256" -Context "artifact '$artifactId'"
+    Assert-Sha256 -FilePath $wheelPath -ExpectedHex $sha256
+    uv pip install --reinstall --strict --no-deps --target $sitePackages $wheelPath
+    Assert-LastExitCode -CommandLabel "uv pip install $artifactId"
   }
+}
+
+function Set-BundleRuntimeEnvironment([string]$BundleRoot) {
+  $env:PYTHONUTF8 = "1"
+  $env:PYTHONPATH = "$BundleRoot\\app\\src;$BundleRoot\\app\\site-packages"
+  $env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = "$BundleRoot\\vs\\extra-plugins"
+  Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue
+
+  $sitePackages = Join-Path $BundleRoot "app\\site-packages"
+  $vsPackage = Join-Path $sitePackages "vapoursynth"
+  $vsPluginDir = Join-Path $vsPackage "plugins"
+  $extraPluginRoot = Join-Path $BundleRoot "vs\\extra-plugins"
+  $ffmpegRoot = Join-Path $BundleRoot "ffmpeg"
+  $ffmpegBin = Join-Path $ffmpegRoot "bin"
+  $qtBin = Join-Path $BundleRoot "app\\site-packages\\PyQt6\\Qt6\\bin"
+
+  $pathEntries = @(
+    (Join-Path $BundleRoot "python"),
+    $vsPackage,
+    $vsPluginDir,
+    $extraPluginRoot,
+    $ffmpegBin,
+    $ffmpegRoot
+  )
+  if (Test-Path -LiteralPath $qtBin) {
+    $pathEntries = @($qtBin) + $pathEntries
+  }
+  foreach ($runtimeRoot in @($vsPackage, $extraPluginRoot, $ffmpegRoot)) {
+    if (Test-Path -LiteralPath $runtimeRoot) {
+      Get-ChildItem -LiteralPath $runtimeRoot -Directory -Recurse | ForEach-Object {
+        $pathEntries += $_.FullName
+      }
+    }
+  }
+  if (Test-Path -LiteralPath $sitePackages) {
+    Get-ChildItem -LiteralPath $sitePackages -Filter "*.dll" -File -Recurse | ForEach-Object {
+      $runtimeDir = Split-Path -Parent $_.FullName
+      if ($pathEntries -notcontains $runtimeDir) {
+        $pathEntries += $runtimeDir
+      }
+    }
+  }
+  $existingEntries = $pathEntries | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
+  $env:PATH = (($existingEntries -join ";") + ";" + $env:PATH)
 }
 
 function Write-BundleInfo([string]$BundleRoot, [string]$AppVersion) {
@@ -436,23 +527,109 @@ function Assert-BundleRuntime([string]$BundleRoot) {
     throw "Embedded python not found for runtime validation: $python"
   }
 
-  $env:PYTHONUTF8 = "1"
-  $env:PYTHONPATH = "$BundleRoot\\app\\src;$BundleRoot\\app\\site-packages"
-  $env:VAPOURSYNTH_PLUGIN_PATH = "$BundleRoot\\vs\\plugins"
-  $pathEntries = @(
-    "$BundleRoot\\python",
-    "$BundleRoot\\vs\\core",
-    "$BundleRoot\\vs\\plugins",
-    "$BundleRoot\\ffmpeg"
-  )
-  $qtBin = Join-Path $BundleRoot "app\\site-packages\\PyQt6\\Qt6\\bin"
-  if (Test-Path -LiteralPath $qtBin) {
-    $pathEntries = @($qtBin) + $pathEntries
-  }
-  $env:PATH = (($pathEntries -join ";") + ";" + $env:PATH)
+  Set-BundleRuntimeEnvironment -BundleRoot $BundleRoot
 
-  & $python -c "import tomli_w; import typer; import rich; import vspreview; import PyQt6; import frame_compare"
-  Assert-LastExitCode -CommandLabel "bundle runtime import validation"
+  $ffmpeg = Join-Path $BundleRoot "ffmpeg\\bin\\ffmpeg.exe"
+  $mediaPath = Join-Path $BundleRoot "runtime-smoke.mp4"
+  if (Test-Path -LiteralPath $ffmpeg) {
+    & $ffmpeg -hide_banner -loglevel error -f lavfi -i "testsrc2=size=32x32:rate=1:duration=1" -frames:v 1 -pix_fmt yuv420p -y $mediaPath
+    Assert-LastExitCode -CommandLabel "ffmpeg tiny media generation"
+  }
+
+  $smokePath = Join-Path $BundleRoot "runtime-smoke.py"
+  $smokeScript = @'
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+import PyQt6  # noqa: F401
+import rich  # noqa: F401
+import tomli_w  # noqa: F401
+import typer  # noqa: F401
+import vapoursynth as vs
+import vspreview  # noqa: F401
+
+import frame_compare  # noqa: F401
+from frame_compare.vs.env import candidate_lsmas_plugin_path_details, try_load_lsmas_plugin
+from frame_compare.vs.tonemap import apply_tonemap
+from frame_compare.vs.types import TonemapSettings
+
+
+def assert_true(condition: object, message: str) -> None:
+    if not condition:
+        raise AssertionError(message)
+
+
+media_path = Path(sys.argv[1])
+core = vs.core
+version = getattr(vs, "__version__", None)
+version_major = getattr(version, "release_major", None)
+version_minor = getattr(version, "release_minor", None)
+plugin_dir = Path(vs.get_plugin_dir())
+extra_plugin_path = os.environ.get("VAPOURSYNTH_EXTRA_PLUGIN_PATH", "")
+plugins = list(core.plugins())
+plugin_namespaces = sorted(plugin.namespace for plugin in plugins)
+
+assert_true(version_major == 76 and version_minor == 0, f"expected VapourSynth R76, got {version!r}")
+assert_true(plugin_dir.is_dir(), f"vapoursynth.get_plugin_dir() is not a directory: {plugin_dir}")
+assert_true("vapoursynth" in str(plugin_dir).replace("\\", "/"), f"unexpected plugin dir: {plugin_dir}")
+assert_true(extra_plugin_path, "VAPOURSYNTH_EXTRA_PLUGIN_PATH is not set")
+assert_true("VAPOURSYNTH_PLUGIN_PATH" not in os.environ, "legacy VAPOURSYNTH_PLUGIN_PATH should not be set")
+assert_true(plugin_namespaces, "core.plugins() returned no plugins")
+
+lsmas_loaded_path = None
+if not (hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource")):
+    lsmas_loaded_path = try_load_lsmas_plugin(core)
+
+assert_true(hasattr(core, "lsmas"), "core.lsmas namespace missing")
+assert_true(hasattr(core.lsmas, "LWLibavSource"), "core.lsmas.LWLibavSource missing")
+assert_true(hasattr(core, "placebo"), "core.placebo namespace missing")
+assert_true(hasattr(core.placebo, "Tonemap"), "core.placebo.Tonemap missing")
+
+if media_path.is_file():
+    clip = core.lsmas.LWLibavSource(str(media_path))
+    frame = clip.get_frame(0)
+    assert_true(frame.width == 32 and frame.height == 32, "LWLibavSource frame render failed")
+else:
+    candidates = [{"source": candidate.source, "path": candidate.path} for candidate in candidate_lsmas_plugin_path_details()]
+    raise AssertionError(f"tiny media proof missing: {media_path}; candidates={candidates}")
+
+tonemap_clip = core.std.BlankClip(width=16, height=16, format=vs.RGB48, length=1, color=[32768, 32768, 32768])
+tonemap_clip = tonemap_clip.std.SetFrameProps(_Matrix=0, _Range=0, _Transfer=16, _Primaries=9)
+direct_out = core.placebo.Tonemap(
+    tonemap_clip,
+    src_max=1000,
+    dst_max=203,
+    tone_mapping_function=2,
+    dst_csp=0,
+    dst_prim=1,
+    src_csp=1,
+)
+direct_frame = direct_out.get_frame(0)
+assert_true(direct_frame.width == 16 and direct_frame.height == 16, "placebo direct frame render failed")
+
+app_out = apply_tonemap(tonemap_clip, TonemapSettings(enabled=True))
+app_frame = app_out.get_frame(0)
+assert_true(app_frame.width == 16 and app_frame.height == 16, "apply_tonemap frame render failed")
+
+print(f"WINDOWS_BUNDLE_PROOF vapoursynth_import=ok version=R{version_major}")
+print(f"WINDOWS_BUNDLE_PROOF plugin_dir={plugin_dir}")
+print(f"WINDOWS_BUNDLE_PROOF extra_plugin_path={extra_plugin_path}")
+print(f"WINDOWS_BUNDLE_PROOF core_plugins={','.join(plugin_namespaces)}")
+print(f"WINDOWS_BUNDLE_PROOF lwlibavsource=ok namespace=lsmas loaded_path={lsmas_loaded_path}")
+print("WINDOWS_BUNDLE_PROOF placebo_tonemap=ok frames=direct,apply_tonemap")
+print("WINDOWS_BUNDLE_PROOF vspreview_pyqt6=ok")
+'@
+  Set-Content -LiteralPath $smokePath -Value $smokeScript -Encoding UTF8
+  try {
+    & $python $smokePath $mediaPath
+    Assert-LastExitCode -CommandLabel "bundle VapourSynth runtime validation"
+  } finally {
+    Remove-Item -Force -LiteralPath $smokePath -ErrorAction SilentlyContinue
+    Remove-Item -Force -LiteralPath $mediaPath -ErrorAction SilentlyContinue
+  }
 }
 
 function Copy-PythonDistLicenses([string]$SitePackages, [string]$LicensesPythonDir) {
@@ -495,7 +672,9 @@ function Copy-Licenses([string]$BundleRoot, [pscustomobject[]]$Artifacts) {
   $sourceUrls = @(
     "Qt source: https://download.qt.io/official_releases/qt/",
     "FFmpeg source: https://ffmpeg.org/download.html",
-    "VapourSynth source: https://github.com/vapoursynth/vapoursynth"
+    "VapourSynth source: https://github.com/vapoursynth/vapoursynth",
+    "L-SMASH-Works source: https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works",
+    "vs-placebo source: https://github.com/Lypheo/vs-placebo"
   )
   Set-Content -LiteralPath (Join-Path $licensesDir "SOURCE_URLS.txt") -Value ($sourceUrls -join "`r`n") -Encoding ASCII
 
@@ -523,39 +702,13 @@ function Copy-Licenses([string]$BundleRoot, [pscustomobject[]]$Artifacts) {
       }
     }
 
-    # Download license text for artifacts that don't ship one in their zip.
-    if ($id -eq "vapoursynth-portable-r73" -or $id -eq "vs-plugin-lsmas-vA.3j" -or $id -eq "vs-plugin-vs-placebo-1.4.4") {
+    # Download license text for artifacts that do not consistently ship one in the installed path.
+    if ($id -like "vapoursynth-*" -or $id -like "vs-plugin-*") {
       $dest = Join-Path $licensesDir ("{0}-{1}.txt" -f $id, $spdx)
       Write-Host "Fetching license for $id ($spdx)"
       Invoke-WebRequest -Uri $licenseUrl -OutFile $dest | Out-Null
     }
   }
-}
-
-function Consolidate-VapourSynthPlugins([string]$BundleRoot) {
-  $vsCore = Join-Path $BundleRoot "vs\\core"
-  $vsPlugins = Join-Path $BundleRoot "vs\\plugins"
-  Ensure-Directory -Path $vsPlugins
-  $blockedPluginNames = @("AvsCompat.dll")
-
-  # Consolidate core plugins into the normative plugin directory.
-  $corePluginsDir = Join-Path $vsCore "vs-coreplugins"
-  $pluginsDir = Join-Path $vsCore "vs-plugins"
-
-  foreach ($dir in @($corePluginsDir, $pluginsDir)) {
-    if (Test-Path -LiteralPath $dir) {
-      Get-ChildItem -LiteralPath $dir -Filter "*.dll" | ForEach-Object {
-        if ($blockedPluginNames -contains $_.Name) {
-          return
-        }
-        Copy-Item -Force -LiteralPath $_.FullName -Destination (Join-Path $vsPlugins $_.Name)
-      }
-    }
-  }
-
-  # Remove original plugin directories from vs/core after consolidation.
-  if (Test-Path -LiteralPath $corePluginsDir) { Remove-Item -Recurse -Force -LiteralPath $corePluginsDir }
-  if (Test-Path -LiteralPath $pluginsDir) { Remove-Item -Recurse -Force -LiteralPath $pluginsDir }
 }
 
 function Main() {
@@ -588,12 +741,10 @@ function Main() {
     Install-Artifact -BundleRoot $OutDir -Artifact $artifact -DownloadedPath $path
   }
 
-  # Post-process VS portable layout to match SSOT plugin directory.
-  Consolidate-VapourSynthPlugins -BundleRoot $OutDir
-
   # Layout: app/
   Copy-RepoApp -BundleRoot $OutDir
   Install-PythonDeps -BundleRoot $OutDir -VsCoreRoot (Join-Path $OutDir "vs\\core")
+  Install-PythonWheelArtifacts -BundleRoot $OutDir -Artifacts $artifacts -Downloaded $downloaded
   Write-BundleInfo -BundleRoot $OutDir -AppVersion (Get-AppVersionFromSource -RepoRootPath $RepoRoot)
   Configure-EmbeddedPython -BundleRoot $OutDir
   Assert-BundleRuntime -BundleRoot $OutDir
