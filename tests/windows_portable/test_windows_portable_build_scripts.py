@@ -15,6 +15,38 @@ def test_windows_portable_bundle_launcher_sets_cwd_to_bundle_root(repo_root: Pat
     assert "Pop-Location" in build_script
 
 
+def test_windows_portable_bundle_launcher_restores_process_environment(repo_root: Path) -> None:
+    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    build_script = _read_text_or_fail(build_path)
+
+    assert "function Get-FrameCompareLauncherEnvironmentValue" in build_script
+    assert "function Restore-FrameCompareLauncherEnvironmentValue" in build_script
+    assert '$originalPath = Get-FrameCompareLauncherEnvironmentValue -Name "PATH"' in build_script
+    assert (
+        '$originalPythonUtf8 = Get-FrameCompareLauncherEnvironmentValue -Name "PYTHONUTF8"'
+        in build_script
+    )
+    assert '$originalPythonPath = Get-FrameCompareLauncherEnvironmentValue -Name "PYTHONPATH"' in (
+        build_script
+    )
+    assert (
+        '$originalVsExtraPluginPath = Get-FrameCompareLauncherEnvironmentValue -Name '
+        '"VAPOURSYNTH_EXTRA_PLUGIN_PATH"'
+    ) in build_script
+    assert (
+        '$originalVsPluginPath = Get-FrameCompareLauncherEnvironmentValue -Name '
+        '"VAPOURSYNTH_PLUGIN_PATH"'
+    ) in build_script
+    assert (
+        'Restore-FrameCompareLauncherEnvironmentValue -Name "PATH" -Value $originalPath'
+        in build_script
+    )
+    assert (
+        'Restore-FrameCompareLauncherEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH" '
+        "-Value $originalVsPluginPath"
+    ) in build_script
+
+
 def test_windows_portable_bundle_launcher_uses_cli_package_entry(repo_root: Path) -> None:
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     build_script = _read_text_or_fail(build_path)

@@ -70,6 +70,18 @@ function Set-FrameCompareShimExitCode([int]$ExitCode) {
   $script:FrameCompareShimExitCode = $ExitCode
 }
 
+function Get-FrameCompareShimEnvironmentValue([string]$Name) {
+  return [Environment]::GetEnvironmentVariable($Name, "Process")
+}
+
+function Restore-FrameCompareShimEnvironmentValue([string]$Name, [object]$Value) {
+  if ($null -eq $Value) {
+    Remove-Item -LiteralPath "Env:$Name" -ErrorAction SilentlyContinue
+    return
+  }
+  [Environment]::SetEnvironmentVariable($Name, [string]$Value, "Process")
+}
+
 function Invoke-FrameCompareShim([object[]]$ArgsValues) {
   $ErrorActionPreference = "Stop"
   Set-StrictMode -Version Latest
@@ -166,8 +178,15 @@ function Invoke-FrameCompareShim([object[]]$ArgsValues) {
   }
 
   $exitCode = 0
-  Push-Location $bundlePath
+  $originalPath = Get-FrameCompareShimEnvironmentValue -Name "PATH"
+  $originalPythonUtf8 = Get-FrameCompareShimEnvironmentValue -Name "PYTHONUTF8"
+  $originalPythonPath = Get-FrameCompareShimEnvironmentValue -Name "PYTHONPATH"
+  $originalVsExtraPluginPath = Get-FrameCompareShimEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH"
+  $originalVsPluginPath = Get-FrameCompareShimEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH"
+  $locationPushed = $false
   try {
+    Push-Location $bundlePath
+    $locationPushed = $true
     & $bundleLauncher @forwardArgs
     if ($null -ne $LASTEXITCODE) {
       $exitCode = $LASTEXITCODE
@@ -177,7 +196,14 @@ function Invoke-FrameCompareShim([object[]]$ArgsValues) {
       $exitCode = 1
     }
   } finally {
-    Pop-Location
+    if ($locationPushed) {
+      Pop-Location
+    }
+    Restore-FrameCompareShimEnvironmentValue -Name "PATH" -Value $originalPath
+    Restore-FrameCompareShimEnvironmentValue -Name "PYTHONUTF8" -Value $originalPythonUtf8
+    Restore-FrameCompareShimEnvironmentValue -Name "PYTHONPATH" -Value $originalPythonPath
+    Restore-FrameCompareShimEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH" -Value $originalVsExtraPluginPath
+    Restore-FrameCompareShimEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH" -Value $originalVsPluginPath
   }
   Set-FrameCompareShimExitCode -ExitCode $exitCode
 }

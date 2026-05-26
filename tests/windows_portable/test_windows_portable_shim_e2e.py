@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import os
+import re
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from ._helpers import powershell_exe as _powershell_exe
+from ._helpers import read_text_or_fail as _read_text_or_fail
 from ._helpers import run_shim as _run_shim
 from ._helpers import setup_install_layout as _setup_install_layout
 from ._helpers import write_valid_config_json as _write_valid_config_json
@@ -153,3 +157,271 @@ def test_windows_portable_shim_preserves_bundle_stdout(
     proc = _run_shim(exe=exe, shim_path=shim_path, env=os.environ.copy(), args=["version"])
     assert proc.returncode == 0, f"stdout:\n{proc.stdout}\n\nstderr:\n{proc.stderr}"
     assert proc.stdout.strip() == "frame-compare 0.1.0"
+
+
+@pytest.mark.integration
+def test_windows_portable_shim_restores_environment_after_bundle_exit(
+    tmp_path: Path, repo_root: Path
+) -> None:
+    exe = _powershell_exe()
+    if exe is None:
+        pytest.skip("pwsh/powershell not available")
+
+    _, shim_path, state_dir, bundle_dir = _setup_install_layout(
+        tmp_path=tmp_path, repo_root=repo_root
+    )
+    _write_valid_config_json(state_dir=state_dir, bundle_dir=bundle_dir, schema_version=1)
+
+    bundle_launcher = bundle_dir / "frame-compare.ps1"
+    bundle_launcher.write_text(
+        "\n".join(
+            [
+                '$env:PATH = "bundle-path;" + $env:PATH',
+                '$env:PYTHONUTF8 = "bundle-utf8"',
+                '$env:PYTHONPATH = "bundle-pythonpath"',
+                '$env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = "bundle-extra-plugins"',
+                "Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue",
+                "exit 0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    proof_script = tmp_path / "prove-shim-env-restore.ps1"
+    proof_script.write_text(
+        "\n".join(
+            [
+                '$ErrorActionPreference = "Stop"',
+                '[Environment]::SetEnvironmentVariable("PATH", "outer-path", "Process")',
+                '[Environment]::SetEnvironmentVariable("PYTHONUTF8", "outer-utf8", "Process")',
+                '[Environment]::SetEnvironmentVariable("PYTHONPATH", "outer-pythonpath", "Process")',
+                (
+                    '[Environment]::SetEnvironmentVariable("VAPOURSYNTH_EXTRA_PLUGIN_PATH", '
+                    '"outer-extra-plugins", "Process")'
+                ),
+                (
+                    '[Environment]::SetEnvironmentVariable("VAPOURSYNTH_PLUGIN_PATH", '
+                    '"outer-legacy-plugins", "Process")'
+                ),
+                f". '{shim_path}'",
+                'Invoke-FrameCompareShim -ArgsValues @("version")',
+                'Write-Output "EXIT=$script:FrameCompareShimExitCode"',
+                'Write-Output "PATH=$env:PATH"',
+                'Write-Output "PYTHONUTF8=$env:PYTHONUTF8"',
+                'Write-Output "PYTHONPATH=$env:PYTHONPATH"',
+                'Write-Output "VAPOURSYNTH_EXTRA_PLUGIN_PATH=$env:VAPOURSYNTH_EXTRA_PLUGIN_PATH"',
+                'Write-Output "VAPOURSYNTH_PLUGIN_PATH=$env:VAPOURSYNTH_PLUGIN_PATH"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    proc = subprocess.run(
+        [exe, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(proof_script)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert proc.returncode == 0, f"stdout:\n{proc.stdout}\n\nstderr:\n{proc.stderr}"
+    output = _parse_key_value_output(proc.stdout)
+    assert output["EXIT"] == "0"
+    assert output["PATH"] == "outer-path"
+    assert output["PYTHONUTF8"] == "outer-utf8"
+    assert output["PYTHONPATH"] == "outer-pythonpath"
+    assert output["VAPOURSYNTH_EXTRA_PLUGIN_PATH"] == "outer-extra-plugins"
+    assert output["VAPOURSYNTH_PLUGIN_PATH"] == "outer-legacy-plugins"
+
+
+@pytest.mark.integration
+def test_windows_portable_shim_restores_environment_on_repeat_path_invocation(
+    tmp_path: Path, repo_root: Path
+) -> None:
+    exe = _powershell_exe()
+    if exe is None:
+        pytest.skip("pwsh/powershell not available")
+
+    install_root = tmp_path / "install"
+    bin_dir = install_root / "bin"
+    state_dir = install_root / "state"
+    bundle_dir = install_root / "bundle"
+    bin_dir.mkdir(parents=True)
+    state_dir.mkdir(parents=True)
+    bundle_dir.mkdir(parents=True)
+
+    repo_shim = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare.ps1"
+    shim_path = bin_dir / "frame-compare.ps1"
+    shim_path.write_text(repo_shim.read_text(encoding="utf-8"), encoding="utf-8")
+    _write_valid_config_json(state_dir=state_dir, bundle_dir=bundle_dir, schema_version=1)
+
+    bundle_launcher = bundle_dir / "frame-compare.ps1"
+    bundle_launcher.write_text(
+        "\n".join(
+            [
+                '$env:PATH = "bundle-path;" + $env:PATH',
+                '$env:PYTHONUTF8 = "bundle-utf8"',
+                '$env:PYTHONPATH = "bundle-pythonpath"',
+                '$env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = "bundle-extra-plugins"',
+                'Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue',
+                'Write-Output "bundle launcher ran"',
+                "exit 0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    proof_script = tmp_path / "prove-repeat-path-invocation.ps1"
+    proof_script.write_text(
+        "\n".join(
+            [
+                '$ErrorActionPreference = "Stop"',
+                f'$shimBin = "{bin_dir}"',
+                '[Environment]::SetEnvironmentVariable("PATH", "$shimBin;outer-path", "Process")',
+                '[Environment]::SetEnvironmentVariable("PYTHONUTF8", "outer-utf8", "Process")',
+                '[Environment]::SetEnvironmentVariable("PYTHONPATH", "outer-pythonpath", "Process")',
+                (
+                    '[Environment]::SetEnvironmentVariable("VAPOURSYNTH_EXTRA_PLUGIN_PATH", '
+                    '"outer-extra-plugins", "Process")'
+                ),
+                (
+                    '[Environment]::SetEnvironmentVariable("VAPOURSYNTH_PLUGIN_PATH", '
+                    '"outer-legacy-plugins", "Process")'
+                ),
+                '$beforePath = [Environment]::GetEnvironmentVariable("PATH", "Process")',
+                "$resolved = Get-Command frame-compare -All | Select-Object -First 1",
+                'Write-Output "COMMAND=$($resolved.CommandType):$($resolved.Source)"',
+                "frame-compare version",
+                '$afterFirstPath = [Environment]::GetEnvironmentVariable("PATH", "Process")',
+                "frame-compare version",
+                '$afterSecondPath = [Environment]::GetEnvironmentVariable("PATH", "Process")',
+                'Write-Output "PATH_UNCHANGED_1=$($beforePath -eq $afterFirstPath)"',
+                'Write-Output "PATH_UNCHANGED_2=$($beforePath -eq $afterSecondPath)"',
+                'Write-Output "PATH=$afterSecondPath"',
+                'Write-Output "PYTHONUTF8=$env:PYTHONUTF8"',
+                'Write-Output "PYTHONPATH=$env:PYTHONPATH"',
+                'Write-Output "VAPOURSYNTH_EXTRA_PLUGIN_PATH=$env:VAPOURSYNTH_EXTRA_PLUGIN_PATH"',
+                'Write-Output "VAPOURSYNTH_PLUGIN_PATH=$env:VAPOURSYNTH_PLUGIN_PATH"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    proc = subprocess.run(
+        [exe, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(proof_script)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert proc.returncode == 0, f"stdout:\n{proc.stdout}\n\nstderr:\n{proc.stderr}"
+    output = _parse_key_value_output(proc.stdout)
+    assert output["COMMAND"] == f"ExternalScript:{shim_path}"
+    assert output["PATH_UNCHANGED_1"] == "True"
+    assert output["PATH_UNCHANGED_2"] == "True"
+    assert output["PATH"] == f"{bin_dir};outer-path"
+    assert output["PYTHONUTF8"] == "outer-utf8"
+    assert output["PYTHONPATH"] == "outer-pythonpath"
+    assert output["VAPOURSYNTH_EXTRA_PLUGIN_PATH"] == "outer-extra-plugins"
+    assert output["VAPOURSYNTH_PLUGIN_PATH"] == "outer-legacy-plugins"
+
+
+@pytest.mark.integration
+def test_windows_portable_generated_bundle_launcher_restores_environment(
+    tmp_path: Path, repo_root: Path
+) -> None:
+    exe = _powershell_exe()
+    if exe is None:
+        pytest.skip("pwsh/powershell not available")
+
+    build_script = _read_text_or_fail(
+        repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    )
+    match = re.search(r"\$ps1 = @'\r?\n(?P<launcher>.*?)\r?\n'@", build_script, re.DOTALL)
+    assert match is not None
+
+    bundle_dir = tmp_path / "bundle"
+    python_dir = bundle_dir / "python"
+    cli_dir = bundle_dir / "app" / "src" / "frame_compare" / "cli"
+    python_dir.mkdir(parents=True)
+    cli_dir.mkdir(parents=True)
+    (bundle_dir / "app" / "site-packages").mkdir(parents=True)
+    base_python = Path(getattr(sys, "_base_executable", sys.executable))
+    shutil.copy2(base_python, python_dir / "python.exe")
+    for dll_path in base_python.parent.glob("python*.dll"):
+        shutil.copy2(dll_path, python_dir / dll_path.name)
+
+    (cli_dir.parent / "__init__.py").write_text("", encoding="utf-8")
+    (cli_dir / "__init__.py").write_text("", encoding="utf-8")
+    (cli_dir / "entry.py").write_text(
+        "\n".join(
+            [
+                "from __future__ import annotations",
+                "import os",
+                "import sys",
+                'os.environ["PATH"] = "bundle-python;" + os.environ.get("PATH", "")',
+                'os.environ["PYTHONUTF8"] = "inner-utf8"',
+                'os.environ["PYTHONPATH"] = "inner-pythonpath"',
+                'os.environ["VAPOURSYNTH_EXTRA_PLUGIN_PATH"] = "inner-extra-plugins"',
+                'os.environ.pop("VAPOURSYNTH_PLUGIN_PATH", None)',
+                'print("fake entry ran")',
+                "sys.exit(0)",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    launcher_path = bundle_dir / "frame-compare.ps1"
+    launcher_path.write_text(match.group("launcher"), encoding="utf-8")
+
+    proof_script = tmp_path / "prove-generated-launcher-env-restore.ps1"
+    proof_script.write_text(
+        "\n".join(
+            [
+                '$ErrorActionPreference = "Stop"',
+                '[Environment]::SetEnvironmentVariable("PATH", "outer-path", "Process")',
+                '[Environment]::SetEnvironmentVariable("PYTHONUTF8", "outer-utf8", "Process")',
+                '[Environment]::SetEnvironmentVariable("PYTHONPATH", "outer-pythonpath", "Process")',
+                (
+                    '[Environment]::SetEnvironmentVariable("VAPOURSYNTH_EXTRA_PLUGIN_PATH", '
+                    '"outer-extra-plugins", "Process")'
+                ),
+                (
+                    '[Environment]::SetEnvironmentVariable("VAPOURSYNTH_PLUGIN_PATH", '
+                    '"outer-legacy-plugins", "Process")'
+                ),
+                f"& '{launcher_path}' version",
+                'Write-Output "EXIT=$LASTEXITCODE"',
+                'Write-Output "PATH=$env:PATH"',
+                'Write-Output "PYTHONUTF8=$env:PYTHONUTF8"',
+                'Write-Output "PYTHONPATH=$env:PYTHONPATH"',
+                'Write-Output "VAPOURSYNTH_EXTRA_PLUGIN_PATH=$env:VAPOURSYNTH_EXTRA_PLUGIN_PATH"',
+                'Write-Output "VAPOURSYNTH_PLUGIN_PATH=$env:VAPOURSYNTH_PLUGIN_PATH"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    proc = subprocess.run(
+        [exe, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(proof_script)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert proc.returncode == 0, f"stdout:\n{proc.stdout}\n\nstderr:\n{proc.stderr}"
+    output = _parse_key_value_output(proc.stdout)
+    assert output["EXIT"] == "0"
+    assert output["PATH"] == "outer-path"
+    assert output["PYTHONUTF8"] == "outer-utf8"
+    assert output["PYTHONPATH"] == "outer-pythonpath"
+    assert output["VAPOURSYNTH_EXTRA_PLUGIN_PATH"] == "outer-extra-plugins"
+    assert output["VAPOURSYNTH_PLUGIN_PATH"] == "outer-legacy-plugins"
+
+
+def _parse_key_value_output(stdout: str) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    for line in stdout.splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        parsed[key] = value
+    return parsed

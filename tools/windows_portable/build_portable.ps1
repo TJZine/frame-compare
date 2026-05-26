@@ -229,48 +229,68 @@ if (!(Test-Path -LiteralPath $python)) {
   throw "Embedded python not found: $python"
 }
 
-$env:PYTHONUTF8 = "1"
-$env:PYTHONPATH = "$bundleRoot\\app\\src;$bundleRoot\\app\\site-packages"
-$env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = "$bundleRoot\\vs\\extra-plugins"
-Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue
-$sitePackages = Join-Path $bundleRoot "app\\site-packages"
-$vsPackage = Join-Path $sitePackages "vapoursynth"
-$vsPluginDir = Join-Path $vsPackage "plugins"
-$extraPluginRoot = Join-Path $bundleRoot "vs\\extra-plugins"
-$ffmpegRoot = Join-Path $bundleRoot "ffmpeg"
-$ffmpegBin = Join-Path $ffmpegRoot "bin"
-$qtBin = Join-Path $bundleRoot "app\\site-packages\\PyQt6\\Qt6\\bin"
-$pathEntries = @(
-  (Join-Path $bundleRoot "python"),
-  $vsPackage,
-  $vsPluginDir,
-  $extraPluginRoot,
-  $ffmpegBin,
-  $ffmpegRoot
-)
-if (Test-Path -LiteralPath $qtBin) {
-  $pathEntries = @($qtBin) + $pathEntries
+function Get-FrameCompareLauncherEnvironmentValue([string]$Name) {
+  return [Environment]::GetEnvironmentVariable($Name, "Process")
 }
-foreach ($runtimeRoot in @($vsPackage, $extraPluginRoot, $ffmpegRoot)) {
-  if (Test-Path -LiteralPath $runtimeRoot) {
-    Get-ChildItem -LiteralPath $runtimeRoot -Directory -Recurse | ForEach-Object {
-      $pathEntries += $_.FullName
-    }
-  }
-}
-if (Test-Path -LiteralPath $sitePackages) {
-  Get-ChildItem -LiteralPath $sitePackages -Filter "*.dll" -File -Recurse | ForEach-Object {
-    $runtimeDir = Split-Path -Parent $_.FullName
-    if ($pathEntries -notcontains $runtimeDir) {
-      $pathEntries += $runtimeDir
-    }
-  }
-}
-$env:PATH = (($pathEntries | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique) -join ";") + ";" + $env:PATH
 
-$exitCode = 0
-Push-Location $bundleRoot
+function Restore-FrameCompareLauncherEnvironmentValue([string]$Name, [object]$Value) {
+  if ($null -eq $Value) {
+    Remove-Item -LiteralPath "Env:$Name" -ErrorAction SilentlyContinue
+    return
+  }
+  [Environment]::SetEnvironmentVariable($Name, [string]$Value, "Process")
+}
+
+$originalPath = Get-FrameCompareLauncherEnvironmentValue -Name "PATH"
+$originalPythonUtf8 = Get-FrameCompareLauncherEnvironmentValue -Name "PYTHONUTF8"
+$originalPythonPath = Get-FrameCompareLauncherEnvironmentValue -Name "PYTHONPATH"
+$originalVsExtraPluginPath = Get-FrameCompareLauncherEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH"
+$originalVsPluginPath = Get-FrameCompareLauncherEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH"
+
+$exitCode = 1
+$locationPushed = $false
 try {
+  $env:PYTHONUTF8 = "1"
+  $env:PYTHONPATH = "$bundleRoot\\app\\src;$bundleRoot\\app\\site-packages"
+  $env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = "$bundleRoot\\vs\\extra-plugins"
+  Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue
+  $sitePackages = Join-Path $bundleRoot "app\\site-packages"
+  $vsPackage = Join-Path $sitePackages "vapoursynth"
+  $vsPluginDir = Join-Path $vsPackage "plugins"
+  $extraPluginRoot = Join-Path $bundleRoot "vs\\extra-plugins"
+  $ffmpegRoot = Join-Path $bundleRoot "ffmpeg"
+  $ffmpegBin = Join-Path $ffmpegRoot "bin"
+  $qtBin = Join-Path $bundleRoot "app\\site-packages\\PyQt6\\Qt6\\bin"
+  $pathEntries = @(
+    (Join-Path $bundleRoot "python"),
+    $vsPackage,
+    $vsPluginDir,
+    $extraPluginRoot,
+    $ffmpegBin,
+    $ffmpegRoot
+  )
+  if (Test-Path -LiteralPath $qtBin) {
+    $pathEntries = @($qtBin) + $pathEntries
+  }
+  foreach ($runtimeRoot in @($vsPackage, $extraPluginRoot, $ffmpegRoot)) {
+    if (Test-Path -LiteralPath $runtimeRoot) {
+      Get-ChildItem -LiteralPath $runtimeRoot -Directory -Recurse | ForEach-Object {
+        $pathEntries += $_.FullName
+      }
+    }
+  }
+  if (Test-Path -LiteralPath $sitePackages) {
+    Get-ChildItem -LiteralPath $sitePackages -Filter "*.dll" -File -Recurse | ForEach-Object {
+      $runtimeDir = Split-Path -Parent $_.FullName
+      if ($pathEntries -notcontains $runtimeDir) {
+        $pathEntries += $runtimeDir
+      }
+    }
+  }
+  $env:PATH = (($pathEntries | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique) -join ";") + ";" + $env:PATH
+
+  Push-Location $bundleRoot
+  $locationPushed = $true
   & $python -m frame_compare.cli.entry @args
   if ($null -eq $LASTEXITCODE) {
     $exitCode = 1
@@ -278,7 +298,14 @@ try {
     $exitCode = $LASTEXITCODE
   }
 } finally {
-  Pop-Location
+  if ($locationPushed) {
+    Pop-Location
+  }
+  Restore-FrameCompareLauncherEnvironmentValue -Name "PATH" -Value $originalPath
+  Restore-FrameCompareLauncherEnvironmentValue -Name "PYTHONUTF8" -Value $originalPythonUtf8
+  Restore-FrameCompareLauncherEnvironmentValue -Name "PYTHONPATH" -Value $originalPythonPath
+  Restore-FrameCompareLauncherEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH" -Value $originalVsExtraPluginPath
+  Restore-FrameCompareLauncherEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH" -Value $originalVsPluginPath
 }
 exit $exitCode
 '@

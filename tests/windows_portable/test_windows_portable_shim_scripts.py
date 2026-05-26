@@ -13,6 +13,30 @@ def test_windows_portable_shim_runs_bundle_launcher_from_bundle_root(repo_root: 
     assert "Pop-Location" in shim
 
 
+def test_windows_portable_shim_restores_launcher_environment(repo_root: Path) -> None:
+    shim_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare.ps1"
+    shim = _read_text_or_fail(shim_path)
+
+    assert "function Get-FrameCompareShimEnvironmentValue" in shim
+    assert "function Restore-FrameCompareShimEnvironmentValue" in shim
+    assert '$originalPath = Get-FrameCompareShimEnvironmentValue -Name "PATH"' in shim
+    assert '$originalPythonUtf8 = Get-FrameCompareShimEnvironmentValue -Name "PYTHONUTF8"' in shim
+    assert '$originalPythonPath = Get-FrameCompareShimEnvironmentValue -Name "PYTHONPATH"' in shim
+    assert (
+        '$originalVsExtraPluginPath = Get-FrameCompareShimEnvironmentValue -Name '
+        '"VAPOURSYNTH_EXTRA_PLUGIN_PATH"'
+    ) in shim
+    assert (
+        '$originalVsPluginPath = Get-FrameCompareShimEnvironmentValue -Name '
+        '"VAPOURSYNTH_PLUGIN_PATH"'
+    ) in shim
+    assert 'Restore-FrameCompareShimEnvironmentValue -Name "PATH" -Value $originalPath' in shim
+    assert (
+        'Restore-FrameCompareShimEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH" '
+        "-Value $originalVsPluginPath"
+    ) in shim
+
+
 def test_windows_portable_shim_injects_state_config_when_missing_explicit_config(
     repo_root: Path,
 ) -> None:
