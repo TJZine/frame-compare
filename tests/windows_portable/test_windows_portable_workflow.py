@@ -94,3 +94,124 @@ def test_windows_portable_workflow_validates_update_public_key_on_release(repo_r
         r"github\.event_name\s*==\s*'workflow_dispatch'",
         workflow,
     )
+
+
+def test_windows_portable_workflow_uploads_versioned_release_assets(repo_root: Path) -> None:
+    workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
+    workflow = _read_text_or_fail(workflow_path)
+
+    assert "Resolve release asset names" in workflow
+    assert "Prepare versioned release asset" in workflow
+    assert 'tag="${{ github.event.release.tag_name }}"' in workflow
+    assert 'asset_tag="${tag//\\//-}"' in workflow
+    assert "steps.release_names.outputs.asset_tag" in workflow
+    assert 'frame-compare-portable-win-x64-${asset_tag}.zip' in workflow
+    assert 'hash="$(sha256sum "$zip" | cut -d \' \' -f 1)"' in workflow
+    assert 'printf \'%s  %s\\n\' "$hash" "$(basename "$zip")" > "$zip.sha256"' in workflow
+    assert (
+        "dist/release-assets/frame-compare-portable-win-x64-${{ "
+        "steps.release_names.outputs.asset_tag }}.zip"
+    ) in workflow
+    assert (
+        "dist/release-assets/frame-compare-portable-win-x64-${{ "
+        "steps.release_names.outputs.asset_tag }}.zip.sha256"
+    ) in workflow
+
+
+def test_windows_portable_workflow_smokes_extracted_install_shim(repo_root: Path) -> None:
+    workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
+    workflow = _read_text_or_fail(workflow_path)
+
+    assert "Smoke: extracted install shim" in workflow
+    assert 'dist/zip_extract_check/frame-compare-portable-win-x64' in workflow
+    assert '& "$bundle/install.cmd"' in workflow
+    assert 'Programs/FrameCompare/bin/frame-compare.cmd' in workflow
+    assert "& $shim version" in workflow
+    assert 'versionOutput -notmatch "^frame-compare \\d+\\.\\d+\\.\\d+"' in workflow
+    assert "& $shim --help" in workflow
+
+
+def test_windows_portable_workflow_builds_code_only_update_after_bundle(
+    repo_root: Path,
+) -> None:
+    workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
+    workflow = _read_text_or_fail(workflow_path)
+
+    assert workflow.index("Smoke: extracted install shim") < workflow.index(
+        "Build code-only update zip"
+    )
+    assert workflow.index("Build code-only update zip") < workflow.index("Upload bundle artifact")
+    assert "tools/windows_portable/build_update.ps1" in workflow
+    assert "$PSNativeCommandUseErrorActionPreference = $true" in workflow
+    assert '$bundle = "dist/frame-compare-portable-win-x64"' in workflow
+    assert "frame-compare-update-win-x64-$version.zip" in workflow
+    assert "-BundleDir $bundle" in workflow
+    assert "-OutFile $updateZip" in workflow
+    assert "UPDATE_ZIP=$updateZip" in workflow
+
+
+def test_windows_portable_workflow_signs_update_only_for_release_like_events(
+    repo_root: Path,
+) -> None:
+    workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
+    workflow = _read_text_or_fail(workflow_path)
+
+    assert "Pull requests prove update zip creation without requiring signing secrets." in workflow
+    assert "Release/manual runs sign only when the private key XML secret is configured." in workflow
+    assert "id: sign_update" in workflow
+    assert "if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'" in workflow
+    assert "WINDOWS_UPDATE_SIGNING_KEY_XML: ${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}" in workflow
+    assert "::notice::Skipping signed update zip; WINDOWS_UPDATE_SIGNING_KEY_XML secret" in workflow
+    assert "$env:SIGNING_KEY_XML_PATH = $keyPath" in workflow
+    assert "tools/windows_portable/sign_update.ps1" in workflow
+    assert "-UpdateZip $env:UPDATE_ZIP" in workflow
+    assert "signed=false" in workflow
+    assert "signed=true" in workflow
+    assert "pull_request" not in re.search(
+        r"- name: Sign code-only update zip[\s\S]*?(?=\n      - name:)",
+        workflow,
+    ).group(0)
+
+
+def test_windows_portable_workflow_verifies_and_uploads_update_artifact(
+    repo_root: Path,
+) -> None:
+    workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
+    workflow = _read_text_or_fail(workflow_path)
+
+    assert "Hash code-only update zip" in workflow
+    assert "Verify code-only update zip layout" in workflow
+    assert "update-manifest.json" in workflow
+    assert "payload/app/src/frame_compare/" in workflow
+    assert 'target_platform -ne "windows-x64"' in workflow
+    assert 'payload_root -ne "payload"' in workflow
+    assert 'signature_file -ne "update-manifest.sig"' in workflow
+    assert "Signed update zip is missing update-manifest.sig." in workflow
+    assert "Upload code-only update artifact" in workflow
+    assert "name: frame-compare-update-win-x64" in workflow
+    assert "dist/frame-compare-update-win-x64-*.zip" in workflow
+    assert "dist/frame-compare-update-win-x64-*.zip.sha256" in workflow
+
+
+def test_windows_portable_workflow_uploads_signed_update_release_asset_conditionally(
+    repo_root: Path,
+) -> None:
+    workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
+    workflow = _read_text_or_fail(workflow_path)
+
+    assert "update_signed: ${{ steps.sign_update.outputs.signed }}" in workflow
+    assert "Download signed update artifact" in workflow
+    assert "Prepare versioned signed update asset" in workflow
+    assert "Upload signed update release asset" in workflow
+    assert workflow.count("if: needs.build.outputs.update_signed == 'true'") == 3
+    assert "mapfile -t update_zips" in workflow
+    assert 'Expected exactly one signed update zip artifact, found ${#update_zips[@]}.' in workflow
+    assert "frame-compare-update-win-x64-${asset_tag}.zip" in workflow
+    assert (
+        "dist/release-assets/frame-compare-update-win-x64-${{ "
+        "steps.release_names.outputs.asset_tag }}.zip"
+    ) in workflow
+    assert (
+        "dist/release-assets/frame-compare-update-win-x64-${{ "
+        "steps.release_names.outputs.asset_tag }}.zip.sha256"
+    ) in workflow

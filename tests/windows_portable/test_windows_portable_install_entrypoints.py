@@ -72,6 +72,17 @@ def test_install_from_source_uv_install_order_is_deterministic(repo_root: Path) 
     assert "py -m pip install --user uv" in text
 
 
+def test_install_from_source_invokes_bundle_install_ps1_directly(repo_root: Path) -> None:
+    script_path = repo_root / "tools" / "windows_portable" / "install-from-source.ps1"
+    text = _read_text_or_fail(script_path)
+
+    assert '$installScript = Join-Path $outDirFullPath "install.ps1"' in text
+    assert "& $installScript" in text
+    assert 'Assert-LastExitCode -Label "install.ps1"' in text
+    assert '$installCmd = Join-Path $outDirFullPath "install.cmd"' not in text
+    assert "& $installCmd" not in text
+
+
 def test_windows_portable_installer_initializes_state_config_toml(repo_root: Path) -> None:
     installer_path = repo_root / "tools" / "windows_portable" / "install.ps1"
     installer = _read_text_or_fail(installer_path)

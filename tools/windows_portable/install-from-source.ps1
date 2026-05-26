@@ -176,17 +176,17 @@ try {
   }
   Assert-LastExitCode -Label "build_portable.ps1"
 
-  $installCmd = Join-Path $outDirFullPath "install.cmd"
-  if (!(Test-Path -LiteralPath $installCmd)) {
-    throw "Bundle installer not found: $installCmd"
+  $installScript = Join-Path $outDirFullPath "install.ps1"
+  if (!(Test-Path -LiteralPath $installScript)) {
+    throw "Bundle installer not found: $installScript"
   }
 
   Write-Host "Installing shim from built bundle..."
-  & $installCmd
+  & $installScript
   if ($null -eq $LASTEXITCODE) {
-    throw "install.cmd terminated unexpectedly."
+    throw "install.ps1 terminated unexpectedly."
   }
-  Assert-LastExitCode -Label "install.cmd"
+  Assert-LastExitCode -Label "install.ps1"
 } finally {
   Pop-Location
 }

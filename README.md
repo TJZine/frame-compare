@@ -115,7 +115,7 @@ pip install pytest pytest-cov ruff pyright
 From GitHub release zip (recommended):
 
 ```powershell
-# 1) Download the release zip
+# 1) Download frame-compare-portable-win-x64-<tag>.zip from the GitHub Release
 # 2) Extract it
 # 3) From the extracted folder:
 .\install.cmd

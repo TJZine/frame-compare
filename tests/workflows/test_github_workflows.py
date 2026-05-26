@@ -164,5 +164,69 @@ def test_windows_portable_workflow_limits_release_write_permissions(repo_root: P
     )
     assert "Download bundle artifact" in workflow
     assert "path: dist/release-assets" in workflow
-    assert "dist/release-assets/frame-compare-portable-win-x64.zip" in workflow
-    assert "dist/release-assets/frame-compare-portable-win-x64.zip.sha256" in workflow
+    assert "Resolve release asset names" in workflow
+    assert "Prepare versioned release asset" in workflow
+    assert 'tag="${{ github.event.release.tag_name }}"' in workflow
+    assert 'asset_tag="${tag//\\//-}"' in workflow
+    assert "steps.release_names.outputs.asset_tag" in workflow
+    assert 'frame-compare-portable-win-x64-${asset_tag}.zip' in workflow
+    assert 'hash="$(sha256sum "$zip" | cut -d \' \' -f 1)"' in workflow
+    assert 'printf \'%s  %s\\n\' "$hash" "$(basename "$zip")" > "$zip.sha256"' in workflow
+    assert (
+        "dist/release-assets/frame-compare-portable-win-x64-${{ "
+        "steps.release_names.outputs.asset_tag }}.zip"
+    ) in workflow
+    assert (
+        "dist/release-assets/frame-compare-portable-win-x64-${{ "
+        "steps.release_names.outputs.asset_tag }}.zip.sha256"
+    ) in workflow
+
+
+def test_windows_portable_workflow_smokes_installed_shim(repo_root: Path) -> None:
+    workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
+    workflow = _read_text_or_fail(workflow_path)
+
+    assert "Smoke: extracted install shim" in workflow
+    assert '& "$bundle/install.cmd"' in workflow
+    assert 'Programs/FrameCompare/bin/frame-compare.cmd' in workflow
+    assert "& $shim version" in workflow
+    assert "& $shim --help" in workflow
+
+
+def test_windows_portable_workflow_proves_code_only_update_without_pr_secrets(
+    repo_root: Path,
+) -> None:
+    workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
+    workflow = _read_text_or_fail(workflow_path)
+
+    assert workflow.index("Build portable bundle") < workflow.index("Build code-only update zip")
+    assert "tools/windows_portable/build_update.ps1" in workflow
+    assert "frame-compare-update-win-x64-$version.zip" in workflow
+    assert "UPDATE_ZIP=$updateZip" in workflow
+    assert "Pull requests prove update zip creation without requiring signing secrets." in workflow
+    assert "Upload code-only update artifact" in workflow
+    assert "name: frame-compare-update-win-x64" in workflow
+    assert "dist/frame-compare-update-win-x64-*.zip" in workflow
+
+
+def test_windows_portable_workflow_gates_signed_update_release_assets(
+    repo_root: Path,
+) -> None:
+    workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
+    workflow = _read_text_or_fail(workflow_path)
+
+    assert "update_signed: ${{ steps.sign_update.outputs.signed }}" in workflow
+    assert "WINDOWS_UPDATE_SIGNING_KEY_XML: ${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}" in workflow
+    assert "::notice::Skipping signed update zip; WINDOWS_UPDATE_SIGNING_KEY_XML secret" in workflow
+    assert "tools/windows_portable/sign_update.ps1" in workflow
+    assert "if: needs.build.outputs.update_signed == 'true'" in workflow
+    assert "Download signed update artifact" in workflow
+    assert "Prepare versioned signed update asset" in workflow
+    assert "Upload signed update release asset" in workflow
+    assert "mapfile -t update_zips" in workflow
+    assert 'Expected exactly one signed update zip artifact, found ${#update_zips[@]}.' in workflow
+    assert "frame-compare-update-win-x64-${asset_tag}.zip" in workflow
+    assert (
+        "dist/release-assets/frame-compare-update-win-x64-${{ "
+        "steps.release_names.outputs.asset_tag }}.zip"
+    ) in workflow
