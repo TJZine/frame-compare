@@ -17,7 +17,9 @@ class WorkspacePaths:
 
     Run folder mode (when run_dir is set):
     - screenshots_dir and generated_dir are resolved relative to run_dir
-    - This enables centralized, per-comparison outputs inside input_dir
+    - analysis_cache_dir remains at the workspace-level generated cache path
+    - This enables fresh per-comparison outputs inside input_dir while preserving
+      reusable analysis results across runs
 
     Legacy mode (when run_dir is None):
     - screenshots_dir and generated_dir are resolved at workspace root level
@@ -27,7 +29,8 @@ class WorkspacePaths:
         input_dir: Video input directory (may be same as root or subdir)
         run_dir: Run folder for centralized outputs (None = legacy mode)
         screenshots_dir: Screenshot output directory
-        generated_dir: Cache and generated files directory
+        generated_dir: Generated files directory for the current run
+        analysis_cache_dir: Workspace-level shared analysis cache directory
         config_dir: Config and presets directory
         config_file: Path to config.toml (or None if using defaults)
     """
@@ -39,11 +42,19 @@ class WorkspacePaths:
     generated_dir: Path
     config_dir: Path
     config_file: Path | None
+    analysis_cache_dir: Path | None = None
+
+    @property
+    def shared_analysis_cache_dir(self) -> Path:
+        """Workspace-level shared analysis cache directory."""
+        if self.analysis_cache_dir is not None:
+            return self.analysis_cache_dir
+        return self.generated_dir / "cache" / "analysis"
 
     @property
     def cache_dir(self) -> Path:
-        """Directory for analysis cache files."""
-        return self.generated_dir / "cache"
+        """Directory for shared analysis cache files."""
+        return self.shared_analysis_cache_dir
 
     @property
     def probe_cache_dir(self) -> Path:
@@ -53,7 +64,8 @@ class WorkspacePaths:
     def with_run_dir(self, run_dir: Path) -> "WorkspacePaths":
         """Return a new WorkspacePaths with run_dir set and paths updated.
 
-        This updates screenshots_dir and generated_dir to be inside run_dir.
+        This updates screenshots_dir and generated_dir to be inside run_dir while
+        preserving the workspace-level shared analysis cache path.
 
         Args:
             run_dir: The run folder path (e.g., input_dir / "Movie (2024)")
@@ -66,4 +78,5 @@ class WorkspacePaths:
             run_dir=run_dir,
             screenshots_dir=run_dir / "screenshots",
             generated_dir=run_dir / "generated",
+            analysis_cache_dir=self.shared_analysis_cache_dir,
         )

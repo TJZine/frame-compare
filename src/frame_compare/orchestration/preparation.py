@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import structlog
@@ -34,18 +33,12 @@ from frame_compare.orchestration.types import (
     RunDependencies,
     RunRequest,
 )
-from frame_compare.services.alignment import CACHE_FILE_NAME, check_alignment_cached
 from frame_compare.services.errors import (
-    AudioAlignmentError,
     MetadataError,
     TmdbError,
     TmdbRateLimitedError,
 )
-from frame_compare.services.run_folder import (
-    derive_run_folder_name,
-    get_existing_run_folders,
-    reserve_run_folder,
-)
+from frame_compare.services.run_folder import reserve_run_folder
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 from frame_compare.utils.types import WorkspacePaths
 
@@ -59,44 +52,11 @@ def _build_preflight_overrides(request: RunRequest) -> dict[str, object] | None:
     return overrides or None
 
 
-def _remove_cached_metrics(workspace: WorkspacePaths) -> None:
-    analysis_cache_path = workspace.cache_dir / cache_io.CACHE_FILENAME
-    if analysis_cache_path.exists():
-        analysis_cache_path.unlink()
-    audio_cache_path = workspace.generated_dir / CACHE_FILE_NAME
-    if audio_cache_path.exists():
-        audio_cache_path.unlink()
-
-
-def _resolve_cache_only_run_dir(workspace: WorkspacePaths, filenames: list[str]) -> Path:
-    """Resolve the deterministic run folder used for cache-only reads.
-
-    Cache-only runs must not depend on live TMDB metadata or reserve a new folder. If the
-    expected folder already exists with different casing, keep the on-disk spelling.
-    """
-    run_folder_name = derive_run_folder_name(
-        filenames=filenames,
-        tmdb_metadata=None,
-    )
-    existing_folders = get_existing_run_folders(workspace.input_dir)
-    expected = run_folder_name.casefold()
-    for folder_name in existing_folders:
-        if folder_name.casefold() == expected:
-            return workspace.input_dir / folder_name
-    return workspace.input_dir / run_folder_name
-
-
-def _resolve_cache_version(cache_path: Path) -> str | None:
-    try:
-        data = cache_path.read_text(encoding="utf-8")
-    except OSError:
-        return None
-    try:
-        payload = json.loads(data)
-    except json.JSONDecodeError:
-        return None
-    version = payload.get("version")
-    return str(version) if version is not None else None
+def _remove_cached_metrics(
+    *, workspace: WorkspacePaths, config: ConfigSchema, input_videos: list[Path]
+) -> None:
+    fingerprint = cache_io.compute_cache_key(input_videos, config.analysis)
+    cache_io.delete_metrics_cache_entry(workspace.cache_dir, fingerprint)
 
 
 async def _resolve_run_directory(
@@ -128,16 +88,12 @@ async def _resolve_run_directory(
                 )
 
         filenames = [video.name for video in input_videos]
-        if request.from_cache_only:
-            run_dir = _resolve_cache_only_run_dir(workspace, filenames)
-            new_workspace = workspace.with_run_dir(run_dir)
-        else:
-            run_dir = reserve_run_folder(
-                input_dir=workspace.input_dir,
-                filenames=filenames,
-                tmdb_metadata=metadata,
-            )
-            new_workspace = workspace.with_run_dir(run_dir)
+        run_dir = reserve_run_folder(
+            input_dir=workspace.input_dir,
+            filenames=filenames,
+            tmdb_metadata=metadata,
+        )
+        new_workspace = workspace.with_run_dir(run_dir)
         return new_workspace, MetadataPrefetch(metadata=metadata, was_attempted=was_attempted)
     return workspace, MetadataPrefetch(metadata=None, was_attempted=False)
 
@@ -150,31 +106,25 @@ def _validate_cache_state(
     input_videos: list[Path],
 ) -> None:
     if request.no_cache:
-        _remove_cached_metrics(workspace)
+        _remove_cached_metrics(workspace=workspace, config=config, input_videos=input_videos)
 
     if request.from_cache_only and not request.skip_analysis:
         fingerprint = cache_io.compute_cache_key(input_videos, config.analysis)
         cache_result = cache_io.load_cached_metrics(workspace.cache_dir, fingerprint, clips=[])
         if not cache_result.success:
-            cache_path = workspace.cache_dir / cache_io.CACHE_FILENAME
+            cache_path = cache_io.find_metrics_cache_file(workspace.cache_dir, fingerprint)
+            expected_cache_path = workspace.cache_dir / cache_io.metrics_cache_filename(
+                input_videos, fingerprint
+            )
+            error_cache_path = cache_path or expected_cache_path
             if cache_result.reason == "corrupted":
-                raise CacheCorruptionError(cache_path)
+                raise CacheCorruptionError(error_cache_path)
             if cache_result.reason == "version_mismatch":
-                found = _resolve_cache_version(cache_path) or "unknown"
+                found = cache_io.read_cache_version(error_cache_path) or "unknown"
                 raise CacheVersionMismatchError(found, str(cache_io.CACHE_VERSION))
             raise MetricsCalculationError(
                 f"Cached metrics missing or mismatched ({cache_result.reason})."
             )
-
-    if request.from_cache_only and config.audio_alignment.enable and len(input_videos) > 1:
-        missing = check_alignment_cached(
-            reference=input_videos[0],
-            comparisons=input_videos[1:],
-            cache_dir=workspace.generated_dir,
-        )
-        if missing:
-            message = "Missing cached audio alignment offsets for: " + ", ".join(missing)
-            raise AudioAlignmentError(message)
 
 
 def _probe_input_videos(
@@ -258,19 +208,19 @@ async def execute_prep(
     input_videos = discover_inputs(workspace.input_dir)
     artifacts = RunArtifacts()
 
+    _validate_cache_state(
+        request=request,
+        workspace=workspace,
+        config=config,
+        input_videos=input_videos,
+    )
+
     workspace, metadata_prefetch = await _resolve_run_directory(
         request=request,
         workspace=workspace,
         config=config,
         input_videos=input_videos,
         deps=deps,
-    )
-
-    _validate_cache_state(
-        request=request,
-        workspace=workspace,
-        config=config,
-        input_videos=input_videos,
     )
 
     clips = _probe_input_videos(

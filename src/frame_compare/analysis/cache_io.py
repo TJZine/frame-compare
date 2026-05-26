@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from fractions import Fraction
@@ -22,7 +23,11 @@ if TYPE_CHECKING:
     from frame_compare.config.schema import AnalysisConfig
 
 CACHE_FILENAME: str = "cache.compframes"
+CACHE_FILE_EXTENSION: str = ".compframes"
+CACHE_LABEL_MAX_LENGTH: int = 80
 CACHE_VERSION: int = 3
+_SAFE_LABEL_CHARS = re.compile(r"[^a-z0-9._-]+")
+_MULTI_SEPARATOR = re.compile(r"[-_.]{2,}")
 
 
 class _CacheParseError(ValueError):
@@ -50,6 +55,76 @@ def compute_cache_key(video_paths: list[Path], config: AnalysisConfig) -> str:
     return h.hexdigest()
 
 
+def build_cache_label(video_paths: list[Path]) -> str:
+    """Build a filesystem-safe human label from input filename stems."""
+    parts: list[str] = []
+    for path in video_paths:
+        label = _sanitize_cache_label(path.stem)
+        if label:
+            parts.append(label)
+    if not parts:
+        return "analysis"
+
+    label = "__".join(parts)
+    if len(label) > CACHE_LABEL_MAX_LENGTH:
+        label = label[:CACHE_LABEL_MAX_LENGTH].rstrip("-_.")
+    return label or "analysis"
+
+
+def metrics_cache_filename(video_paths: list[Path], fingerprint: str) -> str:
+    """Return the labeled filename for an analysis cache entry."""
+    return f"{build_cache_label(video_paths)}__{fingerprint}{CACHE_FILE_EXTENSION}"
+
+
+def find_metrics_cache_file(cache_dir: Path, fingerprint: str) -> Path | None:
+    """Find the shared analysis cache file for a full fingerprint."""
+    fingerprint_suffix = f"__{fingerprint}{CACHE_FILE_EXTENSION}"
+    try:
+        entries = sorted(cache_dir.iterdir(), key=lambda path: path.name)
+    except OSError:
+        return None
+    for path in entries:
+        if path.is_file() and path.name.endswith(fingerprint_suffix):
+            return path
+    return None
+
+
+def delete_metrics_cache_entry(cache_dir: Path, fingerprint: str) -> None:
+    """Delete shared analysis cache files matching a full fingerprint."""
+    fingerprint_suffix = f"__{fingerprint}{CACHE_FILE_EXTENSION}"
+    try:
+        entries = list(cache_dir.iterdir())
+    except OSError:
+        return
+    for path in entries:
+        if not path.is_file() or not path.name.endswith(fingerprint_suffix):
+            continue
+        path.unlink()
+        sidecar_path = path.with_suffix(".meta.json")
+        if sidecar_path.exists():
+            sidecar_path.unlink()
+
+
+def read_cache_version(cache_path: Path) -> str | None:
+    """Read the top-level version from a cache payload for error reporting."""
+    try:
+        raw_data: object = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(raw_data, Mapping):
+        return None
+    data = cast(Mapping[str, object], raw_data)
+    version = data.get("version")
+    return str(version) if version is not None else None
+
+
+def _sanitize_cache_label(value: str) -> str:
+    label = value.lower()
+    label = _SAFE_LABEL_CHARS.sub("-", label)
+    label = _MULTI_SEPARATOR.sub("-", label)
+    return label.strip("-_.")
+
+
 def load_cached_metrics(
     cache_dir: Path,
     fingerprint: str,
@@ -59,7 +134,9 @@ def load_cached_metrics(
 
     The `clips` parameter is reserved for future validation; currently ignored.
     """
-    cache_path = cache_dir / CACHE_FILENAME
+    cache_path = find_metrics_cache_file(cache_dir, fingerprint)
+    if cache_path is None:
+        return CacheLoadResult(success=False, reason="not_found")
     if not cache_path.exists():
         return CacheLoadResult(success=False, reason="not_found")
 
@@ -201,7 +278,10 @@ def _parse_cache_version(value: object) -> int:
 def save_metrics_cache(metrics: FrameMetrics, cache_dir: Path) -> None:
     """Persist analysis metrics to cache file."""
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_path = cache_dir / CACHE_FILENAME
+    cache_path = cache_dir / metrics_cache_filename(
+        [Path(clip.path) for clip in metrics.metadata.clips],
+        metrics.metadata.config_fingerprint,
+    )
 
     data: dict[str, object] = {
         "version": CACHE_VERSION,

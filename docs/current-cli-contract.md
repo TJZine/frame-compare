@@ -85,8 +85,30 @@ exists.
   sanitized summary rather than raw probe exception text.
 - `--diagnose-paths` emits a pinned JSON object with keys `cache`, `config`, `input`,
   `output`, and `root`, then exits without invoking the runtime pipeline.
+  The `cache` value is the resolved configured `paths.generated_dir`; the shared
+  analysis cache lives below it at `cache/analysis`.
 - `--write-config` writes the effective config to disk, then exits without invoking the
   runtime pipeline.
+
+### Cache Mode Semantics
+
+- Analysis cache entries live under `<resolved paths.generated_dir>/cache/analysis`
+  using labeled full-fingerprint filenames:
+  `<safe-human-label>__<full-fingerprint>.compframes`.
+- The full fingerprint remains inside the cache payload and is validated on load.
+  Legacy run-folder `cache.compframes` files are not used as analysis cache hits.
+- With `paths.use_run_folders = true`, runs that proceed reserve a fresh run folder;
+  existing run folders are not reused to satisfy analysis cache hits.
+- `--no-cache` deletes only the matching shared analysis cache entry for the current
+  inputs and analysis settings before continuing. It does not clear unrelated shared
+  analysis entries and does not delete alignment offset caches.
+- `--from-cache-only` is analysis-cache-only. When analysis is not skipped, it validates
+  the matching shared analysis cache entry before metadata prefetch and before run-folder
+  reservation, so a missing or invalid entry does not leave an empty run folder.
+- `--from-cache-only` does not require cached alignment offsets from a previous run.
+  Alignment can compute or use the current run folder's run-scoped alignment cache after
+  the analysis cache validation succeeds.
+- `--no-cache` and `--from-cache-only` are mutually exclusive.
 
 ### Report Auto-Open Ownership
 

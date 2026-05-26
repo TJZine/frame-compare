@@ -152,6 +152,7 @@ def build_phases_before_align(
                 run_analyze_phase,
                 input_videos=input_videos,
                 workspace=workspace,
+                require_cache_only=request.from_cache_only,
                 vs_loader=vs_loader,
             ),
             state=state,
