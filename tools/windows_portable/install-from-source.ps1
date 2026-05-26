@@ -144,6 +144,7 @@ if (!(Test-Path -LiteralPath $buildScript)) {
   throw "Build script not found: $buildScript"
 }
 
+Update-ProcessPathFromRegistry
 Ensure-UvOnPath
 
 if ([string]::IsNullOrWhiteSpace($OutDir)) {

@@ -22,6 +22,18 @@ def test_windows_portable_bundle_launcher_uses_cli_package_entry(repo_root: Path
     assert "frame_compare.cli_entry" not in build_script
 
 
+def test_windows_portable_generated_cmd_launchers_have_absolute_powershell_fallbacks(
+    repo_root: Path,
+) -> None:
+    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    build_script = _read_text_or_fail(build_path)
+
+    assert 'set "POWERSHELL_EXE="' in build_script
+    assert "%ProgramFiles%\\PowerShell\\7\\pwsh.exe" in build_script
+    assert "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" in build_script
+    assert '"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File' in build_script
+
+
 def test_windows_portable_build_creates_default_workspace_directories(repo_root: Path) -> None:
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     build_script = _read_text_or_fail(build_path)
