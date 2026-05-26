@@ -38,6 +38,18 @@ def _set_tty(monkeypatch: pytest.MonkeyPatch, is_tty: bool) -> None:
     monkeypatch.setattr(alignment_vspreview.sys.stderr, "isatty", lambda: is_tty)
 
 
+def _set_tty_streams(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    stdin: bool,
+    stdout: bool,
+    stderr: bool,
+) -> None:
+    monkeypatch.setattr(alignment_vspreview.sys.stdin, "isatty", lambda: stdin)
+    monkeypatch.setattr(alignment_vspreview.sys.stdout, "isatty", lambda: stdout)
+    monkeypatch.setattr(alignment_vspreview.sys.stderr, "isatty", lambda: stderr)
+
+
 def _availability(status: VSPreviewAvailabilityStatus) -> VSPreviewAvailability:
     if status == VSPreviewAvailabilityStatus.PROBE_FAILED:
         return VSPreviewAvailability(
@@ -136,7 +148,7 @@ def test_available_without_tty_generates_script_disabled_and_logs_no_tty(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _set_tty(monkeypatch, is_tty=False)
+    _set_tty_streams(monkeypatch, stdin=False, stdout=True, stderr=False)
     monkeypatch.setattr(
         alignment_vspreview,
         "check_vspreview_availability",
@@ -157,7 +169,7 @@ def test_available_without_tty_generates_script_disabled_and_logs_no_tty(
     warning_args, warning_kwargs = mock_warning.call_args
     assert warning_args == ("vspreview_no_tty",)
     assert warning_kwargs["stdin_tty"] is False
-    assert warning_kwargs["stdout_tty"] is False
+    assert warning_kwargs["stdout_tty"] is True
     assert warning_kwargs["stderr_tty"] is False
 
 
@@ -165,7 +177,7 @@ def test_forced_available_without_tty_raises_without_launch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _set_tty(monkeypatch, is_tty=False)
+    _set_tty_streams(monkeypatch, stdin=False, stdout=True, stderr=False)
     monkeypatch.setattr(
         alignment_vspreview,
         "check_vspreview_availability",

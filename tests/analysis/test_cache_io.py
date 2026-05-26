@@ -53,6 +53,18 @@ def test_compute_cache_key_order_independent(tmp_path: Path) -> None:
     assert key1 == key2
 
 
+def test_metrics_cache_filename_order_independent(tmp_path: Path) -> None:
+    fingerprint = "f" * 64
+    v1 = create_video_file(tmp_path, "b-source.mkv")
+    v2 = create_video_file(tmp_path, "a-source.mkv")
+
+    forward = metrics_cache_filename([v1, v2], fingerprint)
+    reversed_order = metrics_cache_filename([v2, v1], fingerprint)
+
+    assert forward == reversed_order
+    assert forward == f"a-source__b-source__{fingerprint}.compframes"
+
+
 def test_compute_cache_key_changes_on_frame_count(tmp_path: Path) -> None:
     """Different frame_count → different key."""
     v1 = create_video_file(tmp_path, "v1.mkv")
@@ -352,6 +364,7 @@ def test_load_missing_key_returns_corrupted(tmp_path: Path) -> None:
         ("luminance", "not-a-list"),
         ("motion", [False]),
         ("metadata.fps", "not-a-fraction"),
+        ("metadata.fps", "24000/0"),
         ("metadata.version", "3"),
         ("metadata.clips.0.path", 123),
         ("metadata.clips.0.size", True),

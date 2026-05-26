@@ -69,7 +69,7 @@ def test_probe_fps_empty_output_is_alignment_parse_error(mock_run: MagicMock) ->
     assert "empty" in str(exc_info.value)
 
 
-@pytest.mark.parametrize("stdout", [b"not-a-rate\n", b"24000/1001,extra\n"])
+@pytest.mark.parametrize("stdout", [b"not-a-rate\n", b"24000/1001,extra\n", b"24000/0\n"])
 @patch("frame_compare.services.alignment_audio.run_subprocess")
 def test_probe_fps_malformed_output_is_alignment_parse_error(
     mock_run: MagicMock, stdout: bytes

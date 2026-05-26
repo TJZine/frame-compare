@@ -41,7 +41,9 @@ def probe_fps(video_path: Path) -> Fraction:
     output = proc.stdout.decode("utf-8").strip()
     normalized_output = output.removesuffix(",")
     if not normalized_output:
-        raise AudioAlignmentError(f"unable to parse ffprobe FPS output for {video_path.name}: empty")
+        raise AudioAlignmentError(
+            f"unable to parse ffprobe FPS output for {video_path.name}: empty"
+        )
     if "," in normalized_output:
         raise AudioAlignmentError(
             f"unable to parse ffprobe FPS output for {video_path.name}: {output!r}"
@@ -49,7 +51,7 @@ def probe_fps(video_path: Path) -> Fraction:
 
     try:
         return Fraction(normalized_output)
-    except ValueError as e:
+    except (ValueError, ZeroDivisionError) as e:
         raise AudioAlignmentError(
             f"unable to parse ffprobe FPS output for {video_path.name}: {output!r}"
         ) from e

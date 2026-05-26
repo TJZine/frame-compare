@@ -31,10 +31,6 @@ class _TTYStatus:
     stdout: bool
     stderr: bool
 
-    @property
-    def has_any(self) -> bool:
-        return self.stdin or self.stdout or self.stderr
-
 
 @dataclass(frozen=True)
 class _LaunchDecision:
@@ -156,8 +152,7 @@ def _prompt_for_confirmed_offsets(
         while True:
             try:
                 raw_value = input(
-                    f"Confirmed offset for {comparison.stem} "
-                    f"[{_format_signed_frames(suggested)}]: "
+                    f"Confirmed offset for {comparison.stem} [{_format_signed_frames(suggested)}]: "
                 ).strip()
             except (EOFError, OSError):
                 print("No terminal input available; keeping current offsets.")
@@ -207,10 +202,11 @@ def _resolve_launch_decision(
     tty_status: _TTYStatus,
 ) -> _LaunchDecision:
     requested = _launch_requested(config)
-    enabled = bool(requested and is_available and tty_status.has_any)
+    has_prompt_input = tty_status.stdin
+    enabled = bool(requested and is_available and has_prompt_input)
     return _LaunchDecision(
         enabled=enabled,
-        no_tty=bool(requested and is_available and not tty_status.has_any),
+        no_tty=bool(requested and is_available and not has_prompt_input),
     )
 
 

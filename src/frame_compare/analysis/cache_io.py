@@ -41,10 +41,18 @@ class _ValidatedCachePayload:
     metadata: MetricsMetadata
 
 
+def _cache_path_sort_key(path: Path) -> str:
+    return path.as_posix()
+
+
+def _sorted_video_paths(video_paths: list[Path]) -> list[Path]:
+    return sorted(video_paths, key=_cache_path_sort_key)
+
+
 def compute_cache_key(video_paths: list[Path], config: AnalysisConfig) -> str:
     """Generate deterministic cache key from video files and analysis config."""
     h = hashlib.sha256()
-    for p in sorted(video_paths, key=str):
+    for p in _sorted_video_paths(video_paths):
         stat = p.stat()
         h.update(f"{p}|{stat.st_size}|{stat.st_mtime_ns}".encode())
     h.update(
@@ -58,7 +66,7 @@ def compute_cache_key(video_paths: list[Path], config: AnalysisConfig) -> str:
 def build_cache_label(video_paths: list[Path]) -> str:
     """Build a filesystem-safe human label from input filename stems."""
     parts: list[str] = []
-    for path in video_paths:
+    for path in _sorted_video_paths(video_paths):
         label = _sanitize_cache_label(path.stem)
         if label:
             parts.append(label)
@@ -237,7 +245,7 @@ def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
             clips=_parse_clip_identities(data["clips"]),
             version=_parse_cache_version(data.get("version", CACHE_VERSION)),
         )
-    except (ValueError, TypeError) as exc:
+    except (ValueError, TypeError, ZeroDivisionError) as exc:
         raise _CacheParseError from exc
 
 
