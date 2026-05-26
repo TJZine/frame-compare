@@ -6,6 +6,7 @@
 .fastembed_cache
 .codex/schemas/
 .codex/skills/
+.tmp/
 .uv_cache/
 .venv/
 .agent/
