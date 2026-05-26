@@ -333,30 +333,33 @@ jobs:
 
       - name: Resolve release asset names
         id: release_names
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          tag="${{ github.event.release.tag_name }}"
-          asset_tag="${tag//\//-}"
+          asset_tag="${RELEASE_TAG//\//-}"
           printf 'asset_tag=%s\n' "$asset_tag" >> "$GITHUB_OUTPUT"
 
       - name: Prepare versioned release asset
+        env:
+          ASSET_TAG: ${{ steps.release_names.outputs.asset_tag }}
         run: |
-          asset_tag="${{ steps.release_names.outputs.asset_tag }}"
-          zip="dist/release-assets/frame-compare-portable-win-x64-${asset_tag}.zip"
+          zip="dist/release-assets/frame-compare-portable-win-x64-${ASSET_TAG}.zip"
           cp dist/release-assets/frame-compare-portable-win-x64.zip "$zip"
           hash="$(sha256sum "$zip" | cut -d ' ' -f 1)"
           printf '%s  %s\n' "$hash" "$(basename "$zip")" > "$zip.sha256"
 
       - name: Prepare versioned signed update asset
         if: needs.build.outputs.update_signed == 'true'
+        env:
+          ASSET_TAG: ${{ steps.release_names.outputs.asset_tag }}
         run: |
-          asset_tag="${{ steps.release_names.outputs.asset_tag }}"
           mapfile -t update_zips < <(find dist/release-assets -maxdepth 1 -name 'frame-compare-update-win-x64-*.zip' ! -name '*.sha256')
           if [ "${#update_zips[@]}" -ne 1 ]; then
             echo "Expected exactly one signed update zip artifact, found ${#update_zips[@]}." >&2
             exit 1
           fi
           update_zip="${update_zips[0]}"
-          versioned_update_zip="dist/release-assets/frame-compare-update-win-x64-${asset_tag}.zip"
+          versioned_update_zip="dist/release-assets/frame-compare-update-win-x64-${ASSET_TAG}.zip"
           cp "$update_zip" "$versioned_update_zip"
           hash="$(sha256sum "$versioned_update_zip" | cut -d ' ' -f 1)"
           printf '%s  %s\n' "$hash" "$(basename "$versioned_update_zip")" > "$versioned_update_zip.sha256"

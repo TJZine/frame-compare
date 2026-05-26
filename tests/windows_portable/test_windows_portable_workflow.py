@@ -6,6 +6,26 @@ from pathlib import Path
 from ._helpers import read_text_or_fail as _read_text_or_fail
 
 
+def _assert_release_asset_name_hardening(workflow: str) -> None:
+    assert re.search(
+        r"- name: Resolve release asset names[\s\S]*?env:\s*\n\s+RELEASE_TAG:\s+\$\{\{\s*github\.event\.release\.tag_name\s*\}\}"
+        r"[\s\S]*?asset_tag=\"\$\{RELEASE_TAG//\\//-\}\"",
+        workflow,
+    )
+    assert re.search(
+        r"- name: Prepare versioned release asset[\s\S]*?env:\s*\n\s+ASSET_TAG:\s+\$\{\{\s*steps\.release_names\.outputs\.asset_tag\s*\}\}"
+        r"[\s\S]*?frame-compare-portable-win-x64-\$\{ASSET_TAG\}\.zip",
+        workflow,
+    )
+    assert re.search(
+        r"- name: Prepare versioned signed update asset[\s\S]*?env:\s*\n\s+ASSET_TAG:\s+\$\{\{\s*steps\.release_names\.outputs\.asset_tag\s*\}\}"
+        r"[\s\S]*?frame-compare-update-win-x64-\$\{ASSET_TAG\}\.zip",
+        workflow,
+    )
+    assert 'tag="${{ github.event.release.tag_name }}"' not in workflow
+    assert 'asset_tag="${{ steps.release_names.outputs.asset_tag }}"' not in workflow
+
+
 def test_windows_portable_workflow_does_not_flatten_zip_contents(repo_root: Path) -> None:
     wf_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
     wf = _read_text_or_fail(wf_path)
@@ -102,10 +122,8 @@ def test_windows_portable_workflow_uploads_versioned_release_assets(repo_root: P
 
     assert "Resolve release asset names" in workflow
     assert "Prepare versioned release asset" in workflow
-    assert 'tag="${{ github.event.release.tag_name }}"' in workflow
-    assert 'asset_tag="${tag//\\//-}"' in workflow
+    _assert_release_asset_name_hardening(workflow)
     assert "steps.release_names.outputs.asset_tag" in workflow
-    assert 'frame-compare-portable-win-x64-${asset_tag}.zip' in workflow
     assert 'hash="$(sha256sum "$zip" | cut -d \' \' -f 1)"' in workflow
     assert 'printf \'%s  %s\\n\' "$hash" "$(basename "$zip")" > "$zip.sha256"' in workflow
     assert (
@@ -123,9 +141,9 @@ def test_windows_portable_workflow_smokes_extracted_install_shim(repo_root: Path
     workflow = _read_text_or_fail(workflow_path)
 
     assert "Smoke: extracted install shim" in workflow
-    assert 'dist/zip_extract_check/frame-compare-portable-win-x64' in workflow
+    assert "dist/zip_extract_check/frame-compare-portable-win-x64" in workflow
     assert '& "$bundle/install.cmd"' in workflow
-    assert 'Programs/FrameCompare/bin/frame-compare.cmd' in workflow
+    assert "Programs/FrameCompare/bin/frame-compare.cmd" in workflow
     assert "& $shim version" in workflow
     assert 'versionOutput -notmatch "^frame-compare \\d+\\.\\d+\\.\\d+"' in workflow
     assert "& $shim --help" in workflow
@@ -157,10 +175,16 @@ def test_windows_portable_workflow_signs_update_only_for_release_like_events(
     workflow = _read_text_or_fail(workflow_path)
 
     assert "Pull requests prove update zip creation without requiring signing secrets." in workflow
-    assert "Release/manual runs sign only when the private key XML secret is configured." in workflow
+    assert (
+        "Release/manual runs sign only when the private key XML secret is configured." in workflow
+    )
     assert "id: sign_update" in workflow
-    assert "if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'" in workflow
-    assert "WINDOWS_UPDATE_SIGNING_KEY_XML: ${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}" in workflow
+    assert (
+        "if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'" in workflow
+    )
+    assert (
+        "WINDOWS_UPDATE_SIGNING_KEY_XML: ${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}" in workflow
+    )
     assert "::notice::Skipping signed update zip; WINDOWS_UPDATE_SIGNING_KEY_XML secret" in workflow
     assert "$env:SIGNING_KEY_XML_PATH = $keyPath" in workflow
     assert "tools/windows_portable/sign_update.ps1" in workflow
@@ -205,8 +229,8 @@ def test_windows_portable_workflow_uploads_signed_update_release_asset_condition
     assert "Upload signed update release asset" in workflow
     assert workflow.count("if: needs.build.outputs.update_signed == 'true'") == 3
     assert "mapfile -t update_zips" in workflow
-    assert 'Expected exactly one signed update zip artifact, found ${#update_zips[@]}.' in workflow
-    assert "frame-compare-update-win-x64-${asset_tag}.zip" in workflow
+    assert "Expected exactly one signed update zip artifact, found ${#update_zips[@]}." in workflow
+    assert "frame-compare-update-win-x64-${ASSET_TAG}.zip" in workflow
     assert (
         "dist/release-assets/frame-compare-update-win-x64-${{ "
         "steps.release_names.outputs.asset_tag }}.zip"
