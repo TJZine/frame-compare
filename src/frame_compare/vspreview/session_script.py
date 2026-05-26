@@ -324,9 +324,7 @@ def main():
 
     safe_print("\\nReady for VSPreview. Adjust offsets visually, then confirm in terminal.")
 
-
-if __name__ == "__main__":
-    main()
+main()
 """
 
 

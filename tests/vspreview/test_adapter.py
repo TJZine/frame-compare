@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import types
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -242,6 +243,58 @@ def test_build_script_content_resolves_lwlibavsource_with_lsmas_then_lw_fallback
     )
     assert "ref_clip = load_source(str(ref_path))" in script
     assert "comp_clip = load_source(str(comp_path))" in script
+
+
+def test_generated_script_sets_outputs_when_loaded_as_vspreview_module(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reference = tmp_path / "ref.mkv"
+    comparison = tmp_path / "a.mkv"
+    reference.touch()
+    comparison.touch()
+    output_indices: list[int] = []
+
+    class FakeClip:
+        fps = SimpleNamespace(numerator=24, denominator=1)
+
+        def set_output(self, index: int) -> None:
+            output_indices.append(index)
+
+    class FakeLsmas:
+        def LWLibavSource(self, _path: str) -> FakeClip:
+            return FakeClip()
+
+    class FakeText:
+        def Text(self, clip: FakeClip, _text: str, *, alignment: int) -> FakeClip:
+            return clip
+
+    class FakeStd:
+        def AssumeFPS(self, clip: FakeClip, *, fpsnum: int, fpsden: int) -> FakeClip:
+            return clip
+
+    class FakeCore:
+        lsmas = FakeLsmas()
+        text = FakeText()
+        std = FakeStd()
+
+    fake_vapoursynth = types.ModuleType("vapoursynth")
+    fake_vapoursynth.core = FakeCore()
+    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vapoursynth)
+
+    script = _build_script_content(
+        reference=reference,
+        comparisons=[comparison],
+        suggested_offsets_by_key={},
+        bootstrap_paths=[tmp_path],
+    )
+
+    exec(
+        compile(script, "<vspreview-generated>", "exec"),
+        {"__name__": "vspreview_loaded_script", "__file__": str(tmp_path / "session.py")},
+    )
+
+    assert output_indices == [0, 1, 2]
 
 
 def test_generated_script_reports_missing_lwlibavsource_without_traceback(tmp_path: Path) -> None:
