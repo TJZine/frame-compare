@@ -8,6 +8,12 @@ from pathlib import Path
 from ._helpers import read_text_or_fail as _read_text_or_fail
 
 
+def _bundle_runtime_function_block(build_script: str) -> str:
+    start = build_script.index("function Assert-BundleRuntime")
+    end = build_script.index("function Copy-PythonDistLicenses")
+    return build_script[start:end]
+
+
 def test_windows_portable_bundle_launcher_sets_cwd_to_bundle_root(repo_root: Path) -> None:
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     build_script = _read_text_or_fail(build_path)
@@ -30,11 +36,11 @@ def test_windows_portable_bundle_launcher_restores_process_environment(repo_root
         build_script
     )
     assert (
-        '$originalVsExtraPluginPath = Get-FrameCompareLauncherEnvironmentValue -Name '
+        "$originalVsExtraPluginPath = Get-FrameCompareLauncherEnvironmentValue -Name "
         '"VAPOURSYNTH_EXTRA_PLUGIN_PATH"'
     ) in build_script
     assert (
-        '$originalVsPluginPath = Get-FrameCompareLauncherEnvironmentValue -Name '
+        "$originalVsPluginPath = Get-FrameCompareLauncherEnvironmentValue -Name "
         '"VAPOURSYNTH_PLUGIN_PATH"'
     ) in build_script
     assert (
@@ -206,6 +212,7 @@ def test_windows_portable_build_runtime_validation_restores_process_environment(
 ) -> None:
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     build_script = _read_text_or_fail(build_path)
+    runtime_validation = _bundle_runtime_function_block(build_script)
 
     assert "function Get-ProcessEnvironmentValue" in build_script
     assert "function Restore-ProcessEnvironmentValue" in build_script
@@ -213,7 +220,7 @@ def test_windows_portable_build_runtime_validation_restores_process_environment(
     assert '$originalPythonUtf8 = Get-ProcessEnvironmentValue -Name "PYTHONUTF8"' in build_script
     assert '$originalPythonPath = Get-ProcessEnvironmentValue -Name "PYTHONPATH"' in build_script
     assert (
-        '$originalVsExtraPluginPath = Get-ProcessEnvironmentValue -Name '
+        "$originalVsExtraPluginPath = Get-ProcessEnvironmentValue -Name "
         '"VAPOURSYNTH_EXTRA_PLUGIN_PATH"'
     ) in build_script
     assert (
@@ -225,6 +232,13 @@ def test_windows_portable_build_runtime_validation_restores_process_environment(
         'Restore-ProcessEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH" '
         "-Value $originalVsPluginPath"
     ) in build_script
+    assert runtime_validation.count("Set-BundleRuntimeEnvironment -BundleRoot $BundleRoot") == 1
+    assert runtime_validation.index("try {") < runtime_validation.index(
+        "Set-BundleRuntimeEnvironment -BundleRoot $BundleRoot"
+    )
+    assert runtime_validation.index("Set-BundleRuntimeEnvironment -BundleRoot $BundleRoot") < (
+        runtime_validation.index("} finally {")
+    )
 
 
 def test_pyproject_defines_vspreview_optional_dependency(repo_root: Path) -> None:

@@ -623,12 +623,12 @@ function Assert-BundleRuntime([string]$BundleRoot) {
   $originalVsExtraPluginPath = Get-ProcessEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH"
   $originalVsPluginPath = Get-ProcessEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH"
 
-  Set-BundleRuntimeEnvironment -BundleRoot $BundleRoot
-
   $ffmpeg = Join-Path $BundleRoot "ffmpeg\\bin\\ffmpeg.exe"
   $mediaPath = Join-Path $BundleRoot "runtime-smoke.mp4"
   $smokePath = Join-Path $BundleRoot "runtime-smoke.py"
   try {
+    Set-BundleRuntimeEnvironment -BundleRoot $BundleRoot
+
     if (Test-Path -LiteralPath $ffmpeg) {
       & $ffmpeg -hide_banner -loglevel error -f lavfi -i "testsrc2=size=32x32:rate=1:duration=1" -frames:v 1 -pix_fmt yuv420p -y $mediaPath
       Assert-LastExitCode -CommandLabel "ffmpeg tiny media generation"
