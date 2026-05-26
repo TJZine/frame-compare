@@ -17,6 +17,7 @@ from frame_compare.vspreview.adapter import (
     VSPreviewSessionRequest,
 )
 from frame_compare.vspreview.errors import VSPreviewError
+from frame_compare.vspreview.overrides import load_manual_overrides
 
 
 def _write_cached_offset(workspace: Path, frame_offset: int, time_offset_seconds: float) -> None:
@@ -52,6 +53,7 @@ def test_align_clips_launches_vspreview_when_enabled(
     import sys
 
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "skip")
 
     ref = tmp_path / "ref.mkv"
     comp_a = tmp_path / "comp_a.mkv"
@@ -103,6 +105,7 @@ def test_align_clips_full_cache_hit_still_launches_vspreview_when_enabled(
     import sys
 
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "skip")
 
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
@@ -190,6 +193,52 @@ def test_align_clips_vspreview_unavailable_generates_script_without_launch(
     assert kwargs["config"].enabled is False
 
 
+@patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
+@patch("frame_compare.services.alignment._probe_fps")
+@patch("frame_compare.services.alignment._extract_audio")
+@patch("frame_compare.services.alignment._cross_correlate")
+def test_align_clips_vspreview_confirmed_offset_is_saved_and_applied(
+    mock_corr: MagicMock,
+    mock_extract: MagicMock,
+    mock_probe: MagicMock,
+    mock_check_availability: MagicMock,
+    mock_launch: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "9")
+
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+
+    mock_probe.return_value = Fraction(24, 1)
+    mock_extract.return_value = np.ones(10, dtype=np.float32)
+    mock_corr.return_value = (3, 0.99)
+    mock_check_availability.return_value = VSPreviewAvailability(
+        status=VSPreviewAvailabilityStatus.AVAILABLE,
+        message="available",
+    )
+    mock_launch.return_value = tmp_path / "vspreview_script.py"
+
+    results = align_clips(
+        ref,
+        [comp],
+        AlignmentConfig(enable=True, use_vspreview=True, cache_results=False),
+        tmp_path,
+    )
+
+    assert results[0].frame_offset == 9
+    assert results[0].source == "manual"
+    manual_overrides = load_manual_overrides(tmp_path)
+    assert manual_overrides["ref:comp"].frame_offset == 9
+
+
 @patch("frame_compare.services.alignment_vspreview.log.warning")
 @patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
 @patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
@@ -240,6 +289,7 @@ def test_align_clips_force_interactive_launches_when_vspreview_available(
     import sys
 
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "skip")
 
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"

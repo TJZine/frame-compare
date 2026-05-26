@@ -133,7 +133,7 @@ class VSPreviewConfig:
 
     Attributes:
         enabled: Whether to launch VSPreview for verification
-        timeout_seconds: Max time to wait for user input
+        timeout_seconds: Reserved for future bounded interactive confirmation flows
         auto_close: Close VSPreview after user confirms
     """
 
@@ -185,12 +185,11 @@ def launch_alignment_verification_session(
         result = subprocess.run(  # nosec B603
             command,
             check=False,
-            capture_output=True,
+            stdin=None,
+            stdout=None,
+            stderr=None,
             text=True,
-            timeout=config.timeout_seconds,
         )
-    except subprocess.TimeoutExpired as e:
-        raise VSPreviewError(f"launch timed out after {config.timeout_seconds}s") from e
     except FileNotFoundError as e:
         raise VSPreviewError("launcher command was not found") from e
     except Exception as e:
@@ -207,13 +206,7 @@ def launch_alignment_verification_session(
             "vspreview_launch_failed",
             reason=public_reason,
             returncode=result.returncode,
-            hint="Re-run with verbose mode to capture full output",
-        )
-        log.debug(
-            "vspreview_launch_failed_debug",
-            returncode=result.returncode,
-            stderr=result.stderr[:500] if result.stderr else None,
-            stdout=result.stdout[:500] if result.stdout else None,
+            hint="Re-run with verbose mode to inspect VSPreview output",
         )
         raise VSPreviewError(public_reason)
 

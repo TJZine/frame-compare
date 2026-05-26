@@ -63,6 +63,38 @@ def _build_offsets_map(
     return offsets_by_key
 
 
+def _apply_confirmed_vspreview_offsets(
+    *,
+    reference: Path,
+    comparisons: list[Path],
+    confirmed_offsets_by_key: dict[str, int] | None,
+    results_map: dict[str, AlignmentResult],
+    fps_reference: Fraction | None,
+) -> Fraction | None:
+    if not confirmed_offsets_by_key:
+        return fps_reference
+
+    resolved_fps_reference = fps_reference
+    if resolved_fps_reference is None:
+        resolved_fps_reference = _probe_fps(reference)
+
+    for comp in comparisons:
+        key = f"{reference.stem}:{comp.stem}"
+        if key not in confirmed_offsets_by_key:
+            continue
+        frame_offset = int(confirmed_offsets_by_key[key])
+        results_map[key] = AlignmentResult(
+            reference_clip=reference.name,
+            comparison_clip=comp.name,
+            frame_offset=frame_offset,
+            time_offset_seconds=frame_offset / float(resolved_fps_reference),
+            correlation_score=1.0,
+            algorithm=None,
+            source="manual",
+        )
+    return resolved_fps_reference
+
+
 def _check_duplicate_stems(comparisons: list[Path]) -> None:
     """Validate that comparison filenames have unique stems."""
     stems_to_paths: dict[str, list[Path]] = {}
@@ -218,13 +250,20 @@ def align_clips(
         comparisons=comparisons,
         results_map=results_map,
     )
-    maybe_launch_alignment_vspreview(
+    confirmed_offsets = maybe_launch_alignment_vspreview(
         reference=reference,
         comparisons=comparisons,
         offsets_by_key=offsets_by_key,
         cache_dir=cache_dir,
         config=config,
         progress=progress,
+    )
+    fps_reference = _apply_confirmed_vspreview_offsets(
+        reference=reference,
+        comparisons=comparisons,
+        confirmed_offsets_by_key=confirmed_offsets,
+        results_map=results_map,
+        fps_reference=fps_reference,
     )
 
     # Return results in the same order as input comparisons

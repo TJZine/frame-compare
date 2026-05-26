@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 import structlog
@@ -19,6 +20,7 @@ from frame_compare.vspreview.adapter import (
     launch_alignment_verification_session,
 )
 from frame_compare.vspreview.errors import VSPreviewError
+from frame_compare.vspreview.overrides import ManualOverride, save_manual_override
 
 log = structlog.get_logger()
 
@@ -129,6 +131,75 @@ def _log_optional_launch_failed(exc: VSPreviewError, config: AlignmentConfig) ->
     )
 
 
+def _format_signed_frames(value: int) -> str:
+    return f"{value:+d}f"
+
+
+def _prompt_for_confirmed_offsets(
+    *,
+    reference: Path,
+    comparisons: list[Path],
+    offsets_by_key: dict[str, int],
+) -> dict[str, int] | None:
+    if not comparisons:
+        return {}
+
+    print()
+    print("VSPreview closed. Enter confirmed frame offsets.")
+    print("Blank keeps the suggested audio-alignment value; type 'skip' to keep current offsets.")
+    print(f"Reference: {reference.stem}")
+
+    confirmed: dict[str, int] = {}
+    for comparison in comparisons:
+        key = f"{reference.stem}:{comparison.stem}"
+        suggested = int(offsets_by_key.get(key, 0))
+        while True:
+            try:
+                raw_value = input(
+                    f"Confirmed offset for {comparison.stem} "
+                    f"[{_format_signed_frames(suggested)}]: "
+                ).strip()
+            except (EOFError, OSError):
+                print("No terminal input available; keeping current offsets.")
+                return None
+            if raw_value == "":
+                confirmed[key] = suggested
+                break
+            if raw_value.lower() in {"skip", "s"}:
+                return None
+            try:
+                confirmed[key] = int(raw_value)
+            except ValueError:
+                print("Enter an integer frame offset, blank to keep the suggestion, or 'skip'.")
+                continue
+            break
+    return confirmed
+
+
+def _save_confirmed_offsets(
+    *,
+    reference: Path,
+    comparisons: list[Path],
+    cache_dir: Path,
+    confirmed_offsets_by_key: dict[str, int],
+) -> None:
+    timestamp = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    for comparison in comparisons:
+        key = f"{reference.stem}:{comparison.stem}"
+        if key not in confirmed_offsets_by_key:
+            continue
+        save_manual_override(
+            cache_dir,
+            ManualOverride(
+                reference_clip=reference.stem,
+                comparison_clip=comparison.stem,
+                frame_offset=int(confirmed_offsets_by_key[key]),
+                timestamp=timestamp,
+                confirmed=True,
+            ),
+        )
+
+
 def _resolve_launch_decision(
     *,
     config: AlignmentConfig,
@@ -151,7 +222,7 @@ def maybe_launch_alignment_vspreview(
     cache_dir: Path,
     config: AlignmentConfig,
     progress: ProgressReporter | None,
-) -> None:
+) -> dict[str, int] | None:
     """Best-effort VSPreview alignment verification.
 
     This is intended for interactive verification/inspection only. Actual offsets
@@ -161,7 +232,7 @@ def maybe_launch_alignment_vspreview(
       3) computed offsets (cross-correlation)
     """
     if not (config.use_vspreview or config.force_interactive):
-        return
+        return None
 
     availability = check_vspreview_availability()
 
@@ -210,7 +281,24 @@ def maybe_launch_alignment_vspreview(
         )
         if launch_decision.no_tty:
             _log_no_tty(script_path, tty_status)
+        if not launch_decision.enabled:
+            return None
+        confirmed_offsets = _prompt_for_confirmed_offsets(
+            reference=reference,
+            comparisons=comparisons,
+            offsets_by_key=offsets_by_key,
+        )
+        if confirmed_offsets is None:
+            return None
+        _save_confirmed_offsets(
+            reference=reference,
+            comparisons=comparisons,
+            cache_dir=cache_dir,
+            confirmed_offsets_by_key=confirmed_offsets,
+        )
+        return confirmed_offsets
     except VSPreviewError as exc:
         if config.force_interactive:
             raise
         _log_optional_launch_failed(exc, config)
+    return None
