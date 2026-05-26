@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess  # nosec B404
 from fractions import Fraction
 from pathlib import Path
 
@@ -10,7 +9,7 @@ import numpy as np
 
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
-from frame_compare.utils.subproc import run_subprocess
+from frame_compare.utils.subproc import CalledProcessError, TimeoutExpired, run_subprocess
 
 _FFPROBE_TIMEOUT_SECONDS = 15.0
 _FFMPEG_AUDIO_TIMEOUT_SECONDS = 120.0
@@ -34,9 +33,9 @@ def probe_fps(video_path: Path) -> Fraction:
         proc = run_subprocess(argv, timeout_seconds=_FFPROBE_TIMEOUT_SECONDS)
     except FileNotFoundError:
         raise FFmpegNotFoundError() from None
-    except subprocess.TimeoutExpired as e:
+    except TimeoutExpired as e:
         raise FFmpegError("ffprobe timed out", 124) from e
-    except subprocess.CalledProcessError as e:
+    except CalledProcessError as e:
         raise FFmpegError(e.stderr.decode("utf-8"), e.returncode) from e
 
     output = proc.stdout.decode("utf-8").strip()
@@ -76,9 +75,9 @@ def extract_audio(video_path: Path, sample_rate: int) -> np.ndarray:
         proc = run_subprocess(argv, timeout_seconds=_FFMPEG_AUDIO_TIMEOUT_SECONDS)
     except FileNotFoundError:
         raise FFmpegNotFoundError() from None
-    except subprocess.TimeoutExpired as e:
+    except TimeoutExpired as e:
         raise FFmpegError("ffmpeg audio extraction timed out", 124) from e
-    except subprocess.CalledProcessError as e:
+    except CalledProcessError as e:
         raise FFmpegError(e.stderr.decode("utf-8"), e.returncode) from e
     except Exception as e:
         raise FFmpegError(str(e), 1) from e

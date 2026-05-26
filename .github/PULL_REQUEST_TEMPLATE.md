@@ -34,7 +34,7 @@ Closes #
 
 - [ ] I have added tests that prove my fix/feature works
 - [ ] New and existing unit tests pass locally (`pytest -q`)
-- [ ] I have run `lint-imports` to verify import contracts
+- [ ] I have run the canonical import-linter command from the runbook to verify import contracts
 
 ### Documentation
 

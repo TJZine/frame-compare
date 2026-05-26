@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
-from subprocess import CalledProcessError, TimeoutExpired  # nosec B404
 from typing import Protocol, cast
 
 from frame_compare.render.backend._ffmpeg_frame import (
@@ -13,7 +12,7 @@ from frame_compare.render.backend._ffmpeg_frame import (
     frame_seek_time_seconds,
 )
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
-from frame_compare.utils.subproc import run_subprocess
+from frame_compare.utils.subproc import CalledProcessError, TimeoutExpired, run_subprocess
 from frame_compare.vs.types import HDRMetadata
 
 

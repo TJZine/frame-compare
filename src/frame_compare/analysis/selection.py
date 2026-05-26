@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
-import random
 from collections.abc import Sequence
 
 from frame_compare.analysis.errors import SelectionError
@@ -201,10 +201,8 @@ def _select_by_motion(
 def _select_random(
     total_frames: int, count: int, seed: int, exclude: set[int], min_gap: int
 ) -> list[int]:
-    """Select frames randomly, respecting min_gap and excluding existing."""
-    rng = random.Random(seed)
-    candidates = list(range(total_frames))
-    rng.shuffle(candidates)
+    """Select frames via a stable seeded ordering, respecting min_gap and exclusions."""
+    candidates = sorted(range(total_frames), key=lambda idx: _stable_seeded_order(seed, idx))
 
     selected: list[int] = []
     for idx in candidates:
@@ -218,3 +216,9 @@ def _select_random(
             selected.append(idx)
 
     return sorted(selected)
+
+
+def _stable_seeded_order(seed: int, frame_index: int) -> bytes:
+    """Return a stable seed-derived ordering key for a frame index."""
+    payload = f"{seed}:{frame_index}".encode("ascii")
+    return hashlib.blake2b(payload, digest_size=16).digest()
