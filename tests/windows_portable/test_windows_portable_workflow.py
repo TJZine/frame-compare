@@ -3,27 +3,11 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from tests.workflow_helpers import (
+    assert_release_asset_name_hardening as _assert_release_asset_name_hardening,
+)
+
 from ._helpers import read_text_or_fail as _read_text_or_fail
-
-
-def _assert_release_asset_name_hardening(workflow: str) -> None:
-    assert re.search(
-        r"- name: Resolve release asset names[\s\S]*?env:\s*\n\s+RELEASE_TAG:\s+\$\{\{\s*github\.event\.release\.tag_name\s*\}\}"
-        r"[\s\S]*?asset_tag=\"\$\{RELEASE_TAG//\\//-\}\"",
-        workflow,
-    )
-    assert re.search(
-        r"- name: Prepare versioned release asset[\s\S]*?env:\s*\n\s+ASSET_TAG:\s+\$\{\{\s*steps\.release_names\.outputs\.asset_tag\s*\}\}"
-        r"[\s\S]*?frame-compare-portable-win-x64-\$\{ASSET_TAG\}\.zip",
-        workflow,
-    )
-    assert re.search(
-        r"- name: Prepare versioned signed update asset[\s\S]*?env:\s*\n\s+ASSET_TAG:\s+\$\{\{\s*steps\.release_names\.outputs\.asset_tag\s*\}\}"
-        r"[\s\S]*?frame-compare-update-win-x64-\$\{ASSET_TAG\}\.zip",
-        workflow,
-    )
-    assert 'tag="${{ github.event.release.tag_name }}"' not in workflow
-    assert 'asset_tag="${{ steps.release_names.outputs.asset_tag }}"' not in workflow
 
 
 def test_windows_portable_workflow_does_not_flatten_zip_contents(repo_root: Path) -> None:

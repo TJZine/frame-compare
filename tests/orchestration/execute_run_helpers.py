@@ -80,7 +80,7 @@ def write_metrics_cache(
 ) -> None:
     cache_inputs = [source_path] if video_paths is None else video_paths
     fingerprint = cache_io.compute_cache_key(cache_inputs, config.analysis)
-    stat = source_path.stat()
+    stats_by_path = {path: path.stat() for path in cache_inputs}
     metrics = FrameMetrics(
         luminance=[0.1] * 100,
         motion=[0.2] * 100,
@@ -91,8 +91,8 @@ def write_metrics_cache(
             clips=[
                 ClipIdentity(
                     path=str(path),
-                    size=stat.st_size if path == source_path else path.stat().st_size,
-                    mtime=stat.st_mtime if path == source_path else path.stat().st_mtime,
+                    size=stats_by_path[path].st_size,
+                    mtime=stats_by_path[path].st_mtime,
                 )
                 for path in cache_inputs
             ],
