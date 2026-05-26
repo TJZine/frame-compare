@@ -175,7 +175,7 @@ def _manifest_references_lsmas_plugin(manifest_path: str, filenames: list[str]) 
                     continue
                 if line in expected_entries:
                     return True
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         log.debug("Skipping manifest check for %s due to error: %s", manifest_path, exc)
     return False
 
