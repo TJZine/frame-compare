@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -89,6 +90,8 @@ class TmdbConfig(BaseModel):
     enabled: bool = True
     unattended: bool = False
     timeout_seconds: float = Field(default=10.0, ge=1.0)
+    year_tolerance: int = Field(default=2, ge=0, le=5)
+    category_preference: Literal["movie", "tv"] | None = None
 
 
 class ReportConfig(BaseModel):

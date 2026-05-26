@@ -122,7 +122,9 @@ External runtime boundaries:
 
 Keep these integrations at their current owners:
 
-- metadata lookups: `frame_compare.services.metadata`
+- metadata lookups: `frame_compare.services.metadata` remains the facade owner;
+  `frame_compare.services.tmdb_resolution` owns resolver policy and
+  `frame_compare.services.tmdb_lookup` owns low-level TMDB HTTP and response mapping
 - publishing: `frame_compare.services.publishers`
 - browser auto-open for generated reports: `frame_compare.cli.entry`
 - HTML report generation: `frame_compare.services.report`

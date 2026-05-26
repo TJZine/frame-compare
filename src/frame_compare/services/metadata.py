@@ -1,17 +1,17 @@
 """Metadata resolution workflow and compatibility facade."""
 
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import httpx
 
 from frame_compare.services.errors import MetadataError
 from frame_compare.services.metadata_parsing import parse_filename
-from frame_compare.services.tmdb_lookup import (
-    is_valid_tmdb_api_key,
-    lookup_tmdb,
-    search_tmdb,
-)
-from frame_compare.services.types import MetadataConfig, TmdbMetadata
+from frame_compare.services.tmdb_lookup import is_valid_tmdb_api_key, lookup_tmdb
+from frame_compare.services.types import MetadataConfig, ParsedMetadata, TmdbMetadata
+
+if TYPE_CHECKING:
+    from frame_compare.services.tmdb_resolution import TmdbResolutionOutcome
 
 __all__ = [
     "is_valid_tmdb_api_key",
@@ -19,6 +19,16 @@ __all__ = [
     "parse_filename",
     "resolve_metadata",
 ]
+
+
+async def resolve_tmdb_match(
+    parsed: ParsedMetadata,
+    config: MetadataConfig,
+    client: httpx.AsyncClient,
+) -> "TmdbResolutionOutcome":
+    from frame_compare.services.tmdb_resolution import resolve_tmdb_match as _resolve_tmdb_match
+
+    return await _resolve_tmdb_match(parsed, config, client)
 
 
 async def resolve_metadata(
@@ -31,19 +41,10 @@ async def resolve_metadata(
     Full metadata resolution workflow.
 
     Steps:
-    1. Parse first filename
-    2. Search TMDB
-    3. If multiple results, config.unattended is false, and prompt_callback is
-       provided, call prompt_callback; otherwise fall back to the first result
-    4. Return selected metadata
-
-    Selection behavior:
-    - If no results: return None
-    - If single result or config.unattended=True: return first result
-    - If multiple results and prompt_callback is None: return first result (index 0)
-    - If multiple results and prompt_callback provided: call it and use returned index
-    - If prompt_callback returns an invalid index (< 0 or >= len(results)):
-      raise MetadataError with message containing "invalid selection index"
+    1. Parse the first filename
+    2. Delegate TMDB ranking to the resolver
+    3. Return the resolver's selected match when available
+    4. Otherwise, optionally prompt from unresolved ranked candidates
 
     Args:
         filenames: List of filenames to try parsing
@@ -62,19 +63,22 @@ async def resolve_metadata(
         return None
 
     parsed = parse_filename(filenames[0])
-    results = await search_tmdb(parsed, config, client)
+    outcome = await resolve_tmdb_match(parsed, config, client)
 
-    if not results:
+    if outcome.selected is not None:
+        return outcome.selected
+
+    if not outcome.candidates:
         return None
 
-    if len(results) == 1 or config.unattended:
-        return results[0]
+    if config.unattended:
+        return None
 
     if prompt_callback is None:
-        return results[0]
+        return None
 
-    idx = prompt_callback(results)
-    if idx < 0 or idx >= len(results):
+    idx = prompt_callback(outcome.candidates)
+    if idx < 0 or idx >= len(outcome.candidates):
         raise MetadataError("invalid selection index")
 
-    return results[idx]
+    return outcome.candidates[idx]

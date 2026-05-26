@@ -147,6 +147,8 @@ api_key = "test-key"
 enabled = true
 unattended = true
 timeout_seconds = 3.5
+year_tolerance = 4
+category_preference = "tv"
 """
     )
     config = _create_config(tmp_path, content=config_content)
@@ -188,4 +190,6 @@ timeout_seconds = 3.5
         api_key="test-key",
         unattended=True,
         timeout_seconds=3.5,
+        year_tolerance=4,
+        category_preference="tv",
     )

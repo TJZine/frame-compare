@@ -547,6 +547,8 @@ enabled = true
 api_key = "test-key"
 unattended = true
 timeout_seconds = 7.5
+year_tolerance = 1
+category_preference = "movie"
 """
     create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"
@@ -596,8 +598,20 @@ timeout_seconds = 7.5
     assert prefetch_calls == [["source.mkv"]]
     assert phase_calls == [["source.mkv"]]
     assert captured_configs == [
-        MetadataConfig(api_key="test-key", unattended=True, timeout_seconds=7.5),
-        MetadataConfig(api_key="test-key", unattended=True, timeout_seconds=7.5),
+        MetadataConfig(
+            api_key="test-key",
+            unattended=True,
+            timeout_seconds=7.5,
+            year_tolerance=1,
+            category_preference="movie",
+        ),
+        MetadataConfig(
+            api_key="test-key",
+            unattended=True,
+            timeout_seconds=7.5,
+            year_tolerance=1,
+            category_preference="movie",
+        ),
     ]
 
 

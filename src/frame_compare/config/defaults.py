@@ -55,6 +55,8 @@ max_retries = 3
 enabled = true
 unattended = false
 timeout_seconds = 10.0
+year_tolerance = 2
+# category_preference = "movie"  # optional: "movie" or "tv"
 
 [report]
 enable = true
