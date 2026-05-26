@@ -165,14 +165,21 @@ function Invoke-FrameCompareShim([object[]]$ArgsValues) {
   }
 
   $stateConfigToml = Join-Path $stateDir "config.toml"
+  $bundleConfigToml = Join-Path (Join-Path $bundlePath "config") "config.toml"
+  $defaultConfigToml = ""
+  if (Test-Path -LiteralPath $bundleConfigToml) {
+    $defaultConfigToml = $bundleConfigToml
+  } elseif (Test-Path -LiteralPath $stateConfigToml) {
+    $defaultConfigToml = $stateConfigToml
+  }
 
   $forwardArgs = @($ArgsValues | ForEach-Object { [string]$_ })
-  if (Test-Path -LiteralPath $stateConfigToml) {
+  if (-not [string]::IsNullOrWhiteSpace($defaultConfigToml)) {
     $hasExplicitConfigFlag = Test-ArgsContainConfigFlag -ArgsValues $forwardArgs
     if (-not $hasExplicitConfigFlag) {
       $injectIndex = Get-ConfigInjectionIndex -ArgsValues $forwardArgs
       if ($injectIndex -ge 0) {
-        $forwardArgs = Add-ArgsAtIndex -ArgsValues $forwardArgs -Index $injectIndex -InsertValues @("--config", $stateConfigToml)
+        $forwardArgs = Add-ArgsAtIndex -ArgsValues $forwardArgs -Index $injectIndex -InsertValues @("--config", $defaultConfigToml)
       }
     }
   }

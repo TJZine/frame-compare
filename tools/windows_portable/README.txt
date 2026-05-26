@@ -14,14 +14,16 @@ NOTES:
       %LOCALAPPDATA%\Programs\FrameCompare\bin
   - Shim state/config is stored under:
       %LOCALAPPDATA%\Programs\FrameCompare\state\config.json
-  - Default portable config is stored at:
+  - Installed-shim fallback config is stored at:
       %LOCALAPPDATA%\Programs\FrameCompare\state\config.toml
   - To override config for a run, pass:
       frame-compare run --config <path-to-config.toml>
   - Bundle defaults include empty:
       .\config\
       .\comparison_videos\
-    Put config at .\config\config.toml and source clips under .\comparison_videos\.
+    When .\config\config.toml exists in the bundle, the installed `frame-compare`
+    command uses it before the AppData fallback config. Source clips can go under
+    .\comparison_videos\.
   - For source builds (`tools\windows_portable\install-from-source.cmd`), use:
       .\dist\frame-compare-portable-win-x64\
     as the bundle root (not the repository root).

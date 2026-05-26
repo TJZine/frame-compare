@@ -63,6 +63,13 @@ For those commands:
 - `--config` selects the config file path. Relative paths resolve from `--root`.
 - If `--config` is omitted, the CLI resolves `config/config.toml` under `--root`.
 
+For the installed Windows portable shim, the shim runs the bundle launcher from the
+bundle root and injects a default `--config` for `run`, `wizard`, and supported
+`preset` subcommands when the user did not pass `--config`. The injected default
+prefers `<bundle>/config/config.toml` when it exists, otherwise it falls back to
+`%LOCALAPPDATA%/Programs/FrameCompare/state/config.toml` when that state config
+exists.
+
 ## `version` Command Contract
 
 - Prints `frame-compare <version>` to stdout.

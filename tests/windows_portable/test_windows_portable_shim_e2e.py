@@ -88,6 +88,57 @@ def test_windows_portable_shim_preset_apply_injection_e2e(tmp_path: Path, repo_r
 
 
 @pytest.mark.integration
+def test_windows_portable_shim_prefers_bundle_config_over_state_config(
+    tmp_path: Path, repo_root: Path
+) -> None:
+    exe = _powershell_exe()
+    if exe is None:
+        pytest.skip("pwsh/powershell not available")
+
+    _, shim_path, state_dir, bundle_dir = _setup_install_layout(
+        tmp_path=tmp_path, repo_root=repo_root
+    )
+
+    state_config_toml = state_dir / "config.toml"
+    state_config_toml.write_text('[paths]\ninput_dir = "state-inputs"\n', encoding="utf-8")
+    bundle_config_dir = bundle_dir / "config"
+    bundle_config_dir.mkdir()
+    bundle_config_toml = bundle_config_dir / "config.toml"
+    bundle_config_toml.write_text('[paths]\ninput_dir = "bundle-inputs"\n', encoding="utf-8")
+
+    _write_valid_config_json(state_dir=state_dir, bundle_dir=bundle_dir, schema_version=1)
+
+    args_file = tmp_path / "args.txt"
+    bundle_launcher = bundle_dir / "frame-compare.ps1"
+    bundle_launcher.write_text(
+        "\n".join(
+            [
+                "$argsFile = $env:FC_TEST_ARGS_FILE",
+                "if ($null -eq $argsFile) { exit 2 }",
+                'Set-Content -LiteralPath $argsFile -Value ($args -join "|") -Encoding UTF8',
+                '$configIndex = [Array]::IndexOf($args, "--config")',
+                "if ($configIndex -lt 0) { exit 3 }",
+                "if (($configIndex + 1) -ge $args.Count) { exit 4 }",
+                "$cfg = [string]$args[$configIndex + 1]",
+                f"if ($cfg -ne '{bundle_config_toml}') {{ exit 5 }}",
+                f"if ($cfg -eq '{state_config_toml}') {{ exit 6 }}",
+                "exit 0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env["FC_TEST_ARGS_FILE"] = str(args_file)
+    proc = _run_shim(exe=exe, shim_path=shim_path, env=env, args=["run"])
+    assert proc.returncode == 0, f"stdout:\n{proc.stdout}\n\nstderr:\n{proc.stderr}"
+
+    forwarded = args_file.read_text(encoding="utf-8-sig").rstrip("\r\n")
+    parts = forwarded.split("|")
+    assert parts[:3] == ["run", "--config", str(bundle_config_toml)]
+
+
+@pytest.mark.integration
 def test_windows_portable_shim_missing_state_config_toml_skips_injection(
     tmp_path: Path, repo_root: Path
 ) -> None:
