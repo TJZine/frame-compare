@@ -42,6 +42,15 @@ def test_probe_fps_fraction(mock_run: MagicMock):
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")
+def test_probe_fps_accepts_single_trailing_comma(mock_run: MagicMock) -> None:
+    mock_run.return_value.stdout = b"24000/1001,\r\n"
+
+    res = _probe_fps(Path("test.mkv"))
+
+    assert res == Fraction(24000, 1001)
+
+
+@patch("frame_compare.services.alignment_audio.run_subprocess")
 def test_probe_fps_integer(mock_run: MagicMock):
     """Test probing FPS when it returns an integer."""
     mock_run.return_value.stdout = b"24\n"
@@ -50,18 +59,27 @@ def test_probe_fps_integer(mock_run: MagicMock):
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_probe_fps_empty_output_preserves_ffmpeg_error(mock_run: MagicMock):
-    """Empty ffprobe output should preserve the original FFmpegError details."""
-    proc = MagicMock()
-    proc.stdout = b""
-    proc.returncode = 7
-    mock_run.return_value = proc
+def test_probe_fps_empty_output_is_alignment_parse_error(mock_run: MagicMock) -> None:
+    mock_run.return_value.stdout = b""
 
-    with pytest.raises(FFmpegError) as exc_info:
+    with pytest.raises(AudioAlignmentError) as exc_info:
         _probe_fps(Path("test.mkv"))
-    assert exc_info.value.context.details is not None
-    assert exc_info.value.context.details.get("returncode") == 7
-    assert "ffprobe returned empty output" in str(exc_info.value.context.details.get("stderr", ""))
+
+    assert "empty" in str(exc_info.value)
+
+
+@pytest.mark.parametrize("stdout", [b"not-a-rate\n", b"24000/1001,extra\n"])
+@patch("frame_compare.services.alignment_audio.run_subprocess")
+def test_probe_fps_malformed_output_is_alignment_parse_error(
+    mock_run: MagicMock, stdout: bytes
+) -> None:
+    mock_run.return_value.stdout = stdout
+
+    with pytest.raises(AudioAlignmentError) as exc_info:
+        _probe_fps(Path("test.mkv"))
+
+    assert "ffprobe FPS output" in str(exc_info.value)
+    assert stdout.decode("utf-8").strip() in str(exc_info.value.context.details)
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")

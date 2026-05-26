@@ -1,4 +1,5 @@
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -99,3 +100,22 @@ def test_configure_logging_unknown_level_falls_back_to_info():
 def test_configure_logging_rejects_log_file_param() -> None:
     with pytest.raises(TypeError):
         configure_logging(log_file=Path("x.log"))
+
+
+def test_stderr_proxy_accepts_stream_write_returning_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    class NoneReturningStderr:
+        def __init__(self) -> None:
+            self.messages: list[str] = []
+
+        def write(self, message: str) -> None:
+            self.messages.append(message)
+
+        def flush(self) -> None:
+            return None
+
+    stream = NoneReturningStderr()
+    monkeypatch.setattr(sys, "stderr", stream)
+    proxy = logging_module._StderrProxy()  # pyright: ignore[reportPrivateUsage]
+
+    assert proxy.write("message") == len("message")
+    assert stream.messages == ["message"]

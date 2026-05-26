@@ -33,7 +33,12 @@ class _StderrProxy(io.TextIOBase, TextIO):
         if stream is None:
             return 0
         try:
-            return int(stream.write(message))  # type: ignore[attr-defined]
+            written: object = stream.write(message)  # type: ignore[attr-defined]
+            if written is None:
+                return len(message)
+            if isinstance(written, int):
+                return written
+            return 0
         except (ValueError, OSError):
             # E.g. pytest may close capture streams during teardown.
             return 0
