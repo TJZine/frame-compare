@@ -15,6 +15,11 @@ from ._helpers import run_shim as _run_shim
 from ._helpers import setup_install_layout as _setup_install_layout
 from ._helpers import write_valid_config_json as _write_valid_config_json
 
+windows_portable_launcher_e2e = pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Windows portable launcher PATH E2E requires Windows process semantics",
+)
+
 
 @pytest.mark.integration
 def test_windows_portable_shim_preset_apply_injection_e2e(tmp_path: Path, repo_root: Path) -> None:
@@ -285,6 +290,7 @@ def test_windows_portable_shim_restores_environment_after_bundle_exit(
 
 
 @pytest.mark.integration
+@windows_portable_launcher_e2e
 def test_windows_portable_shim_restores_environment_on_repeat_path_invocation(
     tmp_path: Path, repo_root: Path
 ) -> None:
@@ -377,6 +383,7 @@ def test_windows_portable_shim_restores_environment_on_repeat_path_invocation(
 
 
 @pytest.mark.integration
+@windows_portable_launcher_e2e
 def test_windows_portable_generated_bundle_launcher_restores_environment(
     tmp_path: Path, repo_root: Path
 ) -> None:
