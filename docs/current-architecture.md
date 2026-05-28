@@ -85,8 +85,9 @@ The repo uses filesystem persistence, not a database.
 Primary owned paths:
 
 - `config/config.toml` and `config/presets/*.toml`: config owners
-- `generated/cache/analysis/<label>__<fingerprint>.compframes`: shared analysis
-  metrics cache
+- `<resolved paths.generated_dir>/cache/analysis/<label>__<fingerprint>.compframes`:
+  shared analysis metrics cache (defaults to `generated/cache/analysis/` under the
+  workspace root, but follows the configured `paths.generated_dir`)
 - `generated/clip_probe.toml`: clip probe cache when run folders are disabled
 - `<run-folder>/generated/clip_probe.toml`: clip probe cache when run folders are enabled
 - `generated/audio_offsets.toml` or `<run-folder>/generated/audio_offsets.toml`:

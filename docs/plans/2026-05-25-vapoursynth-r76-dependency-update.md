@@ -1,4 +1,4 @@
-Status: Active
+Status: Historical
 
 # VapourSynth R76 Dependency Update Plan
 
