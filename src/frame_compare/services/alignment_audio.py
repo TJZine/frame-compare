@@ -15,6 +15,10 @@ _FFPROBE_TIMEOUT_SECONDS = 15.0
 _FFMPEG_AUDIO_TIMEOUT_SECONDS = 120.0
 
 
+def _decode_stderr(stderr: bytes) -> str:
+    return stderr.decode("utf-8", errors="replace")
+
+
 def probe_fps(video_path: Path) -> Fraction:
     """Probe video FPS using FFprobe."""
     argv = [
@@ -36,7 +40,7 @@ def probe_fps(video_path: Path) -> Fraction:
     except TimeoutExpired as e:
         raise FFmpegError("ffprobe timed out", 124) from e
     except CalledProcessError as e:
-        raise FFmpegError(e.stderr.decode("utf-8"), e.returncode) from e
+        raise FFmpegError(_decode_stderr(e.stderr), e.returncode) from e
 
     output = proc.stdout.decode("utf-8").strip()
     normalized_output = output.removesuffix(",")
@@ -80,9 +84,9 @@ def extract_audio(video_path: Path, sample_rate: int) -> np.ndarray:
     except TimeoutExpired as e:
         raise FFmpegError("ffmpeg audio extraction timed out", 124) from e
     except CalledProcessError as e:
-        raise FFmpegError(e.stderr.decode("utf-8"), e.returncode) from e
-    except Exception as e:
-        raise FFmpegError(str(e), 1) from e
+        raise FFmpegError(_decode_stderr(e.stderr), e.returncode) from e
+    except OSError as e:
+        raise FFmpegError(f"ffmpeg audio extraction could not start: {e}", 1) from e
 
     if not proc.stdout:
         raise AudioAlignmentError(f"empty audio track in {video_path.name}")

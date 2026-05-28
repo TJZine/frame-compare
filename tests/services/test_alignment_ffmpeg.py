@@ -100,6 +100,16 @@ def test_probe_fps_nonzero_exit_raises(mock_run: MagicMock):
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")
+def test_probe_fps_non_utf8_stderr_is_replaced(mock_run: MagicMock) -> None:
+    mock_run.side_effect = CalledProcessError(1, ["ffprobe"], stderr=b"\xfferror")
+
+    with pytest.raises(FFmpegError) as exc_info:
+        _probe_fps(Path("test.mkv"))
+
+    assert "\ufffderror" in str(exc_info.value.context.details)
+
+
+@patch("frame_compare.services.alignment_audio.run_subprocess")
 def test_extract_audio_ffmpeg_not_found(mock_run: MagicMock):
     """Test audio extraction when ffmpeg is missing."""
     mock_run.side_effect = FileNotFoundError()
@@ -127,6 +137,16 @@ def test_extract_audio_ffmpeg_fails(mock_run: MagicMock):
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")
+def test_extract_audio_non_utf8_stderr_is_replaced(mock_run: MagicMock) -> None:
+    mock_run.side_effect = CalledProcessError(1, ["ffmpeg"], stderr=b"\xfferror")
+
+    with pytest.raises(FFmpegError) as exc_info:
+        _extract_audio(Path("test.mkv"), 8000)
+
+    assert "\ufffderror" in str(exc_info.value.context.details)
+
+
+@patch("frame_compare.services.alignment_audio.run_subprocess")
 def test_extract_audio_timeout_raises(mock_run: MagicMock):
     """Test audio extraction timeout surfaces as FFmpegError."""
     mock_run.side_effect = TimeoutExpired(cmd=["ffmpeg"], timeout=120.0)
@@ -135,6 +155,27 @@ def test_extract_audio_timeout_raises(mock_run: MagicMock):
     assert exc_info.value.context.details is not None
     assert exc_info.value.context.details.get("returncode") == 124
     assert "timed out" in str(exc_info.value.context.details.get("stderr", ""))
+
+
+@patch("frame_compare.services.alignment_audio.run_subprocess")
+def test_extract_audio_oserror_raises_ffmpeg_error(mock_run: MagicMock) -> None:
+    mock_run.side_effect = OSError("permission denied")
+
+    with pytest.raises(FFmpegError) as exc_info:
+        _extract_audio(Path("test.mkv"), 8000)
+
+    assert "could not start" in str(exc_info.value.context.details)
+    assert "permission denied" in str(exc_info.value.context.details)
+    assert exc_info.value.context.details is not None
+    assert exc_info.value.context.details.get("returncode") == 1
+
+
+@patch("frame_compare.services.alignment_audio.run_subprocess")
+def test_extract_audio_unexpected_exceptions_propagate(mock_run: MagicMock) -> None:
+    mock_run.side_effect = RuntimeError("unexpected bug")
+
+    with pytest.raises(RuntimeError, match="unexpected bug"):
+        _extract_audio(Path("test.mkv"), 8000)
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")
