@@ -21,6 +21,7 @@ def _call_maybe_launch(
     *,
     tmp_path: Path,
     config: AlignmentConfig,
+    progress: object | None = None,
 ) -> None:
     maybe_launch_alignment_vspreview(
         reference=tmp_path / "ref.mkv",
@@ -28,7 +29,7 @@ def _call_maybe_launch(
         offsets_by_key={"ref:comp": 4},
         cache_dir=tmp_path,
         config=config,
-        progress=None,
+        progress=progress,
     )
 
 
@@ -243,3 +244,41 @@ def test_forced_launch_error_raises(
             tmp_path=tmp_path,
             config=AlignmentConfig(use_vspreview=False, force_interactive=True),
         )
+
+
+def test_available_with_tty_suspends_progress_during_launch_and_prompt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_tty(monkeypatch, is_tty=True)
+    monkeypatch.setattr(
+        alignment_vspreview,
+        "check_vspreview_availability",
+        MagicMock(return_value=_availability(VSPreviewAvailabilityStatus.AVAILABLE)),
+    )
+    monkeypatch.setattr(
+        alignment_vspreview,
+        "launch_alignment_verification_session",
+        MagicMock(return_value=tmp_path / "vspreview.py"),
+    )
+    monkeypatch.setattr(
+        alignment_vspreview,
+        "_prompt_for_confirmed_offsets",
+        MagicMock(return_value={"ref:comp": 4}),
+    )
+    monkeypatch.setattr(
+        alignment_vspreview,
+        "_save_confirmed_offsets",
+        MagicMock(),
+    )
+    progress = MagicMock()
+
+    _call_maybe_launch(
+        tmp_path=tmp_path,
+        config=AlignmentConfig(use_vspreview=True),
+        progress=progress,
+    )
+
+    progress.set_description.assert_called_once_with("Alignment verification")
+    progress.suspend.assert_called_once_with()
+    progress.resume.assert_called_once_with()

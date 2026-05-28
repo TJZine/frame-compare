@@ -195,6 +195,13 @@ def _save_confirmed_offsets(
         )
 
 
+def _suspend_progress_for_interaction(progress: ProgressReporter | None) -> bool:
+    if progress is None:
+        return False
+    progress.suspend()
+    return True
+
+
 def _resolve_launch_decision(
     *,
     config: AlignmentConfig,
@@ -265,6 +272,8 @@ def maybe_launch_alignment_vspreview(
             "Interactive alignment requested but no interactive terminal (TTY) is available."
         )
 
+    interactive_progress = progress
+    progress_suspended = _suspend_progress_for_interaction(interactive_progress)
     try:
         script_path = launch_alignment_verification_session(
             request=VSPreviewSessionRequest(
@@ -297,4 +306,7 @@ def maybe_launch_alignment_vspreview(
         if config.force_interactive:
             raise
         _log_optional_launch_failed(exc, config)
+    finally:
+        if progress_suspended and interactive_progress is not None:
+            interactive_progress.resume()
     return None
