@@ -28,3 +28,11 @@ class ProgressReporter(Protocol):
     def complete_phase(self) -> None:
         """Mark the current phase as complete."""
         ...
+
+    def suspend(self) -> None:
+        """Temporarily hide interactive progress UI during blocking user interaction."""
+        ...
+
+    def resume(self) -> None:
+        """Restore interactive progress UI after a temporary suspension."""
+        ...

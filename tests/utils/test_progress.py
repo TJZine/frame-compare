@@ -14,6 +14,8 @@ def test_null_progress_reporter_noops():
     reporter.advance(1)
     reporter.set_description("desc")
     reporter.complete_phase()
+    reporter.suspend()
+    reporter.resume()
 
 
 def test_rich_progress_reporter_smoke():
@@ -35,6 +37,8 @@ def test_log_progress_reporter_smoke():
     reporter.advance(25)  # 50%
     reporter.set_description("desc")
     reporter.complete_phase()
+    reporter.suspend()
+    reporter.resume()
     assert reporter._name == ""  # noqa: SLF001
     assert reporter._total == 0  # noqa: SLF001
     assert reporter._current == 0  # noqa: SLF001
@@ -54,6 +58,24 @@ def test_log_progress_reporter_supports_nested_phases():
     assert reporter._name == "outer"  # noqa: SLF001
     assert reporter._total == 100  # noqa: SLF001
     assert reporter._current == 10  # noqa: SLF001
+
+
+def test_rich_progress_reporter_suspend_and_resume_preserves_active_task() -> None:
+    reporter = RichProgressReporter()
+
+    reporter.start_phase("test", 10)
+
+    assert reporter._progress.live.is_started is True  # noqa: SLF001
+
+    reporter.suspend()
+
+    assert reporter._progress.live.is_started is False  # noqa: SLF001
+
+    reporter.resume()
+
+    assert reporter._progress.live.is_started is True  # noqa: SLF001
+
+    reporter.complete_phase()
 
 
 def test_progress_reporter_protocol_is_single_source() -> None:

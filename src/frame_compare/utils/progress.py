@@ -38,6 +38,12 @@ class NullProgressReporter:
     def complete_phase(self) -> None:
         del self
 
+    def suspend(self) -> None:
+        del self
+
+    def resume(self) -> None:
+        del self
+
 
 class RichProgressReporter:
     """Progress reporter using the rich library for CLI display."""
@@ -55,6 +61,7 @@ class RichProgressReporter:
         self._task_id: TaskID | None = None
         self._task_stack: list[TaskID] = []
         self._task_totals: dict[TaskID, int] = {}
+        self._suspend_depth = 0
 
     def start_phase(self, name: str, total: int) -> None:
         """Start a new phase with a rich progress bar."""
@@ -91,6 +98,20 @@ class RichProgressReporter:
 
         if self._progress.live.is_started:
             self._progress.stop()
+
+    def suspend(self) -> None:
+        """Pause live progress rendering during blocking terminal interaction."""
+        self._suspend_depth += 1
+        if self._suspend_depth == 1 and self._progress.live.is_started:
+            self._progress.stop()
+
+    def resume(self) -> None:
+        """Resume live progress rendering after blocking terminal interaction."""
+        if self._suspend_depth == 0:
+            return
+        self._suspend_depth -= 1
+        if self._suspend_depth == 0 and self._task_id is not None and not self._progress.live.is_started:
+            self._progress.start()
 
 
 class LogProgressReporter:
@@ -150,3 +171,11 @@ class LogProgressReporter:
         self._total = 0
         self._current = 0
         self._last_logged_milestone = 0
+
+    def suspend(self) -> None:
+        """No-op for log reporter."""
+        return
+
+    def resume(self) -> None:
+        """No-op for log reporter."""
+        return
