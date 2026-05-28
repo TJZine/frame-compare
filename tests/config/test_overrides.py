@@ -4,7 +4,13 @@ from pathlib import Path
 
 from frame_compare.config.loader import get_default_config
 from frame_compare.config.overrides import CLIConfigOverrides, apply_cli_overrides
-from frame_compare.config.schema import OverlayMode, ToneCurve, TonemapPreset
+from frame_compare.config.schema import (
+    ColorConfig,
+    ConfigSchema,
+    OverlayMode,
+    ToneCurve,
+    TonemapPreset,
+)
 
 
 def test_apply_cli_overrides_basic() -> None:
@@ -105,3 +111,24 @@ def test_apply_cli_overrides_input_dir_maps_to_paths_input_dir() -> None:
     new_config = apply_cli_overrides(config, CLIConfigOverrides(input_dir=Path("inputs")))
 
     assert new_config.paths.input_dir == "inputs"
+
+
+def test_apply_cli_overrides_preserves_implicit_color_target_for_unrelated_override() -> None:
+    """Unrelated CLI overrides must not make default color values explicit."""
+    config = ConfigSchema(color=ColorConfig(preset=TonemapPreset.FILMIC))
+    assert config.color.__pydantic_fields_set__ == {"preset"}
+
+    new_config = apply_cli_overrides(config, CLIConfigOverrides(frame_count=12))
+
+    assert new_config.analysis.frame_count == 12
+    assert new_config.color.__pydantic_fields_set__ == {"preset"}
+
+
+def test_apply_cli_overrides_marks_cli_target_as_explicit_color_override() -> None:
+    """CLI target override remains explicit after config rebuild."""
+    config = ConfigSchema(color=ColorConfig(preset=TonemapPreset.FILMIC))
+
+    new_config = apply_cli_overrides(config, CLIConfigOverrides(tm_target_nits=400))
+
+    assert new_config.color.target_nits == 400
+    assert "target_nits" in new_config.color.__pydantic_fields_set__

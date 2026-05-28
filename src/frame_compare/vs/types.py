@@ -47,7 +47,7 @@ class TonemapSettings:
     enabled: bool = True
     preset: TonemapPreset = TonemapPreset.REFERENCE
     tone_curve: ToneCurve = ToneCurve.BT2390
-    target_nits: int = 203
+    target_nits: int = 100
     source_peak: int | None = None
     contrast_recovery: float = 0.0
     gamma_lift: bool = False

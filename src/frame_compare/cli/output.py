@@ -9,8 +9,10 @@ from rich.panel import Panel
 from rich.table import Table
 
 if TYPE_CHECKING:
+    from frame_compare.config.overrides import TonemapCliOverrides
     from frame_compare.config.schema import ConfigSchema
     from frame_compare.orchestration.coordinator import RunRequest, RunResult
+    from frame_compare.vs.types import TonemapSettings
 
 
 def _fmt_bool(value: bool) -> str:
@@ -24,6 +26,17 @@ def _kv_table(*, rows: list[tuple[str, str]]) -> Table:
     for key, value in rows:
         table.add_row(key, value)
     return table
+
+
+def _resolve_preview_tonemap_settings(config: ConfigSchema, request: RunRequest) -> TonemapSettings:
+    from frame_compare.render.prepare import resolve_tonemap_settings
+
+    overrides: TonemapCliOverrides = {
+        "tm_preset": request.tm_preset,
+        "tm_target": request.tm_target_nits,
+        "tm_curve": request.tm_curve,
+    }
+    return resolve_tonemap_settings(config, overrides)
 
 
 def print_at_a_glance(
@@ -50,6 +63,7 @@ def print_at_a_glance(
             vspreview_status = "false"
 
     ffmpeg_available = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
+    tonemap_settings = _resolve_preview_tonemap_settings(config, request)
 
     rows: list[tuple[str, str]] = [
         ("root", str(root)),
@@ -71,9 +85,9 @@ def print_at_a_glance(
     rows.extend(
         [
             ("tonemap.enabled", _fmt_bool(config.color.enable_tonemap)),
-            ("tonemap.preset", config.color.preset.value),
-            ("tonemap.target_nits", str(config.color.target_nits)),
-            ("tonemap.curve", config.color.tone_curve.value),
+            ("tonemap.preset", tonemap_settings.preset.value),
+            ("tonemap.target_nits", str(tonemap_settings.target_nits)),
+            ("tonemap.curve", tonemap_settings.tone_curve.value),
             ("renderer", "ffmpeg" if config.screenshots.use_ffmpeg else "vapoursynth"),
             ("overlay", str(config.screenshots.overlay_mode.value)),
             ("slow.pics.auto_upload", _fmt_bool(config.slowpics.auto_upload)),

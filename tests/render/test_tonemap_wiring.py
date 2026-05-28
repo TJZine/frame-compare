@@ -89,6 +89,23 @@ def test_resolve_tonemap_settings_applies_config_overrides() -> None:
         assert settings.contrast_recovery == 0.25
 
 
+def test_resolve_tonemap_settings_uses_preset_target_when_config_target_is_implicit() -> None:
+    """Preset target must not be overwritten by the schema default target."""
+    config = ConfigSchema(color=ColorConfig(preset=TonemapPreset.FILMIC))
+
+    with patch("frame_compare.vs.tonemap.get_preset_settings") as mock_get_preset:
+        mock_get_preset.return_value = TonemapSettings(
+            enabled=True,
+            preset=TonemapPreset.FILMIC,
+            tone_curve=ToneCurve.SPLINE,
+            target_nits=150,
+        )
+
+        settings = resolve_tonemap_settings(config)
+
+        assert settings.target_nits == 150
+
+
 def test_resolve_tonemap_settings_applies_cli_overrides() -> None:
     """Verify resolve_tonemap_settings applies CLI overrides with highest priority."""
     config = ConfigSchema(

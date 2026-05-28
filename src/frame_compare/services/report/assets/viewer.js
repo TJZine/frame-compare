@@ -7,6 +7,7 @@ const ReportViewer = {
         activeClipIdx: 0, // For overlay/blink
         mode: 'slider',
         zoom: 1.0,
+        fitMode: 'actual',
         revealPercent: 50,
         blinkInterval: null,
         blinkPaused: false
@@ -47,6 +48,8 @@ const ReportViewer = {
             rightSelect: document.getElementById('right-select'),
             zoomRange: document.getElementById('zoom-range'),
             zoomVal: document.getElementById('zoom-val'),
+            fitBtns: document.querySelectorAll('[data-fit]'),
+            btnFullscreen: document.getElementById('btn-fullscreen'),
             filmstrip: document.querySelector('.rv-filmstrip'),
             labelLeft: document.getElementById('label-left'),
             labelRight: document.getElementById('label-right'),
@@ -83,6 +86,15 @@ const ReportViewer = {
         document.getElementById('btn-zoom-out').addEventListener('click', () => this.setZoom(this.state.zoom - 0.1));
         document.getElementById('btn-zoom-in').addEventListener('click', () => this.setZoom(this.state.zoom + 0.1));
         document.getElementById('btn-zoom-reset').addEventListener('click', () => this.setZoom(1.0));
+
+        // Fit and fullscreen controls
+        this.dom.fitBtns.forEach(btn => {
+            btn.addEventListener('click', () => this.setFitMode(btn.dataset.fit));
+        });
+        this.dom.sizerImg.addEventListener('load', () => this.applyFitMode());
+        window.addEventListener('resize', () => this.applyFitMode());
+        document.addEventListener('fullscreenchange', () => this.applyFitMode());
+        this.dom.btnFullscreen.addEventListener('click', () => this.toggleFullscreen());
 
         // Help Modal
         const openModal = () => {
@@ -285,11 +297,74 @@ const ReportViewer = {
     },
 
     setZoom(level) {
+        this.state.fitMode = 'custom';
+        this.updateFitButtons();
+        this.applyZoom(level);
+    },
+
+    applyZoom(level) {
         this.state.zoom = Math.max(0.25, Math.min(2.0, level));
         this.dom.zoomRange.value = this.state.zoom;
         this.dom.zoomRange.setAttribute('aria-valuenow', this.state.zoom);
         this.dom.zoomVal.textContent = Math.round(this.state.zoom * 100) + '%';
         this.dom.canvas.style.setProperty('--zoom-level', this.state.zoom);
+    },
+
+    setFitMode(mode, options = {}) {
+        if (!['actual', 'width', 'height'].includes(mode)) return;
+
+        this.state.fitMode = mode;
+        this.updateFitButtons();
+
+        if (options.updateZoom === false) return;
+        this.applyFitMode();
+    },
+
+    updateFitButtons() {
+        this.dom.fitBtns.forEach(btn => {
+            const isActive = btn.dataset.fit === this.state.fitMode;
+            btn.classList.toggle('active', isActive);
+            btn.setAttribute('aria-checked', isActive);
+        });
+    },
+
+    baseCanvasSize() {
+        const rect = this.dom.sizerImg.getBoundingClientRect();
+        const zoom = this.state.zoom || 1.0;
+        return {
+            width: rect.width / zoom,
+            height: rect.height / zoom
+        };
+    },
+
+    applyFitMode() {
+        if (this.state.fitMode === 'custom') {
+            return;
+        }
+
+        if (this.state.fitMode === 'actual') {
+            this.applyZoom(1.0);
+            return;
+        }
+
+        const stageRect = this.dom.stage.getBoundingClientRect();
+        const base = this.baseCanvasSize();
+        if (stageRect.width <= 0 || stageRect.height <= 0 || base.width <= 0 || base.height <= 0) {
+            return;
+        }
+
+        const nextZoom = this.state.fitMode === 'width'
+            ? stageRect.width / base.width
+            : stageRect.height / base.height;
+        this.applyZoom(nextZoom);
+    },
+
+    toggleFullscreen() {
+        if (document.fullscreenElement) {
+            document.exitFullscreen?.();
+            return;
+        }
+        this.dom.stage.requestFullscreen?.();
     },
 
     updateSlider() {
@@ -367,7 +442,7 @@ const ReportViewer = {
         // Update images and labels
         this.updateImages();
         this.updateSlider();
-        this.setZoom(this.state.zoom);
+        this.applyFitMode();
 
         // Update filmstrip active state
         Array.from(this.dom.filmstrip.children).forEach((el, idx) => {

@@ -79,6 +79,34 @@ def validate_batch_requests(batch_requests: list[ScreenshotBatchRequest]) -> Non
             seen_output_names[output_name] = (req.label, display_frame)
 
 
+def _validate_source_frame_range(
+    request: ScreenshotBatchRequest,
+    *,
+    source_frame: int,
+    num_frames: int | None,
+) -> None:
+    if num_frames is None:
+        return
+
+    if 0 <= source_frame < num_frames:
+        return
+
+    raise ValueError(
+        f"ScreenshotBatchRequest {request.label!r} requested source frame "
+        f"{source_frame} outside valid range 0..{num_frames - 1} "
+        f"for {request.clip_path}"
+    )
+
+
+def _resolve_num_frames(
+    source_num_frames: object,
+    probe_num_frames: int | None,
+) -> int | None:
+    if type(source_num_frames) is int:
+        return source_num_frames
+    return probe_num_frames
+
+
 def _build_overlay_config(
     request: ScreenshotBatchRequest,
     *,
@@ -125,7 +153,11 @@ def expand_batch_render_requests(
 
         width = source_info.width if source_info is not None else (req.probe_width or 0)
         height = source_info.height if source_info is not None else (req.probe_height or 0)
-        num_frames = source_info.num_frames if source_info is not None else req.probe_num_frames
+        num_frames = (
+            _resolve_num_frames(source_info.num_frames, req.probe_num_frames)
+            if source_info is not None
+            else req.probe_num_frames
+        )
         resolved_hdr_info = (
             hdr_info if source_info is not None else ("HDR" if req.probe_is_hdr else None)
         )
@@ -135,6 +167,7 @@ def expand_batch_render_requests(
         start_idx += num_frames_for_req
 
         for idx, source_frame in enumerate(req.source_frames):
+            _validate_source_frame_range(req, source_frame=source_frame, num_frames=num_frames)
             display_frame = req.display_frames[idx]
             selection_label = req.selection_labels[idx]
 

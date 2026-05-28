@@ -78,6 +78,7 @@ class BatchRenderOptions:
     overlay_mode: OverlayMode = OverlayMode.STANDARD
     reporter: ProgressReporter | None = None
     ffmpeg_runner: FFmpegRunner | None = None
+    parallelism: int = 1
 
 
 @dataclass(frozen=True)

@@ -170,6 +170,13 @@ If a future change makes a runtime-only flag persistent, or adds a new persisten
 update this document, `src/frame_compare/config/overrides.py`, and the relevant CLI
 tests in the same pass.
 
+### Tonemap Preset And Target Resolution
+
+`color.preset` selects the baseline tonemap settings. The `reference` preset targets
+100 nits. `color.target_nits` overrides that preset target only when the value is
+explicitly present in config or supplied through `--tm-target`; unrelated CLI overrides
+must not turn schema defaults into explicit tonemap target overrides.
+
 ## `wizard` Command Contract
 
 - `wizard` is interactive and writes a minimal config payload to the resolved config path.

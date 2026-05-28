@@ -23,7 +23,7 @@ def test_get_preset_settings_unknown_raises_tonemap_error():
 @pytest.mark.parametrize(
     "preset, expected_curve, expected_nits, expected_gamma",
     [
-        (TonemapPreset.REFERENCE, ToneCurve.BT2390, 203, False),
+        (TonemapPreset.REFERENCE, ToneCurve.BT2390, 100, False),
         (TonemapPreset.FILMIC, ToneCurve.SPLINE, 203, False),
         (TonemapPreset.CONTRAST, ToneCurve.REINHARD, 203, False),
         (TonemapPreset.BT2390_SPEC, ToneCurve.BT2390, 100, False),
@@ -51,7 +51,7 @@ def test_get_preset_settings_returns_valid_settings():
     assert isinstance(result, TonemapSettings)
     assert result.preset == TonemapPreset.REFERENCE
     assert result.tone_curve == ToneCurve.BT2390
-    assert result.target_nits == 203
+    assert result.target_nits == 100
 
 
 @pytest.mark.parametrize(

@@ -91,7 +91,7 @@ def test_run_default_prints_at_a_glance_and_result_summary(monkeypatch: MonkeyPa
         assert "tonemap.preset" in output
         assert "reference" in output
         assert "tonemap.target_nits" in output
-        assert "203" in output
+        assert "100" in output
         assert "tonemap.curve" in output
         assert "bt2390" in output
         assert "slow.pics.auto_upload" in output
@@ -99,6 +99,26 @@ def test_run_default_prints_at_a_glance_and_result_summary(monkeypatch: MonkeyPa
         assert "unlisted" in output
         assert "report.enabled" in output
         assert "report.auto_open" in output
+
+
+def test_run_at_a_glance_prints_resolved_tonemap_preset_settings(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        return RunResult(success=True)
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace(["--tm-preset", "filmic"])
+
+    assert result.exit_code == 0
+    output = _normalize_cli_output(result.stdout)
+    assert "tonemap.preset" in output
+    assert "filmic" in output
+    assert "tonemap.target_nits" in output
+    assert "203" in output
+    assert "tonemap.curve" in output
+    assert "spline" in output
 
 
 def test_run_at_a_glance_prints_vspreview_availability_when_enabled(

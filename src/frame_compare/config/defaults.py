@@ -38,7 +38,7 @@ ffmpeg_timeout_seconds = 30.0
 [color]
 enable_tonemap = true
 preset = "reference"
-target_nits = 203
+target_nits = 100
 tone_curve = "bt2390"
 gamma_lift = false
 contrast_recovery = 0.0

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypedDict, cast
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from frame_compare.config.errors import ConfigValidationError
 from frame_compare.config.schema import ConfigSchema, OverlayMode, ToneCurve, TonemapPreset
@@ -89,10 +89,33 @@ def apply_cli_overrides(
 
     try:
         # Cast merged dict to Any to satisfy static type checkers on kwargs unpacking
-        return ConfigSchema.model_validate(cast(Any, merged))
+        updated = ConfigSchema.model_validate(cast(Any, merged))
     except ValidationError as exc:
         normalized = normalize_pydantic_errors(cast(Any, exc.errors()))
         raise ConfigValidationError(normalized) from exc
+
+    _restore_explicit_fields(updated, config, overrides)
+    return updated
+
+
+def _restore_explicit_fields(
+    updated: BaseModel,
+    original: BaseModel,
+    overrides: dict[str, object],
+) -> None:
+    """Preserve which nested config fields were explicitly supplied."""
+    updated.__pydantic_fields_set__ = set(original.__pydantic_fields_set__) | set(overrides)
+    for key in type(updated).model_fields:
+        updated_child = getattr(updated, key, None)
+        original_child = getattr(original, key, None)
+        if isinstance(updated_child, BaseModel) and isinstance(original_child, BaseModel):
+            value = overrides.get(key, {})
+            if isinstance(value, dict):
+                _restore_explicit_fields(updated_child, original_child, cast(dict[str, object], value))
+            else:
+                updated_child.__pydantic_fields_set__ = set(
+                    original_child.__pydantic_fields_set__
+                )
 
 
 def _cli_override_values(cli_args: CLIConfigOverrides) -> dict[str, object]:

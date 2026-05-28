@@ -10,7 +10,9 @@ import pytest
 from frame_compare.config.schema import ColorConfig, ConfigSchema, OverlayMode, ScreenshotsConfig
 from frame_compare.render.batch.expansion import (
     _build_overlay_config,
+    _resolve_num_frames,
     _validate_batch_request_lengths,
+    _validate_source_frame_range,
     expand_batch_render_requests,
     render_batch_results_by_label,
     resolve_batch_ffmpeg_runner,
@@ -52,6 +54,68 @@ def test_validate_batch_request_lengths_invalid() -> None:
     )
     with pytest.raises(ValueError, match="mismatched lengths"):
         _validate_batch_request_lengths(req)
+
+
+def test_validate_source_frame_range_rejects_known_out_of_range_frame() -> None:
+    req = ScreenshotBatchRequest(
+        clip_path=Path("video.mkv"),
+        label="ref",
+        source_frames=[100],
+        display_frames=[42],
+        selection_labels=["A"],
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=100,
+        probe_is_hdr=False,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "ScreenshotBatchRequest 'ref' requested source frame 100 "
+            "outside valid range 0..99 for video.mkv"
+        ),
+    ):
+        _validate_source_frame_range(req, source_frame=100, num_frames=100)
+
+
+def test_validate_source_frame_range_rejects_negative_frame() -> None:
+    req = ScreenshotBatchRequest(
+        clip_path=Path("video.mkv"),
+        label="ref",
+        source_frames=[-1],
+        display_frames=[42],
+        selection_labels=["A"],
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=100,
+        probe_is_hdr=False,
+    )
+
+    with pytest.raises(ValueError, match="requested source frame -1 outside valid range"):
+        _validate_source_frame_range(req, source_frame=-1, num_frames=100)
+
+
+def test_validate_source_frame_range_allows_unknown_frame_count() -> None:
+    req = ScreenshotBatchRequest(
+        clip_path=Path("video.mkv"),
+        label="ref",
+        source_frames=[10_000],
+        display_frames=[42],
+        selection_labels=["A"],
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=None,
+        probe_is_hdr=False,
+    )
+
+    _validate_source_frame_range(req, source_frame=10_000, num_frames=None)
+
+
+def test_resolve_num_frames_falls_back_to_probe_for_malformed_source_value() -> None:
+    assert _resolve_num_frames("not-an-int", 100) == 100
+    assert _resolve_num_frames(None, 100) == 100
+    assert _resolve_num_frames(150, 100) == 150
 
 
 def test_resolve_target_renderer() -> None:
@@ -346,6 +410,77 @@ def test_expand_batch_render_requests(mock_prepare: MagicMock) -> None:
     assert third_overlay.resolution == (req2.probe_width, req2.probe_height)
     assert third_overlay.hdr_info is None
     assert third_overlay.num_frames == req2.probe_num_frames
+
+
+@patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
+def test_expand_batch_render_requests_uses_source_info_frame_count_over_probe(
+    mock_prepare: MagicMock,
+) -> None:
+    config = ConfigSchema()
+    ffmpeg_runner = MagicMock()
+
+    source_info = MagicMock()
+    source_info.width = 1920
+    source_info.height = 1080
+    source_info.num_frames = 150
+    mock_prepare.return_value = (MagicMock(name="clip"), None, None, source_info)
+    req = ScreenshotBatchRequest(
+        clip_path=Path("video.mkv"),
+        label="ref",
+        source_frames=[120],
+        display_frames=[10],
+        selection_labels=["A"],
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=100,
+        probe_is_hdr=False,
+    )
+
+    requests, _ = expand_batch_render_requests(
+        [req],
+        output_dir=Path("out"),
+        config=config,
+        overlay_mode=OverlayMode.STANDARD,
+        renderer="ffmpeg",
+        ffmpeg_runner=ffmpeg_runner,
+    )
+
+    assert requests[0].frame_number == 120
+    assert requests[0].output_path == Path("out/ref_00010.png")
+
+
+@patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
+def test_expand_batch_render_requests_preserves_out_of_range_display_frame(
+    mock_prepare: MagicMock,
+) -> None:
+    config = ConfigSchema()
+    ffmpeg_runner = MagicMock()
+    mock_prepare.return_value = (MagicMock(name="clip"), None, None, None)
+    req = ScreenshotBatchRequest(
+        clip_path=Path("video.mkv"),
+        label="ref",
+        source_frames=[10],
+        display_frames=[999],
+        selection_labels=["A"],
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=100,
+        probe_is_hdr=False,
+    )
+
+    requests, _ = expand_batch_render_requests(
+        [req],
+        output_dir=Path("out"),
+        config=config,
+        overlay_mode=OverlayMode.STANDARD,
+        renderer="ffmpeg",
+        ffmpeg_runner=ffmpeg_runner,
+    )
+
+    assert requests[0].frame_number == 10
+    assert requests[0].output_path == Path("out/ref_00999.png")
+    assert requests[0].overlay is not None
+    assert requests[0].overlay.display_frame_number == 999
 
 
 def test_render_batch_results_by_label() -> None:

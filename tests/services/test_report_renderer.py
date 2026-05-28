@@ -160,6 +160,20 @@ def test_build_html_renders_frame_and_clip_selectors(report_payload: ReportPaylo
     assert "selected" in candidate.attrs
 
 
+def test_build_html_renders_viewport_audit_controls(report_payload: ReportPayload) -> None:
+    html = build_html(report_payload)
+
+    assert 'role="radiogroup" aria-label="Fit mode"' in html
+    assert 'data-fit="actual"' in html
+    assert 'aria-label="Actual size"' in html
+    assert 'data-fit="width"' in html
+    assert 'aria-label="Fit width"' in html
+    assert 'data-fit="height"' in html
+    assert 'aria-label="Fit height"' in html
+    assert 'id="btn-fullscreen"' in html
+    assert 'aria-label="Toggle fullscreen"' in html
+
+
 def test_build_html_embeds_json_without_raw_script_terminators(
     report_payload: ReportPayload,
 ) -> None:
@@ -207,9 +221,20 @@ def test_viewer_assets_keep_divider_slider_only_and_pointer_safe() -> None:
     assert "touch-action: none;" in css
     assert ".rv-divider {\n    display: none;" in css
     assert ".rv-mode-slider .rv-divider { display: block; }" in css
+    assert ".rv-viewer-stage:fullscreen" in css
 
     assert "addEventListener('pointerdown'" in js
     assert "addEventListener('pointermove'" in js
     assert "addEventListener('pointercancel'" in js
     assert "e.touches[0]" not in js
     assert "e.clientX ||" not in js
+    assert "document.querySelectorAll('[data-fit]')" in js
+    assert "setAttribute('aria-checked', isActive)" in js
+    assert "this.state.fitMode = 'custom';" in js
+    assert "addEventListener('load', () => this.applyFitMode())" in js
+    assert "window.addEventListener('resize', () => this.applyFitMode())" in js
+    assert "document.addEventListener('fullscreenchange', () => this.applyFitMode())" in js
+    assert "getBoundingClientRect()" in js
+    assert "rect.width / zoom" in js
+    assert "requestFullscreen?.()" in js
+    assert "exitFullscreen?.()" in js

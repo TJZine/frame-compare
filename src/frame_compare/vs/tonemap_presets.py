@@ -10,7 +10,7 @@ TONEMAP_PRESETS: dict[TonemapPreset, TonemapSettings] = {
     TonemapPreset.REFERENCE: TonemapSettings(
         preset=TonemapPreset.REFERENCE,
         tone_curve=ToneCurve.BT2390,
-        target_nits=203,
+        target_nits=100,
         gamma_lift=False,
     ),
     TonemapPreset.FILMIC: TonemapSettings(

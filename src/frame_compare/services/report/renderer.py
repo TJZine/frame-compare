@@ -164,6 +164,16 @@ def _render_controls(
             <span id="zoom-val" style="font-size: var(--text-xs); width: 3ch">100%</span>
         </div>
 
+        <div class="rv-control-group" role="radiogroup" aria-label="Fit mode">
+            <button data-fit="actual" class="active" role="radio" aria-checked="true" aria-label="Actual size" title="Actual size">Actual</button>
+            <button data-fit="width" role="radio" aria-checked="false" aria-label="Fit width" title="Fit width">Fit width</button>
+            <button data-fit="height" role="radio" aria-checked="false" aria-label="Fit height" title="Fit height">Fit height</button>
+        </div>
+
+        <div class="rv-control-group">
+            <button id="btn-fullscreen" aria-label="Toggle fullscreen" title="Fullscreen">Fullscreen</button>
+        </div>
+
         <div class="rv-control-group">
              <button id="btn-help" aria-label="Keyboard shortcuts" title="Help (?)">?</button>
         </div>

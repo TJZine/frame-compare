@@ -106,6 +106,13 @@ def test_tonemap_presets_cover_enum_and_return_expected_values() -> None:
     assert settings.gamma_lift is True
 
 
+def test_reference_preset_uses_legacy_hdr_target() -> None:
+    """Reference preset keeps the legacy screenshot baseline target."""
+    settings = get_preset_settings(TonemapPreset.REFERENCE)
+
+    assert settings.target_nits == 100
+
+
 def test_tonemap_presets_unknown_preset_reports_available_values() -> None:
     """Unknown preset errors should include the supported value list."""
     with pytest.raises(TonemapError) as exc:

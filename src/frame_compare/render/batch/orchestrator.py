@@ -288,5 +288,9 @@ def render_screenshots_from_batch(
         ffmpeg_runner=resolved_ffmpeg_runner,
     )
 
-    rendered_paths = render_batch(all_requests, parallelism=1, reporter=resolved_options.reporter)
+    rendered_paths = render_batch(
+        all_requests,
+        parallelism=max(1, resolved_options.parallelism),
+        reporter=resolved_options.reporter,
+    )
     return render_batch_results_by_label(batch_requests, rendered_paths, label_to_range)

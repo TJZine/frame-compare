@@ -31,7 +31,7 @@ def test_default_config_values() -> None:
     config = get_default_config()
     assert config.analysis.frame_count == 10
     assert config.analysis.selection_mode == SelectionMode.MIXED
-    assert config.color.target_nits == 203
+    assert config.color.target_nits == 100
     assert config.paths.input_dir == "comparison_videos"
     assert config.tmdb.year_tolerance == 2
     assert config.tmdb.category_preference is None
@@ -134,7 +134,7 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert screenshots.overlay_mode == OverlayMode.STANDARD
     assert screenshots.png_compression == 6
     assert screenshots.ffmpeg_timeout_seconds == 30.0
-    assert color.target_nits == 203
+    assert color.target_nits == 100
     assert color.preset == "reference"
     assert slowpics.visibility == Visibility.UNLISTED
     assert slowpics.max_retries == 3
