@@ -14,7 +14,10 @@ if TYPE_CHECKING:
     import vapoursynth as vs
 
 _FRAME_PROP_MATRIX = "_Matrix"
-_UNSPECIFIED_MATRIX = 2
+_FRAME_PROP_TRANSFER = "_Transfer"
+_FRAME_PROP_PRIMARIES = "_Primaries"
+_FRAME_PROP_COLOR_RANGE = "_ColorRange"
+_UNSPECIFIED_COLOR_PROP = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,10 +70,60 @@ def validate_target_nits(settings: TonemapSettings) -> int:
     return target_nits
 
 
-def _matrix_prop_is_specified(props: Mapping[str, object]) -> bool:
-    """Return whether frame props carry a usable VapourSynth matrix prop."""
-    matrix = get_optional_int_prop(props, _FRAME_PROP_MATRIX)
-    return matrix is not None and matrix != _UNSPECIFIED_MATRIX
+def _specified_int_prop(props: Mapping[str, object], key: str) -> int | None:
+    value = get_optional_int_prop(props, key)
+    if value is None or value == _UNSPECIFIED_COLOR_PROP:
+        return None
+    return value
+
+
+def _resolve_matrix_in(
+    props: Mapping[str, object],
+    *,
+    detected_is_hdr: bool | None,
+) -> int:
+    import vapoursynth as vs
+
+    matrix = _specified_int_prop(props, _FRAME_PROP_MATRIX)
+    if matrix is not None:
+        return matrix
+
+    if detected_is_hdr is None:
+        detected_is_hdr, _ = detect_hdr(props)
+    if detected_is_hdr:
+        return int(getattr(vs, "MATRIX_BT2020_NCL", 9))
+    return int(getattr(vs, "MATRIX_BT709", 1))
+
+
+def _resolve_range_in(props: Mapping[str, object]) -> int:
+    import vapoursynth as vs
+
+    range_full = int(getattr(vs, "RANGE_FULL", 1))
+    range_limited = int(getattr(vs, "RANGE_LIMITED", 0))
+    color_range = get_optional_int_prop(props, _FRAME_PROP_COLOR_RANGE)
+    if color_range in {range_full, range_limited}:
+        return int(color_range)
+    return range_limited
+
+
+def _conversion_kwargs(
+    *,
+    target_format: int,
+    props: Mapping[str, object],
+    detected_is_hdr: bool | None,
+) -> dict[str, int]:
+    kwargs = {
+        "format": target_format,
+        "matrix_in": _resolve_matrix_in(props, detected_is_hdr=detected_is_hdr),
+        "range_in": _resolve_range_in(props),
+    }
+    transfer = _specified_int_prop(props, _FRAME_PROP_TRANSFER)
+    if transfer is not None:
+        kwargs["transfer_in"] = transfer
+    primaries = _specified_int_prop(props, _FRAME_PROP_PRIMARIES)
+    if primaries is not None:
+        kwargs["primaries_in"] = primaries
+    return kwargs
 
 
 def convert_non_rgb_with_matrix_hint(
@@ -80,19 +133,16 @@ def convert_non_rgb_with_matrix_hint(
     props: dict[str, object] | None = None,
     detected_is_hdr: bool | None = None,
 ) -> vs.VideoNode:
-    """Convert non-RGB clips to RGB target format with deterministic matrix fallback."""
+    """Convert non-RGB clips to RGB target format with validated source metadata."""
     if props is None:
         props = dict(clip.get_frame(0).props)
 
-    matrix_in_s: str | None = None
-    if not _matrix_prop_is_specified(props):
-        if detected_is_hdr is None:
-            detected_is_hdr, _ = detect_hdr(props)
-        matrix_in_s = "2020ncl" if detected_is_hdr else "709"
-
-    if matrix_in_s is None:
-        return clip.resize.Bicubic(format=target_format)  # type: ignore[attr-defined]
-    return clip.resize.Bicubic(format=target_format, matrix_in_s=matrix_in_s)  # type: ignore[attr-defined]
+    kwargs = _conversion_kwargs(
+        target_format=target_format,
+        props=props,
+        detected_is_hdr=detected_is_hdr,
+    )
+    return clip.resize.Bicubic(**kwargs)  # type: ignore[attr-defined]
 
 
 def to_rgbs(clip: vs.VideoNode) -> vs.VideoNode:

@@ -98,6 +98,20 @@ def test_compose_frame_info_lines_num_frames_none_omits_total() -> None:
     assert lines[0] == "Frame 12"
 
 
+def test_compose_frame_info_lines_can_suppress_only_frame_line() -> None:
+    lines = compose_frame_info_lines(
+        mode=OverlayMode.DIAGNOSTIC,
+        label="Ref",
+        display_frame_number=12,
+        num_frames=100,
+        picture_type="I",
+        selection_label="Dark",
+        include_frame_number=False,
+    )
+
+    assert lines == ["Picture type: I", "Ref", "Selection: Dark"]
+
+
 def test_compose_frame_info_lines_selection_label_none_omits_selection_line() -> None:
     lines = compose_frame_info_lines(
         mode=OverlayMode.STANDARD,

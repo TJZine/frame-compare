@@ -414,10 +414,12 @@ def test_apply_libplacebo_runtime_failure_returns_none_after_rgb_prop_normalizat
 
 
 def test_convert_non_rgb_matrix_presence_uses_frame_prop_boundary() -> None:
-    """A present matrix prop should suppress the deterministic fallback matrix hint."""
+    """A present matrix prop should be forwarded as numeric conversion metadata."""
     clip = _Clip(format_id=999, color_family=999, props={"_Matrix": b"9"})
 
     result = convert_non_rgb_with_matrix_hint(cast("VideoNode", clip), target_format=vs.RGBS)
 
     assert result is clip
-    assert clip.resize.bicubic_calls == [{"format": vs.RGBS}]
+    assert clip.resize.bicubic_calls == [
+        {"format": vs.RGBS, "matrix_in": 9, "range_in": vs.RANGE_LIMITED}
+    ]

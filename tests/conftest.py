@@ -83,6 +83,9 @@ if _vs_needs_mock():
     _global_mock_vs.GRAY = 2
     _global_mock_vs.INTEGER = 0
     _global_mock_vs.FLOAT = 1
+    _global_mock_vs.RANGE_LIMITED = 0
+    _global_mock_vs.RANGE_FULL = 1
+    _global_mock_vs.MATRIX_BT709 = 1
     _global_mock_vs.MATRIX_BT2020_CL = 10
     _global_mock_vs.MATRIX_BT2020_NCL = 9
     sys.modules["vapoursynth"] = _global_mock_vs

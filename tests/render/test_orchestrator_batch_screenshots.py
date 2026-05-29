@@ -45,9 +45,9 @@ def test_render_screenshots_from_batch_happy_path(tmp_path) -> None:
 
     with patch("frame_compare.render.batch.orchestrator.render_batch") as mock_batch:
         mock_batch.return_value = [
-            tmp_path / "label1_00010.png",
-            tmp_path / "label1_00020.png",
-            tmp_path / "label2_00030.png",
+            tmp_path / "10 - label1.png",
+            tmp_path / "20 - label1.png",
+            tmp_path / "30 - label2.png",
         ]
 
         results = render_screenshots_from_batch(
@@ -63,8 +63,8 @@ def test_render_screenshots_from_batch_happy_path(tmp_path) -> None:
 
         assert "label1" in results
         assert "label2" in results
-        assert results["label1"] == [tmp_path / "label1_00010.png", tmp_path / "label1_00020.png"]
-        assert results["label2"] == [tmp_path / "label2_00030.png"]
+        assert results["label1"] == [tmp_path / "10 - label1.png", tmp_path / "20 - label1.png"]
+        assert results["label2"] == [tmp_path / "30 - label2.png"]
         mock_batch.assert_called_once()
         assert mock_batch.call_args.kwargs["parallelism"] == 1
 
@@ -86,7 +86,7 @@ def test_render_screenshots_from_batch_passes_internal_parallelism(tmp_path) -> 
     )
 
     with patch("frame_compare.render.batch.orchestrator.render_batch") as mock_batch:
-        mock_batch.return_value = [tmp_path / "label1_00010.png"]
+        mock_batch.return_value = [tmp_path / "10 - label1.png"]
 
         render_screenshots_from_batch(
             batch_requests=[request],
@@ -119,7 +119,7 @@ def test_render_screenshots_from_batch_clamps_internal_parallelism_to_one(tmp_pa
     )
 
     with patch("frame_compare.render.batch.orchestrator.render_batch") as mock_batch:
-        mock_batch.return_value = [tmp_path / "label1_00010.png"]
+        mock_batch.return_value = [tmp_path / "10 - label1.png"]
 
         render_screenshots_from_batch(
             batch_requests=[request],
@@ -195,7 +195,7 @@ def test_render_screenshots_from_batch_renderer_auto_path(tmp_path) -> None:
         mock_loader.load.return_value = mock_source
 
         with patch("frame_compare.render.batch.orchestrator.render_batch") as mock_batch:
-            mock_batch.return_value = [tmp_path / "label1_00010.png"]
+            mock_batch.return_value = [tmp_path / "10 - label1.png"]
 
             results = render_screenshots_from_batch(
                 batch_requests=[req],
@@ -208,7 +208,7 @@ def test_render_screenshots_from_batch_renderer_auto_path(tmp_path) -> None:
                 ),
             )
 
-            assert results["label1"] == [tmp_path / "label1_00010.png"]
+            assert results["label1"] == [tmp_path / "10 - label1.png"]
             mock_loader.load.assert_called_once_with(Path("vid1.mkv"))
 
 
@@ -288,7 +288,7 @@ def test_render_screenshots_from_batch_rejects_duplicate_output_names_after_sani
     ffmpeg_runner = MagicMock()
     req1 = ScreenshotBatchRequest(
         clip_path=Path("vid1.mkv"),
-        label="A B",
+        label="Bad:Name",
         source_frames=[42],
         display_frames=[42],
         selection_labels=[None],
@@ -299,7 +299,7 @@ def test_render_screenshots_from_batch_rejects_duplicate_output_names_after_sani
     )
     req2 = ScreenshotBatchRequest(
         clip_path=Path("vid2.mkv"),
-        label="A_B",
+        label="Bad?Name",
         source_frames=[42],
         display_frames=[42],
         selection_labels=[None],
@@ -309,7 +309,7 @@ def test_render_screenshots_from_batch_rejects_duplicate_output_names_after_sani
         probe_is_hdr=False,
     )
 
-    with pytest.raises(ValueError, match="Duplicate screenshot output 'A_B_00042.png'"):
+    with pytest.raises(ValueError, match="Duplicate screenshot output '42 - Bad_Name.png'"):
         render_screenshots_from_batch(
             batch_requests=[req1, req2],
             output_dir=tmp_path,

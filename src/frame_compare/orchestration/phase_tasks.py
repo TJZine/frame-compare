@@ -256,6 +256,7 @@ def run_render_phase(
             ScreenshotBatchRequest(
                 clip_path=clip.path,
                 label=clip.label,
+                filename_label=clip.path.stem,
                 source_frames=source_frames,
                 display_frames=frames,
                 selection_labels=selection_labels,

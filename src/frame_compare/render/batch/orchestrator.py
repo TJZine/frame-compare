@@ -227,6 +227,7 @@ def render_screenshots(
         req = ScreenshotBatchRequest(
             clip_path=clip_path,
             label=label,
+            filename_label=clip_path.stem,
             source_frames=frames,
             display_frames=display_frames,
             selection_labels=sel_labels,

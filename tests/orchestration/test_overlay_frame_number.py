@@ -115,10 +115,10 @@ def test_overlay_display_frame_number_matches_aligned_output_filename(
 
     assert output.render.screenshot_dir == workspace.screenshots_dir
     assert "Reference" in output.render.screenshots_by_label
-    assert output.render.screenshots_by_label["Reference"][0].name.endswith("_00010.png")
+    assert output.render.screenshots_by_label["Reference"][0].name == "10 - ref.png"
 
     req = cast(Any, captured[0])
     assert req.frame_number == 20
-    assert req.output_path.name.endswith("_00010.png")
+    assert req.output_path.name == "10 - ref.png"
     assert req.overlay is not None
     assert req.overlay.display_frame_number == 10

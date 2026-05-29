@@ -66,8 +66,9 @@ def validate_batch_requests(batch_requests: list[ScreenshotBatchRequest]) -> Non
         if req.label in seen_labels:
             raise ValueError(f"Duplicate label {req.label!r} detected in batch requests")
         seen_labels.add(req.label)
+        filename_label = _request_filename_label(req)
         for display_frame in req.display_frames:
-            output_name = generate_screenshot_name(req.label, display_frame)
+            output_name = generate_screenshot_name(filename_label, display_frame)
             prior = seen_output_names.get(output_name)
             if prior is not None:
                 prior_label, prior_display_frame = prior
@@ -77,6 +78,10 @@ def validate_batch_requests(batch_requests: list[ScreenshotBatchRequest]) -> Non
                     f"label={prior_label!r}, display_frame={prior_display_frame}"
                 )
             seen_output_names[output_name] = (req.label, display_frame)
+
+
+def _request_filename_label(request: ScreenshotBatchRequest) -> str:
+    return request.filename_label if request.filename_label is not None else request.label
 
 
 def _validate_source_frame_range(
@@ -117,6 +122,7 @@ def _build_overlay_config(
     resolution: tuple[int, int],
     hdr_info: str | None,
     num_frames: int | None,
+    include_frame_number: bool,
 ) -> OverlayConfig | None:
     if overlay_mode == OverlayMode.NONE:
         return None
@@ -127,6 +133,7 @@ def _build_overlay_config(
         display_frame_number=display_frame,
         num_frames=num_frames,
         selection_label=selection_label,
+        include_frame_number=include_frame_number,
         resolution=resolution,
         hdr_info=hdr_info,
         font_path=None,
@@ -171,7 +178,9 @@ def expand_batch_render_requests(
             display_frame = req.display_frames[idx]
             selection_label = req.selection_labels[idx]
 
-            output_path = generate_screenshot_path(output_dir, req.label, display_frame)
+            output_path = generate_screenshot_path(
+                output_dir, _request_filename_label(req), display_frame
+            )
             overlay = _build_overlay_config(
                 req,
                 overlay_mode=overlay_mode,
@@ -181,6 +190,7 @@ def expand_batch_render_requests(
                 resolution=(width, height),
                 hdr_info=resolved_hdr_info,
                 num_frames=num_frames,
+                include_frame_number=config.screenshots.include_frame_number,
             )
 
             render_req = RenderRequest(

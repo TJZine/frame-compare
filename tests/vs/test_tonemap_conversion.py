@@ -8,7 +8,7 @@ import frame_compare.vs.tonemap as tonemap_module  # noqa: E402, I001
 
 
 def test_convert_non_rgb_with_matrix_hint_preserves_existing_matrix_prop() -> None:
-    """Existing frame props should prevent us from inventing a matrix fallback hint."""
+    """Existing frame props should drive numeric source conversion kwargs."""
     mock_clip = MagicMock()
     mock_resized = MagicMock()
     mock_clip.resize.Bicubic.return_value = mock_resized
@@ -21,7 +21,11 @@ def test_convert_non_rgb_with_matrix_hint_preserves_existing_matrix_prop() -> No
     )
 
     assert result is mock_resized
-    mock_clip.resize.Bicubic.assert_called_once_with(format=vs.RGBS)
+    mock_clip.resize.Bicubic.assert_called_once_with(
+        format=vs.RGBS,
+        matrix_in=9,
+        range_in=vs.RANGE_LIMITED,
+    )
 
 
 def test_convert_non_rgb_with_matrix_hint_preserves_parseable_matrix_prop() -> None:
@@ -37,7 +41,38 @@ def test_convert_non_rgb_with_matrix_hint_preserves_parseable_matrix_prop() -> N
     )
 
     assert result is mock_resized
-    mock_clip.resize.Bicubic.assert_called_once_with(format=vs.RGBS)
+    mock_clip.resize.Bicubic.assert_called_once_with(
+        format=vs.RGBS,
+        matrix_in=9,
+        range_in=vs.RANGE_LIMITED,
+    )
+
+
+def test_convert_non_rgb_with_matrix_hint_forwards_valid_transfer_primaries_and_range() -> None:
+    mock_clip = MagicMock()
+    mock_resized = MagicMock()
+    mock_clip.resize.Bicubic.return_value = mock_resized
+
+    result = tonemap_module._convert_non_rgb_with_matrix_hint(
+        mock_clip,
+        target_format=vs.RGBS,
+        props={
+            "_Matrix": 9,
+            "_Transfer": 16,
+            "_Primaries": 9,
+            "_ColorRange": vs.RANGE_LIMITED,
+        },
+        detected_is_hdr=True,
+    )
+
+    assert result is mock_resized
+    mock_clip.resize.Bicubic.assert_called_once_with(
+        format=vs.RGBS,
+        matrix_in=9,
+        range_in=vs.RANGE_LIMITED,
+        transfer_in=16,
+        primaries_in=9,
+    )
 
 
 def test_convert_non_rgb_with_matrix_hint_treats_unspecified_matrix_as_sdr_missing() -> None:
@@ -53,7 +88,11 @@ def test_convert_non_rgb_with_matrix_hint_treats_unspecified_matrix_as_sdr_missi
     )
 
     assert result is mock_resized
-    mock_clip.resize.Bicubic.assert_called_once_with(format=vs.RGBS, matrix_in_s="709")
+    mock_clip.resize.Bicubic.assert_called_once_with(
+        format=vs.RGBS,
+        matrix_in=vs.MATRIX_BT709,
+        range_in=vs.RANGE_LIMITED,
+    )
 
 
 def test_convert_non_rgb_with_matrix_hint_treats_unspecified_matrix_as_hdr_missing() -> None:
@@ -69,7 +108,11 @@ def test_convert_non_rgb_with_matrix_hint_treats_unspecified_matrix_as_hdr_missi
     )
 
     assert result is mock_resized
-    mock_clip.resize.Bicubic.assert_called_once_with(format=vs.RGBS, matrix_in_s="2020ncl")
+    mock_clip.resize.Bicubic.assert_called_once_with(
+        format=vs.RGBS,
+        matrix_in=vs.MATRIX_BT2020_NCL,
+        range_in=vs.RANGE_LIMITED,
+    )
 
 
 def test_convert_non_rgb_with_matrix_hint_treats_unparseable_matrix_as_sdr_missing() -> None:
@@ -85,7 +128,11 @@ def test_convert_non_rgb_with_matrix_hint_treats_unparseable_matrix_as_sdr_missi
     )
 
     assert result is mock_resized
-    mock_clip.resize.Bicubic.assert_called_once_with(format=vs.RGBS, matrix_in_s="709")
+    mock_clip.resize.Bicubic.assert_called_once_with(
+        format=vs.RGBS,
+        matrix_in=vs.MATRIX_BT709,
+        range_in=vs.RANGE_LIMITED,
+    )
 
 
 def test_convert_non_rgb_with_matrix_hint_treats_unparseable_bytes_matrix_as_hdr_missing() -> None:
@@ -101,7 +148,11 @@ def test_convert_non_rgb_with_matrix_hint_treats_unparseable_bytes_matrix_as_hdr
     )
 
     assert result is mock_resized
-    mock_clip.resize.Bicubic.assert_called_once_with(format=vs.RGBS, matrix_in_s="2020ncl")
+    mock_clip.resize.Bicubic.assert_called_once_with(
+        format=vs.RGBS,
+        matrix_in=vs.MATRIX_BT2020_NCL,
+        range_in=vs.RANGE_LIMITED,
+    )
 
 
 def test_to_rgbs_no_op_when_already_rgbs_real():
@@ -132,4 +183,8 @@ def test_to_rgbs_converts_non_rgbs():
     result = _to_rgbs(mock_clip)
 
     assert result is mock_resized
-    mock_clip.resize.Bicubic.assert_called_once_with(format=vs.RGBS, matrix_in_s="709")
+    mock_clip.resize.Bicubic.assert_called_once_with(
+        format=vs.RGBS,
+        matrix_in=vs.MATRIX_BT709,
+        range_in=vs.RANGE_LIMITED,
+    )
