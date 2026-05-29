@@ -43,6 +43,7 @@ def test_doctor_json_conforms_to_schema_shape(monkeypatch: MonkeyPatch) -> None:
 
     result = runner.invoke(app, ["doctor", "--json"])
     assert result.exit_code == 0
+    assert result.stderr == ""
 
     payload = json.loads(result.stdout)
     assert payload["success"] is True
@@ -115,3 +116,42 @@ def test_doctor_exit_code_is_0_on_optional_or_network_failure(monkeypatch: Monke
 
 def test_doctor_stub_text(monkeypatch: MonkeyPatch) -> None:
     _run_doctor_optional_failure_and_assert(monkeypatch)
+
+
+def test_doctor_text_preserves_literal_brackets(monkeypatch: MonkeyPatch) -> None:
+    check = DoctorCheck(
+        name="ffmpeg[optional]",
+        category="optional",
+        check_fn=lambda: CheckResult(
+            passed=False,
+            message="missing [ffmpeg]",
+            hint="install [ffmpeg]",
+        ),
+    )
+    report = DoctorReport(
+        checks=[(check, check.check_fn())],
+        all_passed=False,
+        critical_failures=[],
+    )
+
+    def _run_doctor(
+        checks: list[DoctorCheck] | None = None,
+        reporter: ProgressReporter | None = None,
+    ) -> DoctorReport:
+        return report
+
+    monkeypatch.setattr("frame_compare.cli.entry.run_doctor", _run_doctor)
+
+    result = runner.invoke(
+        app,
+        ["doctor"],
+        color=False,
+        terminal_width=200,
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert "ffmpeg[optional]" in result.stdout
+    assert "missing [ffmpeg]" in result.stdout
+    assert "Hint: install [ffmpeg]" in result.stdout

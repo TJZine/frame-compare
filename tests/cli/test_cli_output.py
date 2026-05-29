@@ -77,6 +77,34 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     assert "vspreview.available" not in output
 
 
+def test_at_a_glance_preserves_literal_brackets_in_dynamic_paths(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    config = _config()
+    config.paths.input_dir = Path("[bold]input[end]")
+    config.paths.screenshots_dir = Path("[red]screens[end]")
+    config.paths.generated_dir = Path("[cyan]generated[end]")
+    console = _console()
+
+    monkeypatch.setattr("frame_compare.cli.output.shutil.which", lambda _command: None)
+
+    print_at_a_glance(
+        console,
+        request=_request(),
+        config=config,
+        root=_workspace_path("[root]"),
+        config_path=_workspace_path("config", "[file].toml"),
+    )
+
+    output = _render(console)
+    assert "root" in output
+    assert str(_workspace_path("[root]")) in output
+    assert str(_workspace_path("config", "[file].toml")) in output
+    assert "[bold]input[end]" in output
+    assert "[red]screens[end]" in output
+    assert "[cyan]generated[end]" in output
+
+
 def test_at_a_glance_prints_vspreview_availability_when_probe_succeeds(
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -190,6 +218,28 @@ def test_result_summary_prints_artifact_rows_and_untruncated_warnings() -> None:
     assert "more)" not in output
 
 
+def test_result_summary_preserves_literal_brackets_in_dynamic_values() -> None:
+    console = _console()
+
+    print_result_summary(
+        console,
+        result=RunResult(
+            success=True,
+            screenshot_dir=_workspace_path("screenshots", "[episode]"),
+            slowpics_url="https://slow.pics/c/[example]",
+            report_path=_workspace_path("reports", "[episode].html"),
+            warnings=["metadata [skipped]"],
+        ),
+        quiet=False,
+    )
+
+    output = _render(console)
+    assert str(_workspace_path("screenshots", "[episode]")) in output
+    assert "https://slow.pics/c/[example]" in output
+    assert str(_workspace_path("reports", "[episode].html")) in output
+    assert "metadata [skipped]" in output
+
+
 def test_result_summary_omits_warnings_panel_when_no_warnings_exist() -> None:
     console = _console()
 
@@ -232,3 +282,17 @@ def test_result_summary_prints_success_fallback_and_truncates_warnings() -> None
     assert "warning 8" in output
     assert "(2 more)" in output
     assert "warning 9" not in output
+
+
+def test_result_summary_quiet_mode_preserves_literal_brackets() -> None:
+    console = _console()
+
+    print_result_summary(
+        console,
+        result=RunResult(success=True, screenshot_dir=_workspace_path("screenshots", "[episode]")),
+        quiet=True,
+    )
+
+    output = _render(console).strip()
+    assert output.startswith("Screenshots:")
+    assert str(_workspace_path("screenshots", "[episode]")) in output

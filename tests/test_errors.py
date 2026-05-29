@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from rich.console import Console
 
 from frame_compare.analysis.errors import (
     AnalysisError,
@@ -72,6 +73,12 @@ from frame_compare.vspreview.errors import (
     VSPreviewError,
     VSPreviewNotFoundError,
 )
+
+
+def _render_rich_markup(markup: str) -> str:
+    console = Console(record=True, no_color=True, width=200)
+    console.print(markup)
+    return console.export_text(styles=False)
 
 
 @pytest.mark.parametrize(
@@ -267,7 +274,6 @@ def test_get_exit_code_maps_by_error_code_prefix_for_generic_error(code, expecte
 def test_format_error_console_basic():
     error = VapourSynthNotFoundError()
     output = format_error_console(error)
-    assert f"Error [red][[{error.code}]][/]:" in output
     assert error.context.message in output
     assert "Hint:" in output
     # Since it has no details, it shouldn't say "For more details" or "Details:"
@@ -279,7 +285,6 @@ def test_format_error_console_verbose_with_details():
     cache_path = Path("/cache")
     error = CacheCorruptionError(cache_path)
     output = format_error_console(error, verbose=True)
-    assert f"Error [red][[{error.code}]][/]:" in output
     assert "Details:" in output
     assert "'path'" in output or "path" in output
     # Path string formatting is platform-dependent (POSIX: "/cache", Windows: "\\cache").
@@ -289,7 +294,6 @@ def test_format_error_console_verbose_with_details():
 def test_format_error_console_non_verbose_with_details():
     error = CacheCorruptionError(Path("/cache"))
     output = format_error_console(error, verbose=False)
-    assert f"Error [red][[{error.code}]][/]:" in output
     assert "Details:" not in output
     assert "For more details, run with --verbose" in output
 
@@ -297,8 +301,26 @@ def test_format_error_console_non_verbose_with_details():
 def test_format_error_console_verbose_no_details():
     error = RenderError()
     output = format_error_console(error, verbose=True)
-    assert f"Error [red][[{error.code}]][/]:" in output
     assert "Details:" not in output
+
+
+def test_format_error_console_rendered_output_preserves_literal_brackets() -> None:
+    error = FrameCompareError(
+        ErrorContext(
+            code="FC-3001",
+            name="BRACKETED_VALUE",
+            message="File [1080p] missing",
+            hint="Try [literal] brackets",
+            details={"path": "C:/videos/[sample].mkv"},
+        )
+    )
+
+    rendered = _render_rich_markup(format_error_console(error, verbose=True))
+
+    assert "Error [FC-3001]: File [1080p] missing" in rendered
+    assert "[[FC-3001]]" not in rendered
+    assert "Hint: Try [literal] brackets" in rendered
+    assert "path: C:/videos/[sample].mkv" in rendered
 
 
 def test_format_error_json():

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
@@ -42,15 +43,15 @@ def _styled_bool(value: bool) -> str:
 
 
 def _styled_value(value: str) -> str:
-    return f"[{STYLE_VALUE}]{value}[/]"
+    return f"[{STYLE_VALUE}]{escape(value)}[/]"
 
 
 def _styled_unit(value: str) -> str:
-    return f"[{STYLE_UNIT}]{value}[/]"
+    return f"[{STYLE_UNIT}]{escape(value)}[/]"
 
 
 def _styled_path(value: str) -> str:
-    return f"[{STYLE_PATH}]{value}[/]"
+    return f"[{STYLE_PATH}]{escape(value)}[/]"
 
 
 
@@ -193,7 +194,7 @@ def print_result_summary(console: Console, *, result: RunResult, quiet: bool) ->
 
     if quiet:
         if screenshot_dir is not None:
-            console.print(f"Screenshots: {screenshot_dir}", soft_wrap=True)
+            console.print(f"Screenshots: {escape(screenshot_dir)}", soft_wrap=True)
         return
 
     table = _group_table()
@@ -252,7 +253,7 @@ def print_result_summary(console: Console, *, result: RunResult, quiet: bool) ->
         max_lines = 8
         visible = result.warnings[:max_lines]
         remaining = len(result.warnings) - len(visible)
-        warning_text = "\n".join(f"[{STYLE_WARN}]\u2022[/] {w}" for w in visible)
+        warning_text = "\n".join(f"[{STYLE_WARN}]\u2022[/] {escape(w)}" for w in visible)
         if remaining > 0:
             warning_text += f"\n[{STYLE_WARN}]\u2022[/] ... ({remaining} more)"
         console.print(

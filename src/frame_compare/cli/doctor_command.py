@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Protocol
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 
 from frame_compare.cli.errors import ExitCode
 from frame_compare.errors import JSONValue
@@ -80,6 +81,6 @@ def print_doctor_report(report: DoctorReport) -> None:
     for check, result in report.checks:
         icon = _STATUS_ICONS.get(result.passed, "\u2022")
         padded_name = check.name.ljust(label_width)
-        console.print(f"{icon} {padded_name} \u2014 {result.message}")
+        console.print(f"{icon} {escape(padded_name)} \u2014 {escape(result.message)}")
         if result.hint:
-            console.print(f"   {''.ljust(label_width)}   [dim]Hint: {result.hint}[/]")
+            console.print(f"   {''.ljust(label_width)}   [dim]Hint: {escape(result.hint)}[/]")

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from enum import IntEnum
 
+from rich.markup import escape
+
 from frame_compare.errors import FrameCompareError, JSONValue
 
 
@@ -39,14 +41,17 @@ def get_exit_code(error: FrameCompareError) -> ExitCode:
 
 def format_error_console(error: FrameCompareError, *, verbose: bool = False) -> str:
     """Format error for Rich console output with styled code and hint."""
-    output = f"[bold red]\u2717[/] Error [red][[{error.code}]][/]: {error.context.message}\n"
+    output = (
+        f"[bold red]\u2717[/] Error [red]{escape(f'[{error.code}]')}[/]: "
+        f"{escape(error.context.message)}\n"
+    )
     if error.hint:
-        output += f"  [yellow]Hint:[/] {error.hint}\n"
+        output += f"  [yellow]Hint:[/] {escape(error.hint)}\n"
 
     if verbose and error.context.details:
         output += "\n  [dim]Details:[/]\n"
         for k, v in error.context.details.items():
-            output += f"    [dim]{k}:[/] {v}\n"
+            output += f"    [dim]{escape(str(k))}:[/] {escape(str(v))}\n"
     elif not verbose and error.context.details:
         output += "\n  [dim]For more details, run with --verbose[/]"
 
