@@ -17,7 +17,7 @@ from frame_compare.analysis.cache_io import (
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.utils.perf import perf_span
-from frame_compare.utils.progress_protocol import ProgressReporter
+from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError
 from frame_compare.vs.loader import DefaultVSLoader
 
@@ -225,6 +225,7 @@ def _calculate_luminance(
             reporter.start_phase("Calculating luminance", clip.num_frames)
 
         luminance: list[float] = []
+        phase_status = ProgressPhaseStatus.COMPLETED
         try:
             for n in range(clip.num_frames):
                 frame = clip.get_frame(n)
@@ -234,13 +235,14 @@ def _calculate_luminance(
                 if reporter:
                     reporter.advance(1)
         except Exception as e:
+            phase_status = ProgressPhaseStatus.FAILED
             # Re-raise with FC-4002 context
             raise MetricsCalculationError(
                 f"Frame access failed at frame {len(luminance)}: {e}"
             ) from e
         finally:
             if reporter:
-                reporter.complete_phase()
+                reporter.complete_phase(phase_status)
 
         return luminance
 
@@ -282,6 +284,7 @@ def _calculate_motion(
             reporter.start_phase("Calculating motion", max(1, total_frames - 1))
 
         motion = [0.0] * clip.num_frames
+        phase_status = ProgressPhaseStatus.COMPLETED
         try:
             for n in range(1, clip.num_frames):
                 prev_frame = clip.get_frame(n - 1)
@@ -293,10 +296,11 @@ def _calculate_motion(
                 if reporter:
                     reporter.advance(1)
         except Exception as e:
+            phase_status = ProgressPhaseStatus.FAILED
             # Re-raise with FC-4002 context
             raise MetricsCalculationError(f"Frame access failed during motion analysis: {e}") from e
         finally:
             if reporter:
-                reporter.complete_phase()
+                reporter.complete_phase(phase_status)
 
         return motion

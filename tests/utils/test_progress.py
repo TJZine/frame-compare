@@ -5,6 +5,7 @@ from frame_compare.utils.progress import (
     NullProgressReporter,
     RichProgressReporter,
 )
+from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 
 
 def test_null_progress_reporter_noops():
@@ -76,6 +77,27 @@ def test_rich_progress_reporter_suspend_and_resume_preserves_active_task() -> No
     assert reporter._progress.live.is_started is True  # noqa: SLF001
 
     reporter.complete_phase()
+
+
+def test_rich_progress_reporter_warned_phase_does_not_force_total(
+    monkeypatch,
+) -> None:
+    reporter = RichProgressReporter()
+    update_calls: list[dict[str, object]] = []
+    original_update = reporter._progress.update  # noqa: SLF001
+
+    def _recording_update(task_id, **kwargs):
+        update_calls.append(kwargs)
+        return original_update(task_id, **kwargs)
+
+    monkeypatch.setattr(reporter._progress, "update", _recording_update)  # noqa: SLF001
+
+    reporter.start_phase("test", 10)
+    reporter.advance(3)
+    reporter.complete_phase(ProgressPhaseStatus.WARNED)
+
+    assert {"description": "Warning"} in update_calls
+    assert {"completed": 10} not in update_calls
 
 
 def test_progress_reporter_protocol_is_single_source() -> None:

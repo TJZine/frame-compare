@@ -6,7 +6,17 @@ from low-level modules without pulling UI dependencies at import time.
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Protocol, runtime_checkable
+
+
+class ProgressPhaseStatus(StrEnum):
+    """Terminal status for a reported phase."""
+
+    COMPLETED = "completed"
+    SKIPPED = "skipped"
+    WARNED = "warned"
+    FAILED = "failed"
 
 
 @runtime_checkable
@@ -25,7 +35,10 @@ class ProgressReporter(Protocol):
         """Set the description for the current phase."""
         ...
 
-    def complete_phase(self) -> None:
+    def complete_phase(
+        self,
+        status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+    ) -> None:
         """Mark the current phase as complete."""
         ...
 
