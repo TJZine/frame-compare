@@ -13,15 +13,25 @@ from frame_compare.orchestration.fps_report import (
 )
 
 
-def _make_clip_state(path: str, label: str, fps: Fraction, effective_fps: Fraction) -> ClipState:
+def _make_clip_state(
+    path: str,
+    label: str,
+    fps: Fraction,
+    effective_fps: Fraction,
+    *,
+    width: int = 1920,
+    height: int = 1080,
+    num_frames: int = 100,
+    is_hdr: bool = False,
+) -> ClipState:
     fingerprint = ClipFingerprint(Path(path), 123, 456)
     probe = ClipProbeSnapshot(
         fingerprint=fingerprint,
-        width=1920,
-        height=1080,
-        num_frames=100,
+        width=width,
+        height=height,
+        num_frames=num_frames,
         fps=fps,
-        is_hdr=False,
+        is_hdr=is_hdr,
     )
     return ClipState(
         path=Path(path),
@@ -32,9 +42,27 @@ def _make_clip_state(path: str, label: str, fps: Fraction, effective_fps: Fracti
     )
 
 
-def test_build_consolidated_fps_report_orders_reference_then_comparisons() -> None:
-    reference = _make_clip_state("ref.mkv", "Reference", Fraction(24, 1), Fraction(24, 1))
-    comp1 = _make_clip_state("a.mkv", "Encode 1", Fraction(24, 1), Fraction(24, 1))
+def test_build_consolidated_fps_report_includes_probe_metadata_and_fps_order() -> None:
+    reference = _make_clip_state(
+        "ref.mkv",
+        "Reference",
+        Fraction(24000, 1001),
+        Fraction(24000, 1001),
+        width=3840,
+        height=2160,
+        num_frames=2400,
+        is_hdr=True,
+    )
+    comp1 = _make_clip_state(
+        "a.mkv",
+        "Encode 1",
+        Fraction(30000, 1001),
+        Fraction(24000, 1001),
+        width=1920,
+        height=1080,
+        num_frames=1200,
+        is_hdr=False,
+    )
     comp2 = _make_clip_state("b.mkv", "Encode 2", Fraction(24, 1), Fraction(24, 1))
 
     report = build_consolidated_fps_report(reference, [comp1, comp2])
@@ -42,6 +70,17 @@ def test_build_consolidated_fps_report_orders_reference_then_comparisons() -> No
     assert report[0].label == "Reference"
     assert report[1].label == "Encode 1"
     assert report[2].label == "Encode 2"
+    assert report[0].width == 3840
+    assert report[0].height == 2160
+    assert report[0].num_frames == 2400
+    assert report[0].is_hdr is True
+    assert report[1].width == 1920
+    assert report[1].height == 1080
+    assert report[1].num_frames == 1200
+    assert report[1].is_hdr is False
+    assert report[1].source_fps == Fraction(30000, 1001)
+    assert report[1].effective_fps == Fraction(24000, 1001)
+    assert report[1].fps_divergent is True
 
 
 def test_build_consolidated_fps_report_with_empty_comparisons_returns_reference_only() -> None:
@@ -63,10 +102,17 @@ def test_build_consolidated_fps_report_flags_divergence_when_effective_fps_diffe
     assert report[1].fps_divergent is True
 
 
-def test_emit_consolidated_fps_report_noop_when_quiet(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_emit_consolidated_fps_report_noop_when_quiet(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     clip = FpsReportClip(
         path=Path("ref.mkv"),
         label="Reference",
+        width=1920,
+        height=1080,
+        num_frames=100,
+        is_hdr=False,
         source_fps=Fraction(24, 1),
         effective_fps=Fraction(24, 1),
         fps_divergent=False,
@@ -74,7 +120,7 @@ def test_emit_consolidated_fps_report_noop_when_quiet(monkeypatch: pytest.Monkey
     )
 
     def _fail(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("No output should be emitted when quiet=True")
+        raise AssertionError("No logs should be emitted when quiet=True")
 
     monkeypatch.setattr("frame_compare.orchestration.fps_report.log.info", _fail)
 
@@ -85,6 +131,70 @@ def test_emit_consolidated_fps_report_noop_when_quiet(monkeypatch: pytest.Monkey
         quiet=True,
     )
 
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+def test_emit_consolidated_fps_report_json_mode_logs_without_human_output(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    clip = FpsReportClip(
+        path=Path("ref.mkv"),
+        label="Reference",
+        width=1920,
+        height=1080,
+        num_frames=100,
+        is_hdr=False,
+        source_fps=Fraction(24, 1),
+        effective_fps=Fraction(24, 1),
+        fps_divergent=False,
+        note=None,
+    )
+
+    log_calls: list[tuple[str, str, list[dict[str, object]]]] = []
+
+    def _record_log(
+        event: str, *, stage: str, clips: list[dict[str, object]]
+    ) -> None:
+        log_calls.append((event, stage, clips))
+
+    monkeypatch.setattr("frame_compare.orchestration.fps_report.log.info", _record_log)
+
+    emit_consolidated_fps_report(
+        stage="after_load_sources",
+        clips=[clip],
+        json_output=True,
+        quiet=False,
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+    assert log_calls == [
+        (
+            "fps_report",
+            "after_load_sources",
+            [
+                {
+                    "path": "ref.mkv",
+                    "label": "Reference",
+                    "width": 1920,
+                    "height": 1080,
+                    "num_frames": 100,
+                    "is_hdr": False,
+                    "source_fps_num": 24,
+                    "source_fps_den": 1,
+                    "effective_fps_num": 24,
+                    "effective_fps_den": 1,
+                    "fps_divergent": False,
+                    "note": None,
+                }
+            ],
+        )
+    ]
+
 
 def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
     capsys: pytest.CaptureFixture[str],
@@ -92,7 +202,11 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
     clips = [
         FpsReportClip(
             path=Path("ref.mkv"),
-            label="Reference",
+            label="Reference [source]",
+            width=3840,
+            height=2160,
+            num_frames=2400,
+            is_hdr=True,
             source_fps=Fraction(24000, 1001),
             effective_fps=Fraction(24000, 1001),
             fps_divergent=False,
@@ -100,7 +214,11 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
         ),
         FpsReportClip(
             path=Path("encode.mkv"),
-            label="Encode",
+            label="Encode [candidate]",
+            width=1920,
+            height=1080,
+            num_frames=1200,
+            is_hdr=False,
             source_fps=Fraction(30000, 1001),
             effective_fps=Fraction(24000, 1001),
             fps_divergent=True,
@@ -109,7 +227,7 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
     ]
 
     emit_consolidated_fps_report(
-        stage="after_align",
+        stage="after_load_sources",
         clips=clips,
         json_output=False,
         quiet=False,
@@ -118,14 +236,57 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "Clip FPS" in captured.err
-    assert "After Alignment" in captured.err
+    assert "Clip Overview" in captured.err
+    assert "After Load Sources" in captured.err
     assert "reference" in captured.err
     assert "encode 1" in captured.err
-    assert "Reference" in captured.err
-    assert "Encode" in captured.err
+    assert "Reference [source]" in captured.err
+    assert "Encode [candidate]" in captured.err
+    assert "3840x2160" in captured.err
+    assert "1920x1080" in captured.err
     assert "24000/1001" in captured.err
     assert "30000/1001 -> 24000/1001" in captured.err
-    assert "matched" in captured.err
-    assert "adjusted" in captured.err
+    assert "2400" in captured.err
+    assert "1200" in captured.err
+    assert "yes" in captured.err
+    assert "no" in captured.err
+    assert "ref.mkv" in captured.err
+    assert "encode.mkv" in captured.err
     assert "\x1b[" not in captured.err
+    assert "[bold cyan]" not in captured.err
+    assert "[dim]" not in captured.err
+
+
+def test_emit_consolidated_fps_report_keeps_after_align_fps_panel(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    clip = FpsReportClip(
+        path=Path("encode.mkv"),
+        label="Encode",
+        width=1920,
+        height=1080,
+        num_frames=1200,
+        is_hdr=False,
+        source_fps=Fraction(30000, 1001),
+        effective_fps=Fraction(24000, 1001),
+        fps_divergent=True,
+        note="assumed",
+    )
+
+    emit_consolidated_fps_report(
+        stage="after_align",
+        clips=[clip],
+        json_output=False,
+        quiet=False,
+        no_color=True,
+    )
+
+    captured = capsys.readouterr()
+    assert "Clip FPS" in captured.err
+    assert "After Alignment" in captured.err
+    assert "30000/1001 -> 24000/1001" in captured.err
+    assert "adjusted" in captured.err
+    assert "assumed" in captured.err
+    assert "\x1b[" not in captured.err
+    assert "[yellow]" not in captured.err
+    assert "[dim]" not in captured.err

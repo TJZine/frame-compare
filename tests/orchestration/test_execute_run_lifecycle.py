@@ -188,16 +188,20 @@ def test_execute_run_emits_fps_report_after_load_sources_and_after_align(
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
-    calls: list[tuple[str, bool]] = []
+    calls: list[tuple[str, bool, tuple[str, ...]]] = []
 
-    def _record_emit(*, stage: str, no_color: bool, **_kwargs: Any) -> None:
-        calls.append((stage, no_color))
+    def _record_emit(*, stage: str, no_color: bool, clips: object, **_kwargs: Any) -> None:
+        clip_labels = tuple(clip.label for clip in clips)
+        calls.append((stage, no_color, clip_labels))
 
     monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", _record_emit)
 
     asyncio.run(execute_run(request, deps=deps))
 
-    assert calls == [("after_load_sources", True), ("after_align", True)]
+    assert calls == [
+        ("after_load_sources", True, ("Reference", "Encode 1")),
+        ("after_align", True, ("Reference", "Encode 1")),
+    ]
 
 
 def test_execute_run_applies_cli_overrides_before_phase_execution(
