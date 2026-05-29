@@ -33,7 +33,7 @@ def test_probe_fps_fraction(mock_run: MagicMock):
             "-select_streams",
             "v:0",
             "-show_entries",
-            "stream=r_frame_rate",
+            "stream=avg_frame_rate",
             "-of",
             "csv=p=0",
             "test.mkv",

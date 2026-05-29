@@ -28,7 +28,7 @@ def probe_fps(video_path: Path) -> Fraction:
         "-select_streams",
         "v:0",
         "-show_entries",
-        "stream=r_frame_rate",
+        "stream=avg_frame_rate",
         "-of",
         "csv=p=0",
         str(video_path),

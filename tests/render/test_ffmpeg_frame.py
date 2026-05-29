@@ -6,42 +6,25 @@ import pytest
 
 from frame_compare.render.backend._ffmpeg_frame import (
     build_extract_frame_argv,
-    frame_seek_time_seconds,
 )
 from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 from frame_compare.utils.subproc import CalledProcessError
 
 
-def test_frame_seek_time_seconds_matches_repo_contract() -> None:
-    assert frame_seek_time_seconds(100, 24000 / 1001) == "4.170833"
-
-
-@pytest.mark.parametrize(
-    ("frame_num", "fps"),
-    [
-        (-1, 24.0),
-        (0, 0.0),
-    ],
-)
-def test_frame_seek_time_seconds_rejects_invalid_inputs(frame_num: int, fps: float) -> None:
-    with pytest.raises(ValueError):
-        frame_seek_time_seconds(frame_num, fps)
-
-
 def test_build_extract_frame_argv_supports_optional_overwrite() -> None:
     assert build_extract_frame_argv(
         video=Path("clip.mkv"),
-        seek_time="4.170",
+        frame_num=100,
         output=Path("frame.png"),
         overwrite=False,
     ) == [
         "ffmpeg",
-        "-ss",
-        "4.170",
         "-i",
         "clip.mkv",
-        "-vframes",
+        "-vf",
+        "select=eq(n\\,100)",
+        "-frames:v",
         "1",
         "-q:v",
         "1",
@@ -49,20 +32,27 @@ def test_build_extract_frame_argv_supports_optional_overwrite() -> None:
     ]
     assert build_extract_frame_argv(
         video=Path("clip.mkv"),
-        seek_time="4.170",
+        frame_num=100,
         output=Path("frame.png"),
         overwrite=True,
     )[:2] == ["ffmpeg", "-y"]
+
+
+def test_build_extract_frame_argv_rejects_negative_frame_numbers() -> None:
+    with pytest.raises(ValueError, match="frame_num must be non-negative"):
+        build_extract_frame_argv(
+            video=Path("clip.mkv"),
+            frame_num=-1,
+            output=Path("frame.png"),
+            overwrite=False,
+        )
 
 
 def test_default_ffmpeg_runner_extract_frame_uses_shared_command_policy(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     run_subprocess = MagicMock(
-        side_effect=[
-            subprocess.CompletedProcess(args=[], returncode=0, stdout=b"24000/1001\n", stderr=b""),
-            subprocess.CompletedProcess(args=[], returncode=0, stdout=b"", stderr=b""),
-        ]
+        return_value=subprocess.CompletedProcess(args=[], returncode=0, stdout=b"", stderr=b"")
     )
     monkeypatch.setattr("frame_compare.render.backend.ffmpeg.run_subprocess", run_subprocess)
 
@@ -70,31 +60,29 @@ def test_default_ffmpeg_runner_extract_frame_uses_shared_command_policy(
     output = tmp_path / "shots" / "frame.png"
     runner.extract_frame(Path("clip.mkv"), 100, output)
 
-    assert run_subprocess.call_count == 2
-    extract_call = run_subprocess.call_args_list[1]
-    argv = extract_call.args[0]
-    assert argv == [
+    run_subprocess.assert_called_once_with(
+        [
         "ffmpeg",
         "-y",
-        "-ss",
-        "4.170833",
         "-i",
         "clip.mkv",
-        "-vframes",
+        "-vf",
+        "select=eq(n\\,100)",
+        "-frames:v",
         "1",
         "-q:v",
         "1",
         str(output),
-    ]
+        ],
+        timeout_seconds=30.0,
+    )
     assert output.parent.is_dir()
 
 
 def test_default_ffmpeg_runner_extract_frame_wraps_missing_binary(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    run_subprocess = MagicMock(
-        side_effect=[subprocess.CompletedProcess([], 0, b"24\n", b""), FileNotFoundError]
-    )
+    run_subprocess = MagicMock(side_effect=FileNotFoundError)
     monkeypatch.setattr("frame_compare.render.backend.ffmpeg.run_subprocess", run_subprocess)
 
     runner = DefaultFFmpegRunner()
@@ -107,14 +95,11 @@ def test_default_ffmpeg_runner_extract_frame_wraps_missing_input_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     run_subprocess = MagicMock(
-        side_effect=[
-            subprocess.CompletedProcess(args=[], returncode=0, stdout=b"24\n", stderr=b""),
-            CalledProcessError(
-                1,
-                ["ffmpeg"],
-                stderr=b"No such file or directory",
-            ),
-        ]
+        side_effect=CalledProcessError(
+            1,
+            ["ffmpeg"],
+            stderr=b"No such file or directory",
+        )
     )
     monkeypatch.setattr("frame_compare.render.backend.ffmpeg.run_subprocess", run_subprocess)
 
