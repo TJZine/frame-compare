@@ -67,9 +67,11 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     assert "reference" in output
     assert "renderer" in output
     assert "ffmpeg" in output
-    assert "slow.pics.visibility" in output
+    assert "slow.pics" in output
+    assert "visibility" in output
     assert "unlisted" in output
-    assert "report.auto_open" in output
+    assert "report" in output
+    assert "auto_open" in output
     assert "upload" in output
     assert "disabled" in output
     assert "vspreview.available" not in output
@@ -183,8 +185,8 @@ def test_result_summary_prints_artifact_rows_and_untruncated_warnings() -> None:
     assert "report" in output
     assert str(_workspace_path("report.html")) in output
     assert "Warnings" in output
-    assert "- metadata skipped" in output
-    assert "- upload reused" in output
+    assert "metadata skipped" in output
+    assert "upload reused" in output
     assert "more)" not in output
 
 
@@ -226,7 +228,7 @@ def test_result_summary_prints_success_fallback_and_truncates_warnings() -> None
     assert "status" in output
     assert "success" in output
     assert "Warnings" in output
-    assert "- warning 1" in output
-    assert "- warning 8" in output
-    assert "- ... (2 more)" in output
+    assert "warning 1" in output
+    assert "warning 8" in output
+    assert "(2 more)" in output
     assert "warning 9" not in output

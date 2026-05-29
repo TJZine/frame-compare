@@ -267,7 +267,7 @@ def test_get_exit_code_maps_by_error_code_prefix_for_generic_error(code, expecte
 def test_format_error_console_basic():
     error = VapourSynthNotFoundError()
     output = format_error_console(error)
-    assert f"✗ Error [{error.code}]:" in output
+    assert f"Error [red][[{error.code}]][/]:" in output
     assert error.context.message in output
     assert "Hint:" in output
     # Since it has no details, it shouldn't say "For more details" or "Details:"
@@ -279,7 +279,7 @@ def test_format_error_console_verbose_with_details():
     cache_path = Path("/cache")
     error = CacheCorruptionError(cache_path)
     output = format_error_console(error, verbose=True)
-    assert f"✗ Error [{error.code}]:" in output
+    assert f"Error [red][[{error.code}]][/]:" in output
     assert "Details:" in output
     assert "'path'" in output or "path" in output
     # Path string formatting is platform-dependent (POSIX: "/cache", Windows: "\\cache").
@@ -289,7 +289,7 @@ def test_format_error_console_verbose_with_details():
 def test_format_error_console_non_verbose_with_details():
     error = CacheCorruptionError(Path("/cache"))
     output = format_error_console(error, verbose=False)
-    assert f"✗ Error [{error.code}]:" in output
+    assert f"Error [red][[{error.code}]][/]:" in output
     assert "Details:" not in output
     assert "For more details, run with --verbose" in output
 
@@ -297,7 +297,7 @@ def test_format_error_console_non_verbose_with_details():
 def test_format_error_console_verbose_no_details():
     error = RenderError()
     output = format_error_console(error, verbose=True)
-    assert f"✗ Error [{error.code}]:" in output
+    assert f"Error [red][[{error.code}]][/]:" in output
     assert "Details:" not in output
 
 

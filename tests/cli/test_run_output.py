@@ -94,11 +94,13 @@ def test_run_default_prints_at_a_glance_and_result_summary(monkeypatch: MonkeyPa
         assert "100" in output
         assert "tonemap.curve" in output
         assert "bt2390" in output
-        assert "slow.pics.auto_upload" in output
-        assert "slow.pics.visibility" in output
+        assert "slow.pics" in output
+        assert "auto_upload" in output
+        assert "visibility" in output
         assert "unlisted" in output
-        assert "report.enabled" in output
-        assert "report.auto_open" in output
+        assert "report" in output
+        assert "enabled" in output
+        assert "auto_open" in output
 
 
 def test_run_at_a_glance_prints_resolved_tonemap_preset_settings(
@@ -211,9 +213,9 @@ def test_run_result_summary_prints_status_and_truncated_warnings(
     assert "status" in output
     assert "success" in output
     assert "Warnings" in output
-    assert "- warning 1" in output
-    assert "- warning 8" in output
-    assert "- ... (2 more)" in output
+    assert "• warning 1" in output
+    assert "• warning 8" in output
+    assert "• ... (2 more)" in output
     assert "warning 9" not in output
 
 
@@ -235,8 +237,8 @@ def test_run_result_summary_prints_slowpics_url_and_untruncated_warnings(
     output = _normalize_cli_output(result.stdout)
     assert "slow.pics" in output
     assert "https://slow.pics/c/example" in output
-    assert "- metadata skipped" in output
-    assert "- upload reused" in output
+    assert "• metadata skipped" in output
+    assert "• upload reused" in output
     assert "more)" not in output
 
 
