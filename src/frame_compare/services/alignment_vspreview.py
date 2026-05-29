@@ -154,11 +154,10 @@ def _prompt_for_confirmed_offsets(
         return {}
 
     _stderr_print()
-    _stderr_print("VSPreview closed. Enter confirmed frame offsets.")
-    _stderr_print(
-        "Blank keeps the suggested audio-alignment value; type 'skip' to keep current offsets."
-    )
-    _stderr_print(f"Reference: {reference.stem}")
+    _stderr_print("VSPreview confirmation")
+    _stderr_print(f"  reference  {reference.stem}")
+    _stderr_print("  enter      blank keeps suggested offset; 'skip' keeps current offsets")
+    _stderr_print()
 
     confirmed: dict[str, int] = {}
     for comparison in comparisons:
@@ -167,7 +166,7 @@ def _prompt_for_confirmed_offsets(
         while True:
             try:
                 raw_value = _read_stderr_prompt(
-                    f"Confirmed offset for {comparison.stem} [{_format_signed_frames(suggested)}]: "
+                    f"  {comparison.stem} [{_format_signed_frames(suggested)}]: "
                 ).strip()
             except (EOFError, OSError):
                 _stderr_print("No terminal input available; keeping current offsets.")
@@ -181,7 +180,7 @@ def _prompt_for_confirmed_offsets(
                 confirmed[key] = int(raw_value)
             except ValueError:
                 _stderr_print(
-                    "Enter an integer frame offset, blank to keep the suggestion, or 'skip'."
+                    "  Enter an integer frame offset, blank to keep the suggestion, or 'skip'."
                 )
                 continue
             break

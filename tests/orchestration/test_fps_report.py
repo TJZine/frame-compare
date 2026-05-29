@@ -84,3 +84,48 @@ def test_emit_consolidated_fps_report_noop_when_quiet(monkeypatch: pytest.Monkey
         json_output=True,
         quiet=True,
     )
+
+
+def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    clips = [
+        FpsReportClip(
+            path=Path("ref.mkv"),
+            label="Reference",
+            source_fps=Fraction(24000, 1001),
+            effective_fps=Fraction(24000, 1001),
+            fps_divergent=False,
+            note=None,
+        ),
+        FpsReportClip(
+            path=Path("encode.mkv"),
+            label="Encode",
+            source_fps=Fraction(30000, 1001),
+            effective_fps=Fraction(24000, 1001),
+            fps_divergent=True,
+            note="assumed",
+        ),
+    ]
+
+    emit_consolidated_fps_report(
+        stage="after_align",
+        clips=clips,
+        json_output=False,
+        quiet=False,
+        no_color=True,
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Clip FPS" in captured.err
+    assert "After Alignment" in captured.err
+    assert "reference" in captured.err
+    assert "encode 1" in captured.err
+    assert "Reference" in captured.err
+    assert "Encode" in captured.err
+    assert "24000/1001" in captured.err
+    assert "30000/1001 -> 24000/1001" in captured.err
+    assert "matched" in captured.err
+    assert "adjusted" in captured.err
+    assert "\x1b[" not in captured.err

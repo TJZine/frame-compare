@@ -263,8 +263,10 @@ def test_prompt_for_confirmed_offsets_writes_to_stderr(
     captured = capsys.readouterr()
     assert confirmed == {"ref:comp": 4}
     assert captured.out == ""
-    assert "VSPreview closed. Enter confirmed frame offsets." in captured.err
-    assert "Confirmed offset for comp" in captured.err
+    assert "VSPreview confirmation" in captured.err
+    assert "reference  ref" in captured.err
+    assert "blank keeps suggested offset" in captured.err
+    assert "comp [+4f]:" in captured.err
 
 
 def test_available_with_tty_suspends_progress_during_launch_and_prompt(

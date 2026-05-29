@@ -24,6 +24,18 @@ from frame_compare.vspreview.session_script import write_vspreview_session_scrip
 log = structlog.get_logger()
 
 
+def _stderr_line(message: str = "") -> None:
+    print(message, file=sys.stderr)
+
+
+def _emit_launch_telemetry(*, script_path: Path, command: list[str]) -> None:
+    _stderr_line()
+    _stderr_line("VSPreview session")
+    _stderr_line(f"  script   {script_path}")
+    _stderr_line(f"  command  {' '.join(command)}")
+    _stderr_line("  output   pass-through from the VSPreview process")
+
+
 class VSPreviewAvailabilityStatus(Enum):
     """Status enum for VSPreview availability."""
 
@@ -176,9 +188,8 @@ def launch_alignment_verification_session(
 
     command = _resolve_launch_command(script_path)
 
-    # Print telemetry per vspreview spec §3.2.3
-    print(f"VSPreview script: {script_path}", file=sys.stderr)
-    print(f"Launch command: {' '.join(command)}", file=sys.stderr)
+    # Print telemetry per vspreview spec §3.2.3.
+    _emit_launch_telemetry(script_path=script_path, command=command)
 
     try:
         # command is a list from _resolve_launch_command; shell=True is never used.

@@ -184,19 +184,20 @@ def test_execute_run_emits_fps_report_after_load_sources_and_after_align(
         skip_metadata=True,
         skip_dovi=True,
         no_upload=True,
+        no_color=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
-    calls: list[str] = []
+    calls: list[tuple[str, bool]] = []
 
-    def _record_emit(*, stage: str, **_kwargs: Any) -> None:
-        calls.append(stage)
+    def _record_emit(*, stage: str, no_color: bool, **_kwargs: Any) -> None:
+        calls.append((stage, no_color))
 
     monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", _record_emit)
 
     asyncio.run(execute_run(request, deps=deps))
 
-    assert calls == ["after_load_sources", "after_align"]
+    assert calls == [("after_load_sources", True), ("after_align", True)]
 
 
 def test_execute_run_applies_cli_overrides_before_phase_execution(

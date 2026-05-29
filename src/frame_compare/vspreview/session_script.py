@@ -270,7 +270,9 @@ def main():
     ref_fps_num = ref_clip.fps.numerator
     ref_fps_den = ref_clip.fps.denominator
 
-    safe_print(f"Reference: {REFERENCE['label']} @ {ref_fps_num}/{ref_fps_den} fps")
+    safe_print("")
+    safe_print("VSPreview bootstrap")
+    safe_print(f"  reference  {REFERENCE['label']} @ {ref_fps_num}/{ref_fps_den} fps")
 
     # Apply overlay to reference (best-effort)
     try:
@@ -322,7 +324,7 @@ def main():
         clips.append(comp_view)  # Odd slot (comparison)
         labels.append(label)
 
-        safe_print(f"Loaded: {label} (offset: {offset})")
+        safe_print(f"  loaded     {label} (offset: {offset})")
 
     if len(clips) < 2:
         safe_print("ERROR: No comparison clips loaded successfully.")
@@ -330,9 +332,10 @@ def main():
 
     for i, (clip, label) in enumerate(zip(clips, labels)):
         clip.set_output(i)
-        safe_print(f"Output {i}: {label}")
+        safe_print(f"  output {i:<2}  {label}")
 
-    safe_print("\\nReady for VSPreview. Adjust offsets visually, then confirm in terminal.")
+    safe_print("\\nVSPreview ready")
+    safe_print("  adjust offsets visually, then confirm in the terminal")
 
 main()
 """

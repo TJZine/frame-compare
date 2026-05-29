@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from fractions import Fraction
@@ -10,6 +9,10 @@ from pathlib import Path
 from typing import Any
 
 import structlog
+from rich.console import Console
+from rich.markup import escape
+from rich.panel import Panel
+from rich.table import Table
 
 from frame_compare.orchestration.context import ClipState
 
@@ -74,12 +77,70 @@ def _format_fraction(value: Fraction) -> str:
     return f"{value.numerator}/{value.denominator}"
 
 
+def _stage_label(stage: str) -> str:
+    if stage == "after_load_sources":
+        return "After Load Sources"
+    if stage == "after_align":
+        return "After Alignment"
+    return stage.replace("_", " ").title()
+
+
+def _clip_role(index: int) -> str:
+    if index == 0:
+        return "reference"
+    return f"encode {index}"
+
+
+def _render_human_fps_report(
+    *,
+    stage: str,
+    clips: Sequence[FpsReportClip],
+    no_color: bool,
+) -> None:
+    table = Table(show_header=True, box=None, pad_edge=False, padding=(0, 2, 0, 0))
+    table.add_column("role", style="blue", no_wrap=True)
+    table.add_column("label", style="bright_white")
+    table.add_column("fps", style="bright_white", no_wrap=True)
+    table.add_column("status", no_wrap=True)
+    table.add_column("path", style="dim")
+
+    for index, clip in enumerate(clips):
+        source_fps = _format_fraction(clip.source_fps)
+        effective_fps = _format_fraction(clip.effective_fps)
+        if clip.fps_divergent:
+            fps_text = f"{escape(source_fps)} -> {escape(effective_fps)}"
+            status_text = "[yellow]adjusted[/]"
+        else:
+            fps_text = escape(effective_fps)
+            status_text = "[green]matched[/]"
+        if clip.note is not None:
+            status_text = f"{status_text} [dim]({escape(clip.note)})[/]"
+
+        table.add_row(
+            _clip_role(index),
+            escape(clip.label),
+            fps_text,
+            status_text,
+            escape(str(clip.path)),
+        )
+
+    console = Console(stderr=True, no_color=no_color, width=200)
+    console.print(
+        Panel(
+            table,
+            title=f"[bold cyan]Clip FPS[/] [dim]{escape(_stage_label(stage))}[/]",
+            border_style="cyan",
+        )
+    )
+
+
 def emit_consolidated_fps_report(
     *,
     stage: str,
     clips: Sequence[FpsReportClip],
     json_output: bool,
     quiet: bool,
+    no_color: bool = False,
 ) -> None:
     """Emit the consolidated FPS report in JSON or human-readable form."""
     if quiet:
@@ -90,12 +151,4 @@ def emit_consolidated_fps_report(
         log.info("fps_report", stage=stage, clips=payload)
         return
 
-    print(f"FPS report ({stage})", file=sys.stderr)
-    for clip in clips:
-        note = clip.note if clip.note is not None else "-"
-        print(
-            f"- {clip.label}: {clip.path} | source={_format_fraction(clip.source_fps)} "
-            f"effective={_format_fraction(clip.effective_fps)} divergent={clip.fps_divergent} "
-            f"note={note}",
-            file=sys.stderr,
-        )
+    _render_human_fps_report(stage=stage, clips=clips, no_color=no_color)

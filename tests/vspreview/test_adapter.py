@@ -108,8 +108,10 @@ def test_launch_alignment_verification_session_writes_launch_telemetry_to_stderr
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "VSPreview script:" in captured.err
-    assert "Launch command:" in captured.err
+    assert "VSPreview session" in captured.err
+    assert "script" in captured.err
+    assert "command" in captured.err
+    assert "pass-through from the VSPreview process" in captured.err
 
 
 def test_launch_alignment_verification_session_redacts_probe_failure_details(
@@ -554,6 +556,8 @@ def test_build_script_content_assert_by_section() -> None:
     assert '"comp_a": "comp_a.mkv"' in script
     assert '"ref:comp_a": 10' in script
     assert '"comp_a": 10' in script
+    assert "VSPreview bootstrap" in script
+    assert "VSPreview ready" in script
     assert "def main():" in script
     assert script.rstrip().endswith("main()")
 
