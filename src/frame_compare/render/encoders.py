@@ -51,6 +51,10 @@ def _get_int_frame_prop(frame_props: Mapping[str, object], key: _ColorFramePropK
     return None
 
 
+def _should_expand_tonemapped_limited_rgb(frame_props: Mapping[str, object]) -> bool:
+    return "_Tonemapped" in frame_props and "_FrameCompareExpandRange" in frame_props
+
+
 def render_frame(request: RenderRequest, renderer: Renderer = "auto") -> Path:
     """
     Render a single frame to image file.
@@ -210,13 +214,39 @@ def _clip_to_rgb24_for_pillow(clip: vs.VideoNode) -> vs.VideoNode:
         return clip.resize.Bicubic(format=vs.RGB24, matrix_in_s=matrix_in_s)  # type: ignore[attr-defined]
 
     if fmt.id == vs.RGB24:  # type: ignore[attr-defined]
+        frame_props = clip.get_frame(0).props
+        if _should_expand_tonemapped_limited_rgb(frame_props):
+            return clip.std.SetFrameProps(_FrameCompareExpandRange=1)
         return clip
 
     if fmt.color_family != vs.RGB:  # type: ignore[attr-defined]
         matrix_in_s = _resolve_matrix_in_s(clip)
         return clip.resize.Bicubic(format=vs.RGB24, matrix_in_s=matrix_in_s)  # type: ignore[attr-defined]
 
+    frame_props = clip.get_frame(0).props
+    if _should_expand_tonemapped_limited_rgb(frame_props):
+        rgb = clip.resize.Point(format=vs.RGB24)  # type: ignore[attr-defined]
+        return rgb.std.SetFrameProps(_FrameCompareExpandRange=1)
+
     return clip.resize.Point(format=vs.RGB24)  # type: ignore[attr-defined]
+
+
+def _expand_video_range_rgb_array(array: np.ndarray) -> np.ndarray:
+    max_code = float(np.iinfo(array.dtype).max)
+    scale = max_code / 255.0
+    min_in = 16.0 * scale
+    max_in = 235.0 * scale
+    expanded = (array.astype(np.float32) - min_in) * (max_code / (max_in - min_in))
+    return np.clip(np.rint(expanded), 0, max_code).astype(array.dtype)
+
+
+def _maybe_expand_tonemapped_video_range(
+    array: np.ndarray,
+    frame_props: Mapping[str, object],
+) -> np.ndarray:
+    if not _should_expand_tonemapped_limited_rgb(frame_props):
+        return array
+    return _expand_video_range_rgb_array(array)
 
 
 def _render_vs(
@@ -239,6 +269,8 @@ def _render_vs(
             array = np.dstack(planes)
         else:
             raise EncodingError(output, f"Unsupported plane count: {len(planes)}")
+
+        array = _maybe_expand_tonemapped_video_range(array, vs_frame.props)
 
         image = Image.fromarray(array)
 

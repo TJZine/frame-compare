@@ -116,11 +116,6 @@ def to_rgbs(clip: vs.VideoNode) -> vs.VideoNode:
 def apply_post_processing(clip: vs.VideoNode, settings: TonemapSettings) -> vs.VideoNode:
     """Apply unified post-processing (contrast recovery and gamma lift)."""
     try:
-        if settings.contrast_recovery > 0.0:
-            factor = 1 + settings.contrast_recovery
-            expr = f"x 0.5 - {factor} * 0.5 + 0 max 1 min"
-            clip = clip.std.Expr(expr=[expr, expr, expr])
-
         if settings.gamma_lift:
             clip = clip.std.Levels(gamma=0.9)
 

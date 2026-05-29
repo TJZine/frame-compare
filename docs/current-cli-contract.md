@@ -177,6 +177,11 @@ tests in the same pass.
 explicitly present in config or supplied through `--tm-target`; unrelated CLI overrides
 must not turn schema defaults into explicit tonemap target overrides.
 
+The default `reference` baseline also uses `contrast_recovery = 0.3`. This value is
+forwarded to libplacebo tonemapping, not applied as a separate post-tonemap contrast
+curve. VapourSynth HDR screenshot export treats tonemapped RGB as limited-range
+intermediate data and expands it to full-range PNG output during encoding.
+
 ## `wizard` Command Contract
 
 - `wizard` is interactive and writes a minimal config payload to the resolved config path.

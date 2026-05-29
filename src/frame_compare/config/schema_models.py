@@ -70,7 +70,7 @@ class ColorConfig(BaseModel):
     target_nits: int = Field(default=100, ge=100, le=1000)
     tone_curve: ToneCurve = ToneCurve.BT2390
     gamma_lift: bool = False
-    contrast_recovery: float = Field(default=0.0, ge=0.0, le=1.0)
+    contrast_recovery: float = Field(default=0.3, ge=0.0, le=1.0)
 
 
 class SlowpicsConfig(BaseModel):

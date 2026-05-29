@@ -8,7 +8,10 @@ import vapoursynth as vs  # noqa: E402, I001
 
 from frame_compare.config.schema import ToneCurve, TonemapPreset
 from frame_compare.vs.errors import TonemapError
-from frame_compare.vs.tonemap_conversion import convert_non_rgb_with_matrix_hint
+from frame_compare.vs.tonemap_conversion import (
+    apply_post_processing,
+    convert_non_rgb_with_matrix_hint,
+)
 from frame_compare.vs.tonemap_fallback import fallback_tonemap
 from frame_compare.vs.tonemap_libplacebo import (
     HdrTonemapInputs,
@@ -111,6 +114,16 @@ def test_reference_preset_uses_legacy_hdr_target() -> None:
     settings = get_preset_settings(TonemapPreset.REFERENCE)
 
     assert settings.target_nits == 100
+    assert settings.dynamic_peak_detection is True
+    assert settings.dst_min_nits == 0.18
+    assert settings.knee_offset == 0.50
+    assert settings.smoothing_period == 45.0
+    assert settings.scene_threshold_low == 0.8
+    assert settings.scene_threshold_high == 2.4
+    assert settings.percentile == 99.995
+    assert settings.metadata == 0
+    assert settings.use_dovi is True
+    assert settings.contrast_recovery == 0.30
 
 
 def test_tonemap_presets_unknown_preset_reports_available_values() -> None:
@@ -184,15 +197,27 @@ def test_build_libplacebo_kwargs_uses_hdr10_hints_and_metadata_peak() -> None:
     assert kwargs == {
         "src_max": 1000,
         "dst_max": 203,
-        "tone_mapping_function": 2,
+        "tone_mapping_function_s": "bt.2390",
+        "tone_mapping_param": 0.5,
         "dst_csp": 0,
         "dst_prim": 1,
+        "dst_min": 0.18,
+        "dynamic_peak_detection": 1,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "contrast_recovery": 0.3,
+        "metadata": 0,
+        "use_dovi": 1,
+        "log_level": 2,
         "src_csp": 1,
     }
 
 
 def test_call_libplacebo_with_compat_retry_drops_newer_kwargs_after_typeerror() -> None:
-    """Compatibility retry should preserve only the legacy required kwargs."""
+    """Compatibility retry should preserve baseline kwargs on unknown TypeError."""
     clip = _Clip()
     placebo = _Placebo([TypeError("signature mismatch"), clip])
     core = SimpleNamespace(placebo=placebo)
@@ -224,8 +249,118 @@ def test_call_libplacebo_with_compat_retry_drops_newer_kwargs_after_typeerror() 
             "src_max": 1000,
             "dst_max": 203,
             "tone_mapping_function": 2,
+            "dst_csp": 0,
+            "dst_prim": 1,
+            "src_csp": 1,
         },
     ]
+
+
+def test_call_libplacebo_with_compat_retry_drops_only_rejected_kwargs() -> None:
+    """Compatibility retry should preserve supported legacy tonemap settings."""
+    clip = _Clip()
+    placebo = _Placebo(
+        [
+            TypeError("Function does not take argument(s) named metadata, use_dovi"),
+            clip,
+        ]
+    )
+    core = SimpleNamespace(placebo=placebo)
+
+    call_libplacebo_with_compat_retry(
+        cast("Core", core),
+        cast("VideoNode", clip),
+        {
+            "src_max": 1000,
+            "dst_max": 100,
+            "tone_mapping_function": 2,
+            "dst_min": 0.18,
+            "dynamic_peak_detection": 1,
+            "metadata": 0,
+            "use_dovi": 1,
+            "contrast_recovery": 0.3,
+        },
+    )
+
+    assert placebo.calls[1] == {
+        "src_max": 1000,
+        "dst_max": 100,
+        "tone_mapping_function": 2,
+        "dst_min": 0.18,
+        "dynamic_peak_detection": 1,
+        "contrast_recovery": 0.3,
+    }
+
+
+def test_call_libplacebo_with_compat_retry_parses_unexpected_keyword_message() -> None:
+    """Single-kwarg TypeError messages should not drop the full legacy baseline."""
+    clip = _Clip()
+    placebo = _Placebo(
+        [
+            TypeError("got an unexpected keyword argument 'metadata'"),
+            clip,
+        ]
+    )
+    core = SimpleNamespace(placebo=placebo)
+
+    call_libplacebo_with_compat_retry(
+        cast("Core", core),
+        cast("VideoNode", clip),
+        {
+            "dst_max": 100,
+            "tone_mapping_function_s": "bt.2390",
+            "metadata": 0,
+            "contrast_recovery": 0.3,
+        },
+    )
+
+    assert placebo.calls[1] == {
+        "dst_max": 100,
+        "tone_mapping_function_s": "bt.2390",
+        "contrast_recovery": 0.3,
+    }
+
+
+def test_call_libplacebo_retry_adds_numeric_curve_when_string_curve_is_rejected() -> None:
+    """Production-built kwargs should preserve non-default curves on older runtimes."""
+    clip = _Clip()
+    placebo = _Placebo(
+        [
+            TypeError("got an unexpected keyword argument 'tone_mapping_function_s'"),
+            clip,
+        ]
+    )
+    core = SimpleNamespace(placebo=placebo)
+    inputs = HdrTonemapInputs(
+        hdr_metadata=None,
+        transfer=16,
+        primaries=9,
+        props={},
+        detected_is_hdr=True,
+    )
+    kwargs = build_libplacebo_tonemap_kwargs(
+        settings=TonemapSettings(tone_curve=ToneCurve.SPLINE),
+        target_nits=100,
+        inputs=inputs,
+    )
+
+    call_libplacebo_with_compat_retry(cast("Core", core), cast("VideoNode", clip), kwargs)
+
+    assert "tone_mapping_function_s" not in placebo.calls[1]
+    assert placebo.calls[1]["tone_mapping_function"] == 1
+
+
+def test_apply_post_processing_does_not_apply_contrast_recovery_expr() -> None:
+    """contrast_recovery is a libplacebo option, not a post-tonemap shadow crusher."""
+    clip = _Clip()
+
+    result = apply_post_processing(
+        cast("VideoNode", clip),
+        TonemapSettings(contrast_recovery=0.3, gamma_lift=False),
+    )
+
+    assert result is clip
+    assert clip.std.expr_calls == []
 
 
 def test_apply_libplacebo_runtime_failure_returns_none_after_rgb_prop_normalization() -> None:
@@ -257,9 +392,21 @@ def test_apply_libplacebo_runtime_failure_returns_none_after_rgb_prop_normalizat
         {
             "src_max": 2000,
             "dst_max": 180,
-            "tone_mapping_function": 1,
+            "tone_mapping_function_s": "spline",
+            "tone_mapping_param": 0.5,
             "dst_csp": 0,
             "dst_prim": 1,
+            "dst_min": 0.18,
+            "dynamic_peak_detection": 1,
+            "smoothing_period": 45.0,
+            "scene_threshold_low": 0.8,
+            "scene_threshold_high": 2.4,
+            "percentile": 99.995,
+            "gamut_mapping": 1,
+            "contrast_recovery": 0.3,
+            "metadata": 0,
+            "use_dovi": 1,
+            "log_level": 2,
             "src_csp": 2,
         }
     ]

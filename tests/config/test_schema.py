@@ -135,6 +135,7 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert screenshots.png_compression == 6
     assert screenshots.ffmpeg_timeout_seconds == 30.0
     assert color.target_nits == 100
+    assert color.contrast_recovery == 0.3
     assert color.preset == "reference"
     assert slowpics.visibility == Visibility.UNLISTED
     assert slowpics.max_retries == 3
