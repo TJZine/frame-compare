@@ -20,6 +20,7 @@ from frame_compare.render.errors import (
 from frame_compare.render.overlay import apply_overlay
 from frame_compare.render.types import EncoderSettings, OverlayMode, Renderer, RenderRequest
 from frame_compare.vs.errors import SourceLoadError
+from frame_compare.vs.props import props_indicate_limited_range
 
 if TYPE_CHECKING:
     import vapoursynth as vs  # type: ignore[import-untyped]
@@ -53,7 +54,9 @@ def _get_int_frame_prop(frame_props: Mapping[str, object], key: _ColorFramePropK
 
 
 def _should_expand_tonemapped_limited_rgb(frame_props: Mapping[str, object]) -> bool:
-    return "_Tonemapped" in frame_props and "_FrameCompareExpandRange" in frame_props
+    if "_Tonemapped" not in frame_props or "_FrameCompareExpandRange" not in frame_props:
+        return False
+    return props_indicate_limited_range(frame_props) is True
 
 
 def _normalize_picture_type(value: object) -> str | None:

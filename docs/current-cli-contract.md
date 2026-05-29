@@ -187,8 +187,9 @@ must not turn schema defaults into explicit tonemap target overrides.
 
 The default `reference` baseline also uses `contrast_recovery = 0.3`. This value is
 forwarded to libplacebo tonemapping, not applied as a separate post-tonemap contrast
-curve. VapourSynth HDR screenshot export treats tonemapped RGB as limited-range
-intermediate data and expands it to full-range PNG output during encoding.
+curve. VapourSynth HDR screenshot export preserves the live tonemap-output range and
+only applies limited-to-full expansion during PNG encoding when the rendered frame
+props still indicate limited-range RGB on the active VapourSynth runtime.
 
 ## `wizard` Command Contract
 

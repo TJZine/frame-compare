@@ -171,7 +171,7 @@ def test_run_render_phase_prefers_typed_selection_details_in_reference_source_do
             ),
             preserved_frame_props={
                 "DolbyVisionRPU": 1,
-                "_ColorRange": 1,
+                "_Range": 0,
                 "DolbyVision_L1_Average": 12.5,
                 "DolbyVision_L1_Maximum": 450.0,
                 "DolbyVision_L6_MaxCLL": 900.0,
@@ -194,7 +194,7 @@ def test_run_render_phase_prefers_typed_selection_details_in_reference_source_do
                     transfer=16,
                     matrix=9,
                 ),
-                preserved_frame_props={"_ColorRange": 0},
+                preserved_frame_props={"_ColorRange": 1},
             ),
         )
     ]

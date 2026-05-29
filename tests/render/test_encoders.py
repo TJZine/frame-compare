@@ -299,7 +299,10 @@ def test_clip_to_rgb24_for_pillow_expands_marked_limited_tonemap(monkeypatch) ->
     monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
 
     fmt = SimpleNamespace(id=999, color_family=2)
-    clip = _FakeClip(fmt=fmt, props={"_Tonemapped": 1, "_FrameCompareExpandRange": 1})
+    clip = _FakeClip(
+        fmt=fmt,
+        props={"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_Range": 0},
+    )
     clip.resize.Point = MagicMock(return_value=clip)
 
     result = _clip_to_rgb24_for_pillow(clip)  # type: ignore[arg-type]
@@ -307,6 +310,22 @@ def test_clip_to_rgb24_for_pillow_expands_marked_limited_tonemap(monkeypatch) ->
     assert result == "props"
     clip.resize.Point.assert_called_once_with(format=1)
     clip.std.SetFrameProps.assert_called_once_with(_FrameCompareExpandRange=1)
+
+
+def test_clip_to_rgb24_for_pillow_does_not_expand_marked_full_range_tonemap(monkeypatch) -> None:
+    fake_vs = SimpleNamespace(RGB24=1, RGB=2)
+    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
+
+    fmt = SimpleNamespace(id=999, color_family=2)
+    clip = _FakeClip(
+        fmt=fmt,
+        props={"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_Range": 1},
+    )
+
+    result = _clip_to_rgb24_for_pillow(clip)  # type: ignore[arg-type]
+
+    assert result == "point"
+    assert clip.resize.calls[0] == ("Point", {"format": 1})
 
 
 def test_clip_to_rgb24_for_pillow_does_not_expand_marked_full_tonemap(monkeypatch) -> None:
@@ -340,12 +359,22 @@ def test_maybe_expand_tonemapped_video_range_expands_marked_limited_video_range(
     )
 
     result = _maybe_expand_tonemapped_video_range(
-        array, {"_Tonemapped": 1, "_FrameCompareExpandRange": 1}
+        array, {"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_Range": 0}
     )
 
     assert result.dtype == np.uint8
     assert result[0, 0, 0] == 0
     assert result[1, 2, 0] > array[1, 2, 0]
+
+
+def test_maybe_expand_tonemapped_video_range_skips_marked_full_range() -> None:
+    array = np.full((2, 2, 3), 32, dtype=np.uint8)
+
+    result = _maybe_expand_tonemapped_video_range(
+        array, {"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_Range": 1}
+    )
+
+    assert result is array
 
 
 @pytest.mark.parametrize(

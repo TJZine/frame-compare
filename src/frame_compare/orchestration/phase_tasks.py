@@ -54,6 +54,7 @@ from frame_compare.services.report.payload import ReportData, clip_info_from_sta
 from frame_compare.services.types import AlignmentConfig, MetadataConfig, TmdbMetadata
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 from frame_compare.utils.types import WorkspacePaths
+from frame_compare.vs.props import range_label_from_props
 
 if TYPE_CHECKING:
     from frame_compare.render.types import (
@@ -266,15 +267,18 @@ def _coerce_int(value: str | int | float) -> int | None:
 def _color_range_from_preserved_props(
     preserved_props: dict[str, str | int | float],
 ) -> str | None:
+    normalized_props: dict[str, int] = {}
     for key, value in preserved_props.items():
-        if _normalize_preserved_prop_key(key) != "colorrange":
+        normalized = _normalize_preserved_prop_key(key)
+        if normalized not in {"range", "colorrange"}:
             continue
-        color_range = _coerce_int(value)
-        if color_range == 0:
-            return "full"
-        if color_range == 1:
-            return "limited"
-    return None
+        coerced = _coerce_int(value)
+        if coerced is not None:
+            if normalized == "range":
+                normalized_props["_Range"] = coerced
+            else:
+                normalized_props["_ColorRange"] = coerced
+    return range_label_from_props(normalized_props)
 
 
 def _dolby_vision_metadata_from_preserved_props(

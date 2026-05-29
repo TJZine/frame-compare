@@ -6,6 +6,9 @@ from collections.abc import Mapping
 
 from frame_compare.vs.types import HDRMetadata
 
+_RANGE_LIMITED = 0
+_RANGE_FULL = 1
+
 
 def get_int_prop(props: Mapping[str, object], key: str, default: int) -> int:
     """Safely extract an integer property from frame properties with fallback."""
@@ -45,6 +48,35 @@ def get_str_prop(props: Mapping[str, object], key: str) -> str | None:
     if isinstance(val, bytes):
         return val.decode("utf-8", errors="replace")
     return str(val)
+
+
+def get_optional_range_prop(props: Mapping[str, object]) -> int | None:
+    """Return the current range prop value, preferring modern `_Range` over `_ColorRange`."""
+    for key in ("_Range", "_ColorRange", "Range", "ColorRange"):
+        value = get_optional_int_prop(props, key)
+        if value is not None:
+            return value
+    return None
+
+
+def props_indicate_limited_range(props: Mapping[str, object]) -> bool | None:
+    """Return whether frame props indicate limited range under current VapourSynth semantics."""
+    range_value = get_optional_range_prop(props)
+    if range_value is None:
+        return None
+    if range_value == _RANGE_LIMITED:
+        return True
+    if range_value == _RANGE_FULL:
+        return False
+    return None
+
+
+def range_label_from_props(props: Mapping[str, object]) -> str | None:
+    """Return `limited` or `full` when frame props expose a recognized range value."""
+    limited = props_indicate_limited_range(props)
+    if limited is None:
+        return None
+    return "limited" if limited else "full"
 
 
 def detect_hdr(frame_props: Mapping[str, object]) -> tuple[bool, HDRMetadata | None]:
