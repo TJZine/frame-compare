@@ -57,7 +57,9 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     assert "config" in output
     assert str(_workspace_path("config", "config.toml")) in output
     assert "input" in output
-    assert "comparison_videos" in output
+    assert str(_workspace_path("comparison_videos")) in output
+    assert "run_folders" in output
+    assert "base paths" in output
     assert "selection" in output
     assert "mixed, n=10, seed=42" in output
     assert "audio_alignment.ffmpeg_available" in output

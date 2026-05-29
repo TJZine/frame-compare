@@ -303,6 +303,16 @@ def test_format_error_console_non_verbose_with_details():
     assert "For more details, run with --verbose" in rendered
 
 
+def test_format_error_console_without_verbose_hint_shows_details() -> None:
+    error = CacheCorruptionError(Path("/cache"))
+    rendered = _render_rich_markup(format_error_console(error, verbose=False, verbose_hint=None))
+
+    assert f"Error [{error.code}]: {error.context.message}" in rendered
+    assert "Details:" in rendered
+    assert "path:" in rendered
+    assert "For more details, run with --verbose" not in rendered
+
+
 def test_format_error_console_verbose_no_details():
     error = RenderError()
     rendered = _render_rich_markup(format_error_console(error, verbose=True))

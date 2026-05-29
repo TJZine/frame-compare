@@ -1,8 +1,11 @@
 import json
+from pathlib import Path
 
 from pytest import MonkeyPatch
 
 from frame_compare.cli.entry import app
+from frame_compare.cli.errors import ExitCode, format_error_json
+from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.orchestration.doctor import CheckResult, DoctorCheck, DoctorReport
 from frame_compare.utils.progress_protocol import ProgressReporter
 
@@ -155,3 +158,46 @@ def test_doctor_text_preserves_literal_brackets(monkeypatch: MonkeyPatch) -> Non
     assert "ffmpeg[optional]" in result.stdout
     assert "missing [ffmpeg]" in result.stdout
     assert "Hint: install [ffmpeg]" in result.stdout
+
+
+def test_doctor_top_level_frame_compare_error_uses_cli_error_contract(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    error = ConfigNotFoundError(Path("missing.toml"))
+
+    def _run_doctor(
+        checks: list[DoctorCheck] | None = None,
+        reporter: ProgressReporter | None = None,
+    ) -> DoctorReport:
+        raise error
+
+    monkeypatch.setattr("frame_compare.cli.entry.run_doctor", _run_doctor)
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stdout == ""
+    assert "FC-1001" in result.stderr
+    assert "--verbose" not in result.stderr
+    assert "Details:" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_doctor_json_top_level_frame_compare_error_uses_standard_error_schema(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    error = ConfigNotFoundError(Path("missing.toml"))
+
+    def _run_doctor(
+        checks: list[DoctorCheck] | None = None,
+        reporter: ProgressReporter | None = None,
+    ) -> DoctorReport:
+        raise error
+
+    monkeypatch.setattr("frame_compare.cli.entry.run_doctor", _run_doctor)
+
+    result = runner.invoke(app, ["doctor", "--json"])
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stderr == ""
+    assert json.loads(result.stdout) == format_error_json(error)

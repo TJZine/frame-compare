@@ -222,12 +222,13 @@ def wizard(
         prompt_secret=typer.prompt,
         write_payload=_write_wizard_config_payload,
         handle_error=handle_error,
+        stdin_is_tty=sys.stdin.isatty(),
     )
 
 
 @app.command()
 def doctor(json_output: bool = _option(False, "--json")) -> None:
-    handle_doctor(json_output, run_doctor=run_doctor)
+    handle_doctor(json_output, run_doctor=run_doctor, handle_error=handle_error)
 
 
 preset_app = typer.Typer(name="preset", help="Manage configuration presets.", no_args_is_help=True)

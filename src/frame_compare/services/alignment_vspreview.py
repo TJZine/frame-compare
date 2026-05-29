@@ -131,6 +131,19 @@ def _format_signed_frames(value: int) -> str:
     return f"{value:+d}f"
 
 
+def _stderr_print(message: str = "") -> None:
+    print(message, file=sys.stderr)
+
+
+def _read_stderr_prompt(prompt: str) -> str:
+    sys.stderr.write(prompt)
+    sys.stderr.flush()
+    raw_value = sys.stdin.readline()
+    if raw_value == "":
+        raise EOFError
+    return raw_value
+
+
 def _prompt_for_confirmed_offsets(
     *,
     reference: Path,
@@ -140,10 +153,12 @@ def _prompt_for_confirmed_offsets(
     if not comparisons:
         return {}
 
-    print()
-    print("VSPreview closed. Enter confirmed frame offsets.")
-    print("Blank keeps the suggested audio-alignment value; type 'skip' to keep current offsets.")
-    print(f"Reference: {reference.stem}")
+    _stderr_print()
+    _stderr_print("VSPreview closed. Enter confirmed frame offsets.")
+    _stderr_print(
+        "Blank keeps the suggested audio-alignment value; type 'skip' to keep current offsets."
+    )
+    _stderr_print(f"Reference: {reference.stem}")
 
     confirmed: dict[str, int] = {}
     for comparison in comparisons:
@@ -151,11 +166,11 @@ def _prompt_for_confirmed_offsets(
         suggested = int(offsets_by_key.get(key, 0))
         while True:
             try:
-                raw_value = input(
+                raw_value = _read_stderr_prompt(
                     f"Confirmed offset for {comparison.stem} [{_format_signed_frames(suggested)}]: "
                 ).strip()
             except (EOFError, OSError):
-                print("No terminal input available; keeping current offsets.")
+                _stderr_print("No terminal input available; keeping current offsets.")
                 return None
             if raw_value == "":
                 confirmed[key] = suggested
@@ -165,7 +180,9 @@ def _prompt_for_confirmed_offsets(
             try:
                 confirmed[key] = int(raw_value)
             except ValueError:
-                print("Enter an integer frame offset, blank to keep the suggestion, or 'skip'.")
+                _stderr_print(
+                    "Enter an integer frame offset, blank to keep the suggestion, or 'skip'."
+                )
                 continue
             break
     return confirmed

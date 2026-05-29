@@ -5,6 +5,7 @@ from _pytest.monkeypatch import MonkeyPatch
 
 from frame_compare.cli.entry import app
 from frame_compare.cli.errors import ExitCode
+from frame_compare.config.errors import ConfigNotFoundError
 
 from .cli_helpers import MINIMAL_CONFIG, _write_minimal_config, runner
 
@@ -133,6 +134,22 @@ def test_preset_list_uses_root_presets_even_when_config_path_is_nondefault() -> 
         )
         assert result.exit_code == 0
         assert result.stdout.splitlines() == ["alpha"]
+
+
+def test_preset_list_error_does_not_suggest_unsupported_verbose(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "frame_compare.cli.entry.list_presets",
+        lambda *, presets_dir: (_ for _ in ()).throw(ConfigNotFoundError(Path("missing.toml"))),
+    )
+
+    result = runner.invoke(app, ["preset", "list"])
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert "--verbose" not in result.stderr
+    assert "Details:" in result.stderr
+    assert "path:" in result.stderr
 
 
 def test_preset_save_respects_root_and_config_writes_preset_file() -> None:

@@ -87,10 +87,17 @@ def _raise_unexpected_write(path: Path, config: ConfigSchema) -> NoReturn:
     raise AssertionError("write_config_to should not be called")
 
 
-def _handle_error(error: Exception, *, no_color: bool, verbose: bool) -> int:
+def _handle_error(
+    error: Exception,
+    *,
+    no_color: bool,
+    verbose: bool,
+    verbose_hint: str | None = "--verbose",
+) -> int:
     assert isinstance(error, ConfigWriteError)
     assert no_color is True
     assert verbose is False
+    assert verbose_hint == "--verbose"
     return int(ExitCode.CONFIG_ERROR)
 
 

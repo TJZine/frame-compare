@@ -88,6 +88,8 @@ def test_run_default_prints_at_a_glance_and_result_summary(monkeypatch: MonkeyPa
         assert "config" in output
         assert "input" in output
         assert "screenshots" in output
+        assert "run_folders" in output
+        assert "base paths" in output
         assert "tonemap.preset" in output
         assert "reference" in output
         assert "tonemap.target_nits" in output

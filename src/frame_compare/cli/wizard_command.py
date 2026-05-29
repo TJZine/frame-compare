@@ -40,7 +40,14 @@ class WriteWizardPayloadFn(Protocol):
 
 
 class HandleErrorFn(Protocol):
-    def __call__(self, error: Exception, *, no_color: bool, verbose: bool) -> int: ...
+    def __call__(
+        self,
+        error: Exception,
+        *,
+        no_color: bool,
+        verbose: bool,
+        verbose_hint: str | None = "--verbose",
+    ) -> int: ...
 
 
 def handle_wizard(
@@ -53,6 +60,7 @@ def handle_wizard(
     prompt_secret: PromptSecretFn,
     write_payload: WriteWizardPayloadFn,
     handle_error: HandleErrorFn,
+    stdin_is_tty: bool,
 ) -> None:
     """Interactive configuration wizard."""
     defaults = get_default_config()
@@ -71,7 +79,7 @@ def handle_wizard(
         tmdb_api_key = prompt_secret(
             "TMDB API key (optional)",
             default="",
-            hide_input=True,
+            hide_input=stdin_is_tty,
         ).strip()
     except (KeyboardInterrupt, typer.Abort):
         raise typer.Exit(code=int(ExitCode.INTERRUPTED)) from None
@@ -90,9 +98,23 @@ def handle_wizard(
     except ValidationError as error:
         normalized = normalize_pydantic_errors(cast(Sequence[dict[str, object]], error.errors()))
         config_error = ConfigValidationError(normalized)
-        raise typer.Exit(code=handle_error(config_error, no_color=True, verbose=False)) from error
+        raise typer.Exit(
+            code=handle_error(
+                config_error,
+                no_color=True,
+                verbose=False,
+                verbose_hint=None,
+            )
+        ) from error
     except FrameCompareError as error:
-        raise typer.Exit(code=handle_error(error, no_color=True, verbose=False)) from error
+        raise typer.Exit(
+            code=handle_error(
+                error,
+                no_color=True,
+                verbose=False,
+                verbose_hint=None,
+            )
+        ) from error
 
 
 def prompt_input_dir(default: str, *, base_dir: Path) -> str:

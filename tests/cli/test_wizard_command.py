@@ -7,7 +7,7 @@ from pytest import MonkeyPatch
 from frame_compare.cli.cli_helpers import prepare_toml_payload
 from frame_compare.cli.entry import app
 from frame_compare.cli.errors import ExitCode
-from frame_compare.cli.wizard_command import write_wizard_config_payload
+from frame_compare.cli.wizard_command import handle_wizard, write_wizard_config_payload
 
 from .cli_helpers import runner
 
@@ -181,6 +181,8 @@ def test_wizard_write_error_uses_cli_error_contract(monkeypatch: MonkeyPatch) ->
         assert result.stdout == ""
         assert "FC-1007" in result.stderr
         assert "Failed to write configuration file" in result.stderr
+        assert "--verbose" not in result.stderr
+        assert "Details:" in result.stderr
         assert "Traceback" not in result.stderr
         assert not (root / "config" / "config.toml").exists()
 
@@ -213,8 +215,40 @@ def test_wizard_validation_error_uses_cli_error_contract(monkeypatch: MonkeyPatc
         assert result.stdout == ""
         assert "FC-1003" in result.stderr
         assert "Invalid configuration: frame_count" in result.stderr
+        assert "--verbose" not in result.stderr
+        assert "Details:" in result.stderr
         assert "Traceback" not in result.stderr
         assert not (root / "config" / "config.toml").exists()
+
+
+def test_handle_wizard_uses_visible_secret_prompt_when_stdin_is_not_tty(tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+    written_payloads: list[tuple[Path, dict[str, object]]] = []
+
+    def _prompt_secret(text: str, *, default: str, hide_input: bool) -> str:
+        captured["text"] = text
+        captured["default"] = default
+        captured["hide_input"] = hide_input
+        return ""
+
+    handle_wizard(
+        tmp_path,
+        tmp_path / "config" / "config.toml",
+        prompt_input_dir=lambda _default, *, base_dir: "inputs",
+        prompt_visibility=lambda _default: "unlisted",
+        confirm=lambda _text, *, default: default,
+        prompt_secret=_prompt_secret,
+        write_payload=lambda config_path, data: written_payloads.append((config_path, data)),
+        handle_error=lambda _error, *, no_color, verbose, verbose_hint="--verbose": 1,
+        stdin_is_tty=False,
+    )
+
+    assert captured == {
+        "text": "TMDB API key (optional)",
+        "default": "",
+        "hide_input": False,
+    }
+    assert written_payloads
 
 
 def test_wizard_root_validates_relative_input_dir_against_root() -> None:
