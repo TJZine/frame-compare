@@ -69,11 +69,8 @@ def handle_error(error: Exception, *, no_color: bool, verbose: bool) -> int:
     """
     if isinstance(error, FrameCompareError):
         message = format_error_console(error, verbose=verbose)
-        if no_color:
-            typer.echo(message, err=True)
-        else:
-            console = Console(stderr=True)
-            console.print(message)
+        console = Console(stderr=True, no_color=no_color)
+        console.print(message)
         return int(get_exit_code(error))
     typer.echo("Unexpected error: please report this bug.", err=True)
     return int(ExitCode.GENERAL_ERROR)
