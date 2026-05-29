@@ -246,10 +246,10 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
     assert "1920x1080" in captured.err
     assert "24000/1001" in captured.err
     assert "30000/1001 -> 24000/1001" in captured.err
-    assert "2400" in captured.err
-    assert "1200" in captured.err
-    assert "yes" in captured.err
-    assert "no" in captured.err
+    assert "2,400 frames" in captured.err
+    assert "1,200 frames" in captured.err
+    assert "HDR" in captured.err
+    assert "SDR" in captured.err
     assert "ref.mkv" in captured.err
     assert "encode.mkv" in captured.err
     assert "\x1b[" not in captured.err

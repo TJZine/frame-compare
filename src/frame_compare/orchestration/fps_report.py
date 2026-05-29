@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Sequence
 from dataclasses import dataclass
 from fractions import Fraction
@@ -17,6 +18,9 @@ from rich.table import Table
 from frame_compare.orchestration.context import ClipState
 
 log = structlog.get_logger()
+
+_REPORT_CONSOLE_WIDTH = 180
+_MIN_REPORT_CONSOLE_WIDTH = 100
 
 
 @dataclass(frozen=True)
@@ -111,32 +115,50 @@ def _format_fps_transition(clip: FpsReportClip) -> str:
     return escape(effective_fps)
 
 
+def _format_frame_count(num_frames: int) -> str:
+    unit = "frame" if num_frames == 1 else "frames"
+    return f"{num_frames:,} {unit}"
+
+
+def _format_dynamic_range(is_hdr: bool) -> str:
+    if is_hdr:
+        return "[bright_magenta]HDR[/]"
+    return "[dim]SDR[/]"
+
+
+def _format_video_summary(clip: FpsReportClip) -> str:
+    resolution = escape(f"{clip.width}x{clip.height}")
+    frames = escape(_format_frame_count(clip.num_frames))
+    dynamic_range = _format_dynamic_range(clip.is_hdr)
+    return f"{resolution}  [dim]{frames}[/]  {dynamic_range}"
+
+
+def _report_console_width() -> int:
+    columns = shutil.get_terminal_size(
+        fallback=(_REPORT_CONSOLE_WIDTH, 24)
+    ).columns
+    return min(max(columns, _MIN_REPORT_CONSOLE_WIDTH), _REPORT_CONSOLE_WIDTH)
+
+
 def _render_clip_overview(clips: Sequence[FpsReportClip]) -> Table:
     table = Table(
-        show_header=True,
+        show_header=False,
         box=None,
         pad_edge=False,
         padding=(0, 2, 0, 0),
         expand=False,
     )
-    table.add_column("role", style="blue", no_wrap=True, overflow="fold")
-    table.add_column("label", style="bright_white", overflow="fold")
-    table.add_column("video", style="bright_white", no_wrap=True, overflow="fold")
-    table.add_column("fps", style="bright_white", no_wrap=True, overflow="fold")
-    table.add_column("frames", justify="right", no_wrap=True, overflow="fold")
-    table.add_column("hdr", no_wrap=True, overflow="fold")
-    table.add_column("path", style="dim", overflow="fold")
+    table.add_column("key", style="blue", no_wrap=True, min_width=12, overflow="fold")
+    table.add_column("value", overflow="fold")
 
     for index, clip in enumerate(clips):
-        table.add_row(
-            _clip_role(index),
-            escape(clip.label),
-            escape(f"{clip.width}x{clip.height}"),
-            _format_fps_transition(clip),
-            escape(str(clip.num_frames)),
-            escape("yes" if clip.is_hdr else "no"),
-            escape(str(clip.path)),
-        )
+        if index > 0:
+            table.add_row("", "")
+
+        table.add_row(_clip_role(index), f"[bright_white]{escape(clip.label)}[/]")
+        table.add_row("  video", _format_video_summary(clip))
+        table.add_row("  fps", f"[bright_white]{_format_fps_transition(clip)}[/]")
+        table.add_row("  path", f"[dim]{escape(str(clip.path))}[/]")
 
     return table
 
@@ -150,7 +172,7 @@ def _render_fps_table(clips: Sequence[FpsReportClip]) -> Table:
         expand=False,
     )
     table.add_column("role", style="blue", no_wrap=True, overflow="fold")
-    table.add_column("label", style="bright_white", overflow="fold")
+    table.add_column("clip", style="bright_white", overflow="fold")
     table.add_column("fps", style="bright_white", no_wrap=True, overflow="fold")
     table.add_column("status", no_wrap=True, overflow="fold")
     table.add_column("path", style="dim", overflow="fold")
@@ -184,7 +206,7 @@ def _render_human_fps_report(
         title = "Clip FPS"
         table = _render_fps_table(clips)
 
-    console = Console(stderr=True, no_color=no_color, width=240)
+    console = Console(stderr=True, no_color=no_color, width=_report_console_width())
     console.print(
         Panel(
             table,
