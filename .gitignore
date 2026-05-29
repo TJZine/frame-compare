@@ -16,6 +16,7 @@ CODEX.md
 .codannaignore
 
 # Generated comparison outputs
+/workspace/
 /report/
 /screens/
 /screenshots/
