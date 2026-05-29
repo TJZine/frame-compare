@@ -182,13 +182,9 @@ def resolve_lwlibavsource(core):
     raise RuntimeError("LWLibavSource not found on core.lsmas or core.lw")
 
 
-def apply_offset(reference_clip, comparison_clip, offset_frames):
-    """Apply the signed offset convention used by Frame Compare alignment."""
-    if offset_frames > 0:
-        return reference_clip[offset_frames:], comparison_clip
-    if offset_frames < 0:
-        return reference_clip, comparison_clip[abs(offset_frames):]
-    return reference_clip, comparison_clip
+def trim_clip(clip, trim_start, trim_end_inclusive):
+    """Trim to the inclusive overlap window used by Frame Compare."""
+    return clip[trim_start : trim_end_inclusive + 1]
 '''
 
 
@@ -267,6 +263,12 @@ def main():
         safe_print(f"ERROR: Failed to load reference: {e}")
         sys.exit(1)
 
+    try:
+        from frame_compare.services.alignment_math import calculate_alignment_trims
+    except Exception as e:
+        safe_print(f"ERROR: Failed to import alignment trim logic: {e}")
+        sys.exit(1)
+
     ref_fps_num = ref_clip.fps.numerator
     ref_fps_den = ref_clip.fps.denominator
 
@@ -284,8 +286,7 @@ def main():
     except Exception:
         safe_print("Warning: Could not apply reference text overlay (plugin missing?)")
 
-    clips = []
-    labels = []
+    loaded_comparisons = []
 
     for label, path_str in sorted(TARGETS.items()):
         comp_path = Path(path_str)
@@ -303,11 +304,14 @@ def main():
         comp_clip = core.std.AssumeFPS(comp_clip, fpsnum=ref_fps_num, fpsden=ref_fps_den)
 
         key = f"{REFERENCE['label']}:{label}"
-        offset = suggested_offsets_by_key.get(key, OFFSET_MAP.get(label, 0))
+        suggested_offset = int(suggested_offsets_by_key.get(key, 0))
+        offset = int(OFFSET_MAP.get(label, suggested_offset))
 
-        # Apply overlay with suggested offset (best-effort)
+        # Apply overlay with the live preview offset (best-effort)
         try:
-            overlay_text = f"CMP: {label}\\nSuggested offset: {offset} frames"
+            overlay_text = f"CMP: {label}\\nPreview offset: {offset} frames"
+            if offset != suggested_offset:
+                overlay_text += f"\\nSuggested offset: {suggested_offset} frames"
             if offset > 0:
                 overlay_text += "\\n(+N trims reference)"
             elif offset < 0:
@@ -316,19 +320,40 @@ def main():
         except Exception:
             safe_print("Warning: Could not apply comparison text overlay (plugin missing?)")
 
-        # Slot layout: ref on even, comparison on odd
-        # Apply OFFSET_MAP so Ctrl+R reloads show the tested manual offset.
-        ref_view, comp_view = apply_offset(ref_clip, comp_clip, offset)
-        clips.append(ref_view)  # Even slot (reference)
-        labels.append(f"{REFERENCE['label']} (ref)")
-        clips.append(comp_view)  # Odd slot (comparison)
-        labels.append(label)
+        loaded_comparisons.append(
+            {
+                "label": label,
+                "clip": comp_clip,
+                "offset": offset,
+            }
+        )
 
         safe_print(f"  loaded     {label} (offset: {offset})")
 
-    if len(clips) < 2:
+    if not loaded_comparisons:
         safe_print("ERROR: No comparison clips loaded successfully.")
         sys.exit(1)
+
+    try:
+        ref_trim, comp_trims = calculate_alignment_trims(
+            ref_num_frames=ref_clip.num_frames,
+            comp_offsets=[entry["offset"] for entry in loaded_comparisons],
+            comp_num_frames=[entry["clip"].num_frames for entry in loaded_comparisons],
+        )
+    except Exception as e:
+        safe_print(f"ERROR: Failed to normalize preview trims: {e}")
+        sys.exit(1)
+
+    ref_view = trim_clip(ref_clip, ref_trim[0], ref_trim[1])
+    clips = []
+    labels = []
+    for entry, (comp_trim_start, comp_trim_end) in zip(
+        loaded_comparisons, comp_trims, strict=True
+    ):
+        clips.append(ref_view)  # Even slot (reference)
+        labels.append(f"{REFERENCE['label']} (ref)")
+        clips.append(trim_clip(entry["clip"], comp_trim_start, comp_trim_end))
+        labels.append(entry["label"])
 
     for i, (clip, label) in enumerate(zip(clips, labels)):
         clip.set_output(i)
