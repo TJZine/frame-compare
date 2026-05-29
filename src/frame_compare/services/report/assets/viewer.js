@@ -399,8 +399,8 @@ const ReportViewer = {
             rightSrc = frameData.images[(this.state.activeClipIdx + 1) % this.state.data.clips.length].src; // Preload next?
 
             const activeClip = this.state.data.clips[this.state.activeClipIdx];
-            leftLabelTxt = activeClip.label;
-            rightLabelTxt = "";
+            leftLabelTxt = "";
+            rightLabelTxt = activeClip.label;
         }
 
         if (this.dom.leftImg.getAttribute('src') !== leftSrc) {

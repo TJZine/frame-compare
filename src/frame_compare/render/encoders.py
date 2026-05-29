@@ -31,6 +31,7 @@ type _ColorFramePropKey = Literal["_Matrix", "_Transfer", "_Primaries"]
 _VS_MATRIX_PROP: _ColorFramePropKey = "_Matrix"
 _VS_TRANSFER_PROP: _ColorFramePropKey = "_Transfer"
 _VS_PRIMARIES_PROP: _ColorFramePropKey = "_Primaries"
+_VS_PICTURE_TYPE_PROP = "_PictType"
 
 _MATRIX_TO_ZIMG: dict[int, str] = {
     1: "709",
@@ -53,6 +54,27 @@ def _get_int_frame_prop(frame_props: Mapping[str, object], key: _ColorFramePropK
 
 def _should_expand_tonemapped_limited_rgb(frame_props: Mapping[str, object]) -> bool:
     return "_Tonemapped" in frame_props and "_FrameCompareExpandRange" in frame_props
+
+
+def _normalize_picture_type(value: object) -> str | None:
+    text: str | None
+    if isinstance(value, bytes):
+        text = value.decode("utf-8", "ignore")
+    elif isinstance(value, str):
+        text = value
+    else:
+        return None
+
+    normalized = text.strip("\x00").strip().upper()
+    if normalized in {"I", "P", "B"}:
+        return normalized
+    if normalized == "IDR":
+        return "I"
+    return None
+
+
+def _picture_type_from_frame_props(frame_props: Mapping[str, object]) -> str | None:
+    return _normalize_picture_type(frame_props.get(_VS_PICTURE_TYPE_PROP))
 
 
 def render_frame(request: RenderRequest, renderer: Renderer = "auto") -> Path:
@@ -275,6 +297,7 @@ def _render_vs(
         image = Image.fromarray(array)
 
         if overlay:
+            overlay.picture_type = _picture_type_from_frame_props(vs_frame.props)
             image = apply_overlay(image, overlay)
 
         image.save(output, format="PNG", compress_level=settings.compression)

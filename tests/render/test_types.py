@@ -5,7 +5,11 @@ from frame_compare.render.types import (
     BatchRenderOptions,
     EncoderSettings,
     OverlayConfig,
+    OverlayDiagnosticMetadata,
+    OverlayDolbyVisionMetadata,
+    OverlayFrameMeasurement,
     OverlayMode,
+    OverlaySelectionDetail,
     Renderer,
     RenderRequest,
     ScreenshotResult,
@@ -52,7 +56,6 @@ def test_overlay_config_defaults() -> None:
         font_path=None,
     )
     assert config.font_size == 24
-    assert config.position == "top-left"
 
 
 def test_overlay_config_optional_none() -> None:
@@ -66,6 +69,41 @@ def test_overlay_config_optional_none() -> None:
     )
     assert config.hdr_info is None
     assert config.font_path is None
+    assert config.burn_in_label is None
+    assert config.selection_detail is None
+    assert config.diagnostic_metadata is None
+
+
+def test_overlay_selection_detail_creation() -> None:
+    detail = OverlaySelectionDetail(
+        frame_index=1,
+        label="User",
+        source="analysis",
+        timecode=None,
+        score=0.3,
+        clip_role="analyze",
+        notes="user_override",
+    )
+    assert detail.label == "User"
+    assert detail.source == "analysis"
+    assert detail.timecode is None
+
+
+def test_overlay_diagnostic_metadata_creation() -> None:
+    measurement = OverlayFrameMeasurement(avg_nits=180.0, max_nits=180.0, category="Motion")
+    dovi = OverlayDolbyVisionMetadata(rpu_present=True, l1_average=12.5, l1_maximum=450.0)
+    metadata = OverlayDiagnosticMetadata(
+        mastering_display="G(0.265,0.690)B(0.150,0.060)R(0.680,0.320)WP(0.3127,0.3290)L(1000.0,0.0050)",
+        max_cll=1000,
+        max_fall=400,
+        color_range="limited",
+        dolby_vision=dovi,
+        measurement=measurement,
+    )
+    assert metadata.max_cll == 1000
+    assert metadata.color_range == "limited"
+    assert metadata.dolby_vision == dovi
+    assert metadata.measurement == measurement
 
 
 def test_render_request_optional_overlay() -> None:

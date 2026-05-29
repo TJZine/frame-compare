@@ -10,6 +10,8 @@ import pytest
 from frame_compare.render.encoders import (
     _clip_to_rgb24_for_pillow,
     _maybe_expand_tonemapped_video_range,
+    _picture_type_from_frame_props,
+    _render_vs,
     apply_overlay_to_file,
     render_frame,
 )
@@ -344,3 +346,121 @@ def test_maybe_expand_tonemapped_video_range_expands_marked_limited_video_range(
     assert result.dtype == np.uint8
     assert result[0, 0, 0] == 0
     assert result[1, 2, 0] > array[1, 2, 0]
+
+
+@pytest.mark.parametrize(
+    ("prop_value", "expected"),
+    [
+        (b"I", "I"),
+        (" p ", "P"),
+        (b"IDR", "I"),
+        ("", None),
+        (b"\x00", None),
+        ("unknown", None),
+        (123, None),
+    ],
+)
+def test_picture_type_from_frame_props_normalizes_supported_values(
+    prop_value: object, expected: str | None
+) -> None:
+    assert _picture_type_from_frame_props({"_PictType": prop_value}) == expected
+
+
+def test_render_vs_populates_overlay_picture_type_from_frame_props(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_vs = SimpleNamespace(RGB24=1, RGB=2)
+    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
+
+    captured_picture_types: list[str | None] = []
+
+    def _capture_overlay(image: object, overlay: OverlayConfig) -> object:
+        captured_picture_types.append(overlay.picture_type)
+        return image
+
+    monkeypatch.setattr("frame_compare.render.encoders.apply_overlay", _capture_overlay)
+
+    class _FrameWithPictureType:
+        def __init__(self) -> None:
+            self.props = {"_PictType": b"b"}
+            self.format = SimpleNamespace(num_planes=1)
+            self._plane = np.zeros((2, 2), dtype=np.uint8)
+
+        def __getitem__(self, index: int) -> np.ndarray:
+            assert index == 0
+            return self._plane
+
+    class _ClipWithPictureType:
+        def __init__(self) -> None:
+            self.format = SimpleNamespace(id=1, color_family=2)
+            self._frame = _FrameWithPictureType()
+
+        def get_frame(self, _index: int) -> _FrameWithPictureType:
+            return self._frame
+
+    overlay = OverlayConfig(OverlayMode.STANDARD, "Label", 0, (2, 2), None, None)
+
+    _render_vs(
+        _ClipWithPictureType(),  # type: ignore[arg-type]
+        0,
+        tmp_path / "out.png",
+        EncoderSettings(),
+        overlay=overlay,
+    )
+
+    assert captured_picture_types == ["B"]
+    assert overlay.picture_type == "B"
+
+
+def test_render_vs_clears_overlay_picture_type_when_prop_is_unsupported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_vs = SimpleNamespace(RGB24=1, RGB=2)
+    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
+
+    captured_picture_types: list[str | None] = []
+
+    def _capture_overlay(image: object, overlay: OverlayConfig) -> object:
+        captured_picture_types.append(overlay.picture_type)
+        return image
+
+    monkeypatch.setattr("frame_compare.render.encoders.apply_overlay", _capture_overlay)
+
+    class _FrameWithoutSupportedPictureType:
+        def __init__(self) -> None:
+            self.props = {"_PictType": "unknown"}
+            self.format = SimpleNamespace(num_planes=1)
+            self._plane = np.zeros((2, 2), dtype=np.uint8)
+
+        def __getitem__(self, index: int) -> np.ndarray:
+            assert index == 0
+            return self._plane
+
+    class _ClipWithoutSupportedPictureType:
+        def __init__(self) -> None:
+            self.format = SimpleNamespace(id=1, color_family=2)
+            self._frame = _FrameWithoutSupportedPictureType()
+
+        def get_frame(self, _index: int) -> _FrameWithoutSupportedPictureType:
+            return self._frame
+
+    overlay = OverlayConfig(
+        OverlayMode.STANDARD,
+        "Label",
+        0,
+        (2, 2),
+        None,
+        None,
+        picture_type="I",
+    )
+
+    _render_vs(
+        _ClipWithoutSupportedPictureType(),  # type: ignore[arg-type]
+        0,
+        tmp_path / "out.png",
+        EncoderSettings(),
+        overlay=overlay,
+    )
+
+    assert captured_picture_types == [None]
+    assert overlay.picture_type is None

@@ -1,13 +1,26 @@
+from pathlib import Path
+
 import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
-from frame_compare.render.overlay import apply_overlay
+from frame_compare.render.overlay import (
+    _DEFAULT_FONT_CANDIDATES,
+    _load_font,
+    apply_overlay,
+)
 from frame_compare.render.overlay_text import (
     compose_frame_info_lines,
     compose_overlay_text_lines,
 )
-from frame_compare.render.types import OverlayConfig, OverlayMode
+from frame_compare.render.types import (
+    OverlayConfig,
+    OverlayDiagnosticMetadata,
+    OverlayDolbyVisionMetadata,
+    OverlayFrameMeasurement,
+    OverlayMode,
+    OverlaySelectionDetail,
+)
 
 
 @pytest.fixture
@@ -41,6 +54,86 @@ def captured_draw_calls(monkeypatch):
     monkeypatch.setattr(ImageDraw.ImageDraw, "text", mock_text)
 
     return calls
+
+
+def test_load_font_prefers_explicit_font_path(monkeypatch) -> None:
+    captured: list[tuple[str, int]] = []
+
+    def mock_truetype(path: str, size: int):
+        captured.append((path, size))
+        return "configured-font"
+
+    monkeypatch.setattr("frame_compare.render.overlay.ImageFont.truetype", mock_truetype)
+
+    config = OverlayConfig(
+        mode=OverlayMode.STANDARD,
+        label="Font",
+        frame_number=1,
+        resolution=(1920, 1080),
+        hdr_info=None,
+        font_path=Path("custom.ttf"),
+    )
+
+    assert _load_font(config) == "configured-font"
+    assert captured == [("custom.ttf", 24)]
+
+
+def test_load_font_uses_first_available_system_font(monkeypatch) -> None:
+    attempts: list[tuple[str, int]] = []
+
+    def mock_truetype(path: str, size: int):
+        attempts.append((path, size))
+        if path in _DEFAULT_FONT_CANDIDATES[:2]:
+            raise OSError("missing font")
+        return "system-font"
+
+    def mock_load_default(*, size: int):
+        raise AssertionError(f"load_default should not run when a system font is available: {size}")
+
+    monkeypatch.setattr("frame_compare.render.overlay.ImageFont.truetype", mock_truetype)
+    monkeypatch.setattr("frame_compare.render.overlay.ImageFont.load_default", mock_load_default)
+
+    config = OverlayConfig(
+        mode=OverlayMode.STANDARD,
+        label="Font",
+        frame_number=1,
+        resolution=(1920, 1080),
+        hdr_info=None,
+        font_path=None,
+    )
+
+    assert _load_font(config) == "system-font"
+    assert attempts == [
+        (_DEFAULT_FONT_CANDIDATES[0], 24),
+        (_DEFAULT_FONT_CANDIDATES[1], 24),
+        (_DEFAULT_FONT_CANDIDATES[2], 24),
+    ]
+
+
+def test_load_font_falls_back_to_pillow_default_when_system_fonts_unavailable(monkeypatch) -> None:
+    attempts: list[tuple[str, int]] = []
+
+    def mock_truetype(path: str, size: int):
+        attempts.append((path, size))
+        raise OSError("missing font")
+
+    def mock_load_default(*, size: int):
+        return ("default-font", size)
+
+    monkeypatch.setattr("frame_compare.render.overlay.ImageFont.truetype", mock_truetype)
+    monkeypatch.setattr("frame_compare.render.overlay.ImageFont.load_default", mock_load_default)
+
+    config = OverlayConfig(
+        mode=OverlayMode.STANDARD,
+        label="Font",
+        frame_number=1,
+        resolution=(1920, 1080),
+        hdr_info=None,
+        font_path=None,
+    )
+
+    assert _load_font(config) == ("default-font", 24)
+    assert attempts == [(font_name, 24) for font_name in _DEFAULT_FONT_CANDIDATES]
 
 
 def test_apply_overlay_minimal_mode(captured_draw_calls):
@@ -214,6 +307,126 @@ def test_apply_overlay_standard_includes_selection_label_when_present(captured_d
     )
 
 
+def test_apply_overlay_standard_omits_picture_type_line_when_unavailable(captured_draw_calls):
+    config = OverlayConfig(
+        mode=OverlayMode.STANDARD,
+        label="Ref",
+        frame_number=100,
+        display_frame_number=12,
+        num_frames=100,
+        resolution=(1920, 1080),
+        hdr_info=None,
+        font_path=None,
+        picture_type=None,
+    )
+    img = Image.new("RGB", (100, 100))
+
+    apply_overlay(img, config)
+
+    _, text1, _ = captured_draw_calls["multiline_text"][0]
+    assert text1.splitlines() == ["Frame 12 of 100", "Ref"]
+    assert all(not line.startswith("Picture type:") for line in text1.splitlines())
+
+
+def test_apply_overlay_uses_burn_in_label_when_present(captured_draw_calls):
+    config = OverlayConfig(
+        mode=OverlayMode.STANDARD,
+        label="Encode 1",
+        burn_in_label="encode-file",
+        frame_number=100,
+        display_frame_number=12,
+        num_frames=100,
+        resolution=(1920, 1080),
+        hdr_info=None,
+        font_path=None,
+    )
+    img = Image.new("RGB", (100, 100))
+
+    apply_overlay(img, config)
+
+    assert len(captured_draw_calls["multiline_text"]) == 2
+    _, text1, _ = captured_draw_calls["multiline_text"][0]
+    assert text1 == "\n".join(
+        compose_frame_info_lines(
+            mode=OverlayMode.STANDARD,
+            label="encode-file",
+            display_frame_number=12,
+            num_frames=100,
+            picture_type=None,
+            selection_label=None,
+        )
+    )
+    assert "Encode 1" not in text1
+
+
+def test_apply_overlay_selection_detail_label_overrides_selection_label(captured_draw_calls):
+    config = OverlayConfig(
+        mode=OverlayMode.STANDARD,
+        label="Ref",
+        frame_number=100,
+        display_frame_number=12,
+        num_frames=100,
+        resolution=(1920, 1080),
+        hdr_info=None,
+        font_path=None,
+        selection_label="Dark",
+        selection_detail=OverlaySelectionDetail(
+            frame_index=12,
+            label="User",
+            source="analysis",
+            timecode="00:00:00.500",
+            clip_role="analyze",
+        ),
+    )
+    img = Image.new("RGB", (100, 100))
+
+    apply_overlay(img, config)
+
+    _, text1, _ = captured_draw_calls["multiline_text"][0]
+    assert text1 == "\n".join(
+        compose_frame_info_lines(
+            mode=OverlayMode.STANDARD,
+            label="Ref",
+            display_frame_number=12,
+            num_frames=100,
+            picture_type=None,
+            selection_label="User",
+        )
+    )
+
+    _, text2, _ = captured_draw_calls["multiline_text"][1]
+    assert text2 == "\n".join(
+        compose_overlay_text_lines(
+            mode=OverlayMode.STANDARD,
+            base_text=None,
+            width=1920,
+            height=1080,
+            selection_type="User",
+            diagnostic_lines=[],
+        )
+    )
+
+
+def test_apply_overlay_standard_renders_picture_type_line_when_present(captured_draw_calls):
+    config = OverlayConfig(
+        mode=OverlayMode.STANDARD,
+        label="Ref",
+        frame_number=100,
+        display_frame_number=12,
+        num_frames=100,
+        resolution=(1920, 1080),
+        hdr_info=None,
+        font_path=None,
+        picture_type="B",
+    )
+    img = Image.new("RGB", (100, 100))
+
+    apply_overlay(img, config)
+
+    _, text1, _ = captured_draw_calls["multiline_text"][0]
+    assert text1.splitlines() == ["Frame 12 of 100", "Picture type: B", "Ref"]
+
+
 def test_apply_overlay_diagnostic_with_hdr(captured_draw_calls):
     config = OverlayConfig(
         mode=OverlayMode.DIAGNOSTIC,
@@ -222,8 +435,45 @@ def test_apply_overlay_diagnostic_with_hdr(captured_draw_calls):
         display_frame_number=20,
         num_frames=100,
         resolution=(3840, 2160),
-        hdr_info="PQ / BT.2020",
+        hdr_info="HDR (native, no tonemap)",
         font_path=None,
+        selection_detail=OverlaySelectionDetail(
+            frame_index=20,
+            label="Motion",
+            source="analysis",
+            timecode="00:00:00.833",
+            score=0.9,
+            clip_role="analyze",
+        ),
+        diagnostic_metadata=OverlayDiagnosticMetadata(
+            mastering_display=(
+                "G(0.265,0.690)B(0.150,0.060)R(0.680,0.320)"
+                "WP(0.3127,0.3290)L(1000.0,0.0050)"
+            ),
+            max_cll=900,
+            max_fall=300,
+            color_range="limited",
+            dolby_vision=OverlayDolbyVisionMetadata(
+                rpu_present=True,
+                block_index=2,
+                block_total=10,
+                target_nits=800.0,
+                l2_target_nits=800.0,
+                l1_average=12.5,
+                l1_maximum=450.0,
+                l5_left=1,
+                l5_right=2,
+                l5_top=3,
+                l5_bottom=4,
+                l6_max_cll=900.0,
+                l6_max_fall=300.0,
+            ),
+            measurement=OverlayFrameMeasurement(
+                avg_nits=180.0,
+                max_nits=180.0,
+                category="Motion",
+            ),
+        ),
     )
     img = Image.new("RGB", (100, 100))
 
@@ -238,7 +488,7 @@ def test_apply_overlay_diagnostic_with_hdr(captured_draw_calls):
             display_frame_number=20,
             num_frames=100,
             picture_type=None,
-            selection_label=None,
+            selection_label="Motion",
         )
     )
 
@@ -249,8 +499,18 @@ def test_apply_overlay_diagnostic_with_hdr(captured_draw_calls):
             base_text=None,
             width=3840,
             height=2160,
-            selection_type=None,
-            diagnostic_lines=["PQ / BT.2020"],
+            selection_type="Motion",
+            diagnostic_lines=[
+                "HDR (native, no tonemap)",
+                "MDL: min: 0.005 cd/m², max: 1000.0 cd/m²",
+                "HDR: MaxCLL 900 / MaxFALL 300",
+                "DoVi: on (Target: 800nits) L2 2/10 target 800 nits",
+                "DV RPU Level 1 MAX/AVG: 450nits / 12.5nits",
+                "DV L5 Active Area: L:1 R:2 T:3 B:4",
+                "DV L6 Metadata: MaxCLL 900 / MaxFALL 300",
+                "Range: Limited",
+                "Measurement MAX/AVG: 180nits / 180nits (Motion)",
+            ],
         )
     )
 

@@ -222,6 +222,13 @@ def test_viewer_assets_keep_divider_slider_only_and_pointer_safe() -> None:
     assert ".rv-divider {\n    display: none;" in css
     assert ".rv-mode-slider .rv-divider { display: block; }" in css
     assert ".rv-viewer-stage:fullscreen" in css
+    assert ".rv-overlay-label:empty { display: none; }" in css
+
+    assert "leftLabelTxt = `${leftClip.label} (Left)`;" in js
+    assert "rightLabelTxt = `${rightClip.label} (Right)`;" in js
+    assert 'leftLabelTxt = "";' in js
+    assert "rightLabelTxt = activeClip.label;" in js
+    assert "leftLabelTxt = activeClip.label;" not in js
 
     assert "addEventListener('pointerdown'" in js
     assert "addEventListener('pointermove'" in js

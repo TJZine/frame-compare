@@ -5,9 +5,16 @@ from __future__ import annotations
 import hashlib
 import math
 from collections.abc import Sequence
+from fractions import Fraction
 
 from frame_compare.analysis.errors import SelectionError
-from frame_compare.analysis.types import FrameMetrics, FrameSelection, SelectionBreakdown
+from frame_compare.analysis.types import (
+    FrameMetrics,
+    FrameSelection,
+    SelectionBreakdown,
+    SelectionDetail,
+    SelectionDetailsByFrame,
+)
 from frame_compare.config.schema import AnalysisConfig, SelectionMode
 
 MIN_GAP: int = 5
@@ -103,7 +110,79 @@ def select_frames(metrics: FrameMetrics, config: AnalysisConfig) -> FrameSelecti
         mode=mode,
         seed=seed,
         breakdown=breakdown,
+        selection_details=_build_selection_details_by_frame(
+            metrics=metrics,
+            breakdown=breakdown,
+        ),
     )
+
+
+def _build_selection_details_by_frame(
+    *,
+    metrics: FrameMetrics,
+    breakdown: SelectionBreakdown,
+) -> SelectionDetailsByFrame:
+    details_by_frame: SelectionDetailsByFrame = {}
+
+    def _store_details(
+        frames: Sequence[int],
+        *,
+        label: str,
+        category_note: str,
+        score_values: Sequence[float] | None,
+    ) -> None:
+        for frame_index in frames:
+            if frame_index in details_by_frame:
+                continue
+            score = None
+            if score_values is not None and 0 <= frame_index < len(score_values):
+                score = score_values[frame_index]
+            details_by_frame[frame_index] = SelectionDetail(
+                frame_index=frame_index,
+                label=label,
+                source="analysis",
+                timecode=_format_selection_timecode(frame_index, metrics.metadata.fps),
+                score=score,
+                clip_role="analyze",
+                notes=category_note,
+            )
+
+    _store_details(
+        breakdown.quantile_dark,
+        label="Dark",
+        category_note="quantile_dark",
+        score_values=metrics.luminance,
+    )
+    _store_details(
+        breakdown.quantile_bright,
+        label="Bright",
+        category_note="quantile_bright",
+        score_values=metrics.luminance,
+    )
+    _store_details(
+        breakdown.motion,
+        label="Motion",
+        category_note="motion",
+        score_values=metrics.motion,
+    )
+    _store_details(
+        breakdown.random,
+        label="Random",
+        category_note="random",
+        score_values=None,
+    )
+
+    return details_by_frame
+
+
+def _format_selection_timecode(frame_index: int, fps: Fraction) -> str | None:
+    if fps <= 0:
+        return None
+    total_milliseconds = round((Fraction(frame_index, 1) * 1000) / fps)
+    total_seconds, milliseconds = divmod(total_milliseconds, 1000)
+    total_minutes, seconds = divmod(total_seconds, 60)
+    hours, minutes = divmod(total_minutes, 60)
+    return f"{hours:02}:{minutes:02}:{seconds:02}.{milliseconds:03}"
 
 
 def _select_by_quantile(

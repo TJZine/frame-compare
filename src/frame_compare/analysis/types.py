@@ -13,10 +13,15 @@ if TYPE_CHECKING:
 
 
 CacheLoadReason = Literal["not_found", "corrupted", "version_mismatch", "mismatched_inputs"]
+type SelectionDetailsByFrame = dict[int, SelectionDetail]
 
 
 def _empty_int_list() -> list[int]:
     return []
+
+
+def _empty_selection_detail_map() -> SelectionDetailsByFrame:
+    return {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +93,19 @@ class SelectionBreakdown:
 
 
 @dataclass(frozen=True, slots=True)
+class SelectionDetail:
+    """Typed per-frame selection metadata in the reference source-frame domain."""
+
+    frame_index: int
+    label: str
+    source: str
+    timecode: str | None = None
+    score: float | None = None
+    clip_role: str | None = None
+    notes: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class FrameSelection:
     """Final list of selected frame numbers and metadata.
 
@@ -96,12 +114,14 @@ class FrameSelection:
         mode: The strategy used for selection
         seed: Random seed used
         breakdown: Details of selection sources
+        selection_details: Source-frame keyed typed metadata
     """
 
     frames: Sequence[int]
     mode: SelectionMode
     seed: int
     breakdown: SelectionBreakdown
+    selection_details: SelectionDetailsByFrame = field(default_factory=_empty_selection_detail_map)
 
 
 @dataclass(frozen=True, slots=True)

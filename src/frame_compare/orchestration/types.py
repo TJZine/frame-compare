@@ -10,7 +10,11 @@ from typing import TYPE_CHECKING
 
 import httpx
 
-from frame_compare.analysis.types import SelectionBreakdown
+from frame_compare.analysis.types import (
+    FrameMetrics,
+    SelectionBreakdown,
+    SelectionDetailsByFrame,
+)
 from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.config.schema import ConfigSchema, OverlayMode, ToneCurve, TonemapPreset
 from frame_compare.orchestration.context import ClipState
@@ -91,6 +95,10 @@ def _empty_frame_list() -> list[int]:
     return []
 
 
+def _empty_selection_details_by_source_frame() -> SelectionDetailsByFrame:
+    return {}
+
+
 @dataclass(frozen=True)
 class RunResult:
     """Complete result from a comparison run."""
@@ -140,6 +148,10 @@ class AnalyzePhaseOutput:
     selected_frames: list[int]
     selection_breakdown: SelectionBreakdown
     metrics_cache_hit: bool
+    analysis_metrics: FrameMetrics
+    selection_details_by_source_frame: SelectionDetailsByFrame = field(
+        default_factory=_empty_selection_details_by_source_frame
+    )
 
 
 @dataclass(frozen=True)
@@ -147,6 +159,8 @@ class AlignPhaseOutput:
     reference: ClipState
     comparisons: list[ClipState]
     selected_frames: list[int]
+    selection_breakdown: SelectionBreakdown | None = None
+    selection_details_by_source_frame: SelectionDetailsByFrame | None = None
 
 
 @dataclass(frozen=True)

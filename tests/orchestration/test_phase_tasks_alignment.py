@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
+from frame_compare.config.schema import SelectionMode
 from frame_compare.orchestration import phase_tasks
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentResult
@@ -57,6 +61,67 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     assert ctx.reference.trim.trim_start_frames == 0
     assert ctx.comparisons[0].alignment is None
     assert selected_frames == [0, 2, 50, 99]
+    assert output.selection_breakdown is None
+    assert output.selection_details_by_source_frame is None
+
+
+def test_run_align_phase_reselects_trimmed_overlap_when_fallback_plan_would_drop_labels(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1", num_frames=220)
+    ctx = _context(tmp_path, comparisons=[comparison])
+    ctx.config.analysis = ctx.config.analysis.model_copy(
+        update={"selection_mode": SelectionMode.QUANTILE, "frame_count": 4}
+    )
+    ctx.analysis_metrics = FrameMetrics(
+        luminance=[float(frame) / 219.0 for frame in range(220)],
+        motion=[0.0 for _ in range(220)],
+        metadata=MetricsMetadata(
+            frame_count=220,
+            fps=Fraction(24, 1),
+            config_fingerprint="test",
+            clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
+        ),
+    )
+    selected_frames = [0, 1, 2, 3]
+
+    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+        return [
+            AlignmentResult(
+                reference_clip="reference.mkv",
+                comparison_clip="encode.mkv",
+                frame_offset=60,
+                time_offset_seconds=2.5,
+                correlation_score=0.9,
+                algorithm="cross_correlation",
+                source="computed",
+            )
+        ]
+
+    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+
+    output = phase_tasks.run_align_phase(ctx, selected_frames=selected_frames)
+    overlap_start = output.reference.trim.trim_start_frames
+    overlap_length = output.reference.effective_num_frames()
+
+    expected_selection = phase_tasks.select_frames(
+        metrics=FrameMetrics(
+            luminance=ctx.analysis_metrics.luminance[overlap_start : overlap_start + overlap_length],
+            motion=ctx.analysis_metrics.motion[overlap_start : overlap_start + overlap_length],
+            metadata=replace(ctx.analysis_metrics.metadata, frame_count=overlap_length),
+        ),
+        config=ctx.config.analysis,
+    )
+
+    assert output.selected_frames == list(expected_selection.frames)
+    assert output.selection_breakdown is not None
+    assert output.selection_details_by_source_frame is not None
+    expected_source_frames = {overlap_start + frame for frame in expected_selection.frames}
+    assert set(output.selection_details_by_source_frame) == expected_source_frames
+    assert all(
+        detail.label in {"Dark", "Bright"}
+        for detail in output.selection_details_by_source_frame.values()
+    )
 
 
 def test_run_align_phase_raises_when_alignment_leaves_no_overlap(

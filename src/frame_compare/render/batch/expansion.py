@@ -9,7 +9,9 @@ from frame_compare.render.prepare import prepare_clip_for_render
 from frame_compare.render.types import (
     EncoderSettings,
     OverlayConfig,
+    OverlayDiagnosticMetadata,
     OverlayMode,
+    OverlaySelectionDetail,
     Renderer,
     RenderRequest,
     ScreenshotBatchRequest,
@@ -25,11 +27,27 @@ def _validate_batch_request_lengths(request: ScreenshotBatchRequest) -> None:
     display_len = len(request.display_frames)
     source_len = len(request.source_frames)
     selection_len = len(request.selection_labels)
-    if display_len != source_len or display_len != selection_len:
+    selection_detail_len = (
+        len(request.selection_details)
+        if request.selection_details is not None
+        else display_len
+    )
+    diagnostic_len = (
+        len(request.diagnostic_metadata)
+        if request.diagnostic_metadata is not None
+        else display_len
+    )
+    if (
+        display_len != source_len
+        or display_len != selection_len
+        or display_len != selection_detail_len
+        or display_len != diagnostic_len
+    ):
         raise ValueError(
             f"ScreenshotBatchRequest {request.label!r} has mismatched lengths: "
             f"display_frames={display_len}, source_frames={source_len}, "
-            f"selection_labels={selection_len}"
+            f"selection_labels={selection_len}, selection_details={selection_detail_len}, "
+            f"diagnostic_metadata={diagnostic_len}"
         )
 
 
@@ -119,6 +137,8 @@ def _build_overlay_config(
     source_frame: int,
     display_frame: int,
     selection_label: str | None,
+    selection_detail: OverlaySelectionDetail | None,
+    diagnostic_metadata: OverlayDiagnosticMetadata | None,
     resolution: tuple[int, int],
     hdr_info: str | None,
     num_frames: int | None,
@@ -133,6 +153,9 @@ def _build_overlay_config(
         display_frame_number=display_frame,
         num_frames=num_frames,
         selection_label=selection_label,
+        selection_detail=selection_detail,
+        diagnostic_metadata=diagnostic_metadata,
+        burn_in_label=_request_filename_label(request),
         include_frame_number=include_frame_number,
         resolution=resolution,
         hdr_info=hdr_info,
@@ -176,7 +199,21 @@ def expand_batch_render_requests(
         for idx, source_frame in enumerate(req.source_frames):
             _validate_source_frame_range(req, source_frame=source_frame, num_frames=num_frames)
             display_frame = req.display_frames[idx]
-            selection_label = req.selection_labels[idx]
+            selection_detail = (
+                req.selection_details[idx]
+                if req.selection_details is not None
+                else None
+            )
+            diagnostic_metadata = (
+                req.diagnostic_metadata[idx]
+                if req.diagnostic_metadata is not None
+                else None
+            )
+            selection_label = (
+                selection_detail.label
+                if selection_detail is not None
+                else req.selection_labels[idx]
+            )
 
             output_path = generate_screenshot_path(
                 output_dir, _request_filename_label(req), display_frame
@@ -187,6 +224,8 @@ def expand_batch_render_requests(
                 source_frame=source_frame,
                 display_frame=display_frame,
                 selection_label=selection_label,
+                selection_detail=selection_detail,
+                diagnostic_metadata=diagnostic_metadata,
                 resolution=(width, height),
                 hdr_info=resolved_hdr_info,
                 num_frames=num_frames,

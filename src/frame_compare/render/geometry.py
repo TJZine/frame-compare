@@ -40,56 +40,6 @@ def calculate_dimensions(
     new_height = max(1, int(source_height * scale))
     return (new_width, new_height)
 
-
-def calculate_overlay_position(
-    image_size: tuple[int, int],
-    overlay_size: tuple[int, int],
-    position: str,
-    margin: int = 10,
-) -> tuple[int, int]:
-    """
-    Calculate overlay top-left corner.
-
-    Valid positions: {"top-left", "top-right", "bottom-left", "bottom-right"}.
-
-    Algorithm:
-    - top-left: (margin, margin)
-    - top-right: (image_width - overlay_width - margin, margin)
-    - bottom-left: (margin, image_height - overlay_height - margin)
-    - bottom-right: (image_width - overlay_width - margin, image_height - overlay_height - margin)
-
-    Invalid inputs:
-    - position not in valid set: raise ValueError.
-    - image_size or overlay_size non-positive: raise ValueError.
-    - Overlay + margin exceeds image dimensions: clamp coordinates to 0.
-
-    Raises:
-        ValueError: If inputs are invalid.
-    """
-    valid_positions = {"top-left", "top-right", "bottom-left", "bottom-right"}
-    if position not in valid_positions:
-        raise ValueError(f"invalid position: {position}")
-    if margin < 0:
-        raise ValueError("margin must be >= 0")
-
-    img_w, img_h = image_size
-    ovr_w, ovr_h = overlay_size
-
-    if img_w <= 0 or img_h <= 0 or ovr_w <= 0 or ovr_h <= 0:
-        raise ValueError("dimensions must be positive")
-
-    if position == "top-left":
-        x, y = margin, margin
-    elif position == "top-right":
-        x, y = img_w - ovr_w - margin, margin
-    elif position == "bottom-left":
-        x, y = margin, img_h - ovr_h - margin
-    else:  # bottom-right
-        x, y = img_w - ovr_w - margin, img_h - ovr_h - margin
-
-    return (max(0, x), max(0, y))
-
-
 def ensure_mod2(width: int, height: int) -> tuple[int, int]:
     """
     Round dimensions up to nearest even values for video encoding compatibility.

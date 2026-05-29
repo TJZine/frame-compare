@@ -41,6 +41,13 @@ def test_quantile_mode_returns_luminance_extremes():
     assert result.frames == [0, 1, 2, 3, 4, 95, 96, 97, 98, 99]
     assert list(result.breakdown.quantile_dark) == [0, 1, 2, 3, 4]
     assert list(result.breakdown.quantile_bright) == [95, 96, 97, 98, 99]
+    assert result.selection_details[0].label == "Dark"
+    assert result.selection_details[0].source == "analysis"
+    assert result.selection_details[0].clip_role == "analyze"
+    assert result.selection_details[0].timecode == "00:00:00.000"
+    assert result.selection_details[95].label == "Bright"
+    assert result.selection_details[95].notes == "quantile_bright"
+    assert result.selection_details[95].score == pytest.approx(0.95)
 
 
 def test_quantile_thresholds_affect_selection_when_pool_is_larger_than_needed():
@@ -111,6 +118,7 @@ def test_deduplication_skips_already_selected():
     assert len(result.frames) == 10
     # Final frames should be unique
     assert len(set(result.frames)) == 10
+    assert result.selection_details[0].label == "Dark"
 
 
 def test_insufficient_candidates_raises():

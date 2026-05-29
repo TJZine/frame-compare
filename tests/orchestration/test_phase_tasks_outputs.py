@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -10,11 +11,14 @@ import pytest
 
 from frame_compare.analysis.types import (
     SelectionBreakdown,
+    SelectionDetail,
 )
+from frame_compare.config.schema import OverlayMode
 from frame_compare.orchestration import phase_tasks
 from frame_compare.orchestration.types import MetadataPrefetch, RenderArtifacts, RunArtifacts
 from frame_compare.services.publishers import PublishResult
 from frame_compare.services.types import TmdbMetadata
+from frame_compare.vs.types import HDRMetadata
 from tests.orchestration.phase_task_helpers import (
     _clip,
     _context,
@@ -142,6 +146,159 @@ def test_run_render_phase_maps_aligned_frames_to_source_frames(
         screenshots_by_label={"Reference": [tmp_path / "reference.png"]},
         screenshot_dir=ctx.workspace.screenshots_dir,
     )
+
+
+def test_run_render_phase_prefers_typed_selection_details_in_reference_source_domain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
+    ctx = _context(tmp_path, comparisons=[comparison])
+    ctx.config.screenshots.overlay_mode = OverlayMode.DIAGNOSTIC
+    ctx.config.diagnostics.per_frame_nits = True
+    ctx.config.color.target_nits = 200
+    ctx.reference = replace(
+        ctx.reference,
+        probe=replace(
+            ctx.reference.probe,
+            is_hdr=True,
+            hdr_metadata=HDRMetadata(
+                mastering_display="G(0.265,0.690)B(0.150,0.060)R(0.680,0.320)WP(0.3127,0.3290)L(1000.0,0.0050)",
+                max_cll=1000,
+                max_fall=400,
+                color_primaries=9,
+                transfer=16,
+                matrix=9,
+            ),
+            preserved_frame_props={
+                "DolbyVisionRPU": 1,
+                "_ColorRange": 1,
+                "DolbyVision_L1_Average": 12.5,
+                "DolbyVision_L1_Maximum": 450.0,
+                "DolbyVision_L6_MaxCLL": 900.0,
+                "DolbyVision_L6_MaxFALL": 300.0,
+            },
+        ),
+    )
+    ctx.reference = ctx.reference.with_trim(trim_start_frames=3, trim_end_frame_inclusive=20)
+    ctx.comparisons = [
+        replace(
+            comparison.with_trim(trim_start_frames=1, trim_end_frame_inclusive=18),
+            probe=replace(
+                comparison.probe,
+                is_hdr=True,
+                hdr_metadata=HDRMetadata(
+                    mastering_display=None,
+                    max_cll=600,
+                    max_fall=200,
+                    color_primaries=9,
+                    transfer=16,
+                    matrix=9,
+                ),
+                preserved_frame_props={"_ColorRange": 0},
+            ),
+        )
+    ]
+    ctx.selection_breakdown = SelectionBreakdown(quantile_dark=[4])
+    ctx.selection_details_by_source_frame = {
+        4: SelectionDetail(
+            frame_index=4,
+            label="User",
+            source="analysis",
+            timecode="00:00:00.167",
+            score=0.5,
+            clip_role="analyze",
+            notes="user_override",
+        )
+    }
+    captured: dict[str, Any] = {}
+
+    def _fake_render_screenshots_from_batch(**kwargs: object) -> dict[str, list[Path]]:
+        captured.update(kwargs)
+        return {"Reference": [tmp_path / "reference.png"]}
+
+    monkeypatch.setattr(
+        "frame_compare.render.batch.orchestrator.render_screenshots_from_batch",
+        _fake_render_screenshots_from_batch,
+    )
+
+    runner = cast(Any, _RenderRunner())
+    phase_tasks.run_render_phase(
+        ctx,
+        frames=[1],
+        runner=runner,
+    )
+
+    requests = captured["batch_requests"]
+    assert requests[0].selection_labels == ["User"]
+    assert requests[0].selection_details is not None
+    assert requests[0].selection_details[0] is not None
+    assert requests[0].selection_details[0].label == "User"
+    assert requests[0].diagnostic_metadata is not None
+    assert requests[0].diagnostic_metadata[0] is not None
+    assert requests[0].diagnostic_metadata[0].max_cll == 1000
+    assert requests[0].diagnostic_metadata[0].color_range == "limited"
+    assert requests[0].diagnostic_metadata[0].dolby_vision is not None
+    assert requests[0].diagnostic_metadata[0].measurement is not None
+    assert requests[0].diagnostic_metadata[0].measurement.avg_nits == pytest.approx(100.0)
+    assert requests[1].selection_details is not None
+    assert requests[1].selection_details[0] is not None
+    assert requests[1].selection_details[0].frame_index == 4
+    assert requests[1].diagnostic_metadata is not None
+    assert requests[1].diagnostic_metadata[0] is not None
+    assert requests[1].diagnostic_metadata[0].max_cll == 600
+    assert requests[1].diagnostic_metadata[0].color_range == "full"
+
+
+def test_run_render_phase_uses_alignment_reselected_source_domain_labels(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1", num_frames=220)
+    ctx = _context(tmp_path, comparisons=[comparison])
+    ctx.reference = ctx.reference.with_trim(trim_start_frames=60, trim_end_frame_inclusive=219)
+    ctx.comparisons = [comparison.with_trim(trim_start_frames=0, trim_end_frame_inclusive=159)]
+    ctx.selection_breakdown = SelectionBreakdown(quantile_dark=[60], quantile_bright=[219])
+    ctx.selection_details_by_source_frame = {
+        60: SelectionDetail(
+            frame_index=60,
+            label="Dark",
+            source="analysis",
+            timecode="00:00:02.500",
+            clip_role="analyze",
+            notes="quantile_dark",
+        ),
+        219: SelectionDetail(
+            frame_index=219,
+            label="Bright",
+            source="analysis",
+            timecode="00:00:09.125",
+            clip_role="analyze",
+            notes="quantile_bright",
+        ),
+    }
+    captured: dict[str, Any] = {}
+
+    def _fake_render_screenshots_from_batch(**kwargs: object) -> dict[str, list[Path]]:
+        captured.update(kwargs)
+        return {"Reference": [tmp_path / "reference.png"]}
+
+    monkeypatch.setattr(
+        "frame_compare.render.batch.orchestrator.render_screenshots_from_batch",
+        _fake_render_screenshots_from_batch,
+    )
+
+    phase_tasks.run_render_phase(
+        ctx,
+        frames=[0, 159],
+        runner=cast(Any, _RenderRunner()),
+    )
+
+    requests = captured["batch_requests"]
+    assert requests[0].selection_labels == ["Dark", "Bright"]
+    assert requests[0].selection_details is not None
+    assert [detail.label if detail is not None else None for detail in requests[0].selection_details] == [
+        "Dark",
+        "Bright",
+    ]
 
 
 def test_run_report_phase_without_screenshots_clears_existing_report_path(tmp_path: Path) -> None:

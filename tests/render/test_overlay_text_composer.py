@@ -31,7 +31,6 @@ def test_compose_frame_info_lines_minimal_is_label_only() -> None:
     )
     assert lines == ["Ref"]
 
-
 def test_compose_overlay_text_lines_standard_order_matches_legacy_intent() -> None:
     lines = compose_overlay_text_lines(
         mode=OverlayMode.STANDARD,
@@ -98,6 +97,19 @@ def test_compose_frame_info_lines_num_frames_none_omits_total() -> None:
     assert lines[0] == "Frame 12"
 
 
+def test_compose_frame_info_lines_picture_type_none_omits_picture_type_line() -> None:
+    lines = compose_frame_info_lines(
+        mode=OverlayMode.STANDARD,
+        label="Ref",
+        display_frame_number=12,
+        num_frames=100,
+        picture_type=None,
+        selection_label="Dark",
+    )
+
+    assert lines == ["Frame 12 of 100", "Ref", "Selection: Dark"]
+
+
 def test_compose_frame_info_lines_can_suppress_only_frame_line() -> None:
     lines = compose_frame_info_lines(
         mode=OverlayMode.DIAGNOSTIC,
@@ -110,6 +122,20 @@ def test_compose_frame_info_lines_can_suppress_only_frame_line() -> None:
     )
 
     assert lines == ["Picture type: I", "Ref", "Selection: Dark"]
+
+
+def test_compose_frame_info_lines_without_frame_or_picture_type_keeps_label_and_selection() -> None:
+    lines = compose_frame_info_lines(
+        mode=OverlayMode.DIAGNOSTIC,
+        label="Ref",
+        display_frame_number=12,
+        num_frames=100,
+        picture_type=None,
+        selection_label="Dark",
+        include_frame_number=False,
+    )
+
+    assert lines == ["Ref", "Selection: Dark"]
 
 
 def test_compose_frame_info_lines_selection_label_none_omits_selection_line() -> None:
