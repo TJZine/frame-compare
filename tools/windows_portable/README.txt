@@ -14,14 +14,16 @@ NOTES:
       %LOCALAPPDATA%\Programs\FrameCompare\bin
   - Shim state/config is stored under:
       %LOCALAPPDATA%\Programs\FrameCompare\state\config.json
-  - Default portable config is stored at:
+  - Installed-shim fallback config is stored at:
       %LOCALAPPDATA%\Programs\FrameCompare\state\config.toml
   - To override config for a run, pass:
       frame-compare run --config <path-to-config.toml>
   - Bundle defaults include empty:
       .\config\
       .\comparison_videos\
-    Put config at .\config\config.toml and source clips under .\comparison_videos\.
+    When .\config\config.toml exists in the bundle, the installed `frame-compare`
+    command uses it before the AppData fallback config. Source clips can go under
+    .\comparison_videos\.
   - For source builds (`tools\windows_portable\install-from-source.cmd`), use:
       .\dist\frame-compare-portable-win-x64\
     as the bundle root (not the repository root).
@@ -75,6 +77,8 @@ RELEASE SIGNING (Maintainers):
     CI guidance:
       - Prefer injecting the signing key path via a masked secret into SIGNING_KEY_XML_PATH.
       - Avoid passing the key path on the command line to reduce exposure in shell history / process listings.
+      - GitHub release/manual bundle workflow signs the code-only update zip when the
+        WINDOWS_UPDATE_SIGNING_KEY_XML repository secret contains the private key XML.
 
   Unsigned zips are for local/dev only and require unsafe confirmation in the updater.
 
@@ -83,6 +87,11 @@ THIRD-PARTY LICENSES / SOURCE AVAILABILITY:
       .\licenses\
       .\licenses\python\
   - Python wheel license files are copied from installed *.dist-info metadata.
+  - Third-party runtime licenses that do not reliably ship in extracted bundle
+    paths are copied from manifest-declared, repo-tracked files under:
+      tools\windows_portable\licenses\
+    The build SHA256-verifies those vendored license texts before copying them
+    into the bundle.
   - Qt license/notice files (when present) are copied from:
       app\site-packages\PyQt6\Qt6\licenses
     Note: newer PyQt6 wheels may ship additional license texts under individual

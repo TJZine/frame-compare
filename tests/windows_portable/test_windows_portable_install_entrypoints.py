@@ -29,9 +29,9 @@ def test_root_install_cmd_exists_and_calls_install_ps1(repo_root: Path) -> None:
     assert path.exists()
     text = _read_text_or_fail(path).lower()
     assert "where pwsh" in text
-    assert "if %errorlevel% equ 0" in text
-    assert "pwsh" in text
-    assert "powershell" in text
+    assert "powershell_exe" in text
+    assert "%programfiles%\\powershell\\7\\pwsh.exe" in text
+    assert "%systemroot%\\system32\\windowspowershell\\v1.0\\powershell.exe" in text
     assert "-noprofile" in text
     assert "-executionpolicy bypass" in text
     assert "-file" in text
@@ -72,6 +72,26 @@ def test_install_from_source_uv_install_order_is_deterministic(repo_root: Path) 
     assert "py -m pip install --user uv" in text
 
 
+def test_install_from_source_refreshes_process_path_before_uv_lookup(repo_root: Path) -> None:
+    script_path = repo_root / "tools" / "windows_portable" / "install-from-source.ps1"
+    text = _read_text_or_fail(script_path)
+
+    assert text.index("Update-ProcessPathFromRegistry\nEnsure-UvOnPath") > text.index(
+        "function Update-ProcessPathFromRegistry()"
+    )
+
+
+def test_install_from_source_invokes_bundle_install_ps1_directly(repo_root: Path) -> None:
+    script_path = repo_root / "tools" / "windows_portable" / "install-from-source.ps1"
+    text = _read_text_or_fail(script_path)
+
+    assert '$installScript = Join-Path $outDirFullPath "install.ps1"' in text
+    assert "& $installScript" in text
+    assert 'Assert-LastExitCode -Label "install.ps1"' in text
+    assert '$installCmd = Join-Path $outDirFullPath "install.cmd"' not in text
+    assert "& $installCmd" not in text
+
+
 def test_windows_portable_installer_initializes_state_config_toml(repo_root: Path) -> None:
     installer_path = repo_root / "tools" / "windows_portable" / "install.ps1"
     installer = _read_text_or_fail(installer_path)
@@ -92,3 +112,23 @@ def test_windows_portable_installer_copies_update_shims(repo_root: Path) -> None
     assert "frame-compare-update.ps1" in installer
     assert "frame-compare-update.cmd" in installer
     assert "update_public_key.xml" in installer
+
+
+def test_windows_portable_cmd_wrappers_have_absolute_powershell_fallbacks(
+    repo_root: Path,
+) -> None:
+    cmd_paths = [
+        repo_root / "install.cmd",
+        repo_root / "tools" / "windows_portable" / "install-from-source.cmd",
+        repo_root / "tools" / "windows_portable" / "install.cmd",
+        repo_root / "tools" / "windows_portable" / "uninstall.cmd",
+        repo_root / "tools" / "windows_portable" / "shim" / "frame-compare.cmd",
+        repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.cmd",
+    ]
+
+    for cmd_path in cmd_paths:
+        text = _read_text_or_fail(cmd_path).lower()
+        assert "powershell_exe" in text, cmd_path
+        assert "%programfiles%\\powershell\\7\\pwsh.exe" in text, cmd_path
+        assert "%systemroot%\\system32\\windowspowershell\\v1.0\\powershell.exe" in text, cmd_path
+        assert '"%powershell_exe%" -noprofile -executionpolicy bypass -file' in text, cmd_path

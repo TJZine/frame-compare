@@ -31,8 +31,10 @@ def test_default_config_values() -> None:
     config = get_default_config()
     assert config.analysis.frame_count == 10
     assert config.analysis.selection_mode == SelectionMode.MIXED
-    assert config.color.target_nits == 203
+    assert config.color.target_nits == 100
     assert config.paths.input_dir == "comparison_videos"
+    assert config.tmdb.year_tolerance == 2
+    assert config.tmdb.category_preference is None
 
 
 def test_analysis_frame_count_bounds_too_low() -> None:
@@ -132,13 +134,16 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert screenshots.overlay_mode == OverlayMode.STANDARD
     assert screenshots.png_compression == 6
     assert screenshots.ffmpeg_timeout_seconds == 30.0
-    assert color.target_nits == 203
+    assert color.target_nits == 100
+    assert color.contrast_recovery == 0.3
     assert color.preset == "reference"
     assert slowpics.visibility == Visibility.UNLISTED
     assert slowpics.max_retries == 3
     assert tmdb.enabled is True
     assert tmdb.api_key is None
     assert tmdb.timeout_seconds == 10.0
+    assert tmdb.year_tolerance == 2
+    assert tmdb.category_preference is None
     assert report.default_mode == "slider"
     assert report.embed_images is False
     assert dovi.dovi_tool_path is None
@@ -168,6 +173,43 @@ def test_schema_model_enums_accept_config_strings_and_reject_unknown_values() ->
 
     with pytest.raises(ValidationError):
         LoggingConfig.model_validate({"level": "debug"})
+
+
+@pytest.mark.parametrize("year_tolerance", [0, 5])
+def test_tmdb_year_tolerance_accepts_config_bounds(year_tolerance: int) -> None:
+    config = TmdbConfig.model_validate({"year_tolerance": year_tolerance})
+
+    assert config.year_tolerance == year_tolerance
+
+
+@pytest.mark.parametrize(
+    ("year_tolerance", "message"),
+    [
+        (-1, "Input should be greater than or equal to 0"),
+        (6, "Input should be less than or equal to 5"),
+    ],
+)
+def test_tmdb_year_tolerance_rejects_out_of_bounds_values(
+    year_tolerance: int, message: str
+) -> None:
+    with pytest.raises(ValidationError) as exc:
+        TmdbConfig.model_validate({"year_tolerance": year_tolerance})
+
+    assert message in str(exc.value)
+
+
+@pytest.mark.parametrize("category_preference", ["movie", "tv", None])
+def test_tmdb_category_preference_accepts_supported_values(
+    category_preference: str | None,
+) -> None:
+    config = TmdbConfig.model_validate({"category_preference": category_preference})
+
+    assert config.category_preference == category_preference
+
+
+def test_tmdb_category_preference_rejects_unknown_values() -> None:
+    with pytest.raises(ValidationError):
+        TmdbConfig.model_validate({"category_preference": "documentary"})
 
 
 def test_toml_settings_source_accepts_utf8_bom_directly(tmp_path: Path) -> None:

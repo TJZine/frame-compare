@@ -10,7 +10,9 @@ import pytest
 from frame_compare.analysis.cache_io import (
     CACHE_VERSION,
     compute_cache_key,
+    delete_metrics_cache_entry,
     load_cached_metrics,
+    metrics_cache_filename,
     save_metrics_cache,
 )
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
@@ -25,6 +27,10 @@ def create_video_file(tmp_path: Path, name: str = "video.mkv", content: bytes = 
     f.write_bytes(content)
     os.utime(f, (FIXED_MTIME, FIXED_MTIME))
     return f
+
+
+def cache_file(cache_dir: Path, fingerprint: str, *video_paths: Path) -> Path:
+    return cache_dir / metrics_cache_filename(list(video_paths), fingerprint)
 
 
 def test_compute_cache_key_deterministic(tmp_path: Path) -> None:
@@ -45,6 +51,18 @@ def test_compute_cache_key_order_independent(tmp_path: Path) -> None:
     key1 = compute_cache_key([v1, v2], config)
     key2 = compute_cache_key([v2, v1], config)
     assert key1 == key2
+
+
+def test_metrics_cache_filename_order_independent(tmp_path: Path) -> None:
+    fingerprint = "f" * 64
+    v1 = create_video_file(tmp_path, "b-source.mkv")
+    v2 = create_video_file(tmp_path, "a-source.mkv")
+
+    forward = metrics_cache_filename([v1, v2], fingerprint)
+    reversed_order = metrics_cache_filename([v2, v1], fingerprint)
+
+    assert forward == reversed_order
+    assert forward == f"a-source__b-source__{fingerprint}.compframes"
 
 
 def test_compute_cache_key_changes_on_frame_count(tmp_path: Path) -> None:
@@ -141,6 +159,7 @@ def test_save_and_load_round_trip(tmp_path: Path) -> None:
     save_metrics_cache(metrics, tmp_path)
     result = load_cached_metrics(tmp_path, fingerprint, clips)
 
+    assert (tmp_path / f"v1__{fingerprint}.compframes").exists()
     assert result.success is True
     assert result.metrics is not None
     assert result.metrics.luminance == [0.1, 0.2, 0.3]
@@ -157,10 +176,43 @@ def test_load_not_found(tmp_path: Path) -> None:
     assert result.reason == "not_found"
 
 
+def test_load_ignores_legacy_single_cache_filename(tmp_path: Path) -> None:
+    """Legacy run-folder cache filename is not a shared-cache hit."""
+    (tmp_path / "cache.compframes").write_text("invalid json", encoding="utf-8")
+
+    result = load_cached_metrics(tmp_path, "some-fingerprint", [])
+
+    assert result.success is False
+    assert result.reason == "not_found"
+
+
+def test_metrics_cache_filename_sanitizes_lowercase_label(tmp_path: Path) -> None:
+    fingerprint = "f" * 64
+    path = tmp_path / "Movie.Name 2024 [HDR]!.mkv"
+
+    filename = metrics_cache_filename([path], fingerprint)
+
+    assert filename == f"movie.name-2024-hdr__{fingerprint}.compframes"
+
+
+def test_delete_metrics_cache_entry_deletes_only_matching_fingerprint(tmp_path: Path) -> None:
+    matching = cache_file(tmp_path, "fp")
+    matching.write_text("{}", encoding="utf-8")
+    matching_sidecar = matching.with_suffix(".meta.json")
+    matching_sidecar.write_text("{}", encoding="utf-8")
+    other = cache_file(tmp_path, "other")
+    other.write_text("{}", encoding="utf-8")
+
+    delete_metrics_cache_entry(tmp_path, "fp")
+
+    assert not matching.exists()
+    assert not matching_sidecar.exists()
+    assert other.exists()
+
+
 def test_load_corrupted(tmp_path: Path) -> None:
     """Invalid JSON → reason="corrupted"."""
-    cache_file = tmp_path / "cache.compframes"
-    cache_file.write_text("invalid json")
+    cache_file(tmp_path, "some-fingerprint").write_text("invalid json")
     result = load_cached_metrics(tmp_path, "some-fingerprint", [])
     assert result.success is False
     assert result.reason == "corrupted"
@@ -168,8 +220,7 @@ def test_load_corrupted(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("payload", ["null", "42"])
 def test_load_non_mapping_root_returns_corrupted(tmp_path: Path, payload: str) -> None:
-    cache_file = tmp_path / "cache.compframes"
-    cache_file.write_text(payload, encoding="utf-8")
+    cache_file(tmp_path, "some-fingerprint").write_text(payload, encoding="utf-8")
 
     result = load_cached_metrics(tmp_path, "some-fingerprint", [])
 
@@ -179,8 +230,7 @@ def test_load_non_mapping_root_returns_corrupted(tmp_path: Path, payload: str) -
 
 def test_load_version_mismatch(tmp_path: Path) -> None:
     """Wrong version → reason="version_mismatch"."""
-    cache_file = tmp_path / "cache.compframes"
-    cache_file.write_text(
+    cache_file(tmp_path, "fp").write_text(
         json.dumps(
             {
                 "version": 1,
@@ -198,8 +248,7 @@ def test_load_version_mismatch(tmp_path: Path) -> None:
 
 def test_load_mismatched_inputs(tmp_path: Path) -> None:
     """Wrong fingerprint → reason="mismatched_inputs"."""
-    cache_file = tmp_path / "cache.compframes"
-    cache_file.write_text(
+    cache_file(tmp_path, "fp2").write_text(
         json.dumps(
             {
                 "version": CACHE_VERSION,
@@ -233,7 +282,7 @@ def test_save_creates_directory(tmp_path: Path) -> None:
     metrics = FrameMetrics(luminance=[], motion=[], metadata=metadata)
     save_metrics_cache(metrics, sub_dir)
     assert sub_dir.exists()
-    assert (sub_dir / "cache.compframes").exists()
+    assert (sub_dir / "analysis__fp.compframes").exists()
 
 
 def test_save_writes_required_keys(tmp_path: Path) -> None:
@@ -247,7 +296,7 @@ def test_save_writes_required_keys(tmp_path: Path) -> None:
     metrics = FrameMetrics(luminance=[0.5], motion=[0.1], metadata=metadata)
     save_metrics_cache(metrics, tmp_path)
 
-    with (tmp_path / "cache.compframes").open("r") as f:
+    with (tmp_path / "analysis__fp.compframes").open("r") as f:
         data = json.load(f)
 
     assert data["version"] == CACHE_VERSION
@@ -280,16 +329,15 @@ def test_save_metrics_cache_uses_atomic_text_write(
     save_metrics_cache(metrics, tmp_path)
 
     assert calls
-    assert calls[0][0] == tmp_path / "cache.compframes"
+    assert calls[0][0] == tmp_path / "analysis__fp.compframes"
     assert calls[0][2] == "utf-8"
     assert json.loads(calls[0][1])["fingerprint"] == "fp"
 
 
 def test_load_missing_key_returns_corrupted(tmp_path: Path) -> None:
     """Missing luminance key → reason="corrupted"."""
-    cache_file = tmp_path / "cache.compframes"
     # Missing luminance
-    cache_file.write_text(
+    cache_file(tmp_path, "fp").write_text(
         json.dumps(
             {
                 "version": CACHE_VERSION,
@@ -316,6 +364,7 @@ def test_load_missing_key_returns_corrupted(tmp_path: Path) -> None:
         ("luminance", "not-a-list"),
         ("motion", [False]),
         ("metadata.fps", "not-a-fraction"),
+        ("metadata.fps", "24000/0"),
         ("metadata.version", "3"),
         ("metadata.clips.0.path", 123),
         ("metadata.clips.0.size", True),
@@ -340,7 +389,7 @@ def test_load_malformed_nested_payload_returns_corrupted(
         },
     }
     _set_payload_field(payload, field, value)
-    (tmp_path / "cache.compframes").write_text(json.dumps(payload), encoding="utf-8")
+    cache_file(tmp_path, "fp").write_text(json.dumps(payload), encoding="utf-8")
 
     result = load_cached_metrics(tmp_path, "fp", [])
 

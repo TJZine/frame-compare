@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   frame-compare:
     build:
@@ -13,7 +11,7 @@ services:
       - ./generated:/workspace/generated
     working_dir: /workspace
     environment:
-      - VAPOURSYNTH_PLUGIN_PATH=/usr/local/lib/vapoursynth
+      - VAPOURSYNTH_EXTRA_PLUGIN_PATH=/opt/vapoursynth-extra-plugins
     # Override entrypoint for interactive dev shell
     entrypoint: ["/bin/bash"]
     stdin_open: true
@@ -30,7 +28,7 @@ services:
       - .:/home/framecompare/frame-compare
     working_dir: /home/framecompare/frame-compare
     environment:
-      - VAPOURSYNTH_PLUGIN_PATH=/usr/local/lib/vapoursynth
+      - VAPOURSYNTH_EXTRA_PLUGIN_PATH=/opt/vapoursynth-extra-plugins
     entrypoint: ["/bin/bash"]
 
   # Production-like service (uses default ENTRYPOINT)
@@ -46,4 +44,4 @@ services:
       - ./generated:/workspace/generated
     working_dir: /workspace
     environment:
-      - VAPOURSYNTH_PLUGIN_PATH=/usr/local/lib/vapoursynth
+      - VAPOURSYNTH_EXTRA_PLUGIN_PATH=/opt/vapoursynth-extra-plugins

@@ -38,10 +38,10 @@ ffmpeg_timeout_seconds = 30.0
 [color]
 enable_tonemap = true
 preset = "reference"
-target_nits = 203
+target_nits = 100
 tone_curve = "bt2390"
 gamma_lift = false
-contrast_recovery = 0.0
+contrast_recovery = 0.3
 
 [slowpics]
 auto_upload = false
@@ -55,6 +55,8 @@ max_retries = 3
 enabled = true
 unattended = false
 timeout_seconds = 10.0
+year_tolerance = 2
+# category_preference = "movie"  # optional: "movie" or "tv"
 
 [report]
 enable = true

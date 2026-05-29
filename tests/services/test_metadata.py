@@ -1,11 +1,15 @@
+from __future__ import annotations
+
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
-import respx
 
-from frame_compare.services.errors import MetadataError, TmdbError, TmdbRateLimitedError
-from frame_compare.services.metadata import lookup_tmdb, parse_filename, resolve_metadata
+import frame_compare.services.metadata as metadata
+from frame_compare.services.errors import MetadataError
+from frame_compare.services.metadata import parse_filename, resolve_metadata
 from frame_compare.services.types import MetadataConfig, ParsedMetadata, TmdbMetadata
 
 
@@ -16,66 +20,29 @@ async def async_client() -> AsyncIterator[httpx.AsyncClient]:
         yield client
 
 
-MOCK_TMDB_MOVIE = {
-    "results": [
-        {
-            "id": 550,
-            "title": "Fight Club",
-            "original_title": "Fight Club",
-            "release_date": "1999-10-15",
-            "media_type": "movie",
-            "poster_path": "/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg",
-            "backdrop_path": "/hZkgoQYus5vegHoetLkCJzb17zJ.jpg",
-        }
-    ]
-}
+@dataclass(frozen=True)
+class ResolutionOutcome:
+    selected: TmdbMetadata | None
+    candidates: list[TmdbMetadata]
 
-MOCK_TMDB_TV = {
-    "results": [
-        {
-            "id": 1399,
-            "name": "Game of Thrones",
-            "original_name": "Game of Thrones",
-            "first_air_date": "2011-04-17",
-            "media_type": "tv",
-            "poster_path": "/1XS1oqL89opfnbLl8WnZY1O1uJx.jpg",
-            "backdrop_path": "/suopoADq0k8YZr4dQXcU6pToj6s.jpg",
-        }
-    ]
-}
 
-MOCK_TMDB_MULTI = {
-    "results": [
-        {
-            "id": 1,
-            "title": "Result 1",
-            "release_date": "2020-01-01",
-            "media_type": "movie",
-        },
-        {
-            "id": 2,
-            "title": "Result 2",
-            "release_date": "2021-01-01",
-            "media_type": "movie",
-        },
-    ]
-}
+def _movie(
+    tmdb_id: int,
+    title: str,
+    year: int,
+    *,
+    original_title: str | None = None,
+) -> TmdbMetadata:
+    return TmdbMetadata(
+        tmdb_id=tmdb_id,
+        title=title,
+        original_title=title if original_title is None else original_title,
+        year=year,
+        media_type="movie",
+        poster_url=None,
+        backdrop_url=None,
+    )
 
-MOCK_TMDB_MULTI_WITH_PERSON = {
-    "results": [
-        {
-            "id": 1,
-            "title": "Result 1",
-            "release_date": "2020-01-01",
-            "media_type": "movie",
-        },
-        {
-            "id": 999,
-            "name": "Some Actor",
-            "media_type": "person",
-        },
-    ]
-}
 
 # ─── Filename Parsing Tests ───────────────────────────────────────────────────
 
@@ -154,223 +121,293 @@ def test_parse_filename_parsers_raise_falls_back_to_stem(mocker) -> None:
     )
 
 
-# ─── TMDB Lookup Tests ────────────────────────────────────────────────────────
+# ─── Resolve Metadata Facade Tests ────────────────────────────────────────────
 
 
 @pytest.mark.anyio
-async def test_lookup_tmdb_returns_metadata(
-    respx_mock: respx.MockRouter, async_client: httpx.AsyncClient
+async def test_resolve_metadata_returns_none_for_empty_filenames(
+    async_client: httpx.AsyncClient,
 ) -> None:
-    respx_mock.get(url__startswith="https://api.themoviedb.org/3/search/multi").mock(
-        return_value=httpx.Response(200, json=MOCK_TMDB_MOVIE)
-    )
+    config = MetadataConfig(api_key="a" * 32)
+
+    result = await resolve_metadata([], config, async_client)
+
+    assert result is None
+
+
+@pytest.mark.anyio
+async def test_resolve_metadata_parses_only_first_filename(
+    monkeypatch: pytest.MonkeyPatch,
+    async_client: httpx.AsyncClient,
+) -> None:
     parsed = ParsedMetadata(title="Fight Club", year=1999)
-    config = MetadataConfig(api_key="a" * 32)
-
-    result = await lookup_tmdb(parsed, config, async_client)
-
-    assert result is not None
-    assert result.tmdb_id == 550
-    assert result.title == "Fight Club"
-    assert result.year == 1999
-    assert result.media_type == "movie"
-    assert (
-        result.poster_url == "https://image.tmdb.org/t/p/original/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg"
-    )
-
-
-@pytest.mark.anyio
-async def test_lookup_tmdb_skips_person_results(
-    respx_mock: respx.MockRouter, async_client: httpx.AsyncClient
-) -> None:
-    respx_mock.get(url__startswith="https://api.themoviedb.org/3/search/multi").mock(
-        return_value=httpx.Response(200, json=MOCK_TMDB_MULTI_WITH_PERSON)
-    )
-    parsed = ParsedMetadata(title="Fight Club", year=1999)
-    config = MetadataConfig(api_key="a" * 32)
-
-    result = await lookup_tmdb(parsed, config, async_client)
-
-    assert result is not None
-    assert result.media_type in {"movie", "tv"}
-
-
-@pytest.mark.anyio
-async def test_lookup_tmdb_tv_uses_first_air_date(
-    respx_mock: respx.MockRouter, async_client: httpx.AsyncClient
-) -> None:
-    respx_mock.get(url__startswith="https://api.themoviedb.org/3/search/multi").mock(
-        return_value=httpx.Response(200, json=MOCK_TMDB_TV)
-    )
-    parsed = ParsedMetadata(title="Game of Thrones")
-    config = MetadataConfig(api_key="a" * 32)
-
-    result = await lookup_tmdb(parsed, config, async_client)
-
-    assert result is not None
-    assert result.tmdb_id == 1399
-    assert result.year == 2011
-    assert result.media_type == "tv"
-
-
-@pytest.mark.anyio
-async def test_lookup_tmdb_no_results(
-    respx_mock: respx.MockRouter, async_client: httpx.AsyncClient
-) -> None:
-    respx_mock.get(url__startswith="https://api.themoviedb.org/3/search/multi").mock(
-        return_value=httpx.Response(200, json={"results": []})
-    )
-    parsed = ParsedMetadata(title="Unknown Movie")
-    config = MetadataConfig(api_key="a" * 32)
-
-    result = await lookup_tmdb(parsed, config, async_client)
-    assert result is None
-
-
-@pytest.mark.anyio
-async def test_lookup_tmdb_api_key_none(
-    respx_mock: respx.MockRouter, async_client: httpx.AsyncClient
-) -> None:
-    parsed = ParsedMetadata(title="Fight Club")
-    config = MetadataConfig(api_key=None)
-
-    result = await lookup_tmdb(parsed, config, async_client)
-
-    assert result is None
-    assert respx_mock.calls.call_count == 0
-
-
-@pytest.mark.anyio
-async def test_lookup_tmdb_invalid_api_key_format(async_client: httpx.AsyncClient) -> None:
-    parsed = ParsedMetadata(title="Fight Club")
-    config = MetadataConfig(api_key="short")
-
-    with pytest.raises(TmdbError, match="Invalid API key format"):
-        await lookup_tmdb(parsed, config, async_client)
-
-
-@pytest.mark.anyio
-async def test_lookup_tmdb_rejects_non_hex_api_key(async_client: httpx.AsyncClient) -> None:
-    parsed = ParsedMetadata(title="Fight Club")
-    config = MetadataConfig(api_key="g" * 32)
-
-    with pytest.raises(TmdbError, match="Invalid API key format"):
-        await lookup_tmdb(parsed, config, async_client)
-
-
-@pytest.mark.anyio
-async def test_lookup_tmdb_rate_limited(
-    respx_mock: respx.MockRouter, async_client: httpx.AsyncClient
-) -> None:
-    respx_mock.get(url__startswith="https://api.themoviedb.org/3/search/multi").mock(
-        return_value=httpx.Response(429)
-    )
-    parsed = ParsedMetadata(title="Fight Club")
-    config = MetadataConfig(api_key="a" * 32)
-
-    with pytest.raises(TmdbRateLimitedError):
-        await lookup_tmdb(parsed, config, async_client)
-
-
-@pytest.mark.anyio
-async def test_lookup_tmdb_server_error(
-    respx_mock: respx.MockRouter, async_client: httpx.AsyncClient
-) -> None:
-    respx_mock.get(url__startswith="https://api.themoviedb.org/3/search/multi").mock(
-        return_value=httpx.Response(500)
-    )
-    parsed = ParsedMetadata(title="Fight Club")
-    config = MetadataConfig(api_key="a" * 32)
-
-    with pytest.raises(TmdbError, match="500"):
-        await lookup_tmdb(parsed, config, async_client)
-
-
-# ─── Resolve Metadata Tests ───────────────────────────────────────────────────
-
-
-@pytest.mark.anyio
-async def test_resolve_metadata_single_result(
-    respx_mock: respx.MockRouter, async_client: httpx.AsyncClient
-) -> None:
-    respx_mock.get(url__startswith="https://api.themoviedb.org/3/search/multi").mock(
-        return_value=httpx.Response(200, json=MOCK_TMDB_MOVIE)
+    selected = _movie(550, "Fight Club", 1999)
+    parse_mock = Mock(return_value=parsed)
+    resolve_mock = AsyncMock(
+        return_value=ResolutionOutcome(selected=selected, candidates=[selected])
     )
     config = MetadataConfig(api_key="a" * 32)
 
-    result = await resolve_metadata(["Fight.Club.mkv"], config, async_client)
+    monkeypatch.setattr(metadata, "parse_filename", parse_mock)
+    monkeypatch.setattr(metadata, "resolve_tmdb_match", resolve_mock)
 
-    assert result is not None
-    assert result.tmdb_id == 550
+    result = await resolve_metadata(
+        ["Fight.Club.1999.mkv", "Ignored.File.Name.mkv"],
+        config,
+        async_client,
+    )
+
+    assert result == selected
+    parse_mock.assert_called_once_with("Fight.Club.1999.mkv")
+    resolve_mock.assert_awaited_once_with(parsed, config, async_client)
 
 
 @pytest.mark.anyio
-async def test_resolve_metadata_no_results(
-    respx_mock: respx.MockRouter, async_client: httpx.AsyncClient
+async def test_resolve_metadata_returns_selected_vvitch_match_over_first_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+    async_client: httpx.AsyncClient,
 ) -> None:
-    respx_mock.get(url__startswith="https://api.themoviedb.org/3/search/multi").mock(
-        return_value=httpx.Response(200, json={"results": []})
+    wrong_plain_title = _movie(41484, "The Witch", 2006)
+    vvitch_release = _movie(
+        310131,
+        "The Witch",
+        2015,
+        original_title="The VVitch: A New-England Folktale",
+    )
+    resolve_mock = AsyncMock(
+        return_value=ResolutionOutcome(
+            selected=vvitch_release,
+            candidates=[wrong_plain_title, vvitch_release],
+        )
+    )
+    callback = Mock(side_effect=AssertionError("prompt_callback should not be used"))
+    config = MetadataConfig(api_key="a" * 32)
+
+    monkeypatch.setattr(
+        metadata,
+        "parse_filename",
+        Mock(return_value=ParsedMetadata(title="The VVitch", year=2015)),
+    )
+    monkeypatch.setattr(metadata, "resolve_tmdb_match", resolve_mock)
+
+    result = await resolve_metadata(
+        ["The.VVitch.2015.1080p.BluRay.mkv"],
+        config,
+        async_client,
+        prompt_callback=callback,
+    )
+
+    assert result == vvitch_release
+    callback.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_resolve_metadata_plain_title_alias_case_returns_vvitch_release(
+    monkeypatch: pytest.MonkeyPatch,
+    async_client: httpx.AsyncClient,
+) -> None:
+    plain_title_match = _movie(79091, "The Witch", 2016)
+    vvitch_release = _movie(
+        310131,
+        "The Witch",
+        2015,
+        original_title="The VVitch: A New-England Folktale",
     )
     config = MetadataConfig(api_key="a" * 32)
 
-    result = await resolve_metadata(["Unknown.mkv"], config, async_client)
-    assert result is None
+    monkeypatch.setattr(
+        metadata,
+        "parse_filename",
+        Mock(return_value=ParsedMetadata(title="The Witch", year=2015)),
+    )
+    monkeypatch.setattr(
+        metadata,
+        "resolve_tmdb_match",
+        AsyncMock(
+            return_value=ResolutionOutcome(
+                selected=vvitch_release,
+                candidates=[plain_title_match, vvitch_release],
+            )
+        ),
+    )
+
+    result = await resolve_metadata(["The.Witch.2015.mkv"], config, async_client)
+
+    assert result == vvitch_release
 
 
 @pytest.mark.anyio
-async def test_resolve_metadata_unattended_mode(
-    respx_mock: respx.MockRouter, async_client: httpx.AsyncClient
+async def test_resolve_metadata_returns_none_for_unresolved_results_in_unattended_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    async_client: httpx.AsyncClient,
 ) -> None:
-    respx_mock.get(url__startswith="https://api.themoviedb.org/3/search/multi").mock(
-        return_value=httpx.Response(200, json=MOCK_TMDB_MULTI)
-    )
+    candidates = [_movie(10, "The Witch", 2015), _movie(11, "The Witch", 2016)]
+    callback = Mock(side_effect=AssertionError("prompt_callback should not be used"))
     config = MetadataConfig(api_key="a" * 32, unattended=True)
 
-    # Callback should not be called in unattended mode
-    callback_called = False
+    monkeypatch.setattr(
+        metadata,
+        "parse_filename",
+        Mock(return_value=ParsedMetadata(title="The Witch", year=2015)),
+    )
+    monkeypatch.setattr(
+        metadata,
+        "resolve_tmdb_match",
+        AsyncMock(return_value=ResolutionOutcome(selected=None, candidates=candidates)),
+    )
 
-    def callback(results: list[TmdbMetadata]) -> int:
-        nonlocal callback_called
-        callback_called = True
-        return 1
+    result = await resolve_metadata(
+        ["The.Witch.2015.mkv"],
+        config,
+        async_client,
+        prompt_callback=callback,
+    )
 
-    result = await resolve_metadata(["Multi.mkv"], config, async_client, prompt_callback=callback)
-
-    assert result is not None
-    assert result.tmdb_id == 1
-    assert not callback_called
+    assert result is None
+    callback.assert_not_called()
 
 
 @pytest.mark.anyio
-async def test_resolve_metadata_with_callback(
-    respx_mock: respx.MockRouter, async_client: httpx.AsyncClient
+async def test_resolve_metadata_returns_none_for_unresolved_results_without_callback(
+    monkeypatch: pytest.MonkeyPatch,
+    async_client: httpx.AsyncClient,
 ) -> None:
-    respx_mock.get(url__startswith="https://api.themoviedb.org/3/search/multi").mock(
-        return_value=httpx.Response(200, json=MOCK_TMDB_MULTI)
-    )
+    candidates = [_movie(10, "The Witch", 2015), _movie(11, "The Witch", 2016)]
     config = MetadataConfig(api_key="a" * 32, unattended=False)
 
+    monkeypatch.setattr(
+        metadata,
+        "parse_filename",
+        Mock(return_value=ParsedMetadata(title="The Witch", year=2015)),
+    )
+    monkeypatch.setattr(
+        metadata,
+        "resolve_tmdb_match",
+        AsyncMock(return_value=ResolutionOutcome(selected=None, candidates=candidates)),
+    )
+
+    result = await resolve_metadata(["The.Witch.2015.mkv"], config, async_client)
+
+    assert result is None
+
+
+@pytest.mark.anyio
+async def test_resolve_metadata_high_confidence_match_auto_accepts(
+    monkeypatch: pytest.MonkeyPatch,
+    async_client: httpx.AsyncClient,
+) -> None:
+    exact_match = _movie(329865, "Arrival", 2016)
+    callback = Mock(side_effect=AssertionError("prompt_callback should not be used"))
+    config = MetadataConfig(api_key="a" * 32, unattended=False)
+
+    monkeypatch.setattr(
+        metadata,
+        "parse_filename",
+        Mock(return_value=ParsedMetadata(title="Arrival", year=2016)),
+    )
+    monkeypatch.setattr(
+        metadata,
+        "resolve_tmdb_match",
+        AsyncMock(
+            return_value=ResolutionOutcome(selected=exact_match, candidates=[exact_match])
+        ),
+    )
+
+    result = await resolve_metadata(
+        ["Arrival.2016.2160p.mkv"],
+        config,
+        async_client,
+        prompt_callback=callback,
+    )
+
+    assert result == exact_match
+    callback.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_resolve_metadata_with_callback_uses_ranked_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+    async_client: httpx.AsyncClient,
+) -> None:
+    first = _movie(1, "Result 1", 2020)
+    second = _movie(2, "Result 2", 2021)
+    config = MetadataConfig(api_key="a" * 32, unattended=False)
+
+    monkeypatch.setattr(
+        metadata,
+        "parse_filename",
+        Mock(return_value=ParsedMetadata(title="Multi")),
+    )
+    monkeypatch.setattr(
+        metadata,
+        "resolve_tmdb_match",
+        AsyncMock(return_value=ResolutionOutcome(selected=None, candidates=[first, second])),
+    )
+
     def callback(results: list[TmdbMetadata]) -> int:
-        assert len(results) == 2
-        return 1  # Select second result
+        assert results == [first, second]
+        return 1
 
-    result = await resolve_metadata(["Multi.mkv"], config, async_client, prompt_callback=callback)
+    result = await resolve_metadata(
+        ["Multi.mkv"],
+        config,
+        async_client,
+        prompt_callback=callback,
+    )
 
-    assert result is not None
-    assert result.tmdb_id == 2
+    assert result == second
+
+
+@pytest.mark.anyio
+async def test_resolve_metadata_returns_none_when_resolver_has_no_match_or_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+    async_client: httpx.AsyncClient,
+) -> None:
+    config = MetadataConfig(api_key="a" * 32)
+
+    monkeypatch.setattr(
+        metadata,
+        "parse_filename",
+        Mock(return_value=ParsedMetadata(title="Unknown")),
+    )
+    monkeypatch.setattr(
+        metadata,
+        "resolve_tmdb_match",
+        AsyncMock(return_value=ResolutionOutcome(selected=None, candidates=[])),
+    )
+
+    result = await resolve_metadata(["Unknown.mkv"], config, async_client)
+
+    assert result is None
 
 
 @pytest.mark.anyio
 async def test_resolve_metadata_invalid_callback_index(
-    respx_mock: respx.MockRouter, async_client: httpx.AsyncClient
+    monkeypatch: pytest.MonkeyPatch,
+    async_client: httpx.AsyncClient,
 ) -> None:
-    respx_mock.get(url__startswith="https://api.themoviedb.org/3/search/multi").mock(
-        return_value=httpx.Response(200, json=MOCK_TMDB_MULTI)
-    )
+    candidates = [_movie(1, "Result 1", 2020), _movie(2, "Result 2", 2021)]
     config = MetadataConfig(api_key="a" * 32, unattended=False)
 
+    monkeypatch.setattr(
+        metadata,
+        "parse_filename",
+        Mock(return_value=ParsedMetadata(title="Multi")),
+    )
+    monkeypatch.setattr(
+        metadata,
+        "resolve_tmdb_match",
+        AsyncMock(return_value=ResolutionOutcome(selected=None, candidates=candidates)),
+    )
+
     def callback(results: list[TmdbMetadata]) -> int:
-        return 99  # Invalid index
+        assert results == candidates
+        return 99
 
     with pytest.raises(MetadataError, match="invalid selection index"):
-        await resolve_metadata(["Multi.mkv"], config, async_client, prompt_callback=callback)
+        await resolve_metadata(
+            ["Multi.mkv"],
+            config,
+            async_client,
+            prompt_callback=callback,
+        )

@@ -10,6 +10,7 @@ from frame_compare.render.backend._ffmpeg_frame import (
 )
 from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
+from frame_compare.utils.subproc import CalledProcessError
 
 
 def test_frame_seek_time_seconds_matches_repo_contract() -> None:
@@ -108,7 +109,7 @@ def test_default_ffmpeg_runner_extract_frame_wraps_missing_input_file(
     run_subprocess = MagicMock(
         side_effect=[
             subprocess.CompletedProcess(args=[], returncode=0, stdout=b"24\n", stderr=b""),
-            subprocess.CalledProcessError(
+            CalledProcessError(
                 1,
                 ["ffmpeg"],
                 stderr=b"No such file or directory",

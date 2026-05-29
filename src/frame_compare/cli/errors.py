@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from enum import IntEnum
 
+from rich.markup import escape
+
 from frame_compare.errors import FrameCompareError, JSONValue
 
 
@@ -37,18 +39,26 @@ def get_exit_code(error: FrameCompareError) -> ExitCode:
     return ExitCode.GENERAL_ERROR
 
 
-def format_error_console(error: FrameCompareError, *, verbose: bool = False) -> str:
-    """Format error for console output."""
-    output = f"✗ Error [{error.code}]: {error.context.message}\n"
+def format_error_console(
+    error: FrameCompareError,
+    *,
+    verbose: bool = False,
+    verbose_hint: str | None = "--verbose",
+) -> str:
+    """Format error for Rich console output with styled code and hint."""
+    output = (
+        f"[bold red]\u2717[/] Error [red]{escape(f'[{error.code}]')}[/]: "
+        f"{escape(error.context.message)}\n"
+    )
     if error.hint:
-        output += f"  Hint: {error.hint}\n"
+        output += f"  [yellow]Hint:[/] {escape(error.hint)}\n"
 
-    if verbose and error.context.details:
-        output += "\n  Details:\n"
+    if (verbose or verbose_hint is None) and error.context.details:
+        output += "\n  [dim]Details:[/]\n"
         for k, v in error.context.details.items():
-            output += f"    {k}: {v}\n"
-    elif not verbose and error.context.details:
-        output += "\n  For more details, run with --verbose"
+            output += f"    [dim]{escape(str(k))}:[/] {escape(str(v))}\n"
+    elif error.context.details and verbose_hint is not None:
+        output += f"\n  [dim]For more details, run with {escape(verbose_hint)}[/]"
 
     return output.rstrip()
 

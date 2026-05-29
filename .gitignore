@@ -6,6 +6,7 @@
 .fastembed_cache
 .codex/schemas/
 .codex/skills/
+.tmp/
 .uv_cache/
 .venv/
 .agent/
@@ -15,6 +16,7 @@ CODEX.md
 .codannaignore
 
 # Generated comparison outputs
+/workspace/
 /report/
 /screens/
 /screenshots/

@@ -6,13 +6,21 @@ import json
 from typing import TYPE_CHECKING, Protocol
 
 import typer
+from rich.console import Console
+from rich.markup import escape
 
-from frame_compare.cli.errors import ExitCode
-from frame_compare.errors import JSONValue
+from frame_compare.cli.errors import ExitCode, format_error_json, get_exit_code
+from frame_compare.errors import FrameCompareError, JSONValue
 
 if TYPE_CHECKING:
     from frame_compare.orchestration.doctor import DoctorCheck, DoctorReport
     from frame_compare.utils.progress_protocol import ProgressReporter
+
+# Status icons matching legacy doctor output style.
+_STATUS_ICONS = {
+    True: "\u2705",  # ✅
+    False: "\u274c",  # ❌
+}
 
 
 class RunDoctorFn(Protocol):
@@ -23,9 +31,39 @@ class RunDoctorFn(Protocol):
     ) -> DoctorReport: ...
 
 
-def handle_doctor(json_output: bool, *, run_doctor: RunDoctorFn) -> None:
+class HandleErrorFn(Protocol):
+    def __call__(
+        self,
+        error: Exception,
+        *,
+        no_color: bool,
+        verbose: bool,
+        verbose_hint: str | None = "--verbose",
+    ) -> int: ...
+
+
+def handle_doctor(
+    json_output: bool,
+    *,
+    run_doctor: RunDoctorFn,
+    handle_error: HandleErrorFn,
+) -> None:
     """Run dependency diagnostics."""
-    report = run_doctor(checks=None, reporter=None)
+    try:
+        report = run_doctor(checks=None, reporter=None)
+    except FrameCompareError as error:
+        if json_output:
+            typer.echo(json.dumps(format_error_json(error), sort_keys=True, separators=(",", ":")))
+            raise typer.Exit(code=int(get_exit_code(error))) from error
+        raise typer.Exit(
+            code=handle_error(
+                error,
+                no_color=True,
+                verbose=False,
+                verbose_hint=None,
+            )
+        ) from error
+
     if json_output:
         payload = doctor_report_json(report)
         typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
@@ -53,7 +91,7 @@ def doctor_report_json(report: DoctorReport) -> dict[str, JSONValue]:
         checks_payload.append(entry)
 
     doctor_payload: dict[str, JSONValue] = {
-        "baseline_version": "R73",
+        "baseline_version": "R76",
         "checks": checks_payload,
     }
     payload: dict[str, JSONValue] = {
@@ -64,9 +102,15 @@ def doctor_report_json(report: DoctorReport) -> dict[str, JSONValue]:
 
 
 def print_doctor_report(report: DoctorReport) -> None:
-    """Print human-readable doctor results."""
+    """Print human-readable doctor results with styled icons and aligned labels."""
+    console = Console()
+    if not report.checks:
+        return
+
+    label_width = max(len(check.name) for check, _result in report.checks)
     for check, result in report.checks:
-        status = "PASS" if result.passed else "FAIL"
-        typer.echo(f"{status} {check.name}: {result.message}")
+        icon = _STATUS_ICONS.get(result.passed, "\u2022")
+        padded_name = check.name.ljust(label_width)
+        console.print(f"{icon} {escape(padded_name)} \u2014 {escape(result.message)}")
         if result.hint:
-            typer.echo(f"  Hint: {result.hint}")
+            console.print(f"   {''.ljust(label_width)}   [dim]Hint: {escape(result.hint)}[/]")

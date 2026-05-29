@@ -83,7 +83,7 @@ Frame Compare is designed so the same inputs produce the same outputs:
 | Python | 3.13+ | Required |
 | uv | Latest | Recommended (or pip) |
 | FFmpeg | Any recent | Must be on `PATH` |
-| VapourSynth | R72+ | Optional, for primary renderer |
+| VapourSynth | R76 | Optional, for primary renderer |
 
 ---
 
@@ -115,7 +115,7 @@ pip install pytest pytest-cov ruff pyright
 From GitHub release zip (recommended):
 
 ```powershell
-# 1) Download the release zip
+# 1) Download frame-compare-portable-win-x64-<tag>.zip from the GitHub Release
 # 2) Extract it
 # 3) From the extracted folder:
 .\install.cmd
@@ -129,7 +129,7 @@ From cloned repo:
 .\install.cmd
 ```
 
-Source installs and portable bundle builds create empty config/ and comparison_videos/ directories in the bundle root. Put an existing `config.toml` at `config/config.toml`, and drop input clips under `comparison_videos/` if you want to use defaults without passing explicit `--config` or `--input` paths.
+Source installs and portable bundle builds create empty config/ and comparison_videos/ directories in the bundle root. Put an existing `config.toml` at `config/config.toml`, and drop input clips under `comparison_videos/` if you want to use defaults without passing explicit `--config` or `--input` paths. For the installed `frame-compare` command, a bundle-local `config/config.toml` takes precedence over the AppData fallback config.
 
 When using `.\tools\windows_portable\install-from-source.cmd`, the bundle root is `dist/frame-compare-portable-win-x64` (not the repository root). Put your config at `dist/frame-compare-portable-win-x64/config/config.toml` and videos under `dist/frame-compare-portable-win-x64/comparison_videos/`.
 

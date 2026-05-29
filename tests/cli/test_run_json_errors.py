@@ -3,12 +3,18 @@ from pathlib import Path
 
 from pytest import MonkeyPatch
 
+from frame_compare.cli.entry import app
 from frame_compare.cli.errors import ExitCode, format_error_json, get_exit_code
 from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.errors import ErrorContext, FrameCompareError
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
 
-from .cli_helpers import _invoke_run_with_minimal_workspace
+from .cli_helpers import (
+    MINIMAL_CONFIG,
+    _invoke_run_with_minimal_workspace,
+    _write_minimal_config,
+    runner,
+)
 
 
 def test_run_write_config_json_write_error_outputs_error_schema(
@@ -66,6 +72,71 @@ def test_run_json_outputs_pinned_success_schema_and_stdout_is_pure_json(
     }
 
 
+def test_run_json_rejects_interactive_alignment_from_config_before_runner(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for invalid CLI/config combinations")
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = _write_minimal_config(root)
+        config_path.write_text(
+            MINIMAL_CONFIG + "\n[audio_alignment]\nuse_vspreview = true\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--root",
+                str(root),
+                "--config",
+                str(config_path.relative_to(root)),
+                "--json",
+            ],
+        )
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stderr == ""
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "FC-1003"
+    assert payload["error"]["message"] == "Interactive alignment is not supported with --json"
+    assert payload["error"]["details"]["validation_errors"] == [
+        {
+            "input": True,
+            "loc": ["audio_alignment", "use_vspreview"],
+            "msg": "Interactive alignment is not supported with --json.",
+            "type": "value_error",
+        }
+    ]
+
+
+def test_run_json_rejects_force_interactive_alignment_before_runner(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for invalid CLI/config combinations")
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace(["--json", "--force-interactive-alignment"])
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stderr == ""
+    payload = json.loads(result.stdout)
+    validation_errors = payload["error"]["details"]["validation_errors"]
+    assert payload["error"]["code"] == "FC-1003"
+    assert payload["error"]["message"] == "Interactive alignment is not supported with --json"
+    assert {tuple(entry["loc"]) for entry in validation_errors} == {
+        ("audio_alignment", "force_interactive"),
+        ("audio_alignment", "use_vspreview"),
+    }
+
+
 def test_run_json_outputs_error_schema_and_exit_code(
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -76,6 +147,7 @@ def test_run_json_outputs_error_schema_and_exit_code(
 
     result = _invoke_run_with_minimal_workspace(["--json"])
     assert result.exit_code == int(get_exit_code(ConfigNotFoundError(Path("missing.toml"))))
+    assert result.stderr == ""
     payload = json.loads(result.stdout)
     expected = format_error_json(ConfigNotFoundError(Path("missing.toml")))
     assert payload == expected
@@ -160,6 +232,7 @@ def test_run_no_color_error_output_has_no_rich_markup(
 
     result = _invoke_run_with_minimal_workspace(["--no-color"])
     assert result.exit_code == int(get_exit_code(ConfigNotFoundError(Path("missing.toml"))))
+    assert "\x1b[" not in result.stderr
     assert "[red]" not in result.stderr
     assert "[yellow]" not in result.stderr
 
@@ -177,5 +250,36 @@ def test_run_env_no_color_error_output_has_no_rich_markup(
         env={"NO_COLOR": "1", "TERM": "dumb"},
     )
     assert result.exit_code == int(get_exit_code(ConfigNotFoundError(Path("missing.toml"))))
+    assert "\x1b[" not in result.stderr
     assert "[red]" not in result.stderr
     assert "[yellow]" not in result.stderr
+
+
+def test_run_no_color_error_output_preserves_literal_brackets(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    error = FrameCompareError(
+        ErrorContext(
+            code="FC-3001",
+            name="BRACKETED_VALUE",
+            message="File [1080p] missing",
+            hint="Try [literal] brackets",
+        )
+    )
+
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise error
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace(["--quiet", "--no-color"])
+
+    assert result.exit_code == int(ExitCode.INPUT_ERROR)
+    assert result.stdout == ""
+    assert "Error [FC-3001]: File [1080p] missing" in result.stderr
+    assert "[[FC-3001]]" not in result.stderr
+    assert "Hint: Try [literal] brackets" in result.stderr
+    assert "\x1b[" not in result.stderr
+    assert "[red]" not in result.stderr
+    assert "[yellow]" not in result.stderr
+    assert "Traceback" not in result.stderr

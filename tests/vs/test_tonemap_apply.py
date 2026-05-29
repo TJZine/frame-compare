@@ -211,8 +211,9 @@ def test_apply_tonemap_retries_minimal_kwargs_on_any_typeerror(mock_runtime_usab
         first_call = mock_core.placebo.Tonemap.call_args_list[0]
         second_call = mock_core.placebo.Tonemap.call_args_list[1]
         assert "dst_csp" in first_call.kwargs
-        assert "dst_csp" not in second_call.kwargs
-        assert "dst_prim" not in second_call.kwargs
+        assert "dst_csp" in second_call.kwargs
+        assert "dst_prim" in second_call.kwargs
+        assert "contrast_recovery" not in second_call.kwargs
 
 
 @patch("frame_compare.vs.tonemap.detect_plugins")

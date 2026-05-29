@@ -72,15 +72,17 @@ def resolve_paths(config: ConfigSchema, root: Path) -> WorkspacePaths:
     paths = config.paths
     resolved_root = root.resolve()
     config_dir = _resolve_path(paths.config_dir, resolved_root)
+    generated_dir = _resolve_path(paths.generated_dir, resolved_root)
 
     return WorkspacePaths(
         root=resolved_root,
         input_dir=_resolve_path(paths.input_dir, resolved_root),
         run_dir=None,  # Legacy mode: run folder disabled
         screenshots_dir=_resolve_path(paths.screenshots_dir, resolved_root),
-        generated_dir=_resolve_path(paths.generated_dir, resolved_root),
+        generated_dir=generated_dir,
         config_dir=config_dir,
         config_file=config_dir / "config.toml",
+        analysis_cache_dir=generated_dir / "cache" / "analysis",
     )
 
 
@@ -90,15 +92,17 @@ def _resolve_paths_with_config_file(
     """Internal: Resolve paths with explicit config_file (for prepare_preflight)."""
     paths = config.paths
     resolved_root = root.resolve()
+    generated_dir = _resolve_path(paths.generated_dir, resolved_root)
 
     return WorkspacePaths(
         root=resolved_root,
         input_dir=_resolve_path(paths.input_dir, resolved_root),
         run_dir=None,  # Legacy mode: run folder disabled
         screenshots_dir=_resolve_path(paths.screenshots_dir, resolved_root),
-        generated_dir=_resolve_path(paths.generated_dir, resolved_root),
+        generated_dir=generated_dir,
         config_dir=_resolve_path(paths.config_dir, resolved_root),
         config_file=config_file,
+        analysis_cache_dir=generated_dir / "cache" / "analysis",
     )
 
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -10,6 +9,7 @@ from typing import TYPE_CHECKING, Any, cast
 from PIL import Image
 
 import frame_compare.analysis.cache_io as cache_io
+from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot, ClipState
 from frame_compare.vs.types import HDRMetadata, SourceInfo
@@ -71,30 +71,35 @@ def create_video_files(input_dir: Path, *filenames: str) -> None:
         (input_dir / name).touch()
 
 
-def write_metrics_cache(cache_dir: Path, *, source_path: Path, config: ConfigSchema) -> None:
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    fingerprint = cache_io.compute_cache_key([source_path], config.analysis)
-    cache_payload = {
-        "version": cache_io.CACHE_VERSION,
-        "fingerprint": fingerprint,
-        "luminance": [0.1] * 100,
-        "motion": [0.2] * 100,
-        "metadata": {
-            "frame_count": 100,
-            "fps": "24",
-            "config_fingerprint": fingerprint,
-            "clips": [
-                {
-                    "path": str(source_path),
-                    "size": 0,
-                    "mtime": 0.0,
-                    "sha1": None,
-                }
+def write_metrics_cache(
+    cache_dir: Path,
+    *,
+    source_path: Path,
+    config: ConfigSchema,
+    video_paths: list[Path] | None = None,
+) -> None:
+    cache_inputs = [source_path] if video_paths is None else video_paths
+    fingerprint = cache_io.compute_cache_key(cache_inputs, config.analysis)
+    stats_by_path = {path: path.stat() for path in cache_inputs}
+    metrics = FrameMetrics(
+        luminance=[0.1] * 100,
+        motion=[0.2] * 100,
+        metadata=MetricsMetadata(
+            frame_count=100,
+            fps=Fraction(24, 1),
+            config_fingerprint=fingerprint,
+            clips=[
+                ClipIdentity(
+                    path=str(path),
+                    size=stats_by_path[path].st_size,
+                    mtime=stats_by_path[path].st_mtime,
+                )
+                for path in cache_inputs
             ],
-            "version": cache_io.CACHE_VERSION,
-        },
-    }
-    (cache_dir / cache_io.CACHE_FILENAME).write_text(json.dumps(cache_payload), encoding="utf-8")
+            version=cache_io.CACHE_VERSION,
+        ),
+    )
+    cache_io.save_metrics_cache(metrics, cache_dir)
 
 
 def clip_state(path: Path, *, label: str, num_frames: int = 100) -> ClipState:

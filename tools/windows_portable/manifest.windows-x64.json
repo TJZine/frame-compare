@@ -3,19 +3,20 @@
   "bundle": {
     "platform": "windows",
     "arch": "x64",
-    "vs_ref": "R73",
-    "python_version": "3.13.1",
+    "vs_ref": "R76",
+    "python_version": "3.13.13",
     "ffmpeg_policy": "lgpl-only",
+    "plugin_layout": "R74+ site-packages/vapoursynth/plugins plus VAPOURSYNTH_EXTRA_PLUGIN_PATH",
     "notes": "Baseline bundle pins for deterministic Windows portable distribution. Users may BYO newer deps best-effort."
   },
   "artifacts": [
     {
       "id": "python-embed-amd64",
       "name": "Python embeddable package (amd64)",
-      "version": "3.13.1",
-      "url": "https://www.python.org/ftp/python/3.13.1/python-3.13.1-embed-amd64.zip",
-      "sha256": "7b7923ff0183a8b8fca90f6047184b419b108cb437f75fc1c002f9d2f8bcec16",
-      "bytes": 10847803,
+      "version": "3.13.13",
+      "url": "https://www.python.org/ftp/python/3.13.13/python-3.13.13-embed-amd64.zip",
+      "sha256": "8766a8775746235e23cf5aee5027ab1060bb981d93110577adcf3508aa0cbd55",
+      "bytes": 10950201,
       "license": {
         "spdx": "Python-2.0",
         "url": "https://docs.python.org/3/license.html"
@@ -26,63 +27,90 @@
       }
     },
     {
-      "id": "vapoursynth-portable-r73",
+      "id": "vapoursynth-portable-r76",
       "name": "VapourSynth 64-bit portable",
-      "version": "R73",
-      "url": "https://github.com/vapoursynth/vapoursynth/releases/download/R73/VapourSynth64-Portable-R73.zip",
-      "sha256": "3326f10d0fdcdec45649a474cbc9810795ab3da422634d0f134bca6089afbb91",
-      "bytes": 13580181,
+      "version": "R76",
+      "url": "https://github.com/vapoursynth/vapoursynth/releases/download/R76/VapourSynth64-Portable-R76.zip",
+      "sha256": "db41537f3eb3f92fe1ff92ae59b4728129199e2afe3ba3b93d8527b46a7ba30c",
+      "bytes": 15000063,
       "license": {
         "spdx": "LGPL-2.1-or-later",
-        "url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/master/COPYING.LESSER"
+        "url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/aa7e83a0aaf87477b5e0fc13c5b97c5aa15a06b7/COPYING.LESSER",
+        "files": [
+          {
+            "path": "licenses/common/LGPL-2.1.txt",
+            "sha256": "6f702d94a2ee265b2b80d9b1215dbdbad34a89c04532aec1088a2831018737dd",
+            "source_url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/aa7e83a0aaf87477b5e0fc13c5b97c5aa15a06b7/COPYING.LESSER"
+          }
+        ]
       },
       "install": {
         "type": "extract",
         "destination": "vs/core"
       },
-      "notes": "Archive includes vs-coreplugins/ and vs-plugins/ at the top level. Assembly scripts should map them into the SSOT layout vs/core and vs/plugins."
+      "notes": "Archive carries the R76 Windows wheel used by the builder; plugin installation follows the R74+ wheel plugin directory and VAPOURSYNTH_EXTRA_PLUGIN_PATH model."
     },
     {
-      "id": "vs-plugin-lsmas-vA.3j",
+      "id": "vs-plugin-lsmas-1282",
       "name": "L-SMASH Works (VapourSynth plugin)",
-      "version": "vA.3j",
-      "url": "https://github.com/AkarinVS/L-SMASH-Works/releases/download/vA.3j/release-x86_64-cachedir-cwd.zip",
-      "sha256": "7bb449f960c8071819994f802b3f175bf1593315b6b2bca89d68739d5af46047",
-      "bytes": 8223503,
+      "version": "1282.0.0.0",
+      "url": "https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/releases/download/1282/L-SMASH-Works-r1282.0.0.0.7z",
+      "sha256": "704b97db3d74667d13d4fa2a5cd94e36f885cd0158366efa1b8e43bf9e426bd7",
+      "bytes": 29754280,
       "license": {
         "spdx": "ISC AND LGPL-2.1-or-later",
-        "url": "https://raw.githubusercontent.com/AkarinVS/L-SMASH-Works/master/VapourSynth/LICENSE"
+        "url": "https://raw.githubusercontent.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/0079a06ee384061ecdadd0de03df4e0493dd56ab/VapourSynth/LICENSE",
+        "files": [
+          {
+            "path": "licenses/lsmash-works/VapourSynth-LICENSE.txt",
+            "sha256": "2e1252454a8fcc24144ce94173d6cf90cc7a10954007efd4a2a0f58eec4c73cb",
+            "source_url": "https://raw.githubusercontent.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/0079a06ee384061ecdadd0de03df4e0493dd56ab/VapourSynth/LICENSE"
+          },
+          {
+            "path": "licenses/common/LGPL-2.1.txt",
+            "sha256": "6f702d94a2ee265b2b80d9b1215dbdbad34a89c04532aec1088a2831018737dd",
+            "source_url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/aa7e83a0aaf87477b5e0fc13c5b97c5aa15a06b7/COPYING.LESSER"
+          }
+        ]
       },
       "install": {
         "type": "copy_file",
-        "source_path": "libvslsmashsource.dll",
-        "destination": "vs/plugins/libvslsmashsource.dll"
-      }
+        "source_path": "x64/LSMASHSource.dll",
+        "destination": "vs/extra-plugins/lsmas/libvslsmashsource.dll",
+        "manifest": "libvslsmashsource"
+      },
+      "notes": "Installed into VAPOURSYNTH_EXTRA_PLUGIN_PATH with manifest.vs so R75+ optimized plugin loading can stop recursive DLL probing."
     },
     {
-      "id": "vs-plugin-vs-placebo-1.4.4",
-      "name": "vs-placebo (VapourSynth plugin)",
-      "version": "1.4.4",
-      "url": "https://github.com/Lypheo/vs-placebo/releases/download/1.4.4/libvs_placebo-1.4.4.zip",
-      "sha256": "81302071eacd0fce5f85cfb3a2267b78e825e179a87b1d5567818f3a057ca6b6",
-      "bytes": 4097183,
+      "id": "vs-plugin-vs-placebo-2.0.2-win-amd64-wheel",
+      "name": "vs-placebo (VapourSynth plugin wheel)",
+      "version": "2.0.2",
+      "url": "https://files.pythonhosted.org/packages/a2/50/db34253e55e082ca7d0632b264fc042b6afb7474ed4b936b3a297f190749/vs_placebo-2.0.2-py3-none-win_amd64.whl",
+      "sha256": "5a08511dc9feaa48a76373e5e8869bef0d4a6c2096607f92364e6a72ce975f94",
+      "bytes": 6136385,
       "license": {
         "spdx": "LGPL-2.1-or-later",
-        "url": "https://raw.githubusercontent.com/Lypheo/vs-placebo/master/COPYING"
+        "url": "https://raw.githubusercontent.com/Lypheo/vs-placebo/ccb4beac9080510f2eb830d948449392e2e5c34a/COPYING",
+        "files": [
+          {
+            "path": "licenses/common/LGPL-2.1.txt",
+            "sha256": "6f702d94a2ee265b2b80d9b1215dbdbad34a89c04532aec1088a2831018737dd",
+            "source_url": "https://raw.githubusercontent.com/Lypheo/vs-placebo/ccb4beac9080510f2eb830d948449392e2e5c34a/COPYING"
+          }
+        ]
       },
       "install": {
-        "type": "copy_file",
-        "source_path": "libvs_placebo.dll",
-        "destination": "vs/plugins/libvs_placebo.dll"
-      }
+        "type": "python_wheel"
+      },
+      "notes": "PyPI wheel installs libvs_placebo.dll under site-packages/vapoursynth/plugins, matching the R74+ package layout."
     },
     {
-      "id": "ffmpeg-btbn-win64-lgpl-7.1-2026-05-19",
+      "id": "ffmpeg-btbn-win64-lgpl-8.1-2026-05-25",
       "name": "FFmpeg (BtbN build, win64, LGPL-only)",
-      "version": "n7.1.4-5-ged860ef7d9 (autobuild-2026-05-19-14-39)",
-      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-05-19-14-39/ffmpeg-n7.1.4-5-ged860ef7d9-win64-lgpl-7.1.zip",
-      "sha256": "700f5f964eac9f838dc606581cd09685fa4a29b1e526d037d61d9a24f823ac91",
-      "bytes": 137951785,
+      "version": "n8.1.1-8-gb21e00eda5 (autobuild-2026-05-25-14-02)",
+      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-05-25-14-02/ffmpeg-n8.1.1-8-gb21e00eda5-win64-lgpl-8.1.zip",
+      "sha256": "a4d1b2ded47ddc7befc7b01dd0794a063e8e90a90efbd601989f2b93dd12489f",
+      "bytes": 198644754,
       "license": {
         "spdx": "LGPL-2.1-or-later",
         "url": "https://ffmpeg.org/legal.html",
@@ -91,9 +119,9 @@
       "install": {
         "type": "extract",
         "destination": "ffmpeg",
-        "strip_prefix": "ffmpeg-n7.1.4-5-ged860ef7d9-win64-lgpl-7.1/"
+        "strip_prefix": "ffmpeg-n8.1.1-8-gb21e00eda5-win64-lgpl-8.1/"
       }
     }
   ],
-  "notes": "Deliberately excludes ffms2 from the baseline bundle: it is not required by the current loader path (lsmas is required), and ffms2 binary licensing can depend on how FFmpeg is built."
+  "notes": "Deliberately excludes ffms2 from the baseline bundle: it is not required by the current loader path (lsmas is required), and adding it to Windows remains a loader-policy/licensing decision requiring explicit approval."
 }

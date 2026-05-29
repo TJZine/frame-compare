@@ -61,5 +61,7 @@ class MetadataConfig:
     """Configuration for metadata service."""
 
     api_key: str | None = None
-    unattended: bool = False  # Auto-select first match
+    unattended: bool = False  # Do not prompt for unresolved matches
     timeout_seconds: float = 10.0
+    year_tolerance: int = 2
+    category_preference: Literal["movie", "tv"] | None = None

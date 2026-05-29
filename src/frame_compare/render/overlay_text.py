@@ -13,6 +13,7 @@ def compose_frame_info_lines(
     num_frames: int | None,
     picture_type: str | None,
     selection_label: str | None,
+    include_frame_number: bool = True,
 ) -> list[str]:
     """
     Compose the "frame-info" block lines for the overlay.
@@ -30,17 +31,19 @@ def compose_frame_info_lines(
     if mode == OverlayMode.MINIMAL:
         return [clip_label]
 
-    if num_frames is None:
-        frame_line = f"Frame {display_frame_number}"
-    else:
-        frame_line = f"Frame {display_frame_number} of {num_frames}"
-
     pict = picture_type or "N/A"
-    lines = [
-        frame_line,
+    lines: list[str] = []
+    if include_frame_number:
+        if num_frames is None:
+            lines.append(f"Frame {display_frame_number}")
+        else:
+            lines.append(f"Frame {display_frame_number} of {num_frames}")
+    lines.extend(
+        [
         f"Picture type: {pict}",
         clip_label,
-    ]
+        ]
+    )
     if selection_label:
         lines.append(f"Selection: {selection_label}")
     return lines

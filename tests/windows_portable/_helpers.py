@@ -5,6 +5,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from tests.workflow_helpers import read_text_or_fail as _read_text_or_fail
+
 
 def first_significant_line(text: str) -> str:
     for line in text.splitlines():
@@ -18,8 +20,7 @@ def first_significant_line(text: str) -> str:
 
 
 def read_text_or_fail(path: Path) -> str:
-    assert path.exists(), f"Required file not found: {path}"
-    return path.read_text(encoding="utf-8")
+    return _read_text_or_fail(path)
 
 
 def powershell_exe() -> str | None:

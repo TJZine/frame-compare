@@ -15,7 +15,6 @@ from frame_compare.orchestration import preparation
 from frame_compare.orchestration.probing.probe_cache import load_clip_probe_cache
 from frame_compare.orchestration.types import RunDependencies, RunRequest
 from frame_compare.services.alignment import CACHE_FILE_NAME
-from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.vs.types import SourceInfo
 
 if TYPE_CHECKING:
@@ -110,14 +109,20 @@ def test_execute_prep_rejects_mutually_exclusive_cache_flags(tmp_path: Path) -> 
         asyncio.run(preparation.execute_prep(request, RunDependencies()))
 
 
-def test_execute_prep_no_cache_removes_metrics_and_audio_offset_caches(tmp_path: Path) -> None:
+def test_execute_prep_no_cache_removes_only_matching_shared_metrics_cache(tmp_path: Path) -> None:
     _create_config(tmp_path)
     input_dir = tmp_path / "comparison_videos"
     _create_video_files(input_dir, "source.mkv")
 
-    metrics_path = tmp_path / "generated" / "cache" / cache_io.CACHE_FILENAME
-    metrics_path.parent.mkdir(parents=True, exist_ok=True)
+    config = preparation.prepare_preflight(root=tmp_path).config
+    source_path = input_dir / "source.mkv"
+    fingerprint = cache_io.compute_cache_key([source_path], config.analysis)
+    metrics_dir = tmp_path / "generated" / "cache" / "analysis"
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+    metrics_path = metrics_dir / cache_io.metrics_cache_filename([source_path], fingerprint)
     metrics_path.write_text("{}", encoding="utf-8")
+    other_metrics_path = metrics_dir / "other__other.compframes"
+    other_metrics_path.write_text("{}", encoding="utf-8")
     offsets_path = tmp_path / "generated" / CACHE_FILE_NAME
     offsets_path.parent.mkdir(parents=True, exist_ok=True)
     offsets_path.write_text('version = "1"\n', encoding="utf-8")
@@ -131,20 +136,24 @@ def test_execute_prep_no_cache_removes_metrics_and_audio_offset_caches(tmp_path:
 
     assert prep.clips[0].label == "Reference"
     assert not metrics_path.exists()
-    assert not offsets_path.exists()
+    assert other_metrics_path.exists()
+    assert offsets_path.exists()
 
 
-def test_execute_prep_from_cache_only_requires_cached_alignment_offsets(tmp_path: Path) -> None:
+def test_execute_prep_from_cache_only_does_not_require_cached_alignment_offsets(
+    tmp_path: Path,
+) -> None:
     _create_config(tmp_path, content=ALIGNMENT_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     _create_video_files(input_dir, "a_source.mkv", "b_comp.mkv")
 
     request = RunRequest(root=tmp_path, from_cache_only=True, skip_analysis=True)
 
-    with pytest.raises(AudioAlignmentError, match="a_source:b_comp"):
-        asyncio.run(
-            preparation.execute_prep(request, RunDependencies(vs_loader=cast(Any, FakeVSLoader())))
-        )
+    prep = asyncio.run(
+        preparation.execute_prep(request, RunDependencies(vs_loader=cast(Any, FakeVSLoader())))
+    )
+
+    assert [clip.label for clip in prep.clips] == ["Reference", "Encode 1"]
 
 
 def test_execute_prep_from_cache_only_validates_metrics_cache_when_analysis_runs(
@@ -160,6 +169,42 @@ def test_execute_prep_from_cache_only_validates_metrics_cache_when_analysis_runs
         asyncio.run(
             preparation.execute_prep(request, RunDependencies(vs_loader=cast(Any, FakeVSLoader())))
         )
+
+
+def test_execute_prep_shared_analysis_cache_stays_outside_run_folder(
+    tmp_path: Path,
+) -> None:
+    config_content = """\
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "custom_generated"
+config_dir = "config"
+use_run_folders = true
+
+[audio_alignment]
+enable = false
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+"""
+    _create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "source.mkv")
+
+    prep = asyncio.run(
+        preparation.execute_prep(
+            RunRequest(root=tmp_path, skip_analysis=True),
+            RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
+        )
+    )
+
+    assert prep.workspace.run_dir is not None
+    assert prep.workspace.generated_dir == prep.workspace.run_dir / "generated"
+    assert prep.workspace.cache_dir == tmp_path / "custom_generated" / "cache" / "analysis"
 
 
 def test_execute_prep_probes_uncached_clips_and_persists_probe_snapshot(tmp_path: Path) -> None:

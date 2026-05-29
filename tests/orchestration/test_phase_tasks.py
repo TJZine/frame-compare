@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 import pytest
 
+from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.types import (
     CacheLoadResult,
     FrameMetrics,
@@ -84,6 +85,30 @@ def test_run_analyze_phase_records_cache_hit_and_selection_breakdown(
     assert calls["select"] == {"metrics": metrics, "config": ctx.config.analysis}
 
 
+def test_run_analyze_phase_cache_only_missing_cache_does_not_recompute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _context(tmp_path)
+    input_videos = [ctx.reference.path]
+
+    def _fake_load_cached_metrics(*_args: object, **_kwargs: object) -> CacheLoadResult:
+        return CacheLoadResult(success=False, reason="not_found")
+
+    def _fake_calculate_metrics(**_kwargs: object) -> FrameMetrics:
+        raise AssertionError("cache-only analyze phase must not recompute metrics")
+
+    monkeypatch.setattr(phase_tasks.cache_io, "load_cached_metrics", _fake_load_cached_metrics)
+    monkeypatch.setattr(phase_tasks, "calculate_metrics", _fake_calculate_metrics)
+
+    with pytest.raises(MetricsCalculationError, match="Cached metrics missing"):
+        phase_tasks.run_analyze_phase(
+            ctx,
+            input_videos=input_videos,
+            workspace=ctx.workspace,
+            require_cache_only=True,
+        )
+
+
 def test_select_initial_frame_plan_uses_effective_reference_domain(tmp_path: Path) -> None:
     ctx = _context(tmp_path)
     ctx.reference = ctx.reference.with_trim(trim_start_frames=10, trim_end_frame_inclusive=19)
@@ -122,6 +147,8 @@ api_key = "test-key"
 enabled = true
 unattended = true
 timeout_seconds = 3.5
+year_tolerance = 4
+category_preference = "tv"
 """
     )
     config = _create_config(tmp_path, content=config_content)
@@ -163,4 +190,6 @@ timeout_seconds = 3.5
         api_key="test-key",
         unattended=True,
         timeout_seconds=3.5,
+        year_tolerance=4,
+        category_preference="tv",
     )

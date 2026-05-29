@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -66,10 +67,10 @@ class ColorConfig(BaseModel):
 
     enable_tonemap: bool = True
     preset: TonemapPreset = TonemapPreset.REFERENCE
-    target_nits: int = Field(default=203, ge=100, le=1000)
+    target_nits: int = Field(default=100, ge=100, le=1000)
     tone_curve: ToneCurve = ToneCurve.BT2390
     gamma_lift: bool = False
-    contrast_recovery: float = Field(default=0.0, ge=0.0, le=1.0)
+    contrast_recovery: float = Field(default=0.3, ge=0.0, le=1.0)
 
 
 class SlowpicsConfig(BaseModel):
@@ -89,6 +90,8 @@ class TmdbConfig(BaseModel):
     enabled: bool = True
     unattended: bool = False
     timeout_seconds: float = Field(default=10.0, ge=1.0)
+    year_tolerance: int = Field(default=2, ge=0, le=5)
+    category_preference: Literal["movie", "tv"] | None = None
 
 
 class ReportConfig(BaseModel):

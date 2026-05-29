@@ -35,6 +35,14 @@ class _WindowsDllRegistrationState:
 _WINDOWS_DLL_REGISTRATION = _WindowsDllRegistrationState()
 
 
+@dataclass(frozen=True, slots=True)
+class PluginPathCandidate:
+    """A concrete plugin file candidate and the discovery source that produced it."""
+
+    path: str
+    source: str
+
+
 def _iter_windows_dll_candidates() -> list[str]:
     """Return candidate DLL directories in bundle-search order."""
     candidates: list[str] = []
@@ -106,29 +114,164 @@ def import_vapoursynth_module() -> ModuleType:
         return __import__("vapoursynth")
 
 
-def candidate_lsmas_plugin_paths() -> list[str]:
-    """Return candidate absolute paths for libvslsmashsource.dll."""
-    candidates: list[str] = []
-    plugin_env = os.environ.get("VAPOURSYNTH_PLUGIN_PATH", "")
-    if plugin_env:
-        for plugin_dir in plugin_env.split(os.pathsep):
-            if plugin_dir:
-                candidates.append(os.path.join(plugin_dir, "libvslsmashsource.dll"))
+def _split_plugin_dirs(value: str) -> list[str]:
+    return [plugin_dir for plugin_dir in value.split(os.pathsep) if plugin_dir]
 
+
+def _normalized_path_key(path: str) -> str:
+    return os.path.normcase(os.path.normpath(path))
+
+
+def _get_canonical_plugin_dir() -> str | None:
+    try:
+        vs_module = import_vapoursynth_module()
+    except ImportError:
+        return None
+
+    get_plugin_dir = getattr(vs_module, "get_plugin_dir", None)
+    if not callable(get_plugin_dir):
+        return None
+
+    try:
+        plugin_dir = get_plugin_dir()
+    except Exception as exc:
+        log.debug("Skipping VapourSynth canonical plugin dir due to error: %s", exc)
+        return None
+
+    if isinstance(plugin_dir, str | os.PathLike):
+        return os.fspath(plugin_dir)
+    return None
+
+
+def _bundle_plugin_dir() -> str:
     python_dir = os.path.dirname(sys.executable)
     bundle_root = os.path.dirname(python_dir)
-    candidates.append(os.path.join(bundle_root, "vs", "plugins", "libvslsmashsource.dll"))
+    return os.path.join(bundle_root, "vs", "plugins")
 
+
+def _candidate_lsmas_filenames() -> list[str]:
+    filenames = ["libvslsmashsource.dll"]
+    if os.name != "nt":
+        filenames = ["libvslsmashsource.so", "libvslsmashsource.dylib", *filenames]
+    return filenames
+
+
+def _candidate_lsmas_manifest_entries(filenames: list[str]) -> set[str]:
+    manifest_entries = {os.path.splitext(filename)[0] for filename in filenames}
+    manifest_entries.update(filenames)
+    return manifest_entries
+
+
+def _manifest_references_lsmas_plugin(manifest_path: str, filenames: list[str]) -> bool:
+    if not os.path.isfile(manifest_path):
+        return False
+
+    expected_entries = _candidate_lsmas_manifest_entries(filenames)
+    try:
+        with open(manifest_path, encoding="utf-8") as manifest_file:
+            for raw_line in manifest_file:
+                line = raw_line.strip()
+                if not line or line.startswith("[") or line.startswith("#"):
+                    continue
+                if line in expected_entries:
+                    return True
+    except (OSError, UnicodeDecodeError) as exc:
+        log.debug("Skipping manifest check for %s due to error: %s", manifest_path, exc)
+    return False
+
+
+def _contains_lsmas_plugin_artifacts(plugin_dir: str, filenames: list[str]) -> bool:
+    if any(os.path.isfile(os.path.join(plugin_dir, filename)) for filename in filenames):
+        return True
+    manifest_path = os.path.join(plugin_dir, "manifest.vs")
+    return _manifest_references_lsmas_plugin(manifest_path, filenames)
+
+
+def _iter_lsmas_search_dirs(plugin_dir: str, source: str, filenames: list[str]) -> list[str]:
+    """Expand plugin search dirs for explicit lsmas fallback loading.
+
+    ``VAPOURSYNTH_EXTRA_PLUGIN_PATH`` in the Windows portable bundle points at an
+    extra-plugin root. R75+ optimized plugin installs can place each plugin under
+    a nested directory with ``manifest.vs`` (for example ``extra-plugins/lsmas``),
+    so explicit fallback loading must consider those first-level child dirs in
+    addition to the root itself. Other discovery sources continue using their
+    configured directory directly.
+    """
+
+    search_dirs = [plugin_dir]
+    if source != "VAPOURSYNTH_EXTRA_PLUGIN_PATH":
+        return search_dirs
+
+    try:
+        with os.scandir(plugin_dir) as entries:
+            nested_dirs: list[str] = []
+            for entry in entries:
+                try:
+                    is_dir = entry.is_dir()
+                except OSError as exc:
+                    log.debug("Skipping extra-plugin entry %s due to error: %s", entry.path, exc)
+                    continue
+                if not is_dir or not _contains_lsmas_plugin_artifacts(entry.path, filenames):
+                    continue
+                nested_dirs.append(entry.path)
+    except OSError as exc:
+        log.debug("Skipping nested extra-plugin scan for %s due to error: %s", plugin_dir, exc)
+        return search_dirs
+
+    nested_dirs.sort(key=_normalized_path_key)
+    search_dirs.extend(nested_dirs)
+    return search_dirs
+
+
+def _iter_candidate_plugin_dirs() -> list[tuple[str, str]]:
+    candidates: list[tuple[str, str]] = []
+
+    canonical_plugin_dir = _get_canonical_plugin_dir()
+    if canonical_plugin_dir:
+        candidates.append((canonical_plugin_dir, "vapoursynth.get_plugin_dir"))
+
+    extra_plugin_env = os.environ.get("VAPOURSYNTH_EXTRA_PLUGIN_PATH", "")
+    for plugin_dir in _split_plugin_dirs(extra_plugin_env):
+        candidates.append((plugin_dir, "VAPOURSYNTH_EXTRA_PLUGIN_PATH"))
+
+    candidates.append((_bundle_plugin_dir(), "bundle_vs_plugins"))
+
+    legacy_plugin_env = os.environ.get("VAPOURSYNTH_PLUGIN_PATH", "")
+    for plugin_dir in _split_plugin_dirs(legacy_plugin_env):
+        candidates.append((plugin_dir, "VAPOURSYNTH_PLUGIN_PATH"))
+
+    return candidates
+
+
+def candidate_lsmas_plugin_path_details() -> list[PluginPathCandidate]:
+    """Return candidate L-SMASH plugin paths with their discovery source.
+
+    VapourSynth R74+ exposes the canonical plugin directory through
+    ``vapoursynth.get_plugin_dir()`` and uses ``VAPOURSYNTH_EXTRA_PLUGIN_PATH``
+    for supplemental plugin locations. When that extra-plugin path points at a
+    root containing nested manifest-based plugin dirs, first-level child dirs
+    are also expanded for explicit fallback loading. The legacy
+    ``VAPOURSYNTH_PLUGIN_PATH`` remains checked last as a migration bridge for
+    existing bundles.
+    """
     seen: set[str] = set()
-    unique_candidates: list[str] = []
-    for candidate in candidates:
-        absolute = os.path.abspath(os.path.normpath(candidate))
-        normalized = os.path.normcase(absolute)
-        if normalized in seen:
-            continue
-        seen.add(normalized)
-        unique_candidates.append(absolute)
+    unique_candidates: list[PluginPathCandidate] = []
+    filenames = _candidate_lsmas_filenames()
+    for plugin_dir, source in _iter_candidate_plugin_dirs():
+        for search_dir in _iter_lsmas_search_dirs(plugin_dir, source, filenames):
+            for filename in filenames:
+                absolute = os.path.abspath(os.path.normpath(os.path.join(search_dir, filename)))
+                normalized = _normalized_path_key(absolute)
+                if normalized in seen:
+                    continue
+                seen.add(normalized)
+                unique_candidates.append(PluginPathCandidate(path=absolute, source=source))
     return unique_candidates
+
+
+def candidate_lsmas_plugin_paths() -> list[str]:
+    """Return candidate absolute paths for the L-SMASH-Works plugin binary."""
+    return [candidate.path for candidate in candidate_lsmas_plugin_path_details()]
 
 
 def try_load_lsmas_plugin(core: object) -> str | None:

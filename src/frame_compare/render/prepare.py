@@ -50,11 +50,17 @@ def resolve_tonemap_settings(
     preset = (cli_overrides or {}).get("tm_preset") or config.color.preset
     settings = get_preset_settings(preset)
 
-    # Apply config overrides (config values always have defaults; direct access)
-    settings = replace(settings, target_nits=config.color.target_nits)
-    settings = replace(settings, tone_curve=config.color.tone_curve)
-    settings = replace(settings, gamma_lift=config.color.gamma_lift)
-    settings = replace(settings, contrast_recovery=config.color.contrast_recovery)
+    explicit_color_fields = config.color.model_fields_set
+
+    # Apply manual config overrides only when they were explicitly supplied.
+    if "target_nits" in explicit_color_fields:
+        settings = replace(settings, target_nits=config.color.target_nits)
+    if "tone_curve" in explicit_color_fields:
+        settings = replace(settings, tone_curve=config.color.tone_curve)
+    if "gamma_lift" in explicit_color_fields:
+        settings = replace(settings, gamma_lift=config.color.gamma_lift)
+    if "contrast_recovery" in explicit_color_fields:
+        settings = replace(settings, contrast_recovery=config.color.contrast_recovery)
 
     # Apply CLI overrides (highest priority)
     if cli_overrides:

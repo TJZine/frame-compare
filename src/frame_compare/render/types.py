@@ -36,6 +36,7 @@ class OverlayConfig:
     num_frames: int | None = None
     picture_type: str | None = None
     selection_label: str | None = None
+    include_frame_number: bool = True
     font_size: int = 24
     position: str = "top-left"  # top-left, top-right, bottom-left, bottom-right
 
@@ -65,6 +66,7 @@ class ScreenshotBatchRequest:
     probe_height: int | None
     probe_num_frames: int | None
     probe_is_hdr: bool | None
+    filename_label: str | None = None
 
 
 Renderer = Literal["vapoursynth", "ffmpeg", "auto"]
@@ -78,6 +80,7 @@ class BatchRenderOptions:
     overlay_mode: OverlayMode = OverlayMode.STANDARD
     reporter: ProgressReporter | None = None
     ffmpeg_runner: FFmpegRunner | None = None
+    parallelism: int = 1
 
 
 @dataclass(frozen=True)

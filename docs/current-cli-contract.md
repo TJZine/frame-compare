@@ -63,6 +63,13 @@ For those commands:
 - `--config` selects the config file path. Relative paths resolve from `--root`.
 - If `--config` is omitted, the CLI resolves `config/config.toml` under `--root`.
 
+For the installed Windows portable shim, the shim runs the bundle launcher from the
+bundle root and injects a default `--config` for `run`, `wizard`, and supported
+`preset` subcommands when the user did not pass `--config`. The injected default
+prefers `<bundle>/config/config.toml` when it exists, otherwise it falls back to
+`%LOCALAPPDATA%/Programs/FrameCompare/state/config.toml` when that state config
+exists.
+
 ## `version` Command Contract
 
 - Prints `frame-compare <version>` to stdout.
@@ -73,13 +80,43 @@ For those commands:
 ### Output Modes
 
 - `--json` writes a single JSON object to stdout and suppresses human-readable summaries.
+- `--json` is incompatible with interactive alignment. If the effective config enables
+  `audio_alignment.use_vspreview` or `audio_alignment.force_interactive`, the CLI exits
+  with the standard config-error payload and exit code before entering the runtime
+  pipeline.
 - `--quiet` suppresses the at-a-glance summary but still allows a minimal success summary.
 - When the at-a-glance summary reports optional VSPreview probe failures, it uses a
   sanitized summary rather than raw probe exception text.
+- The at-a-glance workspace paths are resolved base paths. When
+  `paths.use_run_folders = true`, the `screenshots` and `generated` rows describe the
+  configured base paths rather than the fresh per-run subdirectories reserved later in
+  execution.
 - `--diagnose-paths` emits a pinned JSON object with keys `cache`, `config`, `input`,
   `output`, and `root`, then exits without invoking the runtime pipeline.
+  The `cache` value is the resolved configured `paths.generated_dir`; the shared
+  analysis cache lives below it at `cache/analysis`.
 - `--write-config` writes the effective config to disk, then exits without invoking the
   runtime pipeline.
+
+### Cache Mode Semantics
+
+- Analysis cache entries live under `<resolved paths.generated_dir>/cache/analysis`
+  using labeled full-fingerprint filenames:
+  `<safe-human-label>__<full-fingerprint>.compframes`.
+- The full fingerprint remains inside the cache payload and is validated on load.
+  Legacy run-folder `cache.compframes` files are not used as analysis cache hits.
+- With `paths.use_run_folders = true`, runs that proceed reserve a fresh run folder;
+  existing run folders are not reused to satisfy analysis cache hits.
+- `--no-cache` deletes only the matching shared analysis cache entry for the current
+  inputs and analysis settings before continuing. It does not clear unrelated shared
+  analysis entries and does not delete alignment offset caches.
+- `--from-cache-only` is analysis-cache-only. When analysis is not skipped, it validates
+  the matching shared analysis cache entry before metadata prefetch and before run-folder
+  reservation, so a missing or invalid entry does not leave an empty run folder.
+- `--from-cache-only` does not require cached alignment offsets from a previous run.
+  Alignment can compute or use the current run folder's run-scoped alignment cache after
+  the analysis cache validation succeeds.
+- `--no-cache` and `--from-cache-only` are mutually exclusive.
 
 ### Report Auto-Open Ownership
 
@@ -141,6 +178,18 @@ If a future change makes a runtime-only flag persistent, or adds a new persisten
 update this document, `src/frame_compare/config/overrides.py`, and the relevant CLI
 tests in the same pass.
 
+### Tonemap Preset And Target Resolution
+
+`color.preset` selects the baseline tonemap settings. The `reference` preset targets
+100 nits. `color.target_nits` overrides that preset target only when the value is
+explicitly present in config or supplied through `--tm-target`; unrelated CLI overrides
+must not turn schema defaults into explicit tonemap target overrides.
+
+The default `reference` baseline also uses `contrast_recovery = 0.3`. This value is
+forwarded to libplacebo tonemapping, not applied as a separate post-tonemap contrast
+curve. VapourSynth HDR screenshot export treats tonemapped RGB as limited-range
+intermediate data and expands it to full-range PNG output during encoding.
+
 ## `wizard` Command Contract
 
 - `wizard` is interactive and writes a minimal config payload to the resolved config path.
@@ -158,6 +207,9 @@ tests in the same pass.
 
 - `doctor` runs dependency diagnostics through `run_doctor`.
 - `doctor --json` writes a single JSON object to stdout using `_doctor_report_json`.
+- If the `doctor` command hits a typed top-level failure before it can produce a
+  `DoctorReport`, it uses the standard CLI error contract. In `--json` mode that means
+  the standard error payload is written to stdout.
 - Without `--json`, `doctor` writes a human-readable report to stdout.
 - If any critical failures are present, `doctor` exits with the dependency error exit code.
 - Optional VSPreview probe diagnostics may include exception type metadata, but do not

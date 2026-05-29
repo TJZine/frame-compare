@@ -113,8 +113,8 @@ def _build_script_header() -> str:
 """VSPreview alignment verification session.
 
 Sign convention:
-    + trims comparison (comparison starts AFTER reference)
-    - trims reference (comparison starts BEFORE reference)
+    + trims reference (comparison starts AFTER reference)
+    - trims comparison (comparison starts BEFORE reference)
 
 Operator-confirmed offsets are SIGNED RELATIVE OFFSETS.
 The pipeline will apply trim-first normalization (no padding).
@@ -180,6 +180,15 @@ def resolve_lwlibavsource(core):
     if hasattr(core, "lw") and hasattr(core.lw, "LWLibavSource"):
         return core.lw.LWLibavSource
     raise RuntimeError("LWLibavSource not found on core.lsmas or core.lw")
+
+
+def apply_offset(reference_clip, comparison_clip, offset_frames):
+    """Apply the signed offset convention used by Frame Compare alignment."""
+    if offset_frames > 0:
+        return reference_clip[offset_frames:], comparison_clip
+    if offset_frames < 0:
+        return reference_clip, comparison_clip[abs(offset_frames):]
+    return reference_clip, comparison_clip
 '''
 
 
@@ -261,7 +270,9 @@ def main():
     ref_fps_num = ref_clip.fps.numerator
     ref_fps_den = ref_clip.fps.denominator
 
-    safe_print(f"Reference: {REFERENCE['label']} @ {ref_fps_num}/{ref_fps_den} fps")
+    safe_print("")
+    safe_print("VSPreview bootstrap")
+    safe_print(f"  reference  {REFERENCE['label']} @ {ref_fps_num}/{ref_fps_den} fps")
 
     # Apply overlay to reference (best-effort)
     try:
@@ -271,10 +282,10 @@ def main():
             alignment=7,
         )
     except Exception:
-        safe_print("Warning: Could not apply text overlay (plugin missing?)")
+        safe_print("Warning: Could not apply reference text overlay (plugin missing?)")
 
-    clips = [ref_clip]
-    labels = [REFERENCE["label"]]
+    clips = []
+    labels = []
 
     for label, path_str in sorted(TARGETS.items()):
         comp_path = Path(path_str)
@@ -298,21 +309,22 @@ def main():
         try:
             overlay_text = f"CMP: {label}\\nSuggested offset: {offset} frames"
             if offset > 0:
-                overlay_text += "\\n(+N = comparison starts AFTER reference)"
+                overlay_text += "\\n(+N trims reference)"
             elif offset < 0:
-                overlay_text += "\\n(-N = comparison starts BEFORE reference)"
+                overlay_text += "\\n(-N trims comparison)"
             comp_clip = core.text.Text(comp_clip, overlay_text, alignment=7)
         except Exception:
-            safe_print("Warning: Could not apply text overlay (plugin missing?)")
+            safe_print("Warning: Could not apply comparison text overlay (plugin missing?)")
 
         # Slot layout: ref on even, comparison on odd
-        # We duplicate reference before each comparison
-        clips.append(ref_clip)  # Even slot (duplicate ref)
+        # Apply OFFSET_MAP so Ctrl+R reloads show the tested manual offset.
+        ref_view, comp_view = apply_offset(ref_clip, comp_clip, offset)
+        clips.append(ref_view)  # Even slot (reference)
         labels.append(f"{REFERENCE['label']} (ref)")
-        clips.append(comp_clip)  # Odd slot (comparison)
+        clips.append(comp_view)  # Odd slot (comparison)
         labels.append(label)
 
-        safe_print(f"Loaded: {label} (offset: {offset})")
+        safe_print(f"  loaded     {label} (offset: {offset})")
 
     if len(clips) < 2:
         safe_print("ERROR: No comparison clips loaded successfully.")
@@ -320,13 +332,12 @@ def main():
 
     for i, (clip, label) in enumerate(zip(clips, labels)):
         clip.set_output(i)
-        safe_print(f"Output {i}: {label}")
+        safe_print(f"  output {i:<2}  {label}")
 
-    safe_print("\\nReady for VSPreview. Adjust offsets visually, then confirm in terminal.")
+    safe_print("\\nVSPreview ready")
+    safe_print("  adjust offsets visually, then confirm in the terminal")
 
-
-if __name__ == "__main__":
-    main()
+main()
 """
 
 

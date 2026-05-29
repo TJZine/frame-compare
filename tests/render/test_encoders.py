@@ -4,10 +4,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 
 from frame_compare.render.encoders import (
     _clip_to_rgb24_for_pillow,
+    _maybe_expand_tonemapped_video_range,
     apply_overlay_to_file,
     render_frame,
 )
@@ -206,6 +208,8 @@ class _FakeClip:
     def __init__(self, *, fmt: object | None, props: dict[str, object]) -> None:
         self.format = fmt
         self.resize = _FakeResize()
+        self.std = MagicMock()
+        self.std.SetFrameProps = MagicMock(return_value="props")
         self._frame = _FakeFrame(props)
 
     def get_frame(self, _index: int) -> _FakeFrame:
@@ -286,3 +290,57 @@ def test_clip_to_rgb24_for_pillow_rgb_non_24_uses_point(monkeypatch) -> None:
 
     assert result == "point"
     assert clip.resize.calls[0][0] == "Point"
+
+
+def test_clip_to_rgb24_for_pillow_expands_marked_limited_tonemap(monkeypatch) -> None:
+    fake_vs = SimpleNamespace(RGB24=1, RGB=2)
+    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
+
+    fmt = SimpleNamespace(id=999, color_family=2)
+    clip = _FakeClip(fmt=fmt, props={"_Tonemapped": 1, "_FrameCompareExpandRange": 1})
+    clip.resize.Point = MagicMock(return_value=clip)
+
+    result = _clip_to_rgb24_for_pillow(clip)  # type: ignore[arg-type]
+
+    assert result == "props"
+    clip.resize.Point.assert_called_once_with(format=1)
+    clip.std.SetFrameProps.assert_called_once_with(_FrameCompareExpandRange=1)
+
+
+def test_clip_to_rgb24_for_pillow_does_not_expand_marked_full_tonemap(monkeypatch) -> None:
+    fake_vs = SimpleNamespace(RGB24=1, RGB=2)
+    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
+
+    fmt = SimpleNamespace(id=999, color_family=2)
+    clip = _FakeClip(fmt=fmt, props={"_Tonemapped": 1})
+
+    result = _clip_to_rgb24_for_pillow(clip)  # type: ignore[arg-type]
+
+    assert result == "point"
+    assert clip.resize.calls[0] == ("Point", {"format": 1})
+
+
+def test_maybe_expand_tonemapped_video_range_requires_internal_expand_marker() -> None:
+    array = np.full((2, 2, 3), 32, dtype=np.uint8)
+
+    result = _maybe_expand_tonemapped_video_range(array, {"_Tonemapped": 1})
+
+    assert result is array
+
+
+def test_maybe_expand_tonemapped_video_range_expands_marked_limited_video_range() -> None:
+    array = np.array(
+        [
+            [[16, 16, 16], [32, 32, 32], [90, 90, 90]],
+            [[18, 18, 18], [48, 48, 48], [120, 120, 120]],
+        ],
+        dtype=np.uint8,
+    )
+
+    result = _maybe_expand_tonemapped_video_range(
+        array, {"_Tonemapped": 1, "_FrameCompareExpandRange": 1}
+    )
+
+    assert result.dtype == np.uint8
+    assert result[0, 0, 0] == 0
+    assert result[1, 2, 0] > array[1, 2, 0]

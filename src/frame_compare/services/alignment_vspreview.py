@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 import structlog
@@ -19,6 +20,7 @@ from frame_compare.vspreview.adapter import (
     launch_alignment_verification_session,
 )
 from frame_compare.vspreview.errors import VSPreviewError
+from frame_compare.vspreview.overrides import ManualOverride, save_manual_override
 
 log = structlog.get_logger()
 
@@ -28,10 +30,6 @@ class _TTYStatus:
     stdin: bool
     stdout: bool
     stderr: bool
-
-    @property
-    def has_any(self) -> bool:
-        return self.stdin or self.stdout or self.stderr
 
 
 @dataclass(frozen=True)
@@ -129,6 +127,97 @@ def _log_optional_launch_failed(exc: VSPreviewError, config: AlignmentConfig) ->
     )
 
 
+def _format_signed_frames(value: int) -> str:
+    return f"{value:+d}f"
+
+
+def _stderr_print(message: str = "") -> None:
+    print(message, file=sys.stderr)
+
+
+def _read_stderr_prompt(prompt: str) -> str:
+    sys.stderr.write(prompt)
+    sys.stderr.flush()
+    raw_value = sys.stdin.readline()
+    if raw_value == "":
+        raise EOFError
+    return raw_value
+
+
+def _prompt_for_confirmed_offsets(
+    *,
+    reference: Path,
+    comparisons: list[Path],
+    offsets_by_key: dict[str, int],
+) -> dict[str, int] | None:
+    if not comparisons:
+        return {}
+
+    _stderr_print()
+    _stderr_print("VSPreview confirmation")
+    _stderr_print(f"  reference  {reference.stem}")
+    _stderr_print("  enter      blank keeps suggested offset; 'skip' keeps current offsets")
+    _stderr_print()
+
+    confirmed: dict[str, int] = {}
+    for comparison in comparisons:
+        key = f"{reference.stem}:{comparison.stem}"
+        suggested = int(offsets_by_key.get(key, 0))
+        while True:
+            try:
+                raw_value = _read_stderr_prompt(
+                    f"  {comparison.stem} [{_format_signed_frames(suggested)}]: "
+                ).strip()
+            except (EOFError, OSError):
+                _stderr_print("No terminal input available; keeping current offsets.")
+                return None
+            if raw_value == "":
+                confirmed[key] = suggested
+                break
+            if raw_value.lower() in {"skip", "s"}:
+                return None
+            try:
+                confirmed[key] = int(raw_value)
+            except ValueError:
+                _stderr_print(
+                    "  Enter an integer frame offset, blank to keep the suggestion, or 'skip'."
+                )
+                continue
+            break
+    return confirmed
+
+
+def _save_confirmed_offsets(
+    *,
+    reference: Path,
+    comparisons: list[Path],
+    cache_dir: Path,
+    confirmed_offsets_by_key: dict[str, int],
+) -> None:
+    timestamp = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    for comparison in comparisons:
+        key = f"{reference.stem}:{comparison.stem}"
+        if key not in confirmed_offsets_by_key:
+            continue
+        save_manual_override(
+            cache_dir,
+            ManualOverride(
+                reference_clip=reference.stem,
+                comparison_clip=comparison.stem,
+                frame_offset=int(confirmed_offsets_by_key[key]),
+                timestamp=timestamp,
+                confirmed=True,
+            ),
+        )
+
+
+def _suspend_progress_for_interaction(progress: ProgressReporter | None) -> bool:
+    if progress is None:
+        return False
+    progress.suspend()
+    return True
+
+
 def _resolve_launch_decision(
     *,
     config: AlignmentConfig,
@@ -136,10 +225,11 @@ def _resolve_launch_decision(
     tty_status: _TTYStatus,
 ) -> _LaunchDecision:
     requested = _launch_requested(config)
-    enabled = bool(requested and is_available and tty_status.has_any)
+    has_prompt_input = tty_status.stdin
+    enabled = bool(requested and is_available and has_prompt_input)
     return _LaunchDecision(
         enabled=enabled,
-        no_tty=bool(requested and is_available and not tty_status.has_any),
+        no_tty=bool(requested and is_available and not has_prompt_input),
     )
 
 
@@ -151,7 +241,7 @@ def maybe_launch_alignment_vspreview(
     cache_dir: Path,
     config: AlignmentConfig,
     progress: ProgressReporter | None,
-) -> None:
+) -> dict[str, int] | None:
     """Best-effort VSPreview alignment verification.
 
     This is intended for interactive verification/inspection only. Actual offsets
@@ -161,7 +251,7 @@ def maybe_launch_alignment_vspreview(
       3) computed offsets (cross-correlation)
     """
     if not (config.use_vspreview or config.force_interactive):
-        return
+        return None
 
     availability = check_vspreview_availability()
 
@@ -198,6 +288,8 @@ def maybe_launch_alignment_vspreview(
             "Interactive alignment requested but no interactive terminal (TTY) is available."
         )
 
+    interactive_progress = progress
+    progress_suspended = _suspend_progress_for_interaction(interactive_progress)
     try:
         script_path = launch_alignment_verification_session(
             request=VSPreviewSessionRequest(
@@ -210,7 +302,27 @@ def maybe_launch_alignment_vspreview(
         )
         if launch_decision.no_tty:
             _log_no_tty(script_path, tty_status)
+        if not launch_decision.enabled:
+            return None
+        confirmed_offsets = _prompt_for_confirmed_offsets(
+            reference=reference,
+            comparisons=comparisons,
+            offsets_by_key=offsets_by_key,
+        )
+        if confirmed_offsets is None:
+            return None
+        _save_confirmed_offsets(
+            reference=reference,
+            comparisons=comparisons,
+            cache_dir=cache_dir,
+            confirmed_offsets_by_key=confirmed_offsets,
+        )
+        return confirmed_offsets
     except VSPreviewError as exc:
         if config.force_interactive:
             raise
         _log_optional_launch_failed(exc, config)
+    finally:
+        if progress_suspended and interactive_progress is not None:
+            interactive_progress.resume()
+    return None

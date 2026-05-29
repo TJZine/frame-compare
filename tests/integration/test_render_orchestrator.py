@@ -39,9 +39,9 @@ def test_render_screenshots_naming_and_output(
     assert "TestLabel" in results
     assert len(results["TestLabel"]) == 2
 
-    # Check filenames (deterministic padding per SSOT)
-    assert results["TestLabel"][0].name == "TestLabel_00000.png"
-    assert results["TestLabel"][1].name == "TestLabel_00001.png"
+    # Check filenames (legacy-readable frame + source stem).
+    assert results["TestLabel"][0].name == "0 - test.png"
+    assert results["TestLabel"][1].name == "1 - test.png"
 
     # Check existence and validity
     for path in results["TestLabel"]:

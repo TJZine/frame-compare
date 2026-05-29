@@ -13,7 +13,7 @@ Defaults:
   Runs: pytest -v tests/integration/ tests/vs/
 
 Environment:
-  FRAME_COMPARE_REQUIRE_LIBPLACEBO=1  Require libplacebo tonemap to succeed (intended for Linux GPU runners).
+  FRAME_COMPARE_REQUIRE_LIBPLACEBO=1  Require app-level libplacebo tonemap to succeed.
 
 Options:
   --service NAME   Docker Compose service to run (default: frame-compare-test)
@@ -134,14 +134,121 @@ docker_cmd+=(
 # Note: keep this robust even if the image doesn't include pytest yet.
 container_cmd=$(
   cat <<'EOF'
+set -euo pipefail
 export LIBGL_ALWAYS_SOFTWARE=1
 icd="$(ls /usr/share/vulkan/icd.d/lvp_icd.*.json 2>/dev/null | head -n 1 || true)"
 if [[ -n "$icd" ]]; then
   export VK_ICD_FILENAMES="$icd"
 fi
+pytest_cache_dir=""
+media_path="$(mktemp /tmp/frame-compare-docker-proof.XXXXXX.mp4)"
+trap 'rm -f "$media_path"; if [[ -n "${pytest_cache_dir:-}" ]]; then rm -rf "$pytest_cache_dir"; fi' EXIT
+ffmpeg -hide_banner -loglevel error \
+  -f lavfi -i testsrc2=size=32x32:rate=1 \
+  -frames:v 1 -pix_fmt yuv420p -y "$media_path"
+python - "$media_path" <<'PY'
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+import vapoursynth as vs
+
+from frame_compare.vs.env import candidate_lsmas_plugin_path_details, try_load_lsmas_plugin
+
+
+def assert_true(condition: object, message: str) -> None:
+    if not condition:
+        raise AssertionError(message)
+
+
+media_path = Path(sys.argv[1])
+assert_true(media_path.is_file(), f"proof media missing: {media_path}")
+
+core = vs.core
+version = getattr(vs, "__version__", None)
+version_major = getattr(version, "release_major", None)
+version_minor = getattr(version, "release_minor", None)
+version_label = f"R{version_major}" if version_major is not None else str(version)
+plugin_dir = Path(vs.get_plugin_dir())
+extra_plugin_path = os.environ.get("VAPOURSYNTH_EXTRA_PLUGIN_PATH", "")
+plugins = list(core.plugins())
+plugin_namespaces = sorted(plugin.namespace for plugin in plugins)
+
+assert_true(
+    version_major == 76 and version_minor == 0,
+    f"expected VapourSynth R76, got {version!r}",
+)
+assert_true(plugin_dir.is_dir(), f"vapoursynth.get_plugin_dir() is not a directory: {plugin_dir}")
+assert_true(plugin_namespaces, "core.plugins() returned no plugins")
+assert_true(extra_plugin_path, "VAPOURSYNTH_EXTRA_PLUGIN_PATH is not set")
+
+lsmas_loaded_path = None
+if not (
+    hasattr(core, "lsmas")
+    and hasattr(core.lsmas, "LWLibavSource")
+    or hasattr(core, "lw")
+    and hasattr(core.lw, "LWLibavSource")
+):
+    lsmas_loaded_path = try_load_lsmas_plugin(core)
+
+if hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource"):
+    source_namespace = "lsmas"
+    source_loader = core.lsmas.LWLibavSource
+elif hasattr(core, "lw") and hasattr(core.lw, "LWLibavSource"):
+    source_namespace = "lw"
+    source_loader = core.lw.LWLibavSource
+else:
+    candidates = [
+        {"source": candidate.source, "path": candidate.path}
+        for candidate in candidate_lsmas_plugin_path_details()
+    ]
+    raise AssertionError(f"LWLibavSource missing from core.lsmas/core.lw; candidates={candidates}")
+
+assert_true(hasattr(core, "placebo"), "core.placebo namespace missing")
+assert_true(hasattr(core.placebo, "Tonemap"), "core.placebo.Tonemap missing")
+
+clip = source_loader(str(media_path))
+frame = clip.get_frame(0)
+assert_true(frame.width == 32 and frame.height == 32, "LWLibavSource frame render failed")
+
+tonemap_clip = core.std.BlankClip(
+    width=16,
+    height=16,
+    format=vs.RGB48,
+    length=1,
+    color=[32768, 32768, 32768],
+)
+tonemap_clip = tonemap_clip.std.SetFrameProps(
+    _Matrix=0,
+    _Range=0,
+    _Transfer=16,
+    _Primaries=9,
+)
+tonemap_out = core.placebo.Tonemap(
+    tonemap_clip,
+    src_max=1000,
+    dst_max=203,
+    tone_mapping_function=2,
+    dst_csp=0,
+    dst_prim=1,
+    src_csp=1,
+)
+tonemap_frame = tonemap_out.get_frame(0)
+assert_true(tonemap_frame.width == 16 and tonemap_frame.height == 16, "placebo frame render failed")
+
+print(f"DOCKER_PROOF vapoursynth_import=ok version={version_label}")
+print(f"DOCKER_PROOF plugin_dir={plugin_dir}")
+print(f"DOCKER_PROOF extra_plugin_path={extra_plugin_path}")
+print(f"DOCKER_PROOF core_plugins={','.join(plugin_namespaces)}")
+print(f"DOCKER_PROOF lwlibavsource=ok namespace={source_namespace} loaded_path={lsmas_loaded_path}")
+print("DOCKER_PROOF placebo_tonemap=ok")
+print("DOCKER_PROOF real_frame_render=ok frames=lwlibavsource,placebo")
+PY
+rm -f "$media_path"
 python -c "import pytest, pytest_mock" >/dev/null 2>&1 || python -m pip install --user -q pytest pytest-mock &&
 pytest_cache_dir="$(mktemp -d /tmp/frame-compare-pytest-cache.XXXXXX)"
-trap 'rm -rf "$pytest_cache_dir"' EXIT
 EOF
 )
 container_cmd+=$'\n'"python -m pytest -v -o cache_dir=\"\$pytest_cache_dir\"${pytest_args}"
@@ -161,4 +268,21 @@ if grep -Eq '([1-9][0-9]* skipped|skipped=[1-9][0-9]*)' "$tmp_log"; then
   exit 3
 fi
 
-echo "OK: docker integration tests passed with zero skips"
+required_proof_markers=(
+  "DOCKER_PROOF vapoursynth_import=ok version=R76"
+  "DOCKER_PROOF plugin_dir="
+  "DOCKER_PROOF extra_plugin_path=/opt/vapoursynth-extra-plugins"
+  "DOCKER_PROOF core_plugins="
+  "DOCKER_PROOF lwlibavsource=ok"
+  "DOCKER_PROOF placebo_tonemap=ok"
+  "DOCKER_PROOF real_frame_render=ok frames=lwlibavsource,placebo"
+)
+
+for proof_marker in "${required_proof_markers[@]}"; do
+  if ! grep -Fq "$proof_marker" "$tmp_log"; then
+    echo "ERROR: docker runtime proof marker missing: $proof_marker" >&2
+    exit 4
+  fi
+done
+
+echo "OK: docker runtime proof and integration tests passed with zero skips"

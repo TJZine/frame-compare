@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import types
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -28,9 +29,9 @@ from frame_compare.vspreview.session_script import (
 )
 
 
-def test_launch_alignment_verification_session_respects_timeout(
+def test_launch_alignment_verification_session_waits_for_vspreview_completion(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     # Force launch path
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(
@@ -45,22 +46,72 @@ def test_launch_alignment_verification_session_respects_timeout(
         lambda script_path: ["vspreview", str(script_path)],
     )
 
-    def _raise_timeout(*_args: object, **_kwargs: object) -> object:
-        raise subprocess.TimeoutExpired(cmd=["vspreview"], timeout=1.0)
+    run_calls: list[tuple[object, object]] = []
 
-    monkeypatch.setattr("frame_compare.vspreview.adapter.subprocess.run", _raise_timeout)
+    def _fake_run(command: object, **kwargs: object) -> subprocess.CompletedProcess[object]:
+        run_calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr("frame_compare.vspreview.adapter.subprocess.run", _fake_run)
 
     cfg = VSPreviewConfig(enabled=True, timeout_seconds=1.0)
-    with pytest.raises(VSPreviewError, match="timed out"):
-        launch_alignment_verification_session(
-            request=VSPreviewSessionRequest(
-                reference=Path("ref.mkv"),
-                comparisons=[Path("a.mkv")],
-                suggested_offsets_by_key={},
-                cache_dir=tmp_path,
-            ),
-            config=cfg,
-        )
+    script_path = launch_alignment_verification_session(
+        request=VSPreviewSessionRequest(
+            reference=Path("ref.mkv"),
+            comparisons=[Path("a.mkv")],
+            suggested_offsets_by_key={},
+            cache_dir=tmp_path,
+        ),
+        config=cfg,
+    )
+
+    assert script_path.exists()
+    assert len(run_calls) == 1
+    command, kwargs = run_calls[0]
+    assert command == ["vspreview", str(script_path)]
+    assert "timeout" not in kwargs
+    assert kwargs["stdin"] is None
+    assert kwargs["stdout"] is None
+    assert kwargs["stderr"] is None
+
+
+def test_launch_alignment_verification_session_writes_launch_telemetry_to_stderr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.check_vspreview_availability",
+        lambda: VSPreviewAvailability(
+            status=VSPreviewAvailabilityStatus.AVAILABLE,
+            message="available",
+        ),
+    )
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter._resolve_launch_command",
+        lambda script_path: ["vspreview", str(script_path)],
+    )
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.subprocess.run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0),
+    )
+
+    launch_alignment_verification_session(
+        request=VSPreviewSessionRequest(
+            reference=Path("ref.mkv"),
+            comparisons=[Path("a.mkv")],
+            suggested_offsets_by_key={},
+            cache_dir=tmp_path,
+        ),
+        config=VSPreviewConfig(enabled=True),
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "VSPreview session" in captured.err
+    assert "script" in captured.err
+    assert "command" in captured.err
+    assert "pass-through from the VSPreview process" in captured.err
 
 
 def test_launch_alignment_verification_session_redacts_probe_failure_details(
@@ -96,7 +147,44 @@ def test_launch_alignment_verification_session_redacts_probe_failure_details(
     assert "/tmp/private.log" not in str(excinfo.value)
 
 
-def test_launch_alignment_verification_session_redacts_non_zero_exit_output(
+def test_launch_alignment_verification_session_reports_missing_launcher(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.check_vspreview_availability",
+        lambda: VSPreviewAvailability(
+            status=VSPreviewAvailabilityStatus.AVAILABLE,
+            message="available",
+        ),
+    )
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter._resolve_launch_command",
+        lambda script_path: ["vspreview", str(script_path)],
+    )
+
+    def _raise_missing_launcher(*_args: object, **_kwargs: object) -> object:
+        raise FileNotFoundError("secret missing launcher path")
+
+    monkeypatch.setattr("frame_compare.vspreview.adapter.subprocess.run", _raise_missing_launcher)
+
+    cfg = VSPreviewConfig(enabled=True, timeout_seconds=1.0)
+
+    with pytest.raises(VSPreviewError) as excinfo:
+        launch_alignment_verification_session(
+            request=VSPreviewSessionRequest(
+                reference=Path("ref.mkv"),
+                comparisons=[Path("a.mkv")],
+                suggested_offsets_by_key={},
+                cache_dir=tmp_path,
+            ),
+            config=cfg,
+        )
+
+    assert "launcher command was not found" in str(excinfo.value)
+    assert "secret missing launcher path" not in str(excinfo.value)
+
+
+def test_launch_alignment_verification_session_reports_nonzero_exit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
@@ -112,17 +200,10 @@ def test_launch_alignment_verification_session_redacts_non_zero_exit_output(
     )
     monkeypatch.setattr(
         "frame_compare.vspreview.adapter.subprocess.run",
-        lambda *_args, **_kwargs: subprocess.CompletedProcess(
-            ["vspreview"],
-            7,
-            stdout="stdout secret",
-            stderr="stderr secret at /tmp/private.log",
-        ),
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 7),
     )
 
-    cfg = VSPreviewConfig(enabled=True, timeout_seconds=1.0)
-
-    with pytest.raises(VSPreviewError) as excinfo:
+    with pytest.raises(VSPreviewError, match="launch exited with code 7"):
         launch_alignment_verification_session(
             request=VSPreviewSessionRequest(
                 reference=Path("ref.mkv"),
@@ -130,12 +211,8 @@ def test_launch_alignment_verification_session_redacts_non_zero_exit_output(
                 suggested_offsets_by_key={},
                 cache_dir=tmp_path,
             ),
-            config=cfg,
+            config=VSPreviewConfig(enabled=True),
         )
-
-    assert "launch exited with code 7" in str(excinfo.value)
-    assert "stderr secret" not in str(excinfo.value)
-    assert "/tmp/private.log" not in str(excinfo.value)
 
 
 def test_build_script_content_escapes_path_literals() -> None:
@@ -164,11 +241,16 @@ def test_build_script_content_warns_when_comparison_overlay_fails() -> None:
         bootstrap_paths=[Path("/workspace"), Path("/workspace/src")],
     )
 
-    warning = 'safe_print("Warning: Could not apply text overlay (plugin missing?)")'
+    reference_warning = (
+        'safe_print("Warning: Could not apply reference text overlay (plugin missing?)")'
+    )
+    comparison_warning = (
+        'safe_print("Warning: Could not apply comparison text overlay (plugin missing?)")'
+    )
 
-    assert warning in script
+    assert reference_warning in script
+    assert comparison_warning in script
     assert "pass  # Overlay is best-effort" not in script
-    assert script.count(warning) == 2
 
 
 def test_build_script_content_uses_narrow_stream_reconfigure_helper() -> None:
@@ -242,6 +324,66 @@ def test_build_script_content_resolves_lwlibavsource_with_lsmas_then_lw_fallback
     )
     assert "ref_clip = load_source(str(ref_path))" in script
     assert "comp_clip = load_source(str(comp_path))" in script
+
+
+def test_generated_script_sets_outputs_when_loaded_as_vspreview_module(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reference = tmp_path / "ref.mkv"
+    comparison = tmp_path / "a.mkv"
+    reference.touch()
+    comparison.touch()
+    output_indices: list[int] = []
+    applied_slices: list[int] = []
+
+    class FakeClip:
+        fps = SimpleNamespace(numerator=24, denominator=1)
+
+        def __getitem__(self, key: slice) -> FakeClip:
+            assert isinstance(key, slice)
+            assert key.start is not None
+            applied_slices.append(key.start)
+            return self
+
+        def set_output(self, index: int) -> None:
+            output_indices.append(index)
+
+    class FakeLsmas:
+        def LWLibavSource(self, _path: str) -> FakeClip:
+            return FakeClip()
+
+    class FakeText:
+        def Text(self, clip: FakeClip, _text: str, *, alignment: int) -> FakeClip:
+            return clip
+
+    class FakeStd:
+        def AssumeFPS(self, clip: FakeClip, *, fpsnum: int, fpsden: int) -> FakeClip:
+            return clip
+
+    class FakeCore:
+        lsmas = FakeLsmas()
+        text = FakeText()
+        std = FakeStd()
+
+    fake_vapoursynth = types.ModuleType("vapoursynth")
+    fake_vapoursynth.core = FakeCore()
+    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vapoursynth)
+
+    script = _build_script_content(
+        reference=reference,
+        comparisons=[comparison],
+        suggested_offsets_by_key={f"{reference.stem}:{comparison.stem}": 9},
+        bootstrap_paths=[tmp_path],
+    )
+
+    exec(
+        compile(script, "<vspreview-generated>", "exec"),
+        {"__name__": "vspreview_loaded_script", "__file__": str(tmp_path / "session.py")},
+    )
+
+    assert output_indices == [0, 1]
+    assert applied_slices == [9]
 
 
 def test_generated_script_reports_missing_lwlibavsource_without_traceback(tmp_path: Path) -> None:
@@ -409,10 +551,13 @@ def test_build_script_content_assert_by_section() -> None:
     assert json.dumps(str(bootstrap_paths[1])) in script
     assert "def safe_print(*args, **kwargs):" in script
     assert "def resolve_lwlibavsource(core):" in script
+    assert "def apply_offset(reference_clip, comparison_clip, offset_frames):" in script
     assert '"label": "ref"' in script
     assert '"comp_a": "comp_a.mkv"' in script
     assert '"ref:comp_a": 10' in script
     assert '"comp_a": 10' in script
+    assert "VSPreview bootstrap" in script
+    assert "VSPreview ready" in script
     assert "def main():" in script
     assert script.rstrip().endswith("main()")
 

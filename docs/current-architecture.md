@@ -22,9 +22,10 @@ The main run path is:
 1. Resolve root and config.
 2. Prepare preflight and workspace paths.
 3. Discover input clips.
-4. Create a run folder when configured.
-5. Load or compute clip probe data.
-6. Execute orchestration phases in order:
+4. Validate shared analysis cache mode flags when needed.
+5. Create a fresh run folder when configured.
+6. Load or compute clip probe data.
+7. Execute orchestration phases in order:
    `frame_plan -> analyze -> align -> render -> metadata -> dovi -> publish -> report`
 
 `frame_compare.orchestration.context.RunContext` carries the shared run state across phases.
@@ -84,14 +85,29 @@ The repo uses filesystem persistence, not a database.
 Primary owned paths:
 
 - `config/config.toml` and `config/presets/*.toml`: config owners
-- `generated/cache/cache.compframes`: analysis metrics cache
-- `generated/clip_probe.toml`: clip probe cache
-- `generated/audio_offsets.toml`: alignment cache
-- generated VSPreview session and override files under the generated/run area
+- `<resolved paths.generated_dir>/cache/analysis/<label>__<fingerprint>.compframes`:
+  shared analysis metrics cache (defaults to `generated/cache/analysis/` under the
+  workspace root, but follows the configured `paths.generated_dir`)
+- `generated/clip_probe.toml`: clip probe cache when run folders are disabled
+- `<run-folder>/generated/clip_probe.toml`: clip probe cache when run folders are enabled
+- `generated/audio_offsets.toml` or `<run-folder>/generated/audio_offsets.toml`:
+  run-scoped alignment cache
+- generated VSPreview session and override files under the current generated/run area
 - screenshot output directories and generated HTML reports
 - Windows portable bundle outputs under `dist/frame-compare-portable-win-x64`
 
-`WorkspacePaths` resolves the runtime path set and can switch into run-folder mode so screenshots and generated files live inside an input-specific run directory.
+`WorkspacePaths` resolves the runtime path set and can switch into run-folder mode so
+screenshots and generated files live inside an input-specific run directory. The
+analysis cache is the exception: `WorkspacePaths.cache_dir` remains the shared
+workspace-level `<resolved paths.generated_dir>/cache/analysis` path even after
+`with_run_dir()` moves `generated_dir` and `screenshots_dir` into a fresh run folder.
+
+When `paths.use_run_folders = true`, normal runs and cache-only runs that proceed
+reserve a fresh run folder. Existing run folders are not reused for analysis cache
+hits. Screenshots, slow.pics upload inputs, alignment offsets, manual overrides,
+probe cache files, and VSPreview artifacts remain scoped to the current run folder.
+Configured `report.output_dir` continues to own report placement; only fallback
+report placement follows the screenshot/current run output location.
 
 ## External Boundaries
 
@@ -107,7 +123,9 @@ External runtime boundaries:
 
 Keep these integrations at their current owners:
 
-- metadata lookups: `frame_compare.services.metadata`
+- metadata lookups: `frame_compare.services.metadata` remains the facade owner;
+  `frame_compare.services.tmdb_resolution` owns resolver policy and
+  `frame_compare.services.tmdb_lookup` owns low-level TMDB HTTP and response mapping
 - publishing: `frame_compare.services.publishers`
 - browser auto-open for generated reports: `frame_compare.cli.entry`
 - HTML report generation: `frame_compare.services.report`

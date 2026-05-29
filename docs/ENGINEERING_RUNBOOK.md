@@ -170,9 +170,16 @@ Canonical verification path:
 Current CI ownership:
 
 - `.github/workflows/windows-portable.yml` is the canonical CI path for the full portable bundle.
-- The repo does not currently have a matching CI path for `build_update.ps1` plus `sign_update.ps1`.
+- `.github/workflows/windows-portable.yml` also builds and verifies a code-only
+  update zip after the full bundle exists. Pull requests prove unsigned update
+  zip creation and layout. Release and manual runs sign the update zip only when
+  the `WINDOWS_UPDATE_SIGNING_KEY_XML` secret is configured.
 
-When updater or release-package logic changes and the signed-update path cannot run locally, mark it as documented-only in the task handoff and require explicit maintainer or Windows-runner confirmation before treating the release path as fully verified.
+When updater or release-package logic changes and the signed-update path cannot
+run locally or in CI with `WINDOWS_UPDATE_SIGNING_KEY_XML`, mark signing as
+documented-only in the task handoff and require explicit maintainer or
+Windows-runner confirmation before treating the signed update release path as
+fully verified.
 
 ## Risk Tiers
 

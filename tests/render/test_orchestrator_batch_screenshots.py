@@ -45,9 +45,9 @@ def test_render_screenshots_from_batch_happy_path(tmp_path) -> None:
 
     with patch("frame_compare.render.batch.orchestrator.render_batch") as mock_batch:
         mock_batch.return_value = [
-            tmp_path / "label1_00010.png",
-            tmp_path / "label1_00020.png",
-            tmp_path / "label2_00030.png",
+            tmp_path / "10 - label1.png",
+            tmp_path / "20 - label1.png",
+            tmp_path / "30 - label2.png",
         ]
 
         results = render_screenshots_from_batch(
@@ -63,9 +63,76 @@ def test_render_screenshots_from_batch_happy_path(tmp_path) -> None:
 
         assert "label1" in results
         assert "label2" in results
-        assert results["label1"] == [tmp_path / "label1_00010.png", tmp_path / "label1_00020.png"]
-        assert results["label2"] == [tmp_path / "label2_00030.png"]
+        assert results["label1"] == [tmp_path / "10 - label1.png", tmp_path / "20 - label1.png"]
+        assert results["label2"] == [tmp_path / "30 - label2.png"]
         mock_batch.assert_called_once()
+        assert mock_batch.call_args.kwargs["parallelism"] == 1
+
+
+def test_render_screenshots_from_batch_passes_internal_parallelism(tmp_path) -> None:
+    config = ConfigSchema(color=ColorConfig(enable_tonemap=False), screenshots={"use_ffmpeg": True})
+    ffmpeg_runner = MagicMock()
+
+    request = ScreenshotBatchRequest(
+        clip_path=Path("vid1.mkv"),
+        label="label1",
+        source_frames=[10],
+        display_frames=[10],
+        selection_labels=[None],
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=240,
+        probe_is_hdr=False,
+    )
+
+    with patch("frame_compare.render.batch.orchestrator.render_batch") as mock_batch:
+        mock_batch.return_value = [tmp_path / "10 - label1.png"]
+
+        render_screenshots_from_batch(
+            batch_requests=[request],
+            output_dir=tmp_path,
+            config=config,
+            options=BatchRenderOptions(
+                renderer="ffmpeg",
+                ffmpeg_runner=ffmpeg_runner,
+                parallelism=2,
+            ),
+        )
+
+        assert mock_batch.call_args.kwargs["parallelism"] == 2
+
+
+def test_render_screenshots_from_batch_clamps_internal_parallelism_to_one(tmp_path) -> None:
+    config = ConfigSchema(color=ColorConfig(enable_tonemap=False), screenshots={"use_ffmpeg": True})
+    ffmpeg_runner = MagicMock()
+
+    request = ScreenshotBatchRequest(
+        clip_path=Path("vid1.mkv"),
+        label="label1",
+        source_frames=[10],
+        display_frames=[10],
+        selection_labels=[None],
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=240,
+        probe_is_hdr=False,
+    )
+
+    with patch("frame_compare.render.batch.orchestrator.render_batch") as mock_batch:
+        mock_batch.return_value = [tmp_path / "10 - label1.png"]
+
+        render_screenshots_from_batch(
+            batch_requests=[request],
+            output_dir=tmp_path,
+            config=config,
+            options=BatchRenderOptions(
+                renderer="ffmpeg",
+                ffmpeg_runner=ffmpeg_runner,
+                parallelism=0,
+            ),
+        )
+
+        assert mock_batch.call_args.kwargs["parallelism"] == 1
 
 
 def test_render_screenshots_from_batch_rejects_unknown_hdr_for_ffmpeg_tonemap(
@@ -128,7 +195,7 @@ def test_render_screenshots_from_batch_renderer_auto_path(tmp_path) -> None:
         mock_loader.load.return_value = mock_source
 
         with patch("frame_compare.render.batch.orchestrator.render_batch") as mock_batch:
-            mock_batch.return_value = [tmp_path / "label1_00010.png"]
+            mock_batch.return_value = [tmp_path / "10 - label1.png"]
 
             results = render_screenshots_from_batch(
                 batch_requests=[req],
@@ -141,7 +208,7 @@ def test_render_screenshots_from_batch_renderer_auto_path(tmp_path) -> None:
                 ),
             )
 
-            assert results["label1"] == [tmp_path / "label1_00010.png"]
+            assert results["label1"] == [tmp_path / "10 - label1.png"]
             mock_loader.load.assert_called_once_with(Path("vid1.mkv"))
 
 
@@ -174,6 +241,46 @@ def test_render_screenshots_from_batch_rejects_mismatched_frame_metadata(tmp_pat
     ffmpeg_runner.extract_frame.assert_not_called()
 
 
+def test_render_screenshots_from_batch_rejects_known_out_of_range_source_frame(
+    tmp_path: Path,
+) -> None:
+    config = ConfigSchema(color=ColorConfig(enable_tonemap=False), screenshots={"use_ffmpeg": True})
+    ffmpeg_runner = MagicMock()
+    request = ScreenshotBatchRequest(
+        clip_path=Path("vid1.mkv"),
+        label="vid1",
+        source_frames=[240],
+        display_frames=[999],
+        selection_labels=[None],
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=240,
+        probe_is_hdr=False,
+    )
+
+    with patch("frame_compare.render.batch.orchestrator.render_batch") as mock_batch:
+        with pytest.raises(
+            ValueError,
+            match=(
+                "ScreenshotBatchRequest 'vid1' requested source frame 240 "
+                "outside valid range 0..239 for vid1.mkv"
+            ),
+        ):
+            render_screenshots_from_batch(
+                batch_requests=[request],
+                output_dir=tmp_path,
+                config=config,
+                options=BatchRenderOptions(
+                    overlay_mode=config.screenshots.overlay_mode,
+                    renderer="ffmpeg",
+                    ffmpeg_runner=ffmpeg_runner,
+                ),
+            )
+
+        mock_batch.assert_not_called()
+    ffmpeg_runner.extract_frame.assert_not_called()
+
+
 def test_render_screenshots_from_batch_rejects_duplicate_output_names_after_sanitization(
     tmp_path: Path,
 ) -> None:
@@ -181,7 +288,7 @@ def test_render_screenshots_from_batch_rejects_duplicate_output_names_after_sani
     ffmpeg_runner = MagicMock()
     req1 = ScreenshotBatchRequest(
         clip_path=Path("vid1.mkv"),
-        label="A B",
+        label="Bad:Name",
         source_frames=[42],
         display_frames=[42],
         selection_labels=[None],
@@ -192,7 +299,7 @@ def test_render_screenshots_from_batch_rejects_duplicate_output_names_after_sani
     )
     req2 = ScreenshotBatchRequest(
         clip_path=Path("vid2.mkv"),
-        label="A_B",
+        label="Bad?Name",
         source_frames=[42],
         display_frames=[42],
         selection_labels=[None],
@@ -202,7 +309,7 @@ def test_render_screenshots_from_batch_rejects_duplicate_output_names_after_sani
         probe_is_hdr=False,
     )
 
-    with pytest.raises(ValueError, match="Duplicate screenshot output 'A_B_00042.png'"):
+    with pytest.raises(ValueError, match="Duplicate screenshot output '42 - Bad_Name.png'"):
         render_screenshots_from_batch(
             batch_requests=[req1, req2],
             output_dir=tmp_path,

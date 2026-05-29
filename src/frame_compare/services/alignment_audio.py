@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess  # nosec B404
 from fractions import Fraction
 from pathlib import Path
 
@@ -10,10 +9,14 @@ import numpy as np
 
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
-from frame_compare.utils.subproc import run_subprocess
+from frame_compare.utils.subproc import CalledProcessError, TimeoutExpired, run_subprocess
 
 _FFPROBE_TIMEOUT_SECONDS = 15.0
 _FFMPEG_AUDIO_TIMEOUT_SECONDS = 120.0
+
+
+def _decode_stderr(stderr: bytes) -> str:
+    return stderr.decode("utf-8", errors="replace")
 
 
 def probe_fps(video_path: Path) -> Fraction:
@@ -32,20 +35,30 @@ def probe_fps(video_path: Path) -> Fraction:
     ]
     try:
         proc = run_subprocess(argv, timeout_seconds=_FFPROBE_TIMEOUT_SECONDS)
-        output = proc.stdout.decode("utf-8").strip()
-        if not output:
-            raise FFmpegError("ffprobe returned empty output", proc.returncode)
-        return Fraction(output)
     except FileNotFoundError:
         raise FFmpegNotFoundError() from None
-    except subprocess.TimeoutExpired as e:
+    except TimeoutExpired as e:
         raise FFmpegError("ffprobe timed out", 124) from e
-    except subprocess.CalledProcessError as e:
-        raise FFmpegError(e.stderr.decode("utf-8"), e.returncode) from e
-    except FFmpegError:
-        raise
-    except Exception as e:
-        raise FFmpegError(str(e), 1) from e
+    except CalledProcessError as e:
+        raise FFmpegError(_decode_stderr(e.stderr), e.returncode) from e
+
+    output = proc.stdout.decode("utf-8").strip()
+    normalized_output = output.removesuffix(",")
+    if not normalized_output:
+        raise AudioAlignmentError(
+            f"unable to parse ffprobe FPS output for {video_path.name}: empty"
+        )
+    if "," in normalized_output:
+        raise AudioAlignmentError(
+            f"unable to parse ffprobe FPS output for {video_path.name}: {output!r}"
+        )
+
+    try:
+        return Fraction(normalized_output)
+    except (ValueError, ZeroDivisionError) as e:
+        raise AudioAlignmentError(
+            f"unable to parse ffprobe FPS output for {video_path.name}: {output!r}"
+        ) from e
 
 
 def extract_audio(video_path: Path, sample_rate: int) -> np.ndarray:
@@ -68,12 +81,12 @@ def extract_audio(video_path: Path, sample_rate: int) -> np.ndarray:
         proc = run_subprocess(argv, timeout_seconds=_FFMPEG_AUDIO_TIMEOUT_SECONDS)
     except FileNotFoundError:
         raise FFmpegNotFoundError() from None
-    except subprocess.TimeoutExpired as e:
+    except TimeoutExpired as e:
         raise FFmpegError("ffmpeg audio extraction timed out", 124) from e
-    except subprocess.CalledProcessError as e:
-        raise FFmpegError(e.stderr.decode("utf-8"), e.returncode) from e
-    except Exception as e:
-        raise FFmpegError(str(e), 1) from e
+    except CalledProcessError as e:
+        raise FFmpegError(_decode_stderr(e.stderr), e.returncode) from e
+    except OSError as e:
+        raise FFmpegError(f"ffmpeg audio extraction could not start: {e}", 1) from e
 
     if not proc.stdout:
         raise AudioAlignmentError(f"empty audio track in {video_path.name}")

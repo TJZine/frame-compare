@@ -57,7 +57,9 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     assert "config" in output
     assert str(_workspace_path("config", "config.toml")) in output
     assert "input" in output
-    assert "comparison_videos" in output
+    assert str(_workspace_path("comparison_videos")) in output
+    assert "run_folders" in output
+    assert "base paths" in output
     assert "selection" in output
     assert "mixed, n=10, seed=42" in output
     assert "audio_alignment.ffmpeg_available" in output
@@ -67,12 +69,42 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     assert "reference" in output
     assert "renderer" in output
     assert "ffmpeg" in output
-    assert "slow.pics.visibility" in output
+    assert "slow.pics" in output
+    assert "visibility" in output
     assert "unlisted" in output
-    assert "report.auto_open" in output
+    assert "report" in output
+    assert "auto_open" in output
     assert "upload" in output
     assert "disabled" in output
     assert "vspreview.available" not in output
+
+
+def test_at_a_glance_preserves_literal_brackets_in_dynamic_paths(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    config = _config()
+    config.paths.input_dir = Path("[bold]input[end]")
+    config.paths.screenshots_dir = Path("[red]screens[end]")
+    config.paths.generated_dir = Path("[cyan]generated[end]")
+    console = _console()
+
+    monkeypatch.setattr("frame_compare.cli.output.shutil.which", lambda _command: None)
+
+    print_at_a_glance(
+        console,
+        request=_request(),
+        config=config,
+        root=_workspace_path("[root]"),
+        config_path=_workspace_path("config", "[file].toml"),
+    )
+
+    output = _render(console)
+    assert "root" in output
+    assert str(_workspace_path("[root]")) in output
+    assert str(_workspace_path("config", "[file].toml")) in output
+    assert "[bold]input[end]" in output
+    assert "[red]screens[end]" in output
+    assert "[cyan]generated[end]" in output
 
 
 def test_at_a_glance_prints_vspreview_availability_when_probe_succeeds(
@@ -183,9 +215,31 @@ def test_result_summary_prints_artifact_rows_and_untruncated_warnings() -> None:
     assert "report" in output
     assert str(_workspace_path("report.html")) in output
     assert "Warnings" in output
-    assert "- metadata skipped" in output
-    assert "- upload reused" in output
+    assert "metadata skipped" in output
+    assert "upload reused" in output
     assert "more)" not in output
+
+
+def test_result_summary_preserves_literal_brackets_in_dynamic_values() -> None:
+    console = _console()
+
+    print_result_summary(
+        console,
+        result=RunResult(
+            success=True,
+            screenshot_dir=_workspace_path("screenshots", "[episode]"),
+            slowpics_url="https://slow.pics/c/[example]",
+            report_path=_workspace_path("reports", "[episode].html"),
+            warnings=["metadata [skipped]"],
+        ),
+        quiet=False,
+    )
+
+    output = _render(console)
+    assert str(_workspace_path("screenshots", "[episode]")) in output
+    assert "https://slow.pics/c/[example]" in output
+    assert str(_workspace_path("reports", "[episode].html")) in output
+    assert "metadata [skipped]" in output
 
 
 def test_result_summary_omits_warnings_panel_when_no_warnings_exist() -> None:
@@ -226,7 +280,21 @@ def test_result_summary_prints_success_fallback_and_truncates_warnings() -> None
     assert "status" in output
     assert "success" in output
     assert "Warnings" in output
-    assert "- warning 1" in output
-    assert "- warning 8" in output
-    assert "- ... (2 more)" in output
+    assert "warning 1" in output
+    assert "warning 8" in output
+    assert "(2 more)" in output
     assert "warning 9" not in output
+
+
+def test_result_summary_quiet_mode_preserves_literal_brackets() -> None:
+    console = _console()
+
+    print_result_summary(
+        console,
+        result=RunResult(success=True, screenshot_dir=_workspace_path("screenshots", "[episode]")),
+        quiet=True,
+    )
+
+    output = _render(console).strip()
+    assert output.startswith("Screenshots:")
+    assert str(_workspace_path("screenshots", "[episode]")) in output

@@ -90,6 +90,7 @@ def _compose_frame_info_text(config: OverlayConfig, mode: OverlayMode) -> str | 
         num_frames=config.num_frames,
         picture_type=config.picture_type,
         selection_label=config.selection_label,
+        include_frame_number=config.include_frame_number,
     )
     if not frame_info_lines:
         return None

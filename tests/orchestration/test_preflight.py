@@ -107,6 +107,7 @@ class TestResolvePaths:
         assert result.input_dir == (tmp_path / "comparison_videos").resolve()
         assert result.screenshots_dir == (tmp_path / "screenshots").resolve()
         assert result.generated_dir == (tmp_path / "generated").resolve()
+        assert result.cache_dir == (tmp_path / "generated" / "cache" / "analysis").resolve()
         assert result.config_dir == (tmp_path / "config").resolve()
         # config_file is derived as config_dir / "config.toml"
         assert result.config_file == (tmp_path / "config" / "config.toml").resolve()

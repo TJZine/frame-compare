@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from fractions import Fraction
 from pathlib import Path
 
+import pytest
+
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import (
     ClipFingerprint,
@@ -23,6 +25,7 @@ from frame_compare.orchestration.types import (
     RunRequest,
 )
 from frame_compare.utils.progress import NullProgressReporter
+from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 from frame_compare.utils.types import WorkspacePaths
 
 
@@ -132,7 +135,7 @@ def test_execute_phases_reports_skipped_phase_lifecycle(tmp_path: Path) -> None:
         def __init__(self) -> None:
             self.start_phase_calls: list[tuple[str, int]] = []
             self.set_description_calls: list[str] = []
-            self.complete_phase_calls: list[None] = []
+            self.complete_phase_calls: list[ProgressPhaseStatus] = []
             self.advance_calls: list[int] = []
 
         def start_phase(self, name: str, total: int) -> None:
@@ -144,8 +147,11 @@ def test_execute_phases_reports_skipped_phase_lifecycle(tmp_path: Path) -> None:
         def set_description(self, desc: str) -> None:
             self.set_description_calls.append(desc)
 
-        def complete_phase(self) -> None:
-            self.complete_phase_calls.append(None)
+        def complete_phase(
+            self,
+            status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+        ) -> None:
+            self.complete_phase_calls.append(status)
 
     reporter = SpyReporter()
 
@@ -168,7 +174,10 @@ def test_execute_phases_reports_skipped_phase_lifecycle(tmp_path: Path) -> None:
 
     assert reporter.start_phase_calls == [("skip", 1), ("next", 1)]
     assert reporter.set_description_calls == ["Skipped"]
-    assert len(reporter.complete_phase_calls) == 2
+    assert reporter.complete_phase_calls == [
+        ProgressPhaseStatus.SKIPPED,
+        ProgressPhaseStatus.COMPLETED,
+    ]
     assert phases[0].status is PhaseStatus.SKIPPED
     assert phases[1].status is PhaseStatus.COMPLETED
 
@@ -202,6 +211,86 @@ def test_execute_phases_warn_only_failure_marks_warned_and_continues(
     assert executed == ["warn", "after"]
     assert phases[0].status is PhaseStatus.WARNED
     assert phases[1].status is PhaseStatus.COMPLETED
+
+
+def test_execute_phases_warn_only_failure_reports_warned_progress_status(
+    tmp_path: Path,
+) -> None:
+    context = _make_context(tmp_path)
+
+    class SpyReporter:
+        def __init__(self) -> None:
+            self.complete_phase_calls: list[ProgressPhaseStatus] = []
+
+        def start_phase(self, name: str, total: int) -> None:
+            del name, total
+
+        def advance(self, amount: int = 1) -> None:
+            del amount
+
+        def set_description(self, desc: str) -> None:
+            del desc
+
+        def complete_phase(
+            self,
+            status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+        ) -> None:
+            self.complete_phase_calls.append(status)
+
+    reporter = SpyReporter()
+
+    async def phase_warn(_: RunContext) -> None:
+        raise RuntimeError("boom")
+
+    async def phase_after(_: RunContext) -> None:
+        return None
+
+    phases = [
+        Phase(name="warn", execute=phase_warn, warn_only=True),
+        Phase(name="after", execute=phase_after),
+    ]
+
+    asyncio.run(execute_phases(phases, context, reporter))
+
+    assert reporter.complete_phase_calls == [
+        ProgressPhaseStatus.WARNED,
+        ProgressPhaseStatus.COMPLETED,
+    ]
+
+
+def test_execute_phases_fail_fast_failure_reports_failed_progress_status(
+    tmp_path: Path,
+) -> None:
+    context = _make_context(tmp_path)
+
+    class SpyReporter:
+        def __init__(self) -> None:
+            self.complete_phase_calls: list[ProgressPhaseStatus] = []
+
+        def start_phase(self, name: str, total: int) -> None:
+            del name, total
+
+        def advance(self, amount: int = 1) -> None:
+            del amount
+
+        def set_description(self, desc: str) -> None:
+            del desc
+
+        def complete_phase(
+            self,
+            status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+        ) -> None:
+            self.complete_phase_calls.append(status)
+
+    reporter = SpyReporter()
+
+    async def phase_fail(_: RunContext) -> None:
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        asyncio.run(execute_phases([Phase(name="fail", execute=phase_fail)], context, reporter))
+
+    assert reporter.complete_phase_calls == [ProgressPhaseStatus.FAILED]
 
 
 def test_execute_phases_fail_fast_failure_with_skip_condition_marks_failed_and_raises(

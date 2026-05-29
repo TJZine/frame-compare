@@ -13,6 +13,7 @@ from frame_compare.render.types import (
     EncoderSettings,
     RenderRequest,
 )
+from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 
 
 @pytest.fixture
@@ -142,6 +143,21 @@ def test_render_batch_parallel_waits_for_in_flight_work_before_raising() -> None
     assert len(render_exceptions) == 1
     assert isinstance(render_exceptions[0], RuntimeError)
     assert str(render_exceptions[0]) == "Failed immediately"
+
+
+def test_render_batch_marks_progress_failed_on_exception(mock_render_request) -> None:
+    reporter = MagicMock(spec=ProgressReporter)
+
+    with (
+        patch(
+            "frame_compare.render.batch.orchestrator.render_frame",
+            side_effect=RuntimeError("Failed"),
+        ),
+        pytest.raises(RuntimeError, match="Failed"),
+    ):
+        render_batch([mock_render_request], parallelism=1, reporter=reporter)
+
+    reporter.complete_phase.assert_called_once_with(ProgressPhaseStatus.FAILED)
 
 
 def test_render_batch_sequential(mock_render_request):

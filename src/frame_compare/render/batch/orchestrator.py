@@ -23,7 +23,7 @@ from frame_compare.render.types import (
     ScreenshotBatchRequest,
     ScreenshotRenderOptions,
 )
-from frame_compare.utils.progress_protocol import ProgressReporter
+from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 
 if TYPE_CHECKING:
     from frame_compare.config.schema import ConfigSchema
@@ -160,14 +160,18 @@ def render_batch(
     if reporter:
         reporter.start_phase("Rendering", len(requests))
 
+    phase_status = ProgressPhaseStatus.COMPLETED
     try:
         if parallelism <= 1:
             _render_batch_sequential(requests, results, reporter)
         else:
             _render_batch_parallel(requests, results, parallelism, reporter)
+    except Exception:
+        phase_status = ProgressPhaseStatus.FAILED
+        raise
     finally:
         if reporter:
-            reporter.complete_phase()
+            reporter.complete_phase(phase_status)
 
     return _completed_render_results(results)
 
@@ -227,6 +231,7 @@ def render_screenshots(
         req = ScreenshotBatchRequest(
             clip_path=clip_path,
             label=label,
+            filename_label=clip_path.stem,
             source_frames=frames,
             display_frames=display_frames,
             selection_labels=sel_labels,
@@ -288,5 +293,9 @@ def render_screenshots_from_batch(
         ffmpeg_runner=resolved_ffmpeg_runner,
     )
 
-    rendered_paths = render_batch(all_requests, parallelism=1, reporter=resolved_options.reporter)
+    rendered_paths = render_batch(
+        all_requests,
+        parallelism=max(1, resolved_options.parallelism),
+        reporter=resolved_options.reporter,
+    )
     return render_batch_results_by_label(batch_requests, rendered_paths, label_to_range)

@@ -108,6 +108,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             clips=build_consolidated_fps_report(reference, comparisons),
             json_output=request.json_output,
             quiet=request.quiet,
+            no_color=request.no_color,
         )
         load_sources_end = local_deps.clock()
         state.phase_timings["load_sources"] = (
@@ -140,6 +141,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             clips=build_consolidated_fps_report(context.reference, context.comparisons),
             json_output=request.json_output,
             quiet=request.quiet,
+            no_color=request.no_color,
         )
         await execute_phases(phase_plan.after_align, context, reporter)
         run_end = local_deps.clock()

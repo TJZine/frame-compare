@@ -3,21 +3,26 @@
 from __future__ import annotations
 
 import asyncio
-import json
+from fractions import Fraction
 from pathlib import Path
+from typing import TYPE_CHECKING, NoReturn, cast
 
 import httpx
 import pytest
 
 import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError
+from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.config.loader import load_config
+from frame_compare.config.schema import AnalysisConfig
 from frame_compare.orchestration import phase_tasks, preparation
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.services.alignment import CACHE_FILE_NAME
 from frame_compare.services.errors import TmdbError
 from frame_compare.services.run_folder import derive_run_folder_name
 from frame_compare.services.types import MetadataConfig, TmdbMetadata
+from frame_compare.utils.cache_errors import CacheCorruptionError
+from frame_compare.vs.types import SourceInfo
 
 from .execute_run_helpers import (
     RUN_FOLDERS_CONFIG,
@@ -28,14 +33,45 @@ from .execute_run_helpers import (
     write_metrics_cache,
 )
 
+if TYPE_CHECKING:
+    import vapoursynth as vs
 
-def test_execute_run_no_cache_deletes_run_folder_cache_when_enabled(
+
+class ClipStub:
+    num_frames = 100
+
+
+class FormatStub:
+    pass
+
+
+class AnalysisCapableVSLoader:
+    def load(self, path: Path) -> SourceInfo:
+        del path
+        return SourceInfo(
+            clip=cast("vs.VideoNode", ClipStub()),
+            width=1920,
+            height=1080,
+            num_frames=100,
+            fps=Fraction(24, 1),
+            format=cast("vs.VideoFormat", FormatStub()),
+            frame_props={},
+            is_hdr=False,
+            hdr_metadata=None,
+        )
+
+    def ensure_core(self) -> object:
+        raise RuntimeError("ensure_core should not be called in this test")
+
+
+def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
-    create_video_files(input_dir, "source.mkv", "comp.mkv")
+    create_video_files(input_dir, "source.mkv")
+    config = load_config(tmp_path / "config" / "config.toml")
 
     run_name = "Movie (2024)"
     monkeypatch.setattr(
@@ -43,11 +79,14 @@ def test_execute_run_no_cache_deletes_run_folder_cache_when_enabled(
     )
     run_generated_dir = input_dir / run_name / "generated"
 
-    analysis_cache_dir = run_generated_dir / "cache"
-    analysis_cache_dir.mkdir(parents=True, exist_ok=True)
-    analysis_cache_path = analysis_cache_dir / cache_io.CACHE_FILENAME
-    analysis_cache_path.write_text("{}", encoding="utf-8")
+    analysis_cache_dir = tmp_path / "generated" / "cache" / "analysis"
+    source_path = input_dir / "source.mkv"
+    write_metrics_cache(analysis_cache_dir, source_path=source_path, config=config)
+    fingerprint = cache_io.compute_cache_key([source_path], config.analysis)
+    analysis_cache_path = cache_io.find_metrics_cache_file(analysis_cache_dir, fingerprint)
+    assert analysis_cache_path is not None
 
+    run_generated_dir.mkdir(parents=True, exist_ok=True)
     offsets_path = run_generated_dir / CACHE_FILE_NAME
     offsets_path.write_text('version = "1"\n', encoding="utf-8")
 
@@ -64,7 +103,7 @@ def test_execute_run_no_cache_deletes_run_folder_cache_when_enabled(
     asyncio.run(execute_run(request, deps=deps))
 
     assert not analysis_cache_path.exists()
-    assert not offsets_path.exists()
+    assert offsets_path.exists()
 
 
 def test_execute_run_from_cache_only_does_not_reserve_run_folder_when_metrics_cache_missing(
@@ -92,43 +131,17 @@ def test_execute_run_from_cache_only_does_not_reserve_run_folder_when_metrics_ca
     assert not run_dir.exists()
 
 
-def test_execute_run_from_cache_only_uses_run_folder_cache_when_enabled(
+def test_execute_run_from_cache_only_uses_shared_cache_when_run_folders_enabled(
     tmp_path: Path,
 ) -> None:
     create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
 
-    run_name = derive_run_folder_name(filenames=["source.mkv"])
-    run_generated_dir = input_dir / run_name / "generated"
-    cache_dir = run_generated_dir / "cache"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_path = cache_dir / cache_io.CACHE_FILENAME
-
     config = load_config(tmp_path / "config" / "config.toml")
     source_path = input_dir / "source.mkv"
-    fingerprint = cache_io.compute_cache_key([source_path], config.analysis)
-    cache_payload = {
-        "version": cache_io.CACHE_VERSION,
-        "fingerprint": fingerprint,
-        "luminance": [0.1] * 100,
-        "motion": [0.2] * 100,
-        "metadata": {
-            "frame_count": 100,
-            "fps": "24",
-            "config_fingerprint": fingerprint,
-            "clips": [
-                {
-                    "path": str(source_path),
-                    "size": 0,
-                    "mtime": 0.0,
-                    "sha1": None,
-                }
-            ],
-            "version": cache_io.CACHE_VERSION,
-        },
-    }
-    cache_path.write_text(json.dumps(cache_payload), encoding="utf-8")
+    cache_dir = tmp_path / "generated" / "cache" / "analysis"
+    write_metrics_cache(cache_dir, source_path=source_path, config=config)
 
     request = RunRequest(
         root=tmp_path,
@@ -142,14 +155,128 @@ def test_execute_run_from_cache_only_uses_run_folder_cache_when_enabled(
 
     result = asyncio.run(execute_run(request, deps=deps))
 
+    run_name = derive_run_folder_name(filenames=["source.mkv"])
     assert result.success is True
     assert result.cache_hit is True
     assert result.warnings == []
-    assert result.screenshot_dir == (run_generated_dir.parent / "screenshots").resolve()
+    assert result.screenshot_dir == (input_dir / run_name / "screenshots").resolve()
     assert result.slowpics_url is None
+    assert not (input_dir / run_name / "generated" / "cache" / "analysis").exists()
 
 
-def test_execute_run_from_cache_only_preserves_existing_run_folder_casing(
+def test_execute_run_custom_generated_dir_run_folders_saves_and_loads_shared_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_content = """\
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "custom_generated"
+config_dir = "config"
+use_run_folders = true
+
+[audio_alignment]
+enable = false
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+"""
+    create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    create_video_files(input_dir, "source.mkv")
+    source_path = input_dir / "source.mkv"
+    config = load_config(tmp_path / "config" / "config.toml")
+    fingerprint = cache_io.compute_cache_key([source_path], config.analysis)
+
+    def _fake_calculate_metrics(
+        *,
+        video_paths: list[Path],
+        config: AnalysisConfig,
+        cache_dir: Path,
+        **_kwargs: object,
+    ) -> FrameMetrics:
+        cache_fingerprint = cache_io.compute_cache_key(video_paths, config)
+        stats_by_path = {path: path.stat() for path in video_paths}
+        metrics = FrameMetrics(
+            luminance=[0.1] * 100,
+            motion=[0.0] * 100,
+            metadata=MetricsMetadata(
+                frame_count=100,
+                fps=Fraction(24, 1),
+                config_fingerprint=cache_fingerprint,
+                clips=[
+                    ClipIdentity(
+                        path=str(path),
+                        size=stats_by_path[path].st_size,
+                        mtime=stats_by_path[path].st_mtime,
+                    )
+                    for path in video_paths
+                ],
+                version=cache_io.CACHE_VERSION,
+            ),
+        )
+        cache_io.save_metrics_cache(metrics, cache_dir)
+        return metrics
+
+    monkeypatch.setattr(phase_tasks, "calculate_metrics", _fake_calculate_metrics)
+
+    first = asyncio.run(
+        execute_run(
+            RunRequest(
+                root=tmp_path,
+                skip_analysis=False,
+                skip_metadata=True,
+                skip_dovi=True,
+                no_upload=True,
+            ),
+            deps=RunDependencies(
+                vs_loader=AnalysisCapableVSLoader(),
+                ffmpeg_runner=FakeFFmpegRunner(),
+            ),
+        )
+    )
+
+    shared_cache_dir = tmp_path / "custom_generated" / "cache" / "analysis"
+    shared_cache_path = cache_io.find_metrics_cache_file(shared_cache_dir, fingerprint)
+    assert first.success is True
+    assert first.cache_hit is False
+    assert shared_cache_path is not None
+    assert not any(input_dir.glob("*/generated/cache/analysis/*.compframes"))
+
+    def _fail_calculate_metrics(**_kwargs: object) -> NoReturn:
+        raise AssertionError("from-cache-only should load the shared analysis cache")
+
+    monkeypatch.setattr(phase_tasks, "calculate_metrics", _fail_calculate_metrics)
+
+    second = asyncio.run(
+        execute_run(
+            RunRequest(
+                root=tmp_path,
+                from_cache_only=True,
+                skip_analysis=False,
+                skip_metadata=True,
+                skip_dovi=True,
+                no_upload=True,
+            ),
+            deps=RunDependencies(
+                vs_loader=AnalysisCapableVSLoader(),
+                ffmpeg_runner=FakeFFmpegRunner(),
+            ),
+        )
+    )
+
+    assert second.success is True
+    assert second.cache_hit is True
+    assert second.screenshot_dir is not None
+    assert second.screenshot_dir.parent.parent == input_dir
+    assert len([path for path in input_dir.iterdir() if path.is_dir()]) == 2
+
+
+def test_execute_run_normal_rerun_creates_fresh_run_folder_and_uses_shared_cache(
     tmp_path: Path,
 ) -> None:
     create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
@@ -157,8 +284,44 @@ def test_execute_run_from_cache_only_preserves_existing_run_folder_casing(
     create_video_files(input_dir, "source.mkv")
 
     run_name = derive_run_folder_name(filenames=["source.mkv"])
-    existing_run_name = run_name.upper()
-    run_generated_dir = input_dir / existing_run_name / "generated"
+    existing_run_dir = input_dir / run_name
+    existing_run_dir.mkdir()
+    config = load_config(tmp_path / "config" / "config.toml")
+    source_path = input_dir / "source.mkv"
+    write_metrics_cache(
+        tmp_path / "generated" / "cache" / "analysis",
+        source_path=source_path,
+        config=config,
+    )
+
+    request = RunRequest(
+        root=tmp_path,
+        skip_analysis=False,
+        skip_metadata=True,
+        skip_dovi=True,
+        no_upload=True,
+    )
+    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+
+    result = asyncio.run(execute_run(request, deps=deps))
+
+    assert result.success is True
+    assert result.cache_hit is True
+    assert result.screenshot_dir != (existing_run_dir / "screenshots").resolve()
+    assert result.screenshot_dir is not None
+    assert result.screenshot_dir.parent.parent == input_dir
+    assert len([path for path in input_dir.iterdir() if path.is_dir()]) == 2
+
+
+def test_execute_run_from_cache_only_ignores_old_run_folder_cache(
+    tmp_path: Path,
+) -> None:
+    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    input_dir = tmp_path / "comparison_videos"
+    create_video_files(input_dir, "source.mkv")
+
+    run_name = derive_run_folder_name(filenames=["source.mkv"])
+    run_generated_dir = input_dir / run_name / "generated"
     source_path = input_dir / "source.mkv"
     config = load_config(tmp_path / "config" / "config.toml")
     write_metrics_cache(run_generated_dir / "cache", source_path=source_path, config=config)
@@ -173,14 +336,20 @@ def test_execute_run_from_cache_only_preserves_existing_run_folder_casing(
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
-    result = asyncio.run(execute_run(request, deps=deps))
+    with pytest.raises(MetricsCalculationError):
+        asyncio.run(execute_run(request, deps=deps))
 
-    assert result.success is True
-    assert result.cache_hit is True
-    assert result.screenshot_dir == (input_dir / existing_run_name / "screenshots").resolve()
+    assert sorted(path.name for path in input_dir.iterdir() if path.is_dir()) == [run_name]
+    assert (
+        cache_io.find_metrics_cache_file(
+            tmp_path / "generated" / "cache" / "analysis",
+            cache_io.compute_cache_key([source_path], config.analysis),
+        )
+        is None
+    )
 
 
-def test_execute_run_from_cache_only_ignores_prefetched_tmdb_run_folder_name(
+def test_execute_run_from_cache_only_missing_shared_cache_skips_metadata_prefetch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -209,36 +378,7 @@ unattended = true
     create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
-
-    run_name = derive_run_folder_name(filenames=["source.mkv"])
-    run_generated_dir = input_dir / run_name / "generated"
-    cache_dir = run_generated_dir / "cache"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-
-    config = load_config(tmp_path / "config" / "config.toml")
-    source_path = input_dir / "source.mkv"
-    fingerprint = cache_io.compute_cache_key([source_path], config.analysis)
-    cache_payload = {
-        "version": cache_io.CACHE_VERSION,
-        "fingerprint": fingerprint,
-        "luminance": [0.1] * 100,
-        "motion": [0.2] * 100,
-        "metadata": {
-            "frame_count": 100,
-            "fps": "24",
-            "config_fingerprint": fingerprint,
-            "clips": [
-                {
-                    "path": str(source_path),
-                    "size": 0,
-                    "mtime": 0.0,
-                    "sha1": None,
-                }
-            ],
-            "version": cache_io.CACHE_VERSION,
-        },
-    }
-    (cache_dir / cache_io.CACHE_FILENAME).write_text(json.dumps(cache_payload), encoding="utf-8")
+    metadata_calls: list[list[str]] = []
 
     async def _resolve_metadata(
         *,
@@ -246,7 +386,8 @@ unattended = true
         config: MetadataConfig,
         client: httpx.AsyncClient,
     ) -> TmdbMetadata:
-        del filenames, config, client
+        del config, client
+        metadata_calls.append(filenames)
         return TmdbMetadata(
             tmdb_id=123,
             title="Fight Club",
@@ -267,11 +408,98 @@ unattended = true
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
-    result = asyncio.run(execute_run(request, deps=deps))
+    with pytest.raises(MetricsCalculationError):
+        asyncio.run(execute_run(request, deps=deps))
 
-    assert result.success is True
-    assert result.cache_hit is True
-    assert result.screenshot_dir == (input_dir / run_name / "screenshots").resolve()
+    assert metadata_calls == []
+    assert [path.name for path in input_dir.iterdir() if path.is_dir()] == []
+
+
+def test_execute_run_from_cache_only_invalid_shared_cache_skips_metadata_prefetch_and_reserve(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_content = """\
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "generated"
+config_dir = "config"
+use_run_folders = true
+
+[audio_alignment]
+enable = false
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+
+[tmdb]
+enabled = true
+api_key = "test-key"
+unattended = true
+"""
+    create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    create_video_files(input_dir, "source.mkv")
+    source_path = input_dir / "source.mkv"
+    config = load_config(tmp_path / "config" / "config.toml")
+    fingerprint = cache_io.compute_cache_key([source_path], config.analysis)
+    cache_dir = tmp_path / "generated" / "cache" / "analysis"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / cache_io.metrics_cache_filename([source_path], fingerprint)).write_text(
+        "{not-json",
+        encoding="utf-8",
+    )
+    metadata_calls: list[list[str]] = []
+    reserve_calls: list[list[str]] = []
+
+    async def _resolve_metadata(
+        *,
+        filenames: list[str],
+        config: MetadataConfig,
+        client: httpx.AsyncClient,
+    ) -> TmdbMetadata:
+        del config, client
+        metadata_calls.append(filenames)
+        return TmdbMetadata(
+            tmdb_id=123,
+            title="Fight Club",
+            original_title="Fight Club",
+            year=1999,
+            media_type="movie",
+        )
+
+    def _reserve_run_folder(
+        input_dir: Path,
+        filenames: list[str],
+        tmdb_metadata: TmdbMetadata | None,
+    ) -> Path:
+        del input_dir, tmdb_metadata
+        reserve_calls.append(filenames)
+        return Path("should-not-be-used")
+
+    monkeypatch.setattr(phase_tasks, "resolve_metadata", _resolve_metadata)
+    monkeypatch.setattr(preparation, "reserve_run_folder", _reserve_run_folder)
+
+    request = RunRequest(
+        root=tmp_path,
+        from_cache_only=True,
+        skip_analysis=False,
+        skip_metadata=False,
+        skip_dovi=True,
+        no_upload=True,
+    )
+    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+
+    with pytest.raises(CacheCorruptionError):
+        asyncio.run(execute_run(request, deps=deps))
+
+    assert metadata_calls == []
+    assert reserve_calls == []
+    assert [path.name for path in input_dir.iterdir() if path.is_dir()] == []
 
 
 def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(
@@ -357,6 +585,8 @@ enabled = true
 api_key = "test-key"
 unattended = true
 timeout_seconds = 7.5
+year_tolerance = 1
+category_preference = "movie"
 """
     create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"
@@ -406,8 +636,20 @@ timeout_seconds = 7.5
     assert prefetch_calls == [["source.mkv"]]
     assert phase_calls == [["source.mkv"]]
     assert captured_configs == [
-        MetadataConfig(api_key="test-key", unattended=True, timeout_seconds=7.5),
-        MetadataConfig(api_key="test-key", unattended=True, timeout_seconds=7.5),
+        MetadataConfig(
+            api_key="test-key",
+            unattended=True,
+            timeout_seconds=7.5,
+            year_tolerance=1,
+            category_preference="movie",
+        ),
+        MetadataConfig(
+            api_key="test-key",
+            unattended=True,
+            timeout_seconds=7.5,
+            year_tolerance=1,
+            category_preference="movie",
+        ),
     ]
 
 

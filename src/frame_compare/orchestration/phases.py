@@ -8,18 +8,18 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 import structlog
 
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import RunContext
-from frame_compare.utils.progress_protocol import ProgressReporter
+from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 
 log = structlog.get_logger()
 
 
-class PhaseStatus(str, Enum):
+class PhaseStatus(StrEnum):
     """Canonical phase execution status."""
 
     PENDING = "pending"
@@ -61,18 +61,21 @@ async def execute_phases(
             phase.status = PhaseStatus.SKIPPED
             reporter.start_phase(phase.name, total=phase.progress_total)
             reporter.set_description("Skipped")
-            reporter.complete_phase()
+            reporter.complete_phase(ProgressPhaseStatus.SKIPPED)
             continue
 
         phase.status = PhaseStatus.RUNNING
         reporter.start_phase(phase.name, total=phase.progress_total)
+        phase_progress_status = ProgressPhaseStatus.COMPLETED
         try:
             await phase.execute(context)
         except Exception as exc:
             if not phase.warn_only:
                 phase.status = PhaseStatus.FAILED
+                phase_progress_status = ProgressPhaseStatus.FAILED
                 raise
             phase.status = PhaseStatus.WARNED
+            phase_progress_status = ProgressPhaseStatus.WARNED
             log.warning(
                 "phase_warned",
                 phase=phase.name,
@@ -84,4 +87,4 @@ async def execute_phases(
             phase.status = PhaseStatus.COMPLETED
             reporter.advance(1)
         finally:
-            reporter.complete_phase()
+            reporter.complete_phase(phase_progress_status)

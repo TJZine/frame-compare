@@ -11,7 +11,7 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
-from frame_compare.utils.progress_protocol import ProgressReporter
+from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 
 log = structlog.get_logger()
 
@@ -35,7 +35,16 @@ class NullProgressReporter:
     def set_description(self, desc: str) -> None:
         del desc
 
-    def complete_phase(self) -> None:
+    def complete_phase(
+        self,
+        status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+    ) -> None:
+        del self, status
+
+    def suspend(self) -> None:
+        del self
+
+    def resume(self) -> None:
         del self
 
 
@@ -55,6 +64,7 @@ class RichProgressReporter:
         self._task_id: TaskID | None = None
         self._task_stack: list[TaskID] = []
         self._task_totals: dict[TaskID, int] = {}
+        self._suspend_depth = 0
 
     def start_phase(self, name: str, total: int) -> None:
         """Start a new phase with a rich progress bar."""
@@ -75,11 +85,24 @@ class RichProgressReporter:
         if self._task_id is not None:
             self._progress.update(self._task_id, description=desc)
 
-    def complete_phase(self) -> None:
+    def complete_phase(
+        self,
+        status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+    ) -> None:
         """Complete the current phase and stop progress if all tasks done."""
         if self._task_id is not None:
             total = self._task_totals.get(self._task_id)
-            if total is not None:
+            if status == ProgressPhaseStatus.SKIPPED:
+                self._progress.update(self._task_id, description="Skipped")
+            elif status == ProgressPhaseStatus.WARNED:
+                self._progress.update(self._task_id, description="Warning")
+            elif status == ProgressPhaseStatus.FAILED:
+                self._progress.update(self._task_id, description="Failed")
+
+            if total is not None and status in {
+                ProgressPhaseStatus.COMPLETED,
+                ProgressPhaseStatus.SKIPPED,
+            }:
                 self._progress.update(self._task_id, completed=total)
             self._progress.remove_task(self._task_id)
             self._task_totals.pop(self._task_id, None)
@@ -91,6 +114,24 @@ class RichProgressReporter:
 
         if self._progress.live.is_started:
             self._progress.stop()
+
+    def suspend(self) -> None:
+        """Pause live progress rendering during blocking terminal interaction."""
+        self._suspend_depth += 1
+        if self._suspend_depth == 1 and self._progress.live.is_started:
+            self._progress.stop()
+
+    def resume(self) -> None:
+        """Resume live progress rendering after blocking terminal interaction."""
+        if self._suspend_depth == 0:
+            return
+        self._suspend_depth -= 1
+        if (
+            self._suspend_depth == 0
+            and self._task_id is not None
+            and not self._progress.live.is_started
+        ):
+            self._progress.start()
 
 
 class LogProgressReporter:
@@ -138,9 +179,12 @@ class LogProgressReporter:
         """No-op for log reporter."""
         del desc
 
-    def complete_phase(self) -> None:
+    def complete_phase(
+        self,
+        status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+    ) -> None:
         """Log phase completion."""
-        log.info("phase_completed", phase=self._name)
+        log.info("phase_completed", phase=self._name, status=status.value)
         if self._task_stack:
             self._name, self._total, self._current, self._last_logged_milestone = (
                 self._task_stack.pop()
@@ -150,3 +194,11 @@ class LogProgressReporter:
         self._total = 0
         self._current = 0
         self._last_logged_milestone = 0
+
+    def suspend(self) -> None:
+        """No-op for log reporter."""
+        return
+
+    def resume(self) -> None:
+        """No-op for log reporter."""
+        return

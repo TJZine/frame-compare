@@ -13,10 +13,11 @@ from typing import TYPE_CHECKING
 import httpx
 
 import frame_compare.analysis.cache_io as cache_io
+from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.frame_plan import create_frame_plan
 from frame_compare.analysis.metrics import calculate_metrics
 from frame_compare.analysis.selection import select_frames
-from frame_compare.analysis.types import SelectionBreakdown
+from frame_compare.analysis.types import CacheLoadResult, FrameMetrics, SelectionBreakdown
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import (
     ClipAlignmentState,
@@ -43,6 +44,7 @@ from frame_compare.services.publishers import publish_to_slowpics
 from frame_compare.services.report.entry import generate_report
 from frame_compare.services.report.payload import ReportData, clip_info_from_state
 from frame_compare.services.types import AlignmentConfig, MetadataConfig, TmdbMetadata
+from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 from frame_compare.utils.types import WorkspacePaths
 
 if TYPE_CHECKING:
@@ -55,6 +57,8 @@ def build_metadata_config(config: ConfigSchema) -> MetadataConfig:
         api_key=config.tmdb.api_key,
         unattended=config.tmdb.unattended,
         timeout_seconds=config.tmdb.timeout_seconds,
+        year_tolerance=config.tmdb.year_tolerance,
+        category_preference=config.tmdb.category_preference,
     )
 
 
@@ -86,24 +90,55 @@ def run_analyze_phase(
     *,
     input_videos: list[Path],
     workspace: WorkspacePaths,
+    require_cache_only: bool = False,
     vs_loader: VSLoader | None = None,
 ) -> AnalyzePhaseOutput:
     fingerprint = cache_io.compute_cache_key(input_videos, ctx.config.analysis)
     cache_result = cache_io.load_cached_metrics(workspace.cache_dir, fingerprint, clips=[])
     metrics_cache_hit = cache_result.success and cache_result.metrics is not None
-    metrics = calculate_metrics(
-        video_paths=input_videos,
-        config=ctx.config.analysis,
-        cache_dir=workspace.cache_dir,
-        reporter=ctx.reporter,
-        vs_loader=vs_loader,
-    )
+    if require_cache_only:
+        metrics = _require_cached_metrics(
+            cache_result=cache_result,
+            cache_dir=workspace.cache_dir,
+            input_videos=input_videos,
+            fingerprint=fingerprint,
+        )
+    else:
+        metrics = calculate_metrics(
+            video_paths=input_videos,
+            config=ctx.config.analysis,
+            cache_dir=workspace.cache_dir,
+            reporter=ctx.reporter,
+            vs_loader=vs_loader,
+        )
     selection = select_frames(metrics=metrics, config=ctx.config.analysis)
     return AnalyzePhaseOutput(
         selected_frames=list(selection.frames),
         selection_breakdown=selection.breakdown,
         metrics_cache_hit=metrics_cache_hit,
     )
+
+
+def _require_cached_metrics(
+    *,
+    cache_result: CacheLoadResult,
+    cache_dir: Path,
+    input_videos: list[Path],
+    fingerprint: str,
+) -> FrameMetrics:
+    if cache_result.success and cache_result.metrics is not None:
+        return cache_result.metrics
+
+    cache_path = cache_io.find_metrics_cache_file(cache_dir, fingerprint)
+    expected_cache_path = cache_dir / cache_io.metrics_cache_filename(input_videos, fingerprint)
+    error_cache_path = cache_path or expected_cache_path
+    reason = cache_result.reason
+    if reason == "corrupted":
+        raise CacheCorruptionError(error_cache_path)
+    if reason == "version_mismatch":
+        found = cache_io.read_cache_version(error_cache_path) or "unknown"
+        raise CacheVersionMismatchError(found, str(cache_io.CACHE_VERSION))
+    raise MetricsCalculationError(f"Cached metrics missing or mismatched ({reason}).")
 
 
 def selection_label_for_frame(frame: int, breakdown: SelectionBreakdown | None) -> str | None:
@@ -221,6 +256,7 @@ def run_render_phase(
             ScreenshotBatchRequest(
                 clip_path=clip.path,
                 label=clip.label,
+                filename_label=clip.path.stem,
                 source_frames=source_frames,
                 display_frames=frames,
                 selection_labels=selection_labels,
