@@ -6,6 +6,7 @@ import json
 from typing import TYPE_CHECKING, Protocol
 
 import typer
+from rich.console import Console
 
 from frame_compare.cli.errors import ExitCode
 from frame_compare.errors import JSONValue
@@ -13,6 +14,12 @@ from frame_compare.errors import JSONValue
 if TYPE_CHECKING:
     from frame_compare.orchestration.doctor import DoctorCheck, DoctorReport
     from frame_compare.utils.progress_protocol import ProgressReporter
+
+# Status icons matching legacy doctor output style.
+_STATUS_ICONS = {
+    True: "\u2705",   # ✅
+    False: "\u274c",  # ❌
+}
 
 
 class RunDoctorFn(Protocol):
@@ -64,9 +71,15 @@ def doctor_report_json(report: DoctorReport) -> dict[str, JSONValue]:
 
 
 def print_doctor_report(report: DoctorReport) -> None:
-    """Print human-readable doctor results."""
+    """Print human-readable doctor results with styled icons and aligned labels."""
+    console = Console()
+    if not report.checks:
+        return
+
+    label_width = max(len(check.name) for check, _result in report.checks)
     for check, result in report.checks:
-        status = "PASS" if result.passed else "FAIL"
-        typer.echo(f"{status} {check.name}: {result.message}")
+        icon = _STATUS_ICONS.get(result.passed, "\u2022")
+        padded_name = check.name.ljust(label_width)
+        console.print(f"{icon} {padded_name} \u2014 {result.message}")
         if result.hint:
-            typer.echo(f"  Hint: {result.hint}")
+            console.print(f"   {''.ljust(label_width)}   [dim]Hint: {result.hint}[/]")
