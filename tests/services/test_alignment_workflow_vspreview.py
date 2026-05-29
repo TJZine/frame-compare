@@ -8,11 +8,11 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
-import tomli_w
 
 from frame_compare.services.alignment import align_clips
+from frame_compare.services.alignment_cache import save_offsets_cache
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentConfig
+from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.vspreview.adapter import (
     VSPreviewAvailability,
     VSPreviewAvailabilityStatus,
@@ -22,19 +22,32 @@ from frame_compare.vspreview.errors import VSPreviewError
 from frame_compare.vspreview.overrides import load_manual_overrides
 
 
-def _write_cached_offset(workspace: Path, frame_offset: int, time_offset_seconds: float) -> None:
-    data = {
-        "version": "1",
-        "ref:comp": {
-            "reference_clip": "ref.mkv",
-            "comparison_clip": "comp.mkv",
-            "frame_offset": frame_offset,
-            "time_offset_seconds": time_offset_seconds,
-            "correlation_score": 0.95,
-            "algorithm": "cross_correlation",
-        },
-    }
-    (workspace / "audio_offsets.toml").write_text(tomli_w.dumps(data), encoding="utf-8")
+def _write_cached_offset(
+    workspace: Path,
+    *,
+    reference: Path,
+    comparison: Path,
+    frame_offset: int,
+    time_offset_seconds: float,
+) -> None:
+    save_offsets_cache(
+        workspace,
+        reference=reference,
+        comparisons=[comparison],
+        sample_rate=8000,
+        max_offset_seconds=30.0,
+        results=[
+            AlignmentResult(
+                reference_clip=reference.name,
+                comparison_clip=comparison.name,
+                frame_offset=frame_offset,
+                time_offset_seconds=time_offset_seconds,
+                correlation_score=0.95,
+                algorithm="cross_correlation",
+                source="computed",
+            )
+        ],
+    )
 
 
 def _set_interactive_terminal(monkeypatch: pytest.MonkeyPatch, user_input: str) -> None:
@@ -50,11 +63,13 @@ def _set_interactive_terminal(monkeypatch: pytest.MonkeyPatch, user_input: str) 
 @patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
 @patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
 @patch("frame_compare.services.alignment._probe_fps")
-@patch("frame_compare.services.alignment._extract_audio")
+@patch("frame_compare.services.alignment._extract_matching_audio")
+@patch("frame_compare.services.alignment._extract_reference_audio")
 @patch("frame_compare.services.alignment._cross_correlate")
 def test_align_clips_launches_vspreview_when_enabled(
     mock_corr: MagicMock,
-    mock_extract: MagicMock,
+    mock_extract_reference: MagicMock,
+    mock_extract_matching: MagicMock,
     mock_probe: MagicMock,
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
@@ -72,11 +87,8 @@ def test_align_clips_launches_vspreview_when_enabled(
     comp_b.touch()
 
     mock_probe.return_value = Fraction(24, 1)
-
-    def extract_side_effect(path: Path, sr: int) -> np.ndarray:
-        return np.ones(10, dtype=np.float32)
-
-    mock_extract.side_effect = extract_side_effect
+    mock_extract_reference.return_value = (np.ones(10, dtype=np.float32), object())
+    mock_extract_matching.return_value = np.ones(10, dtype=np.float32)
     mock_corr.return_value = (0, 0.99)
     mock_check_availability.return_value = VSPreviewAvailability(
         status=VSPreviewAvailabilityStatus.AVAILABLE,
@@ -101,9 +113,11 @@ def test_align_clips_launches_vspreview_when_enabled(
 @patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
 @patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
 @patch("frame_compare.services.alignment._probe_fps")
-@patch("frame_compare.services.alignment._extract_audio")
+@patch("frame_compare.services.alignment._extract_matching_audio")
+@patch("frame_compare.services.alignment._extract_reference_audio")
 def test_align_clips_full_cache_hit_still_launches_vspreview_when_enabled(
-    mock_extract: MagicMock,
+    mock_extract_reference: MagicMock,
+    mock_extract_matching: MagicMock,
     mock_probe: MagicMock,
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
@@ -117,10 +131,17 @@ def test_align_clips_full_cache_hit_still_launches_vspreview_when_enabled(
     comp = tmp_path / "comp.mkv"
     ref.touch()
     comp.touch()
-    _write_cached_offset(tmp_path, frame_offset=12, time_offset_seconds=0.5)
+    _write_cached_offset(
+        tmp_path,
+        reference=ref,
+        comparison=comp,
+        frame_offset=12,
+        time_offset_seconds=0.5,
+    )
 
     mock_probe.side_effect = AssertionError("should not be called")
-    mock_extract.side_effect = AssertionError("should not be called")
+    mock_extract_reference.side_effect = AssertionError("should not be called")
+    mock_extract_matching.side_effect = AssertionError("should not be called")
     mock_check_availability.return_value = VSPreviewAvailability(
         status=VSPreviewAvailabilityStatus.AVAILABLE,
         message="available",
@@ -152,7 +173,13 @@ def test_align_clips_force_interactive_raises_when_vspreview_unavailable(
     comp = tmp_path / "comp.mkv"
     ref.touch()
     comp.touch()
-    _write_cached_offset(tmp_path, frame_offset=2, time_offset_seconds=0.083)
+    _write_cached_offset(
+        tmp_path,
+        reference=ref,
+        comparison=comp,
+        frame_offset=2,
+        time_offset_seconds=0.083,
+    )
 
     mock_check_availability.return_value = VSPreviewAvailability(
         status=VSPreviewAvailabilityStatus.MISSING_EXEC_AND_MODULE,
@@ -183,7 +210,13 @@ def test_align_clips_vspreview_unavailable_generates_script_without_launch(
     comp = tmp_path / "comp.mkv"
     ref.touch()
     comp.touch()
-    _write_cached_offset(tmp_path, frame_offset=7, time_offset_seconds=0.292)
+    _write_cached_offset(
+        tmp_path,
+        reference=ref,
+        comparison=comp,
+        frame_offset=7,
+        time_offset_seconds=0.292,
+    )
 
     mock_check_availability.return_value = VSPreviewAvailability(
         status=VSPreviewAvailabilityStatus.MISSING_EXEC_AND_MODULE,
@@ -202,11 +235,13 @@ def test_align_clips_vspreview_unavailable_generates_script_without_launch(
 @patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
 @patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
 @patch("frame_compare.services.alignment._probe_fps")
-@patch("frame_compare.services.alignment._extract_audio")
+@patch("frame_compare.services.alignment._extract_matching_audio")
+@patch("frame_compare.services.alignment._extract_reference_audio")
 @patch("frame_compare.services.alignment._cross_correlate")
 def test_align_clips_vspreview_confirmed_offset_is_saved_and_applied(
     mock_corr: MagicMock,
-    mock_extract: MagicMock,
+    mock_extract_reference: MagicMock,
+    mock_extract_matching: MagicMock,
     mock_probe: MagicMock,
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
@@ -221,7 +256,8 @@ def test_align_clips_vspreview_confirmed_offset_is_saved_and_applied(
     comp.touch()
 
     mock_probe.return_value = Fraction(24, 1)
-    mock_extract.return_value = np.ones(10, dtype=np.float32)
+    mock_extract_reference.return_value = (np.ones(10, dtype=np.float32), object())
+    mock_extract_matching.return_value = np.ones(10, dtype=np.float32)
     mock_corr.return_value = (3, 0.99)
     mock_check_availability.return_value = VSPreviewAvailability(
         status=VSPreviewAvailabilityStatus.AVAILABLE,
@@ -256,7 +292,13 @@ def test_align_clips_optional_vspreview_probe_failure_generates_script_without_l
     comp = tmp_path / "comp.mkv"
     ref.touch()
     comp.touch()
-    _write_cached_offset(tmp_path, frame_offset=7, time_offset_seconds=0.292)
+    _write_cached_offset(
+        tmp_path,
+        reference=ref,
+        comparison=comp,
+        frame_offset=7,
+        time_offset_seconds=0.292,
+    )
 
     mock_check_availability.return_value = VSPreviewAvailability(
         status=VSPreviewAvailabilityStatus.PROBE_FAILED,
@@ -295,7 +337,13 @@ def test_align_clips_force_interactive_launches_when_vspreview_available(
     comp = tmp_path / "comp.mkv"
     ref.touch()
     comp.touch()
-    _write_cached_offset(tmp_path, frame_offset=3, time_offset_seconds=0.125)
+    _write_cached_offset(
+        tmp_path,
+        reference=ref,
+        comparison=comp,
+        frame_offset=3,
+        time_offset_seconds=0.125,
+    )
 
     mock_check_availability.return_value = VSPreviewAvailability(
         status=VSPreviewAvailabilityStatus.AVAILABLE,
@@ -330,7 +378,13 @@ def test_align_clips_force_interactive_probe_failure_raises_alignment_error(
     comp = tmp_path / "comp.mkv"
     ref.touch()
     comp.touch()
-    _write_cached_offset(tmp_path, frame_offset=3, time_offset_seconds=0.125)
+    _write_cached_offset(
+        tmp_path,
+        reference=ref,
+        comparison=comp,
+        frame_offset=3,
+        time_offset_seconds=0.125,
+    )
 
     mock_check_availability.return_value = VSPreviewAvailability(
         status=VSPreviewAvailabilityStatus.PROBE_FAILED,
@@ -364,7 +418,13 @@ def test_align_clips_vspreview_errors_are_warning_only_when_not_forced(
     comp = tmp_path / "comp.mkv"
     ref.touch()
     comp.touch()
-    _write_cached_offset(tmp_path, frame_offset=1, time_offset_seconds=0.042)
+    _write_cached_offset(
+        tmp_path,
+        reference=ref,
+        comparison=comp,
+        frame_offset=1,
+        time_offset_seconds=0.042,
+    )
 
     mock_check_availability.return_value = VSPreviewAvailability(
         status=VSPreviewAvailabilityStatus.AVAILABLE,
@@ -403,7 +463,13 @@ def test_align_clips_vspreview_errors_raise_when_force_interactive(
     comp = tmp_path / "comp.mkv"
     ref.touch()
     comp.touch()
-    _write_cached_offset(tmp_path, frame_offset=1, time_offset_seconds=0.042)
+    _write_cached_offset(
+        tmp_path,
+        reference=ref,
+        comparison=comp,
+        frame_offset=1,
+        time_offset_seconds=0.042,
+    )
 
     mock_check_availability.return_value = VSPreviewAvailability(
         status=VSPreviewAvailabilityStatus.AVAILABLE,
