@@ -11,9 +11,10 @@ import httpx
 import pytest
 
 import frame_compare.analysis.cache_io as cache_io
-import frame_compare.analysis.metrics as metrics_module
 from frame_compare.analysis.errors import MetricsCalculationError
+from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.config.loader import load_config
+from frame_compare.config.schema import AnalysisConfig
 from frame_compare.orchestration import phase_tasks, preparation
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.services.alignment import CACHE_FILE_NAME
@@ -191,10 +192,37 @@ enable = false
     config = load_config(tmp_path / "config" / "config.toml")
     fingerprint = cache_io.compute_cache_key([source_path], config.analysis)
 
-    monkeypatch.setattr(
-        metrics_module, "_calculate_luminance", lambda *_args, **_kwargs: [0.1] * 100
-    )
-    monkeypatch.setattr(metrics_module, "_calculate_motion", lambda *_args, **_kwargs: [0.0] * 100)
+    def _fake_calculate_metrics(
+        *,
+        video_paths: list[Path],
+        config: AnalysisConfig,
+        cache_dir: Path,
+        **_kwargs: object,
+    ) -> FrameMetrics:
+        cache_fingerprint = cache_io.compute_cache_key(video_paths, config)
+        stats_by_path = {path: path.stat() for path in video_paths}
+        metrics = FrameMetrics(
+            luminance=[0.1] * 100,
+            motion=[0.0] * 100,
+            metadata=MetricsMetadata(
+                frame_count=100,
+                fps=Fraction(24, 1),
+                config_fingerprint=cache_fingerprint,
+                clips=[
+                    ClipIdentity(
+                        path=str(path),
+                        size=stats_by_path[path].st_size,
+                        mtime=stats_by_path[path].st_mtime,
+                    )
+                    for path in video_paths
+                ],
+                version=cache_io.CACHE_VERSION,
+            ),
+        )
+        cache_io.save_metrics_cache(metrics, cache_dir)
+        return metrics
+
+    monkeypatch.setattr(phase_tasks, "calculate_metrics", _fake_calculate_metrics)
 
     first = asyncio.run(
         execute_run(
