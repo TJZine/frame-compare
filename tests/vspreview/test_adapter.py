@@ -75,6 +75,43 @@ def test_launch_alignment_verification_session_waits_for_vspreview_completion(
     assert kwargs["stderr"] is None
 
 
+def test_launch_alignment_verification_session_writes_launch_telemetry_to_stderr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.check_vspreview_availability",
+        lambda: VSPreviewAvailability(
+            status=VSPreviewAvailabilityStatus.AVAILABLE,
+            message="available",
+        ),
+    )
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter._resolve_launch_command",
+        lambda script_path: ["vspreview", str(script_path)],
+    )
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.subprocess.run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0),
+    )
+
+    launch_alignment_verification_session(
+        request=VSPreviewSessionRequest(
+            reference=Path("ref.mkv"),
+            comparisons=[Path("a.mkv")],
+            suggested_offsets_by_key={},
+            cache_dir=tmp_path,
+        ),
+        config=VSPreviewConfig(enabled=True),
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "VSPreview script:" in captured.err
+    assert "Launch command:" in captured.err
+
+
 def test_launch_alignment_verification_session_redacts_probe_failure_details(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

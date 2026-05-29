@@ -61,14 +61,24 @@ def maybe_open_report(report_path: Path) -> None:
         return
 
 
-def handle_error(error: Exception, *, no_color: bool, verbose: bool) -> int:
+def handle_error(
+    error: Exception,
+    *,
+    no_color: bool,
+    verbose: bool,
+    verbose_hint: str | None = "--verbose",
+) -> int:
     """Render errors to stderr and return exit code.
 
     Raises:
         None.
     """
     if isinstance(error, FrameCompareError):
-        message = format_error_console(error, verbose=verbose)
+        message = format_error_console(
+            error,
+            verbose=verbose,
+            verbose_hint=verbose_hint,
+        )
         console = Console(stderr=True, no_color=no_color)
         console.print(message)
         return int(get_exit_code(error))

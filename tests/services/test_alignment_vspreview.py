@@ -1,5 +1,6 @@
 """Direct tests for alignment VSPreview launch policy."""
 
+import io
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -244,6 +245,26 @@ def test_forced_launch_error_raises(
             tmp_path=tmp_path,
             config=AlignmentConfig(use_vspreview=False, force_interactive=True),
         )
+
+
+def test_prompt_for_confirmed_offsets_writes_to_stderr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(alignment_vspreview.sys, "stdin", io.StringIO("\n"))
+
+    confirmed = alignment_vspreview._prompt_for_confirmed_offsets(
+        reference=tmp_path / "ref.mkv",
+        comparisons=[tmp_path / "comp.mkv"],
+        offsets_by_key={"ref:comp": 4},
+    )
+
+    captured = capsys.readouterr()
+    assert confirmed == {"ref:comp": 4}
+    assert captured.out == ""
+    assert "VSPreview closed. Enter confirmed frame offsets." in captured.err
+    assert "Confirmed offset for comp" in captured.err
 
 
 def test_available_with_tty_suspends_progress_during_launch_and_prompt(

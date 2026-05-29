@@ -54,7 +54,6 @@ def _styled_path(value: str) -> str:
     return f"[{STYLE_PATH}]{escape(value)}[/]"
 
 
-
 def _group_table() -> Table:
     """Create a borderless two-column table for key-value rows."""
     table = Table(show_header=False, box=None, pad_edge=False, padding=(0, 1, 0, 0))
@@ -103,6 +102,10 @@ def print_at_a_glance(
     root: Path,
     config_path: Path,
 ) -> None:
+    from frame_compare.orchestration.preflight import resolve_paths
+
+    workspace = resolve_paths(config, root)
+
     vspreview_status: str | None = None
     if config.audio_alignment.use_vspreview or config.audio_alignment.force_interactive:
         from frame_compare.vspreview.adapter import (
@@ -127,9 +130,15 @@ def print_at_a_glance(
     _add_subheader(table, "Workspace")
     _add_kv(table, "root", _styled_path(str(root)))
     _add_kv(table, "config", _styled_path(str(config_path)))
-    _add_kv(table, "input", _styled_path(str(config.paths.input_dir)))
-    _add_kv(table, "screenshots", _styled_path(str(config.paths.screenshots_dir)))
-    _add_kv(table, "generated", _styled_path(str(config.paths.generated_dir)))
+    _add_kv(table, "input", _styled_path(str(workspace.input_dir)))
+    _add_kv(table, "screenshots", _styled_path(str(workspace.screenshots_dir)))
+    _add_kv(table, "generated", _styled_path(str(workspace.generated_dir)))
+    run_folder_note = (
+        f"{_styled_value('enabled')} {_styled_unit('(screenshots/generated rows are base paths)')}"
+        if config.paths.use_run_folders
+        else _styled_value("disabled")
+    )
+    _add_kv(table, "run_folders", run_folder_note)
 
     # ── Analysis ──
     _add_separator(table)
@@ -149,8 +158,14 @@ def print_at_a_glance(
     _add_subheader(table, "Audio Alignment")
     _add_kv(table, "audio_alignment.enabled", _styled_bool(config.audio_alignment.enable))
     _add_kv(table, "audio_alignment.ffmpeg_available", _styled_bool(ffmpeg_available))
-    _add_kv(table, "audio_alignment.use_vspreview", _styled_bool(config.audio_alignment.use_vspreview))
-    _add_kv(table, "audio_alignment.force_interactive", _styled_bool(config.audio_alignment.force_interactive))
+    _add_kv(
+        table, "audio_alignment.use_vspreview", _styled_bool(config.audio_alignment.use_vspreview)
+    )
+    _add_kv(
+        table,
+        "audio_alignment.force_interactive",
+        _styled_bool(config.audio_alignment.force_interactive),
+    )
     if vspreview_status is not None:
         _add_kv(table, "vspreview.available", _styled_value(vspreview_status))
 
@@ -225,9 +240,7 @@ def print_result_summary(console: Console, *, result: RunResult, quiet: bool) ->
 
     # Metrics section
     has_metrics = (
-        result.frame_count > 0
-        or result.clips_processed > 0
-        or result.duration_seconds > 0.0
+        result.frame_count > 0 or result.clips_processed > 0 or result.duration_seconds > 0.0
     )
     if has_metrics:
         _add_separator(table)

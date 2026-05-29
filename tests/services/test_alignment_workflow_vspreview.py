@@ -1,7 +1,9 @@
 """Audio alignment workflow VSPreview orchestration tests."""
 
+import io
 from fractions import Fraction
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -35,6 +37,16 @@ def _write_cached_offset(workspace: Path, frame_offset: int, time_offset_seconds
     (workspace / "audio_offsets.toml").write_text(tomli_w.dumps(data), encoding="utf-8")
 
 
+def _set_interactive_terminal(monkeypatch: pytest.MonkeyPatch, user_input: str) -> None:
+    import sys
+
+    monkeypatch.setattr(sys, "stdin", io.StringIO(user_input))
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_vspreview._current_tty_status",
+        lambda: SimpleNamespace(stdin=True, stdout=True, stderr=True),
+    )
+
+
 @patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
 @patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
 @patch("frame_compare.services.alignment._probe_fps")
@@ -50,10 +62,7 @@ def test_align_clips_launches_vspreview_when_enabled(
     monkeypatch: pytest.MonkeyPatch,
 ):
     """When configured, align_clips should generate/launch a VSPreview verification session."""
-    import sys
-
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda _prompt: "skip")
+    _set_interactive_terminal(monkeypatch, "skip\n")
 
     ref = tmp_path / "ref.mkv"
     comp_a = tmp_path / "comp_a.mkv"
@@ -102,10 +111,7 @@ def test_align_clips_full_cache_hit_still_launches_vspreview_when_enabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Cached/manual-only runs should still build/launch VSPreview verification."""
-    import sys
-
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda _prompt: "skip")
+    _set_interactive_terminal(monkeypatch, "skip\n")
 
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
@@ -207,10 +213,7 @@ def test_align_clips_vspreview_confirmed_offset_is_saved_and_applied(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import sys
-
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda _prompt: "9")
+    _set_interactive_terminal(monkeypatch, "9\n")
 
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
@@ -286,10 +289,7 @@ def test_align_clips_force_interactive_launches_when_vspreview_available(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Force-interactive mode should launch VSPreview when available."""
-    import sys
-
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda _prompt: "skip")
+    _set_interactive_terminal(monkeypatch, "skip\n")
 
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"

@@ -80,9 +80,17 @@ exists.
 ### Output Modes
 
 - `--json` writes a single JSON object to stdout and suppresses human-readable summaries.
+- `--json` is incompatible with interactive alignment. If the effective config enables
+  `audio_alignment.use_vspreview` or `audio_alignment.force_interactive`, the CLI exits
+  with the standard config-error payload and exit code before entering the runtime
+  pipeline.
 - `--quiet` suppresses the at-a-glance summary but still allows a minimal success summary.
 - When the at-a-glance summary reports optional VSPreview probe failures, it uses a
   sanitized summary rather than raw probe exception text.
+- The at-a-glance workspace paths are resolved base paths. When
+  `paths.use_run_folders = true`, the `screenshots` and `generated` rows describe the
+  configured base paths rather than the fresh per-run subdirectories reserved later in
+  execution.
 - `--diagnose-paths` emits a pinned JSON object with keys `cache`, `config`, `input`,
   `output`, and `root`, then exits without invoking the runtime pipeline.
   The `cache` value is the resolved configured `paths.generated_dir`; the shared
@@ -199,6 +207,9 @@ intermediate data and expands it to full-range PNG output during encoding.
 
 - `doctor` runs dependency diagnostics through `run_doctor`.
 - `doctor --json` writes a single JSON object to stdout using `_doctor_report_json`.
+- If the `doctor` command hits a typed top-level failure before it can produce a
+  `DoctorReport`, it uses the standard CLI error contract. In `--json` mode that means
+  the standard error payload is written to stdout.
 - Without `--json`, `doctor` writes a human-readable report to stdout.
 - If any critical failures are present, `doctor` exits with the dependency error exit code.
 - Optional VSPreview probe diagnostics may include exception type metadata, but do not

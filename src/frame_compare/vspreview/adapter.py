@@ -177,8 +177,8 @@ def launch_alignment_verification_session(
     command = _resolve_launch_command(script_path)
 
     # Print telemetry per vspreview spec §3.2.3
-    print(f"VSPreview script: {script_path}")
-    print(f"Launch command: {' '.join(command)}")
+    print(f"VSPreview script: {script_path}", file=sys.stderr)
+    print(f"Launch command: {' '.join(command)}", file=sys.stderr)
 
     try:
         # command is a list from _resolve_launch_command; shell=True is never used.

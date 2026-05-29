@@ -9,8 +9,8 @@ import typer
 from rich.console import Console
 from rich.markup import escape
 
-from frame_compare.cli.errors import ExitCode
-from frame_compare.errors import JSONValue
+from frame_compare.cli.errors import ExitCode, format_error_json, get_exit_code
+from frame_compare.errors import FrameCompareError, JSONValue
 
 if TYPE_CHECKING:
     from frame_compare.orchestration.doctor import DoctorCheck, DoctorReport
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 # Status icons matching legacy doctor output style.
 _STATUS_ICONS = {
-    True: "\u2705",   # ✅
+    True: "\u2705",  # ✅
     False: "\u274c",  # ❌
 }
 
@@ -31,9 +31,39 @@ class RunDoctorFn(Protocol):
     ) -> DoctorReport: ...
 
 
-def handle_doctor(json_output: bool, *, run_doctor: RunDoctorFn) -> None:
+class HandleErrorFn(Protocol):
+    def __call__(
+        self,
+        error: Exception,
+        *,
+        no_color: bool,
+        verbose: bool,
+        verbose_hint: str | None = "--verbose",
+    ) -> int: ...
+
+
+def handle_doctor(
+    json_output: bool,
+    *,
+    run_doctor: RunDoctorFn,
+    handle_error: HandleErrorFn,
+) -> None:
     """Run dependency diagnostics."""
-    report = run_doctor(checks=None, reporter=None)
+    try:
+        report = run_doctor(checks=None, reporter=None)
+    except FrameCompareError as error:
+        if json_output:
+            typer.echo(json.dumps(format_error_json(error), sort_keys=True, separators=(",", ":")))
+            raise typer.Exit(code=int(get_exit_code(error))) from error
+        raise typer.Exit(
+            code=handle_error(
+                error,
+                no_color=True,
+                verbose=False,
+                verbose_hint=None,
+            )
+        ) from error
+
     if json_output:
         payload = doctor_report_json(report)
         typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))

@@ -17,7 +17,7 @@ from frame_compare.cli.output import print_at_a_glance, print_result_summary
 from frame_compare.config.errors import ConfigValidationError
 from frame_compare.config.overrides import apply_cli_overrides
 from frame_compare.config.schema import ConfigSchema, OverlayMode, ToneCurve, TonemapPreset
-from frame_compare.errors import FrameCompareError
+from frame_compare.errors import FrameCompareError, JSONValue
 
 from .cli_helpers import format_enum_expected
 
@@ -67,7 +67,14 @@ class WriteConfigFn(Protocol):
 
 
 class HandleErrorFn(Protocol):
-    def __call__(self, error: Exception, *, no_color: bool, verbose: bool) -> int: ...
+    def __call__(
+        self,
+        error: Exception,
+        *,
+        no_color: bool,
+        verbose: bool,
+        verbose_hint: str | None = "--verbose",
+    ) -> int: ...
 
 
 class OpenReportFn(Protocol):
@@ -206,6 +213,8 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
             handle_diagnose_paths(args.resolved_root, args.config_path, load_effective_config())
             return
 
+        validate_run_contracts(args, load_effective_config())
+
         if not args.json_output and not args.quiet:
             print_run_preview(console, args, request, load_effective_config)
 
@@ -285,6 +294,38 @@ def build_effective_config_loaders(
         return resolved_config
 
     return _resolve_effective_config, _load_effective_config
+
+
+def validate_run_contracts(args: RunCliRawArgs, config: ConfigSchema) -> None:
+    """Enforce public CLI mode combinations before entering the runtime pipeline."""
+    if not args.json_output:
+        return
+
+    interactive_fields: list[tuple[str, str]] = []
+    if config.audio_alignment.use_vspreview:
+        interactive_fields.append(("audio_alignment", "use_vspreview"))
+    if config.audio_alignment.force_interactive:
+        interactive_fields.append(("audio_alignment", "force_interactive"))
+    if not interactive_fields:
+        return
+
+    validation_errors: list[dict[str, JSONValue]] = [
+        {
+            "type": "value_error",
+            "loc": list(loc),
+            "msg": "Interactive alignment is not supported with --json.",
+            "input": True,
+        }
+        for loc in interactive_fields
+    ]
+    raise ConfigValidationError(
+        validation_errors,
+        message="Interactive alignment is not supported with --json",
+        hint=(
+            "Disable audio_alignment.use_vspreview and "
+            "audio_alignment.force_interactive, or run without --json"
+        ),
+    )
 
 
 def print_run_preview(

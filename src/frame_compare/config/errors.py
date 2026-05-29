@@ -47,7 +47,13 @@ class ConfigParseError(ConfigError):
 class ConfigValidationError(ConfigError):
     """Config validation failed (FC-1003)."""
 
-    def __init__(self, errors: list[dict[str, JSONValue]]) -> None:
+    def __init__(
+        self,
+        errors: list[dict[str, JSONValue]],
+        *,
+        message: str | None = None,
+        hint: str = "Check field types and constraints",
+    ) -> None:
         fields: list[str] = []
         for e in errors:
             loc = e.get("loc")
@@ -63,8 +69,8 @@ class ConfigValidationError(ConfigError):
             ErrorContext(
                 code="FC-1003",
                 name="CONFIG_VALIDATION_ERROR",
-                message=f"Invalid configuration: {', '.join(fields)}",
-                hint="Check field types and constraints",
+                message=message or f"Invalid configuration: {', '.join(fields)}",
+                hint=hint,
                 details={"validation_errors": safe_errors},
             )
         )

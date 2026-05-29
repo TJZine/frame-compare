@@ -23,7 +23,7 @@ from frame_compare.render.types import (
     ScreenshotBatchRequest,
     ScreenshotRenderOptions,
 )
-from frame_compare.utils.progress_protocol import ProgressReporter
+from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 
 if TYPE_CHECKING:
     from frame_compare.config.schema import ConfigSchema
@@ -160,14 +160,18 @@ def render_batch(
     if reporter:
         reporter.start_phase("Rendering", len(requests))
 
+    phase_status = ProgressPhaseStatus.COMPLETED
     try:
         if parallelism <= 1:
             _render_batch_sequential(requests, results, reporter)
         else:
             _render_batch_parallel(requests, results, parallelism, reporter)
+    except Exception:
+        phase_status = ProgressPhaseStatus.FAILED
+        raise
     finally:
         if reporter:
-            reporter.complete_phase()
+            reporter.complete_phase(phase_status)
 
     return _completed_render_results(results)
 

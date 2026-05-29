@@ -24,7 +24,14 @@ class WriteConfigFn(Protocol):
 
 
 class HandleErrorFn(Protocol):
-    def __call__(self, error: Exception, *, no_color: bool, verbose: bool) -> int: ...
+    def __call__(
+        self,
+        error: Exception,
+        *,
+        no_color: bool,
+        verbose: bool,
+        verbose_hint: str | None = "--verbose",
+    ) -> int: ...
 
 
 class ListPresetsFn(Protocol):
@@ -60,7 +67,14 @@ def handle_preset_list(
         for name in list_presets(presets_dir=presets_dir):
             typer.echo(name)
     except FrameCompareError as error:
-        raise typer.Exit(code=handle_error(error, no_color=True, verbose=False)) from error
+        raise typer.Exit(
+            code=handle_error(
+                error,
+                no_color=True,
+                verbose=False,
+                verbose_hint=None,
+            )
+        ) from error
 
 
 def handle_preset_apply(
@@ -79,7 +93,14 @@ def handle_preset_apply(
         updated = apply_preset(config_data, name, presets_dir=presets_dir)
         write_config_to(config_path, updated)
     except FrameCompareError as error:
-        raise typer.Exit(code=handle_error(error, no_color=True, verbose=False)) from error
+        raise typer.Exit(
+            code=handle_error(
+                error,
+                no_color=True,
+                verbose=False,
+                verbose_hint=None,
+            )
+        ) from error
 
 
 def handle_preset_save(
@@ -96,4 +117,11 @@ def handle_preset_save(
         config_data = load_config(config_path)
         save_preset(name, config_data, presets_dir=presets_dir)
     except FrameCompareError as error:
-        raise typer.Exit(code=handle_error(error, no_color=True, verbose=False)) from error
+        raise typer.Exit(
+            code=handle_error(
+                error,
+                no_color=True,
+                verbose=False,
+                verbose_hint=None,
+            )
+        ) from error
