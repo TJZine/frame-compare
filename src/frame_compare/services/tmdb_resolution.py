@@ -25,16 +25,14 @@ log = structlog.get_logger()
 type MediaType = Literal["movie", "tv"]
 type SearchEndpoint = Literal["movie", "tv", "multi"]
 type CandidateKey = tuple[MediaType, int]
-type SearchCallable = Callable[
-    [ParsedMetadata, MetadataConfig, httpx.AsyncClient],
-    Awaitable[list[TmdbMetadata]],
-]
 type AltTitlesCallable = Callable[
     [int, MediaType, MetadataConfig, httpx.AsyncClient],
     Awaitable[list[str]],
 ]
+type _IndexedSearchResults = tuple[int, list[TmdbMetadata]]
 
 MAX_SEARCH_REQUESTS = 12
+MAX_CONCURRENT_SEARCH_REQUESTS = 4
 MAX_ALT_TITLE_REQUESTS = 5
 MAX_CANDIDATES_TO_SCORE = 8
 
@@ -132,7 +130,9 @@ def _swap_word_initial_vv_w(title: str) -> str | None:
 
 
 def _roman_to_numeric_title(title: str) -> str | None:
-    replaced = _ROMAN_TOKEN_RE.sub(lambda match: _ROMAN_TO_NUMERIC[match.group(1).casefold()], title)
+    replaced = _ROMAN_TOKEN_RE.sub(
+        lambda match: _ROMAN_TO_NUMERIC[match.group(1).casefold()], title
+    )
     return replaced if replaced != title else None
 
 
@@ -169,7 +169,9 @@ def _append_search_variant(
     if key in seen:
         return
     seen.add(key)
-    variants.append(_SearchRequest(endpoint="multi", title=normalized_title, include_year=include_year))
+    variants.append(
+        _SearchRequest(endpoint="multi", title=normalized_title, include_year=include_year)
+    )
 
 
 def _build_search_variants(parsed: ParsedMetadata) -> list[_SearchRequest]:
@@ -195,7 +197,9 @@ def _build_search_variants(parsed: ParsedMetadata) -> list[_SearchRequest]:
 
 
 def _request_with_endpoint(template: _SearchRequest, endpoint: SearchEndpoint) -> _SearchRequest:
-    return _SearchRequest(endpoint=endpoint, title=template.title, include_year=template.include_year)
+    return _SearchRequest(
+        endpoint=endpoint, title=template.title, include_year=template.include_year
+    )
 
 
 def _build_search_plan(parsed: ParsedMetadata, config: MetadataConfig) -> list[_SearchRequest]:
@@ -234,10 +238,6 @@ def _parsed_for_request(parsed: ParsedMetadata, request: _SearchRequest) -> Pars
     )
 
 
-def _search_fn(name: str) -> object | None:
-    return getattr(tmdb_lookup, name, None)
-
-
 async def _search_request(
     request: _SearchRequest,
     parsed: ParsedMetadata,
@@ -247,26 +247,24 @@ async def _search_request(
     request_parsed = _parsed_for_request(parsed, request)
 
     if request.endpoint == "movie":
-        search_movie = _search_fn("search_tmdb_movie")
-        if callable(search_movie):
-            return await cast(SearchCallable, search_movie)(request_parsed, config, client)
-        return [
-            candidate
-            for candidate in await tmdb_lookup.search_tmdb(request_parsed, config, client)
-            if candidate.media_type == "movie"
-        ]
+        return await tmdb_lookup.search_tmdb_movie(request_parsed, config, client)
 
     if request.endpoint == "tv":
-        search_tv = _search_fn("search_tmdb_tv")
-        if callable(search_tv):
-            return await cast(SearchCallable, search_tv)(request_parsed, config, client)
-        return [
-            candidate
-            for candidate in await tmdb_lookup.search_tmdb(request_parsed, config, client)
-            if candidate.media_type == "tv"
-        ]
+        return await tmdb_lookup.search_tmdb_tv(request_parsed, config, client)
 
     return await tmdb_lookup.search_tmdb(request_parsed, config, client)
+
+
+async def _indexed_search_request(
+    request_index: int,
+    request: _SearchRequest,
+    parsed: ParsedMetadata,
+    config: MetadataConfig,
+    client: httpx.AsyncClient,
+    semaphore: asyncio.Semaphore,
+) -> _IndexedSearchResults:
+    async with semaphore:
+        return request_index, await _search_request(request, parsed, config, client)
 
 
 async def _collect_candidates(
@@ -277,8 +275,15 @@ async def _collect_candidates(
 ) -> dict[CandidateKey, _CandidateAggregate]:
     candidates: dict[CandidateKey, _CandidateAggregate] = {}
 
-    for request_index, request in enumerate(plan):
-        results = await _search_request(request, parsed, config, client)
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_SEARCH_REQUESTS)
+    search_results = await asyncio.gather(
+        *(
+            _indexed_search_request(request_index, request, parsed, config, client, semaphore)
+            for request_index, request in enumerate(plan)
+        )
+    )
+
+    for request_index, results in search_results:
         for result_index, candidate in enumerate(results):
             key: CandidateKey = (candidate.media_type, candidate.tmdb_id)
             aggregate = candidates.get(key)
@@ -427,16 +432,15 @@ def _score_candidate(
     expected_media_type = _preferred_media_type(parsed, config)
     title_similarity = _best_similarity(parsed.title, (candidate.title, candidate.original_title))
     informative_aliases = _informative_aliases(candidate, aliases)
-    alias_similarity = _best_similarity(parsed.title, informative_aliases) if informative_aliases else 0.0
+    alias_similarity = (
+        _best_similarity(parsed.title, informative_aliases) if informative_aliases else 0.0
+    )
     effective_similarity = _promoted_similarity(title_similarity, alias_similarity)
     year_score = _year_score(parsed, config, candidate)
     category_score = _category_score(expected_media_type, candidate)
     order_bonus = _order_bonus(aggregate.first_request_index, aggregate.first_result_index)
     score = (
-        (effective_similarity * 0.78)
-        + (year_score * 0.17)
-        + (category_score * 0.04)
-        + order_bonus
+        (effective_similarity * 0.78) + (year_score * 0.17) + (category_score * 0.04) + order_bonus
     )
     if alias_similarity >= ALIAS_PROMOTION_THRESHOLD:
         score = max(score + max(0.1, alias_similarity * 0.25), alias_similarity + 0.05)
@@ -633,7 +637,11 @@ def _select_candidate(
 
 
 def _filter_ranked_candidates(ranked_candidates: list[_ScoredCandidate]) -> list[_ScoredCandidate]:
-    filtered = [candidate for candidate in ranked_candidates if candidate.evidence_similarity >= SIMILARITY_FLOOR]
+    filtered = [
+        candidate
+        for candidate in ranked_candidates
+        if candidate.evidence_similarity >= SIMILARITY_FLOOR
+    ]
     return filtered[:MAX_CANDIDATES_TO_SCORE]
 
 
@@ -670,7 +678,10 @@ async def resolve_tmdb_match(
         return TmdbResolutionOutcome(selected=None, candidates=[])
 
     base_scored = _rank_candidates(
-        [_score_candidate(parsed, config, aggregate, aliases=()) for aggregate in aggregates.values()]
+        [
+            _score_candidate(parsed, config, aggregate, aliases=())
+            for aggregate in aggregates.values()
+        ]
     )
     scoring_pool = _select_scoring_pool(parsed, base_scored)
     ranked_candidates = await _enrich_candidates_with_aliases(

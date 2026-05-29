@@ -5,8 +5,7 @@ from __future__ import annotations
 import asyncio
 from fractions import Fraction
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any, cast
+from typing import TYPE_CHECKING, NoReturn, cast
 
 import httpx
 import pytest
@@ -33,17 +32,28 @@ from .execute_run_helpers import (
     write_metrics_cache,
 )
 
+if TYPE_CHECKING:
+    import vapoursynth as vs
+
+
+class ClipStub:
+    num_frames = 100
+
+
+class FormatStub:
+    pass
+
 
 class AnalysisCapableVSLoader:
     def load(self, path: Path) -> SourceInfo:
         del path
         return SourceInfo(
-            clip=cast(Any, SimpleNamespace(num_frames=100)),
+            clip=cast("vs.VideoNode", ClipStub()),
             width=1920,
             height=1080,
             num_frames=100,
             fps=Fraction(24, 1),
-            format=cast(Any, object()),
+            format=cast("vs.VideoFormat", FormatStub()),
             frame_props={},
             is_hdr=False,
             hdr_metadata=None,
@@ -209,10 +219,10 @@ enable = false
     assert shared_cache_path is not None
     assert not any(input_dir.glob("*/generated/cache/analysis/*.compframes"))
 
-    def _fail_luminance(*_args: object, **_kwargs: object) -> list[float]:
+    def _fail_calculate_metrics(**_kwargs: object) -> NoReturn:
         raise AssertionError("from-cache-only should load the shared analysis cache")
 
-    monkeypatch.setattr(metrics_module, "_calculate_luminance", _fail_luminance)
+    monkeypatch.setattr(phase_tasks, "calculate_metrics", _fail_calculate_metrics)
 
     second = asyncio.run(
         execute_run(

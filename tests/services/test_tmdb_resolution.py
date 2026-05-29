@@ -1,22 +1,32 @@
 from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
+import anyio
 import httpx
 import pytest
 
+import frame_compare.services.tmdb_resolution as tmdb_resolution
 from frame_compare.services.metadata import resolve_metadata
 from frame_compare.services.tmdb_resolution import resolve_tmdb_match
 from frame_compare.services.types import MetadataConfig, ParsedMetadata
 
+type AsyncClientFactory = Callable[
+    [httpx.MockTransport],
+    AbstractAsyncContextManager[httpx.AsyncClient],
+]
+
+
+@asynccontextmanager
+async def _client_for_transport(
+    transport: httpx.MockTransport,
+) -> AsyncIterator[httpx.AsyncClient]:
+    async with httpx.AsyncClient(transport=transport) as client:
+        yield client
+
 
 @pytest.fixture
-async def async_client_factory() -> AsyncIterator[
-    Callable[[httpx.MockTransport], AsyncIterator[httpx.AsyncClient]]
-]:
-    async def _factory(transport: httpx.MockTransport) -> AsyncIterator[httpx.AsyncClient]:
-        async with httpx.AsyncClient(transport=transport) as client:
-            yield client
-
-    yield _factory
+def async_client_factory() -> AsyncClientFactory:
+    return _client_for_transport
 
 
 def _movie_result(
@@ -42,7 +52,7 @@ def _movie_result(
 
 @pytest.mark.anyio
 async def test_resolve_metadata_prefers_vvitch_alias_release(
-    async_client_factory: Callable[[httpx.MockTransport], AsyncIterator[httpx.AsyncClient]],
+    async_client_factory: AsyncClientFactory,
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -90,7 +100,7 @@ async def test_resolve_metadata_prefers_vvitch_alias_release(
         return httpx.Response(200, json={"results": []})
 
     config = MetadataConfig(api_key="a" * 32)
-    async for client in async_client_factory(httpx.MockTransport(handler)):
+    async with async_client_factory(httpx.MockTransport(handler)) as client:
         result = await resolve_metadata(
             ["The.VVitch.A.New-England.Folktale.2015.2160p.mkv"],
             config,
@@ -103,7 +113,7 @@ async def test_resolve_metadata_prefers_vvitch_alias_release(
 
 @pytest.mark.anyio
 async def test_resolve_metadata_plain_title_alias_case_prefers_vvitch_release(
-    async_client_factory: Callable[[httpx.MockTransport], AsyncIterator[httpx.AsyncClient]],
+    async_client_factory: AsyncClientFactory,
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -151,7 +161,7 @@ async def test_resolve_metadata_plain_title_alias_case_prefers_vvitch_release(
         return httpx.Response(200, json={"results": []})
 
     config = MetadataConfig(api_key="a" * 32)
-    async for client in async_client_factory(httpx.MockTransport(handler)):
+    async with async_client_factory(httpx.MockTransport(handler)) as client:
         result = await resolve_metadata(
             ["The.Witch.2015.2160p.UHD.BDRip.DV.HDR10.x265.mkv"],
             config,
@@ -164,7 +174,7 @@ async def test_resolve_metadata_plain_title_alias_case_prefers_vvitch_release(
 
 @pytest.mark.anyio
 async def test_resolve_metadata_returns_none_for_ambiguous_unattended_match(
-    async_client_factory: Callable[[httpx.MockTransport], AsyncIterator[httpx.AsyncClient]],
+    async_client_factory: AsyncClientFactory,
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -195,7 +205,7 @@ async def test_resolve_metadata_returns_none_for_ambiguous_unattended_match(
         return httpx.Response(200, json={"results": []})
 
     config = MetadataConfig(api_key="a" * 32, unattended=True)
-    async for client in async_client_factory(httpx.MockTransport(handler)):
+    async with async_client_factory(httpx.MockTransport(handler)) as client:
         result = await resolve_metadata(["The.Witch.2015.mkv"], config, client)
 
     assert result is None
@@ -203,7 +213,7 @@ async def test_resolve_metadata_returns_none_for_ambiguous_unattended_match(
 
 @pytest.mark.anyio
 async def test_resolve_metadata_auto_accepts_high_confidence_exact_match(
-    async_client_factory: Callable[[httpx.MockTransport], AsyncIterator[httpx.AsyncClient]],
+    async_client_factory: AsyncClientFactory,
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -217,7 +227,9 @@ async def test_resolve_metadata_auto_accepts_high_confidence_exact_match(
                 200,
                 json={
                     "results": [
-                        _movie_result(329865, "Arrival", "2016-11-10", media_type=None, popularity=40.0)
+                        _movie_result(
+                            329865, "Arrival", "2016-11-10", media_type=None, popularity=40.0
+                        )
                     ]
                 },
             )
@@ -226,7 +238,7 @@ async def test_resolve_metadata_auto_accepts_high_confidence_exact_match(
         return httpx.Response(200, json={"results": []})
 
     config = MetadataConfig(api_key="a" * 32)
-    async for client in async_client_factory(httpx.MockTransport(handler)):
+    async with async_client_factory(httpx.MockTransport(handler)) as client:
         result = await resolve_metadata(["Arrival.2016.2160p.mkv"], config, client)
 
     assert result is not None
@@ -235,7 +247,7 @@ async def test_resolve_metadata_auto_accepts_high_confidence_exact_match(
 
 @pytest.mark.anyio
 async def test_resolve_tmdb_match_returns_ranked_candidates_when_unresolved(
-    async_client_factory: Callable[[httpx.MockTransport], AsyncIterator[httpx.AsyncClient]],
+    async_client_factory: AsyncClientFactory,
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -267,7 +279,7 @@ async def test_resolve_tmdb_match_returns_ranked_candidates_when_unresolved(
 
     config = MetadataConfig(api_key="a" * 32)
     parsed = ParsedMetadata(title="The Witch", year=2015)
-    async for client in async_client_factory(httpx.MockTransport(handler)):
+    async with async_client_factory(httpx.MockTransport(handler)) as client:
         outcome = await resolve_tmdb_match(parsed, config, client)
 
     assert outcome.selected is None
@@ -276,7 +288,7 @@ async def test_resolve_tmdb_match_returns_ranked_candidates_when_unresolved(
 
 @pytest.mark.anyio
 async def test_resolve_tmdb_match_does_not_auto_select_movie_for_tv_hint(
-    async_client_factory: Callable[[httpx.MockTransport], AsyncIterator[httpx.AsyncClient]],
+    async_client_factory: AsyncClientFactory,
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -285,13 +297,15 @@ async def test_resolve_tmdb_match_does_not_auto_select_movie_for_tv_hint(
         if path.endswith("/search/multi"):
             return httpx.Response(
                 200,
-                json={"results": [_movie_result(2316, "The Office", "2005-01-01", popularity=25.0)]},
+                json={
+                    "results": [_movie_result(2316, "The Office", "2005-01-01", popularity=25.0)]
+                },
             )
         return httpx.Response(200, json={"results": []})
 
     config = MetadataConfig(api_key="a" * 32)
     parsed = ParsedMetadata(title="The Office", year=2005, season=1, episode=1)
-    async for client in async_client_factory(httpx.MockTransport(handler)):
+    async with async_client_factory(httpx.MockTransport(handler)) as client:
         outcome = await resolve_tmdb_match(parsed, config, client)
 
     assert outcome.selected is None
@@ -301,7 +315,7 @@ async def test_resolve_tmdb_match_does_not_auto_select_movie_for_tv_hint(
 
 @pytest.mark.anyio
 async def test_resolve_tmdb_match_auto_accepts_exact_tv_match_without_parsed_year(
-    async_client_factory: Callable[[httpx.MockTransport], AsyncIterator[httpx.AsyncClient]],
+    async_client_factory: AsyncClientFactory,
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -338,8 +352,37 @@ async def test_resolve_tmdb_match_auto_accepts_exact_tv_match_without_parsed_yea
 
     config = MetadataConfig(api_key="a" * 32)
     parsed = ParsedMetadata(title="Severance", season=1, episode=1)
-    async for client in async_client_factory(httpx.MockTransport(handler)):
+    async with async_client_factory(httpx.MockTransport(handler)) as client:
         outcome = await resolve_tmdb_match(parsed, config, client)
 
     assert outcome.selected is not None
     assert outcome.selected.tmdb_id == 95396
+
+
+@pytest.mark.anyio
+async def test_resolve_tmdb_match_searches_variants_with_bounded_concurrency(
+    async_client_factory: AsyncClientFactory,
+) -> None:
+    active_requests = 0
+    max_active_requests = 0
+    request_count = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal active_requests, max_active_requests, request_count
+        del request
+        active_requests += 1
+        request_count += 1
+        max_active_requests = max(max_active_requests, active_requests)
+        await anyio.sleep(0.01)
+        active_requests -= 1
+        return httpx.Response(200, json={"results": []})
+
+    config = MetadataConfig(api_key="a" * 32)
+    parsed = ParsedMetadata(title="The VVitch IV: Chapter 2", year=2024)
+    async with async_client_factory(httpx.MockTransport(handler)) as client:
+        outcome = await resolve_tmdb_match(parsed, config, client)
+
+    assert outcome.selected is None
+    assert outcome.candidates == []
+    assert request_count > tmdb_resolution.MAX_CONCURRENT_SEARCH_REQUESTS
+    assert 1 < max_active_requests <= tmdb_resolution.MAX_CONCURRENT_SEARCH_REQUESTS

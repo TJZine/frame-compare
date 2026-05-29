@@ -50,7 +50,7 @@ def resolve_tonemap_settings(
     preset = (cli_overrides or {}).get("tm_preset") or config.color.preset
     settings = get_preset_settings(preset)
 
-    explicit_color_fields = config.color.__pydantic_fields_set__
+    explicit_color_fields = config.color.model_fields_set
 
     # Apply manual config overrides only when they were explicitly supplied.
     if "target_nits" in explicit_color_fields:

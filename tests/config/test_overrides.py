@@ -116,12 +116,12 @@ def test_apply_cli_overrides_input_dir_maps_to_paths_input_dir() -> None:
 def test_apply_cli_overrides_preserves_implicit_color_target_for_unrelated_override() -> None:
     """Unrelated CLI overrides must not make default color values explicit."""
     config = ConfigSchema(color=ColorConfig(preset=TonemapPreset.FILMIC))
-    assert config.color.__pydantic_fields_set__ == {"preset"}
+    assert config.color.model_fields_set == {"preset"}
 
     new_config = apply_cli_overrides(config, CLIConfigOverrides(frame_count=12))
 
     assert new_config.analysis.frame_count == 12
-    assert new_config.color.__pydantic_fields_set__ == {"preset"}
+    assert new_config.color.model_fields_set == {"preset"}
 
 
 def test_apply_cli_overrides_marks_cli_target_as_explicit_color_override() -> None:
@@ -131,4 +131,4 @@ def test_apply_cli_overrides_marks_cli_target_as_explicit_color_override() -> No
     new_config = apply_cli_overrides(config, CLIConfigOverrides(tm_target_nits=400))
 
     assert new_config.color.target_nits == 400
-    assert "target_nits" in new_config.color.__pydantic_fields_set__
+    assert "target_nits" in new_config.color.model_fields_set

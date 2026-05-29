@@ -104,18 +104,24 @@ def _restore_explicit_fields(
     overrides: dict[str, object],
 ) -> None:
     """Preserve which nested config fields were explicitly supplied."""
-    updated.__pydantic_fields_set__ = set(original.__pydantic_fields_set__) | set(overrides)
+    _replace_model_fields_set(updated, original.model_fields_set | set(overrides))
     for key in type(updated).model_fields:
         updated_child = getattr(updated, key, None)
         original_child = getattr(original, key, None)
         if isinstance(updated_child, BaseModel) and isinstance(original_child, BaseModel):
             value = overrides.get(key, {})
             if isinstance(value, dict):
-                _restore_explicit_fields(updated_child, original_child, cast(dict[str, object], value))
-            else:
-                updated_child.__pydantic_fields_set__ = set(
-                    original_child.__pydantic_fields_set__
+                _restore_explicit_fields(
+                    updated_child, original_child, cast(dict[str, object], value)
                 )
+            else:
+                _replace_model_fields_set(updated_child, original_child.model_fields_set)
+
+
+def _replace_model_fields_set(model: BaseModel, fields: set[str]) -> None:
+    fields_set = model.model_fields_set
+    fields_set.clear()
+    fields_set.update(fields)
 
 
 def _cli_override_values(cli_args: CLIConfigOverrides) -> dict[str, object]:

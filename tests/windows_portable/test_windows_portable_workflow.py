@@ -175,10 +175,12 @@ def test_windows_portable_workflow_signs_update_only_for_release_like_events(
     assert "-UpdateZip $env:UPDATE_ZIP" in workflow
     assert "signed=false" in workflow
     assert "signed=true" in workflow
-    assert "pull_request" not in re.search(
+    sign_update_step = re.search(
         r"- name: Sign code-only update zip[\s\S]*?(?=\n      - name:)",
         workflow,
-    ).group(0)
+    )
+    assert sign_update_step is not None, "Sign code-only update zip step not found"
+    assert "pull_request" not in sign_update_step.group(0)
 
 
 def test_windows_portable_workflow_verifies_and_uploads_update_artifact(

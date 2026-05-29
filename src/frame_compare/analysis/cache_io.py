@@ -22,7 +22,6 @@ from frame_compare.utils.atomic_write import write_text_atomic
 if TYPE_CHECKING:
     from frame_compare.config.schema import AnalysisConfig
 
-CACHE_FILENAME: str = "cache.compframes"
 CACHE_FILE_EXTENSION: str = ".compframes"
 CACHE_LABEL_MAX_LENGTH: int = 80
 CACHE_VERSION: int = 3
