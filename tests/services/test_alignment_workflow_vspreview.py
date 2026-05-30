@@ -238,6 +238,13 @@ def test_align_clips_vspreview_unavailable_generates_script_without_launch(
 @patch("frame_compare.services.alignment._extract_matching_audio")
 @patch("frame_compare.services.alignment._extract_reference_audio")
 @patch("frame_compare.services.alignment._cross_correlate")
+@pytest.mark.parametrize(
+    ("user_input", "expected_offset"),
+    [
+        ("120 108\n", 12),
+        ("108 120\n", -12),
+    ],
+)
 def test_align_clips_vspreview_confirmed_offset_is_saved_and_applied(
     mock_corr: MagicMock,
     mock_extract_reference: MagicMock,
@@ -245,10 +252,12 @@ def test_align_clips_vspreview_confirmed_offset_is_saved_and_applied(
     mock_probe: MagicMock,
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
+    user_input: str,
+    expected_offset: int,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _set_interactive_terminal(monkeypatch, "9\n")
+    _set_interactive_terminal(monkeypatch, user_input)
 
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
@@ -272,10 +281,10 @@ def test_align_clips_vspreview_confirmed_offset_is_saved_and_applied(
         tmp_path,
     )
 
-    assert results[0].frame_offset == 9
+    assert results[0].frame_offset == expected_offset
     assert results[0].source == "manual"
     manual_overrides = load_manual_overrides(tmp_path)
-    assert manual_overrides["ref:comp"].frame_offset == 9
+    assert manual_overrides["ref:comp"].frame_offset == expected_offset
 
 
 @patch("frame_compare.services.alignment_vspreview.log.warning")

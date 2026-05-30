@@ -116,8 +116,8 @@ Sign convention:
     + trims reference (comparison starts AFTER reference)
     - trims comparison (comparison starts BEFORE reference)
 
-Operator-confirmed offsets are SIGNED RELATIVE OFFSETS.
-The pipeline will apply trim-first normalization (no padding).
+Audio-derived offsets shown here are hints only. This session displays
+untrimmed source clips so the operator can inspect source-frame positions.
 """
 from __future__ import annotations
 
@@ -180,11 +180,6 @@ def resolve_lwlibavsource(core):
     if hasattr(core, "lw") and hasattr(core.lw, "LWLibavSource"):
         return core.lw.LWLibavSource
     raise RuntimeError("LWLibavSource not found on core.lsmas or core.lw")
-
-
-def trim_clip(clip, trim_start, trim_end_inclusive):
-    """Trim to the inclusive overlap window used by Frame Compare."""
-    return clip[trim_start : trim_end_inclusive + 1]
 '''
 
 
@@ -202,15 +197,8 @@ def _build_clip_data_section(
         offset = suggested_offsets_by_key[key]
         offset_lines.append(f"    {json.dumps(key)}: {int(offset)},")
 
-    offset_map_lines: list[str] = []
-    for comp in sorted(comparisons, key=lambda p: p.stem):
-        key = f"{reference.stem}:{comp.stem}"
-        offset = suggested_offsets_by_key.get(key, 0)
-        offset_map_lines.append(f"    {json.dumps(comp.stem)}: {int(offset)},")
-
     targets_content = "\n".join(targets_lines)
     offset_content = "\n".join(offset_lines)
-    offset_map_content = "\n".join(offset_map_lines)
 
     return f"""\
 # ─── Clip Data ────────────────────────────────────────────────────────────────
@@ -226,11 +214,6 @@ TARGETS = {{
 # Suggested offsets keyed by "{{ref_stem}}:{{comp_stem}}"
 suggested_offsets_by_key = {{
 {offset_content}
-}}
-
-# Per-label offset map (operator convenience, edit here to test manually)
-OFFSET_MAP = {{
-{offset_map_content}
 }}
 """
 
@@ -261,12 +244,6 @@ def main():
         ref_clip = load_source(str(ref_path))
     except Exception as e:
         safe_print(f"ERROR: Failed to load reference: {e}")
-        sys.exit(1)
-
-    try:
-        from frame_compare.services.alignment_math import calculate_alignment_trims
-    except Exception as e:
-        safe_print(f"ERROR: Failed to import alignment trim logic: {e}")
         sys.exit(1)
 
     ref_fps_num = ref_clip.fps.numerator
@@ -305,17 +282,22 @@ def main():
 
         key = f"{REFERENCE['label']}:{label}"
         suggested_offset = int(suggested_offsets_by_key.get(key, 0))
-        offset = int(OFFSET_MAP.get(label, suggested_offset))
+        if suggested_offset >= 0:
+            hint_pair = f"hint pair: ref frame {suggested_offset} ~= comparison frame 0"
+        else:
+            hint_pair = f"hint pair: ref frame 0 ~= comparison frame {-suggested_offset}"
 
-        # Apply overlay with the live preview offset (best-effort)
+        # Apply overlay with the audio-derived hint only (best-effort)
         try:
-            overlay_text = f"CMP: {label}\\nPreview offset: {offset} frames"
-            if offset != suggested_offset:
-                overlay_text += f"\\nSuggested offset: {suggested_offset} frames"
-            if offset > 0:
-                overlay_text += "\\n(+N trims reference)"
-            elif offset < 0:
-                overlay_text += "\\n(-N trims comparison)"
+            overlay_text = (
+                f"CMP: {label}\\n"
+                f"Audio hint: {suggested_offset} frames\\n"
+                f"{hint_pair}"
+            )
+            if suggested_offset > 0:
+                overlay_text += "\\n(+N would trim reference after confirmation)"
+            elif suggested_offset < 0:
+                overlay_text += "\\n(-N would trim comparison after confirmation)"
             comp_clip = core.text.Text(comp_clip, overlay_text, alignment=7)
         except Exception:
             safe_print("Warning: Could not apply comparison text overlay (plugin missing?)")
@@ -324,43 +306,30 @@ def main():
             {
                 "label": label,
                 "clip": comp_clip,
-                "offset": offset,
+                "suggested_offset": suggested_offset,
             }
         )
 
-        safe_print(f"  loaded     {label} (offset: {offset})")
+        safe_print(f"  loaded     {label} (audio hint: {suggested_offset})")
 
     if not loaded_comparisons:
         safe_print("ERROR: No comparison clips loaded successfully.")
         sys.exit(1)
 
-    try:
-        ref_trim, comp_trims = calculate_alignment_trims(
-            ref_num_frames=ref_clip.num_frames,
-            comp_offsets=[entry["offset"] for entry in loaded_comparisons],
-            comp_num_frames=[entry["clip"].num_frames for entry in loaded_comparisons],
-        )
-    except Exception as e:
-        safe_print(f"ERROR: Failed to normalize preview trims: {e}")
-        sys.exit(1)
-
-    ref_view = trim_clip(ref_clip, ref_trim[0], ref_trim[1])
     clips = []
     labels = []
-    for entry, (comp_trim_start, comp_trim_end) in zip(
-        loaded_comparisons, comp_trims, strict=True
-    ):
-        clips.append(ref_view)  # Even slot (reference)
+    for entry in loaded_comparisons:
+        clips.append(ref_clip)  # Even slot (untrimmed reference)
         labels.append(f"{REFERENCE['label']} (ref)")
-        clips.append(trim_clip(entry["clip"], comp_trim_start, comp_trim_end))
-        labels.append(entry["label"])
+        clips.append(entry["clip"])  # Odd slot (untrimmed comparison)
+        labels.append(f"{entry['label']} (audio hint: {entry['suggested_offset']})")
 
     for i, (clip, label) in enumerate(zip(clips, labels)):
         clip.set_output(i)
         safe_print(f"  output {i:<2}  {label}")
 
     safe_print("\\nVSPreview ready")
-    safe_print("  adjust offsets visually, then confirm in the terminal")
+    safe_print("  inspect untrimmed source clips, then confirm source frames in the terminal")
 
 main()
 """

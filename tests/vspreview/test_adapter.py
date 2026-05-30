@@ -35,9 +35,12 @@ def _execute_generated_script(
     monkeypatch: pytest.MonkeyPatch,
     suggested_offsets_by_key: dict[str, int],
     comparison_stems: tuple[str, ...],
-    edited_offsets_by_label: dict[str, int] | None = None,
     num_frames_by_stem: dict[str, int] | None = None,
-) -> tuple[dict[str, list[tuple[int | None, int | None, int | None]]], list[int]]:
+) -> tuple[
+    dict[str, list[tuple[int | None, int | None, int | None]]],
+    list[int],
+    list[str],
+]:
     reference = tmp_path / "ref.mkv"
     comparisons = [tmp_path / f"{stem}.mkv" for stem in comparison_stems]
     reference.touch()
@@ -50,6 +53,7 @@ def _execute_generated_script(
         **{stem: [] for stem in comparison_stems},
     }
     output_indices: list[int] = []
+    output_stems: list[str] = []
 
     class FakeClip:
         def __init__(self, stem: str, num_frames: int) -> None:
@@ -64,6 +68,7 @@ def _execute_generated_script(
 
         def set_output(self, index: int) -> None:
             output_indices.append(index)
+            output_stems.append(self.stem)
 
     clips = {
         stem: FakeClip(stem, resolved_num_frames.get(stem, 20))
@@ -97,20 +102,13 @@ def _execute_generated_script(
         suggested_offsets_by_key=suggested_offsets_by_key,
         bootstrap_paths=[tmp_path],
     )
-    if edited_offsets_by_label is not None:
-        for label, edited_offset in edited_offsets_by_label.items():
-            original_offset = suggested_offsets_by_key.get(f"{reference.stem}:{label}", 0)
-            original_line = f'    "{label}": {original_offset},'
-            edited_line = f'    "{label}": {edited_offset},'
-            assert original_line in script
-            script = script.replace(original_line, edited_line, 1)
 
     exec(
         compile(script, "<vspreview-generated>", "exec"),
         {"__name__": "vspreview_loaded_script", "__file__": str(tmp_path / "session.py")},
     )
 
-    return slice_history, output_indices
+    return slice_history, output_indices, output_stems
 
 
 def test_launch_alignment_verification_session_waits_for_vspreview_completion(
@@ -414,7 +412,7 @@ def test_generated_script_sets_outputs_when_loaded_as_vspreview_module(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    slice_history, output_indices = _execute_generated_script(
+    slice_history, output_indices, output_stems = _execute_generated_script(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
         suggested_offsets_by_key={"ref:a": 9},
@@ -422,43 +420,46 @@ def test_generated_script_sets_outputs_when_loaded_as_vspreview_module(
     )
 
     assert output_indices == [0, 1]
-    assert slice_history["ref"] == [(9, 20, None)]
-    assert slice_history["a"] == [(0, 11, None)]
+    assert output_stems == ["ref", "a"]
+    assert slice_history["ref"] == []
+    assert slice_history["a"] == []
 
 
-def test_generated_script_uses_pipeline_trim_normalization_for_mixed_sign_offsets(
+def test_generated_script_uses_untrimmed_outputs_for_mixed_sign_offset_hints(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    slice_history, output_indices = _execute_generated_script(
+    slice_history, output_indices, output_stems = _execute_generated_script(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
         suggested_offsets_by_key={"ref:comp_a": 3, "ref:comp_b": -2},
-        comparison_stems=("comp_a", "comp_b"),
+        comparison_stems=("comp_b", "comp_a"),
     )
 
     assert output_indices == [0, 1, 2, 3]
-    assert slice_history["ref"] == [(3, 18, None)]
-    assert slice_history["comp_a"] == [(0, 15, None)]
-    assert slice_history["comp_b"] == [(5, 20, None)]
+    assert output_stems == ["ref", "comp_a", "ref", "comp_b"]
+    assert slice_history["ref"] == []
+    assert slice_history["comp_a"] == []
+    assert slice_history["comp_b"] == []
 
 
-def test_generated_script_prefers_manual_offset_map_edits_for_the_target_clip(
+def test_generated_script_does_not_slice_source_clips_from_suggested_offsets(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    slice_history, output_indices = _execute_generated_script(
+    slice_history, output_indices, output_stems = _execute_generated_script(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
-        suggested_offsets_by_key={"ref:comp_a": 1, "ref:comp_b": 2},
+        suggested_offsets_by_key={"ref:comp_a": 1, "ref:comp_b": 12},
         comparison_stems=("comp_a", "comp_b"),
-        edited_offsets_by_label={"comp_b": -4},
+        num_frames_by_stem={"ref": 30, "comp_a": 15, "comp_b": 25},
     )
 
     assert output_indices == [0, 1, 2, 3]
-    assert slice_history["ref"] == [(1, 16, None)]
-    assert slice_history["comp_a"] == [(0, 15, None)]
-    assert slice_history["comp_b"] == [(5, 20, None)]
+    assert output_stems == ["ref", "comp_a", "ref", "comp_b"]
+    assert slice_history["ref"] == []
+    assert slice_history["comp_a"] == []
+    assert slice_history["comp_b"] == []
 
 
 def test_generated_script_reports_missing_lwlibavsource_without_traceback(tmp_path: Path) -> None:
@@ -626,13 +627,15 @@ def test_build_script_content_assert_by_section() -> None:
     assert json.dumps(str(bootstrap_paths[1])) in script
     assert "def safe_print(*args, **kwargs):" in script
     assert "def resolve_lwlibavsource(core):" in script
-    assert "def trim_clip(clip, trim_start, trim_end_inclusive):" in script
-    assert "from frame_compare.services.alignment_math import calculate_alignment_trims" in script
+    assert "def trim_clip(clip, trim_start, trim_end_inclusive):" not in script
+    assert "calculate_alignment_trims" not in script
     assert '"label": "ref"' in script
     assert '"comp_a": "comp_a.mkv"' in script
     assert '"ref:comp_a": 10' in script
-    assert '"comp_a": 10' in script
-    assert "offset = int(OFFSET_MAP.get(label, suggested_offset))" in script
+    assert "OFFSET_MAP" not in script
+    assert "Audio hint: {suggested_offset} frames" in script
+    assert "hint pair: ref frame {suggested_offset} ~= comparison frame 0" in script
+    assert "hint pair: ref frame 0 ~= comparison frame {-suggested_offset}" in script
     assert "VSPreview bootstrap" in script
     assert "VSPreview ready" in script
     assert "def main():" in script
