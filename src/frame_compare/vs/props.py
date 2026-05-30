@@ -8,6 +8,8 @@ from frame_compare.vs.types import HDRMetadata
 
 _RANGE_LIMITED = 0
 _RANGE_FULL = 1
+_COLOR_RANGE_FULL = 0
+_COLOR_RANGE_LIMITED = 1
 
 
 def get_int_prop(props: Mapping[str, object], key: str, default: int) -> int:
@@ -51,11 +53,22 @@ def get_str_prop(props: Mapping[str, object], key: str) -> str | None:
 
 
 def get_optional_range_prop(props: Mapping[str, object]) -> int | None:
-    """Return the current range prop value, preferring modern `_Range` over `_ColorRange`."""
-    for key in ("_Range", "_ColorRange", "Range", "ColorRange"):
+    """Return range normalized to modern `_Range` numbering.
+
+    VapourSynth R74 introduced `_Range` with H.273 numbering where
+    0=limited and 1=full. Deprecated `_ColorRange` uses the opposite legacy
+    numbering, so normalize it before callers make limited/full decisions.
+    """
+    for key in ("_Range", "Range"):
         value = get_optional_int_prop(props, key)
-        if value is not None:
+        if value in {_RANGE_LIMITED, _RANGE_FULL}:
             return value
+    for key in ("_ColorRange", "ColorRange"):
+        value = get_optional_int_prop(props, key)
+        if value == _COLOR_RANGE_FULL:
+            return _RANGE_FULL
+        if value == _COLOR_RANGE_LIMITED:
+            return _RANGE_LIMITED
     return None
 
 

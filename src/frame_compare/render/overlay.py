@@ -54,7 +54,10 @@ def _to_pil_image(image: Image.Image | np.ndarray) -> Image.Image:
 
 def _load_font(config: OverlayConfig) -> Font:
     if config.font_path:
-        return ImageFont.truetype(str(config.font_path), size=config.font_size)
+        try:
+            return ImageFont.truetype(str(config.font_path), size=config.font_size)
+        except OSError:
+            pass
     for font_name in _DEFAULT_FONT_CANDIDATES:
         try:
             return ImageFont.truetype(font_name, size=config.font_size)

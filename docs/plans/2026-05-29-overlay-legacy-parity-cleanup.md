@@ -1,19 +1,22 @@
-Status: Active
+Status: Historical
 Scope: Restore screenshot overlay and report-viewer output parity for the approved legacy-gap remediation set
-Owner: Next Codex cleanup-loop session
+Owner: Completed by the 2026-05-29 overlay legacy parity cleanup session
 
 # Overlay and Report Cleanup Plan
 
 ## Purpose
 
-This is a durable execution plan for the next session that will use
-`frame-compare-cleanup-loop` to remediate the approved screenshot-overlay and
-report-viewer gaps identified in the 2026-05-29 head-to-head audit against the
-legacy repo.
+This is retrospective documentation for the completed cleanup-loop remediation
+of the approved screenshot-overlay and report-viewer gaps identified in the
+2026-05-29 head-to-head audit against the legacy repo.
 
-This plan is intentionally execution-grade. It freezes scope, owner seams,
-invariants, verification, and stop-and-replan triggers without prescribing
-unnecessary local implementation detail.
+The completed scope covered overlay identity, `picture_type_from_frame_props`,
+`diagnostic_metadata`, `SelectionDetail` propagation, viewer label handling,
+font fallback candidates, and position removal.
+
+The original plan was intentionally execution-grade. It froze scope, owner
+seams, invariants, verification, and stop-and-replan triggers without
+prescribing unnecessary local implementation detail.
 
 ## Task Family and Risk Tier
 

@@ -194,7 +194,7 @@ def test_run_render_phase_prefers_typed_selection_details_in_reference_source_do
                     transfer=16,
                     matrix=9,
                 ),
-                preserved_frame_props={"_ColorRange": 1},
+                preserved_frame_props={"_ColorRange": 0},
             ),
         )
     ]
@@ -252,7 +252,9 @@ def test_run_render_phase_prefers_typed_selection_details_in_reference_source_do
 def test_run_render_phase_uses_alignment_reselected_source_domain_labels(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1", num_frames=220)
+    comparison = _clip(
+        tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1", num_frames=220
+    )
     ctx = _context(tmp_path, comparisons=[comparison])
     ctx.reference = ctx.reference.with_trim(trim_start_frames=60, trim_end_frame_inclusive=219)
     ctx.comparisons = [comparison.with_trim(trim_start_frames=0, trim_end_frame_inclusive=159)]
@@ -295,7 +297,9 @@ def test_run_render_phase_uses_alignment_reselected_source_domain_labels(
     requests = captured["batch_requests"]
     assert requests[0].selection_labels == ["Dark", "Bright"]
     assert requests[0].selection_details is not None
-    assert [detail.label if detail is not None else None for detail in requests[0].selection_details] == [
+    assert [
+        detail.label if detail is not None else None for detail in requests[0].selection_details
+    ] == [
         "Dark",
         "Bright",
     ]

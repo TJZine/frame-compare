@@ -110,6 +110,34 @@ def test_load_font_uses_first_available_system_font(monkeypatch) -> None:
     ]
 
 
+def test_load_font_falls_back_when_explicit_font_path_is_unavailable(monkeypatch) -> None:
+    attempts: list[tuple[str, int]] = []
+
+    def mock_truetype(path: str, size: int):
+        attempts.append((path, size))
+        if path == "missing.ttf":
+            raise OSError("configured font missing")
+        return "system-font"
+
+    def mock_load_default(*, size: int):
+        raise AssertionError(f"load_default should not run when a system font is available: {size}")
+
+    monkeypatch.setattr("frame_compare.render.overlay.ImageFont.truetype", mock_truetype)
+    monkeypatch.setattr("frame_compare.render.overlay.ImageFont.load_default", mock_load_default)
+
+    config = OverlayConfig(
+        mode=OverlayMode.STANDARD,
+        label="Font",
+        frame_number=1,
+        resolution=(1920, 1080),
+        hdr_info=None,
+        font_path=Path("missing.ttf"),
+    )
+
+    assert _load_font(config) == "system-font"
+    assert attempts == [("missing.ttf", 24), (_DEFAULT_FONT_CANDIDATES[0], 24)]
+
+
 def test_load_font_falls_back_to_pillow_default_when_system_fonts_unavailable(monkeypatch) -> None:
     attempts: list[tuple[str, int]] = []
 
@@ -447,8 +475,7 @@ def test_apply_overlay_diagnostic_with_hdr(captured_draw_calls):
         ),
         diagnostic_metadata=OverlayDiagnosticMetadata(
             mastering_display=(
-                "G(0.265,0.690)B(0.150,0.060)R(0.680,0.320)"
-                "WP(0.3127,0.3290)L(1000.0,0.0050)"
+                "G(0.265,0.690)B(0.150,0.060)R(0.680,0.320)WP(0.3127,0.3290)L(1000.0,0.0050)"
             ),
             max_cll=900,
             max_fall=300,

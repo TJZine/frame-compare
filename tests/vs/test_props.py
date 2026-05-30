@@ -72,14 +72,27 @@ def test_get_optional_range_prop_prefers_modern_range_key():
     assert get_optional_range_prop(props) == 0
 
 
-def test_range_helpers_follow_current_vapoursynth_semantics():
-    limited_props = {"_Range": 0}
-    full_props = {"_ColorRange": 1}
+def test_range_helpers_follow_current_range_semantics():
+    assert props_indicate_limited_range({"_Range": 0}) is True
+    assert range_label_from_props({"_Range": 0}) == "limited"
+    assert props_indicate_limited_range({"_Range": 1}) is False
+    assert range_label_from_props({"_Range": 1}) == "full"
 
-    assert props_indicate_limited_range(limited_props) is True
-    assert range_label_from_props(limited_props) == "limited"
-    assert props_indicate_limited_range(full_props) is False
-    assert range_label_from_props(full_props) == "full"
+
+def test_range_helpers_normalize_deprecated_color_range_semantics():
+    assert get_optional_range_prop({"_ColorRange": 1}) == 0
+    assert props_indicate_limited_range({"_ColorRange": 1}) is True
+    assert range_label_from_props({"_ColorRange": 1}) == "limited"
+
+    assert get_optional_range_prop({"_ColorRange": 0}) == 1
+    assert props_indicate_limited_range({"_ColorRange": 0}) is False
+    assert range_label_from_props({"_ColorRange": 0}) == "full"
+
+
+def test_range_helpers_ignore_unrecognized_range_values():
+    assert get_optional_range_prop({"_Range": 2, "_ColorRange": 2}) is None
+    assert props_indicate_limited_range({"_Range": 2, "_ColorRange": 2}) is None
+    assert range_label_from_props({"_Range": 2, "_ColorRange": 2}) is None
 
 
 def test_detect_hdr_pq_bt2020():

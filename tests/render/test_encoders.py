@@ -11,7 +11,6 @@ from frame_compare.render.encoders import (
     _clip_to_rgb24_for_pillow,
     _maybe_expand_tonemapped_video_range,
     _picture_type_from_frame_props,
-    _render_vs,
     apply_overlay_to_file,
     render_frame,
 )
@@ -312,6 +311,26 @@ def test_clip_to_rgb24_for_pillow_expands_marked_limited_tonemap(monkeypatch) ->
     clip.std.SetFrameProps.assert_called_once_with(_FrameCompareExpandRange=1)
 
 
+def test_clip_to_rgb24_for_pillow_expands_deprecated_limited_color_range_tonemap(
+    monkeypatch,
+) -> None:
+    fake_vs = SimpleNamespace(RGB24=1, RGB=2)
+    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
+
+    fmt = SimpleNamespace(id=999, color_family=2)
+    clip = _FakeClip(
+        fmt=fmt,
+        props={"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_ColorRange": 1},
+    )
+    clip.resize.Point = MagicMock(return_value=clip)
+
+    result = _clip_to_rgb24_for_pillow(clip)  # type: ignore[arg-type]
+
+    assert result == "props"
+    clip.resize.Point.assert_called_once_with(format=1)
+    clip.std.SetFrameProps.assert_called_once_with(_FrameCompareExpandRange=1)
+
+
 def test_clip_to_rgb24_for_pillow_does_not_expand_marked_full_range_tonemap(monkeypatch) -> None:
     fake_vs = SimpleNamespace(RGB24=1, RGB=2)
     monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
@@ -320,6 +339,24 @@ def test_clip_to_rgb24_for_pillow_does_not_expand_marked_full_range_tonemap(monk
     clip = _FakeClip(
         fmt=fmt,
         props={"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_Range": 1},
+    )
+
+    result = _clip_to_rgb24_for_pillow(clip)  # type: ignore[arg-type]
+
+    assert result == "point"
+    assert clip.resize.calls[0] == ("Point", {"format": 1})
+
+
+def test_clip_to_rgb24_for_pillow_skips_deprecated_full_color_range_tonemap(
+    monkeypatch,
+) -> None:
+    fake_vs = SimpleNamespace(RGB24=1, RGB=2)
+    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
+
+    fmt = SimpleNamespace(id=999, color_family=2)
+    clip = _FakeClip(
+        fmt=fmt,
+        props={"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_ColorRange": 0},
     )
 
     result = _clip_to_rgb24_for_pillow(clip)  # type: ignore[arg-type]
@@ -377,6 +414,28 @@ def test_maybe_expand_tonemapped_video_range_skips_marked_full_range() -> None:
     assert result is array
 
 
+def test_maybe_expand_tonemapped_video_range_expands_deprecated_limited_color_range() -> None:
+    array = np.array([[[16, 16, 16], [120, 120, 120]]], dtype=np.uint8)
+
+    result = _maybe_expand_tonemapped_video_range(
+        array, {"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_ColorRange": 1}
+    )
+
+    assert result.dtype == np.uint8
+    assert result[0, 0, 0] == 0
+    assert result[0, 1, 0] > array[0, 1, 0]
+
+
+def test_maybe_expand_tonemapped_video_range_skips_deprecated_full_color_range() -> None:
+    array = np.full((2, 2, 3), 32, dtype=np.uint8)
+
+    result = _maybe_expand_tonemapped_video_range(
+        array, {"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_ColorRange": 0}
+    )
+
+    assert result is array
+
+
 @pytest.mark.parametrize(
     ("prop_value", "expected"),
     [
@@ -392,6 +451,8 @@ def test_maybe_expand_tonemapped_video_range_skips_marked_full_range() -> None:
 def test_picture_type_from_frame_props_normalizes_supported_values(
     prop_value: object, expected: str | None
 ) -> None:
+    # Intentional internal-seam coverage: render_frame tests below prove integration,
+    # while this table protects the stable `_PictType` normalization contract.
     assert _picture_type_from_frame_props({"_PictType": prop_value}) == expected
 
 
@@ -429,12 +490,15 @@ def test_render_vs_populates_overlay_picture_type_from_frame_props(
 
     overlay = OverlayConfig(OverlayMode.STANDARD, "Label", 0, (2, 2), None, None)
 
-    _render_vs(
-        _ClipWithPictureType(),  # type: ignore[arg-type]
-        0,
-        tmp_path / "out.png",
-        EncoderSettings(),
-        overlay=overlay,
+    render_frame(
+        RenderRequest(
+            clip=_ClipWithPictureType(),  # type: ignore[arg-type]
+            frame_number=0,
+            output_path=tmp_path / "out.png",
+            overlay=overlay,
+            encoder_settings=EncoderSettings(),
+        ),
+        renderer="vapoursynth",
     )
 
     assert captured_picture_types == ["B"]
@@ -483,12 +547,15 @@ def test_render_vs_clears_overlay_picture_type_when_prop_is_unsupported(
         picture_type="I",
     )
 
-    _render_vs(
-        _ClipWithoutSupportedPictureType(),  # type: ignore[arg-type]
-        0,
-        tmp_path / "out.png",
-        EncoderSettings(),
-        overlay=overlay,
+    render_frame(
+        RenderRequest(
+            clip=_ClipWithoutSupportedPictureType(),  # type: ignore[arg-type]
+            frame_number=0,
+            output_path=tmp_path / "out.png",
+            overlay=overlay,
+            encoder_settings=EncoderSettings(),
+        ),
+        renderer="vapoursynth",
     )
 
     assert captured_picture_types == [None]
