@@ -305,6 +305,35 @@ def test_hdr_disable_tonemap_allows_ffmpeg_when_vs_missing(tmp_path: Path) -> No
 
 
 @pytest.mark.integration
+def test_explicit_fpng_disallows_auto_ffmpeg_fallback_when_vs_missing(tmp_path: Path) -> None:
+    """Explicit fpng requires the actual VapourSynth path unless FFmpeg is forced."""
+    clips = [Path("sdr_video.mkv")]
+    frames = [0]
+    config = ConfigSchema(
+        color=ColorConfig(enable_tonemap=False),
+        screenshots={"use_ffmpeg": False, "vs_writer": "fpng"},
+    )
+
+    with (
+        patch("frame_compare.vs.loader.DefaultVSLoader") as mock_loader_cls,
+        patch("frame_compare.render.batch.orchestrator.render_batch") as mock_batch,
+    ):
+        mock_loader = mock_loader_cls.return_value
+        mock_loader.load.side_effect = VapourSynthNotFoundError()
+
+        with pytest.raises(VapourSynthNotFoundError):
+            render_screenshots(
+                clips,
+                frames,
+                tmp_path,
+                config,
+                ScreenshotRenderOptions(renderer="auto"),
+            )
+
+        mock_batch.assert_not_called()
+
+
+@pytest.mark.integration
 def test_sdr_allows_ffmpeg_fallback_when_vs_missing(tmp_path: Path) -> None:
     """SDR source + VS missing → fallback to FFmpeg allowed regardless of tonemap setting."""
     clips = [Path("sdr_video.mkv")]

@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from frame_compare.config.schema_enums import ScreenshotGeometryMode
 from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner, FFmpegRunner
+from frame_compare.render.geometry import (
+    GeometryRect,
+    RenderGeometryPlan,
+    SourceGeometry,
+    plan_render_geometry,
+)
 from frame_compare.render.naming import generate_screenshot_name, generate_screenshot_path
 from frame_compare.render.prepare import prepare_clip_for_render
 from frame_compare.render.types import (
@@ -19,7 +27,19 @@ from frame_compare.render.types import (
 from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 
 if TYPE_CHECKING:
+    import vapoursynth as vs
+
     from frame_compare.config.schema import ConfigSchema
+
+
+@dataclass(frozen=True, slots=True)
+class _PreparedBatchRequest:
+    request: ScreenshotBatchRequest
+    loaded_clip: vs.VideoNode | Path
+    hdr_info: str | None
+    width: int
+    height: int
+    num_frames: int | None
 
 
 def _validate_batch_request_lengths(request: ScreenshotBatchRequest) -> None:
@@ -140,6 +160,7 @@ def _build_overlay_config(
     selection_detail: OverlaySelectionDetail | None,
     diagnostic_metadata: OverlayDiagnosticMetadata | None,
     resolution: tuple[int, int],
+    origin: tuple[int, int] | None,
     hdr_info: str | None,
     num_frames: int | None,
     include_frame_number: bool,
@@ -158,24 +179,68 @@ def _build_overlay_config(
         burn_in_label=_request_filename_label(request),
         include_frame_number=include_frame_number,
         resolution=resolution,
+        origin=origin,
         hdr_info=hdr_info,
         font_path=None,
     )
 
 
-def expand_batch_render_requests(
+def _dovi_l5_active_rect(
+    metadata: OverlayDiagnosticMetadata | None,
+    *,
+    width: int,
+    height: int,
+) -> GeometryRect | None:
+    dovi = metadata.dolby_vision if metadata is not None else None
+    if dovi is None:
+        return None
+    margins = (dovi.l5_left, dovi.l5_top, dovi.l5_right, dovi.l5_bottom)
+    if any(value is None for value in margins):
+        return None
+
+    left, top, right, bottom = margins
+    if left is None or top is None or right is None or bottom is None:
+        return None
+    if left < 0 or top < 0 or right < 0 or bottom < 0:
+        return None
+    if left == 0 and top == 0 and right == 0 and bottom == 0:
+        return None
+
+    active_width = width - left - right
+    active_height = height - top - bottom
+    if active_width <= 0 or active_height <= 0:
+        return None
+    return GeometryRect(left, top, active_width, active_height)
+
+
+def _request_active_rect(
+    request: ScreenshotBatchRequest,
+    *,
+    width: int,
+    height: int,
+) -> GeometryRect | None:
+    if request.diagnostic_metadata is None:
+        return None
+
+    rects: set[GeometryRect] = set()
+    for metadata in request.diagnostic_metadata:
+        rect = _dovi_l5_active_rect(metadata, width=width, height=height)
+        if rect is not None:
+            rects.add(rect)
+
+    if len(rects) == 1:
+        return next(iter(rects))
+    return None
+
+
+def _prepare_batch_requests(
     batch_requests: list[ScreenshotBatchRequest],
     *,
-    output_dir: Path,
     config: ConfigSchema,
-    overlay_mode: OverlayMode,
     renderer: Renderer,
     ffmpeg_runner: FFmpegRunner,
-) -> tuple[list[RenderRequest], dict[str, range]]:
-    all_requests: list[RenderRequest] = []
-    label_to_range: dict[str, range] = {}
-    start_idx = 0
-
+) -> list[_PreparedBatchRequest]:
+    prepared_requests: list[_PreparedBatchRequest] = []
     for req in batch_requests:
         loaded_clip, _, hdr_info, source_info = prepare_clip_for_render(
             req.clip_path, renderer, config, ffmpeg_runner=ffmpeg_runner
@@ -191,13 +256,81 @@ def expand_batch_render_requests(
         resolved_hdr_info = (
             hdr_info if source_info is not None else ("HDR" if req.probe_is_hdr else None)
         )
+        prepared_requests.append(
+            _PreparedBatchRequest(
+                request=req,
+                loaded_clip=loaded_clip,
+                hdr_info=resolved_hdr_info,
+                width=width,
+                height=height,
+                num_frames=num_frames,
+            )
+        )
+    return prepared_requests
 
+
+def _geometry_plans_for_batch(
+    prepared_requests: list[_PreparedBatchRequest],
+    *,
+    geometry_mode: ScreenshotGeometryMode,
+) -> tuple[RenderGeometryPlan | None, ...]:
+    if geometry_mode == ScreenshotGeometryMode.NATIVE:
+        return tuple(None for _prepared in prepared_requests)
+
+    sources = tuple(
+        SourceGeometry(
+            width=prepared.width,
+            height=prepared.height,
+            active_rect=_request_active_rect(
+                prepared.request,
+                width=prepared.width,
+                height=prepared.height,
+            ),
+            active_rect_source="metadata",
+            label=prepared.request.label,
+        )
+        for prepared in prepared_requests
+    )
+    return plan_render_geometry(sources, mode="aligned")
+
+
+def expand_batch_render_requests(
+    batch_requests: list[ScreenshotBatchRequest],
+    *,
+    output_dir: Path,
+    config: ConfigSchema,
+    overlay_mode: OverlayMode,
+    renderer: Renderer,
+    ffmpeg_runner: FFmpegRunner,
+) -> tuple[list[RenderRequest], dict[str, range]]:
+    all_requests: list[RenderRequest] = []
+    label_to_range: dict[str, range] = {}
+    start_idx = 0
+    prepared_requests = _prepare_batch_requests(
+        batch_requests,
+        config=config,
+        renderer=renderer,
+        ffmpeg_runner=ffmpeg_runner,
+    )
+    geometry_plans = _geometry_plans_for_batch(
+        prepared_requests,
+        geometry_mode=config.screenshots.geometry_mode,
+    )
+
+    for prepared, geometry_plan in zip(prepared_requests, geometry_plans, strict=True):
+        req = prepared.request
         num_frames_for_req = len(req.source_frames)
         label_to_range[req.label] = range(start_idx, start_idx + num_frames_for_req)
         start_idx += num_frames_for_req
+        overlay_resolution = (
+            geometry_plan.final_canvas_size
+            if geometry_plan is not None
+            else (prepared.width, prepared.height)
+        )
+        overlay_origin = geometry_plan.overlay_origin if geometry_plan is not None else None
 
         for idx, source_frame in enumerate(req.source_frames):
-            _validate_source_frame_range(req, source_frame=source_frame, num_frames=num_frames)
+            _validate_source_frame_range(req, source_frame=source_frame, num_frames=prepared.num_frames)
             display_frame = req.display_frames[idx]
             selection_detail = (
                 req.selection_details[idx]
@@ -226,19 +359,24 @@ def expand_batch_render_requests(
                 selection_label=selection_label,
                 selection_detail=selection_detail,
                 diagnostic_metadata=diagnostic_metadata,
-                resolution=(width, height),
-                hdr_info=resolved_hdr_info,
-                num_frames=num_frames,
+                resolution=overlay_resolution,
+                origin=overlay_origin,
+                hdr_info=prepared.hdr_info,
+                num_frames=prepared.num_frames,
                 include_frame_number=config.screenshots.include_frame_number,
             )
 
             render_req = RenderRequest(
-                clip=loaded_clip,
+                clip=prepared.loaded_clip,
                 frame_number=source_frame,
                 output_path=output_path,
                 overlay=overlay,
-                encoder_settings=EncoderSettings(),
+                encoder_settings=EncoderSettings(
+                    compression=config.screenshots.png_compression,
+                    vs_writer=config.screenshots.vs_writer,
+                ),
                 ffmpeg_runner=ffmpeg_runner,
+                geometry_plan=geometry_plan,
             )
             all_requests.append(render_req)
 

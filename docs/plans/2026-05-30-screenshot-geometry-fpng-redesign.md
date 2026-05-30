@@ -1,6 +1,6 @@
-Status: Active
+Status: Historical
 Scope: Restore and improve legacy-quality screenshot geometry alignment, active-image overlay placement, and VapourSynth fpng screenshot writing for mixed-resolution and letterbox/pillarbox sources.
-Owner: Next Codex cleanup-loop session; the main session is orchestrator only and must delegate validation, implementation, and review through the cleanup-loop workflow.
+Owner: Completed by Codex cleanup-loop session on 2026-05-30.
 
 # Screenshot Geometry And FPNG Redesign
 

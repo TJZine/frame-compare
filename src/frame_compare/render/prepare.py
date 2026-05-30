@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from frame_compare.config.schema_enums import VsScreenshotWriter
 from frame_compare.render.types import Renderer
 
 if TYPE_CHECKING:
@@ -266,6 +267,8 @@ def prepare_clip_for_render(
 
     # === DETERMINISTIC FALLBACK LOGIC (§1.4.1, §1.4.4) ===
     if vs_load_failure is not None and renderer == "auto":
+        if config.screenshots.vs_writer == VsScreenshotWriter.FPNG:
+            raise vs_load_failure
         _resolve_auto_mode_fallback(clip_path, vs_load_failure, config, renderer, ffmpeg_runner)
 
     # === RENDERER=FFMPEG WITH TONEMAP GATING (§1.4.4) ===

@@ -8,6 +8,12 @@ from frame_compare.render.backend._ffmpeg_frame import (
     build_extract_frame_argv,
 )
 from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
+from frame_compare.render.geometry import (
+    GeometryMargins,
+    GeometryRect,
+    RenderGeometryPlan,
+    SourceGeometry,
+)
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 from frame_compare.utils.subproc import CalledProcessError
 
@@ -45,6 +51,68 @@ def test_build_extract_frame_argv_rejects_negative_frame_numbers() -> None:
             frame_num=-1,
             output=Path("frame.png"),
             overwrite=False,
+        )
+
+
+def test_build_extract_frame_argv_places_geometry_filters_after_exact_frame_select() -> None:
+    source = SourceGeometry(width=1920, height=1080)
+    plan = RenderGeometryPlan(
+        source=source,
+        source_rect=GeometryRect(0, 0, 1920, 1080),
+        active_rect=GeometryRect(240, 0, 1440, 1080),
+        active_rect_source="metadata",
+        crop_rect=GeometryRect(240, 0, 1440, 1080),
+        crop=GeometryMargins(left=240, right=240),
+        cropped_size=(1440, 1080),
+        scaled_size=(1280, 960),
+        pad=GeometryMargins(top=60, bottom=60),
+        final_canvas_size=(1280, 1080),
+        content_origin=(0, 60),
+        overlay_origin=(10, 70),
+        source_overlay_origin=(250, 10),
+    )
+
+    argv = build_extract_frame_argv(
+        video=Path("clip.mkv"),
+        frame_num=100,
+        output=Path("frame.png"),
+        overwrite=False,
+        geometry_plan=plan,
+    )
+
+    assert argv[argv.index("-vf") + 1] == (
+        "select=eq(n\\,100),"
+        "crop=1440:1080:240:0,"
+        "scale=1280:960,"
+        "pad=1280:1080:0:60:color=black"
+    )
+
+
+def test_build_extract_frame_argv_rejects_unrepresentable_geometry_plan() -> None:
+    source = SourceGeometry(width=1920, height=1080)
+    plan = RenderGeometryPlan(
+        source=source,
+        source_rect=GeometryRect(0, 0, 1920, 1080),
+        active_rect=GeometryRect(0, 0, 1920, 1080),
+        active_rect_source="full-frame",
+        crop_rect=GeometryRect(0, 0, 1920, 1080),
+        crop=GeometryMargins(),
+        cropped_size=(1920, 1080),
+        scaled_size=(0, 1080),
+        pad=GeometryMargins(),
+        final_canvas_size=(1920, 1080),
+        content_origin=(0, 0),
+        overlay_origin=(10, 10),
+        source_overlay_origin=(10, 10),
+    )
+
+    with pytest.raises(ValueError, match="scale dimensions must be positive"):
+        build_extract_frame_argv(
+            video=Path("clip.mkv"),
+            frame_num=100,
+            output=Path("frame.png"),
+            overwrite=False,
+            geometry_plan=plan,
         )
 
 

@@ -4,18 +4,28 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 from frame_compare.render.backend._ffmpeg_frame import build_extract_frame_argv
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 from frame_compare.utils.subproc import CalledProcessError, TimeoutExpired, run_subprocess
 from frame_compare.vs.types import HDRMetadata
 
+if TYPE_CHECKING:
+    from frame_compare.render.geometry import RenderGeometryPlan
+
 
 class FFmpegRunner(Protocol):
     """Protocol for FFmpeg-based frame extraction and probing."""
 
-    def extract_frame(self, video: Path, frame_num: int, output: Path) -> None:
+    def extract_frame(
+        self,
+        video: Path,
+        frame_num: int,
+        output: Path,
+        *,
+        geometry_plan: RenderGeometryPlan | None = None,
+    ) -> None:
         """Extract a single frame from the given video into the output path."""
         ...
 
@@ -37,13 +47,21 @@ class DefaultFFmpegRunner:
     _FFPROBE_TIMEOUT_SECONDS = 15.0
     _FFMPEG_TIMEOUT_SECONDS = 30.0
 
-    def extract_frame(self, video: Path, frame_num: int, output: Path) -> None:
+    def extract_frame(
+        self,
+        video: Path,
+        frame_num: int,
+        output: Path,
+        *,
+        geometry_plan: RenderGeometryPlan | None = None,
+    ) -> None:
         output.parent.mkdir(parents=True, exist_ok=True)
         argv = build_extract_frame_argv(
             video=video,
             frame_num=frame_num,
             output=output,
             overwrite=True,
+            geometry_plan=geometry_plan,
         )
         try:
             run_subprocess(argv, timeout_seconds=self._FFMPEG_TIMEOUT_SECONDS)

@@ -1,8 +1,12 @@
 import pytest
 
 from frame_compare.render.geometry import (
+    GeometryMargins,
+    GeometryRect,
+    SourceGeometry,
     calculate_dimensions,
     ensure_mod2,
+    plan_render_geometry,
 )
 
 
@@ -51,6 +55,7 @@ def test_calculate_dimensions_invalid_max_raises():
 def test_calculate_dimensions_never_returns_zero_dimensions():
     assert calculate_dimensions(1, 1000, max_width=None, max_height=1) == (1, 1)
 
+
 def test_ensure_mod2_already_even():
     assert ensure_mod2(width=1920, height=1080) == (1920, 1080)
 
@@ -62,3 +67,156 @@ def test_ensure_mod2_rounds_up():
 def test_ensure_mod2_invalid_raises():
     with pytest.raises(ValueError, match="dimensions must be positive"):
         ensure_mod2(width=0, height=100)
+
+
+def test_plan_render_geometry_native_preserves_full_frame_for_multiple_sources():
+    plans = plan_render_geometry(
+        (
+            SourceGeometry(width=1920, height=1080, label="reference"),
+            SourceGeometry(width=1280, height=720, label="encode"),
+        ),
+        mode="native",
+    )
+
+    assert len(plans) == 2
+    assert plans[0].active_rect == GeometryRect(0, 0, 1920, 1080)
+    assert plans[0].crop == GeometryMargins()
+    assert plans[0].scaled_size == (1920, 1080)
+    assert plans[0].pad == GeometryMargins()
+    assert plans[0].final_canvas_size == (1920, 1080)
+    assert plans[0].overlay_origin == (10, 10)
+    assert plans[0].is_noop
+
+    assert plans[1].active_rect == GeometryRect(0, 0, 1280, 720)
+    assert plans[1].final_canvas_size == (1280, 720)
+    assert plans[1].is_noop
+
+
+def test_plan_render_geometry_aligned_same_height_center_crops_wider_source():
+    plans = plan_render_geometry(
+        (
+            SourceGeometry(width=1920, height=1080, label="pillarboxed"),
+            SourceGeometry(width=1440, height=1080, label="active"),
+        ),
+        mode="aligned",
+    )
+
+    wider = plans[0]
+    narrower = plans[1]
+    assert wider.active_rect_source == "dimension-derived"
+    assert wider.active_rect == GeometryRect(240, 0, 1440, 1080)
+    assert wider.crop == GeometryMargins(left=240, right=240)
+    assert wider.cropped_size == (1440, 1080)
+    assert wider.final_canvas_size == (1440, 1080)
+    assert wider.overlay_origin == (10, 10)
+    assert wider.source_overlay_origin == (250, 10)
+
+    assert narrower.crop == GeometryMargins()
+    assert narrower.final_canvas_size == (1440, 1080)
+    assert narrower.overlay_origin == (10, 10)
+
+
+def test_plan_render_geometry_aligned_same_width_center_crops_taller_source():
+    plans = plan_render_geometry(
+        (
+            SourceGeometry(width=1920, height=1080, label="letterboxed"),
+            SourceGeometry(width=1920, height=800, label="active"),
+        ),
+        mode="aligned",
+    )
+
+    taller = plans[0]
+    shorter = plans[1]
+    assert taller.active_rect_source == "dimension-derived"
+    assert taller.active_rect == GeometryRect(0, 140, 1920, 800)
+    assert taller.crop == GeometryMargins(top=140, bottom=140)
+    assert taller.cropped_size == (1920, 800)
+    assert taller.final_canvas_size == (1920, 800)
+    assert taller.source_overlay_origin == (10, 150)
+
+    assert shorter.crop == GeometryMargins()
+    assert shorter.final_canvas_size == (1920, 800)
+
+
+def test_plan_render_geometry_aligned_crops_odd_full_frame_to_mod_safe_size():
+    (plan,) = plan_render_geometry(
+        (SourceGeometry(width=1921, height=1081, label="odd"),),
+        mode="aligned",
+    )
+
+    assert plan.active_rect_source == "full-frame"
+    assert plan.active_rect == GeometryRect(0, 0, 1921, 1081)
+    assert plan.crop_rect == GeometryRect(0, 0, 1920, 1080)
+    assert plan.crop == GeometryMargins(right=1, bottom=1)
+    assert plan.final_canvas_size == (1920, 1080)
+
+
+def test_plan_render_geometry_aligned_scales_proportionally_and_centers_padding():
+    plans = plan_render_geometry(
+        (
+            SourceGeometry(width=1000, height=500, label="wide"),
+            SourceGeometry(width=800, height=800, label="square"),
+        ),
+        mode="aligned",
+    )
+
+    wide = plans[0]
+    square = plans[1]
+    assert wide.scaled_size == (1600, 800)
+    assert wide.pad == GeometryMargins()
+    assert wide.final_canvas_size == (1600, 800)
+
+    assert square.scaled_size == (800, 800)
+    assert square.pad == GeometryMargins(left=400, right=400)
+    assert square.content_origin == (400, 0)
+    assert square.overlay_origin == (410, 10)
+    assert square.final_canvas_size == (1600, 800)
+
+
+def test_plan_render_geometry_prefers_safe_provided_active_rect_over_dimension_fallback():
+    plans = plan_render_geometry(
+        (
+            SourceGeometry(
+                width=1920,
+                height=1080,
+                active_rect=GeometryRect(160, 0, 1600, 1080),
+                active_rect_source="metadata",
+            ),
+            SourceGeometry(width=1440, height=1080),
+        ),
+        mode="aligned",
+    )
+
+    provided = plans[0]
+    derived = plans[1]
+    assert provided.active_rect_source == "metadata"
+    assert provided.crop == GeometryMargins(left=160, right=160)
+    assert provided.final_canvas_size == (1600, 1080)
+    assert provided.source_overlay_origin == (170, 10)
+
+    assert derived.active_rect_source == "dimension-derived"
+    assert derived.pad == GeometryMargins(left=80, right=80)
+    assert derived.overlay_origin == (90, 10)
+
+
+def test_plan_render_geometry_invalid_active_rect_falls_back_to_dimension_derived_rect():
+    plans = plan_render_geometry(
+        (
+            SourceGeometry(width=1920, height=1080, active_rect=GeometryRect(0, 0, 0, 1080)),
+            SourceGeometry(width=1440, height=1080),
+        ),
+        mode="aligned",
+    )
+
+    assert plans[0].active_rect_source == "dimension-derived"
+    assert plans[0].active_rect == GeometryRect(240, 0, 1440, 1080)
+
+
+def test_plan_render_geometry_invalid_active_rect_falls_back_to_full_frame_without_axis_match():
+    (plan,) = plan_render_geometry(
+        (SourceGeometry(width=1920, height=1080, active_rect=GeometryRect(-1, 0, 100, 100)),),
+        mode="aligned",
+    )
+
+    assert plan.active_rect_source == "full-frame"
+    assert plan.active_rect == GeometryRect(0, 0, 1920, 1080)

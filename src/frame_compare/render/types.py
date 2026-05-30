@@ -5,11 +5,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from frame_compare.config.schema import OverlayMode
+from frame_compare.config.schema_enums import VsScreenshotWriter
 
 if TYPE_CHECKING:
     import vapoursynth as vs
 
     from frame_compare.render.backend.ffmpeg import FFmpegRunner
+    from frame_compare.render.geometry import RenderGeometryPlan
     from frame_compare.utils.progress_protocol import ProgressReporter
 
 
@@ -20,6 +22,7 @@ class EncoderSettings:
     format: str = "png"
     compression: int = 6  # PNG compression 0-9
     bit_depth: int = 8
+    vs_writer: VsScreenshotWriter = VsScreenshotWriter.AUTO
 
 
 @dataclass
@@ -32,6 +35,7 @@ class OverlayConfig:
     resolution: tuple[int, int]
     hdr_info: str | None
     font_path: Path | None
+    origin: tuple[int, int] | None = None
     display_frame_number: int | None = None
     num_frames: int | None = None
     picture_type: str | None = None
@@ -106,6 +110,7 @@ class RenderRequest:
     overlay: OverlayConfig | None
     encoder_settings: EncoderSettings
     ffmpeg_runner: FFmpegRunner | None = None
+    geometry_plan: RenderGeometryPlan | None = None
 
 
 @dataclass(frozen=True)

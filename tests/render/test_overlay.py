@@ -293,6 +293,29 @@ def test_apply_overlay_standard_uses_fallback_details_y_when_bbox_fails(monkeypa
     assert calls[1][0] == (10, 140)
 
 
+def test_apply_overlay_uses_explicit_origin_for_frame_and_detail_blocks(captured_draw_calls):
+    config = OverlayConfig(
+        mode=OverlayMode.STANDARD,
+        label="Ref",
+        frame_number=100,
+        display_frame_number=12,
+        num_frames=100,
+        resolution=(1920, 1080),
+        hdr_info=None,
+        font_path=None,
+        origin=(26, 14),
+    )
+    img = Image.new("RGB", (100, 100))
+
+    apply_overlay(img, config)
+
+    (xy1, text1, _kwargs1) = captured_draw_calls["multiline_text"][0]
+    (xy2, _text2, _kwargs2) = captured_draw_calls["multiline_text"][1]
+    expected_frame_info_height = len(str(text1).splitlines()) * 20
+    assert xy1 == (26, 14)
+    assert xy2 == (26, 14 + expected_frame_info_height + 10)
+
+
 def test_apply_overlay_standard_includes_selection_label_when_present(captured_draw_calls):
     config = OverlayConfig(
         mode=OverlayMode.STANDARD,

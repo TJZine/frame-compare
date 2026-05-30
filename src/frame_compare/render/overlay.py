@@ -36,6 +36,10 @@ _DEFAULT_FONT_CANDIDATES = (
 )
 
 
+def _label_position(config: OverlayConfig) -> tuple[int, int]:
+    return config.origin if config.origin is not None else _LABEL_POSITION
+
+
 def _resolve_mode(mode: object) -> OverlayMode:
     if isinstance(mode, OverlayMode):
         return mode
@@ -358,18 +362,19 @@ def apply_overlay(
     canvas = pil_image.convert("RGBA")
     draw = ImageDraw.Draw(canvas)
     font = _load_font(config)
+    label_position = _label_position(config)
 
     frame_info_text = _compose_frame_info_text(config, mode)
     details_y = _DEFAULT_DETAILS_Y
     if frame_info_text is not None:
-        _draw_text_block(draw, _LABEL_POSITION, frame_info_text, font)
-        details_y = _resolve_details_y(draw, _LABEL_POSITION, frame_info_text, font)
+        _draw_text_block(draw, label_position, frame_info_text, font)
+        details_y = _resolve_details_y(draw, label_position, frame_info_text, font)
 
     if mode == OverlayMode.MINIMAL:
         return canvas
 
     overlay_text = _compose_overlay_text(config, mode)
     if overlay_text is not None:
-        _draw_text_block(draw, (_LABEL_POSITION[0], details_y), overlay_text, font)
+        _draw_text_block(draw, (label_position[0], details_y), overlay_text, font)
 
     return canvas

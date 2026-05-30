@@ -1,6 +1,7 @@
 import typing
 from pathlib import Path
 
+from frame_compare.config.schema_enums import VsScreenshotWriter
 from frame_compare.render.types import (
     BatchRenderOptions,
     EncoderSettings,
@@ -37,13 +38,20 @@ def test_encoder_settings_defaults() -> None:
     assert settings.format == "png"
     assert settings.compression == 6
     assert settings.bit_depth == 8
+    assert settings.vs_writer == VsScreenshotWriter.AUTO
 
 
 def test_encoder_settings_custom() -> None:
-    settings = EncoderSettings(format="webp", compression=9, bit_depth=16)
+    settings = EncoderSettings(
+        format="webp",
+        compression=9,
+        bit_depth=16,
+        vs_writer=VsScreenshotWriter.FPNG,
+    )
     assert settings.format == "webp"
     assert settings.compression == 9
     assert settings.bit_depth == 16
+    assert settings.vs_writer == VsScreenshotWriter.FPNG
 
 
 def test_overlay_config_defaults() -> None:
