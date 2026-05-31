@@ -121,4 +121,6 @@ def test_overlay_display_frame_number_matches_aligned_output_filename(
     assert req.frame_number == 20
     assert req.output_path.name == "10 - ref.png"
     assert req.overlay is not None
+    assert req.overlay.label == "Reference"
+    assert req.overlay.burn_in_label == "ref"
     assert req.overlay.display_frame_number == 10

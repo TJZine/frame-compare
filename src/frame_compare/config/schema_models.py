@@ -11,11 +11,13 @@ from frame_compare.config.schema_enums import (
     LogFormat,
     LogLevel,
     OverlayMode,
+    ScreenshotGeometryMode,
     SelectionMode,
     ToneCurve,
     TonemapPreset,
     ViewerMode,
     Visibility,
+    VsScreenshotWriter,
 )
 
 
@@ -60,6 +62,8 @@ class ScreenshotsConfig(BaseModel):
     include_frame_number: bool = True
     png_compression: int = Field(default=6, ge=0, le=9)
     ffmpeg_timeout_seconds: float = Field(default=30.0, ge=5.0)
+    geometry_mode: ScreenshotGeometryMode = ScreenshotGeometryMode.NATIVE
+    vs_writer: VsScreenshotWriter = VsScreenshotWriter.AUTO
 
 
 class ColorConfig(BaseModel):

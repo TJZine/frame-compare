@@ -52,6 +52,43 @@ def test_current_cli_contract_matches_live_override_map() -> None:
         assert config_path in cli_contract
 
 
+def test_current_cli_contract_documents_screenshot_config_only_fields() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
+    screenshot_heading = "## Config-Only Screenshot Surface"
+    persistence_heading = "## Persistence Rules"
+    assert screenshot_heading in cli_contract, f"Missing heading: {screenshot_heading}"
+    assert persistence_heading in cli_contract, f"Missing heading: {persistence_heading}"
+
+    screenshot_section = cli_contract.split(screenshot_heading, maxsplit=1)[1].split(
+        persistence_heading,
+        maxsplit=1,
+    )[0]
+
+    for expected in (
+        '`geometry_mode = "native" | "aligned"`',
+        '`vs_writer = "auto" | "pillow" | "fpng"`',
+        "`png_compression` remains an integer from `0` through `9`",
+        "config-only public surfaces",
+        "dedicated `run` flags",
+        "preserves current behavior until a writer-specific",
+        "explicit `fpng` requires successful VapourSynth loading and does not silently fall",
+        "Fpng maps `0..3` to `0`, `4..6` to `1`, and `7..9` to `2`",
+        "unsupported values fail config validation rather than being silently clamped",
+    ):
+        assert expected in screenshot_section
+
+    command_heading = "## Command Surface"
+    screenshot_heading = "## Config-Only Screenshot Surface"
+    command_override_surface = cli_contract.split(command_heading, maxsplit=1)[1].split(
+        screenshot_heading,
+        maxsplit=1,
+    )[0]
+
+    for unsupported_flag in ("--geometry-mode", "--vs-writer", "--png-compression"):
+        assert unsupported_flag not in command_override_surface
+
+
 def test_current_cli_contract_names_primary_executable_contract_checks() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")

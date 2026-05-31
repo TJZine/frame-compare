@@ -17,6 +17,7 @@ from frame_compare.analysis.types import (
     FrameSelection,
     MetricsMetadata,
     SelectionBreakdown,
+    SelectionDetail,
 )
 from frame_compare.config.schema import SelectionMode
 from frame_compare.orchestration import phase_tasks
@@ -45,11 +46,23 @@ def test_run_analyze_phase_records_cache_hit_and_selection_breakdown(
         ),
     )
     breakdown = SelectionBreakdown(quantile_dark=[1], quantile_bright=[8], motion=[13])
+    selection_details = {
+        1: SelectionDetail(
+            frame_index=1,
+            label="Dark",
+            source="analysis",
+            timecode="00:00:00.042",
+            score=0.1,
+            clip_role="analyze",
+            notes="quantile_dark",
+        )
+    }
     selection = FrameSelection(
         frames=[1, 8, 13],
         mode=SelectionMode.MIXED,
         seed=ctx.config.analysis.random_seed,
         breakdown=breakdown,
+        selection_details=selection_details,
     )
     calls: dict[str, Any] = {}
 
@@ -78,8 +91,11 @@ def test_run_analyze_phase_records_cache_hit_and_selection_breakdown(
     assert output.metrics_cache_hit is True
     assert output.selected_frames == [1, 8, 13]
     assert output.selection_breakdown == breakdown
+    assert output.analysis_metrics == metrics
+    assert output.selection_details_by_source_frame == selection_details
     assert selected_frames == []
     assert ctx.selection_breakdown is None
+    assert ctx.selection_details_by_source_frame is None
     assert calls["calculate"]["video_paths"] == input_videos
     assert calls["calculate"]["cache_dir"] == ctx.workspace.cache_dir
     assert calls["select"] == {"metrics": metrics, "config": ctx.config.analysis}

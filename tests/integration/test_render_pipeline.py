@@ -51,7 +51,6 @@ def test_overlay_application_adds_visible_content(sample_image_path: Path):
             hdr_info=None,
             font_path=None,
             font_size=24,
-            position="top-left",
         )
 
         result = apply_overlay(img, config)

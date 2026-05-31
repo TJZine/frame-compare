@@ -6,7 +6,10 @@ from frame_compare.vs.props import (
     detect_hdr,
     get_int_prop,
     get_optional_int_prop,
+    get_optional_range_prop,
     get_str_prop,
+    props_indicate_limited_range,
+    range_label_from_props,
 )
 
 
@@ -58,6 +61,38 @@ def test_get_str_prop():
     assert get_str_prop(props, "bytes_val") == "world"
     assert get_str_prop(props, "int_val") == "123"
     assert get_str_prop(props, "missing") is None
+
+
+def test_get_optional_range_prop_prefers_modern_range_key():
+    props = {
+        "_ColorRange": 1,
+        "_Range": 0,
+    }
+
+    assert get_optional_range_prop(props) == 0
+
+
+def test_range_helpers_follow_current_range_semantics():
+    assert props_indicate_limited_range({"_Range": 0}) is True
+    assert range_label_from_props({"_Range": 0}) == "limited"
+    assert props_indicate_limited_range({"_Range": 1}) is False
+    assert range_label_from_props({"_Range": 1}) == "full"
+
+
+def test_range_helpers_normalize_deprecated_color_range_semantics():
+    assert get_optional_range_prop({"_ColorRange": 1}) == 0
+    assert props_indicate_limited_range({"_ColorRange": 1}) is True
+    assert range_label_from_props({"_ColorRange": 1}) == "limited"
+
+    assert get_optional_range_prop({"_ColorRange": 0}) == 1
+    assert props_indicate_limited_range({"_ColorRange": 0}) is False
+    assert range_label_from_props({"_ColorRange": 0}) == "full"
+
+
+def test_range_helpers_ignore_unrecognized_range_values():
+    assert get_optional_range_prop({"_Range": 2, "_ColorRange": 2}) is None
+    assert props_indicate_limited_range({"_Range": 2, "_ColorRange": 2}) is None
+    assert range_label_from_props({"_Range": 2, "_ColorRange": 2}) is None
 
 
 def test_detect_hdr_pq_bt2020():

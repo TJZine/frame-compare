@@ -152,6 +152,27 @@ These `run` flags currently map into config values through `CLI_OVERRIDE_MAP`:
 slow.pics publishing is disabled by default. Users must set `slowpics.auto_upload = true`
 in config or through the wizard before `run` uploads generated screenshots.
 
+## Config-Only Screenshot Surface
+
+The following `[screenshots]` fields are config-only public surfaces. There are no
+dedicated `run` flags for them:
+
+- `geometry_mode = "native" | "aligned"` selects screenshot geometry behavior.
+  `native` is the default and preserves current full-frame screenshot behavior.
+  `aligned` is accepted as the opt-in mode for deterministic mixed-geometry
+  screenshot alignment work.
+- `vs_writer = "auto" | "pillow" | "fpng"` selects the VapourSynth screenshot writer
+  policy. `auto` is the default and preserves current behavior until a writer-specific
+  runtime path is eligible. `pillow` means the existing Pillow PNG writer policy, and
+  `fpng` is the explicit VapourSynth `core.fpng.Write` writer selection for the
+  screenshot runtime path. When `use_ffmpeg = false` and renderer selection is `auto`,
+  explicit `fpng` requires successful VapourSynth loading and does not silently fall
+  back to FFmpeg; `use_ffmpeg = true` still forces the FFmpeg path.
+- `png_compression` remains an integer from `0` through `9`. It is the public
+  compression input for Pillow and VapourSynth fpng. Pillow receives the value
+  directly. Fpng maps `0..3` to `0`, `4..6` to `1`, and `7..9` to `2`;
+  unsupported values fail config validation rather than being silently clamped.
+
 ## Persistence Rules
 
 `run --write-config` persists the effective config after applying the mapped overrides
@@ -187,8 +208,9 @@ must not turn schema defaults into explicit tonemap target overrides.
 
 The default `reference` baseline also uses `contrast_recovery = 0.3`. This value is
 forwarded to libplacebo tonemapping, not applied as a separate post-tonemap contrast
-curve. VapourSynth HDR screenshot export treats tonemapped RGB as limited-range
-intermediate data and expands it to full-range PNG output during encoding.
+curve. VapourSynth HDR screenshot export preserves the live tonemap-output range and
+only applies limited-to-full expansion during PNG encoding when the rendered frame
+props still indicate limited-range RGB on the active VapourSynth runtime.
 
 ## `wizard` Command Contract
 

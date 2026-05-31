@@ -26,6 +26,21 @@ class OverlayMode(StrEnum):
     NONE = "none"
 
 
+class ScreenshotGeometryMode(StrEnum):
+    """Geometry planning mode for rendered screenshots."""
+
+    NATIVE = "native"
+    ALIGNED = "aligned"
+
+
+class VsScreenshotWriter(StrEnum):
+    """VapourSynth screenshot writer selection."""
+
+    AUTO = "auto"
+    PILLOW = "pillow"
+    FPNG = "fpng"
+
+
 class TonemapPreset(StrEnum):
     """Named tonemap preset applied when tonemapping HDR to SDR."""
 
@@ -82,9 +97,11 @@ __all__ = [
     "LogFormat",
     "LogLevel",
     "OverlayMode",
+    "ScreenshotGeometryMode",
     "SelectionMode",
     "ToneCurve",
     "TonemapPreset",
     "ViewerMode",
     "Visibility",
+    "VsScreenshotWriter",
 ]

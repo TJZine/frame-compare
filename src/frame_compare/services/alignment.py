@@ -7,7 +7,12 @@ from pathlib import Path
 
 import structlog
 
-from frame_compare.services.alignment_audio import extract_audio, probe_fps
+from frame_compare.services.alignment_audio import (
+    extract_audio,
+    extract_matching_audio,
+    extract_reference_audio,
+    probe_fps,
+)
 from frame_compare.services.alignment_cache import (
     CACHE_FILE_NAME,
     CACHE_VERSION,
@@ -29,6 +34,8 @@ from frame_compare.vspreview.overrides import load_manual_overrides
 log = structlog.get_logger()
 
 _extract_audio = extract_audio
+_extract_matching_audio = extract_matching_audio
+_extract_reference_audio = extract_reference_audio
 _probe_fps = probe_fps
 _cross_correlate = cross_correlate
 _samples_to_frames = samples_to_frames
@@ -150,14 +157,18 @@ def _compute_missing_alignments(
     progress: ProgressReporter | None,
 ) -> None:
     """Extract audio, perform cross-correlation, and populate results map."""
-    ref_audio = _extract_audio(reference, config.sample_rate)
+    ref_audio, reference_stream = _extract_reference_audio(reference, config.sample_rate)
+    max_offset_samples = int(config.max_offset_seconds * config.sample_rate)
 
     for comp in requested_comparisons:
         if progress:
             progress.set_description(f"Aligning {comp.name}")
 
-        comp_audio = _extract_audio(comp, config.sample_rate)
-        max_offset_samples = int(config.max_offset_seconds * config.sample_rate)
+        comp_audio = _extract_matching_audio(
+            comp,
+            config.sample_rate,
+            reference_stream=reference_stream,
+        )
         sample_offset, score = _cross_correlate(
             ref_audio,
             comp_audio,
@@ -208,7 +219,13 @@ def align_clips(
     ]
     if config.cache_results and requested_comparisons:
         try:
-            cached = load_cached_offsets(cache_dir, [reference] + requested_comparisons)
+            cached = load_cached_offsets(
+                cache_dir,
+                reference,
+                requested_comparisons,
+                sample_rate=config.sample_rate,
+                max_offset_seconds=config.max_offset_seconds,
+            )
             if cached is not None:
                 results_map.update(cached)
                 requested_comparisons = [
@@ -243,7 +260,14 @@ def align_clips(
                 if results_map[f"{reference.stem}:{c.stem}"].source != "manual"
             ]
             if computed_results:
-                save_offsets_cache(cache_dir, computed_results)
+                save_offsets_cache(
+                    cache_dir,
+                    reference=reference,
+                    comparisons=comparisons,
+                    sample_rate=config.sample_rate,
+                    max_offset_seconds=config.max_offset_seconds,
+                    results=computed_results,
+                )
 
     offsets_by_key = _build_offsets_map(
         reference=reference,
@@ -274,12 +298,23 @@ def check_alignment_cached(
     reference: Path,
     comparisons: list[Path],
     cache_dir: Path,
+    config: AlignmentConfig | None = None,
 ) -> list[str]:
     """Check if all comparison offsets are cached/overridden, returning missing keys."""
     _check_duplicate_stems(comparisons)
 
     manual_overrides = load_manual_overrides(cache_dir)
-    cached_offsets = load_cached_offsets(cache_dir, [reference] + comparisons) or {}
+    resolved_config = config if config is not None else AlignmentConfig()
+    cached_offsets = (
+        load_cached_offsets(
+            cache_dir,
+            reference,
+            comparisons,
+            sample_rate=resolved_config.sample_rate,
+            max_offset_seconds=resolved_config.max_offset_seconds,
+        )
+        or {}
+    )
 
     missing: list[str] = []
     for comp in comparisons:

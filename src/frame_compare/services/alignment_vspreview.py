@@ -144,6 +144,15 @@ def _read_stderr_prompt(prompt: str) -> str:
     return raw_value
 
 
+def _parse_source_frame_pair(raw_value: str) -> tuple[int, int] | None:
+    tokens = raw_value.replace(",", " ").split()
+    if len(tokens) != 2:
+        return None
+    if not all(token.isascii() and token.isdecimal() for token in tokens):
+        return None
+    return int(tokens[0]), int(tokens[1])
+
+
 def _prompt_for_confirmed_offsets(
     *,
     reference: Path,
@@ -156,7 +165,12 @@ def _prompt_for_confirmed_offsets(
     _stderr_print()
     _stderr_print("VSPreview confirmation")
     _stderr_print(f"  reference  {reference.stem}")
-    _stderr_print("  enter      blank keeps suggested offset; 'skip' keeps current offsets")
+    _stderr_print("  domain     source-frame indices from the untrimmed clips")
+    _stderr_print(
+        "  enter      reference_source_frame comparison_source_frame; "
+        "offset = reference_source_frame - comparison_source_frame"
+    )
+    _stderr_print("  skip       enter 'skip' or 's' to keep current offsets")
     _stderr_print()
 
     confirmed: dict[str, int] = {}
@@ -172,17 +186,21 @@ def _prompt_for_confirmed_offsets(
                 _stderr_print("No terminal input available; keeping current offsets.")
                 return None
             if raw_value == "":
-                confirmed[key] = suggested
-                break
-            if raw_value.lower() in {"skip", "s"}:
-                return None
-            try:
-                confirmed[key] = int(raw_value)
-            except ValueError:
                 _stderr_print(
-                    "  Enter an integer frame offset, blank to keep the suggestion, or 'skip'."
+                    "  Enter both source frames, for example '120 108', or 'skip'."
                 )
                 continue
+            if raw_value.lower() in {"skip", "s"}:
+                return None
+            source_frames = _parse_source_frame_pair(raw_value)
+            if source_frames is None:
+                _stderr_print(
+                    "  Enter two non-negative integer source frames, for example '120 108', "
+                    "or 'skip'."
+                )
+                continue
+            reference_source_frame, comparison_source_frame = source_frames
+            confirmed[key] = reference_source_frame - comparison_source_frame
             break
     return confirmed
 

@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from frame_compare.config.schema import ColorConfig, ConfigSchema, OverlayMode, ScreenshotsConfig
+from frame_compare.config.schema_enums import VsScreenshotWriter
 from frame_compare.render.batch.expansion import (
     _build_overlay_config,
     _resolve_num_frames,
@@ -20,7 +21,13 @@ from frame_compare.render.batch.expansion import (
     validate_batch_requests,
     validate_ffmpeg_batch_tonemap_gate,
 )
-from frame_compare.render.types import ScreenshotBatchRequest
+from frame_compare.render.types import (
+    OverlayDiagnosticMetadata,
+    OverlayDolbyVisionMetadata,
+    OverlayFrameMeasurement,
+    OverlaySelectionDetail,
+    ScreenshotBatchRequest,
+)
 from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 
 
@@ -47,6 +54,53 @@ def test_validate_batch_request_lengths_invalid() -> None:
         source_frames=[10, 20],
         display_frames=[10],
         selection_labels=["A", "B"],
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=100,
+        probe_is_hdr=False,
+    )
+    with pytest.raises(ValueError, match="mismatched lengths"):
+        _validate_batch_request_lengths(req)
+
+
+def test_validate_batch_request_lengths_invalid_selection_details() -> None:
+    req = ScreenshotBatchRequest(
+        clip_path=Path("video.mkv"),
+        label="ref",
+        source_frames=[10, 20],
+        display_frames=[10, 20],
+        selection_labels=["A", "B"],
+        selection_details=[
+            OverlaySelectionDetail(
+                frame_index=10,
+                label="User",
+                source="analysis",
+                timecode="00:00:00.417",
+                clip_role="analyze",
+            )
+        ],
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=100,
+        probe_is_hdr=False,
+    )
+    with pytest.raises(ValueError, match="mismatched lengths"):
+        _validate_batch_request_lengths(req)
+
+
+def test_validate_batch_request_lengths_invalid_diagnostic_metadata() -> None:
+    req = ScreenshotBatchRequest(
+        clip_path=Path("video.mkv"),
+        label="ref",
+        source_frames=[10, 20],
+        display_frames=[10, 20],
+        selection_labels=["A", "B"],
+        diagnostic_metadata=[
+            OverlayDiagnosticMetadata(
+                max_cll=1000,
+                measurement=OverlayFrameMeasurement(avg_nits=100.0, max_nits=100.0),
+            )
+        ],
         probe_width=1920,
         probe_height=1080,
         probe_num_frames=100,
@@ -130,6 +184,38 @@ def test_resolve_target_renderer() -> None:
     # explicit renderer should be returned as-is
     assert resolve_target_renderer(config1, "vapoursynth") == "vapoursynth"
     assert resolve_target_renderer(config2, "ffmpeg") == "ffmpeg"
+
+
+@patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
+def test_expand_batch_render_requests_carries_encoder_settings_from_config(
+    mock_prepare: MagicMock,
+) -> None:
+    config = ConfigSchema(screenshots={"png_compression": 9, "vs_writer": "fpng"})
+    ffmpeg_runner = MagicMock()
+    mock_prepare.return_value = (MagicMock(name="clip"), None, None, None)
+    req = ScreenshotBatchRequest(
+        clip_path=Path("video.mkv"),
+        label="ref",
+        source_frames=[10],
+        display_frames=[10],
+        selection_labels=["A"],
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=100,
+        probe_is_hdr=False,
+    )
+
+    requests, _ = expand_batch_render_requests(
+        [req],
+        output_dir=Path("out"),
+        config=config,
+        overlay_mode=OverlayMode.NONE,
+        renderer="vapoursynth",
+        ffmpeg_runner=ffmpeg_runner,
+    )
+
+    assert requests[0].encoder_settings.compression == 9
+    assert requests[0].encoder_settings.vs_writer == VsScreenshotWriter.FPNG
 
 
 def test_validate_ffmpeg_batch_tonemap_gate() -> None:
@@ -301,16 +387,32 @@ def test_validate_batch_requests_rejects_duplicate_filename_labels_with_distinct
 
 
 def test_build_overlay_config() -> None:
+    detail = OverlaySelectionDetail(
+        frame_index=10,
+        label="User",
+        source="analysis",
+        timecode="00:00:00.417",
+        clip_role="analyze",
+    )
+    diagnostic_metadata = OverlayDiagnosticMetadata(
+        max_cll=1000,
+        color_range="limited",
+        dolby_vision=OverlayDolbyVisionMetadata(rpu_present=True),
+        measurement=OverlayFrameMeasurement(avg_nits=150.0, max_nits=150.0, category="User"),
+    )
     req = ScreenshotBatchRequest(
         clip_path=Path("video.mkv"),
-        label="ref",
+        label="Reference",
         source_frames=[10],
         display_frames=[10],
         selection_labels=["A"],
+        selection_details=[detail],
+        diagnostic_metadata=[diagnostic_metadata],
         probe_width=1920,
         probe_height=1080,
         probe_num_frames=100,
         probe_is_hdr=False,
+        filename_label="ref",
     )
 
     # Mode NONE should return None
@@ -321,7 +423,10 @@ def test_build_overlay_config() -> None:
             source_frame=10,
             display_frame=10,
             selection_label="A",
+            selection_detail=detail,
+            diagnostic_metadata=diagnostic_metadata,
             resolution=(1920, 1080),
+            origin=None,
             hdr_info=None,
             num_frames=100,
             include_frame_number=True,
@@ -335,18 +440,24 @@ def test_build_overlay_config() -> None:
         overlay_mode=OverlayMode.STANDARD,
         source_frame=10,
         display_frame=20,
-        selection_label="A",
+        selection_label="User",
+        selection_detail=detail,
+        diagnostic_metadata=diagnostic_metadata,
         resolution=(1920, 1080),
+        origin=None,
         hdr_info="HDR10",
         num_frames=100,
         include_frame_number=True,
     )
     assert overlay is not None
     assert overlay.mode == OverlayMode.STANDARD
-    assert overlay.label == "ref"
+    assert overlay.label == "Reference"
+    assert overlay.burn_in_label == "ref"
     assert overlay.frame_number == 10
     assert overlay.display_frame_number == 20
-    assert overlay.selection_label == "A"
+    assert overlay.selection_label == "User"
+    assert overlay.selection_detail == detail
+    assert overlay.diagnostic_metadata == diagnostic_metadata
     assert overlay.resolution == (1920, 1080)
     assert overlay.hdr_info == "HDR10"
     assert overlay.num_frames == 100
@@ -368,28 +479,74 @@ def test_expand_batch_render_requests(mock_prepare: MagicMock) -> None:
         (ref_clip, None, "HDR10", ref_source_info),
         (enc_clip, None, None, None),
     ]
+    ref_details = [
+        OverlaySelectionDetail(
+            frame_index=10,
+            label="User",
+            source="analysis",
+            timecode="00:00:00.417",
+            clip_role="analyze",
+        ),
+        OverlaySelectionDetail(
+            frame_index=20,
+            label="Cached",
+            source="analysis",
+            timecode="00:00:00.833",
+            clip_role="analyze",
+        ),
+    ]
+    ref_diagnostics = [
+        OverlayDiagnosticMetadata(
+            max_cll=1000,
+            color_range="limited",
+            measurement=OverlayFrameMeasurement(avg_nits=150.0, max_nits=150.0, category="User"),
+        ),
+        OverlayDiagnosticMetadata(
+            max_cll=900,
+            color_range="limited",
+            measurement=OverlayFrameMeasurement(avg_nits=120.0, max_nits=120.0, category="Cached"),
+        ),
+    ]
+    enc_detail = OverlaySelectionDetail(
+        frame_index=30,
+        label="Motion",
+        source="analysis",
+        timecode="00:00:01.250",
+        clip_role="analyze",
+    )
+    enc_diagnostic = OverlayDiagnosticMetadata(
+        max_cll=600,
+        color_range="full",
+        measurement=OverlayFrameMeasurement(avg_nits=80.0, max_nits=80.0, category="Motion"),
+    )
 
     req1 = ScreenshotBatchRequest(
         clip_path=Path("video1.mkv"),
-        label="ref",
+        label="Reference",
         source_frames=[10, 20],
         display_frames=[10, 20],
         selection_labels=["A", "B"],
+        selection_details=ref_details,
+        diagnostic_metadata=ref_diagnostics,
         probe_width=1920,
         probe_height=1080,
         probe_num_frames=100,
         probe_is_hdr=True,
+        filename_label="ref",
     )
     req2 = ScreenshotBatchRequest(
         clip_path=Path("video2.mkv"),
-        label="enc",
+        label="Encode 1",
         source_frames=[30],
         display_frames=[30],
         selection_labels=["C"],
+        selection_details=[enc_detail],
+        diagnostic_metadata=[enc_diagnostic],
         probe_width=1920,
         probe_height=1080,
         probe_num_frames=100,
         probe_is_hdr=False,
+        filename_label="enc",
     )
 
     requests, label_to_range = expand_batch_render_requests(
@@ -403,8 +560,8 @@ def test_expand_batch_render_requests(mock_prepare: MagicMock) -> None:
 
     assert len(requests) == 3
     assert label_to_range == {
-        "ref": range(0, 2),
-        "enc": range(2, 3),
+        "Reference": range(0, 2),
+        "Encode 1": range(2, 3),
     }
     assert mock_prepare.call_args_list == [
         ((Path("video1.mkv"), "ffmpeg", config), {"ffmpeg_runner": ffmpeg_runner}),
@@ -417,32 +574,127 @@ def test_expand_batch_render_requests(mock_prepare: MagicMock) -> None:
     assert requests[0].output_path == Path("out/10 - ref.png")
     first_overlay = requests[0].overlay
     assert first_overlay is not None
-    assert first_overlay.label == "ref"
+    assert first_overlay.label == "Reference"
+    assert first_overlay.burn_in_label == "ref"
     assert first_overlay.frame_number == 10
     assert first_overlay.display_frame_number == 10
-    assert first_overlay.selection_label == "A"
+    assert first_overlay.selection_label == "User"
+    assert first_overlay.selection_detail == ref_details[0]
+    assert first_overlay.diagnostic_metadata == ref_diagnostics[0]
     assert first_overlay.resolution == (1920, 1080)
+    assert first_overlay.origin is None
     assert first_overlay.hdr_info == "HDR10"
     assert first_overlay.num_frames == 150
+    assert requests[0].geometry_plan is None
 
     assert requests[1].frame_number == 20
     assert requests[1].output_path == Path("out/20 - ref.png")
     second_overlay = requests[1].overlay
     assert second_overlay is not None
-    assert second_overlay.selection_label == "B"
+    assert second_overlay.selection_label == "Cached"
+    assert second_overlay.selection_detail == ref_details[1]
+    assert second_overlay.diagnostic_metadata == ref_diagnostics[1]
 
     assert requests[2].clip is enc_clip
     assert requests[2].frame_number == 30
     assert requests[2].output_path == Path("out/30 - enc.png")
     third_overlay = requests[2].overlay
     assert third_overlay is not None
-    assert third_overlay.label == "enc"
+    assert third_overlay.label == "Encode 1"
+    assert third_overlay.burn_in_label == "enc"
     assert third_overlay.frame_number == 30
     assert third_overlay.display_frame_number == 30
-    assert third_overlay.selection_label == "C"
+    assert third_overlay.selection_label == "Motion"
+    assert third_overlay.selection_detail == enc_detail
+    assert third_overlay.diagnostic_metadata == enc_diagnostic
     assert third_overlay.resolution == (req2.probe_width, req2.probe_height)
+    assert third_overlay.origin is None
     assert third_overlay.hdr_info is None
     assert third_overlay.num_frames == req2.probe_num_frames
+    assert requests[2].geometry_plan is None
+
+
+@patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
+def test_expand_batch_render_requests_attaches_aligned_geometry_after_loading_dimensions(
+    mock_prepare: MagicMock,
+) -> None:
+    config = ConfigSchema(screenshots={"geometry_mode": "aligned"})
+    ffmpeg_runner = MagicMock()
+
+    ref_source_info = MagicMock()
+    ref_source_info.width = 1920
+    ref_source_info.height = 1080
+    ref_source_info.num_frames = 150
+    enc_source_info = MagicMock()
+    enc_source_info.width = 1440
+    enc_source_info.height = 1080
+    enc_source_info.num_frames = 150
+    mock_prepare.side_effect = [
+        (MagicMock(name="ref_clip"), None, None, ref_source_info),
+        (MagicMock(name="enc_clip"), None, None, enc_source_info),
+    ]
+
+    ref_metadata = OverlayDiagnosticMetadata(
+        dolby_vision=OverlayDolbyVisionMetadata(
+            rpu_present=True,
+            l5_left=240,
+            l5_right=240,
+            l5_top=0,
+            l5_bottom=0,
+        )
+    )
+    req1 = ScreenshotBatchRequest(
+        clip_path=Path("wide.mkv"),
+        label="Reference",
+        source_frames=[10, 20],
+        display_frames=[10, 20],
+        selection_labels=[None, None],
+        diagnostic_metadata=[ref_metadata, ref_metadata],
+        probe_width=3840,
+        probe_height=2160,
+        probe_num_frames=100,
+        probe_is_hdr=False,
+    )
+    req2 = ScreenshotBatchRequest(
+        clip_path=Path("active.mkv"),
+        label="Encode",
+        source_frames=[10],
+        display_frames=[10],
+        selection_labels=[None],
+        probe_width=1280,
+        probe_height=720,
+        probe_num_frames=100,
+        probe_is_hdr=False,
+    )
+
+    requests, _ = expand_batch_render_requests(
+        [req1, req2],
+        output_dir=Path("out"),
+        config=config,
+        overlay_mode=OverlayMode.STANDARD,
+        renderer="ffmpeg",
+        ffmpeg_runner=ffmpeg_runner,
+    )
+
+    ref_plan = requests[0].geometry_plan
+    assert ref_plan is not None
+    assert requests[1].geometry_plan is ref_plan
+    assert ref_plan.active_rect_source == "metadata"
+    assert ref_plan.crop.left == 240
+    assert ref_plan.crop.right == 240
+    assert ref_plan.final_canvas_size == (1440, 1080)
+    assert requests[0].overlay is not None
+    assert requests[0].overlay.resolution == (1440, 1080)
+    assert requests[0].overlay.origin == ref_plan.overlay_origin
+
+    enc_plan = requests[2].geometry_plan
+    assert enc_plan is not None
+    assert enc_plan.source.width == 1440
+    assert enc_plan.source.height == 1080
+    assert enc_plan.final_canvas_size == (1440, 1080)
+    assert requests[2].overlay is not None
+    assert requests[2].overlay.resolution == (1440, 1080)
+    assert requests[2].overlay.origin == enc_plan.overlay_origin
 
 
 @patch("frame_compare.render.batch.expansion.prepare_clip_for_render")

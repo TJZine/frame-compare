@@ -106,10 +106,16 @@ def _apply_phase_output(*, ctx: RunContext, state: ExecutionState, output: Phase
             state.selected_frames[:] = phase_output.selected_frames
             state.artifacts.metrics_cache_hit = phase_output.metrics_cache_hit
             ctx.selection_breakdown = phase_output.selection_breakdown
+            ctx.selection_details_by_source_frame = phase_output.selection_details_by_source_frame
+            ctx.analysis_metrics = phase_output.analysis_metrics
         case AlignPhaseOutput() as phase_output:
             ctx.reference = phase_output.reference
             ctx.comparisons = phase_output.comparisons
             state.selected_frames[:] = phase_output.selected_frames
+            if phase_output.selection_breakdown is not None:
+                ctx.selection_breakdown = phase_output.selection_breakdown
+            if phase_output.selection_details_by_source_frame is not None:
+                ctx.selection_details_by_source_frame = phase_output.selection_details_by_source_frame
         case RenderPhaseOutput() as phase_output:
             state.artifacts.render = phase_output.render
         case MetadataPhaseOutput() as phase_output:

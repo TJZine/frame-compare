@@ -132,6 +132,13 @@ Keep these integrations at their current owners:
 - VS loading and HDR/tonemap logic: `frame_compare.vs.*`
 - packaging/install/update flow: `tools/windows_portable/**`
 
+Screenshot rendering owns its geometry and writer policy inside `frame_compare.render`:
+`frame_compare.render.geometry` plans optional aligned crop/scale/pad geometry, render
+batch expansion attaches those plans to render requests, the FFmpeg backend applies
+geometry filters after exact frame selection, and the VapourSynth path chooses between
+the Pillow writer and eligible `core.fpng.Write` output without changing CLI import-time
+behavior.
+
 Runtime ownership matrix:
 
 | Runtime concern | Owner |

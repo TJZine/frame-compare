@@ -178,6 +178,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     border: 1px solid var(--border);
 }
 .rv-overlay-label.right { left: auto; right: 10px; text-align: right; }
+.rv-overlay-label:empty { display: none; }
 
 /* Modal */
 .rv-modal {
