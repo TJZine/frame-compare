@@ -71,6 +71,10 @@ def test_current_cli_contract_documents_screenshot_config_only_fields() -> None:
         "`png_compression` remains an integer from `0` through `9`",
         "config-only public surfaces",
         "dedicated `run` flags",
+        "preserves current behavior until a writer-specific",
+        "explicit `fpng` requires successful VapourSynth loading and does not silently fall",
+        "Fpng maps `0..3` to `0`, `4..6` to `1`, and `7..9` to `2`",
+        "unsupported values fail config validation rather than being silently clamped",
     ):
         assert expected in screenshot_section
 
