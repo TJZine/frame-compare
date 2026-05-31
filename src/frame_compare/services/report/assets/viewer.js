@@ -321,17 +321,29 @@ const ReportViewer = {
     },
 
     bindEvents() {
-        // Mode switching
+        this.bindModeEvents();
+        this.bindFrameNavigationEvents();
+        this.bindClipSelectionEvents();
+        this.bindViewportEvents();
+        this.bindAlignmentEvents();
+        this.bindHelpEvents();
+        this.bindFilmstripEvents();
+        this.bindKeyboardEvents();
+    },
+
+    bindModeEvents() {
         this.dom.modeBtns.forEach(btn => {
             btn.addEventListener('click', () => this.setMode(btn.dataset.mode));
         });
+    },
 
-        // Frame Navigation
+    bindFrameNavigationEvents() {
         this.dom.btnPrev.addEventListener('click', () => this.prevFrame());
         this.dom.btnNext.addEventListener('click', () => this.nextFrame());
         this.dom.frameSelect.addEventListener('change', (e) => this.setFrame(parseInt(e.target.value)));
+    },
 
-        // Clip Selection
+    bindClipSelectionEvents() {
         this.dom.leftSelect.addEventListener('change', (e) => {
             this.setLeftClip(parseInt(e.target.value));
         });
@@ -342,14 +354,23 @@ const ReportViewer = {
             this.state.activeClipIdx = this.clipIndexOrDefault(e.target.value, this.state.activeClipIdx);
             this.render();
         });
+    },
 
-        // Zoom
+    bindViewportEvents() {
+        this.pointerInteraction = {
+            isDragging: false,
+            isPanning: false,
+            activePointerId: null,
+            lastPanX: 0,
+            lastPanY: 0,
+            panMoved: false
+        };
+
         this.dom.zoomRange.addEventListener('input', (e) => this.setZoom(parseFloat(e.target.value)));
         this.dom.btnZoomOut.addEventListener('click', () => this.setZoom(this.state.zoom - 0.1));
         this.dom.btnZoomIn.addEventListener('click', () => this.setZoom(this.state.zoom + 0.1));
         this.dom.btnZoomReset.addEventListener('click', () => this.resetViewport());
 
-        // Fit and fullscreen controls
         this.dom.fitBtns.forEach(btn => {
             btn.addEventListener('click', () => this.setFitMode(btn.dataset.fit));
         });
@@ -362,114 +383,39 @@ const ReportViewer = {
         this.dom.btnFullscreen.addEventListener('click', () => this.toggleFullscreen());
         this.updateFullscreenButton();
 
-        // Alignment controls
-        this.dom.alignmentPreset.addEventListener('change', (e) => {
-            this.setAlignmentPreset(e.target.value);
-        });
-        this.dom.alignX.addEventListener('input', (e) => {
-            this.setManualAlignment(parseFloat(e.target.value), this.state.alignY);
-        });
-        this.dom.alignY.addEventListener('input', (e) => {
-            this.setManualAlignment(this.state.alignX, parseFloat(e.target.value));
-        });
-        this.dom.btnAlignmentReset.addEventListener('click', () => this.setAlignmentPreset('none'));
-
-        // Help Modal
-        this.dom.btnHelp.addEventListener('click', () => this.openHelpModal());
-        this.dom.btnCloseHelp.addEventListener('click', () => this.closeHelpModal());
-        this.dom.modal.addEventListener('click', (e) => {
-            if (e.target === this.dom.modal) this.closeHelpModal();
-        });
-        this.dom.modal.addEventListener('keydown', (e) => this.handleModalKey(e));
-
-        // Pointer interactions
-        let isDragging = false;
-        let isPanning = false;
-        let activePointerId = null;
-        let lastPanX = 0;
-        let lastPanY = 0;
-        let panMoved = false;
-        const captureStagePointer = (e) => {
-            activePointerId = e.pointerId;
-            this.dom.stage.setPointerCapture?.(e.pointerId);
-        };
-        const updateSliderFromPointer = (e) => {
-            const rect = this.sliderCanvasRect();
-            if (rect.width <= 0) return;
-            const clampedClientX = Math.max(rect.left, Math.min(rect.right, e.clientX));
-            const x = clampedClientX - rect.left;
-            let percent = (1 - (x / rect.width)) * 100;
-            percent = Math.max(0, Math.min(100, percent));
-
-            this.state.revealPercent = percent;
-            this.updateSlider();
-        };
-        const shouldPanFromPointer = (e) => {
-            return e.button === 1 || e.altKey || e.shiftKey || this.state.mode !== 'slider';
-        };
-        const startPanFromPointer = (e) => {
-            isPanning = true;
-            panMoved = false;
-            lastPanX = e.clientX;
-            lastPanY = e.clientY;
-            captureStagePointer(e);
-            this.dom.stage.classList.add('is-panning');
-        };
-        const stopPointerInteraction = (e) => {
-            if (activePointerId !== null && e.pointerId !== activePointerId) return;
-            if (this.dom.stage.hasPointerCapture?.(e.pointerId)) {
-                this.dom.stage.releasePointerCapture(e.pointerId);
-            }
-            const completedDrag = isDragging;
-            const completedPan = isPanning;
-            const completedPanMoved = panMoved;
-            isDragging = false;
-            isPanning = false;
-            activePointerId = null;
-            panMoved = false;
-            this.dom.stage.classList.remove('is-panning');
-            if (this.state.mode === 'blink') this.state.blinkPaused = false;
-            if (completedPan) {
-                this.persistViewportState();
-                if (!completedPanMoved && (this.state.mode === 'overlay' || this.state.mode === 'diff')) {
-                    this.cycleClip();
-                }
-            }
-            if (completedDrag) this.persistViewportState();
-        };
-
         this.dom.stage.addEventListener('pointerdown', (e) => {
-            if (shouldPanFromPointer(e)) {
-                startPanFromPointer(e);
+            if (this.shouldPanFromPointer(e)) {
+                this.startPanFromPointer(e);
                 if (this.state.mode === 'blink') this.state.blinkPaused = true;
                 e.preventDefault();
             } else if (this.state.mode === 'slider') {
-                isDragging = true;
-                captureStagePointer(e);
-                updateSliderFromPointer(e);
+                this.pointerInteraction.isDragging = true;
+                this.captureStagePointer(e);
+                this.updateSliderFromPointer(e);
                 e.preventDefault();
             }
         });
 
         this.dom.stage.addEventListener('pointermove', (e) => {
-            if (activePointerId !== null && e.pointerId !== activePointerId) return;
-            if (isPanning) {
-                const dx = e.clientX - lastPanX;
-                const dy = e.clientY - lastPanY;
-                if (Math.abs(dx) > 1 || Math.abs(dy) > 1) panMoved = true;
-                lastPanX = e.clientX;
-                lastPanY = e.clientY;
+            const pointer = this.pointerInteraction;
+            if (pointer.activePointerId !== null && e.pointerId !== pointer.activePointerId) return;
+            if (pointer.isPanning) {
+                const dx = e.clientX - pointer.lastPanX;
+                const dy = e.clientY - pointer.lastPanY;
+                if (Math.abs(dx) > 1 || Math.abs(dy) > 1) pointer.panMoved = true;
+                pointer.lastPanX = e.clientX;
+                pointer.lastPanY = e.clientY;
                 this.setPan(this.state.panX + dx, this.state.panY + dy, { save: false });
                 e.preventDefault();
                 return;
             }
-            if (isDragging) {
-                updateSliderFromPointer(e);
+            if (pointer.isDragging) {
+                this.updateSliderFromPointer(e);
                 e.preventDefault();
             }
         });
-        this.dom.stage.addEventListener('pointerup', stopPointerInteraction);
-        this.dom.stage.addEventListener('pointercancel', stopPointerInteraction);
+        this.dom.stage.addEventListener('pointerup', (e) => this.stopPointerInteraction(e));
+        this.dom.stage.addEventListener('pointercancel', (e) => this.stopPointerInteraction(e));
         this.dom.stage.addEventListener('wheel', (e) => {
             e.preventDefault();
             if (e.shiftKey) {
@@ -481,8 +427,31 @@ const ReportViewer = {
             }
             this.zoomAtPoint(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1);
         }, { passive: false });
+    },
 
-        // Filmstrip
+    bindAlignmentEvents() {
+        this.dom.alignmentPreset.addEventListener('change', (e) => {
+            this.setAlignmentPreset(e.target.value);
+        });
+        this.dom.alignX.addEventListener('input', (e) => {
+            this.setManualAlignment(parseFloat(e.target.value), this.state.alignY);
+        });
+        this.dom.alignY.addEventListener('input', (e) => {
+            this.setManualAlignment(this.state.alignX, parseFloat(e.target.value));
+        });
+        this.dom.btnAlignmentReset.addEventListener('click', () => this.setAlignmentPreset('none'));
+    },
+
+    bindHelpEvents() {
+        this.dom.btnHelp.addEventListener('click', () => this.openHelpModal());
+        this.dom.btnCloseHelp.addEventListener('click', () => this.closeHelpModal());
+        this.dom.modal.addEventListener('click', (e) => {
+            if (e.target === this.dom.modal) this.closeHelpModal();
+        });
+        this.dom.modal.addEventListener('keydown', (e) => this.handleModalKey(e));
+    },
+
+    bindFilmstripEvents() {
         this.dom.filmstrip.addEventListener('click', (e) => {
             const item = e.target.closest('.rv-filmstrip-item');
             if (item) this.setFrame(parseInt(item.dataset.idx));
@@ -490,9 +459,65 @@ const ReportViewer = {
         this.dom.filterChips.forEach(btn => {
             btn.addEventListener('click', () => this.setFrameFilter(btn.dataset.categoryKey));
         });
+    },
 
-        // Keyboard
+    bindKeyboardEvents() {
         document.addEventListener('keydown', (e) => this.handleKey(e));
+    },
+
+    captureStagePointer(e) {
+        this.pointerInteraction.activePointerId = e.pointerId;
+        this.dom.stage.setPointerCapture?.(e.pointerId);
+    },
+
+    updateSliderFromPointer(e) {
+        const rect = this.sliderCanvasRect();
+        if (rect.width <= 0) return;
+        const clampedClientX = Math.max(rect.left, Math.min(rect.right, e.clientX));
+        const x = clampedClientX - rect.left;
+        let percent = (1 - (x / rect.width)) * 100;
+        percent = Math.max(0, Math.min(100, percent));
+
+        this.state.revealPercent = percent;
+        this.updateSlider();
+    },
+
+    shouldPanFromPointer(e) {
+        return e.button === 1 || e.altKey || e.shiftKey || this.state.mode !== 'slider';
+    },
+
+    startPanFromPointer(e) {
+        const pointer = this.pointerInteraction;
+        pointer.isPanning = true;
+        pointer.panMoved = false;
+        pointer.lastPanX = e.clientX;
+        pointer.lastPanY = e.clientY;
+        this.captureStagePointer(e);
+        this.dom.stage.classList.add('is-panning');
+    },
+
+    stopPointerInteraction(e) {
+        const pointer = this.pointerInteraction;
+        if (pointer.activePointerId !== null && e.pointerId !== pointer.activePointerId) return;
+        if (this.dom.stage.hasPointerCapture?.(e.pointerId)) {
+            this.dom.stage.releasePointerCapture(e.pointerId);
+        }
+        const completedDrag = pointer.isDragging;
+        const completedPan = pointer.isPanning;
+        const completedPanMoved = pointer.panMoved;
+        pointer.isDragging = false;
+        pointer.isPanning = false;
+        pointer.activePointerId = null;
+        pointer.panMoved = false;
+        this.dom.stage.classList.remove('is-panning');
+        if (this.state.mode === 'blink') this.state.blinkPaused = false;
+        if (completedPan) {
+            this.persistViewportState();
+            if (!completedPanMoved && (this.state.mode === 'overlay' || this.state.mode === 'diff')) {
+                this.cycleClip();
+            }
+        }
+        if (completedDrag) this.persistViewportState();
     },
 
     clipCount() {

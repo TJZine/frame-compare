@@ -10,6 +10,7 @@ from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest
 from frame_compare.orchestration.execution import _apply_phase_output, build_execution_phase_plan
 from frame_compare.orchestration.types import (
+    AlignPhaseOutput,
     ExecutionState,
     MetadataPrefetch,
     PrepState,
@@ -158,6 +159,46 @@ def test_apply_phase_output_extends_warnings_from_render_output(tmp_path: Path) 
     assert state.warnings == [
         "pre-existing warning",
         "Screenshot geometry alignment skipped: using native geometry.",
+    ]
+
+
+def test_apply_phase_output_extends_warnings_from_align_output(tmp_path: Path) -> None:
+    workspace = WorkspacePaths(
+        root=tmp_path,
+        input_dir=tmp_path / "comparison_videos",
+        run_dir=None,
+        screenshots_dir=tmp_path / "screenshots",
+        generated_dir=tmp_path / "generated",
+        config_dir=tmp_path / "config",
+        config_file=tmp_path / "config" / "config.toml",
+    )
+    reference = clip_state(tmp_path / "ref.mkv", label="Reference")
+    comparison = clip_state(tmp_path / "encode_b.mkv", label="Encode B")
+    ctx = RunContext(
+        config=ConfigSchema(),
+        workspace=workspace,
+        reference=reference,
+        comparisons=[comparison],
+    )
+    state = ExecutionState(artifacts=RunArtifacts(warnings=["pre-existing warning"]))
+
+    _apply_phase_output(
+        ctx=ctx,
+        state=state,
+        output=AlignPhaseOutput(
+            reference=reference,
+            comparisons=[comparison],
+            selected_frames=[0, 2, 50],
+            warnings=["align: encode_b low confidence; left unapplied and untrimmed"],
+        ),
+    )
+
+    assert ctx.reference is reference
+    assert ctx.comparisons == [comparison]
+    assert state.selected_frames == [0, 2, 50]
+    assert state.warnings == [
+        "pre-existing warning",
+        "align: encode_b low confidence; left unapplied and untrimmed",
     ]
 
 

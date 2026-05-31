@@ -85,11 +85,16 @@ def _load_ffprobe_json(argv: list[str], *, operation: str) -> dict[str, object]:
         raise FFmpegError(f"ffprobe timed out while {operation}", 124) from e
     except CalledProcessError as e:
         raise FFmpegError(_decode_stderr(e.stderr), e.returncode) from e
+    except OSError as e:
+        raise FFmpegError(f"ffprobe could not start while {operation}: {e}", 1) from e
 
     try:
-        return cast(dict[str, object], json.loads(proc.stdout.decode("utf-8", errors="replace")))
+        payload = json.loads(proc.stdout.decode("utf-8", errors="replace"))
     except json.JSONDecodeError as e:
         raise FFmpegError("ffprobe returned invalid json", proc.returncode) from e
+    if not isinstance(payload, dict):
+        raise FFmpegError("ffprobe returned invalid json object", proc.returncode)
+    return cast(dict[str, object], payload)
 
 
 def probe_fps(video_path: Path) -> Fraction:
@@ -114,6 +119,8 @@ def probe_fps(video_path: Path) -> Fraction:
         raise FFmpegError("ffprobe timed out", 124) from e
     except CalledProcessError as e:
         raise FFmpegError(_decode_stderr(e.stderr), e.returncode) from e
+    except OSError as e:
+        raise FFmpegError(f"ffprobe could not start: {e}", 1) from e
 
     output = proc.stdout.decode("utf-8").strip()
     normalized_output = output.removesuffix(",")
@@ -136,12 +143,12 @@ def probe_fps(video_path: Path) -> Fraction:
 
 def _parse_audio_stream(stream_obj: object, *, audio_stream_index: int, video_path: Path) -> AudioStreamInfo:
     if not isinstance(stream_obj, dict):
-        raise AudioAlignmentError(f"ffprobe returned invalid audio stream data for {video_path.name}")
+        raise FFmpegError(f"ffprobe returned invalid audio stream data for {video_path.name}", 0)
     stream = cast(dict[str, object], stream_obj)
 
     absolute_stream_index = _parse_optional_int(stream.get("index"))
     if absolute_stream_index is None:
-        raise AudioAlignmentError(f"ffprobe returned audio stream without index for {video_path.name}")
+        raise FFmpegError(f"ffprobe returned audio stream without index for {video_path.name}", 0)
 
     disposition_obj = stream.get("disposition", {})
     disposition_dict = (
@@ -189,7 +196,7 @@ def _probe_audio_streams(video_path: Path) -> list[AudioStreamInfo]:
 
     streams_obj = payload.get("streams")
     if not isinstance(streams_obj, list):
-        raise AudioAlignmentError(f"ffprobe returned invalid audio stream list for {video_path.name}")
+        raise FFmpegError(f"ffprobe returned invalid audio stream list for {video_path.name}", 0)
     stream_items = cast(list[object], streams_obj)
 
     streams = [

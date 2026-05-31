@@ -112,6 +112,21 @@ def test_probe_fps_nonzero_exit_raises(mock_run: MagicMock):
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")
+def test_probe_fps_oserror_raises_ffmpeg_error(mock_run: MagicMock) -> None:
+    mock_run.side_effect = OSError("permission denied")
+
+    with pytest.raises(FFmpegError) as exc_info:
+        _probe_fps(Path("test.mkv"))
+
+    assert "traceback" not in str(exc_info.value).lower()
+    assert exc_info.value.context.details is not None
+    message = str(exc_info.value.context.details).lower()
+    assert "ffprobe" in message
+    assert "could not start" in message
+    assert "permission denied" in message
+
+
+@patch("frame_compare.services.alignment_audio.run_subprocess")
 def test_probe_fps_non_utf8_stderr_is_replaced(mock_run: MagicMock) -> None:
     mock_run.side_effect = CalledProcessError(1, ["ffprobe"], stderr=b"\xfferror")
 
@@ -324,6 +339,66 @@ def test_select_reference_audio_stream_prefers_non_commentary_default_then_chann
 
     assert selected.audio_stream_index == 2
     assert selected.absolute_stream_index == 3
+
+
+@patch("frame_compare.services.alignment_audio.run_subprocess")
+def test_select_reference_audio_stream_ffprobe_oserror_raises_ffmpeg_error(
+    mock_run: MagicMock,
+) -> None:
+    mock_run.side_effect = OSError("permission denied")
+
+    with pytest.raises(FFmpegError) as exc_info:
+        select_reference_audio_stream(Path("reference.mkv"))
+
+    assert "traceback" not in str(exc_info.value).lower()
+    assert exc_info.value.context.details is not None
+    message = str(exc_info.value.context.details).lower()
+    assert "ffprobe" in message
+    assert "could not start" in message
+    assert "permission denied" in message
+
+
+@pytest.mark.parametrize("stdout", [b"[]", b"null", b'"oops"'])
+@patch("frame_compare.services.alignment_audio.run_subprocess")
+def test_select_reference_audio_stream_rejects_non_object_ffprobe_json(
+    mock_run: MagicMock,
+    stdout: bytes,
+) -> None:
+    mock_run.return_value = MagicMock(stdout=stdout, returncode=0)
+
+    with pytest.raises(FFmpegError) as exc_info:
+        select_reference_audio_stream(Path("reference.mkv"))
+
+    assert exc_info.value.context.details is not None
+    message = str(exc_info.value.context.details).lower()
+    assert "ffprobe" in message
+    assert "invalid json" in message
+    assert "object" in message
+
+
+@pytest.mark.parametrize(
+    "stdout, expected",
+    [
+        (b'{"streams": {}}', "stream list"),
+        (b'{"streams": [null]}', "stream data"),
+        (b'{"streams": [{}]}', "without index"),
+    ],
+)
+@patch("frame_compare.services.alignment_audio.run_subprocess")
+def test_select_reference_audio_stream_rejects_malformed_object_ffprobe_json(
+    mock_run: MagicMock,
+    stdout: bytes,
+    expected: str,
+) -> None:
+    mock_run.return_value = MagicMock(stdout=stdout, returncode=0)
+
+    with pytest.raises(FFmpegError) as exc_info:
+        select_reference_audio_stream(Path("reference.mkv"))
+
+    assert exc_info.value.context.details is not None
+    message = str(exc_info.value.context.details).lower()
+    assert "ffprobe" in message
+    assert expected in message
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")

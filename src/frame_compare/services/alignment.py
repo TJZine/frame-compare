@@ -53,9 +53,32 @@ __all__ = [
     "align_clips",
     "calculate_alignment_trims",
     "check_alignment_cached",
+    "format_rejected_alignment_warning",
     "load_cached_offsets",
     "save_offsets_cache",
 ]
+
+
+def _safe_alignment_diagnostic(diagnostic: str | None) -> str:
+    if diagnostic is None:
+        return "no diagnostic"
+    normalized = " ".join(diagnostic.strip().split())
+    if not normalized:
+        return "no diagnostic"
+    allowed_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.=, ")
+    if any(char not in allowed_chars for char in normalized):
+        return "diagnostic unavailable"
+    return normalized[:120]
+
+
+def format_rejected_alignment_warning(result: AlignmentResult) -> str:
+    """Format a rejected computed alignment as a deterministic run warning."""
+    comparison_stem = Path(result.comparison_clip).stem or result.comparison_clip
+    reason = _safe_alignment_diagnostic(result.diagnostic)
+    return (
+        f"align: {comparison_stem} alignment left unapplied and untrimmed "
+        f"because {reason}."
+    )
 
 
 def _build_offsets_map(

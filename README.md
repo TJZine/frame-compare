@@ -230,10 +230,12 @@ bash tools/verify_docker_integration.sh
 
 ### Reports
 
-Generated reports are single offline HTML files. The viewer persists browser-local
-view mode, clip selection, viewport/zoom, reveal, and alignment state per report;
-it supports frame/category navigation, pan and wheel zoom controls, and collapsed
-report, clip, and frame metadata panels.
+Generated reports are static HTML viewers. By default, report image sources point
+to screenshot files by relative path next to the report; when `report.embed_images`
+is enabled, screenshot bytes are embedded in the HTML payload. The viewer persists
+browser-local view mode, clip selection, viewport/zoom, reveal, and alignment state
+per report; it supports frame/category navigation, pan and wheel zoom controls, and
+collapsed report, clip, and frame metadata panels.
 
 ### Overlays
 

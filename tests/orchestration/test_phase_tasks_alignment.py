@@ -208,6 +208,14 @@ def test_run_align_phase_degrades_whole_set_when_any_result_is_not_applied(
     assert [comparison.alignment for comparison in output.comparisons] == [None, None]
     assert [comparison.trim.trim_start_frames for comparison in output.comparisons] == [0, 0]
     assert output.selected_frames == [0, 2, 50]
+    assert len(output.warnings) == 1
+    warning = output.warnings[0]
+    normalized_warning = warning.replace("_", " ").lower()
+    assert "align:" in warning.lower()
+    assert "encode_b" in warning.lower()
+    assert "low confidence" in normalized_warning
+    assert "unapplied" in normalized_warning
+    assert "untrimmed" in normalized_warning
 
 
 def test_run_align_phase_no_comparisons_is_noop(

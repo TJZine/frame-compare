@@ -45,10 +45,18 @@ from frame_compare.orchestration.types import (
     ReportPhaseOutput,
 )
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
-from frame_compare.services.alignment import align_clips, calculate_alignment_trims
+from frame_compare.services.alignment import (
+    align_clips,
+    calculate_alignment_trims,
+    format_rejected_alignment_warning,
+)
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.metadata import resolve_metadata
 from frame_compare.services.publishers import publish_to_slowpics
+from frame_compare.services.report.display import (
+    SourceFrameSelectionDetail,
+    frame_detail_for_source_frame,
+)
 from frame_compare.services.report.entry import generate_report
 from frame_compare.services.report.payload import FrameDetail, ReportData, clip_info_from_state
 from frame_compare.services.types import AlignmentConfig, MetadataConfig, TmdbMetadata
@@ -181,43 +189,13 @@ def _selection_detail_for_frame(
     return details_by_source_frame.get(frame)
 
 
-def _selection_category_from_label(label: str | None) -> str | None:
-    if label is None:
+def _report_selection_detail(detail: SelectionDetail | None) -> SourceFrameSelectionDetail | None:
+    if detail is None:
         return None
-    match label:
-        case "Dark":
-            return "quantile_dark"
-        case "Bright":
-            return "quantile_bright"
-        case "Motion":
-            return "motion"
-        case "Random":
-            return "random"
-        case _:
-            return None
-
-
-def _report_frame_detail_for_source_frame(
-    *,
-    source_frame: int,
-    selection_detail: SelectionDetail | None,
-    selection_label: str | None,
-) -> FrameDetail:
-    label = selection_detail.label if selection_detail is not None else selection_label
-    detail_text = f"Source frame {source_frame}"
-    if selection_detail is not None and selection_detail.timecode is not None:
-        detail_text = f"{detail_text} ({selection_detail.timecode})"
-
-    category = None
-    if selection_detail is not None:
-        category = selection_detail.notes or _selection_category_from_label(selection_detail.label)
-    if category is None:
-        category = _selection_category_from_label(selection_label)
-
-    return FrameDetail(
-        label=label,
-        detail=detail_text,
-        category=category,
+    return SourceFrameSelectionDetail(
+        label=detail.label,
+        timecode=detail.timecode,
+        notes=detail.notes,
     )
 
 
@@ -241,9 +219,9 @@ def _report_frame_details_for_frames(ctx: RunContext, *, frames: list[int]) -> l
             else selection_label_for_frame(source_frame, ctx.selection_breakdown)
         )
         frame_details.append(
-            _report_frame_detail_for_source_frame(
+            frame_detail_for_source_frame(
                 source_frame=source_frame,
-                selection_detail=selection_detail,
+                selection_detail=_report_selection_detail(selection_detail),
                 selection_label=selection_label,
             )
         )
@@ -565,6 +543,9 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
 
     updated_comparisons: list[ClipState] = []
     has_non_applied_result = any(not result.applied for result in results)
+    warnings = [
+        format_rejected_alignment_warning(result) for result in results if not result.applied
+    ]
     for comparison, result in zip(ctx.comparisons, results, strict=True):
         alignment = None
         if result.applied and not has_non_applied_result:
@@ -627,6 +608,7 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
         selected_frames=normalized_selected_frames,
         selection_breakdown=selection_breakdown,
         selection_details_by_source_frame=selection_details_by_source_frame,
+        warnings=warnings,
     )
 
 

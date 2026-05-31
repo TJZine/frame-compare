@@ -12,6 +12,10 @@ from pytest_mock import MockerFixture
 
 from frame_compare.config.schema import ReportConfig, ViewerMode
 from frame_compare.services.errors import ReportError
+from frame_compare.services.report.display import (
+    SourceFrameSelectionDetail,
+    frame_detail_for_source_frame,
+)
 from frame_compare.services.report.entry import generate_report
 from frame_compare.services.report.payload import (
     ClipInfo,
@@ -488,6 +492,73 @@ def test_build_report_payload_rejects_mismatched_frame_display_metadata(
 
     with pytest.raises(ReportError, match="frame detail count mismatch"):
         build_report_payload(data, ReportConfig(output_dir=str(tmp_path)), report_dir=tmp_path)
+
+
+def test_frame_detail_for_source_frame_uses_explicit_selection_detail() -> None:
+    detail = frame_detail_for_source_frame(
+        source_frame=42,
+        selection_detail=SourceFrameSelectionDetail(
+            label="Opening comparison",
+            timecode="00:00:01.750",
+            notes="chapter",
+        ),
+        selection_label="Bright",
+    )
+
+    assert detail == FrameDetail(
+        label="Opening comparison",
+        detail="Source frame 42 (00:00:01.750)",
+        category="chapter",
+    )
+
+
+def test_frame_detail_for_source_frame_uses_breakdown_label_when_detail_absent() -> None:
+    detail = frame_detail_for_source_frame(
+        source_frame=42,
+        selection_detail=None,
+        selection_label="Bright",
+    )
+
+    assert detail == FrameDetail(
+        label="Bright",
+        detail="Source frame 42",
+        category="quantile_bright",
+    )
+
+
+@pytest.mark.parametrize(
+    ("selection_label", "category"),
+    [
+        ("Dark", "quantile_dark"),
+        ("Bright", "quantile_bright"),
+        ("Motion", "motion"),
+        ("Random", "random"),
+    ],
+)
+def test_frame_detail_for_source_frame_maps_known_selection_labels(
+    selection_label: str,
+    category: str,
+) -> None:
+    detail = frame_detail_for_source_frame(
+        source_frame=7,
+        selection_detail=None,
+        selection_label=selection_label,
+    )
+
+    assert detail.category == category
+
+
+@pytest.mark.parametrize("selection_label", ["Other", None])
+def test_frame_detail_for_source_frame_leaves_unknown_selection_label_uncategorized(
+    selection_label: str | None,
+) -> None:
+    detail = frame_detail_for_source_frame(
+        source_frame=7,
+        selection_detail=None,
+        selection_label=selection_label,
+    )
+
+    assert detail.category is None
 
 
 def test_report_id_ignores_generated_at_source_paths_and_image_sources(

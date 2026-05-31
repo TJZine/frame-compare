@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 
@@ -128,6 +129,25 @@ def _script_payload(html: str) -> ReportPayload:
     start = html.index(marker) + len(marker)
     end = html.index("</script>", start)
     return json.loads(html[start:end])
+
+
+def _js_method_body(js: str, method_name: str) -> str:
+    match = re.search(rf"\n    {re.escape(method_name)}\([^)]*\) \{{", js)
+    assert match is not None, f"{method_name}() method is missing"
+
+    body_start = match.end()
+    depth = 1
+    index = body_start
+    while index < len(js) and depth > 0:
+        char = js[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+        index += 1
+
+    assert depth == 0, f"{method_name}() method body is incomplete"
+    return js[body_start : index - 1]
 
 
 def test_build_html_renders_only_safe_slowpics_links(report_payload: ReportPayload) -> None:
@@ -464,6 +484,26 @@ def test_viewer_assets_keep_divider_slider_only_and_pointer_safe() -> None:
     assert "exitFullscreen?.()" in js
     assert "aria-pressed', isFullscreen ? 'true' : 'false'" in js
     assert "alert(" not in js
+
+
+def test_viewer_assets_group_event_binding_by_interaction_area() -> None:
+    js = get_js()
+    expected_binding_methods = [
+        "bindModeEvents",
+        "bindFrameNavigationEvents",
+        "bindClipSelectionEvents",
+        "bindViewportEvents",
+        "bindAlignmentEvents",
+        "bindHelpEvents",
+        "bindFilmstripEvents",
+        "bindKeyboardEvents",
+    ]
+
+    bind_events_body = _js_method_body(js, "bindEvents")
+
+    for method_name in expected_binding_methods:
+        assert f"\n    {method_name}() {{" in js
+        assert f"this.{method_name}();" in bind_events_body
 
 
 def test_viewer_assets_manage_help_focus_and_escape_semantics() -> None:

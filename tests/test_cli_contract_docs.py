@@ -115,9 +115,37 @@ def test_current_cli_contract_documents_audio_alignment_config_only_fields() -> 
         "`reference_stream` is either `null` or a non-negative audio stream ordinal",
         "`comparison_streams` is a mapping from comparison filename stem",
         "config-only public surfaces",
-        "Unit 1 accepts and forwards these values without changing computed",
     ):
         assert expected in audio_section
+
+    normalized_audio_section = " ".join(audio_section.split())
+    for expected in (
+        "correlation algorithm",
+        "preprocessing",
+        "audio channel handling",
+        "It gates whether computed offsets are applied",
+        "It gates ambiguous correlation peaks",
+        "consensus window",
+        "It gates whether enough windows produced valid estimates",
+        "It gates whether enough windows agree",
+        "consensus",
+        "refinement",
+        "selects the reference clip audio stream",
+        "select the comparison clip audio stream",
+    ):
+        assert expected in normalized_audio_section
+
+    audio_section_lower = normalized_audio_section.lower()
+    for stale_phrase in (
+        "future correlation",
+        "future preprocessing",
+        "future channel",
+        "future refinement",
+        "future-only",
+        "inert",
+        "accepts and forwards",
+    ):
+        assert stale_phrase not in audio_section_lower
 
     command_heading = "## Command Surface"
     screenshot_heading = "## Config-Only Screenshot Surface"
@@ -130,7 +158,16 @@ def test_current_cli_contract_documents_audio_alignment_config_only_fields() -> 
         "--correlation-mode",
         "--preprocessing-mode",
         "--channel-strategy",
+        "--confidence-threshold",
+        "--ambiguity-peak-ratio",
+        "--window-length-seconds",
+        "--window-stride-seconds",
+        "--minimum-valid-windows",
+        "--consensus-minimum-ratio",
+        "--refinement-mode",
+        "--refinement-sample-rate",
         "--reference-stream",
+        "--comparison-streams",
     ):
         assert unsupported_flag not in command_override_surface
 
