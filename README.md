@@ -23,7 +23,7 @@
 | 🎵 **Audio Alignment** | Cross-correlation based synchronization for comparison clips |
 | 📸 **Screenshot Rendering** | VapourSynth/FFmpeg with customizable overlays |
 | 🌐 **slow.pics Publishing** | Opt-in uploads with retry logic and rate limiting |
-| 📄 **HTML Reports** | Offline-friendly comparison viewer with 4 modes |
+| 📄 **HTML Reports** | Offline comparison viewer with slider, overlay, diff, and pair blink modes |
 | 🔧 **Zero-Config Docker** | Complete environment with single `docker compose up` |
 
 ---
@@ -227,6 +227,13 @@ Local invocations may require optional dependencies (notably VapourSynth). For r
 ```bash
 bash tools/verify_docker_integration.sh
 ```
+
+### Reports
+
+Generated reports are single offline HTML files. The viewer persists browser-local
+view mode, clip selection, viewport/zoom, reveal, and alignment state per report;
+it supports frame/category navigation, pan and wheel zoom controls, and collapsed
+report, clip, and frame metadata panels.
 
 ### Overlays
 

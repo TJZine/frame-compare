@@ -132,6 +132,13 @@ Keep these integrations at their current owners:
 - VS loading and HDR/tonemap logic: `frame_compare.vs.*`
 - packaging/install/update flow: `tools/windows_portable/**`
 
+`frame_compare.services.report` owns the static offline report payload and viewer
+assets. The generated viewer exposes slider, overlay, diff, and pair-based blink
+modes; frame/category navigation; progressive report, clip, and frame metadata;
+browser-local view mode, clip selection, viewport/zoom, reveal, and alignment state
+scoped by report identity; viewport pan, zoom, and fit controls; and adjacent-frame
+preloading.
+
 Screenshot rendering owns its geometry and writer policy inside `frame_compare.render`:
 `frame_compare.render.geometry` plans optional aligned crop/scale/pad geometry, render
 batch expansion attaches those plans to render requests, the FFmpeg backend applies
