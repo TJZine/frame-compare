@@ -136,6 +136,7 @@ class RunDependencies:
 class RenderArtifacts:
     screenshots_by_label: dict[str, list[Path]]
     screenshot_dir: Path | None
+    warnings: list[str] = field(default_factory=_empty_str_list)
 
 
 @dataclass(frozen=True)

@@ -118,6 +118,9 @@ def test_run_render_phase_maps_aligned_frames_to_source_frames(
 
     def _fake_render_screenshots_from_batch(**kwargs: object) -> dict[str, list[Path]]:
         captured.update(kwargs)
+        options = kwargs["options"]
+        assert options.warnings is not None
+        options.warnings.append("render: geometry alignment skipped")
         return {"Reference": [tmp_path / "reference.png"]}
 
     monkeypatch.setattr(
@@ -145,6 +148,7 @@ def test_run_render_phase_maps_aligned_frames_to_source_frames(
     assert output.render == RenderArtifacts(
         screenshots_by_label={"Reference": [tmp_path / "reference.png"]},
         screenshot_dir=ctx.workspace.screenshots_dir,
+        warnings=["render: geometry alignment skipped"],
     )
 
 

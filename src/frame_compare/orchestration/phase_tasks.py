@@ -634,6 +634,7 @@ def run_render_phase(
             )
         )
 
+    render_warnings: list[str] = []
     rendered = render_screenshots_from_batch(
         batch_requests=batch_requests,
         output_dir=output_dir,
@@ -642,11 +643,16 @@ def run_render_phase(
             overlay_mode=overlay_mode,
             ffmpeg_runner=runner,
             reporter=ctx.reporter,
+            warnings=render_warnings,
         ),
     )
 
     return RenderPhaseOutput(
-        render=RenderArtifacts(screenshots_by_label=rendered, screenshot_dir=output_dir)
+        render=RenderArtifacts(
+            screenshots_by_label=rendered,
+            screenshot_dir=output_dir,
+            warnings=render_warnings,
+        )
     )
 
 

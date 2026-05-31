@@ -118,6 +118,7 @@ def _apply_phase_output(*, ctx: RunContext, state: ExecutionState, output: Phase
                 ctx.selection_details_by_source_frame = phase_output.selection_details_by_source_frame
         case RenderPhaseOutput() as phase_output:
             state.artifacts.render = phase_output.render
+            state.warnings.extend(phase_output.render.warnings)
         case MetadataPhaseOutput() as phase_output:
             state.artifacts.resolved_metadata = phase_output.resolved_metadata
         case DoviPhaseOutput() as phase_output:

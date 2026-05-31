@@ -13,6 +13,8 @@ from frame_compare.orchestration.types import (
     ExecutionState,
     MetadataPrefetch,
     PrepState,
+    RenderArtifacts,
+    RenderPhaseOutput,
     RunArtifacts,
 )
 from frame_compare.utils.types import WorkspacePaths
@@ -124,6 +126,39 @@ def test_apply_phase_output_handles_report_output_explicitly(tmp_path: Path) -> 
     _apply_phase_output(ctx=ctx, state=state, output=ReportPhaseOutput(report_path=report_path))
 
     assert state.artifacts.report_path == report_path
+
+
+def test_apply_phase_output_extends_warnings_from_render_output(tmp_path: Path) -> None:
+    workspace = WorkspacePaths(
+        root=tmp_path,
+        input_dir=tmp_path / "comparison_videos",
+        run_dir=None,
+        screenshots_dir=tmp_path / "screenshots",
+        generated_dir=tmp_path / "generated",
+        config_dir=tmp_path / "config",
+        config_file=tmp_path / "config" / "config.toml",
+    )
+    reference = clip_state(tmp_path / "ref.mkv", label="Reference")
+    ctx = RunContext(
+        config=ConfigSchema(),
+        workspace=workspace,
+        reference=reference,
+        comparisons=[],
+    )
+    state = ExecutionState(artifacts=RunArtifacts(warnings=["pre-existing warning"]))
+    render = RenderArtifacts(
+        screenshots_by_label={"Reference": [tmp_path / "reference.png"]},
+        screenshot_dir=tmp_path / "screenshots",
+        warnings=["Screenshot geometry alignment skipped: using native geometry."],
+    )
+
+    _apply_phase_output(ctx=ctx, state=state, output=RenderPhaseOutput(render=render))
+
+    assert state.artifacts.render is render
+    assert state.warnings == [
+        "pre-existing warning",
+        "Screenshot geometry alignment skipped: using native geometry.",
+    ]
 
 
 def test_apply_phase_output_rejects_unknown_output_type(tmp_path: Path) -> None:
