@@ -4,11 +4,7 @@ import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
-from frame_compare.render.overlay import (
-    _DEFAULT_FONT_CANDIDATES,
-    _load_font,
-    apply_overlay,
-)
+from frame_compare.render.overlay import apply_overlay
 from frame_compare.render.overlay_text import (
     compose_frame_info_lines,
     compose_overlay_text_lines,
@@ -56,7 +52,7 @@ def captured_draw_calls(monkeypatch):
     return calls
 
 
-def test_load_font_prefers_explicit_font_path(monkeypatch) -> None:
+def test_apply_overlay_prefers_explicit_font_path(monkeypatch, captured_draw_calls) -> None:
     captured: list[tuple[str, int]] = []
 
     def mock_truetype(path: str, size: int):
@@ -73,17 +69,21 @@ def test_load_font_prefers_explicit_font_path(monkeypatch) -> None:
         hdr_info=None,
         font_path=Path("custom.ttf"),
     )
+    img = Image.new("RGB", (100, 100))
 
-    assert _load_font(config) == "configured-font"
+    apply_overlay(img, config)
+
     assert captured == [("custom.ttf", 24)]
+    assert captured_draw_calls["multiline_text"]
 
 
-def test_load_font_uses_first_available_system_font(monkeypatch) -> None:
+def test_apply_overlay_uses_first_available_system_font(monkeypatch, captured_draw_calls) -> None:
     attempts: list[tuple[str, int]] = []
+    missing_fonts = {"segoeui.ttf", "arial.ttf"}
 
     def mock_truetype(path: str, size: int):
         attempts.append((path, size))
-        if path in _DEFAULT_FONT_CANDIDATES[:2]:
+        if path in missing_fonts:
             raise OSError("missing font")
         return "system-font"
 
@@ -101,16 +101,21 @@ def test_load_font_uses_first_available_system_font(monkeypatch) -> None:
         hdr_info=None,
         font_path=None,
     )
+    img = Image.new("RGB", (100, 100))
 
-    assert _load_font(config) == "system-font"
+    apply_overlay(img, config)
+
     assert attempts == [
-        (_DEFAULT_FONT_CANDIDATES[0], 24),
-        (_DEFAULT_FONT_CANDIDATES[1], 24),
-        (_DEFAULT_FONT_CANDIDATES[2], 24),
+        ("segoeui.ttf", 24),
+        ("arial.ttf", 24),
+        ("tahoma.ttf", 24),
     ]
+    assert captured_draw_calls["multiline_text"]
 
 
-def test_load_font_falls_back_when_explicit_font_path_is_unavailable(monkeypatch) -> None:
+def test_apply_overlay_falls_back_when_explicit_font_path_is_unavailable(
+    monkeypatch, captured_draw_calls
+) -> None:
     attempts: list[tuple[str, int]] = []
 
     def mock_truetype(path: str, size: int):
@@ -133,12 +138,17 @@ def test_load_font_falls_back_when_explicit_font_path_is_unavailable(monkeypatch
         hdr_info=None,
         font_path=Path("missing.ttf"),
     )
+    img = Image.new("RGB", (100, 100))
 
-    assert _load_font(config) == "system-font"
-    assert attempts == [("missing.ttf", 24), (_DEFAULT_FONT_CANDIDATES[0], 24)]
+    apply_overlay(img, config)
+
+    assert attempts == [("missing.ttf", 24), ("segoeui.ttf", 24)]
+    assert captured_draw_calls["multiline_text"]
 
 
-def test_load_font_falls_back_to_pillow_default_when_system_fonts_unavailable(monkeypatch) -> None:
+def test_apply_overlay_falls_back_to_pillow_default_when_system_fonts_unavailable(
+    monkeypatch, captured_draw_calls
+) -> None:
     attempts: list[tuple[str, int]] = []
 
     def mock_truetype(path: str, size: int):
@@ -159,9 +169,18 @@ def test_load_font_falls_back_to_pillow_default_when_system_fonts_unavailable(mo
         hdr_info=None,
         font_path=None,
     )
+    img = Image.new("RGB", (100, 100))
 
-    assert _load_font(config) == ("default-font", 24)
-    assert attempts == [(font_name, 24) for font_name in _DEFAULT_FONT_CANDIDATES]
+    apply_overlay(img, config)
+
+    assert attempts == [
+        ("segoeui.ttf", 24),
+        ("arial.ttf", 24),
+        ("tahoma.ttf", 24),
+        ("calibri.ttf", 24),
+        ("verdana.ttf", 24),
+    ]
+    assert captured_draw_calls["multiline_text"]
 
 
 def test_apply_overlay_minimal_mode(captured_draw_calls):
@@ -283,14 +302,15 @@ def test_apply_overlay_standard_uses_fallback_details_y_when_bbox_fails(monkeypa
         resolution=(1920, 1080),
         hdr_info=None,
         font_path=None,
+        origin=(26, 14),
     )
     img = Image.new("RGB", (100, 100))
 
     apply_overlay(img, config)
 
     assert len(calls) == 2
-    assert calls[0][0] == (10, 10)
-    assert calls[1][0] == (10, 140)
+    assert calls[0][0] == (26, 14)
+    assert calls[1][0] == (26, 144)
 
 
 def test_apply_overlay_uses_explicit_origin_for_frame_and_detail_blocks(captured_draw_calls):

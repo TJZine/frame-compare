@@ -159,7 +159,8 @@ def plan_render_geometry(
 
     active_rects = _resolve_active_rects(sources)
     crop_rects = tuple(
-        _mod_safe_rect(rect) for (rect, _source_kind), _source in zip(active_rects, sources, strict=True)
+        _mod_safe_rect(rect)
+        for (rect, _source_kind), _source in zip(active_rects, sources, strict=True)
     )
     scaled_sizes = _scale_to_common_height(crop_rects)
     canvas_size = _common_canvas(scaled_sizes)
@@ -175,9 +176,11 @@ def plan_render_geometry(
         active_rect, active_rect_source = active_info
         source_rect = GeometryRect(0, 0, source.width, source.height)
         pad = _center_pad(scaled_size, canvas_size)
+        content_max_x = pad.left + scaled_size[0] - 1
+        content_max_y = pad.top + scaled_size[1] - 1
         overlay_origin = (
-            min(pad.left + overlay_margin, max(pad.left, canvas_size[0] - 1)),
-            min(pad.top + overlay_margin, max(pad.top, canvas_size[1] - 1)),
+            min(pad.left + overlay_margin, content_max_x),
+            min(pad.top + overlay_margin, content_max_y),
         )
         plans.append(
             RenderGeometryPlan(
@@ -247,7 +250,9 @@ def _resolve_active_rects(
     return tuple(resolved)
 
 
-def _dimension_derived_active_rects(sources: Sequence[SourceGeometry]) -> tuple[GeometryRect | None, ...]:
+def _dimension_derived_active_rects(
+    sources: Sequence[SourceGeometry],
+) -> tuple[GeometryRect | None, ...]:
     if len(sources) < 2:
         return tuple(None for _source in sources)
 

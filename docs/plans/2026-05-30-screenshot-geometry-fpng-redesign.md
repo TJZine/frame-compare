@@ -4,6 +4,11 @@ Owner: Completed by Codex cleanup-loop session on 2026-05-30.
 
 # Screenshot Geometry And FPNG Redesign
 
+Archived: for historical reference only. This document is not active guidance,
+is not an approved current workstream, and must not be used as execution
+authority. Imperative language below is preserved only as historical acceptance
+criteria for the completed workstream.
+
 ## User Intent
 
 The maintainer confirmed that the newly implemented VSPreview source-frame alignment
@@ -20,34 +25,24 @@ can improve the design rather than porting it mechanically. The maintainer also
 expects the screenshot path to use VapourSynth `fpng` where appropriate because the
 legacy repo had meaningful performance benefits there.
 
-This plan is the handoff for a fresh session. It must be treated as an approved
-workstream, but functional changes to the plan itself still require maintainer
-approval.
+## Historical Handoff Context
 
-## Required Workflow
+The original handoff was intended for a fresh session using
+`frame-compare-cleanup-loop`, `update_plan`, plan validation, implementation
+delegation, and review delegation. That workflow context is informational only
+now that the workstream is closed.
 
-- Use `frame-compare-cleanup-loop`.
-- Keep authoritative live state in `update_plan`.
-- Start by requesting adversarial review of this plan before implementation.
-- Use subagents for plan validation, implementation units, and review. The main
-  session remains the orchestrator and should not directly implement production
-  runtime behavior unless resolving integration conflicts is unavoidable.
-- Follow `AGENTS.md`, `docs/ENGINEERING_RUNBOOK.md`,
-  `docs/current-architecture.md`, `docs/current-cli-contract.md`,
-  `importlinter.ini`, and `pyproject.toml`.
-- Use relevant boundary skills before editing:
-  `runtime-integration-boundaries`, `report-output-patterns`,
-  `persistence-boundaries`, `python-quality-boundaries`,
-  `python-test-design`, `verification-strategy`, `execution-plan-authoring`,
-  `review-request`, `review-adjudication`, and `closeout-verification`.
-- Preserve existing user-facing CLI behavior unless explicitly authorized below.
-- Preserve the already-landed VSPreview/manual-alignment work:
-  base/untrimmed VSPreview sessions, audio offsets as hints only, user-prompted
-  matching source-frame positions, final signed offsets computed as
+The original handoff also called out behavior to preserve while implementing the
+workstream:
+
+- Existing user-facing CLI behavior unless explicitly authorized in the plan.
+- Already-landed VSPreview/manual-alignment work: base/untrimmed VSPreview
+  sessions, audio offsets as hints only, user-prompted matching source-frame
+  positions, final signed offsets computed as
   `reference_source_frame - comparison_source_frame`, and the parity fixes from
   `e799547` and `155a208`.
-- Preserve exact source-frame selection semantics for FFmpeg extraction. If FFmpeg
-  gains crop/scale/pad filters, frame selection must still target the same exact
+- Exact source-frame selection semantics for FFmpeg extraction. If FFmpeg gained
+  crop/scale/pad filters, frame selection still needed to target the same exact
   source frame before downstream transforms.
 
 ## Risk Tier
@@ -252,8 +247,8 @@ Any change outside these approved surfaces is a stop-and-replan trigger.
 
 ## Suggested Implementation Units
 
-The next session may adjust unit boundaries, but functional scope changes require
-maintainer approval.
+The implementing session could adjust unit boundaries, but functional scope
+changes required maintainer approval.
 
 1. Plan validation sidecars.
    - Read-only legacy geometry/fpng validation against
@@ -335,7 +330,7 @@ Out of scope unless maintainer approves:
 - Changing slow.pics upload behavior.
 - Reworking unrelated render/report parity issues.
 
-## Verification Strategy
+## Historical Verification Strategy
 
 Primary modes:
 
@@ -344,7 +339,7 @@ Primary modes:
 - `manual-runtime` for real media/VSPreview/fpng proof where local runtime is
   required.
 
-Required targeted tests:
+Historical targeted tests:
 
 - Config schema accepts default/native/aligned settings and rejects invalid values.
 - CLI contract docs remain aligned with config/override behavior.
@@ -359,7 +354,7 @@ Required targeted tests:
 - VS writer selection tests cover `fpng` available, `fpng` unavailable fallback,
   overlay parity fallback, and failure/error messaging.
 
-Run during implementation:
+Commands recorded for implementation-time verification:
 
 ```bash
 .venv/bin/pytest tests/render -q
@@ -367,7 +362,7 @@ Run during implementation:
 .venv/bin/pytest tests/cli/test_cli_commands.py tests/test_cli_contract_docs.py -q
 ```
 
-Required full verification before closeout:
+Historical full verification before closeout:
 
 ```bash
 .venv/bin/pyright --warnings
@@ -378,7 +373,7 @@ UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
 bash tools/verify_docker_integration.sh
 ```
 
-Manual/runtime proof to attempt before closeout:
+Manual/runtime proof that the original plan expected before closeout:
 
 - Generate screenshots for the maintainer's black-bar/pillarbox test case with
   `screenshots.geometry_mode = "aligned"`.
@@ -390,9 +385,10 @@ Manual/runtime proof to attempt before closeout:
 - Record any missing real VSPreview, real media, Docker, or `core.fpng` proof
   explicitly.
 
-## Stop-And-Replan Triggers
+## Historical Stop-And-Replan Triggers
 
-Stop and ask the maintainer before implementation continues if:
+The original plan required stopping and asking the maintainer before
+implementation continued if:
 
 - The desired public config shape needs more than the approved minimal geometry
   mode and optional VS writer setting.
@@ -410,9 +406,9 @@ Stop and ask the maintainer before implementation continues if:
 - Required Docker/runtime verification cannot run and no acceptable documented-only
   proof path is available.
 
-## Review Expectations
+## Historical Review Expectations
 
-Before implementation:
+Before implementation, the original plan expected:
 
 - Reviewer must lead with findings ordered by severity and explicitly say whether
   this plan is implementation-grade.
@@ -420,7 +416,7 @@ Before implementation:
   config changes are approved and narrow, and that the verification surface covers
   render/VS/FFmpeg output risk.
 
-After each implementation unit:
+After each implementation unit, the original plan expected:
 
 - Review for behavioral regressions, CLI/config contract drift, render output
   drift, import-layer violations, filesystem ownership leaks, runtime fallback

@@ -5,6 +5,10 @@ Closed: 2026-05-30
 
 # VSPreview Source-Frame Alignment Plan
 
+Archived: historical context only. Do not treat this document as current
+execution authority. Imperative language below is preserved only as historical
+acceptance criteria for the completed workstream.
+
 ## Closeout Notes
 
 - Implemented the approved option-3 flow.
@@ -18,14 +22,14 @@ Closed: 2026-05-30
 
 ## Purpose
 
-This is a durable execution plan for the next session that will use
-`frame-compare-cleanup-loop` to redesign the VSPreview manual alignment flow
-around option 3.
+This historical plan captured the intended `frame-compare-cleanup-loop`
+workflow for redesigning the VSPreview manual alignment flow around option 3.
 
-The next session's main agent must act as orchestrator only. It must keep live
-state in `update_plan` and delegate planning validation, implementation, and
-review work through the cleanup-loop workflow rather than coding the full change
-directly in the orchestrator session.
+Historical handoff context: the original workflow expected the next session's
+main agent to act as orchestrator, keep live state in `update_plan`, and
+delegate planning validation, implementation, and review work through the
+cleanup-loop workflow. That context is informational only now that the
+workstream is closed.
 
 ## Task Family and Risk Tier
 
@@ -470,9 +474,9 @@ Stop before coding further and ask the maintainer if any of these occur:
 - Do not update `AGENTS.md` or the runbook for this work unless workflow policy
   itself changes, which is out of scope by default.
 
-## Cleanup-Loop Requirements
+## Historical Cleanup-Loop Requirements
 
-The next session must follow this controller workflow:
+The original plan required this controller workflow:
 
 1. Use `frame-compare-cleanup-loop`.
 2. Keep authoritative live state in `update_plan`.
@@ -494,7 +498,10 @@ WHY: Score 4+. The work involves hotspot alignment code, runtime VSPreview
 behavior, public CLI/config invariants, multiple boundary skills, and hidden
 semantic coupling between preview, persistence, cache, and downstream trims.
 
-## Suggested Session Start Prompt
+## Historical Suggested Session Start Prompt
+
+The prompt below is archived for context only and must not be used as current
+execution guidance.
 
 ```text
 Use frame-compare-cleanup-loop.

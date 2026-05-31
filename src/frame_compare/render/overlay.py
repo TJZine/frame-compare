@@ -23,6 +23,7 @@ type ImageInput = Image.Image | np.ndarray | None
 _LABEL_POSITION = (10, 10)
 _BLOCK_GAP_PX = 10
 _DEFAULT_DETAILS_Y = 140
+_DEFAULT_DETAILS_OFFSET_Y = _DEFAULT_DETAILS_Y - _LABEL_POSITION[1]
 _FILL = (255, 255, 255, 255)
 _STROKE_FILL = (0, 0, 0, 255)
 _STROKE_WIDTH = 2
@@ -100,7 +101,7 @@ def _resolve_details_y(
             stroke_width=_STROKE_WIDTH,
         )
     except (OSError, ValueError, RuntimeError):
-        return _DEFAULT_DETAILS_Y
+        return position[1] + _DEFAULT_DETAILS_OFFSET_Y
     return int(bbox[3]) + _BLOCK_GAP_PX
 
 

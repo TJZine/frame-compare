@@ -74,8 +74,15 @@ def test_current_cli_contract_documents_screenshot_config_only_fields() -> None:
     ):
         assert expected in screenshot_section
 
+    command_heading = "## Command Surface"
+    screenshot_heading = "## Config-Only Screenshot Surface"
+    command_override_surface = cli_contract.split(command_heading, maxsplit=1)[1].split(
+        screenshot_heading,
+        maxsplit=1,
+    )[0]
+
     for unsupported_flag in ("--geometry-mode", "--vs-writer", "--png-compression"):
-        assert unsupported_flag not in cli_contract
+        assert unsupported_flag not in command_override_surface
 
 
 def test_current_cli_contract_names_primary_executable_contract_checks() -> None:

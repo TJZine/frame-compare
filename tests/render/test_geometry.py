@@ -173,6 +173,27 @@ def test_plan_render_geometry_aligned_scales_proportionally_and_centers_padding(
     assert square.final_canvas_size == (1600, 800)
 
 
+def test_plan_render_geometry_clamps_overlay_origin_to_padded_content_bounds():
+    plans = plan_render_geometry(
+        (
+            SourceGeometry(width=1000, height=500, label="wide"),
+            SourceGeometry(width=800, height=800, label="square"),
+        ),
+        mode="aligned",
+        overlay_margin=1000,
+    )
+
+    wide = plans[0]
+    square = plans[1]
+    assert wide.content_origin == (0, 0)
+    assert wide.scaled_size == (1600, 800)
+    assert wide.overlay_origin == (1000, 799)
+
+    assert square.content_origin == (400, 0)
+    assert square.scaled_size == (800, 800)
+    assert square.overlay_origin == (1199, 799)
+
+
 def test_plan_render_geometry_prefers_safe_provided_active_rect_over_dimension_fallback():
     plans = plan_render_geometry(
         (

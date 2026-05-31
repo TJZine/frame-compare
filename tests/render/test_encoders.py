@@ -105,7 +105,9 @@ class _FakeVsStd:
         top: int,
         bottom: int,
     ) -> "_FakeFpngClip":
-        return self._clip.with_op(("crop", {"left": left, "right": right, "top": top, "bottom": bottom}))
+        return self._clip.with_op(
+            ("crop", {"left": left, "right": right, "top": top, "bottom": bottom})
+        )
 
     def AddBorders(  # noqa: N802
         self,
@@ -115,7 +117,9 @@ class _FakeVsStd:
         top: int,
         bottom: int,
     ) -> "_FakeFpngClip":
-        return self._clip.with_op(("pad", {"left": left, "right": right, "top": top, "bottom": bottom}))
+        return self._clip.with_op(
+            ("pad", {"left": left, "right": right, "top": top, "bottom": bottom})
+        )
 
     def SetFrameProps(self, **_props: object) -> "_FakeFpngClip":  # noqa: N802
         return self._clip
@@ -288,6 +292,34 @@ def test_render_frame_vs_auto_uses_fpng_for_geometry_without_overlay(
     assert clip.frame_reads == [0, 3]
 
 
+def test_render_frame_vs_auto_preserves_pillow_for_native_geometry_without_overlay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    job = _FakeFpngJob()
+    fpng = _FakeFpngNamespace(job)
+    monkeypatch.setitem(
+        sys.modules, "vapoursynth", SimpleNamespace(RGB24=1, RGB=2, core=SimpleNamespace(fpng=fpng))
+    )
+    clip = _FakeFpngClip()
+    pillow = MagicMock()
+    monkeypatch.setattr("frame_compare.render.encoders._render_vs_pillow", pillow)
+
+    render_frame(
+        RenderRequest(
+            clip=clip,  # type: ignore[arg-type]
+            frame_number=3,
+            output_path=tmp_path / "out.png",
+            overlay=None,
+            encoder_settings=EncoderSettings(vs_writer=VsScreenshotWriter.AUTO),
+            geometry_plan=None,
+        ),
+        renderer="vapoursynth",
+    )
+
+    assert fpng.calls == []
+    pillow.assert_called_once()
+
+
 def test_render_frame_vs_auto_falls_back_to_pillow_when_overlay_is_present(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -398,9 +430,7 @@ def test_render_frame_vs_auto_falls_back_to_pillow_for_tonemapped_limited_rgb(
     monkeypatch.setitem(
         sys.modules, "vapoursynth", SimpleNamespace(RGB24=1, RGB=2, core=SimpleNamespace(fpng=fpng))
     )
-    clip = _FakeFpngClip(
-        props={"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_Range": 0}
-    )
+    clip = _FakeFpngClip(props={"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_Range": 0})
     pillow = MagicMock()
     monkeypatch.setattr("frame_compare.render.encoders._render_vs_pillow", pillow)
 
@@ -427,9 +457,7 @@ def test_render_frame_vs_fpng_rejects_tonemapped_limited_rgb_when_explicit(
     monkeypatch.setitem(
         sys.modules, "vapoursynth", SimpleNamespace(RGB24=1, RGB=2, core=SimpleNamespace(fpng=fpng))
     )
-    clip = _FakeFpngClip(
-        props={"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_Range": 0}
-    )
+    clip = _FakeFpngClip(props={"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_Range": 0})
 
     with pytest.raises(EncodingError) as exc_info:
         render_frame(

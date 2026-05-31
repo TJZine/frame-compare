@@ -46,6 +46,7 @@ class _FpngWriter(Protocol):
         overwrite: bool,
     ) -> _FpngJob: ...
 
+
 _VS_MATRIX_PROP: _ColorFramePropKey = "_Matrix"
 _VS_TRANSFER_PROP: _ColorFramePropKey = "_Transfer"
 _VS_PRIMARIES_PROP: _ColorFramePropKey = "_Primaries"
@@ -310,7 +311,12 @@ def _render_vs(
 ) -> None:
     """Render frame via VapourSynth."""
     try:
-        fpng_writer = _resolve_fpng_writer(output, settings, overlay)
+        fpng_writer = _resolve_fpng_writer(
+            output,
+            settings,
+            overlay,
+            geometry_plan=geometry_plan,
+        )
         if fpng_writer is not None:
             fpng_clip = _clip_to_rgb24_for_pillow(clip)
             fpng_frame_props = dict(fpng_clip.get_frame(frame).props)
@@ -403,6 +409,8 @@ def _resolve_fpng_writer(
     output: Path,
     settings: EncoderSettings,
     overlay: OverlayConfig | None,
+    *,
+    geometry_plan: RenderGeometryPlan | None,
 ) -> _FpngWriter | None:
     if settings.vs_writer == VsScreenshotWriter.PILLOW:
         return None
@@ -418,7 +426,7 @@ def _resolve_fpng_writer(
             raise EncodingError(output, "VapourSynth fpng.Write plugin is unavailable")
         return writer
 
-    if _has_rendered_overlay(overlay):
+    if geometry_plan is None or _has_rendered_overlay(overlay):
         return None
     return _detect_fpng_writer()
 
