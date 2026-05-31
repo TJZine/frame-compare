@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import html
 import json
-from typing import TYPE_CHECKING
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, cast
 from urllib.parse import urlparse
 
 from frame_compare.services.report.payload import REPORT_VERSION
 from frame_compare.services.report.viewer import get_css, get_js
+
+ALL_CATEGORY_FILTER_KEY = "__fc_all__"
 
 if TYPE_CHECKING:
     from frame_compare.services.report.payload import (
@@ -48,9 +51,15 @@ def _json_for_script_tag(data: ReportPayload) -> str:
     return raw.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
 
 
-def _render_frame_options(frames: list[ReportFramePayload]) -> str:
+def _render_frame_options(
+    frames: list[ReportFramePayload],
+    category_filter_keys: dict[str, str],
+) -> str:
     return "".join(
-        f'<option value="{_esc_attr(i)}">Frame {_esc_text(frame["number"])}</option>'
+        f'<option value="{_esc_attr(i)}" '
+        f'data-category-key="{_esc_attr(category_filter_keys[frame["category"]])}" '
+        f'data-category="{_esc_attr(frame["category"])}">'
+        f'{_esc_text(frame["label"])}</option>'
         for i, frame in enumerate(frames)
     )
 
@@ -61,11 +70,21 @@ def _render_clip_options(clips: list[ReportClipPayload], *, selected_index: int 
             f'<option value="{_esc_attr(i)}">{_esc_text(clip["label"])}</option>'
             for i, clip in enumerate(clips)
         )
-    return "".join(
-        f'<option value="{_esc_attr(i)}" {"selected" if i == selected_index else ""}>'
-        f"{_esc_text(clip['label'])}</option>"
-        for i, clip in enumerate(clips)
-    )
+    options: list[str] = []
+    for i, clip in enumerate(clips):
+        selected_attr = " selected" if i == selected_index else ""
+        options.append(
+            f'<option value="{_esc_attr(i)}"{selected_attr}>{_esc_text(clip["label"])}</option>'
+        )
+    return "".join(options)
+
+
+def _clip_index_or_default(value: object, *, clip_count: int, fallback: int) -> int:
+    if isinstance(value, int) and 0 <= value < clip_count:
+        return value
+    if 0 <= fallback < clip_count:
+        return fallback
+    return 0
 
 
 def _render_slowpics_link(slowpics_url: str | None) -> str:
@@ -79,18 +98,159 @@ def _render_slowpics_link(slowpics_url: str | None) -> str:
     )
 
 
+def _render_resolution(resolution: tuple[int, int]) -> str:
+    return f"{resolution[0]}x{resolution[1]}"
+
+
+def _render_fps(fps: float) -> str:
+    return f"{fps:g} fps"
+
+
+def _clip_label_for_index(clips: list[ReportClipPayload], index: int) -> str:
+    if 0 <= index < len(clips):
+        return clips[index]["label"]
+    return f"Clip {index + 1}"
+
+
+def _render_report_metadata(
+    data: ReportPayload,
+    *,
+    left_clip_index: int,
+    right_clip_index: int,
+) -> str:
+    stats = data["stats"]
+    default_pair = (
+        f"{_esc_text(_clip_label_for_index(data['clips'], left_clip_index))} "
+        f"vs {_esc_text(_clip_label_for_index(data['clips'], right_clip_index))}"
+    )
+    slowpics_value = data["slowpics_url"] or "Not uploaded"
+    return f"""            <details class="rv-disclosure" data-report-metadata>
+                <summary>Report <span class="rv-summary-value">{_esc_text(data["default_mode"])}</span></summary>
+                <dl class="rv-metadata-list">
+                    <div><dt>Title</dt><dd>{_esc_text(data["title"])}</dd></div>
+                    <div><dt>Report ID</dt><dd>{_esc_text(data["report_id"])}</dd></div>
+                    <div><dt>Generated</dt><dd>{_esc_text(data["generated_at"])}</dd></div>
+                    <div><dt>Frames</dt><dd>{stats["frame_count"]}</dd></div>
+                    <div><dt>Clips</dt><dd>{stats["clip_count"]}</dd></div>
+                    <div><dt>Default pair</dt><dd>{default_pair}</dd></div>
+                    <div><dt>slow.pics</dt><dd>{_esc_text(slowpics_value)}</dd></div>
+                </dl>
+            </details>"""
+
+
+def _render_clip_metadata(clips: list[ReportClipPayload]) -> str:
+    if not clips:
+        clip_items = '<div class="rv-metadata-empty">No clips in payload.</div>'
+    else:
+        clip_items = "".join(
+            f"""                    <li class="rv-clip-meta-item" data-clip-index="{_esc_attr(i)}">
+                        <div class="rv-clip-meta-heading">
+                            <span>{_esc_text(clip["label"])}</span>
+                            <span>{'HDR' if clip["hdr"] else 'SDR'}</span>
+                        </div>
+                        <dl class="rv-metadata-list rv-metadata-list--compact">
+                            <div><dt>Name</dt><dd>{_esc_text(clip["name"])}</dd></div>
+                            <div><dt>Resolution</dt><dd>{_render_resolution(clip["resolution"])}</dd></div>
+                            <div><dt>FPS</dt><dd>{_render_fps(clip["fps"])}</dd></div>
+                            <div><dt>Frames</dt><dd>{clip["frame_count"]}</dd></div>
+                        </dl>
+                    </li>"""
+            for i, clip in enumerate(clips)
+        )
+        clip_items = f'<ol class="rv-clip-meta-list">{clip_items}</ol>'
+    return f"""            <details class="rv-disclosure" data-clip-metadata>
+                <summary>Clips <span class="rv-summary-value">{len(clips)}</span></summary>
+                {clip_items}
+            </details>"""
+
+
+def _render_frame_metadata(frames: list[ReportFramePayload]) -> str:
+    frame = frames[0] if frames else None
+    label = frame["label"] if frame else "No frame selected"
+    detail = frame["detail"] if frame else "No frame detail available."
+    category = frame["category"] if frame else "none"
+    return f"""            <details class="rv-disclosure" data-frame-metadata>
+                <summary>Frame <span class="rv-summary-value" data-current-frame-summary>{_esc_text(label)}</span></summary>
+                <dl class="rv-metadata-list">
+                    <div><dt>Label</dt><dd data-current-frame-label>{_esc_text(label)}</dd></div>
+                    <div><dt>Detail</dt><dd data-current-frame-detail>{_esc_text(detail)}</dd></div>
+                    <div><dt>Category</dt><dd data-current-frame-category>{_esc_text(category)}</dd></div>
+                </dl>
+            </details>"""
+
+
+def _render_metadata_bar(
+    data: ReportPayload,
+    *,
+    left_clip_index: int,
+    right_clip_index: int,
+) -> str:
+    return f"""        <section class="rv-metadata-bar" aria-label="Report metadata">
+{_render_report_metadata(data, left_clip_index=left_clip_index, right_clip_index=right_clip_index)}
+{_render_clip_metadata(data["clips"])}
+{_render_frame_metadata(data["frames"])}
+        </section>"""
+
+
+def _frame_categories(frames: list[ReportFramePayload]) -> list[str]:
+    categories: list[str] = []
+    seen: set[str] = set()
+    for frame in frames:
+        category = frame["category"]
+        if category in seen:
+            continue
+        categories.append(category)
+        seen.add(category)
+    return categories
+
+
+def _category_filter_keys(frames: list[ReportFramePayload]) -> dict[str, str]:
+    return {category: f"cat-{index}" for index, category in enumerate(_frame_categories(frames))}
+
+
+def _render_category_filters(
+    frames: list[ReportFramePayload],
+    category_filter_keys: dict[str, str],
+) -> str:
+    categories = _frame_categories(frames)
+    category_buttons = "".join(
+        f'<button class="rv-filter-chip" type="button" data-frame-filter '
+        f'data-category-key="{_esc_attr(category_filter_keys[category])}" '
+        f'data-category="{_esc_attr(category)}" aria-pressed="false">'
+        f'<span class="rv-category-badge" '
+        f'data-category-key="{_esc_attr(category_filter_keys[category])}" '
+        f'data-category="{_esc_attr(category)}">'
+        f"{_esc_text(category)}</span></button>"
+        for category in categories
+    )
+    return (
+        '<button class="rv-filter-chip active" type="button" data-frame-filter '
+        f'data-category-key="{_esc_attr(ALL_CATEGORY_FILTER_KEY)}" '
+        'aria-pressed="true">All</button>'
+        f"{category_buttons}"
+    )
+
+
 def _render_filmstrip(
     frames: list[ReportFramePayload],
     clips: list[ReportClipPayload],
     *,
     include_filmstrip: bool,
+    category_filter_keys: dict[str, str],
 ) -> str:
+    first_clip_label = clips[0]["label"] if clips else "Clip"
     items = (
         "".join(
             f"""
-                <button class="rv-filmstrip-item" data-idx="{_esc_attr(i)}" aria-label="Frame {_esc_attr(frame["number"])}">
-                    <img src="{_esc_attr(frame["images"][0]["src"])}" loading="lazy" alt="{_esc_attr(clips[0]["label"])} - Frame {_esc_attr(frame["number"])}">
-                    <span class="rv-filmstrip-label">{_esc_text(frame["number"])}</span>
+                <button class="rv-filmstrip-item" data-idx="{_esc_attr(i)}" data-category-key="{_esc_attr(category_filter_keys[frame["category"]])}" data-category="{_esc_attr(frame["category"])}" aria-label="{_esc_attr(frame["label"])}: {_esc_attr(frame["detail"])}">
+                    <span class="rv-filmstrip-thumb">
+                        <img src="{_esc_attr(frame["images"][0]["src"] if frame["images"] else "")}" loading="lazy" alt="{_esc_attr(first_clip_label)} - Frame {_esc_attr(frame["number"])}">
+                        <span class="rv-category-badge rv-filmstrip-category" data-category-key="{_esc_attr(category_filter_keys[frame["category"]])}" data-category="{_esc_attr(frame["category"])}">{_esc_text(frame["category"])}</span>
+                    </span>
+                    <span class="rv-filmstrip-caption">
+                        <span class="rv-filmstrip-label">{_esc_text(frame["label"])}</span>
+                        <span class="rv-filmstrip-detail">{_esc_text(frame["detail"])}</span>
+                    </span>
                 </button>
                 """
             for i, frame in enumerate(frames)
@@ -128,8 +288,10 @@ def _render_header(
 
 def _render_controls(
     frame_options: str,
+    category_filter_controls: str,
     left_clip_options: str,
     right_clip_options: str,
+    active_clip_options: str,
 ) -> str:
     return f"""    <div class="rv-controls" role="toolbar" aria-label="Viewer controls">
         <div class="rv-control-group">
@@ -140,12 +302,22 @@ def _render_controls(
                 <button id="btn-next" aria-label="Next frame">→</button>
             </div>
 
-            <div class="rv-control-group">
+            <div class="rv-control-group rv-filter-group" data-control-scope="frame-filters" aria-label="Frame category filters">
+                {category_filter_controls}
+            </div>
+
+            <div class="rv-control-group" data-control-scope="pair" aria-label="Comparison pair">
                 <select id="left-select" aria-label="Left clip">
                     {left_clip_options}
                 </select>
                 <select id="right-select" aria-label="Right clip">
                     {right_clip_options}
+                </select>
+            </div>
+
+            <div class="rv-control-group" data-control-scope="active" aria-label="Overlay clip" hidden>
+                <select id="active-select" aria-label="Overlay clip">
+                    {active_clip_options}
                 </select>
             </div>
 
@@ -158,7 +330,7 @@ def _render_controls(
 
         <div class="rv-control-group">
             <button id="btn-zoom-out" aria-label="Zoom out">-</button>
-            <input type="range" id="zoom-range" min="0.25" max="2.0" step="0.1" value="1.0" aria-label="Zoom level" aria-valuemin="0.25" aria-valuemax="2.0" aria-valuenow="1.0">
+            <input type="range" id="zoom-range" min="0.25" max="4.0" step="0.1" value="1.0" aria-label="Zoom level" aria-valuemin="0.25" aria-valuemax="4.0" aria-valuenow="1.0">
             <button id="btn-zoom-in" aria-label="Zoom in">+</button>
             <button id="btn-zoom-reset" aria-label="Reset zoom">R</button>
             <span id="zoom-val" style="font-size: var(--text-xs); width: 3ch">100%</span>
@@ -168,10 +340,27 @@ def _render_controls(
             <button data-fit="actual" class="active" role="radio" aria-checked="true" aria-label="Actual size" title="Actual size">Actual</button>
             <button data-fit="width" role="radio" aria-checked="false" aria-label="Fit width" title="Fit width">Fit width</button>
             <button data-fit="height" role="radio" aria-checked="false" aria-label="Fit height" title="Fit height">Fit height</button>
+            <button data-fit="fill" role="radio" aria-checked="false" aria-label="Fill stage" title="Fill stage">Fill</button>
+        </div>
+
+        <div class="rv-control-group" aria-label="Right layer alignment">
+            <select id="alignment-preset" aria-label="Alignment preset">
+                <option value="none">No offset</option>
+                <option value="left-1">Left 1px</option>
+                <option value="right-1">Right 1px</option>
+                <option value="up-1">Up 1px</option>
+                <option value="down-1">Down 1px</option>
+                <option value="custom">Custom</option>
+            </select>
+            <label class="rv-control-label" for="align-x">X</label>
+            <input id="align-x" class="rv-number-input" type="number" value="0" step="1" aria-label="Manual horizontal alignment offset">
+            <label class="rv-control-label" for="align-y">Y</label>
+            <input id="align-y" class="rv-number-input" type="number" value="0" step="1" aria-label="Manual vertical alignment offset">
+            <button id="btn-alignment-reset" aria-label="Reset alignment" title="Reset alignment">Reset</button>
         </div>
 
         <div class="rv-control-group">
-            <button id="btn-fullscreen" aria-label="Toggle fullscreen" title="Fullscreen">Fullscreen</button>
+            <button id="btn-fullscreen" aria-label="Enter fullscreen" aria-pressed="false" title="Fullscreen">Fullscreen</button>
         </div>
 
         <div class="rv-control-group">
@@ -182,6 +371,7 @@ def _render_controls(
 
 def _render_stage() -> str:
     return """    <div class="rv-viewer-stage rv-mode-slider" role="img" aria-label="Comparison viewer">
+        <div class="rv-empty-state" data-empty-state hidden></div>
         <div class="rv-canvas">
             <img src="data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=" alt="" class="rv-sizer" aria-hidden="true">
             <div class="rv-layer rv-left">
@@ -198,9 +388,9 @@ def _render_stage() -> str:
 
 
 def _render_help_modal() -> str:
-    return """    <div id="help-modal" class="rv-modal" aria-hidden="true" role="dialog" aria-label="Keyboard Shortcuts">
+    return """    <div id="help-modal" class="rv-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="help-modal-title" tabindex="-1">
         <div class="rv-modal-content">
-            <div class="rv-modal-title">Keyboard Shortcuts</div>
+            <div id="help-modal-title" class="rv-modal-title">Keyboard Shortcuts</div>
             <div class="rv-shortcuts-grid">
                 <div class="rv-shortcut-row"><span>Previous Frame</span><span class="rv-key">←</span></div>
                 <div class="rv-shortcut-row"><span>Next Frame</span><span class="rv-key">→</span></div>
@@ -209,8 +399,9 @@ def _render_help_modal() -> str:
                 <div class="rv-shortcut-row"><span>Direct Clip Select</span><span class="rv-key">1 - 9</span></div>
                 <div class="rv-shortcut-row"><span>Modes (Slider/Overlay/Diff/Blink)</span><span class="rv-key">S / O / D / B</span></div>
                 <div class="rv-shortcut-row"><span>Zoom In / Out</span><span class="rv-key">+ / -</span></div>
-                <div class="rv-shortcut-row"><span>Reset Zoom</span><span class="rv-key">R</span></div>
-                <div class="rv-shortcut-row"><span>Close Help</span><span class="rv-key">Esc</span></div>
+                <div class="rv-shortcut-row"><span>Reset Viewport</span><span class="rv-key">R</span></div>
+                <div class="rv-shortcut-row"><span>Open Help</span><span class="rv-key">?</span></div>
+                <div class="rv-shortcut-row"><span>Close Help / Exit Fullscreen</span><span class="rv-key">Esc</span></div>
             </div>
             <div style="margin-top: 1rem; text-align: right;">
                 <button id="btn-close-help">Close</button>
@@ -240,10 +431,36 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
     frames = data["frames"]
     clips = data["clips"]
     slowpics_link = _render_slowpics_link(slowpics_url)
-    frame_options = _render_frame_options(frames)
-    left_clip_options = _render_clip_options(clips, selected_index=None)
-    right_clip_options = _render_clip_options(clips, selected_index=1)
-    filmstrip = _render_filmstrip(frames, clips, include_filmstrip=include_filmstrip)
+    category_filter_keys = _category_filter_keys(frames)
+    frame_options = _render_frame_options(frames, category_filter_keys)
+    category_filter_controls = _render_category_filters(frames, category_filter_keys)
+    raw_data: dict[str, object] = dict(data)
+    default_selection = raw_data.get("default_selection")
+    left_selection: object | None = None
+    right_selection: object | None = None
+    if isinstance(default_selection, Mapping):
+        selection_mapping = cast(Mapping[str, object], default_selection)
+        left_selection = selection_mapping.get("left_clip_index")
+        right_selection = selection_mapping.get("right_clip_index")
+    left_clip_index = _clip_index_or_default(
+        left_selection,
+        clip_count=len(clips),
+        fallback=0,
+    )
+    right_clip_index = _clip_index_or_default(
+        right_selection,
+        clip_count=len(clips),
+        fallback=1 if len(clips) > 1 else left_clip_index,
+    )
+    left_clip_options = _render_clip_options(clips, selected_index=left_clip_index)
+    right_clip_options = _render_clip_options(clips, selected_index=right_clip_index)
+    active_clip_options = _render_clip_options(clips, selected_index=left_clip_index)
+    filmstrip = _render_filmstrip(
+        frames,
+        clips,
+        include_filmstrip=include_filmstrip,
+        category_filter_keys=category_filter_keys,
+    )
 
     header_html = _render_header(
         title=title,
@@ -252,7 +469,18 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
         clip_count=stats["clip_count"],
         slowpics_link=slowpics_link,
     )
-    controls_html = _render_controls(frame_options, left_clip_options, right_clip_options)
+    controls_html = _render_controls(
+        frame_options,
+        category_filter_controls,
+        left_clip_options,
+        right_clip_options,
+        active_clip_options,
+    )
+    metadata_html = _render_metadata_bar(
+        data,
+        left_clip_index=left_clip_index,
+        right_clip_index=right_clip_index,
+    )
     stage_html = _render_stage()
     modal_html = _render_help_modal()
     footer_html = _render_footer(json_str)
@@ -267,6 +495,8 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
 </head>
 <body>
 {header_html}
+{metadata_html}
+<div id="viewer-status" class="rv-status" role="status" aria-live="polite" hidden></div>
 {controls_html}
 {stage_html}
 {modal_html}

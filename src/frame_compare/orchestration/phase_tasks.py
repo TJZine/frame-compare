@@ -50,7 +50,7 @@ from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.metadata import resolve_metadata
 from frame_compare.services.publishers import publish_to_slowpics
 from frame_compare.services.report.entry import generate_report
-from frame_compare.services.report.payload import ReportData, clip_info_from_state
+from frame_compare.services.report.payload import FrameDetail, ReportData, clip_info_from_state
 from frame_compare.services.types import AlignmentConfig, MetadataConfig, TmdbMetadata
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 from frame_compare.utils.types import WorkspacePaths
@@ -179,6 +179,75 @@ def _selection_detail_for_frame(
     if details_by_source_frame is None:
         return None
     return details_by_source_frame.get(frame)
+
+
+def _selection_category_from_label(label: str | None) -> str | None:
+    if label is None:
+        return None
+    match label:
+        case "Dark":
+            return "quantile_dark"
+        case "Bright":
+            return "quantile_bright"
+        case "Motion":
+            return "motion"
+        case "Random":
+            return "random"
+        case _:
+            return None
+
+
+def _report_frame_detail_for_source_frame(
+    *,
+    source_frame: int,
+    selection_detail: SelectionDetail | None,
+    selection_label: str | None,
+) -> FrameDetail:
+    label = selection_detail.label if selection_detail is not None else selection_label
+    detail_text = f"Source frame {source_frame}"
+    if selection_detail is not None and selection_detail.timecode is not None:
+        detail_text = f"{detail_text} ({selection_detail.timecode})"
+
+    category = None
+    if selection_detail is not None:
+        category = selection_detail.notes or _selection_category_from_label(selection_detail.label)
+    if category is None:
+        category = _selection_category_from_label(selection_label)
+
+    return FrameDetail(
+        label=label,
+        detail=detail_text,
+        category=category,
+    )
+
+
+def _report_frame_details_for_frames(ctx: RunContext, *, frames: list[int]) -> list[FrameDetail]:
+    if ctx.selection_breakdown is None and ctx.selection_details_by_source_frame is None:
+        return []
+
+    frame_details: list[FrameDetail] = []
+    for aligned_frame in frames:
+        source_frame = _map_aligned_to_source_frame(
+            clip=ctx.reference,
+            aligned_frame=aligned_frame,
+        )
+        selection_detail = _selection_detail_for_frame(
+            source_frame,
+            ctx.selection_details_by_source_frame,
+        )
+        selection_label = (
+            selection_detail.label
+            if selection_detail is not None
+            else selection_label_for_frame(source_frame, ctx.selection_breakdown)
+        )
+        frame_details.append(
+            _report_frame_detail_for_source_frame(
+                source_frame=source_frame,
+                selection_detail=selection_detail,
+                selection_label=selection_label,
+            )
+        )
+    return frame_details
 
 
 def _selection_breakdown_with_source_offset(
@@ -719,6 +788,7 @@ def run_report_phase(
         frames=frames,
         metadata=metadata,
         slowpics_url=slowpics_url,
+        frame_details=_report_frame_details_for_frames(ctx, frames=frames),
     )
     report_path = generate_report(report_data, ctx.config.report)
     return ReportPhaseOutput(report_path=report_path)
