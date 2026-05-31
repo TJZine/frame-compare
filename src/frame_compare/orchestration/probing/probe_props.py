@@ -12,6 +12,7 @@ _TONEMAP_EXACT_KEYS: frozenset[str] = frozenset(
         "matrix",
         "primaries",
         "transfer",
+        "range",
         "colorrange",
         "masteringdisplayprimaries",
         "masteringdisplayluminance",
@@ -54,7 +55,7 @@ def compute_tonemap_prop_keys(frame_props: Mapping[str, object]) -> tuple[str, .
 
     Selection (include key if any match):
         - normalized key equals one of:
-          {"matrix","primaries","transfer","colorrange",
+          {"matrix","primaries","transfer","range","colorrange",
            "masteringdisplayprimaries","masteringdisplayluminance",
            "contentlightlevelmax","contentlightlevelaverage"}
         - normalized key starts with one of:

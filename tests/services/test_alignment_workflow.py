@@ -11,16 +11,40 @@ import pytest
 import tomli_w
 
 from frame_compare.services.alignment import align_clips, check_alignment_cached
+from frame_compare.services.alignment_cache import save_offsets_cache
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentConfig
+from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.cache_errors import CacheCorruptionError
 from frame_compare.utils.progress_protocol import ProgressReporter
 
 
+def _write_cached_offsets(
+    cache_dir: Path,
+    *,
+    reference: Path,
+    comparisons: list[Path],
+    results: list[AlignmentResult],
+    sample_rate: int = 8000,
+    max_offset_seconds: float = 30.0,
+) -> None:
+    save_offsets_cache(
+        cache_dir,
+        reference=reference,
+        comparisons=comparisons,
+        sample_rate=sample_rate,
+        max_offset_seconds=max_offset_seconds,
+        results=results,
+    )
+
+
 @patch("frame_compare.services.alignment._probe_fps")
-@patch("frame_compare.services.alignment._extract_audio")
+@patch("frame_compare.services.alignment._extract_matching_audio")
+@patch("frame_compare.services.alignment._extract_reference_audio")
 def test_align_clips_full_cache_hit_skips_probe_and_extract(
-    mock_extract: MagicMock, mock_probe: MagicMock, tmp_path: Path
+    mock_extract_reference: MagicMock,
+    mock_extract_matching: MagicMock,
+    mock_probe: MagicMock,
+    tmp_path: Path,
 ):
     """Test that full cache hit skips FFmpeg/FFprobe calls."""
     ref = tmp_path / "ref.mkv"
@@ -30,31 +54,35 @@ def test_align_clips_full_cache_hit_skips_probe_and_extract(
     comp_a.touch()
     comp_b.touch()
 
-    cache_file = tmp_path / "audio_offsets.toml"
-    data = {
-        "version": "1",
-        "ref:comp_a": {
-            "reference_clip": "ref.mkv",
-            "comparison_clip": "comp_a.mkv",
-            "frame_offset": 10,
-            "time_offset_seconds": 0.417,
-            "correlation_score": 0.95,
-            "algorithm": "cross_correlation",
-        },
-        "ref:comp_b": {
-            "reference_clip": "ref.mkv",
-            "comparison_clip": "comp_b.mkv",
-            "frame_offset": 20,
-            "time_offset_seconds": 0.834,
-            "correlation_score": 0.92,
-            "algorithm": "cross_correlation",
-        },
-    }
-    with cache_file.open("wb") as f:
-        f.write(tomli_w.dumps(data).encode("utf-8"))
+    _write_cached_offsets(
+        tmp_path,
+        reference=ref,
+        comparisons=[comp_a, comp_b],
+        results=[
+            AlignmentResult(
+                reference_clip="ref.mkv",
+                comparison_clip="comp_a.mkv",
+                frame_offset=10,
+                time_offset_seconds=0.417,
+                correlation_score=0.95,
+                algorithm="cross_correlation",
+                source="computed",
+            ),
+            AlignmentResult(
+                reference_clip="ref.mkv",
+                comparison_clip="comp_b.mkv",
+                frame_offset=20,
+                time_offset_seconds=0.834,
+                correlation_score=0.92,
+                algorithm="cross_correlation",
+                source="computed",
+            ),
+        ],
+    )
 
     mock_probe.side_effect = AssertionError("should not be called")
-    mock_extract.side_effect = AssertionError("should not be called")
+    mock_extract_reference.side_effect = AssertionError("should not be called")
+    mock_extract_matching.side_effect = AssertionError("should not be called")
 
     config = AlignmentConfig()
     results = align_clips(ref, [comp_a, comp_b], config, tmp_path)
@@ -96,11 +124,13 @@ def test_check_alignment_cached_rejects_duplicate_comparison_stems(tmp_path: Pat
 
 
 @patch("frame_compare.services.alignment._probe_fps")
-@patch("frame_compare.services.alignment._extract_audio")
+@patch("frame_compare.services.alignment._extract_matching_audio")
+@patch("frame_compare.services.alignment._extract_reference_audio")
 @patch("frame_compare.services.alignment._cross_correlate")
 def test_align_clips_completes_progress_when_cache_load_raises(
     mock_corr: MagicMock,
-    mock_extract: MagicMock,
+    mock_extract_reference: MagicMock,
+    mock_extract_matching: MagicMock,
     mock_probe: MagicMock,
     tmp_path: Path,
 ) -> None:
@@ -111,7 +141,8 @@ def test_align_clips_completes_progress_when_cache_load_raises(
     (tmp_path / "audio_offsets.toml").write_text("not valid toml {{{ ", encoding="utf-8")
 
     mock_probe.return_value = Fraction(24, 1)
-    mock_extract.return_value = np.ones(10, dtype=np.float32)
+    mock_extract_reference.return_value = (np.ones(10, dtype=np.float32), object())
+    mock_extract_matching.return_value = np.ones(10, dtype=np.float32)
     mock_corr.return_value = (0, 0.99)
     reporter = MagicMock(spec=ProgressReporter)
 
@@ -132,11 +163,13 @@ def test_check_alignment_cached_corruption_raises(tmp_path: Path) -> None:
 
 
 @patch("frame_compare.services.alignment._probe_fps")
-@patch("frame_compare.services.alignment._extract_audio")
+@patch("frame_compare.services.alignment._extract_matching_audio")
+@patch("frame_compare.services.alignment._extract_reference_audio")
 @patch("frame_compare.services.alignment._cross_correlate")
 def test_align_clips_computed_results_do_not_advance_phase_progress(
     mock_corr: MagicMock,
-    mock_extract: MagicMock,
+    mock_extract_reference: MagicMock,
+    mock_extract_matching: MagicMock,
     mock_probe: MagicMock,
     tmp_path: Path,
 ) -> None:
@@ -145,7 +178,8 @@ def test_align_clips_computed_results_do_not_advance_phase_progress(
     ref.touch()
     comp.touch()
     mock_probe.return_value = Fraction(24, 1)
-    mock_extract.return_value = np.ones(10, dtype=np.float32)
+    mock_extract_reference.return_value = (np.ones(10, dtype=np.float32), object())
+    mock_extract_matching.return_value = np.ones(10, dtype=np.float32)
     mock_corr.return_value = (0, 0.99)
     reporter = MagicMock(spec=ProgressReporter)
 
@@ -167,19 +201,22 @@ def test_align_clips_cached_results_do_not_advance_phase_progress(tmp_path: Path
     comp = tmp_path / "comp.mkv"
     ref.touch()
     comp.touch()
-    cache_file = tmp_path / "audio_offsets.toml"
-    data = {
-        "version": "1",
-        "ref:comp": {
-            "reference_clip": "ref.mkv",
-            "comparison_clip": "comp.mkv",
-            "frame_offset": 12,
-            "time_offset_seconds": 0.5,
-            "correlation_score": 0.95,
-            "algorithm": "cross_correlation",
-        },
-    }
-    cache_file.write_text(tomli_w.dumps(data), encoding="utf-8")
+    _write_cached_offsets(
+        tmp_path,
+        reference=ref,
+        comparisons=[comp],
+        results=[
+            AlignmentResult(
+                reference_clip="ref.mkv",
+                comparison_clip="comp.mkv",
+                frame_offset=12,
+                time_offset_seconds=0.5,
+                correlation_score=0.95,
+                algorithm="cross_correlation",
+                source="computed",
+            )
+        ],
+    )
     reporter = MagicMock(spec=ProgressReporter)
 
     align_clips(ref, [comp], AlignmentConfig(cache_results=True), tmp_path, progress=reporter)
@@ -188,9 +225,11 @@ def test_align_clips_cached_results_do_not_advance_phase_progress(tmp_path: Path
 
 
 @patch("frame_compare.services.alignment._probe_fps")
-@patch("frame_compare.services.alignment._extract_audio")
+@patch("frame_compare.services.alignment._extract_matching_audio")
+@patch("frame_compare.services.alignment._extract_reference_audio")
 def test_align_clips_manual_results_do_not_advance_phase_progress(
-    mock_extract: MagicMock,
+    mock_extract_reference: MagicMock,
+    mock_extract_matching: MagicMock,
     mock_probe: MagicMock,
     tmp_path: Path,
 ) -> None:
@@ -213,7 +252,8 @@ def test_align_clips_manual_results_do_not_advance_phase_progress(
         encoding="utf-8",
     )
     mock_probe.return_value = Fraction(24, 1)
-    mock_extract.side_effect = AssertionError("manual alignment should not extract audio")
+    mock_extract_reference.side_effect = AssertionError("manual alignment should not extract audio")
+    mock_extract_matching.side_effect = AssertionError("manual alignment should not extract audio")
     reporter = MagicMock(spec=ProgressReporter)
 
     align_clips(ref, [comp], AlignmentConfig(cache_results=True), tmp_path, progress=reporter)
@@ -222,10 +262,15 @@ def test_align_clips_manual_results_do_not_advance_phase_progress(
 
 
 @patch("frame_compare.services.alignment._probe_fps")
-@patch("frame_compare.services.alignment._extract_audio")
+@patch("frame_compare.services.alignment._extract_matching_audio")
+@patch("frame_compare.services.alignment._extract_reference_audio")
 @patch("frame_compare.services.alignment._cross_correlate")
 def test_align_clips_partial_cache_hit_computes_only_missing_and_preserves_order(
-    mock_corr: MagicMock, mock_extract: MagicMock, mock_probe: MagicMock, tmp_path: Path
+    mock_corr: MagicMock,
+    mock_extract_reference: MagicMock,
+    mock_extract_matching: MagicMock,
+    mock_probe: MagicMock,
+    tmp_path: Path,
 ):
     """Test partial cache hit behavior and result ordering."""
     ref = tmp_path / "ref.mkv"
@@ -235,29 +280,27 @@ def test_align_clips_partial_cache_hit_computes_only_missing_and_preserves_order
     comp_a.touch()
     comp_b.touch()
 
-    # Cache only comp_a
-    cache_file = tmp_path / "audio_offsets.toml"
-    data = {
-        "version": "1",
-        "ref:comp_a": {
-            "reference_clip": "ref.mkv",
-            "comparison_clip": "comp_a.mkv",
-            "frame_offset": 10,
-            "time_offset_seconds": 0.417,
-            "correlation_score": 0.95,
-            "algorithm": "cross_correlation",
-        },
-    }
-    with cache_file.open("wb") as f:
-        f.write(tomli_w.dumps(data).encode("utf-8"))
+    _write_cached_offsets(
+        tmp_path,
+        reference=ref,
+        comparisons=[comp_a],
+        results=[
+            AlignmentResult(
+                reference_clip="ref.mkv",
+                comparison_clip="comp_a.mkv",
+                frame_offset=10,
+                time_offset_seconds=0.417,
+                correlation_score=0.95,
+                algorithm="cross_correlation",
+                source="computed",
+            )
+        ],
+    )
 
     mock_probe.return_value = Fraction(24, 1)
-    # Return dummy arrays
-
-    def extract_side_effect(path: Path, sr: int) -> np.ndarray:
-        return np.ones(10, dtype=np.float32)
-
-    mock_extract.side_effect = extract_side_effect
+    reference_stream = object()
+    mock_extract_reference.return_value = (np.ones(10, dtype=np.float32), reference_stream)
+    mock_extract_matching.return_value = np.ones(10, dtype=np.float32)
     mock_corr.return_value = (0, 0.99)
 
     config = AlignmentConfig()
@@ -270,8 +313,9 @@ def test_align_clips_partial_cache_hit_computes_only_missing_and_preserves_order
     assert results[1].comparison_clip == "comp_b.mkv"
     assert results[1].frame_offset == 0  # from mock computation
 
-    # Check that extract was called for ref and comp_b, but NOT comp_a
-    called_paths = [call[0][0] for call in mock_extract.call_args_list]  # type: ignore
-    assert ref in called_paths
-    assert comp_b in called_paths
-    assert comp_a not in called_paths
+    mock_extract_reference.assert_called_once_with(ref, config.sample_rate)
+    mock_extract_matching.assert_called_once_with(
+        comp_b,
+        config.sample_rate,
+        reference_stream=reference_stream,
+    )

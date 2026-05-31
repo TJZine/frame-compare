@@ -13,7 +13,14 @@ from frame_compare.config.schema import (
     ReportConfig,
     SelectionMode,
 )
-from frame_compare.config.schema_enums import LogFormat, LogLevel, OverlayMode, Visibility
+from frame_compare.config.schema_enums import (
+    LogFormat,
+    LogLevel,
+    OverlayMode,
+    ScreenshotGeometryMode,
+    Visibility,
+    VsScreenshotWriter,
+)
 from frame_compare.config.schema_models import (
     AudioAlignmentConfig,
     DiagnosticsConfig,
@@ -33,6 +40,8 @@ def test_default_config_values() -> None:
     assert config.analysis.selection_mode == SelectionMode.MIXED
     assert config.color.target_nits == 100
     assert config.paths.input_dir == "comparison_videos"
+    assert config.screenshots.geometry_mode == ScreenshotGeometryMode.NATIVE
+    assert config.screenshots.vs_writer == VsScreenshotWriter.AUTO
     assert config.tmdb.year_tolerance == 2
     assert config.tmdb.category_preference is None
 
@@ -134,6 +143,8 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert screenshots.overlay_mode == OverlayMode.STANDARD
     assert screenshots.png_compression == 6
     assert screenshots.ffmpeg_timeout_seconds == 30.0
+    assert screenshots.geometry_mode == ScreenshotGeometryMode.NATIVE
+    assert screenshots.vs_writer == VsScreenshotWriter.AUTO
     assert color.target_nits == 100
     assert color.contrast_recovery == 0.3
     assert color.preset == "reference"
@@ -159,17 +170,31 @@ def test_schema_model_section_defaults_are_representative() -> None:
 
 
 def test_schema_model_enums_accept_config_strings_and_reject_unknown_values() -> None:
-    screenshots = ScreenshotsConfig.model_validate({"overlay_mode": "minimal"})
+    screenshots = ScreenshotsConfig.model_validate(
+        {
+            "geometry_mode": "aligned",
+            "overlay_mode": "minimal",
+            "vs_writer": "fpng",
+        }
+    )
     slowpics = SlowpicsConfig.model_validate({"visibility": "public"})
     logging = LoggingConfig.model_validate({"level": "DEBUG", "format": "json"})
 
+    assert screenshots.geometry_mode == ScreenshotGeometryMode.ALIGNED
     assert screenshots.overlay_mode == OverlayMode.MINIMAL
+    assert screenshots.vs_writer == VsScreenshotWriter.FPNG
     assert slowpics.visibility == Visibility.PUBLIC
     assert logging.level == LogLevel.DEBUG
     assert logging.format == LogFormat.JSON
 
     with pytest.raises(ValidationError):
         ScreenshotsConfig.model_validate({"overlay_mode": "verbose"})
+
+    with pytest.raises(ValidationError):
+        ScreenshotsConfig.model_validate({"geometry_mode": "legacy"})
+
+    with pytest.raises(ValidationError):
+        ScreenshotsConfig.model_validate({"vs_writer": "vapoursynth"})
 
     with pytest.raises(ValidationError):
         LoggingConfig.model_validate({"level": "debug"})

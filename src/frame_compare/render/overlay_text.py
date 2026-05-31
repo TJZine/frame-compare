@@ -31,19 +31,15 @@ def compose_frame_info_lines(
     if mode == OverlayMode.MINIMAL:
         return [clip_label]
 
-    pict = picture_type or "N/A"
     lines: list[str] = []
     if include_frame_number:
         if num_frames is None:
             lines.append(f"Frame {display_frame_number}")
         else:
             lines.append(f"Frame {display_frame_number} of {num_frames}")
-    lines.extend(
-        [
-        f"Picture type: {pict}",
-        clip_label,
-        ]
-    )
+    if picture_type:
+        lines.append(f"Picture type: {picture_type}")
+    lines.append(clip_label)
     if selection_label:
         lines.append(f"Selection: {selection_label}")
     return lines

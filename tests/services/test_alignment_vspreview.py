@@ -16,6 +16,7 @@ from frame_compare.vspreview.adapter import (
     VSPreviewSessionRequest,
 )
 from frame_compare.vspreview.errors import VSPreviewError
+from frame_compare.vspreview.overrides import load_manual_overrides
 
 
 def _call_maybe_launch(
@@ -252,7 +253,7 @@ def test_prompt_for_confirmed_offsets_writes_to_stderr(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr(alignment_vspreview.sys, "stdin", io.StringIO("\n"))
+    monkeypatch.setattr(alignment_vspreview.sys, "stdin", io.StringIO("120 108\n"))
 
     confirmed = alignment_vspreview._prompt_for_confirmed_offsets(
         reference=tmp_path / "ref.mkv",
@@ -261,12 +262,133 @@ def test_prompt_for_confirmed_offsets_writes_to_stderr(
     )
 
     captured = capsys.readouterr()
-    assert confirmed == {"ref:comp": 4}
+    assert confirmed == {"ref:comp": 12}
     assert captured.out == ""
     assert "VSPreview confirmation" in captured.err
     assert "reference  ref" in captured.err
-    assert "blank keeps suggested offset" in captured.err
+    assert "source-frame indices from the untrimmed clips" in captured.err
+    assert "reference_source_frame comparison_source_frame" in captured.err
+    assert "offset = reference_source_frame - comparison_source_frame" in captured.err
     assert "comp [+4f]:" in captured.err
+
+
+def test_prompt_for_confirmed_offsets_accepts_zero_source_frame_offset(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(alignment_vspreview.sys, "stdin", io.StringIO("42, 42\n"))
+
+    confirmed = alignment_vspreview._prompt_for_confirmed_offsets(
+        reference=tmp_path / "ref.mkv",
+        comparisons=[tmp_path / "comp.mkv"],
+        offsets_by_key={"ref:comp": 4},
+    )
+
+    assert confirmed == {"ref:comp": 0}
+
+
+@pytest.mark.parametrize("user_input", ["skip\n", "s\n", ""])
+def test_prompt_for_confirmed_offsets_skip_or_eof_returns_none(
+    user_input: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(alignment_vspreview.sys, "stdin", io.StringIO(user_input))
+
+    confirmed = alignment_vspreview._prompt_for_confirmed_offsets(
+        reference=tmp_path / "ref.mkv",
+        comparisons=[tmp_path / "comp.mkv"],
+        offsets_by_key={"ref:comp": 4},
+    )
+
+    assert confirmed is None
+
+
+def test_prompt_for_confirmed_offsets_reprompts_after_blank_and_malformed_input(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        alignment_vspreview.sys,
+        "stdin",
+        io.StringIO("\n12\n12.5 9\ntrue 9\n-1 9\n120 108\n"),
+    )
+
+    confirmed = alignment_vspreview._prompt_for_confirmed_offsets(
+        reference=tmp_path / "ref.mkv",
+        comparisons=[tmp_path / "comp.mkv"],
+        offsets_by_key={"ref:comp": 4},
+    )
+
+    captured = capsys.readouterr()
+    assert confirmed == {"ref:comp": 12}
+    assert confirmed != {"ref:comp": 4}
+    assert "Enter both source frames" in captured.err
+    assert captured.err.count("Enter two non-negative integer source frames") == 4
+
+
+def test_maybe_launch_blank_then_valid_source_frames_saves_only_computed_offset(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(alignment_vspreview.sys, "stdin", io.StringIO("\n120 108\n"))
+    _set_tty(monkeypatch, is_tty=True)
+    monkeypatch.setattr(
+        alignment_vspreview,
+        "check_vspreview_availability",
+        MagicMock(return_value=_availability(VSPreviewAvailabilityStatus.AVAILABLE)),
+    )
+    monkeypatch.setattr(
+        alignment_vspreview,
+        "launch_alignment_verification_session",
+        MagicMock(return_value=tmp_path / "vspreview.py"),
+    )
+
+    confirmed = maybe_launch_alignment_vspreview(
+        reference=tmp_path / "ref.mkv",
+        comparisons=[tmp_path / "comp.mkv"],
+        offsets_by_key={"ref:comp": 4},
+        cache_dir=tmp_path,
+        config=AlignmentConfig(use_vspreview=True),
+        progress=None,
+    )
+
+    assert confirmed == {"ref:comp": 12}
+    manual_overrides = load_manual_overrides(tmp_path)
+    assert manual_overrides["ref:comp"].frame_offset == 12
+
+
+@pytest.mark.parametrize("user_input", ["skip\n", ""])
+def test_maybe_launch_skip_or_eof_writes_no_override(
+    user_input: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(alignment_vspreview.sys, "stdin", io.StringIO(user_input))
+    _set_tty(monkeypatch, is_tty=True)
+    monkeypatch.setattr(
+        alignment_vspreview,
+        "check_vspreview_availability",
+        MagicMock(return_value=_availability(VSPreviewAvailabilityStatus.AVAILABLE)),
+    )
+    monkeypatch.setattr(
+        alignment_vspreview,
+        "launch_alignment_verification_session",
+        MagicMock(return_value=tmp_path / "vspreview.py"),
+    )
+
+    confirmed = maybe_launch_alignment_vspreview(
+        reference=tmp_path / "ref.mkv",
+        comparisons=[tmp_path / "comp.mkv"],
+        offsets_by_key={"ref:comp": 4},
+        cache_dir=tmp_path,
+        config=AlignmentConfig(use_vspreview=True),
+        progress=None,
+    )
+
+    assert confirmed is None
+    assert load_manual_overrides(tmp_path) == {}
 
 
 def test_available_with_tty_suspends_progress_during_launch_and_prompt(

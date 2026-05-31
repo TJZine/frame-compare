@@ -34,6 +34,8 @@ overlay_mode = "standard"
 include_frame_number = true
 png_compression = 6
 ffmpeg_timeout_seconds = 30.0
+geometry_mode = "native"
+vs_writer = "auto"
 
 [color]
 enable_tonemap = true

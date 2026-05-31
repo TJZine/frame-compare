@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from fractions import Fraction
 from pathlib import Path
 
 import structlog
@@ -15,6 +16,7 @@ from frame_compare.orchestration.context import (
     ClipProbeSnapshot,
     ClipState,
 )
+from frame_compare.orchestration.errors import MixedSourceFpsError
 from frame_compare.orchestration.phase_tasks import resolve_run_metadata
 from frame_compare.orchestration.preflight import discover_inputs, prepare_preflight
 from frame_compare.orchestration.probing.probe_cache import (
@@ -181,6 +183,27 @@ def _probe_input_videos(
     return clips
 
 
+def _validate_source_fps_compatibility(clips: list[ClipState]) -> None:
+    if len(clips) < 2:
+        return
+
+    reference = clips[0]
+    reference_fps = _normalized_fps(reference.source_fps)
+    for comparison in clips[1:]:
+        if _normalized_fps(comparison.source_fps) != reference_fps:
+            raise MixedSourceFpsError(
+                reference_path=reference.path,
+                reference_fps=reference.source_fps,
+                comparison_label=comparison.label,
+                comparison_path=comparison.path,
+                comparison_fps=comparison.source_fps,
+            )
+
+
+def _normalized_fps(fps: Fraction) -> Fraction:
+    return Fraction(fps.numerator, fps.denominator)
+
+
 async def execute_prep(
     request: RunRequest,
     deps: RunDependencies,
@@ -228,6 +251,7 @@ async def execute_prep(
         input_videos=input_videos,
         deps=deps,
     )
+    _validate_source_fps_compatibility(clips)
 
     return PrepState(
         workspace=workspace,

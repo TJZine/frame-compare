@@ -12,6 +12,7 @@ import pytest
 import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.orchestration import preparation
+from frame_compare.orchestration.errors import MixedSourceFpsError
 from frame_compare.orchestration.probing.probe_cache import load_clip_probe_cache
 from frame_compare.orchestration.types import RunDependencies, RunRequest
 from frame_compare.services.alignment import CACHE_FILE_NAME
@@ -77,8 +78,9 @@ def _create_video_files(input_dir: Path, *filenames: str) -> list[Path]:
 
 
 class FakeVSLoader:
-    def __init__(self) -> None:
+    def __init__(self, *, fps_by_name: dict[str, Fraction] | None = None) -> None:
         self.loaded: list[Path] = []
+        self._fps_by_name = fps_by_name or {}
 
     def load(self, path: Path) -> SourceInfo:
         self.loaded.append(path)
@@ -87,7 +89,7 @@ class FakeVSLoader:
             width=1920,
             height=1080,
             num_frames=100,
-            fps=Fraction(24000, 1001),
+            fps=self._fps_by_name.get(path.name, Fraction(24000, 1001)),
             format=cast(Any, object()),
             frame_props={
                 "_Transfer": 16,
@@ -249,3 +251,35 @@ def test_execute_prep_reuses_probe_cache_without_vs_loader(tmp_path: Path) -> No
 
     assert second.clips[0].label == "Reference"
     assert second.clips[0].probe == first.clips[0].probe
+
+
+def test_execute_prep_rejects_mixed_source_fps_before_downstream_work(tmp_path: Path) -> None:
+    _create_config(tmp_path)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "a_reference.mkv", "b_comparison.mkv")
+    loader = FakeVSLoader(
+        fps_by_name={
+            "a_reference.mkv": Fraction(24000, 1001),
+            "b_comparison.mkv": Fraction(30000, 1001),
+        }
+    )
+
+    with pytest.raises(MixedSourceFpsError) as exc_info:
+        asyncio.run(
+            preparation.execute_prep(
+                RunRequest(root=tmp_path),
+                RunDependencies(vs_loader=cast(Any, loader)),
+            )
+        )
+
+    error = exc_info.value
+    assert error.code == "FC-3011"
+    assert "Mixed source FPS is not supported" in error.context.message
+    assert error.context.details == {
+        "reference_path": str(input_dir / "a_reference.mkv"),
+        "reference_fps": "24000/1001",
+        "comparison_label": "Encode 1",
+        "comparison_path": str(input_dir / "b_comparison.mkv"),
+        "comparison_fps": "30000/1001",
+    }
+    assert loader.loaded == [input_dir / "a_reference.mkv", input_dir / "b_comparison.mkv"]

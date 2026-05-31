@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, cast
 
@@ -13,6 +14,7 @@ from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
 from frame_compare.orchestration import coordinator
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
+from frame_compare.orchestration.errors import MixedSourceFpsError
 from frame_compare.orchestration.types import MetadataPrefetch, PrepState, RunArtifacts
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.errors import TonemapRequiresVapourSynthError
@@ -346,3 +348,43 @@ def test_execute_run_uses_and_populates_probe_cache_without_reprobing(tmp_path: 
 
     cache_after = cache_path.read_text(encoding="utf-8")
     assert cache_after == cache_before
+
+
+def test_execute_run_mixed_source_fps_rejects_before_phase_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    create_config(tmp_path)
+    input_dir = tmp_path / "comparison_videos"
+    create_video_files(input_dir, "a_reference.mkv", "b_comparison.mkv")
+
+    class MixedFpsVSLoader(FakeVSLoader):
+        def load(self, path: Path) -> SourceInfo:
+            source_info = super().load(path)
+            source_info.fps = (
+                Fraction(24000, 1001)
+                if path.name == "a_reference.mkv"
+                else Fraction(30000, 1001)
+            )
+            return source_info
+
+    phases_started = False
+
+    async def _unexpected_execute_phases(*_args: object, **_kwargs: object) -> None:
+        nonlocal phases_started
+        phases_started = True
+
+    monkeypatch.setattr(coordinator, "execute_phases", _unexpected_execute_phases)
+
+    request = RunRequest(
+        root=tmp_path,
+        skip_analysis=True,
+        skip_metadata=True,
+        skip_dovi=True,
+        no_upload=True,
+    )
+    deps = RunDependencies(vs_loader=MixedFpsVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+
+    with pytest.raises(MixedSourceFpsError, match="Mixed source FPS is not supported"):
+        asyncio.run(execute_run(request, deps=deps))
+
+    assert phases_started is False

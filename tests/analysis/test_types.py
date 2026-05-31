@@ -10,6 +10,7 @@ from frame_compare.analysis.types import (
     FrameSelection,
     MetricsMetadata,
     SelectionBreakdown,
+    SelectionDetail,
 )
 from frame_compare.config.schema import SelectionMode
 
@@ -64,11 +65,27 @@ def test_selection_breakdown_creation():
 
 def test_frame_selection_creation():
     sb = SelectionBreakdown()
-    fs = FrameSelection(frames=[1, 2], mode=SelectionMode.MIXED, seed=42, breakdown=sb)
+    detail = SelectionDetail(
+        frame_index=1,
+        label="Dark",
+        source="analysis",
+        timecode="00:00:00.042",
+        score=0.1,
+        clip_role="analyze",
+        notes="quantile_dark",
+    )
+    fs = FrameSelection(
+        frames=[1, 2],
+        mode=SelectionMode.MIXED,
+        seed=42,
+        breakdown=sb,
+        selection_details={1: detail},
+    )
     assert fs.frames == [1, 2]
     assert fs.mode is SelectionMode.MIXED
     assert fs.seed == 42
     assert fs.breakdown is sb
+    assert fs.selection_details == {1: detail}
 
 
 def test_cache_load_result_success():

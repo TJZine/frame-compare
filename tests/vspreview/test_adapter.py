@@ -29,6 +29,88 @@ from frame_compare.vspreview.session_script import (
 )
 
 
+def _execute_generated_script(
+    *,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    suggested_offsets_by_key: dict[str, int],
+    comparison_stems: tuple[str, ...],
+    num_frames_by_stem: dict[str, int] | None = None,
+) -> tuple[
+    dict[str, list[tuple[int | None, int | None, int | None]]],
+    list[int],
+    list[str],
+]:
+    reference = tmp_path / "ref.mkv"
+    comparisons = [tmp_path / f"{stem}.mkv" for stem in comparison_stems]
+    reference.touch()
+    for comparison in comparisons:
+        comparison.touch()
+
+    resolved_num_frames = {"ref": 20, **(num_frames_by_stem or {})}
+    slice_history: dict[str, list[tuple[int | None, int | None, int | None]]] = {
+        "ref": [],
+        **{stem: [] for stem in comparison_stems},
+    }
+    output_indices: list[int] = []
+    output_stems: list[str] = []
+
+    class FakeClip:
+        def __init__(self, stem: str, num_frames: int) -> None:
+            self.stem = stem
+            self.num_frames = num_frames
+            self.fps = SimpleNamespace(numerator=24, denominator=1)
+
+        def __getitem__(self, key: slice) -> FakeClip:
+            assert isinstance(key, slice)
+            slice_history[self.stem].append((key.start, key.stop, key.step))
+            return self
+
+        def set_output(self, index: int) -> None:
+            output_indices.append(index)
+            output_stems.append(self.stem)
+
+    clips = {
+        stem: FakeClip(stem, resolved_num_frames.get(stem, 20))
+        for stem in ("ref", *comparison_stems)
+    }
+
+    class FakeLsmas:
+        def LWLibavSource(self, path: str) -> FakeClip:
+            return clips[Path(path).stem]
+
+    class FakeText:
+        def Text(self, clip: FakeClip, _text: str, *, alignment: int) -> FakeClip:
+            return clip
+
+    class FakeStd:
+        def AssumeFPS(self, clip: FakeClip, *, fpsnum: int, fpsden: int) -> FakeClip:
+            return clip
+
+    class FakeCore:
+        lsmas = FakeLsmas()
+        text = FakeText()
+        std = FakeStd()
+
+    fake_vapoursynth = types.ModuleType("vapoursynth")
+    fake_vapoursynth.core = FakeCore()
+    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vapoursynth)
+
+    script = _build_script_content(
+        reference=reference,
+        comparisons=comparisons,
+        suggested_offsets_by_key=suggested_offsets_by_key,
+        bootstrap_paths=[tmp_path],
+    )
+
+    exec(
+        compile(script, "<vspreview-generated>", "exec"),
+        {"__name__": "vspreview_loaded_script", "__file__": str(tmp_path / "session.py")},
+    )
+
+    return slice_history, output_indices, output_stems
+
+
 def test_launch_alignment_verification_session_waits_for_vspreview_completion(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -330,60 +412,54 @@ def test_generated_script_sets_outputs_when_loaded_as_vspreview_module(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    reference = tmp_path / "ref.mkv"
-    comparison = tmp_path / "a.mkv"
-    reference.touch()
-    comparison.touch()
-    output_indices: list[int] = []
-    applied_slices: list[int] = []
-
-    class FakeClip:
-        fps = SimpleNamespace(numerator=24, denominator=1)
-
-        def __getitem__(self, key: slice) -> FakeClip:
-            assert isinstance(key, slice)
-            assert key.start is not None
-            applied_slices.append(key.start)
-            return self
-
-        def set_output(self, index: int) -> None:
-            output_indices.append(index)
-
-    class FakeLsmas:
-        def LWLibavSource(self, _path: str) -> FakeClip:
-            return FakeClip()
-
-    class FakeText:
-        def Text(self, clip: FakeClip, _text: str, *, alignment: int) -> FakeClip:
-            return clip
-
-    class FakeStd:
-        def AssumeFPS(self, clip: FakeClip, *, fpsnum: int, fpsden: int) -> FakeClip:
-            return clip
-
-    class FakeCore:
-        lsmas = FakeLsmas()
-        text = FakeText()
-        std = FakeStd()
-
-    fake_vapoursynth = types.ModuleType("vapoursynth")
-    fake_vapoursynth.core = FakeCore()
-    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vapoursynth)
-
-    script = _build_script_content(
-        reference=reference,
-        comparisons=[comparison],
-        suggested_offsets_by_key={f"{reference.stem}:{comparison.stem}": 9},
-        bootstrap_paths=[tmp_path],
-    )
-
-    exec(
-        compile(script, "<vspreview-generated>", "exec"),
-        {"__name__": "vspreview_loaded_script", "__file__": str(tmp_path / "session.py")},
+    slice_history, output_indices, output_stems = _execute_generated_script(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        suggested_offsets_by_key={"ref:a": 9},
+        comparison_stems=("a",),
     )
 
     assert output_indices == [0, 1]
-    assert applied_slices == [9]
+    assert output_stems == ["ref", "a"]
+    assert slice_history["ref"] == []
+    assert slice_history["a"] == []
+
+
+def test_generated_script_uses_untrimmed_outputs_for_mixed_sign_offset_hints(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    slice_history, output_indices, output_stems = _execute_generated_script(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        suggested_offsets_by_key={"ref:comp_a": 3, "ref:comp_b": -2},
+        comparison_stems=("comp_b", "comp_a"),
+    )
+
+    assert output_indices == [0, 1, 2, 3]
+    assert output_stems == ["ref", "comp_a", "ref", "comp_b"]
+    assert slice_history["ref"] == []
+    assert slice_history["comp_a"] == []
+    assert slice_history["comp_b"] == []
+
+
+def test_generated_script_does_not_slice_source_clips_from_suggested_offsets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    slice_history, output_indices, output_stems = _execute_generated_script(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        suggested_offsets_by_key={"ref:comp_a": 1, "ref:comp_b": 12},
+        comparison_stems=("comp_a", "comp_b"),
+        num_frames_by_stem={"ref": 30, "comp_a": 15, "comp_b": 25},
+    )
+
+    assert output_indices == [0, 1, 2, 3]
+    assert output_stems == ["ref", "comp_a", "ref", "comp_b"]
+    assert slice_history["ref"] == []
+    assert slice_history["comp_a"] == []
+    assert slice_history["comp_b"] == []
 
 
 def test_generated_script_reports_missing_lwlibavsource_without_traceback(tmp_path: Path) -> None:
@@ -551,11 +627,15 @@ def test_build_script_content_assert_by_section() -> None:
     assert json.dumps(str(bootstrap_paths[1])) in script
     assert "def safe_print(*args, **kwargs):" in script
     assert "def resolve_lwlibavsource(core):" in script
-    assert "def apply_offset(reference_clip, comparison_clip, offset_frames):" in script
+    assert "def trim_clip(clip, trim_start, trim_end_inclusive):" not in script
+    assert "calculate_alignment_trims" not in script
     assert '"label": "ref"' in script
     assert '"comp_a": "comp_a.mkv"' in script
     assert '"ref:comp_a": 10' in script
-    assert '"comp_a": 10' in script
+    assert "OFFSET_MAP" not in script
+    assert "Audio hint: {suggested_offset} frames" in script
+    assert "hint pair: ref frame {suggested_offset} ~= comparison frame 0" in script
+    assert "hint pair: ref frame 0 ~= comparison frame {-suggested_offset}" in script
     assert "VSPreview bootstrap" in script
     assert "VSPreview ready" in script
     assert "def main():" in script

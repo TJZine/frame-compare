@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from frame_compare.vs.errors import TonemapError
-from frame_compare.vs.props import detect_hdr, get_optional_int_prop
+from frame_compare.vs.props import detect_hdr, get_optional_int_prop, get_optional_range_prop
 from frame_compare.vs.types import HDRMetadata, TonemapSettings
 
 if TYPE_CHECKING:
@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 _FRAME_PROP_MATRIX = "_Matrix"
 _FRAME_PROP_TRANSFER = "_Transfer"
 _FRAME_PROP_PRIMARIES = "_Primaries"
-_FRAME_PROP_COLOR_RANGE = "_ColorRange"
 _UNSPECIFIED_COLOR_PROP = 2
 
 
@@ -98,12 +97,9 @@ def _resolve_matrix_in(
 def _resolve_range_in(props: Mapping[str, object]) -> int:
     import vapoursynth as vs
 
-    range_full = int(getattr(vs, "RANGE_FULL", 1))
     range_limited = int(getattr(vs, "RANGE_LIMITED", 0))
-    color_range = get_optional_int_prop(props, _FRAME_PROP_COLOR_RANGE)
-    if color_range in {range_full, range_limited}:
-        return int(color_range)
-    return range_limited
+    normalized_range = get_optional_range_prop(props)
+    return range_limited if normalized_range is None else normalized_range
 
 
 def _conversion_kwargs(

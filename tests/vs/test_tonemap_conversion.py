@@ -60,7 +60,7 @@ def test_convert_non_rgb_with_matrix_hint_forwards_valid_transfer_primaries_and_
             "_Matrix": 9,
             "_Transfer": 16,
             "_Primaries": 9,
-            "_ColorRange": vs.RANGE_LIMITED,
+            "_Range": vs.RANGE_LIMITED,
         },
         detected_is_hdr=True,
     )
@@ -72,6 +72,46 @@ def test_convert_non_rgb_with_matrix_hint_forwards_valid_transfer_primaries_and_
         range_in=vs.RANGE_LIMITED,
         transfer_in=16,
         primaries_in=9,
+    )
+
+
+def test_convert_non_rgb_with_matrix_hint_normalizes_deprecated_color_range() -> None:
+    mock_clip = MagicMock()
+    mock_resized = MagicMock()
+    mock_clip.resize.Bicubic.return_value = mock_resized
+
+    result = tonemap_module._convert_non_rgb_with_matrix_hint(
+        mock_clip,
+        target_format=vs.RGBS,
+        props={"_Matrix": 9, "_ColorRange": 1},
+        detected_is_hdr=True,
+    )
+
+    assert result is mock_resized
+    mock_clip.resize.Bicubic.assert_called_once_with(
+        format=vs.RGBS,
+        matrix_in=9,
+        range_in=vs.RANGE_LIMITED,
+    )
+
+
+def test_convert_non_rgb_with_matrix_hint_normalizes_deprecated_full_color_range() -> None:
+    mock_clip = MagicMock()
+    mock_resized = MagicMock()
+    mock_clip.resize.Bicubic.return_value = mock_resized
+
+    result = tonemap_module._convert_non_rgb_with_matrix_hint(
+        mock_clip,
+        target_format=vs.RGBS,
+        props={"_Matrix": 9, "_ColorRange": 0},
+        detected_is_hdr=True,
+    )
+
+    assert result is mock_resized
+    mock_clip.resize.Bicubic.assert_called_once_with(
+        format=vs.RGBS,
+        matrix_in=9,
+        range_in=vs.RANGE_FULL,
     )
 
 

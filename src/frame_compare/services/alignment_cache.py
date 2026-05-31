@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
@@ -13,17 +14,21 @@ from frame_compare.services.types import AlignmentAlgorithm, AlignmentResult
 from frame_compare.utils.atomic_write import write_bytes_atomic
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 
-CACHE_VERSION = "1"
+CACHE_VERSION = "2"
 CACHE_FILE_NAME = "audio_offsets.toml"
 
 log = structlog.get_logger()
 
 
+@dataclass(frozen=True)
+class _ClipFreshness:
+    path: str
+    size_bytes: int
+    mtime_ns: int
+
+
 def _cached_entry_algorithm(entry_dict: dict[str, object]) -> AlignmentAlgorithm:
     algorithm = entry_dict.get("algorithm")
-    if algorithm is None and "method" in entry_dict:
-        algorithm = entry_dict["method"]
-
     if not isinstance(algorithm, str):
         raise TypeError("algorithm must be str")
     if algorithm != "cross_correlation":
@@ -61,7 +66,78 @@ def _parse_cached_alignment_entry(entry_dict: dict[str, object]) -> AlignmentRes
     )
 
 
-def _cache_entry_from_result(result: AlignmentResult) -> dict[str, object]:
+def _file_freshness(path: Path) -> _ClipFreshness | None:
+    try:
+        stat_result = path.stat()
+    except OSError:
+        return None
+
+    return _ClipFreshness(
+        path=str(path.resolve()),
+        size_bytes=stat_result.st_size,
+        mtime_ns=stat_result.st_mtime_ns,
+    )
+
+
+def _parse_clip_freshness(entry_dict: dict[str, object], *, prefix: str) -> _ClipFreshness | None:
+    path = entry_dict.get(f"{prefix}_path")
+    size_bytes = entry_dict.get(f"{prefix}_size_bytes")
+    mtime_ns = entry_dict.get(f"{prefix}_mtime_ns")
+
+    if not isinstance(path, str):
+        return None
+    if not isinstance(size_bytes, int):
+        return None
+    if not isinstance(mtime_ns, int):
+        return None
+
+    return _ClipFreshness(
+        path=path,
+        size_bytes=size_bytes,
+        mtime_ns=mtime_ns,
+    )
+
+
+def _entry_freshness_matches(
+    entry_dict: dict[str, object],
+    *,
+    reference: Path,
+    comparison: Path,
+    sample_rate: int,
+    max_offset_seconds: float,
+) -> bool:
+    reference_freshness = _parse_clip_freshness(entry_dict, prefix="reference")
+    comparison_freshness = _parse_clip_freshness(entry_dict, prefix="comparison")
+    current_reference = _file_freshness(reference)
+    current_comparison = _file_freshness(comparison)
+
+    cached_sample_rate = entry_dict.get("sample_rate")
+    cached_max_offset_seconds = entry_dict.get("max_offset_seconds")
+    if not isinstance(cached_sample_rate, int):
+        return False
+    if not isinstance(cached_max_offset_seconds, int | float):
+        return False
+    if reference_freshness is None or comparison_freshness is None:
+        return False
+    if current_reference is None or current_comparison is None:
+        return False
+
+    return (
+        reference_freshness == current_reference
+        and comparison_freshness == current_comparison
+        and cached_sample_rate == sample_rate
+        and float(cached_max_offset_seconds) == max_offset_seconds
+    )
+
+
+def _cache_entry_from_result(
+    result: AlignmentResult,
+    *,
+    reference_freshness: _ClipFreshness,
+    comparison_freshness: _ClipFreshness,
+    sample_rate: int,
+    max_offset_seconds: float,
+) -> dict[str, object]:
     return {
         "reference_clip": result.reference_clip,
         "comparison_clip": result.comparison_clip,
@@ -69,22 +145,33 @@ def _cache_entry_from_result(result: AlignmentResult) -> dict[str, object]:
         "time_offset_seconds": result.time_offset_seconds,
         "correlation_score": result.correlation_score,
         "algorithm": result.algorithm,
+        "reference_path": reference_freshness.path,
+        "reference_size_bytes": reference_freshness.size_bytes,
+        "reference_mtime_ns": reference_freshness.mtime_ns,
+        "comparison_path": comparison_freshness.path,
+        "comparison_size_bytes": comparison_freshness.size_bytes,
+        "comparison_mtime_ns": comparison_freshness.mtime_ns,
+        "sample_rate": sample_rate,
+        "max_offset_seconds": max_offset_seconds,
     }
 
 
-def _normalize_legacy_cache_entries(data: dict[str, object]) -> None:
-    """Rewrite legacy cache keys to the current schema before saving."""
+def _validate_existing_cache_entries(data: dict[str, object]) -> None:
     for key, entry in data.items():
-        if key == "version" or not isinstance(entry, dict):
+        if key == "version":
             continue
-        data[key] = _cache_entry_from_result(
-            _parse_cached_alignment_entry(cast(dict[str, object], entry))
-        )
+        if not isinstance(entry, dict):
+            raise TypeError("cache entry must be table")
+        _parse_cached_alignment_entry(cast(dict[str, object], entry))
 
 
 def load_cached_offsets(
     cache_dir: Path,
-    clips: list[Path],
+    reference: Path,
+    comparisons: list[Path],
+    *,
+    sample_rate: int,
+    max_offset_seconds: float,
 ) -> dict[str, AlignmentResult] | None:
     """Load previously calculated offsets from cache."""
     cache_path = cache_dir / CACHE_FILE_NAME
@@ -100,9 +187,6 @@ def load_cached_offsets(
     if data.get("version") != CACHE_VERSION:
         raise CacheVersionMismatchError(str(data.get("version")), CACHE_VERSION)
 
-    reference = clips[0]
-    comparisons = clips[1:]
-
     results: dict[str, AlignmentResult] = {}
     for comp in comparisons:
         key = f"{reference.stem}:{comp.stem}"
@@ -111,6 +195,14 @@ def load_cached_offsets(
             if not isinstance(entry, dict):
                 raise CacheCorruptionError(cache_path)
             entry_dict = cast(dict[str, object], entry)
+            if not _entry_freshness_matches(
+                entry_dict,
+                reference=reference,
+                comparison=comp,
+                sample_rate=sample_rate,
+                max_offset_seconds=max_offset_seconds,
+            ):
+                continue
             try:
                 results[key] = _parse_cached_alignment_entry(entry_dict)
             except (KeyError, TypeError, ValueError) as e:
@@ -121,18 +213,32 @@ def load_cached_offsets(
 
 def save_offsets_cache(
     cache_dir: Path,
+    *,
+    reference: Path,
+    comparisons: list[Path],
+    sample_rate: int,
+    max_offset_seconds: float,
     results: list[AlignmentResult],
 ) -> None:
     """Persist alignment results to cache."""
     cache_path = cache_dir / CACHE_FILE_NAME
 
     data: dict[str, object] = {"version": CACHE_VERSION}
+    reference_freshness = _file_freshness(reference)
+    if reference_freshness is None:
+        log.warning(
+            "audio_offsets_cache_reference_missing_on_write",
+            path=str(reference),
+            action="alignment_results_not_cached",
+        )
+        return
+
     if cache_path.exists():
         try:
             with cache_path.open("rb") as f:
                 existing_data = cast(dict[str, object], tomllib.load(f))
             if existing_data.get("version") == CACHE_VERSION:
-                _normalize_legacy_cache_entries(existing_data)
+                _validate_existing_cache_entries(existing_data)
                 existing_data.pop("version", None)
                 data.update(existing_data)
         except (tomllib.TOMLDecodeError, OSError, KeyError, TypeError, ValueError) as exc:
@@ -145,9 +251,32 @@ def save_offsets_cache(
                 exc_info=exc,
             )
 
+    comparison_paths_by_name = {comparison.name: comparison for comparison in comparisons}
     for res in results:
+        comparison_path = comparison_paths_by_name.get(res.comparison_clip)
+        if comparison_path is None:
+            log.warning(
+                "audio_offsets_cache_unknown_comparison_on_write",
+                comparison_clip=res.comparison_clip,
+                action="skip_alignment_cache_entry",
+            )
+            continue
+        comparison_freshness = _file_freshness(comparison_path)
+        if comparison_freshness is None:
+            log.warning(
+                "audio_offsets_cache_comparison_missing_on_write",
+                path=str(comparison_path),
+                action="skip_alignment_cache_entry",
+            )
+            continue
         key = f"{Path(res.reference_clip).stem}:{Path(res.comparison_clip).stem}"
-        data[key] = _cache_entry_from_result(res)
+        data[key] = _cache_entry_from_result(
+            res,
+            reference_freshness=reference_freshness,
+            comparison_freshness=comparison_freshness,
+            sample_rate=sample_rate,
+            max_offset_seconds=max_offset_seconds,
+        )
 
     try:
         write_bytes_atomic(cache_path, tomli_w.dumps(data).encode("utf-8"))
