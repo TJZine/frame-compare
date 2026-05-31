@@ -144,3 +144,4 @@ class RunContext:
     selection_breakdown: SelectionBreakdown | None = None
     selection_details_by_source_frame: dict[int, SelectionDetail] | None = None
     analysis_metrics: FrameMetrics | None = None
+    no_color: bool = False

@@ -173,10 +173,13 @@ def test_launch_alignment_verification_session_writes_launch_telemetry_to_stderr
         "frame_compare.vspreview.adapter._resolve_launch_command",
         lambda script_path: ["vspreview", str(script_path)],
     )
-    monkeypatch.setattr(
-        "frame_compare.vspreview.adapter.subprocess.run",
-        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0),
-    )
+    run_kwargs: dict[str, object] = {}
+
+    def _fake_run(command: object, **kwargs: object) -> subprocess.CompletedProcess[object]:
+        run_kwargs.update(kwargs)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr("frame_compare.vspreview.adapter.subprocess.run", _fake_run)
 
     launch_alignment_verification_session(
         request=VSPreviewSessionRequest(
@@ -185,15 +188,20 @@ def test_launch_alignment_verification_session_writes_launch_telemetry_to_stderr
             suggested_offsets_by_key={},
             cache_dir=tmp_path,
         ),
-        config=VSPreviewConfig(enabled=True),
+        config=VSPreviewConfig(enabled=True, no_color=True),
     )
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "VSPreview session" in captured.err
+    assert "VSPreview Session" in captured.err
     assert "script" in captured.err
     assert "command" in captured.err
     assert "pass-through from the VSPreview process" in captured.err
+    assert "\x1b[" not in captured.err
+    assert "[bold cyan]" not in captured.err
+    env = run_kwargs["env"]
+    assert isinstance(env, dict)
+    assert env["NO_COLOR"] == "1"
 
 
 def test_launch_alignment_verification_session_redacts_probe_failure_details(
@@ -323,15 +331,9 @@ def test_build_script_content_warns_when_comparison_overlay_fails() -> None:
         bootstrap_paths=[Path("/workspace"), Path("/workspace/src")],
     )
 
-    reference_warning = (
-        'safe_print("Warning: Could not apply reference text overlay (plugin missing?)")'
-    )
-    comparison_warning = (
-        'safe_print("Warning: Could not apply comparison text overlay (plugin missing?)")'
-    )
-
-    assert reference_warning in script
-    assert comparison_warning in script
+    assert "Could not apply reference text overlay" in script
+    assert "Could not apply comparison text overlay" in script
+    assert "_warning(" in script
     assert "pass  # Overlay is best-effort" not in script
 
 
@@ -636,8 +638,8 @@ def test_build_script_content_assert_by_section() -> None:
     assert "Audio hint: {suggested_offset} frames" in script
     assert "hint pair: ref frame {suggested_offset} ~= comparison frame 0" in script
     assert "hint pair: ref frame 0 ~= comparison frame {-suggested_offset}" in script
-    assert "VSPreview bootstrap" in script
-    assert "VSPreview ready" in script
+    assert "VSPreview Bootstrap" in script
+    assert "VSPreview Ready" in script
     assert "def main():" in script
     assert script.rstrip().endswith("main()")
 

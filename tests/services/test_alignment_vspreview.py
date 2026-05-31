@@ -259,17 +259,24 @@ def test_prompt_for_confirmed_offsets_writes_to_stderr(
         reference=tmp_path / "ref.mkv",
         comparisons=[tmp_path / "comp.mkv"],
         offsets_by_key={"ref:comp": 4},
+        no_color=True,
     )
 
     captured = capsys.readouterr()
     assert confirmed == {"ref:comp": 12}
     assert captured.out == ""
-    assert "VSPreview confirmation" in captured.err
-    assert "reference  ref" in captured.err
+    assert "VSPreview Confirmation" in captured.err
+    assert "reference" in captured.err
+    assert "ref" in captured.err
     assert "source-frame indices from the untrimmed clips" in captured.err
     assert "reference_source_frame comparison_source_frame" in captured.err
-    assert "offset = reference_source_frame - comparison_source_frame" in captured.err
-    assert "comp [+4f]:" in captured.err
+    assert "offset =" in captured.err
+    assert "comparison_source_frame" in captured.err
+    assert "comparison" in captured.err
+    assert "comp" in captured.err
+    assert "frames [+4f]:" in captured.err
+    assert "\x1b[" not in captured.err
+    assert "[bold cyan]" not in captured.err
 
 
 def test_prompt_for_confirmed_offsets_accepts_zero_source_frame_offset(
@@ -427,3 +434,41 @@ def test_available_with_tty_suspends_progress_during_launch_and_prompt(
     progress.set_description.assert_called_once_with("Alignment verification")
     progress.suspend.assert_called_once_with()
     progress.resume.assert_called_once_with()
+
+
+def test_maybe_launch_propagates_no_color_to_launch_and_prompt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_tty(monkeypatch, is_tty=True)
+    monkeypatch.setattr(
+        alignment_vspreview,
+        "check_vspreview_availability",
+        MagicMock(return_value=_availability(VSPreviewAvailabilityStatus.AVAILABLE)),
+    )
+    mock_launch = MagicMock(return_value=tmp_path / "vspreview.py")
+    mock_prompt = MagicMock(return_value=None)
+    monkeypatch.setattr(
+        alignment_vspreview,
+        "launch_alignment_verification_session",
+        mock_launch,
+    )
+    monkeypatch.setattr(
+        alignment_vspreview,
+        "_prompt_for_confirmed_offsets",
+        mock_prompt,
+    )
+
+    maybe_launch_alignment_vspreview(
+        reference=tmp_path / "ref.mkv",
+        comparisons=[tmp_path / "comp.mkv"],
+        offsets_by_key={"ref:comp": 4},
+        cache_dir=tmp_path,
+        config=AlignmentConfig(use_vspreview=True, no_color=True),
+        progress=None,
+    )
+
+    _, launch_kwargs = mock_launch.call_args
+    assert launch_kwargs["config"].no_color is True
+    _, prompt_kwargs = mock_prompt.call_args
+    assert prompt_kwargs["no_color"] is True

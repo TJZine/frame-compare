@@ -28,6 +28,7 @@ class AlignmentConfig:
     use_vspreview: bool = False
     force_interactive: bool = False
     cache_results: bool = True
+    no_color: bool = False
 
 
 @dataclass(frozen=True)

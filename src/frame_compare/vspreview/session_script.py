@@ -121,6 +121,7 @@ untrimmed source clips so the operator can inspect source-frame positions.
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 '''
@@ -162,6 +163,40 @@ def _reconfigure_text_stream(stream):
 
 _reconfigure_text_stream(sys.stdout)
 _reconfigure_text_stream(sys.stderr)
+
+
+def _ansi_enabled():
+    return "NO_COLOR" not in os.environ and getattr(sys.stdout, "isatty", lambda: False)()
+
+
+def _style(text, code):
+    if not _ansi_enabled():
+        return text
+    return f"\\033[{code}m{text}\\033[0m"
+
+
+def _header(text):
+    return _style(text, "1;36")
+
+
+def _key(text):
+    return _style(text, "34")
+
+
+def _value(text):
+    return _style(text, "97")
+
+
+def _hint(text):
+    return _style(text, "33")
+
+
+def _warning(text):
+    return _style(text, "33")
+
+
+def _error(text):
+    return _style(text, "31")
 
 
 def safe_print(*args, **kwargs):
@@ -225,33 +260,36 @@ def main():
     try:
         import vapoursynth as vs
     except ImportError:
-        safe_print("ERROR: VapourSynth not found. Install VapourSynth first.")
+        safe_print(_error("ERROR: VapourSynth not found. Install VapourSynth first."))
         sys.exit(1)
 
     core = vs.core
     try:
         load_source = resolve_lwlibavsource(core)
     except RuntimeError as e:
-        safe_print(f"ERROR: Failed to resolve LWLibavSource loader: {e}")
+        safe_print(_error(f"ERROR: Failed to resolve LWLibavSource loader: {e}"))
         sys.exit(1)
 
     ref_path = Path(REFERENCE["path"])
     if not ref_path.exists():
-        safe_print(f"ERROR: Reference not found: {ref_path}")
+        safe_print(_error(f"ERROR: Reference not found: {ref_path}"))
         sys.exit(1)
 
     try:
         ref_clip = load_source(str(ref_path))
     except Exception as e:
-        safe_print(f"ERROR: Failed to load reference: {e}")
+        safe_print(_error(f"ERROR: Failed to load reference: {e}"))
         sys.exit(1)
 
     ref_fps_num = ref_clip.fps.numerator
     ref_fps_den = ref_clip.fps.denominator
 
     safe_print("")
-    safe_print("VSPreview bootstrap")
-    safe_print(f"  reference  {REFERENCE['label']} @ {ref_fps_num}/{ref_fps_den} fps")
+    safe_print(_header("VSPreview Bootstrap"))
+    reference_fps = f"{ref_fps_num}/{ref_fps_den} fps"
+    safe_print(
+        f"  {_key('reference')}  {_value(REFERENCE['label'])} @ {_hint(reference_fps)}"
+    )
 
     # Apply overlay to reference (best-effort)
     try:
@@ -261,20 +299,20 @@ def main():
             alignment=7,
         )
     except Exception:
-        safe_print("Warning: Could not apply reference text overlay (plugin missing?)")
+        safe_print(_warning("Warning: Could not apply reference text overlay (plugin missing?)"))
 
     loaded_comparisons = []
 
     for label, path_str in sorted(TARGETS.items()):
         comp_path = Path(path_str)
         if not comp_path.exists():
-            safe_print(f"WARNING: Comparison not found: {comp_path}")
+            safe_print(_warning(f"WARNING: Comparison not found: {comp_path}"))
             continue
 
         try:
             comp_clip = load_source(str(comp_path))
         except Exception as e:
-            safe_print(f"WARNING: Failed to load {label}: {e}")
+            safe_print(_warning(f"WARNING: Failed to load {label}: {e}"))
             continue
 
         # FPS harmonization: apply AssumeFPS to match reference
@@ -300,7 +338,7 @@ def main():
                 overlay_text += "\\n(-N would trim comparison after confirmation)"
             comp_clip = core.text.Text(comp_clip, overlay_text, alignment=7)
         except Exception:
-            safe_print("Warning: Could not apply comparison text overlay (plugin missing?)")
+            safe_print(_warning("Warning: Could not apply comparison text overlay (plugin missing?)"))
 
         loaded_comparisons.append(
             {
@@ -310,10 +348,13 @@ def main():
             }
         )
 
-        safe_print(f"  loaded     {label} (audio hint: {suggested_offset})")
+        safe_print(
+            f"  {_key('loaded')}     {_value(label)} "
+            f"{_hint(f'(audio hint: {suggested_offset})')}"
+        )
 
     if not loaded_comparisons:
-        safe_print("ERROR: No comparison clips loaded successfully.")
+        safe_print(_error("ERROR: No comparison clips loaded successfully."))
         sys.exit(1)
 
     clips = []
@@ -326,10 +367,13 @@ def main():
 
     for i, (clip, label) in enumerate(zip(clips, labels)):
         clip.set_output(i)
-        safe_print(f"  output {i:<2}  {label}")
+        safe_print(f"  {_key(f'output {i:<2}')}  {_value(label)}")
 
-    safe_print("\\nVSPreview ready")
-    safe_print("  inspect untrimmed source clips, then confirm source frames in the terminal")
+    safe_print("\\n" + _header("VSPreview Ready"))
+    safe_print(
+        f"  {_key('inspect')}   inspect untrimmed source clips, "
+        "then confirm source frames in the terminal"
+    )
 
 main()
 """

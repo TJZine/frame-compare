@@ -9,6 +9,7 @@ management.
 from __future__ import annotations
 
 import importlib.util
+import os
 import shutil
 import subprocess  # nosec B404
 import sys
@@ -19,21 +20,10 @@ from pathlib import Path
 import structlog
 
 from frame_compare.vspreview.errors import VSPreviewError, VSPreviewNotFoundError
+from frame_compare.vspreview.output import print_vspreview_session
 from frame_compare.vspreview.session_script import write_vspreview_session_script
 
 log = structlog.get_logger()
-
-
-def _stderr_line(message: str = "") -> None:
-    print(message, file=sys.stderr)
-
-
-def _emit_launch_telemetry(*, script_path: Path, command: list[str]) -> None:
-    _stderr_line()
-    _stderr_line("VSPreview session")
-    _stderr_line(f"  script   {script_path}")
-    _stderr_line(f"  command  {' '.join(command)}")
-    _stderr_line("  output   pass-through from the VSPreview process")
 
 
 class VSPreviewAvailabilityStatus(Enum):
@@ -152,6 +142,7 @@ class VSPreviewConfig:
     enabled: bool = False
     timeout_seconds: float = 300.0  # 5 minutes
     auto_close: bool = True
+    no_color: bool = False
 
 
 @dataclass(frozen=True)
@@ -189,9 +180,16 @@ def launch_alignment_verification_session(
     command = _resolve_launch_command(script_path)
 
     # Print telemetry per vspreview spec §3.2.3.
-    _emit_launch_telemetry(script_path=script_path, command=command)
+    print_vspreview_session(
+        script_path=script_path,
+        command=command,
+        no_color=config.no_color,
+    )
 
     try:
+        env = os.environ.copy()
+        if config.no_color:
+            env["NO_COLOR"] = "1"
         # command is a list from _resolve_launch_command; shell=True is never used.
         result = subprocess.run(  # nosec B603
             command,
@@ -200,6 +198,7 @@ def launch_alignment_verification_session(
             stdout=None,
             stderr=None,
             text=True,
+            env=env,
         )
     except FileNotFoundError as e:
         raise VSPreviewError("launcher command was not found") from e

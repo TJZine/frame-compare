@@ -471,6 +471,7 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
         use_vspreview=ctx.config.audio_alignment.use_vspreview,
         force_interactive=ctx.config.audio_alignment.force_interactive,
         cache_results=ctx.config.audio_alignment.cache_results,
+        no_color=ctx.no_color,
     )
     results = align_clips(
         reference=ctx.reference.path,
