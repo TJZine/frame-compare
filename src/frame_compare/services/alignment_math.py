@@ -6,6 +6,7 @@ from fractions import Fraction
 
 import numpy as np
 
+from frame_compare.services.alignment_correlation import correlate_audio
 from frame_compare.services.errors import AudioAlignmentError
 
 
@@ -15,44 +16,14 @@ def cross_correlate(
     max_offset_samples: int | None = None,
 ) -> tuple[int, float]:
     """Find offset using cross-correlation."""
-    if reference.size == 0 or comparison.size == 0:
-        raise AudioAlignmentError("empty audio signal prevents correlation")
-
-    correlation_size = reference.size + comparison.size - 1
-    fft_size = 1 << (correlation_size - 1).bit_length()
-
-    reference_fft = np.fft.rfft(reference, fft_size)
-    comparison_fft = np.fft.rfft(comparison, fft_size)
-    correlation_raw = np.fft.irfft(reference_fft * np.conj(comparison_fft), fft_size)
-    correlation = np.concatenate(
-        (
-            correlation_raw[-(comparison.size - 1) :],
-            correlation_raw[: reference.size],
-        )
+    estimate = correlate_audio(
+        reference,
+        comparison,
+        max_offset_samples=max_offset_samples,
+        correlation_mode="raw_fft",
+        preprocessing_mode="none",
     )
-
-    if max_offset_samples is not None:
-        bounded = max(0, max_offset_samples)
-        center = reference.size - 1
-        start_idx = max(0, center - bounded)
-        end_idx = min(correlation.size, center + bounded + 1)
-        if start_idx >= end_idx:
-            raise AudioAlignmentError("max_offset_seconds produced an empty search window")
-        peak_idx = int(np.argmax(correlation[start_idx:end_idx])) + start_idx
-    else:
-        peak_idx = int(np.argmax(correlation))
-
-    offset = reference.size - 1 - peak_idx
-
-    norm_ref = np.linalg.norm(reference)
-    norm_comp = np.linalg.norm(comparison)
-
-    if norm_ref == 0 or norm_comp == 0:
-        raise AudioAlignmentError("zero-norm audio signal prevents correlation")
-
-    score = float(correlation[peak_idx] / (norm_ref * norm_comp))
-
-    return offset, score
+    return estimate.sample_offset, estimate.score
 
 
 def samples_to_frames(

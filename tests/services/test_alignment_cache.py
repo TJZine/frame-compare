@@ -12,7 +12,7 @@ from frame_compare.services.alignment_cache import (
     load_cached_offsets,
     save_offsets_cache,
 )
-from frame_compare.services.types import AlignmentResult
+from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 
 
@@ -60,6 +60,21 @@ def _freshness_fields(
     }
 
 
+def _default_alignment_settings() -> dict[str, object]:
+    return {
+        "correlation_mode": "raw_fft",
+        "preprocessing_mode": "none",
+        "channel_strategy": "mono_downmix",
+        "confidence_threshold": 0.0,
+        "ambiguity_peak_ratio": 1.0,
+        "window_length_seconds": 0.0,
+        "window_stride_seconds": 0.0,
+        "minimum_valid_windows": 1,
+        "consensus_minimum_ratio": 1.0,
+        "refinement_mode": "disabled",
+    }
+
+
 def _entry_dict(
     reference: Path,
     comparison: Path,
@@ -84,6 +99,7 @@ def _entry_dict(
             sample_rate=sample_rate,
             max_offset_seconds=max_offset_seconds,
         ),
+        **_default_alignment_settings(),
     }
 
 
@@ -94,6 +110,7 @@ def _load(
     *,
     sample_rate: int = 8000,
     max_offset_seconds: float = 30.0,
+    config: AlignmentConfig | None = None,
 ):
     return load_cached_offsets(
         cache_dir,
@@ -101,6 +118,7 @@ def _load(
         comparisons,
         sample_rate=sample_rate,
         max_offset_seconds=max_offset_seconds,
+        config=config,
     )
 
 
@@ -112,6 +130,7 @@ def _save(
     *,
     sample_rate: int = 8000,
     max_offset_seconds: float = 30.0,
+    config: AlignmentConfig | None = None,
 ) -> None:
     save_offsets_cache(
         cache_dir,
@@ -120,6 +139,7 @@ def _save(
         sample_rate=sample_rate,
         max_offset_seconds=max_offset_seconds,
         results=results,
+        config=config,
     )
 
 
@@ -261,6 +281,7 @@ def test_load_cached_offsets_malformed_entry_raises_cache_corruption(tmp_path: P
         "ref:comp_a": {
             "reference_clip": "ref.mkv",
             **_freshness_fields(reference, comparison),
+            **_default_alignment_settings(),
         },
     }
     cache_file.write_text(tomli_w.dumps(data), encoding="utf-8")
@@ -302,6 +323,62 @@ def test_save_offsets_cache_writes_toml_with_freshness(tmp_path: Path) -> None:
     assert "reference_path" in content
     assert "comparison_mtime_ns" in content
     assert "sample_rate = 8000" in content
+    assert 'correlation_mode = "raw_fft"' in content
+    assert 'preprocessing_mode = "none"' in content
+    assert 'channel_strategy = "mono_downmix"' in content
+    assert "confidence_threshold = 0.0" in content
+    assert "ambiguity_peak_ratio = 1.0" in content
+    assert 'refinement_mode = "disabled"' in content
+
+
+def test_load_cached_offsets_alignment_setting_drift_is_cache_miss(tmp_path: Path) -> None:
+    reference = _touch_clip(tmp_path / "ref.mkv", b"ref")
+    comparison = _touch_clip(tmp_path / "comp_a.mkv", b"comp_a")
+    _save(
+        tmp_path,
+        reference,
+        [comparison],
+        [_make_result()],
+        config=AlignmentConfig(correlation_mode="raw_fft"),
+    )
+
+    res = _load(
+        tmp_path,
+        reference,
+        [comparison],
+        config=AlignmentConfig(correlation_mode="gcc_phat"),
+    )
+
+    assert res == {}
+
+
+def test_load_cached_offsets_stream_override_drift_is_cache_miss(tmp_path: Path) -> None:
+    reference = _touch_clip(tmp_path / "ref.mkv", b"ref")
+    comparison = _touch_clip(tmp_path / "comp_a.mkv", b"comp_a")
+    _save(
+        tmp_path,
+        reference,
+        [comparison],
+        [_make_result()],
+        config=AlignmentConfig(reference_stream=0, comparison_streams={"comp_a": 1}),
+    )
+
+    same_settings = _load(
+        tmp_path,
+        reference,
+        [comparison],
+        config=AlignmentConfig(reference_stream=0, comparison_streams={"comp_a": 1}),
+    )
+    drifted = _load(
+        tmp_path,
+        reference,
+        [comparison],
+        config=AlignmentConfig(reference_stream=0, comparison_streams={"comp_a": 2}),
+    )
+
+    assert same_settings is not None
+    assert same_settings["ref:comp_a"].frame_offset == 42
+    assert drifted == {}
 
 
 def test_save_offsets_cache_preserves_unrelated_current_entries(tmp_path: Path) -> None:

@@ -33,6 +33,19 @@ max_offset_seconds = 4.5
 use_vspreview = true
 force_interactive = false
 cache_results = false
+correlation_mode = "gcc_phat"
+preprocessing_mode = "standard"
+channel_strategy = "best_channel"
+confidence_threshold = 0.25
+ambiguity_peak_ratio = 1.5
+window_length_seconds = 8.0
+window_stride_seconds = 2.0
+minimum_valid_windows = 2
+consensus_minimum_ratio = 0.75
+refinement_mode = "local"
+refinement_sample_rate = 16000
+reference_stream = 1
+comparison_streams = { encode = 2 }
 
 [screenshots]
 use_ffmpeg = true

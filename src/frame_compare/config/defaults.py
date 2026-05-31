@@ -26,6 +26,19 @@ max_offset_seconds = 30.0
 use_vspreview = false
 force_interactive = false
 cache_results = true
+correlation_mode = "raw_fft"
+preprocessing_mode = "none"
+channel_strategy = "mono_downmix"
+confidence_threshold = 0.0
+ambiguity_peak_ratio = 1.0
+window_length_seconds = 0.0
+window_stride_seconds = 0.0
+minimum_valid_windows = 1
+consensus_minimum_ratio = 1.0
+refinement_mode = "disabled"
+# refinement_sample_rate = null
+# reference_stream = null
+comparison_streams = {}
 
 [screenshots]
 use_ffmpeg = false

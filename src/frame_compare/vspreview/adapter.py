@@ -151,7 +151,7 @@ class VSPreviewSessionRequest:
 
     reference: Path
     comparisons: list[Path]
-    suggested_offsets_by_key: dict[str, int]
+    suggested_offsets_by_key: dict[str, int | None]
     cache_dir: Path
 
 

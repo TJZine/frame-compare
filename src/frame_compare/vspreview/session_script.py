@@ -18,7 +18,7 @@ from frame_compare.utils.atomic_write import write_text_atomic
 def write_vspreview_session_script(
     reference: Path,
     comparisons: list[Path],
-    suggested_offsets_by_key: dict[str, int],
+    suggested_offsets_by_key: dict[str, int | None],
     cache_dir: Path,
 ) -> Path:
     """Generate and write a self-contained VSPreview script.
@@ -221,7 +221,7 @@ def resolve_lwlibavsource(core):
 def _build_clip_data_section(
     reference: Path,
     comparisons: list[Path],
-    suggested_offsets_by_key: dict[str, int],
+    suggested_offsets_by_key: dict[str, int | None],
 ) -> str:
     targets_lines: list[str] = []
     for comp in sorted(comparisons, key=lambda p: p.stem):
@@ -230,7 +230,8 @@ def _build_clip_data_section(
     offset_lines: list[str] = []
     for key in sorted(suggested_offsets_by_key.keys()):
         offset = suggested_offsets_by_key[key]
-        offset_lines.append(f"    {json.dumps(key)}: {int(offset)},")
+        offset_value = "None" if offset is None else str(int(offset))
+        offset_lines.append(f"    {json.dumps(key)}: {offset_value},")
 
     targets_content = "\n".join(targets_lines)
     offset_content = "\n".join(offset_lines)
@@ -319,22 +320,27 @@ def main():
         comp_clip = core.std.AssumeFPS(comp_clip, fpsnum=ref_fps_num, fpsden=ref_fps_den)
 
         key = f"{REFERENCE['label']}:{label}"
-        suggested_offset = int(suggested_offsets_by_key.get(key, 0))
-        if suggested_offset >= 0:
+        suggested_offset = suggested_offsets_by_key.get(key)
+        if suggested_offset is None:
+            audio_hint = "no trusted audio hint"
+            hint_pair = "confirm source frames manually"
+        elif suggested_offset >= 0:
+            audio_hint = f"{suggested_offset} frames"
             hint_pair = f"hint pair: ref frame {suggested_offset} ~= comparison frame 0"
         else:
+            audio_hint = f"{suggested_offset} frames"
             hint_pair = f"hint pair: ref frame 0 ~= comparison frame {-suggested_offset}"
 
         # Apply overlay with the audio-derived hint only (best-effort)
         try:
             overlay_text = (
                 f"CMP: {label}\\n"
-                f"Audio hint: {suggested_offset} frames\\n"
+                f"Audio hint: {audio_hint}\\n"
                 f"{hint_pair}"
             )
-            if suggested_offset > 0:
+            if suggested_offset is not None and suggested_offset > 0:
                 overlay_text += "\\n(+N would trim reference after confirmation)"
-            elif suggested_offset < 0:
+            elif suggested_offset is not None and suggested_offset < 0:
                 overlay_text += "\\n(-N would trim comparison after confirmation)"
             comp_clip = core.text.Text(comp_clip, overlay_text, alignment=7)
         except Exception:
@@ -345,12 +351,13 @@ def main():
                 "label": label,
                 "clip": comp_clip,
                 "suggested_offset": suggested_offset,
+                "audio_hint": audio_hint,
             }
         )
 
         safe_print(
             f"  {_key('loaded')}     {_value(label)} "
-            f"{_hint(f'(audio hint: {suggested_offset})')}"
+            f"{_hint(f'(audio hint: {audio_hint})')}"
         )
 
     if not loaded_comparisons:
@@ -363,7 +370,7 @@ def main():
         clips.append(ref_clip)  # Even slot (untrimmed reference)
         labels.append(f"{REFERENCE['label']} (ref)")
         clips.append(entry["clip"])  # Odd slot (untrimmed comparison)
-        labels.append(f"{entry['label']} (audio hint: {entry['suggested_offset']})")
+        labels.append(f"{entry['label']} (audio hint: {entry['audio_hint']})")
 
     for i, (clip, label) in enumerate(zip(clips, labels)):
         clip.set_output(i)
@@ -382,7 +389,7 @@ main()
 def _build_script_content(
     reference: Path,
     comparisons: list[Path],
-    suggested_offsets_by_key: dict[str, int],
+    suggested_offsets_by_key: dict[str, int | None],
     bootstrap_paths: list[Path],
 ) -> str:
     """Build the script content for VSPreview.

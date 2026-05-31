@@ -33,7 +33,7 @@ def _execute_generated_script(
     *,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    suggested_offsets_by_key: dict[str, int],
+    suggested_offsets_by_key: dict[str, int | None],
     comparison_stems: tuple[str, ...],
     num_frames_by_stem: dict[str, int] | None = None,
 ) -> tuple[
@@ -464,6 +464,23 @@ def test_generated_script_does_not_slice_source_clips_from_suggested_offsets(
     assert slice_history["comp_b"] == []
 
 
+def test_generated_script_omits_numeric_hint_when_suggestion_is_none(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _execute_generated_script(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        suggested_offsets_by_key={"ref:a": None},
+        comparison_stems=("a",),
+    )
+
+    captured = capsys.readouterr()
+    assert "no trusted audio hint" in captured.out
+    assert "audio hint: 0" not in captured.out
+
+
 def test_generated_script_reports_missing_lwlibavsource_without_traceback(tmp_path: Path) -> None:
     (tmp_path / "vapoursynth.py").write_text(
         """\
@@ -635,7 +652,7 @@ def test_build_script_content_assert_by_section() -> None:
     assert '"comp_a": "comp_a.mkv"' in script
     assert '"ref:comp_a": 10' in script
     assert "OFFSET_MAP" not in script
-    assert "Audio hint: {suggested_offset} frames" in script
+    assert "Audio hint: {audio_hint}" in script
     assert "hint pair: ref frame {suggested_offset} ~= comparison frame 0" in script
     assert "hint pair: ref frame 0 ~= comparison frame {-suggested_offset}" in script
     assert "VSPreview Bootstrap" in script

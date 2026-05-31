@@ -19,6 +19,7 @@ from frame_compare.services.alignment_cache import (
     load_cached_offsets,
     save_offsets_cache,
 )
+from frame_compare.services.alignment_consensus import estimate_consensus_offset
 from frame_compare.services.alignment_math import (
     calculate_alignment_trims,
     cross_correlate,
@@ -38,6 +39,7 @@ _extract_matching_audio = extract_matching_audio
 _extract_reference_audio = extract_reference_audio
 _probe_fps = probe_fps
 _cross_correlate = cross_correlate
+_estimate_consensus_offset = estimate_consensus_offset
 _samples_to_frames = samples_to_frames
 
 __all__ = [
@@ -45,6 +47,7 @@ __all__ = [
     "CACHE_VERSION",
     "_cross_correlate",
     "_extract_audio",
+    "_estimate_consensus_offset",
     "_probe_fps",
     "_samples_to_frames",
     "align_clips",
@@ -60,13 +63,13 @@ def _build_offsets_map(
     reference: Path,
     comparisons: list[Path],
     results_map: dict[str, AlignmentResult],
-) -> dict[str, int]:
+) -> dict[str, int | None]:
     """Build stable `{reference:comparison -> frame_offset}` map for VSPreview."""
-    offsets_by_key: dict[str, int] = {}
+    offsets_by_key: dict[str, int | None] = {}
     for comp in comparisons:
         key = f"{reference.stem}:{comp.stem}"
         res = results_map.get(key)
-        offsets_by_key[key] = 0 if res is None else int(res.frame_offset)
+        offsets_by_key[key] = res.frame_offset if res is not None and res.applied else None
     return offsets_by_key
 
 
@@ -157,9 +160,12 @@ def _compute_missing_alignments(
     progress: ProgressReporter | None,
 ) -> None:
     """Extract audio, perform cross-correlation, and populate results map."""
-    ref_audio, reference_stream = _extract_reference_audio(reference, config.sample_rate)
-    max_offset_samples = int(config.max_offset_seconds * config.sample_rate)
-
+    ref_audio, reference_stream = _extract_reference_audio(
+        reference,
+        config.sample_rate,
+        stream_override=config.reference_stream,
+        channel_strategy=config.channel_strategy,
+    )
     for comp in requested_comparisons:
         if progress:
             progress.set_description(f"Aligning {comp.name}")
@@ -168,24 +174,35 @@ def _compute_missing_alignments(
             comp,
             config.sample_rate,
             reference_stream=reference_stream,
+            stream_override=config.comparison_streams.get(comp.stem),
+            channel_strategy=config.channel_strategy,
         )
-        sample_offset, score = _cross_correlate(
+        estimate = _estimate_consensus_offset(
             ref_audio,
             comp_audio,
-            max_offset_samples=max_offset_samples,
+            config=config,
         )
-
-        frame_offset = _samples_to_frames(sample_offset, config.sample_rate, fps_reference)
-        time_offset = sample_offset / config.sample_rate
+        frame_offset = (
+            _samples_to_frames(estimate.sample_offset, config.sample_rate, fps_reference)
+            if estimate.sample_offset is not None
+            else None
+        )
+        time_offset = (
+            estimate.sample_offset / config.sample_rate
+            if estimate.sample_offset is not None
+            else None
+        )
 
         res = AlignmentResult(
             reference_clip=reference.name,
             comparison_clip=comp.name,
             frame_offset=frame_offset,
             time_offset_seconds=time_offset,
-            correlation_score=float(score),
+            correlation_score=estimate.score,
             algorithm="cross_correlation",
             source="computed",
+            applied=estimate.applied,
+            diagnostic=estimate.diagnostic,
         )
         results_map[f"{reference.stem}:{comp.stem}"] = res
 
@@ -225,6 +242,7 @@ def align_clips(
                 requested_comparisons,
                 sample_rate=config.sample_rate,
                 max_offset_seconds=config.max_offset_seconds,
+                config=config,
             )
             if cached is not None:
                 results_map.update(cached)
@@ -257,7 +275,10 @@ def align_clips(
             computed_results = [
                 results_map[f"{reference.stem}:{c.stem}"]
                 for c in comparisons
-                if results_map[f"{reference.stem}:{c.stem}"].source != "manual"
+                if (
+                    results_map[f"{reference.stem}:{c.stem}"].source != "manual"
+                    and results_map[f"{reference.stem}:{c.stem}"].applied
+                )
             ]
             if computed_results:
                 save_offsets_cache(
@@ -267,6 +288,7 @@ def align_clips(
                     sample_rate=config.sample_rate,
                     max_offset_seconds=config.max_offset_seconds,
                     results=computed_results,
+                    config=config,
                 )
 
     offsets_by_key = _build_offsets_map(
@@ -312,6 +334,7 @@ def check_alignment_cached(
             comparisons,
             sample_rate=resolved_config.sample_rate,
             max_offset_seconds=resolved_config.max_offset_seconds,
+            config=resolved_config,
         )
         or {}
     )

@@ -471,6 +471,19 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
         use_vspreview=ctx.config.audio_alignment.use_vspreview,
         force_interactive=ctx.config.audio_alignment.force_interactive,
         cache_results=ctx.config.audio_alignment.cache_results,
+        correlation_mode=ctx.config.audio_alignment.correlation_mode,
+        preprocessing_mode=ctx.config.audio_alignment.preprocessing_mode,
+        channel_strategy=ctx.config.audio_alignment.channel_strategy,
+        confidence_threshold=ctx.config.audio_alignment.confidence_threshold,
+        ambiguity_peak_ratio=ctx.config.audio_alignment.ambiguity_peak_ratio,
+        window_length_seconds=ctx.config.audio_alignment.window_length_seconds,
+        window_stride_seconds=ctx.config.audio_alignment.window_stride_seconds,
+        minimum_valid_windows=ctx.config.audio_alignment.minimum_valid_windows,
+        consensus_minimum_ratio=ctx.config.audio_alignment.consensus_minimum_ratio,
+        refinement_mode=ctx.config.audio_alignment.refinement_mode,
+        refinement_sample_rate=ctx.config.audio_alignment.refinement_sample_rate,
+        reference_stream=ctx.config.audio_alignment.reference_stream,
+        comparison_streams=dict(ctx.config.audio_alignment.comparison_streams),
         no_color=ctx.no_color,
     )
     results = align_clips(
@@ -482,16 +495,22 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
     )
 
     updated_comparisons: list[ClipState] = []
+    has_non_applied_result = any(not result.applied for result in results)
     for comparison, result in zip(ctx.comparisons, results, strict=True):
+        alignment = None
+        if result.applied and not has_non_applied_result:
+            if result.frame_offset is None:
+                raise AudioAlignmentError("Applied alignment result is missing frame offset.")
+            alignment = ClipAlignmentState(
+                reference_stem=Path(result.reference_clip).stem,
+                comparison_stem=Path(result.comparison_clip).stem,
+                relative_offset_frames=result.frame_offset,
+                source=result.source,
+            )
         updated_comparisons.append(
             replace(
                 comparison,
-                alignment=ClipAlignmentState(
-                    reference_stem=Path(result.reference_clip).stem,
-                    comparison_stem=Path(result.comparison_clip).stem,
-                    relative_offset_frames=result.frame_offset,
-                    source=result.source,
-                ),
+                alignment=alignment,
             )
         )
     ref_trim, comp_trims = calculate_alignment_trims(

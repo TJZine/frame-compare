@@ -279,6 +279,26 @@ def test_prompt_for_confirmed_offsets_writes_to_stderr(
     assert "[bold cyan]" not in captured.err
 
 
+def test_prompt_for_confirmed_offsets_does_not_show_numeric_hint_when_absent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(alignment_vspreview.sys, "stdin", io.StringIO("120 108\n"))
+
+    confirmed = alignment_vspreview._prompt_for_confirmed_offsets(
+        reference=tmp_path / "ref.mkv",
+        comparisons=[tmp_path / "comp.mkv"],
+        offsets_by_key={"ref:comp": None},
+        no_color=True,
+    )
+
+    captured = capsys.readouterr()
+    assert confirmed == {"ref:comp": 12}
+    assert "no trusted audio hint" in captured.err
+    assert "frames [+0f]:" not in captured.err
+
+
 def test_prompt_for_confirmed_offsets_accepts_zero_source_frame_offset(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

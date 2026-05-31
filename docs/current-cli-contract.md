@@ -173,6 +173,38 @@ dedicated `run` flags for them:
   directly. Fpng maps `0..3` to `0`, `4..6` to `1`, and `7..9` to `2`;
   unsupported values fail config validation rather than being silently clamped.
 
+## Config-Only Audio Alignment Surface
+
+The following `[audio_alignment]` fields are config-only public surfaces for the
+audio-alignment accuracy workstream. There are no dedicated `run` flags for them in
+Unit 1, and Unit 1 accepts and forwards these values without changing computed
+estimator behavior yet.
+
+- `correlation_mode = "raw_fft" | "gcc_phat"` selects the future correlation
+  policy. `raw_fft` is the default and preserves the current computed estimator.
+- `preprocessing_mode = "none" | "standard"` selects future preprocessing policy.
+  `none` is the default.
+- `channel_strategy = "mono_downmix" | "best_channel"` selects future channel
+  extraction policy. `mono_downmix` is the default.
+- `confidence_threshold` remains a float from `0.0` through `1.0`, defaulting to
+  `0.0`.
+- `ambiguity_peak_ratio` remains a float greater than or equal to `1.0`,
+  defaulting to `1.0`.
+- `window_length_seconds` and `window_stride_seconds` remain floats greater than
+  or equal to `0.0`, both defaulting to `0.0`.
+- `minimum_valid_windows` remains an integer greater than or equal to `1`,
+  defaulting to `1`.
+- `consensus_minimum_ratio` remains a float from `0.0` through `1.0`, defaulting
+  to `1.0`.
+- `refinement_mode = "disabled" | "local"` selects future refinement policy.
+  `disabled` is the default.
+- `refinement_sample_rate` is either `null` or an integer from `4000` through
+  `48000`, defaulting to `null`.
+- `reference_stream` is either `null` or a non-negative audio stream ordinal,
+  defaulting to `null`.
+- `comparison_streams` is a mapping from comparison filename stem to non-negative
+  audio stream ordinal, defaulting to an empty map.
+
 ## Persistence Rules
 
 `run --write-config` persists the effective config after applying the mapped overrides

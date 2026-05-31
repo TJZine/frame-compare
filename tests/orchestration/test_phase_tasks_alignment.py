@@ -53,6 +53,19 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     assert captured["config"].max_offset_seconds == 4.5
     assert captured["config"].use_vspreview is True
     assert captured["config"].cache_results is False
+    assert captured["config"].correlation_mode == "gcc_phat"
+    assert captured["config"].preprocessing_mode == "standard"
+    assert captured["config"].channel_strategy == "best_channel"
+    assert captured["config"].confidence_threshold == 0.25
+    assert captured["config"].ambiguity_peak_ratio == 1.5
+    assert captured["config"].window_length_seconds == 8.0
+    assert captured["config"].window_stride_seconds == 2.0
+    assert captured["config"].minimum_valid_windows == 2
+    assert captured["config"].consensus_minimum_ratio == 0.75
+    assert captured["config"].refinement_mode == "local"
+    assert captured["config"].refinement_sample_rate == 16000
+    assert captured["config"].reference_stream == 1
+    assert captured["config"].comparison_streams == {"encode": 2}
     assert output.reference.trim.trim_start_frames == 2
     assert output.comparisons[0].trim.trim_start_frames == 0
     assert output.comparisons[0].alignment is not None
@@ -152,6 +165,49 @@ def test_run_align_phase_raises_when_alignment_leaves_no_overlap(
 
     with pytest.raises(AudioAlignmentError, match="No overlapping frames"):
         phase_tasks.run_align_phase(ctx, selected_frames=selected_frames)
+
+
+def test_run_align_phase_degrades_whole_set_when_any_result_is_not_applied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comp_a = _clip(tmp_path / "comparison_videos" / "encode_a.mkv", label="Encode A")
+    comp_b = _clip(tmp_path / "comparison_videos" / "encode_b.mkv", label="Encode B")
+    ctx = _context(tmp_path, comparisons=[comp_a, comp_b])
+    selected_frames = [0, 2, 50, 99]
+
+    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+        return [
+            AlignmentResult(
+                reference_clip="reference.mkv",
+                comparison_clip="encode_a.mkv",
+                frame_offset=2,
+                time_offset_seconds=0.08,
+                correlation_score=0.9,
+                algorithm="cross_correlation",
+                source="computed",
+            ),
+            AlignmentResult(
+                reference_clip="reference.mkv",
+                comparison_clip="encode_b.mkv",
+                frame_offset=None,
+                time_offset_seconds=None,
+                correlation_score=0.1,
+                algorithm="cross_correlation",
+                source="computed",
+                applied=False,
+                diagnostic="low_confidence",
+            ),
+        ]
+
+    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+
+    output = phase_tasks.run_align_phase(ctx, selected_frames=selected_frames)
+
+    assert output.reference.trim.trim_start_frames == 0
+    assert output.reference.trim.trim_end_frame_inclusive == ctx.reference.probe.num_frames - 1
+    assert [comparison.alignment for comparison in output.comparisons] == [None, None]
+    assert [comparison.trim.trim_start_frames for comparison in output.comparisons] == [0, 0]
+    assert output.selected_frames == [0, 2, 50]
 
 
 def test_run_align_phase_no_comparisons_is_noop(

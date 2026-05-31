@@ -143,8 +143,11 @@ Runtime ownership matrix:
 
 | Runtime concern | Owner |
 | --- | --- |
-| Audio alignment policy, offset cache, FFmpeg/ffprobe audio extraction | `frame_compare.services.alignment` |
-| Alignment-specific VSPreview verification policy | `frame_compare.services.alignment_vspreview` |
+| Audio alignment workflow, offset cache coordination, and precedence policy | `frame_compare.services.alignment` |
+| Audio stream probing, deterministic stream selection, stream overrides, and FFmpeg/channel-aware extraction policy | `frame_compare.services.alignment_audio` |
+| Audio correlation, preprocessing, and refinement estimation | `frame_compare.services.alignment_correlation` |
+| Audio alignment window collection, weak-window rejection, consensus selection, and ambiguity gating | `frame_compare.services.alignment_consensus` |
+| Alignment-specific VSPreview verification display and override policy | `frame_compare.services.alignment_vspreview` |
 | VSPreview availability and launch adapter | `frame_compare.vspreview.adapter` |
 | VapourSynth import, Windows DLL registration, plugin detection/loading helpers | `frame_compare.vs.env` |
 | Doctor check ordering, categories, and diagnostic result mapping | `frame_compare.orchestration.doctor` |
@@ -166,7 +169,9 @@ These files currently carry disproportionate change risk:
 - `src/frame_compare/errors.py`
 - `src/frame_compare/services/report/**`
 - `src/frame_compare/cli/entry.py`
-- `src/frame_compare/services/alignment.py`
+- `src/frame_compare/services/alignment.py` and its focused audio-alignment owners
+  (`alignment_audio.py`, `alignment_correlation.py`, `alignment_consensus.py`,
+  `alignment_vspreview.py`)
 - `src/frame_compare/render/batch/orchestrator.py`
 - `src/frame_compare/orchestration/doctor.py`
 - `src/frame_compare/vspreview/adapter.py`

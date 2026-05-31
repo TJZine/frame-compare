@@ -136,6 +136,12 @@ def _format_signed_frames(value: int) -> str:
     return f"{value:+d}f"
 
 
+def _format_suggested_offset(value: int | None) -> str:
+    if value is None:
+        return "no trusted audio hint"
+    return _format_signed_frames(value)
+
+
 def _read_vspreview_prompt(
     *,
     label: str,
@@ -166,7 +172,7 @@ def _prompt_for_confirmed_offsets(
     *,
     reference: Path,
     comparisons: list[Path],
-    offsets_by_key: dict[str, int],
+    offsets_by_key: dict[str, int | None],
     no_color: bool = False,
 ) -> dict[str, int] | None:
     if not comparisons:
@@ -177,8 +183,7 @@ def _prompt_for_confirmed_offsets(
     confirmed: dict[str, int] = {}
     for comparison in comparisons:
         key = f"{reference.stem}:{comparison.stem}"
-        suggested = int(offsets_by_key.get(key, 0))
-        suggested_offset = _format_signed_frames(suggested)
+        suggested_offset = _format_suggested_offset(offsets_by_key.get(key))
         while True:
             try:
                 raw_value = _read_vspreview_prompt(
@@ -264,7 +269,7 @@ def maybe_launch_alignment_vspreview(
     *,
     reference: Path,
     comparisons: list[Path],
-    offsets_by_key: dict[str, int],
+    offsets_by_key: dict[str, int | None],
     cache_dir: Path,
     config: AlignmentConfig,
     progress: ProgressReporter | None,

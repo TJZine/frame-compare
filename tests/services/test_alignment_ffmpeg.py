@@ -6,8 +6,14 @@ from fractions import Fraction
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 
+from frame_compare.services.alignment_audio import (
+    AudioStreamInfo,
+    select_matching_audio_stream,
+    select_reference_audio_stream,
+)
 from frame_compare.services.alignment_audio import (
     extract_audio as _extract_audio,
 )
@@ -19,10 +25,6 @@ from frame_compare.services.alignment_audio import (
 )
 from frame_compare.services.alignment_audio import (
     probe_fps as _probe_fps,
-)
-from frame_compare.services.alignment_audio import (
-    select_matching_audio_stream,
-    select_reference_audio_stream,
 )
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
@@ -214,6 +216,64 @@ def test_extract_audio_empty_raises(mock_run: MagicMock):
     )
 
 
+@pytest.mark.parametrize(
+    ("channels", "channel_layout", "expected_filter"),
+    [
+        (1, "mono", "pan=mono|c0=c0"),
+        (2, "stereo", "pan=mono|c0=FL"),
+        (6, "5.1", "pan=mono|c0=FC"),
+    ],
+)
+@patch("frame_compare.services.alignment_audio.run_subprocess")
+def test_extract_audio_best_channel_uses_explicit_map_and_deterministic_channel(
+    mock_run: MagicMock,
+    channels: int,
+    channel_layout: str,
+    expected_filter: str,
+) -> None:
+    mock_run.return_value.stdout = np.array([0.1], dtype=np.float32).tobytes()
+    stream = AudioStreamInfo(
+        audio_stream_index=2,
+        absolute_stream_index=7,
+        codec_name="aac",
+        channels=channels,
+        channel_layout=channel_layout,
+        sample_rate=48000,
+        language="eng",
+        is_default=True,
+        is_original=False,
+        is_commentary=False,
+    )
+
+    audio = _extract_audio(
+        Path("test.mkv"),
+        8000,
+        audio_stream_index=2,
+        channel_strategy="best_channel",
+        stream=stream,
+    )
+
+    assert audio.tolist() == pytest.approx([0.1])
+    mock_run.assert_called_once_with(
+        [
+            "ffmpeg",
+            "-i",
+            "test.mkv",
+            "-map",
+            "0:a:2",
+            "-vn",
+            "-af",
+            expected_filter,
+            "-ar",
+            "8000",
+            "-f",
+            "f32le",
+            "-",
+        ],
+        timeout_seconds=120.0,
+    )
+
+
 @patch("frame_compare.services.alignment_audio.run_subprocess")
 def test_extract_audio_invalid_float32_payload_raises(mock_run: MagicMock) -> None:
     mock_run.return_value.stdout = b"abc"
@@ -302,6 +362,65 @@ def test_select_reference_audio_stream_treats_text_commentary_tag_as_commentary(
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")
+def test_select_reference_audio_stream_override_uses_audio_ordinal_not_absolute_index(
+    mock_run: MagicMock,
+) -> None:
+    mock_run.return_value.stdout = b"""
+    {
+      "streams": [
+        {
+          "index": 5,
+          "codec_name": "aac",
+          "channels": 2,
+          "channel_layout": "stereo",
+          "sample_rate": "48000",
+          "disposition": {"default": 1, "original": 0, "comment": 0},
+          "tags": {"language": "eng"}
+        },
+        {
+          "index": 6,
+          "codec_name": "aac",
+          "channels": 6,
+          "channel_layout": "5.1",
+          "sample_rate": "48000",
+          "disposition": {"default": 0, "original": 0, "comment": 0},
+          "tags": {"language": "jpn"}
+        }
+      ]
+    }
+    """
+
+    selected = select_reference_audio_stream(Path("ref.mkv"), stream_override=1)
+
+    assert selected.audio_stream_index == 1
+    assert selected.absolute_stream_index == 6
+
+
+@patch("frame_compare.services.alignment_audio.run_subprocess")
+def test_select_reference_audio_stream_override_rejects_absolute_index(
+    mock_run: MagicMock,
+) -> None:
+    mock_run.return_value.stdout = b"""
+    {
+      "streams": [
+        {
+          "index": 5,
+          "codec_name": "aac",
+          "channels": 2,
+          "channel_layout": "stereo",
+          "sample_rate": "48000",
+          "disposition": {"default": 1, "original": 0, "comment": 0},
+          "tags": {"language": "eng"}
+        }
+      ]
+    }
+    """
+
+    with pytest.raises(AudioAlignmentError, match="available audio stream ordinals: 0"):
+        select_reference_audio_stream(Path("ref.mkv"), stream_override=5)
+
+
+@patch("frame_compare.services.alignment_audio.run_subprocess")
 def test_select_matching_audio_stream_matches_reference_metadata_over_default_flag(
     mock_run: MagicMock,
 ) -> None:
@@ -358,6 +477,67 @@ def test_select_matching_audio_stream_matches_reference_metadata_over_default_fl
     )
 
     assert reference_stream.language == "eng"
+    assert selected.audio_stream_index == 1
+    assert selected.absolute_stream_index == 8
+
+
+@patch("frame_compare.services.alignment_audio.run_subprocess")
+def test_select_matching_audio_stream_override_wins_over_metadata_match(
+    mock_run: MagicMock,
+) -> None:
+    mock_run.side_effect = [
+        MagicMock(
+            stdout=b"""
+            {
+              "streams": [
+                {
+                  "index": 1,
+                  "codec_name": "aac",
+                  "channels": 2,
+                  "channel_layout": "stereo",
+                  "sample_rate": "48000",
+                  "disposition": {"default": 1, "original": 0, "comment": 0},
+                  "tags": {"language": "eng"}
+                }
+              ]
+            }
+            """
+        ),
+        MagicMock(
+            stdout=b"""
+            {
+              "streams": [
+                {
+                  "index": 7,
+                  "codec_name": "aac",
+                  "channels": 2,
+                  "channel_layout": "stereo",
+                  "sample_rate": "48000",
+                  "disposition": {"default": 1, "original": 0, "comment": 0},
+                  "tags": {"language": "eng"}
+                },
+                {
+                  "index": 8,
+                  "codec_name": "aac",
+                  "channels": 6,
+                  "channel_layout": "5.1",
+                  "sample_rate": "48000",
+                  "disposition": {"default": 0, "original": 0, "comment": 1},
+                  "tags": {"language": "jpn"}
+                }
+              ]
+            }
+            """
+        ),
+    ]
+
+    reference_stream = select_reference_audio_stream(Path("reference.mkv"))
+    selected = select_matching_audio_stream(
+        Path("comparison.mkv"),
+        reference_stream=reference_stream,
+        stream_override=1,
+    )
+
     assert selected.audio_stream_index == 1
     assert selected.absolute_stream_index == 8
 
@@ -455,6 +635,58 @@ def test_extract_reference_audio_returns_selected_stream(
         Path("ref.mkv"),
         8000,
         audio_stream_index=0,
+        channel_strategy="mono_downmix",
+        stream=stream,
+    )
+
+
+@patch("frame_compare.services.alignment_audio.extract_audio")
+@patch("frame_compare.services.alignment_audio.run_subprocess")
+def test_extract_reference_audio_applies_override_and_channel_strategy(
+    mock_run: MagicMock,
+    mock_extract_audio: MagicMock,
+) -> None:
+    mock_run.return_value.stdout = b"""
+    {
+      "streams": [
+        {
+          "index": 5,
+          "codec_name": "aac",
+          "channels": 2,
+          "channel_layout": "stereo",
+          "sample_rate": "48000",
+          "disposition": {"default": 1, "original": 0, "comment": 0},
+          "tags": {"language": "eng"}
+        },
+        {
+          "index": 6,
+          "codec_name": "aac",
+          "channels": 6,
+          "channel_layout": "5.1",
+          "sample_rate": "48000",
+          "disposition": {"default": 0, "original": 0, "comment": 0},
+          "tags": {"language": "jpn"}
+        }
+      ]
+    }
+    """
+    mock_extract_audio.return_value = "audio"
+
+    audio, stream = _extract_reference_audio(
+        Path("ref.mkv"),
+        8000,
+        stream_override=1,
+        channel_strategy="best_channel",
+    )
+
+    assert audio == "audio"
+    assert stream.audio_stream_index == 1
+    mock_extract_audio.assert_called_once_with(
+        Path("ref.mkv"),
+        8000,
+        audio_stream_index=1,
+        channel_strategy="best_channel",
+        stream=stream,
     )
 
 
@@ -519,8 +751,12 @@ def test_extract_matching_audio_uses_reference_matched_stream(
     )
 
     assert audio == "audio"
+    called_stream = mock_extract_audio.call_args.kwargs["stream"]
+    assert called_stream.audio_stream_index == 1
     mock_extract_audio.assert_called_once_with(
         Path("comparison.mkv"),
         8000,
         audio_stream_index=1,
+        channel_strategy="mono_downmix",
+        stream=called_stream,
     )
