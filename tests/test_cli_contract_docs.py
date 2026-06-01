@@ -86,6 +86,10 @@ def test_current_cli_contract_documents_slowpics_config_surface_and_defaults() -
         "delete_after_upload",
         "timeout_seconds",
         "max_retries",
+        "copy_url_to_clipboard",
+        "open_in_browser",
+        "create_url_shortcut",
+        "webhook_url",
     ]
     for expected in (
         "`auto_upload = false`",
@@ -93,6 +97,10 @@ def test_current_cli_contract_documents_slowpics_config_surface_and_defaults() -
         "`delete_after_upload = false`",
         "`timeout_seconds = 60.0`",
         "`max_retries = 3`",
+        "`copy_url_to_clipboard = true`",
+        "`open_in_browser = true`",
+        "`create_url_shortcut = true`",
+        "`webhook_url = null`",
         "`delete_after_upload` is local-only",
         "report-safe",
         "`removeAfter`",
@@ -105,7 +113,7 @@ def test_current_cli_contract_documents_slowpics_config_surface_and_defaults() -
     ):
         assert expected in normalized_slowpics_section
     assert (
-        "These five fields are the full current public `[slowpics]` config surface"
+        "These nine fields are the full current public `[slowpics]` config surface"
         in normalized_slowpics_section
     )
 
@@ -117,10 +125,6 @@ def test_current_cli_contract_documents_slowpics_config_surface_and_defaults() -
         "tags",
         "hentai",
         "remove_after",
-        "copy_url",
-        "open_after_upload",
-        "shortcut",
-        "webhook",
     ):
         assert unsupported_field not in SlowpicsConfig.model_fields
 

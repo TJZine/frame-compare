@@ -33,6 +33,7 @@ dependencies = [
     "pillow>=12.2.0",
     "guessit>=3.8.0",
     "anitopy>=2.1.1",
+    "pyperclip>=1.11.0",
 ]
 
 [project.optional-dependencies]

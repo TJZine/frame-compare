@@ -168,9 +168,13 @@ surface.
 - Local uploaded-file deletion errors do not fail an otherwise successful run.
   They are surfaced as run warnings and logs. In `run --json`, warnings remain
   off stdout so the stdout payload stays a single JSON object.
+- The current runtime upload behavior does not execute post-upload side effects
+  for copying the URL, opening slow.pics, creating a shortcut, or posting a
+  webhook. The matching `[slowpics]` fields are currently parsed config surface
+  only; they do not add `run --json` fields or human output.
 - The current public upload surface does not include collection suffix/name,
-  image format or optimization toggles, tags, hentai flag, remote remove-after,
-  copy URL, open slow.pics after upload, shortcut creation, or webhook behavior.
+  image format or optimization toggles, tags, hentai flag, or remote
+  remove-after behavior.
 
 ## CLI Flag To Config Mapping
 
@@ -193,13 +197,17 @@ slow.pics `run` flags exist.
 
 ## Config-Only slow.pics Surface
 
-These five fields are the full current public `[slowpics]` config surface:
+These nine fields are the full current public `[slowpics]` config surface:
 
 - `auto_upload = false`
 - `visibility = "unlisted"`
 - `delete_after_upload = false`
 - `timeout_seconds = 60.0`
 - `max_retries = 3`
+- `copy_url_to_clipboard = true`
+- `open_in_browser = true`
+- `create_url_shortcut = true`
+- `webhook_url = null`
 
 `visibility` accepts only `public` and `unlisted`.
 
@@ -210,9 +218,14 @@ when an embedded-image report is generated successfully. Deletion is skipped for
 non-embedded reports and for warn-only report failures. It does not request
 slow.pics remote removal and does not map to remote `removeAfter`.
 
+`copy_url_to_clipboard`, `open_in_browser`, `create_url_shortcut`, and
+`webhook_url` are approved config fields for slow.pics legacy UX parity. In the
+current implementation slice, they are parsed and defaulted only. They do not add
+new `run` flags, wizard prompts, stdout fields, or post-upload side effects.
+
 There are no current slow.pics config fields for collection suffix/name, image
-format or optimization toggles, tags, hentai flag, remote remove-after, copy URL,
-open-after-upload, shortcut creation, or webhook behavior.
+format or optimization toggles, tags, hentai flag, or remote remove-after
+behavior.
 
 ## Config-Only Screenshot Surface
 

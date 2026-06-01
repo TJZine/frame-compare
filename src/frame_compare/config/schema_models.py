@@ -98,6 +98,10 @@ class SlowpicsConfig(BaseModel):
     delete_after_upload: bool = False
     timeout_seconds: float = Field(default=60.0, ge=10.0)
     max_retries: int = Field(default=3, ge=1, le=10)
+    copy_url_to_clipboard: bool = True
+    open_in_browser: bool = True
+    create_url_shortcut: bool = True
+    webhook_url: str | None = None
 
 
 class TmdbConfig(BaseModel):
