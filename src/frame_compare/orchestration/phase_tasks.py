@@ -41,6 +41,7 @@ from frame_compare.orchestration.types import (
     MetadataPhaseOutput,
     MetadataPrefetch,
     PostReportCleanupPhaseOutput,
+    PostUploadActionResult,
     PublishPhaseOutput,
     RenderArtifacts,
     RenderPhaseOutput,
@@ -61,6 +62,7 @@ from frame_compare.services.report.display import (
 )
 from frame_compare.services.report.entry import generate_report
 from frame_compare.services.report.payload import FrameDetail, ReportData, clip_info_from_state
+from frame_compare.services.slowpics_shortcut import create_slowpics_url_shortcut
 from frame_compare.services.slowpics_upload_plan import (
     SlowpicsUploadClip,
     build_slowpics_upload_plan,
@@ -783,9 +785,16 @@ async def run_publish_phase(
         progress=ctx.reporter,
         upload_plan=upload_plan,
     )
+    post_upload_actions = _slowpics_shortcut_action(
+        ctx=ctx,
+        slowpics_url=result.url,
+        metadata=metadata,
+        upload_title=screenshot_dir.name,
+    )
     return PublishPhaseOutput(
         slowpics_url=result.url,
         uploaded_file_paths=result.uploaded_file_paths,
+        post_upload_actions=post_upload_actions,
     )
 
 
@@ -799,6 +808,48 @@ def _slowpics_upload_clips(ctx: RunContext) -> list[SlowpicsUploadClip]:
         seen_labels.add(clip.label)
         upload_clips.append(SlowpicsUploadClip(label=clip.label, image_name=clip.path.stem))
     return upload_clips
+
+
+def _slowpics_shortcut_action(
+    *,
+    ctx: RunContext,
+    slowpics_url: str,
+    metadata: TmdbMetadata | None,
+    upload_title: str | None,
+) -> tuple[PostUploadActionResult, ...]:
+    if not ctx.config.slowpics.create_url_shortcut:
+        return ()
+
+    result = create_slowpics_url_shortcut(
+        workspace=ctx.workspace,
+        slowpics_url=slowpics_url,
+        metadata_title=metadata.title if metadata is not None else None,
+        upload_title=upload_title,
+    )
+    if result.success:
+        return (
+            PostUploadActionResult(
+                kind="shortcut",
+                success=True,
+                path=result.path,
+                message="slow.pics URL shortcut written",
+            ),
+        )
+
+    if result.warning is not None:
+        log.warning(
+            "slowpics_shortcut_create_failed",
+            path=str(result.path) if result.path is not None else None,
+            warning=result.warning,
+        )
+    return (
+        PostUploadActionResult(
+            kind="shortcut",
+            success=False,
+            path=result.path,
+            warning=result.warning,
+        ),
+    )
 
 
 def run_report_phase(

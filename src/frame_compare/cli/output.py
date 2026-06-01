@@ -350,7 +350,16 @@ def _merged_warnings(
     warnings: list[str],
     actions: PostUploadActionPresentationResults,
 ) -> list[str]:
-    action_warnings = [action.warning for action in actions if action.warning is not None]
-    if not action_warnings:
-        return warnings
-    return [*warnings, *action_warnings]
+    merged: list[str] = []
+    seen: set[str] = set()
+    for warning in warnings:
+        if warning in seen:
+            continue
+        seen.add(warning)
+        merged.append(warning)
+    for action in actions:
+        if action.warning is None or action.warning in seen:
+            continue
+        seen.add(action.warning)
+        merged.append(action.warning)
+    return merged

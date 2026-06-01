@@ -181,6 +181,13 @@ def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
         return PublishPhaseOutput(
             slowpics_url="https://slow.pics/c/example",
             uploaded_file_paths=(uploaded,),
+            post_upload_actions=(
+                PostUploadActionResult(
+                    kind="shortcut",
+                    success=False,
+                    warning="slow.pics shortcut: could not choose a safe output directory",
+                ),
+            ),
         )
 
     def fake_unlink(self: Path) -> None:
@@ -213,7 +220,10 @@ def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
 
     assert result.success is True
     assert result.slowpics_url == "https://slow.pics/c/example"
-    assert result.warnings == [f"cleanup: failed to delete uploaded screenshot {uploaded}: locked"]
+    assert result.warnings == [
+        f"cleanup: failed to delete uploaded screenshot {uploaded}: locked",
+        "slow.pics shortcut: could not choose a safe output directory",
+    ]
 
 
 def test_execute_run_report_warning_blocks_delete_after_upload_cleanup(

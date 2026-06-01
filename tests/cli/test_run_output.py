@@ -6,6 +6,7 @@ from pytest import MonkeyPatch
 
 from frame_compare.cli.entry import app
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
+from frame_compare.orchestration.types import PostUploadActionResult
 
 from .cli_helpers import (
     MINIMAL_CONFIG,
@@ -303,6 +304,35 @@ def test_run_result_summary_merges_interactive_slowpics_action_warnings(
     assert "Warnings" in output
     assert "• slow.pics clipboard: failed to copy URL: clipboard unavailable" in output
     assert "• slow.pics browser: failed to open URL: no browser accepted the request" in output
+
+
+def test_run_result_summary_prints_duplicate_post_upload_warning_once(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    warning = "slow.pics shortcut: failed to write URL shortcut"
+
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        return RunResult(
+            success=True,
+            slowpics_url="https://slow.pics/c/example",
+            post_upload_actions=(
+                PostUploadActionResult(
+                    kind="shortcut",
+                    success=False,
+                    warning=warning,
+                ),
+            ),
+            warnings=[warning],
+        )
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace([])
+
+    assert result.exit_code == 0
+    output = _normalize_cli_output(result.stdout)
+    assert "Warnings" in output
+    assert output.count(warning) == 1
 
 
 def test_run_quiet_suppresses_at_a_glance_but_keeps_minimal_summary(

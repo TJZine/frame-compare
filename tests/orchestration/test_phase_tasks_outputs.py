@@ -21,6 +21,7 @@ from frame_compare.orchestration.phases import execute_phases
 from frame_compare.orchestration.types import (
     ExecutionState,
     MetadataPrefetch,
+    PostUploadActionResult,
     RenderArtifacts,
     RunArtifacts,
     RunRequest,
@@ -480,6 +481,18 @@ async def test_run_publish_phase_sets_url_from_publish_result(
     ]
     assert output.slowpics_url == "https://slow.pics/c/collateral"
     assert output.uploaded_file_paths == (ref_10, enc_10, ref_20, enc_20)
+    shortcut_path = tmp_path / "Collateral.url"
+    assert output.post_upload_actions == (
+        PostUploadActionResult(
+            kind="shortcut",
+            success=True,
+            path=shortcut_path,
+            message="slow.pics URL shortcut written",
+        ),
+    )
+    assert shortcut_path.read_text(encoding="utf-8") == (
+        "[InternetShortcut]\nURL=https://slow.pics/c/collateral\n"
+    )
 
 
 async def test_run_publish_phase_rejects_duplicate_clip_labels_at_translation_seam(
@@ -505,6 +518,49 @@ async def test_run_publish_phase_rejects_duplicate_clip_labels_at_translation_se
                 render=render,
                 selected_frames=[10],
             )
+
+
+async def test_run_publish_phase_skips_shortcut_when_config_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.config.slowpics.create_url_shortcut = False
+    screenshot_dir = tmp_path / "screenshots"
+    screenshot_dir.mkdir()
+    screenshot = screenshot_dir / "10 - reference.png"
+    screenshot.write_bytes(b"\x89PNG\r\n\x1a\n")
+    render = RenderArtifacts(
+        screenshots_by_label={"Reference": [screenshot]},
+        screenshot_dir=screenshot_dir,
+    )
+
+    async def _fake_publish_to_slowpics(**kwargs: object) -> PublishResult:
+        upload_plan = cast(Any, kwargs["upload_plan"])
+        return PublishResult(
+            url="https://slow.pics/c/example",
+            screenshot_count=len(upload_plan.file_paths),
+            upload_duration_seconds=0.1,
+            uploaded_file_paths=tuple(upload_plan.file_paths),
+        )
+
+    def _unexpected_shortcut(**_kwargs: object) -> object:
+        raise AssertionError("shortcut should not be created when disabled")
+
+    monkeypatch.setattr(phase_tasks, "publish_to_slowpics", _fake_publish_to_slowpics)
+    monkeypatch.setattr(phase_tasks, "create_slowpics_url_shortcut", _unexpected_shortcut)
+
+    async with httpx.AsyncClient() as client:
+        output = await phase_tasks.run_publish_phase(
+            ctx,
+            client=client,
+            metadata=None,
+            render=render,
+            selected_frames=[10],
+        )
+
+    assert output.slowpics_url == "https://slow.pics/c/example"
+    assert output.uploaded_file_paths == (screenshot,)
+    assert output.post_upload_actions == ()
 
 
 def test_post_report_cleanup_skips_non_embedded_reports(tmp_path: Path) -> None:
