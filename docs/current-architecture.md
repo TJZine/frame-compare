@@ -136,6 +136,8 @@ Keep these integrations at their current owners:
   `frame_compare.services.tmdb_resolution` owns resolver policy and
   `frame_compare.services.tmdb_lookup` owns low-level TMDB HTTP and response mapping
 - publishing: `frame_compare.services.publishers`
+- slow.pics post-upload shortcut/webhook policy and action aggregation:
+  `frame_compare.services.slowpics_post_upload`
 - browser auto-open for generated reports, slow.pics browser opening, clipboard
   copy, report-confirmed upload prompting, and report/slow.pics browser
   precedence rules:
@@ -155,12 +157,13 @@ upload-plan seam for current render artifacts, row/image names, and upload
 ordering; the final upload path uses that plan and does not scan the screenshot
 directory for membership. After a successful upload, orchestration carries the
 exact uploaded planned local file paths into `post_report_cleanup` and carries
-typed post-upload action results plus warnings from shortcut and webhook owners
-into the final `RunResult`. Orchestration does not own clipboard, browser,
-shortcut, or webhook side-effect policy. That cleanup phase owns report-safe
-local deletion policy for `slowpics.delete_after_upload` and never reconstructs
-deletion membership from directories, labels, render artifacts, or shortcut
-outputs after upload. The `.url` shortcut is not cleanup membership.
+typed post-upload action results plus warnings returned by
+`frame_compare.services.slowpics_post_upload` into the final `RunResult`.
+Orchestration does not own clipboard, browser, shortcut, or webhook side-effect
+policy. That cleanup phase owns report-safe local deletion policy for
+`slowpics.delete_after_upload` and never reconstructs deletion membership from
+directories, labels, render artifacts, or shortcut outputs after upload. The
+`.url` shortcut is not cleanup membership.
 
 Report-confirmed slow.pics upload uses a CLI-owned confirmation callback seam
 carried on `RunDependencies.confirm_slowpics_upload`. Orchestration owns the

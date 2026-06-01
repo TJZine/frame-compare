@@ -20,6 +20,7 @@ from frame_compare.config.schema import ConfigSchema, OverlayMode, ToneCurve, To
 from frame_compare.orchestration.context import ClipState
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
 from frame_compare.services.types import TmdbMetadata
+from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.loader import VSLoader
@@ -99,8 +100,6 @@ def _empty_selection_details_by_source_frame() -> SelectionDetailsByFrame:
     return {}
 
 
-type PostUploadActionKind = Literal["clipboard", "browser", "shortcut", "webhook"]
-
 type SlowpicsUploadConfirmationDecision = Literal["confirmed", "declined"]
 type SlowpicsUploadConfirmationStatus = Literal[
     "not_applicable",
@@ -108,6 +107,7 @@ type SlowpicsUploadConfirmationStatus = Literal[
     "declined",
     "report_unavailable",
 ]
+type PostUploadActionResults = tuple[PostUploadActionResult, ...]
 
 
 @dataclass(frozen=True)
@@ -124,21 +124,6 @@ class SlowpicsUploadConfirmationFn(Protocol):
         self,
         request: SlowpicsUploadConfirmationRequest,
     ) -> SlowpicsUploadConfirmationDecision: ...
-
-
-@dataclass(frozen=True)
-class PostUploadActionResult:
-    """Internal result for an optional post-upload side effect."""
-
-    kind: PostUploadActionKind
-    success: bool
-    detail: str | None = None
-    path: Path | None = None
-    message: str | None = None
-    warning: str | None = None
-
-
-type PostUploadActionResults = tuple[PostUploadActionResult, ...]
 
 
 @dataclass(frozen=True)

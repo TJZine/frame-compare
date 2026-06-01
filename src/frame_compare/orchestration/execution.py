@@ -121,7 +121,9 @@ def _apply_phase_output(*, ctx: RunContext, state: ExecutionState, output: Phase
             if phase_output.selection_breakdown is not None:
                 ctx.selection_breakdown = phase_output.selection_breakdown
             if phase_output.selection_details_by_source_frame is not None:
-                ctx.selection_details_by_source_frame = phase_output.selection_details_by_source_frame
+                ctx.selection_details_by_source_frame = (
+                    phase_output.selection_details_by_source_frame
+                )
         case RenderPhaseOutput() as phase_output:
             state.artifacts.render = phase_output.render
             state.warnings.extend(phase_output.render.warnings)
@@ -321,6 +323,16 @@ def build_phases_after_align(
         warnings=state.warnings,
         warn_only=True,
     )
+    confirm_slowpics_upload_phase = _create_timed_phase(
+        "confirm_slowpics_upload",
+        "confirm_slowpics_upload",
+        None,
+        _run_confirm_slowpics_upload_with_current_artifacts,
+        state=state,
+        clock=clock,
+        phase_timings=state.phase_timings,
+        warnings=state.warnings,
+    )
     post_report_cleanup_phase = _create_timed_phase(
         "post_report_cleanup",
         "post_report_cleanup",
@@ -341,27 +353,8 @@ def build_phases_after_align(
 
     return [
         *render_metadata_dovi_phases,
-        _create_timed_phase(
-            "report",
-            "report",
-            lambda config: not config.report.enable,
-            _run_report_with_current_artifacts,
-            state=state,
-            clock=clock,
-            phase_timings=state.phase_timings,
-            warnings=state.warnings,
-            warn_only=True,
-        ),
-        _create_timed_phase(
-            "confirm_slowpics_upload",
-            "confirm_slowpics_upload",
-            None,
-            _run_confirm_slowpics_upload_with_current_artifacts,
-            state=state,
-            clock=clock,
-            phase_timings=state.phase_timings,
-            warnings=state.warnings,
-        ),
+        report_phase,
+        confirm_slowpics_upload_phase,
         publish_phase,
         post_report_cleanup_phase,
     ]

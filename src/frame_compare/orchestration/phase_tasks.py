@@ -44,7 +44,6 @@ from frame_compare.orchestration.types import (
     MetadataPhaseOutput,
     MetadataPrefetch,
     PostReportCleanupPhaseOutput,
-    PostUploadActionResult,
     PublishPhaseOutput,
     RenderArtifacts,
     RenderPhaseOutput,
@@ -66,13 +65,19 @@ from frame_compare.services.report.display import (
     frame_detail_for_source_frame,
 )
 from frame_compare.services.report.entry import generate_report
-from frame_compare.services.report.payload import FrameDetail, ReportData, clip_info_from_state
-from frame_compare.services.slowpics_shortcut import create_slowpics_url_shortcut
+from frame_compare.services.report.payload import (
+    FrameDetail,
+    ReportData,
+    clip_info_from_state,
+)
+from frame_compare.services.slowpics_post_upload import (
+    SlowpicsPostUploadRequest,
+    run_slowpics_post_upload_actions,
+)
 from frame_compare.services.slowpics_upload_plan import (
     SlowpicsUploadClip,
     build_slowpics_upload_plan,
 )
-from frame_compare.services.slowpics_webhook import deliver_slowpics_webhook
 from frame_compare.services.types import AlignmentConfig, MetadataConfig, TmdbMetadata
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 from frame_compare.utils.types import WorkspacePaths
@@ -795,17 +800,19 @@ async def run_publish_phase(
         progress=ctx.reporter,
         upload_plan=upload_plan,
     )
-    shortcut_actions = _slowpics_shortcut_action(
-        ctx=ctx,
-        slowpics_url=result.url,
-        metadata=metadata,
-        upload_title=screenshot_dir.name,
+    post_upload_actions = await run_slowpics_post_upload_actions(
+        SlowpicsPostUploadRequest(
+            workspace=ctx.workspace,
+            config=ctx.config.slowpics,
+            slowpics_url=result.url,
+            metadata_title=metadata.title if metadata is not None else None,
+            upload_title=screenshot_dir.name,
+        )
     )
-    webhook_actions = await _slowpics_webhook_action(ctx=ctx, slowpics_url=result.url)
     return PublishPhaseOutput(
         slowpics_url=result.url,
         uploaded_file_paths=result.uploaded_file_paths,
-        post_upload_actions=(*shortcut_actions, *webhook_actions),
+        post_upload_actions=post_upload_actions,
     )
 
 
@@ -839,9 +846,7 @@ def run_confirm_slowpics_upload_phase(
             ),
         )
 
-    decision = confirm_slowpics_upload(
-        SlowpicsUploadConfirmationRequest(report_path=report_path)
-    )
+    decision = confirm_slowpics_upload(SlowpicsUploadConfirmationRequest(report_path=report_path))
     return ConfirmSlowpicsUploadPhaseOutput(status=decision)
 
 
@@ -855,82 +860,6 @@ def _slowpics_upload_clips(ctx: RunContext) -> list[SlowpicsUploadClip]:
         seen_labels.add(clip.label)
         upload_clips.append(SlowpicsUploadClip(label=clip.label, image_name=clip.path.stem))
     return upload_clips
-
-
-def _slowpics_shortcut_action(
-    *,
-    ctx: RunContext,
-    slowpics_url: str,
-    metadata: TmdbMetadata | None,
-    upload_title: str | None,
-) -> tuple[PostUploadActionResult, ...]:
-    if not ctx.config.slowpics.create_url_shortcut:
-        return ()
-
-    result = create_slowpics_url_shortcut(
-        workspace=ctx.workspace,
-        slowpics_url=slowpics_url,
-        metadata_title=metadata.title if metadata is not None else None,
-        upload_title=upload_title,
-    )
-    if result.success:
-        return (
-            PostUploadActionResult(
-                kind="shortcut",
-                success=True,
-                path=result.path,
-                message="slow.pics URL shortcut written",
-            ),
-        )
-
-    if result.warning is not None:
-        log.warning(
-            "slowpics_shortcut_create_failed",
-            path=str(result.path) if result.path is not None else None,
-            warning=result.warning,
-        )
-    return (
-        PostUploadActionResult(
-            kind="shortcut",
-            success=False,
-            path=result.path,
-            warning=result.warning,
-        ),
-    )
-
-
-async def _slowpics_webhook_action(
-    *,
-    ctx: RunContext,
-    slowpics_url: str,
-) -> tuple[PostUploadActionResult, ...]:
-    webhook_url = ctx.config.slowpics.webhook_url
-    if webhook_url is None:
-        return ()
-
-    result = await deliver_slowpics_webhook(
-        webhook_url=webhook_url,
-        slowpics_url=slowpics_url,
-    )
-    if result.success:
-        return (
-            PostUploadActionResult(
-                kind="webhook",
-                success=True,
-                detail=result.detail,
-                message="slow.pics webhook delivered",
-            ),
-        )
-
-    if result.warning is not None:
-        log.warning("slowpics_webhook_delivery_failed", warning=result.warning)
-    return (
-        PostUploadActionResult(
-            kind="webhook",
-            success=False,
-            warning=result.warning,
-        ),
-    )
 
 
 def run_report_phase(
