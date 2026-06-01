@@ -352,7 +352,9 @@ def _dolby_vision_metadata_from_preserved_props(
         if normalized == "dolbyvisionrpu":
             rpu_present = True
             continue
-        if not any(token in normalized for token in ("dolby", "dovi", "rpu", "l1", "l2", "l5", "l6")):
+        if not any(
+            token in normalized for token in ("dolby", "dovi", "rpu", "l1", "l2", "l5", "l6")
+        ):
             continue
         if "l2" in normalized and "target" in normalized:
             if l2_target_nits is None:
@@ -388,7 +390,11 @@ def _dolby_vision_metadata_from_preserved_props(
         if "block" in normalized and "index" in normalized and block_index is None:
             block_index = _coerce_int(value)
             continue
-        if "block" in normalized and ("total" in normalized or "count" in normalized) and block_total is None:
+        if (
+            "block" in normalized
+            and ("total" in normalized or "count" in normalized)
+            and block_total is None
+        ):
             block_total = _coerce_int(value)
             continue
         if (
@@ -548,15 +554,17 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
     ]
     for comparison, result in zip(ctx.comparisons, results, strict=True):
         alignment = None
-        if result.applied and not has_non_applied_result:
-            if result.frame_offset is None:
+        if result.applied:
+            frame_offset = result.frame_offset
+            if frame_offset is None:
                 raise AudioAlignmentError("Applied alignment result is missing frame offset.")
-            alignment = ClipAlignmentState(
-                reference_stem=Path(result.reference_clip).stem,
-                comparison_stem=Path(result.comparison_clip).stem,
-                relative_offset_frames=result.frame_offset,
-                source=result.source,
-            )
+            if not has_non_applied_result:
+                alignment = ClipAlignmentState(
+                    reference_stem=Path(result.reference_clip).stem,
+                    comparison_stem=Path(result.comparison_clip).stem,
+                    relative_offset_frames=frame_offset,
+                    source=result.source,
+                )
         updated_comparisons.append(
             replace(
                 comparison,
@@ -582,12 +590,14 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
         )
         for comp, comp_trim in zip(updated_comparisons, comp_trims, strict=True)
     ]
-    normalized_selected_frames, used_fallback_frame_plan = _normalize_selected_frames_for_trimmed_domain(
-        selected_frames=selected_frames,
-        reference=reference,
-        comparisons=comparisons,
-        requested_count=ctx.config.analysis.frame_count,
-        seed=ctx.config.analysis.random_seed,
+    normalized_selected_frames, used_fallback_frame_plan = (
+        _normalize_selected_frames_for_trimmed_domain(
+            selected_frames=selected_frames,
+            reference=reference,
+            comparisons=comparisons,
+            requested_count=ctx.config.analysis.frame_count,
+            seed=ctx.config.analysis.random_seed,
+        )
     )
     selection_breakdown: SelectionBreakdown | None = None
     selection_details_by_source_frame: SelectionDetailsByFrame | None = None
@@ -869,7 +879,9 @@ def _normalize_selected_frames_for_trimmed_domain(
     if target_count <= 0:
         return [], False
     if len(normalized_frames) < target_count:
-        return create_frame_plan(num_frames=common_length, count=target_count, seed=seed).frames, True
+        return create_frame_plan(
+            num_frames=common_length, count=target_count, seed=seed
+        ).frames, True
     return normalized_frames[:target_count], False
 
 

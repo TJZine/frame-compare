@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import html
 import json
-from collections.abc import Mapping
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from frame_compare.services.report.payload import REPORT_VERSION
@@ -59,7 +58,7 @@ def _render_frame_options(
         f'<option value="{_esc_attr(i)}" '
         f'data-category-key="{_esc_attr(category_filter_keys[frame["category"]])}" '
         f'data-category="{_esc_attr(frame["category"])}">'
-        f'{_esc_text(frame["label"])}</option>'
+        f"{_esc_text(frame['label'])}</option>"
         for i, frame in enumerate(frames)
     )
 
@@ -146,7 +145,7 @@ def _render_clip_metadata(clips: list[ReportClipPayload]) -> str:
             f"""                    <li class="rv-clip-meta-item" data-clip-index="{_esc_attr(i)}">
                         <div class="rv-clip-meta-heading">
                             <span>{_esc_text(clip["label"])}</span>
-                            <span>{'HDR' if clip["hdr"] else 'SDR'}</span>
+                            <span>{"HDR" if clip["hdr"] else "SDR"}</span>
                         </div>
                         <dl class="rv-metadata-list rv-metadata-list--compact">
                             <div><dt>Name</dt><dd>{_esc_text(clip["name"])}</dd></div>
@@ -434,14 +433,9 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
     category_filter_keys = _category_filter_keys(frames)
     frame_options = _render_frame_options(frames, category_filter_keys)
     category_filter_controls = _render_category_filters(frames, category_filter_keys)
-    raw_data: dict[str, object] = dict(data)
-    default_selection = raw_data.get("default_selection")
-    left_selection: object | None = None
-    right_selection: object | None = None
-    if isinstance(default_selection, Mapping):
-        selection_mapping = cast(Mapping[str, object], default_selection)
-        left_selection = selection_mapping.get("left_clip_index")
-        right_selection = selection_mapping.get("right_clip_index")
+    default_selection = data["default_selection"]
+    left_selection = default_selection.get("left_clip_index")
+    right_selection = default_selection.get("right_clip_index")
     left_clip_index = _clip_index_or_default(
         left_selection,
         clip_count=len(clips),

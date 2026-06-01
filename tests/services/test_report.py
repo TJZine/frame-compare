@@ -475,7 +475,9 @@ def test_build_report_payload_accepts_frame_display_metadata(
         ],
     )
 
-    payload = build_report_payload(data, ReportConfig(output_dir=str(tmp_path)), report_dir=tmp_path)
+    payload = build_report_payload(
+        data, ReportConfig(output_dir=str(tmp_path)), report_dir=tmp_path
+    )
 
     assert payload["frames"][0]["label"] == "Opening comparison"
     assert payload["frames"][0]["detail"] == "Scene cut"
@@ -522,6 +524,24 @@ def test_frame_detail_for_source_frame_uses_breakdown_label_when_detail_absent()
     assert detail == FrameDetail(
         label="Bright",
         detail="Source frame 42",
+        category="quantile_bright",
+    )
+
+
+def test_frame_detail_for_source_frame_uses_breakdown_label_when_detail_label_absent() -> None:
+    detail = frame_detail_for_source_frame(
+        source_frame=42,
+        selection_detail=SourceFrameSelectionDetail(
+            label=None,
+            timecode="00:00:01.750",
+            notes=None,
+        ),
+        selection_label="Bright",
+    )
+
+    assert detail == FrameDetail(
+        label="Bright",
+        detail="Source frame 42 (00:00:01.750)",
         category="quantile_bright",
     )
 
@@ -583,7 +603,9 @@ def test_report_id_ignores_generated_at_source_paths_and_image_sources(
 
     config = ReportConfig(output_dir=str(tmp_path), embed_images=False)
     monkeypatch.setattr("frame_compare.services.report.payload.datetime", FirstClock)
-    first_payload = build_report_payload(stable_source_data, config, report_dir=tmp_path / "report-a")
+    first_payload = build_report_payload(
+        stable_source_data, config, report_dir=tmp_path / "report-a"
+    )
 
     clips_with_other_source_paths = [
         replace(clip, path=tmp_path / "different-root" / f"{clip.name}.mkv")

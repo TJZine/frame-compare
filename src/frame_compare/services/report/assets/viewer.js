@@ -24,7 +24,9 @@ const ReportViewer = {
         activeCategoryKey: ALL_CATEGORY_FILTER_KEY,
         categoryFilterKeys: new Map(),
         preloadedSrcs: new Set(),
-        helpRestoreFocus: null
+        helpRestoreFocus: null,
+        rawAlignX: null,
+        rawAlignY: null
     },
 
     init() {
@@ -43,13 +45,14 @@ const ReportViewer = {
             this.state.categoryFilterKeys = this.buildCategoryFilterKeys();
             this.applyDefaultSelection();
             this.restorePersistedState();
-            this.bindEvents();
+            this.bindHelpEvents();
 
             if (!this.hasRenderableData()) {
                 this.renderEmptyState(this.emptyStateMessage());
                 return;
             }
 
+            this.bindInteractionEvents();
             this.setMode(this.state.mode); // Apply default mode UI state
             this.preloadImages();
         } catch (e) {
@@ -320,13 +323,12 @@ const ReportViewer = {
         }
     },
 
-    bindEvents() {
+    bindInteractionEvents() {
         this.bindModeEvents();
         this.bindFrameNavigationEvents();
         this.bindClipSelectionEvents();
         this.bindViewportEvents();
         this.bindAlignmentEvents();
-        this.bindHelpEvents();
         this.bindFilmstripEvents();
         this.bindKeyboardEvents();
     },
@@ -434,10 +436,22 @@ const ReportViewer = {
             this.setAlignmentPreset(e.target.value);
         });
         this.dom.alignX.addEventListener('input', (e) => {
-            this.setManualAlignment(parseFloat(e.target.value), this.state.alignY);
+            this.setRawAlignmentInput('x', e.target.value);
         });
         this.dom.alignY.addEventListener('input', (e) => {
-            this.setManualAlignment(this.state.alignX, parseFloat(e.target.value));
+            this.setRawAlignmentInput('y', e.target.value);
+        });
+        this.dom.alignX.addEventListener('blur', () => this.commitRawAlignmentInput('x'));
+        this.dom.alignY.addEventListener('blur', () => this.commitRawAlignmentInput('y'));
+        this.dom.alignX.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter') return;
+            e.preventDefault();
+            this.commitRawAlignmentInput('x');
+        });
+        this.dom.alignY.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter') return;
+            e.preventDefault();
+            this.commitRawAlignmentInput('y');
         });
         this.dom.btnAlignmentReset.addEventListener('click', () => this.setAlignmentPreset('none'));
     },
@@ -1104,6 +1118,7 @@ const ReportViewer = {
         };
         const offset = presets[preset];
         if (!offset) return;
+        this.clearRawAlignmentInputs();
         this.state.alignX = offset[0];
         this.state.alignY = offset[1];
     },
@@ -1121,6 +1136,7 @@ const ReportViewer = {
     },
 
     setManualAlignment(x, y) {
+        this.clearRawAlignmentInputs();
         this.state.alignmentPreset = 'custom';
         this.state.alignX = this.numberOrDefault(x, 0);
         this.state.alignY = this.numberOrDefault(y, 0);
@@ -1128,12 +1144,55 @@ const ReportViewer = {
         this.persistViewportState();
     },
 
+    clearRawAlignmentInputs() {
+        this.state.rawAlignX = null;
+        this.state.rawAlignY = null;
+    },
+
+    rawAlignmentField(axis) {
+        return axis === 'x' ? 'rawAlignX' : 'rawAlignY';
+    },
+
+    rawAlignmentElement(axis) {
+        return axis === 'x' ? this.dom.alignX : this.dom.alignY;
+    },
+
+    setRawAlignmentInput(axis, rawValue) {
+        this.state[this.rawAlignmentField(axis)] = rawValue;
+    },
+
+    isValidAlignmentNumber(rawValue) {
+        const normalized = String(rawValue).trim();
+        return /^-?(?:\d+\.?\d*|\.\d+)$/.test(normalized)
+            && Number.isFinite(Number(normalized));
+    },
+
+    commitRawAlignmentInput(axis) {
+        const field = this.rawAlignmentField(axis);
+        const rawValue = this.state[field];
+        if (rawValue === null) return;
+
+        if (!this.isValidAlignmentNumber(rawValue)) {
+            this.state[field] = null;
+            this.applyAlignment();
+            return;
+        }
+
+        const committedValue = Number(String(rawValue).trim());
+        this.state[field] = null;
+        this.setManualAlignment(
+            axis === 'x' ? committedValue : this.state.alignX,
+            axis === 'y' ? committedValue : this.state.alignY,
+        );
+        this.rawAlignmentElement(axis).value = committedValue;
+    },
+
     applyAlignment() {
         this.dom.rightLayer.style.setProperty('--align-x', `${this.state.alignX}px`);
         this.dom.rightLayer.style.setProperty('--align-y', `${this.state.alignY}px`);
         this.dom.alignmentPreset.value = this.state.alignmentPreset;
-        this.dom.alignX.value = this.state.alignX;
-        this.dom.alignY.value = this.state.alignY;
+        this.dom.alignX.value = this.state.rawAlignX ?? this.state.alignX;
+        this.dom.alignY.value = this.state.rawAlignY ?? this.state.alignY;
     },
 
     toggleFullscreen() {

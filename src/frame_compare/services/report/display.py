@@ -39,7 +39,11 @@ def frame_detail_for_source_frame(
     selection_label: str | None,
 ) -> FrameDetail:
     """Build report display metadata for a selected source-domain frame."""
-    label = selection_detail.label if selection_detail is not None else selection_label
+    label = (
+        selection_detail.label
+        if selection_detail is not None and selection_detail.label is not None
+        else selection_label
+    )
     detail_text = f"Source frame {source_frame}"
     if selection_detail is not None and selection_detail.timecode is not None:
         detail_text = f"{detail_text} ({selection_detail.timecode})"

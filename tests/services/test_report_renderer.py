@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 
@@ -129,25 +128,6 @@ def _script_payload(html: str) -> ReportPayload:
     start = html.index(marker) + len(marker)
     end = html.index("</script>", start)
     return json.loads(html[start:end])
-
-
-def _js_method_body(js: str, method_name: str) -> str:
-    match = re.search(rf"\n    {re.escape(method_name)}\([^)]*\) \{{", js)
-    assert match is not None, f"{method_name}() method is missing"
-
-    body_start = match.end()
-    depth = 1
-    index = body_start
-    while index < len(js) and depth > 0:
-        char = js[index]
-        if char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-        index += 1
-
-    assert depth == 0, f"{method_name}() method body is incomplete"
-    return js[body_start : index - 1]
 
 
 def test_build_html_renders_only_safe_slowpics_links(report_payload: ReportPayload) -> None:
@@ -283,7 +263,10 @@ def test_build_html_renders_empty_viewer_hooks_for_empty_payload(
 
     html = build_html(payload)
 
-    assert '<div id="viewer-status" class="rv-status" role="status" aria-live="polite" hidden></div>' in html
+    assert (
+        '<div id="viewer-status" class="rv-status" role="status" aria-live="polite" hidden></div>'
+        in html
+    )
     assert '<div class="rv-empty-state" data-empty-state hidden></div>' in html
     assert '<div class="rv-metadata-empty">No clips in payload.</div>' in html
     assert "<dd data-current-frame-label>No frame selected</dd>" in html
@@ -313,8 +296,7 @@ def test_build_html_uses_internal_category_keys_for_reserved_category_text(
     assert 'data-category-key="cat-0" data-category="__all__">__all__</span></button>' in html
     assert 'value="0" data-category-key="cat-0" data-category="__all__">Frame 10</option>' in html
     assert (
-        'class="rv-filmstrip-item" data-idx="0" data-category-key="cat-0" '
-        'data-category="__all__"'
+        'class="rv-filmstrip-item" data-idx="0" data-category-key="cat-0" data-category="__all__"'
     ) in html
     assert (
         '<span class="rv-category-badge rv-filmstrip-category" '
@@ -392,8 +374,14 @@ def test_build_html_renders_keyboard_help_accessibility_hooks(
         'aria-modal="true" aria-labelledby="help-modal-title" tabindex="-1"'
     ) in html
     assert 'id="help-modal-title" class="rv-modal-title">Keyboard Shortcuts</div>' in html
-    assert '<div class="rv-shortcut-row"><span>Reset Viewport</span><span class="rv-key">R</span></div>' in html
-    assert '<div class="rv-shortcut-row"><span>Open Help</span><span class="rv-key">?</span></div>' in html
+    assert (
+        '<div class="rv-shortcut-row"><span>Reset Viewport</span><span class="rv-key">R</span></div>'
+        in html
+    )
+    assert (
+        '<div class="rv-shortcut-row"><span>Open Help</span><span class="rv-key">?</span></div>'
+        in html
+    )
     assert (
         '<div class="rv-shortcut-row"><span>Close Help / Exit Fullscreen</span>'
         '<span class="rv-key">Esc</span></div>'
@@ -499,11 +487,16 @@ def test_viewer_assets_group_event_binding_by_interaction_area() -> None:
         "bindKeyboardEvents",
     ]
 
-    bind_events_body = _js_method_body(js, "bindEvents")
-
     for method_name in expected_binding_methods:
         assert f"\n    {method_name}() {{" in js
-        assert f"this.{method_name}();" in bind_events_body
+        assert f"this.{method_name}();" in js
+
+    assert "bindInteractionEvents()" in js
+    assert "this.bindHelpEvents();" in js
+    assert "this.bindInteractionEvents();" in js
+    assert js.index("this.bindHelpEvents();") < js.index("if (!this.hasRenderableData())")
+    assert js.index("if (!this.hasRenderableData())") < js.index("this.bindInteractionEvents();")
+    assert "renderEmptyState(this.emptyStateMessage());\n                return;" in js
 
 
 def test_viewer_assets_manage_help_focus_and_escape_semantics() -> None:
@@ -563,8 +556,18 @@ def test_viewer_assets_wire_pan_wheel_zoom_and_alignment_hooks() -> None:
     assert "this.dom.stage.classList.add('is-panning');" in js
     assert "this.dom.canvas.style.setProperty('--pan-x', `${this.state.panX}px`);" in js
     assert "alignmentPreset: 'none'" in js
+    assert "rawAlignX: null" in js
+    assert "rawAlignY: null" in js
     assert "setAlignmentPreset(preset)" in js
     assert "setManualAlignment(x, y)" in js
+    assert "setRawAlignmentInput('x', e.target.value);" in js
+    assert "setRawAlignmentInput('y', e.target.value);" in js
+    assert "this.setManualAlignment(parseFloat(e.target.value), this.state.alignY);" not in js
+    assert "this.setManualAlignment(this.state.alignX, parseFloat(e.target.value));" not in js
+    assert "commitRawAlignmentInput('x')" in js
+    assert "commitRawAlignmentInput('y')" in js
+    assert "this.dom.alignX.value = this.state.rawAlignX ?? this.state.alignX;" in js
+    assert "this.dom.alignY.value = this.state.rawAlignY ?? this.state.alignY;" in js
     assert "this.dom.rightLayer.style.setProperty('--align-x', `${this.state.alignX}px`);" in js
 
 
@@ -625,8 +628,8 @@ def test_viewer_assets_wire_metadata_and_error_empty_state_hooks() -> None:
 
     assert ".rv-metadata-bar" in css
     assert ".rv-disclosure[open]" in css
-    assert ".rv-status[data-tone=\"error\"]" in css
-    assert ".rv-status[data-tone=\"warning\"]" in css
+    assert '.rv-status[data-tone="error"]' in css
+    assert '.rv-status[data-tone="warning"]' in css
     assert ".rv-empty-state[hidden] { display: none; }" in css
 
     assert "readPayload()" in js
@@ -650,7 +653,10 @@ def test_viewer_assets_preload_adjacent_visible_frames_and_active_clips() -> Non
     assert "this.preloadImages();" in js
     assert "preloadFrameIndexes()" in js
     assert "if (position > 0) indexes.push(visibleIndexes[position - 1]);" in js
-    assert "if (position < visibleIndexes.length - 1) indexes.push(visibleIndexes[position + 1]);" in js
+    assert (
+        "if (position < visibleIndexes.length - 1) indexes.push(visibleIndexes[position + 1]);"
+        in js
+    )
     assert "preloadClipIndexes()" in js
     assert "indexes.add(this.state.activeClipIdx);" in js
     assert "indexes.add(this.state.leftClipIdx);" in js

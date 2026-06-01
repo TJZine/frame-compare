@@ -81,7 +81,9 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
 def test_run_align_phase_reselects_trimmed_overlap_when_fallback_plan_would_drop_labels(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1", num_frames=220)
+    comparison = _clip(
+        tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1", num_frames=220
+    )
     ctx = _context(tmp_path, comparisons=[comparison])
     ctx.config.analysis = ctx.config.analysis.model_copy(
         update={"selection_mode": SelectionMode.QUANTILE, "frame_count": 4}
@@ -119,7 +121,9 @@ def test_run_align_phase_reselects_trimmed_overlap_when_fallback_plan_would_drop
 
     expected_selection = phase_tasks.select_frames(
         metrics=FrameMetrics(
-            luminance=ctx.analysis_metrics.luminance[overlap_start : overlap_start + overlap_length],
+            luminance=ctx.analysis_metrics.luminance[
+                overlap_start : overlap_start + overlap_length
+            ],
             motion=ctx.analysis_metrics.motion[overlap_start : overlap_start + overlap_length],
             metadata=replace(ctx.analysis_metrics.metadata, frame_count=overlap_length),
         ),
@@ -216,6 +220,45 @@ def test_run_align_phase_degrades_whole_set_when_any_result_is_not_applied(
     assert "low confidence" in normalized_warning
     assert "unapplied" in normalized_warning
     assert "untrimmed" in normalized_warning
+
+
+def test_run_align_phase_rejects_applied_result_without_frame_offset_even_when_mixed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comp_a = _clip(tmp_path / "comparison_videos" / "encode_a.mkv", label="Encode A")
+    comp_b = _clip(tmp_path / "comparison_videos" / "encode_b.mkv", label="Encode B")
+    ctx = _context(tmp_path, comparisons=[comp_a, comp_b])
+
+    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+        return [
+            AlignmentResult(
+                reference_clip="reference.mkv",
+                comparison_clip="encode_a.mkv",
+                frame_offset=None,
+                time_offset_seconds=0.08,
+                correlation_score=0.9,
+                algorithm="cross_correlation",
+                source="computed",
+            ),
+            AlignmentResult(
+                reference_clip="reference.mkv",
+                comparison_clip="encode_b.mkv",
+                frame_offset=None,
+                time_offset_seconds=None,
+                correlation_score=0.1,
+                algorithm="cross_correlation",
+                source="computed",
+                applied=False,
+                diagnostic="low_confidence",
+            ),
+        ]
+
+    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+
+    with pytest.raises(
+        AudioAlignmentError, match="Applied alignment result is missing frame offset."
+    ):
+        phase_tasks.run_align_phase(ctx, selected_frames=[0, 2, 50, 99])
 
 
 def test_run_align_phase_no_comparisons_is_noop(
