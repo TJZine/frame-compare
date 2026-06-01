@@ -335,6 +335,96 @@ def test_run_result_summary_prints_duplicate_post_upload_warning_once(
     assert output.count(warning) == 1
 
 
+def test_run_result_summary_prints_enabled_shortcut_and_webhook_outcomes(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    shortcut_path = Path("workspace") / "Example.url"
+
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        return RunResult(
+            success=True,
+            slowpics_url="https://slow.pics/c/example",
+            post_upload_actions=(
+                PostUploadActionResult(
+                    kind="shortcut",
+                    success=True,
+                    path=shortcut_path,
+                    message="slow.pics URL shortcut written",
+                ),
+                PostUploadActionResult(
+                    kind="webhook",
+                    success=True,
+                    detail="HTTP 204",
+                    message="slow.pics webhook delivered",
+                ),
+            ),
+        )
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace([])
+
+    assert result.exit_code == 0
+    output = _normalize_cli_output(result.stdout)
+    assert "shortcut" in output
+    assert str(shortcut_path) in output
+    assert "webhook" in output
+    assert "HTTP 204" in output
+    assert "disabled" not in output
+    assert "skipped" not in output
+
+
+def test_run_json_omits_post_upload_action_fields(monkeypatch: MonkeyPatch) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        return RunResult(
+            success=True,
+            slowpics_url="https://slow.pics/c/example",
+            post_upload_actions=(
+                PostUploadActionResult(
+                    kind="shortcut",
+                    success=True,
+                    path=Path("Example.url"),
+                    message="slow.pics URL shortcut written",
+                ),
+                PostUploadActionResult(
+                    kind="webhook",
+                    success=False,
+                    warning="slow.pics webhook: delivery failed after 3 attempts",
+                ),
+            ),
+            warnings=["slow.pics webhook: delivery failed after 3 attempts"],
+        )
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = _write_minimal_config(root)
+
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--root",
+                str(root),
+                "--config",
+                str(config_path.relative_to(root)),
+                "--json",
+            ],
+            color=False,
+            terminal_width=200,
+            env={"NO_COLOR": "1", "TERM": "dumb"},
+        )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["slowpics_url"] == "https://slow.pics/c/example"
+    assert "post_upload_actions" not in payload
+    assert "shortcut" not in payload
+    assert "webhook" not in payload
+    assert result.stderr == ""
+
+
 def test_run_quiet_suppresses_at_a_glance_but_keeps_minimal_summary(
     monkeypatch: MonkeyPatch,
 ) -> None:

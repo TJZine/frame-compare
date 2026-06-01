@@ -22,6 +22,8 @@ documents that promise elsewhere.
     gating, and command-level CLI behavior.
   - `tests/cli/test_run_slowpics_options.py` for the slow.pics `run` option
     surface.
+  - `tests/cli/test_run_output.py` for human output, JSON stdout cleanliness,
+    and slow.pics post-upload presentation behavior.
   - `tests/config/test_schema.py` for config schema/defaults, including the
     exact slow.pics field set.
   - `tests/config/test_overrides.py` for CLI override mapping semantics.
@@ -38,6 +40,7 @@ Update this document in the same pass when changing:
 - CLI flag to config mapping or persistence rules
 - JSON output schema for `run --json` or `doctor --json`
 - browser/report-opening rules
+- slow.pics post-upload side-effect behavior or warning placement
 
 ## Command Surface
 
@@ -128,6 +131,8 @@ exists.
 
 - HTML report generation is owned by `frame_compare.services.report`.
 - Browser auto-open for a generated report is owned by `frame_compare.cli.entry`.
+- Clipboard copy and slow.pics browser opening are also CLI-owned interactive
+  post-run actions.
 - The CLI only attempts to open a report when all of these are true:
   - the run succeeded and produced `report_path`
   - `--json` was not used
@@ -138,6 +143,10 @@ exists.
 
 There is currently no dedicated `run` flag for `report.auto_open`; it is a config-only
 surface.
+
+If an enabled slow.pics browser open is attempted for the same successful run,
+report auto-open is suppressed for that run. If slow.pics browser open is not
+attempted, the existing report auto-open rules above still apply.
 
 ### slow.pics Upload Behavior
 
@@ -168,13 +177,63 @@ surface.
 - Local uploaded-file deletion errors do not fail an otherwise successful run.
   They are surfaced as run warnings and logs. In `run --json`, warnings remain
   off stdout so the stdout payload stays a single JSON object.
-- The current runtime upload behavior does not execute post-upload side effects
-  for copying the URL, opening slow.pics, creating a shortcut, or posting a
-  webhook. The matching `[slowpics]` fields are currently parsed config surface
-  only; they do not add `run --json` fields or human output.
+- After a successful slow.pics upload, enabled post-upload actions run according
+  to their owners:
+  - `copy_url_to_clipboard` copies the slow.pics URL through the CLI only when
+    `--json` was not used, `--quiet` was not used, and stdout is attached to a
+    TTY.
+  - `open_in_browser` opens the slow.pics URL through the CLI under the same
+    interactive-only conditions as clipboard copy.
+  - `create_url_shortcut` writes a deterministic `.url` shortcut after upload
+    whenever configured, including `--json` and `--quiet` runs.
+  - `webhook_url` posts the slow.pics URL to the configured webhook after upload
+    whenever configured, including `--json` and `--quiet` runs.
+- Post-upload side-effect failures do not fail an otherwise successful run.
+  They are warning-only. In `run --json`, warnings remain off stdout and no
+  post-upload action fields are added to the JSON payload.
+- Human output shows enabled successful post-upload action outcomes and warnings.
+  Disabled or skipped post-upload actions are not listed by default.
 - The current public upload surface does not include collection suffix/name,
   image format or optimization toggles, tags, hentai flag, or remote
   remove-after behavior.
+
+### slow.pics Shortcut Policy
+
+- Shortcut creation is owned by `frame_compare.services.slowpics_shortcut`.
+- The shortcut is a Windows InternetShortcut-compatible `.url` file containing
+  the uploaded slow.pics comparison URL.
+- The shortcut output directory is deterministic:
+  - the current run folder when run folders are enabled
+  - otherwise the safe common parent of the resolved screenshots and generated
+    output directories
+- Without a run folder, the common parent must be under the resolved workspace
+  root and must not be a drive root, filesystem anchor, UNC/share root, or the
+  user home directory. Paths on different drives or anchors have no safe common
+  parent.
+- The filename is derived from current run metadata or upload title, with a
+  stable fallback from the slow.pics URL key.
+- Repeated writes overwrite the same deterministic shortcut path.
+- Shortcut files are not members of `slowpics.delete_after_upload` cleanup.
+- Shortcut write or path-selection failures are warning-only.
+
+### slow.pics Webhook Policy
+
+- Webhook delivery is owned by `frame_compare.services.slowpics_webhook`.
+- The payload is exactly `{"content":"<slowpics_url>"}` serialized as JSON.
+- The configured webhook URL must be a strict external HTTPS endpoint:
+  non-HTTPS URLs, localhost names, loopback, private, link-local, multicast,
+  reserved, unspecified, and otherwise non-public IP targets are rejected.
+- Hostname targets are rejected when DNS resolution fails, returns no addresses,
+  includes an unparseable address, or includes any disallowed address.
+- Delivery prevents validation-to-connect DNS rebinding by connecting to a
+  prevalidated pinned IP address while preserving TLS certificate verification
+  and SNI for the original hostname.
+- Delivery uses no redirects, a fixed 10 second timeout, and 3 attempts.
+- The webhook request path is isolated from the slow.pics upload client: it does
+  not reuse slow.pics cookies, headers, client state, redirect policy, proxy
+  settings, or environment trust.
+- Webhook URL details are redacted from warnings and logs.
+- Delivery failures are warning-only and do not write to JSON stdout.
 
 ## CLI Flag To Config Mapping
 
@@ -219,9 +278,17 @@ non-embedded reports and for warn-only report failures. It does not request
 slow.pics remote removal and does not map to remote `removeAfter`.
 
 `copy_url_to_clipboard`, `open_in_browser`, `create_url_shortcut`, and
-`webhook_url` are approved config fields for slow.pics legacy UX parity. In the
-current implementation slice, they are parsed and defaulted only. They do not add
-new `run` flags, wizard prompts, stdout fields, or post-upload side effects.
+`webhook_url` are implemented config fields for slow.pics legacy UX parity. They
+do not add new `run` flags, wizard prompts, or `run --json` stdout fields.
+
+`copy_url_to_clipboard` and `open_in_browser` are interactive CLI-owned actions:
+they run only after a successful upload in human non-quiet TTY runs. Clipboard
+and slow.pics browser failures are warning-only. If slow.pics browser opening is
+attempted, generated-report auto-open is suppressed for that run.
+
+`create_url_shortcut` and `webhook_url` run after successful upload whenever
+configured, including `--json` and `--quiet`. Their warning-only failures remain
+off JSON stdout and do not fail the run.
 
 There are no current slow.pics config fields for collection suffix/name, image
 format or optimization toggles, tags, hentai flag, or remote remove-after

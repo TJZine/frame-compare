@@ -117,7 +117,10 @@ External runtime boundaries:
 - VapourSynth runtime and plugins
 - TMDB HTTP API
 - slow.pics HTTP API
+- outbound slow.pics post-upload webhooks
 - default browser auto-open for generated reports
+- default browser open for slow.pics URLs in interactive CLI runs
+- clipboard integration for slow.pics URLs in interactive CLI runs
 - Docker build/test runtime
 - Windows PowerShell installer and updater scripts
 
@@ -127,7 +130,12 @@ Keep these integrations at their current owners:
   `frame_compare.services.tmdb_resolution` owns resolver policy and
   `frame_compare.services.tmdb_lookup` owns low-level TMDB HTTP and response mapping
 - publishing: `frame_compare.services.publishers`
-- browser auto-open for generated reports: `frame_compare.cli.entry`
+- browser auto-open for generated reports, slow.pics browser opening, clipboard
+  copy, and report-open precedence after interactive slow.pics URL opening:
+  `frame_compare.cli.entry`
+- slow.pics URL shortcut creation: `frame_compare.services.slowpics_shortcut`
+- isolated slow.pics post-upload webhook delivery:
+  `frame_compare.services.slowpics_webhook`
 - HTML report generation: `frame_compare.services.report`
 - VS loading and HDR/tonemap logic: `frame_compare.vs.*`
 - packaging/install/update flow: `tools/windows_portable/**`
@@ -139,10 +147,34 @@ requests. `frame_compare.services.slowpics_upload_plan` owns the explicit
 upload-plan seam for current render artifacts, row/image names, and upload
 ordering; the final upload path uses that plan and does not scan the screenshot
 directory for membership. After a successful upload, orchestration carries the
-exact uploaded planned local file paths into `post_report_cleanup`. That cleanup
-phase owns report-safe local deletion policy for `slowpics.delete_after_upload`
-and never reconstructs deletion membership from directories, labels, or render
-artifacts after upload.
+exact uploaded planned local file paths into `post_report_cleanup` and carries
+typed post-upload action results plus warnings from shortcut and webhook owners
+into the final `RunResult`. Orchestration does not own clipboard, browser,
+shortcut, or webhook side-effect policy. That cleanup phase owns report-safe
+local deletion policy for `slowpics.delete_after_upload` and never reconstructs
+deletion membership from directories, labels, render artifacts, or shortcut
+outputs after upload. The `.url` shortcut is not cleanup membership.
+
+`frame_compare.services.slowpics_shortcut` owns deterministic `.url` output for
+successful slow.pics uploads. It selects the current run folder when present, or
+the safe common parent of the resolved screenshots/generated directories when
+run folders are disabled. The service rejects unsafe parent choices outside the
+workspace root, filesystem anchors, drive/share roots, and the user home
+directory; filename selection is deterministic and repeated writes overwrite the
+same path.
+
+`frame_compare.services.slowpics_webhook` owns isolated outbound webhook
+delivery for successful slow.pics uploads. It validates strict external HTTPS
+targets, rejects disallowed IP literals and DNS answers, connects to a
+prevalidated pinned address while preserving TLS verification for the original
+hostname, sends the JSON `content` payload without redirects, and does not reuse
+slow.pics client cookies, headers, proxy/environment trust, or transport state.
+Webhook failures are warning-only and redact configured URL details.
+
+`frame_compare.cli.entry` and its run-command helper own interactive-only
+slow.pics URL copy/browser actions and the precedence rule between slow.pics
+browser opening and generated-report auto-open. Those actions run only for
+human, non-quiet, TTY stdout runs; JSON stdout stays a single object.
 
 `frame_compare.services.report` owns the static offline report payload and viewer
 assets. The generated viewer exposes slider, overlay, diff, and pair-based blink

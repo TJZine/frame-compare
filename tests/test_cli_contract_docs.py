@@ -104,6 +104,9 @@ def test_current_cli_contract_documents_slowpics_config_surface_and_defaults() -
         "`delete_after_upload` is local-only",
         "report-safe",
         "`removeAfter`",
+        "`copy_url_to_clipboard` and `open_in_browser` are interactive CLI-owned actions",
+        "`create_url_shortcut` and `webhook_url` run after successful upload",
+        "including `--json` and `--quiet`",
     ):
         assert expected in slowpics_section
     for expected in (
@@ -116,6 +119,8 @@ def test_current_cli_contract_documents_slowpics_config_surface_and_defaults() -
         "These nine fields are the full current public `[slowpics]` config surface"
         in normalized_slowpics_section
     )
+    assert "parsed and defaulted only" not in normalized_slowpics_section
+    assert "warning-only failures remain off JSON stdout" in normalized_slowpics_section
 
     for unsupported_field in (
         "collection_suffix",
@@ -179,6 +184,90 @@ def test_current_cli_contract_documents_slowpics_json_shape() -> None:
     assert "`slowpics_url`" in run_section
     assert "only machine-readable slow.pics result field" in normalized_run_section
     assert "No copy/open/shortcut/webhook result fields" in normalized_run_section
+    for forbidden_field in (
+        "clipboard_result",
+        "browser_result",
+        "shortcut_path",
+        "webhook_status",
+    ):
+        assert forbidden_field not in run_section
+
+
+def test_current_cli_contract_documents_slowpics_post_upload_behavior() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
+    upload_heading = "### slow.pics Upload Behavior"
+    shortcut_heading = "### slow.pics Shortcut Policy"
+    webhook_heading = "### slow.pics Webhook Policy"
+    mapping_heading = "## CLI Flag To Config Mapping"
+
+    upload_section = cli_contract.split(upload_heading, maxsplit=1)[1].split(
+        shortcut_heading,
+        maxsplit=1,
+    )[0]
+    shortcut_section = cli_contract.split(shortcut_heading, maxsplit=1)[1].split(
+        webhook_heading,
+        maxsplit=1,
+    )[0]
+    webhook_section = cli_contract.split(webhook_heading, maxsplit=1)[1].split(
+        mapping_heading,
+        maxsplit=1,
+    )[0]
+    normalized_upload = " ".join(upload_section.split())
+    normalized_shortcut = " ".join(shortcut_section.split())
+    normalized_webhook = " ".join(webhook_section.split())
+
+    for expected in (
+        "`copy_url_to_clipboard` copies the slow.pics URL through the CLI",
+        "`open_in_browser` opens the slow.pics URL through the CLI",
+        "`create_url_shortcut` writes a deterministic `.url` shortcut",
+        "`webhook_url` posts the slow.pics URL to the configured webhook",
+        "including `--json` and `--quiet` runs",
+        "no post-upload action fields are added to the JSON payload",
+        "Disabled or skipped post-upload actions are not listed by default",
+    ):
+        assert expected in normalized_upload
+
+    for expected in (
+        "`frame_compare.services.slowpics_shortcut`",
+        "Repeated writes overwrite the same deterministic shortcut path",
+        "Shortcut files are not members of `slowpics.delete_after_upload` cleanup",
+    ):
+        assert expected in normalized_shortcut
+
+    for expected in (
+        "`frame_compare.services.slowpics_webhook`",
+        "payload is exactly `{\"content\":\"<slowpics_url>\"}`",
+        "strict external HTTPS endpoint",
+        "prevalidated pinned IP address",
+        "does not reuse slow.pics cookies, headers, client state",
+        "fixed 10 second timeout, and 3 attempts",
+        "redacted from warnings and logs",
+        "Delivery failures are warning-only",
+    ):
+        assert expected in normalized_webhook
+
+
+def test_current_cli_contract_documents_slowpics_browser_report_precedence() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
+    report_heading = "### Report Auto-Open Ownership"
+    upload_heading = "### slow.pics Upload Behavior"
+
+    report_section = cli_contract.split(report_heading, maxsplit=1)[1].split(
+        upload_heading,
+        maxsplit=1,
+    )[0]
+    normalized_report_section = " ".join(report_section.split())
+
+    for expected in (
+        "Clipboard copy and slow.pics browser opening are also CLI-owned",
+        "If an enabled slow.pics browser open is attempted",
+        "report auto-open is suppressed for that run",
+        "If slow.pics browser open is not attempted",
+        "existing report auto-open rules above still apply",
+    ):
+        assert expected in normalized_report_section
 
 
 def test_current_architecture_documents_slowpics_service_flow_and_upload_plan() -> None:
@@ -198,8 +287,58 @@ def test_current_architecture_documents_slowpics_service_flow_and_upload_plan() 
         "`post_report_cleanup`",
         "exact uploaded planned local file paths",
         "report-safe local deletion policy",
+        "typed post-upload action results plus warnings",
+        "does not own clipboard, browser, shortcut, or webhook side-effect policy",
+        "The `.url` shortcut is not cleanup membership",
     ):
         assert expected in normalized_architecture
+
+
+def test_current_architecture_documents_slowpics_post_upload_owner_seams() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    architecture = (repo_root / "docs" / "current-architecture.md").read_text(
+        encoding="utf-8"
+    )
+    normalized_architecture = " ".join(architecture.split())
+
+    for expected in (
+        "`frame_compare.services.slowpics_shortcut` owns deterministic `.url` output",
+        "safe common parent of the resolved screenshots/generated directories",
+        "`frame_compare.services.slowpics_webhook` owns isolated outbound webhook",
+        "prevalidated pinned address while preserving TLS verification",
+        "does not reuse slow.pics client cookies, headers",
+        "`frame_compare.cli.entry` and its run-command helper own interactive-only",
+        "precedence rule between slow.pics browser opening and generated-report auto-open",
+        "JSON stdout stays a single object",
+    ):
+        assert expected in normalized_architecture
+
+
+def test_report_confirmed_slowpics_upload_starter_spec_is_historical_only() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    starter_spec = (
+        repo_root
+        / "docs"
+        / "plans"
+        / "2026-06-01-report-confirmed-slowpics-upload-starter-spec.md"
+    )
+    text = starter_spec.read_text(encoding="utf-8")
+    normalized_text = " ".join(text.split())
+
+    assert text.startswith("Status: Historical")
+    assert "Status: Active" not in text
+    for expected in (
+        "This is not an active implementation plan",
+        "This current workstream does not implement report UI controls",
+        "report-owned upload services",
+        "local services",
+        "background processes",
+        "custom protocol handlers",
+        "browser extensions",
+        "Do not add report UI upload controls",
+        "Do not add report-owned upload services",
+    ):
+        assert expected in normalized_text
 
 
 def test_current_cli_contract_documents_screenshot_config_only_fields() -> None:
