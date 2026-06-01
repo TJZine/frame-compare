@@ -72,6 +72,26 @@ def test_run_json_outputs_pinned_success_schema_and_stdout_is_pure_json(
     }
 
 
+def test_run_json_success_omits_warnings_from_stdout(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        return RunResult(
+            success=True,
+            warnings=["cleanup: failed to delete uploaded screenshot shots/a.png: locked"],
+        )
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace(["--json"])
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    payload = json.loads(result.stdout)
+    assert "warnings" not in payload
+    assert "cleanup:" not in result.stdout
+
+
 def test_run_json_rejects_interactive_alignment_from_config_before_runner(
     monkeypatch: MonkeyPatch,
 ) -> None:

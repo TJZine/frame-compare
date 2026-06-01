@@ -2,33 +2,50 @@
 
 import asyncio
 import random
-import warnings
+from collections.abc import Awaitable, Callable
 from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from time import monotonic
-from typing import BinaryIO
+from typing import cast
+from urllib.parse import unquote
+from uuid import uuid4
 
 import httpx
 import structlog
 
+from frame_compare import __version__
 from frame_compare.config.schema import SlowpicsConfig, Visibility
 from frame_compare.services.errors import (
     SlowpicsError,
     SlowpicsRateLimitedError,
     SlowpicsUnavailableError,
 )
+from frame_compare.services.slowpics_upload_plan import SlowpicsUploadPlan
 from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.progress_protocol import ProgressReporter
 
 log = structlog.get_logger()
 
-SLOWPICS_UPLOAD_URL = "https://slow.pics/api/comparison"
+SLOWPICS_BASE_URL = "https://slow.pics"
+SLOWPICS_COMPARISON_URL = f"{SLOWPICS_BASE_URL}/comparison"
+SLOWPICS_METADATA_UPLOAD_URL = f"{SLOWPICS_BASE_URL}/upload/comparison"
+SLOWPICS_IMAGE_UPLOAD_URL_TEMPLATE = f"{SLOWPICS_BASE_URL}/upload/image/{{image_uuid}}"
 SLOWPICS_RETRY_BASE_DELAY_SECONDS = 1.0
 SLOWPICS_RETRY_MAX_DELAY_SECONDS = 30.0
 SLOWPICS_RETRY_JITTER_FACTOR = 0.1
+SLOWPICS_BROWSER_ID_SENTINEL = "eb80db10-97a7-11ee-8f6f-bfa69501bb51"
+SLOWPICS_USER_AGENT = f"frame-compare/{__version__} slowpics-direct"
+SLOWPICS_UPLOAD_HEADERS = {
+    "Origin": SLOWPICS_BASE_URL,
+    "Referer": SLOWPICS_COMPARISON_URL,
+    "User-Agent": SLOWPICS_USER_AGENT,
+}
+SLOWPICS_NAVIGATION_HEADERS = {"User-Agent": SLOWPICS_USER_AGENT}
+
+type _MultipartTextFields = list[tuple[str, tuple[None, str]]]
 
 
 @dataclass(frozen=True)
@@ -38,20 +55,17 @@ class PublishResult:
     url: str
     screenshot_count: int
     upload_duration_seconds: float
+    uploaded_file_paths: tuple[Path, ...]
 
 
-@dataclass(frozen=True)
-class _SlowpicsUploadRequest:
-    """Prepared slow.pics multipart payload for httpx.
+@dataclass(frozen=True, slots=True)
+class _SlowpicsMetadataResponse:
+    """Validated slow.pics metadata response needed for image uploads."""
 
-    Notes:
-        This uses `data=` + `files=` to send multipart form data. Image paths are
-        persisted here, and file handles are opened per-attempt during upload so retry
-        logic can stream fresh handles without retaining image bytes in memory.
-    """
-
-    data: dict[str, str]
-    file_paths: list[Path]
+    key: str
+    first_comparison_key: str | None
+    collection_uuid: str
+    image_uuids: tuple[tuple[str, ...], ...]
 
 
 class SlowpicsPublisher:
@@ -61,15 +75,11 @@ class SlowpicsPublisher:
         self.config = config
         self._client = client
 
-    async def upload(
-        self,
-        files: list[Path],
-        title: str | None = None,
-    ) -> str:
+    async def upload(self, upload_plan: SlowpicsUploadPlan, title: str | None = None) -> str:
         """Upload screenshots to slow.pics.
 
         Args:
-            files: List of PNG files to upload.
+            upload_plan: Planned rows/images to upload.
             title: Optional title for the comparison.
 
         Returns:
@@ -80,11 +90,12 @@ class SlowpicsPublisher:
             SlowpicsRateLimitedError: If rate limited after retries.
             SlowpicsUnavailableError: If service is down after retries.
         """
+        files = upload_plan.file_paths
         if not files:
             raise SlowpicsError("No PNG files found to upload")
+        _validate_upload_files(files)
 
         visibility = self.config.visibility
-        request = self._prepare_upload(files, title, visibility)
         log.info(
             "slowpics_upload_start",
             file_count=len(files),
@@ -93,43 +104,34 @@ class SlowpicsPublisher:
         )
 
         try:
-            response = await self._upload_with_retry(
-                self._client,
-                request,
-                self.config.max_retries,
-                self.config.timeout_seconds,
+            await self._get_comparison_page_with_retry()
+            xsrf_token = _xsrf_token_from_cookies(self._client)
+            browser_id = _browser_id_from_cookies(self._client)
+            metadata_response = await self._create_metadata_with_retry(
+                upload_plan=upload_plan,
+                title=title,
+                visibility=visibility,
+                xsrf_token=xsrf_token,
+                browser_id=browser_id,
             )
-
-            try:
-                result = response.json()
-                url = str(result["url"])
-            except (ValueError, KeyError) as e:
-                raise SlowpicsError(f"Invalid response from slow.pics: {e}") from e
-
-            log.info("slowpics_upload_complete", url=url)
+            await self._upload_planned_images_with_retry(
+                upload_plan=upload_plan,
+                metadata_response=metadata_response,
+                xsrf_token=xsrf_token,
+                browser_id=browser_id,
+            )
+            url_key = metadata_response.first_comparison_key or metadata_response.key
+            url = f"{SLOWPICS_BASE_URL}/c/{url_key}"
+            log.info("slowpics_upload_complete")
             return url
 
-        except Exception as e:
+        except Exception as exc:
             if isinstance(
-                e,
+                exc,
                 SlowpicsError | SlowpicsRateLimitedError | SlowpicsUnavailableError,
             ):
                 raise
-            raise SlowpicsError(f"Upload failed: {e}") from e
-
-    def _prepare_upload(
-        self, files: list[Path], title: str | None, visibility: Visibility
-    ) -> _SlowpicsUploadRequest:
-        """Prepare the slow.pics multipart payload for upload."""
-        form_data: dict[str, str] = {
-            "collectionName": title or "Comparison",
-            "optimize": "true",
-            "lossy": "true",
-        }
-
-        form_data["public"] = "true" if visibility is Visibility.PUBLIC else "false"
-
-        return _SlowpicsUploadRequest(file_paths=list(files), data=form_data)
+            raise SlowpicsError("Upload failed for slow.pics") from None
 
     async def _sleep_with_backoff(
         self,
@@ -177,27 +179,6 @@ class SlowpicsPublisher:
     def _has_retry_budget(self, attempt: int, max_retries: int) -> bool:
         return attempt <= max_retries
 
-    async def _post_upload_attempt(
-        self,
-        client: httpx.AsyncClient,
-        request: _SlowpicsUploadRequest,
-        timeout_seconds: float,
-    ) -> httpx.Response:
-        # Stream files per-attempt to avoid keeping all PNG bytes in memory and
-        # to ensure retries always read fresh file handles.
-        with ExitStack() as stack:
-            multipart_files: list[tuple[str, tuple[str, BinaryIO, str]]] = []
-            for file_path in request.file_paths:
-                file_handle = stack.enter_context(file_path.open("rb"))
-                multipart_files.append(("images", (file_path.name, file_handle, "image/png")))
-
-            return await client.post(
-                SLOWPICS_UPLOAD_URL,
-                timeout=timeout_seconds,
-                data=request.data,
-                files=multipart_files,
-            )
-
     async def _handle_retryable_status(
         self, response: httpx.Response, attempt: int, max_retries: int
     ) -> None:
@@ -228,13 +209,13 @@ class SlowpicsPublisher:
             )
             return
 
-        raise SlowpicsError(f"Upload failed with status {response.status_code}: {response.text}")
+        raise SlowpicsError(f"Upload failed with status {response.status_code}")
 
     async def _handle_timeout(
         self, error: httpx.TimeoutException, attempt: int, max_retries: int
     ) -> None:
         if not self._has_retry_budget(attempt, max_retries):
-            raise SlowpicsError(f"Upload timed out after {max_retries} retries") from error
+            raise SlowpicsError(f"Upload timed out after {max_retries} retries") from None
 
         sleep_time = await self._sleep_with_backoff(attempt)
         log.warning(
@@ -247,40 +228,166 @@ class SlowpicsPublisher:
         self, error: httpx.RequestError, attempt: int, max_retries: int
     ) -> None:
         if not self._has_retry_budget(attempt, max_retries):
-            raise SlowpicsUnavailableError() from error
+            raise SlowpicsUnavailableError() from None
 
         sleep_time = await self._sleep_with_backoff(attempt)
         log.warning(
             "slowpics_connection_error",
-            error=str(error),
             attempt=attempt,
             retry_in=sleep_time,
         )
 
-    async def _upload_with_retry(
+    async def _get_comparison_page_with_retry(self) -> None:
+        response = await self._request_with_retry(
+            step="comparison_page",
+            request=lambda: self._client.get(
+                SLOWPICS_COMPARISON_URL,
+                timeout=self.config.timeout_seconds,
+                headers=SLOWPICS_NAVIGATION_HEADERS,
+            ),
+            max_retries=self.config.max_retries,
+            retry_timeout=True,
+            retry_request_error=True,
+        )
+        if not response.is_success:
+            raise SlowpicsError(f"Comparison page failed with status {response.status_code}")
+
+    async def _create_metadata_with_retry(
         self,
-        client: httpx.AsyncClient,
-        request: _SlowpicsUploadRequest,
-        max_retries: int,
-        timeout_seconds: float,
+        *,
+        upload_plan: SlowpicsUploadPlan,
+        title: str | None,
+        visibility: Visibility,
+        xsrf_token: str,
+        browser_id: str,
+    ) -> _SlowpicsMetadataResponse:
+        response = await self._request_with_retry(
+            step="metadata",
+            request=lambda: self._client.post(
+                SLOWPICS_METADATA_UPLOAD_URL,
+                timeout=self.config.timeout_seconds,
+                headers=_slowpics_upload_headers(xsrf_token),
+                files=_metadata_multipart_fields(
+                    upload_plan=upload_plan,
+                    title=title,
+                    visibility=visibility,
+                    browser_id=browser_id,
+                ),
+            ),
+            max_retries=self.config.max_retries,
+            retry_timeout=False,
+            retry_request_error=False,
+        )
+        if not response.is_success:
+            raise SlowpicsError(f"Metadata upload failed with status {response.status_code}")
+        return _parse_metadata_response(response, upload_plan)
+
+    async def _upload_planned_images_with_retry(
+        self,
+        *,
+        upload_plan: SlowpicsUploadPlan,
+        metadata_response: _SlowpicsMetadataResponse,
+        xsrf_token: str,
+        browser_id: str,
+    ) -> None:
+        for row, image_uuids in zip(upload_plan.rows, metadata_response.image_uuids, strict=True):
+            for image, image_uuid in zip(row.images, image_uuids, strict=True):
+                await self._upload_image_with_retry(
+                    image_path=image.screenshot_path,
+                    image_uuid=image_uuid,
+                    collection_uuid=metadata_response.collection_uuid,
+                    xsrf_token=xsrf_token,
+                    browser_id=browser_id,
+                )
+
+    async def _upload_image_with_retry(
+        self,
+        *,
+        image_path: Path,
+        image_uuid: str,
+        collection_uuid: str,
+        xsrf_token: str,
+        browser_id: str,
+    ) -> None:
+        response = await self._request_with_retry(
+            step="image",
+            request=lambda: self._post_image_attempt(
+                image_path=image_path,
+                image_uuid=image_uuid,
+                collection_uuid=collection_uuid,
+                xsrf_token=xsrf_token,
+                browser_id=browser_id,
+            ),
+            max_retries=self.config.max_retries,
+            retry_timeout=True,
+            retry_request_error=True,
+        )
+        if response.status_code == 200:
+            return
+        if (
+            response.status_code == 400
+            and response.headers.get("X-Error-Message") == "IMAGE_IS_COMPLETE"
+        ):
+            return
+        raise SlowpicsError(f"Image upload failed with status {response.status_code}")
+
+    async def _post_image_attempt(
+        self,
+        *,
+        image_path: Path,
+        image_uuid: str,
+        collection_uuid: str,
+        xsrf_token: str,
+        browser_id: str,
     ) -> httpx.Response:
-        """Upload with exponential backoff."""
+        with ExitStack() as stack:
+            file_handle = stack.enter_context(image_path.open("rb"))
+            return await self._client.post(
+                SLOWPICS_IMAGE_UPLOAD_URL_TEMPLATE.format(image_uuid=image_uuid),
+                timeout=self.config.timeout_seconds,
+                headers=_slowpics_upload_headers(xsrf_token),
+                data={
+                    "collectionUuid": collection_uuid,
+                    "imageUuid": image_uuid,
+                    "browserId": browser_id,
+                },
+                files={"file": (image_path.name, file_handle, "image/png")},
+            )
+
+    async def _request_with_retry(
+        self,
+        *,
+        step: str,
+        request: Callable[[], Awaitable[httpx.Response]],
+        max_retries: int,
+        retry_timeout: bool,
+        retry_request_error: bool,
+    ) -> httpx.Response:
+        """Run one slow.pics HTTP step with step-specific retry policy."""
         attempt = 0
 
         while True:
             attempt += 1
             try:
-                response = await self._post_upload_attempt(client, request, timeout_seconds)
+                response = await request()
 
-                if response.is_success:
+                if response.is_success or _is_complete_image_response(step, response):
                     return response
 
                 await self._handle_retryable_status(response, attempt, max_retries)
 
             except httpx.TimeoutException as e:
+                if not retry_timeout:
+                    raise SlowpicsError(
+                        "Metadata upload failed; remote slow.pics state is unknown"
+                    ) from None
                 await self._handle_timeout(e, attempt, max_retries)
 
             except httpx.RequestError as e:
+                if not retry_request_error:
+                    raise SlowpicsError(
+                        "Metadata upload failed; remote slow.pics state is unknown"
+                    ) from None
                 await self._handle_request_error(e, attempt, max_retries)
 
 
@@ -290,24 +397,29 @@ async def publish_to_slowpics(
     client: httpx.AsyncClient,
     metadata: TmdbMetadata | None = None,
     progress: ProgressReporter | None = None,
+    upload_plan: SlowpicsUploadPlan | None = None,
 ) -> PublishResult:
-    """Convenience function to publish screenshots from a directory.
+    """Publish screenshots through the browser-compatible slow.pics upload flow.
 
     Args:
-        screenshot_dir: Directory containing PNG screenshots.
+        screenshot_dir: Screenshot directory, used for title fallback.
         config: Slowpics configuration.
         client: HTTP client to use.
         metadata: Optional metadata for title.
         progress: Optional progress reporter.
+        upload_plan: Explicit row-major upload plan.
 
     Returns:
         PublishResult containing the URL.
     """
     start_time = monotonic()
 
-    files = sorted(screenshot_dir.glob("*.png"))
+    if upload_plan is None:
+        raise SlowpicsError("No slow.pics upload plan available")
+    files = upload_plan.file_paths
     if not files:
-        raise SlowpicsError(f"No PNG files found in {screenshot_dir}")
+        raise SlowpicsError("No PNG files found to upload")
+    _validate_upload_files(files)
 
     title = metadata.title if metadata else screenshot_dir.name
 
@@ -315,21 +427,7 @@ async def publish_to_slowpics(
         progress.set_description("Uploading screenshots to slow.pics")
 
     publisher = SlowpicsPublisher(config, client)
-    url = await publisher.upload(files, title)
-
-    # Deletion semantics
-    if config.delete_after_upload:
-        try:
-            for f in files:
-                f.unlink()
-            log.info("slowpics_files_deleted", count=len(files))
-        except OSError as e:
-            warnings.warn(
-                f"Failed to delete files after upload: {e}",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-            log.warning("slowpics_deletion_failed", error=str(e))
+    url = await publisher.upload(upload_plan, title)
 
     duration = monotonic() - start_time
 
@@ -337,4 +435,139 @@ async def publish_to_slowpics(
         url=url,
         screenshot_count=len(files),
         upload_duration_seconds=duration,
+        uploaded_file_paths=tuple(files),
+    )
+
+
+def _validate_upload_files(files: list[Path]) -> None:
+    for file_path in files:
+        if not file_path.is_file():
+            raise SlowpicsError(f"PNG file planned for slow.pics upload is missing: {file_path}")
+
+
+def _xsrf_token_from_cookies(client: httpx.AsyncClient) -> str:
+    raw_token = client.cookies.get("XSRF-TOKEN")
+    if raw_token is None or not raw_token:
+        raise SlowpicsError("Missing slow.pics XSRF token")
+    return unquote(raw_token)
+
+
+def _browser_id_from_cookies(client: httpx.AsyncClient) -> str:
+    browser_id = client.cookies.get("BROWSER-ID")
+    if browser_id is None or browser_id == SLOWPICS_BROWSER_ID_SENTINEL or not browser_id:
+        browser_id = str(uuid4())
+        client.cookies.set("BROWSER-ID", browser_id, domain="slow.pics", path="/")
+    return browser_id
+
+
+def _slowpics_upload_headers(xsrf_token: str) -> dict[str, str]:
+    return {**SLOWPICS_UPLOAD_HEADERS, "X-XSRF-TOKEN": xsrf_token}
+
+
+def _metadata_multipart_fields(
+    *,
+    upload_plan: SlowpicsUploadPlan,
+    title: str | None,
+    visibility: Visibility,
+    browser_id: str,
+) -> _MultipartTextFields:
+    fields: list[tuple[str, str]] = [
+        ("collectionName", title or "Comparison"),
+        ("browserId", browser_id),
+        ("optimizeImages", "true"),
+        ("desiredFileType", "image/png"),
+        ("hentai", "false"),
+        ("public", "true" if visibility is Visibility.PUBLIC else "false"),
+        ("visibility", "PUBLIC" if visibility is Visibility.PUBLIC else "UNLISTED"),
+        ("removeAfter", ""),
+    ]
+    for row in upload_plan.rows:
+        row_prefix = f"comparisons[{row.row_index}]"
+        fields.extend(
+            [
+                (f"{row_prefix}.name", row.row_name),
+                (f"{row_prefix}.hentai", "false"),
+                (f"{row_prefix}.sortOrder", str(row.sort_order)),
+            ]
+        )
+        for image in row.images:
+            image_prefix = f"{row_prefix}.images[{image.image_index}]"
+            fields.extend(
+                [
+                    (f"{image_prefix}.name", image.image_name),
+                    (f"{image_prefix}.sortOrder", str(image.sort_order)),
+                ]
+            )
+    return [(name, (None, value)) for name, value in fields]
+
+
+def _parse_metadata_response(
+    response: httpx.Response, upload_plan: SlowpicsUploadPlan
+) -> _SlowpicsMetadataResponse:
+    try:
+        payload = cast(object, response.json())
+    except ValueError:
+        raise SlowpicsError("Invalid metadata response from slow.pics") from None
+    if not isinstance(payload, dict):
+        raise SlowpicsError("Invalid metadata response from slow.pics")
+    response_payload = cast(dict[object, object], payload)
+
+    key = _required_response_string(response_payload, "key")
+    first_comparison_key = _optional_response_string(response_payload, "firstComparisonKey")
+    collection_uuid = _required_response_string(response_payload, "collectionUuid")
+    image_uuids = _response_image_matrix(response_payload.get("images"), upload_plan)
+    return _SlowpicsMetadataResponse(
+        key=key,
+        first_comparison_key=first_comparison_key,
+        collection_uuid=collection_uuid,
+        image_uuids=image_uuids,
+    )
+
+
+def _required_response_string(payload: dict[object, object], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value:
+        raise SlowpicsError("Invalid metadata response from slow.pics")
+    return value
+
+
+def _optional_response_string(payload: dict[object, object], key: str) -> str | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise SlowpicsError("Invalid metadata response from slow.pics")
+    return value
+
+
+def _response_image_matrix(
+    raw_images: object, upload_plan: SlowpicsUploadPlan
+) -> tuple[tuple[str, ...], ...]:
+    if not isinstance(raw_images, list):
+        raise SlowpicsError("Invalid metadata response from slow.pics")
+    raw_rows = cast(list[object], raw_images)
+    if len(raw_rows) != len(upload_plan.rows):
+        raise SlowpicsError("Invalid metadata response from slow.pics")
+
+    rows: list[tuple[str, ...]] = []
+    for raw_row, planned_row in zip(raw_rows, upload_plan.rows, strict=True):
+        if not isinstance(raw_row, list):
+            raise SlowpicsError("Invalid metadata response from slow.pics")
+        raw_image_uuids = cast(list[object], raw_row)
+        if len(raw_image_uuids) != len(planned_row.images):
+            raise SlowpicsError("Invalid metadata response from slow.pics")
+        image_uuids: list[str] = []
+        for raw_image_uuid in raw_image_uuids:
+            if not isinstance(raw_image_uuid, str) or not raw_image_uuid:
+                raise SlowpicsError("Invalid metadata response from slow.pics")
+            image_uuids.append(raw_image_uuid)
+        rows.append(tuple(image_uuids))
+    return tuple(rows)
+
+
+def _is_complete_image_response(step: str, response: httpx.Response) -> bool:
+    return (
+        step == "image"
+        and response.status_code == 400
+        and response.headers.get("X-Error-Message") == "IMAGE_IS_COMPLETE"
     )

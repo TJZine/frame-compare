@@ -20,6 +20,10 @@ documents that promise elsewhere.
 - Primary executable contract checks include:
   - `tests/cli/test_cli_commands.py` for help text, JSON payloads, report auto-open
     gating, and command-level CLI behavior.
+  - `tests/cli/test_run_slowpics_options.py` for the slow.pics `run` option
+    surface.
+  - `tests/config/test_schema.py` for config schema/defaults, including the
+    exact slow.pics field set.
   - `tests/config/test_overrides.py` for CLI override mapping semantics.
   - `tests/e2e/test_cli_version.py` for the public `version` command contract.
   - `tests/cli/test_exit_codes.py` for exit-code behavior.
@@ -80,6 +84,8 @@ exists.
 ### Output Modes
 
 - `--json` writes a single JSON object to stdout and suppresses human-readable summaries.
+- In that JSON object, `slowpics_url` is the only machine-readable slow.pics
+  result field. No copy/open/shortcut/webhook result fields are emitted.
 - `--json` is incompatible with interactive alignment. If the effective config enables
   `audio_alignment.use_vspreview` or `audio_alignment.force_interactive`, the CLI exits
   with the standard config-error payload and exit code before entering the runtime
@@ -133,6 +139,39 @@ exists.
 There is currently no dedicated `run` flag for `report.auto_open`; it is a config-only
 surface.
 
+### slow.pics Upload Behavior
+
+- slow.pics publishing is disabled by default. Users must set
+  `slowpics.auto_upload = true` in config or through the wizard before `run`
+  uploads generated screenshots.
+- When enabled and not suppressed by `--no-upload`, the current upload path uses
+  the browser-compatible slow.pics flow owned by
+  `frame_compare.services.publishers`: fetch `/comparison`, create metadata at
+  `/upload/comparison`, then upload each planned image to
+  `/upload/image/{imageUuid}`.
+- Upload membership comes from the explicit current-render upload plan, not from
+  scanning the screenshot directory. The plan is built from selected frames,
+  current render artifacts, and clip order.
+- `delete_after_upload` is local-only and report-safe. It is not mapped to
+  slow.pics `removeAfter`; the current remote metadata request sends an empty
+  `removeAfter` value.
+- When `delete_after_upload = true`, Frame Compare deletes only the exact
+  planned local screenshot files that were successfully uploaded. Deletion runs
+  after the report phase, not inside the slow.pics publisher, and never scans the
+  screenshot directory for deletion membership.
+- Local uploaded-file deletion runs only when the slow.pics upload completed and
+  report handling is safe: reports are disabled, or report generation completed
+  with `report.embed_images = true`. When reports are enabled with
+  `report.embed_images = false`, deletion is skipped because the report
+  references screenshot files on disk. If report generation warns/fails,
+  deletion is skipped.
+- Local uploaded-file deletion errors do not fail an otherwise successful run.
+  They are surfaced as run warnings and logs. In `run --json`, warnings remain
+  off stdout so the stdout payload stays a single JSON object.
+- The current public upload surface does not include collection suffix/name,
+  image format or optimization toggles, tags, hentai flag, remote remove-after,
+  copy URL, open slow.pics after upload, shortcut creation, or webhook behavior.
+
 ## CLI Flag To Config Mapping
 
 These `run` flags currently map into config values through `CLI_OVERRIDE_MAP`:
@@ -146,11 +185,34 @@ These `run` flags currently map into config values through `CLI_OVERRIDE_MAP`:
 | `--frame-count` | `analysis.frame_count` | Frame-selection override. |
 | `--seed` | `analysis.random_seed` | Deterministic frame-selection seed override. |
 | `--overlay` | `screenshots.overlay_mode` | Overlay mode override. |
-| `--no-upload` | `slowpics.auto_upload` | Inverted flag: passing it persists `auto_upload = false`. |
+| `--no-upload` | `slowpics.auto_upload` | Inverted flag: passing it sets effective `auto_upload = false`, and persists that value when combined with `--write-config`. |
 | `--force-interactive-alignment` | `audio_alignment.force_interactive` | Also forces `audio_alignment.use_vspreview = true`. |
 
-slow.pics publishing is disabled by default. Users must set `slowpics.auto_upload = true`
-in config or through the wizard before `run` uploads generated screenshots.
+`--no-upload` is the only slow.pics-specific `run` flag. No runtime-only
+slow.pics `run` flags exist.
+
+## Config-Only slow.pics Surface
+
+These five fields are the full current public `[slowpics]` config surface:
+
+- `auto_upload = false`
+- `visibility = "unlisted"`
+- `delete_after_upload = false`
+- `timeout_seconds = 60.0`
+- `max_retries = 3`
+
+`visibility` accepts only `public` and `unlisted`.
+
+`delete_after_upload` is local-only and report-safe: it removes only the exact
+planned local screenshot files that were successfully uploaded, and only after
+report processing is complete. Deletion is allowed when reports are disabled or
+when an embedded-image report is generated successfully. Deletion is skipped for
+non-embedded reports and for warn-only report failures. It does not request
+slow.pics remote removal and does not map to remote `removeAfter`.
+
+There are no current slow.pics config fields for collection suffix/name, image
+format or optimization toggles, tags, hentai flag, remote remove-after, copy URL,
+open-after-upload, shortcut creation, or webhook behavior.
 
 ## Config-Only Screenshot Surface
 

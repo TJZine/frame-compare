@@ -187,6 +187,21 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert logging.file is None
 
 
+def test_slowpics_config_public_surface_is_frozen_to_existing_fields_and_defaults() -> None:
+    """slow.pics config remains the documented existing public surface."""
+    expected_defaults = {
+        "auto_upload": False,
+        "visibility": "unlisted",
+        "delete_after_upload": False,
+        "timeout_seconds": 60.0,
+        "max_retries": 3,
+    }
+
+    assert list(SlowpicsConfig.model_fields) == list(expected_defaults)
+    assert SlowpicsConfig().model_dump(mode="json") == expected_defaults
+    assert get_default_config().slowpics.model_dump(mode="json") == expected_defaults
+
+
 def test_schema_model_enums_accept_config_strings_and_reject_unknown_values() -> None:
     screenshots = ScreenshotsConfig.model_validate(
         {

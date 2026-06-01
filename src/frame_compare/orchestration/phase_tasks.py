@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
+import structlog
 
 import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError, SelectionError
@@ -39,6 +40,7 @@ from frame_compare.orchestration.types import (
     FramePlanPhaseOutput,
     MetadataPhaseOutput,
     MetadataPrefetch,
+    PostReportCleanupPhaseOutput,
     PublishPhaseOutput,
     RenderArtifacts,
     RenderPhaseOutput,
@@ -50,7 +52,7 @@ from frame_compare.services.alignment import (
     calculate_alignment_trims,
     format_rejected_alignment_warning,
 )
-from frame_compare.services.errors import AudioAlignmentError
+from frame_compare.services.errors import AudioAlignmentError, SlowpicsError
 from frame_compare.services.metadata import resolve_metadata
 from frame_compare.services.publishers import publish_to_slowpics
 from frame_compare.services.report.display import (
@@ -59,10 +61,16 @@ from frame_compare.services.report.display import (
 )
 from frame_compare.services.report.entry import generate_report
 from frame_compare.services.report.payload import FrameDetail, ReportData, clip_info_from_state
+from frame_compare.services.slowpics_upload_plan import (
+    SlowpicsUploadClip,
+    build_slowpics_upload_plan,
+)
 from frame_compare.services.types import AlignmentConfig, MetadataConfig, TmdbMetadata
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.props import range_label_from_props
+
+log = structlog.get_logger()
 
 if TYPE_CHECKING:
     from frame_compare.render.types import (
@@ -747,17 +755,50 @@ async def run_publish_phase(
     *,
     client: httpx.AsyncClient | None,
     metadata: TmdbMetadata | None,
+    render: RenderArtifacts | None = None,
+    selected_frames: list[int] | None = None,
 ) -> PublishPhaseOutput:
     if client is None:
         return PublishPhaseOutput(slowpics_url=None)
+    if render is None:
+        raise SlowpicsError("No render artifacts available for slow.pics upload")
+    if selected_frames is None:
+        raise SlowpicsError("No selected frames available for slow.pics upload")
+
+    upload_plan = build_slowpics_upload_plan(
+        selected_frames=selected_frames,
+        clips=_slowpics_upload_clips(ctx),
+        screenshots_by_label=render.screenshots_by_label,
+    )
+    screenshot_dir = (
+        render.screenshot_dir
+        if render.screenshot_dir is not None
+        else ctx.workspace.screenshots_dir
+    )
     result = await publish_to_slowpics(
-        screenshot_dir=ctx.workspace.screenshots_dir,
+        screenshot_dir=screenshot_dir,
         config=ctx.config.slowpics,
         client=client,
         metadata=metadata,
         progress=ctx.reporter,
+        upload_plan=upload_plan,
     )
-    return PublishPhaseOutput(slowpics_url=result.url)
+    return PublishPhaseOutput(
+        slowpics_url=result.url,
+        uploaded_file_paths=result.uploaded_file_paths,
+    )
+
+
+def _slowpics_upload_clips(ctx: RunContext) -> list[SlowpicsUploadClip]:
+    clips = [ctx.reference, *ctx.comparisons]
+    seen_labels: set[str] = set()
+    upload_clips: list[SlowpicsUploadClip] = []
+    for clip in clips:
+        if clip.label in seen_labels:
+            raise SlowpicsError(f"Duplicate clip label in slow.pics upload input: {clip.label!r}")
+        seen_labels.add(clip.label)
+        upload_clips.append(SlowpicsUploadClip(label=clip.label, image_name=clip.path.stem))
+    return upload_clips
 
 
 def run_report_phase(
@@ -769,7 +810,7 @@ def run_report_phase(
     slowpics_url: str | None,
 ) -> ReportPhaseOutput:
     if render is None or not render.screenshots_by_label:
-        return ReportPhaseOutput(report_path=None)
+        return ReportPhaseOutput(report_path=None, report_succeeded=True)
 
     clips = [ctx.reference, *ctx.comparisons]
     clip_info = [
@@ -783,7 +824,58 @@ def run_report_phase(
         frame_details=_report_frame_details_for_frames(ctx, frames=frames),
     )
     report_path = generate_report(report_data, ctx.config.report)
-    return ReportPhaseOutput(report_path=report_path)
+    return ReportPhaseOutput(report_path=report_path, report_succeeded=True)
+
+
+def run_post_report_cleanup_phase(
+    ctx: RunContext,
+    *,
+    uploaded_file_paths: tuple[Path, ...],
+    report_succeeded: bool,
+) -> PostReportCleanupPhaseOutput:
+    if not _should_delete_uploaded_files_after_report(
+        ctx,
+        uploaded_file_paths=uploaded_file_paths,
+        report_succeeded=report_succeeded,
+    ):
+        return PostReportCleanupPhaseOutput()
+
+    warnings: list[str] = []
+    deleted_count = 0
+    for path in uploaded_file_paths:
+        try:
+            path.unlink()
+            deleted_count += 1
+        except OSError as exc:
+            message = f"cleanup: failed to delete uploaded screenshot {path}: {exc}"
+            warnings.append(message)
+            log.warning(
+                "slowpics_uploaded_file_delete_failed",
+                path=str(path),
+                error=str(exc),
+            )
+
+    if deleted_count:
+        log.info("slowpics_uploaded_files_deleted", count=deleted_count)
+
+    return PostReportCleanupPhaseOutput(warnings=warnings)
+
+
+def _should_delete_uploaded_files_after_report(
+    ctx: RunContext,
+    *,
+    uploaded_file_paths: tuple[Path, ...],
+    report_succeeded: bool,
+) -> bool:
+    if not ctx.config.slowpics.delete_after_upload:
+        return False
+    if not uploaded_file_paths:
+        return False
+    if not ctx.config.report.enable:
+        return True
+    if not report_succeeded:
+        return False
+    return ctx.config.report.embed_images
 
 
 @dataclass(frozen=True)

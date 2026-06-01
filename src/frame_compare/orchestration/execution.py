@@ -22,6 +22,7 @@ from frame_compare.orchestration.phase_tasks import (
     run_align_phase,
     run_analyze_phase,
     run_metadata_phase,
+    run_post_report_cleanup_phase,
     run_publish_phase,
     run_render_phase,
     run_report_phase,
@@ -39,6 +40,7 @@ from frame_compare.orchestration.types import (
     MetadataPhaseOutput,
     MetadataPrefetch,
     PhaseOutput,
+    PostReportCleanupPhaseOutput,
     PrepState,
     PublishPhaseOutput,
     RenderPhaseOutput,
@@ -126,8 +128,12 @@ def _apply_phase_output(*, ctx: RunContext, state: ExecutionState, output: Phase
             state.warnings.append(phase_output.warning)
         case PublishPhaseOutput() as phase_output:
             state.artifacts.slowpics_url = phase_output.slowpics_url
+            state.artifacts.uploaded_slowpics_file_paths = phase_output.uploaded_file_paths
         case ReportPhaseOutput() as phase_output:
             state.artifacts.report_path = phase_output.report_path
+            state.artifacts.report_succeeded = phase_output.report_succeeded
+        case PostReportCleanupPhaseOutput() as phase_output:
+            state.warnings.extend(phase_output.warnings)
         case _:
             raise TypeError(f"Unsupported phase output type: {output.__class__.__qualname__}")
 
@@ -198,6 +204,8 @@ def build_phases_after_align(
             ctx,
             client=http_client,
             metadata=state.artifacts.resolved_metadata,
+            render=state.artifacts.render,
+            selected_frames=state.selected_frames,
         )
 
     def _run_report_with_current_artifacts(ctx: RunContext) -> ReportPhaseOutput:
@@ -207,6 +215,15 @@ def build_phases_after_align(
             render=state.artifacts.render,
             metadata=state.artifacts.resolved_metadata,
             slowpics_url=state.artifacts.slowpics_url,
+        )
+
+    def _run_post_report_cleanup_with_current_artifacts(
+        ctx: RunContext,
+    ) -> PostReportCleanupPhaseOutput:
+        return run_post_report_cleanup_phase(
+            ctx,
+            uploaded_file_paths=state.artifacts.uploaded_slowpics_file_paths,
+            report_succeeded=state.artifacts.report_succeeded,
         )
 
     return [
@@ -271,6 +288,16 @@ def build_phases_after_align(
             phase_timings=state.phase_timings,
             warnings=state.warnings,
             warn_only=True,
+        ),
+        _create_timed_phase(
+            "post_report_cleanup",
+            "post_report_cleanup",
+            None,
+            _run_post_report_cleanup_with_current_artifacts,
+            state=state,
+            clock=clock,
+            phase_timings=state.phase_timings,
+            warnings=state.warnings,
         ),
     ]
 

@@ -126,6 +126,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                 "dovi": 0.0,
                 "publish": 0.0,
                 "report": 0.0,
+                "post_report_cleanup": 0.0,
             }
         )
 

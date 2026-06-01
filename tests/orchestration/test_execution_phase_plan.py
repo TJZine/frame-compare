@@ -70,6 +70,7 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
         "dovi",
         "publish",
         "report",
+        "post_report_cleanup",
     ]
 
     align_phase = next(phase for phase in plan.before_align if phase.name == "align")
@@ -124,9 +125,14 @@ def test_apply_phase_output_handles_report_output_explicitly(tmp_path: Path) -> 
     state = ExecutionState(artifacts=RunArtifacts())
     report_path = tmp_path / "report.html"
 
-    _apply_phase_output(ctx=ctx, state=state, output=ReportPhaseOutput(report_path=report_path))
+    _apply_phase_output(
+        ctx=ctx,
+        state=state,
+        output=ReportPhaseOutput(report_path=report_path, report_succeeded=True),
+    )
 
     assert state.artifacts.report_path == report_path
+    assert state.artifacts.report_succeeded is True
 
 
 def test_apply_phase_output_extends_warnings_from_render_output(tmp_path: Path) -> None:

@@ -2,8 +2,23 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from click import Group
+from typer.main import get_command
+
+from frame_compare.cli.entry import app
 from frame_compare.config.overrides import CLI_OVERRIDE_MAP
-from frame_compare.config.schema import Visibility
+from frame_compare.config.schema import SlowpicsConfig, Visibility
+
+
+def _declared_run_options() -> set[str]:
+    command = get_command(app)
+    assert isinstance(command, Group)
+    run_command = command.commands["run"]
+    return {
+        opt
+        for param in run_command.params
+        for opt in (*getattr(param, "opts", ()), *getattr(param, "secondary_opts", ()))
+    }
 
 
 def test_current_cli_contract_is_wired_into_repo_authority_surfaces() -> None:
@@ -50,6 +65,137 @@ def test_current_cli_contract_matches_live_override_map() -> None:
         flag = f"--{cli_name.replace('_', '-')}"
         assert flag in cli_contract
         assert config_path in cli_contract
+
+
+def test_current_cli_contract_documents_slowpics_config_surface_and_defaults() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
+    slowpics_heading = "## Config-Only slow.pics Surface"
+    screenshot_heading = "## Config-Only Screenshot Surface"
+    assert slowpics_heading in cli_contract, f"Missing heading: {slowpics_heading}"
+
+    slowpics_section = cli_contract.split(slowpics_heading, maxsplit=1)[1].split(
+        screenshot_heading,
+        maxsplit=1,
+    )[0]
+    normalized_slowpics_section = " ".join(slowpics_section.split())
+
+    assert list(SlowpicsConfig.model_fields) == [
+        "auto_upload",
+        "visibility",
+        "delete_after_upload",
+        "timeout_seconds",
+        "max_retries",
+    ]
+    for expected in (
+        "`auto_upload = false`",
+        '`visibility = "unlisted"`',
+        "`delete_after_upload = false`",
+        "`timeout_seconds = 60.0`",
+        "`max_retries = 3`",
+        "`delete_after_upload` is local-only",
+        "report-safe",
+        "`removeAfter`",
+    ):
+        assert expected in slowpics_section
+    for expected in (
+        "exact planned local screenshot files that were successfully uploaded",
+        "Deletion is skipped for non-embedded reports",
+        "warn-only report failures",
+    ):
+        assert expected in normalized_slowpics_section
+    assert (
+        "These five fields are the full current public `[slowpics]` config surface"
+        in normalized_slowpics_section
+    )
+
+    for unsupported_field in (
+        "collection_suffix",
+        "collection_name",
+        "image_format",
+        "optimize_images",
+        "tags",
+        "hentai",
+        "remove_after",
+        "copy_url",
+        "open_after_upload",
+        "shortcut",
+        "webhook",
+    ):
+        assert unsupported_field not in SlowpicsConfig.model_fields
+
+
+def test_current_cli_contract_documents_only_no_upload_slowpics_run_flag() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
+    mapping_heading = "## CLI Flag To Config Mapping"
+    screenshot_heading = "## Config-Only slow.pics Surface"
+    assert mapping_heading in cli_contract, f"Missing heading: {mapping_heading}"
+    assert screenshot_heading in cli_contract, f"Missing heading: {screenshot_heading}"
+
+    mapping_section = cli_contract.split(mapping_heading, maxsplit=1)[1].split(
+        screenshot_heading,
+        maxsplit=1,
+    )[0]
+    normalized_mapping_section = " ".join(mapping_section.split())
+
+    declared_options = _declared_run_options()
+    slowpics_related = {
+        flag
+        for flag in declared_options
+        if (
+            "slowpics" in flag
+            or "slow-pics" in flag
+            or "upload" in flag
+            or "visibility" in flag
+            or "remove" in flag
+            or "delete" in flag
+            or "webhook" in flag
+        )
+    }
+
+    assert slowpics_related == {"--no-upload"}
+    assert "`--no-upload` is the only slow.pics-specific `run` flag." in mapping_section
+    assert "No runtime-only slow.pics `run` flags exist." in normalized_mapping_section
+
+
+def test_current_cli_contract_documents_slowpics_json_shape() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
+    run_heading = "## `run` Command Contract"
+    mapping_heading = "## CLI Flag To Config Mapping"
+    assert run_heading in cli_contract, f"Missing heading: {run_heading}"
+
+    run_section = cli_contract.split(run_heading, maxsplit=1)[1].split(
+        mapping_heading,
+        maxsplit=1,
+    )[0]
+    normalized_run_section = " ".join(run_section.split())
+
+    assert "`slowpics_url`" in run_section
+    assert "only machine-readable slow.pics result field" in normalized_run_section
+    assert "No copy/open/shortcut/webhook result fields" in normalized_run_section
+
+
+def test_current_architecture_documents_slowpics_service_flow_and_upload_plan() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    architecture = (repo_root / "docs" / "current-architecture.md").read_text(
+        encoding="utf-8"
+    )
+    normalized_architecture = " ".join(architecture.split())
+
+    for expected in (
+        "browser-compatible slow.pics client flow",
+        "`frame_compare.services.publishers`",
+        "`frame_compare.services.slowpics_upload_plan`",
+        "explicit upload-plan seam",
+        "current render artifacts",
+        "does not scan the screenshot directory",
+        "`post_report_cleanup`",
+        "exact uploaded planned local file paths",
+        "report-safe local deletion policy",
+    ):
+        assert expected in normalized_architecture
 
 
 def test_current_cli_contract_documents_screenshot_config_only_fields() -> None:

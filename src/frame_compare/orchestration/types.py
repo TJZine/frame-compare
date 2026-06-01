@@ -183,11 +183,18 @@ class DoviPhaseOutput:
 @dataclass(frozen=True)
 class PublishPhaseOutput:
     slowpics_url: str | None
+    uploaded_file_paths: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True)
 class ReportPhaseOutput:
     report_path: Path | None
+    report_succeeded: bool = False
+
+
+@dataclass(frozen=True)
+class PostReportCleanupPhaseOutput:
+    warnings: list[str] = field(default_factory=_empty_str_list)
 
 
 type PhaseOutput = (
@@ -199,6 +206,7 @@ type PhaseOutput = (
     | DoviPhaseOutput
     | PublishPhaseOutput
     | ReportPhaseOutput
+    | PostReportCleanupPhaseOutput
 )
 
 
@@ -209,7 +217,9 @@ class RunArtifacts:
     metrics_cache_hit: bool
     render: RenderArtifacts | None
     slowpics_url: str | None
+    uploaded_slowpics_file_paths: tuple[Path, ...]
     report_path: Path | None
+    report_succeeded: bool
     resolved_metadata: TmdbMetadata | None
     warnings: list[str]
 
@@ -218,7 +228,9 @@ class RunArtifacts:
         *,
         metrics_cache_hit: bool = False,
         slowpics_url: str | None = None,
+        uploaded_slowpics_file_paths: tuple[Path, ...] = (),
         report_path: Path | None = None,
+        report_succeeded: bool = False,
         resolved_metadata: TmdbMetadata | None = None,
         warnings: list[str] | None = None,
         render: RenderArtifacts | None = None,
@@ -226,7 +238,9 @@ class RunArtifacts:
         self.metrics_cache_hit = metrics_cache_hit
         self.render = render
         self.slowpics_url = slowpics_url
+        self.uploaded_slowpics_file_paths = uploaded_slowpics_file_paths
         self.report_path = report_path
+        self.report_succeeded = report_succeeded
         self.resolved_metadata = resolved_metadata
         self.warnings = [] if warnings is None else warnings
 

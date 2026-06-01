@@ -26,7 +26,7 @@ The main run path is:
 5. Create a fresh run folder when configured.
 6. Load or compute clip probe data.
 7. Execute orchestration phases in order:
-   `frame_plan -> analyze -> align -> render -> metadata -> dovi -> publish -> report`
+   `frame_plan -> analyze -> align -> render -> metadata -> dovi -> publish -> report -> post_report_cleanup`
 
 `frame_compare.orchestration.context.RunContext` carries the shared run state across phases.
 Phase task functions return explicit phase-output DTOs, and `execution.py` applies those
@@ -131,6 +131,18 @@ Keep these integrations at their current owners:
 - HTML report generation: `frame_compare.services.report`
 - VS loading and HDR/tonemap logic: `frame_compare.vs.*`
 - packaging/install/update flow: `tools/windows_portable/**`
+
+slow.pics publishing is service-owned. `frame_compare.services.publishers` owns
+the browser-compatible slow.pics client flow: `GET /comparison`,
+`POST /upload/comparison`, and planned `POST /upload/image/{imageUuid}` image
+requests. `frame_compare.services.slowpics_upload_plan` owns the explicit
+upload-plan seam for current render artifacts, row/image names, and upload
+ordering; the final upload path uses that plan and does not scan the screenshot
+directory for membership. After a successful upload, orchestration carries the
+exact uploaded planned local file paths into `post_report_cleanup`. That cleanup
+phase owns report-safe local deletion policy for `slowpics.delete_after_upload`
+and never reconstructs deletion membership from directories, labels, or render
+artifacts after upload.
 
 `frame_compare.services.report` owns the static offline report payload and viewer
 assets. The generated viewer exposes slider, overlay, diff, and pair-based blink

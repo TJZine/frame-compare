@@ -15,7 +15,14 @@ from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
 from frame_compare.orchestration import coordinator
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.orchestration.errors import MixedSourceFpsError
-from frame_compare.orchestration.types import MetadataPrefetch, PrepState, RunArtifacts
+from frame_compare.orchestration.types import (
+    MetadataPrefetch,
+    PrepState,
+    PublishPhaseOutput,
+    RenderArtifacts,
+    RenderPhaseOutput,
+    RunArtifacts,
+)
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 from frame_compare.vs.types import SourceInfo
@@ -81,6 +88,7 @@ def test_execute_run_returns_success_and_records_preflight_timing(
         "dovi",
         "publish",
         "report",
+        "post_report_cleanup",
     }
     assert set(result.phase_timings.keys()) == expected_keys
     assert result.phase_timings["preflight"] >= 0.0
@@ -91,6 +99,7 @@ def test_execute_run_returns_success_and_records_preflight_timing(
     assert result.phase_timings["dovi"] == 0.0
     assert result.phase_timings["publish"] == 0.0
     assert result.phase_timings["report"] == 0.0
+    assert result.phase_timings["post_report_cleanup"] >= 0.0
 
 
 def test_execute_run_returns_preflight_and_runtime_warnings(
@@ -122,6 +131,153 @@ def test_execute_run_returns_preflight_and_runtime_warnings(
 
     assert result.success is True
     assert result.warnings == ["preflight: warned", "report: warned"]
+
+
+def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = ConfigSchema()
+    config.slowpics.auto_upload = True
+    config.slowpics.delete_after_upload = True
+    config.report.enable = False
+    uploaded = tmp_path / "screenshots" / "planned.png"
+    uploaded.parent.mkdir(parents=True, exist_ok=True)
+    uploaded.write_bytes(b"\x89PNG\r\n\x1a\n")
+    render = RenderArtifacts(
+        screenshots_by_label={"Reference": [uploaded]},
+        screenshot_dir=uploaded.parent,
+    )
+    prep = PrepState(
+        workspace=_workspace(tmp_path),
+        config=config,
+        input_videos=[tmp_path / "reference.mkv"],
+        clips=[clip_state(tmp_path / "reference.mkv", label="Reference")],
+        artifacts=RunArtifacts(),
+        metadata_prefetch=MetadataPrefetch(None, False),
+        preflight_warnings=[],
+        preflight_duration=0.0,
+        load_sources_start=datetime.now(),
+    )
+
+    async def fake_execute_prep(_request: RunRequest, _deps: RunDependencies) -> PrepState:
+        return prep
+
+    def fake_render_phase(*_args: object, **_kwargs: object) -> RenderPhaseOutput:
+        return RenderPhaseOutput(render=render)
+
+    async def fake_publish_phase(*_args: object, **_kwargs: object) -> PublishPhaseOutput:
+        return PublishPhaseOutput(
+            slowpics_url="https://slow.pics/c/example",
+            uploaded_file_paths=(uploaded,),
+        )
+
+    def fake_unlink(self: Path) -> None:
+        if self == uploaded:
+            raise PermissionError("locked")
+        Path.unlink(self)
+
+    monkeypatch.setattr(coordinator, "execute_prep", fake_execute_prep)
+    monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        "frame_compare.orchestration.execution.run_render_phase",
+        fake_render_phase,
+    )
+    monkeypatch.setattr(
+        "frame_compare.orchestration.execution.run_publish_phase",
+        fake_publish_phase,
+    )
+    monkeypatch.setattr(Path, "unlink", fake_unlink)
+
+    request = RunRequest(
+        root=tmp_path,
+        skip_analysis=True,
+        skip_metadata=True,
+        skip_dovi=True,
+        quiet=True,
+    )
+    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+
+    result = asyncio.run(execute_run(request, deps=deps))
+
+    assert result.success is True
+    assert result.slowpics_url == "https://slow.pics/c/example"
+    assert result.warnings == [f"cleanup: failed to delete uploaded screenshot {uploaded}: locked"]
+
+
+def test_execute_run_report_warning_blocks_delete_after_upload_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = ConfigSchema()
+    config.slowpics.auto_upload = True
+    config.slowpics.delete_after_upload = True
+    config.report.enable = True
+    config.report.embed_images = True
+    uploaded = tmp_path / "screenshots" / "planned.png"
+    uploaded.parent.mkdir(parents=True, exist_ok=True)
+    uploaded.write_bytes(b"\x89PNG\r\n\x1a\n")
+    render = RenderArtifacts(
+        screenshots_by_label={"Reference": [uploaded]},
+        screenshot_dir=uploaded.parent,
+    )
+    prep = PrepState(
+        workspace=_workspace(tmp_path),
+        config=config,
+        input_videos=[tmp_path / "reference.mkv"],
+        clips=[clip_state(tmp_path / "reference.mkv", label="Reference")],
+        artifacts=RunArtifacts(),
+        metadata_prefetch=MetadataPrefetch(None, False),
+        preflight_warnings=[],
+        preflight_duration=0.0,
+        load_sources_start=datetime.now(),
+    )
+
+    async def fake_execute_prep(_request: RunRequest, _deps: RunDependencies) -> PrepState:
+        return prep
+
+    def fake_render_phase(*_args: object, **_kwargs: object) -> RenderPhaseOutput:
+        return RenderPhaseOutput(render=render)
+
+    async def fake_publish_phase(*_args: object, **_kwargs: object) -> PublishPhaseOutput:
+        return PublishPhaseOutput(
+            slowpics_url="https://slow.pics/c/example",
+            uploaded_file_paths=(uploaded,),
+        )
+
+    def fake_report_phase(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError("report write failed")
+
+    monkeypatch.setattr(coordinator, "execute_prep", fake_execute_prep)
+    monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        "frame_compare.orchestration.execution.run_render_phase",
+        fake_render_phase,
+    )
+    monkeypatch.setattr(
+        "frame_compare.orchestration.execution.run_publish_phase",
+        fake_publish_phase,
+    )
+    monkeypatch.setattr(
+        "frame_compare.orchestration.execution.run_report_phase",
+        fake_report_phase,
+    )
+
+    request = RunRequest(
+        root=tmp_path,
+        skip_analysis=True,
+        skip_metadata=True,
+        skip_dovi=True,
+        quiet=True,
+    )
+    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+
+    result = asyncio.run(execute_run(request, deps=deps))
+
+    assert result.success is True
+    assert result.slowpics_url == "https://slow.pics/c/example"
+    assert any(warning.startswith("report:") for warning in result.warnings)
+    assert uploaded.exists()
 
 
 def test_execute_run_ffmpeg_render_rejects_hdr_when_tonemap_enabled(
