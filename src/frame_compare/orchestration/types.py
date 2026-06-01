@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import httpx
 
@@ -99,6 +99,24 @@ def _empty_selection_details_by_source_frame() -> SelectionDetailsByFrame:
     return {}
 
 
+type PostUploadActionKind = Literal["clipboard", "browser", "shortcut", "webhook"]
+
+
+@dataclass(frozen=True)
+class PostUploadActionResult:
+    """Internal result for an optional post-upload side effect."""
+
+    kind: PostUploadActionKind
+    success: bool
+    detail: str | None = None
+    path: Path | None = None
+    message: str | None = None
+    warning: str | None = None
+
+
+type PostUploadActionResults = tuple[PostUploadActionResult, ...]
+
+
 @dataclass(frozen=True)
 class RunResult:
     """Complete result from a comparison run."""
@@ -108,6 +126,7 @@ class RunResult:
     screenshot_dir: Path | None = None
     slowpics_url: str | None = None
     report_path: Path | None = None
+    post_upload_actions: PostUploadActionResults = ()
 
     # Metrics
     frame_count: int = 0
@@ -184,6 +203,7 @@ class DoviPhaseOutput:
 class PublishPhaseOutput:
     slowpics_url: str | None
     uploaded_file_paths: tuple[Path, ...] = ()
+    post_upload_actions: PostUploadActionResults = ()
 
 
 @dataclass(frozen=True)
@@ -218,6 +238,7 @@ class RunArtifacts:
     render: RenderArtifacts | None
     slowpics_url: str | None
     uploaded_slowpics_file_paths: tuple[Path, ...]
+    post_upload_actions: PostUploadActionResults
     report_path: Path | None
     report_succeeded: bool
     resolved_metadata: TmdbMetadata | None
@@ -229,6 +250,7 @@ class RunArtifacts:
         metrics_cache_hit: bool = False,
         slowpics_url: str | None = None,
         uploaded_slowpics_file_paths: tuple[Path, ...] = (),
+        post_upload_actions: PostUploadActionResults = (),
         report_path: Path | None = None,
         report_succeeded: bool = False,
         resolved_metadata: TmdbMetadata | None = None,
@@ -239,6 +261,7 @@ class RunArtifacts:
         self.render = render
         self.slowpics_url = slowpics_url
         self.uploaded_slowpics_file_paths = uploaded_slowpics_file_paths
+        self.post_upload_actions = post_upload_actions
         self.report_path = report_path
         self.report_succeeded = report_succeeded
         self.resolved_metadata = resolved_metadata

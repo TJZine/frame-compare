@@ -43,6 +43,7 @@ def _assemble_run_result(
         screenshot_dir=None if artifacts.render is None else artifacts.render.screenshot_dir,
         slowpics_url=artifacts.slowpics_url,
         report_path=artifacts.report_path,
+        post_upload_actions=artifacts.post_upload_actions,
         frame_count=len(selected_frames),
         clips_processed=1 + len(context.comparisons),
         duration_seconds=duration_seconds,

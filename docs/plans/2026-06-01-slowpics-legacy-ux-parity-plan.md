@@ -51,8 +51,8 @@ RISK_TIER: high
 REVIEW_TARGET: active tracked plan
 PLAN_OR_ARTIFACT: docs/plans/2026-06-01-slowpics-legacy-ux-parity-plan.md
 REFERENCE_HANDOFF: docs/plans/2026-06-01-slowpics-legacy-ux-followup-handoff.md
-FILES_IN_SCOPE: src/frame_compare/config/schema_models.py; src/frame_compare/config/defaults.py; src/frame_compare/config/schema.py; src/frame_compare/cli/entry.py; src/frame_compare/cli/run_command.py; src/frame_compare/cli/output.py; src/frame_compare/orchestration/types.py; src/frame_compare/orchestration/execution.py; src/frame_compare/orchestration/phase_tasks.py; src/frame_compare/services/publishers.py or focused sibling service modules; pyproject.toml; uv.lock; tests/config/test_schema.py; tests/cli/test_run_slowpics_options.py; tests/cli/test_run_command.py; tests/cli/test_run_output.py; tests/cli/test_run_report_open.py; tests/services/test_publishers.py or focused sibling service tests; tests/orchestration/test_phase_tasks_outputs.py; tests/test_cli_contract_docs.py; docs/current-cli-contract.md; docs/current-architecture.md
-FILES_OUT_OF_SCOPE: src/frame_compare/render/**; src/frame_compare/vs/**; src/frame_compare/analysis/**; tools/windows_portable/**; Dockerfile; docker-compose.yml; live mutating slow.pics tests; generated HTML report upload controls except the reference-only starter spec named in Unit 8
+FILES_IN_SCOPE: src/frame_compare/config/schema_models.py; src/frame_compare/config/defaults.py; src/frame_compare/config/schema.py; src/frame_compare/cli/entry.py; src/frame_compare/cli/run_command.py; src/frame_compare/cli/output.py; src/frame_compare/orchestration/types.py; src/frame_compare/orchestration/execution.py; src/frame_compare/orchestration/coordinator.py; src/frame_compare/orchestration/phase_tasks.py; src/frame_compare/services/publishers.py or focused sibling service modules; pyproject.toml; uv.lock; tests/config/test_schema.py; tests/cli/test_run_slowpics_options.py; tests/cli/test_run_command.py; tests/cli/test_run_output.py; tests/cli/test_run_report_open.py; tests/services/test_publishers.py or focused sibling service tests; tests/orchestration/test_phase_tasks_outputs.py; tests/test_cli_contract_docs.py; docs/current-cli-contract.md; docs/current-architecture.md
+FILES_OUT_OF_SCOPE: src/frame_compare/render/**; src/frame_compare/vs/**; src/frame_compare/analysis/**; tools/windows_portable/**; Dockerfile; docker-compose.yml; live mutating slow.pics tests; generated HTML report upload controls except the reference-only starter spec named in Unit 7
 KEY_INVARIANTS: no new run flags; no wizard prompt expansion; run --json stdout remains one JSON object with slowpics_url as the only machine-readable slow.pics result field; post-upload side-effect failures are warning-only; browser/report opening stays CLI-owned; webhook delivery is Frame Compare-owned outbound integration with strict external HTTPS and redaction; shortcut creation is deterministic filesystem output and is not part of uploaded-file cleanup
 VERIFICATION_RUN: plan review only; implementation units must run focused tests plus the runbook full verification gate before closeout
 KNOWN_RISKS: CLI/config contract drift; unexpected browser or clipboard side effects in automation; shortcut path ambiguity with run folders disabled; webhook SSRF/DNS rebinding gaps; JSON stdout contamination; dependency lockfile churn; report auto-open behavior conflict
@@ -176,6 +176,8 @@ units below.
 ### Unit 3: Post-Upload Result Plumbing
 
 - Add typed internal status and warning plumbing for post-upload actions.
+- Include the narrow coordinator assembly handoff that carries retained
+  post-upload action results from `RunArtifacts` into `RunResult`.
 - Do not add JSON output keys.
 - Preserve import-layer contracts and lazy CLI import behavior.
 - Keep side-effect results stable enough for CLI output and tests, but do not
@@ -248,7 +250,7 @@ units below.
   cookie/header isolation, redirect refusal, timeout/retry behavior, payload
   shape, redaction, and `--quiet`/`--json` warning placement.
 
-### Unit 7: Human Output And Authority Docs
+### Unit 7: Human Output, Authority Docs, And Future Starter Spec
 
 - Show only enabled action outcomes in the human result summary.
 - Keep disabled/skipped states out of normal output unless needed as warnings.
@@ -260,9 +262,6 @@ units below.
   shortcut filesystem output, webhook external boundary, and CLI-owned browser
   opening behavior.
 - Update `tests/test_cli_contract_docs.py` to lock docs to the live surface.
-
-### Unit 8: Starter Spec For Future Report-Confirmed Upload
-
 - The reference-only starter spec exists at
   `docs/plans/2026-06-01-report-confirmed-slowpics-upload-starter-spec.md`.
 - Keep that spec non-active and not implemented by this plan.

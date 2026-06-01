@@ -129,6 +129,7 @@ def _apply_phase_output(*, ctx: RunContext, state: ExecutionState, output: Phase
         case PublishPhaseOutput() as phase_output:
             state.artifacts.slowpics_url = phase_output.slowpics_url
             state.artifacts.uploaded_slowpics_file_paths = phase_output.uploaded_file_paths
+            state.artifacts.post_upload_actions = phase_output.post_upload_actions
         case ReportPhaseOutput() as phase_output:
             state.artifacts.report_path = phase_output.report_path
             state.artifacts.report_succeeded = phase_output.report_succeeded

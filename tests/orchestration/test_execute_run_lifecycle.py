@@ -17,6 +17,7 @@ from frame_compare.orchestration.coordinator import RunDependencies, RunRequest,
 from frame_compare.orchestration.errors import MixedSourceFpsError
 from frame_compare.orchestration.types import (
     MetadataPrefetch,
+    PostUploadActionResult,
     PrepState,
     PublishPhaseOutput,
     RenderArtifacts,
@@ -105,12 +106,21 @@ def test_execute_run_returns_success_and_records_preflight_timing(
 def test_execute_run_returns_preflight_and_runtime_warnings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    shortcut = PostUploadActionResult(
+        kind="shortcut",
+        success=True,
+        path=tmp_path / "Slowpics.url",
+        message="Shortcut written.",
+    )
     prep = PrepState(
         workspace=_workspace(tmp_path),
         config=ConfigSchema(),
         input_videos=[tmp_path / "reference.mkv"],
         clips=[clip_state(tmp_path / "reference.mkv", label="Reference")],
-        artifacts=RunArtifacts(warnings=["report: warned"]),
+        artifacts=RunArtifacts(
+            post_upload_actions=(shortcut,),
+            warnings=["report: warned"],
+        ),
         metadata_prefetch=MetadataPrefetch(None, False),
         preflight_warnings=["preflight: warned"],
         preflight_duration=0.0,
@@ -130,6 +140,7 @@ def test_execute_run_returns_preflight_and_runtime_warnings(
     result = asyncio.run(execute_run(RunRequest(root=tmp_path, quiet=True), deps=RunDependencies()))
 
     assert result.success is True
+    assert result.post_upload_actions == (shortcut,)
     assert result.warnings == ["preflight: warned", "report: warned"]
 
 
