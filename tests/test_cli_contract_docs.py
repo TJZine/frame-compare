@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from click import Group
 from typer.main import get_command
 
 from frame_compare.cli.entry import app
+from frame_compare.cli.run_command import handle_json_output
 from frame_compare.config.overrides import CLI_OVERRIDE_MAP
 from frame_compare.config.schema import SlowpicsConfig, Visibility
+from frame_compare.orchestration.types import RunResult
 
 
 def _declared_run_options() -> set[str]:
@@ -82,6 +85,7 @@ def test_current_cli_contract_documents_slowpics_config_surface_and_defaults() -
 
     assert list(SlowpicsConfig.model_fields) == [
         "auto_upload",
+        "confirm_upload_after_report",
         "visibility",
         "delete_after_upload",
         "timeout_seconds",
@@ -93,6 +97,7 @@ def test_current_cli_contract_documents_slowpics_config_surface_and_defaults() -
     ]
     for expected in (
         "`auto_upload = false`",
+        "`confirm_upload_after_report = false`",
         '`visibility = "unlisted"`',
         "`delete_after_upload = false`",
         "`timeout_seconds = 60.0`",
@@ -104,19 +109,24 @@ def test_current_cli_contract_documents_slowpics_config_surface_and_defaults() -
         "`delete_after_upload` is local-only",
         "report-safe",
         "`removeAfter`",
+        "`confirm_upload_after_report` is a config-only, interactive-only opt-in",
         "`copy_url_to_clipboard` and `open_in_browser` are interactive CLI-owned actions",
         "`create_url_shortcut` and `webhook_url` run after successful upload",
         "including `--json` and `--quiet`",
+        "The JSON output schema remains unchanged by report-confirmed upload",
     ):
         assert expected in slowpics_section
     for expected in (
         "exact planned local screenshot files that were successfully uploaded",
         "Deletion is skipped for non-embedded reports",
         "warn-only report failures",
+        "adds no `run` flag, no wizard prompt, and no `run --json` stdout field",
+        "incompatible with `--json`, `--quiet`, non-TTY stdin, non-TTY stdout",
+        "`report.enable = false`",
     ):
         assert expected in normalized_slowpics_section
     assert (
-        "These nine fields are the full current public `[slowpics]` config surface"
+        "These ten fields are the full current public `[slowpics]` config surface"
         in normalized_slowpics_section
     )
     assert "parsed and defaulted only" not in normalized_slowpics_section
@@ -164,11 +174,15 @@ def test_current_cli_contract_documents_only_no_upload_slowpics_run_flag() -> No
     }
 
     assert slowpics_related == {"--no-upload"}
+    assert "--confirm-upload-after-report" not in declared_options
+    assert "slowpics.confirm_upload_after_report" not in CLI_OVERRIDE_MAP.values()
     assert "`--no-upload` is the only slow.pics-specific `run` flag." in mapping_section
     assert "No runtime-only slow.pics `run` flags exist." in normalized_mapping_section
 
 
-def test_current_cli_contract_documents_slowpics_json_shape() -> None:
+def test_current_cli_contract_documents_slowpics_json_shape(
+    capsys,
+) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
     run_heading = "## `run` Command Contract"
@@ -184,6 +198,8 @@ def test_current_cli_contract_documents_slowpics_json_shape() -> None:
     assert "`slowpics_url`" in run_section
     assert "only machine-readable slow.pics result field" in normalized_run_section
     assert "No copy/open/shortcut/webhook result fields" in normalized_run_section
+    assert "Report-confirmed upload confirmation status is also not emitted" in run_section
+    assert "success schema remains unchanged" in normalized_run_section
     for forbidden_field in (
         "clipboard_result",
         "browser_result",
@@ -191,6 +207,18 @@ def test_current_cli_contract_documents_slowpics_json_shape() -> None:
         "webhook_status",
     ):
         assert forbidden_field not in run_section
+
+    handle_json_output(
+        RunResult(
+            success=True,
+            slowpics_url=None,
+            slowpics_upload_confirmation_status="declined",
+        )
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert "slowpics_url" in payload
+    assert payload["slowpics_url"] is None
+    assert "slowpics_upload_confirmation_status" not in payload
 
 
 def test_current_cli_contract_documents_slowpics_post_upload_behavior() -> None:
@@ -248,6 +276,44 @@ def test_current_cli_contract_documents_slowpics_post_upload_behavior() -> None:
         assert expected in normalized_webhook
 
 
+def test_current_cli_contract_documents_report_confirmed_slowpics_workflow() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
+    upload_heading = "### slow.pics Upload Behavior"
+    shortcut_heading = "### slow.pics Shortcut Policy"
+
+    upload_section = cli_contract.split(upload_heading, maxsplit=1)[1].split(
+        shortcut_heading,
+        maxsplit=1,
+    )[0]
+    normalized_upload = " ".join(upload_section.split())
+
+    for expected in (
+        "`slowpics.confirm_upload_after_report = true`",
+        "inert unless effective `slowpics.auto_upload = true`",
+        "There is no dedicated `run` flag for report-confirmed upload",
+        "`--no-upload` remains the only slow.pics-specific `run` flag",
+        "normal non-confirmed phase order remains",
+        "`frame_plan -> analyze -> align -> render -> metadata -> dovi -> publish -> report -> post_report_cleanup`",
+        "Report-confirmed upload changes only the opted-in interactive path",
+        "`frame_plan -> analyze -> align -> render -> metadata -> dovi -> report -> confirm_slowpics_upload -> publish -> post_report_cleanup`",
+        "`--json` was passed",
+        "`--quiet` was passed",
+        "stdin is not attached to a TTY",
+        "stdout is not attached to a TTY",
+        "`report.enable = false`",
+        "not regenerated after upload",
+        "`slowpics_url = null`",
+        "slow.pics upload skipped because report confirmation was unavailable",
+        "slow.pics upload skipped by confirmation",
+        "`slowpics_url` remains `None`",
+        "With `report.embed_images = false`, deletion is skipped",
+        "If upload is declined or report confirmation is unavailable",
+        "no slow.pics delete-after-upload cleanup runs",
+    ):
+        assert expected in normalized_upload
+
+
 def test_current_cli_contract_documents_slowpics_browser_report_precedence() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
@@ -266,6 +332,10 @@ def test_current_cli_contract_documents_slowpics_browser_report_precedence() -> 
         "report auto-open is suppressed for that run",
         "If slow.pics browser open is not attempted",
         "existing report auto-open rules above still apply",
+        "Report-confirmed slow.pics upload is the exception to that precedence rule",
+        "CLI presents the local report before prompting for upload",
+        "later confirmed upload will open the slow.pics URL in a browser",
+        "If it is not opened, the CLI prints the report path before prompting",
     ):
         assert expected in normalized_report_section
 
@@ -290,6 +360,36 @@ def test_current_architecture_documents_slowpics_service_flow_and_upload_plan() 
         "typed post-upload action results plus warnings",
         "does not own clipboard, browser, shortcut, or webhook side-effect policy",
         "The `.url` shortcut is not cleanup membership",
+    ):
+        assert expected in normalized_architecture
+
+
+def test_current_architecture_documents_report_confirmed_phase_order_and_owner_seams() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    architecture = (repo_root / "docs" / "current-architecture.md").read_text(
+        encoding="utf-8"
+    )
+    normalized_architecture = " ".join(architecture.split())
+
+    for expected in (
+        "`slowpics.confirm_upload_after_report`",
+        "`frame_plan -> analyze -> align -> render -> metadata -> dovi -> report -> confirm_slowpics_upload -> publish -> post_report_cleanup`",
+        "The non-confirmed flow keeps the normal ordering above",
+        "report-confirmed upload prompting",
+        "Report-confirmed slow.pics upload uses a CLI-owned confirmation callback seam",
+        "`RunDependencies.confirm_slowpics_upload`",
+        "Orchestration owns the typed request, decision, confirmation-status state",
+        "it does not import Typer, open browsers, read stdin, or print prompt text",
+        "raises a typed config error before publish",
+        "`report_unavailable`",
+        "prevents slow.pics upload",
+        "`publish` is skipped and `slowpics_url` stays `None`",
+        "local report is generated before upload and is not regenerated after upload",
+        "report payload therefore has no slow.pics URL",
+        "CLI report presentation happens before the confirmation prompt",
+        "before any later post-upload slow.pics browser opening",
+        "existing non-confirmed rule remains",
+        "It does not own slow.pics upload policy, prompting, or browser side effects",
     ):
         assert expected in normalized_architecture
 

@@ -246,6 +246,26 @@ def test_run_result_summary_prints_slowpics_url_and_untruncated_warnings(
     assert "more)" not in output
 
 
+def test_run_result_summary_prints_declined_upload_as_information(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        return RunResult(
+            success=True,
+            slowpics_upload_confirmation_status="declined",
+            report_path=Path("report.html"),
+        )
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace([])
+
+    assert result.exit_code == 0
+    output = _normalize_cli_output(result.stdout)
+    assert "slow.pics upload skipped by confirmation" in output
+    assert "Warnings" not in output
+
+
 def test_run_result_summary_prints_interactive_slowpics_action_outcomes(
     monkeypatch: MonkeyPatch,
 ) -> None:

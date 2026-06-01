@@ -110,6 +110,15 @@ _handle_json_output = handle_json_output
 _build_minimal_config = build_minimal_config
 _validate_config = validate_config
 
+
+def _sys_stream_isatty(name: str) -> bool:
+    stream: object = getattr(sys, name, None)
+    isatty = getattr(stream, "isatty", None)
+    if not callable(isatty):
+        return False
+    return bool(isatty())
+
+
 if TYPE_CHECKING:
 
     def _option[T](default: T, *param_decls: str) -> T:
@@ -207,7 +216,9 @@ def run(
         open_report=_maybe_open_report,
         copy_to_clipboard=_copy_text_to_clipboard,
         open_url=_open_url_in_browser,
-        stdout_is_tty=sys.stdout.isatty(),
+        confirm_upload=typer.confirm,
+        stdout_is_tty=_sys_stream_isatty("stdout"),
+        stdin_is_tty=_sys_stream_isatty("stdin"),
         no_color_env_present="NO_COLOR" in os.environ,
     )
     handle_run(args, deps)

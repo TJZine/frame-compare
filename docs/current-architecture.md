@@ -28,6 +28,12 @@ The main run path is:
 7. Execute orchestration phases in order:
    `frame_plan -> analyze -> align -> render -> metadata -> dovi -> publish -> report -> post_report_cleanup`
 
+When effective config enables both `slowpics.auto_upload` and
+`slowpics.confirm_upload_after_report`, the opted-in interactive path changes
+only the post-render ordering:
+`frame_plan -> analyze -> align -> render -> metadata -> dovi -> report -> confirm_slowpics_upload -> publish -> post_report_cleanup`.
+The non-confirmed flow keeps the normal ordering above.
+
 `frame_compare.orchestration.context.RunContext` carries the shared run state across phases.
 Phase task functions return explicit phase-output DTOs, and `execution.py` applies those
 outputs back to `ExecutionState`, `RunContext`, or collected artifacts at phase boundaries.
@@ -131,7 +137,8 @@ Keep these integrations at their current owners:
   `frame_compare.services.tmdb_lookup` owns low-level TMDB HTTP and response mapping
 - publishing: `frame_compare.services.publishers`
 - browser auto-open for generated reports, slow.pics browser opening, clipboard
-  copy, and report-open precedence after interactive slow.pics URL opening:
+  copy, report-confirmed upload prompting, and report/slow.pics browser
+  precedence rules:
   `frame_compare.cli.entry`
 - slow.pics URL shortcut creation: `frame_compare.services.slowpics_shortcut`
 - isolated slow.pics post-upload webhook delivery:
@@ -155,6 +162,25 @@ local deletion policy for `slowpics.delete_after_upload` and never reconstructs
 deletion membership from directories, labels, render artifacts, or shortcut
 outputs after upload. The `.url` shortcut is not cleanup membership.
 
+Report-confirmed slow.pics upload uses a CLI-owned confirmation callback seam
+carried on `RunDependencies.confirm_slowpics_upload`. Orchestration owns the
+typed request, decision, confirmation-status state, phase ordering, and upload
+skip decisions; it does not import Typer, open browsers, read stdin, or print
+prompt text. If a report-confirmed runtime path reaches orchestration without
+the callback, orchestration raises a typed config error before publish rather
+than silently uploading. When report generation warns, fails, or produces no
+report path, `confirm_slowpics_upload` records `report_unavailable`, emits the
+skip warning, and prevents slow.pics upload. When the user declines through the
+CLI callback, `publish` is skipped and `slowpics_url` stays `None`.
+
+In the report-confirmed workflow, the local report is generated before upload
+and is not regenerated after upload. The report payload therefore has no
+slow.pics URL even if the later upload succeeds; the CLI summary is the owner
+for presenting the uploaded URL. CLI report presentation happens before the
+confirmation prompt and before any later post-upload slow.pics browser opening.
+The existing non-confirmed rule remains: an attempted slow.pics browser open
+suppresses generated-report auto-open for that run.
+
 `frame_compare.services.slowpics_shortcut` owns deterministic `.url` output for
 successful slow.pics uploads. It selects the current run folder when present, or
 the safe common parent of the resolved screenshots/generated directories when
@@ -175,13 +201,16 @@ Webhook failures are warning-only and redact configured URL details.
 slow.pics URL copy/browser actions and the precedence rule between slow.pics
 browser opening and generated-report auto-open. Those actions run only for
 human, non-quiet, TTY stdout runs; JSON stdout stays a single object.
+The same CLI owner presents the local report and asks for confirmation in the
+report-confirmed workflow before post-upload URL actions are considered.
 
 `frame_compare.services.report` owns the static offline report payload and viewer
 assets. The generated viewer exposes slider, overlay, diff, and pair-based blink
 modes; frame/category navigation; progressive report, clip, and frame metadata;
 browser-local view mode, clip selection, viewport/zoom, reveal, and alignment state
 scoped by report identity; viewport pan, zoom, and fit controls; and adjacent-frame
-preloading.
+preloading. It does not own slow.pics upload policy, prompting, or browser side
+effects.
 
 Screenshot rendering owns its geometry and writer policy inside `frame_compare.render`:
 `frame_compare.render.geometry` plans optional aligned crop/scale/pad geometry, render

@@ -157,6 +157,51 @@ def test_run_json_rejects_force_interactive_alignment_before_runner(
     }
 
 
+def test_run_json_rejects_report_confirmed_slowpics_before_runner(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for invalid CLI/config combinations")
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = _write_minimal_config(root)
+        config_path.write_text(
+            MINIMAL_CONFIG
+            + "\n[slowpics]\nauto_upload = true\nconfirm_upload_after_report = true\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--root",
+                str(root),
+                "--config",
+                str(config_path.relative_to(root)),
+                "--json",
+            ],
+        )
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stderr == ""
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert payload["error"]["code"] == "FC-1003"
+    assert payload["error"]["message"] == (
+        "Report-confirmed slow.pics upload requires an interactive report-enabled run"
+    )
+    assert "warnings" not in payload
+    assert result.stdout.count("\n") == 1
+    assert {
+        tuple(entry["loc"]): entry["msg"]
+        for entry in payload["error"]["details"]["validation_errors"]
+    }[("cli", "json")] == "Report-confirmed slow.pics upload is not supported with --json."
+
+
 def test_run_json_outputs_error_schema_and_exit_code(
     monkeypatch: MonkeyPatch,
 ) -> None:

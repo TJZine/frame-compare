@@ -276,6 +276,12 @@ def print_result_summary(
             f"  [{STYLE_CHECK}]\u2713[/] slow.pics",
             _styled_value(result.slowpics_url),
         )
+    elif result.slowpics_upload_confirmation_status == "declined":
+        has_artifacts = True
+        table.add_row(
+            f"  [{STYLE_CHECK}]\u2713[/] slow.pics",
+            _styled_value("slow.pics upload skipped by confirmation"),
+        )
     for action in all_post_upload_actions:
         if not action.success:
             continue

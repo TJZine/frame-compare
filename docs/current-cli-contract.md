@@ -89,11 +89,21 @@ exists.
 - `--json` writes a single JSON object to stdout and suppresses human-readable summaries.
 - In that JSON object, `slowpics_url` is the only machine-readable slow.pics
   result field. No copy/open/shortcut/webhook result fields are emitted.
+  Report-confirmed upload confirmation status is also not emitted; the success
+  schema remains unchanged and `slowpics_url` remains the only machine-readable
+  slow.pics result field.
 - `--json` is incompatible with interactive alignment. If the effective config enables
   `audio_alignment.use_vspreview` or `audio_alignment.force_interactive`, the CLI exits
   with the standard config-error payload and exit code before entering the runtime
   pipeline.
+- `--json` is incompatible with report-confirmed slow.pics upload when that
+  prompt would be needed. If effective config has `slowpics.auto_upload = true`
+  and `slowpics.confirm_upload_after_report = true`, the CLI rejects `--json`
+  before entering the runtime pipeline with the standard config-error JSON
+  payload on stdout.
 - `--quiet` suppresses the at-a-glance summary but still allows a minimal success summary.
+- `--quiet` is incompatible with report-confirmed slow.pics upload when that
+  prompt would be needed.
 - When the at-a-glance summary reports optional VSPreview probe failures, it uses a
   sanitized summary rather than raw probe exception text.
 - The at-a-glance workspace paths are resolved base paths. When
@@ -130,7 +140,8 @@ exists.
 ### Report Auto-Open Ownership
 
 - HTML report generation is owned by `frame_compare.services.report`.
-- Browser auto-open for a generated report is owned by `frame_compare.cli.entry`.
+- Browser auto-open and report-path presentation for a generated report are
+  owned by `frame_compare.cli.entry` and its run-command helper.
 - Clipboard copy and slow.pics browser opening are also CLI-owned interactive
   post-run actions.
 - The CLI only attempts to open a report when all of these are true:
@@ -148,11 +159,23 @@ If an enabled slow.pics browser open is attempted for the same successful run,
 report auto-open is suppressed for that run. If slow.pics browser open is not
 attempted, the existing report auto-open rules above still apply.
 
+Report-confirmed slow.pics upload is the exception to that precedence rule. In
+that opted-in workflow, the CLI presents the local report before prompting for
+upload, regardless of whether a later confirmed upload will open the slow.pics
+URL in a browser. The same report auto-open rules decide whether the report is
+opened. If it is not opened, the CLI prints the report path before prompting.
+
 ### slow.pics Upload Behavior
 
 - slow.pics publishing is disabled by default. Users must set
   `slowpics.auto_upload = true` in config or through the wizard before `run`
   uploads generated screenshots.
+- Users may additionally opt into report-confirmed upload with the config-only
+  field `slowpics.confirm_upload_after_report = true`. The field is inert unless
+  effective `slowpics.auto_upload = true`.
+- There is no dedicated `run` flag for report-confirmed upload. `--no-upload`
+  remains the only slow.pics-specific `run` flag and still forces effective
+  `slowpics.auto_upload = false`.
 - When enabled and not suppressed by `--no-upload`, the current upload path uses
   the browser-compatible slow.pics flow owned by
   `frame_compare.services.publishers`: fetch `/comparison`, create metadata at
@@ -161,6 +184,26 @@ attempted, the existing report auto-open rules above still apply.
 - Upload membership comes from the explicit current-render upload plan, not from
   scanning the screenshot directory. The plan is built from selected frames,
   current render artifacts, and clip order.
+- The normal non-confirmed phase order remains:
+  `frame_plan -> analyze -> align -> render -> metadata -> dovi -> publish -> report -> post_report_cleanup`.
+- Report-confirmed upload changes only the opted-in interactive path:
+  `frame_plan -> analyze -> align -> render -> metadata -> dovi -> report -> confirm_slowpics_upload -> publish -> post_report_cleanup`.
+- Report-confirmed upload requires an interactive report-enabled run when the
+  prompt would be needed. If effective `slowpics.auto_upload = true` and
+  `slowpics.confirm_upload_after_report = true`, the CLI rejects the run before
+  runtime when any of these are true: `--json` was passed, `--quiet` was passed,
+  stdin is not attached to a TTY, stdout is not attached to a TTY, or
+  `report.enable = false`.
+- In the report-confirmed workflow, the report is generated before upload and is
+  not regenerated after upload. The generated report payload has
+  `slowpics_url = null`; after a confirmed upload, the CLI summary remains the
+  place where the uploaded slow.pics URL is shown.
+- If the report phase warns, fails, or produces no `report_path`, confirmation
+  does not prompt and slow.pics upload is skipped with the deterministic warning
+  `slow.pics upload skipped because report confirmation was unavailable`.
+- If the user declines the prompt, the run still succeeds, no slow.pics upload
+  side effects run, human output includes `slow.pics upload skipped by
+  confirmation`, and `slowpics_url` remains `None`.
 - `delete_after_upload` is local-only and report-safe. It is not mapped to
   slow.pics `removeAfter`; the current remote metadata request sends an empty
   `removeAfter` value.
@@ -174,6 +217,12 @@ attempted, the existing report auto-open rules above still apply.
   `report.embed_images = false`, deletion is skipped because the report
   references screenshot files on disk. If report generation warns/fails,
   deletion is skipped.
+- In the report-confirmed workflow, reports are required, so delete-after-upload
+  can run only after a confirmed successful upload when the already-generated
+  report embedded images. With `report.embed_images = false`, deletion is
+  skipped because the report references local screenshot files. If upload is
+  declined or report confirmation is unavailable, no files are considered
+  uploaded and no slow.pics delete-after-upload cleanup runs.
 - Local uploaded-file deletion errors do not fail an otherwise successful run.
   They are surfaced as run warnings and logs. In `run --json`, warnings remain
   off stdout so the stdout payload stays a single JSON object.
@@ -193,6 +242,8 @@ attempted, the existing report auto-open rules above still apply.
   post-upload action fields are added to the JSON payload.
 - Human output shows enabled successful post-upload action outcomes and warnings.
   Disabled or skipped post-upload actions are not listed by default.
+- Confirmed report-first upload still runs the existing post-upload actions
+  after a successful upload according to their normal owners and gating.
 - The current public upload surface does not include collection suffix/name,
   image format or optimization toggles, tags, hentai flag, or remote
   remove-after behavior.
@@ -256,9 +307,10 @@ slow.pics `run` flags exist.
 
 ## Config-Only slow.pics Surface
 
-These nine fields are the full current public `[slowpics]` config surface:
+These ten fields are the full current public `[slowpics]` config surface:
 
 - `auto_upload = false`
+- `confirm_upload_after_report = false`
 - `visibility = "unlisted"`
 - `delete_after_upload = false`
 - `timeout_seconds = 60.0`
@@ -269,6 +321,12 @@ These nine fields are the full current public `[slowpics]` config surface:
 - `webhook_url = null`
 
 `visibility` accepts only `public` and `unlisted`.
+
+`confirm_upload_after_report` is a config-only, interactive-only opt-in. It only
+has effect when effective `auto_upload = true`; it adds no `run` flag, no wizard
+prompt, and no `run --json` stdout field. When the prompt would be needed, it is
+incompatible with `--json`, `--quiet`, non-TTY stdin, non-TTY stdout, and
+`report.enable = false`.
 
 `delete_after_upload` is local-only and report-safe: it removes only the exact
 planned local screenshot files that were successfully uploaded, and only after
@@ -289,6 +347,9 @@ attempted, generated-report auto-open is suppressed for that run.
 `create_url_shortcut` and `webhook_url` run after successful upload whenever
 configured, including `--json` and `--quiet`. Their warning-only failures remain
 off JSON stdout and do not fail the run.
+
+The JSON output schema remains unchanged by report-confirmed upload:
+`slowpics_url` is still the only machine-readable slow.pics result field.
 
 There are no current slow.pics config fields for collection suffix/name, image
 format or optimization toggles, tags, hentai flag, or remote remove-after

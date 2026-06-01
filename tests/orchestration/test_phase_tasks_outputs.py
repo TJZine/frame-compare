@@ -22,9 +22,13 @@ from frame_compare.orchestration.types import (
     ExecutionState,
     MetadataPrefetch,
     PostUploadActionResult,
+    PublishPhaseOutput,
     RenderArtifacts,
+    ReportPhaseOutput,
     RunArtifacts,
     RunRequest,
+    SlowpicsUploadConfirmationDecision,
+    SlowpicsUploadConfirmationRequest,
 )
 from frame_compare.services.errors import SlowpicsError
 from frame_compare.services.publishers import PublishResult
@@ -729,6 +733,200 @@ async def test_run_publish_phase_webhook_validation_failure_preserves_upload_out
     )
 
 
+async def test_report_confirmed_decline_skips_publish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.config.slowpics.auto_upload = True
+    ctx.config.slowpics.confirm_upload_after_report = True
+    ctx.config.report.enable = True
+    report_path = tmp_path / "report.html"
+    state = ExecutionState(
+        artifacts=RunArtifacts(report_path=report_path, report_succeeded=True),
+        selected_frames=[10],
+    )
+    callback_calls: list[SlowpicsUploadConfirmationRequest] = []
+
+    def _decline(
+        request: SlowpicsUploadConfirmationRequest,
+    ) -> SlowpicsUploadConfirmationDecision:
+        callback_calls.append(request)
+        return "declined"
+
+    async def _unexpected_publish(*_args: object, **_kwargs: object) -> PublishPhaseOutput:
+        raise AssertionError("declined report-confirmed upload must not publish")
+
+    monkeypatch.setattr(
+        "frame_compare.orchestration.execution.run_publish_phase",
+        _unexpected_publish,
+    )
+
+    async with httpx.AsyncClient() as client:
+        phases = build_phases_after_align(
+            request=RunRequest(root=tmp_path),
+            clock=lambda: datetime(2026, 5, 31, tzinfo=UTC),
+            ffmpeg_runner=cast(Any, _RenderRunner()),
+            http_client=client,
+            state=state,
+            metadata_prefetch=MetadataPrefetch(None, False),
+            config=ctx.config,
+            confirm_slowpics_upload=_decline,
+        )
+        selected_phases = [
+            phase for phase in phases if phase.name in {"confirm_slowpics_upload", "publish"}
+        ]
+        await execute_phases(selected_phases, ctx, NullProgressReporter())
+
+    assert callback_calls == [SlowpicsUploadConfirmationRequest(report_path=report_path)]
+    assert state.artifacts.slowpics_upload_confirmation_status == "declined"
+    assert state.artifacts.slowpics_url is None
+    assert state.artifacts.uploaded_slowpics_file_paths == ()
+
+
+async def test_report_confirmed_available_report_confirms_then_publishes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.config.slowpics.auto_upload = True
+    ctx.config.slowpics.confirm_upload_after_report = True
+    ctx.config.report.enable = True
+    report_path = tmp_path / "report.html"
+    state = ExecutionState(
+        artifacts=RunArtifacts(report_path=report_path, report_succeeded=True),
+        selected_frames=[10],
+    )
+    publish_calls = 0
+
+    def _confirm(
+        _request: SlowpicsUploadConfirmationRequest,
+    ) -> SlowpicsUploadConfirmationDecision:
+        return "confirmed"
+
+    async def _fake_publish(*_args: object, **_kwargs: object) -> PublishPhaseOutput:
+        nonlocal publish_calls
+        publish_calls += 1
+        return PublishPhaseOutput(slowpics_url="https://slow.pics/c/confirmed")
+
+    monkeypatch.setattr(
+        "frame_compare.orchestration.execution.run_publish_phase",
+        _fake_publish,
+    )
+
+    async with httpx.AsyncClient() as client:
+        phases = build_phases_after_align(
+            request=RunRequest(root=tmp_path),
+            clock=lambda: datetime(2026, 5, 31, tzinfo=UTC),
+            ffmpeg_runner=cast(Any, _RenderRunner()),
+            http_client=client,
+            state=state,
+            metadata_prefetch=MetadataPrefetch(None, False),
+            config=ctx.config,
+            confirm_slowpics_upload=_confirm,
+        )
+        selected_phases = [
+            phase for phase in phases if phase.name in {"confirm_slowpics_upload", "publish"}
+        ]
+        await execute_phases(selected_phases, ctx, NullProgressReporter())
+
+    assert publish_calls == 1
+    assert state.artifacts.slowpics_upload_confirmation_status == "confirmed"
+    assert state.artifacts.slowpics_url == "https://slow.pics/c/confirmed"
+
+
+async def test_report_confirmed_report_failure_skips_prompt_and_publish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.config.slowpics.auto_upload = True
+    ctx.config.slowpics.confirm_upload_after_report = True
+    ctx.config.report.enable = True
+    state = ExecutionState(artifacts=RunArtifacts(), selected_frames=[10])
+
+    def _failing_report(*_args: object, **_kwargs: object) -> ReportPhaseOutput:
+        raise RuntimeError("report failed")
+
+    def _unexpected_confirm(
+        _request: SlowpicsUploadConfirmationRequest,
+    ) -> SlowpicsUploadConfirmationDecision:
+        raise AssertionError("unavailable report must not prompt")
+
+    async def _unexpected_publish(*_args: object, **_kwargs: object) -> PublishPhaseOutput:
+        raise AssertionError("unavailable report must not publish")
+
+    monkeypatch.setattr(
+        "frame_compare.orchestration.execution.run_report_phase",
+        _failing_report,
+    )
+    monkeypatch.setattr(
+        "frame_compare.orchestration.execution.run_publish_phase",
+        _unexpected_publish,
+    )
+
+    async with httpx.AsyncClient() as client:
+        phases = build_phases_after_align(
+            request=RunRequest(root=tmp_path),
+            clock=lambda: datetime(2026, 5, 31, tzinfo=UTC),
+            ffmpeg_runner=cast(Any, _RenderRunner()),
+            http_client=client,
+            state=state,
+            metadata_prefetch=MetadataPrefetch(None, False),
+            config=ctx.config,
+            confirm_slowpics_upload=_unexpected_confirm,
+        )
+        selected_phases = [
+            phase
+            for phase in phases
+            if phase.name in {"report", "confirm_slowpics_upload", "publish"}
+        ]
+        await execute_phases(selected_phases, ctx, NullProgressReporter())
+
+    assert state.artifacts.slowpics_upload_confirmation_status == "report_unavailable"
+    assert state.artifacts.slowpics_url is None
+    assert state.warnings == [
+        "report: report failed",
+        "slow.pics upload skipped because report confirmation was unavailable",
+    ]
+
+
+async def test_report_confirmed_report_payload_uses_no_slowpics_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.config.slowpics.auto_upload = True
+    ctx.config.slowpics.confirm_upload_after_report = True
+    ctx.config.report.enable = True
+    state = ExecutionState(
+        artifacts=RunArtifacts(slowpics_url="https://slow.pics/c/stale"),
+        selected_frames=[10],
+    )
+    captured_slowpics_url: str | None = "not-captured"
+
+    def _capture_report(*_args: object, **kwargs: object) -> ReportPhaseOutput:
+        nonlocal captured_slowpics_url
+        captured_slowpics_url = cast(str | None, kwargs["slowpics_url"])
+        return ReportPhaseOutput(report_path=tmp_path / "report.html", report_succeeded=True)
+
+    monkeypatch.setattr(
+        "frame_compare.orchestration.execution.run_report_phase",
+        _capture_report,
+    )
+
+    phases = build_phases_after_align(
+        request=RunRequest(root=tmp_path),
+        clock=lambda: datetime(2026, 5, 31, tzinfo=UTC),
+        ffmpeg_runner=cast(Any, _RenderRunner()),
+        http_client=None,
+        state=state,
+        metadata_prefetch=MetadataPrefetch(None, False),
+        config=ctx.config,
+    )
+    report_phase = next(phase for phase in phases if phase.name == "report")
+    await execute_phases([report_phase], ctx, NullProgressReporter())
+
+    assert captured_slowpics_url is None
+    assert state.artifacts.report_path == tmp_path / "report.html"
+
+
 def test_post_report_cleanup_skips_non_embedded_reports(tmp_path: Path) -> None:
     ctx = _context(tmp_path)
     ctx.config.slowpics.delete_after_upload = True
@@ -926,6 +1124,7 @@ async def test_warn_only_publish_phase_keeps_sanitized_service_error_in_warning_
             http_client=client,
             state=state,
             metadata_prefetch=MetadataPrefetch(None, False),
+            config=ctx.config,
         )
         publish_phase = next(phase for phase in phases if phase.name == "publish")
 

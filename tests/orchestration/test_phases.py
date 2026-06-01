@@ -377,6 +377,7 @@ def test_publish_phase_skip_condition_uses_effective_slowpics_config() -> None:
         http_client=None,
         state=state,
         metadata_prefetch=MetadataPrefetch(None, False),
+        config=ConfigSchema(),
     )
 
     publish_phase = next(phase for phase in phases if phase.name == "publish")

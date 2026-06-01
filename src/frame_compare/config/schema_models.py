@@ -94,6 +94,7 @@ class SlowpicsConfig(BaseModel):
     """slow.pics upload configuration and retry policy."""
 
     auto_upload: bool = False
+    confirm_upload_after_report: bool = False
     visibility: Visibility = Visibility.UNLISTED
     delete_after_upload: bool = False
     timeout_seconds: float = Field(default=60.0, ge=10.0)

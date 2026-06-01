@@ -11,6 +11,8 @@ UNSUPPORTED_SLOWPICS_RUN_FLAGS = (
     "--visibility",
     "--slowpics-visibility",
     "--delete-after-upload",
+    "--confirm-upload",
+    "--confirm-upload-after-report",
     "--remove-after",
     "--collection-name",
     "--collection-suffix",

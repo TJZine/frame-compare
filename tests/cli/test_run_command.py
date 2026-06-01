@@ -17,6 +17,7 @@ from frame_compare.cli.run_command import (
     RunCliRawArgs,
     RunCommandDeps,
     WriteConfigFn,
+    build_confirm_slowpics_upload_callback,
     build_run_request_from_cli,
     collect_interactive_slowpics_actions,
     handle_diagnose_paths,
@@ -25,7 +26,7 @@ from frame_compare.cli.run_command import (
     maybe_open_run_report,
     slowpics_browser_open_attempted,
 )
-from frame_compare.config.errors import ConfigNotFoundError, ConfigWriteError
+from frame_compare.config.errors import ConfigNotFoundError, ConfigValidationError, ConfigWriteError
 from frame_compare.config.loader import get_default_config
 from frame_compare.config.schema import (
     ConfigSchema,
@@ -36,15 +37,18 @@ from frame_compare.config.schema import (
     TonemapPreset,
 )
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
+from frame_compare.orchestration.types import SlowpicsUploadConfirmationRequest
 
 
 class RecordingRunner:
     def __init__(self, result: RunResult | None = None) -> None:
         self.result = result or RunResult(success=True)
         self.requests: list[RunRequest] = []
+        self.dependencies: list[RunDependencies | None] = []
 
     def run(self, request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         self.requests.append(request)
+        self.dependencies.append(dependencies)
         return self.result
 
 
@@ -110,18 +114,22 @@ class DepsOptions:
     load_config: LoadConfigFn = _raise_unexpected_load
     write_config_to: WriteConfigFn = _raise_unexpected_write
     handle_error: HandleErrorFn = _handle_error
+    open_report: Callable[[Path], bool] | None = None
     stdout_is_tty: bool = False
+    stdin_is_tty: bool = False
     no_color_env_present: bool = False
     copy_to_clipboard: Callable[[str], None] | None = None
     open_url: Callable[[str], bool] | None = None
+    confirm_upload: Callable[..., bool] | None = None
 
 
 def _deps(options: DepsOptions | None = None, opened: list[Path] | None = None) -> RunCommandDeps:
     opts = options or DepsOptions()
     opened_reports = [] if opened is None else opened
 
-    def _open_report(report_path: Path) -> None:
+    def _open_report(report_path: Path) -> bool:
         opened_reports.append(report_path)
+        return True
 
     return RunCommandDeps(
         runner=opts.runner or RecordingRunner(),
@@ -130,12 +138,22 @@ def _deps(options: DepsOptions | None = None, opened: list[Path] | None = None) 
         handle_error=opts.handle_error,
         configure_logging=lambda *, level, format: None,
         console_factory=_console_factory,
-        open_report=_open_report,
+        open_report=opts.open_report or _open_report,
         copy_to_clipboard=opts.copy_to_clipboard or (lambda _text: None),
         open_url=opts.open_url or (lambda _url: True),
+        confirm_upload=opts.confirm_upload or (lambda _text, *, default: default),
         stdout_is_tty=opts.stdout_is_tty,
+        stdin_is_tty=opts.stdin_is_tty,
         no_color_env_present=opts.no_color_env_present,
     )
+
+
+def _prompt_required_config(*, report_enable: bool = True) -> ConfigSchema:
+    config = get_default_config()
+    config.slowpics.auto_upload = True
+    config.slowpics.confirm_upload_after_report = True
+    config.report.enable = report_enable
+    return config
 
 
 def test_build_run_request_from_cli_maps_all_runtime_options() -> None:
@@ -345,6 +363,264 @@ def test_handle_run_json_write_config_error_writes_machine_schema(
     payload = json.loads(capsys.readouterr().out)
     assert payload["success"] is False
     assert payload["error"]["code"] == "FC-1007"
+
+
+@pytest.mark.parametrize(
+    ("args_update", "deps_update", "config", "expected_message"),
+    [
+        (
+            {"quiet": True},
+            {"stdin_is_tty": True, "stdout_is_tty": True},
+            _prompt_required_config(),
+            "Report-confirmed slow.pics upload is not supported with --quiet.",
+        ),
+        (
+            {"quiet": False},
+            {"stdin_is_tty": False, "stdout_is_tty": True},
+            _prompt_required_config(),
+            "Report-confirmed slow.pics upload requires stdin to be attached to a TTY.",
+        ),
+        (
+            {"quiet": False},
+            {"stdin_is_tty": True, "stdout_is_tty": False},
+            _prompt_required_config(),
+            "Report-confirmed slow.pics upload requires stdout to be attached to a TTY.",
+        ),
+        (
+            {"quiet": False},
+            {"stdin_is_tty": True, "stdout_is_tty": True},
+            _prompt_required_config(report_enable=False),
+            "Report-confirmed slow.pics upload requires report.enable = true.",
+        ),
+    ],
+)
+def test_handle_run_rejects_report_confirmed_slowpics_preflight_before_runner(
+    args_update: dict[str, object],
+    deps_update: dict[str, object],
+    config: ConfigSchema,
+    expected_message: str,
+) -> None:
+    runner = RecordingRunner()
+    handled_errors: list[ConfigValidationError] = []
+
+    def _load_config(
+        config_path: Path | None = None,
+        overrides: dict[str, object] | None = None,
+    ) -> ConfigSchema:
+        return config
+
+    def _handle_validation_error(
+        error: Exception,
+        *,
+        no_color: bool,
+        verbose: bool,
+        verbose_hint: str | None = "--verbose",
+    ) -> int:
+        assert isinstance(error, ConfigValidationError)
+        handled_errors.append(error)
+        assert no_color is False
+        assert verbose is False
+        assert verbose_hint == "--verbose"
+        return int(ExitCode.CONFIG_ERROR)
+
+    with pytest.raises(typer.Exit) as exc_info:
+        handle_run(
+            replace(_base_args(), **args_update),
+            _deps(
+                DepsOptions(
+                    runner=runner,
+                    load_config=_load_config,
+                    handle_error=_handle_validation_error,
+                    **deps_update,
+                )
+            ),
+        )
+
+    assert exc_info.value.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert runner.requests == []
+    assert handled_errors
+    assert expected_message in {
+        str(error["msg"]) for error in handled_errors[0].validation_errors
+    }
+
+
+def test_handle_run_report_confirmed_slowpics_preflight_allows_no_upload_override() -> None:
+    runner = RecordingRunner()
+
+    def _load_config(
+        config_path: Path | None = None,
+        overrides: dict[str, object] | None = None,
+    ) -> ConfigSchema:
+        return _prompt_required_config()
+
+    handle_run(
+        replace(_base_args(), no_upload=True, quiet=False),
+        _deps(
+            DepsOptions(
+                runner=runner,
+                load_config=_load_config,
+                stdin_is_tty=False,
+                stdout_is_tty=False,
+            )
+        ),
+    )
+
+    assert len(runner.requests) == 1
+
+
+def test_handle_run_injects_confirmation_dependency_only_for_prompt_required_path() -> None:
+    prompt_runner = RecordingRunner()
+    normal_runner = RecordingRunner()
+
+    def _prompt_config(
+        config_path: Path | None = None,
+        overrides: dict[str, object] | None = None,
+    ) -> ConfigSchema:
+        return _prompt_required_config()
+
+    def _normal_config(
+        config_path: Path | None = None,
+        overrides: dict[str, object] | None = None,
+    ) -> ConfigSchema:
+        return get_default_config()
+
+    handle_run(
+        replace(_base_args(), quiet=False),
+        _deps(
+            DepsOptions(
+                runner=prompt_runner,
+                load_config=_prompt_config,
+                stdin_is_tty=True,
+                stdout_is_tty=True,
+            )
+        ),
+    )
+    handle_run(
+        replace(_base_args(), quiet=False),
+        _deps(
+            DepsOptions(
+                runner=normal_runner,
+                load_config=_normal_config,
+                stdin_is_tty=True,
+                stdout_is_tty=True,
+            )
+        ),
+    )
+
+    assert prompt_runner.dependencies[0] is not None
+    assert prompt_runner.dependencies[0].confirm_slowpics_upload is not None
+    assert normal_runner.dependencies == [None]
+
+
+def test_confirmation_callback_opens_report_before_prompt_and_defaults_decline() -> None:
+    opened: list[Path] = []
+
+    def _confirm_upload(text: str, *, default: bool) -> bool:
+        assert opened == [Path("report.html")]
+        assert text == "Review the local report, then upload this comparison to slow.pics?"
+        assert default is False
+        return True
+
+    callback = build_confirm_slowpics_upload_callback(
+        args=replace(_base_args(), quiet=False),
+        deps=_deps(
+            DepsOptions(
+                stdout_is_tty=True,
+                confirm_upload=_confirm_upload,
+            ),
+            opened,
+        ),
+        console=Console(file=StringIO(), no_color=True),
+        resolve_effective_config=get_default_config,
+    )
+
+    assert callback(SlowpicsUploadConfirmationRequest(report_path=Path("report.html"))) == (
+        "confirmed"
+    )
+
+
+def test_confirmation_callback_prints_report_path_when_auto_open_disabled() -> None:
+    disabled_auto_open = get_default_config()
+    disabled_auto_open.report.auto_open = False
+    output = StringIO()
+
+    callback = build_confirm_slowpics_upload_callback(
+        args=replace(_base_args(), quiet=False),
+        deps=_deps(
+            DepsOptions(
+                stdout_is_tty=True,
+                confirm_upload=lambda _text, *, default: False,
+            )
+        ),
+        console=Console(file=output, no_color=True, force_terminal=False),
+        resolve_effective_config=lambda: disabled_auto_open,
+    )
+
+    assert callback(SlowpicsUploadConfirmationRequest(report_path=Path("report.html"))) == (
+        "declined"
+    )
+    assert "Report: report.html" in output.getvalue()
+
+
+def test_confirmation_callback_prints_report_path_when_auto_open_attempt_fails() -> None:
+    output = StringIO()
+
+    callback = build_confirm_slowpics_upload_callback(
+        args=replace(_base_args(), quiet=False),
+        deps=_deps(
+            DepsOptions(
+                stdout_is_tty=True,
+                open_report=lambda _path: False,
+                confirm_upload=lambda _text, *, default: False,
+            )
+        ),
+        console=Console(file=output, no_color=True, force_terminal=False),
+        resolve_effective_config=get_default_config,
+    )
+
+    assert callback(SlowpicsUploadConfirmationRequest(report_path=Path("report.html"))) == (
+        "declined"
+    )
+    assert "Report: report.html" in output.getvalue()
+
+
+def test_handle_run_interrupts_when_confirmation_prompt_aborts() -> None:
+    class PromptAbortRunner(RecordingRunner):
+        def run(
+            self, request: RunRequest, dependencies: RunDependencies | None = None
+        ) -> RunResult:
+            self.requests.append(request)
+            self.dependencies.append(dependencies)
+            assert dependencies is not None
+            assert dependencies.confirm_slowpics_upload is not None
+            dependencies.confirm_slowpics_upload(
+                SlowpicsUploadConfirmationRequest(report_path=Path("report.html"))
+            )
+            raise AssertionError("upload should not continue after prompt abort")
+
+    def _load_config(
+        config_path: Path | None = None,
+        overrides: dict[str, object] | None = None,
+    ) -> ConfigSchema:
+        return _prompt_required_config()
+
+    with pytest.raises(typer.Exit) as exc_info:
+        handle_run(
+            replace(_base_args(), quiet=False),
+            _deps(
+                DepsOptions(
+                    runner=PromptAbortRunner(),
+                    load_config=_load_config,
+                    stdin_is_tty=True,
+                    stdout_is_tty=True,
+                    confirm_upload=lambda _text, *, default: (_ for _ in ()).throw(
+                        typer.Abort()
+                    ),
+                )
+            ),
+        )
+
+    assert exc_info.value.exit_code == int(ExitCode.INTERRUPTED)
 
 
 def test_maybe_open_run_report_requires_report_human_output_and_tty() -> None:
@@ -567,3 +843,71 @@ def test_handle_run_executes_interactive_actions_before_summary(monkeypatch) -> 
     )
 
     assert events == ["copy", "open", "summary"]
+
+
+def test_handle_run_confirmed_workflow_presents_report_before_post_upload_actions(
+    monkeypatch,
+) -> None:
+    events: list[str] = []
+    opened_reports: list[Path] = []
+
+    class ConfirmingRunner(RecordingRunner):
+        def run(
+            self, request: RunRequest, dependencies: RunDependencies | None = None
+        ) -> RunResult:
+            self.requests.append(request)
+            self.dependencies.append(dependencies)
+            assert dependencies is not None
+            assert dependencies.confirm_slowpics_upload is not None
+            decision = dependencies.confirm_slowpics_upload(
+                SlowpicsUploadConfirmationRequest(report_path=Path("report.html"))
+            )
+            return RunResult(
+                success=True,
+                slowpics_url="https://slow.pics/c/example",
+                report_path=Path("report.html"),
+                slowpics_upload_confirmation_status=decision,
+            )
+
+    def _print_summary(*_args: object, **_kwargs: object) -> None:
+        events.append("summary")
+
+    def _load_config(
+        config_path: Path | None = None,
+        overrides: dict[str, object] | None = None,
+    ) -> ConfigSchema:
+        return _prompt_required_config()
+
+    def _confirm_upload(_text: str, *, default: bool) -> bool:
+        assert default is False
+        assert opened_reports == [Path("report.html")]
+        events.append("prompt")
+        return True
+
+    def _copy_url(_url: str) -> None:
+        events.append("copy")
+
+    def _open_url(_url: str) -> bool:
+        events.append("slowpics-browser")
+        return True
+
+    monkeypatch.setattr("frame_compare.cli.run_command.print_result_summary", _print_summary)
+
+    handle_run(
+        replace(_base_args(), quiet=False),
+        _deps(
+            DepsOptions(
+                runner=ConfirmingRunner(),
+                load_config=_load_config,
+                stdin_is_tty=True,
+                stdout_is_tty=True,
+                copy_to_clipboard=_copy_url,
+                open_url=_open_url,
+                confirm_upload=_confirm_upload,
+            ),
+            opened_reports,
+        ),
+    )
+
+    assert events == ["prompt", "copy", "slowpics-browser", "summary"]
+    assert opened_reports == [Path("report.html")]

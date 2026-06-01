@@ -44,6 +44,7 @@ def _assemble_run_result(
         slowpics_url=artifacts.slowpics_url,
         report_path=artifacts.report_path,
         post_upload_actions=artifacts.post_upload_actions,
+        slowpics_upload_confirmation_status=artifacts.slowpics_upload_confirmation_status,
         frame_count=len(selected_frames),
         clips_processed=1 + len(context.comparisons),
         duration_seconds=duration_seconds,
@@ -67,6 +68,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             ffmpeg_runner=deps.ffmpeg_runner,
             http_client=deps.http_client,
             progress=deps.progress,
+            confirm_slowpics_upload=deps.confirm_slowpics_upload,
             clock=deps.clock,
         )
 
@@ -130,6 +132,8 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                 "post_report_cleanup": 0.0,
             }
         )
+        if prep.config.slowpics.auto_upload and prep.config.slowpics.confirm_upload_after_report:
+            state.phase_timings["confirm_slowpics_upload"] = 0.0
 
         phase_plan = build_execution_phase_plan(
             request=request,

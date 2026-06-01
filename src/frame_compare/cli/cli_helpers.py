@@ -44,21 +44,22 @@ class FrameCompareTyperGroup(TyperGroup):
         return super().main(*args, **kwargs)
 
 
-def maybe_open_report(report_path: Path) -> None:
+def maybe_open_report(report_path: Path) -> bool:
     """Best-effort open of a generated HTML report in the default browser."""
     if os.name == "nt" and hasattr(os, "startfile"):
         try:
             os.startfile(str(report_path))  # type: ignore[attr-defined]  # nosec B606
-            return
+            return True
         except OSError:
-            with contextlib.suppress(OSError, webbrowser.Error):
-                webbrowser.open(report_path.resolve().as_uri())
-            return
+            try:
+                return webbrowser.open(report_path.resolve().as_uri())
+            except (OSError, webbrowser.Error):
+                return False
 
     try:
-        webbrowser.open(report_path.resolve().as_uri())
+        return webbrowser.open(report_path.resolve().as_uri())
     except (OSError, webbrowser.Error):
-        return
+        return False
 
 
 def copy_text_to_clipboard(text: str) -> None:

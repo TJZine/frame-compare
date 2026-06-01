@@ -60,6 +60,7 @@ contrast_recovery = 0.3
 
 [slowpics]
 auto_upload = false
+confirm_upload_after_report = false
 visibility = "unlisted"
 delete_after_upload = false
 timeout_seconds = 60.0

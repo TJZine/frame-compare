@@ -26,7 +26,9 @@ from frame_compare.analysis.types import (
     SelectionDetail,
     SelectionDetailsByFrame,
 )
+from frame_compare.config.errors import ConfigValidationError
 from frame_compare.config.schema import AnalysisConfig, ConfigSchema, OverlayMode
+from frame_compare.errors import JSONValue
 from frame_compare.orchestration.context import (
     ClipAlignmentState,
     ClipProbeSnapshot,
@@ -36,6 +38,7 @@ from frame_compare.orchestration.context import (
 from frame_compare.orchestration.types import (
     AlignPhaseOutput,
     AnalyzePhaseOutput,
+    ConfirmSlowpicsUploadPhaseOutput,
     DoviPhaseOutput,
     FramePlanPhaseOutput,
     MetadataPhaseOutput,
@@ -46,6 +49,8 @@ from frame_compare.orchestration.types import (
     RenderArtifacts,
     RenderPhaseOutput,
     ReportPhaseOutput,
+    SlowpicsUploadConfirmationFn,
+    SlowpicsUploadConfirmationRequest,
 )
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
 from frame_compare.services.alignment import (
@@ -74,6 +79,10 @@ from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.props import range_label_from_props
 
 log = structlog.get_logger()
+
+REPORT_CONFIRMATION_UNAVAILABLE_WARNING = (
+    "slow.pics upload skipped because report confirmation was unavailable"
+)
 
 if TYPE_CHECKING:
     from frame_compare.render.types import (
@@ -798,6 +807,42 @@ async def run_publish_phase(
         uploaded_file_paths=result.uploaded_file_paths,
         post_upload_actions=(*shortcut_actions, *webhook_actions),
     )
+
+
+def run_confirm_slowpics_upload_phase(
+    _ctx: RunContext,
+    *,
+    report_path: Path | None,
+    report_succeeded: bool,
+    confirm_slowpics_upload: SlowpicsUploadConfirmationFn | None,
+) -> ConfirmSlowpicsUploadPhaseOutput:
+    if not report_succeeded or report_path is None:
+        return ConfirmSlowpicsUploadPhaseOutput(
+            status="report_unavailable",
+            warnings=[REPORT_CONFIRMATION_UNAVAILABLE_WARNING],
+        )
+    if confirm_slowpics_upload is None:
+        validation_errors: list[dict[str, JSONValue]] = [
+            {
+                "type": "value_error",
+                "loc": ["slowpics", "confirm_upload_after_report"],
+                "msg": "Report-confirmed slow.pics upload requires a confirmation callback.",
+                "input": True,
+            }
+        ]
+        raise ConfigValidationError(
+            validation_errors,
+            message="Report-confirmed slow.pics upload requires a confirmation callback",
+            hint=(
+                "Provide RunDependencies.confirm_slowpics_upload, or disable "
+                "slowpics.confirm_upload_after_report."
+            ),
+        )
+
+    decision = confirm_slowpics_upload(
+        SlowpicsUploadConfirmationRequest(report_path=report_path)
+    )
+    return ConfirmSlowpicsUploadPhaseOutput(status=decision)
 
 
 def _slowpics_upload_clips(ctx: RunContext) -> list[SlowpicsUploadClip]:

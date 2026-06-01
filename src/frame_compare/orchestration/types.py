@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, Protocol
 
 import httpx
 
@@ -101,6 +101,30 @@ def _empty_selection_details_by_source_frame() -> SelectionDetailsByFrame:
 
 type PostUploadActionKind = Literal["clipboard", "browser", "shortcut", "webhook"]
 
+type SlowpicsUploadConfirmationDecision = Literal["confirmed", "declined"]
+type SlowpicsUploadConfirmationStatus = Literal[
+    "not_applicable",
+    "confirmed",
+    "declined",
+    "report_unavailable",
+]
+
+
+@dataclass(frozen=True)
+class SlowpicsUploadConfirmationRequest:
+    """Request passed to the CLI-owned slow.pics upload confirmation callback."""
+
+    report_path: Path
+
+
+class SlowpicsUploadConfirmationFn(Protocol):
+    """CLI-owned callback for report-confirmed slow.pics upload decisions."""
+
+    def __call__(
+        self,
+        request: SlowpicsUploadConfirmationRequest,
+    ) -> SlowpicsUploadConfirmationDecision: ...
+
 
 @dataclass(frozen=True)
 class PostUploadActionResult:
@@ -127,6 +151,7 @@ class RunResult:
     slowpics_url: str | None = None
     report_path: Path | None = None
     post_upload_actions: PostUploadActionResults = ()
+    slowpics_upload_confirmation_status: SlowpicsUploadConfirmationStatus = "not_applicable"
 
     # Metrics
     frame_count: int = 0
@@ -148,6 +173,7 @@ class RunDependencies:
     ffmpeg_runner: FFmpegRunner | None = None
     http_client: httpx.AsyncClient | None = None
     progress: ProgressReporter | None = None
+    confirm_slowpics_upload: SlowpicsUploadConfirmationFn | None = None
     clock: Callable[[], datetime] = field(default=datetime.now)
 
 
@@ -213,6 +239,12 @@ class ReportPhaseOutput:
 
 
 @dataclass(frozen=True)
+class ConfirmSlowpicsUploadPhaseOutput:
+    status: SlowpicsUploadConfirmationStatus
+    warnings: list[str] = field(default_factory=_empty_str_list)
+
+
+@dataclass(frozen=True)
 class PostReportCleanupPhaseOutput:
     warnings: list[str] = field(default_factory=_empty_str_list)
 
@@ -226,6 +258,7 @@ type PhaseOutput = (
     | DoviPhaseOutput
     | PublishPhaseOutput
     | ReportPhaseOutput
+    | ConfirmSlowpicsUploadPhaseOutput
     | PostReportCleanupPhaseOutput
 )
 
@@ -239,6 +272,7 @@ class RunArtifacts:
     slowpics_url: str | None
     uploaded_slowpics_file_paths: tuple[Path, ...]
     post_upload_actions: PostUploadActionResults
+    slowpics_upload_confirmation_status: SlowpicsUploadConfirmationStatus
     report_path: Path | None
     report_succeeded: bool
     resolved_metadata: TmdbMetadata | None
@@ -251,6 +285,7 @@ class RunArtifacts:
         slowpics_url: str | None = None,
         uploaded_slowpics_file_paths: tuple[Path, ...] = (),
         post_upload_actions: PostUploadActionResults = (),
+        slowpics_upload_confirmation_status: SlowpicsUploadConfirmationStatus = "not_applicable",
         report_path: Path | None = None,
         report_succeeded: bool = False,
         resolved_metadata: TmdbMetadata | None = None,
@@ -262,6 +297,7 @@ class RunArtifacts:
         self.slowpics_url = slowpics_url
         self.uploaded_slowpics_file_paths = uploaded_slowpics_file_paths
         self.post_upload_actions = post_upload_actions
+        self.slowpics_upload_confirmation_status = slowpics_upload_confirmation_status
         self.report_path = report_path
         self.report_succeeded = report_succeeded
         self.resolved_metadata = resolved_metadata

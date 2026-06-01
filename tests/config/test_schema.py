@@ -51,6 +51,7 @@ def test_default_config_values() -> None:
     assert config.audio_alignment.channel_strategy == "mono_downmix"
     assert config.audio_alignment.refinement_mode == "disabled"
     assert config.audio_alignment.comparison_streams == {}
+    assert config.slowpics.confirm_upload_after_report is False
 
 
 def test_analysis_frame_count_bounds_too_low() -> None:
@@ -168,6 +169,7 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert color.target_nits == 100
     assert color.contrast_recovery == 0.3
     assert color.preset == "reference"
+    assert slowpics.confirm_upload_after_report is False
     assert slowpics.visibility == Visibility.UNLISTED
     assert slowpics.max_retries == 3
     assert slowpics.copy_url_to_clipboard is True
@@ -197,6 +199,7 @@ def test_slowpics_config_public_surface_is_frozen_to_approved_fields_and_default
     """slow.pics config remains the documented approved public surface."""
     expected_defaults = {
         "auto_upload": False,
+        "confirm_upload_after_report": False,
         "visibility": "unlisted",
         "delete_after_upload": False,
         "timeout_seconds": 60.0,
@@ -218,6 +221,7 @@ def test_default_config_toml_documents_approved_slowpics_defaults() -> None:
 
     assert data["slowpics"] == {
         "auto_upload": False,
+        "confirm_upload_after_report": False,
         "visibility": "unlisted",
         "delete_after_upload": False,
         "timeout_seconds": 60.0,
@@ -258,6 +262,12 @@ def test_schema_model_enums_accept_config_strings_and_reject_unknown_values() ->
 
     with pytest.raises(ValidationError):
         LoggingConfig.model_validate({"level": "debug"})
+
+
+def test_slowpics_confirm_upload_after_report_accepts_explicit_bool() -> None:
+    slowpics = SlowpicsConfig.model_validate({"confirm_upload_after_report": True})
+
+    assert slowpics.confirm_upload_after_report is True
 
 
 def test_audio_alignment_new_config_controls_validate_and_reject_unknown_values() -> None:
