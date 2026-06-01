@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from io import StringIO
 from pathlib import Path
@@ -17,10 +18,12 @@ from frame_compare.cli.run_command import (
     RunCommandDeps,
     WriteConfigFn,
     build_run_request_from_cli,
+    collect_interactive_slowpics_actions,
     handle_diagnose_paths,
     handle_json_output,
     handle_run,
     maybe_open_run_report,
+    slowpics_browser_open_attempted,
 )
 from frame_compare.config.errors import ConfigNotFoundError, ConfigWriteError
 from frame_compare.config.loader import get_default_config
@@ -109,6 +112,8 @@ class DepsOptions:
     handle_error: HandleErrorFn = _handle_error
     stdout_is_tty: bool = False
     no_color_env_present: bool = False
+    copy_to_clipboard: Callable[[str], None] | None = None
+    open_url: Callable[[str], bool] | None = None
 
 
 def _deps(options: DepsOptions | None = None, opened: list[Path] | None = None) -> RunCommandDeps:
@@ -126,6 +131,8 @@ def _deps(options: DepsOptions | None = None, opened: list[Path] | None = None) 
         configure_logging=lambda *, level, format: None,
         console_factory=_console_factory,
         open_report=_open_report,
+        copy_to_clipboard=opts.copy_to_clipboard or (lambda _text: None),
+        open_url=opts.open_url or (lambda _url: True),
         stdout_is_tty=opts.stdout_is_tty,
         no_color_env_present=opts.no_color_env_present,
     )
@@ -400,3 +407,163 @@ def test_maybe_open_run_report_respects_config_and_reload_failure() -> None:
     )
 
     assert opened == [Path("report.html"), Path("report.html")]
+
+
+def test_interactive_slowpics_actions_require_url_enabled_config_human_tty() -> None:
+    copied: list[str] = []
+    opened: list[str] = []
+    deps = _deps(
+        DepsOptions(
+            stdout_is_tty=True,
+            copy_to_clipboard=copied.append,
+            open_url=lambda url: opened.append(url) is None or True,
+        )
+    )
+    result = RunResult(success=True, slowpics_url="https://slow.pics/c/example")
+
+    actions = collect_interactive_slowpics_actions(
+        result,
+        args=replace(_base_args(), quiet=False),
+        deps=deps,
+        config=get_default_config(),
+    )
+
+    assert copied == ["https://slow.pics/c/example"]
+    assert opened == ["https://slow.pics/c/example"]
+    assert [(action.kind, action.success) for action in actions] == [
+        ("clipboard", True),
+        ("browser", True),
+    ]
+
+    copied.clear()
+    opened.clear()
+    disabled = get_default_config()
+    disabled.slowpics.copy_url_to_clipboard = False
+    disabled.slowpics.open_in_browser = False
+
+    assert (
+        collect_interactive_slowpics_actions(
+            result,
+            args=replace(_base_args(), quiet=False),
+            deps=deps,
+            config=disabled,
+        )
+        == ()
+    )
+    assert (
+        collect_interactive_slowpics_actions(
+            result,
+            args=replace(_base_args(), quiet=False, json_output=True),
+            deps=deps,
+            config=get_default_config(),
+        )
+        == ()
+    )
+    assert (
+        collect_interactive_slowpics_actions(
+            result,
+            args=replace(_base_args(), quiet=True),
+            deps=deps,
+            config=get_default_config(),
+        )
+        == ()
+    )
+    assert (
+        collect_interactive_slowpics_actions(
+            result,
+            args=replace(_base_args(), quiet=False),
+            deps=_deps(DepsOptions(stdout_is_tty=False)),
+            config=get_default_config(),
+        )
+        == ()
+    )
+    assert (
+        collect_interactive_slowpics_actions(
+            RunResult(success=True),
+            args=replace(_base_args(), quiet=False),
+            deps=deps,
+            config=get_default_config(),
+        )
+        == ()
+    )
+    assert copied == []
+    assert opened == []
+
+
+def test_interactive_slowpics_action_failures_are_warning_only() -> None:
+    deps = _deps(
+        DepsOptions(
+            stdout_is_tty=True,
+            copy_to_clipboard=lambda _url: (_ for _ in ()).throw(RuntimeError("clipboard denied")),
+            open_url=lambda _url: False,
+        )
+    )
+
+    actions = collect_interactive_slowpics_actions(
+        RunResult(success=True, slowpics_url="https://slow.pics/c/example"),
+        args=replace(_base_args(), quiet=False),
+        deps=deps,
+        config=get_default_config(),
+    )
+
+    assert [(action.kind, action.success) for action in actions] == [
+        ("clipboard", False),
+        ("browser", False),
+    ]
+    assert actions[0].warning == "slow.pics clipboard: failed to copy URL: clipboard denied"
+    assert actions[1].warning == (
+        "slow.pics browser: failed to open URL: no browser accepted the request"
+    )
+    assert slowpics_browser_open_attempted(actions) is True
+
+
+def test_report_auto_open_can_be_suppressed_by_slowpics_browser_attempt() -> None:
+    opened: list[Path] = []
+
+    maybe_open_run_report(
+        RunResult(success=True, report_path=Path("report.html")),
+        args=replace(_base_args(), quiet=False),
+        deps=_deps(DepsOptions(stdout_is_tty=True), opened),
+        resolve_effective_config=get_default_config,
+        suppress_report_open=True,
+    )
+
+    assert opened == []
+
+
+def test_handle_run_executes_interactive_actions_before_summary(monkeypatch) -> None:
+    events: list[str] = []
+    runner = RecordingRunner(RunResult(success=True, slowpics_url="https://slow.pics/c/example"))
+
+    def _print_summary(*_args: object, **_kwargs: object) -> None:
+        events.append("summary")
+
+    def _load_config(
+        config_path: Path | None = None,
+        overrides: dict[str, object] | None = None,
+    ) -> ConfigSchema:
+        return get_default_config()
+
+    def _copy_url(_url: str) -> None:
+        events.append("copy")
+
+    def _open_url(_url: str) -> bool:
+        events.append("open")
+        return True
+
+    monkeypatch.setattr("frame_compare.cli.run_command.print_result_summary", _print_summary)
+
+    handle_run(
+        replace(_base_args(), quiet=False),
+        _deps(
+            DepsOptions(
+                runner=runner,
+                load_config=_load_config,
+                stdout_is_tty=True,
+                copy_to_clipboard=_copy_url,
+                open_url=_open_url,
+            )
+        ),
+    )
+
+    assert events == ["copy", "open", "summary"]

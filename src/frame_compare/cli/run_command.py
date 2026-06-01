@@ -13,7 +13,12 @@ import typer
 from rich.console import Console
 
 from frame_compare.cli.errors import ExitCode, format_error_json, get_exit_code
-from frame_compare.cli.output import print_at_a_glance, print_result_summary
+from frame_compare.cli.output import (
+    PostUploadActionPresentationResult,
+    PostUploadActionPresentationResults,
+    print_at_a_glance,
+    print_result_summary,
+)
 from frame_compare.config.errors import ConfigValidationError
 from frame_compare.config.overrides import apply_cli_overrides
 from frame_compare.config.schema import ConfigSchema, OverlayMode, ToneCurve, TonemapPreset
@@ -50,6 +55,8 @@ class RunCommandDeps:
     configure_logging: ConfigureLoggingFn
     console_factory: ConsoleFactory
     open_report: OpenReportFn
+    copy_to_clipboard: CopyToClipboardFn
+    open_url: OpenUrlFn
     stdout_is_tty: bool
     no_color_env_present: bool
 
@@ -79,6 +86,14 @@ class HandleErrorFn(Protocol):
 
 class OpenReportFn(Protocol):
     def __call__(self, report_path: Path) -> None: ...
+
+
+class CopyToClipboardFn(Protocol):
+    def __call__(self, text: str) -> None: ...
+
+
+class OpenUrlFn(Protocol):
+    def __call__(self, url: str) -> bool: ...
 
 
 def coerce_cli_choice[CliChoiceT: Enum](
@@ -236,12 +251,24 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
     if not result.success:
         raise typer.Exit(code=int(ExitCode.PROCESSING_ERROR))
 
-    print_result_summary(console, result=result, quiet=args.quiet)
+    post_upload_actions = collect_interactive_slowpics_actions(
+        result,
+        args=args,
+        deps=deps,
+        config=load_effective_config(),
+    )
+    print_result_summary(
+        console,
+        result=result,
+        quiet=args.quiet,
+        post_upload_actions=post_upload_actions,
+    )
     maybe_open_run_report(
         result,
         args=args,
         deps=deps,
         resolve_effective_config=resolve_effective_config,
+        suppress_report_open=slowpics_browser_open_attempted(post_upload_actions),
     )
 
 
@@ -362,8 +389,15 @@ def maybe_open_run_report(
     args: RunCliRawArgs,
     deps: RunCommandDeps,
     resolve_effective_config: EffectiveConfigLoader,
+    suppress_report_open: bool = False,
 ) -> None:
-    if result.report_path is None or args.json_output or args.quiet or not deps.stdout_is_tty:
+    if (
+        suppress_report_open
+        or result.report_path is None
+        or args.json_output
+        or args.quiet
+        or not deps.stdout_is_tty
+    ):
         return
 
     try:
@@ -375,6 +409,78 @@ def maybe_open_run_report(
 
     if cfg is None or cfg.report.auto_open:
         deps.open_report(result.report_path)
+
+
+def collect_interactive_slowpics_actions(
+    result: RunResult,
+    *,
+    args: RunCliRawArgs,
+    deps: RunCommandDeps,
+    config: ConfigSchema,
+) -> PostUploadActionPresentationResults:
+    """Run enabled interactive slow.pics URL actions and collect presentation state."""
+    url = result.slowpics_url
+    if url is None or args.json_output or args.quiet or not deps.stdout_is_tty:
+        return ()
+
+    actions: list[PostUploadActionPresentationResult] = []
+    if config.slowpics.copy_url_to_clipboard:
+        actions.append(_copy_slowpics_url(url, copy_to_clipboard=deps.copy_to_clipboard))
+    if config.slowpics.open_in_browser:
+        actions.append(_open_slowpics_url(url, open_url=deps.open_url))
+    return tuple(actions)
+
+
+def _copy_slowpics_url(
+    url: str,
+    *,
+    copy_to_clipboard: CopyToClipboardFn,
+) -> PostUploadActionPresentationResult:
+    try:
+        copy_to_clipboard(url)
+    except Exception as exc:
+        return PostUploadActionPresentationResult(
+            kind="clipboard",
+            success=False,
+            warning=f"slow.pics clipboard: failed to copy URL: {exc}",
+        )
+    return PostUploadActionPresentationResult(
+        kind="clipboard",
+        success=True,
+        detail="slow.pics URL copied to clipboard",
+    )
+
+
+def _open_slowpics_url(
+    url: str,
+    *,
+    open_url: OpenUrlFn,
+) -> PostUploadActionPresentationResult:
+    try:
+        opened = open_url(url)
+    except Exception as exc:
+        return PostUploadActionPresentationResult(
+            kind="browser",
+            success=False,
+            warning=f"slow.pics browser: failed to open URL: {exc}",
+        )
+    if not opened:
+        return PostUploadActionPresentationResult(
+            kind="browser",
+            success=False,
+            warning="slow.pics browser: failed to open URL: no browser accepted the request",
+        )
+    return PostUploadActionPresentationResult(
+        kind="browser",
+        success=True,
+        detail="slow.pics URL opened in browser",
+    )
+
+
+def slowpics_browser_open_attempted(
+    actions: PostUploadActionPresentationResults,
+) -> bool:
+    return any(action.kind == "browser" for action in actions)
 
 
 def handle_diagnose_paths(resolved_root: Path, config_path: Path, config: ConfigSchema) -> None:

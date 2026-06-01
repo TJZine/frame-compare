@@ -243,6 +243,90 @@ def test_run_reloads_config_after_runner_and_respects_mid_run_auto_open_change(
     assert "path" not in opened
 
 
+def test_run_slowpics_browser_open_suppresses_report_auto_open(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    opened_reports: dict[str, Path] = {}
+    opened_urls: list[str] = []
+
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        return RunResult(
+            success=True,
+            slowpics_url="https://slow.pics/c/example",
+            report_path=Path("report.html"),
+        )
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+    monkeypatch.setattr(
+        "frame_compare.cli.entry.sys",
+        SimpleNamespace(stdout=SimpleNamespace(isatty=lambda: True)),
+    )
+    monkeypatch.setattr("frame_compare.cli.entry._copy_text_to_clipboard", lambda _url: None)
+    monkeypatch.setattr(
+        "frame_compare.cli.entry._open_url_in_browser",
+        lambda url: opened_urls.append(url) is None or True,
+    )
+    monkeypatch.setattr(
+        "frame_compare.cli.entry._maybe_open_report",
+        lambda report_path: opened_reports.setdefault("path", report_path),
+    )
+
+    result = _invoke_run_with_minimal_workspace([])
+
+    assert result.exit_code == 0
+    assert opened_urls == ["https://slow.pics/c/example"]
+    assert "path" not in opened_reports
+
+
+def test_run_report_auto_open_preserved_when_slowpics_browser_open_disabled(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    opened_reports: dict[str, Path] = {}
+    opened_urls: list[str] = []
+
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        return RunResult(
+            success=True,
+            slowpics_url="https://slow.pics/c/example",
+            report_path=Path("report.html"),
+        )
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+    monkeypatch.setattr(
+        "frame_compare.cli.entry.sys",
+        SimpleNamespace(stdout=SimpleNamespace(isatty=lambda: True)),
+    )
+    monkeypatch.setattr("frame_compare.cli.entry._copy_text_to_clipboard", lambda _url: None)
+    monkeypatch.setattr(
+        "frame_compare.cli.entry._open_url_in_browser",
+        lambda url: opened_urls.append(url) is None or True,
+    )
+    monkeypatch.setattr(
+        "frame_compare.cli.entry._maybe_open_report",
+        lambda report_path: opened_reports.setdefault("path", report_path),
+    )
+
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = _write_minimal_config(root)
+        config_path.write_text(
+            MINIMAL_CONFIG + "\n[slowpics]\nopen_in_browser = false\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            app,
+            ["run", "--root", str(root), "--config", str(config_path.relative_to(root))],
+            color=False,
+            terminal_width=200,
+            env={"NO_COLOR": "1", "TERM": "dumb"},
+        )
+
+    assert result.exit_code == 0
+    assert opened_urls == []
+    assert opened_reports["path"] == Path("report.html")
+
+
 def test_maybe_open_report_swallows_webbrowser_error(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr("frame_compare.cli.cli_helpers.os", SimpleNamespace(name="posix"))
     monkeypatch.setattr(

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from rich.console import Console
 from rich.markup import escape
@@ -30,6 +31,43 @@ STYLE_HEADER = "bold cyan"
 STYLE_SUBHEADER = "bold bright_cyan"
 STYLE_CHECK = "green"
 STYLE_METRIC_KEY = "dim"
+
+type PostUploadActionPresentationKind = Literal["clipboard", "browser", "shortcut", "webhook"]
+
+
+class PostUploadActionPresentation(Protocol):
+    @property
+    def kind(self) -> PostUploadActionPresentationKind: ...
+
+    @property
+    def success(self) -> bool: ...
+
+    @property
+    def detail(self) -> str | None: ...
+
+    @property
+    def path(self) -> Path | None: ...
+
+    @property
+    def message(self) -> str | None: ...
+
+    @property
+    def warning(self) -> str | None: ...
+
+
+@dataclass(frozen=True)
+class PostUploadActionPresentationResult:
+    """CLI-local presentation state for optional post-upload side effects."""
+
+    kind: PostUploadActionPresentationKind
+    success: bool
+    detail: str | None = None
+    path: Path | None = None
+    message: str | None = None
+    warning: str | None = None
+
+
+type PostUploadActionPresentationResults = tuple[PostUploadActionPresentation, ...]
 
 
 # ── Formatting helpers ─────────────────────────────────────────────────────────
@@ -204,7 +242,13 @@ def print_at_a_glance(
 # ── Result summary ────────────────────────────────────────────────────────────
 
 
-def print_result_summary(console: Console, *, result: RunResult, quiet: bool) -> None:
+def print_result_summary(
+    console: Console,
+    *,
+    result: RunResult,
+    quiet: bool,
+    post_upload_actions: PostUploadActionPresentationResults = (),
+) -> None:
     screenshot_dir = str(result.screenshot_dir) if result.screenshot_dir is not None else None
 
     if quiet:
@@ -213,6 +257,10 @@ def print_result_summary(console: Console, *, result: RunResult, quiet: bool) ->
         return
 
     table = _group_table()
+    all_post_upload_actions: PostUploadActionPresentationResults = (
+        *result.post_upload_actions,
+        *post_upload_actions,
+    )
 
     # Artifact rows with checkmarks
     has_artifacts = False
@@ -227,6 +275,14 @@ def print_result_summary(console: Console, *, result: RunResult, quiet: bool) ->
         table.add_row(
             f"  [{STYLE_CHECK}]\u2713[/] slow.pics",
             _styled_value(result.slowpics_url),
+        )
+    for action in all_post_upload_actions:
+        if not action.success:
+            continue
+        has_artifacts = True
+        table.add_row(
+            f"  [{STYLE_CHECK}]\u2713[/] {action.kind}",
+            _styled_value(_post_upload_action_detail(action)),
         )
     if result.report_path is not None:
         has_artifacts = True
@@ -262,10 +318,11 @@ def print_result_summary(console: Console, *, result: RunResult, quiet: bool) ->
 
     console.print(Panel(table, title=f"[{STYLE_HEADER}]Result[/]", border_style="cyan"))
 
-    if result.warnings:
+    warnings = _merged_warnings(result.warnings, all_post_upload_actions)
+    if warnings:
         max_lines = 8
-        visible = result.warnings[:max_lines]
-        remaining = len(result.warnings) - len(visible)
+        visible = warnings[:max_lines]
+        remaining = len(warnings) - len(visible)
         warning_text = "\n".join(f"[{STYLE_WARN}]\u2022[/] {escape(w)}" for w in visible)
         if remaining > 0:
             warning_text += f"\n[{STYLE_WARN}]\u2022[/] ... ({remaining} more)"
@@ -277,3 +334,23 @@ def print_result_summary(console: Console, *, result: RunResult, quiet: bool) ->
                 expand=False,
             )
         )
+
+
+def _post_upload_action_detail(action: PostUploadActionPresentation) -> str:
+    if action.path is not None:
+        return str(action.path)
+    if action.detail is not None:
+        return action.detail
+    if action.message is not None:
+        return action.message
+    return "completed"
+
+
+def _merged_warnings(
+    warnings: list[str],
+    actions: PostUploadActionPresentationResults,
+) -> list[str]:
+    action_warnings = [action.warning for action in actions if action.warning is not None]
+    if not action_warnings:
+        return warnings
+    return [*warnings, *action_warnings]

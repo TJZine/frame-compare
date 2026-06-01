@@ -13,7 +13,9 @@ from rich.console import Console
 
 from frame_compare.cli.cli_helpers import (
     FrameCompareTyperGroup,
+    copy_text_to_clipboard,
     handle_error,
+    open_url_in_browser,
     prepare_toml_payload,
     resolve_root_and_config,
     stabilize_typer_help_width,
@@ -94,6 +96,8 @@ app = typer.Typer(
 _stabilize_typer_help_width = stabilize_typer_help_width
 _prepare_toml_payload = prepare_toml_payload
 _resolve_root_and_config = resolve_root_and_config
+_copy_text_to_clipboard = copy_text_to_clipboard
+_open_url_in_browser = open_url_in_browser
 _doctor_report_json = doctor_report_json
 _print_doctor_report = print_doctor_report
 _prompt_input_dir = prompt_input_dir
@@ -201,6 +205,8 @@ def run(
         configure_logging=configure_logging,
         console_factory=Console,
         open_report=_maybe_open_report,
+        copy_to_clipboard=_copy_text_to_clipboard,
+        open_url=_open_url_in_browser,
         stdout_is_tty=sys.stdout.isatty(),
         no_color_env_present="NO_COLOR" in os.environ,
     )

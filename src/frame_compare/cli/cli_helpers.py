@@ -61,6 +61,18 @@ def maybe_open_report(report_path: Path) -> None:
         return
 
 
+def copy_text_to_clipboard(text: str) -> None:
+    """Copy text to the clipboard while keeping pyperclip import lazy."""
+    import pyperclip
+
+    pyperclip.copy(text)
+
+
+def open_url_in_browser(url: str) -> bool:
+    """Open a URL in the default browser and report whether a handler accepted it."""
+    return webbrowser.open(url)
+
+
 def handle_error(
     error: Exception,
     *,
