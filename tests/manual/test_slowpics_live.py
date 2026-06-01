@@ -118,15 +118,9 @@ def _named_function_bodies(script: str) -> list[tuple[str, str]]:
 
 
 def _function_names_touching_cookie(script: str, *, writes: bool) -> set[str]:
-    cookie_pattern = (
-        r"document\s*\.\s*cookie\s*="
-        if writes
-        else r"document\s*\.\s*cookie(?!\s*=)"
-    )
+    cookie_pattern = r"document\s*\.\s*cookie\s*=" if writes else r"document\s*\.\s*cookie(?!\s*=)"
     return {
-        name
-        for name, body in _named_function_bodies(script)
-        if re.search(cookie_pattern, body)
+        name for name, body in _named_function_bodies(script) if re.search(cookie_pattern, body)
     }
 
 
@@ -138,17 +132,16 @@ def _calls_browser_id_cookie_function(script: str, function_names: set[str]) -> 
 
 
 def _browser_id_near_cookie_expression(script: str, *, writes: bool) -> bool:
-    cookie_pattern = (
-        r"document\s*\.\s*cookie\s*="
-        if writes
-        else r"document\s*\.\s*cookie(?!\s*=)"
-    )
+    cookie_pattern = r"document\s*\.\s*cookie\s*=" if writes else r"document\s*\.\s*cookie(?!\s*=)"
     browser_id_pattern = r"['\"]BROWSER-ID['\"]"
-    return re.search(
-        rf"(?:{cookie_pattern}.{{0,500}}{browser_id_pattern})|"
-        rf"(?:{browser_id_pattern}.{{0,500}}{cookie_pattern})",
-        script,
-    ) is not None
+    return (
+        re.search(
+            rf"(?:{cookie_pattern}.{{0,500}}{browser_id_pattern})|"
+            rf"(?:{browser_id_pattern}.{{0,500}}{cookie_pattern})",
+            script,
+        )
+        is not None
+    )
 
 
 def _assert_browser_id_cookie_behavior(script: str) -> None:
@@ -186,8 +179,13 @@ def test_slowpics_comparison_page_exposes_passive_upload_protocol() -> None:
 
         script_urls = _same_origin_scripts(page.url, page.text)
         upload_script_url = next(
-            script_url for script_url in script_urls if "/js/upload-comparison-" in script_url
+            (script_url for script_url in script_urls if "/js/upload-comparison-" in script_url),
+            None,
         )
+        if upload_script_url is None:
+            pytest.fail(
+                f"Upload script not found for {page.url}; same-origin scripts={script_urls!r}"
+            )
         upload_script = client.get(upload_script_url)
         upload_script.raise_for_status()
 
