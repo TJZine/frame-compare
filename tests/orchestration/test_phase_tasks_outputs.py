@@ -28,6 +28,10 @@ from frame_compare.orchestration.types import (
 )
 from frame_compare.services.errors import SlowpicsError
 from frame_compare.services.publishers import PublishResult
+from frame_compare.services.slowpics_webhook import (
+    WEBHOOK_VALIDATION_WARNING,
+    SlowpicsWebhookResult,
+)
 from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.progress import NullProgressReporter
 from frame_compare.vs.types import HDRMetadata
@@ -561,6 +565,168 @@ async def test_run_publish_phase_skips_shortcut_when_config_disabled(
     assert output.slowpics_url == "https://slow.pics/c/example"
     assert output.uploaded_file_paths == (screenshot,)
     assert output.post_upload_actions == ()
+
+
+async def test_run_publish_phase_delivers_configured_webhook_after_upload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.config.slowpics.create_url_shortcut = False
+    ctx.config.slowpics.webhook_url = "https://hooks.example.test/webhook/token?secret=value"
+    screenshot_dir = tmp_path / "screenshots"
+    screenshot_dir.mkdir()
+    screenshot = screenshot_dir / "10 - reference.png"
+    screenshot.write_bytes(b"\x89PNG\r\n\x1a\n")
+    render = RenderArtifacts(
+        screenshots_by_label={"Reference": [screenshot]},
+        screenshot_dir=screenshot_dir,
+    )
+    captured: dict[str, object] = {}
+
+    async def _fake_publish_to_slowpics(**kwargs: object) -> PublishResult:
+        upload_plan = cast(Any, kwargs["upload_plan"])
+        return PublishResult(
+            url="https://slow.pics/c/example",
+            screenshot_count=len(upload_plan.file_paths),
+            upload_duration_seconds=0.1,
+            uploaded_file_paths=tuple(upload_plan.file_paths),
+        )
+
+    async def _fake_deliver_slowpics_webhook(**kwargs: object) -> SlowpicsWebhookResult:
+        captured.update(kwargs)
+        return SlowpicsWebhookResult(success=True, detail="HTTP 204")
+
+    monkeypatch.setattr(phase_tasks, "publish_to_slowpics", _fake_publish_to_slowpics)
+    monkeypatch.setattr(
+        phase_tasks, "deliver_slowpics_webhook", _fake_deliver_slowpics_webhook
+    )
+
+    async with httpx.AsyncClient() as client:
+        output = await phase_tasks.run_publish_phase(
+            ctx,
+            client=client,
+            metadata=None,
+            render=render,
+            selected_frames=[10],
+        )
+
+    assert captured == {
+        "webhook_url": "https://hooks.example.test/webhook/token?secret=value",
+        "slowpics_url": "https://slow.pics/c/example",
+    }
+    assert output.post_upload_actions == (
+        PostUploadActionResult(
+            kind="webhook",
+            success=True,
+            detail="HTTP 204",
+            message="slow.pics webhook delivered",
+        ),
+    )
+
+
+async def test_run_publish_phase_webhook_failure_is_warning_only_and_redacted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.config.slowpics.create_url_shortcut = False
+    ctx.config.slowpics.webhook_url = "https://secret.example.test/webhook/token?secret=value"
+    screenshot_dir = tmp_path / "screenshots"
+    screenshot_dir.mkdir()
+    screenshot = screenshot_dir / "10 - reference.png"
+    screenshot.write_bytes(b"\x89PNG\r\n\x1a\n")
+    render = RenderArtifacts(
+        screenshots_by_label={"Reference": [screenshot]},
+        screenshot_dir=screenshot_dir,
+    )
+    warning = "slow.pics webhook: delivery failed after 3 attempts"
+    warning_calls: list[tuple[str, dict[str, object]]] = []
+
+    async def _fake_publish_to_slowpics(**kwargs: object) -> PublishResult:
+        upload_plan = cast(Any, kwargs["upload_plan"])
+        return PublishResult(
+            url="https://slow.pics/c/example",
+            screenshot_count=len(upload_plan.file_paths),
+            upload_duration_seconds=0.1,
+            uploaded_file_paths=tuple(upload_plan.file_paths),
+        )
+
+    async def _fake_deliver_slowpics_webhook(**_kwargs: object) -> SlowpicsWebhookResult:
+        return SlowpicsWebhookResult(success=False, warning=warning)
+
+    def _capture_warning(event: str, **kwargs: object) -> None:
+        warning_calls.append((event, kwargs))
+
+    monkeypatch.setattr(phase_tasks, "publish_to_slowpics", _fake_publish_to_slowpics)
+    monkeypatch.setattr(
+        phase_tasks, "deliver_slowpics_webhook", _fake_deliver_slowpics_webhook
+    )
+    monkeypatch.setattr(phase_tasks.log, "warning", _capture_warning)
+
+    async with httpx.AsyncClient() as client:
+        output = await phase_tasks.run_publish_phase(
+            ctx,
+            client=client,
+            metadata=None,
+            render=render,
+            selected_frames=[10],
+        )
+
+    assert output.slowpics_url == "https://slow.pics/c/example"
+    assert output.post_upload_actions == (
+        PostUploadActionResult(kind="webhook", success=False, warning=warning),
+    )
+    assert "secret.example.test" not in warning
+    assert "/webhook/token" not in warning
+    assert "secret=value" not in warning
+    assert warning_calls == [
+        ("slowpics_webhook_delivery_failed", {"warning": warning}),
+    ]
+
+
+async def test_run_publish_phase_webhook_validation_failure_preserves_upload_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.config.slowpics.create_url_shortcut = False
+    ctx.config.slowpics.webhook_url = "https://[::1"
+    screenshot_dir = tmp_path / "screenshots"
+    screenshot_dir.mkdir()
+    screenshot = screenshot_dir / "10 - reference.png"
+    screenshot.write_bytes(b"\x89PNG\r\n\x1a\n")
+    render = RenderArtifacts(
+        screenshots_by_label={"Reference": [screenshot]},
+        screenshot_dir=screenshot_dir,
+    )
+
+    async def _fake_publish_to_slowpics(**kwargs: object) -> PublishResult:
+        upload_plan = cast(Any, kwargs["upload_plan"])
+        return PublishResult(
+            url="https://slow.pics/c/example",
+            screenshot_count=len(upload_plan.file_paths),
+            upload_duration_seconds=0.1,
+            uploaded_file_paths=tuple(upload_plan.file_paths),
+        )
+
+    monkeypatch.setattr(phase_tasks, "publish_to_slowpics", _fake_publish_to_slowpics)
+
+    async with httpx.AsyncClient() as client:
+        output = await phase_tasks.run_publish_phase(
+            ctx,
+            client=client,
+            metadata=None,
+            render=render,
+            selected_frames=[10],
+        )
+
+    assert output.slowpics_url == "https://slow.pics/c/example"
+    assert output.uploaded_file_paths == (screenshot,)
+    assert output.post_upload_actions == (
+        PostUploadActionResult(
+            kind="webhook",
+            success=False,
+            warning=WEBHOOK_VALIDATION_WARNING,
+        ),
+    )
 
 
 def test_post_report_cleanup_skips_non_embedded_reports(tmp_path: Path) -> None:

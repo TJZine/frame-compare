@@ -67,6 +67,7 @@ from frame_compare.services.slowpics_upload_plan import (
     SlowpicsUploadClip,
     build_slowpics_upload_plan,
 )
+from frame_compare.services.slowpics_webhook import deliver_slowpics_webhook
 from frame_compare.services.types import AlignmentConfig, MetadataConfig, TmdbMetadata
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 from frame_compare.utils.types import WorkspacePaths
@@ -785,16 +786,17 @@ async def run_publish_phase(
         progress=ctx.reporter,
         upload_plan=upload_plan,
     )
-    post_upload_actions = _slowpics_shortcut_action(
+    shortcut_actions = _slowpics_shortcut_action(
         ctx=ctx,
         slowpics_url=result.url,
         metadata=metadata,
         upload_title=screenshot_dir.name,
     )
+    webhook_actions = await _slowpics_webhook_action(ctx=ctx, slowpics_url=result.url)
     return PublishPhaseOutput(
         slowpics_url=result.url,
         uploaded_file_paths=result.uploaded_file_paths,
-        post_upload_actions=post_upload_actions,
+        post_upload_actions=(*shortcut_actions, *webhook_actions),
     )
 
 
@@ -847,6 +849,40 @@ def _slowpics_shortcut_action(
             kind="shortcut",
             success=False,
             path=result.path,
+            warning=result.warning,
+        ),
+    )
+
+
+async def _slowpics_webhook_action(
+    *,
+    ctx: RunContext,
+    slowpics_url: str,
+) -> tuple[PostUploadActionResult, ...]:
+    webhook_url = ctx.config.slowpics.webhook_url
+    if webhook_url is None:
+        return ()
+
+    result = await deliver_slowpics_webhook(
+        webhook_url=webhook_url,
+        slowpics_url=slowpics_url,
+    )
+    if result.success:
+        return (
+            PostUploadActionResult(
+                kind="webhook",
+                success=True,
+                detail=result.detail,
+                message="slow.pics webhook delivered",
+            ),
+        )
+
+    if result.warning is not None:
+        log.warning("slowpics_webhook_delivery_failed", warning=result.warning)
+    return (
+        PostUploadActionResult(
+            kind="webhook",
+            success=False,
             warning=result.warning,
         ),
     )

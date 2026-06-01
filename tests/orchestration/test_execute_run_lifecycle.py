@@ -226,6 +226,77 @@ def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
     ]
 
 
+def test_execute_run_webhook_action_warning_is_warning_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = ConfigSchema()
+    config.slowpics.auto_upload = True
+    config.report.enable = False
+    webhook_warning = "slow.pics webhook: delivery failed after 3 attempts"
+    render = RenderArtifacts(
+        screenshots_by_label={"Reference": [tmp_path / "screenshots" / "planned.png"]},
+        screenshot_dir=tmp_path / "screenshots",
+    )
+    prep = PrepState(
+        workspace=_workspace(tmp_path),
+        config=config,
+        input_videos=[tmp_path / "reference.mkv"],
+        clips=[clip_state(tmp_path / "reference.mkv", label="Reference")],
+        artifacts=RunArtifacts(),
+        metadata_prefetch=MetadataPrefetch(None, False),
+        preflight_warnings=[],
+        preflight_duration=0.0,
+        load_sources_start=datetime.now(),
+    )
+
+    async def fake_execute_prep(_request: RunRequest, _deps: RunDependencies) -> PrepState:
+        return prep
+
+    def fake_render_phase(*_args: object, **_kwargs: object) -> RenderPhaseOutput:
+        return RenderPhaseOutput(render=render)
+
+    async def fake_publish_phase(*_args: object, **_kwargs: object) -> PublishPhaseOutput:
+        return PublishPhaseOutput(
+            slowpics_url="https://slow.pics/c/example",
+            post_upload_actions=(
+                PostUploadActionResult(
+                    kind="webhook",
+                    success=False,
+                    warning=webhook_warning,
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(coordinator, "execute_prep", fake_execute_prep)
+    monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        "frame_compare.orchestration.execution.run_render_phase",
+        fake_render_phase,
+    )
+    monkeypatch.setattr(
+        "frame_compare.orchestration.execution.run_publish_phase",
+        fake_publish_phase,
+    )
+
+    request = RunRequest(
+        root=tmp_path,
+        skip_analysis=True,
+        skip_metadata=True,
+        skip_dovi=True,
+        quiet=True,
+    )
+    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+
+    result = asyncio.run(execute_run(request, deps=deps))
+
+    assert result.success is True
+    assert result.post_upload_actions == (
+        PostUploadActionResult(kind="webhook", success=False, warning=webhook_warning),
+    )
+    assert result.warnings == [webhook_warning]
+
+
 def test_execute_run_report_warning_blocks_delete_after_upload_cleanup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
