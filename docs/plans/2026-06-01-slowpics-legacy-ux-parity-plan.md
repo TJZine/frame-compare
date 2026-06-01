@@ -1,6 +1,6 @@
-Status: Active
+Status: Historical
 Scope: Restore slow.pics legacy post-upload UX for clipboard copy, browser open, .url shortcut, and webhook delivery
-Owner: Next Codex feature-loop session
+Owner: Completed Codex feature-loop session
 
 # slow.pics Legacy UX Parity Plan
 
