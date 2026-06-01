@@ -138,6 +138,7 @@ async def test_malformed_ipv6_url_returns_sanitized_validation_warning() -> None
         success=False,
         warning=WEBHOOK_VALIDATION_WARNING,
     )
+    assert result.warning is not None
     assert "::1" not in result.warning
 
 
@@ -292,6 +293,31 @@ async def test_retryable_timeout_connection_and_server_failures_attempt_three_ti
         WEBHOOK_TIMEOUT_SECONDS,
         WEBHOOK_TIMEOUT_SECONDS,
         WEBHOOK_TIMEOUT_SECONDS,
+    ]
+
+
+async def test_retryable_failures_rotate_across_validated_addresses() -> None:
+    calls: list[WebhookDeliveryRequest] = []
+
+    def _resolver(_hostname: str, _port: int) -> tuple[str, ...]:
+        return ("93.184.216.34", "1.1.1.1")
+
+    def _connector(request: WebhookDeliveryRequest) -> WebhookResponse:
+        calls.append(request)
+        raise TimeoutError("timed out")
+
+    result = await _deliver(
+        "https://hooks.example.test/path",
+        resolver=_resolver,
+        connector=_connector,
+    )
+
+    assert result.success is False
+    assert result.warning is not None
+    assert [request.resolved_ip for request in calls] == [
+        "93.184.216.34",
+        "1.1.1.1",
+        "93.184.216.34",
     ]
 
 

@@ -152,19 +152,19 @@ def _deliver_slowpics_webhook_sync(
         ("Content-Length", str(len(body))),
         ("Connection", "close"),
     )
-    request = WebhookDeliveryRequest(
-        hostname=target.hostname,
-        port=target.port,
-        resolved_ip=target.resolved_ips[0],
-        host_header=target.host_header,
-        target=target.target,
-        headers=headers,
-        body=body,
-        timeout_seconds=WEBHOOK_TIMEOUT_SECONDS,
-    )
-
     last_status: int | None = None
     for attempt in range(1, WEBHOOK_ATTEMPTS + 1):
+        resolved_ip = target.resolved_ips[(attempt - 1) % len(target.resolved_ips)]
+        request = WebhookDeliveryRequest(
+            hostname=target.hostname,
+            port=target.port,
+            resolved_ip=resolved_ip,
+            host_header=target.host_header,
+            target=target.target,
+            headers=headers,
+            body=body,
+            timeout_seconds=WEBHOOK_TIMEOUT_SECONDS,
+        )
         try:
             response = connector(request)
         except TimeoutError:
