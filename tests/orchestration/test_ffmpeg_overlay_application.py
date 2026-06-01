@@ -22,7 +22,7 @@ class FakeFFmpegRunner:
     def __init__(self) -> None:
         self.calls: list[tuple[Path, int, Path]] = []
 
-    def extract_frame(self, video: Path, frame_num: int, output: Path) -> None:
+    def extract_frame(self, video: Path, frame_num: int, output: Path, **_kwargs) -> None:
         output.parent.mkdir(parents=True, exist_ok=True)
         Image.new("RGB", (10, 10), color=(0, 0, 0)).save(output, format="PNG")
         self.calls.append((video, frame_num, output))

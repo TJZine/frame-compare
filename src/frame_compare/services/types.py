@@ -1,8 +1,16 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 type AlignmentSource = Literal["manual", "computed", "cached"]
 type AlignmentAlgorithm = Literal["cross_correlation"]
+type AlignmentCorrelationMode = Literal["raw_fft", "gcc_phat"]
+type AlignmentPreprocessingMode = Literal["none", "standard"]
+type AlignmentChannelStrategy = Literal["mono_downmix", "best_channel"]
+type AlignmentRefinementMode = Literal["disabled", "local"]
+
+
+def _empty_comparison_streams() -> dict[str, int]:
+    return {}
 
 
 @dataclass(frozen=True)
@@ -11,11 +19,13 @@ class AlignmentResult:
 
     reference_clip: str
     comparison_clip: str
-    frame_offset: int
-    time_offset_seconds: float
+    frame_offset: int | None
+    time_offset_seconds: float | None
     correlation_score: float
     algorithm: AlignmentAlgorithm | None
     source: AlignmentSource
+    applied: bool = True
+    diagnostic: str | None = None
 
 
 @dataclass(frozen=True)
@@ -28,6 +38,20 @@ class AlignmentConfig:
     use_vspreview: bool = False
     force_interactive: bool = False
     cache_results: bool = True
+    correlation_mode: AlignmentCorrelationMode = "raw_fft"
+    preprocessing_mode: AlignmentPreprocessingMode = "none"
+    channel_strategy: AlignmentChannelStrategy = "mono_downmix"
+    confidence_threshold: float = 0.0
+    ambiguity_peak_ratio: float = 1.0
+    window_length_seconds: float = 0.0
+    window_stride_seconds: float = 0.0
+    minimum_valid_windows: int = 1
+    consensus_minimum_ratio: float = 1.0
+    refinement_mode: AlignmentRefinementMode = "disabled"
+    refinement_sample_rate: int | None = None
+    reference_stream: int | None = None
+    comparison_streams: dict[str, int] = field(default_factory=_empty_comparison_streams)
+    no_color: bool = False
 
 
 @dataclass(frozen=True)

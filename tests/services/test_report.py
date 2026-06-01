@@ -2,7 +2,9 @@
 
 import base64
 import json
-from dataclasses import FrozenInstanceError, replace
+from dataclasses import FrozenInstanceError, dataclass, replace
+from datetime import UTC, datetime
+from fractions import Fraction
 from pathlib import Path
 
 import pytest
@@ -10,8 +12,20 @@ from pytest_mock import MockerFixture
 
 from frame_compare.config.schema import ReportConfig, ViewerMode
 from frame_compare.services.errors import ReportError
+from frame_compare.services.report.display import (
+    SourceFrameSelectionDetail,
+    frame_detail_for_source_frame,
+)
 from frame_compare.services.report.entry import generate_report
-from frame_compare.services.report.payload import ClipInfo, ReportData, image_src_for_report
+from frame_compare.services.report.payload import (
+    ClipInfo,
+    FrameDetail,
+    ReportData,
+    ReportPayload,
+    build_report_payload,
+    clip_info_from_state,
+    image_src_for_report,
+)
 from frame_compare.services.types import TmdbMetadata
 
 
@@ -68,6 +82,14 @@ def report_data(mock_clips: list[ClipInfo], mock_screenshots: dict[str, list[Pat
         ),
         slowpics_url="https://slow.pics/c/12345",
     )
+
+
+def _json_payload_from_report(path: Path) -> ReportPayload:
+    content = path.read_text(encoding="utf-8")
+    marker = '<script type="application/json" id="report-data">'
+    start = content.find(marker) + len(marker)
+    end = content.find("</script>", start)
+    return json.loads(content[start:end])
 
 
 def test_generate_report_creates_html_file(report_data: ReportData, tmp_path: Path) -> None:
@@ -419,23 +441,266 @@ def test_generate_report_accessibility(report_data: ReportData, tmp_path: Path) 
 
 def test_generate_report_json_payload_structure(report_data: ReportData, tmp_path: Path) -> None:
     out_path = generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
-    content = out_path.read_text(encoding="utf-8")
 
-    # Extract JSON from script tag
-    start = content.find('<script type="application/json" id="report-data">') + len(
-        '<script type="application/json" id="report-data">'
-    )
-    end = content.find("</script>", start)
-    json_str = content[start:end]
-
-    data = json.loads(json_str)
+    data = _json_payload_from_report(out_path)
     assert data["version"] == "1.0"
+    assert isinstance(data["report_id"], str)
+    assert data["report_id"].startswith("report_")
+    assert len(data["report_id"]) == len("report_") + 32
     assert "generated_at" in data
+    assert data["default_selection"] == {"left_clip_index": 0, "right_clip_index": 1}
     assert len(data["clips"]) == 2
     assert len(data["frames"]) == 2
-    assert data["clips"][0]["name"] == "clip1"
-    assert data["frames"][0]["number"] == 10
-    assert len(data["frames"][0]["images"]) == 2
+    clips = data["clips"]
+    frames = data["frames"]
+    assert isinstance(clips, list)
+    assert isinstance(frames, list)
+    assert clips[0]["name"] == "clip1"
+    assert clips[0]["frame_count"] == 100
+    assert frames[0]["number"] == 10
+    assert frames[0]["label"] == "Frame 10"
+    assert frames[0]["detail"] == "Source frame 10"
+    assert frames[0]["category"] == "selected"
+    assert len(frames[0]["images"]) == 2
+
+
+def test_build_report_payload_accepts_frame_display_metadata(
+    report_data: ReportData, tmp_path: Path
+) -> None:
+    data = replace(
+        report_data,
+        frame_details=[
+            FrameDetail(label="Opening comparison", detail="Scene cut", category="chapter"),
+            FrameDetail(),
+        ],
+    )
+
+    payload = build_report_payload(
+        data, ReportConfig(output_dir=str(tmp_path)), report_dir=tmp_path
+    )
+
+    assert payload["frames"][0]["label"] == "Opening comparison"
+    assert payload["frames"][0]["detail"] == "Scene cut"
+    assert payload["frames"][0]["category"] == "chapter"
+    assert payload["frames"][1]["label"] == "Frame 20"
+    assert payload["frames"][1]["detail"] == "Source frame 20"
+    assert payload["frames"][1]["category"] == "selected"
+
+
+def test_build_report_payload_rejects_mismatched_frame_display_metadata(
+    report_data: ReportData, tmp_path: Path
+) -> None:
+    data = replace(report_data, frame_details=[FrameDetail(label="only one")])
+
+    with pytest.raises(ReportError, match="frame detail count mismatch"):
+        build_report_payload(data, ReportConfig(output_dir=str(tmp_path)), report_dir=tmp_path)
+
+
+def test_frame_detail_for_source_frame_uses_explicit_selection_detail() -> None:
+    detail = frame_detail_for_source_frame(
+        source_frame=42,
+        selection_detail=SourceFrameSelectionDetail(
+            label="Opening comparison",
+            timecode="00:00:01.750",
+            notes="chapter",
+        ),
+        selection_label="Bright",
+    )
+
+    assert detail == FrameDetail(
+        label="Opening comparison",
+        detail="Source frame 42 (00:00:01.750)",
+        category="chapter",
+    )
+
+
+def test_frame_detail_for_source_frame_uses_breakdown_label_when_detail_absent() -> None:
+    detail = frame_detail_for_source_frame(
+        source_frame=42,
+        selection_detail=None,
+        selection_label="Bright",
+    )
+
+    assert detail == FrameDetail(
+        label="Bright",
+        detail="Source frame 42",
+        category="quantile_bright",
+    )
+
+
+def test_frame_detail_for_source_frame_uses_breakdown_label_when_detail_label_absent() -> None:
+    detail = frame_detail_for_source_frame(
+        source_frame=42,
+        selection_detail=SourceFrameSelectionDetail(
+            label=None,
+            timecode="00:00:01.750",
+            notes=None,
+        ),
+        selection_label="Bright",
+    )
+
+    assert detail == FrameDetail(
+        label="Bright",
+        detail="Source frame 42 (00:00:01.750)",
+        category="quantile_bright",
+    )
+
+
+@pytest.mark.parametrize(
+    ("selection_label", "category"),
+    [
+        ("Dark", "quantile_dark"),
+        ("Bright", "quantile_bright"),
+        ("Motion", "motion"),
+        ("Random", "random"),
+    ],
+)
+def test_frame_detail_for_source_frame_maps_known_selection_labels(
+    selection_label: str,
+    category: str,
+) -> None:
+    detail = frame_detail_for_source_frame(
+        source_frame=7,
+        selection_detail=None,
+        selection_label=selection_label,
+    )
+
+    assert detail.category == category
+
+
+@pytest.mark.parametrize("selection_label", ["Other", None])
+def test_frame_detail_for_source_frame_leaves_unknown_selection_label_uncategorized(
+    selection_label: str | None,
+) -> None:
+    detail = frame_detail_for_source_frame(
+        source_frame=7,
+        selection_detail=None,
+        selection_label=selection_label,
+    )
+
+    assert detail.category is None
+
+
+def test_report_id_ignores_generated_at_source_paths_and_image_sources(
+    report_data: ReportData,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class FirstClock:
+        @classmethod
+        def now(cls, tz: object) -> datetime:
+            return datetime(2026, 5, 22, 12, 0, tzinfo=UTC)
+
+    class SecondClock:
+        @classmethod
+        def now(cls, tz: object) -> datetime:
+            return datetime(2026, 5, 23, 12, 0, tzinfo=UTC)
+
+    clips_with_source_identities = [
+        replace(clip, source_identity=f"source_identity_{clip.name}") for clip in report_data.clips
+    ]
+    stable_source_data = replace(report_data, clips=clips_with_source_identities)
+
+    config = ReportConfig(output_dir=str(tmp_path), embed_images=False)
+    monkeypatch.setattr("frame_compare.services.report.payload.datetime", FirstClock)
+    first_payload = build_report_payload(
+        stable_source_data, config, report_dir=tmp_path / "report-a"
+    )
+
+    clips_with_other_source_paths = [
+        replace(clip, path=tmp_path / "different-root" / f"{clip.name}.mkv")
+        for clip in stable_source_data.clips
+    ]
+    same_report_local_data = replace(stable_source_data, clips=clips_with_other_source_paths)
+
+    monkeypatch.setattr("frame_compare.services.report.payload.datetime", SecondClock)
+    second_payload = build_report_payload(
+        same_report_local_data,
+        config,
+        report_dir=tmp_path / "different" / "report-b",
+    )
+
+    assert first_payload["generated_at"] != second_payload["generated_at"]
+    first_src = first_payload["frames"][0]["images"][0]["src"]
+    second_src = second_payload["frames"][0]["images"][0]["src"]
+    assert first_src != second_src
+    assert first_payload["report_id"] == second_payload["report_id"]
+
+    embedded_payload = build_report_payload(
+        same_report_local_data,
+        ReportConfig(output_dir=str(tmp_path), embed_images=True),
+        report_dir=tmp_path,
+    )
+    assert embedded_payload["frames"][0]["images"][0]["src"].startswith("data:image/png;base64,")
+    assert embedded_payload["report_id"] == first_payload["report_id"]
+
+    changed_source_identity_payload = build_report_payload(
+        replace(
+            same_report_local_data,
+            clips=[
+                same_report_local_data.clips[0],
+                replace(same_report_local_data.clips[1], source_identity="source_identity_other"),
+            ],
+        ),
+        config,
+        report_dir=tmp_path,
+    )
+    assert changed_source_identity_payload["report_id"] != first_payload["report_id"]
+
+    changed_frame_payload = build_report_payload(
+        replace(same_report_local_data, frames=[11, 20]),
+        config,
+        report_dir=tmp_path,
+    )
+    assert changed_frame_payload["report_id"] != first_payload["report_id"]
+
+
+@dataclass(frozen=True)
+class _Fingerprint:
+    path: Path
+    size_bytes: int
+    mtime_ns: int
+
+
+@dataclass(frozen=True)
+class _Probe:
+    fingerprint: _Fingerprint
+    num_frames: int = 100
+    width: int = 1920
+    height: int = 1080
+    is_hdr: bool = False
+
+
+@dataclass(frozen=True)
+class _ClipState:
+    label: str
+    path: Path
+    probe: _Probe
+    effective_fps: Fraction
+
+
+def test_clip_info_from_state_sets_safe_source_identity(tmp_path: Path) -> None:
+    source_path = tmp_path / "source-root" / "reference.mkv"
+    state = _ClipState(
+        label="Reference",
+        path=source_path,
+        probe=_Probe(
+            fingerprint=_Fingerprint(
+                path=source_path,
+                size_bytes=123456,
+                mtime_ns=987654321,
+            )
+        ),
+        effective_fps=Fraction(24000, 1001),
+    )
+
+    clip = clip_info_from_state(state, screenshots=[])
+
+    assert clip.source_identity is not None
+    assert clip.source_identity.startswith("source_")
+    assert len(clip.source_identity) == len("source_") + 32
+    assert str(tmp_path) not in clip.source_identity
+    assert "reference.mkv" not in clip.source_identity
 
 
 def test_clip_info_frozen() -> None:
@@ -477,11 +742,12 @@ def test_renderer_clip_options_rendering(report_data: ReportData, tmp_path: Path
     # and selected index is respected
     out_path = generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
     content = out_path.read_text(encoding="utf-8")
-    # Left clip select shouldn't have selected index set in option
+    # Left and right clip controls use the report payload's default selection.
     assert '<select id="left-select" aria-label="Left clip">' in content
-    assert '<option value="0">REF</option>' in content
+    assert '<option value="0" selected>REF</option>' in content
     assert '<option value="1">ENC</option>' in content
 
-    # Right clip select should have option index 1 marked as "selected"
     assert '<select id="right-select" aria-label="Right clip">' in content
     assert '<option value="1" selected>ENC</option>' in content
+
+    assert '<select id="active-select" aria-label="Overlay clip">' in content

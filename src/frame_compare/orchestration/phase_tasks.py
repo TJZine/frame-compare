@@ -45,12 +45,20 @@ from frame_compare.orchestration.types import (
     ReportPhaseOutput,
 )
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
-from frame_compare.services.alignment import align_clips, calculate_alignment_trims
+from frame_compare.services.alignment import (
+    align_clips,
+    calculate_alignment_trims,
+    format_rejected_alignment_warning,
+)
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.metadata import resolve_metadata
 from frame_compare.services.publishers import publish_to_slowpics
+from frame_compare.services.report.display import (
+    SourceFrameSelectionDetail,
+    frame_detail_for_source_frame,
+)
 from frame_compare.services.report.entry import generate_report
-from frame_compare.services.report.payload import ReportData, clip_info_from_state
+from frame_compare.services.report.payload import FrameDetail, ReportData, clip_info_from_state
 from frame_compare.services.types import AlignmentConfig, MetadataConfig, TmdbMetadata
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 from frame_compare.utils.types import WorkspacePaths
@@ -181,6 +189,45 @@ def _selection_detail_for_frame(
     return details_by_source_frame.get(frame)
 
 
+def _report_selection_detail(detail: SelectionDetail | None) -> SourceFrameSelectionDetail | None:
+    if detail is None:
+        return None
+    return SourceFrameSelectionDetail(
+        label=detail.label,
+        timecode=detail.timecode,
+        notes=detail.notes,
+    )
+
+
+def _report_frame_details_for_frames(ctx: RunContext, *, frames: list[int]) -> list[FrameDetail]:
+    if ctx.selection_breakdown is None and ctx.selection_details_by_source_frame is None:
+        return []
+
+    frame_details: list[FrameDetail] = []
+    for aligned_frame in frames:
+        source_frame = _map_aligned_to_source_frame(
+            clip=ctx.reference,
+            aligned_frame=aligned_frame,
+        )
+        selection_detail = _selection_detail_for_frame(
+            source_frame,
+            ctx.selection_details_by_source_frame,
+        )
+        selection_label = (
+            selection_detail.label
+            if selection_detail is not None
+            else selection_label_for_frame(source_frame, ctx.selection_breakdown)
+        )
+        frame_details.append(
+            frame_detail_for_source_frame(
+                source_frame=source_frame,
+                selection_detail=_report_selection_detail(selection_detail),
+                selection_label=selection_label,
+            )
+        )
+    return frame_details
+
+
 def _selection_breakdown_with_source_offset(
     breakdown: SelectionBreakdown,
     *,
@@ -305,7 +352,9 @@ def _dolby_vision_metadata_from_preserved_props(
         if normalized == "dolbyvisionrpu":
             rpu_present = True
             continue
-        if not any(token in normalized for token in ("dolby", "dovi", "rpu", "l1", "l2", "l5", "l6")):
+        if not any(
+            token in normalized for token in ("dolby", "dovi", "rpu", "l1", "l2", "l5", "l6")
+        ):
             continue
         if "l2" in normalized and "target" in normalized:
             if l2_target_nits is None:
@@ -341,7 +390,11 @@ def _dolby_vision_metadata_from_preserved_props(
         if "block" in normalized and "index" in normalized and block_index is None:
             block_index = _coerce_int(value)
             continue
-        if "block" in normalized and ("total" in normalized or "count" in normalized) and block_total is None:
+        if (
+            "block" in normalized
+            and ("total" in normalized or "count" in normalized)
+            and block_total is None
+        ):
             block_total = _coerce_int(value)
             continue
         if (
@@ -471,6 +524,20 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
         use_vspreview=ctx.config.audio_alignment.use_vspreview,
         force_interactive=ctx.config.audio_alignment.force_interactive,
         cache_results=ctx.config.audio_alignment.cache_results,
+        correlation_mode=ctx.config.audio_alignment.correlation_mode,
+        preprocessing_mode=ctx.config.audio_alignment.preprocessing_mode,
+        channel_strategy=ctx.config.audio_alignment.channel_strategy,
+        confidence_threshold=ctx.config.audio_alignment.confidence_threshold,
+        ambiguity_peak_ratio=ctx.config.audio_alignment.ambiguity_peak_ratio,
+        window_length_seconds=ctx.config.audio_alignment.window_length_seconds,
+        window_stride_seconds=ctx.config.audio_alignment.window_stride_seconds,
+        minimum_valid_windows=ctx.config.audio_alignment.minimum_valid_windows,
+        consensus_minimum_ratio=ctx.config.audio_alignment.consensus_minimum_ratio,
+        refinement_mode=ctx.config.audio_alignment.refinement_mode,
+        refinement_sample_rate=ctx.config.audio_alignment.refinement_sample_rate,
+        reference_stream=ctx.config.audio_alignment.reference_stream,
+        comparison_streams=dict(ctx.config.audio_alignment.comparison_streams),
+        no_color=ctx.no_color,
     )
     results = align_clips(
         reference=ctx.reference.path,
@@ -481,16 +548,27 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
     )
 
     updated_comparisons: list[ClipState] = []
+    has_non_applied_result = any(not result.applied for result in results)
+    warnings = [
+        format_rejected_alignment_warning(result) for result in results if not result.applied
+    ]
     for comparison, result in zip(ctx.comparisons, results, strict=True):
+        alignment = None
+        if result.applied:
+            frame_offset = result.frame_offset
+            if frame_offset is None:
+                raise AudioAlignmentError("Applied alignment result is missing frame offset.")
+            if not has_non_applied_result:
+                alignment = ClipAlignmentState(
+                    reference_stem=Path(result.reference_clip).stem,
+                    comparison_stem=Path(result.comparison_clip).stem,
+                    relative_offset_frames=frame_offset,
+                    source=result.source,
+                )
         updated_comparisons.append(
             replace(
                 comparison,
-                alignment=ClipAlignmentState(
-                    reference_stem=Path(result.reference_clip).stem,
-                    comparison_stem=Path(result.comparison_clip).stem,
-                    relative_offset_frames=result.frame_offset,
-                    source=result.source,
-                ),
+                alignment=alignment,
             )
         )
     ref_trim, comp_trims = calculate_alignment_trims(
@@ -512,12 +590,14 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
         )
         for comp, comp_trim in zip(updated_comparisons, comp_trims, strict=True)
     ]
-    normalized_selected_frames, used_fallback_frame_plan = _normalize_selected_frames_for_trimmed_domain(
-        selected_frames=selected_frames,
-        reference=reference,
-        comparisons=comparisons,
-        requested_count=ctx.config.analysis.frame_count,
-        seed=ctx.config.analysis.random_seed,
+    normalized_selected_frames, used_fallback_frame_plan = (
+        _normalize_selected_frames_for_trimmed_domain(
+            selected_frames=selected_frames,
+            reference=reference,
+            comparisons=comparisons,
+            requested_count=ctx.config.analysis.frame_count,
+            seed=ctx.config.analysis.random_seed,
+        )
     )
     selection_breakdown: SelectionBreakdown | None = None
     selection_details_by_source_frame: SelectionDetailsByFrame | None = None
@@ -538,6 +618,7 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
         selected_frames=normalized_selected_frames,
         selection_breakdown=selection_breakdown,
         selection_details_by_source_frame=selection_details_by_source_frame,
+        warnings=warnings,
     )
 
 
@@ -614,6 +695,7 @@ def run_render_phase(
             )
         )
 
+    render_warnings: list[str] = []
     rendered = render_screenshots_from_batch(
         batch_requests=batch_requests,
         output_dir=output_dir,
@@ -622,11 +704,16 @@ def run_render_phase(
             overlay_mode=overlay_mode,
             ffmpeg_runner=runner,
             reporter=ctx.reporter,
+            warnings=render_warnings,
         ),
     )
 
     return RenderPhaseOutput(
-        render=RenderArtifacts(screenshots_by_label=rendered, screenshot_dir=output_dir)
+        render=RenderArtifacts(
+            screenshots_by_label=rendered,
+            screenshot_dir=output_dir,
+            warnings=render_warnings,
+        )
     )
 
 
@@ -693,6 +780,7 @@ def run_report_phase(
         frames=frames,
         metadata=metadata,
         slowpics_url=slowpics_url,
+        frame_details=_report_frame_details_for_frames(ctx, frames=frames),
     )
     report_path = generate_report(report_data, ctx.config.report)
     return ReportPhaseOutput(report_path=report_path)
@@ -791,7 +879,9 @@ def _normalize_selected_frames_for_trimmed_domain(
     if target_count <= 0:
         return [], False
     if len(normalized_frames) < target_count:
-        return create_frame_plan(num_frames=common_length, count=target_count, seed=seed).frames, True
+        return create_frame_plan(
+            num_frames=common_length, count=target_count, seed=seed
+        ).frames, True
     return normalized_frames[:target_count], False
 
 

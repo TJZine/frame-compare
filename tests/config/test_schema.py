@@ -44,6 +44,11 @@ def test_default_config_values() -> None:
     assert config.screenshots.vs_writer == VsScreenshotWriter.AUTO
     assert config.tmdb.year_tolerance == 2
     assert config.tmdb.category_preference is None
+    assert config.audio_alignment.correlation_mode == "raw_fft"
+    assert config.audio_alignment.preprocessing_mode == "none"
+    assert config.audio_alignment.channel_strategy == "mono_downmix"
+    assert config.audio_alignment.refinement_mode == "disabled"
+    assert config.audio_alignment.comparison_streams == {}
 
 
 def test_analysis_frame_count_bounds_too_low() -> None:
@@ -140,6 +145,19 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert audio.sample_rate == 8000
     assert audio.max_offset_seconds == 30.0
     assert audio.force_interactive is False
+    assert audio.correlation_mode == "raw_fft"
+    assert audio.preprocessing_mode == "none"
+    assert audio.channel_strategy == "mono_downmix"
+    assert audio.confidence_threshold == 0.0
+    assert audio.ambiguity_peak_ratio == 1.0
+    assert audio.window_length_seconds == 0.0
+    assert audio.window_stride_seconds == 0.0
+    assert audio.minimum_valid_windows == 1
+    assert audio.consensus_minimum_ratio == 1.0
+    assert audio.refinement_mode == "disabled"
+    assert audio.refinement_sample_rate is None
+    assert audio.reference_stream is None
+    assert audio.comparison_streams == {}
     assert screenshots.overlay_mode == OverlayMode.STANDARD
     assert screenshots.png_compression == 6
     assert screenshots.ffmpeg_timeout_seconds == 30.0
@@ -198,6 +216,61 @@ def test_schema_model_enums_accept_config_strings_and_reject_unknown_values() ->
 
     with pytest.raises(ValidationError):
         LoggingConfig.model_validate({"level": "debug"})
+
+
+def test_audio_alignment_new_config_controls_validate_and_reject_unknown_values() -> None:
+    audio = AudioAlignmentConfig.model_validate(
+        {
+            "correlation_mode": "gcc_phat",
+            "preprocessing_mode": "standard",
+            "channel_strategy": "best_channel",
+            "confidence_threshold": 0.25,
+            "ambiguity_peak_ratio": 1.5,
+            "window_length_seconds": 10.0,
+            "window_stride_seconds": 2.5,
+            "minimum_valid_windows": 2,
+            "consensus_minimum_ratio": 0.75,
+            "refinement_mode": "local",
+            "refinement_sample_rate": 16000,
+            "reference_stream": 1,
+            "comparison_streams": {"encode": 2},
+        }
+    )
+
+    assert audio.correlation_mode == "gcc_phat"
+    assert audio.preprocessing_mode == "standard"
+    assert audio.channel_strategy == "best_channel"
+    assert audio.confidence_threshold == 0.25
+    assert audio.ambiguity_peak_ratio == 1.5
+    assert audio.window_length_seconds == 10.0
+    assert audio.window_stride_seconds == 2.5
+    assert audio.minimum_valid_windows == 2
+    assert audio.consensus_minimum_ratio == 0.75
+    assert audio.refinement_mode == "local"
+    assert audio.refinement_sample_rate == 16000
+    assert audio.reference_stream == 1
+    assert audio.comparison_streams == {"encode": 2}
+
+    for invalid in (
+        {"correlation_mode": "normalized"},
+        {"preprocessing_mode": "aggressive"},
+        {"channel_strategy": "first_channel"},
+        {"confidence_threshold": -0.1},
+        {"confidence_threshold": 1.1},
+        {"ambiguity_peak_ratio": 0.99},
+        {"window_length_seconds": -1.0},
+        {"window_stride_seconds": -1.0},
+        {"minimum_valid_windows": 0},
+        {"consensus_minimum_ratio": -0.1},
+        {"consensus_minimum_ratio": 1.1},
+        {"refinement_mode": "global"},
+        {"refinement_sample_rate": 3999},
+        {"refinement_sample_rate": 48001},
+        {"reference_stream": -1},
+        {"comparison_streams": {"encode": -1}},
+    ):
+        with pytest.raises(ValidationError):
+            AudioAlignmentConfig.model_validate(invalid)
 
 
 @pytest.mark.parametrize("year_tolerance", [0, 5])

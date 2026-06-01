@@ -10,11 +10,11 @@ from typing import cast
 import structlog
 import tomli_w
 
-from frame_compare.services.types import AlignmentAlgorithm, AlignmentResult
+from frame_compare.services.types import AlignmentAlgorithm, AlignmentConfig, AlignmentResult
 from frame_compare.utils.atomic_write import write_bytes_atomic
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 
-CACHE_VERSION = "2"
+CACHE_VERSION = "3"
 CACHE_FILE_NAME = "audio_offsets.toml"
 
 log = structlog.get_logger()
@@ -105,6 +105,7 @@ def _entry_freshness_matches(
     comparison: Path,
     sample_rate: int,
     max_offset_seconds: float,
+    config: AlignmentConfig,
 ) -> bool:
     reference_freshness = _parse_clip_freshness(entry_dict, prefix="reference")
     comparison_freshness = _parse_clip_freshness(entry_dict, prefix="comparison")
@@ -127,7 +128,51 @@ def _entry_freshness_matches(
         and comparison_freshness == current_comparison
         and cached_sample_rate == sample_rate
         and float(cached_max_offset_seconds) == max_offset_seconds
+        and _entry_alignment_settings_match(entry_dict, config=config, comparison=comparison)
     )
+
+
+def _effective_alignment_config(
+    *,
+    sample_rate: int,
+    max_offset_seconds: float,
+    config: AlignmentConfig | None,
+) -> AlignmentConfig:
+    if config is not None:
+        return config
+    return AlignmentConfig(sample_rate=sample_rate, max_offset_seconds=max_offset_seconds)
+
+
+def _entry_alignment_settings_match(
+    entry_dict: dict[str, object],
+    *,
+    config: AlignmentConfig,
+    comparison: Path,
+) -> bool:
+    expected_fields: dict[str, object] = {
+        "correlation_mode": config.correlation_mode,
+        "preprocessing_mode": config.preprocessing_mode,
+        "channel_strategy": config.channel_strategy,
+        "confidence_threshold": config.confidence_threshold,
+        "ambiguity_peak_ratio": config.ambiguity_peak_ratio,
+        "window_length_seconds": config.window_length_seconds,
+        "window_stride_seconds": config.window_stride_seconds,
+        "minimum_valid_windows": config.minimum_valid_windows,
+        "consensus_minimum_ratio": config.consensus_minimum_ratio,
+        "refinement_mode": config.refinement_mode,
+        "refinement_sample_rate": config.refinement_sample_rate,
+        "reference_stream": config.reference_stream,
+        "comparison_stream": config.comparison_streams.get(comparison.stem),
+    }
+    for field_name, expected in expected_fields.items():
+        cached = entry_dict.get(field_name)
+        if isinstance(expected, float):
+            if not isinstance(cached, int | float) or float(cached) != expected:
+                return False
+            continue
+        if cached != expected:
+            return False
+    return True
 
 
 def _cache_entry_from_result(
@@ -137,8 +182,10 @@ def _cache_entry_from_result(
     comparison_freshness: _ClipFreshness,
     sample_rate: int,
     max_offset_seconds: float,
+    config: AlignmentConfig,
 ) -> dict[str, object]:
-    return {
+    comparison_stem = Path(result.comparison_clip).stem
+    entry: dict[str, object] = {
         "reference_clip": result.reference_clip,
         "comparison_clip": result.comparison_clip,
         "frame_offset": result.frame_offset,
@@ -153,7 +200,24 @@ def _cache_entry_from_result(
         "comparison_mtime_ns": comparison_freshness.mtime_ns,
         "sample_rate": sample_rate,
         "max_offset_seconds": max_offset_seconds,
+        "correlation_mode": config.correlation_mode,
+        "preprocessing_mode": config.preprocessing_mode,
+        "channel_strategy": config.channel_strategy,
+        "confidence_threshold": config.confidence_threshold,
+        "ambiguity_peak_ratio": config.ambiguity_peak_ratio,
+        "window_length_seconds": config.window_length_seconds,
+        "window_stride_seconds": config.window_stride_seconds,
+        "minimum_valid_windows": config.minimum_valid_windows,
+        "consensus_minimum_ratio": config.consensus_minimum_ratio,
+        "refinement_mode": config.refinement_mode,
     }
+    optional_settings: dict[str, int | None] = {
+        "refinement_sample_rate": config.refinement_sample_rate,
+        "reference_stream": config.reference_stream,
+        "comparison_stream": config.comparison_streams.get(comparison_stem),
+    }
+    entry.update({key: value for key, value in optional_settings.items() if value is not None})
+    return entry
 
 
 def _validate_existing_cache_entries(data: dict[str, object]) -> None:
@@ -172,8 +236,14 @@ def load_cached_offsets(
     *,
     sample_rate: int,
     max_offset_seconds: float,
+    config: AlignmentConfig | None = None,
 ) -> dict[str, AlignmentResult] | None:
     """Load previously calculated offsets from cache."""
+    effective_config = _effective_alignment_config(
+        sample_rate=sample_rate,
+        max_offset_seconds=max_offset_seconds,
+        config=config,
+    )
     cache_path = cache_dir / CACHE_FILE_NAME
     if not cache_path.exists():
         return None
@@ -201,6 +271,7 @@ def load_cached_offsets(
                 comparison=comp,
                 sample_rate=sample_rate,
                 max_offset_seconds=max_offset_seconds,
+                config=effective_config,
             ):
                 continue
             try:
@@ -219,9 +290,15 @@ def save_offsets_cache(
     sample_rate: int,
     max_offset_seconds: float,
     results: list[AlignmentResult],
+    config: AlignmentConfig | None = None,
 ) -> None:
     """Persist alignment results to cache."""
     cache_path = cache_dir / CACHE_FILE_NAME
+    effective_config = _effective_alignment_config(
+        sample_rate=sample_rate,
+        max_offset_seconds=max_offset_seconds,
+        config=config,
+    )
 
     data: dict[str, object] = {"version": CACHE_VERSION}
     reference_freshness = _file_freshness(reference)
@@ -276,6 +353,7 @@ def save_offsets_cache(
             comparison_freshness=comparison_freshness,
             sample_rate=sample_rate,
             max_offset_seconds=max_offset_seconds,
+            config=effective_config,
         )
 
     try:

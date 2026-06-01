@@ -20,7 +20,7 @@ from frame_compare.vs.types import HDRMetadata
 
 
 class FakeFFmpegRunner:
-    def extract_frame(self, video: Path, frame_num: int, output: Path) -> None:
+    def extract_frame(self, video: Path, frame_num: int, output: Path, **_kwargs) -> None:
         _, _ = video, frame_num
         output.parent.mkdir(parents=True, exist_ok=True)
         Image.new("RGB", (10, 10), color=(0, 0, 0)).save(output, format="PNG")

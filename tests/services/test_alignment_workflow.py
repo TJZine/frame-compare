@@ -4,7 +4,7 @@
 
 from fractions import Fraction
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import numpy as np
 import pytest
@@ -12,6 +12,7 @@ import tomli_w
 
 from frame_compare.services.alignment import align_clips, check_alignment_cached
 from frame_compare.services.alignment_cache import save_offsets_cache
+from frame_compare.services.alignment_consensus import AlignmentConsensus
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.cache_errors import CacheCorruptionError
@@ -26,6 +27,7 @@ def _write_cached_offsets(
     results: list[AlignmentResult],
     sample_rate: int = 8000,
     max_offset_seconds: float = 30.0,
+    config: AlignmentConfig | None = None,
 ) -> None:
     save_offsets_cache(
         cache_dir,
@@ -34,6 +36,7 @@ def _write_cached_offsets(
         sample_rate=sample_rate,
         max_offset_seconds=max_offset_seconds,
         results=results,
+        config=config,
     )
 
 
@@ -126,9 +129,9 @@ def test_check_alignment_cached_rejects_duplicate_comparison_stems(tmp_path: Pat
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_matching_audio")
 @patch("frame_compare.services.alignment._extract_reference_audio")
-@patch("frame_compare.services.alignment._cross_correlate")
+@patch("frame_compare.services.alignment._estimate_consensus_offset")
 def test_align_clips_completes_progress_when_cache_load_raises(
-    mock_corr: MagicMock,
+    mock_estimate: MagicMock,
     mock_extract_reference: MagicMock,
     mock_extract_matching: MagicMock,
     mock_probe: MagicMock,
@@ -143,7 +146,7 @@ def test_align_clips_completes_progress_when_cache_load_raises(
     mock_probe.return_value = Fraction(24, 1)
     mock_extract_reference.return_value = (np.ones(10, dtype=np.float32), object())
     mock_extract_matching.return_value = np.ones(10, dtype=np.float32)
-    mock_corr.return_value = (0, 0.99)
+    mock_estimate.return_value = AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, None)
     reporter = MagicMock(spec=ProgressReporter)
 
     align_clips(ref, [comp], AlignmentConfig(), tmp_path, progress=reporter)
@@ -165,9 +168,9 @@ def test_check_alignment_cached_corruption_raises(tmp_path: Path) -> None:
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_matching_audio")
 @patch("frame_compare.services.alignment._extract_reference_audio")
-@patch("frame_compare.services.alignment._cross_correlate")
+@patch("frame_compare.services.alignment._estimate_consensus_offset")
 def test_align_clips_computed_results_do_not_advance_phase_progress(
-    mock_corr: MagicMock,
+    mock_estimate: MagicMock,
     mock_extract_reference: MagicMock,
     mock_extract_matching: MagicMock,
     mock_probe: MagicMock,
@@ -180,7 +183,7 @@ def test_align_clips_computed_results_do_not_advance_phase_progress(
     mock_probe.return_value = Fraction(24, 1)
     mock_extract_reference.return_value = (np.ones(10, dtype=np.float32), object())
     mock_extract_matching.return_value = np.ones(10, dtype=np.float32)
-    mock_corr.return_value = (0, 0.99)
+    mock_estimate.return_value = AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, None)
     reporter = MagicMock(spec=ProgressReporter)
 
     align_clips(
@@ -264,9 +267,9 @@ def test_align_clips_manual_results_do_not_advance_phase_progress(
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_matching_audio")
 @patch("frame_compare.services.alignment._extract_reference_audio")
-@patch("frame_compare.services.alignment._cross_correlate")
+@patch("frame_compare.services.alignment._estimate_consensus_offset")
 def test_align_clips_partial_cache_hit_computes_only_missing_and_preserves_order(
-    mock_corr: MagicMock,
+    mock_estimate: MagicMock,
     mock_extract_reference: MagicMock,
     mock_extract_matching: MagicMock,
     mock_probe: MagicMock,
@@ -301,7 +304,7 @@ def test_align_clips_partial_cache_hit_computes_only_missing_and_preserves_order
     reference_stream = object()
     mock_extract_reference.return_value = (np.ones(10, dtype=np.float32), reference_stream)
     mock_extract_matching.return_value = np.ones(10, dtype=np.float32)
-    mock_corr.return_value = (0, 0.99)
+    mock_estimate.return_value = AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, None)
 
     config = AlignmentConfig()
     # Request comp_a and comp_b
@@ -313,9 +316,158 @@ def test_align_clips_partial_cache_hit_computes_only_missing_and_preserves_order
     assert results[1].comparison_clip == "comp_b.mkv"
     assert results[1].frame_offset == 0  # from mock computation
 
-    mock_extract_reference.assert_called_once_with(ref, config.sample_rate)
+    mock_extract_reference.assert_called_once_with(
+        ref,
+        config.sample_rate,
+        stream_override=None,
+        channel_strategy="mono_downmix",
+    )
     mock_extract_matching.assert_called_once_with(
         comp_b,
         config.sample_rate,
         reference_stream=reference_stream,
+        stream_override=None,
+        channel_strategy="mono_downmix",
     )
+
+
+@patch("frame_compare.services.alignment._probe_fps")
+@patch("frame_compare.services.alignment._extract_matching_audio")
+@patch("frame_compare.services.alignment._extract_reference_audio")
+@patch("frame_compare.services.alignment._estimate_consensus_offset")
+def test_align_clips_threads_runtime_alignment_config_through_cache_io(
+    mock_estimate: MagicMock,
+    mock_extract_reference: MagicMock,
+    mock_extract_matching: MagicMock,
+    mock_probe: MagicMock,
+    tmp_path: Path,
+) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+    _write_cached_offsets(
+        tmp_path,
+        reference=ref,
+        comparisons=[comp],
+        results=[
+            AlignmentResult(
+                reference_clip="ref.mkv",
+                comparison_clip="comp.mkv",
+                frame_offset=12,
+                time_offset_seconds=0.5,
+                correlation_score=0.95,
+                algorithm="cross_correlation",
+                source="computed",
+            )
+        ],
+        config=AlignmentConfig(),
+    )
+
+    mock_probe.return_value = Fraction(24, 1)
+    reference_stream = object()
+    mock_extract_reference.return_value = (np.ones(10, dtype=np.float32), reference_stream)
+    mock_extract_matching.return_value = np.ones(10, dtype=np.float32)
+    mock_estimate.return_value = AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, None)
+
+    config = AlignmentConfig(correlation_mode="gcc_phat")
+    results = align_clips(ref, [comp], config, tmp_path)
+
+    assert results[0].frame_offset == 0
+    mock_extract_reference.assert_called_once_with(
+        ref,
+        config.sample_rate,
+        stream_override=None,
+        channel_strategy=config.channel_strategy,
+    )
+    mock_extract_matching.assert_called_once_with(
+        comp,
+        config.sample_rate,
+        reference_stream=reference_stream,
+        stream_override=None,
+        channel_strategy=config.channel_strategy,
+    )
+    assert check_alignment_cached(ref, [comp], tmp_path, config=config) == []
+
+
+@patch("frame_compare.services.alignment._probe_fps")
+@patch("frame_compare.services.alignment._extract_matching_audio")
+@patch("frame_compare.services.alignment._extract_reference_audio")
+@patch("frame_compare.services.alignment._estimate_consensus_offset")
+def test_align_clips_passes_stream_overrides_and_channel_strategy_to_audio_owner(
+    mock_estimate: MagicMock,
+    mock_extract_reference: MagicMock,
+    mock_extract_matching: MagicMock,
+    mock_probe: MagicMock,
+    tmp_path: Path,
+) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp_a = tmp_path / "comp_a.mkv"
+    comp_b = tmp_path / "comp_b.mkv"
+    ref.touch()
+    comp_a.touch()
+    comp_b.touch()
+    mock_probe.return_value = Fraction(24, 1)
+    reference_stream = object()
+    mock_extract_reference.return_value = (np.ones(10, dtype=np.float32), reference_stream)
+    mock_extract_matching.return_value = np.ones(10, dtype=np.float32)
+    mock_estimate.return_value = AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, None)
+    config = AlignmentConfig(
+        cache_results=False,
+        channel_strategy="best_channel",
+        reference_stream=2,
+        comparison_streams={"comp_b": 1},
+    )
+
+    align_clips(ref, [comp_a, comp_b], config, tmp_path)
+
+    mock_extract_reference.assert_called_once_with(
+        ref,
+        config.sample_rate,
+        stream_override=2,
+        channel_strategy="best_channel",
+    )
+    assert mock_extract_matching.call_args_list == [
+        call(
+            comp_a,
+            config.sample_rate,
+            reference_stream=reference_stream,
+            stream_override=None,
+            channel_strategy="best_channel",
+        ),
+        call(
+            comp_b,
+            config.sample_rate,
+            reference_stream=reference_stream,
+            stream_override=1,
+            channel_strategy="best_channel",
+        ),
+    ]
+
+
+def test_check_alignment_cached_uses_runtime_alignment_config_for_cache_lookup(tmp_path: Path) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+    cached_config = AlignmentConfig(correlation_mode="gcc_phat")
+    _write_cached_offsets(
+        tmp_path,
+        reference=ref,
+        comparisons=[comp],
+        results=[
+            AlignmentResult(
+                reference_clip="ref.mkv",
+                comparison_clip="comp.mkv",
+                frame_offset=4,
+                time_offset_seconds=1 / 6,
+                correlation_score=0.95,
+                algorithm="cross_correlation",
+                source="computed",
+            )
+        ],
+        config=cached_config,
+    )
+
+    assert check_alignment_cached(ref, [comp], tmp_path, config=AlignmentConfig()) == ["ref:comp"]
+    assert check_alignment_cached(ref, [comp], tmp_path, config=cached_config) == []

@@ -11,6 +11,7 @@ from typing import cast
 import numpy as np
 
 from frame_compare.services.errors import AudioAlignmentError
+from frame_compare.services.types import AlignmentChannelStrategy
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 from frame_compare.utils.subproc import CalledProcessError, TimeoutExpired, run_subprocess
 
@@ -84,11 +85,16 @@ def _load_ffprobe_json(argv: list[str], *, operation: str) -> dict[str, object]:
         raise FFmpegError(f"ffprobe timed out while {operation}", 124) from e
     except CalledProcessError as e:
         raise FFmpegError(_decode_stderr(e.stderr), e.returncode) from e
+    except OSError as e:
+        raise FFmpegError(f"ffprobe could not start while {operation}: {e}", 1) from e
 
     try:
-        return cast(dict[str, object], json.loads(proc.stdout.decode("utf-8", errors="replace")))
+        payload = json.loads(proc.stdout.decode("utf-8", errors="replace"))
     except json.JSONDecodeError as e:
         raise FFmpegError("ffprobe returned invalid json", proc.returncode) from e
+    if not isinstance(payload, dict):
+        raise FFmpegError("ffprobe returned invalid json object", proc.returncode)
+    return cast(dict[str, object], payload)
 
 
 def probe_fps(video_path: Path) -> Fraction:
@@ -113,6 +119,8 @@ def probe_fps(video_path: Path) -> Fraction:
         raise FFmpegError("ffprobe timed out", 124) from e
     except CalledProcessError as e:
         raise FFmpegError(_decode_stderr(e.stderr), e.returncode) from e
+    except OSError as e:
+        raise FFmpegError(f"ffprobe could not start: {e}", 1) from e
 
     output = proc.stdout.decode("utf-8").strip()
     normalized_output = output.removesuffix(",")
@@ -135,12 +143,12 @@ def probe_fps(video_path: Path) -> Fraction:
 
 def _parse_audio_stream(stream_obj: object, *, audio_stream_index: int, video_path: Path) -> AudioStreamInfo:
     if not isinstance(stream_obj, dict):
-        raise AudioAlignmentError(f"ffprobe returned invalid audio stream data for {video_path.name}")
+        raise FFmpegError(f"ffprobe returned invalid audio stream data for {video_path.name}", 0)
     stream = cast(dict[str, object], stream_obj)
 
     absolute_stream_index = _parse_optional_int(stream.get("index"))
     if absolute_stream_index is None:
-        raise AudioAlignmentError(f"ffprobe returned audio stream without index for {video_path.name}")
+        raise FFmpegError(f"ffprobe returned audio stream without index for {video_path.name}", 0)
 
     disposition_obj = stream.get("disposition", {})
     disposition_dict = (
@@ -188,7 +196,7 @@ def _probe_audio_streams(video_path: Path) -> list[AudioStreamInfo]:
 
     streams_obj = payload.get("streams")
     if not isinstance(streams_obj, list):
-        raise AudioAlignmentError(f"ffprobe returned invalid audio stream list for {video_path.name}")
+        raise FFmpegError(f"ffprobe returned invalid audio stream list for {video_path.name}", 0)
     stream_items = cast(list[object], streams_obj)
 
     streams = [
@@ -261,24 +269,93 @@ def _comparison_stream_sort_key(
     )
 
 
-def select_reference_audio_stream(video_path: Path) -> AudioStreamInfo:
+def _select_audio_stream_override(
+    streams: list[AudioStreamInfo],
+    *,
+    video_path: Path,
+    stream_override: int,
+) -> AudioStreamInfo:
+    for stream in streams:
+        if stream.audio_stream_index == stream_override:
+            return stream
+
+    available = ", ".join(str(stream.audio_stream_index) for stream in streams)
+    raise AudioAlignmentError(
+        f"audio stream override {stream_override} not found in {video_path.name}; "
+        f"available audio stream ordinals: {available}"
+    )
+
+
+def select_reference_audio_stream(
+    video_path: Path,
+    *,
+    stream_override: int | None = None,
+) -> AudioStreamInfo:
     """Choose the reference anchor stream deterministically from ffprobe metadata."""
-    return min(_probe_audio_streams(video_path), key=_reference_stream_sort_key)
+    streams = _probe_audio_streams(video_path)
+    if stream_override is not None:
+        return _select_audio_stream_override(
+            streams,
+            video_path=video_path,
+            stream_override=stream_override,
+        )
+    return min(streams, key=_reference_stream_sort_key)
 
 
 def select_matching_audio_stream(
     video_path: Path,
     *,
     reference_stream: AudioStreamInfo,
+    stream_override: int | None = None,
 ) -> AudioStreamInfo:
     """Choose the comparison stream that best matches the selected reference stream."""
+    streams = _probe_audio_streams(video_path)
+    if stream_override is not None:
+        return _select_audio_stream_override(
+            streams,
+            video_path=video_path,
+            stream_override=stream_override,
+        )
     return min(
-        _probe_audio_streams(video_path),
+        streams,
         key=lambda candidate: _comparison_stream_sort_key(reference_stream, candidate),
     )
 
 
-def extract_audio(video_path: Path, sample_rate: int, *, audio_stream_index: int) -> np.ndarray:
+def _best_channel_audio_filter(stream: AudioStreamInfo | None) -> str:
+    if stream is None:
+        return "pan=mono|c0=c0"
+
+    layout = stream.channel_layout
+    if layout is not None and "5.1" in layout:
+        return "pan=mono|c0=FC"
+    if layout in {"stereo", "2.0"}:
+        return "pan=mono|c0=FL"
+    if stream.channels == 1 or layout == "mono":
+        return "pan=mono|c0=c0"
+    if stream.channels is not None and stream.channels >= 3:
+        return "pan=mono|c0=c2"
+    return "pan=mono|c0=c0"
+
+
+def _channel_strategy_args(
+    *,
+    channel_strategy: AlignmentChannelStrategy,
+    stream: AudioStreamInfo | None,
+) -> list[str]:
+    if channel_strategy == "mono_downmix":
+        return ["-ac", "1"]
+    return ["-af", _best_channel_audio_filter(stream)]
+
+
+def extract_audio(
+    video_path: Path,
+    sample_rate: int,
+    *,
+    audio_stream_index: int,
+    channel_strategy: AlignmentChannelStrategy = "mono_downmix",
+    stream: AudioStreamInfo | None = None,
+) -> np.ndarray:
     """Extract audio using FFmpeg with an explicit mapped audio stream."""
     argv = [
         "ffmpeg",
@@ -287,8 +364,7 @@ def extract_audio(video_path: Path, sample_rate: int, *, audio_stream_index: int
         "-map",
         f"0:a:{audio_stream_index}",
         "-vn",
-        "-ac",
-        "1",
+        *_channel_strategy_args(channel_strategy=channel_strategy, stream=stream),
         "-ar",
         str(sample_rate),
         "-f",
@@ -319,14 +395,22 @@ def extract_audio(video_path: Path, sample_rate: int, *, audio_stream_index: int
     return np.frombuffer(proc.stdout, dtype=np.float32)
 
 
-def extract_reference_audio(video_path: Path, sample_rate: int) -> tuple[np.ndarray, AudioStreamInfo]:
+def extract_reference_audio(
+    video_path: Path,
+    sample_rate: int,
+    *,
+    stream_override: int | None = None,
+    channel_strategy: AlignmentChannelStrategy = "mono_downmix",
+) -> tuple[np.ndarray, AudioStreamInfo]:
     """Select and extract the reference anchor stream."""
-    stream = select_reference_audio_stream(video_path)
+    stream = select_reference_audio_stream(video_path, stream_override=stream_override)
     return (
         extract_audio(
             video_path,
             sample_rate,
             audio_stream_index=stream.audio_stream_index,
+            channel_strategy=channel_strategy,
+            stream=stream,
         ),
         stream,
     )
@@ -337,11 +421,19 @@ def extract_matching_audio(
     sample_rate: int,
     *,
     reference_stream: AudioStreamInfo,
+    stream_override: int | None = None,
+    channel_strategy: AlignmentChannelStrategy = "mono_downmix",
 ) -> np.ndarray:
     """Select and extract the comparison stream that matches the reference anchor."""
-    stream = select_matching_audio_stream(video_path, reference_stream=reference_stream)
+    stream = select_matching_audio_stream(
+        video_path,
+        reference_stream=reference_stream,
+        stream_override=stream_override,
+    )
     return extract_audio(
         video_path,
         sample_rate,
         audio_stream_index=stream.audio_stream_index,
+        channel_strategy=channel_strategy,
+        stream=stream,
     )

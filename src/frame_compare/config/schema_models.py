@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -51,6 +51,19 @@ class AudioAlignmentConfig(BaseModel):
     use_vspreview: bool = False
     force_interactive: bool = False
     cache_results: bool = True
+    correlation_mode: Literal["raw_fft", "gcc_phat"] = "raw_fft"
+    preprocessing_mode: Literal["none", "standard"] = "none"
+    channel_strategy: Literal["mono_downmix", "best_channel"] = "mono_downmix"
+    confidence_threshold: float = Field(default=0.0, ge=0.0, le=1.0)
+    ambiguity_peak_ratio: float = Field(default=1.0, ge=1.0)
+    window_length_seconds: float = Field(default=0.0, ge=0.0)
+    window_stride_seconds: float = Field(default=0.0, ge=0.0)
+    minimum_valid_windows: int = Field(default=1, ge=1)
+    consensus_minimum_ratio: float = Field(default=1.0, ge=0.0, le=1.0)
+    refinement_mode: Literal["disabled", "local"] = "disabled"
+    refinement_sample_rate: int | None = Field(default=None, ge=4000, le=48000)
+    reference_stream: int | None = Field(default=None, ge=0)
+    comparison_streams: dict[str, Annotated[int, Field(ge=0)]] = Field(default_factory=dict)
 
 
 class ScreenshotsConfig(BaseModel):

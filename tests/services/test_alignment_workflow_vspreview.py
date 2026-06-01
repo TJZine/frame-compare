@@ -11,6 +11,7 @@ import pytest
 
 from frame_compare.services.alignment import align_clips
 from frame_compare.services.alignment_cache import save_offsets_cache
+from frame_compare.services.alignment_consensus import AlignmentConsensus
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.vspreview.adapter import (
@@ -65,9 +66,9 @@ def _set_interactive_terminal(monkeypatch: pytest.MonkeyPatch, user_input: str) 
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_matching_audio")
 @patch("frame_compare.services.alignment._extract_reference_audio")
-@patch("frame_compare.services.alignment._cross_correlate")
+@patch("frame_compare.services.alignment._estimate_consensus_offset")
 def test_align_clips_launches_vspreview_when_enabled(
-    mock_corr: MagicMock,
+    mock_estimate: MagicMock,
     mock_extract_reference: MagicMock,
     mock_extract_matching: MagicMock,
     mock_probe: MagicMock,
@@ -89,7 +90,7 @@ def test_align_clips_launches_vspreview_when_enabled(
     mock_probe.return_value = Fraction(24, 1)
     mock_extract_reference.return_value = (np.ones(10, dtype=np.float32), object())
     mock_extract_matching.return_value = np.ones(10, dtype=np.float32)
-    mock_corr.return_value = (0, 0.99)
+    mock_estimate.return_value = AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, 2.0)
     mock_check_availability.return_value = VSPreviewAvailability(
         status=VSPreviewAvailabilityStatus.AVAILABLE,
         message="available",
@@ -107,6 +108,66 @@ def test_align_clips_launches_vspreview_when_enabled(
     assert request.comparisons == [comp_a, comp_b]
     suggested = request.suggested_offsets_by_key
     assert suggested == {"ref:comp_a": 0, "ref:comp_b": 0}
+    assert kwargs["config"].enabled is True
+
+
+@patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
+@patch("frame_compare.services.alignment._probe_fps")
+@patch("frame_compare.services.alignment._extract_matching_audio")
+@patch("frame_compare.services.alignment._extract_reference_audio")
+@patch("frame_compare.services.alignment._estimate_consensus_offset")
+def test_align_clips_rejected_computed_result_passes_none_hint_to_vspreview(
+    mock_estimate: MagicMock,
+    mock_extract_reference: MagicMock,
+    mock_extract_matching: MagicMock,
+    mock_probe: MagicMock,
+    mock_check_availability: MagicMock,
+    mock_launch: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_interactive_terminal(monkeypatch, "skip\n")
+
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+
+    mock_probe.return_value = Fraction(24, 1)
+    mock_extract_reference.return_value = (np.ones(10, dtype=np.float32), object())
+    mock_extract_matching.return_value = np.ones(10, dtype=np.float32)
+    mock_estimate.return_value = AlignmentConsensus(
+        None,
+        0.2,
+        False,
+        "low_confidence",
+        1,
+        1,
+        1.0,
+        1.0,
+    )
+    mock_check_availability.return_value = VSPreviewAvailability(
+        status=VSPreviewAvailabilityStatus.AVAILABLE,
+        message="available",
+    )
+    mock_launch.return_value = tmp_path / "vspreview_script.py"
+
+    results = align_clips(
+        ref,
+        [comp],
+        AlignmentConfig(enable=True, use_vspreview=True, cache_results=False),
+        tmp_path,
+    )
+
+    assert len(results) == 1
+    assert results[0].applied is False
+    assert results[0].frame_offset is None
+    assert mock_launch.call_count == 1
+    _, kwargs = mock_launch.call_args
+    request = kwargs["request"]
+    assert isinstance(request, VSPreviewSessionRequest)
+    assert request.suggested_offsets_by_key == {"ref:comp": None}
     assert kwargs["config"].enabled is True
 
 
@@ -237,7 +298,7 @@ def test_align_clips_vspreview_unavailable_generates_script_without_launch(
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_matching_audio")
 @patch("frame_compare.services.alignment._extract_reference_audio")
-@patch("frame_compare.services.alignment._cross_correlate")
+@patch("frame_compare.services.alignment._estimate_consensus_offset")
 @pytest.mark.parametrize(
     ("user_input", "expected_offset"),
     [
@@ -246,7 +307,7 @@ def test_align_clips_vspreview_unavailable_generates_script_without_launch(
     ],
 )
 def test_align_clips_vspreview_confirmed_offset_is_saved_and_applied(
-    mock_corr: MagicMock,
+    mock_estimate: MagicMock,
     mock_extract_reference: MagicMock,
     mock_extract_matching: MagicMock,
     mock_probe: MagicMock,
@@ -267,7 +328,7 @@ def test_align_clips_vspreview_confirmed_offset_is_saved_and_applied(
     mock_probe.return_value = Fraction(24, 1)
     mock_extract_reference.return_value = (np.ones(10, dtype=np.float32), object())
     mock_extract_matching.return_value = np.ones(10, dtype=np.float32)
-    mock_corr.return_value = (3, 0.99)
+    mock_estimate.return_value = AlignmentConsensus(3, 0.99, True, "accepted", 1, 1, 1.0, 2.0)
     mock_check_availability.return_value = VSPreviewAvailability(
         status=VSPreviewAvailabilityStatus.AVAILABLE,
         message="available",

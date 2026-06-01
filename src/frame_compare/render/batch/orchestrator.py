@@ -291,6 +291,7 @@ def render_screenshots_from_batch(
         overlay_mode=resolved_options.overlay_mode,
         renderer=target_renderer,
         ffmpeg_runner=resolved_ffmpeg_runner,
+        warnings=resolved_options.warnings,
     )
 
     rendered_paths = render_batch(

@@ -143,6 +143,7 @@ class BatchRenderOptions:
     reporter: ProgressReporter | None = None
     ffmpeg_runner: FFmpegRunner | None = None
     parallelism: int = 1
+    warnings: list[str] | None = None
 
 
 @dataclass(frozen=True)

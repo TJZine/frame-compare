@@ -20,6 +20,11 @@ from frame_compare.vspreview.adapter import (
     launch_alignment_verification_session,
 )
 from frame_compare.vspreview.errors import VSPreviewError
+from frame_compare.vspreview.output import (
+    print_vspreview_confirmation_header,
+    print_vspreview_input_hint,
+    write_vspreview_prompt,
+)
 from frame_compare.vspreview.overrides import ManualOverride, save_manual_override
 
 log = structlog.get_logger()
@@ -131,13 +136,23 @@ def _format_signed_frames(value: int) -> str:
     return f"{value:+d}f"
 
 
-def _stderr_print(message: str = "") -> None:
-    print(message, file=sys.stderr)
+def _format_suggested_offset(value: int | None) -> str:
+    if value is None:
+        return "no trusted audio hint"
+    return _format_signed_frames(value)
 
 
-def _read_stderr_prompt(prompt: str) -> str:
-    sys.stderr.write(prompt)
-    sys.stderr.flush()
+def _read_vspreview_prompt(
+    *,
+    label: str,
+    suggested_offset: str,
+    no_color: bool,
+) -> str:
+    write_vspreview_prompt(
+        label=label,
+        suggested_offset=suggested_offset,
+        no_color=no_color,
+    )
     raw_value = sys.stdin.readline()
     if raw_value == "":
         raise EOFError
@@ -157,46 +172,45 @@ def _prompt_for_confirmed_offsets(
     *,
     reference: Path,
     comparisons: list[Path],
-    offsets_by_key: dict[str, int],
+    offsets_by_key: dict[str, int | None],
+    no_color: bool = False,
 ) -> dict[str, int] | None:
     if not comparisons:
         return {}
 
-    _stderr_print()
-    _stderr_print("VSPreview confirmation")
-    _stderr_print(f"  reference  {reference.stem}")
-    _stderr_print("  domain     source-frame indices from the untrimmed clips")
-    _stderr_print(
-        "  enter      reference_source_frame comparison_source_frame; "
-        "offset = reference_source_frame - comparison_source_frame"
-    )
-    _stderr_print("  skip       enter 'skip' or 's' to keep current offsets")
-    _stderr_print()
+    print_vspreview_confirmation_header(reference=reference, no_color=no_color)
 
     confirmed: dict[str, int] = {}
     for comparison in comparisons:
         key = f"{reference.stem}:{comparison.stem}"
-        suggested = int(offsets_by_key.get(key, 0))
+        suggested_offset = _format_suggested_offset(offsets_by_key.get(key))
         while True:
             try:
-                raw_value = _read_stderr_prompt(
-                    f"  {comparison.stem} [{_format_signed_frames(suggested)}]: "
+                raw_value = _read_vspreview_prompt(
+                    label=comparison.stem,
+                    suggested_offset=suggested_offset,
+                    no_color=no_color,
                 ).strip()
             except (EOFError, OSError):
-                _stderr_print("No terminal input available; keeping current offsets.")
+                print_vspreview_input_hint(
+                    "No terminal input available; keeping current offsets.",
+                    no_color=no_color,
+                )
                 return None
             if raw_value == "":
-                _stderr_print(
-                    "  Enter both source frames, for example '120 108', or 'skip'."
+                print_vspreview_input_hint(
+                    "Enter both source frames, for example '120 108', or 'skip'.",
+                    no_color=no_color,
                 )
                 continue
             if raw_value.lower() in {"skip", "s"}:
                 return None
             source_frames = _parse_source_frame_pair(raw_value)
             if source_frames is None:
-                _stderr_print(
-                    "  Enter two non-negative integer source frames, for example '120 108', "
-                    "or 'skip'."
+                print_vspreview_input_hint(
+                    "Enter two non-negative integer source frames, for example '120 108', "
+                    "or 'skip'.",
+                    no_color=no_color,
                 )
                 continue
             reference_source_frame, comparison_source_frame = source_frames
@@ -255,7 +269,7 @@ def maybe_launch_alignment_vspreview(
     *,
     reference: Path,
     comparisons: list[Path],
-    offsets_by_key: dict[str, int],
+    offsets_by_key: dict[str, int | None],
     cache_dir: Path,
     config: AlignmentConfig,
     progress: ProgressReporter | None,
@@ -316,7 +330,10 @@ def maybe_launch_alignment_vspreview(
                 suggested_offsets_by_key=offsets_by_key,
                 cache_dir=cache_dir,
             ),
-            config=VSPreviewConfig(enabled=launch_decision.enabled),
+            config=VSPreviewConfig(
+                enabled=launch_decision.enabled,
+                no_color=config.no_color,
+            ),
         )
         if launch_decision.no_tty:
             _log_no_tty(script_path, tty_status)
@@ -326,6 +343,7 @@ def maybe_launch_alignment_vspreview(
             reference=reference,
             comparisons=comparisons,
             offsets_by_key=offsets_by_key,
+            no_color=config.no_color,
         )
         if confirmed_offsets is None:
             return None

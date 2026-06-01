@@ -96,12 +96,72 @@ def test_run_report_phase_builds_report_data_and_records_path(
     assert output.report_path == expected_path
     assert artifacts.report_path is None
     assert report_data.frames == [5]
+    assert report_data.frame_details == []
     assert report_data.clips[0].screenshots == render.screenshots_by_label["Reference"]
     assert report_data.clips[1].screenshots == render.screenshots_by_label["Encode 1"]
     assert report_data.slowpics_url == "https://slow.pics/c/example"
     assert [(clip.name, clip.resolution, clip.fps) for clip in report_data.clips] == [
         ("Reference", (1920, 1080), 24.0),
         ("Encode 1", (1920, 1080), 24.0),
+    ]
+    assert captured["report_config"] == ctx.config.report
+
+
+def test_run_report_phase_passes_reference_source_frame_details(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
+    ctx = _context(tmp_path, comparisons=[comparison])
+    ctx.reference = ctx.reference.with_trim(trim_start_frames=3, trim_end_frame_inclusive=20)
+    ctx.selection_breakdown = SelectionBreakdown(quantile_bright=[5])
+    ctx.selection_details_by_source_frame = {
+        4: SelectionDetail(
+            frame_index=4,
+            label="User",
+            source="analysis",
+            timecode="00:00:00.167",
+            score=0.5,
+            clip_role="analyze",
+            notes="user_override",
+        )
+    }
+    render = RenderArtifacts(
+        screenshots_by_label={
+            "Reference": [
+                tmp_path / "screenshots" / "reference_1.png",
+                tmp_path / "screenshots" / "reference_2.png",
+            ],
+            "Encode 1": [
+                tmp_path / "screenshots" / "encode_1.png",
+                tmp_path / "screenshots" / "encode_2.png",
+            ],
+        },
+        screenshot_dir=tmp_path / "screenshots",
+    )
+    captured: dict[str, Any] = {}
+    expected_path = tmp_path / "report.html"
+
+    def _fake_generate_report(report_data: object, report_config: object) -> Path:
+        captured["report_data"] = report_data
+        captured["report_config"] = report_config
+        return expected_path
+
+    monkeypatch.setattr(phase_tasks, "generate_report", _fake_generate_report)
+
+    output = phase_tasks.run_report_phase(
+        ctx,
+        frames=[1, 2],
+        render=render,
+        metadata=None,
+        slowpics_url=None,
+    )
+
+    report_data = captured["report_data"]
+    assert output.report_path == expected_path
+    assert report_data.frames == [1, 2]
+    assert [(detail.label, detail.detail, detail.category) for detail in report_data.frame_details] == [
+        ("User", "Source frame 4 (00:00:00.167)", "user_override"),
+        ("Bright", "Source frame 5", "quantile_bright"),
     ]
     assert captured["report_config"] == ctx.config.report
 
@@ -118,6 +178,9 @@ def test_run_render_phase_maps_aligned_frames_to_source_frames(
 
     def _fake_render_screenshots_from_batch(**kwargs: object) -> dict[str, list[Path]]:
         captured.update(kwargs)
+        options = kwargs["options"]
+        assert options.warnings is not None
+        options.warnings.append("render: geometry alignment skipped")
         return {"Reference": [tmp_path / "reference.png"]}
 
     monkeypatch.setattr(
@@ -145,6 +208,7 @@ def test_run_render_phase_maps_aligned_frames_to_source_frames(
     assert output.render == RenderArtifacts(
         screenshots_by_label={"Reference": [tmp_path / "reference.png"]},
         screenshot_dir=ctx.workspace.screenshots_dir,
+        warnings=["render: geometry alignment skipped"],
     )
 
 

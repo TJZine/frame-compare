@@ -136,6 +136,7 @@ class RunDependencies:
 class RenderArtifacts:
     screenshots_by_label: dict[str, list[Path]]
     screenshot_dir: Path | None
+    warnings: list[str] = field(default_factory=_empty_str_list)
 
 
 @dataclass(frozen=True)
@@ -161,6 +162,7 @@ class AlignPhaseOutput:
     selected_frames: list[int]
     selection_breakdown: SelectionBreakdown | None = None
     selection_details_by_source_frame: SelectionDetailsByFrame | None = None
+    warnings: list[str] = field(default_factory=_empty_str_list)
 
 
 @dataclass(frozen=True)

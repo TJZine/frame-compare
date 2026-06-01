@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from frame_compare.config.schema import ColorConfig, ConfigSchema, OverlayMode, ScreenshotsConfig
-from frame_compare.config.schema_enums import VsScreenshotWriter
+from frame_compare.config.schema_enums import ScreenshotGeometryMode, VsScreenshotWriter
 from frame_compare.render.batch.expansion import (
     _build_overlay_config,
     _resolve_num_frames,
@@ -466,7 +466,9 @@ def test_build_overlay_config() -> None:
 
 @patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
 def test_expand_batch_render_requests(mock_prepare: MagicMock) -> None:
-    config = ConfigSchema()
+    config = ConfigSchema(
+        screenshots=ScreenshotsConfig(geometry_mode=ScreenshotGeometryMode.NATIVE)
+    )
     ffmpeg_runner = MagicMock()
 
     ref_clip = MagicMock(name="ref_clip")
@@ -695,6 +697,46 @@ def test_expand_batch_render_requests_attaches_aligned_geometry_after_loading_di
     assert requests[2].overlay is not None
     assert requests[2].overlay.resolution == (1440, 1080)
     assert requests[2].overlay.origin == enc_plan.overlay_origin
+
+
+@patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
+def test_expand_batch_render_requests_warns_and_uses_native_when_aligned_dimensions_unknown(
+    mock_prepare: MagicMock,
+) -> None:
+    config = ConfigSchema(screenshots={"geometry_mode": "aligned"})
+    ffmpeg_runner = MagicMock()
+    warnings: list[str] = []
+    mock_prepare.return_value = (Path("video.mkv"), None, None, None)
+    req = ScreenshotBatchRequest(
+        clip_path=Path("video.mkv"),
+        label="Reference",
+        source_frames=[10],
+        display_frames=[10],
+        selection_labels=[None],
+        probe_width=None,
+        probe_height=None,
+        probe_num_frames=100,
+        probe_is_hdr=False,
+    )
+
+    requests, _ = expand_batch_render_requests(
+        [req],
+        output_dir=Path("out"),
+        config=config,
+        overlay_mode=OverlayMode.STANDARD,
+        renderer="ffmpeg",
+        ffmpeg_runner=ffmpeg_runner,
+        warnings=warnings,
+    )
+
+    assert requests[0].geometry_plan is None
+    assert requests[0].overlay is not None
+    assert requests[0].overlay.origin is None
+    assert requests[0].overlay.resolution == (0, 0)
+    assert warnings == [
+        "Screenshot geometry alignment skipped: source dimensions were unavailable "
+        "for Reference; using native screenshot geometry for this batch."
+    ]
 
 
 @patch("frame_compare.render.batch.expansion.prepare_clip_for_render")

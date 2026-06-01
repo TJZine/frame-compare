@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import structlog
+
 from frame_compare.config.schema_enums import ScreenshotGeometryMode
 from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner, FFmpegRunner
 from frame_compare.render.geometry import (
@@ -30,6 +32,8 @@ if TYPE_CHECKING:
     import vapoursynth as vs
 
     from frame_compare.config.schema import ConfigSchema
+
+log = structlog.get_logger()
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,8 +277,32 @@ def _geometry_plans_for_batch(
     prepared_requests: list[_PreparedBatchRequest],
     *,
     geometry_mode: ScreenshotGeometryMode,
+    warnings: list[str] | None = None,
 ) -> tuple[RenderGeometryPlan | None, ...]:
     if geometry_mode == ScreenshotGeometryMode.NATIVE:
+        return tuple(None for _prepared in prepared_requests)
+    if not any(prepared.request.source_frames for prepared in prepared_requests):
+        return tuple(None for _prepared in prepared_requests)
+    missing_dimension_labels = tuple(
+        prepared.request.label
+        for prepared in prepared_requests
+        if prepared.width <= 0 or prepared.height <= 0
+    )
+    if missing_dimension_labels:
+        visible_labels = ", ".join(missing_dimension_labels[:3])
+        if len(missing_dimension_labels) > 3:
+            visible_labels += f", ... ({len(missing_dimension_labels) - 3} more)"
+        warning = (
+            "Screenshot geometry alignment skipped: source dimensions were unavailable "
+            f"for {visible_labels}; using native screenshot geometry for this batch."
+        )
+        log.warning(
+            "screenshot_geometry_alignment_skipped",
+            reason="missing_source_dimensions",
+            labels=list(missing_dimension_labels),
+        )
+        if warnings is not None:
+            warnings.append(warning)
         return tuple(None for _prepared in prepared_requests)
 
     sources = tuple(
@@ -302,6 +330,7 @@ def expand_batch_render_requests(
     overlay_mode: OverlayMode,
     renderer: Renderer,
     ffmpeg_runner: FFmpegRunner,
+    warnings: list[str] | None = None,
 ) -> tuple[list[RenderRequest], dict[str, range]]:
     all_requests: list[RenderRequest] = []
     label_to_range: dict[str, range] = {}
@@ -315,6 +344,7 @@ def expand_batch_render_requests(
     geometry_plans = _geometry_plans_for_batch(
         prepared_requests,
         geometry_mode=config.screenshots.geometry_mode,
+        warnings=warnings,
     )
 
     for prepared, geometry_plan in zip(prepared_requests, geometry_plans, strict=True):

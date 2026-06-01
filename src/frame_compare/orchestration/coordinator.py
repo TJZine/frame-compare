@@ -102,6 +102,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             reference=reference,
             comparisons=comparisons,
             reporter=reporter,
+            no_color=request.no_color,
         )
         emit_consolidated_fps_report(
             stage="after_load_sources",
