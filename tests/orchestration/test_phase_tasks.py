@@ -107,6 +107,65 @@ def test_run_analyze_phase_records_cache_hit_and_selection_breakdown(
     assert calls["select"] == {"metrics": metrics, "config": ctx.config.analysis}
 
 
+def test_run_analyze_phase_uses_prepared_reference_cache_domain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.reference_cache_domain = "trim_start=0|trim_end=0|effective_fps=24/1"
+    input_videos = [ctx.reference.path]
+    metrics = FrameMetrics(
+        luminance=[0.1, 0.9],
+        motion=[0.2, 0.8],
+        metadata=MetricsMetadata(
+            frame_count=2,
+            fps=Fraction(24, 1),
+            config_fingerprint="fingerprint",
+            clips=[],
+        ),
+    )
+    observed_reference_domains: list[str | None] = []
+
+    def _fake_compute_cache_key(
+        _video_paths: list[Path],
+        _config: object,
+        *,
+        reference_domain: str | None = None,
+    ) -> str:
+        observed_reference_domains.append(reference_domain)
+        return "fingerprint"
+
+    def _fake_load_cached_metrics(*_args: object, **_kwargs: object) -> CacheLoadResult:
+        return CacheLoadResult(success=True, metrics=metrics)
+
+    def _fake_calculate_metrics(**kwargs: object) -> FrameMetrics:
+        observed_reference_domains.append(kwargs["reference_domain"])
+        return metrics
+
+    def _fake_select_frames(**_kwargs: object) -> FrameSelection:
+        return FrameSelection(
+            frames=[0],
+            mode=SelectionMode.MIXED,
+            seed=ctx.config.analysis.random_seed,
+            breakdown=SelectionBreakdown(quantile_dark=[0]),
+        )
+
+    monkeypatch.setattr(phase_tasks.cache_io, "compute_cache_key", _fake_compute_cache_key)
+    monkeypatch.setattr(phase_tasks.cache_io, "load_cached_metrics", _fake_load_cached_metrics)
+    monkeypatch.setattr(phase_tasks, "calculate_metrics", _fake_calculate_metrics)
+    monkeypatch.setattr(phase_tasks, "select_frames", _fake_select_frames)
+
+    phase_tasks.run_analyze_phase(
+        ctx,
+        input_videos=input_videos,
+        workspace=ctx.workspace,
+    )
+
+    assert observed_reference_domains == [
+        "trim_start=0|trim_end=0|effective_fps=24/1",
+        "trim_start=0|trim_end=0|effective_fps=24/1",
+    ]
+
+
 def test_run_analyze_phase_cache_only_missing_cache_does_not_recompute(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -156,6 +156,11 @@ def calculate_metrics(
         cache_dir: Directory for cache files
         reporter: Optional progress reporter
         vs_loader: Optional VapourSynth clip loader seam
+        reference_domain: Optional reference frame-domain token included in
+            the analysis cache key when source overrides affect reference
+            selection.
+        effective_fps: Optional FPS value stored in metrics metadata for
+            timing and selection-detail normalization.
 
     Returns:
         FrameMetrics with luminance and motion arrays

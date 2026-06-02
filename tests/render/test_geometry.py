@@ -116,6 +116,7 @@ def test_plan_render_geometry_aligned_same_height_center_crops_wider_source():
     assert narrower.overlay_origin == (10, 10)
 
 
+@pytest.mark.unit
 def test_plan_render_geometry_aligned_three_sources_same_height_center_crops_wider_sources():
     plans = plan_render_geometry(
         (
@@ -161,6 +162,7 @@ def test_plan_render_geometry_aligned_same_width_center_crops_taller_source():
     assert shorter.final_canvas_size == (1920, 800)
 
 
+@pytest.mark.unit
 def test_plan_render_geometry_aligned_three_sources_same_width_center_crops_taller_sources():
     plans = plan_render_geometry(
         (
@@ -240,6 +242,7 @@ def test_plan_render_geometry_clamps_overlay_origin_to_padded_content_bounds():
     assert square.overlay_origin == (1199, 799)
 
 
+@pytest.mark.unit
 def test_plan_render_geometry_aligned_three_sources_mixed_dimensions_with_explicit_active_rects():
     plans = plan_render_geometry(
         (

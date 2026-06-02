@@ -459,6 +459,38 @@ effective_fps = "24000/1001"
     assert prep.clips[1].effective_fps == Fraction(24000, 1001)
 
 
+def test_execute_prep_preserves_explicit_reference_effective_fps_cache_domain_when_equal_to_source(
+    tmp_path: Path,
+) -> None:
+    config_content = (
+        MINIMAL_CONFIG
+        + """
+[sources.overrides."00-reference.mkv"]
+effective_fps = "24/1"
+"""
+    )
+    _create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "00-reference.mkv", "01-encode.mkv")
+    loader = FakeVSLoader(
+        fps_by_name={
+            "00-reference.mkv": Fraction(24, 1),
+            "01-encode.mkv": Fraction(24, 1),
+        }
+    )
+
+    prep = asyncio.run(
+        preparation.execute_prep(
+            RunRequest(root=tmp_path),
+            RunDependencies(vs_loader=cast(Any, loader)),
+        )
+    )
+
+    assert prep.reference_cache_domain == "trim_start=0|trim_end=0|effective_fps=24/1"
+    assert prep.clips[0].source_fps == Fraction(24, 1)
+    assert prep.clips[0].effective_fps == Fraction(24, 1)
+
+
 def test_execute_prep_reference_source_trims_constrain_effective_frame_domain(
     tmp_path: Path,
 ) -> None:

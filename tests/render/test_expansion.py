@@ -719,6 +719,7 @@ def test_expand_batch_render_requests_attaches_aligned_geometry_after_loading_di
     assert requests[2].overlay.origin == enc_plan.overlay_origin
 
 
+@pytest.mark.unit
 @patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
 def test_expand_batch_render_requests_aligns_mixed_dimensions_with_explicit_active_rects(
     mock_prepare: MagicMock,
@@ -855,6 +856,7 @@ def test_expand_batch_render_requests_aligns_mixed_dimensions_with_explicit_acti
     ]
 
 
+@pytest.mark.unit
 @patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
 def test_expand_batch_render_requests_ignores_overlay_metadata_for_geometry_without_trust(
     mock_prepare: MagicMock,
@@ -918,6 +920,7 @@ def test_expand_batch_render_requests_ignores_overlay_metadata_for_geometry_with
     assert warnings == []
 
 
+@pytest.mark.unit
 @patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
 def test_expand_batch_render_requests_explicit_active_rect_beats_metadata_rect(
     mock_prepare: MagicMock,
@@ -997,6 +1000,7 @@ def test_expand_batch_render_requests_explicit_active_rect_beats_metadata_rect(
         ),
     ],
 )
+@pytest.mark.unit
 @patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
 def test_expand_batch_render_requests_rejected_trusted_metadata_falls_back_with_warning(
     mock_prepare: MagicMock,
@@ -1063,6 +1067,7 @@ def test_expand_batch_render_requests_rejected_trusted_metadata_falls_back_with_
     ]
 
 
+@pytest.mark.unit
 @patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
 def test_expand_batch_render_requests_rejected_trusted_metadata_falls_back_to_explicit_with_warning(
     mock_prepare: MagicMock,
@@ -1114,6 +1119,7 @@ def test_expand_batch_render_requests_rejected_trusted_metadata_falls_back_to_ex
     ]
 
 
+@pytest.mark.unit
 @patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
 def test_expand_batch_render_requests_trusted_metadata_without_l5_candidate_falls_back_quietly(
     mock_prepare: MagicMock,
@@ -1178,6 +1184,7 @@ def test_expand_batch_render_requests_trusted_metadata_without_l5_candidate_fall
     assert warnings == []
 
 
+@pytest.mark.unit
 @patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
 def test_expand_batch_render_requests_attaches_aligned_geometry_for_three_sources(
     mock_prepare: MagicMock,

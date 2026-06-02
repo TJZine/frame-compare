@@ -77,9 +77,14 @@ def write_metrics_cache(
     source_path: Path,
     config: ConfigSchema,
     video_paths: list[Path] | None = None,
+    reference_domain: str | None = None,
 ) -> None:
     cache_inputs = [source_path] if video_paths is None else video_paths
-    fingerprint = cache_io.compute_cache_key(cache_inputs, config.analysis)
+    fingerprint = cache_io.compute_cache_key(
+        cache_inputs,
+        config.analysis,
+        reference_domain=reference_domain,
+    )
     stats_by_path = {path: path.stat() for path in cache_inputs}
     metrics = FrameMetrics(
         luminance=[0.1] * 100,

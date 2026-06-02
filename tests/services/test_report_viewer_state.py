@@ -9,6 +9,7 @@ import pytest
 from pyright import node as pyright_node
 
 
+@pytest.mark.unit
 def test_viewer_state_harness_exercises_pair_scoped_alignment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

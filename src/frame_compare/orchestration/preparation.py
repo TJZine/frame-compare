@@ -330,6 +330,7 @@ async def execute_prep(
         workspace=workspace,
         config=config,
         input_videos=input_videos,
+        reference_cache_domain=reference_domain,
         clips=clips,
         artifacts=artifacts,
         metadata_prefetch=metadata_prefetch,

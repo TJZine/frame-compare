@@ -5,6 +5,7 @@ from fractions import Fraction
 from pathlib import Path
 
 import pytest
+import tomli_w
 from pydantic import ValidationError
 
 from frame_compare.config.defaults import DEFAULT_CONFIG_TOML
@@ -251,6 +252,22 @@ def test_sources_config_defaults_and_override_schema() -> None:
 
 
 @pytest.mark.parametrize(
+    "value, expected",
+    [
+        ("2997/125", Fraction(2997, 125)),
+        ("24/1", Fraction(24, 1)),
+    ],
+)
+def test_source_override_accepts_num_den_effective_fps(
+    value: str,
+    expected: Fraction,
+) -> None:
+    override = SourceOverrideConfig(effective_fps=value)
+
+    assert override.effective_fps == expected
+
+
+@pytest.mark.parametrize(
     "payload",
     [
         {"trim_start_frames": -1},
@@ -288,14 +305,34 @@ def test_sources_config_rejects_unknown_fields(payload: dict[str, object]) -> No
     "payload",
     [
         {"effective_fps": "not-a-rational"},
+        {"effective_fps": "23.976"},
+        {"effective_fps": "24"},
         {"effective_fps": "0"},
+        {"effective_fps": "0/1"},
         {"effective_fps": "-24000/1001"},
+        {"effective_fps": Fraction(0, 1)},
+        {"effective_fps": Fraction(-24, 1)},
         {"effective_fps": 24},
     ],
 )
 def test_source_override_rejects_malformed_effective_fps(payload: dict[str, object]) -> None:
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="num/den|positive"):
         SourceOverrideConfig.model_validate(payload)
+
+
+def test_sources_config_effective_fps_serializes_num_den_for_toml_round_trip() -> None:
+    config = SourcesConfig(
+        overrides={
+            "source-24.mkv": SourceOverrideConfig(effective_fps=Fraction(24, 1)),
+            "source-ntsc.mkv": SourceOverrideConfig(effective_fps=Fraction(24000, 1001)),
+        }
+    )
+
+    toml_text = tomli_w.dumps({"sources": config.model_dump(mode="json", exclude_none=True)})
+    data = tomllib.loads(toml_text)
+
+    assert data["sources"]["overrides"]["source-24.mkv"]["effective_fps"] == "24/1"
+    assert data["sources"]["overrides"]["source-ntsc.mkv"]["effective_fps"] == "24000/1001"
 
 
 def test_default_config_toml_documents_sources_defaults() -> None:

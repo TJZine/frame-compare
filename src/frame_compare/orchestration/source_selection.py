@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 
 from frame_compare.config.schema_models import SourceOverrideConfig, SourcesConfig
@@ -77,8 +78,14 @@ def reference_cache_domain_token(override: SourceOverrideConfig | None) -> str |
     return (
         f"trim_start={override.trim_start_frames}|"
         f"trim_end={override.trim_end_frames}|"
-        f"effective_fps={override.effective_fps or ''}"
+        f"effective_fps={_format_effective_fps_token(override.effective_fps)}"
     )
+
+
+def _format_effective_fps_token(effective_fps: Fraction | None) -> str:
+    if effective_fps is None:
+        return ""
+    return f"{effective_fps.numerator}/{effective_fps.denominator}"
 
 
 def _ensure_unique_stems(paths: list[Path]) -> None:

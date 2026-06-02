@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from fractions import Fraction
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 from frame_compare.config.schema_enums import (
     LogFormat,
@@ -20,6 +21,8 @@ from frame_compare.config.schema_enums import (
     Visibility,
     VsScreenshotWriter,
 )
+
+_EFFECTIVE_FPS_PATTERN = re.compile(r"^[0-9]+/[0-9]+$")
 
 
 class PathsConfig(BaseModel):
@@ -91,17 +94,27 @@ class SourceOverrideConfig(BaseModel):
     @field_validator("effective_fps", mode="before")
     @classmethod
     def parse_effective_fps(cls, value: object) -> object:
-        if value is None or isinstance(value, Fraction):
+        if value is None:
             return value
-        if not isinstance(value, str):
-            raise ValueError("effective_fps must be a positive rational string")
+        if isinstance(value, Fraction):
+            if value <= 0:
+                raise ValueError("effective_fps must be positive")
+            return value
+        if not isinstance(value, str) or _EFFECTIVE_FPS_PATTERN.fullmatch(value) is None:
+            raise ValueError('effective_fps must be a positive "num/den" string')
         try:
             parsed = Fraction(value)
-        except (ValueError, ZeroDivisionError) as exc:
-            raise ValueError("effective_fps must be a positive rational string") from exc
+        except ZeroDivisionError as exc:
+            raise ValueError('effective_fps must be a positive "num/den" string') from exc
         if parsed <= 0:
             raise ValueError("effective_fps must be positive")
         return parsed
+
+    @field_serializer("effective_fps")
+    def serialize_effective_fps(self, value: Fraction | None) -> str | None:
+        if value is None:
+            return None
+        return f"{value.numerator}/{value.denominator}"
 
 
 class SourcesConfig(BaseModel):

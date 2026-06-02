@@ -142,7 +142,7 @@ def run_analyze_phase(
     require_cache_only: bool = False,
     vs_loader: VSLoader | None = None,
 ) -> AnalyzePhaseOutput:
-    reference_domain = _reference_cache_domain_from_clip(ctx.reference)
+    reference_domain = ctx.reference_cache_domain
     fingerprint = cache_io.compute_cache_key(
         input_videos,
         ctx.config.analysis,
@@ -201,26 +201,6 @@ def _require_cached_metrics(
         found = cache_io.read_cache_version(error_cache_path) or "unknown"
         raise CacheVersionMismatchError(found, str(cache_io.CACHE_VERSION))
     raise MetricsCalculationError(f"Cached metrics missing or mismatched ({reason}).")
-
-
-def _reference_cache_domain_from_clip(clip: ClipState) -> str | None:
-    trim_end_frames = 0
-    if clip.trim.trim_end_frame_inclusive is not None:
-        trim_end_frames = max(
-            0,
-            clip.probe.num_frames - 1 - clip.trim.trim_end_frame_inclusive,
-        )
-    if (
-        clip.trim.trim_start_frames == 0
-        and trim_end_frames == 0
-        and clip.effective_fps == clip.source_fps
-    ):
-        return None
-    return (
-        f"trim_start={clip.trim.trim_start_frames}|"
-        f"trim_end={trim_end_frames}|"
-        f"effective_fps={clip.effective_fps if clip.effective_fps != clip.source_fps else ''}"
-    )
 
 
 def _select_frames_for_reference_domain(

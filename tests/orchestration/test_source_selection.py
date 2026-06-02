@@ -131,6 +131,12 @@ def test_source_selection_resolves_overrides_by_selector(tmp_path: Path) -> None
     )
 
 
+def test_reference_cache_domain_token_preserves_integral_num_den_effective_fps() -> None:
+    token = reference_cache_domain_token(SourceOverrideConfig(effective_fps="24/1"))
+
+    assert token == "trim_start=0|trim_end=0|effective_fps=24/1"
+
+
 def test_source_selection_rejects_duplicate_override_selectors_for_same_source(
     tmp_path: Path,
 ) -> None:
