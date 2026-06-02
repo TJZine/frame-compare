@@ -100,7 +100,6 @@ const ReportViewer = {
             status: document.getElementById('viewer-status'),
             emptyState: document.querySelector('[data-empty-state]'),
             currentFrameLabel: document.querySelector('[data-current-frame-label]'),
-            currentFrameDetail: document.querySelector('[data-current-frame-detail]'),
             currentFrameCategoryDivider: document.querySelector('[data-current-frame-category-divider]'),
             currentFrameCategory: document.querySelector('[data-current-frame-category]'),
             labelLeft: document.getElementById('label-left'),
@@ -542,6 +541,7 @@ const ReportViewer = {
         this.dom.stage.addEventListener('pointerup', (e) => this.stopPointerInteraction(e));
         this.dom.stage.addEventListener('pointercancel', (e) => this.stopPointerInteraction(e));
         this.dom.stage.addEventListener('dblclick', (e) => {
+            if (this.state.mode === 'overlay' || this.state.mode === 'diff') return;
             e.preventDefault();
             this.resetViewport();
         });
@@ -1630,12 +1630,10 @@ const ReportViewer = {
     updateCurrentFrameMetadata(frameData) {
         const frame = frameData || this.state.data?.frames?.[this.state.currentFrameIdx] || null;
         const label = frame?.label || 'No frame selected';
-        const detail = frame?.detail || 'No frame detail available.';
         const categoryText = frame?.category ? this.humanizeCategory(frame.category) : '';
         const showCategory = this.shouldShowFrameCategory(label, categoryText);
 
         if (this.dom.currentFrameLabel) this.dom.currentFrameLabel.textContent = label;
-        if (this.dom.currentFrameDetail) this.dom.currentFrameDetail.textContent = detail;
         if (this.dom.currentFrameCategoryDivider) {
             this.dom.currentFrameCategoryDivider.hidden = !showCategory;
         }

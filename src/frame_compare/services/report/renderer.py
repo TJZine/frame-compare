@@ -187,14 +187,13 @@ def _render_filmstrip(
     items = (
         "".join(
             f"""
-                <button class="rv-filmstrip-item" data-idx="{_esc_attr(i)}" data-category-key="{_esc_attr(category_filter_keys[frame["category"]])}" data-category="{_esc_attr(frame["category"])}" aria-label="{_esc_attr(frame["label"])}: {_esc_attr(frame["detail"])}">
+                <button class="rv-filmstrip-item" data-idx="{_esc_attr(i)}" data-category-key="{_esc_attr(category_filter_keys[frame["category"]])}" data-category="{_esc_attr(frame["category"])}" aria-label="{_esc_attr(_frame_filmstrip_label(frame))}">
                     <span class="rv-filmstrip-thumb">
                         <img src="{_esc_attr(frame["images"][0]["src"] if frame["images"] else "")}" loading="lazy" alt="{_esc_attr(first_clip_label)} - Frame {_esc_attr(frame["number"])}">
                         <span class="rv-filmstrip-accent" data-category-key="{_esc_attr(category_filter_keys[frame["category"]])}" data-category="{_esc_attr(frame["category"])}"></span>
                     </span>
                     <span class="rv-filmstrip-caption">
                         <span class="rv-filmstrip-label">{_esc_text(_frame_filmstrip_label(frame))}</span>
-                        <span class="rv-filmstrip-detail">{_esc_text(frame["detail"])}</span>
                     </span>
                 </button>
                 """
@@ -438,8 +437,6 @@ def _render_stage() -> str:
         </div>
         <div class="rv-stage-overlay-info">
             <span class="rv-info-label" data-current-frame-label></span>
-            <span class="rv-info-divider">•</span>
-            <span class="rv-info-detail" data-current-frame-detail></span>
             <span class="rv-info-divider" data-current-frame-category-divider>•</span>
             <span class="rv-info-category" data-current-frame-category></span>
         </div>

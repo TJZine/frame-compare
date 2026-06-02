@@ -373,7 +373,7 @@ def test_build_html_renders_frame_metadata_and_category_filters(
     assert 'data-category-key="cat-0" data-category="selected" aria-pressed="false"' in html
     assert 'data-category-key="cat-1" data-category="scene-cut" aria-pressed="false"' in html
     assert '<span class="rv-filmstrip-label">Frame 10 • Selected</span>' in html
-    assert '<span class="rv-filmstrip-detail">Source frame 10</span>' in html
+    assert "Source frame 10</span>" not in html
     assert (
         '<span class="rv-filmstrip-accent" '
         'data-category-key="cat-1" data-category="scene-cut"></span>'
@@ -436,13 +436,12 @@ def test_build_html_avoids_inline_styles(report_payload: ReportPayload) -> None:
     assert tags.tags_with_style == []
 
 
-def test_build_html_exposes_current_frame_detail_hooks(
+def test_build_html_exposes_current_frame_metadata_hooks(
     report_payload: ReportPayload,
 ) -> None:
     html = build_html(report_payload)
 
     assert "data-current-frame-label" in html
-    assert "data-current-frame-detail" in html
     assert "data-current-frame-category-divider" in html
     assert "data-current-frame-category" in html
 
@@ -671,6 +670,8 @@ def test_viewer_assets_keep_divider_slider_only_and_pointer_safe() -> None:
     assert "bottom: 16px;" in _css_block(css, ".rv-overlay-label")
     assert "left: 50%;" in _css_block(css, ".rv-stage-overlay-info")
     assert "transform: translateX(-50%);" in _css_block(css, ".rv-stage-overlay-info")
+    assert "position: absolute;" in _css_block(css, ".rv-filmstrip-caption")
+    assert "text-shadow:" in _css_block(css, ".rv-filmstrip-label")
 
     assert "leftLabelTxt = `${leftClip.label} (Left)`;" in js
     assert "rightLabelTxt = `${rightClip.label} (Right)`;" in js
@@ -802,6 +803,7 @@ def test_viewer_assets_wire_pan_wheel_zoom_and_alignment_hooks() -> None:
     assert "panY: 0" in js
     assert "this.dom.stage.addEventListener('wheel'" in js
     assert "this.dom.stage.addEventListener('dblclick'" in js
+    assert "if (this.state.mode === 'overlay' || this.state.mode === 'diff') return;" in js
     assert "this.zoomAtPoint(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1);" in js
     assert "this.setPan(this.state.panX + dx, this.state.panY + dy, { save: false });" in js
     assert "shouldPanFromPointer" in js
@@ -914,7 +916,7 @@ def test_viewer_assets_wire_metadata_and_error_empty_state_hooks() -> None:
     assert "if (control === this.dom.btnHelp) return;" in js
     assert "hasRenderableData()" in js
     assert "updateCurrentFrameMetadata(frameData)" in js
-    assert "document.querySelector('[data-current-frame-detail]')" in js
+    assert "document.querySelector('[data-current-frame-detail]')" not in js
     assert "normalizedDisplayToken(value)" in js
     assert "this.dom.currentFrameCategoryDivider.hidden = !showCategory;" in js
     assert "Selected frame image data is unavailable." in js
