@@ -111,6 +111,27 @@ def _humanize_category(cat: str) -> str:
     return cat.replace("_", " ").replace("-", " ").title()
 
 
+def _normalized_display_token(value: str) -> str:
+    return " ".join(value.replace("_", " ").replace("-", " ").split()).casefold()
+
+
+def _frame_category_text(frame: ReportFramePayload) -> str:
+    return _humanize_category(frame["category"])
+
+
+def _frame_label_repeats_category(frame: ReportFramePayload) -> bool:
+    return _normalized_display_token(frame["label"]) == _normalized_display_token(
+        _frame_category_text(frame)
+    )
+
+
+def _frame_filmstrip_label(frame: ReportFramePayload) -> str:
+    category_text = _frame_category_text(frame)
+    if _frame_label_repeats_category(frame):
+        return frame["label"]
+    return f"{frame['label']} • {category_text}"
+
+
 def _frame_categories(frames: list[ReportFramePayload]) -> list[str]:
     categories: list[str] = []
     seen: set[str] = set()
@@ -172,7 +193,7 @@ def _render_filmstrip(
                         <span class="rv-filmstrip-accent" data-category-key="{_esc_attr(category_filter_keys[frame["category"]])}" data-category="{_esc_attr(frame["category"])}"></span>
                     </span>
                     <span class="rv-filmstrip-caption">
-                        <span class="rv-filmstrip-label">{_esc_text(frame["label"])} • {_esc_text(_humanize_category(frame["category"]))}</span>
+                        <span class="rv-filmstrip-label">{_esc_text(_frame_filmstrip_label(frame))}</span>
                         <span class="rv-filmstrip-detail">{_esc_text(frame["detail"])}</span>
                     </span>
                 </button>
@@ -230,9 +251,9 @@ def _render_info_modal(
     if safe_slowpics_href:
         slowpics_row = f'<div><dt>slow.pics</dt><dd><a href="{safe_slowpics_href}" target="_blank" rel="noopener noreferrer" class="rv-link">{_esc_text(slowpics_url)}</a></dd></div>'
     elif slowpics_url:
-        slowpics_row = f'<div><dt>slow.pics</dt><dd>{_esc_text(slowpics_url)}</dd></div>'
+        slowpics_row = f"<div><dt>slow.pics</dt><dd>{_esc_text(slowpics_url)}</dd></div>"
     else:
-        slowpics_row = '<div><dt>slow.pics</dt><dd>Not uploaded</dd></div>'
+        slowpics_row = "<div><dt>slow.pics</dt><dd>Not uploaded</dd></div>"
 
     clip_items: list[str] = []
     for i, clip in enumerate(clips):
@@ -240,16 +261,16 @@ def _render_info_modal(
         clip_items.append(
             f'<li class="rv-clip-meta-item" data-clip-index="{_esc_attr(i)}">'
             f'<div class="rv-clip-meta-heading">'
-            f'<span>{_esc_text(clip["label"])}</span>'
-            f'<span>{hdr_tag}</span>'
-            f'</div>'
+            f"<span>{_esc_text(clip['label'])}</span>"
+            f"<span>{hdr_tag}</span>"
+            f"</div>"
             f'<dl class="rv-metadata-list">'
-            f'<div><dt>Name</dt><dd>{_esc_text(clip["name"])}</dd></div>'
-            f'<div><dt>Resolution</dt><dd>{_render_resolution(clip["resolution"])}</dd></div>'
-            f'<div><dt>FPS</dt><dd>{_render_fps(clip["fps"])}</dd></div>'
-            f'<div><dt>Frames</dt><dd>{clip["frame_count"]}</dd></div>'
-            f'</dl>'
-            f'</li>'
+            f"<div><dt>Name</dt><dd>{_esc_text(clip['name'])}</dd></div>"
+            f"<div><dt>Resolution</dt><dd>{_render_resolution(clip['resolution'])}</dd></div>"
+            f"<div><dt>FPS</dt><dd>{_render_fps(clip['fps'])}</dd></div>"
+            f"<div><dt>Frames</dt><dd>{clip['frame_count']}</dd></div>"
+            f"</dl>"
+            f"</li>"
         )
     clip_list_html = (
         f'<ol class="rv-clip-meta-list">{"".join(clip_items)}</ol>'
@@ -334,6 +355,7 @@ def _render_controls(
             <select id="left-select" aria-label="Left clip">
                 {left_clip_options}
             </select>
+            <button id="btn-swap-clips" class="rv-swap-button" aria-label="Swap comparison clips" title="Swap clips (X)">⇄</button>
             <span class="rv-clip-vs">vs</span>
             <span class="rv-clip-prefix right">R:</span>
             <select id="right-select" aria-label="Right clip">
@@ -392,6 +414,10 @@ def _render_controls(
         <div class="rv-control-group">
             <button id="btn-fullscreen" aria-label="Enter fullscreen" aria-pressed="false" title="Fullscreen">Fullscreen</button>
         </div>
+
+        <div class="rv-control-group">
+            <button id="btn-overlays" class="active" aria-label="Hide overlays" aria-pressed="true" title="Hide overlays (H)">Overlays</button>
+        </div>
     </div>"""
 
 
@@ -414,7 +440,7 @@ def _render_stage() -> str:
             <span class="rv-info-label" data-current-frame-label></span>
             <span class="rv-info-divider">•</span>
             <span class="rv-info-detail" data-current-frame-detail></span>
-            <span class="rv-info-divider">•</span>
+            <span class="rv-info-divider" data-current-frame-category-divider>•</span>
             <span class="rv-info-category" data-current-frame-category></span>
         </div>
     </div>"""
@@ -423,16 +449,18 @@ def _render_stage() -> str:
 def _render_help_modal() -> str:
     return """    <div id="help-modal" class="rv-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="help-modal-title" tabindex="-1">
         <div class="rv-modal-content">
-            <div id="help-modal-title" class="rv-modal-title">Keyboard Shortcuts</div>
+            <div id="help-modal-title" class="rv-modal-title">Viewer Shortcuts</div>
             <div class="rv-shortcuts-grid">
                 <div class="rv-shortcut-row"><span>Previous Frame</span><span class="rv-key">←</span></div>
                 <div class="rv-shortcut-row"><span>Next Frame</span><span class="rv-key">→</span></div>
                 <div class="rv-shortcut-row"><span>First / Last Frame</span><span class="rv-key">Home / End</span></div>
                 <div class="rv-shortcut-row"><span>Cycle Clip</span><span class="rv-key">↑ / ↓</span></div>
                 <div class="rv-shortcut-row"><span>Direct Clip Select</span><span class="rv-key">1 - 9</span></div>
+                <div class="rv-shortcut-row"><span>Swap Clips</span><span class="rv-key">X</span></div>
                 <div class="rv-shortcut-row"><span>Modes (Slider/Overlay/Diff/Blink)</span><span class="rv-key">S / O / D / B</span></div>
+                <div class="rv-shortcut-row"><span>Toggle Overlays</span><span class="rv-key">H</span></div>
                 <div class="rv-shortcut-row"><span>Zoom In / Out</span><span class="rv-key">+ / -</span></div>
-                <div class="rv-shortcut-row"><span>Reset Viewport</span><span class="rv-key">R</span></div>
+                <div class="rv-shortcut-row"><span>Reset Viewport</span><span class="rv-key">R / Double-click</span></div>
                 <div class="rv-shortcut-row"><span>Open Help</span><span class="rv-key">?</span></div>
                 <div class="rv-shortcut-row"><span>Close Help / Exit Fullscreen</span><span class="rv-key">Esc</span></div>
             </div>

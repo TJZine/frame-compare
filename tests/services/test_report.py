@@ -509,12 +509,12 @@ def test_frame_detail_for_source_frame_uses_explicit_selection_detail() -> None:
 
     assert detail == FrameDetail(
         label="Opening comparison",
-        detail="Source frame 42 (00:00:01.750)",
+        detail="Source frame 42",
         category="chapter",
     )
 
 
-def test_frame_detail_for_source_frame_uses_breakdown_label_when_detail_absent() -> None:
+def test_frame_detail_for_source_frame_uses_frame_number_label_when_detail_absent() -> None:
     detail = frame_detail_for_source_frame(
         source_frame=42,
         selection_detail=None,
@@ -522,13 +522,13 @@ def test_frame_detail_for_source_frame_uses_breakdown_label_when_detail_absent()
     )
 
     assert detail == FrameDetail(
-        label="Bright",
+        label="Frame 42",
         detail="Source frame 42",
         category="quantile_bright",
     )
 
 
-def test_frame_detail_for_source_frame_uses_breakdown_label_when_detail_label_absent() -> None:
+def test_frame_detail_for_source_frame_uses_frame_number_label_when_detail_label_absent() -> None:
     detail = frame_detail_for_source_frame(
         source_frame=42,
         selection_detail=SourceFrameSelectionDetail(
@@ -540,9 +540,27 @@ def test_frame_detail_for_source_frame_uses_breakdown_label_when_detail_label_ab
     )
 
     assert detail == FrameDetail(
-        label="Bright",
-        detail="Source frame 42 (00:00:01.750)",
+        label="Frame 42",
+        detail="Source frame 42",
         category="quantile_bright",
+    )
+
+
+def test_frame_detail_for_source_frame_uses_frame_number_when_label_matches_category() -> None:
+    detail = frame_detail_for_source_frame(
+        source_frame=42,
+        selection_detail=SourceFrameSelectionDetail(
+            label="Motion",
+            timecode="00:00:01.750",
+            notes="motion",
+        ),
+        selection_label="Motion",
+    )
+
+    assert detail == FrameDetail(
+        label="Frame 42",
+        detail="Source frame 42",
+        category="motion",
     )
 
 

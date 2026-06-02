@@ -358,6 +358,7 @@ def test_build_html_renders_mode_aware_clip_controls(report_payload: ReportPaylo
     assert 'data-control-scope="pair" aria-label="Comparison pair"' in html
     assert 'data-control-scope="active" aria-label="Overlay clip" hidden' in html
     assert 'id="left-select" aria-label="Left clip"' in html
+    assert 'id="btn-swap-clips" class="rv-swap-button"' in html
     assert 'id="right-select" aria-label="Right clip"' in html
     assert 'id="active-select" aria-label="Overlay clip"' in html
 
@@ -404,10 +405,7 @@ def test_build_html_renders_header_metadata(
         "Default Pair": 'REF <main> vs ENC "candidate"',
         "slow.pics": "https://slow.pics/c/abc?x=1&y=2",
     }
-    assert [
-        (clip.label, clip.dynamic_range, clip.fields)
-        for clip in info_modal.clips
-    ] == [
+    assert [(clip.label, clip.dynamic_range, clip.fields) for clip in info_modal.clips] == [
         (
             "REF <main>",
             "SDR",
@@ -443,9 +441,10 @@ def test_build_html_exposes_current_frame_detail_hooks(
 ) -> None:
     html = build_html(report_payload)
 
-    assert 'data-current-frame-label' in html
-    assert 'data-current-frame-detail' in html
-    assert 'data-current-frame-category' in html
+    assert "data-current-frame-label" in html
+    assert "data-current-frame-detail" in html
+    assert "data-current-frame-category-divider" in html
+    assert "data-current-frame-category" in html
 
 
 def test_build_html_renders_empty_viewer_hooks_for_empty_payload(
@@ -466,6 +465,29 @@ def test_build_html_renders_empty_viewer_hooks_for_empty_payload(
     )
     assert '<div class="rv-empty-state" data-empty-state hidden></div>' in html
     assert 'class="rv-filmstrip-item"' not in html
+
+
+def test_build_html_avoids_duplicate_category_labels_when_label_matches_category(
+    report_payload: ReportPayload,
+) -> None:
+    payload: ReportPayload = {
+        **report_payload,
+        "frames": [
+            {
+                "number": 10,
+                "label": "Motion",
+                "detail": "Source frame 10",
+                "category": "motion",
+                "images": report_payload["frames"][0]["images"],
+            },
+        ],
+        "stats": {"frame_count": 1, "clip_count": 2},
+    }
+
+    html = build_html(payload)
+
+    assert '<span class="rv-filmstrip-label">Motion</span>' in html
+    assert "Motion • Motion" not in html
 
 
 def test_build_html_uses_internal_category_keys_for_reserved_category_text(
@@ -554,6 +576,8 @@ def test_build_html_renders_viewport_audit_controls(report_payload: ReportPayloa
     assert 'id="btn-fullscreen"' in html
     assert 'aria-label="Enter fullscreen"' in html
     assert 'aria-pressed="false"' in html
+    assert 'id="btn-overlays"' in html
+    assert 'aria-label="Hide overlays"' in html
 
 
 def test_build_html_renders_keyboard_help_accessibility_hooks(
@@ -565,9 +589,17 @@ def test_build_html_renders_keyboard_help_accessibility_hooks(
         'id="help-modal" class="rv-modal" aria-hidden="true" role="dialog" '
         'aria-modal="true" aria-labelledby="help-modal-title" tabindex="-1"'
     ) in html
-    assert 'id="help-modal-title" class="rv-modal-title">Keyboard Shortcuts</div>' in html
+    assert 'id="help-modal-title" class="rv-modal-title">Viewer Shortcuts</div>' in html
     assert (
-        '<div class="rv-shortcut-row"><span>Reset Viewport</span><span class="rv-key">R</span></div>'
+        '<div class="rv-shortcut-row"><span>Swap Clips</span><span class="rv-key">X</span></div>'
+        in html
+    )
+    assert (
+        '<div class="rv-shortcut-row"><span>Toggle Overlays</span><span class="rv-key">H</span></div>'
+        in html
+    )
+    assert (
+        '<div class="rv-shortcut-row"><span>Reset Viewport</span><span class="rv-key">R / Double-click</span></div>'
         in html
     )
     assert (
@@ -622,7 +654,8 @@ def test_viewer_assets_keep_divider_slider_only_and_pointer_safe() -> None:
     css = get_css()
     js = get_js()
 
-    assert '--font-sans: -apple-system, "BlinkMacSystemFont", "Segoe UI"' in css
+    assert "color-scheme: dark;" in css
+    assert '--font-sans: "Inter", "SF Pro Text", "Segoe UI Variable Text"' in css
     assert ".rv-viewer-stage" in css
     assert "touch-action: none;" in css
     assert "cursor: grab;" in css
@@ -633,11 +666,21 @@ def test_viewer_assets_keep_divider_slider_only_and_pointer_safe() -> None:
     assert "translate(var(--pan-x, 0px), var(--pan-y, 0px)) scale(var(--zoom-level, 1))" in css
     assert ".rv-right { transform: translate(var(--align-x, 0px), var(--align-y, 0px)); }" in css
     assert ".rv-overlay-label:empty { display: none; }" in css
+    assert "select option," in css
+    assert 'background-image: url("data:image/svg+xml,' in css
+    assert "bottom: 16px;" in _css_block(css, ".rv-overlay-label")
+    assert "left: 50%;" in _css_block(css, ".rv-stage-overlay-info")
+    assert "transform: translateX(-50%);" in _css_block(css, ".rv-stage-overlay-info")
 
     assert "leftLabelTxt = `${leftClip.label} (Left)`;" in js
     assert "rightLabelTxt = `${rightClip.label} (Right)`;" in js
+    assert "leftLabelTxt = leftClip.label;" in js
+    assert "rightLabelTxt = rightClip.label;" in js
     assert "leftLabelTxt = activeClip.label;" in js
     assert 'rightLabelTxt = "";' in js
+    assert "this.dom.stage.className = `rv-viewer-stage rv-mode-${mode}`;" not in js
+    assert "this.dom.stage.classList.remove(" in js
+    assert "this.dom.stage.classList.add(`rv-mode-${mode}`);" in js
 
     assert "addEventListener('pointerdown'" in js
     assert "addEventListener('pointermove'" in js
@@ -748,6 +791,7 @@ def test_viewer_assets_wire_report_scoped_viewport_persistence() -> None:
     assert "storage.setItem(this.state.storageKey, JSON.stringify(payload))" in js
     assert "mode: this.state.mode" in js
     assert "panX: this.state.panX" in js
+    assert "overlaysHidden: this.state.overlaysHidden" in js
     assert "alignmentPreset: this.state.alignmentPreset" in js
 
 
@@ -757,11 +801,20 @@ def test_viewer_assets_wire_pan_wheel_zoom_and_alignment_hooks() -> None:
     assert "panX: 0" in js
     assert "panY: 0" in js
     assert "this.dom.stage.addEventListener('wheel'" in js
+    assert "this.dom.stage.addEventListener('dblclick'" in js
     assert "this.zoomAtPoint(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1);" in js
     assert "this.setPan(this.state.panX + dx, this.state.panY + dy, { save: false });" in js
     assert "shouldPanFromPointer" in js
     assert "this.state.mode !== 'slider'" in js
     assert "updateSliderFromPointer(e);" in js
+    assert "pointerPositions: new Map()" in js
+    assert "capturedPointerIds: new Set()" in js
+    assert "pinchStartDistance: 0" in js
+    assert "trackedTouchPointers()" in js
+    assert "Math.hypot(dx, dy)" in js
+    assert "startPinchFromTrackedPointers()" in js
+    assert "updatePinchFromTrackedPointers()" in js
+    assert "finishPinchInteraction()" in js
     assert "this.dom.stage.classList.add('is-panning');" in js
     assert "this.dom.canvas.style.setProperty('--pan-x', `${this.state.panX}px`);" in js
     assert "alignmentPreset: 'none'" in js
@@ -792,6 +845,7 @@ def test_viewer_assets_keep_overlay_and_blink_clip_semantics() -> None:
     assert "this.dom.pairControls.hidden = isOverlay;" in js
     assert "this.dom.activeControls.hidden = !isOverlay;" in js
     assert "this.dom.leftSelect.disabled = isOverlay;" in js
+    assert "this.dom.btnSwapClips.disabled = isOverlay || this.clipCount() <= 1;" in js
     assert "this.dom.activeSelect.disabled = !isOverlay;" in js
     assert "this.dom.leftSelect.setAttribute('aria-label', 'Base clip');" in js
     assert "this.dom.rightSelect.setAttribute('aria-label', 'Compare clip');" in js
@@ -800,6 +854,11 @@ def test_viewer_assets_keep_overlay_and_blink_clip_semantics() -> None:
     assert "this.state.activeClipIdx === this.state.leftClipIdx" in js
     assert "? this.state.rightClipIdx" in js
     assert ": this.state.leftClipIdx" in js
+    assert (
+        "this.state.mode === 'slider' || this.state.mode === 'diff' || this.state.mode === 'blink'"
+        in js
+    )
+    assert "isBlink && this.state.activeClipIdx === this.state.rightClipIdx" in js
     assert "(this.state.activeClipIdx + 1) % this.state.data.clips.length" not in js
     assert "this.state.mode === 'diff' || this.state.mode === 'blink'" in js
 
@@ -809,6 +868,8 @@ def test_viewer_assets_wire_category_filtering_and_visible_navigation() -> None:
     js = get_js()
 
     assert ".rv-filter-chip.active" in css
+    assert ".rv-filter-chip::before" in css
+    assert "--category-accent: var(--accent);" in css
     assert "display: none;" in _css_block(css, ".rv-filmstrip-item[hidden]")
     assert ".rv-filmstrip-caption" in css
     assert ".rv-category-badge" in css
@@ -836,6 +897,7 @@ def test_viewer_assets_wire_metadata_and_error_empty_state_hooks() -> None:
     js = get_js()
 
     assert ".rv-stage-overlay-info" in css
+    assert ".rv-viewer-stage.rv-overlays-hidden .rv-overlay-label" in css
     assert ".rv-align-popover" in css
     assert '.rv-status[data-tone="error"]' in css
     assert '.rv-status[data-tone="warning"]' in css
@@ -853,8 +915,23 @@ def test_viewer_assets_wire_metadata_and_error_empty_state_hooks() -> None:
     assert "hasRenderableData()" in js
     assert "updateCurrentFrameMetadata(frameData)" in js
     assert "document.querySelector('[data-current-frame-detail]')" in js
+    assert "normalizedDisplayToken(value)" in js
+    assert "this.dom.currentFrameCategoryDivider.hidden = !showCategory;" in js
     assert "Selected frame image data is unavailable." in js
     assert "Report viewer markup is incomplete." in js
+
+
+def test_viewer_assets_toggle_overlays_and_keep_split_pairs_distinct() -> None:
+    js = get_js()
+
+    assert "setOverlaysHidden(hidden, options = {})" in js
+    assert "updateOverlayVisibility()" in js
+    assert "this.dom.btnOverlays.addEventListener('click'" in js
+    assert "case 'h': case 'H': this.setOverlaysHidden(!this.state.overlaysHidden); break;" in js
+    assert "case 'x': case 'X': this.swapPairClips(); break;" in js
+    assert "ensureDistinctPairSelection(mode = this.state.mode)" in js
+    assert "nextDistinctClipIndex(startIdx, excludedIdx, direction = 1)" in js
+    assert "this.state.rightClipIdx = this.nextDistinctClipIndex(" in js
 
 
 def test_viewer_assets_preload_adjacent_visible_frames_and_active_clips() -> None:

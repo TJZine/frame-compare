@@ -181,8 +181,8 @@ def test_run_report_phase_passes_reference_source_frame_details(
     assert [
         (detail.label, detail.detail, detail.category) for detail in report_data.frame_details
     ] == [
-        ("User", "Source frame 4 (00:00:00.167)", "user_override"),
-        ("Bright", "Source frame 5", "quantile_bright"),
+        ("User", "Source frame 4", "user_override"),
+        ("Frame 5", "Source frame 5", "quantile_bright"),
     ]
     assert captured["report_config"] == ctx.config.report
 

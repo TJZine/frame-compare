@@ -22,6 +22,7 @@ const ReportViewer = {
         blinkPaused: false,
         storageKey: null,
         activeCategoryKey: ALL_CATEGORY_FILTER_KEY,
+        overlaysHidden: false,
         categoryFilterKeys: new Map(),
         preloadedSrcs: new Set(),
         helpRestoreFocus: null,
@@ -47,6 +48,7 @@ const ReportViewer = {
             this.applyDefaultSelection();
             this.restorePersistedState();
             this.bindHelpEvents();
+            this.updateOverlayVisibility();
 
             if (!this.hasRenderableData()) {
                 this.renderEmptyState(this.emptyStateMessage());
@@ -77,6 +79,7 @@ const ReportViewer = {
             btnNext: document.getElementById('btn-next'),
             modeBtns: document.querySelectorAll('[data-mode]'),
             leftSelect: document.getElementById('left-select'),
+            btnSwapClips: document.getElementById('btn-swap-clips'),
             rightSelect: document.getElementById('right-select'),
             activeSelect: document.getElementById('active-select'),
             pairControls: document.querySelector('[data-control-scope="pair"]'),
@@ -98,6 +101,7 @@ const ReportViewer = {
             emptyState: document.querySelector('[data-empty-state]'),
             currentFrameLabel: document.querySelector('[data-current-frame-label]'),
             currentFrameDetail: document.querySelector('[data-current-frame-detail]'),
+            currentFrameCategoryDivider: document.querySelector('[data-current-frame-category-divider]'),
             currentFrameCategory: document.querySelector('[data-current-frame-category]'),
             labelLeft: document.getElementById('label-left'),
             labelRight: document.getElementById('label-right'),
@@ -109,6 +113,7 @@ const ReportViewer = {
             btnCloseInfo: document.getElementById('btn-close-info'),
             btnAlignToggle: document.getElementById('btn-align-toggle'),
             alignPopover: document.getElementById('align-popover'),
+            btnOverlays: document.getElementById('btn-overlays'),
         };
     },
 
@@ -126,6 +131,7 @@ const ReportViewer = {
             this.dom.btnPrev,
             this.dom.btnNext,
             this.dom.leftSelect,
+            this.dom.btnSwapClips,
             this.dom.rightSelect,
             this.dom.activeSelect,
             this.dom.pairControls,
@@ -151,7 +157,8 @@ const ReportViewer = {
             this.dom.btnInfo,
             this.dom.btnCloseInfo,
             this.dom.btnAlignToggle,
-            this.dom.alignPopover
+            this.dom.alignPopover,
+            this.dom.btnOverlays
         ];
         return requiredElements.every(Boolean)
             && this.dom.modeBtns.length > 0
@@ -428,6 +435,9 @@ const ReportViewer = {
         this.dom.modeBtns.forEach(btn => {
             btn.addEventListener('click', () => this.setMode(btn.dataset.mode));
         });
+        this.dom.btnOverlays.addEventListener('click', () => {
+            this.setOverlaysHidden(!this.state.overlaysHidden);
+        });
     },
 
     bindFrameNavigationEvents() {
@@ -440,6 +450,7 @@ const ReportViewer = {
         this.dom.leftSelect.addEventListener('change', (e) => {
             this.setLeftClip(parseInt(e.target.value));
         });
+        this.dom.btnSwapClips.addEventListener('click', () => this.swapPairClips());
         this.dom.rightSelect.addEventListener('change', (e) => {
             this.setRightClip(parseInt(e.target.value));
         });
@@ -456,7 +467,14 @@ const ReportViewer = {
             activePointerId: null,
             lastPanX: 0,
             lastPanY: 0,
-            panMoved: false
+            panMoved: false,
+            pointerPositions: new Map(),
+            capturedPointerIds: new Set(),
+            pinchActive: false,
+            pinchStartDistance: 0,
+            pinchStartZoom: 1.0,
+            pinchContentX: 0,
+            pinchContentY: 0
         };
 
         this.dom.zoomRange.addEventListener('input', (e) => this.setZoom(parseFloat(e.target.value)));
@@ -477,6 +495,14 @@ const ReportViewer = {
         this.updateFullscreenButton();
 
         this.dom.stage.addEventListener('pointerdown', (e) => {
+            this.trackPointerPosition(e);
+            this.capturePointer(e.pointerId);
+            if (this.shouldStartPinch(e)) {
+                this.startPinchFromTrackedPointers();
+                if (this.state.mode === 'blink') this.state.blinkPaused = true;
+                e.preventDefault();
+                return;
+            }
             if (this.shouldPanFromPointer(e)) {
                 this.startPanFromPointer(e);
                 if (this.state.mode === 'blink') this.state.blinkPaused = true;
@@ -490,7 +516,13 @@ const ReportViewer = {
         });
 
         this.dom.stage.addEventListener('pointermove', (e) => {
+            this.trackPointerPosition(e);
             const pointer = this.pointerInteraction;
+            if (pointer.pinchActive) {
+                this.updatePinchFromTrackedPointers();
+                e.preventDefault();
+                return;
+            }
             if (pointer.activePointerId !== null && e.pointerId !== pointer.activePointerId) return;
             if (pointer.isPanning) {
                 const dx = e.clientX - pointer.lastPanX;
@@ -509,6 +541,10 @@ const ReportViewer = {
         });
         this.dom.stage.addEventListener('pointerup', (e) => this.stopPointerInteraction(e));
         this.dom.stage.addEventListener('pointercancel', (e) => this.stopPointerInteraction(e));
+        this.dom.stage.addEventListener('dblclick', (e) => {
+            e.preventDefault();
+            this.resetViewport();
+        });
         this.dom.stage.addEventListener('wheel', (e) => {
             e.preventDefault();
             if (e.shiftKey) {
@@ -609,9 +645,113 @@ const ReportViewer = {
         document.addEventListener('keydown', (e) => this.handleKey(e));
     },
 
+    capturePointer(pointerId) {
+        this.pointerInteraction.capturedPointerIds.add(pointerId);
+        this.dom.stage.setPointerCapture?.(pointerId);
+    },
+
+    releasePointer(pointerId) {
+        if (!this.pointerInteraction.capturedPointerIds.has(pointerId)) return;
+        if (this.dom.stage.hasPointerCapture?.(pointerId)) {
+            this.dom.stage.releasePointerCapture(pointerId);
+        }
+        this.pointerInteraction.capturedPointerIds.delete(pointerId);
+    },
+
     captureStagePointer(e) {
         this.pointerInteraction.activePointerId = e.pointerId;
-        this.dom.stage.setPointerCapture?.(e.pointerId);
+        this.capturePointer(e.pointerId);
+    },
+
+    trackPointerPosition(e) {
+        this.pointerInteraction.pointerPositions.set(e.pointerId, {
+            x: e.clientX,
+            y: e.clientY,
+            type: e.pointerType,
+        });
+    },
+
+    untrackPointer(pointerId) {
+        this.pointerInteraction.pointerPositions.delete(pointerId);
+    },
+
+    trackedTouchPointers() {
+        return Array.from(this.pointerInteraction.pointerPositions.values())
+            .filter(pointer => pointer.type === 'touch');
+    },
+
+    shouldStartPinch(e) {
+        return e.pointerType === 'touch' && this.trackedTouchPointers().length >= 2;
+    },
+
+    pinchMetricsFromTrackedPointers() {
+        const [first, second] = this.trackedTouchPointers();
+        if (!first || !second) return null;
+
+        const dx = second.x - first.x;
+        const dy = second.y - first.y;
+        return {
+            centerX: (first.x + second.x) / 2,
+            centerY: (first.y + second.y) / 2,
+            distance: Math.hypot(dx, dy),
+        };
+    },
+
+    startPinchFromTrackedPointers() {
+        const metrics = this.pinchMetricsFromTrackedPointers();
+        if (!metrics) return;
+
+        const pointer = this.pointerInteraction;
+        const stageRect = this.dom.stage.getBoundingClientRect();
+        const stageCenterX = stageRect.left + stageRect.width / 2;
+        const stageCenterY = stageRect.top + stageRect.height / 2;
+
+        pointer.pinchActive = true;
+        pointer.isDragging = false;
+        pointer.isPanning = false;
+        pointer.activePointerId = null;
+        pointer.panMoved = true;
+        pointer.pinchStartDistance = Math.max(metrics.distance, 1);
+        pointer.pinchStartZoom = this.state.zoom;
+        pointer.pinchContentX = (metrics.centerX - stageCenterX - this.state.panX) / this.state.zoom;
+        pointer.pinchContentY = (metrics.centerY - stageCenterY - this.state.panY) / this.state.zoom;
+
+        this.state.fitMode = 'custom';
+        this.updateFitButtons();
+        this.dom.stage.classList.add('is-panning');
+    },
+
+    updatePinchFromTrackedPointers() {
+        const metrics = this.pinchMetricsFromTrackedPointers();
+        if (!metrics) return;
+
+        const pointer = this.pointerInteraction;
+        if (pointer.pinchStartDistance <= 0) return;
+
+        const nextZoom = this.clampZoom(
+            pointer.pinchStartZoom * (metrics.distance / pointer.pinchStartDistance)
+        );
+        const stageRect = this.dom.stage.getBoundingClientRect();
+        const stageCenterX = stageRect.left + stageRect.width / 2;
+        const stageCenterY = stageRect.top + stageRect.height / 2;
+
+        this.applyZoom(nextZoom, { clampPan: false });
+        this.setPan(
+            metrics.centerX - stageCenterX - pointer.pinchContentX * nextZoom,
+            metrics.centerY - stageCenterY - pointer.pinchContentY * nextZoom,
+            { save: false },
+        );
+    },
+
+    finishPinchInteraction() {
+        const pointer = this.pointerInteraction;
+        if (!pointer.pinchActive) return;
+
+        pointer.pinchActive = false;
+        pointer.pinchStartDistance = 0;
+        this.dom.stage.classList.remove('is-panning');
+        this.persistViewportState();
+        if (this.state.mode === 'blink') this.state.blinkPaused = false;
     },
 
     updateSliderFromPointer(e) {
@@ -642,16 +782,27 @@ const ReportViewer = {
 
     stopPointerInteraction(e) {
         const pointer = this.pointerInteraction;
-        if (pointer.activePointerId !== null && e.pointerId !== pointer.activePointerId) return;
-        if (this.dom.stage.hasPointerCapture?.(e.pointerId)) {
-            this.dom.stage.releasePointerCapture(e.pointerId);
+        this.untrackPointer(e.pointerId);
+        this.releasePointer(e.pointerId);
+
+        if (pointer.pinchActive) {
+            if (this.trackedTouchPointers().length >= 2) {
+                this.startPinchFromTrackedPointers();
+                return;
+            }
+            this.finishPinchInteraction();
+            return;
         }
+
+        if (pointer.activePointerId !== null && e.pointerId !== pointer.activePointerId) return;
         const completedDrag = pointer.isDragging;
         const completedPan = pointer.isPanning;
         const completedPanMoved = pointer.panMoved;
         pointer.isDragging = false;
         pointer.isPanning = false;
-        pointer.activePointerId = null;
+        if (pointer.activePointerId === e.pointerId) {
+            pointer.activePointerId = null;
+        }
         pointer.panMoved = false;
         this.dom.stage.classList.remove('is-panning');
         if (this.state.mode === 'blink') this.state.blinkPaused = false;
@@ -679,6 +830,32 @@ const ReportViewer = {
         return 0;
     },
 
+    modeUsesDistinctPair(mode = this.state.mode) {
+        return mode === 'diff' || mode === 'blink';
+    },
+
+    nextDistinctClipIndex(startIdx, excludedIdx, direction = 1) {
+        const count = this.clipCount();
+        if (count <= 1) return this.clipIndexOrDefault(startIdx, 0);
+
+        let idx = this.clipIndexOrDefault(startIdx, 0);
+        for (let attempts = 0; attempts < count; attempts += 1) {
+            idx = (idx + direction + count) % count;
+            if (idx !== excludedIdx) return idx;
+        }
+        return idx;
+    },
+
+    ensureDistinctPairSelection(mode = this.state.mode) {
+        if (!this.modeUsesDistinctPair(mode) || this.clipCount() <= 1) return;
+        if (this.state.leftClipIdx !== this.state.rightClipIdx) return;
+
+        this.state.rightClipIdx = this.nextDistinctClipIndex(
+            this.state.rightClipIdx,
+            this.state.leftClipIdx,
+        );
+    },
+
     applyDefaultSelection() {
         const selection = this.state.data.default_selection || {};
         const left = this.clipIndexOrDefault(selection.left_clip_index, 0);
@@ -688,19 +865,32 @@ const ReportViewer = {
         this.state.leftClipIdx = left;
         this.state.rightClipIdx = right;
         this.state.activeClipIdx = left;
+        this.ensureDistinctPairSelection();
     },
 
     setLeftClip(idx) {
         this.state.leftClipIdx = this.clipIndexOrDefault(idx, this.state.leftClipIdx);
+        this.ensureDistinctPairSelection();
         if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
         this.render();
     },
 
     setRightClip(idx) {
         this.state.rightClipIdx = this.clipIndexOrDefault(idx, this.state.rightClipIdx);
+        this.ensureDistinctPairSelection();
         if (this.state.mode === 'blink') {
             this.state.activeClipIdx = this.state.rightClipIdx;
         }
+        if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
+        this.render();
+    },
+
+    swapPairClips() {
+        if (this.state.mode === 'overlay' || this.clipCount() <= 1) return;
+
+        const previousLeft = this.state.leftClipIdx;
+        this.state.leftClipIdx = this.state.rightClipIdx;
+        this.state.rightClipIdx = previousLeft;
         if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
         this.render();
     },
@@ -745,6 +935,9 @@ const ReportViewer = {
         this.state.panX = this.numberOrDefault(saved.panX, 0);
         this.state.panY = this.numberOrDefault(saved.panY, 0);
         this.state.revealPercent = Math.max(0, Math.min(100, this.numberOrDefault(saved.revealPercent, 50)));
+        if (typeof saved.overlaysHidden === 'boolean') {
+            this.state.overlaysHidden = saved.overlaysHidden;
+        }
         if (['none', 'left-1', 'right-1', 'up-1', 'down-1', 'custom'].includes(saved.alignmentPreset)) {
             this.state.alignmentPreset = saved.alignmentPreset;
         }
@@ -753,6 +946,7 @@ const ReportViewer = {
         if (this.state.alignmentPreset !== 'custom') {
             this.applyAlignmentPresetOffsets(this.state.alignmentPreset);
         }
+        this.ensureDistinctPairSelection();
         if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
     },
 
@@ -770,6 +964,7 @@ const ReportViewer = {
             panX: this.state.panX,
             panY: this.state.panY,
             revealPercent: this.state.revealPercent,
+            overlaysHidden: this.state.overlaysHidden,
             alignmentPreset: this.state.alignmentPreset,
             alignX: this.state.alignX,
             alignY: this.state.alignY
@@ -792,6 +987,27 @@ const ReportViewer = {
     numberOrDefault(value, fallback) {
         const numberValue = Number(value);
         return Number.isFinite(numberValue) ? numberValue : fallback;
+    },
+
+    setOverlaysHidden(hidden, options = {}) {
+        this.state.overlaysHidden = Boolean(hidden);
+        this.updateOverlayVisibility();
+        if (options.save !== false) this.persistViewportState();
+    },
+
+    updateOverlayVisibility() {
+        const overlaysVisible = !this.state.overlaysHidden;
+        this.dom.stage.classList.toggle('rv-overlays-hidden', !overlaysVisible);
+        this.dom.btnOverlays.classList.toggle('active', overlaysVisible);
+        this.dom.btnOverlays.setAttribute('aria-pressed', overlaysVisible ? 'true' : 'false');
+        this.dom.btnOverlays.setAttribute(
+            'aria-label',
+            overlaysVisible ? 'Hide overlays' : 'Show overlays'
+        );
+        this.dom.btnOverlays.setAttribute(
+            'title',
+            `${overlaysVisible ? 'Hide' : 'Show'} overlays (H)`
+        );
     },
 
     frameCategoryText(frame) {
@@ -974,6 +1190,8 @@ const ReportViewer = {
             case 'o': case 'O': this.setMode('overlay'); break;
             case 'd': case 'D': this.setMode('diff'); break;
             case 'b': case 'B': this.setMode('blink'); break;
+            case 'x': case 'X': this.swapPairClips(); break;
+            case 'h': case 'H': this.setOverlaysHidden(!this.state.overlaysHidden); break;
 
             case '=': case '+': this.setZoom(this.state.zoom + 0.1); break;
             case '-': this.setZoom(this.state.zoom - 0.1); break;
@@ -997,6 +1215,7 @@ const ReportViewer = {
     setMode(mode) {
         if (!this.validMode(mode)) return;
         this.state.mode = mode;
+        this.ensureDistinctPairSelection(mode);
         if (mode === 'blink') this.keepBlinkActiveInPair();
 
         // Stop blink if leaving blink mode
@@ -1015,7 +1234,13 @@ const ReportViewer = {
             btn.setAttribute('aria-checked', isActive);
         });
 
-        this.dom.stage.className = `rv-viewer-stage rv-mode-${mode}`;
+        this.dom.stage.classList.remove(
+            'rv-mode-slider',
+            'rv-mode-overlay',
+            'rv-mode-diff',
+            'rv-mode-blink',
+        );
+        this.dom.stage.classList.add(`rv-mode-${mode}`);
         this.updateModeControls();
         this.render();
     },
@@ -1039,6 +1264,7 @@ const ReportViewer = {
         this.dom.activeControls.hidden = !isOverlay;
         this.dom.leftSelect.disabled = isOverlay;
         this.dom.rightSelect.disabled = isOverlay;
+        this.dom.btnSwapClips.disabled = isOverlay || this.clipCount() <= 1;
         this.dom.activeSelect.disabled = !isOverlay;
 
         if (mode === 'diff') {
@@ -1105,7 +1331,9 @@ const ReportViewer = {
             this.setLeftClip((this.state.leftClipIdx + direction + count) % count);
         } else if (this.state.mode === 'diff' || this.state.mode === 'blink') {
             // Cycle the comparison side of the explicit pair.
-            this.setRightClip((this.state.rightClipIdx + direction + count) % count);
+            this.setRightClip(
+                this.nextDistinctClipIndex(this.state.rightClipIdx, this.state.leftClipIdx, direction)
+            );
         } else {
             this.state.activeClipIdx = (this.state.activeClipIdx + direction + count) % count;
             this.dom.activeSelect.value = this.state.activeClipIdx;
@@ -1129,6 +1357,7 @@ const ReportViewer = {
         this.dom.zoomRange.value = this.state.zoom;
         this.dom.zoomRange.setAttribute('aria-valuenow', this.state.zoom);
         this.dom.zoomVal.textContent = Math.round(this.state.zoom * 100) + '%';
+        this.dom.canvas.classList.toggle('rv-canvas--pixelated', this.state.zoom > 1);
         this.dom.canvas.style.setProperty('--zoom-level', this.state.zoom);
         if (options.clampPan !== false) this.clampPan();
     },
@@ -1385,16 +1614,34 @@ const ReportViewer = {
         return cat.replace(/_/g, ' ').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     },
 
+    normalizedDisplayToken(value) {
+        return String(value || '')
+            .trim()
+            .toLowerCase()
+            .replace(/[_-]+/g, ' ')
+            .replace(/\s+/g, ' ');
+    },
+
+    shouldShowFrameCategory(label, categoryText) {
+        return Boolean(categoryText)
+            && this.normalizedDisplayToken(label) !== this.normalizedDisplayToken(categoryText);
+    },
+
     updateCurrentFrameMetadata(frameData) {
         const frame = frameData || this.state.data?.frames?.[this.state.currentFrameIdx] || null;
         const label = frame?.label || 'No frame selected';
         const detail = frame?.detail || 'No frame detail available.';
-        const category = frame?.category || 'none';
+        const categoryText = frame?.category ? this.humanizeCategory(frame.category) : '';
+        const showCategory = this.shouldShowFrameCategory(label, categoryText);
 
         if (this.dom.currentFrameLabel) this.dom.currentFrameLabel.textContent = label;
         if (this.dom.currentFrameDetail) this.dom.currentFrameDetail.textContent = detail;
+        if (this.dom.currentFrameCategoryDivider) {
+            this.dom.currentFrameCategoryDivider.hidden = !showCategory;
+        }
         if (this.dom.currentFrameCategory) {
-            this.dom.currentFrameCategory.textContent = this.humanizeCategory(category);
+            this.dom.currentFrameCategory.hidden = !showCategory;
+            this.dom.currentFrameCategory.textContent = showCategory ? categoryText : '';
         }
     },
 
@@ -1412,7 +1659,7 @@ const ReportViewer = {
         let leftLabelTxt, rightLabelTxt;
         this.updateCurrentFrameMetadata(frameData);
 
-        if (this.state.mode === 'slider' || this.state.mode === 'diff') {
+        if (this.state.mode === 'slider' || this.state.mode === 'diff' || this.state.mode === 'blink') {
             const leftImage = frameData.images?.[this.state.leftClipIdx];
             const rightImage = frameData.images?.[this.state.rightClipIdx];
             const leftClip = this.state.data.clips[this.state.leftClipIdx];
@@ -1426,15 +1673,19 @@ const ReportViewer = {
             leftSrc = leftImage.src;
             rightSrc = rightImage.src;
 
-            leftLabelTxt = `${leftClip.label} (Left)`;
-            rightLabelTxt = `${rightClip.label} (Right)`;
+            if (this.state.mode === 'blink') {
+                leftLabelTxt = leftClip.label;
+                rightLabelTxt = rightClip.label;
+            } else {
+                leftLabelTxt = `${leftClip.label} (Left)`;
+                rightLabelTxt = `${rightClip.label} (Right)`;
+            }
 
             // For Diff mode, right layer is the "compare" one which gets difference blend
             // Left layer is base.
 
         } else {
-            // Overlay or Blink - show activeClip
-            // We use left layer as the main visible one for these modes
+            // Overlay uses the left layer as the single visible layer.
             const activeImage = frameData.images?.[this.state.activeClipIdx];
             const rightImage = frameData.images?.[this.state.rightClipIdx];
             const activeClip = this.state.data.clips[this.state.activeClipIdx];
@@ -1462,7 +1713,7 @@ const ReportViewer = {
             }
             this.dom.leftImg.src = leftSrc;
             // Alt text update
-            const clip = (this.state.mode === 'overlay' || this.state.mode === 'blink')
+            const clip = this.state.mode === 'overlay'
                 ? this.state.data.clips[this.state.activeClipIdx]
                 : this.state.data.clips[this.state.leftClipIdx];
             const clipName = clip?.label || 'Clip';
@@ -1479,9 +1730,16 @@ const ReportViewer = {
         this.dom.labelRight.textContent = rightLabelTxt;
 
         // Toggle visibility classes based on mode logic in CSS
-        const singleClipMode = this.state.mode === 'overlay' || this.state.mode === 'blink';
-        this.dom.leftLayer.classList.toggle('active', singleClipMode);
-        this.dom.rightLayer.classList.toggle('active', false);
+        const isOverlay = this.state.mode === 'overlay';
+        const isBlink = this.state.mode === 'blink';
+        this.dom.leftLayer.classList.toggle(
+            'active',
+            isOverlay || (isBlink && this.state.activeClipIdx === this.state.leftClipIdx)
+        );
+        this.dom.rightLayer.classList.toggle(
+            'active',
+            isBlink && this.state.activeClipIdx === this.state.rightClipIdx
+        );
     },
 
     clearFrameImages() {
@@ -1514,6 +1772,7 @@ const ReportViewer = {
         this.dom.leftSelect.value = this.state.leftClipIdx;
         this.dom.rightSelect.value = this.state.rightClipIdx;
         this.dom.activeSelect.value = this.state.activeClipIdx;
+        this.updateOverlayVisibility();
 
         // Update images and labels
         this.updateImages();
