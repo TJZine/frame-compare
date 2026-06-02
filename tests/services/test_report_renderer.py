@@ -941,6 +941,7 @@ def test_viewer_assets_wire_metadata_and_error_empty_state_hooks() -> None:
     assert "if (control === this.dom.btnHelp) return;" in js
     assert "hasRenderableData()" in js
     assert "updateCurrentFrameMetadata(frameData)" in js
+    assert "this.updateCurrentFrameMetadata(null);" in js
     assert "document.querySelector('[data-current-frame-detail]')" not in js
     assert "normalizedDisplayToken(value)" in js
     assert "this.dom.currentFrameCategoryDivider.hidden = !showCategory;" in js

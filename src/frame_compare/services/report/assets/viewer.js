@@ -219,7 +219,6 @@ const ReportViewer = {
         this.disableViewerControls(true);
         this.showStageMessage(message);
         this.clearFrameImages();
-        this.updateCurrentFrameMetadata(null);
     },
 
     showStatus(message, tone = 'info') {
@@ -264,7 +263,6 @@ const ReportViewer = {
         this.disableViewerControls(true);
         this.showStageMessage(message);
         this.clearFrameImages();
-        this.updateCurrentFrameMetadata(null);
     },
 
     disableViewerControls(disabled) {
@@ -1721,7 +1719,6 @@ const ReportViewer = {
             this.showStageMessage('Selected frame data is unavailable.');
             this.showStatus('Selected frame data is unavailable.', 'error');
             this.clearFrameImages();
-            this.updateCurrentFrameMetadata(null);
             return;
         }
 
@@ -1808,6 +1805,7 @@ const ReportViewer = {
         }
         if (this.dom.labelLeft) this.dom.labelLeft.textContent = '';
         if (this.dom.labelRight) this.dom.labelRight.textContent = '';
+        this.updateCurrentFrameMetadata(null);
     },
 
     render() {
