@@ -25,6 +25,7 @@ const ReportViewer = {
         categoryFilterKeys: new Map(),
         preloadedSrcs: new Set(),
         helpRestoreFocus: null,
+        infoRestoreFocus: null,
         rawAlignX: null,
         rawAlignY: null
     },
@@ -104,6 +105,9 @@ const ReportViewer = {
             modal: document.getElementById('help-modal'),
             btnHelp: document.getElementById('btn-help'),
             btnCloseHelp: document.getElementById('btn-close-help'),
+            infoModal: document.getElementById('info-modal'),
+            btnInfo: document.getElementById('btn-info'),
+            btnCloseInfo: document.getElementById('btn-close-info'),
             btnAlignToggle: document.getElementById('btn-align-toggle'),
             alignPopover: document.getElementById('align-popover'),
         };
@@ -144,6 +148,9 @@ const ReportViewer = {
             this.dom.modal,
             this.dom.btnHelp,
             this.dom.btnCloseHelp,
+            this.dom.infoModal,
+            this.dom.btnInfo,
+            this.dom.btnCloseInfo,
             this.dom.btnAlignToggle,
             this.dom.alignPopover
         ];
@@ -313,6 +320,66 @@ const ReportViewer = {
         if (focusable.length === 0) {
             e.preventDefault();
             this.focusElement(this.dom.modal);
+            return;
+        }
+
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault();
+            this.focusElement(last);
+        } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault();
+            this.focusElement(first);
+        }
+    },
+
+    isInfoModalOpen() {
+        return this.dom.infoModal.classList.contains('open');
+    },
+
+    openInfoModal() {
+        const activeElement = document.activeElement;
+        this.state.infoRestoreFocus = activeElement && typeof activeElement.focus === 'function'
+            ? activeElement
+            : this.dom.btnInfo;
+        this.dom.infoModal.classList.add('open');
+        this.dom.infoModal.setAttribute('aria-hidden', 'false');
+        this.focusElement(this.dom.btnCloseInfo);
+    },
+
+    closeInfoModal(options = {}) {
+        if (!this.isInfoModalOpen()) return;
+        this.dom.infoModal.classList.remove('open');
+        this.dom.infoModal.setAttribute('aria-hidden', 'true');
+
+        const shouldRestoreFocus = options.restoreFocus !== false;
+        const restoreTarget = this.state.infoRestoreFocus?.isConnected
+            ? this.state.infoRestoreFocus
+            : this.dom.btnInfo;
+        this.state.infoRestoreFocus = null;
+        if (shouldRestoreFocus) this.focusElement(restoreTarget);
+    },
+
+    infoModalFocusableElements() {
+        return Array.from(
+            this.dom.infoModal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
+        ).filter(element => !element.disabled && !element.hidden);
+    },
+
+    handleInfoModalKey(e) {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            this.closeInfoModal();
+            return;
+        }
+        if (e.key !== 'Tab') return;
+
+        const focusable = this.infoModalFocusableElements();
+        if (focusable.length === 0) {
+            e.preventDefault();
+            this.focusElement(this.dom.infoModal);
             return;
         }
 
@@ -503,6 +570,14 @@ const ReportViewer = {
             if (e.target === this.dom.modal) this.closeHelpModal();
         });
         this.dom.modal.addEventListener('keydown', (e) => this.handleModalKey(e));
+
+        // Info modal
+        this.dom.btnInfo.addEventListener('click', () => this.openInfoModal());
+        this.dom.btnCloseInfo.addEventListener('click', () => this.closeInfoModal());
+        this.dom.infoModal.addEventListener('click', (e) => {
+            if (e.target === this.dom.infoModal) this.closeInfoModal();
+        });
+        this.dom.infoModal.addEventListener('keydown', (e) => this.handleInfoModalKey(e));
     },
 
     bindFilmstripEvents() {
@@ -827,6 +902,11 @@ const ReportViewer = {
                 this.closeHelpModal();
                 return;
             }
+            if (this.isInfoModalOpen()) {
+                e.preventDefault();
+                this.closeInfoModal();
+                return;
+            }
             if (document.fullscreenElement) {
                 e.preventDefault();
                 document.exitFullscreen?.();
@@ -834,8 +914,18 @@ const ReportViewer = {
             }
         }
 
-        if (this.dom.modal.classList.contains('open')) return;
+        if (this.dom.modal.classList.contains('open') || this.dom.infoModal.classList.contains('open')) return;
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+
+        if (e.key === 'i' || e.key === 'I') {
+            e.preventDefault();
+            if (this.isInfoModalOpen()) {
+                this.closeInfoModal();
+            } else {
+                this.openInfoModal();
+            }
+            return;
+        }
 
         if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
             e.preventDefault();

@@ -216,6 +216,15 @@ def test_build_html_renders_header_metadata(
 
     assert "Generated 2026-05-22T12:00:00+00:00 • 2 frames • 2 clips" in html
     assert '<button id="btn-help" class="rv-header-help-btn" aria-label="Keyboard shortcuts" title="Help (?)">?</button>' in html
+    assert '<button id="btn-info" class="rv-header-info-btn" aria-label="Report information" title="Report Info (I)">ℹ</button>' in html
+    assert 'id="info-modal" class="rv-modal" aria-hidden="true" role="dialog"' in html
+    assert '<div id="info-modal-title" class="rv-modal-title">Report Information</div>' in html
+    assert '<h3>General</h3>' in html
+    assert '<h3>Clips</h3>' in html
+    assert '<dt>Resolution</dt><dd>1920x1080</dd>' in html
+    assert '<dt>FPS</dt><dd>24 fps</dd>' in html
+    assert '<dt>Frames</dt><dd>100</dd>' in html
+
 
 
 def test_build_html_exposes_current_frame_detail_hooks(

@@ -193,6 +193,95 @@ def _render_filmstrip(
         """
 
 
+def _render_resolution(resolution: tuple[int, int]) -> str:
+    return f"{resolution[0]}x{resolution[1]}"
+
+
+def _render_fps(fps: float) -> str:
+    return f"{fps:g} fps"
+
+
+def _clip_label_for_index(clips: list[ReportClipPayload], index: int) -> str:
+    if 0 <= index < len(clips):
+        return clips[index]["label"]
+    return f"Clip {index + 1}"
+
+
+def _render_info_modal(
+    data: ReportPayload,
+    *,
+    left_clip_index: int,
+    right_clip_index: int,
+) -> str:
+    clips = data["clips"]
+    title = data["title"]
+    report_id = data["report_id"]
+    generated_at = data["generated_at"]
+    default_mode = data["default_mode"]
+
+    default_pair = (
+        f"{_esc_text(_clip_label_for_index(clips, left_clip_index))} "
+        f"vs {_esc_text(_clip_label_for_index(clips, right_clip_index))}"
+    )
+
+    slowpics_url = data["slowpics_url"]
+    safe_slowpics_href = _safe_http_href(slowpics_url)
+    slowpics_row = ""
+    if safe_slowpics_href:
+        slowpics_row = f'<div><dt>slow.pics</dt><dd><a href="{safe_slowpics_href}" target="_blank" rel="noopener noreferrer" class="rv-link">{_esc_text(slowpics_url)}</a></dd></div>'
+    elif slowpics_url:
+        slowpics_row = f'<div><dt>slow.pics</dt><dd>{_esc_text(slowpics_url)}</dd></div>'
+    else:
+        slowpics_row = '<div><dt>slow.pics</dt><dd>Not uploaded</dd></div>'
+
+    clip_items: list[str] = []
+    for i, clip in enumerate(clips):
+        hdr_tag = "HDR" if clip["hdr"] else "SDR"
+        clip_items.append(
+            f'<li class="rv-clip-meta-item" data-clip-index="{_esc_attr(i)}">'
+            f'<div class="rv-clip-meta-heading">'
+            f'<span>{_esc_text(clip["label"])}</span>'
+            f'<span>{hdr_tag}</span>'
+            f'</div>'
+            f'<dl class="rv-metadata-list">'
+            f'<div><dt>Name</dt><dd>{_esc_text(clip["name"])}</dd></div>'
+            f'<div><dt>Resolution</dt><dd>{_render_resolution(clip["resolution"])}</dd></div>'
+            f'<div><dt>FPS</dt><dd>{_render_fps(clip["fps"])}</dd></div>'
+            f'<div><dt>Frames</dt><dd>{clip["frame_count"]}</dd></div>'
+            f'</dl>'
+            f'</li>'
+        )
+    clip_list_html = "".join(clip_items) if clip_items else '<div class="rv-metadata-empty">No clips in payload.</div>'
+
+    return f"""    <div id="info-modal" class="rv-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="info-modal-title" tabindex="-1">
+        <div class="rv-modal-content" style="max-width: 600px;">
+            <div id="info-modal-title" class="rv-modal-title">Report Information</div>
+            <div class="rv-info-grid">
+                <div class="rv-info-section">
+                    <h3>General</h3>
+                    <dl class="rv-metadata-list">
+                        <div><dt>Title</dt><dd>{_esc_text(title)}</dd></div>
+                        <div><dt>Report ID</dt><dd>{_esc_text(report_id)}</dd></div>
+                        <div><dt>Generated</dt><dd>{_esc_text(generated_at)}</dd></div>
+                        <div><dt>Default Mode</dt><dd>{_esc_text(default_mode)}</dd></div>
+                        <div><dt>Default Pair</dt><dd>{default_pair}</dd></div>
+                        {slowpics_row}
+                    </dl>
+                </div>
+                <div class="rv-info-section">
+                    <h3>Clips</h3>
+                    <ol class="rv-clip-meta-list">
+                        {clip_list_html}
+                    </ol>
+                </div>
+            </div>
+            <div style="margin-top: 1.5rem; text-align: right;">
+                <button id="btn-close-info">Close</button>
+            </div>
+        </div>
+    </div>"""
+
+
 def _render_header(
     title: str,
     generated_at: str,
@@ -200,6 +289,7 @@ def _render_header(
     clip_count: int,
     slowpics_link: str,
 ) -> str:
+    info_button = '<button id="btn-info" class="rv-header-info-btn" aria-label="Report information" title="Report Info (I)">ℹ</button>'
     help_button = '<button id="btn-help" class="rv-header-help-btn" aria-label="Keyboard shortcuts" title="Help (?)">?</button>'
     slowpics_block = f"{slowpics_link} • " if slowpics_link else ""
     return f"""        <header class="rv-header">
@@ -208,7 +298,7 @@ def _render_header(
                 <div class="rv-meta">Generated {_esc_text(generated_at)} • {frame_count} frames • {clip_count} clips</div>
             </div>
             <div class="rv-header-right">
-                {slowpics_block}{help_button}
+                {slowpics_block}{info_button} {help_button}
             </div>
         </header>"""
 
@@ -413,6 +503,11 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
     )
     stage_html = _render_stage()
     modal_html = _render_help_modal()
+    info_modal_html = _render_info_modal(
+        data,
+        left_clip_index=left_clip_index,
+        right_clip_index=right_clip_index,
+    )
     footer_html = _render_footer(json_str)
 
     return f"""<!DOCTYPE html>
@@ -429,6 +524,7 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
 {controls_html}
 {stage_html}
 {modal_html}
+{info_modal_html}
 <div class="rv-category-filters-container">
     <div class="rv-filter-group" data-control-scope="frame-filters" aria-label="Frame category filters">
         {category_filter_controls}
