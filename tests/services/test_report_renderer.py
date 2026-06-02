@@ -197,38 +197,25 @@ def test_build_html_renders_frame_metadata_and_category_filters(
     html = build_html(report_payload)
 
     assert 'data-control-scope="frame-filters" aria-label="Frame category filters"' in html
-    assert 'data-category-key="__fc_all__" aria-pressed="true">All</button>' in html
+    assert 'data-category-key="__fc_all__" aria-pressed="true">All (2)</button>' in html
     assert 'data-category-key="cat-0" data-category="selected" aria-pressed="false"' in html
     assert 'data-category-key="cat-1" data-category="scene-cut" aria-pressed="false"' in html
-    assert '<span class="rv-filmstrip-label">Frame 10</span>' in html
+    assert '<span class="rv-filmstrip-label">Frame 10 • Selected</span>' in html
     assert '<span class="rv-filmstrip-detail">Source frame 10</span>' in html
     assert (
-        '<span class="rv-category-badge rv-filmstrip-category" '
-        'data-category-key="cat-1" data-category="scene-cut">scene-cut</span>'
+        '<span class="rv-filmstrip-accent" '
+        'data-category-key="cat-1" data-category="scene-cut"></span>'
     ) in html
-    assert 'data-category-key="cat-0" data-category="selected">selected</span></button>' in html
     assert 'value="1" data-category-key="cat-1" data-category="scene-cut">Frame 20</option>' in html
 
 
-def test_build_html_renders_collapsed_progressive_metadata(
+def test_build_html_renders_header_metadata(
     report_payload: ReportPayload,
 ) -> None:
     html = build_html(report_payload)
 
-    assert '<section class="rv-metadata-bar" aria-label="Report metadata">' in html
-    assert '<details class="rv-disclosure" data-report-metadata>' in html
-    assert '<summary>Report <span class="rv-summary-value">slider</span></summary>' in html
-    assert "<dt>Report ID</dt>" in html
-    assert "report_0123456789abcdef0123456789abcdef" in html
-    assert "<dt>Default pair</dt>" in html
-    assert 'REF &lt;main&gt; vs ENC "candidate"' in html
-    assert '<details class="rv-disclosure" data-clip-metadata>' in html
-    assert '<li class="rv-clip-meta-item" data-clip-index="0">' in html
-    assert "<dt>Resolution</dt><dd>1920x1080</dd>" in html
-    assert "<dt>FPS</dt><dd>24 fps</dd>" in html
-    assert "<dt>Frames</dt><dd>100</dd>" in html
-    assert '<details class="rv-disclosure" data-frame-metadata>' in html
-    assert '<span class="rv-summary-value" data-current-frame-summary>Frame 10</span>' in html
+    assert "Generated 2026-05-22T12:00:00+00:00 • 2 frames • 2 clips" in html
+    assert '<button id="btn-help" class="rv-header-help-btn" aria-label="Keyboard shortcuts" title="Help (?)">?</button>' in html
 
 
 def test_build_html_exposes_current_frame_detail_hooks(
@@ -236,19 +223,9 @@ def test_build_html_exposes_current_frame_detail_hooks(
 ) -> None:
     html = build_html(report_payload)
 
-    assert "<dt>Label</dt><dd data-current-frame-label>Frame 10</dd>" in html
-    assert "<dt>Detail</dt><dd data-current-frame-detail>Source frame 10</dd>" in html
-    assert "<dt>Category</dt><dd data-current-frame-category>selected</dd>" in html
-
-
-def test_build_html_metadata_disclosures_default_collapsed(
-    report_payload: ReportPayload,
-) -> None:
-    html = build_html(report_payload)
-
-    assert '<details class="rv-disclosure" data-report-metadata open>' not in html
-    assert '<details class="rv-disclosure" data-clip-metadata open>' not in html
-    assert '<details class="rv-disclosure" data-frame-metadata open>' not in html
+    assert 'data-current-frame-label' in html
+    assert 'data-current-frame-detail' in html
+    assert 'data-current-frame-category' in html
 
 
 def test_build_html_renders_empty_viewer_hooks_for_empty_payload(
@@ -268,10 +245,6 @@ def test_build_html_renders_empty_viewer_hooks_for_empty_payload(
         in html
     )
     assert '<div class="rv-empty-state" data-empty-state hidden></div>' in html
-    assert '<div class="rv-metadata-empty">No clips in payload.</div>' in html
-    assert "<dd data-current-frame-label>No frame selected</dd>" in html
-    assert "<dd data-current-frame-detail>No frame detail available.</dd>" in html
-    assert "<dd data-current-frame-category>none</dd>" in html
     assert 'class="rv-filmstrip-item"' not in html
 
 
@@ -291,16 +264,15 @@ def test_build_html_uses_internal_category_keys_for_reserved_category_text(
 
     html = build_html(payload)
 
-    assert 'data-category-key="__fc_all__" aria-pressed="true">All</button>' in html
+    assert 'data-category-key="__fc_all__" aria-pressed="true">All (2)</button>' in html
     assert 'data-category-key="cat-0" data-category="__all__" aria-pressed="false"' in html
-    assert 'data-category-key="cat-0" data-category="__all__">__all__</span></button>' in html
     assert 'value="0" data-category-key="cat-0" data-category="__all__">Frame 10</option>' in html
     assert (
         'class="rv-filmstrip-item" data-idx="0" data-category-key="cat-0" data-category="__all__"'
     ) in html
     assert (
-        '<span class="rv-category-badge rv-filmstrip-category" '
-        'data-category-key="cat-0" data-category="__all__">__all__</span>'
+        '<span class="rv-filmstrip-accent" '
+        'data-category-key="cat-0" data-category="__all__"></span>'
     ) in html
     assert 'data-category-key="__all__"' not in html
 
@@ -626,8 +598,8 @@ def test_viewer_assets_wire_metadata_and_error_empty_state_hooks() -> None:
     css = get_css()
     js = get_js()
 
-    assert ".rv-metadata-bar" in css
-    assert ".rv-disclosure[open]" in css
+    assert ".rv-stage-overlay-info" in css
+    assert ".rv-align-popover" in css
     assert '.rv-status[data-tone="error"]' in css
     assert '.rv-status[data-tone="warning"]' in css
     assert ".rv-empty-state[hidden] { display: none; }" in css
