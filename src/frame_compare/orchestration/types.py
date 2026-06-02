@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, Protocol
 
 import httpx
 
@@ -20,6 +20,7 @@ from frame_compare.config.schema import ConfigSchema, OverlayMode, ToneCurve, To
 from frame_compare.orchestration.context import ClipState
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
 from frame_compare.services.types import TmdbMetadata
+from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.loader import VSLoader
@@ -99,6 +100,32 @@ def _empty_selection_details_by_source_frame() -> SelectionDetailsByFrame:
     return {}
 
 
+type SlowpicsUploadConfirmationDecision = Literal["confirmed", "declined"]
+type SlowpicsUploadConfirmationStatus = Literal[
+    "not_applicable",
+    "confirmed",
+    "declined",
+    "report_unavailable",
+]
+type PostUploadActionResults = tuple[PostUploadActionResult, ...]
+
+
+@dataclass(frozen=True)
+class SlowpicsUploadConfirmationRequest:
+    """Request passed to the CLI-owned slow.pics upload confirmation callback."""
+
+    report_path: Path
+
+
+class SlowpicsUploadConfirmationFn(Protocol):
+    """CLI-owned callback for report-confirmed slow.pics upload decisions."""
+
+    def __call__(
+        self,
+        request: SlowpicsUploadConfirmationRequest,
+    ) -> SlowpicsUploadConfirmationDecision: ...
+
+
 @dataclass(frozen=True)
 class RunResult:
     """Complete result from a comparison run."""
@@ -108,6 +135,8 @@ class RunResult:
     screenshot_dir: Path | None = None
     slowpics_url: str | None = None
     report_path: Path | None = None
+    post_upload_actions: PostUploadActionResults = ()
+    slowpics_upload_confirmation_status: SlowpicsUploadConfirmationStatus = "not_applicable"
 
     # Metrics
     frame_count: int = 0
@@ -129,6 +158,7 @@ class RunDependencies:
     ffmpeg_runner: FFmpegRunner | None = None
     http_client: httpx.AsyncClient | None = None
     progress: ProgressReporter | None = None
+    confirm_slowpics_upload: SlowpicsUploadConfirmationFn | None = None
     clock: Callable[[], datetime] = field(default=datetime.now)
 
 
@@ -183,11 +213,25 @@ class DoviPhaseOutput:
 @dataclass(frozen=True)
 class PublishPhaseOutput:
     slowpics_url: str | None
+    uploaded_file_paths: tuple[Path, ...] = ()
+    post_upload_actions: PostUploadActionResults = ()
 
 
 @dataclass(frozen=True)
 class ReportPhaseOutput:
     report_path: Path | None
+    report_succeeded: bool = False
+
+
+@dataclass(frozen=True)
+class ConfirmSlowpicsUploadPhaseOutput:
+    status: SlowpicsUploadConfirmationStatus
+    warnings: list[str] = field(default_factory=_empty_str_list)
+
+
+@dataclass(frozen=True)
+class PostReportCleanupPhaseOutput:
+    warnings: list[str] = field(default_factory=_empty_str_list)
 
 
 type PhaseOutput = (
@@ -199,6 +243,8 @@ type PhaseOutput = (
     | DoviPhaseOutput
     | PublishPhaseOutput
     | ReportPhaseOutput
+    | ConfirmSlowpicsUploadPhaseOutput
+    | PostReportCleanupPhaseOutput
 )
 
 
@@ -209,7 +255,11 @@ class RunArtifacts:
     metrics_cache_hit: bool
     render: RenderArtifacts | None
     slowpics_url: str | None
+    uploaded_slowpics_file_paths: tuple[Path, ...]
+    post_upload_actions: PostUploadActionResults
+    slowpics_upload_confirmation_status: SlowpicsUploadConfirmationStatus
     report_path: Path | None
+    report_succeeded: bool
     resolved_metadata: TmdbMetadata | None
     warnings: list[str]
 
@@ -218,7 +268,11 @@ class RunArtifacts:
         *,
         metrics_cache_hit: bool = False,
         slowpics_url: str | None = None,
+        uploaded_slowpics_file_paths: tuple[Path, ...] = (),
+        post_upload_actions: PostUploadActionResults = (),
+        slowpics_upload_confirmation_status: SlowpicsUploadConfirmationStatus = "not_applicable",
         report_path: Path | None = None,
+        report_succeeded: bool = False,
         resolved_metadata: TmdbMetadata | None = None,
         warnings: list[str] | None = None,
         render: RenderArtifacts | None = None,
@@ -226,7 +280,11 @@ class RunArtifacts:
         self.metrics_cache_hit = metrics_cache_hit
         self.render = render
         self.slowpics_url = slowpics_url
+        self.uploaded_slowpics_file_paths = uploaded_slowpics_file_paths
+        self.post_upload_actions = post_upload_actions
+        self.slowpics_upload_confirmation_status = slowpics_upload_confirmation_status
         self.report_path = report_path
+        self.report_succeeded = report_succeeded
         self.resolved_metadata = resolved_metadata
         self.warnings = [] if warnings is None else warnings
 

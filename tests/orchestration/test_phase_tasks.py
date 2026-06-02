@@ -19,9 +19,15 @@ from frame_compare.analysis.types import (
     SelectionBreakdown,
     SelectionDetail,
 )
+from frame_compare.config.errors import ConfigValidationError
 from frame_compare.config.schema import SelectionMode
 from frame_compare.orchestration import phase_tasks
-from frame_compare.orchestration.types import RenderArtifacts, RunArtifacts
+from frame_compare.orchestration.types import (
+    RenderArtifacts,
+    RunArtifacts,
+    SlowpicsUploadConfirmationDecision,
+    SlowpicsUploadConfirmationRequest,
+)
 from frame_compare.services.types import MetadataConfig, TmdbMetadata
 from tests.orchestration.phase_task_helpers import (
     MINIMAL_CONFIG,
@@ -149,6 +155,69 @@ def test_run_artifacts_uses_render_artifacts_carrier() -> None:
 
     assert artifacts.render.screenshots_by_label == {"Reference": [screenshot]}
     assert artifacts.render.screenshot_dir == Path("screenshots")
+
+
+def test_run_confirm_slowpics_upload_phase_marks_report_unavailable_without_prompt(
+    tmp_path: Path,
+) -> None:
+    ctx = _context(tmp_path)
+    callback_calls: list[SlowpicsUploadConfirmationRequest] = []
+
+    def _callback(
+        request: SlowpicsUploadConfirmationRequest,
+    ) -> SlowpicsUploadConfirmationDecision:
+        callback_calls.append(request)
+        return "confirmed"
+
+    output = phase_tasks.run_confirm_slowpics_upload_phase(
+        ctx,
+        report_path=None,
+        report_succeeded=False,
+        confirm_slowpics_upload=_callback,
+    )
+
+    assert output.status == "report_unavailable"
+    assert output.warnings == [
+        "slow.pics upload skipped because report confirmation was unavailable"
+    ]
+    assert callback_calls == []
+
+
+def test_run_confirm_slowpics_upload_phase_requires_callback_when_report_available(
+    tmp_path: Path,
+) -> None:
+    ctx = _context(tmp_path)
+
+    with pytest.raises(ConfigValidationError, match="requires a confirmation callback"):
+        phase_tasks.run_confirm_slowpics_upload_phase(
+            ctx,
+            report_path=tmp_path / "report.html",
+            report_succeeded=True,
+            confirm_slowpics_upload=None,
+        )
+
+
+def test_run_confirm_slowpics_upload_phase_records_callback_decision(tmp_path: Path) -> None:
+    ctx = _context(tmp_path)
+    report_path = tmp_path / "report.html"
+    callback_calls: list[SlowpicsUploadConfirmationRequest] = []
+
+    def _callback(
+        request: SlowpicsUploadConfirmationRequest,
+    ) -> SlowpicsUploadConfirmationDecision:
+        callback_calls.append(request)
+        return "declined"
+
+    output = phase_tasks.run_confirm_slowpics_upload_phase(
+        ctx,
+        report_path=report_path,
+        report_succeeded=True,
+        confirm_slowpics_upload=_callback,
+    )
+
+    assert output.status == "declined"
+    assert output.warnings == []
+    assert callback_calls == [SlowpicsUploadConfirmationRequest(report_path=report_path)]
 
 
 def test_resolve_run_metadata_builds_metadata_config_and_delegates(

@@ -1,9 +1,14 @@
 """Tests for CLI override logic."""
 
+from dataclasses import fields
 from pathlib import Path
 
 from frame_compare.config.loader import get_default_config
-from frame_compare.config.overrides import CLIConfigOverrides, apply_cli_overrides
+from frame_compare.config.overrides import (
+    CLI_OVERRIDE_MAP,
+    CLIConfigOverrides,
+    apply_cli_overrides,
+)
 from frame_compare.config.schema import (
     ColorConfig,
     ConfigSchema,
@@ -33,6 +38,20 @@ def test_apply_cli_overrides_inverts_no_upload() -> None:
     new_config = apply_cli_overrides(config, cli_args)
 
     assert new_config.slowpics.auto_upload is False
+
+
+def test_cli_overrides_do_not_map_confirm_upload_after_report() -> None:
+    """Report-confirmed upload is config-only, not a CLI override surface."""
+    config = get_default_config()
+    config.slowpics.confirm_upload_after_report = True
+
+    new_config = apply_cli_overrides(config, CLIConfigOverrides(no_upload=True))
+
+    assert "slowpics.confirm_upload_after_report" not in CLI_OVERRIDE_MAP.values()
+    cli_override_fields = {field.name for field in fields(CLIConfigOverrides)}
+    assert "confirm_upload_after_report" not in cli_override_fields
+    assert new_config.slowpics.auto_upload is False
+    assert new_config.slowpics.confirm_upload_after_report is True
 
 
 def test_apply_cli_overrides_does_not_override_false_flag_defaults() -> None:

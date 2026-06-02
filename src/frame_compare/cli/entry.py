@@ -13,7 +13,9 @@ from rich.console import Console
 
 from frame_compare.cli.cli_helpers import (
     FrameCompareTyperGroup,
+    copy_text_to_clipboard,
     handle_error,
+    open_url_in_browser,
     prepare_toml_payload,
     resolve_root_and_config,
     stabilize_typer_help_width,
@@ -94,6 +96,8 @@ app = typer.Typer(
 _stabilize_typer_help_width = stabilize_typer_help_width
 _prepare_toml_payload = prepare_toml_payload
 _resolve_root_and_config = resolve_root_and_config
+_copy_text_to_clipboard = copy_text_to_clipboard
+_open_url_in_browser = open_url_in_browser
 _doctor_report_json = doctor_report_json
 _print_doctor_report = print_doctor_report
 _prompt_input_dir = prompt_input_dir
@@ -105,6 +109,15 @@ _handle_diagnose_paths = handle_diagnose_paths
 _handle_json_output = handle_json_output
 _build_minimal_config = build_minimal_config
 _validate_config = validate_config
+
+
+def _sys_stream_isatty(name: str) -> bool:
+    stream: object = getattr(sys, name, None)
+    isatty = getattr(stream, "isatty", None)
+    if not callable(isatty):
+        return False
+    return bool(isatty())
+
 
 if TYPE_CHECKING:
 
@@ -201,7 +214,11 @@ def run(
         configure_logging=configure_logging,
         console_factory=Console,
         open_report=_maybe_open_report,
-        stdout_is_tty=sys.stdout.isatty(),
+        copy_to_clipboard=_copy_text_to_clipboard,
+        open_url=_open_url_in_browser,
+        confirm_upload=typer.confirm,
+        stdout_is_tty=_sys_stream_isatty("stdout"),
+        stdin_is_tty=_sys_stream_isatty("stdin"),
         no_color_env_present="NO_COLOR" in os.environ,
     )
     handle_run(args, deps)

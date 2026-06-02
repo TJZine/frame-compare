@@ -60,10 +60,15 @@ contrast_recovery = 0.3
 
 [slowpics]
 auto_upload = false
+confirm_upload_after_report = false
 visibility = "unlisted"
 delete_after_upload = false
 timeout_seconds = 60.0
 max_retries = 3
+copy_url_to_clipboard = true
+open_in_browser = true
+create_url_shortcut = true
+# webhook_url = null
 
 [tmdb]
 # api_key = "your-api-key"

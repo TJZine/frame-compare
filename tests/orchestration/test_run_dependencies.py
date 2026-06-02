@@ -12,7 +12,11 @@ from frame_compare.orchestration.coordinator import (
     RunDependencies,
     execute_run,
 )
-from frame_compare.orchestration.types import RunRequest
+from frame_compare.orchestration.types import (
+    RunRequest,
+    SlowpicsUploadConfirmationDecision,
+    SlowpicsUploadConfirmationRequest,
+)
 from frame_compare.vs.loader import VSLoader
 from frame_compare.vs.types import HDRMetadata, SourceInfo
 
@@ -52,6 +56,17 @@ def test_run_dependencies_returns_injected_dependencies() -> None:
 
     assert deps.vs_loader is loader
     assert deps.ffmpeg_runner is runner
+
+
+def test_run_dependencies_accepts_slowpics_confirmation_callback() -> None:
+    def _confirm(
+        _request: SlowpicsUploadConfirmationRequest,
+    ) -> SlowpicsUploadConfirmationDecision:
+        return "confirmed"
+
+    deps = RunDependencies(confirm_slowpics_upload=_confirm)
+
+    assert deps.confirm_slowpics_upload is _confirm
 
 
 def test_run_dependencies_clock_returns_datetime() -> None:
@@ -103,3 +118,31 @@ def test_execute_run_initializes_local_dependencies_without_mutating_injected_de
     assert deps.ffmpeg_runner is None
     assert deps.progress is None
     assert deps.http_client is None
+
+
+def test_execute_run_preserves_slowpics_confirmation_callback_when_cloning_deps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from frame_compare.orchestration import coordinator
+
+    captured_local_deps: RunDependencies | None = None
+
+    def _confirm(
+        _request: SlowpicsUploadConfirmationRequest,
+    ) -> SlowpicsUploadConfirmationDecision:
+        return "confirmed"
+
+    async def fake_execute_prep(_request: RunRequest, local_deps: RunDependencies):
+        nonlocal captured_local_deps
+        captured_local_deps = local_deps
+        raise StopAfterDependencyInit
+
+    monkeypatch.setattr(coordinator, "execute_prep", fake_execute_prep)
+
+    deps = RunDependencies(confirm_slowpics_upload=_confirm)
+
+    with pytest.raises(StopAfterDependencyInit):
+        asyncio.run(execute_run(RunRequest(root=tmp_path, quiet=True), deps=deps))
+
+    assert captured_local_deps is not None
+    assert captured_local_deps.confirm_slowpics_upload is _confirm

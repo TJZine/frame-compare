@@ -21,7 +21,9 @@ from frame_compare.orchestration.phase_tasks import (
     record_dovi_not_implemented_warning,
     run_align_phase,
     run_analyze_phase,
+    run_confirm_slowpics_upload_phase,
     run_metadata_phase,
+    run_post_report_cleanup_phase,
     run_publish_phase,
     run_render_phase,
     run_report_phase,
@@ -32,6 +34,7 @@ from frame_compare.orchestration.phases import Phase
 from frame_compare.orchestration.types import (
     AlignPhaseOutput,
     AnalyzePhaseOutput,
+    ConfirmSlowpicsUploadPhaseOutput,
     DoviPhaseOutput,
     ExecutionPhasePlan,
     ExecutionState,
@@ -39,12 +42,14 @@ from frame_compare.orchestration.types import (
     MetadataPhaseOutput,
     MetadataPrefetch,
     PhaseOutput,
+    PostReportCleanupPhaseOutput,
     PrepState,
     PublishPhaseOutput,
     RenderPhaseOutput,
     ReportPhaseOutput,
     RunDependencies,
     RunRequest,
+    SlowpicsUploadConfirmationFn,
 )
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
 from frame_compare.utils.types import WorkspacePaths
@@ -116,7 +121,9 @@ def _apply_phase_output(*, ctx: RunContext, state: ExecutionState, output: Phase
             if phase_output.selection_breakdown is not None:
                 ctx.selection_breakdown = phase_output.selection_breakdown
             if phase_output.selection_details_by_source_frame is not None:
-                ctx.selection_details_by_source_frame = phase_output.selection_details_by_source_frame
+                ctx.selection_details_by_source_frame = (
+                    phase_output.selection_details_by_source_frame
+                )
         case RenderPhaseOutput() as phase_output:
             state.artifacts.render = phase_output.render
             state.warnings.extend(phase_output.render.warnings)
@@ -126,8 +133,21 @@ def _apply_phase_output(*, ctx: RunContext, state: ExecutionState, output: Phase
             state.warnings.append(phase_output.warning)
         case PublishPhaseOutput() as phase_output:
             state.artifacts.slowpics_url = phase_output.slowpics_url
+            state.artifacts.uploaded_slowpics_file_paths = phase_output.uploaded_file_paths
+            state.artifacts.post_upload_actions = phase_output.post_upload_actions
+            state.warnings.extend(
+                action.warning
+                for action in phase_output.post_upload_actions
+                if action.warning is not None
+            )
         case ReportPhaseOutput() as phase_output:
             state.artifacts.report_path = phase_output.report_path
+            state.artifacts.report_succeeded = phase_output.report_succeeded
+        case ConfirmSlowpicsUploadPhaseOutput() as phase_output:
+            state.artifacts.slowpics_upload_confirmation_status = phase_output.status
+            state.warnings.extend(phase_output.warnings)
+        case PostReportCleanupPhaseOutput() as phase_output:
+            state.warnings.extend(phase_output.warnings)
         case _:
             raise TypeError(f"Unsupported phase output type: {output.__class__.__qualname__}")
 
@@ -192,12 +212,21 @@ def build_phases_after_align(
     http_client: httpx.AsyncClient | None,
     state: ExecutionState,
     metadata_prefetch: MetadataPrefetch,
+    config: ConfigSchema,
+    confirm_slowpics_upload: SlowpicsUploadConfirmationFn | None = None,
 ) -> list[Phase]:
     async def _run_publish_with_current_artifacts(ctx: RunContext) -> PublishPhaseOutput:
+        if (
+            _requires_report_confirmed_slowpics(ctx.config)
+            and state.artifacts.slowpics_upload_confirmation_status != "confirmed"
+        ):
+            return PublishPhaseOutput(slowpics_url=None)
         return await run_publish_phase(
             ctx,
             client=http_client,
             metadata=state.artifacts.resolved_metadata,
+            render=state.artifacts.render,
+            selected_frames=state.selected_frames,
         )
 
     def _run_report_with_current_artifacts(ctx: RunContext) -> ReportPhaseOutput:
@@ -206,10 +235,31 @@ def build_phases_after_align(
             frames=state.selected_frames,
             render=state.artifacts.render,
             metadata=state.artifacts.resolved_metadata,
-            slowpics_url=state.artifacts.slowpics_url,
+            slowpics_url=None
+            if _requires_report_confirmed_slowpics(ctx.config)
+            else state.artifacts.slowpics_url,
         )
 
-    return [
+    def _run_confirm_slowpics_upload_with_current_artifacts(
+        ctx: RunContext,
+    ) -> ConfirmSlowpicsUploadPhaseOutput:
+        return run_confirm_slowpics_upload_phase(
+            ctx,
+            report_path=state.artifacts.report_path,
+            report_succeeded=state.artifacts.report_succeeded,
+            confirm_slowpics_upload=confirm_slowpics_upload,
+        )
+
+    def _run_post_report_cleanup_with_current_artifacts(
+        ctx: RunContext,
+    ) -> PostReportCleanupPhaseOutput:
+        return run_post_report_cleanup_phase(
+            ctx,
+            uploaded_file_paths=state.artifacts.uploaded_slowpics_file_paths,
+            report_succeeded=state.artifacts.report_succeeded,
+        )
+
+    render_metadata_dovi_phases = [
         _create_timed_phase(
             "render",
             "render",
@@ -250,29 +300,68 @@ def build_phases_after_align(
             warnings=state.warnings,
             warn_only=True,
         ),
-        _create_timed_phase(
-            "publish",
-            "publish",
-            lambda config: not config.slowpics.auto_upload,
-            _run_publish_with_current_artifacts,
-            state=state,
-            clock=clock,
-            phase_timings=state.phase_timings,
-            warnings=state.warnings,
-            warn_only=True,
-        ),
-        _create_timed_phase(
-            "report",
-            "report",
-            lambda config: not config.report.enable,
-            _run_report_with_current_artifacts,
-            state=state,
-            clock=clock,
-            phase_timings=state.phase_timings,
-            warnings=state.warnings,
-            warn_only=True,
-        ),
     ]
+    publish_phase = _create_timed_phase(
+        "publish",
+        "publish",
+        lambda config: not config.slowpics.auto_upload,
+        _run_publish_with_current_artifacts,
+        state=state,
+        clock=clock,
+        phase_timings=state.phase_timings,
+        warnings=state.warnings,
+        warn_only=True,
+    )
+    report_phase = _create_timed_phase(
+        "report",
+        "report",
+        lambda config: not config.report.enable,
+        _run_report_with_current_artifacts,
+        state=state,
+        clock=clock,
+        phase_timings=state.phase_timings,
+        warnings=state.warnings,
+        warn_only=True,
+    )
+    confirm_slowpics_upload_phase = _create_timed_phase(
+        "confirm_slowpics_upload",
+        "confirm_slowpics_upload",
+        None,
+        _run_confirm_slowpics_upload_with_current_artifacts,
+        state=state,
+        clock=clock,
+        phase_timings=state.phase_timings,
+        warnings=state.warnings,
+    )
+    post_report_cleanup_phase = _create_timed_phase(
+        "post_report_cleanup",
+        "post_report_cleanup",
+        None,
+        _run_post_report_cleanup_with_current_artifacts,
+        state=state,
+        clock=clock,
+        phase_timings=state.phase_timings,
+        warnings=state.warnings,
+    )
+    if not _requires_report_confirmed_slowpics(config):
+        return [
+            *render_metadata_dovi_phases,
+            publish_phase,
+            report_phase,
+            post_report_cleanup_phase,
+        ]
+
+    return [
+        *render_metadata_dovi_phases,
+        report_phase,
+        confirm_slowpics_upload_phase,
+        publish_phase,
+        post_report_cleanup_phase,
+    ]
+
+
+def _requires_report_confirmed_slowpics(config: ConfigSchema) -> bool:
+    return config.slowpics.auto_upload and config.slowpics.confirm_upload_after_report
 
 
 def build_execution_phase_plan(
@@ -307,6 +396,8 @@ def build_execution_phase_plan(
         http_client=deps.http_client,
         state=state,
         metadata_prefetch=prep.metadata_prefetch,
+        config=prep.config,
+        confirm_slowpics_upload=deps.confirm_slowpics_upload,
     )
     return ExecutionPhasePlan(
         before_align=before_align,

@@ -12,7 +12,14 @@ from frame_compare.config.loader import load_config
 from frame_compare.orchestration import phase_tasks
 from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
-from frame_compare.orchestration.types import MetadataPrefetch, RenderArtifacts, RunArtifacts
+from frame_compare.orchestration.types import (
+    MetadataPrefetch,
+    PublishPhaseOutput,
+    RenderArtifacts,
+    RunArtifacts,
+    SlowpicsUploadConfirmationDecision,
+    SlowpicsUploadConfirmationRequest,
+)
 from frame_compare.services.types import AlignmentResult, TmdbMetadata
 from frame_compare.utils.types import WorkspacePaths
 
@@ -106,6 +113,73 @@ enable = false
     assert by_video["a_ref.mkv"] == [5, 50, 97]
     assert by_video["b_comp1.mkv"] == [4, 49, 96]
     assert by_video["c_comp2.mkv"] == [6, 51, 98]
+
+
+def test_execute_run_report_confirmed_decline_skips_publish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_content = """\
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "generated"
+config_dir = "config"
+
+[slowpics]
+auto_upload = true
+confirm_upload_after_report = true
+
+[audio_alignment]
+enable = false
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = true
+"""
+    create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    create_video_files(input_dir, "a_source.mkv", "b_encode.mkv")
+    callback_calls: list[SlowpicsUploadConfirmationRequest] = []
+
+    def _decline(
+        request: SlowpicsUploadConfirmationRequest,
+    ) -> SlowpicsUploadConfirmationDecision:
+        callback_calls.append(request)
+        return "declined"
+
+    async def _unexpected_publish(*_args: object, **_kwargs: object) -> PublishPhaseOutput:
+        raise AssertionError("declined report-confirmed upload must not publish")
+
+    monkeypatch.setattr(
+        "frame_compare.orchestration.execution.run_publish_phase",
+        _unexpected_publish,
+    )
+
+    result = asyncio.run(
+        execute_run(
+            RunRequest(
+                root=tmp_path,
+                frame_count=1,
+                skip_analysis=True,
+                skip_metadata=True,
+                skip_dovi=True,
+            ),
+            deps=RunDependencies(
+                vs_loader=FakeVSLoader(),
+                ffmpeg_runner=FakeFFmpegRunner(),
+                confirm_slowpics_upload=_decline,
+            ),
+        )
+    )
+
+    assert result.success is True
+    assert result.report_path is not None
+    assert callback_calls == [SlowpicsUploadConfirmationRequest(report_path=result.report_path)]
+    assert result.slowpics_upload_confirmation_status == "declined"
+    assert result.slowpics_url is None
+    assert "confirm_slowpics_upload" in result.phase_timings
 
 
 def test_run_metadata_phase_uses_prefetched_metadata_without_client(tmp_path: Path) -> None:

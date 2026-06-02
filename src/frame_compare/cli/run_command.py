@@ -11,9 +11,15 @@ from typing import TYPE_CHECKING, Protocol
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 
 from frame_compare.cli.errors import ExitCode, format_error_json, get_exit_code
-from frame_compare.cli.output import print_at_a_glance, print_result_summary
+from frame_compare.cli.output import (
+    PostUploadActionPresentationResult,
+    PostUploadActionPresentationResults,
+    print_at_a_glance,
+    print_result_summary,
+)
 from frame_compare.config.errors import ConfigValidationError
 from frame_compare.config.overrides import apply_cli_overrides
 from frame_compare.config.schema import ConfigSchema, OverlayMode, ToneCurve, TonemapPreset
@@ -23,6 +29,11 @@ from .cli_helpers import format_enum_expected
 
 if TYPE_CHECKING:
     from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, RunResult
+    from frame_compare.orchestration.types import (
+        SlowpicsUploadConfirmationDecision,
+        SlowpicsUploadConfirmationFn,
+        SlowpicsUploadConfirmationRequest,
+    )
 
 type EffectiveConfigLoader = Callable[[], ConfigSchema]
 
@@ -50,7 +61,11 @@ class RunCommandDeps:
     configure_logging: ConfigureLoggingFn
     console_factory: ConsoleFactory
     open_report: OpenReportFn
+    copy_to_clipboard: CopyToClipboardFn
+    open_url: OpenUrlFn
+    confirm_upload: ConfirmUploadPromptFn
     stdout_is_tty: bool
+    stdin_is_tty: bool
     no_color_env_present: bool
 
 
@@ -78,7 +93,19 @@ class HandleErrorFn(Protocol):
 
 
 class OpenReportFn(Protocol):
-    def __call__(self, report_path: Path) -> None: ...
+    def __call__(self, report_path: Path) -> bool: ...
+
+
+class CopyToClipboardFn(Protocol):
+    def __call__(self, text: str) -> None: ...
+
+
+class OpenUrlFn(Protocol):
+    def __call__(self, url: str) -> bool: ...
+
+
+class ConfirmUploadPromptFn(Protocol):
+    def __call__(self, text: str, *, default: bool) -> bool: ...
 
 
 def coerce_cli_choice[CliChoiceT: Enum](
@@ -213,12 +240,19 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
             handle_diagnose_paths(args.resolved_root, args.config_path, load_effective_config())
             return
 
-        validate_run_contracts(args, load_effective_config())
+        validate_run_contracts(args, deps, load_effective_config())
 
         if not args.json_output and not args.quiet:
             print_run_preview(console, args, request, load_effective_config)
 
-        result = deps.runner.run(request, dependencies=None)
+        run_dependencies = build_runner_dependencies(
+            args=args,
+            deps=deps,
+            config=load_effective_config(),
+            console=console,
+            resolve_effective_config=resolve_effective_config,
+        )
+        result = deps.runner.run(request, dependencies=run_dependencies)
     except FrameCompareError as error:
         raise run_error_exit(
             error,
@@ -226,7 +260,7 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
             deps=deps,
             no_color=effective_no_color,
         ) from error
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, typer.Abort):
         raise typer.Exit(code=int(ExitCode.INTERRUPTED)) from None
 
     if args.json_output:
@@ -236,13 +270,83 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
     if not result.success:
         raise typer.Exit(code=int(ExitCode.PROCESSING_ERROR))
 
-    print_result_summary(console, result=result, quiet=args.quiet)
+    post_upload_actions = collect_interactive_slowpics_actions(
+        result,
+        args=args,
+        deps=deps,
+        config=load_effective_config(),
+    )
+    print_result_summary(
+        console,
+        result=result,
+        quiet=args.quiet,
+        post_upload_actions=post_upload_actions,
+    )
     maybe_open_run_report(
         result,
         args=args,
         deps=deps,
         resolve_effective_config=resolve_effective_config,
+        suppress_report_open=(
+            slowpics_browser_open_attempted(post_upload_actions)
+            or report_confirmed_slowpics_enabled(load_effective_config())
+        ),
     )
+
+
+def build_runner_dependencies(
+    *,
+    args: RunCliRawArgs,
+    deps: RunCommandDeps,
+    config: ConfigSchema,
+    console: Console,
+    resolve_effective_config: EffectiveConfigLoader,
+) -> RunDependencies | None:
+    if not report_confirmed_slowpics_enabled(config):
+        return None
+
+    from frame_compare.orchestration.coordinator import RunDependencies
+
+    return RunDependencies(
+        confirm_slowpics_upload=build_confirm_slowpics_upload_callback(
+            args=args,
+            deps=deps,
+            console=console,
+            resolve_effective_config=resolve_effective_config,
+        )
+    )
+
+
+def report_confirmed_slowpics_enabled(config: ConfigSchema) -> bool:
+    return config.slowpics.auto_upload and config.slowpics.confirm_upload_after_report
+
+
+def build_confirm_slowpics_upload_callback(
+    *,
+    args: RunCliRawArgs,
+    deps: RunCommandDeps,
+    console: Console,
+    resolve_effective_config: EffectiveConfigLoader,
+) -> SlowpicsUploadConfirmationFn:
+    def _confirm_slowpics_upload(
+        request: SlowpicsUploadConfirmationRequest,
+    ) -> SlowpicsUploadConfirmationDecision:
+        opened = maybe_open_report_path(
+            request.report_path,
+            args=args,
+            deps=deps,
+            resolve_effective_config=resolve_effective_config,
+        )
+        if not opened:
+            console.print(f"Report: {escape(str(request.report_path))}", soft_wrap=True)
+        if deps.confirm_upload(
+            "Review the local report, then upload this comparison to slow.pics?",
+            default=False,
+        ):
+            return "confirmed"
+        return "declined"
+
+    return _confirm_slowpics_upload
 
 
 def parse_run_options(args: RunCliRawArgs, *, no_color: bool) -> RunCliOptions:
@@ -296,8 +400,16 @@ def build_effective_config_loaders(
     return _resolve_effective_config, _load_effective_config
 
 
-def validate_run_contracts(args: RunCliRawArgs, config: ConfigSchema) -> None:
+def validate_run_contracts(args: RunCliRawArgs, deps: RunCommandDeps, config: ConfigSchema) -> None:
     """Enforce public CLI mode combinations before entering the runtime pipeline."""
+    validate_json_interactive_alignment_contract(args, config)
+    validate_report_confirmed_slowpics_contract(args, deps, config)
+
+
+def validate_json_interactive_alignment_contract(
+    args: RunCliRawArgs,
+    config: ConfigSchema,
+) -> None:
     if not args.json_output:
         return
 
@@ -324,6 +436,73 @@ def validate_run_contracts(args: RunCliRawArgs, config: ConfigSchema) -> None:
         hint=(
             "Disable audio_alignment.use_vspreview and "
             "audio_alignment.force_interactive, or run without --json"
+        ),
+    )
+
+
+def validate_report_confirmed_slowpics_contract(
+    args: RunCliRawArgs,
+    deps: RunCommandDeps,
+    config: ConfigSchema,
+) -> None:
+    if not report_confirmed_slowpics_enabled(config):
+        return
+
+    validation_errors: list[dict[str, JSONValue]] = []
+    if args.json_output:
+        validation_errors.append(
+            {
+                "type": "value_error",
+                "loc": ["cli", "json"],
+                "msg": "Report-confirmed slow.pics upload is not supported with --json.",
+                "input": True,
+            }
+        )
+    if args.quiet:
+        validation_errors.append(
+            {
+                "type": "value_error",
+                "loc": ["cli", "quiet"],
+                "msg": "Report-confirmed slow.pics upload is not supported with --quiet.",
+                "input": True,
+            }
+        )
+    if not deps.stdin_is_tty:
+        validation_errors.append(
+            {
+                "type": "value_error",
+                "loc": ["stdin"],
+                "msg": "Report-confirmed slow.pics upload requires stdin to be attached to a TTY.",
+                "input": False,
+            }
+        )
+    if not deps.stdout_is_tty:
+        validation_errors.append(
+            {
+                "type": "value_error",
+                "loc": ["stdout"],
+                "msg": "Report-confirmed slow.pics upload requires stdout to be attached to a TTY.",
+                "input": False,
+            }
+        )
+    if not config.report.enable:
+        validation_errors.append(
+            {
+                "type": "value_error",
+                "loc": ["report", "enable"],
+                "msg": "Report-confirmed slow.pics upload requires report.enable = true.",
+                "input": False,
+            }
+        )
+    if not validation_errors:
+        return
+
+    raise ConfigValidationError(
+        validation_errors,
+        message="Report-confirmed slow.pics upload requires an interactive report-enabled run",
+        hint=(
+            "Disable slowpics.confirm_upload_after_report, disable slowpics.auto_upload, "
+            "enable reports, or run from an interactive terminal without --json/--quiet"
         ),
     )
 
@@ -362,9 +541,34 @@ def maybe_open_run_report(
     args: RunCliRawArgs,
     deps: RunCommandDeps,
     resolve_effective_config: EffectiveConfigLoader,
-) -> None:
-    if result.report_path is None or args.json_output or args.quiet or not deps.stdout_is_tty:
-        return
+    suppress_report_open: bool = False,
+) -> bool:
+    if result.report_path is None:
+        return False
+    return maybe_open_report_path(
+        result.report_path,
+        args=args,
+        deps=deps,
+        resolve_effective_config=resolve_effective_config,
+        suppress_report_open=suppress_report_open,
+    )
+
+
+def maybe_open_report_path(
+    report_path: Path,
+    *,
+    args: RunCliRawArgs,
+    deps: RunCommandDeps,
+    resolve_effective_config: EffectiveConfigLoader,
+    suppress_report_open: bool = False,
+) -> bool:
+    if (
+        suppress_report_open
+        or args.json_output
+        or args.quiet
+        or not deps.stdout_is_tty
+    ):
+        return False
 
     try:
         cfg = resolve_effective_config()
@@ -374,7 +578,80 @@ def maybe_open_run_report(
         cfg = None
 
     if cfg is None or cfg.report.auto_open:
-        deps.open_report(result.report_path)
+        return deps.open_report(report_path)
+    return False
+
+
+def collect_interactive_slowpics_actions(
+    result: RunResult,
+    *,
+    args: RunCliRawArgs,
+    deps: RunCommandDeps,
+    config: ConfigSchema,
+) -> PostUploadActionPresentationResults:
+    """Run enabled interactive slow.pics URL actions and collect presentation state."""
+    url = result.slowpics_url
+    if url is None or args.json_output or args.quiet or not deps.stdout_is_tty:
+        return ()
+
+    actions: list[PostUploadActionPresentationResult] = []
+    if config.slowpics.copy_url_to_clipboard:
+        actions.append(_copy_slowpics_url(url, copy_to_clipboard=deps.copy_to_clipboard))
+    if config.slowpics.open_in_browser:
+        actions.append(_open_slowpics_url(url, open_url=deps.open_url))
+    return tuple(actions)
+
+
+def _copy_slowpics_url(
+    url: str,
+    *,
+    copy_to_clipboard: CopyToClipboardFn,
+) -> PostUploadActionPresentationResult:
+    try:
+        copy_to_clipboard(url)
+    except Exception as exc:
+        return PostUploadActionPresentationResult(
+            kind="clipboard",
+            success=False,
+            warning=f"slow.pics clipboard: failed to copy URL: {exc}",
+        )
+    return PostUploadActionPresentationResult(
+        kind="clipboard",
+        success=True,
+        detail="slow.pics URL copied to clipboard",
+    )
+
+
+def _open_slowpics_url(
+    url: str,
+    *,
+    open_url: OpenUrlFn,
+) -> PostUploadActionPresentationResult:
+    try:
+        opened = open_url(url)
+    except Exception as exc:
+        return PostUploadActionPresentationResult(
+            kind="browser",
+            success=False,
+            warning=f"slow.pics browser: failed to open URL: {exc}",
+        )
+    if not opened:
+        return PostUploadActionPresentationResult(
+            kind="browser",
+            success=False,
+            warning="slow.pics browser: failed to open URL: no browser accepted the request",
+        )
+    return PostUploadActionPresentationResult(
+        kind="browser",
+        success=True,
+        detail="slow.pics URL opened in browser",
+    )
+
+
+def slowpics_browser_open_attempted(
+    actions: PostUploadActionPresentationResults,
+) -> bool:
+    return any(action.kind == "browser" for action in actions)
 
 
 def handle_diagnose_paths(resolved_root: Path, config_path: Path, config: ConfigSchema) -> None:

@@ -25,6 +25,22 @@ class _ParsedSelect:
     options: list[_ParsedOption] = field(default_factory=list)
 
 
+@dataclass
+class _ParsedClipMetadata:
+    label: str = ""
+    dynamic_range: str = ""
+    fields: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class _ParsedInfoModal:
+    attrs: dict[str, str | None]
+    section_headings: list[str] = field(default_factory=list)
+    general: dict[str, str] = field(default_factory=dict)
+    links: dict[str, str] = field(default_factory=dict)
+    clips: list[_ParsedClipMetadata] = field(default_factory=list)
+
+
 class _SelectParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
@@ -61,6 +77,153 @@ class _SelectParser(HTMLParser):
             self._current_option_text = []
         elif tag == "select":
             self._current_select_id = None
+
+
+class _StartTagParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.by_id: dict[str, tuple[str, dict[str, str | None]]] = {}
+        self.tags_with_style: list[tuple[str, dict[str, str | None]]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attr_map = dict(attrs)
+        element_id = attr_map.get("id")
+        if element_id is not None:
+            self.by_id[element_id] = (tag, attr_map)
+        if "style" in attr_map:
+            self.tags_with_style.append((tag, attr_map))
+
+
+class _InfoModalParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.modal: _ParsedInfoModal | None = None
+        self._in_info_modal = False
+        self._info_div_depth = 0
+        self._capture_kind: str | None = None
+        self._capture_text: list[str] = []
+        self._current_term: str | None = None
+        self._current_clip: _ParsedClipMetadata | None = None
+        self._in_clip_heading = False
+        self._clip_heading_parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attr_map = dict(attrs)
+        if not self._in_info_modal and tag == "div" and attr_map.get("id") == "info-modal":
+            self._in_info_modal = True
+            self._info_div_depth = 1
+            self.modal = _ParsedInfoModal(attrs=attr_map)
+            return
+        if not self._in_info_modal:
+            return
+
+        classes = set((attr_map.get("class") or "").split())
+        if tag == "div":
+            self._info_div_depth += 1
+            if "rv-clip-meta-heading" in classes:
+                self._in_clip_heading = True
+                self._clip_heading_parts = []
+        elif tag == "li" and "rv-clip-meta-item" in classes:
+            self._current_clip = _ParsedClipMetadata()
+        elif tag == "h3":
+            self._start_capture("section")
+        elif tag == "dt":
+            self._start_capture("term")
+        elif tag == "dd":
+            self._start_capture("definition")
+        elif tag == "span" and self._in_clip_heading:
+            self._start_capture("clip-heading")
+        elif tag == "a" and self._capture_kind == "definition" and self._current_term is not None:
+            href = attr_map.get("href")
+            if href is not None and self.modal is not None:
+                self.modal.links[self._current_term] = href
+
+    def handle_data(self, data: str) -> None:
+        if self._capture_kind is not None:
+            self._capture_text.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if not self._in_info_modal:
+            return
+
+        if tag == "h3" and self._capture_kind == "section":
+            if self.modal is not None:
+                self.modal.section_headings.append(_normalize_text(self._capture_text))
+            self._stop_capture()
+        elif tag == "dt" and self._capture_kind == "term":
+            self._current_term = _normalize_text(self._capture_text)
+            self._stop_capture()
+        elif tag == "dd" and self._capture_kind == "definition":
+            definition = _normalize_text(self._capture_text)
+            self._store_definition(definition)
+            self._current_term = None
+            self._stop_capture()
+        elif tag == "span" and self._capture_kind == "clip-heading":
+            self._clip_heading_parts.append(_normalize_text(self._capture_text))
+            self._stop_capture()
+        elif tag == "li" and self._current_clip is not None:
+            if self.modal is not None:
+                self.modal.clips.append(self._current_clip)
+            self._current_clip = None
+        elif tag == "div":
+            if self._in_clip_heading:
+                self._in_clip_heading = False
+                if self._current_clip is not None:
+                    if self._clip_heading_parts:
+                        self._current_clip.label = self._clip_heading_parts[0]
+                    if len(self._clip_heading_parts) > 1:
+                        self._current_clip.dynamic_range = self._clip_heading_parts[1]
+            self._info_div_depth -= 1
+            if self._info_div_depth == 0:
+                self._in_info_modal = False
+
+    def _start_capture(self, kind: str) -> None:
+        self._capture_kind = kind
+        self._capture_text = []
+
+    def _stop_capture(self) -> None:
+        self._capture_kind = None
+        self._capture_text = []
+
+    def _store_definition(self, definition: str) -> None:
+        if self._current_term is None or self.modal is None:
+            return
+        if self._current_clip is not None:
+            self._current_clip.fields[self._current_term] = definition
+            return
+        self.modal.general[self._current_term] = definition
+
+
+def _normalize_text(parts: list[str]) -> str:
+    return " ".join("".join(parts).split())
+
+
+def _parse_start_tags(html: str) -> _StartTagParser:
+    parser = _StartTagParser()
+    parser.feed(html)
+    return parser
+
+
+def _parse_info_modal(html: str) -> _ParsedInfoModal:
+    parser = _InfoModalParser()
+    parser.feed(html)
+    assert parser.modal is not None
+    return parser.modal
+
+
+def _css_block(css: str, selector: str) -> str:
+    selector_start = css.index(selector)
+    block_start = css.index("{", selector_start)
+    depth = 0
+    for idx in range(block_start, len(css)):
+        char = css[idx]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return css[block_start + 1 : idx]
+    raise AssertionError(f"Unterminated CSS block for selector: {selector}")
 
 
 @pytest.fixture
@@ -132,24 +295,32 @@ def _script_payload(html: str) -> ReportPayload:
 
 def test_build_html_renders_only_safe_slowpics_links(report_payload: ReportPayload) -> None:
     html = build_html(report_payload)
+    info_modal = _parse_info_modal(html)
 
     assert 'href="https://slow.pics/c/abc?x=1&amp;y=2"' in html
     assert 'target="_blank"' in html
     assert 'rel="noopener noreferrer"' in html
     assert "View on slow.pics" in html
+    assert info_modal.links["slow.pics"] == "https://slow.pics/c/abc?x=1&y=2"
+    assert info_modal.general["slow.pics"] == "https://slow.pics/c/abc?x=1&y=2"
 
     unsafe_payload: ReportPayload = {**report_payload, "slowpics_url": "javascript:alert(1)"}
     unsafe_html = build_html(unsafe_payload)
+    unsafe_info_modal = _parse_info_modal(unsafe_html)
 
     assert "javascript:alert(1)" in unsafe_html
     assert 'href="javascript:alert(1)"' not in unsafe_html
     assert "View on slow.pics" not in unsafe_html
+    assert "slow.pics" not in unsafe_info_modal.links
+    assert unsafe_info_modal.general["slow.pics"] == "javascript:alert(1)"
 
     no_upload_payload: ReportPayload = {**report_payload, "slowpics_url": None}
     no_upload_html = build_html(no_upload_payload)
+    no_upload_info_modal = _parse_info_modal(no_upload_html)
 
     assert "View on slow.pics" not in no_upload_html
     assert 'class="rv-link"' not in no_upload_html
+    assert no_upload_info_modal.general["slow.pics"] == "Not uploaded"
 
 
 def test_build_html_renders_frame_and_clip_selectors(report_payload: ReportPayload) -> None:
@@ -187,6 +358,7 @@ def test_build_html_renders_mode_aware_clip_controls(report_payload: ReportPaylo
     assert 'data-control-scope="pair" aria-label="Comparison pair"' in html
     assert 'data-control-scope="active" aria-label="Overlay clip" hidden' in html
     assert 'id="left-select" aria-label="Left clip"' in html
+    assert 'id="btn-swap-clips" class="rv-swap-button"' in html
     assert 'id="right-select" aria-label="Right clip"' in html
     assert 'id="active-select" aria-label="Overlay clip"' in html
 
@@ -197,58 +369,95 @@ def test_build_html_renders_frame_metadata_and_category_filters(
     html = build_html(report_payload)
 
     assert 'data-control-scope="frame-filters" aria-label="Frame category filters"' in html
-    assert 'data-category-key="__fc_all__" aria-pressed="true">All</button>' in html
+    assert 'data-category-key="__fc_all__" aria-pressed="true">All (2)</button>' in html
     assert 'data-category-key="cat-0" data-category="selected" aria-pressed="false"' in html
     assert 'data-category-key="cat-1" data-category="scene-cut" aria-pressed="false"' in html
-    assert '<span class="rv-filmstrip-label">Frame 10</span>' in html
-    assert '<span class="rv-filmstrip-detail">Source frame 10</span>' in html
+    assert '<span class="rv-filmstrip-label">Frame 10 • Selected</span>' in html
+    assert "Source frame 10</span>" not in html
     assert (
-        '<span class="rv-category-badge rv-filmstrip-category" '
-        'data-category-key="cat-1" data-category="scene-cut">scene-cut</span>'
+        '<span class="rv-filmstrip-accent" '
+        'data-category-key="cat-1" data-category="scene-cut"></span>'
     ) in html
-    assert 'data-category-key="cat-0" data-category="selected">selected</span></button>' in html
     assert 'value="1" data-category-key="cat-1" data-category="scene-cut">Frame 20</option>' in html
 
 
-def test_build_html_renders_collapsed_progressive_metadata(
+def test_build_html_renders_header_metadata(
+    report_payload: ReportPayload,
+) -> None:
+    html = build_html(report_payload)
+    tags = _parse_start_tags(html)
+    info_modal = _parse_info_modal(html)
+
+    assert "Generated 2026-05-22T12:00:00+00:00 • 2 frames • 2 clips" in html
+    assert tags.by_id["btn-help"][1]["class"] == "rv-header-help-btn"
+    assert tags.by_id["btn-info"][1]["class"] == "rv-header-info-btn"
+    assert info_modal.attrs["class"] == "rv-modal"
+    assert info_modal.attrs["aria-hidden"] == "true"
+    assert info_modal.attrs["role"] == "dialog"
+    assert info_modal.section_headings == ["General", "Clips"]
+    assert info_modal.general == {
+        "Title": "Renderer Contract",
+        "Report ID": "report_0123456789abcdef0123456789abcdef",
+        "Generated": "2026-05-22T12:00:00+00:00",
+        "Frames": "2",
+        "Clips": "2",
+        "Default Mode": "slider",
+        "Default Pair": 'REF <main> vs ENC "candidate"',
+        "slow.pics": "https://slow.pics/c/abc?x=1&y=2",
+    }
+    assert [(clip.label, clip.dynamic_range, clip.fields) for clip in info_modal.clips] == [
+        (
+            "REF <main>",
+            "SDR",
+            {
+                "Name": "reference",
+                "Resolution": "1920x1080",
+                "FPS": "24 fps",
+                "Frames": "100",
+            },
+        ),
+        (
+            'ENC "candidate"',
+            "HDR",
+            {
+                "Name": "encode",
+                "Resolution": "1920x1080",
+                "FPS": "24 fps",
+                "Frames": "100",
+            },
+        ),
+    ]
+
+
+def test_build_html_avoids_inline_styles(report_payload: ReportPayload) -> None:
+    html = build_html(report_payload)
+    tags = _parse_start_tags(html)
+
+    assert tags.tags_with_style == []
+
+
+def test_build_html_exposes_current_frame_metadata_hooks(
     report_payload: ReportPayload,
 ) -> None:
     html = build_html(report_payload)
 
-    assert '<section class="rv-metadata-bar" aria-label="Report metadata">' in html
-    assert '<details class="rv-disclosure" data-report-metadata>' in html
-    assert '<summary>Report <span class="rv-summary-value">slider</span></summary>' in html
-    assert "<dt>Report ID</dt>" in html
-    assert "report_0123456789abcdef0123456789abcdef" in html
-    assert "<dt>Default pair</dt>" in html
-    assert 'REF &lt;main&gt; vs ENC "candidate"' in html
-    assert '<details class="rv-disclosure" data-clip-metadata>' in html
-    assert '<li class="rv-clip-meta-item" data-clip-index="0">' in html
-    assert "<dt>Resolution</dt><dd>1920x1080</dd>" in html
-    assert "<dt>FPS</dt><dd>24 fps</dd>" in html
-    assert "<dt>Frames</dt><dd>100</dd>" in html
-    assert '<details class="rv-disclosure" data-frame-metadata>' in html
-    assert '<span class="rv-summary-value" data-current-frame-summary>Frame 10</span>' in html
+    assert "data-current-frame-label" in html
+    assert "data-current-frame-category-divider" in html
+    assert "data-current-frame-category" in html
 
 
-def test_build_html_exposes_current_frame_detail_hooks(
+def test_build_html_positions_stage_labels_outside_image_layers(
     report_payload: ReportPayload,
 ) -> None:
     html = build_html(report_payload)
 
-    assert "<dt>Label</dt><dd data-current-frame-label>Frame 10</dd>" in html
-    assert "<dt>Detail</dt><dd data-current-frame-detail>Source frame 10</dd>" in html
-    assert "<dt>Category</dt><dd data-current-frame-category>selected</dd>" in html
+    left_layer_start = html.index('<div class="rv-layer rv-left">')
+    stage_labels_start = html.index('<div class="rv-stage-labels" aria-hidden="true">')
+    left_layer_markup = html[left_layer_start:stage_labels_start]
 
-
-def test_build_html_metadata_disclosures_default_collapsed(
-    report_payload: ReportPayload,
-) -> None:
-    html = build_html(report_payload)
-
-    assert '<details class="rv-disclosure" data-report-metadata open>' not in html
-    assert '<details class="rv-disclosure" data-clip-metadata open>' not in html
-    assert '<details class="rv-disclosure" data-frame-metadata open>' not in html
+    assert stage_labels_start > left_layer_start
+    assert 'id="label-left"' not in left_layer_markup
+    assert 'id="label-right"' not in left_layer_markup
 
 
 def test_build_html_renders_empty_viewer_hooks_for_empty_payload(
@@ -268,11 +477,30 @@ def test_build_html_renders_empty_viewer_hooks_for_empty_payload(
         in html
     )
     assert '<div class="rv-empty-state" data-empty-state hidden></div>' in html
-    assert '<div class="rv-metadata-empty">No clips in payload.</div>' in html
-    assert "<dd data-current-frame-label>No frame selected</dd>" in html
-    assert "<dd data-current-frame-detail>No frame detail available.</dd>" in html
-    assert "<dd data-current-frame-category>none</dd>" in html
     assert 'class="rv-filmstrip-item"' not in html
+
+
+def test_build_html_avoids_duplicate_category_labels_when_label_matches_category(
+    report_payload: ReportPayload,
+) -> None:
+    payload: ReportPayload = {
+        **report_payload,
+        "frames": [
+            {
+                "number": 10,
+                "label": "Motion",
+                "detail": "Source frame 10",
+                "category": "motion",
+                "images": report_payload["frames"][0]["images"],
+            },
+        ],
+        "stats": {"frame_count": 1, "clip_count": 2},
+    }
+
+    html = build_html(payload)
+
+    assert '<span class="rv-filmstrip-label">Motion</span>' in html
+    assert "Motion • Motion" not in html
 
 
 def test_build_html_uses_internal_category_keys_for_reserved_category_text(
@@ -291,16 +519,15 @@ def test_build_html_uses_internal_category_keys_for_reserved_category_text(
 
     html = build_html(payload)
 
-    assert 'data-category-key="__fc_all__" aria-pressed="true">All</button>' in html
+    assert 'data-category-key="__fc_all__" aria-pressed="true">All (2)</button>' in html
     assert 'data-category-key="cat-0" data-category="__all__" aria-pressed="false"' in html
-    assert 'data-category-key="cat-0" data-category="__all__">__all__</span></button>' in html
     assert 'value="0" data-category-key="cat-0" data-category="__all__">Frame 10</option>' in html
     assert (
         'class="rv-filmstrip-item" data-idx="0" data-category-key="cat-0" data-category="__all__"'
     ) in html
     assert (
-        '<span class="rv-category-badge rv-filmstrip-category" '
-        'data-category-key="cat-0" data-category="__all__">__all__</span>'
+        '<span class="rv-filmstrip-accent" '
+        'data-category-key="cat-0" data-category="__all__"></span>'
     ) in html
     assert 'data-category-key="__all__"' not in html
 
@@ -362,6 +589,8 @@ def test_build_html_renders_viewport_audit_controls(report_payload: ReportPayloa
     assert 'id="btn-fullscreen"' in html
     assert 'aria-label="Enter fullscreen"' in html
     assert 'aria-pressed="false"' in html
+    assert 'id="btn-overlays"' in html
+    assert 'aria-label="Hide overlays"' in html
 
 
 def test_build_html_renders_keyboard_help_accessibility_hooks(
@@ -373,9 +602,17 @@ def test_build_html_renders_keyboard_help_accessibility_hooks(
         'id="help-modal" class="rv-modal" aria-hidden="true" role="dialog" '
         'aria-modal="true" aria-labelledby="help-modal-title" tabindex="-1"'
     ) in html
-    assert 'id="help-modal-title" class="rv-modal-title">Keyboard Shortcuts</div>' in html
+    assert 'id="help-modal-title" class="rv-modal-title">Viewer Shortcuts</div>' in html
     assert (
-        '<div class="rv-shortcut-row"><span>Reset Viewport</span><span class="rv-key">R</span></div>'
+        '<div class="rv-shortcut-row"><span>Swap Clips</span><span class="rv-key">X</span></div>'
+        in html
+    )
+    assert (
+        '<div class="rv-shortcut-row"><span>Toggle Overlays</span><span class="rv-key">H</span></div>'
+        in html
+    )
+    assert (
+        '<div class="rv-shortcut-row"><span>Reset Viewport</span><span class="rv-key">R / Double-click</span></div>'
         in html
     )
     assert (
@@ -430,22 +667,46 @@ def test_viewer_assets_keep_divider_slider_only_and_pointer_safe() -> None:
     css = get_css()
     js = get_js()
 
-    assert '--font-sans: -apple-system, "BlinkMacSystemFont", "Segoe UI"' in css
+    assert "color-scheme: dark;" in css
+    assert '--font-sans: "Inter", "SF Pro Text", "Segoe UI Variable Text"' in css
     assert ".rv-viewer-stage" in css
     assert "touch-action: none;" in css
     assert "cursor: grab;" in css
-    assert ".rv-viewer-stage.is-panning { cursor: grabbing; }" in css
-    assert ".rv-divider {\n    display: none;" in css
-    assert ".rv-mode-slider .rv-divider { display: block; }" in css
+    assert "cursor: grabbing;" in _css_block(css, ".rv-viewer-stage.is-panning")
+    assert "display: none;" in _css_block(css, ".rv-divider")
+    assert "display: block;" in _css_block(css, ".rv-mode-slider .rv-divider")
     assert ".rv-viewer-stage:fullscreen" in css
     assert "translate(var(--pan-x, 0px), var(--pan-y, 0px)) scale(var(--zoom-level, 1))" in css
     assert ".rv-right { transform: translate(var(--align-x, 0px), var(--align-y, 0px)); }" in css
     assert ".rv-overlay-label:empty { display: none; }" in css
+    assert "select option," in css
+    assert 'background-image: url("data:image/svg+xml,' in css
+    assert "position: absolute;" in _css_block(css, ".rv-stage-labels")
+    assert "display: none;" in _css_block(css, ".rv-mode-diff .rv-stage-labels")
+    assert "bottom: 16px;" in _css_block(css, ".rv-overlay-label")
+    assert "color: var(--text-primary);" in _css_block(css, ".rv-overlay-label")
+    assert "backdrop-filter:" not in _css_block(css, ".rv-overlay-label")
+    assert "left: 50%;" in _css_block(css, ".rv-stage-overlay-info")
+    assert "transform: translateX(-50%);" in _css_block(css, ".rv-stage-overlay-info")
+    assert "position: absolute;" in _css_block(css, ".rv-filmstrip-caption")
+    assert "text-shadow:" in _css_block(css, ".rv-filmstrip-label")
 
+    assert "imageLoadPromises: new Map()," in js
+    assert "void this.ensureImageReady(src);" in js
+    assert "Promise.all([" in js
+    assert "this.ensureImageReady(imageState.leftSrc)" in js
+    assert "this.ensureImageReady(imageState.rightSrc)" in js
+    assert "window.requestAnimationFrame(() => commit());" in js
+    assert "preloadedSrcs" not in js
     assert "leftLabelTxt = `${leftClip.label} (Left)`;" in js
     assert "rightLabelTxt = `${rightClip.label} (Right)`;" in js
+    assert "leftLabelTxt = leftClip.label;" in js
+    assert "rightLabelTxt = rightClip.label;" in js
     assert "leftLabelTxt = activeClip.label;" in js
     assert 'rightLabelTxt = "";' in js
+    assert "this.dom.stage.className = `rv-viewer-stage rv-mode-${mode}`;" not in js
+    assert "this.dom.stage.classList.remove(" in js
+    assert "this.dom.stage.classList.add(`rv-mode-${mode}`);" in js
 
     assert "addEventListener('pointerdown'" in js
     assert "addEventListener('pointermove'" in js
@@ -503,6 +764,7 @@ def test_viewer_assets_manage_help_focus_and_escape_semantics() -> None:
     js = get_js()
 
     assert "helpRestoreFocus: null" in js
+    assert "infoRestoreFocus: null" in js
     assert "openHelpModal()" in js
     assert "this.state.helpRestoreFocus = activeElement" in js
     assert "closeHelpModal(options = {})" in js
@@ -513,6 +775,10 @@ def test_viewer_assets_manage_help_focus_and_escape_semantics() -> None:
     assert "this.closeHelpModal();" in js
     assert "document.exitFullscreen?.();" in js
     assert "this.openHelpModal();" in js
+    assert "openInfoModal()" in js
+    assert "handleInfoModalKey(e)" in js
+    assert "this.state.infoRestoreFocus = activeElement" in js
+    assert "this.closeInfoModal();" in js
 
 
 def test_viewer_assets_stop_modal_escape_before_document_fullscreen_handler() -> None:
@@ -528,6 +794,18 @@ def test_viewer_assets_stop_modal_escape_before_document_fullscreen_handler() ->
     assert modal_escape_guard in js
 
 
+def test_viewer_assets_close_alignment_popover_before_global_escape_and_shortcuts() -> None:
+    js = get_js()
+
+    assert "isAlignmentPopoverOpen()" in js
+    assert "setAlignmentPopoverOpen(isOpen, options = {})" in js
+    assert "this.closeAlignmentPopover({ restoreFocus: false });" in js
+    assert "e.stopPropagation();" in js
+    assert "if (this.isAlignmentPopoverOpen()) {" in js
+    assert "this.closeAlignmentPopover();" in js
+    assert "if (this.isAlignmentPopoverOpen()) return;" in js
+
+
 def test_viewer_assets_wire_report_scoped_viewport_persistence() -> None:
     js = get_js()
 
@@ -539,6 +817,7 @@ def test_viewer_assets_wire_report_scoped_viewport_persistence() -> None:
     assert "storage.setItem(this.state.storageKey, JSON.stringify(payload))" in js
     assert "mode: this.state.mode" in js
     assert "panX: this.state.panX" in js
+    assert "overlaysHidden: this.state.overlaysHidden" in js
     assert "alignmentPreset: this.state.alignmentPreset" in js
 
 
@@ -548,11 +827,21 @@ def test_viewer_assets_wire_pan_wheel_zoom_and_alignment_hooks() -> None:
     assert "panX: 0" in js
     assert "panY: 0" in js
     assert "this.dom.stage.addEventListener('wheel'" in js
+    assert "this.dom.stage.addEventListener('dblclick'" in js
+    assert "if (this.state.mode === 'overlay' || this.state.mode === 'diff') return;" in js
     assert "this.zoomAtPoint(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1);" in js
     assert "this.setPan(this.state.panX + dx, this.state.panY + dy, { save: false });" in js
     assert "shouldPanFromPointer" in js
     assert "this.state.mode !== 'slider'" in js
     assert "updateSliderFromPointer(e);" in js
+    assert "pointerPositions: new Map()" in js
+    assert "capturedPointerIds: new Set()" in js
+    assert "pinchStartDistance: 0" in js
+    assert "trackedTouchPointers()" in js
+    assert "Math.hypot(dx, dy)" in js
+    assert "startPinchFromTrackedPointers()" in js
+    assert "updatePinchFromTrackedPointers()" in js
+    assert "finishPinchInteraction()" in js
     assert "this.dom.stage.classList.add('is-panning');" in js
     assert "this.dom.canvas.style.setProperty('--pan-x', `${this.state.panX}px`);" in js
     assert "alignmentPreset: 'none'" in js
@@ -575,7 +864,7 @@ def test_viewer_assets_keep_overlay_and_blink_clip_semantics() -> None:
     css = get_css()
     js = get_js()
 
-    assert ".rv-control-group[hidden] { display: none; }" in css
+    assert "display: none;" in _css_block(css, ".rv-control-group[hidden]")
     assert "const selection = this.state.data.default_selection || {};" in js
     assert "this.state.leftClipIdx = left;" in js
     assert "this.state.rightClipIdx = right;" in js
@@ -583,6 +872,7 @@ def test_viewer_assets_keep_overlay_and_blink_clip_semantics() -> None:
     assert "this.dom.pairControls.hidden = isOverlay;" in js
     assert "this.dom.activeControls.hidden = !isOverlay;" in js
     assert "this.dom.leftSelect.disabled = isOverlay;" in js
+    assert "this.dom.btnSwapClips.disabled = isOverlay || this.clipCount() <= 1;" in js
     assert "this.dom.activeSelect.disabled = !isOverlay;" in js
     assert "this.dom.leftSelect.setAttribute('aria-label', 'Base clip');" in js
     assert "this.dom.rightSelect.setAttribute('aria-label', 'Compare clip');" in js
@@ -591,6 +881,11 @@ def test_viewer_assets_keep_overlay_and_blink_clip_semantics() -> None:
     assert "this.state.activeClipIdx === this.state.leftClipIdx" in js
     assert "? this.state.rightClipIdx" in js
     assert ": this.state.leftClipIdx" in js
+    assert (
+        "this.state.mode === 'slider' || this.state.mode === 'diff' || this.state.mode === 'blink'"
+        in js
+    )
+    assert "isBlink && this.state.activeClipIdx === this.state.rightClipIdx" in js
     assert "(this.state.activeClipIdx + 1) % this.state.data.clips.length" not in js
     assert "this.state.mode === 'diff' || this.state.mode === 'blink'" in js
 
@@ -600,7 +895,9 @@ def test_viewer_assets_wire_category_filtering_and_visible_navigation() -> None:
     js = get_js()
 
     assert ".rv-filter-chip.active" in css
-    assert ".rv-filmstrip-item[hidden] { display: none; }" in css
+    assert ".rv-filter-chip::before" in css
+    assert "--category-accent: var(--accent);" in css
+    assert "display: none;" in _css_block(css, ".rv-filmstrip-item[hidden]")
     assert ".rv-filmstrip-caption" in css
     assert ".rv-category-badge" in css
 
@@ -626,11 +923,15 @@ def test_viewer_assets_wire_metadata_and_error_empty_state_hooks() -> None:
     css = get_css()
     js = get_js()
 
-    assert ".rv-metadata-bar" in css
-    assert ".rv-disclosure[open]" in css
+    assert ".rv-stage-overlay-info" in css
+    assert ".rv-viewer-stage.rv-overlays-hidden .rv-overlay-label" in css
+    assert ".rv-align-popover" in css
     assert '.rv-status[data-tone="error"]' in css
     assert '.rv-status[data-tone="warning"]' in css
-    assert ".rv-empty-state[hidden] { display: none; }" in css
+    assert "display: none;" in _css_block(css, ".rv-empty-state[hidden]")
+    assert ".rv-modal-content--wide" in css
+    assert ".rv-modal-actions" in css
+    assert ".rv-zoom-value" in css
 
     assert "readPayload()" in js
     assert "normalizePayload(payload)" in js
@@ -640,16 +941,31 @@ def test_viewer_assets_wire_metadata_and_error_empty_state_hooks() -> None:
     assert "if (control === this.dom.btnHelp) return;" in js
     assert "hasRenderableData()" in js
     assert "updateCurrentFrameMetadata(frameData)" in js
-    assert "document.querySelector('[data-current-frame-summary]')" in js
-    assert "document.querySelector('[data-current-frame-detail]')" in js
+    assert "this.updateCurrentFrameMetadata(null);" in js
+    assert "document.querySelector('[data-current-frame-detail]')" not in js
+    assert "normalizedDisplayToken(value)" in js
+    assert "this.dom.currentFrameCategoryDivider.hidden = !showCategory;" in js
     assert "Selected frame image data is unavailable." in js
     assert "Report viewer markup is incomplete." in js
+
+
+def test_viewer_assets_toggle_overlays_and_keep_split_pairs_distinct() -> None:
+    js = get_js()
+
+    assert "setOverlaysHidden(hidden, options = {})" in js
+    assert "updateOverlayVisibility()" in js
+    assert "this.dom.btnOverlays.addEventListener('click'" in js
+    assert "case 'h': case 'H': this.setOverlaysHidden(!this.state.overlaysHidden); break;" in js
+    assert "case 'x': case 'X': this.swapPairClips(); break;" in js
+    assert "ensureDistinctPairSelection(mode = this.state.mode)" in js
+    assert "nextDistinctClipIndex(startIdx, excludedIdx, direction = 1)" in js
+    assert "this.state.rightClipIdx = this.nextDistinctClipIndex(" in js
 
 
 def test_viewer_assets_preload_adjacent_visible_frames_and_active_clips() -> None:
     js = get_js()
 
-    assert "preloadedSrcs: new Set()" in js
+    assert "imageLoadPromises: new Map()" in js
     assert "this.preloadImages();" in js
     assert "preloadFrameIndexes()" in js
     assert "if (position > 0) indexes.push(visibleIndexes[position - 1]);" in js
@@ -664,6 +980,7 @@ def test_viewer_assets_preload_adjacent_visible_frames_and_active_clips() -> Non
     assert "const images = Array.isArray(frame.images) ? frame.images : [];" in js
     assert "const src = images[clipIdx]?.src;" in js
     assert "src.startsWith('data:')" in js
-    assert "this.state.preloadedSrcs.has(src)" in js
+    assert "this.state.imageLoadPromises.get(src)" in js
     assert "const image = new Image();" in js
     assert "image.src = src;" in js
+    assert "image.decode().catch(() => undefined).finally(finish);" in js

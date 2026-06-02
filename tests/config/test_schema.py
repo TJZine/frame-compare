@@ -1,10 +1,12 @@
 """Tests for configuration schema validation."""
 
+import tomllib
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
+from frame_compare.config.defaults import DEFAULT_CONFIG_TOML
 from frame_compare.config.loader import get_default_config
 from frame_compare.config.schema import (
     AnalysisConfig,
@@ -49,6 +51,7 @@ def test_default_config_values() -> None:
     assert config.audio_alignment.channel_strategy == "mono_downmix"
     assert config.audio_alignment.refinement_mode == "disabled"
     assert config.audio_alignment.comparison_streams == {}
+    assert config.slowpics.confirm_upload_after_report is False
 
 
 def test_analysis_frame_count_bounds_too_low() -> None:
@@ -166,8 +169,13 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert color.target_nits == 100
     assert color.contrast_recovery == 0.3
     assert color.preset == "reference"
+    assert slowpics.confirm_upload_after_report is False
     assert slowpics.visibility == Visibility.UNLISTED
     assert slowpics.max_retries == 3
+    assert slowpics.copy_url_to_clipboard is True
+    assert slowpics.open_in_browser is True
+    assert slowpics.create_url_shortcut is True
+    assert slowpics.webhook_url is None
     assert tmdb.enabled is True
     assert tmdb.api_key is None
     assert tmdb.timeout_seconds == 10.0
@@ -185,6 +193,44 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert logging.level == LogLevel.INFO
     assert logging.format == LogFormat.CONSOLE
     assert logging.file is None
+
+
+def test_slowpics_config_public_surface_is_frozen_to_approved_fields_and_defaults() -> None:
+    """slow.pics config remains the documented approved public surface."""
+    expected_defaults = {
+        "auto_upload": False,
+        "confirm_upload_after_report": False,
+        "visibility": "unlisted",
+        "delete_after_upload": False,
+        "timeout_seconds": 60.0,
+        "max_retries": 3,
+        "copy_url_to_clipboard": True,
+        "open_in_browser": True,
+        "create_url_shortcut": True,
+        "webhook_url": None,
+    }
+
+    assert list(SlowpicsConfig.model_fields) == list(expected_defaults)
+    assert SlowpicsConfig().model_dump(mode="json") == expected_defaults
+    assert get_default_config().slowpics.model_dump(mode="json") == expected_defaults
+
+
+def test_default_config_toml_documents_approved_slowpics_defaults() -> None:
+    """Default config template keeps the approved slow.pics config surface visible."""
+    data = tomllib.loads(DEFAULT_CONFIG_TOML)
+
+    assert data["slowpics"] == {
+        "auto_upload": False,
+        "confirm_upload_after_report": False,
+        "visibility": "unlisted",
+        "delete_after_upload": False,
+        "timeout_seconds": 60.0,
+        "max_retries": 3,
+        "copy_url_to_clipboard": True,
+        "open_in_browser": True,
+        "create_url_shortcut": True,
+    }
+    assert "# webhook_url = null" in DEFAULT_CONFIG_TOML
 
 
 def test_schema_model_enums_accept_config_strings_and_reject_unknown_values() -> None:
@@ -216,6 +262,12 @@ def test_schema_model_enums_accept_config_strings_and_reject_unknown_values() ->
 
     with pytest.raises(ValidationError):
         LoggingConfig.model_validate({"level": "debug"})
+
+
+def test_slowpics_confirm_upload_after_report_accepts_explicit_bool() -> None:
+    slowpics = SlowpicsConfig.model_validate({"confirm_upload_after_report": True})
+
+    assert slowpics.confirm_upload_after_report is True
 
 
 def test_audio_alignment_new_config_controls_validate_and_reject_unknown_values() -> None:

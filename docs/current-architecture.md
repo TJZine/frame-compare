@@ -26,7 +26,13 @@ The main run path is:
 5. Create a fresh run folder when configured.
 6. Load or compute clip probe data.
 7. Execute orchestration phases in order:
-   `frame_plan -> analyze -> align -> render -> metadata -> dovi -> publish -> report`
+   `frame_plan -> analyze -> align -> render -> metadata -> dovi -> publish -> report -> post_report_cleanup`
+
+When effective config enables both `slowpics.auto_upload` and
+`slowpics.confirm_upload_after_report`, the opted-in interactive path changes
+only the post-render ordering:
+`frame_plan -> analyze -> align -> render -> metadata -> dovi -> report -> confirm_slowpics_upload -> publish -> post_report_cleanup`.
+The non-confirmed flow keeps the normal ordering above.
 
 `frame_compare.orchestration.context.RunContext` carries the shared run state across phases.
 Phase task functions return explicit phase-output DTOs, and `execution.py` applies those
@@ -117,7 +123,10 @@ External runtime boundaries:
 - VapourSynth runtime and plugins
 - TMDB HTTP API
 - slow.pics HTTP API
+- outbound slow.pics post-upload webhooks
 - default browser auto-open for generated reports
+- default browser open for slow.pics URLs in interactive CLI runs
+- clipboard integration for slow.pics URLs in interactive CLI runs
 - Docker build/test runtime
 - Windows PowerShell installer and updater scripts
 
@@ -127,17 +136,85 @@ Keep these integrations at their current owners:
   `frame_compare.services.tmdb_resolution` owns resolver policy and
   `frame_compare.services.tmdb_lookup` owns low-level TMDB HTTP and response mapping
 - publishing: `frame_compare.services.publishers`
-- browser auto-open for generated reports: `frame_compare.cli.entry`
+- slow.pics post-upload shortcut/webhook policy and action aggregation:
+  `frame_compare.services.slowpics_post_upload`
+- browser auto-open for generated reports, slow.pics browser opening, clipboard
+  copy, report-confirmed upload prompting, and report/slow.pics browser
+  precedence rules:
+  `frame_compare.cli.entry`
+- slow.pics URL shortcut creation: `frame_compare.services.slowpics_shortcut`
+- isolated slow.pics post-upload webhook delivery:
+  `frame_compare.services.slowpics_webhook`
 - HTML report generation: `frame_compare.services.report`
 - VS loading and HDR/tonemap logic: `frame_compare.vs.*`
 - packaging/install/update flow: `tools/windows_portable/**`
 
+slow.pics publishing is service-owned. `frame_compare.services.publishers` owns
+the browser-compatible slow.pics client flow: `GET /comparison`,
+`POST /upload/comparison`, and planned `POST /upload/image/{imageUuid}` image
+requests. `frame_compare.services.slowpics_upload_plan` owns the explicit
+upload-plan seam for current render artifacts, row/image names, and upload
+ordering; the final upload path uses that plan and does not scan the screenshot
+directory for membership. After a successful upload, orchestration carries the
+exact uploaded planned local file paths into `post_report_cleanup` and carries
+typed post-upload action results plus warnings returned by
+`frame_compare.services.slowpics_post_upload` into the final `RunResult`.
+Orchestration does not own clipboard, browser, shortcut, or webhook side-effect
+policy. That cleanup phase owns report-safe local deletion policy for
+`slowpics.delete_after_upload` and never reconstructs deletion membership from
+directories, labels, render artifacts, or shortcut outputs after upload. The
+`.url` shortcut is not cleanup membership.
+
+Report-confirmed slow.pics upload uses a CLI-owned confirmation callback seam
+carried on `RunDependencies.confirm_slowpics_upload`. Orchestration owns the
+typed request, decision, confirmation-status state, phase ordering, and upload
+skip decisions; it does not import Typer, open browsers, read stdin, or print
+prompt text. If a report-confirmed runtime path reaches orchestration without
+the callback, orchestration raises a typed config error before publish rather
+than silently uploading. When report generation warns, fails, or produces no
+report path, `confirm_slowpics_upload` records `report_unavailable`, emits the
+skip warning, and prevents slow.pics upload. When the user declines through the
+CLI callback, `publish` is skipped and `slowpics_url` stays `None`.
+
+In the report-confirmed workflow, the local report is generated before upload
+and is not regenerated after upload. The report payload therefore has no
+slow.pics URL even if the later upload succeeds; the CLI summary is the owner
+for presenting the uploaded URL. CLI report presentation happens before the
+confirmation prompt and before any later post-upload slow.pics browser opening.
+The existing non-confirmed rule remains: an attempted slow.pics browser open
+suppresses generated-report auto-open for that run.
+
+`frame_compare.services.slowpics_shortcut` owns deterministic `.url` output for
+successful slow.pics uploads. It selects the current run folder when present, or
+the safe common parent of the resolved screenshots/generated directories when
+run folders are disabled. The service rejects unsafe parent choices outside the
+workspace root, filesystem anchors, drive/share roots, and the user home
+directory; filename selection is deterministic and repeated writes overwrite the
+same path.
+
+`frame_compare.services.slowpics_webhook` owns isolated outbound webhook
+delivery for successful slow.pics uploads. It validates strict external HTTPS
+targets, rejects disallowed IP literals and DNS answers, connects to a
+prevalidated pinned address while preserving TLS verification for the original
+hostname, sends the JSON `content` payload without redirects, and does not reuse
+slow.pics client cookies, headers, proxy/environment trust, or transport state.
+Webhook failures are warning-only and redact configured URL details.
+
+`frame_compare.cli.entry` and its run-command helper own interactive-only
+slow.pics URL copy/browser actions and the precedence rule between slow.pics
+browser opening and generated-report auto-open. Those actions run only for
+human, non-quiet, TTY stdout runs; JSON stdout stays a single object.
+The same CLI owner presents the local report and asks for confirmation in the
+report-confirmed workflow before post-upload URL actions are considered.
+
 `frame_compare.services.report` owns the static offline report payload and viewer
 assets. The generated viewer exposes slider, overlay, diff, and pair-based blink
-modes; frame/category navigation; progressive report, clip, and frame metadata;
+modes; frame/category navigation; an info modal for report and clip metadata plus
+current-frame metadata in the stage overlay;
 browser-local view mode, clip selection, viewport/zoom, reveal, and alignment state
 scoped by report identity; viewport pan, zoom, and fit controls; and adjacent-frame
-preloading.
+preloading. It does not own slow.pics upload policy, prompting, or browser side
+effects.
 
 Screenshot rendering owns its geometry and writer policy inside `frame_compare.render`:
 `frame_compare.render.geometry` plans optional aligned crop/scale/pad geometry, render
