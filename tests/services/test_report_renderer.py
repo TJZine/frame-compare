@@ -446,6 +446,20 @@ def test_build_html_exposes_current_frame_metadata_hooks(
     assert "data-current-frame-category" in html
 
 
+def test_build_html_positions_stage_labels_outside_image_layers(
+    report_payload: ReportPayload,
+) -> None:
+    html = build_html(report_payload)
+
+    left_layer_start = html.index('<div class="rv-layer rv-left">')
+    stage_labels_start = html.index('<div class="rv-stage-labels" aria-hidden="true">')
+    left_layer_markup = html[left_layer_start:stage_labels_start]
+
+    assert stage_labels_start > left_layer_start
+    assert 'id="label-left"' not in left_layer_markup
+    assert 'id="label-right"' not in left_layer_markup
+
+
 def test_build_html_renders_empty_viewer_hooks_for_empty_payload(
     report_payload: ReportPayload,
 ) -> None:
@@ -667,12 +681,23 @@ def test_viewer_assets_keep_divider_slider_only_and_pointer_safe() -> None:
     assert ".rv-overlay-label:empty { display: none; }" in css
     assert "select option," in css
     assert 'background-image: url("data:image/svg+xml,' in css
+    assert "position: absolute;" in _css_block(css, ".rv-stage-labels")
+    assert "display: none;" in _css_block(css, ".rv-mode-diff .rv-stage-labels")
     assert "bottom: 16px;" in _css_block(css, ".rv-overlay-label")
+    assert "color: var(--text-primary);" in _css_block(css, ".rv-overlay-label")
+    assert "backdrop-filter:" not in _css_block(css, ".rv-overlay-label")
     assert "left: 50%;" in _css_block(css, ".rv-stage-overlay-info")
     assert "transform: translateX(-50%);" in _css_block(css, ".rv-stage-overlay-info")
     assert "position: absolute;" in _css_block(css, ".rv-filmstrip-caption")
     assert "text-shadow:" in _css_block(css, ".rv-filmstrip-label")
 
+    assert "imageLoadPromises: new Map()," in js
+    assert "void this.ensureImageReady(src);" in js
+    assert "Promise.all([" in js
+    assert "this.ensureImageReady(imageState.leftSrc)" in js
+    assert "this.ensureImageReady(imageState.rightSrc)" in js
+    assert "window.requestAnimationFrame(() => commit());" in js
+    assert "preloadedSrcs" not in js
     assert "leftLabelTxt = `${leftClip.label} (Left)`;" in js
     assert "rightLabelTxt = `${rightClip.label} (Right)`;" in js
     assert "leftLabelTxt = leftClip.label;" in js
@@ -939,7 +964,7 @@ def test_viewer_assets_toggle_overlays_and_keep_split_pairs_distinct() -> None:
 def test_viewer_assets_preload_adjacent_visible_frames_and_active_clips() -> None:
     js = get_js()
 
-    assert "preloadedSrcs: new Set()" in js
+    assert "imageLoadPromises: new Map()" in js
     assert "this.preloadImages();" in js
     assert "preloadFrameIndexes()" in js
     assert "if (position > 0) indexes.push(visibleIndexes[position - 1]);" in js
@@ -954,6 +979,7 @@ def test_viewer_assets_preload_adjacent_visible_frames_and_active_clips() -> Non
     assert "const images = Array.isArray(frame.images) ? frame.images : [];" in js
     assert "const src = images[clipIdx]?.src;" in js
     assert "src.startsWith('data:')" in js
-    assert "this.state.preloadedSrcs.has(src)" in js
+    assert "this.state.imageLoadPromises.get(src)" in js
     assert "const image = new Image();" in js
     assert "image.src = src;" in js
+    assert "image.decode().catch(() => undefined).finally(finish);" in js

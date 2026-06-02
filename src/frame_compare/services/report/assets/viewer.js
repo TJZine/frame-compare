@@ -24,7 +24,8 @@ const ReportViewer = {
         activeCategoryKey: ALL_CATEGORY_FILTER_KEY,
         overlaysHidden: false,
         categoryFilterKeys: new Map(),
-        preloadedSrcs: new Set(),
+        imageLoadPromises: new Map(),
+        imageRequestToken: 0,
         helpRestoreFocus: null,
         infoRestoreFocus: null,
         rawAlignX: null,
@@ -1643,6 +1644,77 @@ const ReportViewer = {
         }
     },
 
+    commitImageState(imageState) {
+        const requestToken = ++this.state.imageRequestToken;
+        const commit = () => {
+            if (requestToken !== this.state.imageRequestToken) return;
+            this.applyImageState(imageState);
+        };
+
+        if (!this.shouldAwaitAtomicDiffSwap(imageState)) {
+            commit();
+            return;
+        }
+
+        Promise.all([
+            this.ensureImageReady(imageState.leftSrc),
+            this.ensureImageReady(imageState.rightSrc),
+        ]).then(() => {
+            if (typeof window.requestAnimationFrame === 'function') {
+                window.requestAnimationFrame(() => commit());
+                return;
+            }
+            commit();
+        });
+    },
+
+    shouldAwaitAtomicDiffSwap(imageState) {
+        return this.state.mode === 'diff'
+            && (
+                this.dom.leftImg.getAttribute('src') !== imageState.leftSrc
+                || this.dom.rightImg.getAttribute('src') !== imageState.rightSrc
+            );
+    },
+
+    applyImageState(imageState) {
+        const {
+            frameData,
+            leftSrc,
+            rightSrc,
+            leftAlt,
+            rightAlt,
+            leftLabelTxt,
+            rightLabelTxt,
+            isOverlay,
+            isBlink,
+        } = imageState;
+
+        if (this.dom.leftImg.getAttribute('src') !== leftSrc) {
+            if (this.dom.sizerImg && this.dom.sizerImg.getAttribute('src') !== leftSrc) {
+                this.dom.sizerImg.src = leftSrc;
+            }
+            this.dom.leftImg.src = leftSrc;
+        }
+        if (this.dom.rightImg.getAttribute('src') !== rightSrc) {
+            this.dom.rightImg.src = rightSrc;
+        }
+
+        this.dom.leftImg.alt = leftAlt;
+        this.dom.rightImg.alt = rightAlt;
+        this.dom.labelLeft.textContent = leftLabelTxt;
+        this.dom.labelRight.textContent = rightLabelTxt;
+        this.updateCurrentFrameMetadata(frameData);
+
+        this.dom.leftLayer.classList.toggle(
+            'active',
+            isOverlay || (isBlink && this.state.activeClipIdx === this.state.leftClipIdx)
+        );
+        this.dom.rightLayer.classList.toggle(
+            'active',
+            isBlink && this.state.activeClipIdx === this.state.rightClipIdx
+        );
+    },
+
     updateImages() {
         const frameData = this.state.data.frames[this.state.currentFrameIdx];
         if (!frameData) {
@@ -1655,7 +1727,9 @@ const ReportViewer = {
 
         let leftSrc, rightSrc;
         let leftLabelTxt, rightLabelTxt;
-        this.updateCurrentFrameMetadata(frameData);
+        let leftAlt, rightAlt;
+        const isOverlay = this.state.mode === 'overlay';
+        const isBlink = this.state.mode === 'blink';
 
         if (this.state.mode === 'slider' || this.state.mode === 'diff' || this.state.mode === 'blink') {
             const leftImage = frameData.images?.[this.state.leftClipIdx];
@@ -1678,6 +1752,8 @@ const ReportViewer = {
                 leftLabelTxt = `${leftClip.label} (Left)`;
                 rightLabelTxt = `${rightClip.label} (Right)`;
             }
+            leftAlt = `${leftClip.label} - Frame ${frameData.number}`;
+            rightAlt = `${rightClip.label} - Frame ${frameData.number}`;
 
             // For Diff mode, right layer is the "compare" one which gets difference blend
             // Left layer is base.
@@ -1700,47 +1776,27 @@ const ReportViewer = {
 
             leftLabelTxt = activeClip.label;
             rightLabelTxt = "";
+            leftAlt = `${activeClip.label} - Frame ${frameData.number}`;
+            rightAlt = `${rightClip.label} - Frame ${frameData.number}`;
         }
 
         this.hideStageMessage();
         this.clearStatus();
-
-        if (this.dom.leftImg.getAttribute('src') !== leftSrc) {
-            if (this.dom.sizerImg && this.dom.sizerImg.getAttribute('src') !== leftSrc) {
-                this.dom.sizerImg.src = leftSrc;
-            }
-            this.dom.leftImg.src = leftSrc;
-            // Alt text update
-            const clip = this.state.mode === 'overlay'
-                ? this.state.data.clips[this.state.activeClipIdx]
-                : this.state.data.clips[this.state.leftClipIdx];
-            const clipName = clip?.label || 'Clip';
-            this.dom.leftImg.alt = `${clipName} - Frame ${frameData.number}`;
-        }
-        if (this.dom.rightImg.getAttribute('src') !== rightSrc) {
-            this.dom.rightImg.src = rightSrc;
-            // Alt text update for right image (only relevant in split modes)
-            const clipName = this.state.data.clips[this.state.rightClipIdx]?.label || 'Clip';
-            this.dom.rightImg.alt = `${clipName} - Frame ${frameData.number}`;
-        }
-
-        this.dom.labelLeft.textContent = leftLabelTxt;
-        this.dom.labelRight.textContent = rightLabelTxt;
-
-        // Toggle visibility classes based on mode logic in CSS
-        const isOverlay = this.state.mode === 'overlay';
-        const isBlink = this.state.mode === 'blink';
-        this.dom.leftLayer.classList.toggle(
-            'active',
-            isOverlay || (isBlink && this.state.activeClipIdx === this.state.leftClipIdx)
-        );
-        this.dom.rightLayer.classList.toggle(
-            'active',
-            isBlink && this.state.activeClipIdx === this.state.rightClipIdx
-        );
+        this.commitImageState({
+            frameData,
+            leftSrc,
+            rightSrc,
+            leftAlt,
+            rightAlt,
+            leftLabelTxt,
+            rightLabelTxt,
+            isOverlay,
+            isBlink,
+        });
     },
 
     clearFrameImages() {
+        this.state.imageRequestToken += 1;
         if (this.dom.sizerImg) this.dom.sizerImg.src = EMPTY_IMAGE_SRC;
         if (this.dom.leftImg) {
             this.dom.leftImg.src = EMPTY_IMAGE_SRC;
@@ -1836,11 +1892,46 @@ const ReportViewer = {
     },
 
     preloadImage(src) {
-        if (!src || src.startsWith('data:') || this.state.preloadedSrcs.has(src)) return;
+        void this.ensureImageReady(src);
+    },
 
-        this.state.preloadedSrcs.add(src);
-        const image = new Image();
-        image.src = src;
+    ensureImageReady(src) {
+        if (!src || src.startsWith('data:')) return Promise.resolve();
+
+        const existingPromise = this.state.imageLoadPromises.get(src);
+        if (existingPromise) return existingPromise;
+
+        const promise = new Promise(resolve => {
+            const image = new Image();
+            let settled = false;
+            const finish = () => {
+                if (settled) return;
+                settled = true;
+                resolve();
+            };
+            const decodeAndFinish = () => {
+                if (typeof image.decode === 'function') {
+                    image.decode().catch(() => undefined).finally(finish);
+                    return;
+                }
+                finish();
+            };
+
+            image.addEventListener('load', decodeAndFinish, { once: true });
+            image.addEventListener('error', finish, { once: true });
+            image.decoding = 'async';
+            image.src = src;
+            if (image.complete) {
+                if (image.naturalWidth > 0 || image.naturalHeight > 0) {
+                    decodeAndFinish();
+                } else {
+                    finish();
+                }
+            }
+        });
+
+        this.state.imageLoadPromises.set(src, promise);
+        return promise;
     }
 };
 

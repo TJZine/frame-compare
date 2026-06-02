@@ -427,13 +427,15 @@ def _render_stage() -> str:
             <img src="data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=" alt="" class="rv-sizer" aria-hidden="true">
             <div class="rv-layer rv-left">
                 <img src="" alt="" class="rv-image">
-                <div id="label-left" class="rv-overlay-label"></div>
             </div>
             <div class="rv-layer rv-right">
                 <img src="" alt="" class="rv-image">
-                <div id="label-right" class="rv-overlay-label right"></div>
             </div>
             <div class="rv-divider"><div class="rv-divider-handle"></div></div>
+            <div class="rv-stage-labels" aria-hidden="true">
+                <div id="label-left" class="rv-overlay-label"></div>
+                <div id="label-right" class="rv-overlay-label right"></div>
+            </div>
         </div>
         <div class="rv-stage-overlay-info">
             <span class="rv-info-label" data-current-frame-label></span>
