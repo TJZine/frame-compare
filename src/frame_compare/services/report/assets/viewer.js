@@ -104,6 +104,8 @@ const ReportViewer = {
             modal: document.getElementById('help-modal'),
             btnHelp: document.getElementById('btn-help'),
             btnCloseHelp: document.getElementById('btn-close-help'),
+            btnAlignToggle: document.getElementById('btn-align-toggle'),
+            alignPopover: document.getElementById('align-popover'),
         };
     },
 
@@ -141,7 +143,9 @@ const ReportViewer = {
             this.dom.labelRight,
             this.dom.modal,
             this.dom.btnHelp,
-            this.dom.btnCloseHelp
+            this.dom.btnCloseHelp,
+            this.dom.btnAlignToggle,
+            this.dom.alignPopover
         ];
         return requiredElements.every(Boolean)
             && this.dom.modeBtns.length > 0
@@ -454,6 +458,42 @@ const ReportViewer = {
             this.commitRawAlignmentInput('y');
         });
         this.dom.btnAlignmentReset.addEventListener('click', () => this.setAlignmentPreset('none'));
+
+        // Toggle popover visibility
+        this.dom.btnAlignToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isHidden = this.dom.alignPopover.hidden;
+            this.dom.alignPopover.hidden = !isHidden;
+            this.dom.btnAlignToggle.classList.toggle('active', isHidden);
+            this.dom.btnAlignToggle.setAttribute('aria-expanded', isHidden ? 'true' : 'false');
+            this.dom.alignPopover.setAttribute('aria-hidden', isHidden ? 'false' : 'true');
+            if (isHidden) {
+                this.dom.alignmentPreset.focus();
+            }
+        });
+
+        // Close on outside click
+        document.addEventListener('click', (e) => {
+            if (!this.dom.alignPopover.contains(e.target) && e.target !== this.dom.btnAlignToggle) {
+                this.closeAlignmentPopover();
+            }
+        });
+
+        // Close on Escape key
+        this.dom.alignPopover.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                this.closeAlignmentPopover();
+                this.dom.btnAlignToggle.focus();
+            }
+        });
+    },
+
+    closeAlignmentPopover() {
+        this.dom.alignPopover.hidden = true;
+        this.dom.btnAlignToggle.classList.remove('active');
+        this.dom.btnAlignToggle.setAttribute('aria-expanded', 'false');
+        this.dom.alignPopover.setAttribute('aria-hidden', 'true');
     },
 
     bindHelpEvents() {
@@ -1193,6 +1233,10 @@ const ReportViewer = {
         this.dom.alignmentPreset.value = this.state.alignmentPreset;
         this.dom.alignX.value = this.state.rawAlignX ?? this.state.alignX;
         this.dom.alignY.value = this.state.rawAlignY ?? this.state.alignY;
+
+        // Visual indicator on gear button if offset is non-zero
+        const isOffset = this.state.alignX !== 0 || this.state.alignY !== 0;
+        this.dom.btnAlignToggle.classList.toggle('has-offset', isOffset);
     },
 
     toggleFullscreen() {
@@ -1218,6 +1262,18 @@ const ReportViewer = {
         this.dom.divider.style.setProperty('--reveal-percent', this.state.revealPercent + '%');
     },
 
+    humanizeCategory(cat) {
+        const mapping = {
+            'quantile_bright': 'Bright',
+            'quantile_dark': 'Dark',
+            'scene-cut': 'Scene Cuts',
+            'scene_cut': 'Scene Cuts',
+            'selected': 'Selected'
+        };
+        if (mapping[cat]) return mapping[cat];
+        return cat.replace(/_/g, ' ').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    },
+
     updateCurrentFrameMetadata(frameData) {
         const frame = frameData || this.state.data?.frames?.[this.state.currentFrameIdx] || null;
         const label = frame?.label || 'No frame selected';
@@ -1227,7 +1283,9 @@ const ReportViewer = {
         if (this.dom.currentFrameSummary) this.dom.currentFrameSummary.textContent = label;
         if (this.dom.currentFrameLabel) this.dom.currentFrameLabel.textContent = label;
         if (this.dom.currentFrameDetail) this.dom.currentFrameDetail.textContent = detail;
-        if (this.dom.currentFrameCategory) this.dom.currentFrameCategory.textContent = category;
+        if (this.dom.currentFrameCategory) {
+            this.dom.currentFrameCategory.textContent = this.humanizeCategory(category);
+        }
     },
 
     updateImages() {
