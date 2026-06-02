@@ -521,6 +521,50 @@ def test_generate_report_json_payload_structure(report_data: ReportData, tmp_pat
     assert len(frames[0]["images"]) == 2
 
 
+def test_build_report_payload_preserves_four_clip_order_and_default_pair(
+    tmp_path: Path,
+) -> None:
+    clips: list[ClipInfo] = []
+    for clip_index, name in enumerate(("Reference", "Encode 1", "Encode 2", "Encode 3")):
+        screenshots = [
+            tmp_path / "screens" / name / "frame-10.png",
+            tmp_path / "screens" / name / "frame-20.png",
+        ]
+        for screenshot in screenshots:
+            screenshot.parent.mkdir(parents=True, exist_ok=True)
+            screenshot.write_bytes(b"fake_png_data")
+        clips.append(
+            ClipInfo(
+                name=name,
+                path=tmp_path / f"clip-{clip_index}.mkv",
+                frame_count=100,
+                resolution=(1920, 1080),
+                fps=24.0,
+                hdr=False,
+                label=name,
+                screenshots=screenshots,
+            )
+        )
+    data = ReportData(clips=clips, frames=[10, 20])
+
+    payload = build_report_payload(
+        data, ReportConfig(output_dir=str(tmp_path)), report_dir=tmp_path
+    )
+
+    assert payload["default_selection"] == {"left_clip_index": 0, "right_clip_index": 1}
+    assert payload["stats"] == {"frame_count": 2, "clip_count": 4}
+    assert [clip["name"] for clip in payload["clips"]] == [
+        "Reference",
+        "Encode 1",
+        "Encode 2",
+        "Encode 3",
+    ]
+    assert [[image["clip"] for image in frame["images"]] for frame in payload["frames"]] == [
+        ["Reference", "Encode 1", "Encode 2", "Encode 3"],
+        ["Reference", "Encode 1", "Encode 2", "Encode 3"],
+    ]
+
+
 def test_build_report_payload_accepts_frame_display_metadata(
     report_data: ReportData, tmp_path: Path
 ) -> None:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import structlog
 
@@ -46,20 +46,22 @@ class _PreparedBatchRequest:
     num_frames: int | None
 
 
+@dataclass(frozen=True, slots=True)
+class _ResolvedRequestActiveRect:
+    rect: GeometryRect | None
+    source: Literal["explicit", "metadata"]
+
+
 def _validate_batch_request_lengths(request: ScreenshotBatchRequest) -> None:
     """Fail fast when a batch request carries mismatched frame metadata lists."""
     display_len = len(request.display_frames)
     source_len = len(request.source_frames)
     selection_len = len(request.selection_labels)
     selection_detail_len = (
-        len(request.selection_details)
-        if request.selection_details is not None
-        else display_len
+        len(request.selection_details) if request.selection_details is not None else display_len
     )
     diagnostic_len = (
-        len(request.diagnostic_metadata)
-        if request.diagnostic_metadata is not None
-        else display_len
+        len(request.diagnostic_metadata) if request.diagnostic_metadata is not None else display_len
     )
     if (
         display_len != source_len
@@ -217,7 +219,54 @@ def _dovi_l5_active_rect(
     return GeometryRect(left, top, active_width, active_height)
 
 
-def _request_active_rect(
+def _dovi_l5_metadata_warning_reason(
+    request: ScreenshotBatchRequest,
+    *,
+    width: int,
+    height: int,
+) -> str | None:
+    if request.diagnostic_metadata is None:
+        return None
+
+    if not request.diagnostic_metadata:
+        return "no selected-frame metadata entries were available"
+
+    rects: set[GeometryRect] = set()
+    partial_count = 0
+    invalid_count = 0
+    missing_count = 0
+    for metadata in request.diagnostic_metadata:
+        dovi = metadata.dolby_vision if metadata is not None else None
+        if dovi is None:
+            missing_count += 1
+            continue
+
+        margins = (dovi.l5_left, dovi.l5_top, dovi.l5_right, dovi.l5_bottom)
+        if all(value is None for value in margins):
+            missing_count += 1
+            continue
+        if any(value is None for value in margins):
+            partial_count += 1
+            continue
+
+        rect = _dovi_l5_active_rect(metadata, width=width, height=height)
+        if rect is None:
+            invalid_count += 1
+            continue
+        rects.add(rect)
+
+    if partial_count:
+        return "one or more selected-frame entries had partial Dolby Vision L5 margins"
+    if invalid_count:
+        return "one or more selected-frame entries had invalid Dolby Vision L5 margins"
+    if missing_count and (rects or partial_count or invalid_count):
+        return "one or more selected-frame entries had no Dolby Vision L5 margins"
+    if len(rects) > 1:
+        return "selected-frame Dolby Vision L5 margins were inconsistent"
+    return None
+
+
+def _trusted_metadata_active_rect(
     request: ScreenshotBatchRequest,
     *,
     width: int,
@@ -229,12 +278,72 @@ def _request_active_rect(
     rects: set[GeometryRect] = set()
     for metadata in request.diagnostic_metadata:
         rect = _dovi_l5_active_rect(metadata, width=width, height=height)
-        if rect is not None:
-            rects.add(rect)
+        if rect is None:
+            return None
+        rects.add(rect)
 
     if len(rects) == 1:
         return next(iter(rects))
     return None
+
+
+def _resolve_request_active_rect(
+    request: ScreenshotBatchRequest,
+    *,
+    width: int,
+    height: int,
+    warnings: list[str] | None,
+) -> _ResolvedRequestActiveRect:
+    if request.active_rect is not None:
+        if request.diagnostic_metadata_trusted_for_geometry:
+            _warn_if_metadata_geometry_rejected(
+                request,
+                width=width,
+                height=height,
+                fallback="explicit active rect override",
+                warnings=warnings,
+            )
+        return _ResolvedRequestActiveRect(request.active_rect, "explicit")
+
+    if request.diagnostic_metadata_trusted_for_geometry:
+        metadata_rect = _trusted_metadata_active_rect(request, width=width, height=height)
+        if metadata_rect is not None:
+            return _ResolvedRequestActiveRect(metadata_rect, "metadata")
+        _warn_if_metadata_geometry_rejected(
+            request,
+            width=width,
+            height=height,
+            fallback="geometry fallback",
+            warnings=warnings,
+        )
+
+    return _ResolvedRequestActiveRect(None, "explicit")
+
+
+def _warn_if_metadata_geometry_rejected(
+    request: ScreenshotBatchRequest,
+    *,
+    width: int,
+    height: int,
+    fallback: str,
+    warnings: list[str] | None,
+) -> None:
+    warning_reason = _dovi_l5_metadata_warning_reason(request, width=width, height=height)
+    if warning_reason is None:
+        return
+
+    warning = (
+        f"Screenshot geometry alignment ignored Dolby Vision L5 active rect metadata "
+        f"for {request.label}: {warning_reason}; using {fallback}."
+    )
+    log.warning(
+        "screenshot_geometry_metadata_active_rect_ignored",
+        reason=warning_reason,
+        label=request.label,
+        has_explicit_active_rect=request.active_rect is not None,
+    )
+    if warnings is not None:
+        warnings.append(warning)
 
 
 def _prepare_batch_requests(
@@ -306,20 +415,29 @@ def _geometry_plans_for_batch(
         return tuple(None for _prepared in prepared_requests)
 
     sources = tuple(
-        SourceGeometry(
-            width=prepared.width,
-            height=prepared.height,
-            active_rect=_request_active_rect(
-                prepared.request,
-                width=prepared.width,
-                height=prepared.height,
-            ),
-            active_rect_source="metadata",
-            label=prepared.request.label,
-        )
-        for prepared in prepared_requests
+        _source_geometry_for_request(prepared, warnings=warnings) for prepared in prepared_requests
     )
     return plan_render_geometry(sources, mode="aligned")
+
+
+def _source_geometry_for_request(
+    prepared: _PreparedBatchRequest,
+    *,
+    warnings: list[str] | None,
+) -> SourceGeometry:
+    active_rect = _resolve_request_active_rect(
+        prepared.request,
+        width=prepared.width,
+        height=prepared.height,
+        warnings=warnings,
+    )
+    return SourceGeometry(
+        width=prepared.width,
+        height=prepared.height,
+        active_rect=active_rect.rect,
+        active_rect_source=active_rect.source,
+        label=prepared.request.label,
+    )
 
 
 def expand_batch_render_requests(
@@ -360,17 +478,15 @@ def expand_batch_render_requests(
         overlay_origin = geometry_plan.overlay_origin if geometry_plan is not None else None
 
         for idx, source_frame in enumerate(req.source_frames):
-            _validate_source_frame_range(req, source_frame=source_frame, num_frames=prepared.num_frames)
+            _validate_source_frame_range(
+                req, source_frame=source_frame, num_frames=prepared.num_frames
+            )
             display_frame = req.display_frames[idx]
             selection_detail = (
-                req.selection_details[idx]
-                if req.selection_details is not None
-                else None
+                req.selection_details[idx] if req.selection_details is not None else None
             )
             diagnostic_metadata = (
-                req.diagnostic_metadata[idx]
-                if req.diagnostic_metadata is not None
-                else None
+                req.diagnostic_metadata[idx] if req.diagnostic_metadata is not None else None
             )
             selection_label = (
                 selection_detail.label

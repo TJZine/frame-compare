@@ -16,6 +16,7 @@ from frame_compare.analysis.types import (
 )
 from frame_compare.config.schema import OverlayMode
 from frame_compare.orchestration import phase_tasks
+from frame_compare.orchestration.context import ClipActiveRect
 from frame_compare.orchestration.execution import build_phases_after_align
 from frame_compare.orchestration.phases import execute_phases
 from frame_compare.orchestration.types import (
@@ -35,7 +36,7 @@ from frame_compare.services.publishers import PublishResult
 from frame_compare.services.slowpics_post_upload import (
     SlowpicsPostUploadRequest,
 )
-from frame_compare.services.types import TmdbMetadata
+from frame_compare.services.types import AlignmentResult, TmdbMetadata
 from frame_compare.utils.progress import NullProgressReporter
 from frame_compare.vs.types import HDRMetadata
 from tests.orchestration.phase_task_helpers import (
@@ -124,6 +125,56 @@ def test_run_report_phase_builds_report_data_and_records_path(
         ("Encode 1", (1920, 1080), 24.0),
     ]
     assert captured["report_config"] == ctx.config.report
+
+
+def test_run_report_phase_builds_four_clip_payload_inputs_in_clip_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comp_a = _clip(tmp_path / "comparison_videos" / "encode_a.mkv", label="Encode 1")
+    comp_b = _clip(tmp_path / "comparison_videos" / "encode_b.mkv", label="Encode 2")
+    comp_c = _clip(tmp_path / "comparison_videos" / "encode_c.mkv", label="Encode 3")
+    ctx = _context(tmp_path, comparisons=[comp_a, comp_b, comp_c])
+    screenshots_by_label = {
+        "Reference": [tmp_path / "screenshots" / "reference_1.png"],
+        "Encode 1": [tmp_path / "screenshots" / "encode_a_1.png"],
+        "Encode 2": [tmp_path / "screenshots" / "encode_b_1.png"],
+        "Encode 3": [tmp_path / "screenshots" / "encode_c_1.png"],
+    }
+    render = RenderArtifacts(
+        screenshots_by_label=screenshots_by_label,
+        screenshot_dir=tmp_path / "screenshots",
+    )
+    captured: dict[str, Any] = {}
+
+    def _fake_generate_report(report_data: object, report_config: object) -> Path:
+        captured["report_data"] = report_data
+        captured["report_config"] = report_config
+        return tmp_path / "report.html"
+
+    monkeypatch.setattr(phase_tasks, "generate_report", _fake_generate_report)
+
+    phase_tasks.run_report_phase(
+        ctx,
+        frames=[12],
+        render=render,
+        metadata=None,
+        slowpics_url=None,
+    )
+
+    report_data = captured["report_data"]
+    assert [clip.name for clip in report_data.clips] == [
+        "Reference",
+        "Encode 1",
+        "Encode 2",
+        "Encode 3",
+    ]
+    assert [clip.screenshots for clip in report_data.clips] == [
+        screenshots_by_label["Reference"],
+        screenshots_by_label["Encode 1"],
+        screenshots_by_label["Encode 2"],
+        screenshots_by_label["Encode 3"],
+    ]
+    assert report_data.frames == [12]
 
 
 def test_run_report_phase_passes_reference_source_frame_details(
@@ -231,6 +282,191 @@ def test_run_render_phase_maps_aligned_frames_to_source_frames(
         screenshot_dir=ctx.workspace.screenshots_dir,
         warnings=["render: geometry alignment skipped"],
     )
+
+
+def test_run_render_phase_maps_three_clip_aligned_frames_to_source_frames(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comp_a = _clip(tmp_path / "comparison_videos" / "encode_a.mkv", label="Encode 1")
+    comp_b = _clip(tmp_path / "comparison_videos" / "encode_b.mkv", label="Encode 2")
+    ctx = _context(tmp_path, comparisons=[comp_a, comp_b])
+    ctx.reference = ctx.reference.with_trim(trim_start_frames=3, trim_end_frame_inclusive=20)
+    ctx.comparisons = [
+        comp_a.with_trim(trim_start_frames=1, trim_end_frame_inclusive=18),
+        comp_b.with_trim(trim_start_frames=5, trim_end_frame_inclusive=30),
+    ]
+    captured: dict[str, Any] = {}
+
+    def _fake_render_screenshots_from_batch(**kwargs: object) -> dict[str, list[Path]]:
+        captured.update(kwargs)
+        return {
+            "Reference": [tmp_path / "reference-1.png", tmp_path / "reference-2.png"],
+            "Encode 1": [tmp_path / "encode-a-1.png", tmp_path / "encode-a-2.png"],
+            "Encode 2": [tmp_path / "encode-b-1.png", tmp_path / "encode-b-2.png"],
+        }
+
+    monkeypatch.setattr(
+        "frame_compare.render.batch.orchestrator.render_screenshots_from_batch",
+        _fake_render_screenshots_from_batch,
+    )
+
+    phase_tasks.run_render_phase(
+        ctx,
+        frames=[1, 2],
+        runner=cast(Any, _RenderRunner()),
+    )
+
+    requests = captured["batch_requests"]
+    assert [(request.label, request.source_frames) for request in requests] == [
+        ("Reference", [4, 5]),
+        ("Encode 1", [2, 3]),
+        ("Encode 2", [6, 7]),
+    ]
+    assert [request.display_frames for request in requests] == [[1, 2], [1, 2], [1, 2]]
+
+
+def test_run_align_then_render_phase_maps_four_clip_aligned_frames_in_clip_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comp_a = _clip(
+        tmp_path / "comparison_videos" / "encode_a.mkv",
+        label="Encode 1",
+        num_frames=120,
+    )
+    comp_b = _clip(
+        tmp_path / "comparison_videos" / "encode_b.mkv",
+        label="Encode 2",
+        num_frames=105,
+    )
+    comp_c = _clip(
+        tmp_path / "comparison_videos" / "encode_c.mkv",
+        label="Encode 3",
+        num_frames=140,
+    )
+    ctx = _context(tmp_path, comparisons=[comp_a, comp_b, comp_c])
+    ctx.reference = ctx.reference.with_trim(trim_start_frames=3, trim_end_frame_inclusive=90)
+    ctx.comparisons = [
+        comp_a.with_trim(trim_start_frames=7, trim_end_frame_inclusive=95),
+        comp_b.with_trim(trim_start_frames=11, trim_end_frame_inclusive=99),
+        comp_c.with_trim(trim_start_frames=13, trim_end_frame_inclusive=120),
+    ]
+
+    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+        return [
+            AlignmentResult(
+                reference_clip="reference.mkv",
+                comparison_clip="encode_a.mkv",
+                frame_offset=10,
+                time_offset_seconds=10 / 24,
+                correlation_score=0.95,
+                algorithm="cross_correlation",
+                source="computed",
+            ),
+            AlignmentResult(
+                reference_clip="reference.mkv",
+                comparison_clip="encode_b.mkv",
+                frame_offset=-5,
+                time_offset_seconds=-5 / 24,
+                correlation_score=0.92,
+                algorithm="cross_correlation",
+                source="computed",
+            ),
+            AlignmentResult(
+                reference_clip="reference.mkv",
+                comparison_clip="encode_c.mkv",
+                frame_offset=0,
+                time_offset_seconds=0.0,
+                correlation_score=0.98,
+                algorithm="cross_correlation",
+                source="computed",
+            ),
+        ]
+
+    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    align_output = phase_tasks.run_align_phase(ctx, selected_frames=[10, 57, 81])
+    ctx.reference = align_output.reference
+    ctx.comparisons = align_output.comparisons
+    ctx.selection_breakdown = SelectionBreakdown(
+        quantile_dark=[13],
+        quantile_bright=[60],
+        motion=[84],
+    )
+    captured: dict[str, Any] = {}
+
+    def _fake_render_screenshots_from_batch(**kwargs: object) -> dict[str, list[Path]]:
+        captured.update(kwargs)
+        return {
+            "Reference": [tmp_path / "reference-1.png"],
+            "Encode 1": [tmp_path / "encode-a-1.png"],
+            "Encode 2": [tmp_path / "encode-b-1.png"],
+            "Encode 3": [tmp_path / "encode-c-1.png"],
+        }
+
+    monkeypatch.setattr(
+        "frame_compare.render.batch.orchestrator.render_screenshots_from_batch",
+        _fake_render_screenshots_from_batch,
+    )
+
+    phase_tasks.run_render_phase(
+        ctx,
+        frames=align_output.selected_frames,
+        runner=cast(Any, _RenderRunner()),
+    )
+
+    requests = captured["batch_requests"]
+    assert [
+        (
+            request.label,
+            request.source_frames,
+            request.display_frames,
+            request.selection_labels,
+            request.probe_num_frames,
+        )
+        for request in requests
+    ] == [
+        ("Reference", [13, 60, 84], [0, 47, 71], ["Dark", "Bright", "Motion"], 100),
+        ("Encode 1", [7, 54, 78], [0, 47, 71], ["Dark", "Bright", "Motion"], 120),
+        ("Encode 2", [26, 73, 97], [0, 47, 71], ["Dark", "Bright", "Motion"], 105),
+        ("Encode 3", [23, 70, 94], [0, 47, 71], ["Dark", "Bright", "Motion"], 140),
+    ]
+
+
+def test_run_render_phase_passes_clip_active_rect_to_batch_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
+    ctx = _context(tmp_path, comparisons=[comparison])
+    ctx.reference = replace(
+        ctx.reference,
+        active_rect=ClipActiveRect(x=240, y=140, width=1440, height=800),
+    )
+    captured: dict[str, Any] = {}
+
+    def _fake_render_screenshots_from_batch(**kwargs: object) -> dict[str, list[Path]]:
+        captured.update(kwargs)
+        return {"Reference": [tmp_path / "reference.png"]}
+
+    monkeypatch.setattr(
+        "frame_compare.render.batch.orchestrator.render_screenshots_from_batch",
+        _fake_render_screenshots_from_batch,
+    )
+
+    phase_tasks.run_render_phase(
+        ctx,
+        frames=[1],
+        runner=cast(Any, _RenderRunner()),
+    )
+
+    requests = captured["batch_requests"]
+    assert requests[0].diagnostic_metadata_trusted_for_geometry is False
+    assert requests[0].active_rect is not None
+    assert (
+        requests[0].active_rect.x,
+        requests[0].active_rect.y,
+        requests[0].active_rect.width,
+        requests[0].active_rect.height,
+    ) == (240, 140, 1440, 800)
+    assert requests[1].active_rect is None
 
 
 def test_run_render_phase_prefers_typed_selection_details_in_reference_source_domain(
@@ -598,6 +834,91 @@ async def test_run_publish_phase_skips_shortcut_when_config_disabled(
     assert output.post_upload_actions == ()
 
 
+async def test_unresolved_comparison_remains_in_render_report_and_slowpics_membership(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comp_a = _clip(tmp_path / "comparison_videos" / "encode_a.mkv", label="Encode 1")
+    comp_b = _clip(tmp_path / "comparison_videos" / "encode_b.mkv", label="Encode 2")
+    ctx = _context(tmp_path, comparisons=[comp_a, comp_b])
+    frames = [0, 1]
+    screenshots_by_label: dict[str, list[Path]] = {}
+    for label in ("Reference", "Encode 1", "Encode 2"):
+        label_key = label.lower().replace(" ", "-")
+        screenshots_by_label[label] = []
+        for frame in frames:
+            screenshot = tmp_path / "screenshots" / f"{frame}-{label_key}.png"
+            screenshot.parent.mkdir(parents=True, exist_ok=True)
+            screenshot.write_bytes(b"\x89PNG\r\n\x1a\n")
+            screenshots_by_label[label].append(screenshot)
+    captured: dict[str, Any] = {}
+
+    def _fake_render_screenshots_from_batch(**kwargs: object) -> dict[str, list[Path]]:
+        captured["render_labels"] = [
+            request.label for request in cast(list[Any], kwargs["batch_requests"])
+        ]
+        return screenshots_by_label
+
+    def _fake_generate_report(report_data: object, report_config: object) -> Path:
+        captured["report_clip_names"] = [clip.name for clip in cast(Any, report_data).clips]
+        captured["report_config"] = report_config
+        return tmp_path / "report.html"
+
+    async def _fake_publish_to_slowpics(**kwargs: object) -> PublishResult:
+        upload_plan = cast(Any, kwargs["upload_plan"])
+        captured["slowpics_clip_labels"] = [
+            image.clip_label for image in upload_plan.rows[0].images
+        ]
+        return PublishResult(
+            url="https://slow.pics/c/unresolved",
+            screenshot_count=len(upload_plan.file_paths),
+            upload_duration_seconds=0.1,
+            uploaded_file_paths=tuple(upload_plan.file_paths),
+        )
+
+    async def _no_post_upload_actions(
+        _request: SlowpicsPostUploadRequest,
+    ) -> tuple[PostUploadActionResult, ...]:
+        return ()
+
+    monkeypatch.setattr(
+        "frame_compare.render.batch.orchestrator.render_screenshots_from_batch",
+        _fake_render_screenshots_from_batch,
+    )
+    monkeypatch.setattr(phase_tasks, "generate_report", _fake_generate_report)
+    monkeypatch.setattr(phase_tasks, "publish_to_slowpics", _fake_publish_to_slowpics)
+    monkeypatch.setattr(
+        phase_tasks,
+        "run_slowpics_post_upload_actions",
+        _no_post_upload_actions,
+    )
+
+    render_output = phase_tasks.run_render_phase(
+        ctx,
+        frames=frames,
+        runner=cast(Any, _RenderRunner()),
+    )
+    phase_tasks.run_report_phase(
+        ctx,
+        frames=frames,
+        render=render_output.render,
+        metadata=None,
+        slowpics_url=None,
+    )
+    async with httpx.AsyncClient() as client:
+        await phase_tasks.run_publish_phase(
+            ctx,
+            client=client,
+            metadata=None,
+            render=render_output.render,
+            selected_frames=frames,
+        )
+
+    assert [comparison.alignment for comparison in ctx.comparisons] == [None, None]
+    assert captured["render_labels"] == ["Reference", "Encode 1", "Encode 2"]
+    assert captured["report_clip_names"] == ["Reference", "Encode 1", "Encode 2"]
+    assert captured["slowpics_clip_labels"] == ["Reference", "Encode 1", "Encode 2"]
+
+
 async def test_report_confirmed_decline_skips_publish(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -831,9 +1152,11 @@ def test_post_report_cleanup_deletes_planned_files_after_embedded_report_success
         tmp_path / "screenshots" / "planned-b.png",
     )
     stale = tmp_path / "screenshots" / "stale.png"
+    shortcut = tmp_path / "Collateral.url"
     for path in (*uploaded, stale):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"\x89PNG\r\n\x1a\n")
+    shortcut.write_text("[InternetShortcut]\nURL=https://slow.pics/c/example\n", encoding="utf-8")
 
     output = phase_tasks.run_post_report_cleanup_phase(
         ctx,
@@ -844,6 +1167,7 @@ def test_post_report_cleanup_deletes_planned_files_after_embedded_report_success
     assert output.warnings == []
     assert not any(path.exists() for path in uploaded)
     assert stale.exists()
+    assert shortcut.exists()
 
 
 def test_post_report_cleanup_deletes_planned_files_when_reports_disabled(
