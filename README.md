@@ -235,7 +235,7 @@ to screenshot files by relative path next to the report; when `report.embed_imag
 is enabled, screenshot bytes are embedded in the HTML payload. The viewer persists
 browser-local view mode, clip selection, viewport/zoom, reveal, and alignment state
 per report; it supports frame/category navigation, pan and wheel zoom controls, and
-collapsed report, clip, and frame metadata panels.
+an info modal that keeps report, clip, and current-frame metadata accessible.
 
 ### Overlays
 

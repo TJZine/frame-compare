@@ -111,7 +111,6 @@ def _humanize_category(cat: str) -> str:
     return cat.replace("_", " ").replace("-", " ").title()
 
 
-
 def _frame_categories(frames: list[ReportFramePayload]) -> list[str]:
     categories: list[str] = []
     seen: set[str] = set()
@@ -214,6 +213,7 @@ def _render_info_modal(
     right_clip_index: int,
 ) -> str:
     clips = data["clips"]
+    stats = data["stats"]
     title = data["title"]
     report_id = data["report_id"]
     generated_at = data["generated_at"]
@@ -251,10 +251,14 @@ def _render_info_modal(
             f'</dl>'
             f'</li>'
         )
-    clip_list_html = "".join(clip_items) if clip_items else '<div class="rv-metadata-empty">No clips in payload.</div>'
+    clip_list_html = (
+        f'<ol class="rv-clip-meta-list">{"".join(clip_items)}</ol>'
+        if clip_items
+        else '<div class="rv-metadata-empty">No clips in payload.</div>'
+    )
 
     return f"""    <div id="info-modal" class="rv-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="info-modal-title" tabindex="-1">
-        <div class="rv-modal-content" style="max-width: 600px;">
+        <div class="rv-modal-content rv-modal-content--wide">
             <div id="info-modal-title" class="rv-modal-title">Report Information</div>
             <div class="rv-info-grid">
                 <div class="rv-info-section">
@@ -263,6 +267,8 @@ def _render_info_modal(
                         <div><dt>Title</dt><dd>{_esc_text(title)}</dd></div>
                         <div><dt>Report ID</dt><dd>{_esc_text(report_id)}</dd></div>
                         <div><dt>Generated</dt><dd>{_esc_text(generated_at)}</dd></div>
+                        <div><dt>Frames</dt><dd>{stats["frame_count"]}</dd></div>
+                        <div><dt>Clips</dt><dd>{stats["clip_count"]}</dd></div>
                         <div><dt>Default Mode</dt><dd>{_esc_text(default_mode)}</dd></div>
                         <div><dt>Default Pair</dt><dd>{default_pair}</dd></div>
                         {slowpics_row}
@@ -270,12 +276,10 @@ def _render_info_modal(
                 </div>
                 <div class="rv-info-section">
                     <h3>Clips</h3>
-                    <ol class="rv-clip-meta-list">
-                        {clip_list_html}
-                    </ol>
+                    {clip_list_html}
                 </div>
             </div>
-            <div style="margin-top: 1.5rem; text-align: right;">
+            <div class="rv-modal-actions rv-modal-actions--spacious">
                 <button id="btn-close-info">Close</button>
             </div>
         </div>
@@ -305,7 +309,6 @@ def _render_header(
 
 def _render_controls(
     frame_options: str,
-    category_filter_controls: str,
     left_clip_options: str,
     right_clip_options: str,
     active_clip_options: str,
@@ -350,7 +353,7 @@ def _render_controls(
             <input type="range" id="zoom-range" min="0.25" max="4.0" step="0.1" value="1.0" aria-label="Zoom level" aria-valuemin="0.25" aria-valuemax="4.0" aria-valuenow="1.0">
             <button id="btn-zoom-in" aria-label="Zoom in">+</button>
             <button id="btn-zoom-reset" aria-label="Reset zoom">R</button>
-            <span id="zoom-val" style="width: 4ch">100%</span>
+            <span id="zoom-val" class="rv-zoom-value">100%</span>
         </div>
 
         <div class="rv-control-group" role="radiogroup" aria-label="Fit mode">
@@ -433,7 +436,7 @@ def _render_help_modal() -> str:
                 <div class="rv-shortcut-row"><span>Open Help</span><span class="rv-key">?</span></div>
                 <div class="rv-shortcut-row"><span>Close Help / Exit Fullscreen</span><span class="rv-key">Esc</span></div>
             </div>
-            <div style="margin-top: 1rem; text-align: right;">
+            <div class="rv-modal-actions">
                 <button id="btn-close-help">Close</button>
             </div>
         </div>
@@ -496,7 +499,6 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
     )
     controls_html = _render_controls(
         frame_options,
-        category_filter_controls,
         left_clip_options,
         right_clip_options,
         active_clip_options,

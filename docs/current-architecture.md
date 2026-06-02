@@ -209,7 +209,8 @@ report-confirmed workflow before post-upload URL actions are considered.
 
 `frame_compare.services.report` owns the static offline report payload and viewer
 assets. The generated viewer exposes slider, overlay, diff, and pair-based blink
-modes; frame/category navigation; progressive report, clip, and frame metadata;
+modes; frame/category navigation; an info modal for report and clip metadata plus
+current-frame metadata in the stage overlay;
 browser-local view mode, clip selection, viewport/zoom, reveal, and alignment state
 scoped by report identity; viewport pan, zoom, and fit controls; and adjacent-frame
 preloading. It does not own slow.pics upload policy, prompting, or browser side

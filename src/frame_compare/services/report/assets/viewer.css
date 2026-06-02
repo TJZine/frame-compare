@@ -150,7 +150,10 @@ body {
 .rv-control-group:last-child {
     border-right: none;
 }
-.rv-control-group[hidden] { display: none; }
+
+.rv-control-group[hidden] {
+    display: none;
+}
 
 /* Button & Select styling */
 button, select, input[type="number"] {
@@ -250,6 +253,10 @@ select {
     user-select: none;
 }
 
+.rv-zoom-value {
+    width: 4ch;
+}
+
 /* 5. Viewer Stage */
 .rv-viewer-stage {
     flex: 1;
@@ -294,7 +301,9 @@ select {
     font-size: var(--text-sm);
 }
 
-.rv-empty-state[hidden] { display: none; }
+.rv-empty-state[hidden] {
+    display: none;
+}
 
 .rv-viewer-stage--empty {
     cursor: default;
@@ -359,7 +368,9 @@ select {
     box-shadow: 0 0 10px rgba(0,0,0,0.5);
 }
 
-.rv-mode-slider .rv-divider { display: block; }
+.rv-mode-slider .rv-divider {
+    display: block;
+}
 
 /* Slider grab handle circular style */
 .rv-divider-handle {
@@ -623,7 +634,9 @@ select {
     transition: border-color 0.15s, box-shadow 0.15s;
 }
 
-.rv-filmstrip-item[hidden] { display: none; }
+.rv-filmstrip-item[hidden] {
+    display: none;
+}
 
 .rv-filmstrip-item.active {
     border-color: var(--accent);
@@ -745,6 +758,10 @@ select {
     box-shadow: 0 10px 30px rgba(0,0,0,0.6);
 }
 
+.rv-modal-content--wide {
+    max-width: 600px;
+}
+
 .rv-modal-title {
     font-size: var(--text-base);
     font-weight: 600;
@@ -782,6 +799,15 @@ select {
     color: var(--text-primary);
 }
 
+.rv-modal-actions {
+    margin-top: 1rem;
+    text-align: right;
+}
+
+.rv-modal-actions--spacious {
+    margin-top: 1.5rem;
+}
+
 /* 11. Footer */
 .rv-footer {
     padding: 0.35rem 1.5rem;
@@ -794,12 +820,6 @@ select {
     align-items: center;
     min-height: 28px;
 }
-
-/* Single line CSS definitions for exact test contract match */
-.rv-viewer-stage.is-panning { cursor: grabbing; }
-.rv-control-group[hidden] { display: none; }
-.rv-filmstrip-item[hidden] { display: none; }
-.rv-empty-state[hidden] { display: none; }
 
 /* 12. Responsive adaptation */
 @media (max-width: 992px) {
@@ -907,4 +927,3 @@ select {
     font-size: 0.7rem;
     color: var(--accent-hover);
 }
-

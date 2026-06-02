@@ -96,7 +96,6 @@ const ReportViewer = {
             filterChips: document.querySelectorAll('[data-frame-filter]'),
             status: document.getElementById('viewer-status'),
             emptyState: document.querySelector('[data-empty-state]'),
-            currentFrameSummary: document.querySelector('[data-current-frame-summary]'),
             currentFrameLabel: document.querySelector('[data-current-frame-label]'),
             currentFrameDetail: document.querySelector('[data-current-frame-detail]'),
             currentFrameCategory: document.querySelector('[data-current-frame-category]'),
@@ -279,6 +278,7 @@ const ReportViewer = {
     },
 
     openHelpModal() {
+        this.closeAlignmentPopover({ restoreFocus: false });
         const activeElement = document.activeElement;
         this.state.helpRestoreFocus = activeElement && typeof activeElement.focus === 'function'
             ? activeElement
@@ -339,6 +339,7 @@ const ReportViewer = {
     },
 
     openInfoModal() {
+        this.closeAlignmentPopover({ restoreFocus: false });
         const activeElement = document.activeElement;
         this.state.infoRestoreFocus = activeElement && typeof activeElement.focus === 'function'
             ? activeElement
@@ -391,6 +392,25 @@ const ReportViewer = {
         } else if (!e.shiftKey && document.activeElement === last) {
             e.preventDefault();
             this.focusElement(first);
+        }
+    },
+
+    isAlignmentPopoverOpen() {
+        return !this.dom.alignPopover.hidden;
+    },
+
+    setAlignmentPopoverOpen(isOpen, options = {}) {
+        this.dom.alignPopover.hidden = !isOpen;
+        this.dom.btnAlignToggle.classList.toggle('active', isOpen);
+        this.dom.btnAlignToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        this.dom.alignPopover.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+
+        if (isOpen) {
+            this.focusElement(this.dom.alignmentPreset);
+            return;
+        }
+        if (options.restoreFocus !== false) {
+            this.focusElement(this.dom.btnAlignToggle);
         }
     },
 
@@ -529,20 +549,17 @@ const ReportViewer = {
         // Toggle popover visibility
         this.dom.btnAlignToggle.addEventListener('click', (e) => {
             e.stopPropagation();
-            const isHidden = this.dom.alignPopover.hidden;
-            this.dom.alignPopover.hidden = !isHidden;
-            this.dom.btnAlignToggle.classList.toggle('active', isHidden);
-            this.dom.btnAlignToggle.setAttribute('aria-expanded', isHidden ? 'true' : 'false');
-            this.dom.alignPopover.setAttribute('aria-hidden', isHidden ? 'false' : 'true');
-            if (isHidden) {
-                this.dom.alignmentPreset.focus();
-            }
+            this.setAlignmentPopoverOpen(!this.isAlignmentPopoverOpen());
         });
 
         // Close on outside click
         document.addEventListener('click', (e) => {
-            if (!this.dom.alignPopover.contains(e.target) && e.target !== this.dom.btnAlignToggle) {
-                this.closeAlignmentPopover();
+            if (
+                this.isAlignmentPopoverOpen()
+                && !this.dom.alignPopover.contains(e.target)
+                && e.target !== this.dom.btnAlignToggle
+            ) {
+                this.closeAlignmentPopover({ restoreFocus: false });
             }
         });
 
@@ -550,17 +567,15 @@ const ReportViewer = {
         this.dom.alignPopover.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 e.preventDefault();
+                e.stopPropagation();
                 this.closeAlignmentPopover();
-                this.dom.btnAlignToggle.focus();
             }
         });
     },
 
-    closeAlignmentPopover() {
-        this.dom.alignPopover.hidden = true;
-        this.dom.btnAlignToggle.classList.remove('active');
-        this.dom.btnAlignToggle.setAttribute('aria-expanded', 'false');
-        this.dom.alignPopover.setAttribute('aria-hidden', 'true');
+    closeAlignmentPopover(options = {}) {
+        if (!this.isAlignmentPopoverOpen()) return;
+        this.setAlignmentPopoverOpen(false, options);
     },
 
     bindHelpEvents() {
@@ -907,6 +922,11 @@ const ReportViewer = {
                 this.closeInfoModal();
                 return;
             }
+            if (this.isAlignmentPopoverOpen()) {
+                e.preventDefault();
+                this.closeAlignmentPopover();
+                return;
+            }
             if (document.fullscreenElement) {
                 e.preventDefault();
                 document.exitFullscreen?.();
@@ -915,6 +935,7 @@ const ReportViewer = {
         }
 
         if (this.dom.modal.classList.contains('open') || this.dom.infoModal.classList.contains('open')) return;
+        if (this.isAlignmentPopoverOpen()) return;
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
 
         if (e.key === 'i' || e.key === 'I') {
@@ -1370,7 +1391,6 @@ const ReportViewer = {
         const detail = frame?.detail || 'No frame detail available.';
         const category = frame?.category || 'none';
 
-        if (this.dom.currentFrameSummary) this.dom.currentFrameSummary.textContent = label;
         if (this.dom.currentFrameLabel) this.dom.currentFrameLabel.textContent = label;
         if (this.dom.currentFrameDetail) this.dom.currentFrameDetail.textContent = detail;
         if (this.dom.currentFrameCategory) {
