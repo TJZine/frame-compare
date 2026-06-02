@@ -12,6 +12,11 @@ from pytest_mock import MockerFixture
 
 from frame_compare.config.schema import ReportConfig, ViewerMode
 from frame_compare.services.errors import ReportError
+from frame_compare.services.report.category_display import (
+    humanize_category,
+    label_repeats_category,
+    normalized_display_token,
+)
 from frame_compare.services.report.display import (
     SourceFrameSelectionDetail,
     frame_detail_for_source_frame,
@@ -90,6 +95,58 @@ def _json_payload_from_report(path: Path) -> ReportPayload:
     start = content.find(marker) + len(marker)
     end = content.find("</script>", start)
     return json.loads(content[start:end])
+
+
+@pytest.mark.parametrize(
+    ("category", "expected"),
+    [
+        ("quantile_bright", "Bright"),
+        ("quantile_dark", "Dark"),
+        ("scene-cut", "Scene Cuts"),
+        ("scene_cut", "Scene Cuts"),
+        ("selected", "Selected"),
+        ("user_override", "User Override"),
+        (None, None),
+    ],
+)
+def test_humanize_category_maps_known_and_dynamic_categories(
+    category: str | None, expected: str | None
+) -> None:
+    assert humanize_category(category) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("Scene Cuts", "scene cuts"),
+        ("scene_cut", "scene cut"),
+        ("  User---Override  ", "user override"),
+        ("", None),
+        (None, None),
+    ],
+)
+def test_normalized_display_token_compares_display_equivalent_text(
+    value: str | None, expected: str | None
+) -> None:
+    assert normalized_display_token(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("label", "category", "expected"),
+    [
+        ("Bright", "quantile_bright", True),
+        ("Scene Cuts", "scene_cut", True),
+        ("scene cuts", "scene-cut", True),
+        ("Frame 42", "quantile_bright", False),
+        (None, "selected", False),
+        ("", "selected", False),
+        ("Selected", None, False),
+    ],
+)
+def test_label_repeats_category_uses_humanized_category_text(
+    label: str | None, category: str | None, expected: bool
+) -> None:
+    assert label_repeats_category(label, category) is expected
 
 
 def test_generate_report_creates_html_file(report_data: ReportData, tmp_path: Path) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from frame_compare.services.report.category_display import label_repeats_category
 from frame_compare.services.report.payload import FrameDetail
 
 
@@ -18,35 +19,6 @@ class SourceFrameSelectionDetail:
 
 def _default_frame_label(source_frame: int) -> str:
     return f"Frame {source_frame}"
-
-
-def _humanize_category(category: str | None) -> str | None:
-    if category is None:
-        return None
-    mapping = {
-        "quantile_bright": "Bright",
-        "quantile_dark": "Dark",
-        "scene-cut": "Scene Cuts",
-        "scene_cut": "Scene Cuts",
-        "selected": "Selected",
-    }
-    if category in mapping:
-        return mapping[category]
-    return category.replace("_", " ").replace("-", " ").title()
-
-
-def _normalized_display_token(value: str | None) -> str | None:
-    if value is None:
-        return None
-    normalized = " ".join(value.replace("_", " ").replace("-", " ").split()).casefold()
-    return normalized or None
-
-
-def _label_repeats_category(label: str | None, category: str | None) -> bool:
-    humanized_category = _humanize_category(category)
-    return _normalized_display_token(label) is not None and _normalized_display_token(
-        label
-    ) == _normalized_display_token(humanized_category)
 
 
 def category_from_selection_label(label: str | None) -> str | None:
@@ -82,7 +54,7 @@ def frame_detail_for_source_frame(
     if (
         selection_detail is not None
         and selection_detail.label is not None
-        and not _label_repeats_category(selection_detail.label, category)
+        and not label_repeats_category(selection_detail.label, category)
     ):
         label = selection_detail.label
 

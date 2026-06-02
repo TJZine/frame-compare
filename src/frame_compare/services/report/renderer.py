@@ -7,6 +7,10 @@ import json
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
+from frame_compare.services.report.category_display import (
+    humanize_category,
+    label_repeats_category,
+)
 from frame_compare.services.report.payload import REPORT_VERSION
 from frame_compare.services.report.viewer import get_css, get_js
 
@@ -97,32 +101,12 @@ def _render_slowpics_link(slowpics_url: str | None) -> str:
     )
 
 
-def _humanize_category(cat: str) -> str:
-    """Map dynamic technical categories into readable names."""
-    mapping = {
-        "quantile_bright": "Bright",
-        "quantile_dark": "Dark",
-        "scene-cut": "Scene Cuts",
-        "scene_cut": "Scene Cuts",
-        "selected": "Selected",
-    }
-    if cat in mapping:
-        return mapping[cat]
-    return cat.replace("_", " ").replace("-", " ").title()
-
-
-def _normalized_display_token(value: str) -> str:
-    return " ".join(value.replace("_", " ").replace("-", " ").split()).casefold()
-
-
 def _frame_category_text(frame: ReportFramePayload) -> str:
-    return _humanize_category(frame["category"])
+    return humanize_category(frame["category"]) or frame["category"]
 
 
 def _frame_label_repeats_category(frame: ReportFramePayload) -> bool:
-    return _normalized_display_token(frame["label"]) == _normalized_display_token(
-        _frame_category_text(frame)
-    )
+    return label_repeats_category(frame["label"], frame["category"])
 
 
 def _frame_filmstrip_label(frame: ReportFramePayload) -> str:
@@ -165,7 +149,8 @@ def _render_category_filters(
         f'<span class="rv-category-badge" '
         f'data-category-key="{_esc_attr(category_filter_keys[category])}" '
         f'data-category="{_esc_attr(category)}">'
-        f"{_esc_text(_humanize_category(category))} ({counts[category]})</span></button>"
+        f"{_esc_text(humanize_category(category) or category)} ({counts[category]})"
+        "</span></button>"
         for category in categories
     )
     return (
