@@ -107,6 +107,7 @@ def test_run_analyze_phase_records_cache_hit_and_selection_breakdown(
     assert calls["select"] == {"metrics": metrics, "config": ctx.config.analysis}
 
 
+@pytest.mark.unit
 def test_run_analyze_phase_uses_prepared_reference_cache_domain(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -190,6 +191,7 @@ def test_run_analyze_phase_cache_only_missing_cache_does_not_recompute(
         )
 
 
+@pytest.mark.unit
 def test_run_analyze_phase_selects_from_reference_base_trim_domain(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

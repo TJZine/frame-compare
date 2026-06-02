@@ -507,6 +507,12 @@ def test_current_cli_contract_documents_sources_config_only_surface() -> None:
     )[0]
     declared_options = _declared_run_options()
     override_flags = {f"--{cli_name.replace('_', '-')}" for cli_name in CLI_OVERRIDE_MAP}
+    source_override_paths = {
+        config_path
+        for config_path in CLI_OVERRIDE_MAP.values()
+        if config_path.startswith("sources.")
+    }
+    assert source_override_paths == set()
     for unsupported_flag in ("--source-reference", "--reference-source", "--source-override"):
         assert unsupported_flag not in sources_surface
         assert unsupported_flag not in declared_options
