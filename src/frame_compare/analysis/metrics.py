@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from fractions import Fraction
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -106,13 +107,14 @@ def _build_metrics(
     source: SourceInfo,
     fingerprint: str,
     clips: list[ClipIdentity],
+    effective_fps: Fraction | None,
 ) -> FrameMetrics:
     return FrameMetrics(
         luminance=luminance,
         motion=motion,
         metadata=MetricsMetadata(
             frame_count=source.clip.num_frames,
-            fps=source.fps,
+            fps=effective_fps if effective_fps is not None else source.fps,
             config_fingerprint=fingerprint,
             clips=clips,
             version=CACHE_VERSION,
@@ -139,6 +141,8 @@ def calculate_metrics(
     cache_dir: Path,
     reporter: ProgressReporter | None = None,
     vs_loader: VSLoader | None = None,
+    reference_domain: str | None = None,
+    effective_fps: Fraction | None = None,
 ) -> FrameMetrics:
     """
     Calculate frame metrics for the given clips.
@@ -152,6 +156,11 @@ def calculate_metrics(
         cache_dir: Directory for cache files
         reporter: Optional progress reporter
         vs_loader: Optional VapourSynth clip loader seam
+        reference_domain: Optional reference frame-domain token included in
+            the analysis cache key when source overrides affect reference
+            selection.
+        effective_fps: Optional FPS value stored in metrics metadata for
+            timing and selection-detail normalization.
 
     Returns:
         FrameMetrics with luminance and motion arrays
@@ -165,7 +174,7 @@ def calculate_metrics(
     if not video_paths:
         raise MetricsCalculationError("No input video paths provided")
 
-    fingerprint = compute_cache_key(video_paths, config)
+    fingerprint = compute_cache_key(video_paths, config, reference_domain=reference_domain)
     clips = _clip_identities(video_paths)
 
     cached = _cached_metrics(cache_dir, fingerprint, clips, reporter)
@@ -181,6 +190,7 @@ def calculate_metrics(
         source=source,
         fingerprint=fingerprint,
         clips=clips,
+        effective_fps=effective_fps,
     )
 
     _save_metrics_cache_best_effort(metrics, cache_dir, reporter)

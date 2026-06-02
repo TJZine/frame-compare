@@ -363,6 +363,49 @@ def test_build_html_renders_mode_aware_clip_controls(report_payload: ReportPaylo
     assert 'id="active-select" aria-label="Overlay clip"' in html
 
 
+def test_build_html_keeps_ten_plus_long_label_clips_reachable_and_mobile_safe(
+    report_payload: ReportPayload,
+) -> None:
+    long_label = "Reference candidate with a very long release label and source annotation "
+    clips = [
+        {
+            **report_payload["clips"][0],
+            "name": f"clip-{idx + 1}",
+            "label": f"{long_label}{idx + 1:02d}",
+        }
+        for idx in range(12)
+    ]
+    frames = [
+        {
+            **report_payload["frames"][0],
+            "images": [{"clip": clip["name"], "src": f"{clip['name']}/10.png"} for clip in clips],
+        }
+    ]
+    payload: ReportPayload = {
+        **report_payload,
+        "stats": {"frame_count": 1, "clip_count": 12},
+        "clips": clips,
+        "frames": frames,
+    }
+
+    parser = _SelectParser()
+    parser.feed(build_html(payload))
+    css = get_css()
+
+    for select_id in ("left-select", "right-select", "active-select"):
+        options = parser.selects[select_id].options
+        assert len(options) == 12
+        assert options[9].attrs["value"] == "9"
+        assert options[11].attrs["value"] == "11"
+        assert options[11].text.endswith("12")
+
+    assert "max-width: min(22rem, 100%);" in css
+    assert "text-overflow: ellipsis;" in css
+    assert "flex-wrap: wrap;" in css
+    assert "flex: 1 1 12rem;" in css
+    assert ".rv-overlay-label.right {\n        bottom: 42px;\n    }" in css
+
+
 def test_build_html_renders_frame_metadata_and_category_filters(
     report_payload: ReportPayload,
 ) -> None:
@@ -808,6 +851,9 @@ def test_viewer_assets_close_alignment_popover_before_global_escape_and_shortcut
 
 def test_viewer_assets_wire_report_scoped_viewport_persistence() -> None:
     js = get_js()
+    persistence_block = js[
+        js.index("persistViewportState() {") : js.index("\n    localStorage() {")
+    ]
 
     assert "this.state.storageKey = this.viewportStorageKey();" in js
     assert "frame-compare:report-viewer:${reportId}:viewport" in js
@@ -818,7 +864,9 @@ def test_viewer_assets_wire_report_scoped_viewport_persistence() -> None:
     assert "mode: this.state.mode" in js
     assert "panX: this.state.panX" in js
     assert "overlaysHidden: this.state.overlaysHidden" in js
-    assert "alignmentPreset: this.state.alignmentPreset" in js
+    assert "pairAlignments: this.state.pairAlignments" in persistence_block
+    assert "alignmentPreset: this.state.alignmentPreset" not in persistence_block
+    assert "alignX: this.state.alignX" not in persistence_block
 
 
 def test_viewer_assets_wire_pan_wheel_zoom_and_alignment_hooks() -> None:

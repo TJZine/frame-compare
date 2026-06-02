@@ -18,6 +18,7 @@ const ReportViewer = {
         alignmentPreset: 'none',
         alignX: 0,
         alignY: 0,
+        pairAlignments: {},
         blinkInterval: null,
         blinkPaused: false,
         storageKey: null,
@@ -868,15 +869,19 @@ const ReportViewer = {
     },
 
     setLeftClip(idx) {
+        this.storeCurrentPairAlignment();
         this.state.leftClipIdx = this.clipIndexOrDefault(idx, this.state.leftClipIdx);
         this.ensureDistinctPairSelection();
+        this.loadCurrentPairAlignment();
         if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
         this.render();
     },
 
     setRightClip(idx) {
+        this.storeCurrentPairAlignment();
         this.state.rightClipIdx = this.clipIndexOrDefault(idx, this.state.rightClipIdx);
         this.ensureDistinctPairSelection();
+        this.loadCurrentPairAlignment();
         if (this.state.mode === 'blink') {
             this.state.activeClipIdx = this.state.rightClipIdx;
         }
@@ -887,9 +892,11 @@ const ReportViewer = {
     swapPairClips() {
         if (this.state.mode === 'overlay' || this.clipCount() <= 1) return;
 
+        this.storeCurrentPairAlignment();
         const previousLeft = this.state.leftClipIdx;
         this.state.leftClipIdx = this.state.rightClipIdx;
         this.state.rightClipIdx = previousLeft;
+        this.loadCurrentPairAlignment();
         if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
         this.render();
     },
@@ -937,21 +944,22 @@ const ReportViewer = {
         if (typeof saved.overlaysHidden === 'boolean') {
             this.state.overlaysHidden = saved.overlaysHidden;
         }
-        if (['none', 'left-1', 'right-1', 'up-1', 'down-1', 'custom'].includes(saved.alignmentPreset)) {
-            this.state.alignmentPreset = saved.alignmentPreset;
-        }
-        this.state.alignX = this.numberOrDefault(saved.alignX, 0);
-        this.state.alignY = this.numberOrDefault(saved.alignY, 0);
-        if (this.state.alignmentPreset !== 'custom') {
-            this.applyAlignmentPresetOffsets(this.state.alignmentPreset);
-        }
         this.ensureDistinctPairSelection();
+        this.state.pairAlignments = this.normalizedPairAlignments(saved.pairAlignments);
+        if (!this.state.pairAlignments[this.currentPairAlignmentKey()]) {
+            const legacyAlignment = this.normalizedAlignmentState(saved);
+            if (legacyAlignment) {
+                this.state.pairAlignments[this.currentPairAlignmentKey()] = legacyAlignment;
+            }
+        }
+        this.loadCurrentPairAlignment();
         if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
     },
 
     persistViewportState() {
         const storage = this.localStorage();
         if (!this.state.storageKey || !storage) return;
+        this.storeCurrentPairAlignment();
 
         const payload = {
             mode: this.state.mode,
@@ -964,9 +972,7 @@ const ReportViewer = {
             panY: this.state.panY,
             revealPercent: this.state.revealPercent,
             overlaysHidden: this.state.overlaysHidden,
-            alignmentPreset: this.state.alignmentPreset,
-            alignX: this.state.alignX,
-            alignY: this.state.alignY
+            pairAlignments: this.state.pairAlignments
         };
         try {
             storage.setItem(this.state.storageKey, JSON.stringify(payload));
@@ -1488,6 +1494,44 @@ const ReportViewer = {
     },
 
     applyAlignmentPresetOffsets(preset) {
+        const offset = this.presetAlignmentOffsets(preset);
+        if (!offset) return;
+        this.clearRawAlignmentInputs();
+        this.state.alignX = offset[0];
+        this.state.alignY = offset[1];
+    },
+
+    validAlignmentPreset(preset) {
+        return ['none', 'left-1', 'right-1', 'up-1', 'down-1', 'custom'].includes(preset);
+    },
+
+    currentPairAlignmentKey() {
+        return this.pairAlignmentKey(this.state.leftClipIdx, this.state.rightClipIdx);
+    },
+
+    pairAlignmentKey(leftIdx, rightIdx) {
+        return `${leftIdx}:${rightIdx}`;
+    },
+
+    isValidPairAlignmentKey(key) {
+        if (typeof key !== 'string') return false;
+        const match = key.match(/^(\d+):(\d+)$/);
+        if (!match) return false;
+        const leftIdx = Number(match[1]);
+        const rightIdx = Number(match[2]);
+        const count = this.clipCount();
+        return leftIdx >= 0 && rightIdx >= 0 && leftIdx < count && rightIdx < count;
+    },
+
+    neutralAlignmentState() {
+        return {
+            alignmentPreset: 'none',
+            alignX: 0,
+            alignY: 0
+        };
+    },
+
+    presetAlignmentOffsets(preset) {
         const presets = {
             none: [0, 0],
             'left-1': [-1, 0],
@@ -1495,15 +1539,70 @@ const ReportViewer = {
             'up-1': [0, -1],
             'down-1': [0, 1]
         };
-        const offset = presets[preset];
-        if (!offset) return;
+        return presets[preset] || null;
+    },
+
+    currentAlignmentState() {
+        return {
+            alignmentPreset: this.state.alignmentPreset,
+            alignX: this.state.alignX,
+            alignY: this.state.alignY
+        };
+    },
+
+    normalizedAlignmentState(value) {
+        if (!value || typeof value !== 'object') return null;
+        const preset = this.validAlignmentPreset(value.alignmentPreset)
+            ? value.alignmentPreset
+            : 'none';
+        const alignment = {
+            alignmentPreset: preset,
+            alignX: this.numberOrDefault(value.alignX, 0),
+            alignY: this.numberOrDefault(value.alignY, 0)
+        };
+        if (preset !== 'custom') {
+            const offset = this.presetAlignmentOffsets(preset);
+            if (offset) {
+                alignment.alignX = offset[0];
+                alignment.alignY = offset[1];
+            }
+        }
+        return alignment;
+    },
+
+    normalizedPairAlignments(value) {
+        if (!value || typeof value !== 'object') return {};
+        const pairAlignments = {};
+        Object.entries(value).forEach(([key, alignment]) => {
+            if (!this.isValidPairAlignmentKey(key)) return;
+            const normalized = this.normalizedAlignmentState(alignment);
+            if (normalized) pairAlignments[key] = normalized;
+        });
+        return pairAlignments;
+    },
+
+    applyAlignmentState(alignment) {
+        const normalized = this.normalizedAlignmentState(alignment) || this.neutralAlignmentState();
         this.clearRawAlignmentInputs();
-        this.state.alignX = offset[0];
-        this.state.alignY = offset[1];
+        this.state.alignmentPreset = normalized.alignmentPreset;
+        this.state.alignX = normalized.alignX;
+        this.state.alignY = normalized.alignY;
+    },
+
+    storeCurrentPairAlignment() {
+        if (this.clipCount() <= 0) return;
+        const key = this.currentPairAlignmentKey();
+        if (!this.isValidPairAlignmentKey(key)) return;
+        this.state.pairAlignments[key] = this.currentAlignmentState();
+    },
+
+    loadCurrentPairAlignment() {
+        const saved = this.state.pairAlignments[this.currentPairAlignmentKey()];
+        this.applyAlignmentState(saved || this.neutralAlignmentState());
     },
 
     setAlignmentPreset(preset) {
-        if (!['none', 'left-1', 'right-1', 'up-1', 'down-1', 'custom'].includes(preset)) {
+        if (!this.validAlignmentPreset(preset)) {
             return;
         }
         this.state.alignmentPreset = preset;

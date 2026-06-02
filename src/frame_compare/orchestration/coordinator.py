@@ -104,6 +104,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             workspace=prep.workspace,
             reference=reference,
             comparisons=comparisons,
+            reference_cache_domain=prep.reference_cache_domain,
             reporter=reporter,
             no_color=request.no_color,
         )

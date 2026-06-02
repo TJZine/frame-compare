@@ -77,6 +77,41 @@ prefers `<bundle>/config/config.toml` when it exists, otherwise it falls back to
 `%LOCALAPPDATA%/Programs/FrameCompare/state/config.toml` when that state config
 exists.
 
+## Config-Only Sources Surface
+
+`[sources]` is a config-only public surface for source identity, explicit
+reference selection, and per-source overrides. There are no dedicated `run`
+flags for these fields.
+
+Current fields:
+
+- `reference`: optional source selector. When omitted, the first discovered
+  input remains the reference. When set, the selected source moves to the front
+  of clip order and comparisons keep deterministic discovery order after it.
+- `overrides`: mapping from source selector to per-source override table.
+  Current override fields are `trim_start_frames`, `trim_end_frames`, and
+  `active_rect = { x, y, width, height }`, and `effective_fps = "num/den"`.
+
+Source selectors match discovered input clips in this order: input-dir-relative
+path, filename, then stem. Selectors are case-sensitive. Backslashes are
+normalized to `/` before matching so Windows-style separators work in config.
+Absolute paths, Windows drive paths, UNC paths, empty selectors, and selectors
+with `.` or `..` path segments are rejected. Missing or ambiguous selectors fail
+with the standard typed input/config error path before runtime work proceeds.
+
+Duplicate discovered source stems fail early. This remains true until alignment
+cache/manual override persistence moves from stem-based keys to versioned stable
+source IDs.
+
+Configured source trims define each clip's base renderable domain. Alignment
+trims compose on top of those base trims rather than replacing them. Explicit
+config `active_rect` values are validated against the probed source dimensions
+and invalid explicit rectangles fail instead of falling back silently.
+`effective_fps` is an AssumeFPS-style timing override: it changes timing/FPS
+interpretation without resampling, dropping, interpolating, or duplicating
+source frames. Mixed-FPS validation compares effective FPS values after
+overrides.
+
 ## `version` Command Contract
 
 - Prints `frame-compare <version>` to stdout.
@@ -122,12 +157,17 @@ exists.
 - Analysis cache entries live under `<resolved paths.generated_dir>/cache/analysis`
   using labeled full-fingerprint filenames:
   `<safe-human-label>__<full-fingerprint>.compframes`.
+- The analysis cache fingerprint includes the selected reference identity and
+  source overrides that affect the selected reference frame/timing domain.
+  Cache entries for different selected references from the same input set do
+  not satisfy each other.
 - The full fingerprint remains inside the cache payload and is validated on load.
   Legacy run-folder `cache.compframes` files are not used as analysis cache hits.
 - With `paths.use_run_folders = true`, runs that proceed reserve a fresh run folder;
   existing run folders are not reused to satisfy analysis cache hits.
 - `--no-cache` deletes only the matching shared analysis cache entry for the current
-  inputs and analysis settings before continuing. It does not clear unrelated shared
+  inputs, selected reference, selected reference-domain source overrides, and
+  analysis settings before continuing. It does not clear unrelated shared
   analysis entries and does not delete alignment offset caches.
 - `--from-cache-only` is analysis-cache-only. When analysis is not skipped, it validates
   the matching shared analysis cache entry before metadata prefetch and before run-folder

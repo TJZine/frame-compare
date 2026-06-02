@@ -12,7 +12,12 @@ import pytest
 import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.orchestration import preparation
-from frame_compare.orchestration.errors import MixedSourceFpsError
+from frame_compare.orchestration.context import ClipActiveRect
+from frame_compare.orchestration.errors import (
+    DuplicateSourceStemError,
+    MixedSourceFpsError,
+    SourceSelectionError,
+)
 from frame_compare.orchestration.probing.probe_cache import load_clip_probe_cache
 from frame_compare.orchestration.types import RunDependencies, RunRequest
 from frame_compare.services.alignment import CACHE_FILE_NAME
@@ -142,6 +147,41 @@ def test_execute_prep_no_cache_removes_only_matching_shared_metrics_cache(tmp_pa
     assert offsets_path.exists()
 
 
+def test_execute_prep_no_cache_removes_only_selected_reference_metrics_cache(
+    tmp_path: Path,
+) -> None:
+    config_content = MINIMAL_CONFIG + '\n[sources]\nreference = "b-reference.mkv"\n'
+    _create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "a-default.mkv", "b-reference.mkv")
+
+    config = preparation.prepare_preflight(root=tmp_path).config
+    default_order = [input_dir / "a-default.mkv", input_dir / "b-reference.mkv"]
+    selected_order = [input_dir / "b-reference.mkv", input_dir / "a-default.mkv"]
+    metrics_dir = tmp_path / "generated" / "cache" / "analysis"
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+    default_fingerprint = cache_io.compute_cache_key(default_order, config.analysis)
+    selected_fingerprint = cache_io.compute_cache_key(selected_order, config.analysis)
+    default_cache_path = metrics_dir / cache_io.metrics_cache_filename(
+        default_order, default_fingerprint
+    )
+    selected_cache_path = metrics_dir / cache_io.metrics_cache_filename(
+        selected_order, selected_fingerprint
+    )
+    default_cache_path.write_text("{}", encoding="utf-8")
+    selected_cache_path.write_text("{}", encoding="utf-8")
+
+    asyncio.run(
+        preparation.execute_prep(
+            RunRequest(root=tmp_path, no_cache=True),
+            RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
+        )
+    )
+
+    assert default_cache_path.exists()
+    assert not selected_cache_path.exists()
+
+
 def test_execute_prep_from_cache_only_does_not_require_cached_alignment_offsets(
     tmp_path: Path,
 ) -> None:
@@ -170,6 +210,64 @@ def test_execute_prep_from_cache_only_validates_metrics_cache_when_analysis_runs
     with pytest.raises(MetricsCalculationError, match="Cached metrics missing"):
         asyncio.run(
             preparation.execute_prep(request, RunDependencies(vs_loader=cast(Any, FakeVSLoader())))
+        )
+
+
+def test_execute_prep_from_cache_only_misses_when_selected_reference_differs(
+    tmp_path: Path,
+) -> None:
+    config_content = MINIMAL_CONFIG + '\n[sources]\nreference = "b-reference.mkv"\n'
+    _create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "a-default.mkv", "b-reference.mkv")
+    config = preparation.prepare_preflight(root=tmp_path).config
+    default_order = [input_dir / "a-default.mkv", input_dir / "b-reference.mkv"]
+    fingerprint = cache_io.compute_cache_key(default_order, config.analysis)
+    metrics_dir = tmp_path / "generated" / "cache" / "analysis"
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+    (metrics_dir / cache_io.metrics_cache_filename(default_order, fingerprint)).write_text(
+        "{}",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(MetricsCalculationError, match="Cached metrics missing"):
+        asyncio.run(
+            preparation.execute_prep(
+                RunRequest(root=tmp_path, from_cache_only=True),
+                RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
+            )
+        )
+
+
+def test_execute_prep_from_cache_only_misses_when_reference_effective_fps_differs(
+    tmp_path: Path,
+) -> None:
+    config_content = (
+        MINIMAL_CONFIG
+        + """
+[sources.overrides."a-default.mkv"]
+effective_fps = "24000/1001"
+"""
+    )
+    _create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "a-default.mkv", "b-encode.mkv")
+    config = preparation.prepare_preflight(root=tmp_path).config
+    input_order = [input_dir / "a-default.mkv", input_dir / "b-encode.mkv"]
+    source_fps_fingerprint = cache_io.compute_cache_key(input_order, config.analysis)
+    metrics_dir = tmp_path / "generated" / "cache" / "analysis"
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+    (metrics_dir / cache_io.metrics_cache_filename(input_order, source_fps_fingerprint)).write_text(
+        "{}",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(MetricsCalculationError, match="Cached metrics missing"):
+        asyncio.run(
+            preparation.execute_prep(
+                RunRequest(root=tmp_path, from_cache_only=True),
+                RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
+            )
         )
 
 
@@ -234,6 +332,250 @@ def test_execute_prep_probes_uncached_clips_and_persists_probe_snapshot(tmp_path
     probe_cache = load_clip_probe_cache(tmp_path / "generated" / "clip_probe.toml")
     assert len(probe_cache) == 2
     assert {snapshot.fingerprint.path for snapshot in probe_cache.values()} == {source, encode}
+
+
+def test_execute_prep_preserves_deterministic_four_clip_order_and_labels(tmp_path: Path) -> None:
+    _create_config(tmp_path)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(
+        input_dir,
+        "03-delta.mkv",
+        "01-bravo.mkv",
+        "04-charlie.ts",
+        "00-alpha.mp4",
+    )
+
+    prep = asyncio.run(
+        preparation.execute_prep(
+            RunRequest(root=tmp_path),
+            RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
+        )
+    )
+
+    assert [clip.path for clip in prep.clips] == [
+        input_dir / "00-alpha.mp4",
+        input_dir / "01-bravo.mkv",
+        input_dir / "03-delta.mkv",
+        input_dir / "04-charlie.ts",
+    ]
+    assert [clip.label for clip in prep.clips] == [
+        "Reference",
+        "Encode 1",
+        "Encode 2",
+        "Encode 3",
+    ]
+
+
+def test_execute_prep_explicit_reference_moves_selected_source_to_front(
+    tmp_path: Path,
+) -> None:
+    config_content = MINIMAL_CONFIG + '\n[sources]\nreference = "03-delta.mkv"\n'
+    _create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(
+        input_dir,
+        "00-alpha.mp4",
+        "01-bravo.mkv",
+        "03-delta.mkv",
+    )
+
+    prep = asyncio.run(
+        preparation.execute_prep(
+            RunRequest(root=tmp_path),
+            RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
+        )
+    )
+
+    assert [clip.path for clip in prep.clips] == [
+        input_dir / "03-delta.mkv",
+        input_dir / "00-alpha.mp4",
+        input_dir / "01-bravo.mkv",
+    ]
+    assert [clip.label for clip in prep.clips] == ["Reference", "Encode 1", "Encode 2"]
+
+
+def test_execute_prep_applies_source_trim_and_active_rect_overrides(tmp_path: Path) -> None:
+    config_content = (
+        MINIMAL_CONFIG
+        + """
+[sources.overrides."01-encode.mkv"]
+trim_start_frames = 12
+trim_end_frames = 5
+active_rect = { x = 240, y = 0, width = 1440, height = 1080 }
+"""
+    )
+    _create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "00-reference.mkv", "01-encode.mkv")
+
+    prep = asyncio.run(
+        preparation.execute_prep(
+            RunRequest(root=tmp_path),
+            RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
+        )
+    )
+
+    assert prep.clips[0].trim.trim_start_frames == 0
+    assert prep.clips[1].trim.trim_start_frames == 12
+    assert prep.clips[1].trim.trim_end_frame_inclusive == 94
+    assert prep.clips[1].active_rect == ClipActiveRect(
+        x=240,
+        y=0,
+        width=1440,
+        height=1080,
+    )
+
+
+def test_execute_prep_applies_effective_fps_overrides_without_changing_source_fps(
+    tmp_path: Path,
+) -> None:
+    config_content = (
+        MINIMAL_CONFIG
+        + """
+[sources.overrides."01-encode.mkv"]
+effective_fps = "24000/1001"
+"""
+    )
+    _create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "00-reference.mkv", "01-encode.mkv")
+    loader = FakeVSLoader(
+        fps_by_name={
+            "00-reference.mkv": Fraction(24000, 1001),
+            "01-encode.mkv": Fraction(30000, 1001),
+        }
+    )
+
+    prep = asyncio.run(
+        preparation.execute_prep(
+            RunRequest(root=tmp_path),
+            RunDependencies(vs_loader=cast(Any, loader)),
+        )
+    )
+
+    assert prep.clips[0].source_fps == Fraction(24000, 1001)
+    assert prep.clips[0].effective_fps == Fraction(24000, 1001)
+    assert prep.clips[1].source_fps == Fraction(30000, 1001)
+    assert prep.clips[1].effective_fps == Fraction(24000, 1001)
+
+
+def test_execute_prep_preserves_explicit_reference_effective_fps_cache_domain_when_equal_to_source(
+    tmp_path: Path,
+) -> None:
+    config_content = (
+        MINIMAL_CONFIG
+        + """
+[sources.overrides."00-reference.mkv"]
+effective_fps = "24/1"
+"""
+    )
+    _create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "00-reference.mkv", "01-encode.mkv")
+    loader = FakeVSLoader(
+        fps_by_name={
+            "00-reference.mkv": Fraction(24, 1),
+            "01-encode.mkv": Fraction(24, 1),
+        }
+    )
+
+    prep = asyncio.run(
+        preparation.execute_prep(
+            RunRequest(root=tmp_path),
+            RunDependencies(vs_loader=cast(Any, loader)),
+        )
+    )
+
+    assert prep.reference_cache_domain == "trim_start=0|trim_end=0|effective_fps=24/1"
+    assert prep.clips[0].source_fps == Fraction(24, 1)
+    assert prep.clips[0].effective_fps == Fraction(24, 1)
+
+
+def test_execute_prep_reference_source_trims_constrain_effective_frame_domain(
+    tmp_path: Path,
+) -> None:
+    config_content = (
+        MINIMAL_CONFIG
+        + """
+[sources.overrides."00-reference.mkv"]
+trim_start_frames = 10
+trim_end_frames = 5
+"""
+    )
+    _create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "00-reference.mkv", "01-encode.mkv")
+
+    prep = asyncio.run(
+        preparation.execute_prep(
+            RunRequest(root=tmp_path),
+            RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
+        )
+    )
+
+    assert prep.clips[0].trim.trim_start_frames == 10
+    assert prep.clips[0].trim.trim_end_frame_inclusive == 94
+    assert prep.clips[0].effective_num_frames() == 85
+
+
+def test_execute_prep_rejects_source_trims_that_remove_every_frame(tmp_path: Path) -> None:
+    config_content = (
+        MINIMAL_CONFIG
+        + """
+[sources.overrides."01-encode.mkv"]
+trim_start_frames = 100
+trim_end_frames = 0
+"""
+    )
+    _create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "00-reference.mkv", "01-encode.mkv")
+
+    with pytest.raises(SourceSelectionError, match="source trims remove every frame"):
+        asyncio.run(
+            preparation.execute_prep(
+                RunRequest(root=tmp_path),
+                RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
+            )
+        )
+
+
+def test_execute_prep_rejects_out_of_bounds_explicit_active_rect(tmp_path: Path) -> None:
+    config_content = (
+        MINIMAL_CONFIG
+        + """
+[sources.overrides."01-encode.mkv"]
+active_rect = { x = 1800, y = 0, width = 400, height = 1080 }
+"""
+    )
+    _create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "00-reference.mkv", "01-encode.mkv")
+
+    with pytest.raises(SourceSelectionError, match="active_rect is outside source dimensions"):
+        asyncio.run(
+            preparation.execute_prep(
+                RunRequest(root=tmp_path),
+                RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
+            )
+        )
+
+
+def test_execute_prep_rejects_duplicate_source_stems_before_probe(tmp_path: Path) -> None:
+    _create_config(tmp_path)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "source.mkv", "source.mp4")
+    loader = FakeVSLoader()
+
+    with pytest.raises(DuplicateSourceStemError):
+        asyncio.run(
+            preparation.execute_prep(
+                RunRequest(root=tmp_path),
+                RunDependencies(vs_loader=cast(Any, loader)),
+            )
+        )
+
+    assert loader.loaded == []
 
 
 def test_execute_prep_reuses_probe_cache_without_vs_loader(tmp_path: Path) -> None:

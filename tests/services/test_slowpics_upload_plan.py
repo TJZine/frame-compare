@@ -58,6 +58,41 @@ def test_upload_plan_preserves_reference_then_comparison_image_order(tmp_path: P
     assert plan.file_paths == [ref, encode_a, encode_b]
 
 
+def test_upload_plan_preserves_ten_clip_row_major_order(tmp_path: Path) -> None:
+    selected_frames = [10, 20]
+    clips = [
+        SlowpicsUploadClip(
+            label="Reference" if clip_index == 0 else f"Encode {clip_index}",
+            image_name=f"source-{clip_index}",
+        )
+        for clip_index in range(10)
+    ]
+    screenshots_by_label = {
+        clip.label: [
+            _png(tmp_path / f"frame-{frame}" / f"clip-{clip_index}.png")
+            for frame in selected_frames
+        ]
+        for clip_index, clip in enumerate(clips)
+    }
+
+    plan = build_slowpics_upload_plan(
+        selected_frames=selected_frames,
+        clips=clips,
+        screenshots_by_label=screenshots_by_label,
+    )
+
+    assert [row.row_name for row in plan.rows] == ["10", "20"]
+    assert [[image.clip_label for image in row.images] for row in plan.rows] == [
+        [clip.label for clip in clips],
+        [clip.label for clip in clips],
+    ]
+    assert plan.file_paths == [
+        screenshots_by_label[clip.label][frame_index]
+        for frame_index in range(len(selected_frames))
+        for clip in clips
+    ]
+
+
 def test_upload_plan_uses_source_filename_stems_for_image_names(tmp_path: Path) -> None:
     ref = _png(tmp_path / "screenshots" / "ui-reference-frame-10.png")
     encode = _png(tmp_path / "screenshots" / "ui-encode-frame-10.png")

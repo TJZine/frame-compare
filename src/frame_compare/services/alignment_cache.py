@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tomllib
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 from typing import cast
 
@@ -98,6 +99,17 @@ def _parse_clip_freshness(entry_dict: dict[str, object], *, prefix: str) -> _Cli
     )
 
 
+def _cached_reference_fps_matches(value: object, reference_fps: Fraction | None) -> bool:
+    if reference_fps is None:
+        return True
+    if not isinstance(value, str):
+        return False
+    try:
+        return Fraction(value) == reference_fps
+    except (ValueError, ZeroDivisionError):
+        return False
+
+
 def _entry_freshness_matches(
     entry_dict: dict[str, object],
     *,
@@ -106,6 +118,7 @@ def _entry_freshness_matches(
     sample_rate: int,
     max_offset_seconds: float,
     config: AlignmentConfig,
+    reference_fps: Fraction | None,
 ) -> bool:
     reference_freshness = _parse_clip_freshness(entry_dict, prefix="reference")
     comparison_freshness = _parse_clip_freshness(entry_dict, prefix="comparison")
@@ -114,6 +127,7 @@ def _entry_freshness_matches(
 
     cached_sample_rate = entry_dict.get("sample_rate")
     cached_max_offset_seconds = entry_dict.get("max_offset_seconds")
+    cached_reference_fps = entry_dict.get("reference_fps")
     if not isinstance(cached_sample_rate, int):
         return False
     if not isinstance(cached_max_offset_seconds, int | float):
@@ -128,6 +142,7 @@ def _entry_freshness_matches(
         and comparison_freshness == current_comparison
         and cached_sample_rate == sample_rate
         and float(cached_max_offset_seconds) == max_offset_seconds
+        and _cached_reference_fps_matches(cached_reference_fps, reference_fps)
         and _entry_alignment_settings_match(entry_dict, config=config, comparison=comparison)
     )
 
@@ -183,6 +198,7 @@ def _cache_entry_from_result(
     sample_rate: int,
     max_offset_seconds: float,
     config: AlignmentConfig,
+    reference_fps: Fraction | None,
 ) -> dict[str, object]:
     comparison_stem = Path(result.comparison_clip).stem
     entry: dict[str, object] = {
@@ -211,6 +227,8 @@ def _cache_entry_from_result(
         "consensus_minimum_ratio": config.consensus_minimum_ratio,
         "refinement_mode": config.refinement_mode,
     }
+    if reference_fps is not None:
+        entry["reference_fps"] = str(reference_fps)
     optional_settings: dict[str, int | None] = {
         "refinement_sample_rate": config.refinement_sample_rate,
         "reference_stream": config.reference_stream,
@@ -237,6 +255,7 @@ def load_cached_offsets(
     sample_rate: int,
     max_offset_seconds: float,
     config: AlignmentConfig | None = None,
+    reference_fps: Fraction | None = None,
 ) -> dict[str, AlignmentResult] | None:
     """Load previously calculated offsets from cache."""
     effective_config = _effective_alignment_config(
@@ -272,6 +291,7 @@ def load_cached_offsets(
                 sample_rate=sample_rate,
                 max_offset_seconds=max_offset_seconds,
                 config=effective_config,
+                reference_fps=reference_fps,
             ):
                 continue
             try:
@@ -291,6 +311,7 @@ def save_offsets_cache(
     max_offset_seconds: float,
     results: list[AlignmentResult],
     config: AlignmentConfig | None = None,
+    reference_fps: Fraction | None = None,
 ) -> None:
     """Persist alignment results to cache."""
     cache_path = cache_dir / CACHE_FILE_NAME
@@ -354,6 +375,7 @@ def save_offsets_cache(
             sample_rate=sample_rate,
             max_offset_seconds=max_offset_seconds,
             config=effective_config,
+            reference_fps=reference_fps,
         )
 
     try:

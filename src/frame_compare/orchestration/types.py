@@ -319,6 +319,7 @@ class PrepState:
     preflight_warnings: list[str]
     preflight_duration: float
     load_sources_start: datetime
+    reference_cache_domain: str | None = None
 
 
 @dataclass(frozen=True)

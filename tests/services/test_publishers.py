@@ -220,9 +220,7 @@ async def test_publish_to_slowpics_sends_decoded_xsrf_browser_id_headers_and_use
         if request.url.path == "/comparison":
             return httpx.Response(
                 200,
-                headers={
-                    "Set-Cookie": "XSRF-TOKEN=token%2Bdecoded; Domain=.slow.pics; Path=/"
-                },
+                headers={"Set-Cookie": "XSRF-TOKEN=token%2Bdecoded; Domain=.slow.pics; Path=/"},
             )
         if request.url.path == "/upload/comparison":
             return httpx.Response(200, json=_metadata_payload(rows=1, cols=1))
@@ -436,6 +434,59 @@ async def test_publish_to_slowpics_response_matrix_maps_to_matching_image_upload
 
 
 @pytest.mark.anyio
+async def test_publish_to_slowpics_maps_ten_column_upload_plan(
+    tmp_path: Path,
+    async_client: httpx.AsyncClient,
+    respx_mock,
+) -> None:
+    upload_plan = _plan(tmp_path, rows=2, cols=10)
+    metadata_requests: list[httpx.Request] = []
+    image_requests: list[httpx.Request] = []
+    respx_mock.get("https://slow.pics/comparison").mock(
+        return_value=httpx.Response(
+            200,
+            headers={"Set-Cookie": "XSRF-TOKEN=token; Domain=.slow.pics; Path=/"},
+        )
+    )
+    respx_mock.post("https://slow.pics/upload/comparison").mock(
+        side_effect=lambda request: metadata_requests.append(request)
+        or httpx.Response(200, json=_metadata_payload(rows=2, cols=10))
+    )
+    for row in range(2):
+        for col in range(10):
+            respx_mock.post(f"https://slow.pics/upload/image/image-{row}-{col}-secret").mock(
+                side_effect=lambda request: image_requests.append(request) or httpx.Response(200)
+            )
+
+    result = await publish_to_slowpics(
+        tmp_path / "screenshots", SlowpicsConfig(), async_client, upload_plan=upload_plan
+    )
+
+    assert result.screenshot_count == 20
+    metadata_request = metadata_requests[0]
+    for row in range(2):
+        assert _multipart_field_value(metadata_request, f"comparisons[{row}].name") == str(10 + row)
+        assert _multipart_field_value(metadata_request, f"comparisons[{row}].sortOrder") == str(row)
+        for col in range(10):
+            expected_name = "reference-source" if col == 0 else f"encode-source-{col}"
+            assert (
+                _multipart_field_value(metadata_request, f"comparisons[{row}].images[{col}].name")
+                == expected_name
+            )
+            assert _multipart_field_value(
+                metadata_request, f"comparisons[{row}].images[{col}].sortOrder"
+            ) == str(col)
+    assert [request.url.path for request in image_requests] == [
+        f"/upload/image/image-{row}-{col}-secret" for row in range(2) for col in range(10)
+    ]
+    assert [_multipart_filenames(request) for request in image_requests] == [
+        [f"{row}-{col}.png"] for row in range(2) for col in range(10)
+    ]
+    assert _multipart_field_value(image_requests[19], "imageUuid") == "image-1-9-secret"
+    assert _multipart_filenames(image_requests[19]) == ["1-9.png"]
+
+
+@pytest.mark.anyio
 async def test_publish_to_slowpics_metadata_response_count_mismatch_fails_before_image_upload(
     tmp_path: Path,
     async_client: httpx.AsyncClient,
@@ -461,6 +512,61 @@ async def test_publish_to_slowpics_metadata_response_count_mismatch_fails_before
         )
 
     assert image_route.call_count == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "response_images",
+    [
+        [
+            ["image-0-0-secret", "image-0-1-secret"],
+            ["image-1-0-secret"],
+        ],
+        [
+            ["image-0-0-secret", "image-0-1-secret"],
+            ["image-1-0-secret", "image-1-1-secret", "image-1-extra-secret"],
+        ],
+    ],
+)
+async def test_publish_to_slowpics_metadata_response_column_mismatch_fails_before_image_upload(
+    tmp_path: Path,
+    async_client: httpx.AsyncClient,
+    respx_mock,
+    response_images: list[list[str]],
+) -> None:
+    upload_plan = _plan(tmp_path, rows=2, cols=2)
+    respx_mock.get("https://slow.pics/comparison").mock(
+        return_value=httpx.Response(
+            200,
+            headers={"Set-Cookie": "XSRF-TOKEN=token; Domain=.slow.pics; Path=/"},
+        )
+    )
+    respx_mock.post("https://slow.pics/upload/comparison").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                **_metadata_payload(rows=2, cols=2),
+                "images": response_images,
+            },
+        )
+    )
+    possible_image_uuids = {
+        *(image_uuid for row in response_images for image_uuid in row),
+        *(f"image-{row}-{col}-secret" for row in range(2) for col in range(2)),
+    }
+    image_routes = [
+        respx_mock.post(f"https://slow.pics/upload/image/{image_uuid}").mock(
+            return_value=httpx.Response(200)
+        )
+        for image_uuid in sorted(possible_image_uuids)
+    ]
+
+    with pytest.raises(SlowpicsError, match="Invalid metadata response"):
+        await publish_to_slowpics(
+            tmp_path / "screenshots", SlowpicsConfig(), async_client, upload_plan=upload_plan
+        )
+
+    assert all(route.call_count == 0 for route in image_routes)
 
 
 @pytest.mark.anyio

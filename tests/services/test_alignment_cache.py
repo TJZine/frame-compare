@@ -2,6 +2,7 @@
 
 # pyright: reportPrivateUsage=false
 
+from fractions import Fraction
 from pathlib import Path
 
 import pytest
@@ -111,7 +112,8 @@ def _load(
     sample_rate: int = 8000,
     max_offset_seconds: float = 30.0,
     config: AlignmentConfig | None = None,
-):
+    reference_fps: Fraction | None = None,
+) -> dict[str, AlignmentResult] | None:
     return load_cached_offsets(
         cache_dir,
         reference,
@@ -119,6 +121,7 @@ def _load(
         sample_rate=sample_rate,
         max_offset_seconds=max_offset_seconds,
         config=config,
+        reference_fps=reference_fps,
     )
 
 
@@ -131,6 +134,7 @@ def _save(
     sample_rate: int = 8000,
     max_offset_seconds: float = 30.0,
     config: AlignmentConfig | None = None,
+    reference_fps: Fraction | None = None,
 ) -> None:
     save_offsets_cache(
         cache_dir,
@@ -140,6 +144,7 @@ def _save(
         max_offset_seconds=max_offset_seconds,
         results=results,
         config=config,
+        reference_fps=reference_fps,
     )
 
 
@@ -161,6 +166,60 @@ def test_load_cached_offsets_valid_returns_dict(tmp_path: Path) -> None:
     assert res["ref:comp_a"].frame_offset == 42
     assert res["ref:comp_a"].source == "cached"
     assert res["ref:comp_a"].algorithm == "cross_correlation"
+
+
+def test_load_cached_offsets_reference_fps_mismatch_is_cache_miss(tmp_path: Path) -> None:
+    reference = _touch_clip(tmp_path / "ref.mkv", b"ref")
+    comparison = _touch_clip(tmp_path / "comp_a.mkv", b"comp_a")
+    _save(
+        tmp_path,
+        reference,
+        [comparison],
+        [_make_result()],
+        reference_fps=Fraction(24000, 1001),
+    )
+
+    matching = _load(
+        tmp_path,
+        reference,
+        [comparison],
+        reference_fps=Fraction(24000, 1001),
+    )
+    mismatched = _load(tmp_path, reference, [comparison], reference_fps=Fraction(24, 1))
+    unspecified = _load(tmp_path, reference, [comparison])
+
+    assert matching is not None
+    assert matching["ref:comp_a"].frame_offset == 42
+    assert mismatched == {}
+    assert unspecified is not None
+    assert unspecified["ref:comp_a"].frame_offset == 42
+
+
+def test_load_cached_offsets_with_reference_fps_misses_legacy_entry(tmp_path: Path) -> None:
+    cache_file = tmp_path / "audio_offsets.toml"
+    reference = _touch_clip(tmp_path / "ref.mkv", b"ref")
+    comparison = _touch_clip(tmp_path / "comp_a.mkv", b"comp_a")
+    cache_file.write_text(
+        tomli_w.dumps(
+            {
+                "version": CACHE_VERSION,
+                "ref:comp_a": _entry_dict(reference, comparison),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    legacy_caller = _load(tmp_path, reference, [comparison])
+    selected_fps_caller = _load(
+        tmp_path,
+        reference,
+        [comparison],
+        reference_fps=Fraction(24000, 1001),
+    )
+
+    assert legacy_caller is not None
+    assert legacy_caller["ref:comp_a"].frame_offset == 42
+    assert selected_fps_caller == {}
 
 
 def test_load_cached_offsets_valid_no_match_returns_empty(tmp_path: Path) -> None:
@@ -323,12 +382,29 @@ def test_save_offsets_cache_writes_toml_with_freshness(tmp_path: Path) -> None:
     assert "reference_path" in content
     assert "comparison_mtime_ns" in content
     assert "sample_rate = 8000" in content
+    assert "reference_fps" not in content
     assert 'correlation_mode = "raw_fft"' in content
     assert 'preprocessing_mode = "none"' in content
     assert 'channel_strategy = "mono_downmix"' in content
     assert "confidence_threshold = 0.0" in content
     assert "ambiguity_peak_ratio = 1.0" in content
     assert 'refinement_mode = "disabled"' in content
+
+
+def test_save_offsets_cache_writes_reference_fps_when_supplied(tmp_path: Path) -> None:
+    reference = _touch_clip(tmp_path / "ref.mkv", b"ref")
+    comparison = _touch_clip(tmp_path / "comp.mkv", b"comp")
+
+    _save(
+        tmp_path,
+        reference,
+        [comparison],
+        [_make_result(comparison_clip="comp.mkv", frame_offset=10, time_offset_seconds=0.4)],
+        reference_fps=Fraction(24000, 1001),
+    )
+
+    content = (tmp_path / "audio_offsets.toml").read_text(encoding="utf-8")
+    assert 'reference_fps = "24000/1001"' in content
 
 
 def test_load_cached_offsets_alignment_setting_drift_is_cache_miss(tmp_path: Path) -> None:

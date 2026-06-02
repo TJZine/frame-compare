@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Literal
 
 from frame_compare.config.schema import OverlayMode
 from frame_compare.config.schema_enums import VsScreenshotWriter
+from frame_compare.render.geometry import GeometryRect
 
 if TYPE_CHECKING:
     import vapoursynth as vs
@@ -128,6 +129,8 @@ class ScreenshotBatchRequest:
     probe_is_hdr: bool | None
     selection_details: list[OverlaySelectionDetail | None] | None = None
     diagnostic_metadata: list[OverlayDiagnosticMetadata | None] | None = None
+    diagnostic_metadata_trusted_for_geometry: bool = False
+    active_rect: GeometryRect | None = None
     filename_label: str | None = None
 
 

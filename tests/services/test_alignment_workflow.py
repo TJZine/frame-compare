@@ -28,6 +28,7 @@ def _write_cached_offsets(
     sample_rate: int = 8000,
     max_offset_seconds: float = 30.0,
     config: AlignmentConfig | None = None,
+    reference_fps: Fraction | None = None,
 ) -> None:
     save_offsets_cache(
         cache_dir,
@@ -37,6 +38,7 @@ def _write_cached_offsets(
         max_offset_seconds=max_offset_seconds,
         results=results,
         config=config,
+        reference_fps=reference_fps,
     )
 
 
@@ -225,6 +227,154 @@ def test_align_clips_cached_results_do_not_advance_phase_progress(tmp_path: Path
     align_clips(ref, [comp], AlignmentConfig(cache_results=True), tmp_path, progress=reporter)
 
     reporter.advance.assert_not_called()
+
+
+@patch("frame_compare.services.alignment._probe_fps")
+@patch("frame_compare.services.alignment._extract_matching_audio")
+@patch("frame_compare.services.alignment._extract_reference_audio")
+@patch("frame_compare.services.alignment._estimate_consensus_offset")
+def test_align_clips_uses_supplied_reference_fps_for_computed_frame_offsets(
+    mock_estimate: MagicMock,
+    mock_extract_reference: MagicMock,
+    mock_extract_matching: MagicMock,
+    mock_probe: MagicMock,
+    tmp_path: Path,
+) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+
+    mock_extract_reference.return_value = (np.ones(10, dtype=np.float32), object())
+    mock_extract_matching.return_value = np.ones(10, dtype=np.float32)
+    mock_estimate.return_value = AlignmentConsensus(
+        8000,
+        0.99,
+        True,
+        "accepted",
+        1,
+        1,
+        1.0,
+        None,
+    )
+
+    results = align_clips(
+        ref,
+        [comp],
+        AlignmentConfig(cache_results=False),
+        tmp_path,
+        reference_fps=Fraction(24000, 1001),
+    )
+
+    assert results[0].frame_offset == 24
+    mock_probe.assert_not_called()
+
+
+@patch("frame_compare.services.alignment._probe_fps")
+@patch("frame_compare.services.alignment._extract_matching_audio")
+@patch("frame_compare.services.alignment._extract_reference_audio")
+@patch("frame_compare.services.alignment._estimate_consensus_offset")
+def test_align_clips_recomputes_when_cached_reference_fps_differs(
+    mock_estimate: MagicMock,
+    mock_extract_reference: MagicMock,
+    mock_extract_matching: MagicMock,
+    mock_probe: MagicMock,
+    tmp_path: Path,
+) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+    _write_cached_offsets(
+        tmp_path,
+        reference=ref,
+        comparisons=[comp],
+        results=[
+            AlignmentResult(
+                reference_clip="ref.mkv",
+                comparison_clip="comp.mkv",
+                frame_offset=99,
+                time_offset_seconds=99 / 24,
+                correlation_score=0.95,
+                algorithm="cross_correlation",
+                source="computed",
+            )
+        ],
+        reference_fps=Fraction(24, 1),
+    )
+
+    mock_extract_reference.return_value = (np.ones(10, dtype=np.float32), object())
+    mock_extract_matching.return_value = np.ones(10, dtype=np.float32)
+    mock_estimate.return_value = AlignmentConsensus(
+        16000,
+        0.99,
+        True,
+        "accepted",
+        1,
+        1,
+        1.0,
+        None,
+    )
+
+    results = align_clips(
+        ref,
+        [comp],
+        AlignmentConfig(cache_results=True),
+        tmp_path,
+        reference_fps=Fraction(24000, 1001),
+    )
+
+    assert results[0].source == "computed"
+    assert results[0].frame_offset == 48
+    mock_probe.assert_not_called()
+    mock_extract_reference.assert_called_once()
+    mock_extract_matching.assert_called_once()
+
+
+@patch("frame_compare.services.alignment._probe_fps")
+@patch("frame_compare.services.alignment._extract_matching_audio")
+@patch("frame_compare.services.alignment._extract_reference_audio")
+def test_align_clips_loads_cache_when_reference_fps_matches(
+    mock_extract_reference: MagicMock,
+    mock_extract_matching: MagicMock,
+    mock_probe: MagicMock,
+    tmp_path: Path,
+) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+    _write_cached_offsets(
+        tmp_path,
+        reference=ref,
+        comparisons=[comp],
+        results=[
+            AlignmentResult(
+                reference_clip="ref.mkv",
+                comparison_clip="comp.mkv",
+                frame_offset=99,
+                time_offset_seconds=99 / 24,
+                correlation_score=0.95,
+                algorithm="cross_correlation",
+                source="computed",
+            )
+        ],
+        reference_fps=Fraction(24000, 1001),
+    )
+
+    results = align_clips(
+        ref,
+        [comp],
+        AlignmentConfig(cache_results=True),
+        tmp_path,
+        reference_fps=Fraction(24000, 1001),
+    )
+
+    assert results[0].source == "cached"
+    assert results[0].frame_offset == 99
+    mock_probe.assert_not_called()
+    mock_extract_reference.assert_not_called()
+    mock_extract_matching.assert_not_called()
 
 
 @patch("frame_compare.services.alignment._probe_fps")
@@ -445,7 +595,9 @@ def test_align_clips_passes_stream_overrides_and_channel_strategy_to_audio_owner
     ]
 
 
-def test_check_alignment_cached_uses_runtime_alignment_config_for_cache_lookup(tmp_path: Path) -> None:
+def test_check_alignment_cached_uses_runtime_alignment_config_for_cache_lookup(
+    tmp_path: Path,
+) -> None:
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
     ref.touch()

@@ -149,6 +149,7 @@ body {
     gap: 0.4rem;
     padding-right: 0.5rem;
     border-right: 1px solid var(--border);
+    min-width: 0;
 }
 .rv-control-group:last-child {
     border-right: none;
@@ -204,6 +205,10 @@ select {
     background-repeat: no-repeat;
     background-position: right 0.55rem center;
     background-size: 0.7rem auto;
+    max-width: min(22rem, 100%);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 select::-ms-expand {
@@ -508,6 +513,7 @@ select optgroup {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    overflow-wrap: anywhere;
 }
 
 .rv-overlay-label.right {
@@ -981,6 +987,7 @@ select optgroup {
         border-bottom: 1px solid var(--border);
         padding-bottom: 0.4rem;
         width: 100%;
+        flex-wrap: wrap;
     }
     .rv-control-group:last-child {
         border-bottom: none;
@@ -995,7 +1002,18 @@ select optgroup {
 
     .rv-overlay-label {
         bottom: 12px;
-        max-width: calc(50% - 1rem);
+        max-width: calc(100% - 1.5rem);
+    }
+
+    .rv-overlay-label.right {
+        bottom: 42px;
+    }
+
+    .rv-control-group[data-control-scope="pair"] select,
+    .rv-control-group[data-control-scope="active"] select,
+    #frame-select {
+        flex: 1 1 12rem;
+        width: auto;
     }
 }
 

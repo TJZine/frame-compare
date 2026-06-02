@@ -109,7 +109,14 @@ def test_run_write_config_respects_root_and_config_and_does_not_invoke_runner(
         root = Path("workspace")
         config_path = root / "configs" / "config.toml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(MINIMAL_CONFIG)
+        config_path.write_text(
+            MINIMAL_CONFIG
+            + """
+[sources.overrides."reference.mkv"]
+effective_fps = "24/1"
+""",
+            encoding="utf-8",
+        )
 
         result = runner.invoke(
             app,
@@ -127,6 +134,7 @@ def test_run_write_config_respects_root_and_config_and_does_not_invoke_runner(
         assert result.exit_code == 0
         data = tomllib.loads(config_path.read_text(encoding="utf-8"))
         assert data["analysis"]["frame_count"] == 17
+        assert data["sources"]["overrides"]["reference.mkv"]["effective_fps"] == "24/1"
 
 
 def test_run_write_config_write_error_uses_cli_error_contract(

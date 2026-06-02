@@ -80,6 +80,16 @@ class ClipAlignmentState:
 
 
 @dataclass(frozen=True)
+class ClipActiveRect:
+    """Explicit active image rectangle in source-frame coordinates."""
+
+    x: int
+    y: int
+    width: int
+    height: int
+
+
+@dataclass(frozen=True)
 class ClipState:
     """Canonical per-clip state across orchestration phases (legacy ClipPlan analogue)."""
 
@@ -96,6 +106,7 @@ class ClipState:
 
     trim: ClipTrimState = field(default_factory=ClipTrimState)
     alignment: ClipAlignmentState | None = None
+    active_rect: ClipActiveRect | None = None
 
     def effective_num_frames(self) -> int:
         """Return effective frame count after applied trims.
@@ -144,4 +155,5 @@ class RunContext:
     selection_breakdown: SelectionBreakdown | None = None
     selection_details_by_source_frame: dict[int, SelectionDetail] | None = None
     analysis_metrics: FrameMetrics | None = None
+    reference_cache_domain: str | None = None
     no_color: bool = False

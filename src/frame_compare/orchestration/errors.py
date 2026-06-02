@@ -4,7 +4,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import cast
 
-from frame_compare.errors import ErrorContext, InputError, JSONValue
+from frame_compare.errors import ErrorContext, ErrorDetails, InputError, JSONValue
 
 
 class NoVideosFoundError(InputError):
@@ -87,6 +87,58 @@ class MixedSourceFpsError(InputError):
                     "comparison_label": comparison_label,
                     "comparison_path": str(comparison_path),
                     "comparison_fps": str(comparison_fps),
+                },
+            )
+        )
+
+
+class SourceSelectionError(InputError):
+    """Invalid, missing, or ambiguous configured source selector (FC-3012)."""
+
+    def __init__(
+        self,
+        *,
+        selector: str,
+        reason: str,
+        role: str,
+        matches: list[Path] | None = None,
+    ) -> None:
+        details: ErrorDetails = {
+            "selector": selector,
+            "reason": reason,
+            "role": role,
+            "matches": [str(path) for path in matches or []],
+        }
+        super().__init__(
+            ErrorContext(
+                code="FC-3012",
+                name="SOURCE_SELECTION_ERROR",
+                message=f"Invalid source selector for {role}: {selector!r} ({reason}).",
+                hint=(
+                    "Use an input-dir-relative path, filename, or unique stem. "
+                    "Selectors are case-sensitive; absolute and traversal paths are rejected."
+                ),
+                details=details,
+            )
+        )
+
+
+class DuplicateSourceStemError(InputError):
+    """Discovered sources have duplicate stems (FC-3013)."""
+
+    def __init__(self, *, stem: str, matches: list[Path]) -> None:
+        super().__init__(
+            ErrorContext(
+                code="FC-3013",
+                name="DUPLICATE_SOURCE_STEM",
+                message=(
+                    f"Duplicate source stem {stem!r} is not supported until alignment "
+                    "persistence uses stable versioned source IDs."
+                ),
+                hint="Rename one of the source files so every discovered source stem is unique.",
+                details={
+                    "stem": stem,
+                    "matches": cast(JSONValue, [str(path) for path in matches]),
                 },
             )
         )

@@ -116,6 +116,30 @@ def test_plan_render_geometry_aligned_same_height_center_crops_wider_source():
     assert narrower.overlay_origin == (10, 10)
 
 
+@pytest.mark.unit
+def test_plan_render_geometry_aligned_three_sources_same_height_center_crops_wider_sources():
+    plans = plan_render_geometry(
+        (
+            SourceGeometry(width=1920, height=1080, label="wide"),
+            SourceGeometry(width=1600, height=1080, label="mid"),
+            SourceGeometry(width=1440, height=1080, label="active"),
+        ),
+        mode="aligned",
+    )
+
+    assert [plan.active_rect for plan in plans] == [
+        GeometryRect(240, 0, 1440, 1080),
+        GeometryRect(80, 0, 1440, 1080),
+        GeometryRect(0, 0, 1440, 1080),
+    ]
+    assert [plan.crop for plan in plans] == [
+        GeometryMargins(left=240, right=240),
+        GeometryMargins(left=80, right=80),
+        GeometryMargins(),
+    ]
+    assert [plan.final_canvas_size for plan in plans] == [(1440, 1080)] * 3
+
+
 def test_plan_render_geometry_aligned_same_width_center_crops_taller_source():
     plans = plan_render_geometry(
         (
@@ -136,6 +160,30 @@ def test_plan_render_geometry_aligned_same_width_center_crops_taller_source():
 
     assert shorter.crop == GeometryMargins()
     assert shorter.final_canvas_size == (1920, 800)
+
+
+@pytest.mark.unit
+def test_plan_render_geometry_aligned_three_sources_same_width_center_crops_taller_sources():
+    plans = plan_render_geometry(
+        (
+            SourceGeometry(width=1920, height=1080, label="tall"),
+            SourceGeometry(width=1920, height=900, label="mid"),
+            SourceGeometry(width=1920, height=800, label="active"),
+        ),
+        mode="aligned",
+    )
+
+    assert [plan.active_rect for plan in plans] == [
+        GeometryRect(0, 140, 1920, 800),
+        GeometryRect(0, 50, 1920, 800),
+        GeometryRect(0, 0, 1920, 800),
+    ]
+    assert [plan.crop for plan in plans] == [
+        GeometryMargins(top=140, bottom=140),
+        GeometryMargins(top=50, bottom=50),
+        GeometryMargins(),
+    ]
+    assert [plan.final_canvas_size for plan in plans] == [(1920, 800)] * 3
 
 
 def test_plan_render_geometry_aligned_crops_odd_full_frame_to_mod_safe_size():
@@ -192,6 +240,48 @@ def test_plan_render_geometry_clamps_overlay_origin_to_padded_content_bounds():
     assert square.content_origin == (400, 0)
     assert square.scaled_size == (800, 800)
     assert square.overlay_origin == (1199, 799)
+
+
+@pytest.mark.unit
+def test_plan_render_geometry_aligned_three_sources_mixed_dimensions_with_explicit_active_rects():
+    plans = plan_render_geometry(
+        (
+            SourceGeometry(
+                width=1920,
+                height=1080,
+                active_rect=GeometryRect(240, 140, 1440, 800),
+                active_rect_source="explicit",
+                label="reference",
+            ),
+            SourceGeometry(
+                width=1440,
+                height=800,
+                active_rect=GeometryRect(0, 0, 1440, 800),
+                active_rect_source="explicit",
+                label="encode-a",
+            ),
+            SourceGeometry(
+                width=1280,
+                height=720,
+                active_rect=GeometryRect(0, 0, 1280, 720),
+                active_rect_source="explicit",
+                label="encode-b",
+            ),
+        ),
+        mode="aligned",
+    )
+
+    assert [plan.active_rect_source for plan in plans] == ["explicit"] * 3
+    assert plans[0].crop == GeometryMargins(left=240, top=140, right=240, bottom=140)
+    assert plans[0].scaled_size == (1440, 800)
+    assert plans[1].crop == GeometryMargins()
+    assert plans[1].scaled_size == (1440, 800)
+    assert plans[2].crop == GeometryMargins()
+    assert plans[2].scaled_size == (1422, 800)
+    assert [plan.final_canvas_size for plan in plans] == [(1440, 800)] * 3
+    assert plans[2].pad == GeometryMargins(left=9, right=9)
+    assert plans[0].source_overlay_origin == (250, 150)
+    assert plans[0].overlay_origin == (10, 10)
 
 
 def test_plan_render_geometry_prefers_safe_provided_active_rect_over_dimension_fallback():

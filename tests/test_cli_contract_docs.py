@@ -265,7 +265,7 @@ def test_current_cli_contract_documents_slowpics_post_upload_behavior() -> None:
 
     for expected in (
         "`frame_compare.services.slowpics_webhook`",
-        "payload is exactly `{\"content\":\"<slowpics_url>\"}`",
+        'payload is exactly `{"content":"<slowpics_url>"}`',
         "strict external HTTPS endpoint",
         "prevalidated pinned IP address",
         "does not reuse slow.pics cookies, headers, client state",
@@ -342,9 +342,7 @@ def test_current_cli_contract_documents_slowpics_browser_report_precedence() -> 
 
 def test_current_architecture_documents_slowpics_service_flow_and_upload_plan() -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    architecture = (repo_root / "docs" / "current-architecture.md").read_text(
-        encoding="utf-8"
-    )
+    architecture = (repo_root / "docs" / "current-architecture.md").read_text(encoding="utf-8")
     normalized_architecture = " ".join(architecture.split())
 
     for expected in (
@@ -366,9 +364,7 @@ def test_current_architecture_documents_slowpics_service_flow_and_upload_plan() 
 
 def test_current_architecture_documents_report_confirmed_phase_order_and_owner_seams() -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    architecture = (repo_root / "docs" / "current-architecture.md").read_text(
-        encoding="utf-8"
-    )
+    architecture = (repo_root / "docs" / "current-architecture.md").read_text(encoding="utf-8")
     normalized_architecture = " ".join(architecture.split())
 
     for expected in (
@@ -396,9 +392,7 @@ def test_current_architecture_documents_report_confirmed_phase_order_and_owner_s
 
 def test_current_architecture_documents_slowpics_post_upload_owner_seams() -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    architecture = (repo_root / "docs" / "current-architecture.md").read_text(
-        encoding="utf-8"
-    )
+    architecture = (repo_root / "docs" / "current-architecture.md").read_text(encoding="utf-8")
     normalized_architecture = " ".join(architecture.split())
 
     for expected in (
@@ -417,10 +411,7 @@ def test_current_architecture_documents_slowpics_post_upload_owner_seams() -> No
 def test_report_confirmed_slowpics_upload_starter_spec_is_historical_only() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     starter_spec = (
-        repo_root
-        / "docs"
-        / "plans"
-        / "2026-06-01-report-confirmed-slowpics-upload-starter-spec.md"
+        repo_root / "docs" / "plans" / "2026-06-01-report-confirmed-slowpics-upload-starter-spec.md"
     )
     text = starter_spec.read_text(encoding="utf-8")
     normalized_text = " ".join(text.split())
@@ -476,6 +467,56 @@ def test_current_cli_contract_documents_screenshot_config_only_fields() -> None:
 
     for unsupported_flag in ("--geometry-mode", "--vs-writer", "--png-compression"):
         assert unsupported_flag not in command_override_surface
+
+
+def test_current_cli_contract_documents_sources_config_only_surface() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
+    sources_heading = "## Config-Only Sources Surface"
+    version_heading = "## `version` Command Contract"
+    assert sources_heading in cli_contract, f"Missing heading: {sources_heading}"
+
+    sources_section = cli_contract.split(sources_heading, maxsplit=1)[1].split(
+        version_heading,
+        maxsplit=1,
+    )[0]
+    normalized_sources_section = " ".join(sources_section.split())
+
+    for expected in (
+        "`reference`: optional source selector",
+        "`overrides`: mapping from source selector",
+        "`trim_start_frames`",
+        "`trim_end_frames`",
+        "`active_rect = { x, y, width, height }`",
+        '`effective_fps = "num/den"`',
+        "input-dir-relative path, filename, then stem",
+        "Backslashes are normalized to `/`",
+        "Absolute paths, Windows drive paths, UNC paths, empty selectors",
+        "Duplicate discovered source stems fail early",
+        "Alignment trims compose on top of those base trims",
+        "invalid explicit rectangles fail",
+        "AssumeFPS-style timing override",
+        "Mixed-FPS validation compares effective FPS values",
+    ):
+        assert expected in normalized_sources_section
+
+    command_heading = "## Command Surface"
+    sources_surface = cli_contract.split(command_heading, maxsplit=1)[1].split(
+        sources_heading,
+        maxsplit=1,
+    )[0]
+    declared_options = _declared_run_options()
+    override_flags = {f"--{cli_name.replace('_', '-')}" for cli_name in CLI_OVERRIDE_MAP}
+    source_override_paths = {
+        config_path
+        for config_path in CLI_OVERRIDE_MAP.values()
+        if config_path.startswith("sources.")
+    }
+    assert source_override_paths == set()
+    for unsupported_flag in ("--source-reference", "--reference-source", "--source-override"):
+        assert unsupported_flag not in sources_surface
+        assert unsupported_flag not in declared_options
+        assert unsupported_flag not in override_flags
 
 
 def test_current_cli_contract_documents_audio_alignment_config_only_fields() -> None:

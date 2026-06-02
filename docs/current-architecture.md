@@ -93,7 +93,9 @@ Primary owned paths:
 - `config/config.toml` and `config/presets/*.toml`: config owners
 - `<resolved paths.generated_dir>/cache/analysis/<label>__<fingerprint>.compframes`:
   shared analysis metrics cache (defaults to `generated/cache/analysis/` under the
-  workspace root, but follows the configured `paths.generated_dir`)
+  workspace root, but follows the configured `paths.generated_dir`). The
+  fingerprint includes the selected reference identity and selected-reference
+  source overrides that affect the analysis frame/timing domain.
 - `generated/clip_probe.toml`: clip probe cache when run folders are disabled
 - `<run-folder>/generated/clip_probe.toml`: clip probe cache when run folders are enabled
 - `generated/audio_offsets.toml` or `<run-folder>/generated/audio_offsets.toml`:
@@ -227,6 +229,7 @@ Runtime ownership matrix:
 
 | Runtime concern | Owner |
 | --- | --- |
+| Source selector resolution, explicit reference ordering, duplicate-stem fail-fast, and per-source override application during preparation | `frame_compare.orchestration.source_selection` plus `frame_compare.orchestration.preparation` |
 | Audio alignment workflow, offset cache coordination, and precedence policy | `frame_compare.services.alignment` |
 | Audio stream probing, deterministic stream selection, stream overrides, and FFmpeg/channel-aware extraction policy | `frame_compare.services.alignment_audio` |
 | Audio correlation, preprocessing, and refinement estimation | `frame_compare.services.alignment_correlation` |
