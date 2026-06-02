@@ -264,6 +264,41 @@ def test_calculate_metrics_computes_on_cache_miss(
 @patch("frame_compare.analysis.metrics.DefaultVSLoader")
 @patch("frame_compare.analysis.metrics.load_cached_metrics")
 @patch("frame_compare.analysis.metrics.compute_cache_key")
+def test_calculate_metrics_uses_effective_fps_in_metadata(
+    mock_key, mock_load, mock_loader_cls, mock_lum, mock_mot, mock_save, tmp_path
+):
+    mock_key.return_value = "fp"
+    mock_load.return_value = MagicMock(success=False)
+    mock_loader = mock_loader_cls.return_value
+    mock_source = MagicMock()
+    mock_loader.load.return_value = mock_source
+    mock_clip = MagicMock()
+    mock_clip.num_frames = 10
+    mock_source.clip = mock_clip
+    mock_source.fps = Fraction(30000, 1001)
+    mock_lum.return_value = [0.1] * 10
+    mock_mot.return_value = [0.0] * 10
+
+    video_paths = [tmp_path / "v1.mkv"]
+    video_paths[0].write_bytes(b"")
+
+    result = calculate_metrics(
+        video_paths,
+        AnalysisConfig(),
+        tmp_path,
+        effective_fps=Fraction(24000, 1001),
+    )
+
+    assert result.metadata.fps == Fraction(24000, 1001)
+    mock_save.assert_called_once()
+
+
+@patch("frame_compare.analysis.metrics.save_metrics_cache")
+@patch("frame_compare.analysis.metrics._calculate_motion")
+@patch("frame_compare.analysis.metrics._calculate_luminance")
+@patch("frame_compare.analysis.metrics.DefaultVSLoader")
+@patch("frame_compare.analysis.metrics.load_cached_metrics")
+@patch("frame_compare.analysis.metrics.compute_cache_key")
 def test_calculate_metrics_cache_save_is_best_effort(
     mock_key, mock_load, mock_loader_cls, mock_lum, mock_mot, mock_save, tmp_path
 ):

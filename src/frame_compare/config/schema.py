@@ -30,6 +30,9 @@ from frame_compare.config.schema_models import (
     ReportConfig,
     ScreenshotsConfig,
     SlowpicsConfig,
+    SourceActiveRectConfig,
+    SourceOverrideConfig,
+    SourcesConfig,
     TmdbConfig,
 )
 from frame_compare.config.schema_sources import TomlConfigSettingsSourceNoBOM
@@ -71,6 +74,7 @@ class ConfigSchema(BaseSettings):
         )
 
     paths: PathsConfig = Field(default_factory=PathsConfig)
+    sources: SourcesConfig = Field(default_factory=SourcesConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     audio_alignment: AudioAlignmentConfig = Field(default_factory=AudioAlignmentConfig)
     screenshots: ScreenshotsConfig = Field(default_factory=ScreenshotsConfig)
@@ -99,6 +103,9 @@ __all__ = [
     "ScreenshotsConfig",
     "SelectionMode",
     "SlowpicsConfig",
+    "SourceActiveRectConfig",
+    "SourceOverrideConfig",
+    "SourcesConfig",
     "TmdbConfig",
     "ToneCurve",
     "TonemapPreset",

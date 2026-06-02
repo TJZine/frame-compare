@@ -131,6 +131,73 @@ def test_run_analyze_phase_cache_only_missing_cache_does_not_recompute(
         )
 
 
+def test_run_analyze_phase_selects_from_reference_base_trim_domain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.reference = ctx.reference.with_trim(trim_start_frames=10, trim_end_frame_inclusive=14)
+    input_videos = [ctx.reference.path]
+    metrics = FrameMetrics(
+        luminance=[float(frame) for frame in range(20)],
+        motion=[float(frame) / 10.0 for frame in range(20)],
+        metadata=MetricsMetadata(
+            frame_count=20,
+            fps=Fraction(24, 1),
+            config_fingerprint="fingerprint",
+            clips=[],
+        ),
+    )
+    calls: dict[str, Any] = {}
+
+    def _fake_load_cached_metrics(*_args: object, **_kwargs: object) -> CacheLoadResult:
+        return CacheLoadResult(success=True, metrics=metrics)
+
+    def _fake_select_frames(**kwargs: object) -> FrameSelection:
+        calls["select"] = kwargs
+        received_metrics = kwargs["metrics"]
+        assert received_metrics.luminance == [10.0, 11.0, 12.0, 13.0, 14.0]
+        return FrameSelection(
+            frames=[0, 4],
+            mode=SelectionMode.MIXED,
+            seed=ctx.config.analysis.random_seed,
+            breakdown=SelectionBreakdown(quantile_dark=[0], quantile_bright=[4]),
+            selection_details={
+                0: SelectionDetail(
+                    frame_index=0,
+                    label="Dark",
+                    source="analysis",
+                    notes="quantile_dark",
+                ),
+                4: SelectionDetail(
+                    frame_index=4,
+                    label="Bright",
+                    source="analysis",
+                    notes="quantile_bright",
+                ),
+            },
+        )
+
+    monkeypatch.setattr(phase_tasks.cache_io, "load_cached_metrics", _fake_load_cached_metrics)
+    monkeypatch.setattr(phase_tasks, "select_frames", _fake_select_frames)
+
+    output = phase_tasks.run_analyze_phase(
+        ctx,
+        input_videos=input_videos,
+        workspace=ctx.workspace,
+        require_cache_only=True,
+    )
+
+    assert output.selected_frames == [0, 4]
+    assert output.selection_breakdown == SelectionBreakdown(
+        quantile_dark=[10],
+        quantile_bright=[14],
+    )
+    assert output.selection_details_by_source_frame is not None
+    assert set(output.selection_details_by_source_frame) == {10, 14}
+    assert output.selection_details_by_source_frame[10].frame_index == 10
+    assert calls["select"]["config"].frame_count == 3
+
+
 def test_select_initial_frame_plan_uses_effective_reference_domain(tmp_path: Path) -> None:
     ctx = _context(tmp_path)
     ctx.reference = ctx.reference.with_trim(trim_start_frames=10, trim_end_frame_inclusive=19)

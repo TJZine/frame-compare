@@ -76,8 +76,8 @@ def format_rejected_alignment_warning(result: AlignmentResult) -> str:
     comparison_stem = Path(result.comparison_clip).stem or result.comparison_clip
     reason = _safe_alignment_diagnostic(result.diagnostic)
     return (
-        f"align: {comparison_stem} alignment left unapplied and untrimmed "
-        f"because {reason}."
+        f"align: {comparison_stem} alignment left unapplied because {reason}; "
+        "rendering in best-effort reference-frame domain without accepted alignment."
     )
 
 
@@ -150,10 +150,10 @@ def _apply_manual_overrides(
     comparisons: list[Path],
     cache_dir: Path,
     results_map: dict[str, AlignmentResult],
+    fps_reference: Fraction | None,
 ) -> Fraction | None:
     """Apply manual offsets from overrides config, returning reference FPS if probed."""
     manual_overrides = load_manual_overrides(cache_dir)
-    fps_reference: Fraction | None = None
 
     for comp in comparisons:
         key = f"{reference.stem}:{comp.stem}"
@@ -236,6 +236,7 @@ def align_clips(
     config: AlignmentConfig,
     cache_dir: Path,
     progress: ProgressReporter | None = None,
+    reference_fps: Fraction | None = None,
 ) -> list[AlignmentResult]:
     """
     Align comparison clips to reference using audio cross-correlation.
@@ -251,7 +252,13 @@ def align_clips(
 
     results_map: dict[str, AlignmentResult] = {}
     # 0. Load manual overrides (highest precedence per §2.4)
-    fps_reference = _apply_manual_overrides(reference, comparisons, cache_dir, results_map)
+    fps_reference = _apply_manual_overrides(
+        reference,
+        comparisons,
+        cache_dir,
+        results_map,
+        reference_fps,
+    )
 
     # 1. Check cache for non-manual entries
     requested_comparisons = [
@@ -266,6 +273,7 @@ def align_clips(
                 sample_rate=config.sample_rate,
                 max_offset_seconds=config.max_offset_seconds,
                 config=config,
+                reference_fps=reference_fps,
             )
             if cached is not None:
                 results_map.update(cached)
@@ -312,6 +320,7 @@ def align_clips(
                     max_offset_seconds=config.max_offset_seconds,
                     results=computed_results,
                     config=config,
+                    reference_fps=fps_reference,
                 )
 
     offsets_by_key = _build_offsets_map(
@@ -344,6 +353,7 @@ def check_alignment_cached(
     comparisons: list[Path],
     cache_dir: Path,
     config: AlignmentConfig | None = None,
+    reference_fps: Fraction | None = None,
 ) -> list[str]:
     """Check if all comparison offsets are cached/overridden, returning missing keys."""
     _check_duplicate_stems(comparisons)
@@ -358,6 +368,7 @@ def check_alignment_cached(
             sample_rate=resolved_config.sample_rate,
             max_offset_seconds=resolved_config.max_offset_seconds,
             config=resolved_config,
+            reference_fps=reference_fps,
         )
         or {}
     )

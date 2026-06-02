@@ -439,10 +439,41 @@ def test_generated_script_uses_untrimmed_outputs_for_mixed_sign_offset_hints(
     )
 
     assert output_indices == [0, 1, 2, 3]
-    assert output_stems == ["ref", "comp_a", "ref", "comp_b"]
+    assert output_stems == ["ref", "comp_b", "ref", "comp_a"]
     assert slice_history["ref"] == []
     assert slice_history["comp_a"] == []
     assert slice_history["comp_b"] == []
+
+
+def test_generated_script_output_order_matches_prompt_input_order_for_unsorted_comparisons(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _slice_history, output_indices, output_stems = _execute_generated_script(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        suggested_offsets_by_key={
+            "ref:zeta": 4,
+            "ref:alpha": None,
+            "ref:mid": -2,
+        },
+        comparison_stems=("zeta", "alpha", "mid"),
+    )
+
+    captured = capsys.readouterr()
+    assert output_indices == [0, 1, 2, 3, 4, 5]
+    assert output_stems == ["ref", "zeta", "ref", "alpha", "ref", "mid"]
+    assert captured.out.index("loaded") < captured.out.index("output 0")
+    assert captured.out.index("loaded") < captured.out.index("zeta")
+    assert captured.out.index("zeta") < captured.out.index("alpha") < captured.out.index("mid")
+    output_section = captured.out[captured.out.index("output 0") :]
+    assert output_section.index("zeta (audio hint: 4 frames)") < output_section.index(
+        "alpha (audio hint: no trusted audio hint)"
+    )
+    assert output_section.index("alpha (audio hint: no trusted audio hint)") < output_section.index(
+        "mid (audio hint: -2 frames)"
+    )
 
 
 def test_generated_script_does_not_slice_source_clips_from_suggested_offsets(

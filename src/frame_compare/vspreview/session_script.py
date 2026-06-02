@@ -224,7 +224,7 @@ def _build_clip_data_section(
     suggested_offsets_by_key: dict[str, int | None],
 ) -> str:
     targets_lines: list[str] = []
-    for comp in sorted(comparisons, key=lambda p: p.stem):
+    for comp in comparisons:
         targets_lines.append(f"    {json.dumps(comp.stem)}: {json.dumps(str(comp))},")
 
     offset_lines: list[str] = []
@@ -304,7 +304,7 @@ def main():
 
     loaded_comparisons = []
 
-    for label, path_str in sorted(TARGETS.items()):
+    for label, path_str in TARGETS.items():
         comp_path = Path(path_str)
         if not comp_path.exists():
             safe_print(_warning(f"WARNING: Comparison not found: {comp_path}"))

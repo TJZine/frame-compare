@@ -204,7 +204,7 @@ def _prompt_for_confirmed_offsets(
                 )
                 continue
             if raw_value.lower() in {"skip", "s"}:
-                return None
+                break
             source_frames = _parse_source_frame_pair(raw_value)
             if source_frames is None:
                 print_vspreview_input_hint(

@@ -348,6 +348,61 @@ def test_align_clips_vspreview_confirmed_offset_is_saved_and_applied(
     assert manual_overrides["ref:comp"].frame_offset == expected_offset
 
 
+@patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
+@patch("frame_compare.services.alignment._probe_fps")
+@patch("frame_compare.services.alignment._extract_matching_audio")
+@patch("frame_compare.services.alignment._extract_reference_audio")
+@patch("frame_compare.services.alignment._estimate_consensus_offset")
+def test_align_clips_vspreview_confirm_skip_confirm_keeps_prior_and_later_offsets(
+    mock_estimate: MagicMock,
+    mock_extract_reference: MagicMock,
+    mock_extract_matching: MagicMock,
+    mock_probe: MagicMock,
+    mock_check_availability: MagicMock,
+    mock_launch: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_interactive_terminal(monkeypatch, "120 108\nskip\n210 216\n")
+
+    ref = tmp_path / "ref.mkv"
+    zeta = tmp_path / "zeta.mkv"
+    alpha = tmp_path / "alpha.mkv"
+    mid = tmp_path / "mid.mkv"
+    for path in (ref, zeta, alpha, mid):
+        path.touch()
+
+    mock_probe.return_value = Fraction(24, 1)
+    mock_extract_reference.return_value = (np.ones(10, dtype=np.float32), object())
+    mock_extract_matching.return_value = np.ones(10, dtype=np.float32)
+    mock_estimate.side_effect = [
+        AlignmentConsensus(4, 0.99, True, "accepted", 1, 1, 1.0, 2.0),
+        AlignmentConsensus(2667, 0.98, True, "accepted", 1, 1, 1.0, 2.0),
+        AlignmentConsensus(-2, 0.97, True, "accepted", 1, 1, 1.0, 2.0),
+    ]
+    mock_check_availability.return_value = VSPreviewAvailability(
+        status=VSPreviewAvailabilityStatus.AVAILABLE,
+        message="available",
+    )
+    mock_launch.return_value = tmp_path / "vspreview_script.py"
+
+    results = align_clips(
+        ref,
+        [zeta, alpha, mid],
+        AlignmentConfig(enable=True, use_vspreview=True, cache_results=False),
+        tmp_path,
+    )
+
+    assert [result.comparison_clip for result in results] == ["zeta.mkv", "alpha.mkv", "mid.mkv"]
+    assert [result.frame_offset for result in results] == [12, 8, -6]
+    assert [result.source for result in results] == ["manual", "computed", "manual"]
+    manual_overrides = load_manual_overrides(tmp_path)
+    assert set(manual_overrides) == {"ref:zeta", "ref:mid"}
+    assert manual_overrides["ref:zeta"].frame_offset == 12
+    assert manual_overrides["ref:mid"].frame_offset == -6
+
+
 @patch("frame_compare.services.alignment_vspreview.log.warning")
 @patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
 @patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")

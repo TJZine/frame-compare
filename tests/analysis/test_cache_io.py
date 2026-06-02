@@ -43,14 +43,22 @@ def test_compute_cache_key_deterministic(tmp_path: Path) -> None:
     assert len(key1) == 64
 
 
-def test_compute_cache_key_order_independent(tmp_path: Path) -> None:
-    """[a, b] → same key as [b, a]."""
+def test_compute_cache_key_changes_when_selected_reference_changes(tmp_path: Path) -> None:
     v1 = create_video_file(tmp_path, "v1.mkv")
     v2 = create_video_file(tmp_path, "v2.mkv")
     config = AnalysisConfig(frame_count=10)
     key1 = compute_cache_key([v1, v2], config)
     key2 = compute_cache_key([v2, v1], config)
-    assert key1 == key2
+    assert key1 != key2
+
+
+def test_compute_cache_key_changes_when_reference_domain_changes(tmp_path: Path) -> None:
+    v1 = create_video_file(tmp_path, "v1.mkv")
+    v2 = create_video_file(tmp_path, "v2.mkv")
+    config = AnalysisConfig(frame_count=10)
+    key1 = compute_cache_key([v1, v2], config, reference_domain="trim_start=0|trim_end=0")
+    key2 = compute_cache_key([v1, v2], config, reference_domain="trim_start=12|trim_end=0")
+    assert key1 != key2
 
 
 def test_metrics_cache_filename_order_independent(tmp_path: Path) -> None:

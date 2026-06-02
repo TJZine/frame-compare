@@ -11,6 +11,14 @@ generated_dir = "generated"
 config_dir = "config"
 use_run_folders = true
 
+[sources]
+# reference = "00-reference.mkv"
+# Add per-source overrides with tables such as:
+# [sources.overrides."encode-a.mkv"]
+# trim_start_frames = 0
+# trim_end_frames = 0
+# effective_fps = "24000/1001"
+
 [analysis]
 frame_count = 10
 random_seed = 42

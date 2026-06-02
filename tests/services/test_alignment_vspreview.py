@@ -314,8 +314,8 @@ def test_prompt_for_confirmed_offsets_accepts_zero_source_frame_offset(
     assert confirmed == {"ref:comp": 0}
 
 
-@pytest.mark.parametrize("user_input", ["skip\n", "s\n", ""])
-def test_prompt_for_confirmed_offsets_skip_or_eof_returns_none(
+@pytest.mark.parametrize("user_input", ["skip\n", "s\n"])
+def test_prompt_for_confirmed_offsets_skip_omits_comparison_key(
     user_input: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -328,7 +328,58 @@ def test_prompt_for_confirmed_offsets_skip_or_eof_returns_none(
         offsets_by_key={"ref:comp": 4},
     )
 
+    assert confirmed == {}
+
+
+def test_prompt_for_confirmed_offsets_eof_returns_none(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(alignment_vspreview.sys, "stdin", io.StringIO(""))
+
+    confirmed = alignment_vspreview._prompt_for_confirmed_offsets(
+        reference=tmp_path / "ref.mkv",
+        comparisons=[tmp_path / "comp.mkv"],
+        offsets_by_key={"ref:comp": 4},
+    )
+
     assert confirmed is None
+
+
+def test_prompt_for_confirmed_offsets_confirm_skip_confirm_preserves_confirmed_keys(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        alignment_vspreview.sys,
+        "stdin",
+        io.StringIO("120 108\nskip\n210 216\n"),
+    )
+    comparisons = [
+        tmp_path / "zeta.mkv",
+        tmp_path / "alpha.mkv",
+        tmp_path / "mid.mkv",
+    ]
+
+    confirmed = alignment_vspreview._prompt_for_confirmed_offsets(
+        reference=tmp_path / "ref.mkv",
+        comparisons=comparisons,
+        offsets_by_key={
+            "ref:zeta": 4,
+            "ref:alpha": None,
+            "ref:mid": -2,
+        },
+        no_color=True,
+    )
+
+    captured = capsys.readouterr()
+    assert confirmed == {"ref:zeta": 12, "ref:mid": -6}
+    assert "ref:alpha" not in confirmed
+    assert captured.err.index("zeta") < captured.err.index("alpha") < captured.err.index("mid")
+    assert "frames [+4f]:" in captured.err
+    assert "frames [no trusted audio hint]:" in captured.err
+    assert "frames [-2f]:" in captured.err
 
 
 def test_prompt_for_confirmed_offsets_reprompts_after_blank_and_malformed_input(
@@ -386,9 +437,16 @@ def test_maybe_launch_blank_then_valid_source_frames_saves_only_computed_offset(
     assert manual_overrides["ref:comp"].frame_offset == 12
 
 
-@pytest.mark.parametrize("user_input", ["skip\n", ""])
+@pytest.mark.parametrize(
+    ("user_input", "expected_confirmed"),
+    [
+        ("skip\n", {}),
+        ("", None),
+    ],
+)
 def test_maybe_launch_skip_or_eof_writes_no_override(
     user_input: str,
+    expected_confirmed: dict[str, int] | None,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -414,8 +472,53 @@ def test_maybe_launch_skip_or_eof_writes_no_override(
         progress=None,
     )
 
-    assert confirmed is None
+    assert confirmed == expected_confirmed
     assert load_manual_overrides(tmp_path) == {}
+
+
+def test_maybe_launch_confirm_skip_confirm_saves_only_confirmed_offsets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        alignment_vspreview.sys,
+        "stdin",
+        io.StringIO("120 108\nskip\n210 216\n"),
+    )
+    _set_tty(monkeypatch, is_tty=True)
+    monkeypatch.setattr(
+        alignment_vspreview,
+        "check_vspreview_availability",
+        MagicMock(return_value=_availability(VSPreviewAvailabilityStatus.AVAILABLE)),
+    )
+    monkeypatch.setattr(
+        alignment_vspreview,
+        "launch_alignment_verification_session",
+        MagicMock(return_value=tmp_path / "vspreview.py"),
+    )
+
+    confirmed = maybe_launch_alignment_vspreview(
+        reference=tmp_path / "ref.mkv",
+        comparisons=[
+            tmp_path / "zeta.mkv",
+            tmp_path / "alpha.mkv",
+            tmp_path / "mid.mkv",
+        ],
+        offsets_by_key={
+            "ref:zeta": 4,
+            "ref:alpha": None,
+            "ref:mid": -2,
+        },
+        cache_dir=tmp_path,
+        config=AlignmentConfig(use_vspreview=True),
+        progress=None,
+    )
+
+    assert confirmed == {"ref:zeta": 12, "ref:mid": -6}
+    manual_overrides = load_manual_overrides(tmp_path)
+    assert set(manual_overrides) == {"ref:zeta", "ref:mid"}
+    assert manual_overrides["ref:zeta"].frame_offset == 12
+    assert manual_overrides["ref:mid"].frame_offset == -6
 
 
 def test_available_with_tty_suspends_progress_during_launch_and_prompt(

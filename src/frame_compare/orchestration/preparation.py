@@ -11,12 +11,14 @@ import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.config.overrides import apply_cli_overrides
 from frame_compare.config.schema import ConfigSchema
+from frame_compare.config.schema_models import SourceOverrideConfig
 from frame_compare.orchestration.context import (
+    ClipActiveRect,
     ClipFingerprint,
     ClipProbeSnapshot,
     ClipState,
 )
-from frame_compare.orchestration.errors import MixedSourceFpsError
+from frame_compare.orchestration.errors import MixedSourceFpsError, SourceSelectionError
 from frame_compare.orchestration.phase_tasks import resolve_run_metadata
 from frame_compare.orchestration.preflight import discover_inputs, prepare_preflight
 from frame_compare.orchestration.probing.probe_cache import (
@@ -27,6 +29,10 @@ from frame_compare.orchestration.probing.probe_cache import (
 from frame_compare.orchestration.probing.probe_props import (
     compute_preserved_frame_props,
     compute_tonemap_prop_keys,
+)
+from frame_compare.orchestration.source_selection import (
+    reference_cache_domain_token,
+    resolve_source_selection,
 )
 from frame_compare.orchestration.types import (
     MetadataPrefetch,
@@ -55,9 +61,17 @@ def _build_preflight_overrides(request: RunRequest) -> dict[str, object] | None:
 
 
 def _remove_cached_metrics(
-    *, workspace: WorkspacePaths, config: ConfigSchema, input_videos: list[Path]
+    *,
+    workspace: WorkspacePaths,
+    config: ConfigSchema,
+    input_videos: list[Path],
+    reference_domain: str | None,
 ) -> None:
-    fingerprint = cache_io.compute_cache_key(input_videos, config.analysis)
+    fingerprint = cache_io.compute_cache_key(
+        input_videos,
+        config.analysis,
+        reference_domain=reference_domain,
+    )
     cache_io.delete_metrics_cache_entry(workspace.cache_dir, fingerprint)
 
 
@@ -106,12 +120,22 @@ def _validate_cache_state(
     workspace: WorkspacePaths,
     config: ConfigSchema,
     input_videos: list[Path],
+    reference_domain: str | None,
 ) -> None:
     if request.no_cache:
-        _remove_cached_metrics(workspace=workspace, config=config, input_videos=input_videos)
+        _remove_cached_metrics(
+            workspace=workspace,
+            config=config,
+            input_videos=input_videos,
+            reference_domain=reference_domain,
+        )
 
     if request.from_cache_only and not request.skip_analysis:
-        fingerprint = cache_io.compute_cache_key(input_videos, config.analysis)
+        fingerprint = cache_io.compute_cache_key(
+            input_videos,
+            config.analysis,
+            reference_domain=reference_domain,
+        )
         cache_result = cache_io.load_cached_metrics(workspace.cache_dir, fingerprint, clips=[])
         if not cache_result.success:
             cache_path = cache_io.find_metrics_cache_file(workspace.cache_dir, fingerprint)
@@ -134,6 +158,7 @@ def _probe_input_videos(
     workspace: WorkspacePaths,
     input_videos: list[Path],
     deps: RunDependencies,
+    overrides_by_path: dict[Path, SourceOverrideConfig],
 ) -> list[ClipState]:
     cache_path = workspace.generated_dir / "clip_probe.toml"
     cached_entries = load_clip_probe_cache(cache_path)
@@ -168,14 +193,51 @@ def _probe_input_videos(
             )
             entries_by_key[cache_key] = snapshot
 
+        override = overrides_by_path.get(path)
+        trim_start_frames = override.trim_start_frames if override is not None else 0
+        trim_end_frames = override.trim_end_frames if override is not None else 0
+        end_inclusive = snapshot.num_frames - 1 - trim_end_frames if trim_end_frames > 0 else None
+        effective_end = end_inclusive if end_inclusive is not None else snapshot.num_frames - 1
+        if trim_start_frames > effective_end:
+            raise SourceSelectionError(
+                selector=path.name,
+                reason="source trims remove every frame",
+                role="sources.overrides",
+                matches=[path],
+            )
+        active_rect = None
+        if override is not None and override.active_rect is not None:
+            rect = override.active_rect
+            if rect.x + rect.width > snapshot.width or rect.y + rect.height > snapshot.height:
+                raise SourceSelectionError(
+                    selector=path.name,
+                    reason="active_rect is outside source dimensions",
+                    role="sources.overrides",
+                    matches=[path],
+                )
+            active_rect = ClipActiveRect(
+                x=rect.x,
+                y=rect.y,
+                width=rect.width,
+                height=rect.height,
+            )
         label = "Reference" if index == 0 else f"Encode {index}"
+        effective_fps = (
+            override.effective_fps
+            if override is not None and override.effective_fps is not None
+            else snapshot.fps
+        )
         clips.append(
             ClipState(
                 path=path,
                 label=label,
                 probe=snapshot,
                 source_fps=snapshot.fps,
-                effective_fps=snapshot.fps,
+                effective_fps=effective_fps,
+                active_rect=active_rect,
+            ).with_trim(
+                trim_start_frames=trim_start_frames,
+                trim_end_frame_inclusive=end_inclusive,
             )
         )
 
@@ -188,15 +250,15 @@ def _validate_source_fps_compatibility(clips: list[ClipState]) -> None:
         return
 
     reference = clips[0]
-    reference_fps = _normalized_fps(reference.source_fps)
+    reference_fps = _normalized_fps(reference.effective_fps)
     for comparison in clips[1:]:
-        if _normalized_fps(comparison.source_fps) != reference_fps:
+        if _normalized_fps(comparison.effective_fps) != reference_fps:
             raise MixedSourceFpsError(
                 reference_path=reference.path,
-                reference_fps=reference.source_fps,
+                reference_fps=reference.effective_fps,
                 comparison_label=comparison.label,
                 comparison_path=comparison.path,
-                comparison_fps=comparison.source_fps,
+                comparison_fps=comparison.effective_fps,
             )
 
 
@@ -228,7 +290,16 @@ async def execute_prep(
         preflight.config,
         cli_args=request.cli_config_overrides(),
     )
-    input_videos = discover_inputs(workspace.input_dir)
+    discovered_videos = discover_inputs(workspace.input_dir)
+    source_selection = resolve_source_selection(
+        input_dir=workspace.input_dir,
+        discovered_paths=discovered_videos,
+        config=config.sources,
+    )
+    input_videos = source_selection.ordered_paths
+    reference_domain = reference_cache_domain_token(
+        source_selection.overrides_by_path.get(input_videos[0])
+    )
     artifacts = RunArtifacts()
 
     _validate_cache_state(
@@ -236,6 +307,7 @@ async def execute_prep(
         workspace=workspace,
         config=config,
         input_videos=input_videos,
+        reference_domain=reference_domain,
     )
 
     workspace, metadata_prefetch = await _resolve_run_directory(
@@ -250,6 +322,7 @@ async def execute_prep(
         workspace=workspace,
         input_videos=input_videos,
         deps=deps,
+        overrides_by_path=dict(source_selection.overrides_by_path),
     )
     _validate_source_fps_compatibility(clips)
 

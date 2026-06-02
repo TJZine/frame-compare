@@ -22,6 +22,7 @@ from frame_compare.analysis.selection import select_frames
 from frame_compare.analysis.types import (
     CacheLoadResult,
     FrameMetrics,
+    FrameSelection,
     SelectionBreakdown,
     SelectionDetail,
     SelectionDetailsByFrame,
@@ -141,7 +142,12 @@ def run_analyze_phase(
     require_cache_only: bool = False,
     vs_loader: VSLoader | None = None,
 ) -> AnalyzePhaseOutput:
-    fingerprint = cache_io.compute_cache_key(input_videos, ctx.config.analysis)
+    reference_domain = _reference_cache_domain_from_clip(ctx.reference)
+    fingerprint = cache_io.compute_cache_key(
+        input_videos,
+        ctx.config.analysis,
+        reference_domain=reference_domain,
+    )
     cache_result = cache_io.load_cached_metrics(workspace.cache_dir, fingerprint, clips=[])
     metrics_cache_hit = cache_result.success and cache_result.metrics is not None
     if require_cache_only:
@@ -158,8 +164,14 @@ def run_analyze_phase(
             cache_dir=workspace.cache_dir,
             reporter=ctx.reporter,
             vs_loader=vs_loader,
+            reference_domain=reference_domain,
+            effective_fps=ctx.reference.effective_fps,
         )
-    selection = select_frames(metrics=metrics, config=ctx.config.analysis)
+    selection = _select_frames_for_reference_domain(
+        metrics=metrics,
+        reference=ctx.reference,
+        config=ctx.config.analysis,
+    )
     return AnalyzePhaseOutput(
         selected_frames=list(selection.frames),
         selection_breakdown=selection.breakdown,
@@ -189,6 +201,64 @@ def _require_cached_metrics(
         found = cache_io.read_cache_version(error_cache_path) or "unknown"
         raise CacheVersionMismatchError(found, str(cache_io.CACHE_VERSION))
     raise MetricsCalculationError(f"Cached metrics missing or mismatched ({reason}).")
+
+
+def _reference_cache_domain_from_clip(clip: ClipState) -> str | None:
+    trim_end_frames = 0
+    if clip.trim.trim_end_frame_inclusive is not None:
+        trim_end_frames = max(
+            0,
+            clip.probe.num_frames - 1 - clip.trim.trim_end_frame_inclusive,
+        )
+    if (
+        clip.trim.trim_start_frames == 0
+        and trim_end_frames == 0
+        and clip.effective_fps == clip.source_fps
+    ):
+        return None
+    return (
+        f"trim_start={clip.trim.trim_start_frames}|"
+        f"trim_end={trim_end_frames}|"
+        f"effective_fps={clip.effective_fps if clip.effective_fps != clip.source_fps else ''}"
+    )
+
+
+def _select_frames_for_reference_domain(
+    *,
+    metrics: FrameMetrics,
+    reference: ClipState,
+    config: AnalysisConfig,
+) -> FrameSelection:
+    if reference.trim.trim_start_frames == 0 and reference.trim.trim_end_frame_inclusive is None:
+        return select_frames(metrics=metrics, config=config)
+
+    frame_count = reference.effective_num_frames()
+    if frame_count <= 0:
+        raise SelectionError("reference source trims leave no selectable frames", 0, 0)
+
+    trimmed_metrics = _trimmed_metrics_for_overlap(
+        metrics=metrics,
+        trim_start_frame=reference.trim.trim_start_frames,
+        frame_count=frame_count,
+    )
+    selection = select_frames(
+        metrics=trimmed_metrics,
+        config=config.model_copy(update={"frame_count": min(config.frame_count, frame_count)}),
+    )
+    return FrameSelection(
+        frames=list(selection.frames),
+        mode=selection.mode,
+        seed=selection.seed,
+        breakdown=_selection_breakdown_with_source_offset(
+            selection.breakdown,
+            source_offset=reference.trim.trim_start_frames,
+        ),
+        selection_details=_selection_details_with_source_offset(
+            dict(selection.selection_details),
+            source_offset=reference.trim.trim_start_frames,
+            fps=trimmed_metrics.metadata.fps,
+        ),
+    )
 
 
 def selection_label_for_frame(frame: int, breakdown: SelectionBreakdown | None) -> str | None:
@@ -570,10 +640,10 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
         config=alignment_config,
         cache_dir=ctx.workspace.generated_dir,
         progress=ctx.reporter,
+        reference_fps=ctx.reference.effective_fps,
     )
 
     updated_comparisons: list[ClipState] = []
-    has_non_applied_result = any(not result.applied for result in results)
     warnings = [
         format_rejected_alignment_warning(result) for result in results if not result.applied
     ]
@@ -583,13 +653,12 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
             frame_offset = result.frame_offset
             if frame_offset is None:
                 raise AudioAlignmentError("Applied alignment result is missing frame offset.")
-            if not has_non_applied_result:
-                alignment = ClipAlignmentState(
-                    reference_stem=Path(result.reference_clip).stem,
-                    comparison_stem=Path(result.comparison_clip).stem,
-                    relative_offset_frames=frame_offset,
-                    source=result.source,
-                )
+            alignment = ClipAlignmentState(
+                reference_stem=Path(result.reference_clip).stem,
+                comparison_stem=Path(result.comparison_clip).stem,
+                relative_offset_frames=frame_offset,
+                source=result.source,
+            )
         updated_comparisons.append(
             replace(
                 comparison,
@@ -597,27 +666,24 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
             )
         )
     ref_trim, comp_trims = calculate_alignment_trims(
-        ref_num_frames=ctx.reference.probe.num_frames,
+        ref_num_frames=ctx.reference.effective_num_frames(),
         comp_offsets=[
             comp.alignment.relative_offset_frames if comp.alignment is not None else None
             for comp in updated_comparisons
         ],
-        comp_num_frames=[comp.probe.num_frames for comp in updated_comparisons],
+        comp_num_frames=[comp.effective_num_frames() for comp in updated_comparisons],
     )
-    reference = ctx.reference.with_trim(
-        trim_start_frames=ref_trim[0],
-        trim_end_frame_inclusive=ref_trim[1],
-    )
+    reference = _compose_alignment_trim(ctx.reference, ref_trim)
     comparisons = [
-        comp.with_trim(
-            trim_start_frames=comp_trim[0],
-            trim_end_frame_inclusive=comp_trim[1],
-        )
+        _compose_alignment_trim(comp, comp_trim)
         for comp, comp_trim in zip(updated_comparisons, comp_trims, strict=True)
     ]
     normalized_selected_frames, used_fallback_frame_plan = (
         _normalize_selected_frames_for_trimmed_domain(
-            selected_frames=selected_frames,
+            selected_frames=_source_frames_for_reference_base_domain(
+                reference=ctx.reference,
+                selected_frames=selected_frames,
+            ),
             reference=reference,
             comparisons=comparisons,
             requested_count=ctx.config.analysis.frame_count,
@@ -647,6 +713,29 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
     )
 
 
+def _source_frames_for_reference_base_domain(
+    *, reference: ClipState, selected_frames: list[int]
+) -> list[int]:
+    return [reference.trim.trim_start_frames + frame for frame in selected_frames]
+
+
+def _compose_alignment_trim(clip: ClipState, alignment_trim: tuple[int, int | None]) -> ClipState:
+    base_end = (
+        clip.trim.trim_end_frame_inclusive
+        if clip.trim.trim_end_frame_inclusive is not None
+        else clip.probe.num_frames - 1
+    )
+    alignment_end = (
+        clip.trim.trim_start_frames + alignment_trim[1]
+        if alignment_trim[1] is not None
+        else base_end
+    )
+    return clip.with_trim(
+        trim_start_frames=clip.trim.trim_start_frames + alignment_trim[0],
+        trim_end_frame_inclusive=min(base_end, alignment_end),
+    )
+
+
 def run_render_phase(
     ctx: RunContext,
     *,
@@ -654,6 +743,7 @@ def run_render_phase(
     runner: FFmpegRunner,
 ) -> RenderPhaseOutput:
     from frame_compare.render.batch.orchestrator import render_screenshots_from_batch
+    from frame_compare.render.geometry import GeometryRect
     from frame_compare.render.types import (
         BatchRenderOptions,
         ScreenshotBatchRequest,
@@ -713,6 +803,16 @@ def run_render_phase(
                 selection_labels=selection_labels,
                 selection_details=selection_details,
                 diagnostic_metadata=diagnostic_metadata,
+                active_rect=(
+                    GeometryRect(
+                        clip.active_rect.x,
+                        clip.active_rect.y,
+                        clip.active_rect.width,
+                        clip.active_rect.height,
+                    )
+                    if clip.active_rect is not None
+                    else None
+                ),
                 probe_width=clip.probe.width,
                 probe_height=clip.probe.height,
                 probe_num_frames=clip.probe.num_frames,
