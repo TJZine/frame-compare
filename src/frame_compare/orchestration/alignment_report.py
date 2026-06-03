@@ -114,6 +114,7 @@ def _render_alignment_table(
     *,
     comparisons: Sequence[AlignmentReportComparison],
     selected_frames: Sequence[int],
+    alignment_warnings: Sequence[str],
 ) -> Table:
     table = Table(
         show_header=False,
@@ -158,6 +159,13 @@ def _render_alignment_table(
                 f"[bright_white]aligned {escape(_format_selected_frames(selected_frames))}[/]",
             )
 
+    if alignment_warnings:
+        if comparisons:
+            table.add_row("", "")
+        table.add_row("warnings", "")
+        for warning in alignment_warnings:
+            table.add_row("  rejected", f"[yellow]{escape(warning)}[/]")
+
     return table
 
 
@@ -166,6 +174,7 @@ def _render_human_alignment_report(
     stage: str,
     comparisons: Sequence[AlignmentReportComparison],
     selected_frames: Sequence[int],
+    alignment_warnings: Sequence[str],
     no_color: bool,
 ) -> None:
     console = Console(stderr=True, no_color=no_color, width=_report_console_width())
@@ -174,6 +183,7 @@ def _render_human_alignment_report(
             _render_alignment_table(
                 comparisons=comparisons,
                 selected_frames=selected_frames,
+                alignment_warnings=alignment_warnings,
             ),
             title=f"[bold cyan]Frame Alignment[/] [dim]{escape(_stage_label(stage))}[/]",
             border_style="cyan",
@@ -204,5 +214,6 @@ def emit_frame_alignment_report(
         stage=stage,
         comparisons=comparisons,
         selected_frames=selected_frames,
+        alignment_warnings=alignment_warnings,
         no_color=no_color,
     )

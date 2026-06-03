@@ -27,6 +27,7 @@ STYLE_BOOL_TRUE = "green"
 STYLE_BOOL_FALSE = "red"
 STYLE_SUCCESS = "bold green"
 STYLE_WARN = "yellow"
+STYLE_SKIPPED = "yellow"
 STYLE_HEADER = "bold cyan"
 STYLE_SUBHEADER = "bold bright_cyan"
 STYLE_CHECK = "green"
@@ -188,7 +189,7 @@ def print_at_a_glance(
         if config.paths.use_run_folders
         else _styled_value("disabled")
     )
-    _add_kv(table, "run_folders", run_folder_note)
+    _add_kv(table, "run folders", run_folder_note)
 
     # ── Analysis ──
     _add_separator(table)
@@ -206,18 +207,16 @@ def print_at_a_glance(
     # ── Audio Alignment ──
     _add_separator(table)
     _add_subheader(table, "Audio Alignment")
-    _add_kv(table, "audio_alignment.enabled", _styled_bool(config.audio_alignment.enable))
-    _add_kv(table, "audio_alignment.ffmpeg_available", _styled_bool(ffmpeg_available))
-    _add_kv(
-        table, "audio_alignment.use_vspreview", _styled_bool(config.audio_alignment.use_vspreview)
-    )
+    _add_kv(table, "alignment enabled", _styled_bool(config.audio_alignment.enable))
+    _add_kv(table, "FFmpeg audio", _styled_bool(ffmpeg_available))
+    _add_kv(table, "interactive alignment", _styled_bool(config.audio_alignment.use_vspreview))
     _add_kv(
         table,
-        "audio_alignment.force_interactive",
+        "force interactive",
         _styled_bool(config.audio_alignment.force_interactive),
     )
     if vspreview_status is not None:
-        _add_kv(table, "vspreview.available", _styled_value(vspreview_status))
+        _add_kv(table, "VSPreview", _styled_value(vspreview_status))
 
     # ── Tonemap ──
     _add_separator(table)
@@ -291,8 +290,14 @@ def print_result_summary(
     elif result.slowpics_upload_confirmation_status == "declined":
         has_artifacts = True
         table.add_row(
-            f"  [{STYLE_CHECK}]\u2713[/] slow.pics",
+            f"  [{STYLE_SKIPPED}]-[/] slow.pics",
             _styled_value("slow.pics upload skipped by confirmation"),
+        )
+    elif result.slowpics_upload_confirmation_status == "report_unavailable":
+        has_artifacts = True
+        table.add_row(
+            f"  [{STYLE_SKIPPED}]-[/] slow.pics",
+            _styled_value("slow.pics upload skipped because report confirmation was unavailable"),
         )
     for action in all_post_upload_actions:
         if not action.success:

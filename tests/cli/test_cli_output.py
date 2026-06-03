@@ -62,13 +62,13 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     assert str(_workspace_path("config", "config.toml")) in output
     assert "input" in output
     assert str(_workspace_path("comparison_videos")) in output
-    assert "run_folders" in output
+    assert "run folders" in output
     assert "base paths" in output
     assert "selection" in output
     assert "mixed, n=10, seed=42" in output
-    assert "audio_alignment.ffmpeg_available" in output
-    assert "audio_alignment.use_vspreview" in output
-    assert "audio_alignment.force_interactive" in output
+    assert "FFmpeg audio" in output
+    assert "interactive alignment" in output
+    assert "force interactive" in output
     assert "tonemap.preset" in output
     assert "reference" in output
     assert "renderer" in output
@@ -80,7 +80,7 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     assert "auto_open" in output
     assert "upload" in output
     assert "disabled" in output
-    assert "vspreview.available" not in output
+    assert "VSPreview" not in output
 
 
 def test_at_a_glance_preserves_literal_brackets_in_dynamic_paths(
@@ -138,8 +138,8 @@ def test_at_a_glance_prints_vspreview_availability_when_probe_succeeds(
     )
 
     output = _render(console)
-    assert "audio_alignment.use_vspreview" in output
-    assert "vspreview.available" in output
+    assert "interactive alignment" in output
+    assert "VSPreview" in output
     assert "true" in output
 
 
@@ -172,8 +172,8 @@ def test_at_a_glance_prints_vspreview_probe_failure(monkeypatch: MonkeyPatch) ->
     )
 
     output = _render(console)
-    assert "audio_alignment.force_interactive" in output
-    assert "vspreview.available" in output
+    assert "force interactive" in output
+    assert "VSPreview" in output
     assert "probe failed (RuntimeError)" in output
     assert "display unavailable" not in output
 
@@ -222,6 +222,43 @@ def test_result_summary_prints_artifact_rows_and_untruncated_warnings() -> None:
     assert "metadata skipped" in output
     assert "upload reused" in output
     assert "more)" not in output
+
+
+def test_result_summary_prints_declined_slowpics_as_skipped_not_artifact() -> None:
+    console = _console()
+
+    print_result_summary(
+        console,
+        result=RunResult(
+            success=True,
+            slowpics_upload_confirmation_status="declined",
+            report_path=_workspace_path("report.html"),
+        ),
+        quiet=False,
+    )
+
+    output = _render(console)
+    assert "slow.pics upload skipped by confirmation" in output
+    assert "✓ slow.pics" not in output
+    assert "- slow.pics" in output
+
+
+def test_result_summary_prints_report_unavailable_slowpics_as_skipped() -> None:
+    console = _console()
+
+    print_result_summary(
+        console,
+        result=RunResult(
+            success=True,
+            slowpics_upload_confirmation_status="report_unavailable",
+        ),
+        quiet=False,
+    )
+
+    output = _render(console)
+    assert "slow.pics upload skipped because report confirmation was unavailable" in output
+    assert "✓ slow.pics" not in output
+    assert "- slow.pics" in output
 
 
 def test_result_summary_groups_warning_sources_with_severity_detail_and_action() -> None:

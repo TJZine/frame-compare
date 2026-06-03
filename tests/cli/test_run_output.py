@@ -91,7 +91,7 @@ def test_run_default_prints_at_a_glance_and_result_summary(monkeypatch: MonkeyPa
         assert "config" in output
         assert "input" in output
         assert "screenshots" in output
-        assert "run_folders" in output
+        assert "run folders" in output
         assert "base paths" in output
         assert "tonemap.preset" in output
         assert "reference" in output
@@ -213,8 +213,8 @@ def test_run_at_a_glance_prints_vspreview_availability_when_enabled(
 
     assert result.exit_code == 0
     output = _normalize_cli_output(result.stdout)
-    assert "audio_alignment.use_vspreview" in output
-    assert "vspreview.available" in output
+    assert "interactive alignment" in output
+    assert "VSPreview" in output
     assert "true" in output
 
 
@@ -243,8 +243,8 @@ def test_run_at_a_glance_prints_vspreview_probe_failure(
 
     assert result.exit_code == 0
     output = _normalize_cli_output(result.stdout)
-    assert "audio_alignment.force_interactive" in output
-    assert "vspreview.available" in output
+    assert "force interactive" in output
+    assert "VSPreview" in output
     assert "probe failed (RuntimeError)" in output
     assert "no display" not in output
 
@@ -314,6 +314,8 @@ def test_run_result_summary_prints_declined_upload_as_information(
     assert result.exit_code == 0
     output = _normalize_cli_output(result.stdout)
     assert "slow.pics upload skipped by confirmation" in output
+    assert "✓ slow.pics" not in output
+    assert "- slow.pics" in output
     assert "Warnings" not in output
 
 

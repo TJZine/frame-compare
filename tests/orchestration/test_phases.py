@@ -24,7 +24,7 @@ from frame_compare.orchestration.types import (
     RunArtifacts,
     RunRequest,
 )
-from frame_compare.utils.progress import NullProgressReporter
+from frame_compare.utils.progress import LogProgressReporter, NullProgressReporter
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 from frame_compare.utils.types import WorkspacePaths
 
@@ -173,7 +173,7 @@ def test_execute_phases_reports_skipped_phase_lifecycle(tmp_path: Path) -> None:
 
     asyncio.run(execute_phases(phases, context, reporter))
 
-    assert reporter.start_phase_calls == [("skip", 1), ("next", 1)]
+    assert reporter.start_phase_calls == [("SKIP", 1), ("NEXT", 1)]
     assert reporter.set_description_calls == ["Skipped"]
     assert reporter.complete_phase_calls == [
         ProgressPhaseStatus.SKIPPED,
@@ -181,6 +181,23 @@ def test_execute_phases_reports_skipped_phase_lifecycle(tmp_path: Path) -> None:
     ]
     assert phases[0].status is PhaseStatus.SKIPPED
     assert phases[1].status is PhaseStatus.COMPLETED
+
+
+def test_execute_phases_preserves_internal_phase_name_for_log_progress(
+    tmp_path: Path,
+) -> None:
+    context = _make_context(tmp_path)
+    reporter = LogProgressReporter()
+    started_phases: list[str] = []
+
+    async def phase_analyze(_: RunContext) -> None:
+        started_phases.append(reporter._name)  # noqa: SLF001
+
+    phases = [Phase(name="analyze", execute=phase_analyze)]
+
+    asyncio.run(execute_phases(phases, context, reporter))
+
+    assert started_phases == ["analyze"]
 
 
 def test_execute_phases_warn_only_failure_marks_warned_and_continues(

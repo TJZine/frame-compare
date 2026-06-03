@@ -142,9 +142,9 @@ overrides.
 - Human-readable non-quiet runs emit a `Frame Alignment` diagnostic to stderr after
   the alignment phase when accepted or rejected frame alignment changes need
   explanation. The diagnostic reports normalized source-frame row 0, final trim
-  ranges, offsets, and selected aligned frames for comparisons with material
-  alignment information. It is suppressed by `--quiet` and is never emitted to
-  `run --json` stdout.
+  ranges, offsets, selected aligned frames, and rejected alignment warning context
+  for comparisons with material alignment information. It is suppressed by
+  `--quiet` and is never emitted to `run --json` stdout.
 - Human-readable non-quiet successful runs group final warnings by source in a
   `Warnings` panel. Existing runtime warning strings and slow.pics post-upload
   action warnings are bridged into presentation rows with source, severity,
@@ -156,10 +156,20 @@ overrides.
   diagnostics may still use stderr.
 - When the at-a-glance summary reports optional VSPreview probe failures, it uses a
   sanitized summary rather than raw probe exception text.
+- The at-a-glance summary uses user-facing row labels such as `run folders`,
+  `FFmpeg audio`, `interactive alignment`, `force interactive`, and `VSPreview`
+  while preserving the same effective configuration facts.
 - The at-a-glance workspace paths are resolved base paths. When
   `paths.use_run_folders = true`, the `screenshots` and `generated` rows describe the
   configured base paths rather than the fresh per-run subdirectories reserved later in
   execution.
+- Human Rich progress uses product phase labels: `PLAN`, `ANALYZE`, `ALIGN`,
+  `RENDER`, `METADATA`, `DOVI`, `PUBLISH`, `REPORT`, `CONFIRM`, and `CLEANUP`.
+  Internal phase names in logs and `phase_timings` remain the runtime keys such
+  as `frame_plan`, `analyze`, `align`, and `confirm_slowpics_upload`.
+- `--no-color` disables ANSI color in interactive Rich progress output. It does
+  not switch an interactive human run to structlog progress. Quiet and JSON modes
+  still suppress Rich progress, and non-TTY runs still use log progress.
 - `--diagnose-paths` emits a pinned JSON object with keys `cache`, `config`, `input`,
   `output`, and `root`, then exits without invoking the runtime pipeline.
   The `cache` value is the resolved configured `paths.generated_dir`; the shared
@@ -260,10 +270,13 @@ opened. If it is not opened, the CLI prints the report path before prompting.
   place where the uploaded slow.pics URL is shown.
 - If the report phase warns, fails, or produces no `report_path`, confirmation
   does not prompt and slow.pics upload is skipped with the deterministic warning
-  `slow.pics upload skipped because report confirmation was unavailable`.
+  `slow.pics upload skipped because report confirmation was unavailable`. Human
+  output includes that message as a neutral skipped Result row rather than a
+  successful artifact row.
 - If the user declines the prompt, the run still succeeds, no slow.pics upload
-  side effects run, human output includes `slow.pics upload skipped by
-  confirmation`, and `slowpics_url` remains `None`.
+  side effects run, human output includes a neutral skipped Result row
+  `slow.pics upload skipped by confirmation` rather than a successful artifact
+  row, and `slowpics_url` remains `None`.
 - `delete_after_upload` is local-only and report-safe. It is not mapped to
   slow.pics `removeAfter`; the current remote metadata request sends an empty
   `removeAfter` value.

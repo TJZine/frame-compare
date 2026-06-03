@@ -272,3 +272,34 @@ def test_emit_frame_alignment_report_renders_rejected_alignment_warning_context(
     assert "Frame Alignment" in captured.err
     assert "Encode" in captured.err
     assert "none" in captured.err
+    assert "warnings" in captured.err
+    assert "rejected" in captured.err
+    assert "align: encode low confidence; left unapplied and untrimmed" in captured.err
+
+
+def test_emit_frame_alignment_report_preserves_literal_brackets_in_warnings(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    comparison = AlignmentReportComparison(
+        label="Encode",
+        alignment_source=None,
+        relative_offset_frames=None,
+        reference_row_zero_source_frame=0,
+        comparison_row_zero_source_frame=0,
+        reference_trim_range=(0, 99),
+        comparison_trim_range=(0, 99),
+    )
+
+    emit_frame_alignment_report(
+        stage="after_align",
+        comparisons=[comparison],
+        selected_frames=[],
+        alignment_warnings=["align: encode [low] confidence"],
+        json_output=False,
+        quiet=False,
+        no_color=True,
+    )
+
+    captured = capsys.readouterr()
+    assert "align: encode [low] confidence" in captured.err
+    assert "\x1b[" not in captured.err
