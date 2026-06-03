@@ -15,6 +15,7 @@ from frame_compare.analysis.types import (
     SelectionBreakdown,
     SelectionDetailsByFrame,
 )
+from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.config.schema import ConfigSchema, OverlayMode, ToneCurve, TonemapPreset
 from frame_compare.orchestration.context import ClipState
@@ -319,7 +320,10 @@ class PrepState:
     preflight_warnings: list[str]
     preflight_duration: float
     load_sources_start: datetime
-    reference_cache_domain: str | None = None
+    analysis_selection_domain: str
+    selection_window: SelectionWindow = field(
+        default_factory=lambda: SelectionWindow(start_frame=0, end_frame_exclusive=0)
+    )
 
 
 @dataclass(frozen=True)

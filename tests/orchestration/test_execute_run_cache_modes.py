@@ -11,18 +11,18 @@ import pytest
 import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.config.loader import load_config
-from frame_compare.orchestration import phase_tasks
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.services.alignment import CACHE_FILE_NAME
-from frame_compare.services.types import AlignmentResult
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 
 from .execute_run_helpers import (
     FakeFFmpegRunner,
     FakeVSLoader,
+    analysis_selection_domain_for_cache_inputs,
     create_config,
     create_video_files,
     write_metrics_cache,
+    write_probe_cache_for_inputs,
 )
 
 
@@ -37,7 +37,12 @@ def test_execute_run_no_cache_deletes_only_matching_shared_metrics_cache(
     analysis_cache_dir = tmp_path / "generated" / "cache" / "analysis"
     source_path = input_dir / "source.mkv"
     write_metrics_cache(analysis_cache_dir, source_path=source_path, config=config)
-    fingerprint = cache_io.compute_cache_key([source_path], config.analysis)
+    selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
+    fingerprint = cache_io.compute_cache_key(
+        [source_path],
+        config.analysis,
+        selection_domain=selection_domain,
+    )
     analysis_cache_path = cache_io.find_metrics_cache_file(analysis_cache_dir, fingerprint)
     assert analysis_cache_path is not None
 
@@ -118,7 +123,6 @@ enable = false
         tmp_path / "generated" / "cache" / "analysis",
         source_path=source_path,
         config=config,
-        reference_domain="trim_start=0|trim_end=0|effective_fps=24/1",
     )
 
     request = RunRequest(
@@ -148,7 +152,13 @@ def test_execute_run_from_cache_only_fails_when_metrics_cache_invalid(
     cache_dir.mkdir(parents=True, exist_ok=True)
     config = load_config(tmp_path / "config" / "config.toml")
     source_path = input_dir / "source.mkv"
-    fingerprint = cache_io.compute_cache_key([source_path], config.analysis)
+    write_probe_cache_for_inputs(tmp_path / "generated" / "clip_probe.toml", [source_path], config)
+    selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
+    fingerprint = cache_io.compute_cache_key(
+        [source_path],
+        config.analysis,
+        selection_domain=selection_domain,
+    )
     cache_path = cache_dir / cache_io.metrics_cache_filename([source_path], fingerprint)
     cache_path.write_text("{not-json", encoding="utf-8")
 
@@ -176,10 +186,15 @@ def test_execute_run_from_cache_only_fails_when_metrics_cache_version_mismatch(
     cache_dir = tmp_path / "generated" / "cache" / "analysis"
     cache_dir.mkdir(parents=True, exist_ok=True)
     config = load_config(tmp_path / "config" / "config.toml")
-    fingerprint = cache_io.compute_cache_key([input_dir / "source.mkv"], config.analysis)
-    cache_path = cache_dir / cache_io.metrics_cache_filename(
-        [input_dir / "source.mkv"], fingerprint
+    source_path = input_dir / "source.mkv"
+    write_probe_cache_for_inputs(tmp_path / "generated" / "clip_probe.toml", [source_path], config)
+    selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
+    fingerprint = cache_io.compute_cache_key(
+        [source_path],
+        config.analysis,
+        selection_domain=selection_domain,
     )
+    cache_path = cache_dir / cache_io.metrics_cache_filename([source_path], fingerprint)
     cache_payload = {
         "version": cache_io.CACHE_VERSION + 1,
         "fingerprint": fingerprint,
@@ -216,9 +231,8 @@ def test_execute_run_from_cache_only_fails_when_metrics_cache_version_mismatch(
         asyncio.run(execute_run(request, deps=deps))
 
 
-def test_execute_run_from_cache_only_does_not_require_cached_audio_offsets_when_alignment_enabled(
+def test_execute_run_from_cache_only_requires_probe_cache_before_audio_offsets_when_alignment_enabled(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_content = """\
 [paths]
@@ -239,29 +253,6 @@ enable = false
     create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "a_source.mkv", "b_comp.mkv")
-    input_videos = [input_dir / "a_source.mkv", input_dir / "b_comp.mkv"]
-    config = load_config(tmp_path / "config" / "config.toml")
-    write_metrics_cache(
-        tmp_path / "generated" / "cache" / "analysis",
-        source_path=input_dir / "a_source.mkv",
-        config=config,
-        video_paths=input_videos,
-    )
-
-    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
-        return [
-            AlignmentResult(
-                reference_clip=str(input_videos[0]),
-                comparison_clip=str(input_videos[1]),
-                frame_offset=0,
-                time_offset_seconds=0.0,
-                correlation_score=1.0,
-                algorithm="cross_correlation",
-                source="computed",
-            )
-        ]
-
-    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
 
     request = RunRequest(
         root=tmp_path,
@@ -273,6 +264,5 @@ enable = false
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
-    result = asyncio.run(execute_run(request, deps=deps))
-
-    assert result.success is True
+    with pytest.raises(MetricsCalculationError, match="Cached clip probe data is required"):
+        asyncio.run(execute_run(request, deps=deps))

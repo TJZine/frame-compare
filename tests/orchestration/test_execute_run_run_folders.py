@@ -28,9 +28,11 @@ from .execute_run_helpers import (
     RUN_FOLDERS_CONFIG,
     FakeFFmpegRunner,
     FakeVSLoader,
+    analysis_selection_domain_for_cache_inputs,
     create_config,
     create_video_files,
     write_metrics_cache,
+    write_probe_cache_for_inputs,
 )
 
 if TYPE_CHECKING:
@@ -82,7 +84,12 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
     analysis_cache_dir = tmp_path / "generated" / "cache" / "analysis"
     source_path = input_dir / "source.mkv"
     write_metrics_cache(analysis_cache_dir, source_path=source_path, config=config)
-    fingerprint = cache_io.compute_cache_key([source_path], config.analysis)
+    selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
+    fingerprint = cache_io.compute_cache_key(
+        [source_path],
+        config.analysis,
+        selection_domain=selection_domain,
+    )
     analysis_cache_path = cache_io.find_metrics_cache_file(analysis_cache_dir, fingerprint)
     assert analysis_cache_path is not None
 
@@ -190,16 +197,26 @@ enable = false
     create_video_files(input_dir, "source.mkv")
     source_path = input_dir / "source.mkv"
     config = load_config(tmp_path / "config" / "config.toml")
-    fingerprint = cache_io.compute_cache_key([source_path], config.analysis)
+    selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
+    fingerprint = cache_io.compute_cache_key(
+        [source_path],
+        config.analysis,
+        selection_domain=selection_domain,
+    )
 
     def _fake_calculate_metrics(
         *,
         video_paths: list[Path],
         config: AnalysisConfig,
         cache_dir: Path,
+        selection_domain: str | None = None,
         **_kwargs: object,
     ) -> FrameMetrics:
-        cache_fingerprint = cache_io.compute_cache_key(video_paths, config)
+        cache_fingerprint = cache_io.compute_cache_key(
+            video_paths,
+            config,
+            selection_domain=selection_domain,
+        )
         stats_by_path = {path: path.stat() for path in video_paths}
         metrics = FrameMetrics(
             luminance=[0.1] * 100,
@@ -245,6 +262,7 @@ enable = false
     assert first.success is True
     assert first.cache_hit is False
     assert shared_cache_path is not None
+    assert (tmp_path / "custom_generated" / "clip_probe.toml").exists()
     assert not any(input_dir.glob("*/generated/cache/analysis/*.compframes"))
 
     def _fail_calculate_metrics(**_kwargs: object) -> NoReturn:
@@ -446,7 +464,13 @@ unattended = true
     create_video_files(input_dir, "source.mkv")
     source_path = input_dir / "source.mkv"
     config = load_config(tmp_path / "config" / "config.toml")
-    fingerprint = cache_io.compute_cache_key([source_path], config.analysis)
+    write_probe_cache_for_inputs(tmp_path / "generated" / "clip_probe.toml", [source_path], config)
+    selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
+    fingerprint = cache_io.compute_cache_key(
+        [source_path],
+        config.analysis,
+        selection_domain=selection_domain,
+    )
     cache_dir = tmp_path / "generated" / "cache" / "analysis"
     cache_dir.mkdir(parents=True)
     (cache_dir / cache_io.metrics_cache_filename([source_path], fingerprint)).write_text(

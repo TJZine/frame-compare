@@ -1152,6 +1152,8 @@ def test_viewer_assets_wire_report_scoped_viewport_persistence() -> None:
     assert "restorePersistedState()" in js
     assert "persistViewportState()" in js
     assert "storage.setItem(this.state.storageKey, JSON.stringify(payload))" in js
+    assert "Number.isInteger(saved.currentFrameIdx)" in js
+    assert "currentFrameIdx: this.state.currentFrameIdx" in persistence_block
     assert "mode: this.state.mode" in js
     assert "panX: this.state.panX" in js
     assert "overlaysHidden: this.state.overlaysHidden" in js

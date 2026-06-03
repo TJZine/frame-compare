@@ -24,6 +24,9 @@ frame_count = 10
 random_seed = 42
 save_frames_data = true
 selection_mode = "mixed"
+ignore_lead_seconds = 0.0
+ignore_trail_seconds = 0.0
+min_window_seconds = 5.0
 dark_quantile = 0.05
 bright_quantile = 0.95
 

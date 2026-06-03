@@ -1090,6 +1090,13 @@ const ReportViewer = {
         if (this.validPaletteOrientation(saved.paletteOrientation)) {
             this.state.paletteOrientation = saved.paletteOrientation;
         }
+        if (
+            Number.isInteger(saved.currentFrameIdx) &&
+            saved.currentFrameIdx >= 0 &&
+            saved.currentFrameIdx < (this.state.data?.frames?.length || 0)
+        ) {
+            this.state.currentFrameIdx = saved.currentFrameIdx;
+        }
         this.ensureDistinctPairSelection();
         this.state.pairAlignments = this.normalizedPairAlignments(saved.pairAlignments);
         if (!this.state.pairAlignments[this.currentPairAlignmentKey()]) {
@@ -1099,6 +1106,7 @@ const ReportViewer = {
             }
         }
         this.loadCurrentPairAlignment();
+        this.normalizeCurrentFrameForFilter();
         if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
     },
 
@@ -1108,6 +1116,7 @@ const ReportViewer = {
         this.storeCurrentPairAlignment();
 
         const payload = {
+            currentFrameIdx: this.state.currentFrameIdx,
             mode: this.state.mode,
             leftClipIdx: this.state.leftClipIdx,
             rightClipIdx: this.state.rightClipIdx,

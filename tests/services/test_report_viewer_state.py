@@ -72,6 +72,7 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment(
             "stringBlinkIntervalFallback": 700,
         },
         "inspectorBlinkFocusState": {
+            "currentFrameIdx": 1,
             "inspectorOpen": False,
             "inspectorTab": "export",
             "blinkIntervalMs": 300,

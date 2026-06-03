@@ -104,6 +104,7 @@ def test_overlay_display_frame_number_matches_aligned_output_filename(
         workspace=workspace,
         reference=reference,
         comparisons=[],
+        analysis_selection_domain="test-selection-domain",
         reporter=None,
     )
 

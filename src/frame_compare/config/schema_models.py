@@ -42,6 +42,9 @@ class AnalysisConfig(BaseModel):
     random_seed: int = 42
     save_frames_data: bool = True
     selection_mode: SelectionMode = SelectionMode.MIXED
+    ignore_lead_seconds: float = Field(default=0.0, ge=0.0)
+    ignore_trail_seconds: float = Field(default=0.0, ge=0.0)
+    min_window_seconds: float = Field(default=5.0, ge=0.0)
     dark_quantile: float = Field(default=0.05, ge=0.0, le=0.5)
     bright_quantile: float = Field(default=0.95, ge=0.5, le=1.0)
 

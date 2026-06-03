@@ -52,7 +52,7 @@ def compute_cache_key(
     video_paths: list[Path],
     config: AnalysisConfig,
     *,
-    reference_domain: str | None = None,
+    selection_domain: str | None = None,
 ) -> str:
     """Generate deterministic cache key from video files and analysis config."""
     h = hashlib.sha256()
@@ -60,14 +60,16 @@ def compute_cache_key(
         reference_path = video_paths[0]
         stat = reference_path.stat()
         h.update(f"reference|{reference_path}|{stat.st_size}|{stat.st_mtime_ns}".encode())
-    if reference_domain is not None:
-        h.update(f"reference_domain|{reference_domain}".encode())
+    if selection_domain is not None:
+        h.update(f"selection_domain|{selection_domain}".encode())
     for p in _sorted_video_paths(video_paths):
         stat = p.stat()
         h.update(f"{p}|{stat.st_size}|{stat.st_mtime_ns}".encode())
     h.update(
         f"{config.frame_count}|{config.selection_mode.value}|{config.random_seed}|"
-        f"{config.dark_quantile}|{config.bright_quantile}".encode()
+        f"{config.dark_quantile}|{config.bright_quantile}|"
+        f"{config.ignore_lead_seconds}|{config.ignore_trail_seconds}|"
+        f"{config.min_window_seconds}".encode()
     )
     h.update(str(CACHE_VERSION).encode("utf-8"))
     return h.hexdigest()

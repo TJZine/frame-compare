@@ -66,6 +66,7 @@ def _make_context(tmp_path: Path) -> RunContext:
         workspace=workspace,
         reference=reference,
         comparisons=[],
+        analysis_selection_domain="test-selection-domain",
         reporter=NullProgressReporter(),
     )
 

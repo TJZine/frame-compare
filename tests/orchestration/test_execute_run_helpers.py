@@ -5,7 +5,12 @@ from pathlib import Path
 import frame_compare.analysis.cache_io as cache_io
 from frame_compare.config.loader import load_config
 
-from .execute_run_helpers import create_config, create_video_files, write_metrics_cache
+from .execute_run_helpers import (
+    analysis_selection_domain_for_cache_inputs,
+    create_config,
+    create_video_files,
+    write_metrics_cache,
+)
 
 
 def test_write_metrics_cache_uses_cache_inputs_stats_when_video_paths_are_provided(
@@ -25,7 +30,11 @@ def test_write_metrics_cache_uses_cache_inputs_stats_when_video_paths_are_provid
         video_paths=cache_inputs,
     )
 
-    fingerprint = cache_io.compute_cache_key(cache_inputs, config.analysis)
+    fingerprint = cache_io.compute_cache_key(
+        cache_inputs,
+        config.analysis,
+        selection_domain=analysis_selection_domain_for_cache_inputs(cache_inputs, config),
+    )
     cache_path = cache_io.find_metrics_cache_file(cache_dir, fingerprint)
 
     assert cache_path is not None

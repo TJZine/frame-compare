@@ -385,6 +385,7 @@ const summary = {};
         clipCount: 2,
         savedState: {
             mode: 'diff',
+            currentFrameIdx: 99,
             leftClipIdx: 3,
             rightClipIdx: 9,
             activeClipIdx: 9,
@@ -395,6 +396,7 @@ const summary = {};
         },
     });
 
+    assert.equal(viewer.state.currentFrameIdx, 0);
     assert.equal(viewer.state.leftClipIdx, 0);
     assert.equal(viewer.state.rightClipIdx, 1);
     assert.equal(viewer.state.activeClipIdx, 0);
@@ -459,6 +461,7 @@ const summary = {};
     const { viewer, storage, storageKey, document } = loadViewer({
         clipCount: 4,
         savedState: {
+            currentFrameIdx: 1,
             inspectorOpen: true,
             inspectorTab: 'align',
             blinkIntervalMs: 1200,
@@ -467,6 +470,7 @@ const summary = {};
         },
     });
 
+    assert.equal(viewer.state.currentFrameIdx, 1);
     assert.equal(viewer.state.inspectorOpen, true);
     assert.equal(viewer.state.inspectorTab, 'align');
     assert.equal(viewer.state.blinkIntervalMs, 1200);
@@ -499,12 +503,14 @@ const summary = {};
     viewer.setBlinkPaused(true);
     viewer.setFocusMode(true);
     const saved = persisted(storage, storageKey);
+    assert.equal(saved.currentFrameIdx, 1);
     assert.equal(saved.inspectorOpen, false);
     assert.equal(saved.inspectorTab, 'export');
     assert.equal(saved.blinkIntervalMs, 300);
     assert.equal(saved.blinkPaused, undefined);
     assert.equal(saved.focusMode, undefined);
     summary.inspectorBlinkFocusState = {
+        currentFrameIdx: saved.currentFrameIdx,
         inspectorOpen: saved.inspectorOpen,
         inspectorTab: saved.inspectorTab,
         blinkIntervalMs: saved.blinkIntervalMs,

@@ -602,6 +602,59 @@ def test_current_cli_contract_documents_audio_alignment_config_only_fields() -> 
         assert unsupported_flag not in command_override_surface
 
 
+def test_current_cli_contract_documents_analysis_ignore_window_and_cache_domain() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
+    analysis_heading = "## Config-Only Analysis Surface"
+    slowpics_heading = "## Config-Only slow.pics Surface"
+    assert analysis_heading in cli_contract, f"Missing heading: {analysis_heading}"
+
+    analysis_section = cli_contract.split(analysis_heading, maxsplit=1)[1].split(
+        slowpics_heading,
+        maxsplit=1,
+    )[0]
+    normalized_analysis_section = " ".join(analysis_section.split())
+    for expected in (
+        "`ignore_lead_seconds = 0.0`",
+        "`ignore_trail_seconds = 0.0`",
+        "`min_window_seconds = 5.0`",
+        "there are no dedicated `run` flags",
+        "source-specific base trim domain",
+        "do not physically trim sources",
+        "reported source-frame numbers",
+        "standard typed selection error",
+    ):
+        assert expected in normalized_analysis_section
+
+    command_heading = "## Command Surface"
+    command_override_surface = cli_contract.split(command_heading, maxsplit=1)[1].split(
+        analysis_heading,
+        maxsplit=1,
+    )[0]
+    for unsupported_flag in (
+        "--ignore-lead-seconds",
+        "--ignore-trail-seconds",
+        "--min-window-seconds",
+    ):
+        assert unsupported_flag not in command_override_surface
+
+    cache_section = cli_contract.split("### Cache Mode Semantics", maxsplit=1)[1].split(
+        "### Report Auto-Open Ownership",
+        maxsplit=1,
+    )[0]
+    normalized_cache_section = " ".join(cache_section.split())
+    for expected in (
+        "stable all-source selection-domain token",
+        "source trims",
+        "effective FPS values",
+        "configured analysis ignore-window settings",
+        "final shared selectable window",
+        "probe cache is missing",
+        "rather than validating a weaker fingerprint",
+    ):
+        assert expected in normalized_cache_section
+
+
 def test_current_cli_contract_names_primary_executable_contract_checks() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
@@ -625,6 +678,21 @@ def test_current_cli_contract_names_primary_executable_contract_checks() -> None
 
     for expected in expected_checks:
         assert expected in authority_section
+
+
+def test_current_architecture_documents_shared_probe_cache_for_cache_only() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    architecture = (repo_root / "docs" / "current-architecture.md").read_text(encoding="utf-8")
+    normalized_architecture = " ".join(architecture.split())
+
+    for expected in (
+        "shared clip probe cache used by `--from-cache-only` prevalidation",
+        "before run-folder reservation",
+        "current-run clip probe cache when run folders are enabled",
+        "written to both the current run folder and the shared generated probe cache",
+        "validate the exact all-source analysis selection domain",
+    ):
+        assert expected in normalized_architecture
 
 
 def test_current_cli_contract_matches_wizard_visibility_choices() -> None:

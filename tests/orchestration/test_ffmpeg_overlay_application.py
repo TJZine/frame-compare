@@ -83,6 +83,7 @@ def test_ffmpeg_extraction_applies_overlay_post_process(
         workspace=workspace,
         reference=reference,
         comparisons=[],
+        analysis_selection_domain="test-selection-domain",
         reporter=None,
     )
 

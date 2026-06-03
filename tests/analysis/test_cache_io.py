@@ -52,13 +52,23 @@ def test_compute_cache_key_changes_when_selected_reference_changes(tmp_path: Pat
     assert key1 != key2
 
 
-def test_compute_cache_key_changes_when_reference_domain_changes(tmp_path: Path) -> None:
+def test_compute_cache_key_changes_when_selection_domain_changes(tmp_path: Path) -> None:
     v1 = create_video_file(tmp_path, "v1.mkv")
     v2 = create_video_file(tmp_path, "v2.mkv")
     config = AnalysisConfig(frame_count=10)
-    key1 = compute_cache_key([v1, v2], config, reference_domain="trim_start=0|trim_end=0")
-    key2 = compute_cache_key([v1, v2], config, reference_domain="trim_start=12|trim_end=0")
+    key1 = compute_cache_key([v1, v2], config, selection_domain="window=0:100")
+    key2 = compute_cache_key([v1, v2], config, selection_domain="window=10:100")
     assert key1 != key2
+
+
+def test_compute_cache_key_changes_on_ignore_window_config(tmp_path: Path) -> None:
+    v1 = create_video_file(tmp_path, "v1.mkv")
+    default_key = compute_cache_key([v1], AnalysisConfig())
+    lead_key = compute_cache_key([v1], AnalysisConfig(ignore_lead_seconds=1.0))
+    trail_key = compute_cache_key([v1], AnalysisConfig(ignore_trail_seconds=1.0))
+    min_window_key = compute_cache_key([v1], AnalysisConfig(min_window_seconds=10.0))
+
+    assert len({default_key, lead_key, trail_key, min_window_key}) == 4
 
 
 def test_metrics_cache_filename_order_independent(tmp_path: Path) -> None:

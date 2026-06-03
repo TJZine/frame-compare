@@ -11,6 +11,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from frame_compare.analysis.window import SelectionWindow
 from frame_compare.services.types import AlignmentSource
 from frame_compare.vs.types import HDRMetadata
 
@@ -151,9 +152,12 @@ class RunContext:
     workspace: WorkspacePaths
     reference: ClipState
     comparisons: list[ClipState]
+    analysis_selection_domain: str
     reporter: ProgressReporter | None = None
     selection_breakdown: SelectionBreakdown | None = None
     selection_details_by_source_frame: dict[int, SelectionDetail] | None = None
     analysis_metrics: FrameMetrics | None = None
-    reference_cache_domain: str | None = None
+    selection_window: SelectionWindow = field(
+        default_factory=lambda: SelectionWindow(start_frame=0, end_frame_exclusive=0)
+    )
     no_color: bool = False

@@ -108,4 +108,5 @@ def _context(tmp_path: Path, *, comparisons: list[ClipState] | None = None) -> R
         workspace=_workspace(tmp_path),
         reference=reference,
         comparisons=[] if comparisons is None else comparisons,
+        analysis_selection_domain="test-selection-domain",
     )

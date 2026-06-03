@@ -8,10 +8,7 @@ import pytest
 
 from frame_compare.config.schema_models import SourceOverrideConfig, SourcesConfig
 from frame_compare.orchestration.errors import DuplicateSourceStemError, SourceSelectionError
-from frame_compare.orchestration.source_selection import (
-    reference_cache_domain_token,
-    resolve_source_selection,
-)
+from frame_compare.orchestration.source_selection import resolve_source_selection
 
 
 def _paths(input_dir: Path, *names: str) -> list[Path]:
@@ -125,16 +122,6 @@ def test_source_selection_resolves_overrides_by_selector(tmp_path: Path) -> None
     )
 
     assert selection.overrides_by_path == {encode: override}
-    assert reference_cache_domain_token(selection.overrides_by_path.get(reference)) is None
-    assert reference_cache_domain_token(selection.overrides_by_path[encode]) == (
-        "trim_start=12|trim_end=2|effective_fps=24000/1001"
-    )
-
-
-def test_reference_cache_domain_token_preserves_integral_num_den_effective_fps() -> None:
-    token = reference_cache_domain_token(SourceOverrideConfig(effective_fps="24/1"))
-
-    assert token == "trim_start=0|trim_end=0|effective_fps=24/1"
 
 
 def test_source_selection_rejects_duplicate_override_selectors_for_same_source(

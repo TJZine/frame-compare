@@ -141,7 +141,7 @@ def calculate_metrics(
     cache_dir: Path,
     reporter: ProgressReporter | None = None,
     vs_loader: VSLoader | None = None,
-    reference_domain: str | None = None,
+    selection_domain: str | None = None,
     effective_fps: Fraction | None = None,
 ) -> FrameMetrics:
     """
@@ -156,7 +156,7 @@ def calculate_metrics(
         cache_dir: Directory for cache files
         reporter: Optional progress reporter
         vs_loader: Optional VapourSynth clip loader seam
-        reference_domain: Optional reference frame-domain token included in
+        selection_domain: Optional selection-domain token included in
             the analysis cache key when source overrides affect reference
             selection.
         effective_fps: Optional FPS value stored in metrics metadata for
@@ -174,7 +174,7 @@ def calculate_metrics(
     if not video_paths:
         raise MetricsCalculationError("No input video paths provided")
 
-    fingerprint = compute_cache_key(video_paths, config, reference_domain=reference_domain)
+    fingerprint = compute_cache_key(video_paths, config, selection_domain=selection_domain)
     clips = _clip_identities(video_paths)
 
     cached = _cached_metrics(cache_dir, fingerprint, clips, reporter)

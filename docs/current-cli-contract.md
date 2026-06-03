@@ -163,21 +163,26 @@ overrides.
 - Analysis cache entries live under `<resolved paths.generated_dir>/cache/analysis`
   using labeled full-fingerprint filenames:
   `<safe-human-label>__<full-fingerprint>.compframes`.
-- The analysis cache fingerprint includes the selected reference identity and
-  source overrides that affect the selected reference frame/timing domain.
-  Cache entries for different selected references from the same input set do
+- The analysis cache fingerprint includes the selected reference identity and a
+  stable all-source selection-domain token. That token covers source identity,
+  source trims, effective FPS values, the configured analysis ignore-window
+  settings, and the final shared selectable window. Cache entries for different
+  selected references or different selection domains from the same input set do
   not satisfy each other.
 - The full fingerprint remains inside the cache payload and is validated on load.
   Legacy run-folder `cache.compframes` files are not used as analysis cache hits.
 - With `paths.use_run_folders = true`, runs that proceed reserve a fresh run folder;
   existing run folders are not reused to satisfy analysis cache hits.
 - `--no-cache` deletes only the matching shared analysis cache entry for the current
-  inputs, selected reference, selected reference-domain source overrides, and
-  analysis settings before continuing. It does not clear unrelated shared
-  analysis entries and does not delete alignment offset caches.
+  inputs, selected reference, all-source selection domain, and analysis settings
+  before continuing. It does not clear unrelated shared analysis entries and
+  does not delete alignment offset caches.
 - `--from-cache-only` is analysis-cache-only. When analysis is not skipped, it validates
   the matching shared analysis cache entry before metadata prefetch and before run-folder
   reservation, so a missing or invalid entry does not leave an empty run folder.
+- When the exact all-source selection-domain token requires probe data and the
+  probe cache is missing, `--from-cache-only` fails before metadata prefetch and
+  before run-folder reservation rather than validating a weaker fingerprint.
 - `--from-cache-only` does not require cached alignment offsets from a previous run.
   Alignment can compute or use the current run folder's run-scoped alignment cache after
   the analysis cache validation succeeds.
@@ -350,6 +355,22 @@ These `run` flags currently map into config values through `CLI_OVERRIDE_MAP`:
 
 `--no-upload` is the only slow.pics-specific `run` flag. No runtime-only
 slow.pics `run` flags exist.
+
+## Config-Only Analysis Surface
+
+These `[analysis]` fields are config-only public surface; there are no dedicated
+`run` flags for them:
+
+- `ignore_lead_seconds = 0.0`
+- `ignore_trail_seconds = 0.0`
+- `min_window_seconds = 5.0`
+
+The lead/trail fields define a global selectable analysis window inside each
+clip's source-specific base trim domain. They do not physically trim sources or
+change reported source-frame numbers. `min_window_seconds` expands a too-small
+per-clip selectable window within clip bounds, preferring to extend the end
+first and then shift the start earlier. If a shared selectable intersection
+cannot be formed, the run fails with the standard typed selection error.
 
 ## Config-Only slow.pics Surface
 

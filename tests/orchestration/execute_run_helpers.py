@@ -12,6 +12,14 @@ import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot, ClipState
+from frame_compare.orchestration.preparation import (
+    _analysis_selection_domain_token,
+    _selection_window_for_clips,
+)
+from frame_compare.orchestration.probing.probe_cache import (
+    compute_probe_cache_key,
+    save_clip_probe_cache,
+)
 from frame_compare.vs.types import HDRMetadata, SourceInfo
 
 if TYPE_CHECKING:
@@ -77,13 +85,16 @@ def write_metrics_cache(
     source_path: Path,
     config: ConfigSchema,
     video_paths: list[Path] | None = None,
-    reference_domain: str | None = None,
+    selection_domain: str | None = None,
 ) -> None:
     cache_inputs = [source_path] if video_paths is None else video_paths
+    if selection_domain is None:
+        selection_domain = analysis_selection_domain_for_cache_inputs(cache_inputs, config)
+    write_probe_cache_for_inputs(cache_dir.parent.parent / "clip_probe.toml", cache_inputs, config)
     fingerprint = cache_io.compute_cache_key(
         cache_inputs,
         config.analysis,
-        reference_domain=reference_domain,
+        selection_domain=selection_domain,
     )
     stats_by_path = {path: path.stat() for path in cache_inputs}
     metrics = FrameMetrics(
@@ -105,6 +116,65 @@ def write_metrics_cache(
         ),
     )
     cache_io.save_metrics_cache(metrics, cache_dir)
+
+
+def analysis_selection_domain_for_cache_inputs(
+    video_paths: list[Path],
+    config: ConfigSchema,
+) -> str:
+    clips = [
+        _clip_state_for_cache_input(path, label="Reference" if index == 0 else f"Encode {index}")
+        for index, path in enumerate(video_paths)
+    ]
+    window = _selection_window_for_clips(clips=clips, config=config)
+    return _analysis_selection_domain_token(
+        clips=clips,
+        config=config,
+        selection_window=window,
+    )
+
+
+def write_probe_cache_for_inputs(
+    cache_path: Path,
+    video_paths: list[Path],
+    config: ConfigSchema,
+) -> None:
+    del config
+    entries = {}
+    for path in video_paths:
+        fingerprint = _clip_fingerprint_for_path(path)
+        entries[compute_probe_cache_key(fingerprint)] = ClipProbeSnapshot(
+            fingerprint=fingerprint,
+            width=1920,
+            height=1080,
+            num_frames=100,
+            fps=Fraction(24, 1),
+            is_hdr=False,
+        )
+    save_clip_probe_cache(cache_path, entries)
+
+
+def _clip_state_for_cache_input(path: Path, *, label: str) -> ClipState:
+    probe = ClipProbeSnapshot(
+        fingerprint=_clip_fingerprint_for_path(path),
+        width=1920,
+        height=1080,
+        num_frames=100,
+        fps=Fraction(24, 1),
+        is_hdr=False,
+    )
+    return ClipState(
+        path=path,
+        label=label,
+        probe=probe,
+        source_fps=probe.fps,
+        effective_fps=probe.fps,
+    )
+
+
+def _clip_fingerprint_for_path(path: Path) -> ClipFingerprint:
+    stat = path.stat()
+    return ClipFingerprint(path=path, size_bytes=stat.st_size, mtime_ns=stat.st_mtime_ns)
 
 
 def clip_state(path: Path, *, label: str, num_frames: int = 100) -> ClipState:
