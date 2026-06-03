@@ -829,7 +829,13 @@ def test_viewer_assets_keep_divider_slider_only_and_pointer_safe() -> None:
     assert "display: block;" in _css_block(css, ".rv-mode-slider .rv-divider")
     assert ".rv-viewer-stage:fullscreen" in css
     assert "translate(var(--pan-x, 0px), var(--pan-y, 0px)) scale(var(--zoom-level, 1))" in css
-    assert ".rv-right { transform: translate(var(--align-x, 0px), var(--align-y, 0px)); }" in css
+    alignment_transform_block = _css_block(
+        css, ".rv-right,\n.rv-mode-overlay .rv-left.rv-layer--aligned-active"
+    )
+    assert (
+        "transform: translate(var(--align-x, 0px), var(--align-y, 0px));"
+        in alignment_transform_block
+    )
     assert ".rv-overlay-label:empty { display: none; }" in css
     assert "select option," in css
     assert 'background-image: url("data:image/svg+xml,' in css
@@ -1033,7 +1039,8 @@ def test_viewer_assets_wire_pan_wheel_zoom_and_alignment_hooks() -> None:
     assert "commitRawAlignmentInput('y')" in js
     assert "this.dom.alignX.value = this.state.rawAlignX ?? this.state.alignX;" in js
     assert "this.dom.alignY.value = this.state.rawAlignY ?? this.state.alignY;" in js
-    assert "this.dom.rightLayer.style.setProperty('--align-x', `${this.state.alignX}px`);" in js
+    assert "this.dom.canvas.style.setProperty('--align-x', `${this.state.alignX}px`);" in js
+    assert "this.dom.canvas.style.setProperty('--align-y', `${this.state.alignY}px`);" in js
 
 
 def test_viewer_assets_keep_overlay_and_blink_clip_semantics() -> None:
@@ -1101,6 +1108,7 @@ def test_viewer_assets_wire_metadata_and_error_empty_state_hooks() -> None:
 
     assert ".rv-stage-overlay-info" in css
     assert ".rv-viewer-stage.rv-overlays-hidden .rv-overlay-label" in css
+    assert ".rv-viewer-stage.rv-overlays-hidden .rv-focus-hud" in css
     assert ".rv-align-popover" in css
     assert '.rv-status[data-tone="error"]' in css
     assert '.rv-status[data-tone="warning"]' in css
@@ -1140,42 +1148,18 @@ def test_viewer_assets_toggle_overlays_and_keep_split_pairs_distinct() -> None:
 
 def test_viewer_assets_wire_bottom_panel_and_filmstrip_state() -> None:
     css = get_css()
-    js = get_js()
 
     assert ".rv-bottom-panel" in css
-    assert ".rv-bottom-panel--collapsed .rv-category-filters-container" in css
     assert ".rv-bottom-panel--collapsed .rv-filmstrip" in css
-    assert "display: none;" in _css_block(
-        css,
-        ".rv-bottom-panel--collapsed .rv-category-filters-container,\n.rv-bottom-panel--collapsed .rv-filmstrip",
-    )
+    assert ".rv-bottom-panel--collapsed .rv-category-filters-container" not in css
+    assert "display: none;" in _css_block(css, ".rv-bottom-panel--collapsed .rv-filmstrip")
     assert "height: 88px;" in _css_block(css, ".rv-filmstrip-size-compact .rv-filmstrip")
     assert "height: 120px;" in _css_block(css, ".rv-filmstrip-size-normal .rv-filmstrip")
     assert "height: 168px;" in _css_block(css, ".rv-filmstrip-size-large .rv-filmstrip")
 
-    assert "filmstripCollapsed: false" in js
-    assert "filmstripSize: 'normal'" in js
-    assert "btnFilmstripToggle: document.getElementById('btn-filmstrip-toggle')" in js
-    assert "filmstripSizeBtns: document.querySelectorAll('[data-filmstrip-size]')" in js
-    assert "setFilmstripCollapsed(collapsed, options = {})" in js
-    assert "setFilmstripSize(size, options = {})" in js
-    assert "validFilmstripSize(size)" in js
-    assert "if (this.validFilmstripSize(saved.filmstripSize))" in js
-    assert "filmstripCollapsed: this.state.filmstripCollapsed" in js
-    assert "filmstripSize: this.state.filmstripSize" in js
-    assert (
-        "case 'f': case 'F': this.setFilmstripCollapsed(!this.state.filmstripCollapsed); break;"
-        in js
-    )
-    assert "isShortcutEditableTarget(target)" in js
-    assert "['INPUT', 'SELECT', 'BUTTON', 'TEXTAREA'].includes(tagName)" in js
-    assert "if (this.isShortcutEditableTarget(e.target)) return;" in js
-    assert "hasThumbnails ? 'Toggle filmstrip (F)' : 'Filmstrip disabled'" in js
-
 
 def test_viewer_assets_wire_inspector_blink_and_focus_state() -> None:
     css = get_css()
-    js = get_js()
     tablet_css = _css_block(css, "@media (max-width: 992px)")
     mobile_css = _css_block(css, "@media (max-width: 768px)")
     reduced_motion_css = _css_block(css, "@media (prefers-reduced-motion: reduce)")
@@ -1196,39 +1180,6 @@ def test_viewer_assets_wire_inspector_blink_and_focus_state() -> None:
     assert "width: min(360px, 92vw);" in tablet_css
     assert "transition: none !important;" in reduced_motion_css
     assert "animation-duration: 0.01ms !important;" in reduced_motion_css
-
-    assert "inspectorOpen: false" in js
-    assert "inspectorTab: 'frame'" in js
-    assert "blinkIntervalMs: 700" in js
-    assert "focusMode: false" in js
-    assert "if (this.validInspectorTab(saved.inspectorTab))" in js
-    assert "if (this.validBlinkIntervalMs(saved.blinkIntervalMs))" in js
-    assert "setInspectorOpen(open, options = {})" in js
-    assert "setInspectorTab(tab, options = {})" in js
-    assert "setInspectorFocusable(enabled)" in js
-    assert "this.dom.inspector.inert = !enabled;" in js
-    assert "element.dataset.inspectorPreviousTabindex" in js
-    assert "element.setAttribute('tabindex', '-1');" in js
-    assert "element.removeAttribute('tabindex');" in js
-    assert "updateInspectorData()" in js
-    assert "safeHttpUrl(url)" in js
-    assert "updateInspectorSlowpics()" in js
-    assert "document.createTextNode(slowpicsUrl || 'Not uploaded')" in js
-    assert "document.createElement('a')" in js
-    assert "link.rel = 'noopener noreferrer';" in js
-    assert "resetCurrentPairAlignment()" in js
-    assert "resetAllPairAlignments()" in js
-    assert "this.setInspectorOpen(!this.state.inspectorOpen)" in js
-    assert "this.setBlinkIntervalMs(Number(e.target.value))" in js
-    assert "this.setBlinkPaused(!this.state.blinkPaused)" in js
-    assert "setBlinkIntervalMs(intervalMs, options = {})" in js
-    assert "stepBlinkInterval(direction)" in js
-    assert "window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches" in js
-    assert "this.state.blinkPaused = true;" in js
-    assert "setFocusMode(enabled)" in js
-    assert "case 'z': case 'Z': this.setFocusMode(!this.state.focusMode); break;" in js
-    assert "if (this.isInspectorVisible()) {" in js
-    assert "if (this.state.focusMode) {" in js
 
 
 def test_viewer_assets_preload_adjacent_visible_frames_and_active_clips() -> None:

@@ -64,6 +64,7 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment(
         "filmstripState": {
             "collapsed": False,
             "size": "compact",
+            "collapsedClassRemoved": True,
         },
         "invalidFilmstripStateFallback": {
             "collapsed": False,
@@ -79,6 +80,8 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment(
             "focusModeActive": True,
             "closedInspectorInert": True,
             "closedInspectorTabIndex": "-1",
+            "restoredFocusToInfo": True,
+            "clearedRestoreFocus": True,
         },
         "escapeOrder": {
             "inspectorClosedBeforeAlignment": True,
@@ -93,6 +96,14 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment(
             "safeLinkTag": "A",
             "unsafeAsText": True,
             "missingStatus": "Not uploaded",
+        },
+        "singleModeAlignment": {
+            "mode": "overlay",
+            "canvasAlignX": "9px",
+            "canvasAlignY": "-4px",
+            "alignedComparisonActive": True,
+            "baseClipUnshifted": True,
+            "emptyStateClearsAlignment": True,
         },
         "blinkControls": {
             "reducedMotionPaused": True,

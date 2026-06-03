@@ -14,6 +14,8 @@ const viewerPath = path.join(
     'viewer.js',
 );
 
+let activeDocument = null;
+
 function payloadWithClipCount(clipCount) {
     const clips = Array.from({ length: clipCount }, (_, idx) => ({
         name: `clip-${idx + 1}`,
@@ -66,6 +68,7 @@ function fakeElement() {
         dataset: {},
         tagName: 'DIV',
         isContentEditable: false,
+        isConnected: true,
         classList: {
             toggle(name, force) {
                 const enabled = force === undefined ? !classes.has(name) : Boolean(force);
@@ -100,7 +103,9 @@ function fakeElement() {
         contains(target) {
             return target === this;
         },
-        focus() {},
+        focus() {
+            if (activeDocument) activeDocument.activeElement = this;
+        },
         replaceChildren(...children) {
             this.children = children;
         },
@@ -147,6 +152,7 @@ function loadViewer({ clipCount, savedState = null }) {
         clearInterval() {},
         URL,
         document: {
+            activeElement: null,
             body: fakeBody(),
             addEventListener() {},
             createElement(tagName) {
@@ -163,6 +169,7 @@ function loadViewer({ clipCount, savedState = null }) {
             },
         },
     };
+    activeDocument = context.document;
     const script = `${fs.readFileSync(viewerPath, 'utf8')}\nglobalThis.__ReportViewer = ReportViewer;`;
     vm.runInNewContext(script, context, { filename: viewerPath });
 
@@ -200,8 +207,11 @@ function loadViewer({ clipCount, savedState = null }) {
                 return { width: 1920, height: 1080 };
             },
         },
+        leftImg: fakeElement(),
+        rightImg: fakeElement(),
         labelLeft: fakeElement(),
         labelRight: fakeElement(),
+        leftLayer: fakeElement(),
         rightLayer: fakeElement(),
         zoomRange: fakeElement(),
         zoomVal: fakeElement(),
@@ -266,8 +276,8 @@ function loadViewer({ clipCount, savedState = null }) {
         focusHudMode: fakeElement(),
         focusHudPair: fakeElement(),
         bottomPanel: {
+            ...fakeElement(),
             dataset: { filmstripEnabled: 'true' },
-            classList: { toggle() {} },
         },
         btnFilmstripToggle: fakeElement(),
         filmstripSizeBtns: ['compact', 'normal', 'large'].map((size) => ({
@@ -302,7 +312,7 @@ function loadViewer({ clipCount, savedState = null }) {
     viewer.applyDefaultSelection();
     viewer.restorePersistedState();
     viewer.applyAlignment();
-    return { viewer, storage, storageKey: viewer.state.storageKey };
+    return { viewer, storage, storageKey: viewer.state.storageKey, document: context.document };
 }
 
 function persisted(storage, storageKey) {
@@ -401,7 +411,10 @@ const summary = {};
 
     assert.equal(viewer.state.filmstripCollapsed, true);
     assert.equal(viewer.state.filmstripSize, 'large');
+    viewer.setFilmstripCollapsed(true);
+    assert.equal(viewer.dom.bottomPanel.classList.contains('rv-bottom-panel--collapsed'), true);
     viewer.setFilmstripCollapsed(false);
+    assert.equal(viewer.dom.bottomPanel.classList.contains('rv-bottom-panel--collapsed'), false);
     viewer.setFilmstripSize('compact');
 
     const saved = persisted(storage, storageKey);
@@ -410,6 +423,7 @@ const summary = {};
     summary.filmstripState = {
         collapsed: saved.filmstripCollapsed,
         size: saved.filmstripSize,
+        collapsedClassRemoved: !viewer.dom.bottomPanel.classList.contains('rv-bottom-panel--collapsed'),
     };
 }
 
@@ -439,7 +453,7 @@ const summary = {};
 }
 
 {
-    const { viewer, storage, storageKey } = loadViewer({
+    const { viewer, storage, storageKey, document } = loadViewer({
         clipCount: 4,
         savedState: {
             inspectorOpen: true,
@@ -459,10 +473,14 @@ const summary = {};
     viewer.setInspectorTab('export');
     const focusables = viewer.dom.inspectorFocusables;
     viewer.dom.btnInspectorClose.setAttribute('tabindex', '0');
+    document.activeElement = viewer.dom.btnInfo;
     viewer.setInspectorOpen(true);
+    assert.equal(document.activeElement, viewer.dom.inspectorTabs[0]);
     assert.equal(viewer.dom.inspector.inert, false);
     assert.equal(viewer.dom.btnInspectorClose.getAttribute('tabindex'), '0');
     viewer.setInspectorOpen(false);
+    assert.equal(document.activeElement, viewer.dom.btnInfo);
+    assert.equal(viewer.state.inspectorRestoreFocus, null);
     assert.equal(viewer.dom.inspector.inert, true);
     focusables.forEach((element) => {
         assert.equal(element.getAttribute('tabindex'), '-1');
@@ -492,6 +510,8 @@ const summary = {};
         focusModeActive: viewer.state.focusMode,
         closedInspectorInert: viewer.dom.inspector.inert,
         closedInspectorTabIndex: viewer.dom.btnInspectorClose.getAttribute('tabindex'),
+        restoredFocusToInfo: document.activeElement === viewer.dom.btnInfo,
+        clearedRestoreFocus: viewer.state.inspectorRestoreFocus === null,
     };
 }
 
@@ -801,6 +821,32 @@ const summary = {};
         neutral: 'Aligned: none',
         preset: 'Aligned: preset left 1px',
         reset: viewer.dom.alignmentStatus.textContent,
+    };
+}
+
+{
+    const { viewer } = loadViewer({ clipCount: 4 });
+
+    viewer.setMode('overlay');
+    viewer.state.activeClipIdx = viewer.state.rightClipIdx;
+    viewer.setManualAlignment(9, -4);
+    viewer.updateImages();
+    assert.equal(viewer.dom.canvas.style.values['--align-x'], '9px');
+    assert.equal(viewer.dom.canvas.style.values['--align-y'], '-4px');
+    assert.equal(viewer.dom.leftLayer.classList.contains('rv-layer--aligned-active'), true);
+    viewer.clearFrameImages();
+    assert.equal(viewer.dom.leftLayer.classList.contains('rv-layer--aligned-active'), false);
+    assert.equal(viewer.dom.leftLayer.classList.contains('active'), false);
+    viewer.state.activeClipIdx = viewer.state.leftClipIdx;
+    viewer.updateImages();
+    assert.equal(viewer.dom.leftLayer.classList.contains('rv-layer--aligned-active'), false);
+    summary.singleModeAlignment = {
+        mode: viewer.state.mode,
+        canvasAlignX: viewer.dom.canvas.style.values['--align-x'],
+        canvasAlignY: viewer.dom.canvas.style.values['--align-y'],
+        alignedComparisonActive: true,
+        baseClipUnshifted: true,
+        emptyStateClearsAlignment: true,
     };
 }
 

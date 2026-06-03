@@ -35,6 +35,7 @@ const ReportViewer = {
         imageRequestToken: 0,
         helpRestoreFocus: null,
         infoRestoreFocus: null,
+        inspectorRestoreFocus: null,
         rawAlignX: null,
         rawAlignY: null
     },
@@ -1199,7 +1200,16 @@ const ReportViewer = {
     },
 
     setInspectorOpen(open, options = {}) {
-        this.state.inspectorOpen = Boolean(open);
+        const nextOpen = Boolean(open);
+        const wasOpen = this.state.inspectorOpen;
+        if (nextOpen && !wasOpen && options.focus !== false) {
+            const activeElement = document.activeElement;
+            this.state.inspectorRestoreFocus = activeElement && typeof activeElement.focus === 'function'
+                ? activeElement
+                : this.dom.btnInfo;
+        }
+
+        this.state.inspectorOpen = nextOpen;
         if (this.state.inspectorOpen && this.state.focusMode) {
             this.setFocusMode(false);
         }
@@ -1207,6 +1217,13 @@ const ReportViewer = {
         if (options.save !== false) this.persistViewportState();
         if (this.state.inspectorOpen && options.focus !== false) {
             this.focusElement(this.dom.inspectorTabs[0]);
+        } else if (!this.state.inspectorOpen && wasOpen) {
+            const shouldRestoreFocus = options.focus !== false;
+            const restoreTarget = this.state.inspectorRestoreFocus?.isConnected
+                ? this.state.inspectorRestoreFocus
+                : this.dom.btnInfo;
+            this.state.inspectorRestoreFocus = null;
+            if (shouldRestoreFocus) this.focusElement(restoreTarget);
         }
     },
 
@@ -2222,8 +2239,8 @@ const ReportViewer = {
     },
 
     applyAlignment() {
-        this.dom.rightLayer.style.setProperty('--align-x', `${this.state.alignX}px`);
-        this.dom.rightLayer.style.setProperty('--align-y', `${this.state.alignY}px`);
+        this.dom.canvas.style.setProperty('--align-x', `${this.state.alignX}px`);
+        this.dom.canvas.style.setProperty('--align-y', `${this.state.alignY}px`);
         this.dom.alignmentPreset.value = this.state.alignmentPreset;
         this.dom.alignX.value = this.state.rawAlignX ?? this.state.alignX;
         this.dom.alignY.value = this.state.rawAlignY ?? this.state.alignY;
@@ -2477,6 +2494,10 @@ const ReportViewer = {
             'active',
             isOverlay || (isBlink && this.state.activeClipIdx === this.state.leftClipIdx)
         );
+        this.dom.leftLayer.classList.toggle(
+            'rv-layer--aligned-active',
+            isOverlay && this.state.activeClipIdx === this.state.rightClipIdx
+        );
         this.dom.rightLayer.classList.toggle(
             'active',
             isBlink && this.state.activeClipIdx === this.state.rightClipIdx
@@ -2574,6 +2595,8 @@ const ReportViewer = {
             this.dom.rightImg.src = EMPTY_IMAGE_SRC;
             this.dom.rightImg.alt = '';
         }
+        this.dom.leftLayer?.classList?.remove('active', 'rv-layer--aligned-active');
+        this.dom.rightLayer?.classList?.remove('active');
         if (this.dom.labelLeft) this.dom.labelLeft.textContent = '';
         if (this.dom.labelRight) this.dom.labelRight.textContent = '';
         this.updateCurrentFrameMetadata(null);
