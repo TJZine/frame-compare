@@ -660,6 +660,10 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
         cache_dir=ctx.workspace.generated_dir,
         progress=ctx.reporter,
         reference_fps=ctx.reference.effective_fps,
+        frame_props_by_stem={
+            ctx.reference.path.stem: dict(ctx.reference.probe.preserved_frame_props),
+            **{comp.path.stem: dict(comp.probe.preserved_frame_props) for comp in ctx.comparisons},
+        },
     )
 
     updated_comparisons: list[ClipState] = []

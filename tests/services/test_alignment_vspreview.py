@@ -589,9 +589,17 @@ def test_maybe_launch_propagates_no_color_to_launch_and_prompt(
         cache_dir=tmp_path,
         config=AlignmentConfig(use_vspreview=True, no_color=True),
         progress=None,
+        frame_props_by_stem={
+            "ref": {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1},
+            "comp": {"_Matrix": 1, "_Transfer": 16, "_Primaries": 9},
+        },
     )
 
     _, launch_kwargs = mock_launch.call_args
     assert launch_kwargs["config"].no_color is True
+    assert launch_kwargs["request"].frame_props_by_stem == {
+        "ref": {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1},
+        "comp": {"_Matrix": 1, "_Transfer": 16, "_Primaries": 9},
+    }
     _, prompt_kwargs = mock_prompt.call_args
     assert prompt_kwargs["no_color"] is True

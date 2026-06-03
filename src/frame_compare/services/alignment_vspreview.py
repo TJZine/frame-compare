@@ -273,6 +273,7 @@ def maybe_launch_alignment_vspreview(
     cache_dir: Path,
     config: AlignmentConfig,
     progress: ProgressReporter | None,
+    frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
 ) -> dict[str, int] | None:
     """Best-effort VSPreview alignment verification.
 
@@ -329,6 +330,7 @@ def maybe_launch_alignment_vspreview(
                 comparisons=comparisons,
                 suggested_offsets_by_key=offsets_by_key,
                 cache_dir=cache_dir,
+                frame_props_by_stem=frame_props_by_stem,
             ),
             config=VSPreviewConfig(
                 enabled=launch_decision.enabled,

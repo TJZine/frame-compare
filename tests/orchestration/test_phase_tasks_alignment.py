@@ -25,7 +25,21 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
+    comparison = replace(
+        comparison,
+        probe=replace(
+            comparison.probe,
+            preserved_frame_props={"_Matrix": 1, "_Transfer": 16, "_Primaries": 9},
+        ),
+    )
     ctx = _context(tmp_path, comparisons=[comparison])
+    ctx.reference = replace(
+        ctx.reference,
+        probe=replace(
+            ctx.reference.probe,
+            preserved_frame_props={"_Matrix": 1, "_Transfer": 1, "_Primaries": 1},
+        ),
+    )
     selected_frames = [0, 2, 50, 99]
     captured: dict[str, Any] = {}
 
@@ -51,6 +65,10 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     assert captured["comparisons"] == [comparison.path]
     assert captured["cache_dir"] == ctx.workspace.generated_dir
     assert captured["reference_fps"] == ctx.reference.effective_fps
+    assert captured["frame_props_by_stem"] == {
+        "reference": {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1},
+        "encode": {"_Matrix": 1, "_Transfer": 16, "_Primaries": 9},
+    }
     assert captured["config"].sample_rate == 12000
     assert captured["config"].max_offset_seconds == 4.5
     assert captured["config"].use_vspreview is True

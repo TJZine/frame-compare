@@ -8,6 +8,7 @@ and path bootstrapping.
 from __future__ import annotations
 
 import json
+import math
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -20,6 +21,7 @@ def write_vspreview_session_script(
     comparisons: list[Path],
     suggested_offsets_by_key: dict[str, int | None],
     cache_dir: Path,
+    frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
 ) -> Path:
     """Generate and write a self-contained VSPreview script.
 
@@ -41,6 +43,7 @@ def write_vspreview_session_script(
         comparisons=comparisons,
         suggested_offsets_by_key=suggested_offsets_by_key,
         bootstrap_paths=bootstrap_paths,
+        frame_props_by_stem=frame_props_by_stem,
     )
 
     base_timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -166,7 +169,7 @@ _reconfigure_text_stream(sys.stderr)
 
 
 def _ansi_enabled():
-    return "NO_COLOR" not in os.environ and getattr(sys.stdout, "isatty", lambda: False)()
+    return "NO_COLOR" not in os.environ and getattr(sys.stderr, "isatty", lambda: False)()
 
 
 def _style(text, code):
@@ -200,6 +203,7 @@ def _error(text):
 
 
 def safe_print(*args, **kwargs):
+    kwargs.setdefault("file", sys.stderr)
     try:
         print(*args, **kwargs)
     except UnicodeEncodeError:
@@ -215,6 +219,83 @@ def resolve_lwlibavsource(core):
     if hasattr(core, "lw") and hasattr(core.lw, "LWLibavSource"):
         return core.lw.LWLibavSource
     raise RuntimeError("LWLibavSource not found on core.lsmas or core.lw")
+
+
+FRAME_PROP_ALIASES = {
+    "_Matrix": ("_Matrix", "Matrix"),
+    "_Transfer": ("_Transfer", "Transfer"),
+    "_Primaries": ("_Primaries", "Primaries"),
+}
+UNSPECIFIED_FRAME_PROP = 2
+
+
+def _parse_frame_prop_int(value):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, bytes):
+        try:
+            value = value.decode("ascii")
+        except UnicodeDecodeError:
+            return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.isdecimal():
+            return int(stripped)
+    return None
+
+
+def _join_prop_names(names):
+    return "/".join(names)
+
+
+def _read_prop(props, canonical_key):
+    for key in FRAME_PROP_ALIASES[canonical_key]:
+        if key in props:
+            return props[key]
+    raise KeyError(canonical_key)
+
+
+def collect_preview_assumption(label):
+    props = FRAME_PROPS_BY_LABEL.get(label)
+    if props is None:
+        return None
+
+    missing = []
+    unspecified = []
+    unparseable = []
+    for key in FRAME_PROP_ALIASES:
+        try:
+            raw_value = _read_prop(props, key)
+        except KeyError:
+            missing.append(key)
+            continue
+        except Exception:
+            unparseable.append(key)
+            continue
+
+        parsed_value = _parse_frame_prop_int(raw_value)
+        if parsed_value is None:
+            unparseable.append(key)
+        elif parsed_value == UNSPECIFIED_FRAME_PROP:
+            unspecified.append(key)
+
+    details = []
+    if missing:
+        details.append(f"missing {_join_prop_names(missing)}")
+    if unspecified:
+        details.append(f"unspecified {_join_prop_names(unspecified)}")
+    if unparseable:
+        details.append(f"unparseable {_join_prop_names(unparseable)}")
+    if not details:
+        return None
+
+    return (
+        f"{label} {'; '.join(details)}; "
+        "assuming display-safe defaults for preview only; "
+        "render/report semantics unchanged"
+    )
 '''
 
 
@@ -222,6 +303,7 @@ def _build_clip_data_section(
     reference: Path,
     comparisons: list[Path],
     suggested_offsets_by_key: dict[str, int | None],
+    frame_props_by_stem: dict[str, dict[str, str | int | float]] | None,
 ) -> str:
     targets_lines: list[str] = []
     for comp in comparisons:
@@ -235,6 +317,12 @@ def _build_clip_data_section(
 
     targets_content = "\n".join(targets_lines)
     offset_content = "\n".join(offset_lines)
+    frame_props_content = json.dumps(
+        _preview_frame_props_for_script(frame_props_by_stem),
+        sort_keys=True,
+        indent=4,
+        allow_nan=False,
+    )
 
     return f"""\
 # ─── Clip Data ────────────────────────────────────────────────────────────────
@@ -251,7 +339,29 @@ TARGETS = {{
 suggested_offsets_by_key = {{
 {offset_content}
 }}
+
+FRAME_PROPS_BY_LABEL = {frame_props_content}
 """
+
+
+def _preview_frame_props_for_script(
+    frame_props_by_stem: dict[str, dict[str, str | int | float]] | None,
+) -> dict[str, dict[str, str | int]]:
+    if frame_props_by_stem is None:
+        return {}
+
+    props_for_script: dict[str, dict[str, str | int]] = {}
+    for stem, props in frame_props_by_stem.items():
+        clean_props: dict[str, str | int] = {}
+        for key, value in props.items():
+            if isinstance(value, int | str):
+                clean_props[key] = value
+            elif math.isfinite(value) and value.is_integer():
+                clean_props[key] = int(value)
+            else:
+                clean_props[key] = str(value)
+        props_for_script[stem] = clean_props
+    return props_for_script
 
 
 def _build_main_execution_section() -> str:
@@ -284,6 +394,10 @@ def main():
 
     ref_fps_num = ref_clip.fps.numerator
     ref_fps_den = ref_clip.fps.denominator
+    preview_assumptions = []
+    ref_assumption = collect_preview_assumption(REFERENCE["label"])
+    if ref_assumption is not None:
+        preview_assumptions.append(ref_assumption)
 
     safe_print("")
     safe_print(_header("VSPreview Bootstrap"))
@@ -315,6 +429,10 @@ def main():
         except Exception as e:
             safe_print(_warning(f"WARNING: Failed to load {label}: {e}"))
             continue
+
+        comp_assumption = collect_preview_assumption(label)
+        if comp_assumption is not None:
+            preview_assumptions.append(comp_assumption)
 
         # FPS harmonization: apply AssumeFPS to match reference
         comp_clip = core.std.AssumeFPS(comp_clip, fpsnum=ref_fps_num, fpsden=ref_fps_den)
@@ -364,6 +482,11 @@ def main():
         safe_print(_error("ERROR: No comparison clips loaded successfully."))
         sys.exit(1)
 
+    if preview_assumptions:
+        safe_print("\\n" + _header("VSPreview Assumptions"))
+        for assumption in preview_assumptions:
+            safe_print(f"  {_key('preview')}   {_hint(assumption)}")
+
     clips = []
     labels = []
     for entry in loaded_comparisons:
@@ -391,6 +514,7 @@ def _build_script_content(
     comparisons: list[Path],
     suggested_offsets_by_key: dict[str, int | None],
     bootstrap_paths: list[Path],
+    frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
 ) -> str:
     """Build the script content for VSPreview.
 
@@ -399,7 +523,12 @@ def _build_script_content(
     header = _build_script_header()
     bootstrap = _build_bootstrap_section(bootstrap_paths)
     helpers = _build_helpers_section()
-    clip_data = _build_clip_data_section(reference, comparisons, suggested_offsets_by_key)
+    clip_data = _build_clip_data_section(
+        reference,
+        comparisons,
+        suggested_offsets_by_key,
+        frame_props_by_stem,
+    )
     main_execution = _build_main_execution_section()
 
     return f"{header}\n\n{bootstrap}\n\n{helpers}\n\n\n{clip_data}\n\n{main_execution}"

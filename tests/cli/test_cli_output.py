@@ -6,7 +6,11 @@ from pathlib import Path
 from _pytest.monkeypatch import MonkeyPatch
 from rich.console import Console
 
-from frame_compare.cli.output import print_at_a_glance, print_result_summary
+from frame_compare.cli.output import (
+    PostUploadActionPresentationResult,
+    print_at_a_glance,
+    print_result_summary,
+)
 from frame_compare.config.loader import get_default_config
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration import RunRequest, RunResult
@@ -218,6 +222,43 @@ def test_result_summary_prints_artifact_rows_and_untruncated_warnings() -> None:
     assert "metadata skipped" in output
     assert "upload reused" in output
     assert "more)" not in output
+
+
+def test_result_summary_groups_warning_sources_with_severity_detail_and_action() -> None:
+    console = _console()
+
+    print_result_summary(
+        console,
+        result=RunResult(
+            success=True,
+            warnings=[
+                "align: encode_b low confidence; left unapplied and untrimmed",
+                "slow.pics upload skipped because report confirmation was unavailable",
+                "align: encode_c low confidence; left unapplied and untrimmed",
+            ],
+        ),
+        quiet=False,
+        post_upload_actions=(
+            PostUploadActionPresentationResult(
+                kind="clipboard",
+                success=False,
+                warning="slow.pics clipboard: failed to copy URL: clipboard unavailable",
+            ),
+        ),
+    )
+
+    output = _render(console)
+    assert "alignment" in output
+    assert "slow.pics" in output
+    assert output.count("alignment") == 1
+    assert "align: encode_b low confidence; left unapplied and untrimmed (warning)" in output
+    assert "align: encode_c low confidence; left unapplied and untrimmed (warning)" in output
+    assert (
+        "slow.pics upload skipped because report confirmation was unavailable (skipped)" in output
+    )
+    assert "detail because report confirmation was unavailable" in output
+    assert "action clipboard" in output
+    assert output.index("encode_c") < output.index("slow.pics upload skipped")
 
 
 def test_result_summary_preserves_literal_brackets_in_dynamic_values() -> None:

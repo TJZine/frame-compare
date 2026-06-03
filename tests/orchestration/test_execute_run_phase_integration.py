@@ -74,6 +74,7 @@ enable = false
         cache_dir,
         progress=None,
         reference_fps=None,
+        frame_props_by_stem=None,
     ):
         return [
             AlignmentResult(

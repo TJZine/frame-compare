@@ -153,6 +153,7 @@ class VSPreviewSessionRequest:
     comparisons: list[Path]
     suggested_offsets_by_key: dict[str, int | None]
     cache_dir: Path
+    frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None
 
 
 def launch_alignment_verification_session(
@@ -229,6 +230,7 @@ def _write_vspreview_session_script(request: VSPreviewSessionRequest) -> Path:
         comparisons=request.comparisons,
         suggested_offsets_by_key=request.suggested_offsets_by_key,
         cache_dir=request.cache_dir,
+        frame_props_by_stem=request.frame_props_by_stem,
     )
 
 

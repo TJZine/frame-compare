@@ -145,6 +145,15 @@ overrides.
   ranges, offsets, and selected aligned frames for comparisons with material
   alignment information. It is suppressed by `--quiet` and is never emitted to
   `run --json` stdout.
+- Human-readable non-quiet successful runs group final warnings by source in a
+  `Warnings` panel. Existing runtime warning strings and slow.pics post-upload
+  action warnings are bridged into presentation rows with source, severity,
+  message, and optional detail/action context, then de-duplicated for display.
+  The visible warning cap remains eight rows; truncated output includes the
+  number of hidden rows and counts by hidden source.
+- `run --json` does not emit the human warning panel, does not add warning
+  fields, and keeps warning text off stdout for successful runs. Runtime logs and
+  diagnostics may still use stderr.
 - When the at-a-glance summary reports optional VSPreview probe failures, it uses a
   sanitized summary rather than raw probe exception text.
 - The at-a-glance workspace paths are resolved base paths. When
@@ -421,6 +430,34 @@ The JSON output schema remains unchanged by report-confirmed upload:
 There are no current slow.pics config fields for collection suffix/name, image
 format or optimization toggles, tags, hentai flag, or remote remove-after
 behavior.
+
+## VSPreview Interactive Diagnostics
+
+VSPreview parent telemetry, generated Frame Compare session diagnostics,
+preview assumptions, ready text, and terminal confirmation prompts use stderr as
+the single human diagnostic stream. The VSPreview child process is still
+launched with inherited stdout/stderr so GUI/runtime compatibility is preserved;
+Frame Compare-owned generated script diagnostics are written to stderr.
+
+When interactive alignment launches a generated VSPreview session, the
+diagnostic order is:
+
+1. parent `VSPreview Session` telemetry
+2. generated `VSPreview Bootstrap`
+3. generated reference and loaded comparison rows
+4. generated `VSPreview Assumptions`, only when assumptions exist
+5. generated output slot rows
+6. generated `VSPreview Ready`
+7. parent `VSPreview Confirmation` prompt text
+
+Generated VSPreview assumptions are preview-only diagnostics derived from
+Frame Compare's existing clip probe metadata and serialized into the generated
+session script. Missing, unspecified, malformed, or unparseable `_Matrix`,
+`_Transfer`, or `_Primaries` frame properties are collected and shown in the
+`VSPreview Assumptions` section before output rows and before `VSPreview Ready`.
+The generated session does not decode source frames just to collect these
+assumptions. These assumptions do not change render, report, analysis, or
+alignment semantics.
 
 ## Config-Only Screenshot Surface
 
