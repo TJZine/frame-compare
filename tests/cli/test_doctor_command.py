@@ -87,6 +87,7 @@ def test_doctor_exit_code_is_3_on_core_failure(monkeypatch: MonkeyPatch) -> None
 
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 3
+    assert "\u274c vapoursynth" in result.stdout
 
 
 def _run_doctor_optional_failure_and_assert(monkeypatch: MonkeyPatch) -> None:
@@ -111,6 +112,8 @@ def _run_doctor_optional_failure_and_assert(monkeypatch: MonkeyPatch) -> None:
 
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 0
+    assert result.stderr == ""
+    assert "\u274c slowpics" in result.stdout
 
 
 def test_doctor_exit_code_is_0_on_optional_or_network_failure(monkeypatch: MonkeyPatch) -> None:
@@ -119,6 +122,135 @@ def test_doctor_exit_code_is_0_on_optional_or_network_failure(monkeypatch: Monke
 
 def test_doctor_stub_text(monkeypatch: MonkeyPatch) -> None:
     _run_doctor_optional_failure_and_assert(monkeypatch)
+
+
+def test_doctor_human_marks_optional_failed_check_neutrally(monkeypatch: MonkeyPatch) -> None:
+    check = DoctorCheck(
+        name="ffmpeg",
+        category="optional",
+        check_fn=lambda: CheckResult(passed=False, message="FFmpeg not found in PATH"),
+    )
+    report = DoctorReport(
+        checks=[(check, check.check_fn())],
+        all_passed=False,
+        critical_failures=[],
+    )
+
+    def _run_doctor(
+        checks: list[DoctorCheck] | None = None,
+        reporter: ProgressReporter | None = None,
+    ) -> DoctorReport:
+        return report
+
+    monkeypatch.setattr("frame_compare.cli.entry.run_doctor", _run_doctor)
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert "- ffmpeg" in result.stdout
+    assert "\u274c ffmpeg" not in result.stdout
+
+
+def test_doctor_human_marks_optional_vspreview_unavailable_neutrally(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    check = DoctorCheck(
+        name="vspreview",
+        category="optional",
+        check_fn=lambda: CheckResult(
+            passed=True,
+            message="VSPreview not installed (optional for manual alignment)",
+        ),
+    )
+    report = DoctorReport(
+        checks=[(check, check.check_fn())],
+        all_passed=True,
+        critical_failures=[],
+    )
+
+    def _run_doctor(
+        checks: list[DoctorCheck] | None = None,
+        reporter: ProgressReporter | None = None,
+    ) -> DoctorReport:
+        return report
+
+    monkeypatch.setattr("frame_compare.cli.entry.run_doctor", _run_doctor)
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert "- vspreview" in result.stdout
+    assert "\u2705 vspreview" not in result.stdout
+    assert "\u274c vspreview" not in result.stdout
+
+
+def test_doctor_human_marks_optional_vspreview_probe_failure_neutrally(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    check = DoctorCheck(
+        name="vspreview",
+        category="optional",
+        check_fn=lambda: CheckResult(
+            passed=True,
+            message="VSPreview availability probe failed",
+        ),
+    )
+    report = DoctorReport(
+        checks=[(check, check.check_fn())],
+        all_passed=True,
+        critical_failures=[],
+    )
+
+    def _run_doctor(
+        checks: list[DoctorCheck] | None = None,
+        reporter: ProgressReporter | None = None,
+    ) -> DoctorReport:
+        return report
+
+    monkeypatch.setattr("frame_compare.cli.entry.run_doctor", _run_doctor)
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert "- vspreview" in result.stdout
+    assert "\u2705 vspreview" not in result.stdout
+    assert "\u274c vspreview" not in result.stdout
+
+
+def test_doctor_human_marks_available_optional_vspreview_as_pass(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    check = DoctorCheck(
+        name="vspreview",
+        category="optional",
+        check_fn=lambda: CheckResult(
+            passed=True,
+            message="VSPreview is available for interactive alignment",
+        ),
+    )
+    report = DoctorReport(
+        checks=[(check, check.check_fn())],
+        all_passed=True,
+        critical_failures=[],
+    )
+
+    def _run_doctor(
+        checks: list[DoctorCheck] | None = None,
+        reporter: ProgressReporter | None = None,
+    ) -> DoctorReport:
+        return report
+
+    monkeypatch.setattr("frame_compare.cli.entry.run_doctor", _run_doctor)
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert "\u2705 vspreview" in result.stdout
+    assert "- vspreview" not in result.stdout
 
 
 def test_doctor_text_preserves_literal_brackets(monkeypatch: MonkeyPatch) -> None:

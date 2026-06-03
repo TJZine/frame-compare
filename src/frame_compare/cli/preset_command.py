@@ -92,6 +92,7 @@ def handle_preset_apply(
         config_data = load_config(config_path)
         updated = apply_preset(config_data, name, presets_dir=presets_dir)
         write_config_to(config_path, updated)
+        typer.echo(f"Applied preset '{name}' to {config_path}", err=True)
     except FrameCompareError as error:
         raise typer.Exit(
             code=handle_error(
@@ -115,7 +116,8 @@ def handle_preset_save(
     try:
         presets_dir = resolved_root / "config" / "presets"
         config_data = load_config(config_path)
-        save_preset(name, config_data, presets_dir=presets_dir)
+        saved_path = save_preset(name, config_data, presets_dir=presets_dir)
+        typer.echo(f"Saved preset '{name}' to {saved_path}", err=True)
     except FrameCompareError as error:
         raise typer.Exit(
             code=handle_error(

@@ -21,6 +21,7 @@ _STATUS_ICONS = {
     True: "\u2705",  # ✅
     False: "\u274c",  # ❌
 }
+_OPTIONAL_STATUS_ICON = "-"
 
 
 class RunDoctorFn(Protocol):
@@ -108,9 +109,41 @@ def print_doctor_report(report: DoctorReport) -> None:
         return
 
     label_width = max(len(check.name) for check, _result in report.checks)
+    critical_failures = set(report.critical_failures)
     for check, result in report.checks:
-        icon = _STATUS_ICONS.get(result.passed, "\u2022")
+        icon = _doctor_status_icon(
+            check_name=check.name,
+            category=check.category,
+            passed=result.passed,
+            message=result.message,
+            critical_failures=critical_failures,
+        )
         padded_name = check.name.ljust(label_width)
         console.print(f"{icon} {escape(padded_name)} \u2014 {escape(result.message)}")
         if result.hint:
             console.print(f"   {''.ljust(label_width)}   [dim]Hint: {escape(result.hint)}[/]")
+
+
+def _doctor_status_icon(
+    *,
+    check_name: str,
+    category: str,
+    passed: bool,
+    message: str,
+    critical_failures: set[str],
+) -> str:
+    if check_name in critical_failures:
+        return _STATUS_ICONS[False]
+    if _is_optional_unavailable_status(check_name=check_name, category=category, message=message):
+        return _OPTIONAL_STATUS_ICON
+    if not passed and category == "optional":
+        return _OPTIONAL_STATUS_ICON
+    return _STATUS_ICONS.get(passed, "\u2022")
+
+
+def _is_optional_unavailable_status(*, check_name: str, category: str, message: str) -> bool:
+    if category != "optional":
+        return False
+    if check_name != "vspreview":
+        return False
+    return "available for interactive alignment" not in message.lower()

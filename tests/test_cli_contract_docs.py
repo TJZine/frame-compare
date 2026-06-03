@@ -60,6 +60,36 @@ def test_current_cli_contract_covers_all_public_command_families() -> None:
     assert "## `preset` Command Contract" in cli_contract
 
 
+def test_current_cli_contract_documents_secondary_command_streams() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
+
+    wizard_section = cli_contract.split("## `wizard` Command Contract", maxsplit=1)[1].split(
+        "## `doctor` Command Contract",
+        maxsplit=1,
+    )[0]
+    doctor_section = cli_contract.split("## `doctor` Command Contract", maxsplit=1)[1].split(
+        "## `preset` Command Contract",
+        maxsplit=1,
+    )[0]
+    preset_section = cli_contract.split("## `preset` Command Contract", maxsplit=1)[1]
+    normalized_wizard = " ".join(wizard_section.split())
+    normalized_doctor = " ".join(doctor_section.split())
+    normalized_preset = " ".join(preset_section.split())
+
+    assert "confirmation to stderr including the resolved config path" in normalized_wizard
+    assert "neutral status marker for optional unavailable checks" in normalized_doctor
+    assert "This does not change `doctor --json` status values." in normalized_doctor
+    assert "Prints preset names one per line to stdout." in normalized_preset
+    assert "Emits no success confirmation." in normalized_preset
+    assert "confirmation to stderr including the preset name and resolved config path" in (
+        normalized_preset
+    )
+    assert "confirmation to stderr including the preset name and saved preset path" in (
+        normalized_preset
+    )
+
+
 def test_current_cli_contract_matches_live_override_map() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")

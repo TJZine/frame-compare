@@ -578,6 +578,8 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   - optional TMDB API key
 - It validates the generated payload against `ConfigSchema` before writing.
 - It does not advertise or accept unsupported slow.pics visibility values.
+- On success, it writes a concise confirmation to stderr including the resolved
+  config path.
 - Interruptions during prompting exit with the interrupted exit code.
 
 ## `doctor` Command Contract
@@ -588,6 +590,9 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   `DoctorReport`, it uses the standard CLI error contract. In `--json` mode that means
   the standard error payload is written to stdout.
 - Without `--json`, `doctor` writes a human-readable report to stdout.
+- Human output uses a neutral status marker for optional unavailable checks such as
+  VSPreview, so optional availability gaps are visually distinct from critical
+  dependency failures. This does not change `doctor --json` status values.
 - If any critical failures are present, `doctor` exits with the dependency error exit code.
 - Optional VSPreview probe diagnostics may include exception type metadata, but do not
   expose raw probe exception messages.
@@ -600,14 +605,19 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 - Accepts `--config` for interface consistency, but current behavior ignores the resolved
   config path and uses `--root` only when locating presets.
 - Prints preset names one per line to stdout.
+- Emits no success confirmation.
 
 ### `preset apply`
 
 - Loads the resolved config file.
 - Applies the named preset from `<root>/config/presets`.
 - Writes the updated config back to the resolved config path.
+- On success, writes a concise confirmation to stderr including the preset name and
+  resolved config path.
 
 ### `preset save`
 
 - Loads the resolved config file.
 - Saves the current config as a named preset under `<root>/config/presets`.
+- On success, writes a concise confirmation to stderr including the preset name and
+  saved preset path.

@@ -38,6 +38,7 @@ def _run_wizard_and_assert_config() -> None:
         assert data["slowpics"]["visibility"] == "public"
         assert data["slowpics"]["delete_after_upload"] is True
         assert data["tmdb"]["api_key"] == "abc123"
+        assert f"Configuration written: {config_path.resolve()}" in result.stderr
 
 
 def test_wizard_writes_explicit_config_path_via_public_cli() -> None:
@@ -53,6 +54,8 @@ def test_wizard_writes_explicit_config_path_via_public_cli() -> None:
         )
 
         assert result.exit_code == 0
+        assert result.stdout
+        assert f"Configuration written: {config_path.resolve()}" in result.stderr
         assert config_path.exists()
         data = tomllib.loads(config_path.read_text(encoding="utf-8"))
         assert data["paths"]["input_dir"] == "inputs"
@@ -73,6 +76,7 @@ def test_wizard_defaults_slowpics_upload_to_disabled() -> None:
         assert result.exit_code == 0
 
         config_path = Path("config") / "config.toml"
+        assert f"Configuration written: {config_path.resolve()}" in result.stderr
         data = tomllib.loads(config_path.read_text(encoding="utf-8"))
         assert data["slowpics"]["auto_upload"] is False
 
