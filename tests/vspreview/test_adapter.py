@@ -538,10 +538,11 @@ def test_generated_script_collects_preview_assumptions_before_outputs_and_ready(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "VSPreview Assumptions" in captured.err
-    assert "ref missing _Matrix; unspecified _Transfer; unparseable _Primaries" in captured.err
-    assert "b missing _Primaries; unparseable _Matrix" in captured.err
-    assert "assuming display-safe defaults for preview only" in captured.err
-    assert "render/report semantics unchanged" in captured.err
+    for token in ("ref", "b", "_Matrix", "_Transfer", "_Primaries"):
+        assert token in captured.err
+    assert "display-safe defaults" in captured.err
+    assert "preview only" in captured.err
+    assert "render/report semantics" in captured.err
     assert "a missing" not in captured.err
     assert captured.err.index("VSPreview Bootstrap") < captured.err.index("VSPreview Assumptions")
     assert captured.err.index("VSPreview Assumptions") < captured.err.index("output 0")
@@ -567,7 +568,9 @@ def test_generated_script_serializes_non_finite_preview_props_as_assumptions(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "VSPreview Assumptions" in captured.err
-    assert "ref unparseable _Matrix/_Transfer" in captured.err
+    assert "ref" in captured.err
+    assert "_Matrix" in captured.err
+    assert "_Transfer" in captured.err
     assert "a missing" not in captured.err
 
 

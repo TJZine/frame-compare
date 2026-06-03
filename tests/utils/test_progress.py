@@ -31,8 +31,8 @@ def test_rich_progress_reporter_smoke():
 def test_rich_progress_reporter_accepts_no_color() -> None:
     reporter = RichProgressReporter(no_color=True)
 
-    assert reporter._progress.console.no_color is True  # noqa: SLF001
-    assert reporter._progress.console.stderr is True  # noqa: SLF001
+    assert reporter.no_color is True
+    assert reporter.writes_to_stderr is True
 
 
 def test_log_progress_reporter_smoke():

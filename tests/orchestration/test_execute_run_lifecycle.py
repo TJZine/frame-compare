@@ -10,6 +10,7 @@ from typing import Any, cast
 
 import pytest
 
+from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
 from frame_compare.orchestration import coordinator
@@ -126,6 +127,7 @@ def test_execute_run_returns_preflight_and_runtime_warnings(
         preflight_warnings=["preflight: warned"],
         preflight_duration=0.0,
         load_sources_start=datetime.now(),
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
 
     async def fake_execute_prep(_request: RunRequest, _deps: RunDependencies) -> PrepState:
@@ -171,6 +173,7 @@ def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
         preflight_warnings=[],
         preflight_duration=0.0,
         load_sources_start=datetime.now(),
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
 
     async def fake_execute_prep(_request: RunRequest, _deps: RunDependencies) -> PrepState:
@@ -251,6 +254,7 @@ def test_execute_run_webhook_action_warning_is_warning_only(
         preflight_warnings=[],
         preflight_duration=0.0,
         load_sources_start=datetime.now(),
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
 
     async def fake_execute_prep(_request: RunRequest, _deps: RunDependencies) -> PrepState:
@@ -327,6 +331,7 @@ def test_execute_run_report_warning_blocks_delete_after_upload_cleanup(
         preflight_warnings=[],
         preflight_duration=0.0,
         load_sources_start=datetime.now(),
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
 
     async def fake_execute_prep(_request: RunRequest, _deps: RunDependencies) -> PrepState:

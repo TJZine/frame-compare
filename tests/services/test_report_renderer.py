@@ -546,6 +546,7 @@ def test_build_html_renders_header_metadata(
     assert "Generated 2026-05-22T12:00:00+00:00 • 2 frames • 2 clips" in html
     assert tags.by_id["btn-help"][1]["class"] == "rv-header-help-btn"
     assert tags.by_id["btn-info"][1]["class"] == "rv-header-info-btn"
+    assert tags.by_id["btn-info"][1]["title"] == "Report Info"
     assert info_modal.attrs["class"] == "rv-modal"
     assert info_modal.attrs["aria-hidden"] == "true"
     assert info_modal.attrs["role"] == "dialog"
@@ -1228,6 +1229,9 @@ def test_viewer_assets_keep_overlay_and_blink_clip_semantics() -> None:
     assert "this.state.activeClipIdx === this.state.leftClipIdx" in js
     assert "? this.state.rightClipIdx" in js
     assert ": this.state.leftClipIdx" in js
+    assert "this.dom.activeSelect.value = String(this.state.activeClipIdx);" in js
+    assert "this.updateInspectorData();" in js
+    assert "this.updateFocusHud();" in js
     assert (
         "this.state.mode === 'slider' || this.state.mode === 'diff' || this.state.mode === 'blink'"
         in js
@@ -1367,6 +1371,7 @@ def test_viewer_assets_wire_inspector_blink_and_focus_state() -> None:
     assert "width: min(360px, 92vw);" in tablet_css
     assert "transition: none !important;" in reduced_motion_css
     assert "animation-duration: 0.01ms !important;" in reduced_motion_css
+    assert ".rv-focus-hud" in reduced_motion_css
 
 
 def test_viewer_assets_preload_adjacent_visible_frames_and_active_clips() -> None:

@@ -8,7 +8,9 @@ from fractions import Fraction
 from pathlib import Path
 
 import pytest
+from structlog.testing import capture_logs
 
+from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import (
     ClipFingerprint,
@@ -67,6 +69,7 @@ def _make_context(tmp_path: Path) -> RunContext:
         reference=reference,
         comparisons=[],
         analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
         reporter=NullProgressReporter(),
     )
 
@@ -188,16 +191,21 @@ def test_execute_phases_preserves_internal_phase_name_for_log_progress(
 ) -> None:
     context = _make_context(tmp_path)
     reporter = LogProgressReporter()
-    started_phases: list[str] = []
 
     async def phase_analyze(_: RunContext) -> None:
-        started_phases.append(reporter._name)  # noqa: SLF001
+        return None
 
     phases = [Phase(name="analyze", execute=phase_analyze)]
 
-    asyncio.run(execute_phases(phases, context, reporter))
+    with capture_logs() as captured:
+        asyncio.run(execute_phases(phases, context, reporter))
 
-    assert started_phases == ["analyze"]
+    assert any(
+        event.get("event") == "phase_started"
+        and event.get("phase") == "analyze"
+        and event.get("total") == 1
+        for event in captured
+    )
 
 
 def test_execute_phases_warn_only_failure_marks_warned_and_continues(

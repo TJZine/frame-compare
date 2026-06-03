@@ -153,11 +153,9 @@ class RunContext:
     reference: ClipState
     comparisons: list[ClipState]
     analysis_selection_domain: str
+    selection_window: SelectionWindow
     reporter: ProgressReporter | None = None
     selection_breakdown: SelectionBreakdown | None = None
     selection_details_by_source_frame: dict[int, SelectionDetail] | None = None
     analysis_metrics: FrameMetrics | None = None
-    selection_window: SelectionWindow = field(
-        default_factory=lambda: SelectionWindow(start_frame=0, end_frame_exclusive=0)
-    )
     no_color: bool = False

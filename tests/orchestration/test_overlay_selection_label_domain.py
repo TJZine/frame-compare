@@ -7,6 +7,7 @@ import pytest
 from PIL import Image
 
 from frame_compare.analysis.types import SelectionBreakdown, SelectionDetail
+from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import (
     ClipFingerprint,
@@ -83,6 +84,7 @@ def test_selection_labels_are_looked_up_in_reference_source_frame_domain_after_t
         reference=reference,
         comparisons=[],
         analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=190),
         reporter=None,
         selection_breakdown=SelectionBreakdown(quantile_dark=[10]),
     )
@@ -143,6 +145,7 @@ def test_selection_details_are_looked_up_in_reference_source_frame_domain_after_
         reference=reference,
         comparisons=[],
         analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=190),
         reporter=None,
         selection_details_by_source_frame={
             10: SelectionDetail(

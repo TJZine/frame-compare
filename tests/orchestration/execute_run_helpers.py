@@ -12,13 +12,13 @@ import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot, ClipState
-from frame_compare.orchestration.preparation import (
-    _analysis_selection_domain_token,
-    _selection_window_for_clips,
-)
 from frame_compare.orchestration.probing.probe_cache import (
     compute_probe_cache_key,
     save_clip_probe_cache,
+)
+from frame_compare.orchestration.selection_domain import (
+    build_analysis_selection_domain_token,
+    compute_selection_window_for_clips,
 )
 from frame_compare.vs.types import HDRMetadata, SourceInfo
 
@@ -126,8 +126,8 @@ def analysis_selection_domain_for_cache_inputs(
         _clip_state_for_cache_input(path, label="Reference" if index == 0 else f"Encode {index}")
         for index, path in enumerate(video_paths)
     ]
-    window = _selection_window_for_clips(clips=clips, config=config)
-    return _analysis_selection_domain_token(
+    window = compute_selection_window_for_clips(clips=clips, config=config)
+    return build_analysis_selection_domain_token(
         clips=clips,
         config=config,
         selection_window=window,

@@ -67,6 +67,16 @@ class RichProgressReporter:
         self._task_totals: dict[TaskID, int] = {}
         self._suspend_depth = 0
 
+    @property
+    def no_color(self) -> bool:
+        """Return whether Rich rendering disables ANSI color."""
+        return self._progress.console.no_color
+
+    @property
+    def writes_to_stderr(self) -> bool:
+        """Return whether Rich progress targets stderr."""
+        return self._progress.console.stderr
+
     def start_phase(self, name: str, total: int) -> None:
         """Start a new phase with a rich progress bar."""
         if not self._progress.live.is_started:

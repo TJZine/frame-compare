@@ -1890,6 +1890,9 @@ const ReportViewer = {
             this.state.activeClipIdx = this.state.activeClipIdx === this.state.leftClipIdx
                 ? this.state.rightClipIdx
                 : this.state.leftClipIdx;
+            this.dom.activeSelect.value = String(this.state.activeClipIdx);
+            this.updateInspectorData();
+            this.updateFocusHud();
             this.updateImages();
 
         }, this.state.blinkIntervalMs);

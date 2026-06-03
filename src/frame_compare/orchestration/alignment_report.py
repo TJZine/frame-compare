@@ -106,7 +106,18 @@ def _has_material_alignment_info(
     alignment_warnings: Sequence[str],
 ) -> bool:
     return any(
-        comparison.relative_offset_frames not in (None, 0) for comparison in comparisons
+        comparison.relative_offset_frames not in (None, 0)
+        or (
+            comparison.alignment_source is not None
+            and (
+                comparison.reference_trim_range != comparison.comparison_trim_range
+                or (
+                    comparison.reference_row_zero_source_frame
+                    != comparison.comparison_row_zero_source_frame
+                )
+            )
+        )
+        for comparison in comparisons
     ) or bool(alignment_warnings)
 
 

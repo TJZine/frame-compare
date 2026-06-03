@@ -9,11 +9,7 @@ import structlog
 
 import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError
-from frame_compare.analysis.window import (
-    ClipWindowInput,
-    SelectionWindow,
-    compute_shared_selection_window,
-)
+from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.overrides import apply_cli_overrides
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_models import SourceOverrideConfig
@@ -34,6 +30,10 @@ from frame_compare.orchestration.probing.probe_cache import (
 from frame_compare.orchestration.probing.probe_props import (
     compute_preserved_frame_props,
     compute_tonemap_prop_keys,
+)
+from frame_compare.orchestration.selection_domain import (
+    build_analysis_selection_domain_token,
+    compute_selection_window_for_clips,
 )
 from frame_compare.orchestration.source_selection import resolve_source_selection
 from frame_compare.orchestration.types import (
@@ -328,62 +328,6 @@ def _normalized_fps(fps: Fraction) -> Fraction:
     return Fraction(fps.numerator, fps.denominator)
 
 
-def _selection_window_for_clips(
-    *,
-    clips: list[ClipState],
-    config: ConfigSchema,
-) -> SelectionWindow:
-    return compute_shared_selection_window(
-        [
-            ClipWindowInput(frame_count=clip.effective_num_frames(), fps=clip.effective_fps)
-            for clip in clips
-        ],
-        ignore_lead_seconds=config.analysis.ignore_lead_seconds,
-        ignore_trail_seconds=config.analysis.ignore_trail_seconds,
-        min_window_seconds=config.analysis.min_window_seconds,
-    )
-
-
-def _analysis_selection_domain_token(
-    *,
-    clips: list[ClipState],
-    config: ConfigSchema,
-    selection_window: SelectionWindow,
-) -> str:
-    source_tokens: list[str] = []
-    for clip in clips:
-        trim_end = (
-            ""
-            if clip.trim.trim_end_frame_inclusive is None
-            else str(clip.trim.trim_end_frame_inclusive)
-        )
-        source_tokens.append(
-            "|".join(
-                [
-                    f"path={clip.path}",
-                    f"size={clip.probe.fingerprint.size_bytes}",
-                    f"mtime_ns={clip.probe.fingerprint.mtime_ns}",
-                    f"trim_start={clip.trim.trim_start_frames}",
-                    f"trim_end_inclusive={trim_end}",
-                    f"effective_fps={clip.effective_fps.numerator}/{clip.effective_fps.denominator}",
-                ]
-            )
-        )
-    analysis = config.analysis
-    return "||".join(
-        [
-            "sources=[" + ";".join(source_tokens) + "]",
-            f"ignore_lead_seconds={analysis.ignore_lead_seconds}",
-            f"ignore_trail_seconds={analysis.ignore_trail_seconds}",
-            f"min_window_seconds={analysis.min_window_seconds}",
-            (
-                "selection_window="
-                f"{selection_window.start_frame}:{selection_window.end_frame_exclusive}"
-            ),
-        ]
-    )
-
-
 def _probe_input_videos_from_snapshots(
     *,
     input_videos: list[Path],
@@ -452,11 +396,11 @@ async def execute_prep(
             snapshots_by_path=cached_snapshots,
         )
         _validate_source_fps_compatibility(prevalidated_clips)
-        prevalidated_selection_window = _selection_window_for_clips(
+        prevalidated_selection_window = compute_selection_window_for_clips(
             clips=prevalidated_clips,
             config=config,
         )
-        prevalidated_selection_domain = _analysis_selection_domain_token(
+        prevalidated_selection_domain = build_analysis_selection_domain_token(
             clips=prevalidated_clips,
             config=config,
             selection_window=prevalidated_selection_window,
@@ -491,8 +435,8 @@ async def execute_prep(
             overrides_by_path=overrides_by_path,
         )
         _validate_source_fps_compatibility(clips)
-        selection_window = _selection_window_for_clips(clips=clips, config=config)
-        selection_domain = _analysis_selection_domain_token(
+        selection_window = compute_selection_window_for_clips(clips=clips, config=config)
+        selection_domain = build_analysis_selection_domain_token(
             clips=clips,
             config=config,
             selection_window=selection_window,

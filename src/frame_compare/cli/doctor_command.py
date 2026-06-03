@@ -115,7 +115,7 @@ def print_doctor_report(report: DoctorReport) -> None:
             check_name=check.name,
             category=check.category,
             passed=result.passed,
-            message=result.message,
+            available=result.available,
             critical_failures=critical_failures,
         )
         padded_name = check.name.ljust(label_width)
@@ -129,21 +129,30 @@ def _doctor_status_icon(
     check_name: str,
     category: str,
     passed: bool,
-    message: str,
+    available: bool | None,
     critical_failures: set[str],
 ) -> str:
     if check_name in critical_failures:
         return _STATUS_ICONS[False]
-    if _is_optional_unavailable_status(check_name=check_name, category=category, message=message):
+    if _is_optional_unavailable_status(
+        check_name=check_name,
+        category=category,
+        available=available,
+    ):
         return _OPTIONAL_STATUS_ICON
     if not passed and category == "optional":
         return _OPTIONAL_STATUS_ICON
     return _STATUS_ICONS.get(passed, "\u2022")
 
 
-def _is_optional_unavailable_status(*, check_name: str, category: str, message: str) -> bool:
+def _is_optional_unavailable_status(
+    *,
+    check_name: str,
+    category: str,
+    available: bool | None,
+) -> bool:
     if category != "optional":
         return False
     if check_name != "vspreview":
         return False
-    return "available for interactive alignment" not in message.lower()
+    return available is not True
