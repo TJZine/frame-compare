@@ -5,6 +5,7 @@ from __future__ import annotations
 from fractions import Fraction
 from pathlib import Path
 
+from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import (
@@ -109,4 +110,5 @@ def _context(tmp_path: Path, *, comparisons: list[ClipState] | None = None) -> R
         reference=reference,
         comparisons=[] if comparisons is None else comparisons,
         analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )

@@ -321,9 +321,7 @@ class PrepState:
     preflight_duration: float
     load_sources_start: datetime
     analysis_selection_domain: str
-    selection_window: SelectionWindow = field(
-        default_factory=lambda: SelectionWindow(start_frame=0, end_frame_exclusive=0)
-    )
+    selection_window: SelectionWindow
 
 
 @dataclass(frozen=True)

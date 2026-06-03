@@ -1569,8 +1569,10 @@ body.rv-focus-mode .rv-focus-hud {
 
     .rv-overlay-label,
     .rv-stage-overlay-info,
+    .rv-focus-hud,
     .rv-inspector {
         transition: none !important;
+        animation: none !important;
     }
 }
 

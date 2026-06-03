@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
 from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest
@@ -58,6 +59,7 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
         preflight_warnings=[],
         preflight_duration=0.0,
         load_sources_start=datetime.now(),
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
 
     plan = build_execution_phase_plan(
@@ -108,6 +110,7 @@ def test_build_execution_phase_plan_moves_report_before_publish_for_confirmed_up
         preflight_warnings=[],
         preflight_duration=0.0,
         load_sources_start=datetime.now(),
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
 
     plan = build_execution_phase_plan(
@@ -173,6 +176,7 @@ def test_apply_phase_output_handles_report_output_explicitly(tmp_path: Path) -> 
         reference=reference,
         comparisons=[],
         analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
     state = ExecutionState(artifacts=RunArtifacts())
     report_path = tmp_path / "report.html"
@@ -204,6 +208,7 @@ def test_apply_phase_output_retains_publish_post_upload_actions(tmp_path: Path) 
         reference=reference,
         comparisons=[],
         analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
     state = ExecutionState(artifacts=RunArtifacts())
     uploaded = tmp_path / "screenshots" / "reference.png"
@@ -253,6 +258,7 @@ def test_apply_phase_output_records_slowpics_confirmation_status_and_warnings(
         reference=reference,
         comparisons=[],
         analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
     state = ExecutionState(artifacts=RunArtifacts())
 
@@ -288,6 +294,7 @@ def test_apply_phase_output_extends_warnings_from_render_output(tmp_path: Path) 
         reference=reference,
         comparisons=[],
         analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
     state = ExecutionState(artifacts=RunArtifacts(warnings=["pre-existing warning"]))
     render = RenderArtifacts(
@@ -323,6 +330,7 @@ def test_apply_phase_output_extends_warnings_from_align_output(tmp_path: Path) -
         reference=reference,
         comparisons=[comparison],
         analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
     state = ExecutionState(artifacts=RunArtifacts(warnings=["pre-existing warning"]))
 
@@ -368,6 +376,7 @@ def test_apply_phase_output_rejects_unknown_output_type(tmp_path: Path) -> None:
         reference=reference,
         comparisons=[],
         analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
     state = ExecutionState(artifacts=RunArtifacts())
 

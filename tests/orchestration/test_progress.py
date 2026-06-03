@@ -123,7 +123,7 @@ def test_select_reporter_no_color_uses_rich_for_forced_tty():
     """Interactive no-color runs should keep Rich progress with color disabled."""
     reporter = select_reporter(no_color=True, force_tty=True)
     assert isinstance(reporter, RichProgressReporter)
-    assert reporter._progress.console.no_color is True  # noqa: SLF001
+    assert reporter.no_color is True
 
 
 def test_select_reporter_no_color_uses_rich_for_detected_tty(
@@ -133,7 +133,7 @@ def test_select_reporter_no_color_uses_rich_for_detected_tty(
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     reporter = select_reporter(no_color=True)
     assert isinstance(reporter, RichProgressReporter)
-    assert reporter._progress.console.no_color is True  # noqa: SLF001
+    assert reporter.no_color is True
 
 
 def test_select_reporter_no_color_non_tty_returns_log():

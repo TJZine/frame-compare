@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 
 import frame_compare.vs.loader as vs_loader_module
+from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import (
     ClipFingerprint,
@@ -105,6 +106,7 @@ def test_overlay_display_frame_number_matches_aligned_output_filename(
         reference=reference,
         comparisons=[],
         analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=190),
         reporter=None,
     )
 

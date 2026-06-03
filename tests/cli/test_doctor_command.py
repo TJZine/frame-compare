@@ -161,6 +161,7 @@ def test_doctor_human_marks_optional_vspreview_unavailable_neutrally(
         check_fn=lambda: CheckResult(
             passed=True,
             message="VSPreview not installed (optional for manual alignment)",
+            available=False,
         ),
     )
     report = DoctorReport(
@@ -195,6 +196,7 @@ def test_doctor_human_marks_optional_vspreview_probe_failure_neutrally(
         check_fn=lambda: CheckResult(
             passed=True,
             message="VSPreview availability probe failed",
+            available=False,
         ),
     )
     report = DoctorReport(
@@ -229,6 +231,7 @@ def test_doctor_human_marks_available_optional_vspreview_as_pass(
         check_fn=lambda: CheckResult(
             passed=True,
             message="VSPreview is available for interactive alignment",
+            available=True,
         ),
     )
     report = DoctorReport(

@@ -51,6 +51,7 @@ class CheckResult:
 
     passed: bool
     message: str
+    available: bool | None = None
     hint: str | None = None
     details: dict[str, JSONValue] = field(default_factory=lambda: {})
 
@@ -207,12 +208,14 @@ def _check_vspreview() -> CheckResult:
         return CheckResult(
             passed=True,
             message="VSPreview is available for interactive alignment",
+            available=True,
         )
 
     if availability.status == VSPreviewAvailabilityStatus.PROBE_FAILED:
         return CheckResult(
             passed=True,
             message=availability.message,
+            available=False,
             hint=availability.hint,
             details=cast(dict[str, JSONValue], availability.public_probe_failure_details()),
         )
@@ -220,6 +223,7 @@ def _check_vspreview() -> CheckResult:
     return CheckResult(
         passed=True,  # Not a failure, just optional per spec §6.1
         message=availability.message,
+        available=False,
         hint=availability.hint,
     )
 

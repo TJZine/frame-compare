@@ -368,6 +368,17 @@ def test_default_config_toml_documents_sources_defaults() -> None:
 def test_default_config_toml_documents_analysis_ignore_window_defaults() -> None:
     data = tomllib.loads(DEFAULT_CONFIG_TOML)
 
+    assert set(data["analysis"].keys()) == {
+        "frame_count",
+        "random_seed",
+        "save_frames_data",
+        "selection_mode",
+        "ignore_lead_seconds",
+        "ignore_trail_seconds",
+        "min_window_seconds",
+        "dark_quantile",
+        "bright_quantile",
+    }
     assert data["analysis"]["ignore_lead_seconds"] == 0.0
     assert data["analysis"]["ignore_trail_seconds"] == 0.0
     assert data["analysis"]["min_window_seconds"] == 5.0

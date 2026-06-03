@@ -198,6 +198,7 @@ def test_run_analyze_phase_selects_from_reference_base_trim_domain(
 ) -> None:
     ctx = _context(tmp_path)
     ctx.reference = ctx.reference.with_trim(trim_start_frames=10, trim_end_frame_inclusive=14)
+    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=5)
     input_videos = [ctx.reference.path]
     metrics = FrameMetrics(
         luminance=[float(frame) for frame in range(20)],
@@ -317,6 +318,7 @@ def test_run_analyze_phase_selects_from_global_selection_window(
 def test_select_initial_frame_plan_uses_effective_selection_domain(tmp_path: Path) -> None:
     ctx = _context(tmp_path)
     ctx.reference = ctx.reference.with_trim(trim_start_frames=10, trim_end_frame_inclusive=19)
+    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=10)
     selected_frames: list[int] = []
 
     output = phase_tasks.select_initial_frame_plan(ctx)
