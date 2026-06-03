@@ -1318,6 +1318,9 @@ def test_viewer_assets_wire_bottom_panel_and_filmstrip_state() -> None:
     assert ".rv-bottom-panel--collapsed .rv-filmstrip" in css
     assert "display: none;" in _css_block(css, ".rv-bottom-panel--collapsed .rv-filmstrip")
     assert "display: none;" in _css_block(css, ".rv-bottom-panel--collapsed .rv-filter-group")
+    assert "display: none;" in _css_block(
+        css, ".rv-bottom-panel--collapsed .rv-filmstrip-size-control"
+    )
     assert "aspect-ratio: 16 / 10;" in _css_block(css, ".rv-filmstrip-item")
     assert "object-fit: contain;" in _css_block(css, ".rv-filmstrip-item img")
     assert "width: 120px;" in _css_block(css, ".rv-filmstrip-size-compact .rv-filmstrip-item")

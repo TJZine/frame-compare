@@ -930,6 +930,10 @@ select optgroup {
     display: none;
 }
 
+.rv-bottom-panel--collapsed .rv-filmstrip-size-control {
+    display: none;
+}
+
 .rv-filter-group {
     display: flex;
     align-items: center;
