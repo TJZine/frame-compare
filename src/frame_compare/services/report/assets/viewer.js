@@ -37,7 +37,8 @@ const ReportViewer = {
         infoRestoreFocus: null,
         inspectorRestoreFocus: null,
         rawAlignX: null,
-        rawAlignY: null
+        rawAlignY: null,
+        paletteOrientation: 'horizontal'
     },
 
     init() {
@@ -109,6 +110,8 @@ const ReportViewer = {
             alignmentStatus: document.getElementById('alignment-status'),
             btnFullscreen: document.getElementById('btn-fullscreen'),
             btnFocusMode: document.getElementById('btn-focus-mode'),
+            btnPaletteOrientation: document.getElementById('btn-palette-orientation'),
+            palette: document.querySelector('.rv-viewport-palette'),
             blinkControls: document.querySelector('[data-control-scope="blink"]'),
             btnBlinkPause: document.getElementById('btn-blink-pause'),
             blinkSpeed: document.getElementById('blink-speed'),
@@ -259,6 +262,10 @@ const ReportViewer = {
 
     validMode(mode) {
         return ['slider', 'overlay', 'diff', 'blink'].includes(mode);
+    },
+
+    validPaletteOrientation(orientation) {
+        return ['horizontal', 'vertical'].includes(orientation);
     },
 
     hasRenderableData() {
@@ -559,6 +566,13 @@ const ReportViewer = {
         });
         this.dom.btnFullscreen.addEventListener('click', () => this.toggleFullscreen());
         this.updateFullscreenButton();
+
+        if (this.dom.btnPaletteOrientation) {
+            this.dom.btnPaletteOrientation.addEventListener('click', () => {
+                const nextOrientation = this.state.paletteOrientation === 'horizontal' ? 'vertical' : 'horizontal';
+                this.setPaletteOrientation(nextOrientation);
+            });
+        }
 
         this.dom.stage.addEventListener('pointerdown', (e) => {
             if (this.isViewportPaletteEvent(e)) return;
@@ -1072,6 +1086,9 @@ const ReportViewer = {
         if (this.validBlinkIntervalMs(saved.blinkIntervalMs)) {
             this.state.blinkIntervalMs = saved.blinkIntervalMs;
         }
+        if (this.validPaletteOrientation(saved.paletteOrientation)) {
+            this.state.paletteOrientation = saved.paletteOrientation;
+        }
         this.ensureDistinctPairSelection();
         this.state.pairAlignments = this.normalizedPairAlignments(saved.pairAlignments);
         if (!this.state.pairAlignments[this.currentPairAlignmentKey()]) {
@@ -1105,6 +1122,7 @@ const ReportViewer = {
             inspectorOpen: this.state.inspectorOpen,
             inspectorTab: this.state.inspectorTab,
             blinkIntervalMs: this.state.blinkIntervalMs,
+            paletteOrientation: this.state.paletteOrientation,
             pairAlignments: this.state.pairAlignments
         };
         try {
@@ -1197,6 +1215,25 @@ const ReportViewer = {
             btn.classList.toggle('active', isActive);
             btn.setAttribute('aria-checked', isActive ? 'true' : 'false');
         });
+    },
+
+    setPaletteOrientation(orientation, options = {}) {
+        if (!this.validPaletteOrientation(orientation)) return;
+        this.state.paletteOrientation = orientation;
+        this.updatePaletteOrientation();
+        if (options.save !== false) this.persistViewportState();
+    },
+
+    updatePaletteOrientation() {
+        if (!this.dom.viewportPalette) return;
+        this.dom.viewportPalette.setAttribute('data-orientation', this.state.paletteOrientation);
+
+        if (this.dom.btnPaletteOrientation) {
+            const isVertical = this.state.paletteOrientation === 'vertical';
+            this.dom.btnPaletteOrientation.textContent = isVertical ? '↕' : '↔';
+            this.dom.btnPaletteOrientation.setAttribute('aria-label', `Switch to ${isVertical ? 'horizontal' : 'vertical'} orientation`);
+            this.dom.btnPaletteOrientation.setAttribute('title', `Switch to ${isVertical ? 'horizontal' : 'vertical'} orientation`);
+        }
     },
 
     setInspectorOpen(open, options = {}) {
@@ -2620,6 +2657,7 @@ const ReportViewer = {
         this.dom.activeSelect.value = this.state.activeClipIdx;
         this.updateOverlayVisibility();
         this.updateFilmstripPanel();
+        this.updatePaletteOrientation();
         this.updateBlinkControls();
         this.updateInspectorData();
         this.updateFocusHud();

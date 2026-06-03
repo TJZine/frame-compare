@@ -1151,11 +1151,15 @@ def test_viewer_assets_wire_bottom_panel_and_filmstrip_state() -> None:
 
     assert ".rv-bottom-panel" in css
     assert ".rv-bottom-panel--collapsed .rv-filmstrip" in css
-    assert ".rv-bottom-panel--collapsed .rv-category-filters-container" not in css
     assert "display: none;" in _css_block(css, ".rv-bottom-panel--collapsed .rv-filmstrip")
-    assert "height: 88px;" in _css_block(css, ".rv-filmstrip-size-compact .rv-filmstrip")
-    assert "height: 120px;" in _css_block(css, ".rv-filmstrip-size-normal .rv-filmstrip")
-    assert "height: 168px;" in _css_block(css, ".rv-filmstrip-size-large .rv-filmstrip")
+    assert "display: none;" in _css_block(css, ".rv-bottom-panel--collapsed .rv-filter-group")
+    assert "aspect-ratio: 16 / 10;" in _css_block(css, ".rv-filmstrip-item")
+    assert "object-fit: contain;" in _css_block(css, ".rv-filmstrip-item img")
+    assert "width: 120px;" in _css_block(css, ".rv-filmstrip-size-compact .rv-filmstrip-item")
+    assert "width: 150px;" in _css_block(css, ".rv-filmstrip-size-normal .rv-filmstrip-item")
+    assert "width: 210px;" in _css_block(css, ".rv-filmstrip-size-large .rv-filmstrip-item")
+    assert "display: none;" in _css_block(css, ".rv-filmstrip-size-compact .rv-filmstrip-caption")
+    assert "linear-gradient" in _css_block(css, ".rv-filmstrip-caption")
 
 
 def test_viewer_assets_wire_inspector_blink_and_focus_state() -> None:
@@ -1172,7 +1176,7 @@ def test_viewer_assets_wire_inspector_blink_and_focus_state() -> None:
     assert ".rv-blink-status" in css
     for block in (tablet_css, mobile_css):
         assert ".rv-viewport-palette" in block
-        assert ".rv-bottom-panel-handle" in block
+        assert ".rv-bottom-panel-bar" in block
         assert "body.rv-inspector-open .rv-viewer-stage" in block
         assert ".rv-inspector" in block
         assert ".rv-focus-hud" in block

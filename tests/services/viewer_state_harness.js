@@ -275,6 +275,8 @@ function loadViewer({ clipCount, savedState = null }) {
         focusHudFrame: fakeElement(),
         focusHudMode: fakeElement(),
         focusHudPair: fakeElement(),
+        viewportPalette: fakeElement(),
+        btnPaletteOrientation: fakeElement(),
         bottomPanel: {
             ...fakeElement(),
             dataset: { filmstripEnabled: 'true' },
@@ -878,6 +880,40 @@ const summary = {};
         swappedPair: `${viewer.state.leftClipIdx}:${viewer.state.rightClipIdx}`,
         swappedAlignment: [viewer.state.alignX, viewer.state.alignY],
         reversePairAlignment: [-6, -7],
+    };
+}
+
+{
+    const { viewer, storage, storageKey } = loadViewer({
+        clipCount: 4,
+        savedState: {
+            paletteOrientation: 'vertical',
+        },
+    });
+
+    assert.equal(viewer.state.paletteOrientation, 'vertical');
+    viewer.setPaletteOrientation('horizontal');
+    assert.equal(viewer.state.paletteOrientation, 'horizontal');
+    assert.equal(viewer.dom.viewportPalette.getAttribute('data-orientation'), 'horizontal');
+    assert.equal(viewer.dom.btnPaletteOrientation.textContent, '↔');
+
+    viewer.setPaletteOrientation('vertical');
+    assert.equal(viewer.state.paletteOrientation, 'vertical');
+    assert.equal(viewer.dom.viewportPalette.getAttribute('data-orientation'), 'vertical');
+    assert.equal(viewer.dom.btnPaletteOrientation.textContent, '↕');
+
+    const { viewer: viewer2 } = loadViewer({
+        clipCount: 4,
+        savedState: {
+            paletteOrientation: 'invalid_mode',
+        },
+    });
+    assert.equal(viewer2.state.paletteOrientation, 'horizontal');
+
+    const saved = persisted(storage, storageKey);
+    summary.paletteOrientationState = {
+        restoredOrientation: 'vertical',
+        savedOrientation: saved.paletteOrientation,
     };
 }
 

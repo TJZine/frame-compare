@@ -131,4 +131,8 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment(
             "swappedAlignment": [6, 7],
             "reversePairAlignment": [-6, -7],
         },
+        "paletteOrientationState": {
+            "restoredOrientation": "vertical",
+            "savedOrientation": "vertical",
+        },
     }

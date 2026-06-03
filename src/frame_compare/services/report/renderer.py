@@ -205,17 +205,17 @@ def _render_bottom_panel(
     aria_label = "Collapse filmstrip" if include_filmstrip else "Filmstrip disabled"
     title = "Toggle filmstrip (F)" if include_filmstrip else "Filmstrip disabled"
     return f"""<section class="rv-bottom-panel" data-filmstrip-enabled="{str(include_filmstrip).lower()}" aria-label="Frame timeline">
-    <div class="rv-bottom-panel-handle">
-        <button id="btn-filmstrip-toggle" type="button" aria-expanded="true" aria-label="{aria_label}" title="{title}"{disabled_attr}>{expanded_label}</button>
-        <div class="rv-filmstrip-size-control" role="radiogroup" aria-label="Filmstrip size">
-            <button type="button" data-filmstrip-size="compact" role="radio" aria-checked="false"{disabled_attr}>Compact</button>
-            <button type="button" data-filmstrip-size="normal" class="active" role="radio" aria-checked="true"{disabled_attr}>Normal</button>
-            <button type="button" data-filmstrip-size="large" role="radio" aria-checked="false"{disabled_attr}>Large</button>
-        </div>
-    </div>
-    <div class="rv-category-filters-container">
+    <div class="rv-bottom-panel-bar">
         <div class="rv-filter-group" data-control-scope="frame-filters" aria-label="Frame category filters">
             {category_filter_controls}
+        </div>
+        <div class="rv-filmstrip-controls">
+            <div class="rv-filmstrip-size-control" role="radiogroup" aria-label="Filmstrip size">
+                <button type="button" data-filmstrip-size="compact" role="radio" aria-checked="false"{disabled_attr}>Compact</button>
+                <button type="button" data-filmstrip-size="normal" class="active" role="radio" aria-checked="true"{disabled_attr}>Normal</button>
+                <button type="button" data-filmstrip-size="large" role="radio" aria-checked="false"{disabled_attr}>Large</button>
+            </div>
+            <button id="btn-filmstrip-toggle" type="button" aria-expanded="true" aria-label="{aria_label}" title="{title}"{disabled_attr}>{expanded_label}</button>
         </div>
     </div>
     {filmstrip}
@@ -386,7 +386,11 @@ def _render_controls(
 
 
 def _render_viewport_palette() -> str:
-    return """        <div class="rv-viewport-palette" role="toolbar" aria-label="Viewport controls">
+    return """        <div class="rv-viewport-palette" role="toolbar" aria-label="Viewport controls" data-orientation="horizontal">
+        <div class="rv-palette-group">
+            <button id="btn-palette-orientation" aria-label="Toggle palette orientation" title="Toggle palette orientation">↔</button>
+        </div>
+
         <div class="rv-palette-group rv-palette-group--zoom">
             <button id="btn-zoom-out" aria-label="Zoom out">-</button>
             <input type="range" id="zoom-range" min="0.25" max="4.0" step="0.1" value="1.0" aria-label="Zoom level" aria-valuemin="0.25" aria-valuemax="4.0" aria-valuenow="1.0">
