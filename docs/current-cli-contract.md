@@ -139,6 +139,12 @@ overrides.
 - `--quiet` suppresses the at-a-glance summary but still allows a minimal success summary.
 - `--quiet` is incompatible with report-confirmed slow.pics upload when that
   prompt would be needed.
+- Human-readable non-quiet runs emit a `Frame Alignment` diagnostic to stderr after
+  the alignment phase when accepted or rejected frame alignment changes need
+  explanation. The diagnostic reports normalized source-frame row 0, final trim
+  ranges, offsets, and selected aligned frames for comparisons with material
+  alignment information. It is suppressed by `--quiet` and is never emitted to
+  `run --json` stdout.
 - When the at-a-glance summary reports optional VSPreview probe failures, it uses a
   sanitized summary rather than raw probe exception text.
 - The at-a-glance workspace paths are resolved base paths. When

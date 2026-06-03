@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import httpx
 
+from frame_compare.orchestration.alignment_report import (
+    build_frame_alignment_report,
+    emit_frame_alignment_report,
+)
 from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.execution import (
     build_execution_phase_plan,
@@ -147,6 +151,20 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         emit_consolidated_fps_report(
             stage="after_align",
             clips=build_consolidated_fps_report(context.reference, context.comparisons),
+            json_output=request.json_output,
+            quiet=request.quiet,
+            no_color=request.no_color,
+        )
+        emit_frame_alignment_report(
+            stage="after_align",
+            comparisons=build_frame_alignment_report(
+                reference=context.reference,
+                comparisons=context.comparisons,
+            ),
+            selected_frames=state.selected_frames,
+            alignment_warnings=[
+                warning for warning in state.warnings if warning.startswith("align:")
+            ],
             json_output=request.json_output,
             quiet=request.quiet,
             no_color=request.no_color,

@@ -420,10 +420,10 @@ def test_execute_run_creates_and_discards_http_client_when_missing(
     assert deps.http_client is None
 
 
-def test_execute_run_emits_fps_report_after_load_sources_and_after_align(
+def test_execute_run_emits_reports_after_load_sources_and_after_align(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """FPS report is emitted after LoadSources and after Align, even if Align is skipped."""
+    """Post-load and post-align diagnostics are emitted from the coordinator seam."""
     create_config(tmp_path)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv", "comp.mkv")
@@ -438,20 +438,45 @@ def test_execute_run_emits_fps_report_after_load_sources_and_after_align(
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
-    calls: list[tuple[str, bool, tuple[str, ...]]] = []
+    fps_calls: list[tuple[str, bool, tuple[str, ...]]] = []
+    alignment_calls: list[tuple[str, bool, bool, bool, tuple[int, ...]]] = []
 
-    def _record_emit(*, stage: str, no_color: bool, clips: object, **_kwargs: Any) -> None:
+    def _record_emit(*, stage: str, no_color: bool, clips: Any, **_kwargs: Any) -> None:
         clip_labels = tuple(clip.label for clip in clips)
-        calls.append((stage, no_color, clip_labels))
+        fps_calls.append((stage, no_color, clip_labels))
+
+    def _record_alignment_emit(
+        *,
+        stage: str,
+        no_color: bool,
+        json_output: bool,
+        quiet: bool,
+        selected_frames: Any,
+        **_kwargs: Any,
+    ) -> None:
+        alignment_calls.append(
+            (
+                stage,
+                no_color,
+                json_output,
+                quiet,
+                tuple(cast(list[int], selected_frames)),
+            )
+        )
 
     monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", _record_emit)
+    monkeypatch.setattr(coordinator, "emit_frame_alignment_report", _record_alignment_emit)
 
     asyncio.run(execute_run(request, deps=deps))
 
-    assert calls == [
+    assert fps_calls == [
         ("after_load_sources", True, ("Reference", "Encode 1")),
         ("after_align", True, ("Reference", "Encode 1")),
     ]
+    assert len(alignment_calls) == 1
+    assert alignment_calls[0][:4] == ("after_align", True, False, False)
+    assert len(alignment_calls[0][4]) == 10
+    assert all(isinstance(frame, int) for frame in alignment_calls[0][4])
 
 
 def test_execute_run_applies_cli_overrides_before_phase_execution(
@@ -609,9 +634,7 @@ def test_execute_run_mixed_source_fps_rejects_before_phase_execution(
         def load(self, path: Path) -> SourceInfo:
             source_info = super().load(path)
             source_info.fps = (
-                Fraction(24000, 1001)
-                if path.name == "a_reference.mkv"
-                else Fraction(30000, 1001)
+                Fraction(24000, 1001) if path.name == "a_reference.mkv" else Fraction(30000, 1001)
             )
             return source_info
 
