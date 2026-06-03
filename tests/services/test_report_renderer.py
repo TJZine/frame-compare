@@ -673,6 +673,14 @@ def test_build_html_renders_viewport_audit_controls(report_payload: ReportPayloa
     assert '<option value="1200">1.2s</option>' in html
     assert 'id="blink-status" class="rv-blink-status" role="status" aria-live="polite"' in html
 
+    # Check follow-up UI features
+    assert 'id="active-filter-badge" class="rv-active-filter-badge" hidden' in html
+    assert 'title="Actual size (1:1)">1:1</button>' in html
+    assert 'title="Fit width (↔)">↔</button>' in html
+    assert 'title="Fit height (↕)">↕</button>' in html
+    assert 'title="Fill stage (⛶)">⛶</button>' in html
+    assert '<div class="rv-modal-subtitle">Viewport Fit Modes</div>' in html
+
 
 def test_build_html_renders_inspector_drawer(report_payload: ReportPayload) -> None:
     html = build_html(report_payload)

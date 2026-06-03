@@ -286,6 +286,7 @@ function loadViewer({ clipCount, savedState = null }) {
             ...fakeElement(),
             dataset: { filmstripSize: size },
         })),
+        activeFilterBadge: fakeElement(),
         alignPopover: {
             ...fakeElement(),
             hidden: true,
@@ -914,6 +915,41 @@ const summary = {};
     summary.paletteOrientationState = {
         restoredOrientation: 'vertical',
         savedOrientation: saved.paletteOrientation,
+    };
+}
+
+{
+    const { viewer } = loadViewer({ clipCount: 4 });
+
+    viewer.dom.filterChips = [
+        { ...fakeElement(), textContent: 'All (10)', dataset: { categoryKey: '__fc_all__' } },
+        { ...fakeElement(), textContent: 'Dark (3)', dataset: { categoryKey: 'dark' } },
+        { ...fakeElement(), textContent: 'Motion', dataset: { categoryKey: 'motion' } },
+    ];
+
+    viewer.updateFilterChips();
+    assert.equal(viewer.dom.activeFilterBadge.hidden, true);
+
+    viewer.state.activeCategoryKey = 'dark';
+    viewer.updateFilterChips();
+    assert.equal(viewer.dom.activeFilterBadge.hidden, false);
+    assert.equal(viewer.dom.activeFilterBadge.textContent, 'Filtered: Dark');
+
+    viewer.state.activeCategoryKey = 'motion';
+    viewer.updateFilterChips();
+    assert.equal(viewer.dom.activeFilterBadge.hidden, false);
+    assert.equal(viewer.dom.activeFilterBadge.textContent, 'Filtered: Motion');
+
+    viewer.state.activeCategoryKey = '__fc_all__';
+    viewer.updateFilterChips();
+    assert.equal(viewer.dom.activeFilterBadge.hidden, true);
+    assert.equal(viewer.dom.activeFilterBadge.textContent, '');
+
+    summary.activeFilterBadge = {
+        badgeHiddenByDefault: true,
+        badgeTextFilteredDark: 'Filtered: Dark',
+        badgeTextFilteredMotion: 'Filtered: Motion',
+        badgeClearedToHidden: true,
     };
 }
 

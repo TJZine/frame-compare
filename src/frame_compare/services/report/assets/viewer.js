@@ -124,6 +124,7 @@ const ReportViewer = {
             filmstripSizeBtns: document.querySelectorAll('[data-filmstrip-size]'),
             filmstrip: document.querySelector('.rv-filmstrip'),
             filterChips: document.querySelectorAll('[data-frame-filter]'),
+            activeFilterBadge: document.getElementById('active-filter-badge'),
             status: document.getElementById('viewer-status'),
             emptyState: document.querySelector('[data-empty-state]'),
             currentFrameLabel: document.querySelector('[data-current-frame-label]'),
@@ -1670,6 +1671,22 @@ const ReportViewer = {
             btn.classList.toggle('active', isActive);
             btn.setAttribute('aria-pressed', isActive);
         });
+
+        if (this.dom.activeFilterBadge) {
+            const isFiltered = this.state.activeCategoryKey !== ALL_CATEGORY_FILTER_KEY;
+            if (isFiltered) {
+                const activeBtn = Array.from(this.dom.filterChips)
+                    .find(btn => btn.dataset.categoryKey === this.state.activeCategoryKey);
+                const label = activeBtn
+                    ? activeBtn.textContent.replace(/\s*\(\d+\)\s*$/, '')
+                    : this.state.activeCategoryKey;
+                this.dom.activeFilterBadge.textContent = `Filtered: ${label}`;
+                this.dom.activeFilterBadge.hidden = false;
+            } else {
+                this.dom.activeFilterBadge.hidden = true;
+                this.dom.activeFilterBadge.textContent = '';
+            }
+        }
     },
 
     updateFrameOptionVisibility() {

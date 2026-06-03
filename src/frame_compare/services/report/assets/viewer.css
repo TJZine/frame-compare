@@ -181,6 +181,21 @@ body {
     white-space: nowrap;
 }
 
+.rv-active-filter-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 0.15rem 0.5rem;
+    border: 1px solid rgba(235, 94, 40, 0.3);
+    border-radius: 4px;
+    background: rgba(235, 94, 40, 0.12);
+    color: #ff8552;
+    font-size: var(--text-xs);
+    font-weight: 500;
+    white-space: nowrap;
+    margin-left: 0.5rem;
+}
+
 /* Button & Select styling */
 button, select, input[type="number"] {
     background: var(--bg-elevated);
@@ -664,7 +679,7 @@ select optgroup {
     position: absolute;
     right: 16px;
     bottom: 16px;
-    z-index: 30;
+    z-index: 35;
     display: flex;
     align-items: center;
     gap: 0.35rem;
@@ -695,6 +710,15 @@ select optgroup {
 .rv-palette-group select,
 .rv-palette-group input[type="number"] {
     background: rgba(36, 40, 48, 0.96);
+}
+
+.rv-palette-group[role="radiogroup"] button {
+    min-width: 28px;
+    height: 28px;
+    padding: 0.25rem 0.35rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .rv-palette-group #zoom-range {
@@ -1327,6 +1351,28 @@ body.rv-focus-mode .rv-focus-hud {
     font-family: var(--font-mono);
     font-size: 0.7rem;
     color: var(--text-primary);
+}
+
+.rv-modal-subtitle {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    margin-top: 1.25rem;
+    margin-bottom: 0.5rem;
+}
+
+.rv-legend-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.4rem 1rem;
+    padding-bottom: 0.5rem;
+}
+
+.rv-legend-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
 }
 
 .rv-modal-actions {

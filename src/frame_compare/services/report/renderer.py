@@ -352,6 +352,7 @@ def _render_controls(
                 {frame_options}
             </select>
             <button id="btn-next" aria-label="Next frame">→</button>
+            <span id="active-filter-badge" class="rv-active-filter-badge" hidden></span>
         </div>
 
         <div class="rv-control-group" role="radiogroup" aria-label="View mode">
@@ -400,10 +401,10 @@ def _render_viewport_palette() -> str:
         </div>
 
         <div class="rv-palette-group" role="radiogroup" aria-label="Fit mode">
-            <button data-fit="actual" class="active" role="radio" aria-checked="true" aria-label="Actual size" title="Actual size">Actual</button>
-            <button data-fit="width" role="radio" aria-checked="false" aria-label="Fit width" title="Fit width">Fit width</button>
-            <button data-fit="height" role="radio" aria-checked="false" aria-label="Fit height" title="Fit height">Fit height</button>
-            <button data-fit="fill" role="radio" aria-checked="false" aria-label="Fill stage" title="Fill stage">Fill</button>
+            <button data-fit="actual" class="active" role="radio" aria-checked="true" aria-label="Actual size" title="Actual size (1:1)">1:1</button>
+            <button data-fit="width" role="radio" aria-checked="false" aria-label="Fit width" title="Fit width (↔)">↔</button>
+            <button data-fit="height" role="radio" aria-checked="false" aria-label="Fit height" title="Fit height (↕)">↕</button>
+            <button data-fit="fill" role="radio" aria-checked="false" aria-label="Fill stage" title="Fill stage (⛶)">⛶</button>
         </div>
 
         <div class="rv-palette-group rv-alignment-group">
@@ -555,6 +556,13 @@ def _render_help_modal() -> str:
                 <div class="rv-shortcut-row"><span>Reset Viewport</span><span class="rv-key">R / Double-click</span></div>
                 <div class="rv-shortcut-row"><span>Open Help</span><span class="rv-key">?</span></div>
                 <div class="rv-shortcut-row"><span>Close Panel / Exit Focus / Exit Fullscreen</span><span class="rv-key">Esc</span></div>
+            </div>
+            <div class="rv-modal-subtitle">Viewport Fit Modes</div>
+            <div class="rv-legend-grid">
+                <div class="rv-legend-row"><span class="rv-key">1:1</span><span>Actual size</span></div>
+                <div class="rv-legend-row"><span class="rv-key">↔</span><span>Fit width</span></div>
+                <div class="rv-legend-row"><span class="rv-key">↕</span><span>Fit height</span></div>
+                <div class="rv-legend-row"><span class="rv-key">⛶</span><span>Fill stage</span></div>
             </div>
             <div class="rv-modal-actions">
                 <button id="btn-close-help">Close</button>

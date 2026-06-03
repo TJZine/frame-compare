@@ -135,4 +135,10 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment(
             "restoredOrientation": "vertical",
             "savedOrientation": "vertical",
         },
+        "activeFilterBadge": {
+            "badgeHiddenByDefault": True,
+            "badgeTextFilteredDark": "Filtered: Dark",
+            "badgeTextFilteredMotion": "Filtered: Motion",
+            "badgeClearedToHidden": True,
+        },
     }
