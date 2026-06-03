@@ -179,6 +179,7 @@ def _render_filmstrip(
                     </span>
                     <span class="rv-filmstrip-caption">
                         <span class="rv-filmstrip-label">{_esc_text(_frame_filmstrip_label(frame))}</span>
+                        <span class="rv-filmstrip-compact-label">Frame {_esc_text(frame["number"])}</span>
                     </span>
                 </button>
                 """

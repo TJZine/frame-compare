@@ -1115,10 +1115,6 @@ select optgroup {
     background: linear-gradient(transparent, rgba(0, 0, 0, 0.75));
 }
 
-.rv-filmstrip-size-compact .rv-filmstrip-caption {
-    display: none;
-}
-
 .rv-filmstrip-label {
     color: var(--text-primary);
     font-size: var(--text-xs);
@@ -1132,6 +1128,36 @@ select optgroup {
         -1px 1px 0 rgba(0, 0, 0, 0.95),
         1px 1px 0 rgba(0, 0, 0, 0.95),
         0 2px 6px rgba(0, 0, 0, 0.85);
+}
+
+.rv-filmstrip-compact-label {
+    display: none;
+    color: var(--text-primary);
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-shadow:
+        -1px -1px 0 rgba(0, 0, 0, 0.95),
+        1px -1px 0 rgba(0, 0, 0, 0.95),
+        -1px 1px 0 rgba(0, 0, 0, 0.95),
+        1px 1px 0 rgba(0, 0, 0, 0.95),
+        0 2px 6px rgba(0, 0, 0, 0.85);
+}
+
+.rv-filmstrip-size-compact .rv-filmstrip-caption {
+    padding: 0.2rem 0.3rem;
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.82));
+}
+
+.rv-filmstrip-size-compact .rv-filmstrip-label {
+    display: none;
+}
+
+.rv-filmstrip-size-compact .rv-filmstrip-compact-label {
+    display: block;
 }
 
 .rv-filmstrip-detail {

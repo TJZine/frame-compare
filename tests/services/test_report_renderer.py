@@ -527,6 +527,7 @@ def test_build_html_renders_frame_metadata_and_category_filters(
     assert 'data-category-key="cat-0" data-category="selected" aria-pressed="false"' in html
     assert 'data-category-key="cat-1" data-category="scene-cut" aria-pressed="false"' in html
     assert '<span class="rv-filmstrip-label">Frame 10 • Selected</span>' in html
+    assert '<span class="rv-filmstrip-compact-label">Frame 10</span>' in html
     assert "Source frame 10</span>" not in html
     assert (
         '<span class="rv-filmstrip-accent" '
@@ -1320,7 +1321,14 @@ def test_viewer_assets_wire_bottom_panel_and_filmstrip_state() -> None:
     assert "width: 120px;" in _css_block(css, ".rv-filmstrip-size-compact .rv-filmstrip-item")
     assert "width: 150px;" in _css_block(css, ".rv-filmstrip-size-normal .rv-filmstrip-item")
     assert "width: 210px;" in _css_block(css, ".rv-filmstrip-size-large .rv-filmstrip-item")
-    assert "display: none;" in _css_block(css, ".rv-filmstrip-size-compact .rv-filmstrip-caption")
+    assert "display: none;" not in _css_block(
+        css, ".rv-filmstrip-size-compact .rv-filmstrip-caption"
+    )
+    assert "display: none;" in _css_block(css, ".rv-filmstrip-compact-label")
+    assert "display: none;" in _css_block(css, ".rv-filmstrip-size-compact .rv-filmstrip-label")
+    assert "display: block;" in _css_block(
+        css, ".rv-filmstrip-size-compact .rv-filmstrip-compact-label"
+    )
     assert "linear-gradient" in _css_block(css, ".rv-filmstrip-caption")
     assert "Show timeline" in js
     assert "Hide timeline" in js
