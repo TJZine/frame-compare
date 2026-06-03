@@ -1196,18 +1196,18 @@ const ReportViewer = {
 
         this.dom.btnFilmstripToggle.disabled = !hasThumbnails;
         this.dom.btnFilmstripToggle.textContent = hasThumbnails
-            ? (collapsed ? 'Show filmstrip' : 'Hide filmstrip')
+            ? (collapsed ? 'Show timeline' : 'Hide timeline')
             : 'Filmstrip disabled';
         this.dom.btnFilmstripToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
         this.dom.btnFilmstripToggle.setAttribute(
             'aria-label',
             hasThumbnails
-                ? `${collapsed ? 'Expand' : 'Collapse'} filmstrip`
+                ? `${collapsed ? 'Expand' : 'Collapse'} timeline controls`
                 : 'Filmstrip disabled'
         );
         this.dom.btnFilmstripToggle.setAttribute(
             'title',
-            hasThumbnails ? 'Toggle filmstrip (F)' : 'Filmstrip disabled'
+            hasThumbnails ? 'Toggle timeline (F)' : 'Filmstrip disabled'
         );
 
         this.dom.filmstripSizeBtns.forEach(btn => {

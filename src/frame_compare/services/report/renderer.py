@@ -201,9 +201,9 @@ def _render_bottom_panel(
     category_filter_controls: str, filmstrip: str, *, include_filmstrip: bool
 ) -> str:
     disabled_attr = " disabled" if not include_filmstrip else ""
-    expanded_label = "Hide filmstrip" if include_filmstrip else "Filmstrip disabled"
-    aria_label = "Collapse filmstrip" if include_filmstrip else "Filmstrip disabled"
-    title = "Toggle filmstrip (F)" if include_filmstrip else "Filmstrip disabled"
+    expanded_label = "Hide timeline" if include_filmstrip else "Filmstrip disabled"
+    aria_label = "Collapse timeline controls" if include_filmstrip else "Filmstrip disabled"
+    title = "Toggle timeline (F)" if include_filmstrip else "Filmstrip disabled"
     return f"""<section class="rv-bottom-panel" data-filmstrip-enabled="{str(include_filmstrip).lower()}" aria-label="Frame timeline">
     <div class="rv-bottom-panel-bar">
         <div class="rv-filter-group" data-control-scope="frame-filters" aria-label="Frame category filters">

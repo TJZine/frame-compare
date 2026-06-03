@@ -732,6 +732,7 @@ select optgroup {
 /* Vertical palette orientation */
 .rv-viewport-palette[data-orientation="vertical"] {
     flex-direction: column;
+    flex-wrap: nowrap;
     align-items: stretch;
     max-width: none;
     max-height: calc(100% - 2rem);

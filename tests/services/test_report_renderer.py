@@ -41,6 +41,24 @@ class _ParsedInfoModal:
     clips: list[_ParsedClipMetadata] = field(default_factory=list)
 
 
+@dataclass
+class _ParsedElement:
+    tag: str
+    attrs: dict[str, str | None]
+    children: list[_ParsedElement] = field(default_factory=list)
+    text_parts: list[str] = field(default_factory=list)
+
+    @property
+    def text(self) -> str:
+        parts = [*self.text_parts]
+        parts.extend(child.text for child in self.children)
+        return _normalize_text(parts)
+
+    @property
+    def classes(self) -> set[str]:
+        return set((self.attrs.get("class") or "").split())
+
+
 class _SelectParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
@@ -92,6 +110,44 @@ class _StartTagParser(HTMLParser):
             self.by_id[element_id] = (tag, attr_map)
         if "style" in attr_map:
             self.tags_with_style.append((tag, attr_map))
+
+
+class _ElementTreeParser(HTMLParser):
+    _VOID_TAGS = {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "source",
+        "track",
+        "wbr",
+    }
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.root = _ParsedElement("document", {})
+        self._stack = [self.root]
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        element = _ParsedElement(tag, dict(attrs))
+        self._stack[-1].children.append(element)
+        if tag not in self._VOID_TAGS:
+            self._stack.append(element)
+
+    def handle_endtag(self, tag: str) -> None:
+        for index in range(len(self._stack) - 1, 0, -1):
+            if self._stack[index].tag == tag:
+                del self._stack[index:]
+                return
+
+    def handle_data(self, data: str) -> None:
+        self._stack[-1].text_parts.append(data)
 
 
 class _InfoModalParser(HTMLParser):
@@ -209,6 +265,56 @@ def _parse_info_modal(html: str) -> _ParsedInfoModal:
     parser.feed(html)
     assert parser.modal is not None
     return parser.modal
+
+
+def _parse_elements(html: str) -> _ParsedElement:
+    parser = _ElementTreeParser()
+    parser.feed(html)
+    return parser.root
+
+
+def _find_first(
+    element: _ParsedElement,
+    *,
+    tag: str | None = None,
+    element_id: str | None = None,
+    class_name: str | None = None,
+) -> _ParsedElement | None:
+    tag_matches = tag is None or element.tag == tag
+    id_matches = element_id is None or element.attrs.get("id") == element_id
+    class_matches = class_name is None or class_name in element.classes
+    if tag_matches and id_matches and class_matches:
+        return element
+    for child in element.children:
+        match = _find_first(child, tag=tag, element_id=element_id, class_name=class_name)
+        if match is not None:
+            return match
+    return None
+
+
+def _require_first(
+    element: _ParsedElement,
+    *,
+    tag: str | None = None,
+    element_id: str | None = None,
+    class_name: str | None = None,
+) -> _ParsedElement:
+    match = _find_first(element, tag=tag, element_id=element_id, class_name=class_name)
+    assert match is not None
+    return match
+
+
+def _find_children(
+    element: _ParsedElement,
+    *,
+    tag: str | None = None,
+    class_name: str | None = None,
+) -> list[_ParsedElement]:
+    return [
+        child
+        for child in element.children
+        if (tag is None or child.tag == tag) and (class_name is None or class_name in child.classes)
+    ]
 
 
 def _css_block(css: str, selector: str) -> str:
@@ -634,8 +740,12 @@ def test_build_html_uses_payload_default_selection_for_clip_controls(
 
 def test_build_html_renders_viewport_audit_controls(report_payload: ReportPayload) -> None:
     html = build_html(report_payload)
+    document = _parse_elements(html)
+    palette = _require_first(document, tag="div", class_name="rv-viewport-palette")
 
-    assert 'class="rv-viewport-palette" role="toolbar" aria-label="Viewport controls"' in html
+    assert palette.attrs["role"] == "toolbar"
+    assert palette.attrs["aria-label"] == "Viewport controls"
+    assert palette.attrs["data-orientation"] == "horizontal"
     stage_start = html.index('<div class="rv-viewer-stage rv-mode-slider"')
     palette_start = html.index('class="rv-viewport-palette"')
     controls_start = html.index('<div class="rv-controls"')
@@ -673,12 +783,28 @@ def test_build_html_renders_viewport_audit_controls(report_payload: ReportPayloa
     assert '<option value="1200">1.2s</option>' in html
     assert 'id="blink-status" class="rv-blink-status" role="status" aria-live="polite"' in html
 
-    # Check follow-up UI features
-    assert 'id="active-filter-badge" class="rv-active-filter-badge" hidden' in html
-    assert 'title="Actual size (1:1)">1:1</button>' in html
-    assert 'title="Fit width (↔)">↔</button>' in html
-    assert 'title="Fit height (↕)">↕</button>' in html
-    assert 'title="Fill stage (⛶)">⛶</button>' in html
+    active_filter_badge = _require_first(document, tag="span", element_id="active-filter-badge")
+    assert "rv-active-filter-badge" in active_filter_badge.classes
+    assert "hidden" in active_filter_badge.attrs
+
+    orientation_button = _require_first(palette, tag="button", element_id="btn-palette-orientation")
+    assert orientation_button.attrs["aria-label"] == "Toggle palette orientation"
+    assert orientation_button.text == "↔"
+
+    fit_buttons = {
+        child.attrs.get("data-fit"): child
+        for group in _find_children(palette, tag="div", class_name="rv-palette-group")
+        for child in group.children
+        if child.tag == "button" and "data-fit" in child.attrs
+    }
+    assert fit_buttons["actual"].text == "1:1"
+    assert fit_buttons["actual"].attrs["title"] == "Actual size (1:1)"
+    assert fit_buttons["width"].text == "↔"
+    assert fit_buttons["width"].attrs["title"] == "Fit width (↔)"
+    assert fit_buttons["height"].text == "↕"
+    assert fit_buttons["height"].attrs["title"] == "Fit height (↕)"
+    assert fit_buttons["fill"].text == "⛶"
+    assert fit_buttons["fill"].attrs["title"] == "Fill stage (⛶)"
     assert '<div class="rv-modal-subtitle">Viewport Fit Modes</div>' in html
 
 
@@ -787,19 +913,44 @@ def test_build_html_embeds_json_without_raw_script_terminators(
 
 def test_build_html_toggles_filmstrip_visibility(report_payload: ReportPayload) -> None:
     visible_html = build_html(report_payload, include_filmstrip=True)
+    visible_document = _parse_elements(visible_html)
+    visible_panel = _require_first(visible_document, tag="section", class_name="rv-bottom-panel")
+    visible_panel_bar = _require_first(visible_panel, tag="div", class_name="rv-bottom-panel-bar")
+    visible_filter_group = _require_first(
+        visible_panel_bar, tag="div", class_name="rv-filter-group"
+    )
+    visible_filmstrip_controls = _require_first(
+        visible_panel_bar, tag="div", class_name="rv-filmstrip-controls"
+    )
+    visible_toggle = _require_first(
+        visible_filmstrip_controls, tag="button", element_id="btn-filmstrip-toggle"
+    )
 
-    assert (
-        'class="rv-bottom-panel" data-filmstrip-enabled="true" aria-label="Frame timeline"'
-        in visible_html
-    )
-    assert 'id="btn-filmstrip-toggle" type="button" aria-expanded="true"' in visible_html
-    assert ">Hide filmstrip</button>" in visible_html
-    assert 'data-filmstrip-size="compact" role="radio" aria-checked="false"' in visible_html
-    assert (
-        'data-filmstrip-size="normal" class="active" role="radio" aria-checked="true"'
-        in visible_html
-    )
-    assert 'data-filmstrip-size="large" role="radio" aria-checked="false"' in visible_html
+    assert visible_panel.attrs["data-filmstrip-enabled"] == "true"
+    assert visible_panel.attrs["aria-label"] == "Frame timeline"
+    assert visible_filter_group.attrs["data-control-scope"] == "frame-filters"
+    assert visible_filter_group.attrs["aria-label"] == "Frame category filters"
+    assert visible_toggle.attrs["type"] == "button"
+    assert visible_toggle.attrs["aria-expanded"] == "true"
+    assert visible_toggle.attrs["aria-label"] == "Collapse timeline controls"
+    assert visible_toggle.attrs["title"] == "Toggle timeline (F)"
+    assert visible_toggle.text == "Hide timeline"
+
+    size_buttons = {
+        child.attrs.get("data-filmstrip-size"): child
+        for size_control in _find_children(
+            visible_filmstrip_controls, tag="div", class_name="rv-filmstrip-size-control"
+        )
+        for child in size_control.children
+        if child.tag == "button"
+    }
+    assert size_buttons["compact"].attrs["role"] == "radio"
+    assert size_buttons["compact"].attrs["aria-checked"] == "false"
+    assert size_buttons["normal"].attrs["role"] == "radio"
+    assert size_buttons["normal"].attrs["aria-checked"] == "true"
+    assert "active" in size_buttons["normal"].classes
+    assert size_buttons["large"].attrs["role"] == "radio"
+    assert size_buttons["large"].attrs["aria-checked"] == "false"
     assert 'class="rv-filmstrip"' in visible_html
     assert 'aria-label="Frame thumbnails"' in visible_html
     assert 'aria-hidden="false"' in visible_html
@@ -807,16 +958,18 @@ def test_build_html_toggles_filmstrip_visibility(report_payload: ReportPayload) 
     assert 'alt="REF &lt;main&gt; - Frame 10"' in visible_html
 
     hidden_html = build_html(report_payload, include_filmstrip=False)
+    hidden_document = _parse_elements(hidden_html)
+    hidden_panel = _require_first(hidden_document, tag="section", class_name="rv-bottom-panel")
+    hidden_toggle = _require_first(hidden_panel, tag="button", element_id="btn-filmstrip-toggle")
 
-    assert (
-        'class="rv-bottom-panel" data-filmstrip-enabled="false" aria-label="Frame timeline"'
-        in hidden_html
-    )
-    assert ">Filmstrip disabled</button>" in hidden_html
-    assert (
-        'id="btn-filmstrip-toggle" type="button" aria-expanded="true" aria-label="Filmstrip disabled" title="Filmstrip disabled" disabled'
-        in hidden_html
-    )
+    assert hidden_panel.attrs["data-filmstrip-enabled"] == "false"
+    assert hidden_panel.attrs["aria-label"] == "Frame timeline"
+    assert hidden_toggle.attrs["type"] == "button"
+    assert hidden_toggle.attrs["aria-expanded"] == "true"
+    assert hidden_toggle.attrs["aria-label"] == "Filmstrip disabled"
+    assert hidden_toggle.attrs["title"] == "Filmstrip disabled"
+    assert "disabled" in hidden_toggle.attrs
+    assert hidden_toggle.text == "Filmstrip disabled"
     assert 'class="rv-filmstrip rv-filmstrip--hidden"' in hidden_html
     assert 'aria-label="Frame thumbnails disabled"' in hidden_html
     assert 'aria-hidden="true"' in hidden_html
@@ -1156,6 +1309,7 @@ def test_viewer_assets_toggle_overlays_and_keep_split_pairs_distinct() -> None:
 
 def test_viewer_assets_wire_bottom_panel_and_filmstrip_state() -> None:
     css = get_css()
+    js = get_js()
 
     assert ".rv-bottom-panel" in css
     assert ".rv-bottom-panel--collapsed .rv-filmstrip" in css
@@ -1168,10 +1322,15 @@ def test_viewer_assets_wire_bottom_panel_and_filmstrip_state() -> None:
     assert "width: 210px;" in _css_block(css, ".rv-filmstrip-size-large .rv-filmstrip-item")
     assert "display: none;" in _css_block(css, ".rv-filmstrip-size-compact .rv-filmstrip-caption")
     assert "linear-gradient" in _css_block(css, ".rv-filmstrip-caption")
+    assert "Show timeline" in js
+    assert "Hide timeline" in js
+    assert "timeline controls" in js
+    assert "Toggle timeline (F)" in js
 
 
 def test_viewer_assets_wire_inspector_blink_and_focus_state() -> None:
     css = get_css()
+    vertical_palette_css = _css_block(css, '.rv-viewport-palette[data-orientation="vertical"]')
     tablet_css = _css_block(css, "@media (max-width: 992px)")
     mobile_css = _css_block(css, "@media (max-width: 768px)")
     reduced_motion_css = _css_block(css, "@media (prefers-reduced-motion: reduce)")
@@ -1182,6 +1341,9 @@ def test_viewer_assets_wire_inspector_blink_and_focus_state() -> None:
     assert "body.rv-focus-mode .rv-header" in css
     assert "body.rv-focus-mode .rv-focus-hud" in css
     assert ".rv-blink-status" in css
+    assert "flex-direction: column;" in vertical_palette_css
+    assert "flex-wrap: nowrap;" in vertical_palette_css
+    assert "overflow-y: auto;" in vertical_palette_css
     for block in (tablet_css, mobile_css):
         assert ".rv-viewport-palette" in block
         assert ".rv-bottom-panel-bar" in block
