@@ -869,4 +869,4 @@ def test_renderer_clip_options_rendering(report_data: ReportData, tmp_path: Path
     assert '<select id="right-select" aria-label="Right clip">' in content
     assert '<option value="1" selected>ENC</option>' in content
 
-    assert '<select id="active-select" aria-label="Overlay clip">' in content
+    assert '<select id="active-select" aria-label="Single clip">' in content

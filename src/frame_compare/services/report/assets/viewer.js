@@ -21,9 +21,15 @@ const ReportViewer = {
         pairAlignments: {},
         blinkInterval: null,
         blinkPaused: false,
+        blinkIntervalMs: 700,
+        focusMode: false,
         storageKey: null,
         activeCategoryKey: ALL_CATEGORY_FILTER_KEY,
         overlaysHidden: false,
+        filmstripCollapsed: false,
+        filmstripSize: 'normal',
+        inspectorOpen: false,
+        inspectorTab: 'frame',
         categoryFilterKeys: new Map(),
         imageLoadPromises: new Map(),
         imageRequestToken: 0,
@@ -51,6 +57,8 @@ const ReportViewer = {
             this.restorePersistedState();
             this.bindHelpEvents();
             this.updateOverlayVisibility();
+            this.updateInspectorTabs();
+            this.updateInspectorVisibility();
 
             if (!this.hasRenderableData()) {
                 this.renderEmptyState(this.emptyStateMessage());
@@ -69,6 +77,7 @@ const ReportViewer = {
     cacheDOM() {
         this.dom = {
             stage: document.querySelector('.rv-viewer-stage'),
+            viewportPalette: document.querySelector('.rv-viewport-palette'),
             canvas: document.querySelector('.rv-canvas'),
             sizerImg: document.querySelector('.rv-sizer'),
             leftLayer: document.querySelector('.rv-left'),
@@ -96,7 +105,19 @@ const ReportViewer = {
             alignX: document.getElementById('align-x'),
             alignY: document.getElementById('align-y'),
             btnAlignmentReset: document.getElementById('btn-alignment-reset'),
+            alignmentStatus: document.getElementById('alignment-status'),
             btnFullscreen: document.getElementById('btn-fullscreen'),
+            btnFocusMode: document.getElementById('btn-focus-mode'),
+            blinkControls: document.querySelector('[data-control-scope="blink"]'),
+            btnBlinkPause: document.getElementById('btn-blink-pause'),
+            blinkSpeed: document.getElementById('blink-speed'),
+            blinkStatus: document.getElementById('blink-status'),
+            focusHudFrame: document.querySelector('[data-focus-frame]'),
+            focusHudMode: document.querySelector('[data-focus-mode]'),
+            focusHudPair: document.querySelector('[data-focus-pair]'),
+            bottomPanel: document.querySelector('.rv-bottom-panel'),
+            btnFilmstripToggle: document.getElementById('btn-filmstrip-toggle'),
+            filmstripSizeBtns: document.querySelectorAll('[data-filmstrip-size]'),
             filmstrip: document.querySelector('.rv-filmstrip'),
             filterChips: document.querySelectorAll('[data-frame-filter]'),
             status: document.getElementById('viewer-status'),
@@ -112,6 +133,27 @@ const ReportViewer = {
             infoModal: document.getElementById('info-modal'),
             btnInfo: document.getElementById('btn-info'),
             btnCloseInfo: document.getElementById('btn-close-info'),
+            inspector: document.getElementById('rv-inspector'),
+            btnInspectorClose: document.getElementById('btn-inspector-close'),
+            inspectorTabs: document.querySelectorAll('[data-inspector-tab]'),
+            inspectorPanels: document.querySelectorAll('.rv-inspector-panel'),
+            inspectorFrameLabel: document.querySelector('[data-inspector-frame-label]'),
+            inspectorFrameNumber: document.querySelector('[data-inspector-frame-number]'),
+            inspectorFrameCategory: document.querySelector('[data-inspector-frame-category]'),
+            inspectorFrameDetail: document.querySelector('[data-inspector-frame-detail]'),
+            inspectorFramePosition: document.querySelector('[data-inspector-frame-position]'),
+            inspectorClips: document.querySelector('[data-inspector-clips]'),
+            inspectorAlignPair: document.querySelector('[data-inspector-align-pair]'),
+            inspectorAlignPreset: document.querySelector('[data-inspector-align-preset]'),
+            inspectorAlignX: document.querySelector('[data-inspector-align-x]'),
+            inspectorAlignY: document.querySelector('[data-inspector-align-y]'),
+            btnInspectorResetCurrentAlign: document.getElementById('btn-inspector-reset-current-align'),
+            btnInspectorResetAllAlign: document.getElementById('btn-inspector-reset-all-align'),
+            inspectorExportTitle: document.querySelector('[data-inspector-export-title]'),
+            inspectorExportId: document.querySelector('[data-inspector-export-id]'),
+            inspectorExportGenerated: document.querySelector('[data-inspector-export-generated]'),
+            inspectorExportSlowpics: document.querySelector('[data-inspector-export-slowpics]'),
+            inspectorExportSummary: document.querySelector('[data-inspector-export-summary]'),
             btnAlignToggle: document.getElementById('btn-align-toggle'),
             alignPopover: document.getElementById('align-popover'),
             btnOverlays: document.getElementById('btn-overlays'),
@@ -121,6 +163,7 @@ const ReportViewer = {
     hasRequiredDOM() {
         const requiredElements = [
             this.dom.stage,
+            this.dom.viewportPalette,
             this.dom.canvas,
             this.dom.sizerImg,
             this.dom.leftLayer,
@@ -146,7 +189,15 @@ const ReportViewer = {
             this.dom.alignX,
             this.dom.alignY,
             this.dom.btnAlignmentReset,
+            this.dom.alignmentStatus,
             this.dom.btnFullscreen,
+            this.dom.btnFocusMode,
+            this.dom.blinkControls,
+            this.dom.btnBlinkPause,
+            this.dom.blinkSpeed,
+            this.dom.blinkStatus,
+            this.dom.bottomPanel,
+            this.dom.btnFilmstripToggle,
             this.dom.filmstrip,
             this.dom.emptyState,
             this.dom.labelLeft,
@@ -157,12 +208,20 @@ const ReportViewer = {
             this.dom.infoModal,
             this.dom.btnInfo,
             this.dom.btnCloseInfo,
+            this.dom.inspector,
+            this.dom.btnInspectorClose,
+            this.dom.inspectorClips,
+            this.dom.btnInspectorResetCurrentAlign,
+            this.dom.btnInspectorResetAllAlign,
             this.dom.btnAlignToggle,
             this.dom.alignPopover,
             this.dom.btnOverlays
         ];
         return requiredElements.every(Boolean)
             && this.dom.modeBtns.length > 0
+            && this.dom.filmstripSizeBtns.length > 0
+            && this.dom.inspectorTabs.length > 0
+            && this.dom.inspectorPanels.length > 0
             && this.dom.fitBtns.length > 0;
     },
 
@@ -267,7 +326,9 @@ const ReportViewer = {
     },
 
     disableViewerControls(disabled) {
-        document.querySelectorAll('.rv-controls button, .rv-controls select, .rv-controls input').forEach(control => {
+        document.querySelectorAll(
+            '.rv-controls button, .rv-controls select, .rv-controls input, .rv-viewport-palette button, .rv-viewport-palette select, .rv-viewport-palette input, .rv-bottom-panel button, .rv-bottom-panel select, .rv-bottom-panel input, .rv-inspector button, .rv-inspector select, .rv-inspector input'
+        ).forEach(control => {
             if (control === this.dom.btnHelp) return;
             control.disabled = disabled;
         });
@@ -426,6 +487,8 @@ const ReportViewer = {
         this.bindClipSelectionEvents();
         this.bindViewportEvents();
         this.bindAlignmentEvents();
+        this.bindInspectorEvents();
+        this.bindBlinkEvents();
         this.bindFilmstripEvents();
         this.bindKeyboardEvents();
     },
@@ -436,6 +499,9 @@ const ReportViewer = {
         });
         this.dom.btnOverlays.addEventListener('click', () => {
             this.setOverlaysHidden(!this.state.overlaysHidden);
+        });
+        this.dom.btnFocusMode.addEventListener('click', () => {
+            this.setFocusMode(!this.state.focusMode);
         });
     },
 
@@ -494,6 +560,7 @@ const ReportViewer = {
         this.updateFullscreenButton();
 
         this.dom.stage.addEventListener('pointerdown', (e) => {
+            if (this.isViewportPaletteEvent(e)) return;
             this.trackPointerPosition(e);
             this.capturePointer(e.pointerId);
             if (this.shouldStartPinch(e)) {
@@ -541,11 +608,13 @@ const ReportViewer = {
         this.dom.stage.addEventListener('pointerup', (e) => this.stopPointerInteraction(e));
         this.dom.stage.addEventListener('pointercancel', (e) => this.stopPointerInteraction(e));
         this.dom.stage.addEventListener('dblclick', (e) => {
+            if (this.isViewportPaletteEvent(e)) return;
             if (this.state.mode === 'overlay' || this.state.mode === 'diff') return;
             e.preventDefault();
             this.resetViewport();
         });
         this.dom.stage.addEventListener('wheel', (e) => {
+            if (this.isViewportPaletteEvent(e)) return;
             e.preventDefault();
             if (e.shiftKey) {
                 this.setPan(
@@ -556,6 +625,10 @@ const ReportViewer = {
             }
             this.zoomAtPoint(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1);
         }, { passive: false });
+    },
+
+    isViewportPaletteEvent(e) {
+        return Boolean(e.target?.closest?.('.rv-viewport-palette'));
     },
 
     bindAlignmentEvents() {
@@ -604,6 +677,18 @@ const ReportViewer = {
             if (e.key === 'Escape') {
                 e.preventDefault();
                 e.stopPropagation();
+                if (this.isHelpModalOpen()) {
+                    this.closeHelpModal();
+                    return;
+                }
+                if (this.isInfoModalOpen()) {
+                    this.closeInfoModal();
+                    return;
+                }
+                if (this.isInspectorVisible()) {
+                    this.setInspectorOpen(false);
+                    return;
+                }
                 this.closeAlignmentPopover();
             }
         });
@@ -622,8 +707,9 @@ const ReportViewer = {
         });
         this.dom.modal.addEventListener('keydown', (e) => this.handleModalKey(e));
 
-        // Info modal
-        this.dom.btnInfo.addEventListener('click', () => this.openInfoModal());
+        // The legacy info modal remains in markup as fallback content; the main Info
+        // surface is the non-modal inspector drawer to avoid duplicate focus traps.
+        this.dom.btnInfo.addEventListener('click', () => this.setInspectorOpen(!this.state.inspectorOpen));
         this.dom.btnCloseInfo.addEventListener('click', () => this.closeInfoModal());
         this.dom.infoModal.addEventListener('click', (e) => {
             if (e.target === this.dom.infoModal) this.closeInfoModal();
@@ -631,7 +717,33 @@ const ReportViewer = {
         this.dom.infoModal.addEventListener('keydown', (e) => this.handleInfoModalKey(e));
     },
 
+    bindInspectorEvents() {
+        this.dom.btnInspectorClose.addEventListener('click', () => this.setInspectorOpen(false));
+        this.dom.inspectorTabs.forEach(tab => {
+            tab.addEventListener('click', () => this.setInspectorTab(tab.dataset.inspectorTab));
+        });
+        this.dom.btnInspectorResetCurrentAlign.addEventListener('click', () => this.resetCurrentPairAlignment());
+        this.dom.btnInspectorResetAllAlign.addEventListener('click', () => this.resetAllPairAlignments());
+        this.dom.inspector.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape') return;
+            e.preventDefault();
+            e.stopPropagation();
+            this.setInspectorOpen(false);
+        });
+    },
+
+    bindBlinkEvents() {
+        this.dom.btnBlinkPause.addEventListener('click', () => this.setBlinkPaused(!this.state.blinkPaused));
+        this.dom.blinkSpeed.addEventListener('change', (e) => this.setBlinkIntervalMs(Number(e.target.value)));
+    },
+
     bindFilmstripEvents() {
+        this.dom.btnFilmstripToggle.addEventListener('click', () => {
+            this.setFilmstripCollapsed(!this.state.filmstripCollapsed);
+        });
+        this.dom.filmstripSizeBtns.forEach(btn => {
+            btn.addEventListener('click', () => this.setFilmstripSize(btn.dataset.filmstripSize));
+        });
         this.dom.filmstrip.addEventListener('click', (e) => {
             const item = e.target.closest('.rv-filmstrip-item');
             if (item) this.setFrame(parseInt(item.dataset.idx));
@@ -944,6 +1056,21 @@ const ReportViewer = {
         if (typeof saved.overlaysHidden === 'boolean') {
             this.state.overlaysHidden = saved.overlaysHidden;
         }
+        if (typeof saved.filmstripCollapsed === 'boolean') {
+            this.state.filmstripCollapsed = saved.filmstripCollapsed;
+        }
+        if (this.validFilmstripSize(saved.filmstripSize)) {
+            this.state.filmstripSize = saved.filmstripSize;
+        }
+        if (typeof saved.inspectorOpen === 'boolean') {
+            this.state.inspectorOpen = saved.inspectorOpen;
+        }
+        if (this.validInspectorTab(saved.inspectorTab)) {
+            this.state.inspectorTab = saved.inspectorTab;
+        }
+        if (this.validBlinkIntervalMs(saved.blinkIntervalMs)) {
+            this.state.blinkIntervalMs = saved.blinkIntervalMs;
+        }
         this.ensureDistinctPairSelection();
         this.state.pairAlignments = this.normalizedPairAlignments(saved.pairAlignments);
         if (!this.state.pairAlignments[this.currentPairAlignmentKey()]) {
@@ -972,6 +1099,11 @@ const ReportViewer = {
             panY: this.state.panY,
             revealPercent: this.state.revealPercent,
             overlaysHidden: this.state.overlaysHidden,
+            filmstripCollapsed: this.state.filmstripCollapsed,
+            filmstripSize: this.state.filmstripSize,
+            inspectorOpen: this.state.inspectorOpen,
+            inspectorTab: this.state.inspectorTab,
+            blinkIntervalMs: this.state.blinkIntervalMs,
             pairAlignments: this.state.pairAlignments
         };
         try {
@@ -994,6 +1126,310 @@ const ReportViewer = {
         return Number.isFinite(numberValue) ? numberValue : fallback;
     },
 
+    hasFilmstripThumbnails() {
+        return this.dom.bottomPanel?.dataset.filmstripEnabled === 'true';
+    },
+
+    validFilmstripSize(size) {
+        return ['compact', 'normal', 'large'].includes(size);
+    },
+
+    validInspectorTab(tab) {
+        return ['frame', 'clips', 'align', 'export'].includes(tab);
+    },
+
+    validBlinkIntervalMs(intervalMs) {
+        return typeof intervalMs === 'number' && [300, 700, 1200].includes(intervalMs);
+    },
+
+    blinkIntervalOptions() {
+        return [300, 700, 1200];
+    },
+
+    setFilmstripCollapsed(collapsed, options = {}) {
+        if (!this.hasFilmstripThumbnails()) {
+            this.state.filmstripCollapsed = false;
+            this.updateFilmstripPanel();
+            return;
+        }
+        this.state.filmstripCollapsed = Boolean(collapsed);
+        this.updateFilmstripPanel();
+        if (options.save !== false) this.persistViewportState();
+    },
+
+    setFilmstripSize(size, options = {}) {
+        if (!this.validFilmstripSize(size)) return;
+        this.state.filmstripSize = size;
+        this.updateFilmstripPanel();
+        if (options.save !== false) this.persistViewportState();
+    },
+
+    updateFilmstripPanel() {
+        const hasThumbnails = this.hasFilmstripThumbnails();
+        if (!hasThumbnails) this.state.filmstripCollapsed = false;
+        const collapsed = hasThumbnails && this.state.filmstripCollapsed;
+        this.dom.bottomPanel.classList.toggle('rv-bottom-panel--collapsed', collapsed);
+        this.dom.bottomPanel.classList.toggle('rv-bottom-panel--disabled', !hasThumbnails);
+        ['compact', 'normal', 'large'].forEach(size => {
+            this.dom.bottomPanel.classList.toggle(`rv-filmstrip-size-${size}`, this.state.filmstripSize === size);
+        });
+
+        this.dom.btnFilmstripToggle.disabled = !hasThumbnails;
+        this.dom.btnFilmstripToggle.textContent = hasThumbnails
+            ? (collapsed ? 'Show filmstrip' : 'Hide filmstrip')
+            : 'Filmstrip disabled';
+        this.dom.btnFilmstripToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        this.dom.btnFilmstripToggle.setAttribute(
+            'aria-label',
+            hasThumbnails
+                ? `${collapsed ? 'Expand' : 'Collapse'} filmstrip`
+                : 'Filmstrip disabled'
+        );
+        this.dom.btnFilmstripToggle.setAttribute(
+            'title',
+            hasThumbnails ? 'Toggle filmstrip (F)' : 'Filmstrip disabled'
+        );
+
+        this.dom.filmstripSizeBtns.forEach(btn => {
+            const isActive = btn.dataset.filmstripSize === this.state.filmstripSize;
+            btn.disabled = !hasThumbnails;
+            btn.classList.toggle('active', isActive);
+            btn.setAttribute('aria-checked', isActive ? 'true' : 'false');
+        });
+    },
+
+    setInspectorOpen(open, options = {}) {
+        this.state.inspectorOpen = Boolean(open);
+        if (this.state.inspectorOpen && this.state.focusMode) {
+            this.setFocusMode(false);
+        }
+        this.updateInspectorVisibility();
+        if (options.save !== false) this.persistViewportState();
+        if (this.state.inspectorOpen && options.focus !== false) {
+            this.focusElement(this.dom.inspectorTabs[0]);
+        }
+    },
+
+    isInspectorVisible() {
+        return this.state.inspectorOpen && !this.state.focusMode;
+    },
+
+    updateInspectorVisibility() {
+        const visible = this.isInspectorVisible();
+        document.body?.classList?.toggle('rv-inspector-open', visible);
+        this.dom.inspector.classList.toggle('open', visible);
+        this.dom.inspector.setAttribute('aria-hidden', visible ? 'false' : 'true');
+        this.setInspectorFocusable(visible);
+        this.dom.btnInfo.classList.toggle('active', visible);
+        this.dom.btnInfo.setAttribute('aria-pressed', visible ? 'true' : 'false');
+        this.dom.btnInfo.setAttribute(
+            'aria-label',
+            visible ? 'Close inspector' : 'Open inspector'
+        );
+        this.dom.btnInfo.setAttribute(
+            'title',
+            visible ? 'Close inspector (I)' : 'Open inspector (I)'
+        );
+    },
+
+    inspectorFocusableElements() {
+        return Array.from(
+            this.dom.inspector.querySelectorAll('button, [href], input, select, textarea, [tabindex]')
+        );
+    },
+
+    setInspectorFocusable(enabled) {
+        this.dom.inspector.inert = !enabled;
+        this.inspectorFocusableElements().forEach(element => {
+            if (enabled) {
+                if (Object.hasOwn(element.dataset, 'inspectorPreviousTabindex')) {
+                    const previous = element.dataset.inspectorPreviousTabindex;
+                    if (previous === '') {
+                        element.removeAttribute('tabindex');
+                    } else {
+                        element.setAttribute('tabindex', previous);
+                    }
+                    delete element.dataset.inspectorPreviousTabindex;
+                } else if (element.getAttribute('tabindex') === '-1') {
+                    element.removeAttribute('tabindex');
+                }
+                return;
+            }
+
+            if (!Object.hasOwn(element.dataset, 'inspectorPreviousTabindex')) {
+                element.dataset.inspectorPreviousTabindex = element.getAttribute('tabindex') ?? '';
+            }
+            element.setAttribute('tabindex', '-1');
+        });
+    },
+
+    safeHttpUrl(url) {
+        if (typeof url !== 'string' || url.length === 0) return null;
+        try {
+            const parsed = new URL(url);
+            return ['http:', 'https:'].includes(parsed.protocol) ? parsed.href : null;
+        } catch {
+            return null;
+        }
+    },
+
+    updateInspectorSlowpics() {
+        if (!this.dom.inspectorExportSlowpics) return;
+        const slowpicsUrl = this.state.data.slowpics_url;
+        const safeUrl = this.safeHttpUrl(slowpicsUrl);
+        if (!safeUrl) {
+            this.dom.inspectorExportSlowpics.replaceChildren(
+                document.createTextNode(slowpicsUrl || 'Not uploaded')
+            );
+            return;
+        }
+
+        const link = document.createElement('a');
+        link.href = safeUrl;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.className = 'rv-link';
+        link.textContent = slowpicsUrl;
+        this.dom.inspectorExportSlowpics.replaceChildren(link);
+    },
+
+    setInspectorTab(tab, options = {}) {
+        if (!this.validInspectorTab(tab)) tab = 'frame';
+        this.state.inspectorTab = tab;
+        this.updateInspectorTabs();
+        if (options.save !== false) this.persistViewportState();
+    },
+
+    updateInspectorTabs() {
+        this.dom.inspectorTabs.forEach(tab => {
+            const isActive = tab.dataset.inspectorTab === this.state.inspectorTab;
+            tab.classList.toggle('active', isActive);
+            tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        });
+        this.dom.inspectorPanels.forEach(panel => {
+            panel.hidden = panel.id !== `inspector-panel-${this.state.inspectorTab}`;
+        });
+    },
+
+    setText(element, text) {
+        if (element) element.textContent = String(text ?? '');
+    },
+
+    currentFrame() {
+        return this.state.data?.frames?.[this.state.currentFrameIdx] || null;
+    },
+
+    currentClipRole(index) {
+        const roles = [];
+        if (index === this.state.leftClipIdx && this.state.mode !== 'overlay') roles.push('Left');
+        if (index === this.state.rightClipIdx && this.state.mode !== 'overlay') roles.push('Right');
+        if (index === this.state.activeClipIdx && (this.state.mode === 'overlay' || this.state.mode === 'blink')) {
+            roles.push(this.state.mode === 'overlay' ? 'Active' : 'Visible');
+        }
+        return roles.length > 0 ? roles.join(', ') : 'Available';
+    },
+
+    modeLabel(mode = this.state.mode) {
+        const labels = {
+            slider: 'Slider',
+            overlay: 'Single',
+            diff: 'Diff',
+            blink: 'Blink'
+        };
+        return labels[mode] || mode;
+    },
+
+    formatFps(value) {
+        const fps = Number(value);
+        if (!Number.isFinite(fps)) return '';
+        return `${Number.isInteger(fps) ? fps : fps.toString()} fps`;
+    },
+
+    currentPairLabel() {
+        const left = this.state.data.clips[this.state.leftClipIdx]?.label || `Clip ${this.state.leftClipIdx + 1}`;
+        const right = this.state.data.clips[this.state.rightClipIdx]?.label || `Clip ${this.state.rightClipIdx + 1}`;
+        return `${left} vs ${right}`;
+    },
+
+    visibleFramePositionText() {
+        const visibleIndexes = this.visibleFrameIndexes();
+        const position = this.visibleFramePosition(visibleIndexes);
+        if (position === -1) return `Not shown of ${visibleIndexes.length}`;
+        return `${position + 1} of ${visibleIndexes.length} shown`;
+    },
+
+    updateInspectorData() {
+        if (!this.dom.inspector) return;
+        const frame = this.currentFrame();
+        this.setText(this.dom.inspectorFrameLabel, frame?.label || 'No frame selected');
+        this.setText(this.dom.inspectorFrameNumber, frame?.number ?? '');
+        this.setText(this.dom.inspectorFrameCategory, frame?.category ? this.humanizeCategory(frame.category) : '');
+        this.setText(this.dom.inspectorFrameDetail, frame?.detail || '');
+        this.setText(this.dom.inspectorFramePosition, this.visibleFramePositionText());
+
+        if (this.dom.inspectorClips) {
+            this.dom.inspectorClips.replaceChildren(...this.state.data.clips.map((clip, index) => {
+                const item = document.createElement('li');
+                item.className = 'rv-inspector-clip';
+                item.dataset.clipIndex = String(index);
+                const role = this.currentClipRole(index);
+                const hdrTag = clip.hdr ? 'HDR' : 'SDR';
+                item.innerHTML = `
+                    <div class="rv-inspector-clip-heading">
+                        <span></span>
+                        <span></span>
+                    </div>
+                    <dl class="rv-inspector-list">
+                        <div><dt>Role</dt><dd></dd></div>
+                        <div><dt>Source</dt><dd></dd></div>
+                        <div><dt>Resolution</dt><dd></dd></div>
+                        <div><dt>FPS</dt><dd></dd></div>
+                    </dl>
+                `;
+                const heading = item.querySelectorAll('.rv-inspector-clip-heading span');
+                heading[0].textContent = clip.label || `Clip ${index + 1}`;
+                heading[1].textContent = hdrTag;
+                const values = item.querySelectorAll('dd');
+                values[0].textContent = role;
+                values[1].textContent = clip.name || '';
+                values[2].textContent = Array.isArray(clip.resolution) ? `${clip.resolution[0]}x${clip.resolution[1]}` : '';
+                values[3].textContent = this.formatFps(clip.fps);
+                return item;
+            }));
+        }
+
+        this.setText(this.dom.inspectorAlignPair, `${this.currentPairLabel()} (${this.currentPairAlignmentKey()})`);
+        this.setText(this.dom.inspectorAlignPreset, this.alignmentPresetLabel(this.state.alignmentPreset));
+        this.setText(this.dom.inspectorAlignX, this.formatSignedPixels(this.state.alignX, 'x'));
+        this.setText(this.dom.inspectorAlignY, this.formatSignedPixels(this.state.alignY, 'y'));
+
+        this.setText(this.dom.inspectorExportTitle, this.state.data.title || '');
+        this.setText(this.dom.inspectorExportId, this.state.data.report_id || '');
+        this.setText(this.dom.inspectorExportGenerated, this.state.data.generated_at || '');
+        this.updateInspectorSlowpics();
+        this.setText(
+            this.dom.inspectorExportSummary,
+            `${this.state.data.title || 'Report'} • ${this.state.data.stats.frame_count} frames • ${this.state.data.stats.clip_count} clips • ${this.modeLabel()}`
+        );
+
+        this.updateInspectorTabs();
+        this.updateInspectorVisibility();
+    },
+
+    resetCurrentPairAlignment() {
+        delete this.state.pairAlignments[this.currentPairAlignmentKey()];
+        this.applyAlignmentState(this.neutralAlignmentState());
+        this.applyAlignment();
+        this.persistViewportState();
+    },
+
+    resetAllPairAlignments() {
+        this.state.pairAlignments = {};
+        this.applyAlignmentState(this.neutralAlignmentState());
+        this.applyAlignment();
+        this.persistViewportState();
+    },
+
     setOverlaysHidden(hidden, options = {}) {
         this.state.overlaysHidden = Boolean(hidden);
         this.updateOverlayVisibility();
@@ -1007,11 +1443,95 @@ const ReportViewer = {
         this.dom.btnOverlays.setAttribute('aria-pressed', overlaysVisible ? 'true' : 'false');
         this.dom.btnOverlays.setAttribute(
             'aria-label',
-            overlaysVisible ? 'Hide overlays' : 'Show overlays'
+            overlaysVisible ? 'Hide HUD' : 'Show HUD'
         );
         this.dom.btnOverlays.setAttribute(
             'title',
-            `${overlaysVisible ? 'Hide' : 'Show'} overlays (H)`
+            `${overlaysVisible ? 'Hide' : 'Show'} HUD (H)`
+        );
+    },
+
+    reducedMotionActive() {
+        return Boolean(
+            window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches
+        );
+    },
+
+    setBlinkIntervalMs(intervalMs, options = {}) {
+        const normalized = Number(intervalMs);
+        if (!this.validBlinkIntervalMs(normalized)) return;
+        this.state.blinkIntervalMs = normalized;
+        this.updateBlinkControls();
+        if (this.state.mode === 'blink') this.restartBlink();
+        if (options.save !== false) this.persistViewportState();
+    },
+
+    setBlinkPaused(paused) {
+        this.state.blinkPaused = Boolean(paused);
+        this.updateBlinkControls();
+    },
+
+    stepBlinkInterval(direction) {
+        const options = this.blinkIntervalOptions();
+        const currentIndex = Math.max(0, options.indexOf(this.state.blinkIntervalMs));
+        const nextIndex = Math.max(0, Math.min(options.length - 1, currentIndex + direction));
+        this.setBlinkIntervalMs(options[nextIndex]);
+    },
+
+    updateBlinkControls() {
+        const isBlink = this.state.mode === 'blink';
+        this.dom.blinkControls.hidden = !isBlink;
+        this.dom.btnBlinkPause.disabled = !isBlink;
+        this.dom.blinkSpeed.disabled = !isBlink;
+        this.dom.blinkSpeed.value = String(this.state.blinkIntervalMs);
+        this.dom.btnBlinkPause.textContent = this.state.blinkPaused ? 'Resume' : 'Pause';
+        this.dom.btnBlinkPause.setAttribute('aria-pressed', this.state.blinkPaused ? 'true' : 'false');
+        this.dom.btnBlinkPause.setAttribute(
+            'aria-label',
+            this.state.blinkPaused ? 'Resume blink' : 'Pause blink'
+        );
+        this.dom.blinkStatus.textContent = isBlink
+            ? (this.state.blinkPaused ? 'Blink paused' : `Blink ${this.state.blinkIntervalMs / 1000}s`)
+            : '';
+    },
+
+    restartBlink() {
+        if (this.state.blinkInterval) {
+            clearInterval(this.state.blinkInterval);
+            this.state.blinkInterval = null;
+        }
+        if (this.state.mode === 'blink') this.startBlink();
+    },
+
+    setFocusMode(enabled) {
+        const nextFocusMode = Boolean(enabled);
+        if (nextFocusMode && this.state.inspectorOpen) {
+            this.setInspectorOpen(false, { focus: false });
+        }
+        this.state.focusMode = nextFocusMode;
+        document.body?.classList?.toggle('rv-focus-mode', this.state.focusMode);
+        this.dom.btnFocusMode.classList.toggle('active', this.state.focusMode);
+        this.dom.btnFocusMode.setAttribute('aria-pressed', this.state.focusMode ? 'true' : 'false');
+        this.dom.btnFocusMode.setAttribute(
+            'aria-label',
+            this.state.focusMode ? 'Exit focus mode' : 'Enter focus mode'
+        );
+        this.dom.btnFocusMode.textContent = this.state.focusMode ? 'Exit focus' : 'Focus';
+        this.updateInspectorVisibility();
+        this.updateFocusHud();
+        this.applyFitMode();
+    },
+
+    updateFocusHud() {
+        if (!this.dom.focusHudFrame) return;
+        const frame = this.currentFrame();
+        this.setText(this.dom.focusHudFrame, frame?.label || 'No frame');
+        this.setText(this.dom.focusHudMode, this.modeLabel());
+        this.setText(
+            this.dom.focusHudPair,
+            this.state.mode === 'overlay'
+                ? (this.state.data.clips[this.state.activeClipIdx]?.label || '')
+                : this.currentPairLabel()
         );
     },
 
@@ -1143,9 +1663,19 @@ const ReportViewer = {
                 this.closeInfoModal();
                 return;
             }
+            if (this.isInspectorVisible()) {
+                e.preventDefault();
+                this.setInspectorOpen(false);
+                return;
+            }
             if (this.isAlignmentPopoverOpen()) {
                 e.preventDefault();
                 this.closeAlignmentPopover();
+                return;
+            }
+            if (this.state.focusMode) {
+                e.preventDefault();
+                this.setFocusMode(false);
                 return;
             }
             if (document.fullscreenElement) {
@@ -1157,16 +1687,30 @@ const ReportViewer = {
 
         if (this.dom.modal.classList.contains('open') || this.dom.infoModal.classList.contains('open')) return;
         if (this.isAlignmentPopoverOpen()) return;
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+        if (this.isShortcutEditableTarget(e.target)) return;
 
         if (e.key === 'i' || e.key === 'I') {
             e.preventDefault();
-            if (this.isInfoModalOpen()) {
-                this.closeInfoModal();
-            } else {
-                this.openInfoModal();
-            }
+            this.setInspectorOpen(!this.state.inspectorOpen);
             return;
+        }
+
+        if (this.state.mode === 'blink') {
+            if (e.key === ' ') {
+                e.preventDefault();
+                this.setBlinkPaused(!this.state.blinkPaused);
+                return;
+            }
+            if (e.key === '[') {
+                e.preventDefault();
+                this.stepBlinkInterval(1);
+                return;
+            }
+            if (e.key === ']') {
+                e.preventDefault();
+                this.stepBlinkInterval(-1);
+                return;
+            }
         }
 
         if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
@@ -1197,6 +1741,8 @@ const ReportViewer = {
             case 'b': case 'B': this.setMode('blink'); break;
             case 'x': case 'X': this.swapPairClips(); break;
             case 'h': case 'H': this.setOverlaysHidden(!this.state.overlaysHidden); break;
+            case 'f': case 'F': this.setFilmstripCollapsed(!this.state.filmstripCollapsed); break;
+            case 'z': case 'Z': this.setFocusMode(!this.state.focusMode); break;
 
             case '=': case '+': this.setZoom(this.state.zoom + 0.1); break;
             case '-': this.setZoom(this.state.zoom - 0.1); break;
@@ -1230,7 +1776,12 @@ const ReportViewer = {
         }
         // Start blink if entering
         if (mode === 'blink' && !this.state.blinkInterval) {
+            if (this.reducedMotionActive()) {
+                this.state.blinkPaused = true;
+            }
             this.startBlink();
+        } else if (mode !== 'blink') {
+            this.state.blinkPaused = false;
         }
 
         this.dom.modeBtns.forEach(btn => {
@@ -1247,6 +1798,8 @@ const ReportViewer = {
         );
         this.dom.stage.classList.add(`rv-mode-${mode}`);
         this.updateModeControls();
+        this.updateBlinkControls();
+        this.updateFocusHud();
         this.render();
     },
 
@@ -1259,7 +1812,8 @@ const ReportViewer = {
                 : this.state.leftClipIdx;
             this.updateImages();
 
-        }, 700);
+        }, this.state.blinkIntervalMs);
+        this.updateBlinkControls();
     },
 
     updateModeControls() {
@@ -1285,7 +1839,7 @@ const ReportViewer = {
 
         this.dom.leftSelect.setAttribute('aria-label', 'Left clip');
         this.dom.rightSelect.setAttribute('aria-label', 'Right clip');
-        this.dom.activeSelect.setAttribute('aria-label', 'Overlay clip');
+        this.dom.activeSelect.setAttribute('aria-label', 'Single clip');
     },
 
     setFrame(idx) {
@@ -1365,6 +1919,7 @@ const ReportViewer = {
         this.dom.canvas.classList.toggle('rv-canvas--pixelated', this.state.zoom > 1);
         this.dom.canvas.style.setProperty('--zoom-level', this.state.zoom);
         if (options.clampPan !== false) this.clampPan();
+        this.updateSmartStageLabels();
     },
 
     resetViewport() {
@@ -1426,6 +1981,7 @@ const ReportViewer = {
     applyPan() {
         this.dom.canvas.style.setProperty('--pan-x', `${this.state.panX}px`);
         this.dom.canvas.style.setProperty('--pan-y', `${this.state.panY}px`);
+        this.updateSmartStageLabels();
     },
 
     setFitMode(mode, options = {}) {
@@ -1675,6 +2231,43 @@ const ReportViewer = {
         // Visual indicator on gear button if offset is non-zero
         const isOffset = this.state.alignX !== 0 || this.state.alignY !== 0;
         this.dom.btnAlignToggle.classList.toggle('has-offset', isOffset);
+        this.updateAlignmentStatus();
+        this.updateInspectorData();
+        this.updateFocusHud();
+    },
+
+    formatSignedPixels(value, axis) {
+        const numberValue = this.numberOrDefault(value, 0);
+        const prefix = numberValue > 0 ? '+' : '';
+        return `${prefix}${numberValue}${axis}`;
+    },
+
+    alignmentPresetLabel(preset) {
+        const labels = {
+            'left-1': 'left 1px',
+            'right-1': 'right 1px',
+            'up-1': 'up 1px',
+            'down-1': 'down 1px'
+        };
+        return labels[preset] || preset;
+    },
+
+    alignmentStatusText() {
+        const xText = this.formatSignedPixels(this.state.alignX, 'x');
+        const yText = this.formatSignedPixels(this.state.alignY, 'y');
+        const hasOffset = this.state.alignX !== 0 || this.state.alignY !== 0;
+
+        if (!hasOffset && this.state.alignmentPreset === 'none') return 'Aligned: none';
+        if (this.state.alignmentPreset === 'custom') return `Aligned: custom ${xText} ${yText}`;
+        if (this.state.alignmentPreset !== 'none') {
+            return `Aligned: preset ${this.alignmentPresetLabel(this.state.alignmentPreset)}`;
+        }
+        return `Aligned: ${xText} ${yText}`;
+    },
+
+    updateAlignmentStatus() {
+        if (!this.dom.alignmentStatus) return;
+        this.dom.alignmentStatus.textContent = this.alignmentStatusText();
     },
 
     toggleFullscreen() {
@@ -1698,6 +2291,70 @@ const ReportViewer = {
     updateSlider() {
         this.dom.leftLayer.style.setProperty('--reveal-percent', this.state.revealPercent + '%');
         this.dom.divider.style.setProperty('--reveal-percent', this.state.revealPercent + '%');
+        this.dom.canvas.style.setProperty('--reveal-percent', this.state.revealPercent + '%');
+        this.updateSmartStageLabels();
+    },
+
+    isShortcutEditableTarget(target) {
+        if (!target) return false;
+        if (target.isContentEditable) return true;
+
+        const tagName = String(target.tagName || '').toUpperCase();
+        if (['INPUT', 'SELECT', 'BUTTON', 'TEXTAREA'].includes(tagName)) return true;
+
+        const closestEditable = target.closest?.(
+            'input, select, button, textarea, [contenteditable=""], [contenteditable="true"]'
+        );
+        return Boolean(closestEditable);
+    },
+
+    untransformedCanvasWidth() {
+        const offsetWidth = this.dom.canvas.offsetWidth;
+        if (Number.isFinite(offsetWidth) && offsetWidth > 0) return offsetWidth;
+
+        const clientWidth = this.dom.canvas.clientWidth;
+        if (Number.isFinite(clientWidth) && clientWidth > 0) return clientWidth;
+
+        const rectWidth = this.dom.canvas.getBoundingClientRect().width;
+        if (rectWidth <= 0) return 0;
+        return rectWidth / this.clampZoom(this.state.zoom);
+    },
+
+    smartLabelPositions(canvasWidth, leftLabelWidth, rightLabelWidth) {
+        if (canvasWidth <= 0) return null;
+
+        const edgePadding = 8;
+        const dividerX = canvasWidth * (1 - (this.state.revealPercent / 100));
+        const leftX = Math.max(
+            edgePadding + leftLabelWidth,
+            Math.min(canvasWidth - edgePadding, dividerX - 10)
+        );
+        const rightX = Math.max(
+            edgePadding,
+            Math.min(canvasWidth - rightLabelWidth - edgePadding, dividerX + 10)
+        );
+
+        return { leftX, rightX };
+    },
+
+    updateSmartStageLabels() {
+        if (!this.dom.canvas || !this.dom.labelLeft || !this.dom.labelRight) return;
+
+        if (this.state.mode !== 'slider') {
+            this.dom.canvas.style.removeProperty('--label-left-x');
+            this.dom.canvas.style.removeProperty('--label-right-x');
+            return;
+        }
+
+        const positions = this.smartLabelPositions(
+            this.untransformedCanvasWidth(),
+            this.dom.labelLeft.offsetWidth || 0,
+            this.dom.labelRight.offsetWidth || 0,
+        );
+        if (!positions) return;
+
+        this.dom.canvas.style.setProperty('--label-left-x', `${positions.leftX}px`);
+        this.dom.canvas.style.setProperty('--label-right-x', `${positions.rightX}px`);
     },
 
     humanizeCategory(cat) {
@@ -1739,6 +2396,19 @@ const ReportViewer = {
             this.dom.currentFrameCategory.hidden = !showCategory;
             this.dom.currentFrameCategory.textContent = showCategory ? categoryText : '';
         }
+    },
+
+    blinkStageLabels(leftClipLabel, rightClipLabel) {
+        if (this.state.activeClipIdx === this.state.rightClipIdx) {
+            return {
+                left: '',
+                right: rightClipLabel,
+            };
+        }
+        return {
+            left: leftClipLabel,
+            right: '',
+        };
     },
 
     commitImageState(imageState) {
@@ -1800,6 +2470,7 @@ const ReportViewer = {
         this.dom.rightImg.alt = rightAlt;
         this.dom.labelLeft.textContent = leftLabelTxt;
         this.dom.labelRight.textContent = rightLabelTxt;
+        this.updateSmartStageLabels();
         this.updateCurrentFrameMetadata(frameData);
 
         this.dom.leftLayer.classList.toggle(
@@ -1842,8 +2513,9 @@ const ReportViewer = {
             rightSrc = rightImage.src;
 
             if (this.state.mode === 'blink') {
-                leftLabelTxt = leftClip.label;
-                rightLabelTxt = rightClip.label;
+                const blinkLabels = this.blinkStageLabels(leftClip.label, rightClip.label);
+                leftLabelTxt = blinkLabels.left;
+                rightLabelTxt = blinkLabels.right;
             } else {
                 leftLabelTxt = `${leftClip.label} (Left)`;
                 rightLabelTxt = `${rightClip.label} (Right)`;
@@ -1924,6 +2596,10 @@ const ReportViewer = {
         this.dom.rightSelect.value = this.state.rightClipIdx;
         this.dom.activeSelect.value = this.state.activeClipIdx;
         this.updateOverlayVisibility();
+        this.updateFilmstripPanel();
+        this.updateBlinkControls();
+        this.updateInspectorData();
+        this.updateFocusHud();
 
         // Update images and labels
         this.updateImages();

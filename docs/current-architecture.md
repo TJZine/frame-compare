@@ -210,12 +210,18 @@ The same CLI owner presents the local report and asks for confirmation in the
 report-confirmed workflow before post-upload URL actions are considered.
 
 `frame_compare.services.report` owns the static offline report payload and viewer
-assets. The generated viewer exposes slider, overlay, diff, and pair-based blink
-modes; frame/category navigation; an info modal for report and clip metadata plus
-current-frame metadata in the stage overlay;
-browser-local view mode, clip selection, viewport/zoom, reveal, and alignment state
-scoped by report identity; viewport pan, zoom, and fit controls; and adjacent-frame
-preloading. It does not own slow.pics upload policy, prompting, or browser side
+assets. The generated viewer exposes slider, internal overlay mode presented to
+users as Single where appropriate, diff, and pair-based blink modes; frame/category
+navigation; a HUD toggle for stage labels and current-frame metadata; a primary
+toolbar plus floating viewport palette; a collapsible, compact/normal/large
+filmstrip bottom panel; an inspector drawer with Frame, Clips, Align, and Export
+tabs; focus mode for minimal chrome; viewport pan, zoom, fit, reveal, and adjacent-
+frame preloading. Blink mode supports 0.3s/0.7s/1.2s speeds, pause/resume, keyboard
+speed controls, and reduced-motion handling that enters Blink paused. Browser-local
+viewer state is scoped by report identity and persists view mode, clip selection,
+viewport/zoom/reveal, pair alignments, HUD visibility, filmstrip collapsed/size,
+inspector open/tab, and blink speed. Transient focus mode and blink paused state are
+not persisted. It does not own slow.pics upload policy, prompting, or browser side
 effects.
 
 Screenshot rendering owns its geometry and writer policy inside `frame_compare.render`:

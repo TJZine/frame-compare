@@ -41,10 +41,12 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment(
             "activeClipIdx": 3,
             "restoredPairKeys": ["0:1", "1:0"],
             "currentAlignment": [5, -2],
+            "alignmentStatus": "Aligned: custom +5x -2y",
         },
         "pairSwitchFourClip": {
             "finalPair": "3:0",
             "finalAlignment": [-21, 3],
+            "finalAlignmentStatus": "Aligned: custom -21x +3y",
             "persistedPairKeys": ["0:1", "0:2", "0:3", "2:0", "3:0"],
             "persistedAlignments": {
                 "0:1": [4, 5],
@@ -53,6 +55,65 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment(
                 "2:0": [12, 13],
                 "3:0": [-21, 3],
             },
+        },
+        "alignmentStatus": {
+            "neutral": "Aligned: none",
+            "preset": "Aligned: preset left 1px",
+            "reset": "Aligned: none",
+        },
+        "filmstripState": {
+            "collapsed": False,
+            "size": "compact",
+        },
+        "invalidFilmstripStateFallback": {
+            "collapsed": False,
+            "size": "normal",
+            "stringBlinkIntervalFallback": 700,
+        },
+        "inspectorBlinkFocusState": {
+            "inspectorOpen": False,
+            "inspectorTab": "export",
+            "blinkIntervalMs": 300,
+            "blinkPausedPersisted": False,
+            "focusModePersisted": False,
+            "focusModeActive": True,
+            "closedInspectorInert": True,
+            "closedInspectorTabIndex": "-1",
+        },
+        "escapeOrder": {
+            "inspectorClosedBeforeAlignment": True,
+            "legacyInfoModalWins": True,
+            "alignmentStillOpenAfterInspectorEscape": True,
+        },
+        "focusModeInspectorClose": {
+            "inspectorClosedOnEntry": True,
+            "inspectorStayedClosedAfterEscape": True,
+        },
+        "inspectorSlowpics": {
+            "safeLinkTag": "A",
+            "unsafeAsText": True,
+            "missingStatus": "Not uploaded",
+        },
+        "blinkControls": {
+            "reducedMotionPaused": True,
+            "status": "Blink paused",
+            "intervalAfterSteps": 700,
+        },
+        "smartLabelGeometry": {
+            "untransformedWidth": 400,
+            "labelLeftX": "290px",
+            "labelRightX": "310px",
+        },
+        "blinkLabels": {
+            "leftActive": {"left": "Clip 1", "right": ""},
+            "rightActive": {"left": "", "right": "Clip 2"},
+        },
+        "keyboardGuard": {
+            "button": True,
+            "textarea": True,
+            "contentEditable": True,
+            "nestedInButton": True,
+            "plain": False,
         },
         "directionalFourClip": {
             "swappedPair": "0:1",
