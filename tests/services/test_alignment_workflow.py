@@ -236,11 +236,14 @@ def test_align_clips_advances_each_computed_comparison_before_starting_next(
     relevant_calls = [
         call for call in reporter.method_calls if call[0] in {"set_description", "advance"}
     ]
-    assert relevant_calls.index(call.set_description("Checked alignment for comp_a.mkv")) < (
-        relevant_calls.index(call.set_description("Checking alignment for comp_b.mkv"))
-    )
-    assert relevant_calls.index(call.advance(1)) < (
-        relevant_calls.index(call.set_description("Checking alignment for comp_b.mkv"))
+    comp_a_to_comp_b_progress = [
+        call.set_description("Checked alignment for comp_a.mkv"),
+        call.advance(1),
+        call.set_description("Checking alignment for comp_b.mkv"),
+    ]
+    assert any(
+        relevant_calls[index : index + len(comp_a_to_comp_b_progress)] == comp_a_to_comp_b_progress
+        for index in range(len(relevant_calls) - len(comp_a_to_comp_b_progress) + 1)
     )
     assert reporter.advance.call_count == 2
 
