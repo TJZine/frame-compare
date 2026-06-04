@@ -104,7 +104,7 @@ enable = false
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=ffmpeg)
     request = RunRequest(
         root=tmp_path,
-        frame_count=3,
+        random_frame_count=3,
         skip_analysis=True,
         skip_metadata=True,
         skip_dovi=True,
@@ -170,7 +170,7 @@ enable = true
         execute_run(
             RunRequest(
                 root=tmp_path,
-                frame_count=1,
+                random_frame_count=1,
                 skip_analysis=True,
                 skip_metadata=True,
                 skip_dovi=True,

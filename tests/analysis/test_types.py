@@ -12,7 +12,6 @@ from frame_compare.analysis.types import (
     SelectionBreakdown,
     SelectionDetail,
 )
-from frame_compare.config.schema import SelectionMode
 
 
 def test_clip_identity_creation():
@@ -76,13 +75,11 @@ def test_frame_selection_creation():
     )
     fs = FrameSelection(
         frames=[1, 2],
-        mode=SelectionMode.MIXED,
         seed=42,
         breakdown=sb,
         selection_details={1: detail},
     )
     assert fs.frames == [1, 2]
-    assert fs.mode is SelectionMode.MIXED
     assert fs.seed == 42
     assert fs.breakdown is sb
     assert fs.selection_details == {1: detail}

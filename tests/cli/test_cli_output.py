@@ -65,7 +65,7 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     assert "run folders" in output
     assert "base paths" in output
     assert "selection" in output
-    assert "mixed, n=10, seed=42" in output
+    assert "user=0, random=10, dark=0, bright=0, motion=0, seed=42" in output
     assert "FFmpeg audio" in output
     assert "interactive alignment" in output
     assert "force interactive" in output

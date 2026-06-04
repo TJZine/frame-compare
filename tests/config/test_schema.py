@@ -15,7 +15,6 @@ from frame_compare.config.schema import (
     ColorConfig,
     DoviConfig,
     ReportConfig,
-    SelectionMode,
 )
 from frame_compare.config.schema_enums import (
     LogFormat,
@@ -43,8 +42,11 @@ from frame_compare.config.schema_sources import TomlConfigSettingsSourceNoBOM
 def test_default_config_values() -> None:
     """Test that default config has expected values."""
     config = get_default_config()
-    assert config.analysis.frame_count == 10
-    assert config.analysis.selection_mode == SelectionMode.MIXED
+    assert config.analysis.user_frames == []
+    assert config.analysis.random_frame_count == 10
+    assert config.analysis.dark_frame_count == 0
+    assert config.analysis.bright_frame_count == 0
+    assert config.analysis.motion_frame_count == 0
     assert config.analysis.ignore_lead_seconds == 0.0
     assert config.analysis.ignore_trail_seconds == 0.0
     assert config.analysis.min_window_seconds == 5.0
@@ -64,18 +66,31 @@ def test_default_config_values() -> None:
     assert config.slowpics.confirm_upload_after_report is False
 
 
-def test_analysis_frame_count_bounds_too_low() -> None:
-    """Test frame_count lower bound."""
-    with pytest.raises(ValidationError) as exc:
-        AnalysisConfig(frame_count=0)
-    assert "Input should be greater than or equal to 1" in str(exc.value)
+def test_analysis_requires_at_least_one_requested_frame() -> None:
+    with pytest.raises(ValidationError, match="at least one analysis frame selector"):
+        AnalysisConfig(random_frame_count=0)
 
 
-def test_analysis_frame_count_bounds_too_high() -> None:
-    """Test frame_count upper bound."""
-    with pytest.raises(ValidationError) as exc:
-        AnalysisConfig(frame_count=101)
-    assert "Input should be less than or equal to 100" in str(exc.value)
+def test_analysis_rejects_total_requested_frame_count_above_cap() -> None:
+    with pytest.raises(ValidationError, match="less than or equal to 100"):
+        AnalysisConfig(user_frames=[0], random_frame_count=100)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"user_frames": [-1]},
+        {"random_frame_count": -1},
+        {"dark_frame_count": -1},
+        {"bright_frame_count": -1},
+        {"motion_frame_count": -1},
+    ],
+)
+def test_analysis_frame_selector_counts_reject_negative_values(
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError, match="greater than or equal to 0|non-negative"):
+        AnalysisConfig.model_validate(payload)
 
 
 @pytest.mark.parametrize(
@@ -107,16 +122,10 @@ def test_color_target_nits_bounds_too_high() -> None:
     assert "Input should be less than or equal to 1000" in str(exc.value)
 
 
-def test_enum_lowercase_only_accepted() -> None:
-    """Test that enums accept lowercase values only."""
-    # Valid
-    config = AnalysisConfig(selection_mode=SelectionMode.MIXED)
-    assert config.selection_mode == "mixed"
-
-    # Invalid uppercase (Pydantic enums are strict by default or follow enum rules)
-    # Since our Enum inherits from str and Enum, "MIXED" is not "mixed".
-    with pytest.raises(ValidationError):
-        AnalysisConfig(selection_mode="MIXED")  # type: ignore
+@pytest.mark.parametrize("stale_key", ["frame_count", "selection_mode"])
+def test_analysis_rejects_removed_public_keys(stale_key: str) -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        AnalysisConfig.model_validate({stale_key: 10})
 
 
 def test_optional_path_accepts_none() -> None:
@@ -167,8 +176,11 @@ def test_schema_model_section_defaults_are_representative() -> None:
         "config_dir": "config",
         "use_run_folders": True,
     }
-    assert analysis.frame_count == 10
-    assert analysis.selection_mode == SelectionMode.MIXED
+    assert analysis.user_frames == []
+    assert analysis.random_frame_count == 10
+    assert analysis.dark_frame_count == 0
+    assert analysis.bright_frame_count == 0
+    assert analysis.motion_frame_count == 0
     assert analysis.ignore_lead_seconds == 0.0
     assert analysis.ignore_trail_seconds == 0.0
     assert analysis.min_window_seconds == 5.0
@@ -369,10 +381,13 @@ def test_default_config_toml_documents_analysis_ignore_window_defaults() -> None
     data = tomllib.loads(DEFAULT_CONFIG_TOML)
 
     assert set(data["analysis"].keys()) == {
-        "frame_count",
+        "user_frames",
+        "random_frame_count",
+        "dark_frame_count",
+        "bright_frame_count",
+        "motion_frame_count",
         "random_seed",
         "save_frames_data",
-        "selection_mode",
         "ignore_lead_seconds",
         "ignore_trail_seconds",
         "min_window_seconds",
@@ -534,13 +549,13 @@ def test_tmdb_category_preference_rejects_unknown_values() -> None:
 def test_toml_settings_source_accepts_utf8_bom_directly(tmp_path: Path) -> None:
     config_file = tmp_path / "config.toml"
     config_file.write_bytes(
-        b'\xef\xbb\xbf[analysis]\nframe_count = 24\n[logging]\nlevel = "DEBUG"\n'
+        b'\xef\xbb\xbf[analysis]\nrandom_frame_count = 24\n[logging]\nlevel = "DEBUG"\n'
     )
     source = TomlConfigSettingsSourceNoBOM(get_default_config().__class__)
 
     data = source._read_file(config_file)
 
     assert data == {
-        "analysis": {"frame_count": 24},
+        "analysis": {"random_frame_count": 24},
         "logging": {"level": "DEBUG"},
     }

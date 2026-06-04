@@ -17,7 +17,11 @@ def test_run_request_defaults() -> None:
     assert request.tm_preset is None
     assert request.tm_target_nits is None
     assert request.tm_curve is None
-    assert request.frame_count is None
+    assert request.user_frames is None
+    assert request.random_frame_count is None
+    assert request.dark_frame_count is None
+    assert request.bright_frame_count is None
+    assert request.motion_frame_count is None
     assert request.seed is None
     assert request.overlay_mode is None
 

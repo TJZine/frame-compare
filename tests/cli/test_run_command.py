@@ -63,7 +63,12 @@ def _base_args() -> RunCliRawArgs:
         tm_preset=None,
         tm_target=None,
         tm_curve=None,
-        frame_count=None,
+        frames=None,
+        random_frame_count=None,
+        dark_frame_count=None,
+        bright_frame_count=None,
+        motion_frame_count=None,
+        removed_frame_count=None,
         seed=None,
         overlay=None,
         skip_analysis=False,
@@ -168,7 +173,11 @@ def test_build_run_request_from_cli_maps_all_runtime_options() -> None:
             tm_preset=TonemapPreset.FILMIC,
             tm_target_nits=203,
             tm_curve=ToneCurve.SPLINE,
-            frame_count=17,
+            user_frames=[12, 24],
+            random_frame_count=17,
+            dark_frame_count=3,
+            bright_frame_count=4,
+            motion_frame_count=5,
             seed=42,
             overlay_mode=OverlayMode.DIAGNOSTIC,
             skip_analysis=True,
@@ -196,7 +205,11 @@ def test_build_run_request_from_cli_maps_all_runtime_options() -> None:
         tm_preset=TonemapPreset.FILMIC,
         tm_target_nits=203,
         tm_curve=ToneCurve.SPLINE,
-        frame_count=17,
+        user_frames=[12, 24],
+        random_frame_count=17,
+        dark_frame_count=3,
+        bright_frame_count=4,
+        motion_frame_count=5,
         seed=42,
         overlay_mode=OverlayMode.DIAGNOSTIC,
         no_color=True,
@@ -288,7 +301,8 @@ def test_handle_run_write_config_applies_cli_overrides_and_skips_runner() -> Non
         replace(
             _base_args(),
             write_config=True,
-            frame_count=17,
+            frames="3,5,8",
+            random_frame_count="17",
             tm_preset="filmic",
             overlay="diagnostic",
             no_upload=True,
@@ -304,7 +318,8 @@ def test_handle_run_write_config_applies_cli_overrides_and_skips_runner() -> Non
 
     assert runner.requests == []
     assert written_paths == [Path("/workspace/config/config.toml")]
-    assert written_configs[0].analysis.frame_count == 17
+    assert written_configs[0].analysis.user_frames == [3, 5, 8]
+    assert written_configs[0].analysis.random_frame_count == 17
     assert written_configs[0].color.preset == TonemapPreset.FILMIC
     assert written_configs[0].screenshots.overlay_mode == OverlayMode.DIAGNOSTIC
     assert written_configs[0].slowpics.auto_upload is False
@@ -439,9 +454,7 @@ def test_handle_run_rejects_report_confirmed_slowpics_preflight_before_runner(
     assert exc_info.value.exit_code == int(ExitCode.CONFIG_ERROR)
     assert runner.requests == []
     assert handled_errors
-    assert expected_message in {
-        str(error["msg"]) for error in handled_errors[0].validation_errors
-    }
+    assert expected_message in {str(error["msg"]) for error in handled_errors[0].validation_errors}
 
 
 def test_handle_run_report_confirmed_slowpics_preflight_allows_no_upload_override() -> None:
@@ -613,9 +626,7 @@ def test_handle_run_interrupts_when_confirmation_prompt_aborts() -> None:
                     load_config=_load_config,
                     stdin_is_tty=True,
                     stdout_is_tty=True,
-                    confirm_upload=lambda _text, *, default: (_ for _ in ()).throw(
-                        typer.Abort()
-                    ),
+                    confirm_upload=lambda _text, *, default: (_ for _ in ()).throw(typer.Abort()),
                 )
             ),
         )

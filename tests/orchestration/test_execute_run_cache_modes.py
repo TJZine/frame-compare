@@ -29,7 +29,30 @@ from .execute_run_helpers import (
 def test_execute_run_no_cache_deletes_only_matching_shared_metrics_cache(
     tmp_path: Path,
 ) -> None:
-    create_config(tmp_path)
+    create_config(
+        tmp_path,
+        content="""\
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "generated"
+config_dir = "config"
+use_run_folders = false
+
+[analysis]
+random_frame_count = 0
+dark_frame_count = 1
+
+[audio_alignment]
+enable = false
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+""",
+    )
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
     config = load_config(tmp_path / "config" / "config.toml")
@@ -73,7 +96,30 @@ def test_execute_run_no_cache_deletes_only_matching_shared_metrics_cache(
 def test_execute_run_from_cache_only_fails_when_metrics_cache_missing(
     tmp_path: Path,
 ) -> None:
-    create_config(tmp_path)
+    create_config(
+        tmp_path,
+        content="""\
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "generated"
+config_dir = "config"
+use_run_folders = false
+
+[analysis]
+random_frame_count = 0
+dark_frame_count = 1
+
+[audio_alignment]
+enable = false
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+""",
+    )
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
 
@@ -104,6 +150,10 @@ use_run_folders = false
 
 [sources.overrides."source.mkv"]
 effective_fps = "24/1"
+
+[analysis]
+random_frame_count = 0
+dark_frame_count = 1
 
 [audio_alignment]
 enable = false
@@ -144,7 +194,30 @@ enable = false
 def test_execute_run_from_cache_only_fails_when_metrics_cache_invalid(
     tmp_path: Path,
 ) -> None:
-    create_config(tmp_path)
+    create_config(
+        tmp_path,
+        content="""\
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "generated"
+config_dir = "config"
+use_run_folders = false
+
+[analysis]
+random_frame_count = 0
+dark_frame_count = 1
+
+[audio_alignment]
+enable = false
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+""",
+    )
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
 
@@ -179,7 +252,30 @@ def test_execute_run_from_cache_only_fails_when_metrics_cache_invalid(
 def test_execute_run_from_cache_only_fails_when_metrics_cache_version_mismatch(
     tmp_path: Path,
 ) -> None:
-    create_config(tmp_path)
+    create_config(
+        tmp_path,
+        content="""\
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "generated"
+config_dir = "config"
+use_run_folders = false
+
+[analysis]
+random_frame_count = 0
+dark_frame_count = 1
+
+[audio_alignment]
+enable = false
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+""",
+    )
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
 
@@ -240,6 +336,10 @@ input_dir = "comparison_videos"
 screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
+
+[analysis]
+random_frame_count = 0
+dark_frame_count = 1
 
 [audio_alignment]
 enable = true

@@ -39,6 +39,16 @@ if TYPE_CHECKING:
     import vapoursynth as vs
 
 
+METRIC_RUN_FOLDERS_CONFIG = (
+    RUN_FOLDERS_CONFIG
+    + """
+[analysis]
+random_frame_count = 0
+dark_frame_count = 1
+"""
+)
+
+
 class ClipStub:
     num_frames = 100
 
@@ -70,7 +80,7 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
     config = load_config(tmp_path / "config" / "config.toml")
@@ -116,7 +126,7 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
 def test_execute_run_from_cache_only_does_not_reserve_run_folder_when_metrics_cache_missing(
     tmp_path: Path,
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
     run_name = derive_run_folder_name(filenames=["source.mkv"])
@@ -141,7 +151,7 @@ def test_execute_run_from_cache_only_does_not_reserve_run_folder_when_metrics_ca
 def test_execute_run_from_cache_only_uses_shared_cache_when_run_folders_enabled(
     tmp_path: Path,
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
 
@@ -182,6 +192,10 @@ screenshots_dir = "screenshots"
 generated_dir = "custom_generated"
 config_dir = "config"
 use_run_folders = true
+
+[analysis]
+random_frame_count = 0
+dark_frame_count = 1
 
 [audio_alignment]
 enable = false
@@ -297,7 +311,7 @@ enable = false
 def test_execute_run_normal_rerun_creates_fresh_run_folder_and_uses_shared_cache(
     tmp_path: Path,
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
 
@@ -334,7 +348,7 @@ def test_execute_run_normal_rerun_creates_fresh_run_folder_and_uses_shared_cache
 def test_execute_run_from_cache_only_ignores_old_run_folder_cache(
     tmp_path: Path,
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
 
@@ -378,6 +392,10 @@ screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
 use_run_folders = true
+
+[analysis]
+random_frame_count = 0
+dark_frame_count = 1
 
 [audio_alignment]
 enable = false
@@ -444,6 +462,10 @@ screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
 use_run_folders = true
+
+[analysis]
+random_frame_count = 0
+dark_frame_count = 1
 
 [audio_alignment]
 enable = false

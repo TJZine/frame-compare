@@ -45,6 +45,15 @@ use_ffmpeg = true
 enable = false
 """
 
+METRIC_CONFIG = (
+    MINIMAL_CONFIG
+    + """
+[analysis]
+random_frame_count = 0
+dark_frame_count = 1
+"""
+)
+
 
 ALIGNMENT_CONFIG = """\
 [paths]
@@ -118,7 +127,7 @@ def test_execute_prep_rejects_mutually_exclusive_cache_flags(tmp_path: Path) -> 
 
 
 def test_execute_prep_no_cache_removes_only_matching_shared_metrics_cache(tmp_path: Path) -> None:
-    _create_config(tmp_path)
+    _create_config(tmp_path, content=METRIC_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     _create_video_files(input_dir, "source.mkv")
 
@@ -161,7 +170,7 @@ def test_execute_prep_no_cache_removes_only_matching_shared_metrics_cache(tmp_pa
 def test_execute_prep_no_cache_removes_only_selected_reference_metrics_cache(
     tmp_path: Path,
 ) -> None:
-    config_content = MINIMAL_CONFIG + '\n[sources]\nreference = "b-reference.mkv"\n'
+    config_content = METRIC_CONFIG + '\n[sources]\nreference = "b-reference.mkv"\n'
     _create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"
     _create_video_files(input_dir, "a-default.mkv", "b-reference.mkv")
@@ -222,7 +231,7 @@ def test_execute_prep_from_cache_only_does_not_require_cached_alignment_offsets(
 def test_execute_prep_from_cache_only_validates_metrics_cache_when_analysis_runs(
     tmp_path: Path,
 ) -> None:
-    _create_config(tmp_path)
+    _create_config(tmp_path, content=METRIC_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     _create_video_files(input_dir, "source.mkv")
 
@@ -243,7 +252,7 @@ def test_execute_prep_from_cache_only_validates_metrics_cache_when_analysis_runs
 def test_execute_prep_from_cache_only_misses_when_selected_reference_differs(
     tmp_path: Path,
 ) -> None:
-    config_content = MINIMAL_CONFIG + '\n[sources]\nreference = "b-reference.mkv"\n'
+    config_content = METRIC_CONFIG + '\n[sources]\nreference = "b-reference.mkv"\n'
     _create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"
     _create_video_files(input_dir, "a-default.mkv", "b-reference.mkv")
@@ -270,7 +279,7 @@ def test_execute_prep_from_cache_only_misses_when_reference_effective_fps_differ
     tmp_path: Path,
 ) -> None:
     config_content = (
-        MINIMAL_CONFIG
+        METRIC_CONFIG
         + """
 [sources.overrides."a-default.mkv"]
 effective_fps = "24000/1001"

@@ -75,7 +75,7 @@ def test_preset_apply_stub():
         presets_dir = root / "config" / "presets"
         presets_dir.mkdir(parents=True, exist_ok=True)
         (presets_dir / "boost.toml").write_text(
-            "[analysis]\nframe_count = 12\n",
+            "[analysis]\nrandom_frame_count = 12\n",
             encoding="utf-8",
         )
 
@@ -87,7 +87,7 @@ def test_preset_apply_stub():
         assert result.stdout == ""
         assert f"Applied preset 'boost' to {config_path.resolve()}" in result.stderr
         data = tomllib.loads(config_path.read_text(encoding="utf-8"))
-        assert data["analysis"]["frame_count"] == 12
+        assert data["analysis"]["random_frame_count"] == 12
 
 
 def test_preset_save_stub():
@@ -211,7 +211,7 @@ def test_preset_apply_respects_root_and_config_updates_config_file() -> None:
         presets_dir = root / "config" / "presets"
         presets_dir.mkdir(parents=True, exist_ok=True)
         (presets_dir / "boost.toml").write_text(
-            "[analysis]\nframe_count = 22\n",
+            "[analysis]\nrandom_frame_count = 22\n",
             encoding="utf-8",
         )
 
@@ -223,4 +223,4 @@ def test_preset_apply_respects_root_and_config_updates_config_file() -> None:
         assert result.stdout == ""
         assert f"Applied preset 'boost' to {config_path.resolve()}" in result.stderr
         data = tomllib.loads(config_path.read_text(encoding="utf-8"))
-        assert data["analysis"]["frame_count"] == 22
+        assert data["analysis"]["random_frame_count"] == 22

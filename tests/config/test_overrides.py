@@ -21,10 +21,10 @@ from frame_compare.config.schema import (
 def test_apply_cli_overrides_basic() -> None:
     """Test applying basic CLI overrides."""
     config = get_default_config()
-    cli_args = CLIConfigOverrides(frame_count=50)
+    cli_args = CLIConfigOverrides(random_frame_count=50)
 
     new_config = apply_cli_overrides(config, cli_args)
-    assert new_config.analysis.frame_count == 50
+    assert new_config.analysis.random_frame_count == 50
     # Original config unchanged (Pydantic models are mutable but we model_dump -> new instance)
     # Wait, apply_cli_overrides returns a new instance.
 
@@ -70,10 +70,10 @@ def test_apply_cli_overrides_does_not_override_false_flag_defaults() -> None:
 def test_apply_cli_overrides_ignores_none_values() -> None:
     """Test that None values in CLI args are ignored."""
     config = get_default_config()
-    cli_args = CLIConfigOverrides(frame_count=None)
+    cli_args = CLIConfigOverrides(random_frame_count=None)
 
     new_config = apply_cli_overrides(config, cli_args)
-    assert new_config.analysis.frame_count == 10  # Default
+    assert new_config.analysis.random_frame_count == 10  # Default
 
 
 def test_apply_cli_overrides_empty_dto_returns_original_config() -> None:
@@ -137,10 +137,31 @@ def test_apply_cli_overrides_preserves_implicit_color_target_for_unrelated_overr
     config = ConfigSchema(color=ColorConfig(preset=TonemapPreset.FILMIC))
     assert config.color.model_fields_set == {"preset"}
 
-    new_config = apply_cli_overrides(config, CLIConfigOverrides(frame_count=12))
+    new_config = apply_cli_overrides(config, CLIConfigOverrides(random_frame_count=12))
 
-    assert new_config.analysis.frame_count == 12
+    assert new_config.analysis.random_frame_count == 12
     assert new_config.color.model_fields_set == {"preset"}
+
+
+def test_apply_cli_overrides_maps_explicit_frame_selectors() -> None:
+    config = get_default_config()
+
+    new_config = apply_cli_overrides(
+        config,
+        CLIConfigOverrides(
+            user_frames=[12, 24],
+            random_frame_count=3,
+            dark_frame_count=2,
+            bright_frame_count=1,
+            motion_frame_count=4,
+        ),
+    )
+
+    assert new_config.analysis.user_frames == [12, 24]
+    assert new_config.analysis.random_frame_count == 3
+    assert new_config.analysis.dark_frame_count == 2
+    assert new_config.analysis.bright_frame_count == 1
+    assert new_config.analysis.motion_frame_count == 4
 
 
 def test_apply_cli_overrides_marks_cli_target_as_explicit_color_override() -> None:

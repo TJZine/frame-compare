@@ -164,7 +164,7 @@ def test_apply_preset_merges_values(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     (presets_dir / "custom.toml").write_text(
         """
         [analysis]
-        frame_count = 50
+        random_frame_count = 50
         """,
         encoding="utf-8",
     )
@@ -172,7 +172,7 @@ def test_apply_preset_merges_values(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     config = get_default_config()
     new_config = apply_preset(config, "custom")
 
-    assert new_config.analysis.frame_count == 50
+    assert new_config.analysis.random_frame_count == 50
     assert new_config.paths.input_dir == "comparison_videos"  # Unchanged
 
 

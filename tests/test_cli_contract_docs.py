@@ -645,9 +645,16 @@ def test_current_cli_contract_documents_analysis_ignore_window_and_cache_domain(
     )[0]
     normalized_analysis_section = " ".join(analysis_section.split())
     for expected in (
+        "`user_frames = []`",
+        "`random_frame_count = 10`",
+        "`dark_frame_count = 0`",
+        "`bright_frame_count = 0`",
+        "`motion_frame_count = 0`",
         "`ignore_lead_seconds = 0.0`",
         "`ignore_trail_seconds = 0.0`",
         "`min_window_seconds = 5.0`",
+        "original selected-reference source-frame numbers",
+        "Removed stale analysis keys `selection_mode` and `frame_count` fail validation explicitly",
         "there are no dedicated `run` flags",
         "source-specific base trim domain",
         "do not physically trim sources",

@@ -277,6 +277,103 @@ def test_run_json_invalid_overlay_outputs_config_error_schema(
     ]
 
 
+def test_run_json_invalid_frames_outputs_config_error_schema(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for invalid frame selectors")
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace(["--json", "--frames", "abc"])
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stderr == ""
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "FC-1003"
+    assert payload["error"]["details"]["validation_errors"][0]["loc"] == [
+        "analysis",
+        "user_frames",
+    ]
+
+
+def test_run_json_removed_frame_count_outputs_config_error_schema(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for removed frame-count option")
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace(["--json", "--frame-count", "12"])
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stderr == ""
+    payload = json.loads(result.stdout)
+    assert payload["error"]["message"] == "--frame-count/-n has been removed"
+    assert payload["error"]["details"]["validation_errors"][0]["loc"] == ["cli", "frame_count"]
+
+
+def test_run_json_skip_analysis_rejects_metric_frame_count_before_runner(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for --skip-analysis conflict")
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace(
+        ["--json", "--skip-analysis", "--dark-frame-count", "1"]
+    )
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stderr == ""
+    payload = json.loads(result.stdout)
+    assert payload["error"]["message"] == "Metric-based frame selection requires analysis"
+    assert payload["error"]["details"]["validation_errors"][0]["loc"] == [
+        "analysis",
+        "dark_frame_count",
+    ]
+
+
+def test_run_json_stale_analysis_config_keys_fail_before_runner(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for stale analysis config")
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = _write_minimal_config(root)
+        config_path.write_text(
+            MINIMAL_CONFIG + '\n[analysis]\nselection_mode = "mixed"\nframe_count = 12\n',
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--root",
+                str(root),
+                "--config",
+                str(config_path.relative_to(root)),
+                "--json",
+            ],
+        )
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stderr == ""
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "FC-1003"
+    assert {tuple(entry["loc"]) for entry in payload["error"]["details"]["validation_errors"]} == {
+        ("analysis", "selection_mode"),
+        ("analysis", "frame_count"),
+    }
+
+
 def test_run_exit_code_is_130_on_keyboard_interrupt(monkeypatch: MonkeyPatch) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise KeyboardInterrupt()

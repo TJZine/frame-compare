@@ -16,7 +16,7 @@ from frame_compare.analysis.cache_io import (
     save_metrics_cache,
 )
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
-from frame_compare.config.schema import AnalysisConfig, SelectionMode
+from frame_compare.config.schema import AnalysisConfig
 
 FIXED_MTIME = 1704067200.0  # 2024-01-01 00:00:00 UTC
 
@@ -36,7 +36,7 @@ def cache_file(cache_dir: Path, fingerprint: str, *video_paths: Path) -> Path:
 def test_compute_cache_key_deterministic(tmp_path: Path) -> None:
     """Same paths + config → same 64-char hex."""
     v1 = create_video_file(tmp_path, "v1.mkv")
-    config = AnalysisConfig(frame_count=10)
+    config = AnalysisConfig(random_frame_count=10)
     key1 = compute_cache_key([v1], config)
     key2 = compute_cache_key([v1], config)
     assert key1 == key2
@@ -46,7 +46,7 @@ def test_compute_cache_key_deterministic(tmp_path: Path) -> None:
 def test_compute_cache_key_changes_when_selected_reference_changes(tmp_path: Path) -> None:
     v1 = create_video_file(tmp_path, "v1.mkv")
     v2 = create_video_file(tmp_path, "v2.mkv")
-    config = AnalysisConfig(frame_count=10)
+    config = AnalysisConfig(random_frame_count=10)
     key1 = compute_cache_key([v1, v2], config)
     key2 = compute_cache_key([v2, v1], config)
     assert key1 != key2
@@ -55,7 +55,7 @@ def test_compute_cache_key_changes_when_selected_reference_changes(tmp_path: Pat
 def test_compute_cache_key_changes_when_selection_domain_changes(tmp_path: Path) -> None:
     v1 = create_video_file(tmp_path, "v1.mkv")
     v2 = create_video_file(tmp_path, "v2.mkv")
-    config = AnalysisConfig(frame_count=10)
+    config = AnalysisConfig(random_frame_count=10)
     key1 = compute_cache_key([v1, v2], config, selection_domain="window=0:100")
     key2 = compute_cache_key([v1, v2], config, selection_domain="window=10:100")
     assert key1 != key2
@@ -83,50 +83,51 @@ def test_metrics_cache_filename_order_independent(tmp_path: Path) -> None:
     assert forward == f"a-source__b-source__{fingerprint}.compframes"
 
 
-def test_compute_cache_key_changes_on_frame_count(tmp_path: Path) -> None:
-    """Different frame_count → different key."""
+def test_compute_cache_key_ignores_selection_counts(tmp_path: Path) -> None:
+    """Selection counts affect frame choice, not metric-array computation."""
     v1 = create_video_file(tmp_path, "v1.mkv")
-    key1 = compute_cache_key([v1], AnalysisConfig(frame_count=10))
-    key2 = compute_cache_key([v1], AnalysisConfig(frame_count=20))
-    assert key1 != key2
+    key1 = compute_cache_key([v1], AnalysisConfig(random_frame_count=10))
+    key2 = compute_cache_key(
+        [v1],
+        AnalysisConfig(
+            user_frames=[1, 2],
+            random_frame_count=3,
+            dark_frame_count=4,
+            bright_frame_count=5,
+            motion_frame_count=6,
+        ),
+    )
+    assert key1 == key2
 
 
-def test_compute_cache_key_changes_on_selection_mode(tmp_path: Path) -> None:
-    """Different selection_mode → different key."""
-    v1 = create_video_file(tmp_path, "v1.mkv")
-    key1 = compute_cache_key([v1], AnalysisConfig(selection_mode=SelectionMode.MIXED))
-    key2 = compute_cache_key([v1], AnalysisConfig(selection_mode=SelectionMode.RANDOM))
-    assert key1 != key2
-
-
-def test_compute_cache_key_changes_on_random_seed(tmp_path: Path) -> None:
-    """Different random_seed → different key."""
+def test_compute_cache_key_ignores_random_seed(tmp_path: Path) -> None:
+    """Random seed affects frame choice, not metric-array computation."""
     v1 = create_video_file(tmp_path, "v1.mkv")
     key1 = compute_cache_key([v1], AnalysisConfig(random_seed=42))
     key2 = compute_cache_key([v1], AnalysisConfig(random_seed=43))
-    assert key1 != key2
+    assert key1 == key2
 
 
-def test_compute_cache_key_changes_on_dark_quantile(tmp_path: Path) -> None:
-    """Different dark_quantile → different key."""
+def test_compute_cache_key_ignores_dark_quantile(tmp_path: Path) -> None:
+    """Dark quantile affects frame choice, not metric-array computation."""
     v1 = create_video_file(tmp_path, "v1.mkv")
     key1 = compute_cache_key([v1], AnalysisConfig(dark_quantile=0.05))
     key2 = compute_cache_key([v1], AnalysisConfig(dark_quantile=0.10))
-    assert key1 != key2
+    assert key1 == key2
 
 
-def test_compute_cache_key_changes_on_bright_quantile(tmp_path: Path) -> None:
-    """Different bright_quantile → different key."""
+def test_compute_cache_key_ignores_bright_quantile(tmp_path: Path) -> None:
+    """Bright quantile affects frame choice, not metric-array computation."""
     v1 = create_video_file(tmp_path, "v1.mkv")
     key1 = compute_cache_key([v1], AnalysisConfig(bright_quantile=0.95))
     key2 = compute_cache_key([v1], AnalysisConfig(bright_quantile=0.90))
-    assert key1 != key2
+    assert key1 == key2
 
 
 def test_compute_cache_key_changes_on_path_change(tmp_path: Path) -> None:
     """Rename file → different key."""
     v1 = create_video_file(tmp_path, "v1.mkv")
-    config = AnalysisConfig(frame_count=10)
+    config = AnalysisConfig(random_frame_count=10)
     key1 = compute_cache_key([v1], config)
 
     v2 = tmp_path / "v2.mkv"
@@ -138,27 +139,27 @@ def test_compute_cache_key_changes_on_path_change(tmp_path: Path) -> None:
 def test_compute_cache_key_changes_on_size_change(tmp_path: Path) -> None:
     """Write more bytes to file → different key."""
     v1 = create_video_file(tmp_path, "v1.mkv", content=b"test")
-    key1 = compute_cache_key([v1], AnalysisConfig(frame_count=10))
+    key1 = compute_cache_key([v1], AnalysisConfig(random_frame_count=10))
 
     create_video_file(tmp_path, "v1.mkv", content=b"test-longer")
-    key2 = compute_cache_key([v1], AnalysisConfig(frame_count=10))
+    key2 = compute_cache_key([v1], AnalysisConfig(random_frame_count=10))
     assert key1 != key2
 
 
 def test_compute_cache_key_changes_on_mtime_change(tmp_path: Path) -> None:
     """os.utime(path, (new_mtime, new_mtime)) → different key."""
     v1 = create_video_file(tmp_path, "v1.mkv")
-    key1 = compute_cache_key([v1], AnalysisConfig(frame_count=10))
+    key1 = compute_cache_key([v1], AnalysisConfig(random_frame_count=10))
 
     os.utime(v1, (FIXED_MTIME + 1, FIXED_MTIME + 1))
-    key2 = compute_cache_key([v1], AnalysisConfig(frame_count=10))
+    key2 = compute_cache_key([v1], AnalysisConfig(random_frame_count=10))
     assert key1 != key2
 
 
 def test_save_and_load_round_trip(tmp_path: Path) -> None:
     """Save → load → success=True, data matches, fps == Fraction(24)."""
     v1 = create_video_file(tmp_path, "v1.mkv")
-    config = AnalysisConfig(frame_count=10)
+    config = AnalysisConfig(random_frame_count=10)
     fingerprint = compute_cache_key([v1], config)
 
     clips = [ClipIdentity(path=str(v1), size=v1.stat().st_size, mtime=v1.stat().st_mtime)]

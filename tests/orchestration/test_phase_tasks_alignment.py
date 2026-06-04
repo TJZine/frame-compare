@@ -11,7 +11,6 @@ import pytest
 
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.analysis.window import SelectionWindow
-from frame_compare.config.schema import SelectionMode
 from frame_compare.orchestration import phase_tasks
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentResult
@@ -140,7 +139,7 @@ def test_run_align_phase_reselects_trimmed_overlap_when_fallback_plan_would_drop
     )
     ctx = _context(tmp_path, comparisons=[comparison])
     ctx.config.analysis = ctx.config.analysis.model_copy(
-        update={"selection_mode": SelectionMode.QUANTILE, "frame_count": 4}
+        update={"random_frame_count": 0, "dark_frame_count": 2, "bright_frame_count": 2}
     )
     ctx.analysis_metrics = FrameMetrics(
         luminance=[float(frame) / 219.0 for frame in range(220)],
@@ -204,7 +203,7 @@ def test_run_align_phase_fallback_reselects_only_inside_global_selection_window(
     ctx = _context(tmp_path, comparisons=[comparison])
     ctx.selection_window = SelectionWindow(start_frame=80, end_frame_exclusive=140)
     ctx.config.analysis = ctx.config.analysis.model_copy(
-        update={"selection_mode": SelectionMode.QUANTILE, "frame_count": 4}
+        update={"random_frame_count": 0, "dark_frame_count": 2, "bright_frame_count": 2}
     )
     ctx.analysis_metrics = FrameMetrics(
         luminance=[float(frame) / 219.0 for frame in range(220)],

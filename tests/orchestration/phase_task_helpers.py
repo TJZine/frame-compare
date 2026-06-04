@@ -24,7 +24,7 @@ generated_dir = "generated"
 config_dir = "config"
 
 [analysis]
-frame_count = 3
+random_frame_count = 3
 random_seed = 7
 
 [audio_alignment]

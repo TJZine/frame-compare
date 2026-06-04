@@ -40,9 +40,13 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
         config_file=tmp_path / "config" / "config.toml",
     )
 
+    config = ConfigSchema()
+    config.analysis = config.analysis.model_copy(
+        update={"random_frame_count": 0, "dark_frame_count": 1}
+    )
     prep = PrepState(
         workspace=workspace,
-        config=ConfigSchema(),
+        config=config,
         input_videos=[
             tmp_path / "ref.mkv",
             tmp_path / "comp_a.mkv",
@@ -138,7 +142,11 @@ def test_run_request_cli_config_overrides_capture_runtime_override_contract(tmp_
         tm_preset=TonemapPreset.FILMIC,
         tm_target_nits=203,
         overlay_mode=OverlayMode.DIAGNOSTIC,
-        frame_count=12,
+        user_frames=[4, 8],
+        random_frame_count=12,
+        dark_frame_count=2,
+        bright_frame_count=3,
+        motion_frame_count=4,
         seed=123,
         no_upload=True,
         force_interactive_alignment=True,
@@ -150,7 +158,11 @@ def test_run_request_cli_config_overrides_capture_runtime_override_contract(tmp_
     assert overrides.tm_preset == TonemapPreset.FILMIC
     assert overrides.tm_target_nits == 203
     assert overrides.tm_curve is None
-    assert overrides.frame_count == 12
+    assert overrides.user_frames == [4, 8]
+    assert overrides.random_frame_count == 12
+    assert overrides.dark_frame_count == 2
+    assert overrides.bright_frame_count == 3
+    assert overrides.motion_frame_count == 4
     assert overrides.seed == 123
     assert overrides.overlay_mode == OverlayMode.DIAGNOSTIC
     assert overrides.no_upload is True

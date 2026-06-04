@@ -21,7 +21,6 @@ from frame_compare.analysis.types import (
 )
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.errors import ConfigValidationError
-from frame_compare.config.schema import SelectionMode
 from frame_compare.orchestration import phase_tasks
 from frame_compare.orchestration.types import (
     RenderArtifacts,
@@ -66,7 +65,6 @@ def test_run_analyze_phase_records_cache_hit_and_selection_breakdown(
     }
     selection = FrameSelection(
         frames=[1, 8, 13],
-        mode=SelectionMode.MIXED,
         seed=ctx.config.analysis.random_seed,
         breakdown=breakdown,
         selection_details=selection_details,
@@ -146,7 +144,6 @@ def test_run_analyze_phase_uses_prepared_analysis_selection_domain(
     def _fake_select_frames(**_kwargs: object) -> FrameSelection:
         return FrameSelection(
             frames=[0],
-            mode=SelectionMode.MIXED,
             seed=ctx.config.analysis.random_seed,
             breakdown=SelectionBreakdown(quantile_dark=[0]),
         )
@@ -221,7 +218,6 @@ def test_run_analyze_phase_selects_from_reference_base_trim_domain(
         assert received_metrics.luminance == [10.0, 11.0, 12.0, 13.0, 14.0]
         return FrameSelection(
             frames=[0, 4],
-            mode=SelectionMode.MIXED,
             seed=ctx.config.analysis.random_seed,
             breakdown=SelectionBreakdown(quantile_dark=[0], quantile_bright=[4]),
             selection_details={
@@ -258,7 +254,7 @@ def test_run_analyze_phase_selects_from_reference_base_trim_domain(
     assert output.selection_details_by_source_frame is not None
     assert set(output.selection_details_by_source_frame) == {10, 14}
     assert output.selection_details_by_source_frame[10].frame_index == 10
-    assert calls["select"]["config"].frame_count == 3
+    assert calls["select"]["config"].random_frame_count == 3
 
 
 @pytest.mark.unit
@@ -288,7 +284,6 @@ def test_run_analyze_phase_selects_from_global_selection_window(
         assert len(received_metrics.luminance) == 48
         return FrameSelection(
             frames=[0, 47],
-            mode=SelectionMode.MIXED,
             seed=ctx.config.analysis.random_seed,
             breakdown=SelectionBreakdown(quantile_dark=[0], quantile_bright=[47]),
             selection_details={
