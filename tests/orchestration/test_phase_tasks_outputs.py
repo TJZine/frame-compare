@@ -626,6 +626,123 @@ def test_run_render_phase_uses_alignment_reselected_source_domain_labels(
     ]
 
 
+def test_run_render_phase_labels_skipped_analysis_alignment_fallback_random_frame(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
+    ctx = _context(tmp_path, comparisons=[comparison])
+    ctx.config.analysis = ctx.config.analysis.model_copy(
+        update={"user_frames": [0], "random_frame_count": 1}
+    )
+
+    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+        return [
+            AlignmentResult(
+                reference_clip="reference.mkv",
+                comparison_clip="encode.mkv",
+                frame_offset=80,
+                time_offset_seconds=3.33,
+                correlation_score=0.9,
+                algorithm="cross_correlation",
+                source="computed",
+            )
+        ]
+
+    captured: dict[str, Any] = {}
+
+    def _fake_render_screenshots_from_batch(**kwargs: object) -> dict[str, list[Path]]:
+        captured.update(kwargs)
+        return {"Reference": [tmp_path / "reference.png"]}
+
+    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(
+        "frame_compare.render.batch.orchestrator.render_screenshots_from_batch",
+        _fake_render_screenshots_from_batch,
+    )
+
+    align_output = phase_tasks.run_align_phase(ctx, selected_frames=[0, 66])
+    ctx.reference = align_output.reference
+    ctx.comparisons = align_output.comparisons
+    ctx.selection_breakdown = align_output.selection_breakdown
+    ctx.selection_details_by_source_frame = align_output.selection_details_by_source_frame
+
+    phase_tasks.run_render_phase(
+        ctx,
+        frames=align_output.selected_frames,
+        runner=cast(Any, _RenderRunner()),
+    )
+
+    requests = captured["batch_requests"]
+    assert align_output.selected_frames == [6]
+    assert requests[0].selection_labels == ["Random"]
+    assert requests[0].selection_details is not None
+    assert requests[0].selection_details[0] is not None
+    assert requests[0].selection_details[0].frame_index == 86
+    assert requests[0].selection_details[0].label == "Random"
+
+
+def test_run_report_phase_labels_skipped_analysis_alignment_fallback_random_frame(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
+    ctx = _context(tmp_path, comparisons=[comparison])
+    ctx.config.analysis = ctx.config.analysis.model_copy(
+        update={"user_frames": [0], "random_frame_count": 1}
+    )
+
+    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+        return [
+            AlignmentResult(
+                reference_clip="reference.mkv",
+                comparison_clip="encode.mkv",
+                frame_offset=80,
+                time_offset_seconds=3.33,
+                correlation_score=0.9,
+                algorithm="cross_correlation",
+                source="computed",
+            )
+        ]
+
+    captured: dict[str, Any] = {}
+    expected_path = tmp_path / "report.html"
+
+    def _fake_generate_report(report_data: object, report_config: object) -> Path:
+        captured["report_data"] = report_data
+        captured["report_config"] = report_config
+        return expected_path
+
+    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(phase_tasks, "generate_report", _fake_generate_report)
+
+    align_output = phase_tasks.run_align_phase(ctx, selected_frames=[0, 66])
+    ctx.reference = align_output.reference
+    ctx.comparisons = align_output.comparisons
+    ctx.selection_breakdown = align_output.selection_breakdown
+    ctx.selection_details_by_source_frame = align_output.selection_details_by_source_frame
+    render = RenderArtifacts(
+        screenshots_by_label={
+            "Reference": [tmp_path / "screenshots" / "reference.png"],
+            "Encode 1": [tmp_path / "screenshots" / "encode.png"],
+        },
+        screenshot_dir=tmp_path / "screenshots",
+    )
+
+    output = phase_tasks.run_report_phase(
+        ctx,
+        frames=align_output.selected_frames,
+        render=render,
+        metadata=None,
+        slowpics_url=None,
+    )
+
+    report_data = captured["report_data"]
+    assert output.report_path == expected_path
+    assert align_output.selected_frames == [6]
+    assert [
+        (detail.label, detail.detail, detail.category) for detail in report_data.frame_details
+    ] == [("Frame 86", "Source frame 86", "random")]
+
+
 def test_run_report_phase_without_screenshots_clears_existing_report_path(tmp_path: Path) -> None:
     ctx = _context(tmp_path)
     artifacts = RunArtifacts(report_path=tmp_path / "stale.html")

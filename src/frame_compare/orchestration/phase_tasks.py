@@ -830,11 +830,7 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
         reference=ctx.reference,
         selected_frames=selected_frames,
     )
-    (
-        normalized_selected_frames,
-        used_fallback_frame_plan,
-        dropped_user_source_frames,
-    ) = _normalize_selected_frames_for_trimmed_domain(
+    normalized_selection = _normalize_selected_frames_for_trimmed_domain(
         selected_frames=selected_source_frames,
         user_source_frames=set(ctx.config.analysis.user_frames),
         reference=reference,
@@ -844,14 +840,15 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
         seed=ctx.config.analysis.random_seed,
         allow_fallback=_generated_frame_count(ctx.config.analysis) > 0,
     )
-    if dropped_user_source_frames:
+    normalized_selected_frames = normalized_selection.selected_frames
+    if normalized_selection.dropped_user_source_frames:
         warnings.append(
             "frame selection: dropped user frame(s) outside aligned renderable range: "
-            + ", ".join(str(frame) for frame in dropped_user_source_frames)
+            + ", ".join(str(frame) for frame in normalized_selection.dropped_user_source_frames)
         )
     selection_breakdown: SelectionBreakdown | None = None
     selection_details_by_source_frame: SelectionDetailsByFrame | None = None
-    if used_fallback_frame_plan and ctx.analysis_metrics is not None:
+    if normalized_selection.used_fallback_frame_plan and ctx.analysis_metrics is not None:
         configured_user_source_frames = set(ctx.config.analysis.user_frames)
         normalized_user_frames = [
             frame
@@ -900,6 +897,16 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
                     **selection_details_by_source_frame,
                     **user_selection_details,
                 }
+    elif normalized_selection.used_fallback_frame_plan:
+        selection_breakdown = SelectionBreakdown(
+            user=normalized_selection.user_source_frames,
+            random=normalized_selection.generated_source_frames,
+        )
+        selection_details_by_source_frame = _initial_selection_details_by_source_frame(
+            user_source_frames=normalized_selection.user_source_frames,
+            random_source_frames=normalized_selection.generated_source_frames,
+            fps=reference.effective_fps,
+        )
     return AlignPhaseOutput(
         reference=reference,
         comparisons=comparisons,
@@ -1251,6 +1258,15 @@ class _TrimmedOverlapSelection:
     selection_details_by_source_frame: SelectionDetailsByFrame
 
 
+@dataclass(frozen=True, slots=True)
+class _NormalizedFrameSelection:
+    selected_frames: list[int]
+    used_fallback_frame_plan: bool
+    dropped_user_source_frames: list[int]
+    user_source_frames: list[int]
+    generated_source_frames: list[int]
+
+
 def _trimmed_metrics_for_overlap(
     *,
     metrics: FrameMetrics,
@@ -1328,7 +1344,7 @@ def _normalize_selected_frames_for_trimmed_domain(
     generated_requested_count: int,
     seed: int,
     allow_fallback: bool = True,
-) -> tuple[list[int], bool, list[int]]:
+) -> _NormalizedFrameSelection:
     selectable_start, selectable_length = _selectable_aligned_source_window(
         reference=reference,
         comparisons=comparisons,
@@ -1369,14 +1385,32 @@ def _normalize_selected_frames_for_trimmed_domain(
     )
     if generated_target_count <= 0:
         if normalized_frames:
-            return normalized_frames, False, dropped_user_source_frames
+            return _normalized_frame_selection_result(
+                selected_frames=normalized_frames,
+                used_fallback_frame_plan=False,
+                dropped_user_source_frames=dropped_user_source_frames,
+                reference_trim_start=reference.trim.trim_start_frames,
+                user_source_frames=user_source_frames,
+            )
         if not allow_fallback:
             raise AudioAlignmentError("No selected frames remain after alignment.")
-        return [], False, dropped_user_source_frames
+        return _normalized_frame_selection_result(
+            selected_frames=[],
+            used_fallback_frame_plan=False,
+            dropped_user_source_frames=dropped_user_source_frames,
+            reference_trim_start=reference.trim.trim_start_frames,
+            user_source_frames=user_source_frames,
+        )
     if not allow_fallback:
         if not normalized_frames:
             raise AudioAlignmentError("No selected frames remain after alignment.")
-        return normalized_frames, False, dropped_user_source_frames
+        return _normalized_frame_selection_result(
+            selected_frames=normalized_frames,
+            used_fallback_frame_plan=False,
+            dropped_user_source_frames=dropped_user_source_frames,
+            reference_trim_start=reference.trim.trim_start_frames,
+            user_source_frames=user_source_frames,
+        )
     if len(normalized_generated_frames) < generated_target_count:
         fallback_frames = _fallback_generated_frames_for_aligned_window(
             selectable_length=selectable_length,
@@ -1388,8 +1422,44 @@ def _normalize_selected_frames_for_trimmed_domain(
                 frame + reference.trim.trim_start_frames for frame in normalized_user_frames
             },
         )
-        return sorted({*normalized_user_frames, *fallback_frames}), True, dropped_user_source_frames
-    return normalized_frames, False, dropped_user_source_frames
+        return _normalized_frame_selection_result(
+            selected_frames=sorted({*normalized_user_frames, *fallback_frames}),
+            used_fallback_frame_plan=True,
+            dropped_user_source_frames=dropped_user_source_frames,
+            reference_trim_start=reference.trim.trim_start_frames,
+            user_source_frames=user_source_frames,
+        )
+    return _normalized_frame_selection_result(
+        selected_frames=normalized_frames,
+        used_fallback_frame_plan=False,
+        dropped_user_source_frames=dropped_user_source_frames,
+        reference_trim_start=reference.trim.trim_start_frames,
+        user_source_frames=user_source_frames,
+    )
+
+
+def _normalized_frame_selection_result(
+    *,
+    selected_frames: list[int],
+    used_fallback_frame_plan: bool,
+    dropped_user_source_frames: list[int],
+    reference_trim_start: int,
+    user_source_frames: set[int],
+) -> _NormalizedFrameSelection:
+    selected_source_frames = [frame + reference_trim_start for frame in selected_frames]
+    final_user_source_frames = [
+        frame for frame in selected_source_frames if frame in user_source_frames
+    ]
+    final_generated_source_frames = [
+        frame for frame in selected_source_frames if frame not in user_source_frames
+    ]
+    return _NormalizedFrameSelection(
+        selected_frames=selected_frames,
+        used_fallback_frame_plan=used_fallback_frame_plan,
+        dropped_user_source_frames=dropped_user_source_frames,
+        user_source_frames=final_user_source_frames,
+        generated_source_frames=final_generated_source_frames,
+    )
 
 
 def _fallback_generated_frames_for_aligned_window(
