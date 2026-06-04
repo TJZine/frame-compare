@@ -1306,13 +1306,7 @@ def _reselect_frames_for_trimmed_overlap(
         trimmed_selection = select_frames(
             metrics=trimmed_metrics,
             config=config.model_copy(
-                update={
-                    "user_frames": [],
-                    "random_frame_count": min(config.random_frame_count, target_count),
-                    "dark_frame_count": min(config.dark_frame_count, target_count),
-                    "bright_frame_count": min(config.bright_frame_count, target_count),
-                    "motion_frame_count": min(config.motion_frame_count, target_count),
-                }
+                update=_generated_selection_counts_for_capacity(config, target_count)
             ),
         )
     except SelectionError:
@@ -1332,6 +1326,27 @@ def _reselect_frames_for_trimmed_overlap(
             fps=trimmed_metrics.metadata.fps,
         ),
     )
+
+
+def _generated_selection_counts_for_capacity(
+    config: AnalysisConfig,
+    capacity: int,
+) -> dict[str, int | list[int]]:
+    remaining = max(0, capacity)
+
+    def _claim(requested: int) -> int:
+        nonlocal remaining
+        count = min(requested, remaining)
+        remaining -= count
+        return count
+
+    return {
+        "user_frames": [],
+        "dark_frame_count": _claim(config.dark_frame_count),
+        "bright_frame_count": _claim(config.bright_frame_count),
+        "motion_frame_count": _claim(config.motion_frame_count),
+        "random_frame_count": _claim(config.random_frame_count),
+    }
 
 
 def _normalize_selected_frames_for_trimmed_domain(
