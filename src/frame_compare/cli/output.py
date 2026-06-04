@@ -339,7 +339,7 @@ def print_result_summary(
         _add_kv(
             table,
             "cache",
-            _styled_value("hit" if result.cache_hit else "miss"),
+            _styled_value(result.metrics_cache_status),
         )
 
     console.print(Panel(table, title=f"[{STYLE_HEADER}]Result[/]", border_style="cyan"))

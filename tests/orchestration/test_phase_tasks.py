@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 import pytest
 
-from frame_compare.analysis.errors import MetricsCalculationError
+from frame_compare.analysis.errors import MetricsCalculationError, SelectionError
 from frame_compare.analysis.types import (
     CacheLoadResult,
     FrameMetrics,
@@ -331,6 +331,36 @@ def test_select_initial_frame_plan_uses_global_selection_window(tmp_path: Path) 
 
     assert len(output.selected_frames) == 3
     assert all(24 <= frame < 48 for frame in output.selected_frames)
+
+
+def test_select_initial_frame_plan_fails_when_user_random_candidates_are_empty(
+    tmp_path: Path,
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.reference = ctx.reference.with_trim(trim_start_frames=10, trim_end_frame_inclusive=19)
+    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=10)
+    ctx.config.analysis = ctx.config.analysis.model_copy(
+        update={"user_frames": [0], "random_frame_count": 0}
+    )
+
+    with pytest.raises(SelectionError, match="no selectable user or random frames"):
+        phase_tasks.select_initial_frame_plan(ctx)
+
+
+def test_select_initial_frame_plan_warns_when_user_frames_are_dropped(
+    tmp_path: Path,
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.reference = ctx.reference.with_trim(trim_start_frames=10, trim_end_frame_inclusive=19)
+    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=10)
+    ctx.config.analysis = ctx.config.analysis.model_copy(
+        update={"user_frames": [0, 12], "random_frame_count": 1}
+    )
+
+    output = phase_tasks.select_initial_frame_plan(ctx)
+
+    assert 2 in output.selected_frames
+    assert output.warnings == ["frame selection: dropped user frame(s) outside trims/windowing: 0"]
 
 
 def test_run_artifacts_uses_render_artifacts_carrier() -> None:

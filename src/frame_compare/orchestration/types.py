@@ -110,6 +110,7 @@ def _empty_selection_details_by_source_frame() -> SelectionDetailsByFrame:
 
 
 type SlowpicsUploadConfirmationDecision = Literal["confirmed", "declined"]
+type MetricsCacheStatus = Literal["skipped", "hit", "miss"]
 type SlowpicsUploadConfirmationStatus = Literal[
     "not_applicable",
     "confirmed",
@@ -152,6 +153,7 @@ class RunResult:
     clips_processed: int = 0
     duration_seconds: float = 0.0
     cache_hit: bool = False
+    metrics_cache_status: MetricsCacheStatus = "skipped"
 
     # Diagnostics
     errors: list[str] = field(default_factory=_empty_str_list)
@@ -181,6 +183,7 @@ class RenderArtifacts:
 @dataclass(frozen=True)
 class FramePlanPhaseOutput:
     selected_frames: list[int]
+    warnings: list[str] = field(default_factory=_empty_str_list)
 
 
 @dataclass(frozen=True)
@@ -262,6 +265,7 @@ class RunArtifacts:
     """Internal carrier for artifacts accumulated during the run."""
 
     metrics_cache_hit: bool
+    metrics_cache_status: MetricsCacheStatus
     render: RenderArtifacts | None
     slowpics_url: str | None
     uploaded_slowpics_file_paths: tuple[Path, ...]
@@ -276,6 +280,7 @@ class RunArtifacts:
         self,
         *,
         metrics_cache_hit: bool = False,
+        metrics_cache_status: MetricsCacheStatus = "skipped",
         slowpics_url: str | None = None,
         uploaded_slowpics_file_paths: tuple[Path, ...] = (),
         post_upload_actions: PostUploadActionResults = (),
@@ -287,6 +292,7 @@ class RunArtifacts:
         render: RenderArtifacts | None = None,
     ) -> None:
         self.metrics_cache_hit = metrics_cache_hit
+        self.metrics_cache_status = metrics_cache_status
         self.render = render
         self.slowpics_url = slowpics_url
         self.uploaded_slowpics_file_paths = uploaded_slowpics_file_paths

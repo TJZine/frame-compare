@@ -130,6 +130,7 @@ def select_initial_frame_plan(ctx: RunContext) -> FramePlanPhaseOutput:
     user_frames = _user_frames_in_window(
         ctx.config.analysis, ctx.reference, window_start, frame_count
     )
+    dropped_user_frames = sorted(set(ctx.config.analysis.user_frames) - set(user_frames))
     random_count = min(
         ctx.config.analysis.random_frame_count,
         max(0, frame_count - len(set(user_frames))),
@@ -142,13 +143,32 @@ def select_initial_frame_plan(ctx: RunContext) -> FramePlanPhaseOutput:
             seed=ctx.config.analysis.random_seed,
         ).frames
     ]
-    return FramePlanPhaseOutput(
-        sorted(
-            {
-                *(frame - ctx.reference.trim.trim_start_frames for frame in user_frames),
-                *random_frames,
-            }
+    selected_frames = sorted(
+        {
+            *(frame - ctx.reference.trim.trim_start_frames for frame in user_frames),
+            *random_frames,
+        }
+    )
+    requested_initial_count = len(ctx.config.analysis.user_frames) + (
+        ctx.config.analysis.random_frame_count
+    )
+    if requested_initial_count > 0 and not selected_frames:
+        raise SelectionError(
+            "no selectable user or random frames remain after trims/windowing",
+            requested=requested_initial_count,
+            found=0,
         )
+    warnings = (
+        [
+            "frame selection: dropped user frame(s) outside trims/windowing: "
+            + ", ".join(str(frame) for frame in dropped_user_frames)
+        ]
+        if dropped_user_frames
+        else []
+    )
+    return FramePlanPhaseOutput(
+        selected_frames=selected_frames,
+        warnings=warnings,
     )
 
 
@@ -168,16 +188,6 @@ def _selection_window_for_context(ctx: RunContext) -> tuple[int, int]:
     if window.frame_count > 0:
         return window.start_frame, window.frame_count
     return 0, ctx.reference.effective_num_frames()
-
-
-def _requested_selection_count(config: AnalysisConfig) -> int:
-    return (
-        len(config.user_frames)
-        + config.random_frame_count
-        + config.dark_frame_count
-        + config.bright_frame_count
-        + config.motion_frame_count
-    )
 
 
 def _generated_frame_count(config: AnalysisConfig) -> int:
@@ -773,16 +783,18 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
         for comp, comp_trim in zip(updated_comparisons, comp_trims, strict=True)
     ]
     selection_source_window = _selection_source_window_for_alignment(ctx)
+    selected_source_frames = _source_frames_for_reference_base_domain(
+        reference=ctx.reference,
+        selected_frames=selected_frames,
+    )
     normalized_selected_frames, used_fallback_frame_plan = (
         _normalize_selected_frames_for_trimmed_domain(
-            selected_frames=_source_frames_for_reference_base_domain(
-                reference=ctx.reference,
-                selected_frames=selected_frames,
-            ),
+            selected_frames=selected_source_frames,
+            user_source_frames=set(ctx.config.analysis.user_frames),
             reference=reference,
             comparisons=comparisons,
             selection_source_window=selection_source_window,
-            requested_count=_requested_selection_count(ctx.config.analysis),
+            generated_requested_count=_generated_frame_count(ctx.config.analysis),
             seed=ctx.config.analysis.random_seed,
             allow_fallback=_generated_frame_count(ctx.config.analysis) > 0,
         )
@@ -1179,7 +1191,7 @@ def _reselect_frames_for_trimmed_overlap(
         comparisons=comparisons,
         selection_source_window=selection_source_window,
     )
-    target_count = min(_requested_selection_count(config), selectable_length)
+    target_count = min(_generated_frame_count(config), selectable_length)
     if selectable_length <= 0 or target_count <= 0:
         return None
     trimmed_metrics = _trimmed_metrics_for_overlap(
@@ -1222,10 +1234,11 @@ def _reselect_frames_for_trimmed_overlap(
 def _normalize_selected_frames_for_trimmed_domain(
     *,
     selected_frames: list[int],
+    user_source_frames: set[int],
     reference: ClipState,
     comparisons: list[ClipState],
     selection_source_window: tuple[int, int] | None,
-    requested_count: int,
+    generated_requested_count: int,
     seed: int,
     allow_fallback: bool = True,
 ) -> tuple[list[int], bool]:
@@ -1238,29 +1251,79 @@ def _normalize_selected_frames_for_trimmed_domain(
         raise AudioAlignmentError("No overlapping frames remain after alignment.")
 
     selectable_end = selectable_start + selectable_length
-    normalized_frames = sorted(
+    normalized_user_frames = sorted(
         {
             frame - reference.trim.trim_start_frames
             for frame in selected_frames
+            if frame in user_source_frames and selectable_start <= frame < selectable_end
+        }
+    )
+    normalized_generated_frames = sorted(
+        {
+            frame - reference.trim.trim_start_frames
+            for frame in selected_frames
+            if frame not in user_source_frames
             if selectable_start <= frame < selectable_end
         }
     )
-    target_count = min(requested_count, selectable_length)
-    if target_count <= 0:
+    generated_target_count = min(
+        generated_requested_count,
+        max(0, selectable_length - len(normalized_user_frames)),
+    )
+    normalized_frames = sorted(
+        {*normalized_user_frames, *normalized_generated_frames[:generated_target_count]}
+    )
+    if generated_target_count <= 0:
+        if normalized_frames:
+            return normalized_frames, False
+        if not allow_fallback:
+            raise AudioAlignmentError("No selected frames remain after alignment.")
         return [], False
     if not allow_fallback:
         if not normalized_frames:
             raise AudioAlignmentError("No selected frames remain after alignment.")
-        return normalized_frames[:target_count], False
-    if len(normalized_frames) < target_count:
-        fallback_offset = selectable_start - reference.trim.trim_start_frames
-        return [
+        return normalized_frames, False
+    if len(normalized_generated_frames) < generated_target_count:
+        fallback_frames = _fallback_generated_frames_for_aligned_window(
+            selectable_length=selectable_length,
+            selectable_start=selectable_start,
+            reference_trim_start=reference.trim.trim_start_frames,
+            seed=seed,
+            count=generated_target_count,
+            excluded_frames={
+                frame + reference.trim.trim_start_frames for frame in normalized_user_frames
+            },
+        )
+        return sorted({*normalized_user_frames, *fallback_frames}), True
+    return normalized_frames, False
+
+
+def _fallback_generated_frames_for_aligned_window(
+    *,
+    selectable_length: int,
+    selectable_start: int,
+    reference_trim_start: int,
+    seed: int,
+    count: int,
+    excluded_frames: set[int],
+) -> list[int]:
+    if count <= 0:
+        return []
+    fallback_offset = selectable_start - reference_trim_start
+    sample_count = min(selectable_length, count + len(excluded_frames))
+    while True:
+        selected = [
             frame + fallback_offset
             for frame in create_frame_plan(
-                num_frames=selectable_length, count=target_count, seed=seed
+                num_frames=selectable_length,
+                count=sample_count,
+                seed=seed,
             ).frames
-        ], True
-    return normalized_frames[:target_count], False
+            if frame + selectable_start not in excluded_frames
+        ]
+        if len(selected) >= count or sample_count >= selectable_length:
+            return selected[:count]
+        sample_count = min(selectable_length, sample_count * 2)
 
 
 def _selectable_aligned_source_window(

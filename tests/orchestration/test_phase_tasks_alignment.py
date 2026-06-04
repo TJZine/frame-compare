@@ -131,6 +131,36 @@ def test_run_align_phase_normalizes_analyze_selected_base_domain_frames_with_bas
     assert output.selected_frames == [0, 2, 50]
 
 
+def test_run_align_phase_does_not_backfill_dropped_user_frames_with_random(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
+    ctx = _context(tmp_path, comparisons=[comparison])
+    ctx.config.analysis = ctx.config.analysis.model_copy(
+        update={"user_frames": [0], "random_frame_count": 1}
+    )
+
+    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+        return [
+            AlignmentResult(
+                reference_clip="reference.mkv",
+                comparison_clip="encode.mkv",
+                frame_offset=2,
+                time_offset_seconds=0.08,
+                correlation_score=0.9,
+                algorithm="cross_correlation",
+                source="computed",
+            )
+        ]
+
+    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+
+    output = phase_tasks.run_align_phase(ctx, selected_frames=[0, 50])
+
+    assert output.reference.trim.trim_start_frames == 2
+    assert output.selected_frames == [48]
+
+
 def test_run_align_phase_reselects_trimmed_overlap_when_fallback_plan_would_drop_labels(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

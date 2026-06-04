@@ -108,9 +108,13 @@ def _apply_phase_output(*, ctx: RunContext, state: ExecutionState, output: Phase
     match output:
         case FramePlanPhaseOutput() as phase_output:
             state.selected_frames[:] = phase_output.selected_frames
+            state.warnings.extend(phase_output.warnings)
         case AnalyzePhaseOutput() as phase_output:
             state.selected_frames[:] = phase_output.selected_frames
             state.artifacts.metrics_cache_hit = phase_output.metrics_cache_hit
+            state.artifacts.metrics_cache_status = (
+                "hit" if phase_output.metrics_cache_hit else "miss"
+            )
             ctx.selection_breakdown = phase_output.selection_breakdown
             ctx.selection_details_by_source_frame = phase_output.selection_details_by_source_frame
             ctx.analysis_metrics = phase_output.analysis_metrics

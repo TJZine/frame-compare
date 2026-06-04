@@ -341,6 +341,28 @@ def test_result_summary_omits_warnings_panel_when_no_warnings_exist() -> None:
     assert "Warnings" not in output
 
 
+def test_result_summary_reports_skipped_analysis_cache_status() -> None:
+    console = _console()
+
+    print_result_summary(
+        console,
+        result=RunResult(
+            success=True,
+            frame_count=1,
+            clips_processed=2,
+            duration_seconds=0.5,
+            cache_hit=False,
+            metrics_cache_status="skipped",
+        ),
+        quiet=False,
+    )
+
+    output = _render(console)
+    assert "cache" in output
+    assert "skipped" in output
+    assert "miss" not in output
+
+
 def test_result_summary_prints_success_fallback_and_truncates_warnings() -> None:
     console = _console()
 
