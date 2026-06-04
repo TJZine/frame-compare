@@ -113,6 +113,31 @@ def test_rich_progress_reporter_hides_parent_while_nested_phase_is_active(
     reporter.complete_phase()
 
 
+def test_rich_progress_reporter_restores_parent_when_nested_phase_fails(
+    monkeypatch,
+) -> None:
+    reporter = RichProgressReporter()
+    update_calls: list[tuple[object, dict[str, object]]] = []
+    original_update = reporter._progress.update  # noqa: SLF001
+
+    def _recording_update(task_id, **kwargs):
+        update_calls.append((task_id, kwargs))
+        return original_update(task_id, **kwargs)
+
+    monkeypatch.setattr(reporter._progress, "update", _recording_update)  # noqa: SLF001
+
+    reporter.start_phase("outer", 10)
+    outer_task_id = reporter._task_id  # noqa: SLF001
+    reporter.start_phase("inner", 3)
+
+    reporter.complete_phase(ProgressPhaseStatus.FAILED)
+
+    assert reporter._task_id == outer_task_id  # noqa: SLF001
+    assert (outer_task_id, {"visible": True}) in update_calls
+
+    reporter.complete_phase()
+
+
 def test_rich_progress_reporter_warned_phase_does_not_force_total(
     monkeypatch,
 ) -> None:

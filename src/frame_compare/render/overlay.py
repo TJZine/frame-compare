@@ -90,7 +90,10 @@ def _font_line_gap(font: Font) -> int:
     try:
         bbox = font.getbbox("Ag", stroke_width=_STROKE_WIDTH)
     except TypeError:
-        bbox = font.getbbox("Ag")
+        try:
+            bbox = font.getbbox("Ag")
+        except (AttributeError, OSError, ValueError, RuntimeError):
+            return 24
     except (AttributeError, OSError, ValueError, RuntimeError):
         return 24
     return max(1, int(bbox[3] - bbox[1]))

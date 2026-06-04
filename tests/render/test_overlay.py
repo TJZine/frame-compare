@@ -27,6 +27,18 @@ def _line_gap_for_font(font: object) -> int:
     return max(1, int(bbox[3] - bbox[1]))
 
 
+class _FontWithFailingFallbackGetbbox:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def getbbox(self, text: str, **kwargs: object) -> tuple[int, int, int, int]:
+        del text
+        self.calls += 1
+        if "stroke_width" in kwargs:
+            raise TypeError("stroke_width unsupported")
+        raise OSError("font metrics unavailable")
+
+
 @pytest.fixture
 def captured_draw_calls(monkeypatch):
     """
@@ -328,6 +340,42 @@ def test_apply_overlay_standard_uses_fallback_details_y_when_bbox_fails(monkeypa
     assert len(calls) == 2
     assert calls[0][0] == (26, 14)
     assert calls[1][0] == (26, 144)
+
+
+def test_apply_overlay_uses_fallback_gap_when_font_getbbox_retry_fails(monkeypatch):
+    calls: list[tuple[tuple[int, int], str]] = []
+    fake_font = _FontWithFailingFallbackGetbbox()
+
+    def mock_multiline_text(self, xy, text, *args, **kwargs):
+        calls.append((xy, text))
+        return None
+
+    def mock_multiline_textbbox(self, xy, text, *args, **kwargs):
+        del self, text, args, kwargs
+        x, y = xy
+        return (x, y, x + 120, y + 40)
+
+    monkeypatch.setattr("frame_compare.render.overlay._load_font", lambda config: fake_font)
+    monkeypatch.setattr(ImageDraw.ImageDraw, "multiline_text", mock_multiline_text)
+    monkeypatch.setattr(ImageDraw.ImageDraw, "multiline_textbbox", mock_multiline_textbbox)
+
+    config = OverlayConfig(
+        mode=OverlayMode.STANDARD,
+        label="Ref",
+        frame_number=100,
+        display_frame_number=12,
+        num_frames=100,
+        resolution=(1920, 1080),
+        hdr_info=None,
+        font_path=None,
+        base_text="Base",
+    )
+    img = Image.new("RGB", (100, 100))
+
+    apply_overlay(img, config)
+
+    assert fake_font.calls == 2
+    assert calls[1][0] == (10, 74)
 
 
 def test_apply_overlay_uses_explicit_origin_for_frame_and_detail_blocks(captured_draw_calls):
