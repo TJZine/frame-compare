@@ -315,6 +315,71 @@ def test_run_align_phase_labels_analysis_fallback_when_overlap_is_smaller_than_c
     ]
 
 
+def test_run_align_phase_replaces_stale_analysis_metadata_after_tiny_overlap_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
+    ctx = _context(tmp_path, comparisons=[comparison])
+    ctx.config.analysis = ctx.config.analysis.model_copy(
+        update={"random_frame_count": 0, "dark_frame_count": 2, "bright_frame_count": 2}
+    )
+    luminance = [0.5 for _frame in range(100)]
+    luminance[0] = 0.0
+    luminance[1] = 0.01
+    luminance[50] = 0.99
+    luminance[60] = 1.0
+    ctx.analysis_metrics = FrameMetrics(
+        luminance=luminance,
+        motion=[0.0 for _ in range(100)],
+        metadata=MetricsMetadata(
+            frame_count=100,
+            fps=Fraction(24, 1),
+            config_fingerprint="test",
+            clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
+        ),
+    )
+    initial_selection = phase_tasks.select_frames(
+        metrics=ctx.analysis_metrics,
+        config=ctx.config.analysis,
+    )
+    ctx.selection_breakdown = initial_selection.breakdown
+    ctx.selection_details_by_source_frame = dict(initial_selection.selection_details)
+
+    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+        return [
+            AlignmentResult(
+                reference_clip="reference.mkv",
+                comparison_clip="encode.mkv",
+                frame_offset=98,
+                time_offset_seconds=4.08,
+                correlation_score=0.9,
+                algorithm="cross_correlation",
+                source="computed",
+            )
+        ]
+
+    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+
+    output = phase_tasks.run_align_phase(
+        ctx,
+        selected_frames=list(initial_selection.frames),
+    )
+
+    assert len(initial_selection.frames) == 4
+    assert set(initial_selection.selection_details).isdisjoint({98, 99})
+    assert output.reference.trim.trim_start_frames == 98
+    assert output.selected_frames == [0, 1]
+    assert output.selection_breakdown is not None
+    assert output.selection_breakdown.quantile_dark == [98, 99]
+    assert output.selection_breakdown.quantile_bright == []
+    assert output.selection_details_by_source_frame is not None
+    assert set(output.selection_details_by_source_frame) == {98, 99}
+    assert [output.selection_details_by_source_frame[frame].label for frame in [98, 99]] == [
+        "Dark",
+        "Dark",
+    ]
+
+
 def test_run_align_phase_preserves_surviving_user_label_when_metrics_reselect_same_frame(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
