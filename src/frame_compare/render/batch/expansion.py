@@ -205,12 +205,14 @@ def _overlay_resolution_summary(
     source_size: tuple[int, int],
     geometry_plan: RenderGeometryPlan | None,
 ) -> str | None:
+    transformed = False
     if geometry_plan is None:
         original = source_size
         final = source_size
     else:
         original = geometry_plan.cropped_size
         final = geometry_plan.final_canvas_size
+        transformed = original != source_size or final != source_size
 
     original_width, original_height = original
     final_width, final_height = final
@@ -219,7 +221,7 @@ def _overlay_resolution_summary(
 
     original_text = _format_dimensions(original_width, original_height)
     final_text = _format_dimensions(final_width, final_height)
-    if original == final:
+    if not transformed:
         return f"{original_text}  (native)"
     return f"{original_text} → {final_text}  (original → target)"
 

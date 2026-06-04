@@ -721,7 +721,7 @@ def test_expand_batch_render_requests_attaches_aligned_geometry_after_loading_di
     assert ref_plan.final_canvas_size == (1440, 1080)
     assert requests[0].overlay is not None
     assert requests[0].overlay.resolution == (1440, 1080)
-    assert requests[0].overlay.resolution_summary == "1440 × 1080  (native)"
+    assert requests[0].overlay.resolution_summary == "1440 × 1080 → 1440 × 1080  (original → target)"
     assert requests[0].overlay.origin == ref_plan.overlay_origin
 
     enc_plan = requests[2].geometry_plan
@@ -870,7 +870,7 @@ def test_expand_batch_render_requests_aligns_mixed_dimensions_with_explicit_acti
     ] == [
         (
             (1440, 800),
-            "1440 × 800  (native)",
+            "1440 × 800 → 1440 × 800  (original → target)",
             None,
             (10, 10),
             "HDR10",
@@ -901,6 +901,22 @@ def test_overlay_resolution_summary_uses_cropped_to_target_when_geometry_changes
         geometry_plan=MagicMock(cropped_size=(1280, 720), final_canvas_size=(1440, 800)),
     )
     assert summary == "1280 × 720 → 1440 × 800  (original → target)"
+
+
+def test_overlay_resolution_summary_uses_arrow_for_crop_only_geometry_changes() -> None:
+    summary = _overlay_resolution_summary(
+        source_size=(1920, 1080),
+        geometry_plan=MagicMock(cropped_size=(1440, 1080), final_canvas_size=(1440, 1080)),
+    )
+    assert summary == "1440 × 1080 → 1440 × 1080  (original → target)"
+
+
+def test_overlay_resolution_summary_uses_native_only_when_geometry_is_unchanged() -> None:
+    summary = _overlay_resolution_summary(
+        source_size=(1920, 1080),
+        geometry_plan=MagicMock(cropped_size=(1920, 1080), final_canvas_size=(1920, 1080)),
+    )
+    assert summary == "1920 × 1080  (native)"
 
 
 def test_overlay_base_text_for_request_only_when_hdr_tonemap_is_enabled() -> None:
