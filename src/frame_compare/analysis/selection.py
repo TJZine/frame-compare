@@ -15,90 +15,69 @@ from frame_compare.analysis.types import (
     SelectionDetail,
     SelectionDetailsByFrame,
 )
-from frame_compare.config.schema import AnalysisConfig, SelectionMode
+from frame_compare.config.schema import AnalysisConfig
 
 MIN_GAP: int = 5
 
 
 def select_frames(metrics: FrameMetrics, config: AnalysisConfig) -> FrameSelection:
-    """Select frames based on configuration and metrics.
+    """Select frames from explicit user/random/dark/bright/motion requests."""
 
-    Args:
-        metrics: Calculated frame metrics (luminance, motion).
-        config: Analysis configuration including frame count and selection mode.
-
-    Returns:
-        A FrameSelection object containing the selected frames and breakdown.
-
-    Raises:
-        SelectionError: If metrics are empty or insufficient candidates are found.
-    """
     total_frames = metrics.metadata.frame_count
     if total_frames == 0:
-        raise SelectionError(reason="empty_metrics", requested=config.frame_count, found=0)
+        raise SelectionError(reason="empty_metrics", requested=_requested_count(config), found=0)
 
-    mode = config.selection_mode
-    requested_count = config.frame_count
     seed = config.random_seed
 
     selected_set: set[int] = set()
-    breakdown = SelectionBreakdown()
+    user_frames = sorted({frame for frame in config.user_frames if 0 <= frame < total_frames})
+    selected_set.update(user_frames)
 
-    if mode == SelectionMode.QUANTILE:
-        dark, bright = _select_by_quantile(
-            metrics.luminance,
-            requested_count,
-            dark_quantile=config.dark_quantile,
-            bright_quantile=config.bright_quantile,
-        )
-        breakdown = SelectionBreakdown(quantile_dark=dark, quantile_bright=bright)
-        selected_set.update(dark)
-        selected_set.update(bright)
+    dark = _select_dark_frames(
+        metrics.luminance,
+        config.dark_frame_count,
+        dark_quantile=config.dark_quantile,
+    )
+    dark = [frame for frame in dark if frame not in selected_set]
+    selected_set.update(dark)
 
-    elif mode == SelectionMode.MOTION:
-        motion_frames = _select_by_motion(metrics.motion, requested_count, selected_set, MIN_GAP)
-        breakdown = SelectionBreakdown(motion=motion_frames)
-        selected_set.update(motion_frames)
+    bright = _select_bright_frames(
+        metrics.luminance,
+        config.bright_frame_count,
+        bright_quantile=config.bright_quantile,
+    )
+    bright = [frame for frame in bright if frame not in selected_set]
+    selected_set.update(bright)
 
-    elif mode == SelectionMode.RANDOM:
-        random_frames = _select_random(total_frames, requested_count, seed, selected_set, MIN_GAP)
-        breakdown = SelectionBreakdown(random=random_frames)
-        selected_set.update(random_frames)
+    motion_frames = _select_by_motion(
+        metrics.motion,
+        config.motion_frame_count,
+        selected_set,
+        MIN_GAP,
+    )
+    selected_set.update(motion_frames)
 
-    elif mode == SelectionMode.MIXED:
-        # Allocation for MIXED:
-        # 40% Quantiles (20% dark, 20% bright)
-        # 40% Motion
-        # Remaining Random
-        quantile_n = int(requested_count * 0.4)
-        motion_n = int(requested_count * 0.4)
-        random_n = requested_count - quantile_n - motion_n
+    random_frames = _select_random(
+        total_frames,
+        config.random_frame_count,
+        seed,
+        selected_set,
+        MIN_GAP,
+    )
+    selected_set.update(random_frames)
 
-        dark, bright = _select_by_quantile(
-            metrics.luminance,
-            quantile_n,
-            dark_quantile=config.dark_quantile,
-            bright_quantile=config.bright_quantile,
-        )
-        selected_set.update(dark)
-        selected_set.update(bright)
-
-        motion_frames = _select_by_motion(metrics.motion, motion_n, selected_set, MIN_GAP)
-        selected_set.update(motion_frames)
-
-        random_frames = _select_random(total_frames, random_n, seed, selected_set, MIN_GAP)
-        selected_set.update(random_frames)
-
-        breakdown = SelectionBreakdown(
-            quantile_dark=dark,
-            quantile_bright=bright,
-            motion=motion_frames,
-            random=random_frames,
-        )
+    breakdown = SelectionBreakdown(
+        user=user_frames,
+        quantile_dark=dark,
+        quantile_bright=bright,
+        motion=motion_frames,
+        random=random_frames,
+    )
 
     selected_list = sorted(selected_set)
+    requested_count = _requested_count(config)
 
-    if len(selected_list) < requested_count:
+    if len(selected_list) < requested_count and len(selected_list) >= total_frames:
         raise SelectionError(
             reason="insufficient_candidates",
             requested=requested_count,
@@ -107,13 +86,22 @@ def select_frames(metrics: FrameMetrics, config: AnalysisConfig) -> FrameSelecti
 
     return FrameSelection(
         frames=selected_list,
-        mode=mode,
         seed=seed,
         breakdown=breakdown,
         selection_details=_build_selection_details_by_frame(
             metrics=metrics,
             breakdown=breakdown,
         ),
+    )
+
+
+def _requested_count(config: AnalysisConfig) -> int:
+    return (
+        len(config.user_frames)
+        + config.random_frame_count
+        + config.dark_frame_count
+        + config.bright_frame_count
+        + config.motion_frame_count
     )
 
 
@@ -147,6 +135,7 @@ def _build_selection_details_by_frame(
                 notes=category_note,
             )
 
+    _store_details(breakdown.user, label="User", category_note="user", score_values=None)
     _store_details(
         breakdown.quantile_dark,
         label="Dark",
@@ -185,52 +174,44 @@ def _format_selection_timecode(frame_index: int, fps: Fraction) -> str | None:
     return f"{hours:02}:{minutes:02}:{seconds:02}.{milliseconds:03}"
 
 
-def _select_by_quantile(
+def _select_dark_frames(
     luminance: Sequence[float],
     count: int,
     *,
     dark_quantile: float,
-    bright_quantile: float,
-) -> tuple[list[int], list[int]]:
-    """Select frames based on luminance extremes bounded by configured quantiles.
-
-    `dark_quantile` and `bright_quantile` define rank cutoffs (not luminance values):
-    - Dark candidates are the lowest `int(N * dark_quantile)` frames by luminance.
-    - Bright candidates are the highest frames starting at rank `int(N * bright_quantile)`.
-
-    When the candidate pool is larger than needed, selections are evenly sampled
-    across the pool to make the quantile thresholds meaningful.
-    """
+) -> list[int]:
     if count <= 0:
-        return ([], [])
-
-    half = count // 2
-    dark_needed = half
-    bright_needed = count - half
-
+        return []
     indexed = sorted(enumerate(luminance), key=lambda x: x[1])
     n = len(indexed)
-
     if n == 0:
-        return ([], [])
-
+        return []
     dark_cut = max(1, int(n * dark_quantile))
+    dark_pool = [idx for idx, _ in indexed[:dark_cut]]
+    if len(dark_pool) < count:
+        dark_pool = [idx for idx, _ in indexed[:count]]
+    return sorted(_sample_evenly(dark_pool, count))
+
+
+def _select_bright_frames(
+    luminance: Sequence[float],
+    count: int,
+    *,
+    bright_quantile: float,
+) -> list[int]:
+    if count <= 0:
+        return []
+    indexed = sorted(enumerate(luminance), key=lambda x: x[1])
+    n = len(indexed)
+    if n == 0:
+        return []
     bright_cut = int(n * bright_quantile)
     if bright_cut >= n:
         bright_cut = n - 1
-
-    dark_pool = [idx for idx, _ in indexed[:dark_cut]]
     bright_pool = [idx for idx, _ in indexed[bright_cut:]]
-
-    # Ensure pools can satisfy requested counts.
-    if len(dark_pool) < dark_needed:
-        dark_pool = [idx for idx, _ in indexed[:dark_needed]]
-    if len(bright_pool) < bright_needed:
-        bright_pool = [idx for idx, _ in indexed[-bright_needed:]]
-
-    dark = sorted(_sample_evenly(dark_pool, dark_needed))
-    bright = sorted(_sample_evenly(bright_pool, bright_needed))
-    return (dark, bright)
+    if len(bright_pool) < count:
+        bright_pool = [idx for idx, _ in indexed[-count:]]
+    return sorted(_sample_evenly(bright_pool, count))
 
 
 def _sample_evenly(items: Sequence[int], count: int) -> list[int]:

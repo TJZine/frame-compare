@@ -127,16 +127,40 @@ async def resolve_run_metadata(
 
 def select_initial_frame_plan(ctx: RunContext) -> FramePlanPhaseOutput:
     window_start, frame_count = _selection_window_for_context(ctx)
-    return FramePlanPhaseOutput(
-        [
-            frame + window_start
-            for frame in create_frame_plan(
-                num_frames=frame_count,
-                count=min(ctx.config.analysis.frame_count, frame_count),
-                seed=ctx.config.analysis.random_seed,
-            ).frames
-        ]
+    user_frames = _user_frames_in_window(
+        ctx.config.analysis, ctx.reference, window_start, frame_count
     )
+    random_count = min(
+        ctx.config.analysis.random_frame_count,
+        max(0, frame_count - len(set(user_frames))),
+    )
+    random_frames = [
+        frame + window_start
+        for frame in create_frame_plan(
+            num_frames=frame_count,
+            count=random_count,
+            seed=ctx.config.analysis.random_seed,
+        ).frames
+    ]
+    return FramePlanPhaseOutput(
+        sorted(
+            {
+                *(frame - ctx.reference.trim.trim_start_frames for frame in user_frames),
+                *random_frames,
+            }
+        )
+    )
+
+
+def _user_frames_in_window(
+    config: AnalysisConfig,
+    reference: ClipState,
+    window_start: int,
+    frame_count: int,
+) -> list[int]:
+    source_start = reference.trim.trim_start_frames + window_start
+    source_end = source_start + frame_count
+    return sorted({frame for frame in config.user_frames if source_start <= frame < source_end})
 
 
 def _selection_window_for_context(ctx: RunContext) -> tuple[int, int]:
@@ -146,8 +170,23 @@ def _selection_window_for_context(ctx: RunContext) -> tuple[int, int]:
     return 0, ctx.reference.effective_num_frames()
 
 
-def _target_selection_count(config: AnalysisConfig, frame_count: int) -> int:
-    return min(config.frame_count, frame_count)
+def _requested_selection_count(config: AnalysisConfig) -> int:
+    return (
+        len(config.user_frames)
+        + config.random_frame_count
+        + config.dark_frame_count
+        + config.bright_frame_count
+        + config.motion_frame_count
+    )
+
+
+def _generated_frame_count(config: AnalysisConfig) -> int:
+    return (
+        config.random_frame_count
+        + config.dark_frame_count
+        + config.bright_frame_count
+        + config.motion_frame_count
+    )
 
 
 def _source_offset_for_reference_window(reference: ClipState, window_start: int) -> int:
@@ -244,8 +283,11 @@ def _select_frames_for_selection_domain(
     ):
         return select_frames(
             metrics=metrics,
-            config=config.model_copy(
-                update={"frame_count": _target_selection_count(config, frame_count)}
+            config=_config_for_selection_window(
+                config=config,
+                reference=reference,
+                window_start=window_start,
+                frame_count=frame_count,
             ),
         )
 
@@ -259,14 +301,16 @@ def _select_frames_for_selection_domain(
     )
     selection = select_frames(
         metrics=trimmed_metrics,
-        config=config.model_copy(
-            update={"frame_count": _target_selection_count(config, frame_count)}
+        config=_config_for_selection_window(
+            config=config,
+            reference=reference,
+            window_start=window_start,
+            frame_count=frame_count,
         ),
     )
     source_offset = _source_offset_for_reference_window(reference, window_start)
     return FrameSelection(
         frames=[frame + window_start for frame in selection.frames],
-        mode=selection.mode,
         seed=selection.seed,
         breakdown=_selection_breakdown_with_source_offset(
             selection.breakdown,
@@ -280,9 +324,35 @@ def _select_frames_for_selection_domain(
     )
 
 
+def _config_for_selection_window(
+    *,
+    config: AnalysisConfig,
+    reference: ClipState,
+    window_start: int,
+    frame_count: int,
+) -> AnalysisConfig:
+    source_start = reference.trim.trim_start_frames + window_start
+    source_end = source_start + frame_count
+    local_user_frames = [
+        frame - source_start for frame in config.user_frames if source_start <= frame < source_end
+    ]
+    available_after_user = max(0, frame_count - len(set(local_user_frames)))
+    return config.model_copy(
+        update={
+            "user_frames": local_user_frames,
+            "random_frame_count": min(config.random_frame_count, available_after_user),
+            "dark_frame_count": min(config.dark_frame_count, frame_count),
+            "bright_frame_count": min(config.bright_frame_count, frame_count),
+            "motion_frame_count": min(config.motion_frame_count, frame_count),
+        }
+    )
+
+
 def selection_label_for_frame(frame: int, breakdown: SelectionBreakdown | None) -> str | None:
     if breakdown is None:
         return None
+    if frame in breakdown.user:
+        return "User"
     if frame in breakdown.quantile_dark:
         return "Dark"
     if frame in breakdown.quantile_bright:
@@ -348,6 +418,7 @@ def _selection_breakdown_with_source_offset(
     source_offset: int,
 ) -> SelectionBreakdown:
     return SelectionBreakdown(
+        user=[frame + source_offset for frame in breakdown.user],
         quantile_dark=[frame + source_offset for frame in breakdown.quantile_dark],
         quantile_bright=[frame + source_offset for frame in breakdown.quantile_bright],
         motion=[frame + source_offset for frame in breakdown.motion],
@@ -711,8 +782,9 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
             reference=reference,
             comparisons=comparisons,
             selection_source_window=selection_source_window,
-            requested_count=ctx.config.analysis.frame_count,
+            requested_count=_requested_selection_count(ctx.config.analysis),
             seed=ctx.config.analysis.random_seed,
+            allow_fallback=_generated_frame_count(ctx.config.analysis) > 0,
         )
     )
     selection_breakdown: SelectionBreakdown | None = None
@@ -1107,7 +1179,7 @@ def _reselect_frames_for_trimmed_overlap(
         comparisons=comparisons,
         selection_source_window=selection_source_window,
     )
-    target_count = min(config.frame_count, selectable_length)
+    target_count = min(_requested_selection_count(config), selectable_length)
     if selectable_length <= 0 or target_count <= 0:
         return None
     trimmed_metrics = _trimmed_metrics_for_overlap(
@@ -1118,7 +1190,15 @@ def _reselect_frames_for_trimmed_overlap(
     try:
         trimmed_selection = select_frames(
             metrics=trimmed_metrics,
-            config=config.model_copy(update={"frame_count": target_count}),
+            config=config.model_copy(
+                update={
+                    "user_frames": [],
+                    "random_frame_count": min(config.random_frame_count, target_count),
+                    "dark_frame_count": min(config.dark_frame_count, target_count),
+                    "bright_frame_count": min(config.bright_frame_count, target_count),
+                    "motion_frame_count": min(config.motion_frame_count, target_count),
+                }
+            ),
         )
     except SelectionError:
         return None
@@ -1147,6 +1227,7 @@ def _normalize_selected_frames_for_trimmed_domain(
     selection_source_window: tuple[int, int] | None,
     requested_count: int,
     seed: int,
+    allow_fallback: bool = True,
 ) -> tuple[list[int], bool]:
     selectable_start, selectable_length = _selectable_aligned_source_window(
         reference=reference,
@@ -1167,6 +1248,10 @@ def _normalize_selected_frames_for_trimmed_domain(
     target_count = min(requested_count, selectable_length)
     if target_count <= 0:
         return [], False
+    if not allow_fallback:
+        if not normalized_frames:
+            raise AudioAlignmentError("No selected frames remain after alignment.")
+        return normalized_frames[:target_count], False
     if len(normalized_frames) < target_count:
         fallback_offset = selectable_start - reference.trim.trim_start_frames
         return [

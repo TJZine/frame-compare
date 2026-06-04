@@ -60,7 +60,11 @@ class RunRequest:
     tm_curve: ToneCurve | None = None
 
     # Frame selection overrides
-    frame_count: int | None = None
+    user_frames: list[int] | None = None
+    random_frame_count: int | None = None
+    dark_frame_count: int | None = None
+    bright_frame_count: int | None = None
+    motion_frame_count: int | None = None
     seed: int | None = None
 
     # Output behavior
@@ -77,7 +81,11 @@ class RunRequest:
             tm_preset=self.tm_preset,
             tm_target_nits=self.tm_target_nits,
             tm_curve=self.tm_curve,
-            frame_count=self.frame_count,
+            user_frames=self.user_frames,
+            random_frame_count=self.random_frame_count,
+            dark_frame_count=self.dark_frame_count,
+            bright_frame_count=self.bright_frame_count,
+            motion_frame_count=self.motion_frame_count,
             seed=self.seed,
             overlay_mode=self.overlay_mode,
             no_upload=self.no_upload,

@@ -6,8 +6,6 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 from typing import TYPE_CHECKING, Literal
 
-from frame_compare.config.schema import SelectionMode
-
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -80,12 +78,14 @@ class SelectionBreakdown:
     """Breakdown of which frames were selected by which criteria.
 
     Fields:
+        user: Explicit user-selected frames
         quantile_dark: Frames selected for lowest luminance
         quantile_bright: Frames selected for highest luminance
         motion: Frames selected for scene changes/motion
         random: Frames selected for uniform distribution
     """
 
+    user: Sequence[int] = field(default_factory=_empty_int_list)
     quantile_dark: Sequence[int] = field(default_factory=_empty_int_list)
     quantile_bright: Sequence[int] = field(default_factory=_empty_int_list)
     motion: Sequence[int] = field(default_factory=_empty_int_list)
@@ -111,14 +111,12 @@ class FrameSelection:
 
     Fields:
         frames: Sorted list of unique frame numbers
-        mode: The strategy used for selection
         seed: Random seed used
         breakdown: Details of selection sources
         selection_details: Source-frame keyed typed metadata
     """
 
     frames: Sequence[int]
-    mode: SelectionMode
     seed: int
     breakdown: SelectionBreakdown
     selection_details: SelectionDetailsByFrame = field(default_factory=_empty_selection_detail_map)

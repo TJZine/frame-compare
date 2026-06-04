@@ -121,10 +121,10 @@ def _sys_stream_isatty(name: str) -> bool:
 
 if TYPE_CHECKING:
 
-    def _option[T](default: T, *param_decls: str) -> T:
+    def _option[T](default: T, *param_decls: str, **kwargs: object) -> T:
         return default
 
-    def _path_option(default: str, *param_decls: str) -> Path:
+    def _path_option(default: str, *param_decls: str, **kwargs: object) -> Path:
         return Path(default)
 
 else:
@@ -167,7 +167,12 @@ def run(
     tm_preset: str | None = _option(None, "--tm-preset"),
     tm_target: int | None = _option(None, "--tm-target"),
     tm_curve: str | None = _option(None, "--tm-curve"),
-    frame_count: int | None = _option(None, "--frame-count", "-n"),
+    frames: str | None = _option(None, "--frames"),
+    random_frame_count: str | None = _option(None, "--random-frame-count"),
+    dark_frame_count: str | None = _option(None, "--dark-frame-count"),
+    bright_frame_count: str | None = _option(None, "--bright-frame-count"),
+    motion_frame_count: str | None = _option(None, "--motion-frame-count"),
+    removed_frame_count: str | None = _option(None, "--frame-count", "-n", hidden=True),
     seed: int | None = _option(None, "--seed"),
     overlay: str | None = _option(None, "--overlay"),
     skip_analysis: bool = _option(False, "--skip-analysis"),
@@ -192,7 +197,12 @@ def run(
         tm_preset=tm_preset,
         tm_target=tm_target,
         tm_curve=tm_curve,
-        frame_count=frame_count,
+        frames=frames,
+        random_frame_count=random_frame_count,
+        dark_frame_count=dark_frame_count,
+        bright_frame_count=bright_frame_count,
+        motion_frame_count=motion_frame_count,
+        removed_frame_count=removed_frame_count,
         seed=seed,
         overlay=overlay,
         skip_analysis=skip_analysis,

@@ -16,6 +16,7 @@ import httpx
 
 from frame_compare.analysis.metrics import ANALYZE_PROGRESS_TOTAL
 from frame_compare.config.schema import ConfigSchema
+from frame_compare.orchestration.analysis_policy import needs_analysis
 from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.phase_tasks import (
     record_dovi_not_implemented_warning,
@@ -175,7 +176,7 @@ def build_phases_before_align(
         _create_timed_phase(
             "analyze",
             "analyze",
-            lambda config: request.skip_analysis,
+            lambda config: request.skip_analysis or not needs_analysis(config.analysis),
             partial(
                 run_analyze_phase,
                 input_videos=input_videos,

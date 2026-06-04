@@ -27,6 +27,9 @@ The main run path is:
 6. Load or compute clip probe data.
 7. Execute orchestration phases in order:
    `frame_plan -> analyze -> align -> render -> metadata -> dovi -> publish -> report -> post_report_cleanup`
+   The `analyze` phase is automatically skipped when the effective `[analysis]`
+   frame selectors request only `user_frames` and/or `random_frame_count`.
+   Dark, bright, or motion frame counts require analysis.
 
 When effective config enables both `slowpics.auto_upload` and
 `slowpics.confirm_upload_after_report`, the opted-in interactive path changes
@@ -97,7 +100,9 @@ Primary owned paths:
   fingerprint includes the selected reference identity and an all-source
   selection-domain token covering source identity, source trims, effective FPS
   values, configured analysis ignore windows, and the final shared selectable
-  window.
+  window. Metric-array cache identity excludes frame-selection counts,
+  `user_frames`, random seed, and dark/bright quantile thresholds because those
+  affect frame choice rather than metric computation.
 - `generated/clip_probe.toml` or `<resolved paths.generated_dir>/clip_probe.toml`:
   shared clip probe cache used by `--from-cache-only` prevalidation before
   run-folder reservation

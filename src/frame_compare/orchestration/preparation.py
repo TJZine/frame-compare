@@ -13,6 +13,7 @@ from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.overrides import apply_cli_overrides
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_models import SourceOverrideConfig
+from frame_compare.orchestration.analysis_policy import needs_analysis
 from frame_compare.orchestration.context import (
     ClipFingerprint,
     ClipProbeSnapshot,
@@ -124,6 +125,9 @@ def _validate_cache_state(
     input_videos: list[Path],
     selection_domain: str | None,
 ) -> None:
+    if not needs_analysis(config.analysis):
+        return
+
     if request.no_cache:
         _remove_cached_metrics(
             workspace=workspace,
@@ -322,7 +326,7 @@ async def execute_prep(
     prevalidated_selection_window: SelectionWindow | None = None
     prevalidated_selection_domain: str | None = None
 
-    if request.from_cache_only and not request.skip_analysis:
+    if request.from_cache_only and not request.skip_analysis and needs_analysis(config.analysis):
         cached_snapshots = _cached_probe_snapshots_for_cache_only(
             workspace=workspace,
             input_videos=input_videos,

@@ -20,10 +20,13 @@ use_run_folders = true
 # effective_fps = "24000/1001"
 
 [analysis]
-frame_count = 10
+user_frames = []
+random_frame_count = 10
+dark_frame_count = 0
+bright_frame_count = 0
+motion_frame_count = 0
 random_seed = 42
 save_frames_data = true
-selection_mode = "mixed"
 ignore_lead_seconds = 0.0
 ignore_trail_seconds = 0.0
 min_window_seconds = 5.0
