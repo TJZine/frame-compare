@@ -542,11 +542,18 @@ def test_build_html_renders_header_metadata(
     html = build_html(report_payload)
     tags = _parse_start_tags(html)
     info_modal = _parse_info_modal(html)
+    elements = _parse_elements(html)
+    help_button = _require_first(elements, tag="button", element_id="btn-help")
+    info_button = _require_first(elements, tag="button", element_id="btn-info")
+    help_icon = _require_first(help_button, tag="span", class_name="rv-btn-icon")
+    info_icon = _require_first(info_button, tag="span", class_name="rv-btn-icon")
 
     assert "Generated 2026-05-22T12:00:00+00:00 • 2 frames • 2 clips" in html
     assert tags.by_id["btn-help"][1]["class"] == "rv-header-help-btn"
     assert tags.by_id["btn-info"][1]["class"] == "rv-header-info-btn"
     assert tags.by_id["btn-info"][1]["title"] == "Report Info"
+    assert help_icon.text == "?"
+    assert info_icon.text == "ℹ"
     assert info_modal.attrs["class"] == "rv-modal"
     assert info_modal.attrs["aria-hidden"] == "true"
     assert info_modal.attrs["role"] == "dialog"
@@ -1275,6 +1282,7 @@ def test_viewer_assets_wire_metadata_and_error_empty_state_hooks() -> None:
     js = get_js()
 
     assert ".rv-stage-overlay-info" in css
+    assert "display: none !important;" in _css_block(css, "[hidden]")
     assert ".rv-viewer-stage.rv-overlays-hidden .rv-overlay-label" in css
     assert ".rv-viewer-stage.rv-overlays-hidden .rv-focus-hud" not in css
     assert ".rv-align-popover" in css
@@ -1299,6 +1307,30 @@ def test_viewer_assets_wire_metadata_and_error_empty_state_hooks() -> None:
     assert "this.dom.currentFrameCategoryDivider.hidden = !showCategory;" in js
     assert "Selected frame image data is unavailable." in js
     assert "Report viewer markup is incomplete." in js
+
+
+def test_viewer_assets_cover_header_icon_motion_and_dynamic_range_badges() -> None:
+    css = get_css()
+    header_icon_block = _css_block(css, ".rv-btn-icon")
+    dynamic_range_badge_block = _css_block(css, ".rv-clip-meta-heading span:last-child")
+
+    assert ".rv-header-help-btn:hover .rv-btn-icon" in css
+    assert ".rv-header-info-btn:hover .rv-btn-icon" in css
+    assert "transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);" in (
+        header_icon_block
+    )
+    assert "transform: rotate(15deg) scale(1.15);" in css
+
+    assert "font-family: var(--font-mono);" in dynamic_range_badge_block
+    assert "font-size: 0.65rem;" in dynamic_range_badge_block
+    assert "font-weight: 600;" in dynamic_range_badge_block
+    assert "color: var(--text-secondary);" in dynamic_range_badge_block
+    assert "background: rgba(255, 255, 255, 0.05);" in dynamic_range_badge_block
+    assert "border: 1px solid var(--border);" in dynamic_range_badge_block
+    assert "border-radius: 4px;" in dynamic_range_badge_block
+    assert "padding: 0.05rem 0.35rem;" in dynamic_range_badge_block
+    assert "letter-spacing: 0.05em;" in dynamic_range_badge_block
+    assert "line-height: 1;" in dynamic_range_badge_block
 
 
 def test_viewer_assets_toggle_overlays_and_keep_split_pairs_distinct() -> None:
