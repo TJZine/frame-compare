@@ -1551,14 +1551,8 @@ body.rv-inspector-open .rv-viewer-stage {
         align-items: stretch;
     }
     .rv-control-group {
-        border-right: none;
-        border-bottom: 1px solid var(--border);
-        padding-bottom: 0.4rem;
         width: 100%;
         flex-wrap: wrap;
-    }
-    .rv-control-group:last-child {
-        border-bottom: none;
     }
 
     .rv-stage-overlay-info {
@@ -1597,7 +1591,7 @@ body.rv-inspector-open .rv-viewer-stage {
         right: 8px;
         bottom: 8px;
         max-width: calc(100% - 1rem);
-        flex-wrap: wrap;
+        flex-wrap: wrap !important;
         justify-content: flex-end;
         flex-direction: row !important;
         width: auto !important;
