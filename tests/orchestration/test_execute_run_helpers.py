@@ -144,3 +144,45 @@ enable = false
 
     cache_path = cache_io.find_metrics_cache_file(cache_dir, fingerprint)
     assert cache_path is not None
+
+
+def test_analysis_selection_domain_for_cache_inputs_resolves_nested_relative_selectors(
+    tmp_path: Path,
+) -> None:
+    create_config(
+        tmp_path,
+        content="""\
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "generated"
+config_dir = "config"
+use_run_folders = false
+
+[sources]
+reference = "nested/b_comp.mkv"
+
+[audio_alignment]
+enable = false
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+""",
+    )
+    nested_dir = tmp_path / "comparison_videos" / "nested"
+    create_video_files(nested_dir, "a_source.mkv", "b_comp.mkv")
+    config = load_config(tmp_path / "config" / "config.toml")
+    discovered_paths = [nested_dir / "a_source.mkv", nested_dir / "b_comp.mkv"]
+
+    selection_domain = json.loads(
+        analysis_selection_domain_for_cache_inputs(discovered_paths, config)
+    )
+
+    assert selection_domain["reference_path"] == (nested_dir / "b_comp.mkv").as_posix()
+    assert [clip["path"] for clip in selection_domain["clips"]] == [
+        (nested_dir / "b_comp.mkv").as_posix(),
+        (nested_dir / "a_source.mkv").as_posix(),
+    ]

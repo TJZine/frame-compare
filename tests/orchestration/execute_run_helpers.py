@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -191,12 +192,36 @@ def _resolve_cache_source_selection(
     video_paths: list[Path],
     config: ConfigSchema,
 ) -> SourceSelection:
-    input_dir = video_paths[0].parent
+    input_dir = _resolve_cache_input_dir(video_paths, config)
     return resolve_source_selection(
         input_dir=input_dir,
         discovered_paths=video_paths,
         config=config.sources,
     )
+
+
+def _resolve_cache_input_dir(video_paths: list[Path], config: ConfigSchema) -> Path:
+    common_path = Path(os.path.commonpath([str(path) for path in video_paths]))
+    configured_input_dir = Path(config.paths.input_dir)
+    if configured_input_dir.is_absolute():
+        return configured_input_dir
+
+    candidates = [common_path, *common_path.parents]
+    configured_parts = configured_input_dir.parts
+    for candidate in candidates:
+        if candidate.parts[-len(configured_parts) :] != configured_parts:
+            continue
+        if all(_is_relative_to(path, candidate) for path in video_paths):
+            return candidate
+    return common_path
+
+
+def _is_relative_to(path: Path, base: Path) -> bool:
+    try:
+        path.relative_to(base)
+    except ValueError:
+        return False
+    return True
 
 
 def _clip_fingerprint_for_path(path: Path) -> ClipFingerprint:
