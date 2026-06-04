@@ -21,7 +21,7 @@ type Font = ImageFont.ImageFont | ImageFont.FreeTypeFont
 type ImageInput = Image.Image | np.ndarray | None
 
 _LABEL_POSITION = (10, 10)
-_BLOCK_GAP_PX = 10
+_BLOCK_GAP_PX = 0
 _DEFAULT_DETAILS_Y = 140
 _DEFAULT_DETAILS_OFFSET_Y = _DEFAULT_DETAILS_Y - _LABEL_POSITION[1]
 _FILL = (255, 255, 255, 255)

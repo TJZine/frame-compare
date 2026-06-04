@@ -31,6 +31,7 @@ def test_compose_frame_info_lines_minimal_is_label_only() -> None:
     )
     assert lines == ["Ref"]
 
+
 def test_compose_overlay_text_lines_standard_order_matches_legacy_intent() -> None:
     lines = compose_overlay_text_lines(
         mode=OverlayMode.STANDARD,
@@ -44,7 +45,7 @@ def test_compose_overlay_text_lines_standard_order_matches_legacy_intent() -> No
     assert lines[1] == "Frame Selection Type: Dark"
 
 
-def test_compose_overlay_text_lines_diagnostic_appends_lines_before_selection_type() -> None:
+def test_compose_overlay_text_lines_diagnostic_omits_redundant_selection_type() -> None:
     lines = compose_overlay_text_lines(
         mode=OverlayMode.DIAGNOSTIC,
         base_text="Base",
@@ -56,7 +57,7 @@ def test_compose_overlay_text_lines_diagnostic_appends_lines_before_selection_ty
     assert lines[:2] == ["Base", "1920 × 1080  (native)"]
     assert "MDL: ..." in lines
     assert "HDR: ..." in lines
-    assert lines[-1] == "Frame Selection Type: Bright"
+    assert "Frame Selection Type: Bright" not in lines
 
 
 def test_compose_frame_info_lines_none_mode_returns_empty() -> None:
@@ -197,3 +198,15 @@ def test_compose_overlay_text_lines_unknown_resolution_omits_resolution_line() -
         diagnostic_lines=[],
     )
     assert lines == ["Frame Selection Type: Dark"]
+
+
+def test_compose_overlay_text_lines_diagnostic_without_metadata_can_be_resolution_only() -> None:
+    lines = compose_overlay_text_lines(
+        mode=OverlayMode.DIAGNOSTIC,
+        base_text=None,
+        width=1920,
+        height=1080,
+        selection_type="Dark",
+        diagnostic_lines=[],
+    )
+    assert lines == ["1920 × 1080  (native)"]

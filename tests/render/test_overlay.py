@@ -259,7 +259,7 @@ def test_apply_overlay_standard_mode(captured_draw_calls):
 
     expected_frame_info_lines = text1.splitlines()
     expected_frame_info_height = len(expected_frame_info_lines) * 20
-    assert xy2 == (10, 10 + expected_frame_info_height + 10)
+    assert xy2 == (10, 10 + expected_frame_info_height)
     assert text2 == "\n".join(
         compose_overlay_text_lines(
             mode=OverlayMode.STANDARD,
@@ -327,7 +327,7 @@ def test_apply_overlay_uses_explicit_origin_for_frame_and_detail_blocks(captured
     (xy2, _text2, _kwargs2) = captured_draw_calls["multiline_text"][1]
     expected_frame_info_height = len(str(text1).splitlines()) * 20
     assert xy1 == (26, 14)
-    assert xy2 == (26, 14 + expected_frame_info_height + 10)
+    assert xy2 == (26, 14 + expected_frame_info_height)
 
 
 def test_apply_overlay_standard_includes_selection_label_when_present(captured_draw_calls):
@@ -577,6 +577,7 @@ def test_apply_overlay_diagnostic_with_hdr(captured_draw_calls):
             ],
         )
     )
+    assert "Frame Selection Type:" not in text2
 
 
 def test_apply_overlay_diagnostic_sdr(captured_draw_calls):

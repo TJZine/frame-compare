@@ -59,7 +59,7 @@ def compose_overlay_text_lines(
 
     Invariants:
     - STANDARD: optional base text, resolution, selection type.
-    - DIAGNOSTIC: like STANDARD, but inserts diagnostic lines before selection type.
+    - DIAGNOSTIC: optional base text, resolution, then diagnostic lines.
     - MINIMAL/NONE: no lines.
     """
     if mode in (OverlayMode.NONE, OverlayMode.MINIMAL):
@@ -74,6 +74,7 @@ def compose_overlay_text_lines(
 
     if mode == OverlayMode.DIAGNOSTIC:
         lines.extend(diagnostic_lines)
+        return lines
 
     selection = selection_type or "(unknown)"
     lines.append(f"Frame Selection Type: {selection}")
