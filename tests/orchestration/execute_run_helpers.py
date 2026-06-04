@@ -11,6 +11,7 @@ from PIL import Image
 import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.config.schema import ConfigSchema
+from frame_compare.config.schema_models import SourceOverrideConfig
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot, ClipState
 from frame_compare.orchestration.probing.probe_cache import (
     compute_probe_cache_key,
@@ -21,7 +22,7 @@ from frame_compare.orchestration.selection_domain import (
     build_selection_domain_clips,
     compute_selection_window_for_clips,
 )
-from frame_compare.orchestration.source_selection import resolve_source_selection
+from frame_compare.orchestration.source_selection import SourceSelection, resolve_source_selection
 from frame_compare.vs.types import HDRMetadata, SourceInfo
 
 if TYPE_CHECKING:
@@ -90,15 +91,20 @@ def write_metrics_cache(
     selection_domain: str | None = None,
 ) -> None:
     cache_inputs = [source_path] if video_paths is None else video_paths
+    ordered_cache_inputs = _resolved_cache_inputs(cache_inputs, config)
     if selection_domain is None:
-        selection_domain = analysis_selection_domain_for_cache_inputs(cache_inputs, config)
-    write_probe_cache_for_inputs(cache_dir.parent.parent / "clip_probe.toml", cache_inputs, config)
+        selection_domain = analysis_selection_domain_for_cache_inputs(ordered_cache_inputs, config)
+    write_probe_cache_for_inputs(
+        cache_dir.parent.parent / "clip_probe.toml",
+        ordered_cache_inputs,
+        config,
+    )
     fingerprint = cache_io.compute_cache_key(
-        cache_inputs,
+        ordered_cache_inputs,
         config.analysis,
         selection_domain=selection_domain,
     )
-    stats_by_path = {path: path.stat() for path in cache_inputs}
+    stats_by_path = {path: path.stat() for path in ordered_cache_inputs}
     metrics = FrameMetrics(
         luminance=[0.1] * 100,
         motion=[0.2] * 100,
@@ -112,7 +118,7 @@ def write_metrics_cache(
                     size=stats_by_path[path].st_size,
                     mtime=stats_by_path[path].st_mtime,
                 )
-                for path in cache_inputs
+                for path in ordered_cache_inputs
             ],
             version=cache_io.CACHE_VERSION,
         ),
@@ -124,19 +130,12 @@ def analysis_selection_domain_for_cache_inputs(
     video_paths: list[Path],
     config: ConfigSchema,
 ) -> str:
-    input_dir = video_paths[0].parent
-    source_selection = resolve_source_selection(
-        input_dir=input_dir,
-        discovered_paths=video_paths,
-        config=config.sources,
-    )
-    snapshots_by_path = {
-        path: _clip_probe_snapshot_for_cache_input(path) for path in source_selection.ordered_paths
-    }
+    ordered_paths = _resolved_cache_inputs(video_paths, config)
+    snapshots_by_path = {path: _clip_probe_snapshot_for_cache_input(path) for path in ordered_paths}
     clips = build_selection_domain_clips(
-        ordered_paths=source_selection.ordered_paths,
+        ordered_paths=ordered_paths,
         snapshots_by_path=snapshots_by_path,
-        overrides_by_path=dict(source_selection.overrides_by_path),
+        overrides_by_path=_resolved_cache_overrides(video_paths, config),
     )
     window = compute_selection_window_for_clips(clips=clips, config=config)
     return build_analysis_selection_domain_token(
@@ -174,6 +173,29 @@ def _clip_probe_snapshot_for_cache_input(path: Path) -> ClipProbeSnapshot:
         num_frames=100,
         fps=Fraction(24, 1),
         is_hdr=False,
+    )
+
+
+def _resolved_cache_inputs(video_paths: list[Path], config: ConfigSchema) -> list[Path]:
+    return _resolve_cache_source_selection(video_paths, config).ordered_paths
+
+
+def _resolved_cache_overrides(
+    video_paths: list[Path],
+    config: ConfigSchema,
+) -> dict[Path, SourceOverrideConfig]:
+    return dict(_resolve_cache_source_selection(video_paths, config).overrides_by_path)
+
+
+def _resolve_cache_source_selection(
+    video_paths: list[Path],
+    config: ConfigSchema,
+) -> SourceSelection:
+    input_dir = video_paths[0].parent
+    return resolve_source_selection(
+        input_dir=input_dir,
+        discovered_paths=video_paths,
+        config=config.sources,
     )
 
 

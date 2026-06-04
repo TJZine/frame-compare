@@ -94,3 +94,53 @@ enable = false
         "numerator": 24000,
         "denominator": 1001,
     }
+
+
+def test_write_metrics_cache_uses_selected_reference_order_for_fingerprint(
+    tmp_path: Path,
+) -> None:
+    create_config(
+        tmp_path,
+        content="""\
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "generated"
+config_dir = "config"
+use_run_folders = false
+
+[sources]
+reference = "b_comp.mkv"
+
+[audio_alignment]
+enable = false
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+""",
+    )
+    input_dir = tmp_path / "comparison_videos"
+    create_video_files(input_dir, "a_source.mkv", "b_comp.mkv")
+    config = load_config(tmp_path / "config" / "config.toml")
+    cache_dir = tmp_path / "generated" / "cache" / "analysis"
+    discovered_paths = [input_dir / "a_source.mkv", input_dir / "b_comp.mkv"]
+
+    write_metrics_cache(
+        cache_dir,
+        source_path=discovered_paths[0],
+        config=config,
+        video_paths=discovered_paths,
+    )
+
+    selection_domain = analysis_selection_domain_for_cache_inputs(discovered_paths, config)
+    fingerprint = cache_io.compute_cache_key(
+        [input_dir / "b_comp.mkv", input_dir / "a_source.mkv"],
+        config.analysis,
+        selection_domain=selection_domain,
+    )
+
+    cache_path = cache_io.find_metrics_cache_file(cache_dir, fingerprint)
+    assert cache_path is not None
