@@ -1,0 +1,327 @@
+"""Metadata, publish, report, and cleanup phase work."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import httpx
+import structlog
+
+from frame_compare.analysis.types import SelectionDetail
+from frame_compare.config.errors import ConfigValidationError
+from frame_compare.config.schema import ConfigSchema
+from frame_compare.errors import JSONValue
+from frame_compare.orchestration.context import RunContext
+from frame_compare.orchestration.phase_selection import (
+    map_aligned_to_source_frame,
+    selection_detail_for_frame,
+    selection_label_for_frame,
+)
+from frame_compare.orchestration.types import (
+    ConfirmSlowpicsUploadPhaseOutput,
+    DoviPhaseOutput,
+    MetadataPhaseOutput,
+    MetadataPrefetch,
+    PostReportCleanupPhaseOutput,
+    PublishPhaseOutput,
+    RenderArtifacts,
+    ReportPhaseOutput,
+    SlowpicsUploadConfirmationFn,
+    SlowpicsUploadConfirmationRequest,
+)
+from frame_compare.services.errors import SlowpicsError
+from frame_compare.services.metadata import resolve_metadata
+from frame_compare.services.publishers import publish_to_slowpics
+from frame_compare.services.report.display import (
+    SourceFrameSelectionDetail,
+    frame_detail_for_source_frame,
+)
+from frame_compare.services.report.entry import generate_report
+from frame_compare.services.report.payload import FrameDetail, ReportData, clip_info_from_state
+from frame_compare.services.slowpics_post_upload import (
+    SlowpicsPostUploadRequest,
+    run_slowpics_post_upload_actions,
+)
+from frame_compare.services.slowpics_upload_plan import (
+    SlowpicsUploadClip,
+    build_slowpics_upload_plan,
+)
+from frame_compare.services.types import MetadataConfig, TmdbMetadata
+
+log = structlog.get_logger()
+
+REPORT_CONFIRMATION_UNAVAILABLE_WARNING = (
+    "slow.pics upload skipped because report confirmation was unavailable"
+)
+
+__all__ = [
+    "REPORT_CONFIRMATION_UNAVAILABLE_WARNING",
+    "build_metadata_config",
+    "record_dovi_not_implemented_warning",
+    "resolve_run_metadata",
+    "run_confirm_slowpics_upload_phase",
+    "run_metadata_phase",
+    "run_post_report_cleanup_phase",
+    "run_publish_phase",
+    "run_report_phase",
+]
+
+
+def build_metadata_config(config: ConfigSchema) -> MetadataConfig:
+    """Build metadata service config from run config."""
+    return MetadataConfig(
+        api_key=config.tmdb.api_key,
+        unattended=config.tmdb.unattended,
+        timeout_seconds=config.tmdb.timeout_seconds,
+        year_tolerance=config.tmdb.year_tolerance,
+        category_preference=config.tmdb.category_preference,
+    )
+
+
+async def resolve_run_metadata(
+    *,
+    filenames: list[str],
+    config: ConfigSchema,
+    client: httpx.AsyncClient,
+) -> TmdbMetadata | None:
+    return await resolve_metadata(
+        filenames=filenames,
+        config=build_metadata_config(config),
+        client=client,
+    )
+
+
+async def run_metadata_phase(
+    ctx: RunContext,
+    *,
+    client: httpx.AsyncClient | None,
+    metadata_prefetch: MetadataPrefetch,
+) -> MetadataPhaseOutput:
+    if metadata_prefetch.was_attempted:
+        return MetadataPhaseOutput(resolved_metadata=metadata_prefetch.metadata)
+
+    if client is None or not ctx.config.tmdb.enabled:
+        return MetadataPhaseOutput(resolved_metadata=None)
+    metadata = await resolve_run_metadata(
+        filenames=[ctx.reference.path.name],
+        config=ctx.config,
+        client=client,
+    )
+    return MetadataPhaseOutput(resolved_metadata=metadata)
+
+
+def record_dovi_not_implemented_warning(_ctx: RunContext) -> DoviPhaseOutput:
+    return DoviPhaseOutput(
+        warning="dovi: DOVI processing is not implemented yet; continuing without Dolby Vision extraction."
+    )
+
+
+async def run_publish_phase(
+    ctx: RunContext,
+    *,
+    client: httpx.AsyncClient | None,
+    metadata: TmdbMetadata | None,
+    render: RenderArtifacts | None = None,
+    selected_frames: list[int] | None = None,
+) -> PublishPhaseOutput:
+    if client is None:
+        return PublishPhaseOutput(slowpics_url=None)
+    if render is None:
+        raise SlowpicsError("No render artifacts available for slow.pics upload")
+    if selected_frames is None:
+        raise SlowpicsError("No selected frames available for slow.pics upload")
+
+    upload_plan = build_slowpics_upload_plan(
+        selected_frames=selected_frames,
+        clips=_slowpics_upload_clips(ctx),
+        screenshots_by_label=render.screenshots_by_label,
+    )
+    screenshot_dir = (
+        render.screenshot_dir
+        if render.screenshot_dir is not None
+        else ctx.workspace.screenshots_dir
+    )
+    result = await publish_to_slowpics(
+        screenshot_dir=screenshot_dir,
+        config=ctx.config.slowpics,
+        client=client,
+        metadata=metadata,
+        progress=ctx.reporter,
+        upload_plan=upload_plan,
+    )
+    post_upload_actions = await run_slowpics_post_upload_actions(
+        SlowpicsPostUploadRequest(
+            workspace=ctx.workspace,
+            config=ctx.config.slowpics,
+            slowpics_url=result.url,
+            metadata_title=metadata.title if metadata is not None else None,
+            upload_title=screenshot_dir.name,
+        )
+    )
+    return PublishPhaseOutput(
+        slowpics_url=result.url,
+        uploaded_file_paths=result.uploaded_file_paths,
+        post_upload_actions=post_upload_actions,
+    )
+
+
+def run_confirm_slowpics_upload_phase(
+    _ctx: RunContext,
+    *,
+    report_path: Path | None,
+    report_succeeded: bool,
+    confirm_slowpics_upload: SlowpicsUploadConfirmationFn | None,
+) -> ConfirmSlowpicsUploadPhaseOutput:
+    if not report_succeeded or report_path is None:
+        return ConfirmSlowpicsUploadPhaseOutput(
+            status="report_unavailable",
+            warnings=[REPORT_CONFIRMATION_UNAVAILABLE_WARNING],
+        )
+    if confirm_slowpics_upload is None:
+        validation_errors: list[dict[str, JSONValue]] = [
+            {
+                "type": "value_error",
+                "loc": ["slowpics", "confirm_upload_after_report"],
+                "msg": "Report-confirmed slow.pics upload requires a confirmation callback.",
+                "input": True,
+            }
+        ]
+        raise ConfigValidationError(
+            validation_errors,
+            message="Report-confirmed slow.pics upload requires a confirmation callback",
+            hint=(
+                "Provide RunDependencies.confirm_slowpics_upload, or disable "
+                "slowpics.confirm_upload_after_report."
+            ),
+        )
+
+    decision = confirm_slowpics_upload(SlowpicsUploadConfirmationRequest(report_path=report_path))
+    return ConfirmSlowpicsUploadPhaseOutput(status=decision)
+
+
+def _slowpics_upload_clips(ctx: RunContext) -> list[SlowpicsUploadClip]:
+    clips = [ctx.reference, *ctx.comparisons]
+    seen_labels: set[str] = set()
+    upload_clips: list[SlowpicsUploadClip] = []
+    for clip in clips:
+        if clip.label in seen_labels:
+            raise SlowpicsError(f"Duplicate clip label in slow.pics upload input: {clip.label!r}")
+        seen_labels.add(clip.label)
+        upload_clips.append(SlowpicsUploadClip(label=clip.label, image_name=clip.path.stem))
+    return upload_clips
+
+
+def run_report_phase(
+    ctx: RunContext,
+    *,
+    frames: list[int],
+    render: RenderArtifacts | None,
+    metadata: TmdbMetadata | None,
+    slowpics_url: str | None,
+) -> ReportPhaseOutput:
+    if render is None or not render.screenshots_by_label:
+        return ReportPhaseOutput(report_path=None, report_succeeded=True)
+
+    clips = [ctx.reference, *ctx.comparisons]
+    clip_info = [
+        clip_info_from_state(clip, render.screenshots_by_label[clip.label]) for clip in clips
+    ]
+    report_data = ReportData(
+        clips=clip_info,
+        frames=frames,
+        metadata=metadata,
+        slowpics_url=slowpics_url,
+        frame_details=report_frame_details_for_frames(ctx, frames=frames),
+    )
+    report_path = generate_report(report_data, ctx.config.report)
+    return ReportPhaseOutput(report_path=report_path, report_succeeded=True)
+
+
+def _report_selection_detail(detail: SelectionDetail | None) -> SourceFrameSelectionDetail | None:
+    if detail is None:
+        return None
+    return SourceFrameSelectionDetail(
+        label=detail.label,
+        timecode=detail.timecode,
+        notes=detail.notes,
+    )
+
+
+def report_frame_details_for_frames(ctx: RunContext, *, frames: list[int]) -> list[FrameDetail]:
+    if ctx.selection_breakdown is None and ctx.selection_details_by_source_frame is None:
+        return []
+
+    frame_details: list[FrameDetail] = []
+    for aligned_frame in frames:
+        source_frame = map_aligned_to_source_frame(
+            clip=ctx.reference,
+            aligned_frame=aligned_frame,
+        )
+        detail = selection_detail_for_frame(
+            source_frame,
+            ctx.selection_details_by_source_frame,
+        )
+        selection_label = (
+            detail.label
+            if detail is not None
+            else selection_label_for_frame(source_frame, ctx.selection_breakdown)
+        )
+        frame_details.append(
+            frame_detail_for_source_frame(
+                source_frame=source_frame,
+                selection_detail=_report_selection_detail(detail),
+                selection_label=selection_label,
+            )
+        )
+    return frame_details
+
+
+def run_post_report_cleanup_phase(
+    ctx: RunContext,
+    *,
+    uploaded_file_paths: tuple[Path, ...],
+    report_succeeded: bool,
+) -> PostReportCleanupPhaseOutput:
+    if not _should_delete_uploaded_files_after_report(
+        ctx,
+        uploaded_file_paths=uploaded_file_paths,
+        report_succeeded=report_succeeded,
+    ):
+        return PostReportCleanupPhaseOutput()
+
+    warnings: list[str] = []
+    deleted_count = 0
+    for path in uploaded_file_paths:
+        try:
+            path.unlink()
+            deleted_count += 1
+        except OSError as exc:
+            message = f"cleanup: failed to delete uploaded screenshot {path}: {exc}"
+            warnings.append(message)
+            log.warning(
+                "slowpics_uploaded_file_delete_failed",
+                path=str(path),
+                error=str(exc),
+            )
+
+    if deleted_count:
+        log.info("slowpics_uploaded_files_deleted", count=deleted_count)
+
+    return PostReportCleanupPhaseOutput(warnings=warnings)
+
+
+def _should_delete_uploaded_files_after_report(
+    ctx: RunContext,
+    *,
+    uploaded_file_paths: tuple[Path, ...],
+    report_succeeded: bool,
+) -> bool:
+    if not ctx.config.slowpics.delete_after_upload:
+        return False
+    if not uploaded_file_paths:
+        return False
+    if not ctx.config.report.enable:
+        return True
+    if not report_succeeded:
+        return False
+    return ctx.config.report.embed_images

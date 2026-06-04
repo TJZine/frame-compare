@@ -10,7 +10,7 @@ import pytest
 
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.loader import load_config
-from frame_compare.orchestration import phase_tasks
+from frame_compare.orchestration import phase_post_render, phase_tasks
 from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.orchestration.types import (
@@ -211,7 +211,7 @@ def test_run_metadata_phase_uses_prefetched_metadata_without_client(tmp_path: Pa
         media_type="movie",
     )
     output = asyncio.run(
-        phase_tasks.run_metadata_phase(
+        phase_post_render.run_metadata_phase(
             ctx,
             client=None,
             metadata_prefetch=MetadataPrefetch(metadata=expected_metadata, was_attempted=True),
@@ -236,7 +236,7 @@ def test_run_publish_phase_without_client_clears_slowpics_url(tmp_path: Path) ->
     artifacts = RunArtifacts(slowpics_url="https://slow.pics/c/example")
 
     output = asyncio.run(
-        phase_tasks.run_publish_phase(
+        phase_post_render.run_publish_phase(
             ctx,
             client=None,
             metadata=artifacts.resolved_metadata,
@@ -261,7 +261,7 @@ def test_run_report_phase_clears_report_path_when_no_screenshots(tmp_path: Path)
     )
     artifacts = RunArtifacts(report_path=tmp_path / "stale.html")
 
-    output = phase_tasks.run_report_phase(
+    output = phase_post_render.run_report_phase(
         ctx,
         frames=[1, 2],
         render=artifacts.render,
@@ -319,9 +319,9 @@ def test_run_report_phase_builds_report_from_current_clip_artifacts(
         captured["report_config"] = report_config
         return expected_report_path
 
-    monkeypatch.setattr(phase_tasks, "generate_report", _fake_generate_report)
+    monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
 
-    output = phase_tasks.run_report_phase(
+    output = phase_post_render.run_report_phase(
         ctx,
         frames=[7, 11],
         render=artifacts.render,

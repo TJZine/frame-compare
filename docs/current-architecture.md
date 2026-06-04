@@ -40,6 +40,11 @@ The non-confirmed flow keeps the normal ordering above.
 `frame_compare.orchestration.context.RunContext` carries the shared run state across phases.
 Phase task functions return explicit phase-output DTOs, and `execution.py` applies those
 outputs back to `ExecutionState`, `RunContext`, or collected artifacts at phase boundaries.
+Current phase-family owners are intentionally explicit:
+
+- `frame_compare.orchestration.phase_selection`: frame-plan and analyze phase bodies plus shared selection/frame-translation helpers
+- `frame_compare.orchestration.phase_tasks`: align and render phase bodies plus alignment/render-specific helpers
+- `frame_compare.orchestration.phase_post_render`: metadata, dovi warning, publish, report, confirmation, and cleanup phase bodies
 
 ## Module Boundaries
 

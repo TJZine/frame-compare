@@ -13,7 +13,7 @@ import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.config.loader import load_config
-from frame_compare.orchestration import phase_tasks
+from frame_compare.orchestration import phase_selection
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.services.alignment import CACHE_FILE_NAME
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
@@ -108,7 +108,7 @@ enable = false
             ),
         )
 
-    monkeypatch.setattr(phase_tasks, "calculate_metrics", _fake_calculate_metrics)
+    monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
     asyncio.run(execute_run(request, deps=deps))

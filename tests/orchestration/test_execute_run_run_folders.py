@@ -15,7 +15,7 @@ from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema import AnalysisConfig
-from frame_compare.orchestration import phase_tasks, preparation
+from frame_compare.orchestration import phase_post_render, phase_selection, preparation
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.services.alignment import CACHE_FILE_NAME
 from frame_compare.services.errors import TmdbError
@@ -135,7 +135,7 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
             ),
         )
 
-    monkeypatch.setattr(phase_tasks, "calculate_metrics", _fake_calculate_metrics)
+    monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
     deps = RunDependencies(vs_loader=AnalysisCapableVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
     asyncio.run(execute_run(request, deps=deps))
@@ -274,7 +274,7 @@ enable = false
         cache_io.save_metrics_cache(metrics, cache_dir)
         return metrics
 
-    monkeypatch.setattr(phase_tasks, "calculate_metrics", _fake_calculate_metrics)
+    monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
 
     first = asyncio.run(
         execute_run(
@@ -303,7 +303,7 @@ enable = false
     def _fail_calculate_metrics(**_kwargs: object) -> NoReturn:
         raise AssertionError("from-cache-only should load the shared analysis cache")
 
-    monkeypatch.setattr(phase_tasks, "calculate_metrics", _fail_calculate_metrics)
+    monkeypatch.setattr(phase_selection, "calculate_metrics", _fail_calculate_metrics)
 
     second = asyncio.run(
         execute_run(
@@ -459,7 +459,7 @@ unattended = true
             media_type="movie",
         )
 
-    monkeypatch.setattr(phase_tasks, "resolve_metadata", _resolve_metadata)
+    monkeypatch.setattr(phase_post_render, "resolve_metadata", _resolve_metadata)
 
     request = RunRequest(
         root=tmp_path,
@@ -554,7 +554,7 @@ unattended = true
         reserve_calls.append(filenames)
         return Path("should-not-be-used")
 
-    monkeypatch.setattr(phase_tasks, "resolve_metadata", _resolve_metadata)
+    monkeypatch.setattr(phase_post_render, "resolve_metadata", _resolve_metadata)
     monkeypatch.setattr(preparation, "reserve_run_folder", _reserve_run_folder)
 
     request = RunRequest(
@@ -612,7 +612,7 @@ def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(
         return expected_metadata
 
     monkeypatch.setattr(preparation, "reserve_run_folder", _capture_reserve_run_folder)
-    monkeypatch.setattr(phase_tasks, "resolve_metadata", _fake_resolve_metadata)
+    monkeypatch.setattr(phase_post_render, "resolve_metadata", _fake_resolve_metadata)
 
     request = RunRequest(
         root=tmp_path,
@@ -691,7 +691,7 @@ category_preference = "movie"
         phase_calls.append(filenames)
         return expected_metadata
 
-    monkeypatch.setattr(phase_tasks, "resolve_metadata", _resolve_metadata)
+    monkeypatch.setattr(phase_post_render, "resolve_metadata", _resolve_metadata)
 
     request = RunRequest(
         root=tmp_path,
@@ -766,7 +766,7 @@ timeout_seconds = 7.5
         del filenames, config, client
         raise RuntimeError("unexpected metadata failure")
 
-    monkeypatch.setattr(phase_tasks, "resolve_metadata", _resolve_metadata)
+    monkeypatch.setattr(phase_post_render, "resolve_metadata", _resolve_metadata)
 
     request = RunRequest(
         root=tmp_path,

@@ -12,7 +12,7 @@ import pytest
 from frame_compare.analysis.errors import SelectionError
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.analysis.window import SelectionWindow
-from frame_compare.orchestration import phase_tasks
+from frame_compare.orchestration import phase_selection, phase_tasks
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentResult
 from tests.orchestration.phase_task_helpers import (
@@ -757,14 +757,14 @@ def test_map_aligned_to_source_frame_after_positive_negative_and_zero_offsets(
     output = phase_tasks.run_align_phase(ctx, selected_frames=[0, 20, 40])
 
     assert (
-        phase_tasks._map_aligned_to_source_frame(
+        phase_selection.map_aligned_to_source_frame(
             clip=output.reference,
             aligned_frame=0,
         )
         == expected_reference_source_frame
     )
     assert (
-        phase_tasks._map_aligned_to_source_frame(
+        phase_selection.map_aligned_to_source_frame(
             clip=output.comparisons[0],
             aligned_frame=0,
         )

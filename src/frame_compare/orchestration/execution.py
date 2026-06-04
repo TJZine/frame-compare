@@ -18,18 +18,22 @@ from frame_compare.analysis.metrics import ANALYZE_PROGRESS_TOTAL
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.analysis_policy import needs_analysis
 from frame_compare.orchestration.context import RunContext
-from frame_compare.orchestration.phase_tasks import (
+from frame_compare.orchestration.phase_post_render import (
     record_dovi_not_implemented_warning,
-    run_align_phase,
-    run_analyze_phase,
     run_confirm_slowpics_upload_phase,
     run_metadata_phase,
     run_post_report_cleanup_phase,
     run_publish_phase,
-    run_render_phase,
     run_report_phase,
+)
+from frame_compare.orchestration.phase_selection import (
+    run_analyze_phase,
     select_initial_frame_plan,
     selection_label_for_frame,
+)
+from frame_compare.orchestration.phase_tasks import (
+    run_align_phase,
+    run_render_phase,
 )
 from frame_compare.orchestration.phases import Phase
 from frame_compare.orchestration.types import (

@@ -20,8 +20,8 @@ from frame_compare.cli.output import (
     print_at_a_glance,
     print_result_summary,
 )
+from frame_compare.config.effective import load_effective_config
 from frame_compare.config.errors import ConfigValidationError
-from frame_compare.config.overrides import apply_cli_overrides
 from frame_compare.config.schema import ConfigSchema, OverlayMode, ToneCurve, TonemapPreset
 from frame_compare.errors import FrameCompareError, JSONValue
 from frame_compare.orchestration.analysis_policy import (
@@ -522,11 +522,13 @@ def build_effective_config_loaders(
     request: RunRequest,
 ) -> tuple[EffectiveConfigLoader, EffectiveConfigLoader]:
     resolved_config: ConfigSchema | None = None
+    cli_overrides = request.cli_config_overrides()
 
     def _resolve_effective_config() -> ConfigSchema:
-        return apply_cli_overrides(
-            deps.load_config(args.config_path),
-            cli_args=request.cli_config_overrides(),
+        return load_effective_config(
+            args.config_path,
+            cli_overrides=cli_overrides,
+            load_config_fn=deps.load_config,
         )
 
     def _load_effective_config() -> ConfigSchema:
