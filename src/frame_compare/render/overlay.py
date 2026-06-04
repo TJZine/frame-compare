@@ -21,7 +21,7 @@ type Font = ImageFont.ImageFont | ImageFont.FreeTypeFont
 type ImageInput = Image.Image | np.ndarray | None
 
 _LABEL_POSITION = (10, 10)
-_BLOCK_GAP_PX = 10
+_BLOCK_GAP_PX = 0
 _DEFAULT_DETAILS_Y = 140
 _DEFAULT_DETAILS_OFFSET_Y = _DEFAULT_DETAILS_Y - _LABEL_POSITION[1]
 _FILL = (255, 255, 255, 255)
@@ -322,11 +322,12 @@ def _compose_overlay_text(config: OverlayConfig, mode: OverlayMode) -> str | Non
     width, height = config.resolution
     overlay_lines = compose_overlay_text_lines(
         mode=mode,
-        base_text=None,
+        base_text=config.base_text,
         width=width,
         height=height,
         selection_type=_resolve_selection_label(config),
         diagnostic_lines=_diagnostic_lines(config, mode),
+        resolution_summary=config.resolution_summary,
     )
     if not overlay_lines:
         return None

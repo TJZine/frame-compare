@@ -64,6 +64,8 @@ def test_overlay_config_defaults() -> None:
         font_path=None,
     )
     assert config.font_size == 24
+    assert config.base_text is None
+    assert config.resolution_summary is None
 
 
 def test_overlay_config_optional_none() -> None:
@@ -80,6 +82,8 @@ def test_overlay_config_optional_none() -> None:
     assert config.burn_in_label is None
     assert config.selection_detail is None
     assert config.diagnostic_metadata is None
+    assert config.base_text is None
+    assert config.resolution_summary is None
 
 
 def test_overlay_selection_detail_creation() -> None:

@@ -15,7 +15,7 @@ from frame_compare.render.geometry import (
     plan_render_geometry,
 )
 from frame_compare.render.naming import generate_screenshot_name, generate_screenshot_path
-from frame_compare.render.prepare import prepare_clip_for_render
+from frame_compare.render.prepare import prepare_clip_for_render, resolve_tonemap_settings
 from frame_compare.render.types import (
     EncoderSettings,
     OverlayConfig,
@@ -41,6 +41,7 @@ class _PreparedBatchRequest:
     request: ScreenshotBatchRequest
     loaded_clip: vs.VideoNode | Path
     hdr_info: str | None
+    base_text: str | None
     width: int
     height: int
     num_frames: int | None
@@ -166,8 +167,10 @@ def _build_overlay_config(
     selection_detail: OverlaySelectionDetail | None,
     diagnostic_metadata: OverlayDiagnosticMetadata | None,
     resolution: tuple[int, int],
+    resolution_summary: str | None,
     origin: tuple[int, int] | None,
     hdr_info: str | None,
+    base_text: str | None,
     num_frames: int | None,
     include_frame_number: bool,
 ) -> OverlayConfig | None:
@@ -178,6 +181,8 @@ def _build_overlay_config(
         label=request.label,
         frame_number=source_frame,
         display_frame_number=display_frame,
+        base_text=base_text,
+        resolution_summary=resolution_summary,
         num_frames=num_frames,
         selection_label=selection_label,
         selection_detail=selection_detail,
@@ -188,6 +193,54 @@ def _build_overlay_config(
         origin=origin,
         hdr_info=hdr_info,
         font_path=None,
+    )
+
+
+def _format_dimensions(width: int, height: int) -> str:
+    return f"{int(width)} × {int(height)}"
+
+
+def _overlay_resolution_summary(
+    *,
+    source_size: tuple[int, int],
+    geometry_plan: RenderGeometryPlan | None,
+) -> str | None:
+    transformed = False
+    if geometry_plan is None:
+        original = source_size
+        final = source_size
+    else:
+        original = geometry_plan.cropped_size
+        final = geometry_plan.final_canvas_size
+        transformed = original != source_size or final != source_size
+
+    original_width, original_height = original
+    final_width, final_height = final
+    if original_width <= 0 or original_height <= 0 or final_width <= 0 or final_height <= 0:
+        return None
+
+    original_text = _format_dimensions(original_width, original_height)
+    final_text = _format_dimensions(final_width, final_height)
+    if not transformed:
+        return f"{original_text}  (native)"
+    return f"{original_text} → {final_text}  (original → target)"
+
+
+def _overlay_base_text_for_request(
+    *,
+    config: ConfigSchema,
+    source_info: object | None,
+) -> str | None:
+    source_is_hdr = getattr(source_info, "is_hdr", False)
+    if source_is_hdr is not True or not config.color.enable_tonemap:
+        return None
+
+    settings = resolve_tonemap_settings(config)
+    return (
+        "Tonemapping Algorithm: "
+        f"{settings.tone_curve.value} "
+        f"dpd = {int(settings.dynamic_peak_detection)} "
+        f"dst = {settings.target_nits} nits"
     )
 
 
@@ -374,6 +427,7 @@ def _prepare_batch_requests(
                 request=req,
                 loaded_clip=loaded_clip,
                 hdr_info=resolved_hdr_info,
+                base_text=_overlay_base_text_for_request(config=config, source_info=source_info),
                 width=width,
                 height=height,
                 num_frames=num_frames,
@@ -476,6 +530,10 @@ def expand_batch_render_requests(
             else (prepared.width, prepared.height)
         )
         overlay_origin = geometry_plan.overlay_origin if geometry_plan is not None else None
+        overlay_resolution_summary = _overlay_resolution_summary(
+            source_size=(prepared.width, prepared.height),
+            geometry_plan=geometry_plan,
+        )
 
         for idx, source_frame in enumerate(req.source_frames):
             _validate_source_frame_range(
@@ -506,8 +564,10 @@ def expand_batch_render_requests(
                 selection_detail=selection_detail,
                 diagnostic_metadata=diagnostic_metadata,
                 resolution=overlay_resolution,
+                resolution_summary=overlay_resolution_summary,
                 origin=overlay_origin,
                 hdr_info=prepared.hdr_info,
+                base_text=prepared.base_text,
                 num_frames=prepared.num_frames,
                 include_frame_number=config.screenshots.include_frame_number,
             )

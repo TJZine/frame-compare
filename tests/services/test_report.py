@@ -480,7 +480,7 @@ def test_generate_report_creates_parent_dirs(report_data: ReportData, tmp_path: 
 def test_generate_report_dark_theme(report_data: ReportData, tmp_path: Path) -> None:
     out_path = generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
     content = out_path.read_text(encoding="utf-8")
-    assert "--bg-primary: #0f1115" in content
+    assert "--bg-primary: #08090c" in content
 
 
 def test_generate_report_keyboard_shortcuts(report_data: ReportData, tmp_path: Path) -> None:

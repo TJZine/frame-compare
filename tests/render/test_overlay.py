@@ -232,6 +232,8 @@ def test_apply_overlay_standard_mode(captured_draw_calls):
         resolution=(1920, 1080),
         hdr_info=None,
         font_path=None,
+        base_text="Tonemapping Algorithm: bt2390 dpd = 1 dst = 100 nits",
+        resolution_summary="1280 × 720 → 1440 × 810  (original → target)",
     )
     img = Image.new("RGB", (100, 100))
 
@@ -259,15 +261,16 @@ def test_apply_overlay_standard_mode(captured_draw_calls):
 
     expected_frame_info_lines = text1.splitlines()
     expected_frame_info_height = len(expected_frame_info_lines) * 20
-    assert xy2 == (10, 10 + expected_frame_info_height + 10)
+    assert xy2 == (10, 10 + expected_frame_info_height)
     assert text2 == "\n".join(
         compose_overlay_text_lines(
             mode=OverlayMode.STANDARD,
-            base_text=None,
+            base_text="Tonemapping Algorithm: bt2390 dpd = 1 dst = 100 nits",
             width=1920,
             height=1080,
             selection_type=None,
             diagnostic_lines=[],
+            resolution_summary="1280 × 720 → 1440 × 810  (original → target)",
         )
     )
     assert kwargs2["stroke_width"] == 2
@@ -296,6 +299,7 @@ def test_apply_overlay_standard_uses_fallback_details_y_when_bbox_fails(monkeypa
         resolution=(1920, 1080),
         hdr_info=None,
         font_path=None,
+        base_text="Base",
         origin=(26, 14),
     )
     img = Image.new("RGB", (100, 100))
@@ -317,6 +321,7 @@ def test_apply_overlay_uses_explicit_origin_for_frame_and_detail_blocks(captured
         resolution=(1920, 1080),
         hdr_info=None,
         font_path=None,
+        base_text="Base",
         origin=(26, 14),
     )
     img = Image.new("RGB", (100, 100))
@@ -327,7 +332,7 @@ def test_apply_overlay_uses_explicit_origin_for_frame_and_detail_blocks(captured
     (xy2, _text2, _kwargs2) = captured_draw_calls["multiline_text"][1]
     expected_frame_info_height = len(str(text1).splitlines()) * 20
     assert xy1 == (26, 14)
-    assert xy2 == (26, 14 + expected_frame_info_height + 10)
+    assert xy2 == (26, 14 + expected_frame_info_height)
 
 
 def test_apply_overlay_standard_includes_selection_label_when_present(captured_draw_calls):
@@ -577,6 +582,7 @@ def test_apply_overlay_diagnostic_with_hdr(captured_draw_calls):
             ],
         )
     )
+    assert "Frame Selection Type:" not in text2
 
 
 def test_apply_overlay_diagnostic_sdr(captured_draw_calls):

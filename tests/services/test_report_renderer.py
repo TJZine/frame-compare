@@ -1377,6 +1377,10 @@ def test_viewer_assets_wire_inspector_and_blink_state() -> None:
         assert ".rv-inspector" in block
     assert "margin-right: 0;" in tablet_css
     assert "width: min(360px, 92vw);" in tablet_css
+    assert "flex-direction: row !important;" in mobile_css
+    assert "flex-wrap: wrap !important;" in mobile_css
+    assert "#btn-palette-orientation" in mobile_css
+    assert "display: none !important;" in mobile_css
     assert "transition: none !important;" in reduced_motion_css
     assert "animation-duration: 0.01ms !important;" in reduced_motion_css
 
@@ -1403,3 +1407,71 @@ def test_viewer_assets_preload_adjacent_visible_frames_and_active_clips() -> Non
     assert "const image = new Image();" in js
     assert "image.src = src;" in js
     assert "image.decode().catch(() => undefined).finally(finish);" in js
+
+
+def test_viewer_assets_offline_containment_and_tokens(report_payload: ReportPayload) -> None:
+    import html as html_module
+    import re
+
+    css = get_css()
+
+    # Ensure no external HTTP/HTTPS resources or font files are imported
+    # (Allowing only standard local SVG namespaces: http://www.w3.org/2000/svg)
+    urls = re.findall(r'url\([\'"]?([^\'")]+)[\'"]?\)', css)
+    for url in urls:
+        if url.startswith(("http://", "https://")):
+            assert url.startswith(("http://www.w3.org/", "https://www.w3.org/"))
+
+    # Check for external @imports
+    assert "@import" not in css
+
+    # Verify that the newly introduced styling tokens are present
+    assert "--bg-glass" in css
+    assert "--accent-glow" in css
+
+    # Verify color-mix uses in hsl color space for chip backgrounds
+    assert "color-mix(in hsl" in css
+
+    # Verify empty stage palette blocks pointer events
+    empty_palette_block = _css_block(css, ".rv-viewer-stage--empty .rv-viewport-palette")
+    assert "pointer-events: none" in empty_palette_block
+
+    # Verify sibling divider lines transparency rule is present
+    assert "border-left-color: transparent" in css
+
+    # Verify that vertical zoom tracks do not specify misalignment margins
+    webkit_vertical_track = _css_block(
+        css,
+        '.rv-viewport-palette[data-orientation="vertical"] #zoom-range::-webkit-slider-runnable-track',
+    )
+    moz_vertical_track = _css_block(
+        css,
+        '.rv-viewport-palette[data-orientation="vertical"] #zoom-range::-moz-range-track',
+    )
+    assert "margin-left" not in webkit_vertical_track
+    assert "margin-right" not in webkit_vertical_track
+    assert "margin-left" not in moz_vertical_track
+    assert "margin-right" not in moz_vertical_track
+
+    # Scan get_js() for external HTTP/HTTPS URLs (excluding standard local SVG namespaces)
+    js = get_js()
+    js_urls = re.findall(r'https?://[^\s\'"<>]+', js)
+    for url in js_urls:
+        if not url.startswith(("http://www.w3.org/", "https://www.w3.org/")):
+            raise AssertionError(f"Found forbidden external URL in JS: {url}")
+
+    # Scan build_html() for external HTTP/HTTPS URLs, allowing only standard SVG namespaces
+    # and the explicit safe slow.pics URL from the payload.
+    rendered_html = build_html(report_payload)
+    html_urls = re.findall(r'https?://[^\s\'"<>]+', rendered_html)
+    allowed_html_urls = {
+        "http://www.w3.org/2000/svg",
+        "https://www.w3.org/2000/svg",
+    }
+    if report_payload["slowpics_url"] is not None:
+        allowed_html_urls.add(report_payload["slowpics_url"])
+        allowed_html_urls.add(html_module.escape(report_payload["slowpics_url"], quote=True))
+        allowed_html_urls.add(report_payload["slowpics_url"].replace("&", "\\u0026"))
+    for url in html_urls:
+        if url not in allowed_html_urls:
+            raise AssertionError(f"Found forbidden external URL in HTML: {url}")
