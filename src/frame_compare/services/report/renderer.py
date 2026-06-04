@@ -435,7 +435,7 @@ def _render_viewport_palette() -> str:
         </div>
 
         <div class="rv-palette-group">
-            <button id="btn-fullscreen" aria-label="Enter fullscreen" aria-pressed="false" title="Enter fullscreen">⛶</button>
+            <button id="btn-fullscreen" aria-label="Enter fullscreen" aria-pressed="false" title="Enter fullscreen"><span class="rv-fullscreen-icon" aria-hidden="true">⛶</span></button>
         </div>
 
         <div class="rv-palette-group">

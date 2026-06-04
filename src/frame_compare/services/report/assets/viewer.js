@@ -2310,7 +2310,6 @@ const ReportViewer = {
 
     updateFullscreenButton() {
         const isFullscreen = Boolean(document.fullscreenElement);
-        this.dom.btnFullscreen.textContent = '⛶';
         this.dom.btnFullscreen.setAttribute(
             'aria-label',
             isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'

@@ -693,6 +693,12 @@ select optgroup {
     justify-content: center;
 }
 
+.rv-fullscreen-icon {
+    display: inline-block;
+    line-height: 1;
+    transform: scale(1.3);
+}
+
 .rv-palette-group #zoom-range {
     width: 76px;
 }

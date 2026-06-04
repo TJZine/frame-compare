@@ -776,7 +776,7 @@ def test_build_html_renders_viewport_audit_controls(report_payload: ReportPayloa
     assert 'aria-pressed="false"' in html
     assert (
         'id="btn-fullscreen" aria-label="Enter fullscreen" aria-pressed="false" '
-        'title="Enter fullscreen">⛶</button>'
+        'title="Enter fullscreen"><span class="rv-fullscreen-icon" aria-hidden="true">⛶</span></button>'
     ) in html
     assert 'id="btn-focus-mode"' not in html
     assert 'id="btn-overlays"' in html
@@ -1366,6 +1366,7 @@ def test_viewer_assets_wire_inspector_and_blink_state() -> None:
     assert "rv-focus-mode" not in css
     assert ".rv-focus-hud" not in css
     assert ".rv-blink-status" in css
+    assert "transform: scale(1.3);" in _css_block(css, ".rv-fullscreen-icon")
     assert "flex-direction: column;" in vertical_palette_css
     assert "flex-wrap: nowrap;" in vertical_palette_css
     assert "overflow-y: auto;" in vertical_palette_css
