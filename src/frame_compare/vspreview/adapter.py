@@ -25,6 +25,12 @@ from frame_compare.vspreview.session_script import write_vspreview_session_scrip
 
 log = structlog.get_logger()
 
+_LSMAS_API3_WARNING_MARKERS = (
+    "libvslsmashsource.dll",
+    "is using API3 which is deprecated",
+    "will be removed shortly",
+)
+
 
 class VSPreviewAvailabilityStatus(Enum):
     """Status enum for VSPreview availability."""
@@ -191,16 +197,7 @@ def launch_alignment_verification_session(
         env = os.environ.copy()
         if config.no_color:
             env["NO_COLOR"] = "1"
-        # command is a list from _resolve_launch_command; shell=True is never used.
-        result = subprocess.run(  # nosec B603
-            command,
-            check=False,
-            stdin=None,
-            stdout=None,
-            stderr=None,
-            text=True,
-            env=env,
-        )
+        returncode = _run_vspreview_command(command, env=env)
     except FileNotFoundError as e:
         raise VSPreviewError("launcher command was not found") from e
     except Exception as e:
@@ -211,17 +208,42 @@ def launch_alignment_verification_session(
         )
         raise VSPreviewError(f"unexpected launch error ({type(e).__name__})") from e
 
-    if result.returncode != 0:
-        public_reason = f"launch exited with code {result.returncode}"
+    if returncode != 0:
+        public_reason = f"launch exited with code {returncode}"
         log.warning(
             "vspreview_launch_failed",
             reason=public_reason,
-            returncode=result.returncode,
+            returncode=returncode,
             hint="Re-run with verbose mode to inspect VSPreview output",
         )
         raise VSPreviewError(public_reason)
 
     return script_path
+
+
+def _run_vspreview_command(command: list[str], *, env: dict[str, str]) -> int:
+    # command is a list from _resolve_launch_command; shell=True is never used.
+    with subprocess.Popen(  # nosec B603
+        command,
+        stdin=None,
+        stdout=None,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        bufsize=1,
+    ) as process:
+        assert process.stderr is not None
+        for line in process.stderr:
+            if _should_suppress_vspreview_stderr(line):
+                continue
+            sys.stderr.write(line)
+        sys.stderr.flush()
+        return process.wait()
+
+
+def _should_suppress_vspreview_stderr(line: str) -> bool:
+    # Temporary lsmas cleanup: remove once a current-API Windows plugin build is available.
+    return all(marker in line for marker in _LSMAS_API3_WARNING_MARKERS)
 
 
 def _write_vspreview_session_script(request: VSPreviewSessionRequest) -> Path:
