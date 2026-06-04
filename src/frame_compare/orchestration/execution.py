@@ -182,7 +182,7 @@ def build_phases_before_align(
         _create_timed_phase(
             "analyze",
             "analyze",
-            lambda config: request.skip_analysis or not needs_analysis(config.analysis),
+            lambda config: not needs_analysis(config.analysis),
             partial(
                 run_analyze_phase,
                 input_videos=input_videos,

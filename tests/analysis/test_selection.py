@@ -129,6 +129,39 @@ def test_user_frames_have_label_precedence_over_metric_categories() -> None:
     assert len(set(result.frames)) == len(result.frames)
 
 
+def test_metric_categories_backfill_after_user_collisions() -> None:
+    lum = [0.0, 0.1, 0.2, 0.8, 0.9, 1.0]
+    mot = [0.0] * len(lum)
+    metrics = make_metrics(lum, mot)
+    config = AnalysisConfig(
+        user_frames=[0, 5],
+        random_frame_count=0,
+        dark_frame_count=2,
+        bright_frame_count=2,
+    )
+
+    result = select_frames(metrics, config)
+
+    assert result.breakdown.user == [0, 5]
+    assert result.breakdown.quantile_dark == [1, 2]
+    assert result.breakdown.quantile_bright == [3, 4]
+    assert result.frames == [0, 1, 2, 3, 4, 5]
+
+
+def test_random_underfill_raises_when_min_gap_prevents_requested_count() -> None:
+    metrics = make_metrics([0.1] * 5, [0.0] * 5)
+    config = AnalysisConfig(random_frame_count=2)
+
+    with pytest.raises(SelectionError) as exc:
+        select_frames(metrics, config)
+
+    assert exc.value.context.details == {
+        "reason": "insufficient_candidates",
+        "requested": 2,
+        "found": 1,
+    }
+
+
 def test_insufficient_candidates_raises() -> None:
     metrics = make_metrics([0.1] * 5, [0.1] * 5)
     config = AnalysisConfig(random_frame_count=0, dark_frame_count=10)

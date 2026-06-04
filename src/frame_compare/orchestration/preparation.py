@@ -13,7 +13,10 @@ from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.overrides import apply_cli_overrides
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_models import SourceOverrideConfig
-from frame_compare.orchestration.analysis_policy import needs_analysis
+from frame_compare.orchestration.analysis_policy import (
+    needs_analysis,
+    validate_skip_analysis_frame_selection_contract,
+)
 from frame_compare.orchestration.context import (
     ClipFingerprint,
     ClipProbeSnapshot,
@@ -312,6 +315,10 @@ async def execute_prep(
     config = apply_cli_overrides(
         preflight.config,
         cli_args=request.cli_config_overrides(),
+    )
+    validate_skip_analysis_frame_selection_contract(
+        skip_analysis=request.skip_analysis,
+        config=config.analysis,
     )
     discovered_videos = discover_inputs(workspace.input_dir)
     source_selection = resolve_source_selection(

@@ -10,9 +10,6 @@ import pytest
 from frame_compare.config.schema import ColorConfig, ConfigSchema, OverlayMode, ScreenshotsConfig
 from frame_compare.config.schema_enums import ScreenshotGeometryMode, VsScreenshotWriter
 from frame_compare.render.batch.expansion import (
-    _build_overlay_config,
-    _overlay_base_text_for_request,
-    _overlay_resolution_summary,
     _resolve_num_frames,
     _validate_batch_request_lengths,
     _validate_source_frame_range,
@@ -407,7 +404,8 @@ def test_validate_batch_requests_rejects_duplicate_filename_labels_with_distinct
         validate_batch_requests([req1, req2])
 
 
-def test_build_overlay_config() -> None:
+@patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
+def test_expand_batch_render_requests_populates_overlay_config(mock_prepare: MagicMock) -> None:
     detail = OverlaySelectionDetail(
         frame_index=10,
         label="User",
@@ -436,50 +434,41 @@ def test_build_overlay_config() -> None:
         filename_label="ref",
     )
 
-    # Mode NONE should return None
-    assert (
-        _build_overlay_config(
-            req,
-            overlay_mode=OverlayMode.NONE,
-            source_frame=10,
-            display_frame=10,
-            selection_label="A",
-            selection_detail=detail,
-            diagnostic_metadata=diagnostic_metadata,
-            resolution=(1920, 1080),
-            resolution_summary=None,
-            origin=None,
-            hdr_info=None,
-            base_text=None,
-            num_frames=100,
-            include_frame_number=True,
-        )
-        is None
-    )
+    source_info = MagicMock()
+    source_info.width = 1920
+    source_info.height = 1080
+    source_info.num_frames = 100
+    source_info.is_hdr = True
+    mock_prepare.return_value = (MagicMock(name="clip"), None, "HDR10", source_info)
+    config = ConfigSchema(color=ColorConfig(enable_tonemap=True))
+    ffmpeg_runner = MagicMock()
 
-    # Normal mode should populate correctly
-    overlay = _build_overlay_config(
-        req,
-        overlay_mode=OverlayMode.STANDARD,
-        source_frame=10,
-        display_frame=20,
-        selection_label="User",
-        selection_detail=detail,
-        diagnostic_metadata=diagnostic_metadata,
-        resolution=(1920, 1080),
-        resolution_summary="1920 × 1080  (native)",
-        origin=None,
-        hdr_info="HDR10",
-        base_text="Tonemapping Algorithm: bt2390 dpd = 1 dst = 100 nits",
-        num_frames=100,
-        include_frame_number=True,
+    none_requests, _ = expand_batch_render_requests(
+        [req],
+        output_dir=Path("out"),
+        config=config,
+        overlay_mode=OverlayMode.NONE,
+        renderer="ffmpeg",
+        ffmpeg_runner=ffmpeg_runner,
     )
+    assert none_requests[0].overlay is None
+
+    standard_requests, _ = expand_batch_render_requests(
+        [req],
+        output_dir=Path("out"),
+        config=config,
+        overlay_mode=OverlayMode.STANDARD,
+        renderer="ffmpeg",
+        ffmpeg_runner=ffmpeg_runner,
+    )
+    overlay = standard_requests[0].overlay
+
     assert overlay is not None
     assert overlay.mode == OverlayMode.STANDARD
     assert overlay.label == "Reference"
     assert overlay.burn_in_label == "ref"
     assert overlay.frame_number == 10
-    assert overlay.display_frame_number == 20
+    assert overlay.display_frame_number == 10
     assert overlay.selection_label == "User"
     assert overlay.selection_detail == detail
     assert overlay.diagnostic_metadata == diagnostic_metadata
@@ -660,10 +649,12 @@ def test_expand_batch_render_requests_attaches_aligned_geometry_after_loading_di
     ref_source_info.width = 1920
     ref_source_info.height = 1080
     ref_source_info.num_frames = 150
+    ref_source_info.is_hdr = False
     enc_source_info = MagicMock()
     enc_source_info.width = 1440
     enc_source_info.height = 1080
     enc_source_info.num_frames = 150
+    enc_source_info.is_hdr = False
     mock_prepare.side_effect = [
         (MagicMock(name="ref_clip"), None, None, ref_source_info),
         (MagicMock(name="enc_clip"), None, None, enc_source_info),
@@ -721,7 +712,9 @@ def test_expand_batch_render_requests_attaches_aligned_geometry_after_loading_di
     assert ref_plan.final_canvas_size == (1440, 1080)
     assert requests[0].overlay is not None
     assert requests[0].overlay.resolution == (1440, 1080)
-    assert requests[0].overlay.resolution_summary == "1440 × 1080 → 1440 × 1080  (original → target)"
+    assert (
+        requests[0].overlay.resolution_summary == "1920 × 1080 → 1440 × 1080  (original → target)"
+    )
     assert requests[0].overlay.origin == ref_plan.overlay_origin
 
     enc_plan = requests[2].geometry_plan
@@ -749,6 +742,7 @@ def test_expand_batch_render_requests_aligns_mixed_dimensions_with_explicit_acti
         source_info.width = width
         source_info.height = height
         source_info.num_frames = num_frames
+        source_info.is_hdr = False
         source_infos.append(source_info)
     clips = [MagicMock(name=f"clip_{idx}") for idx in range(3)]
     mock_prepare.side_effect = [
@@ -870,7 +864,7 @@ def test_expand_batch_render_requests_aligns_mixed_dimensions_with_explicit_acti
     ] == [
         (
             (1440, 800),
-            "1440 × 800 → 1440 × 800  (original → target)",
+            "1920 × 1080 → 1440 × 800  (original → target)",
             None,
             (10, 10),
             "HDR10",
@@ -895,46 +889,50 @@ def test_expand_batch_render_requests_aligns_mixed_dimensions_with_explicit_acti
     ]
 
 
-def test_overlay_resolution_summary_uses_cropped_to_target_when_geometry_changes() -> None:
-    summary = _overlay_resolution_summary(
-        source_size=(1920, 1080),
-        geometry_plan=MagicMock(cropped_size=(1280, 720), final_canvas_size=(1440, 800)),
+@pytest.mark.parametrize(
+    ("source_is_hdr", "tonemap_enabled", "expected_base_text"),
+    [
+        (True, True, "Tonemapping Algorithm: bt2390 dpd = 1 dst = 100 nits"),
+        (False, True, None),
+        (True, False, None),
+    ],
+)
+@patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
+def test_expand_batch_render_requests_sets_base_text_only_for_hdr_tonemap(
+    mock_prepare: MagicMock,
+    source_is_hdr: bool,
+    tonemap_enabled: bool,
+    expected_base_text: str | None,
+) -> None:
+    source_info = MagicMock()
+    source_info.width = 1920
+    source_info.height = 1080
+    source_info.num_frames = 100
+    source_info.is_hdr = source_is_hdr
+    mock_prepare.return_value = (MagicMock(name="clip"), None, "HDR10", source_info)
+    req = ScreenshotBatchRequest(
+        clip_path=Path("video.mkv"),
+        label="Reference",
+        source_frames=[10],
+        display_frames=[10],
+        selection_labels=["User"],
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=100,
+        probe_is_hdr=source_is_hdr,
     )
-    assert summary == "1280 × 720 → 1440 × 800  (original → target)"
 
-
-def test_overlay_resolution_summary_uses_arrow_for_crop_only_geometry_changes() -> None:
-    summary = _overlay_resolution_summary(
-        source_size=(1920, 1080),
-        geometry_plan=MagicMock(cropped_size=(1440, 1080), final_canvas_size=(1440, 1080)),
+    requests, _ = expand_batch_render_requests(
+        [req],
+        output_dir=Path("out"),
+        config=ConfigSchema(color=ColorConfig(enable_tonemap=tonemap_enabled)),
+        overlay_mode=OverlayMode.STANDARD,
+        renderer="ffmpeg",
+        ffmpeg_runner=MagicMock(),
     )
-    assert summary == "1440 × 1080 → 1440 × 1080  (original → target)"
 
-
-def test_overlay_resolution_summary_uses_native_only_when_geometry_is_unchanged() -> None:
-    summary = _overlay_resolution_summary(
-        source_size=(1920, 1080),
-        geometry_plan=MagicMock(cropped_size=(1920, 1080), final_canvas_size=(1920, 1080)),
-    )
-    assert summary == "1920 × 1080  (native)"
-
-
-def test_overlay_base_text_for_request_only_when_hdr_tonemap_is_enabled() -> None:
-    hdr_source_info = MagicMock()
-    hdr_source_info.is_hdr = True
-
-    sdr_source_info = MagicMock()
-    sdr_source_info.is_hdr = False
-
-    enabled = ConfigSchema(color=ColorConfig(enable_tonemap=True))
-    disabled = ConfigSchema(color=ColorConfig(enable_tonemap=False))
-
-    assert (
-        _overlay_base_text_for_request(config=enabled, source_info=hdr_source_info)
-        == "Tonemapping Algorithm: bt2390 dpd = 1 dst = 100 nits"
-    )
-    assert _overlay_base_text_for_request(config=enabled, source_info=sdr_source_info) is None
-    assert _overlay_base_text_for_request(config=disabled, source_info=hdr_source_info) is None
+    assert requests[0].overlay is not None
+    assert requests[0].overlay.base_text == expected_base_text
 
 
 @pytest.mark.unit
@@ -949,10 +947,12 @@ def test_expand_batch_render_requests_ignores_overlay_metadata_for_geometry_with
     ref_source_info.width = 1920
     ref_source_info.height = 1080
     ref_source_info.num_frames = 150
+    ref_source_info.is_hdr = False
     enc_source_info = MagicMock()
     enc_source_info.width = 1440
     enc_source_info.height = 1080
     enc_source_info.num_frames = 150
+    enc_source_info.is_hdr = False
     mock_prepare.side_effect = [
         (MagicMock(name="ref_clip"), None, None, ref_source_info),
         (MagicMock(name="enc_clip"), None, None, enc_source_info),
@@ -1012,6 +1012,7 @@ def test_expand_batch_render_requests_explicit_active_rect_beats_metadata_rect(
     source_info.width = 1920
     source_info.height = 1080
     source_info.num_frames = 150
+    source_info.is_hdr = False
     mock_prepare.return_value = (MagicMock(name="clip"), None, None, source_info)
     req = ScreenshotBatchRequest(
         clip_path=Path("wide.mkv"),
@@ -1095,10 +1096,12 @@ def test_expand_batch_render_requests_rejected_trusted_metadata_falls_back_with_
     ref_source_info.width = 1920
     ref_source_info.height = 1080
     ref_source_info.num_frames = 150
+    ref_source_info.is_hdr = False
     enc_source_info = MagicMock()
     enc_source_info.width = 1440
     enc_source_info.height = 1080
     enc_source_info.num_frames = 150
+    enc_source_info.is_hdr = False
     mock_prepare.side_effect = [
         (MagicMock(name="ref_clip"), None, None, ref_source_info),
         (MagicMock(name="enc_clip"), None, None, enc_source_info),
@@ -1160,6 +1163,7 @@ def test_expand_batch_render_requests_rejected_trusted_metadata_falls_back_to_ex
     source_info.width = 1920
     source_info.height = 1080
     source_info.num_frames = 150
+    source_info.is_hdr = False
     mock_prepare.return_value = (MagicMock(name="clip"), None, None, source_info)
     req = ScreenshotBatchRequest(
         clip_path=Path("wide.mkv"),
@@ -1212,10 +1216,12 @@ def test_expand_batch_render_requests_trusted_metadata_without_l5_candidate_fall
     ref_source_info.width = 1920
     ref_source_info.height = 1080
     ref_source_info.num_frames = 150
+    ref_source_info.is_hdr = False
     enc_source_info = MagicMock()
     enc_source_info.width = 1440
     enc_source_info.height = 1080
     enc_source_info.num_frames = 150
+    enc_source_info.is_hdr = False
     mock_prepare.side_effect = [
         (MagicMock(name="ref_clip"), None, None, ref_source_info),
         (MagicMock(name="enc_clip"), None, None, enc_source_info),
@@ -1278,6 +1284,7 @@ def test_expand_batch_render_requests_attaches_aligned_geometry_for_three_source
         source_info.width = width
         source_info.height = 1080
         source_info.num_frames = 150
+        source_info.is_hdr = False
         source_infos.append(source_info)
     mock_prepare.side_effect = [
         (MagicMock(name="ref_clip"), None, None, source_infos[0]),
@@ -1383,6 +1390,7 @@ def test_expand_batch_render_requests_uses_source_info_frame_count_over_probe(
     source_info.width = 1920
     source_info.height = 1080
     source_info.num_frames = 150
+    source_info.is_hdr = False
     mock_prepare.return_value = (MagicMock(name="clip"), None, None, source_info)
     req = ScreenshotBatchRequest(
         clip_path=Path("video.mkv"),

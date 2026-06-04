@@ -12,6 +12,7 @@ import pytest
 
 import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError
+from frame_compare.config.errors import ConfigValidationError
 from frame_compare.orchestration import preparation
 from frame_compare.orchestration.context import ClipActiveRect
 from frame_compare.orchestration.errors import (
@@ -23,6 +24,7 @@ from frame_compare.orchestration.probing.probe_cache import load_clip_probe_cach
 from frame_compare.orchestration.types import RunDependencies, RunRequest
 from frame_compare.services.alignment import CACHE_FILE_NAME
 from frame_compare.vs.types import SourceInfo
+from tests.orchestration.execute_run_helpers import write_probe_cache_for_inputs
 
 if TYPE_CHECKING:
     import vapoursynth as vs
@@ -233,20 +235,33 @@ def test_execute_prep_from_cache_only_validates_metrics_cache_when_analysis_runs
 ) -> None:
     _create_config(tmp_path, content=METRIC_CONFIG)
     input_dir = tmp_path / "comparison_videos"
-    _create_video_files(input_dir, "source.mkv")
+    source_path = _create_video_files(input_dir, "source.mkv")[0]
+    config = preparation.prepare_preflight(root=tmp_path).config
+    write_probe_cache_for_inputs(tmp_path / "generated" / "clip_probe.toml", [source_path], config)
 
     request = RunRequest(root=tmp_path, from_cache_only=True, skip_analysis=False)
-    asyncio.run(
-        preparation.execute_prep(
-            RunRequest(root=tmp_path, skip_analysis=True),
-            RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
-        )
-    )
 
     with pytest.raises(MetricsCalculationError, match="Cached metrics missing"):
         asyncio.run(
             preparation.execute_prep(request, RunDependencies(vs_loader=cast(Any, FakeVSLoader())))
         )
+
+
+def test_execute_prep_rejects_skip_analysis_with_metric_frame_selection(tmp_path: Path) -> None:
+    _create_config(tmp_path, content=METRIC_CONFIG)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "source.mkv")
+
+    with pytest.raises(ConfigValidationError) as exc_info:
+        asyncio.run(
+            preparation.execute_prep(
+                RunRequest(root=tmp_path, skip_analysis=True),
+                RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
+            )
+        )
+
+    assert exc_info.value.context.message == "Metric-based frame selection requires analysis"
+    assert exc_info.value.validation_errors[0]["loc"] == ["analysis", "dark_frame_count"]
 
 
 def test_execute_prep_from_cache_only_misses_when_selected_reference_differs(

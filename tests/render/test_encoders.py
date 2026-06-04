@@ -206,7 +206,14 @@ def test_render_frame_mismatch_error():
 def test_render_frame_overlay_integration(mock_render_vs):
     # VS Path: pass overlay to _render_vs
     clip = FakeClip()
-    overlay = OverlayConfig(OverlayMode.MINIMAL, "Label", 100, (1920, 1080), None, None)
+    overlay = OverlayConfig(
+        mode=OverlayMode.MINIMAL,
+        label="Label",
+        frame_number=100,
+        resolution=(1920, 1080),
+        hdr_info=None,
+        font_path=None,
+    )
     request = RenderRequest(
         clip=clip,  # type: ignore
         frame_number=100,
@@ -229,7 +236,14 @@ def test_render_frame_overlay_integration_ffmpeg(mock_ffmpeg_runner, mock_apply_
         clip=Path("test.mp4"),
         frame_number=100,
         output_path=Path("out.png"),
-        overlay=OverlayConfig(OverlayMode.MINIMAL, "Label", 100, (1920, 1080), None, None),
+        overlay=OverlayConfig(
+            mode=OverlayMode.MINIMAL,
+            label="Label",
+            frame_number=100,
+            resolution=(1920, 1080),
+            hdr_info=None,
+            font_path=None,
+        ),
         encoder_settings=EncoderSettings(),
     )
     render_frame(request, renderer="ffmpeg")
@@ -331,7 +345,14 @@ def test_render_frame_vs_auto_falls_back_to_pillow_when_overlay_is_present(
     clip = _FakeFpngClip()
     pillow = MagicMock()
     monkeypatch.setattr("frame_compare.render.encoders._render_vs_pillow", pillow)
-    overlay = OverlayConfig(OverlayMode.MINIMAL, "Label", 3, (4, 4), None, None)
+    overlay = OverlayConfig(
+        mode=OverlayMode.MINIMAL,
+        label="Label",
+        frame_number=3,
+        resolution=(4, 4),
+        hdr_info=None,
+        font_path=None,
+    )
 
     render_frame(
         RenderRequest(
@@ -412,7 +433,14 @@ def test_render_frame_vs_fpng_rejects_overlay_when_explicit(
                 clip=clip,  # type: ignore[arg-type]
                 frame_number=3,
                 output_path=tmp_path / "out.png",
-                overlay=OverlayConfig(OverlayMode.MINIMAL, "Label", 3, (4, 4), None, None),
+                overlay=OverlayConfig(
+                    mode=OverlayMode.MINIMAL,
+                    label="Label",
+                    frame_number=3,
+                    resolution=(4, 4),
+                    hdr_info=None,
+                    font_path=None,
+                ),
                 encoder_settings=EncoderSettings(vs_writer=VsScreenshotWriter.FPNG),
             ),
             renderer="vapoursynth",
@@ -546,7 +574,14 @@ def test_render_frame_ffmpeg_wraps_unrepresentable_geometry_as_render_error() ->
 
 
 def test_apply_overlay_to_file_none_mode_is_noop(monkeypatch) -> None:
-    overlay = OverlayConfig(OverlayMode.NONE, "Label", 100, (1920, 1080), None, None)
+    overlay = OverlayConfig(
+        mode=OverlayMode.NONE,
+        label="Label",
+        frame_number=100,
+        resolution=(1920, 1080),
+        hdr_info=None,
+        font_path=None,
+    )
 
     def _should_not_call(_path: Path, _config: OverlayConfig) -> None:
         raise AssertionError("_apply_overlay_to_file should not be called for NONE mode")
@@ -562,7 +597,14 @@ def test_render_frame_overlay_none_mode_is_strict_noop_on_ffmpeg(
         clip=Path("test.mp4"),
         frame_number=100,
         output_path=Path("out.png"),
-        overlay=OverlayConfig(OverlayMode.NONE, "Label", 100, (1920, 1080), None, None),
+        overlay=OverlayConfig(
+            mode=OverlayMode.NONE,
+            label="Label",
+            frame_number=100,
+            resolution=(1920, 1080),
+            hdr_info=None,
+            font_path=None,
+        ),
         encoder_settings=EncoderSettings(),
     )
     render_frame(request, renderer="ffmpeg")
@@ -903,7 +945,14 @@ def test_render_vs_populates_overlay_picture_type_from_frame_props(
         def get_frame(self, _index: int) -> _FrameWithPictureType:
             return self._frame
 
-    overlay = OverlayConfig(OverlayMode.STANDARD, "Label", 0, (2, 2), None, None)
+    overlay = OverlayConfig(
+        mode=OverlayMode.STANDARD,
+        label="Label",
+        frame_number=0,
+        resolution=(2, 2),
+        hdr_info=None,
+        font_path=None,
+    )
 
     render_frame(
         RenderRequest(
@@ -1005,12 +1054,12 @@ def test_render_vs_clears_overlay_picture_type_when_prop_is_unsupported(
             return self._frame
 
     overlay = OverlayConfig(
-        OverlayMode.STANDARD,
-        "Label",
-        0,
-        (2, 2),
-        None,
-        None,
+        mode=OverlayMode.STANDARD,
+        label="Label",
+        frame_number=0,
+        resolution=(2, 2),
+        hdr_info=None,
+        font_path=None,
         picture_type="I",
     )
 

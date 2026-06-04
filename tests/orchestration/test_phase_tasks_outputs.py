@@ -10,6 +10,7 @@ from typing import Any, cast
 import httpx
 import pytest
 
+from frame_compare.analysis.errors import SelectionError
 from frame_compare.analysis.types import (
     FrameMetrics,
     MetricsMetadata,
@@ -634,7 +635,7 @@ def test_run_render_phase_labels_skipped_analysis_alignment_fallback_random_fram
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
     ctx = _context(tmp_path, comparisons=[comparison])
     ctx.config.analysis = ctx.config.analysis.model_copy(
-        update={"user_frames": [0], "random_frame_count": 1}
+        update={"user_frames": [0], "random_frame_count": 1, "random_seed": 42}
     )
 
     def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
@@ -675,11 +676,11 @@ def test_run_render_phase_labels_skipped_analysis_alignment_fallback_random_fram
     )
 
     requests = captured["batch_requests"]
-    assert align_output.selected_frames == [6]
+    assert align_output.selected_frames == [18]
     assert requests[0].selection_labels == ["Random"]
     assert requests[0].selection_details is not None
     assert requests[0].selection_details[0] is not None
-    assert requests[0].selection_details[0].frame_index == 86
+    assert requests[0].selection_details[0].frame_index == 98
     assert requests[0].selection_details[0].label == "Random"
 
 
@@ -689,7 +690,7 @@ def test_run_report_phase_labels_skipped_analysis_alignment_fallback_random_fram
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
     ctx = _context(tmp_path, comparisons=[comparison])
     ctx.config.analysis = ctx.config.analysis.model_copy(
-        update={"user_frames": [0], "random_frame_count": 1}
+        update={"user_frames": [0], "random_frame_count": 1, "random_seed": 42}
     )
 
     def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
@@ -739,13 +740,13 @@ def test_run_report_phase_labels_skipped_analysis_alignment_fallback_random_fram
 
     report_data = captured["report_data"]
     assert output.report_path == expected_path
-    assert align_output.selected_frames == [6]
+    assert align_output.selected_frames == [18]
     assert [
         (detail.label, detail.detail, detail.category) for detail in report_data.frame_details
-    ] == [("Frame 86", "Source frame 86", "random")]
+    ] == [("Frame 98", "Source frame 98", "random")]
 
 
-def test_run_render_phase_labels_analysis_fallback_when_overlap_is_smaller_than_counts(
+def test_run_render_phase_rejects_analysis_fallback_when_overlap_is_smaller_than_counts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
@@ -777,40 +778,19 @@ def test_run_render_phase_labels_analysis_fallback_when_overlap_is_smaller_than_
             )
         ]
 
-    captured: dict[str, Any] = {}
-
-    def _fake_render_screenshots_from_batch(**kwargs: object) -> dict[str, list[Path]]:
-        captured.update(kwargs)
-        return {"Reference": [tmp_path / "reference.png"]}
-
     monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
-    monkeypatch.setattr(
-        "frame_compare.render.batch.orchestrator.render_screenshots_from_batch",
-        _fake_render_screenshots_from_batch,
-    )
 
-    align_output = phase_tasks.run_align_phase(ctx, selected_frames=[0, 1, 2, 3])
-    ctx.reference = align_output.reference
-    ctx.comparisons = align_output.comparisons
-    ctx.selection_breakdown = align_output.selection_breakdown
-    ctx.selection_details_by_source_frame = align_output.selection_details_by_source_frame
+    with pytest.raises(SelectionError) as exc_info:
+        phase_tasks.run_align_phase(ctx, selected_frames=[0, 1, 2, 3])
 
-    phase_tasks.run_render_phase(
-        ctx,
-        frames=align_output.selected_frames,
-        runner=cast(Any, _RenderRunner()),
-    )
-
-    requests = captured["batch_requests"]
-    assert align_output.selected_frames == [0, 1]
-    assert requests[0].selection_labels == ["Dark", "Dark"]
-    assert requests[0].selection_details is not None
-    assert [
-        detail.label if detail is not None else None for detail in requests[0].selection_details
-    ] == ["Dark", "Dark"]
+    assert exc_info.value.context.details == {
+        "reason": "insufficient generated candidates after alignment",
+        "requested": 4,
+        "found": 2,
+    }
 
 
-def test_run_report_phase_labels_analysis_fallback_when_overlap_is_smaller_than_counts(
+def test_run_report_phase_rejects_analysis_fallback_when_overlap_is_smaller_than_counts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
@@ -842,52 +822,16 @@ def test_run_report_phase_labels_analysis_fallback_when_overlap_is_smaller_than_
             )
         ]
 
-    captured: dict[str, Any] = {}
-    expected_path = tmp_path / "report.html"
-
-    def _fake_generate_report(report_data: object, report_config: object) -> Path:
-        captured["report_data"] = report_data
-        captured["report_config"] = report_config
-        return expected_path
-
     monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
-    monkeypatch.setattr(phase_tasks, "generate_report", _fake_generate_report)
 
-    align_output = phase_tasks.run_align_phase(ctx, selected_frames=[0, 1, 2, 3])
-    ctx.reference = align_output.reference
-    ctx.comparisons = align_output.comparisons
-    ctx.selection_breakdown = align_output.selection_breakdown
-    ctx.selection_details_by_source_frame = align_output.selection_details_by_source_frame
-    render = RenderArtifacts(
-        screenshots_by_label={
-            "Reference": [
-                tmp_path / "screenshots" / "reference_1.png",
-                tmp_path / "screenshots" / "reference_2.png",
-            ],
-            "Encode 1": [
-                tmp_path / "screenshots" / "encode_1.png",
-                tmp_path / "screenshots" / "encode_2.png",
-            ],
-        },
-        screenshot_dir=tmp_path / "screenshots",
-    )
+    with pytest.raises(SelectionError) as exc_info:
+        phase_tasks.run_align_phase(ctx, selected_frames=[0, 1, 2, 3])
 
-    output = phase_tasks.run_report_phase(
-        ctx,
-        frames=align_output.selected_frames,
-        render=render,
-        metadata=None,
-        slowpics_url=None,
-    )
-
-    report_data = captured["report_data"]
-    assert output.report_path == expected_path
-    assert [
-        (detail.label, detail.detail, detail.category) for detail in report_data.frame_details
-    ] == [
-        ("Frame 98", "Source frame 98", "quantile_dark"),
-        ("Frame 99", "Source frame 99", "quantile_dark"),
-    ]
+    assert exc_info.value.context.details == {
+        "reason": "insufficient generated candidates after alignment",
+        "requested": 4,
+        "found": 2,
+    }
 
 
 def test_output_phases_use_reselected_metric_metadata_after_real_initial_selection(
@@ -896,7 +840,7 @@ def test_output_phases_use_reselected_metric_metadata_after_real_initial_selecti
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
     ctx = _context(tmp_path, comparisons=[comparison])
     ctx.config.analysis = ctx.config.analysis.model_copy(
-        update={"random_frame_count": 0, "dark_frame_count": 2, "bright_frame_count": 2}
+        update={"random_frame_count": 0, "dark_frame_count": 2, "bright_frame_count": 0}
     )
     luminance = [0.5 for _frame in range(100)]
     luminance[0] = 0.0

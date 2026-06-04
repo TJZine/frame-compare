@@ -132,23 +132,28 @@ def select_initial_frame_plan(ctx: RunContext) -> FramePlanPhaseOutput:
     )
     user_frame_set = set(user_frames)
     dropped_user_frames = sorted(set(ctx.config.analysis.user_frames) - set(user_frames))
-    random_count = min(
-        ctx.config.analysis.random_frame_count,
-        max(0, frame_count - len(set(user_frames))),
-    )
+    source_offset = ctx.reference.trim.trim_start_frames + window_start
+    selectable_random_indices = [
+        frame_index
+        for frame_index in range(frame_count)
+        if source_offset + frame_index not in user_frame_set
+    ]
+    random_count = ctx.config.analysis.random_frame_count
+    if random_count > len(selectable_random_indices):
+        raise SelectionError(
+            "insufficient random candidates after user frames",
+            requested=random_count,
+            found=len(selectable_random_indices),
+        )
     random_frames = [
-        frame + window_start
+        selectable_random_indices[frame] + window_start
         for frame in create_frame_plan(
-            num_frames=frame_count,
+            num_frames=len(selectable_random_indices),
             count=random_count,
             seed=ctx.config.analysis.random_seed,
         ).frames
     ]
-    random_source_frames = [
-        ctx.reference.trim.trim_start_frames + frame
-        for frame in random_frames
-        if ctx.reference.trim.trim_start_frames + frame not in user_frame_set
-    ]
+    random_source_frames = [ctx.reference.trim.trim_start_frames + frame for frame in random_frames]
     selected_frames = sorted(
         {
             *(frame - ctx.reference.trim.trim_start_frames for frame in user_frames),
@@ -389,14 +394,9 @@ def _config_for_selection_window(
     local_user_frames = [
         frame - source_start for frame in config.user_frames if source_start <= frame < source_end
     ]
-    available_after_user = max(0, frame_count - len(set(local_user_frames)))
     return config.model_copy(
         update={
             "user_frames": local_user_frames,
-            "random_frame_count": min(config.random_frame_count, available_after_user),
-            "dark_frame_count": min(config.dark_frame_count, frame_count),
-            "bright_frame_count": min(config.bright_frame_count, frame_count),
-            "motion_frame_count": min(config.motion_frame_count, frame_count),
         }
     )
 
@@ -861,6 +861,9 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
             comparisons=comparisons,
             selection_source_window=selection_source_window,
             config=ctx.config.analysis,
+            accepted_user_source_frames={
+                frame + reference.trim.trim_start_frames for frame in normalized_user_frames
+            },
         )
         if trimmed_selection is not None:
             normalized_selected_frames = sorted(
@@ -1288,33 +1291,47 @@ def _reselect_frames_for_trimmed_overlap(
     comparisons: list[ClipState],
     selection_source_window: tuple[int, int] | None,
     config: AnalysisConfig,
+    accepted_user_source_frames: set[int],
 ) -> _TrimmedOverlapSelection | None:
     selectable_start, selectable_length = _selectable_aligned_source_window(
         reference=reference,
         comparisons=comparisons,
         selection_source_window=selection_source_window,
     )
-    target_count = min(_generated_frame_count(config), selectable_length)
+    target_count = _generated_frame_count(config)
     if selectable_length <= 0 or target_count <= 0:
         return None
+    if target_count > selectable_length:
+        raise SelectionError(
+            "insufficient generated candidates after alignment",
+            requested=target_count,
+            found=selectable_length,
+        )
     trimmed_metrics = _trimmed_metrics_for_overlap(
         metrics=metrics,
         trim_start_frame=selectable_start,
         frame_count=selectable_length,
     )
-    try:
-        trimmed_selection = select_frames(
-            metrics=trimmed_metrics,
-            config=config.model_copy(
-                update=_generated_selection_counts_for_capacity(config, target_count)
-            ),
-        )
-    except SelectionError:
-        return None
+    local_user_frames = sorted(
+        frame - selectable_start
+        for frame in accepted_user_source_frames
+        if selectable_start <= frame < selectable_start + selectable_length
+    )
+    trimmed_selection = select_frames(
+        metrics=trimmed_metrics,
+        config=config.model_copy(
+            update=_generated_selection_counts(
+                config,
+                local_user_frames=local_user_frames,
+            )
+        ),
+    )
+    local_user_frame_set = set(local_user_frames)
     return _TrimmedOverlapSelection(
         selected_frames=[
             frame + selectable_start - reference.trim.trim_start_frames
             for frame in trimmed_selection.frames
+            if frame not in local_user_frame_set
         ],
         selection_breakdown=_selection_breakdown_with_source_offset(
             trimmed_selection.breakdown,
@@ -1328,24 +1345,17 @@ def _reselect_frames_for_trimmed_overlap(
     )
 
 
-def _generated_selection_counts_for_capacity(
+def _generated_selection_counts(
     config: AnalysisConfig,
-    capacity: int,
+    *,
+    local_user_frames: list[int],
 ) -> dict[str, int | list[int]]:
-    remaining = max(0, capacity)
-
-    def _claim(requested: int) -> int:
-        nonlocal remaining
-        count = min(requested, remaining)
-        remaining -= count
-        return count
-
     return {
-        "user_frames": [],
-        "dark_frame_count": _claim(config.dark_frame_count),
-        "bright_frame_count": _claim(config.bright_frame_count),
-        "motion_frame_count": _claim(config.motion_frame_count),
-        "random_frame_count": _claim(config.random_frame_count),
+        "user_frames": local_user_frames,
+        "dark_frame_count": config.dark_frame_count,
+        "bright_frame_count": config.bright_frame_count,
+        "motion_frame_count": config.motion_frame_count,
+        "random_frame_count": config.random_frame_count,
     }
 
 
@@ -1391,10 +1401,14 @@ def _normalize_selected_frames_for_trimmed_domain(
     dropped_user_source_frames = [
         frame for frame in selected_user_source_frames if frame not in normalized_user_source_frames
     ]
-    generated_target_count = min(
-        generated_requested_count,
-        max(0, selectable_length - len(normalized_user_frames)),
-    )
+    generated_capacity = max(0, selectable_length - len(normalized_user_frames))
+    if generated_requested_count > generated_capacity:
+        raise SelectionError(
+            "insufficient generated candidates after alignment",
+            requested=generated_requested_count,
+            found=generated_capacity,
+        )
+    generated_target_count = generated_requested_count
     normalized_frames = sorted(
         {*normalized_user_frames, *normalized_generated_frames[:generated_target_count]}
     )

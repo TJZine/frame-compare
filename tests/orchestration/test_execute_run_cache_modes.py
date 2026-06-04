@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+from fractions import Fraction
 from pathlib import Path
 
 import pytest
 
 import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError
+from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.config.loader import load_config
+from frame_compare.orchestration import phase_tasks
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.services.alignment import CACHE_FILE_NAME
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
@@ -28,6 +31,7 @@ from .execute_run_helpers import (
 
 def test_execute_run_no_cache_deletes_only_matching_shared_metrics_cache(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     create_config(
         tmp_path,
@@ -79,11 +83,32 @@ enable = false
     request = RunRequest(
         root=tmp_path,
         no_cache=True,
-        skip_analysis=True,
+        skip_analysis=False,
         skip_metadata=True,
         skip_dovi=True,
         no_upload=True,
     )
+
+    def _fake_calculate_metrics(**_kwargs: object) -> FrameMetrics:
+        return FrameMetrics(
+            luminance=[0.1] * 100,
+            motion=[0.0] * 100,
+            metadata=MetricsMetadata(
+                frame_count=100,
+                fps=Fraction(24, 1),
+                config_fingerprint="fingerprint",
+                clips=[
+                    ClipIdentity(
+                        path=str(source_path),
+                        size=source_path.stat().st_size,
+                        mtime=source_path.stat().st_mtime,
+                        sha1=None,
+                    )
+                ],
+            ),
+        )
+
+    monkeypatch.setattr(phase_tasks, "calculate_metrics", _fake_calculate_metrics)
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
     asyncio.run(execute_run(request, deps=deps))

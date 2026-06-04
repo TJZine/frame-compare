@@ -24,17 +24,28 @@ def captured_draw_calls(monkeypatch):
     """
     Monkeypatch ImageDraw.multiline_text and ImageDraw.rectangle to capture calls.
     """
-    calls: dict[str, list[object]] = {"multiline_text": [], "rectangle": [], "text": []}
+    calls: dict[str, list[object]] = {
+        "multiline_text": [],
+        "multiline_textbbox": [],
+        "rectangle": [],
+        "text": [],
+    }
+    original_multiline_textbbox = ImageDraw.ImageDraw.multiline_textbbox
 
     def mock_multiline_text(self, xy, text, *args, **kwargs):
         calls["multiline_text"].append((xy, text, kwargs))
         return None
 
     def mock_multiline_textbbox(self, xy, text, *args, **kwargs):
-        lines = str(text).splitlines() if text else [""]
-        height = len(lines) * 20
-        x, y = xy
-        return (x, y, x + 200, y + height)
+        try:
+            bbox = original_multiline_textbbox(self, xy, text, *args, **kwargs)
+        except AttributeError:
+            lines = str(text).splitlines() if text else [""]
+            height = len(lines) * 20
+            x, y = xy
+            bbox = (x, y, x + 200, y + height)
+        calls["multiline_textbbox"].append((xy, text, kwargs, bbox))
+        return bbox
 
     def mock_rectangle(self, xy, *args, **kwargs):
         calls["rectangle"].append(xy)
@@ -259,9 +270,9 @@ def test_apply_overlay_standard_mode(captured_draw_calls):
     assert kwargs1["stroke_width"] == 2
     assert kwargs1["stroke_fill"] == (0, 0, 0, 255)
 
-    expected_frame_info_lines = text1.splitlines()
-    expected_frame_info_height = len(expected_frame_info_lines) * 20
-    assert xy2 == (10, 10 + expected_frame_info_height)
+    first_bbox = captured_draw_calls["multiline_textbbox"][0][3]
+    assert isinstance(first_bbox, tuple)
+    assert xy2 == (10, first_bbox[3])
     assert text2 == "\n".join(
         compose_overlay_text_lines(
             mode=OverlayMode.STANDARD,
@@ -330,9 +341,10 @@ def test_apply_overlay_uses_explicit_origin_for_frame_and_detail_blocks(captured
 
     (xy1, text1, _kwargs1) = captured_draw_calls["multiline_text"][0]
     (xy2, _text2, _kwargs2) = captured_draw_calls["multiline_text"][1]
-    expected_frame_info_height = len(str(text1).splitlines()) * 20
     assert xy1 == (26, 14)
-    assert xy2 == (26, 14 + expected_frame_info_height)
+    first_bbox = captured_draw_calls["multiline_textbbox"][0][3]
+    assert isinstance(first_bbox, tuple)
+    assert xy2 == (26, first_bbox[3])
 
 
 def test_apply_overlay_standard_includes_selection_label_when_present(captured_draw_calls):

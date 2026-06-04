@@ -26,7 +26,7 @@ class EncoderSettings:
     vs_writer: VsScreenshotWriter = VsScreenshotWriter.AUTO
 
 
-@dataclass
+@dataclass(kw_only=True)
 class OverlayConfig:
     """Overlay rendering configuration for a single output frame."""
 

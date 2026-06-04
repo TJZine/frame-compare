@@ -24,7 +24,9 @@ from frame_compare.config.errors import ConfigValidationError
 from frame_compare.config.overrides import apply_cli_overrides
 from frame_compare.config.schema import ConfigSchema, OverlayMode, ToneCurve, TonemapPreset
 from frame_compare.errors import FrameCompareError, JSONValue
-from frame_compare.orchestration.analysis_policy import needs_analysis
+from frame_compare.orchestration.analysis_policy import (
+    validate_skip_analysis_frame_selection_contract as validate_skip_analysis_policy,
+)
 
 from .cli_helpers import format_enum_expected
 
@@ -547,30 +549,9 @@ def validate_skip_analysis_frame_selection_contract(
     args: RunCliRawArgs,
     config: ConfigSchema,
 ) -> None:
-    if not args.skip_analysis:
-        return
-    if not needs_analysis(config.analysis):
-        return
-
-    validation_errors: list[dict[str, JSONValue]] = []
-    for field_name in ("dark_frame_count", "bright_frame_count", "motion_frame_count"):
-        count = getattr(config.analysis, field_name)
-        if count > 0:
-            validation_errors.append(
-                {
-                    "type": "value_error",
-                    "loc": ["analysis", field_name],
-                    "msg": f"{field_name} requires analysis and cannot be used with --skip-analysis.",
-                    "input": count,
-                }
-            )
-    if not validation_errors:
-        return
-
-    raise ConfigValidationError(
-        validation_errors,
-        message="Metric-based frame selection requires analysis",
-        hint="Remove --skip-analysis or set dark/bright/motion frame counts to 0",
+    validate_skip_analysis_policy(
+        skip_analysis=args.skip_analysis,
+        config=config.analysis,
     )
 
 

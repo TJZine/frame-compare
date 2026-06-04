@@ -381,6 +381,39 @@ def test_select_initial_frame_plan_labels_user_and_random_frames(
     assert output.selection_details_by_source_frame[random_frame].label == "Random"
 
 
+def test_select_initial_frame_plan_refills_random_after_user_collision(tmp_path: Path) -> None:
+    ctx = _context(tmp_path)
+    ctx.config.analysis = ctx.config.analysis.model_copy(
+        update={"user_frames": [8], "random_frame_count": 10, "random_seed": 42}
+    )
+
+    output = phase_tasks.select_initial_frame_plan(ctx)
+
+    assert output.selection_breakdown.user == [8]
+    assert len(output.selection_breakdown.random) == 10
+    assert 8 not in output.selection_breakdown.random
+    assert len(output.selected_frames) == 11
+
+
+def test_select_initial_frame_plan_fails_when_random_request_exceeds_remaining_domain(
+    tmp_path: Path,
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=2)
+    ctx.config.analysis = ctx.config.analysis.model_copy(
+        update={"user_frames": [0], "random_frame_count": 2}
+    )
+
+    with pytest.raises(SelectionError) as exc_info:
+        phase_tasks.select_initial_frame_plan(ctx)
+
+    assert exc_info.value.context.details == {
+        "reason": "insufficient random candidates after user frames",
+        "requested": 2,
+        "found": 1,
+    }
+
+
 def test_run_artifacts_uses_render_artifacts_carrier() -> None:
     artifacts = RunArtifacts()
     assert artifacts.render is None

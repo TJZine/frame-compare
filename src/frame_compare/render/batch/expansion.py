@@ -210,9 +210,9 @@ def _overlay_resolution_summary(
         original = source_size
         final = source_size
     else:
-        original = geometry_plan.cropped_size
+        original = source_size
         final = geometry_plan.final_canvas_size
-        transformed = original != source_size or final != source_size
+        transformed = final != source_size
 
     original_width, original_height = original
     final_width, final_height = final
@@ -229,10 +229,9 @@ def _overlay_resolution_summary(
 def _overlay_base_text_for_request(
     *,
     config: ConfigSchema,
-    source_info: object | None,
+    source_is_hdr: bool,
 ) -> str | None:
-    source_is_hdr = getattr(source_info, "is_hdr", False)
-    if source_is_hdr is not True or not config.color.enable_tonemap:
+    if not source_is_hdr or not config.color.enable_tonemap:
         return None
 
     settings = resolve_tonemap_settings(config)
@@ -427,7 +426,12 @@ def _prepare_batch_requests(
                 request=req,
                 loaded_clip=loaded_clip,
                 hdr_info=resolved_hdr_info,
-                base_text=_overlay_base_text_for_request(config=config, source_info=source_info),
+                base_text=_overlay_base_text_for_request(
+                    config=config,
+                    source_is_hdr=(
+                        source_info.is_hdr if source_info is not None else req.probe_is_hdr is True
+                    ),
+                ),
                 width=width,
                 height=height,
                 num_frames=num_frames,

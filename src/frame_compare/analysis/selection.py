@@ -36,17 +36,17 @@ def select_frames(metrics: FrameMetrics, config: AnalysisConfig) -> FrameSelecti
     dark = _select_dark_frames(
         metrics.luminance,
         config.dark_frame_count,
+        selected_set,
         dark_quantile=config.dark_quantile,
     )
-    dark = [frame for frame in dark if frame not in selected_set]
     selected_set.update(dark)
 
     bright = _select_bright_frames(
         metrics.luminance,
         config.bright_frame_count,
+        selected_set,
         bright_quantile=config.bright_quantile,
     )
-    bright = [frame for frame in bright if frame not in selected_set]
     selected_set.update(bright)
 
     motion_frames = _select_by_motion(
@@ -75,9 +75,9 @@ def select_frames(metrics: FrameMetrics, config: AnalysisConfig) -> FrameSelecti
     )
 
     selected_list = sorted(selected_set)
-    requested_count = _requested_count(config)
+    requested_count = _requested_count(config, accepted_user_frame_count=len(user_frames))
 
-    if len(selected_list) < requested_count and len(selected_list) >= total_frames:
+    if len(selected_list) < requested_count:
         raise SelectionError(
             reason="insufficient_candidates",
             requested=requested_count,
@@ -95,9 +95,17 @@ def select_frames(metrics: FrameMetrics, config: AnalysisConfig) -> FrameSelecti
     )
 
 
-def _requested_count(config: AnalysisConfig) -> int:
+def _requested_count(
+    config: AnalysisConfig,
+    *,
+    accepted_user_frame_count: int | None = None,
+) -> int:
     return (
-        len(config.user_frames)
+        (
+            len(config.user_frames)
+            if accepted_user_frame_count is None
+            else accepted_user_frame_count
+        )
         + config.random_frame_count
         + config.dark_frame_count
         + config.bright_frame_count
@@ -177,6 +185,7 @@ def _format_selection_timecode(frame_index: int, fps: Fraction) -> str | None:
 def _select_dark_frames(
     luminance: Sequence[float],
     count: int,
+    exclude: set[int],
     *,
     dark_quantile: float,
 ) -> list[int]:
@@ -187,15 +196,16 @@ def _select_dark_frames(
     if n == 0:
         return []
     dark_cut = max(1, int(n * dark_quantile))
-    dark_pool = [idx for idx, _ in indexed[:dark_cut]]
+    dark_pool = [idx for idx, _ in indexed[:dark_cut] if idx not in exclude]
     if len(dark_pool) < count:
-        dark_pool = [idx for idx, _ in indexed[:count]]
+        dark_pool = [idx for idx, _ in indexed if idx not in exclude][:count]
     return sorted(_sample_evenly(dark_pool, count))
 
 
 def _select_bright_frames(
     luminance: Sequence[float],
     count: int,
+    exclude: set[int],
     *,
     bright_quantile: float,
 ) -> list[int]:
@@ -208,9 +218,9 @@ def _select_bright_frames(
     bright_cut = int(n * bright_quantile)
     if bright_cut >= n:
         bright_cut = n - 1
-    bright_pool = [idx for idx, _ in indexed[bright_cut:]]
+    bright_pool = [idx for idx, _ in indexed[bright_cut:] if idx not in exclude]
     if len(bright_pool) < count:
-        bright_pool = [idx for idx, _ in indexed[-count:]]
+        bright_pool = [idx for idx, _ in indexed if idx not in exclude][-count:]
     return sorted(_sample_evenly(bright_pool, count))
 
 

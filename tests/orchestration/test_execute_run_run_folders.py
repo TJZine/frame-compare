@@ -110,12 +110,33 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
     request = RunRequest(
         root=tmp_path,
         no_cache=True,
-        skip_analysis=True,
+        skip_analysis=False,
         skip_metadata=True,
         skip_dovi=True,
         no_upload=True,
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+
+    def _fake_calculate_metrics(**_kwargs: object) -> FrameMetrics:
+        return FrameMetrics(
+            luminance=[0.1] * 100,
+            motion=[0.0] * 100,
+            metadata=MetricsMetadata(
+                frame_count=100,
+                fps=Fraction(24, 1),
+                config_fingerprint="fingerprint",
+                clips=[
+                    ClipIdentity(
+                        path=str(source_path),
+                        size=source_path.stat().st_size,
+                        mtime=source_path.stat().st_mtime,
+                        sha1=None,
+                    )
+                ],
+            ),
+        )
+
+    monkeypatch.setattr(phase_tasks, "calculate_metrics", _fake_calculate_metrics)
+    deps = RunDependencies(vs_loader=AnalysisCapableVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
     asyncio.run(execute_run(request, deps=deps))
 
@@ -371,11 +392,17 @@ def test_execute_run_from_cache_only_ignores_old_run_folder_cache(
     with pytest.raises(MetricsCalculationError):
         asyncio.run(execute_run(request, deps=deps))
 
+    selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
+    fingerprint = cache_io.compute_cache_key(
+        [source_path],
+        config.analysis,
+        selection_domain=selection_domain,
+    )
     assert sorted(path.name for path in input_dir.iterdir() if path.is_dir()) == [run_name]
     assert (
         cache_io.find_metrics_cache_file(
             tmp_path / "generated" / "cache" / "analysis",
-            cache_io.compute_cache_key([source_path], config.analysis),
+            fingerprint,
         )
         is None
     )

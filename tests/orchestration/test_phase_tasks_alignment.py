@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from frame_compare.analysis.errors import SelectionError
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.orchestration import phase_tasks
@@ -137,7 +138,7 @@ def test_run_align_phase_does_not_backfill_dropped_user_frames_with_random(
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
     ctx = _context(tmp_path, comparisons=[comparison])
     ctx.config.analysis = ctx.config.analysis.model_copy(
-        update={"user_frames": [0], "random_frame_count": 1}
+        update={"user_frames": [0], "random_frame_count": 1, "random_seed": 42}
     )
 
     def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
@@ -170,7 +171,7 @@ def test_run_align_phase_labels_skipped_analysis_fallback_random_frame(
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
     ctx = _context(tmp_path, comparisons=[comparison])
     ctx.config.analysis = ctx.config.analysis.model_copy(
-        update={"user_frames": [0], "random_frame_count": 1}
+        update={"user_frames": [0], "random_frame_count": 1, "random_seed": 42}
     )
 
     def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
@@ -191,13 +192,13 @@ def test_run_align_phase_labels_skipped_analysis_fallback_random_frame(
     output = phase_tasks.run_align_phase(ctx, selected_frames=[0, 66])
 
     assert output.reference.trim.trim_start_frames == 80
-    assert output.selected_frames == [6]
+    assert output.selected_frames == [18]
     assert output.selection_breakdown is not None
     assert output.selection_breakdown.user == []
-    assert output.selection_breakdown.random == [86]
+    assert output.selection_breakdown.random == [98]
     assert output.selection_details_by_source_frame is not None
-    assert output.selection_details_by_source_frame[86].label == "Random"
-    assert output.selection_details_by_source_frame[86].notes == "random"
+    assert output.selection_details_by_source_frame[98].label == "Random"
+    assert output.selection_details_by_source_frame[98].notes == "random"
     assert output.warnings == [
         "frame selection: dropped user frame(s) outside aligned renderable range: 0"
     ]
@@ -211,7 +212,7 @@ def test_run_align_phase_reselects_trimmed_overlap_when_fallback_plan_would_drop
     )
     ctx = _context(tmp_path, comparisons=[comparison])
     ctx.config.analysis = ctx.config.analysis.model_copy(
-        update={"random_frame_count": 0, "dark_frame_count": 2, "bright_frame_count": 2}
+        update={"random_frame_count": 0, "dark_frame_count": 2, "bright_frame_count": 0}
     )
     ctx.analysis_metrics = FrameMetrics(
         luminance=[float(frame) / 219.0 for frame in range(220)],
@@ -266,7 +267,7 @@ def test_run_align_phase_reselects_trimmed_overlap_when_fallback_plan_would_drop
     )
 
 
-def test_run_align_phase_labels_analysis_fallback_when_overlap_is_smaller_than_counts(
+def test_run_align_phase_raises_when_overlap_is_smaller_than_generated_counts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
@@ -300,19 +301,14 @@ def test_run_align_phase_labels_analysis_fallback_when_overlap_is_smaller_than_c
 
     monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
 
-    output = phase_tasks.run_align_phase(ctx, selected_frames=[0, 1, 2, 3])
+    with pytest.raises(SelectionError) as exc_info:
+        phase_tasks.run_align_phase(ctx, selected_frames=[0, 1, 2, 3])
 
-    assert output.reference.trim.trim_start_frames == 98
-    assert output.selected_frames == [0, 1]
-    assert output.selection_breakdown is not None
-    assert output.selection_breakdown.quantile_dark == [98, 99]
-    assert output.selection_breakdown.quantile_bright == []
-    assert output.selection_details_by_source_frame is not None
-    assert set(output.selection_details_by_source_frame) == {98, 99}
-    assert [output.selection_details_by_source_frame[frame].label for frame in [98, 99]] == [
-        "Dark",
-        "Dark",
-    ]
+    assert exc_info.value.context.details == {
+        "reason": "insufficient generated candidates after alignment",
+        "requested": 4,
+        "found": 2,
+    }
 
 
 def test_run_align_phase_replaces_stale_analysis_metadata_after_tiny_overlap_fallback(
@@ -321,7 +317,7 @@ def test_run_align_phase_replaces_stale_analysis_metadata_after_tiny_overlap_fal
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
     ctx = _context(tmp_path, comparisons=[comparison])
     ctx.config.analysis = ctx.config.analysis.model_copy(
-        update={"random_frame_count": 0, "dark_frame_count": 2, "bright_frame_count": 2}
+        update={"random_frame_count": 0, "dark_frame_count": 2, "bright_frame_count": 0}
     )
     luminance = [0.5 for _frame in range(100)]
     luminance[0] = 0.0
@@ -365,7 +361,7 @@ def test_run_align_phase_replaces_stale_analysis_metadata_after_tiny_overlap_fal
         selected_frames=list(initial_selection.frames),
     )
 
-    assert len(initial_selection.frames) == 4
+    assert len(initial_selection.frames) == 2
     assert set(initial_selection.selection_details).isdisjoint({98, 99})
     assert output.reference.trim.trim_start_frames == 98
     assert output.selected_frames == [0, 1]
@@ -386,7 +382,7 @@ def test_run_align_phase_preserves_surviving_user_label_when_metrics_reselect_sa
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
     ctx = _context(tmp_path, comparisons=[comparison])
     ctx.config.analysis = ctx.config.analysis.model_copy(
-        update={"user_frames": [98], "random_frame_count": 0, "dark_frame_count": 2}
+        update={"user_frames": [98], "random_frame_count": 0, "dark_frame_count": 1}
     )
     ctx.analysis_metrics = FrameMetrics(
         luminance=[float(frame) / 99.0 for frame in range(100)],
