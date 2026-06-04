@@ -145,6 +145,16 @@ body {
     box-shadow: 0 0 10px rgba(56, 189, 248, 0.15);
 }
 
+.rv-btn-icon {
+    display: inline-block;
+    transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.rv-header-help-btn:hover .rv-btn-icon,
+.rv-header-info-btn:hover .rv-btn-icon {
+    transform: rotate(15deg) scale(1.15);
+}
+
 
 /* 4. Controls Toolbar */
 .rv-controls {
@@ -1737,6 +1747,13 @@ body.rv-inspector-open .rv-viewer-stage {
 
 .rv-clip-meta-heading span:last-child {
     font-family: var(--font-mono);
-    font-size: 0.7rem;
-    color: var(--accent-hover);
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.05rem 0.35rem;
+    letter-spacing: 0.05em;
+    line-height: 1;
 }

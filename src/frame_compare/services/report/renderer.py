@@ -326,8 +326,8 @@ def _render_header(
     clip_count: int,
     slowpics_link: str,
 ) -> str:
-    info_button = '<button id="btn-info" class="rv-header-info-btn" aria-label="Report information" title="Report Info">ℹ</button>'
-    help_button = '<button id="btn-help" class="rv-header-help-btn" aria-label="Keyboard shortcuts" title="Help (?)">?</button>'
+    info_button = '<button id="btn-info" class="rv-header-info-btn" aria-label="Report information" title="Report Info"><span class="rv-btn-icon">ℹ</span></button>'
+    help_button = '<button id="btn-help" class="rv-header-help-btn" aria-label="Keyboard shortcuts" title="Help (?)"><span class="rv-btn-icon">?</span></button>'
     slowpics_block = f"{slowpics_link} • " if slowpics_link else ""
     return f"""        <header class="rv-header">
             <div>
