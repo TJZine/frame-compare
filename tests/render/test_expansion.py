@@ -11,6 +11,8 @@ from frame_compare.config.schema import ColorConfig, ConfigSchema, OverlayMode, 
 from frame_compare.config.schema_enums import ScreenshotGeometryMode, VsScreenshotWriter
 from frame_compare.render.batch.expansion import (
     _build_overlay_config,
+    _overlay_base_text_for_request,
+    _overlay_resolution_summary,
     _resolve_num_frames,
     _validate_batch_request_lengths,
     _validate_source_frame_range,
@@ -445,8 +447,10 @@ def test_build_overlay_config() -> None:
             selection_detail=detail,
             diagnostic_metadata=diagnostic_metadata,
             resolution=(1920, 1080),
+            resolution_summary=None,
             origin=None,
             hdr_info=None,
+            base_text=None,
             num_frames=100,
             include_frame_number=True,
         )
@@ -463,8 +467,10 @@ def test_build_overlay_config() -> None:
         selection_detail=detail,
         diagnostic_metadata=diagnostic_metadata,
         resolution=(1920, 1080),
+        resolution_summary="1920 × 1080  (native)",
         origin=None,
         hdr_info="HDR10",
+        base_text="Tonemapping Algorithm: bt2390 dpd = 1 dst = 100 nits",
         num_frames=100,
         include_frame_number=True,
     )
@@ -478,7 +484,9 @@ def test_build_overlay_config() -> None:
     assert overlay.selection_detail == detail
     assert overlay.diagnostic_metadata == diagnostic_metadata
     assert overlay.resolution == (1920, 1080)
+    assert overlay.resolution_summary == "1920 × 1080  (native)"
     assert overlay.hdr_info == "HDR10"
+    assert overlay.base_text == "Tonemapping Algorithm: bt2390 dpd = 1 dst = 100 nits"
     assert overlay.num_frames == 100
     assert overlay.include_frame_number is True
 
@@ -495,6 +503,7 @@ def test_expand_batch_render_requests(mock_prepare: MagicMock) -> None:
     ref_source_info.width = 1920
     ref_source_info.height = 1080
     ref_source_info.num_frames = 150
+    ref_source_info.is_hdr = True
     enc_clip = MagicMock(name="enc_clip")
     mock_prepare.side_effect = [
         (ref_clip, None, "HDR10", ref_source_info),
@@ -603,8 +612,10 @@ def test_expand_batch_render_requests(mock_prepare: MagicMock) -> None:
     assert first_overlay.selection_detail == ref_details[0]
     assert first_overlay.diagnostic_metadata == ref_diagnostics[0]
     assert first_overlay.resolution == (1920, 1080)
+    assert first_overlay.resolution_summary == "1920 × 1080  (native)"
     assert first_overlay.origin is None
     assert first_overlay.hdr_info == "HDR10"
+    assert first_overlay.base_text == "Tonemapping Algorithm: bt2390 dpd = 1 dst = 100 nits"
     assert first_overlay.num_frames == 150
     assert requests[0].geometry_plan is None
 
@@ -615,6 +626,7 @@ def test_expand_batch_render_requests(mock_prepare: MagicMock) -> None:
     assert second_overlay.selection_label == "Cached"
     assert second_overlay.selection_detail == ref_details[1]
     assert second_overlay.diagnostic_metadata == ref_diagnostics[1]
+    assert second_overlay.base_text == "Tonemapping Algorithm: bt2390 dpd = 1 dst = 100 nits"
 
     assert requests[2].clip is enc_clip
     assert requests[2].frame_number == 30
@@ -629,8 +641,10 @@ def test_expand_batch_render_requests(mock_prepare: MagicMock) -> None:
     assert third_overlay.selection_detail == enc_detail
     assert third_overlay.diagnostic_metadata == enc_diagnostic
     assert third_overlay.resolution == (req2.probe_width, req2.probe_height)
+    assert third_overlay.resolution_summary == "1920 × 1080  (native)"
     assert third_overlay.origin is None
     assert third_overlay.hdr_info is None
+    assert third_overlay.base_text is None
     assert third_overlay.num_frames == req2.probe_num_frames
     assert requests[2].geometry_plan is None
 
@@ -707,6 +721,7 @@ def test_expand_batch_render_requests_attaches_aligned_geometry_after_loading_di
     assert ref_plan.final_canvas_size == (1440, 1080)
     assert requests[0].overlay is not None
     assert requests[0].overlay.resolution == (1440, 1080)
+    assert requests[0].overlay.resolution_summary == "1440 × 1080  (native)"
     assert requests[0].overlay.origin == ref_plan.overlay_origin
 
     enc_plan = requests[2].geometry_plan
@@ -716,6 +731,7 @@ def test_expand_batch_render_requests_attaches_aligned_geometry_after_loading_di
     assert enc_plan.final_canvas_size == (1440, 1080)
     assert requests[2].overlay is not None
     assert requests[2].overlay.resolution == (1440, 1080)
+    assert requests[2].overlay.resolution_summary == "1440 × 1080  (native)"
     assert requests[2].overlay.origin == enc_plan.overlay_origin
 
 
@@ -844,16 +860,65 @@ def test_expand_batch_render_requests_aligns_mixed_dimensions_with_explicit_acti
     assert [
         (
             request.overlay.resolution if request.overlay is not None else None,
+            request.overlay.resolution_summary if request.overlay is not None else None,
+            request.overlay.base_text if request.overlay is not None else None,
             request.overlay.origin if request.overlay is not None else None,
             request.overlay.hdr_info if request.overlay is not None else None,
             request.overlay.num_frames if request.overlay is not None else None,
         )
         for request in requests
     ] == [
-        ((1440, 800), (10, 10), "HDR10", 180),
-        ((1440, 800), (10, 10), None, 160),
-        ((1440, 800), (19, 10), None, 140),
+        (
+            (1440, 800),
+            "1440 × 800  (native)",
+            None,
+            (10, 10),
+            "HDR10",
+            180,
+        ),
+        (
+            (1440, 800),
+            "1440 × 800  (native)",
+            None,
+            (10, 10),
+            None,
+            160,
+        ),
+        (
+            (1440, 800),
+            "1280 × 720 → 1440 × 800  (original → target)",
+            None,
+            (19, 10),
+            None,
+            140,
+        ),
     ]
+
+
+def test_overlay_resolution_summary_uses_cropped_to_target_when_geometry_changes() -> None:
+    summary = _overlay_resolution_summary(
+        source_size=(1920, 1080),
+        geometry_plan=MagicMock(cropped_size=(1280, 720), final_canvas_size=(1440, 800)),
+    )
+    assert summary == "1280 × 720 → 1440 × 800  (original → target)"
+
+
+def test_overlay_base_text_for_request_only_when_hdr_tonemap_is_enabled() -> None:
+    hdr_source_info = MagicMock()
+    hdr_source_info.is_hdr = True
+
+    sdr_source_info = MagicMock()
+    sdr_source_info.is_hdr = False
+
+    enabled = ConfigSchema(color=ColorConfig(enable_tonemap=True))
+    disabled = ConfigSchema(color=ColorConfig(enable_tonemap=False))
+
+    assert (
+        _overlay_base_text_for_request(config=enabled, source_info=hdr_source_info)
+        == "Tonemapping Algorithm: bt2390 dpd = 1 dst = 100 nits"
+    )
+    assert _overlay_base_text_for_request(config=enabled, source_info=sdr_source_info) is None
+    assert _overlay_base_text_for_request(config=disabled, source_info=hdr_source_info) is None
 
 
 @pytest.mark.unit

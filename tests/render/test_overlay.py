@@ -232,6 +232,8 @@ def test_apply_overlay_standard_mode(captured_draw_calls):
         resolution=(1920, 1080),
         hdr_info=None,
         font_path=None,
+        base_text="Tonemapping Algorithm: bt2390 dpd = 1 dst = 100 nits",
+        resolution_summary="1280 × 720 → 1440 × 810  (original → target)",
     )
     img = Image.new("RGB", (100, 100))
 
@@ -263,11 +265,12 @@ def test_apply_overlay_standard_mode(captured_draw_calls):
     assert text2 == "\n".join(
         compose_overlay_text_lines(
             mode=OverlayMode.STANDARD,
-            base_text=None,
+            base_text="Tonemapping Algorithm: bt2390 dpd = 1 dst = 100 nits",
             width=1920,
             height=1080,
             selection_type=None,
             diagnostic_lines=[],
+            resolution_summary="1280 × 720 → 1440 × 810  (original → target)",
         )
     )
     assert kwargs2["stroke_width"] == 2
@@ -296,6 +299,7 @@ def test_apply_overlay_standard_uses_fallback_details_y_when_bbox_fails(monkeypa
         resolution=(1920, 1080),
         hdr_info=None,
         font_path=None,
+        base_text="Base",
         origin=(26, 14),
     )
     img = Image.new("RGB", (100, 100))
@@ -317,6 +321,7 @@ def test_apply_overlay_uses_explicit_origin_for_frame_and_detail_blocks(captured
         resolution=(1920, 1080),
         hdr_info=None,
         font_path=None,
+        base_text="Base",
         origin=(26, 14),
     )
     img = Image.new("RGB", (100, 100))

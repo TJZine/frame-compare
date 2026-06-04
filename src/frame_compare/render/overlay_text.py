@@ -53,6 +53,7 @@ def compose_overlay_text_lines(
     height: int,
     selection_type: str | None,
     diagnostic_lines: Sequence[str],
+    resolution_summary: str | None = None,
 ) -> list[str]:
     """
     Compose the "overlay-text" block lines for the overlay.
@@ -69,7 +70,9 @@ def compose_overlay_text_lines(
     if base_text:
         lines.append(base_text)
 
-    if width > 0 and height > 0:
+    if resolution_summary:
+        lines.append(resolution_summary)
+    elif width > 0 and height > 0:
         lines.append(f"{width} × {height}  (native)")
 
     if mode == OverlayMode.DIAGNOSTIC:

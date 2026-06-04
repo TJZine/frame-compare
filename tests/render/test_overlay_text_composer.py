@@ -45,6 +45,23 @@ def test_compose_overlay_text_lines_standard_order_matches_legacy_intent() -> No
     assert lines[1] == "Frame Selection Type: Dark"
 
 
+def test_compose_overlay_text_lines_standard_prefers_explicit_base_and_resolution_summary() -> None:
+    lines = compose_overlay_text_lines(
+        mode=OverlayMode.STANDARD,
+        base_text="Tonemapping Algorithm: bt2390 dpd = 1 dst = 100 nits",
+        width=1920,
+        height=1080,
+        selection_type="Dark",
+        diagnostic_lines=[],
+        resolution_summary="1280 × 720 → 1440 × 810  (original → target)",
+    )
+    assert lines == [
+        "Tonemapping Algorithm: bt2390 dpd = 1 dst = 100 nits",
+        "1280 × 720 → 1440 × 810  (original → target)",
+        "Frame Selection Type: Dark",
+    ]
+
+
 def test_compose_overlay_text_lines_diagnostic_omits_redundant_selection_type() -> None:
     lines = compose_overlay_text_lines(
         mode=OverlayMode.DIAGNOSTIC,

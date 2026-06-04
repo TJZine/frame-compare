@@ -36,6 +36,8 @@ class OverlayConfig:
     resolution: tuple[int, int]
     hdr_info: str | None
     font_path: Path | None
+    base_text: str | None = None
+    resolution_summary: str | None = None
     origin: tuple[int, int] | None = None
     display_frame_number: int | None = None
     num_frames: int | None = None

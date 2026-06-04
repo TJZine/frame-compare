@@ -322,11 +322,12 @@ def _compose_overlay_text(config: OverlayConfig, mode: OverlayMode) -> str | Non
     width, height = config.resolution
     overlay_lines = compose_overlay_text_lines(
         mode=mode,
-        base_text=None,
+        base_text=config.base_text,
         width=width,
         height=height,
         selection_type=_resolve_selection_label(config),
         diagnostic_lines=_diagnostic_lines(config, mode),
+        resolution_summary=config.resolution_summary,
     )
     if not overlay_lines:
         return None
