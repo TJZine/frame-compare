@@ -762,8 +762,8 @@ def test_build_html_renders_viewport_audit_controls(report_payload: ReportPayloa
     assert 'aria-label="Fit width"' in html
     assert 'data-fit="height"' in html
     assert 'aria-label="Fit height"' in html
-    assert 'data-fit="fill"' in html
-    assert 'aria-label="Fill stage"' in html
+    assert 'data-fit="fill"' not in html
+    assert 'aria-label="Fill stage"' not in html
     assert 'id="alignment-preset" aria-label="Alignment preset"' in html
     assert '<option value="left-1">Left 1px</option>' in html
     assert '<option value="custom">Custom</option>' in html
@@ -774,7 +774,11 @@ def test_build_html_renders_viewport_audit_controls(report_payload: ReportPayloa
     assert 'id="btn-fullscreen"' in html
     assert 'aria-label="Enter fullscreen"' in html
     assert 'aria-pressed="false"' in html
-    assert 'id="btn-focus-mode" aria-label="Enter focus mode" aria-pressed="false"' in html
+    assert (
+        'id="btn-fullscreen" aria-label="Enter fullscreen" aria-pressed="false" '
+        'title="Enter fullscreen">⛶</button>'
+    ) in html
+    assert 'id="btn-focus-mode"' not in html
     assert 'id="btn-overlays"' in html
     assert 'aria-label="Hide HUD"' in html
     assert ">HUD</button>" in html
@@ -805,8 +809,7 @@ def test_build_html_renders_viewport_audit_controls(report_payload: ReportPayloa
     assert fit_buttons["width"].attrs["title"] == "Fit width (↔)"
     assert fit_buttons["height"].text == "↕"
     assert fit_buttons["height"].attrs["title"] == "Fit height (↕)"
-    assert fit_buttons["fill"].text == "⛶"
-    assert fit_buttons["fill"].attrs["title"] == "Fill stage (⛶)"
+    assert "fill" not in fit_buttons
     assert '<div class="rv-modal-subtitle">Viewport Fit Modes</div>' in html
 
 
@@ -842,9 +845,9 @@ def test_build_html_renders_inspector_drawer(report_payload: ReportPayload) -> N
         assert 'tabindex="-1"' in html[button_start:button_end]
     assert "Offsets are scoped to the selected pair." in html
     assert "data-inspector-export-summary" in html
-    assert "data-focus-frame" in html
-    assert "data-focus-mode" in html
-    assert "data-focus-pair" in html
+    assert "data-focus-frame" not in html
+    assert "data-focus-mode" not in html
+    assert "data-focus-pair" not in html
 
 
 def test_build_html_renders_keyboard_help_accessibility_hooks(
@@ -873,10 +876,7 @@ def test_build_html_renders_keyboard_help_accessibility_hooks(
         '<div class="rv-shortcut-row"><span>Blink Pause / Speed</span><span class="rv-key">Space / [ / ]</span></div>'
         in html
     )
-    assert (
-        '<div class="rv-shortcut-row"><span>Toggle Focus</span><span class="rv-key">Z</span></div>'
-        in html
-    )
+    assert "Toggle Focus" not in html
     assert "Modes (Slider/Single/Diff/Blink)" in html
     assert (
         '<div class="rv-shortcut-row"><span>Reset Viewport</span><span class="rv-key">R / Double-click</span></div>'
@@ -887,7 +887,7 @@ def test_build_html_renders_keyboard_help_accessibility_hooks(
         in html
     )
     assert (
-        '<div class="rv-shortcut-row"><span>Close Panel / Exit Focus / Exit Fullscreen</span>'
+        '<div class="rv-shortcut-row"><span>Close Panel / Exit Fullscreen</span>'
         '<span class="rv-key">Esc</span></div>'
     ) in html
 
@@ -1049,8 +1049,8 @@ def test_viewer_assets_keep_divider_slider_only_and_pointer_safe() -> None:
     assert "document.querySelectorAll('[data-fit]')" in js
     assert "setAttribute('aria-checked', isActive)" in js
     assert "this.state.fitMode = 'custom';" in js
-    assert "if (!['actual', 'width', 'height', 'fill'].includes(mode)) return;" in js
-    assert ": Math.max(fitWidthZoom, fitHeightZoom);" in js
+    assert "if (!['actual', 'width', 'height'].includes(mode)) return;" in js
+    assert ": Math.max(fitWidthZoom, fitHeightZoom);" not in js
     assert "addEventListener('load', () => this.applyFitMode())" in js
     assert "window.addEventListener('resize', () => this.applyFitMode())" in js
     assert "document.addEventListener('fullscreenchange', () => {" in js
@@ -1095,7 +1095,7 @@ def test_viewer_assets_group_event_binding_by_interaction_area() -> None:
     assert "renderEmptyState(this.emptyStateMessage());\n                return;" in js
 
 
-def test_viewer_assets_manage_help_focus_and_escape_semantics() -> None:
+def test_viewer_assets_manage_help_keyboard_focus_and_escape_semantics() -> None:
     js = get_js()
 
     assert "helpRestoreFocus: null" in js
@@ -1162,7 +1162,7 @@ def test_viewer_assets_wire_report_scoped_viewport_persistence() -> None:
     assert "inspectorTab: this.state.inspectorTab" in persistence_block
     assert "blinkIntervalMs: this.state.blinkIntervalMs" in persistence_block
     assert "blinkPaused" not in persistence_block
-    assert "focusMode" not in persistence_block
+    assert "focusMode" not in js
     assert "pairAlignments: this.state.pairAlignments" in persistence_block
     assert "alignmentPreset: this.state.alignmentPreset" not in persistence_block
     assert "alignX: this.state.alignX" not in persistence_block
@@ -1231,7 +1231,7 @@ def test_viewer_assets_keep_overlay_and_blink_clip_semantics() -> None:
     assert ": this.state.leftClipIdx" in js
     assert "this.dom.activeSelect.value = String(this.state.activeClipIdx);" in js
     assert "this.updateInspectorData();" in js
-    assert "this.updateFocusHud();" in js
+    assert "this.updateFocusHud();" not in js
     assert (
         "this.state.mode === 'slider' || this.state.mode === 'diff' || this.state.mode === 'blink'"
         in js
@@ -1276,7 +1276,7 @@ def test_viewer_assets_wire_metadata_and_error_empty_state_hooks() -> None:
 
     assert ".rv-stage-overlay-info" in css
     assert ".rv-viewer-stage.rv-overlays-hidden .rv-overlay-label" in css
-    assert ".rv-viewer-stage.rv-overlays-hidden .rv-focus-hud" in css
+    assert ".rv-viewer-stage.rv-overlays-hidden .rv-focus-hud" not in css
     assert ".rv-align-popover" in css
     assert '.rv-status[data-tone="error"]' in css
     assert '.rv-status[data-tone="warning"]' in css
@@ -1321,6 +1321,12 @@ def test_viewer_assets_wire_bottom_panel_and_filmstrip_state() -> None:
     assert ".rv-bottom-panel" in css
     assert ".rv-bottom-panel--collapsed .rv-filmstrip" in css
     assert "display: none;" in _css_block(css, ".rv-bottom-panel--collapsed .rv-filmstrip")
+    assert "justify-content: flex-end;" in _css_block(
+        css, ".rv-bottom-panel--collapsed .rv-bottom-panel-bar"
+    )
+    assert "margin-left: auto;" in _css_block(
+        css, ".rv-bottom-panel--collapsed .rv-filmstrip-controls"
+    )
     assert "display: none;" in _css_block(css, ".rv-bottom-panel--collapsed .rv-filter-group")
     assert "display: none;" in _css_block(
         css, ".rv-bottom-panel--collapsed .rv-filmstrip-size-control"
@@ -1346,7 +1352,7 @@ def test_viewer_assets_wire_bottom_panel_and_filmstrip_state() -> None:
     assert "hasThumbnails && !collapsed ? 'true' : 'false'" in js
 
 
-def test_viewer_assets_wire_inspector_blink_and_focus_state() -> None:
+def test_viewer_assets_wire_inspector_and_blink_state() -> None:
     css = get_css()
     vertical_palette_css = _css_block(css, '.rv-viewport-palette[data-orientation="vertical"]')
     tablet_css = _css_block(css, "@media (max-width: 992px)")
@@ -1357,8 +1363,8 @@ def test_viewer_assets_wire_inspector_blink_and_focus_state() -> None:
     assert "previous === '' || previous === '-1'" in get_js()
     assert ".rv-inspector.open" in css
     assert "body.rv-inspector-open .rv-viewer-stage" in css
-    assert "body.rv-focus-mode .rv-header" in css
-    assert "body.rv-focus-mode .rv-focus-hud" in css
+    assert "rv-focus-mode" not in css
+    assert ".rv-focus-hud" not in css
     assert ".rv-blink-status" in css
     assert "flex-direction: column;" in vertical_palette_css
     assert "flex-wrap: nowrap;" in vertical_palette_css
@@ -1368,12 +1374,10 @@ def test_viewer_assets_wire_inspector_blink_and_focus_state() -> None:
         assert ".rv-bottom-panel-bar" in block
         assert "body.rv-inspector-open .rv-viewer-stage" in block
         assert ".rv-inspector" in block
-        assert ".rv-focus-hud" in block
     assert "margin-right: 0;" in tablet_css
     assert "width: min(360px, 92vw);" in tablet_css
     assert "transition: none !important;" in reduced_motion_css
     assert "animation-duration: 0.01ms !important;" in reduced_motion_css
-    assert ".rv-focus-hud" in reduced_motion_css
 
 
 def test_viewer_assets_preload_adjacent_visible_frames_and_active_clips() -> None:

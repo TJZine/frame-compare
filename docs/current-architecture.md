@@ -223,14 +223,13 @@ users as Single where appropriate, diff, and pair-based blink modes; frame/categ
 navigation; a HUD toggle for stage labels and current-frame metadata; a primary
 toolbar plus floating viewport palette; a collapsible, compact/normal/large
 filmstrip bottom panel; an inspector drawer with Frame, Clips, Align, and Export
-tabs; focus mode for minimal chrome; viewport pan, zoom, fit, reveal, and adjacent-
-frame preloading. Blink mode supports 0.3s/0.7s/1.2s speeds, pause/resume, keyboard
+tabs; fullscreen support; viewport pan, zoom, actual/width/height fit, reveal, and
+adjacent-frame preloading. Blink mode supports 0.3s/0.7s/1.2s speeds, pause/resume, keyboard
 speed controls, and reduced-motion handling that enters Blink paused. Browser-local
 viewer state is scoped by report identity and persists current frame, view mode,
 clip selection, viewport/zoom/reveal, pair alignments, HUD visibility, filmstrip
-collapsed/size, inspector open/tab, and blink speed. Transient focus mode and
-blink paused state are not persisted. It does not own slow.pics upload policy,
-prompting, or browser side
+collapsed/size, inspector open/tab, and blink speed. Blink paused state is not
+persisted. It does not own slow.pics upload policy, prompting, or browser side
 effects.
 
 Screenshot rendering owns its geometry and writer policy inside `frame_compare.render`:

@@ -22,7 +22,6 @@ const ReportViewer = {
         blinkInterval: null,
         blinkPaused: false,
         blinkIntervalMs: 700,
-        focusMode: false,
         storageKey: null,
         activeCategoryKey: ALL_CATEGORY_FILTER_KEY,
         overlaysHidden: false,
@@ -109,16 +108,12 @@ const ReportViewer = {
             btnAlignmentReset: document.getElementById('btn-alignment-reset'),
             alignmentStatus: document.getElementById('alignment-status'),
             btnFullscreen: document.getElementById('btn-fullscreen'),
-            btnFocusMode: document.getElementById('btn-focus-mode'),
             btnPaletteOrientation: document.getElementById('btn-palette-orientation'),
             palette: document.querySelector('.rv-viewport-palette'),
             blinkControls: document.querySelector('[data-control-scope="blink"]'),
             btnBlinkPause: document.getElementById('btn-blink-pause'),
             blinkSpeed: document.getElementById('blink-speed'),
             blinkStatus: document.getElementById('blink-status'),
-            focusHudFrame: document.querySelector('[data-focus-frame]'),
-            focusHudMode: document.querySelector('[data-focus-mode]'),
-            focusHudPair: document.querySelector('[data-focus-pair]'),
             bottomPanel: document.querySelector('.rv-bottom-panel'),
             btnFilmstripToggle: document.getElementById('btn-filmstrip-toggle'),
             filmstripSizeBtns: document.querySelectorAll('[data-filmstrip-size]'),
@@ -196,7 +191,6 @@ const ReportViewer = {
             this.dom.btnAlignmentReset,
             this.dom.alignmentStatus,
             this.dom.btnFullscreen,
-            this.dom.btnFocusMode,
             this.dom.blinkControls,
             this.dom.btnBlinkPause,
             this.dom.blinkSpeed,
@@ -508,9 +502,6 @@ const ReportViewer = {
         });
         this.dom.btnOverlays.addEventListener('click', () => {
             this.setOverlaysHidden(!this.state.overlaysHidden);
-        });
-        this.dom.btnFocusMode.addEventListener('click', () => {
-            this.setFocusMode(!this.state.focusMode);
         });
     },
 
@@ -1059,7 +1050,7 @@ const ReportViewer = {
         if (['slider', 'overlay', 'diff', 'blink'].includes(saved.mode)) {
             this.state.mode = saved.mode;
         }
-        if (['actual', 'width', 'height', 'fill', 'custom'].includes(saved.fitMode)) {
+        if (['actual', 'width', 'height', 'custom'].includes(saved.fitMode)) {
             this.state.fitMode = saved.fitMode;
         }
         this.state.leftClipIdx = this.clipIndexOrDefault(saved.leftClipIdx, this.state.leftClipIdx);
@@ -1260,9 +1251,6 @@ const ReportViewer = {
         }
 
         this.state.inspectorOpen = nextOpen;
-        if (this.state.inspectorOpen && this.state.focusMode) {
-            this.setFocusMode(false);
-        }
         this.updateInspectorVisibility();
         if (options.save !== false) this.persistViewportState();
         if (this.state.inspectorOpen && options.focus !== false) {
@@ -1278,7 +1266,7 @@ const ReportViewer = {
     },
 
     isInspectorVisible() {
-        return this.state.inspectorOpen && !this.state.focusMode;
+        return this.state.inspectorOpen;
     },
 
     updateInspectorVisibility() {
@@ -1570,38 +1558,6 @@ const ReportViewer = {
         if (this.state.mode === 'blink') this.startBlink();
     },
 
-    setFocusMode(enabled) {
-        const nextFocusMode = Boolean(enabled);
-        if (nextFocusMode && this.state.inspectorOpen) {
-            this.setInspectorOpen(false, { focus: false });
-        }
-        this.state.focusMode = nextFocusMode;
-        document.body?.classList?.toggle('rv-focus-mode', this.state.focusMode);
-        this.dom.btnFocusMode.classList.toggle('active', this.state.focusMode);
-        this.dom.btnFocusMode.setAttribute('aria-pressed', this.state.focusMode ? 'true' : 'false');
-        this.dom.btnFocusMode.setAttribute(
-            'aria-label',
-            this.state.focusMode ? 'Exit focus mode' : 'Enter focus mode'
-        );
-        this.dom.btnFocusMode.textContent = this.state.focusMode ? 'Exit focus' : 'Focus';
-        this.updateInspectorVisibility();
-        this.updateFocusHud();
-        this.applyFitMode();
-    },
-
-    updateFocusHud() {
-        if (!this.dom.focusHudFrame) return;
-        const frame = this.currentFrame();
-        this.setText(this.dom.focusHudFrame, frame?.label || 'No frame');
-        this.setText(this.dom.focusHudMode, this.modeLabel());
-        this.setText(
-            this.dom.focusHudPair,
-            this.state.mode === 'overlay'
-                ? (this.state.data.clips[this.state.activeClipIdx]?.label || '')
-                : this.currentPairLabel()
-        );
-    },
-
     frameCategoryText(frame) {
         return frame?.category ?? DEFAULT_FRAME_CATEGORY;
     },
@@ -1756,11 +1712,6 @@ const ReportViewer = {
                 this.closeAlignmentPopover();
                 return;
             }
-            if (this.state.focusMode) {
-                e.preventDefault();
-                this.setFocusMode(false);
-                return;
-            }
             if (document.fullscreenElement) {
                 e.preventDefault();
                 document.exitFullscreen?.();
@@ -1825,8 +1776,6 @@ const ReportViewer = {
             case 'x': case 'X': this.swapPairClips(); break;
             case 'h': case 'H': this.setOverlaysHidden(!this.state.overlaysHidden); break;
             case 'f': case 'F': this.setFilmstripCollapsed(!this.state.filmstripCollapsed); break;
-            case 'z': case 'Z': this.setFocusMode(!this.state.focusMode); break;
-
             case '=': case '+': this.setZoom(this.state.zoom + 0.1); break;
             case '-': this.setZoom(this.state.zoom - 0.1); break;
             case 'r': case 'R': this.resetViewport(); break;
@@ -1882,7 +1831,6 @@ const ReportViewer = {
         this.dom.stage.classList.add(`rv-mode-${mode}`);
         this.updateModeControls();
         this.updateBlinkControls();
-        this.updateFocusHud();
         this.render();
     },
 
@@ -1895,7 +1843,6 @@ const ReportViewer = {
                 : this.state.leftClipIdx;
             this.dom.activeSelect.value = String(this.state.activeClipIdx);
             this.updateInspectorData();
-            this.updateFocusHud();
             this.updateImages();
 
         }, this.state.blinkIntervalMs);
@@ -2071,7 +2018,7 @@ const ReportViewer = {
     },
 
     setFitMode(mode, options = {}) {
-        if (!['actual', 'width', 'height', 'fill'].includes(mode)) return;
+        if (!['actual', 'width', 'height'].includes(mode)) return;
 
         this.state.fitMode = mode;
         this.updateFitButtons();
@@ -2124,9 +2071,7 @@ const ReportViewer = {
         const fitHeightZoom = stageRect.height / base.height;
         const nextZoom = this.state.fitMode === 'width'
             ? fitWidthZoom
-            : this.state.fitMode === 'height'
-                ? fitHeightZoom
-                : Math.max(fitWidthZoom, fitHeightZoom);
+            : fitHeightZoom;
         this.applyZoom(nextZoom, { clampPan: false });
         if (options.resetPan) {
             this.setPan(0, 0, { save: false });
@@ -2319,7 +2264,6 @@ const ReportViewer = {
         this.dom.btnAlignToggle.classList.toggle('has-offset', isOffset);
         this.updateAlignmentStatus();
         this.updateInspectorData();
-        this.updateFocusHud();
     },
 
     formatSignedPixels(value, axis) {
@@ -2366,9 +2310,13 @@ const ReportViewer = {
 
     updateFullscreenButton() {
         const isFullscreen = Boolean(document.fullscreenElement);
-        this.dom.btnFullscreen.textContent = isFullscreen ? 'Exit fullscreen' : 'Fullscreen';
+        this.dom.btnFullscreen.textContent = '⛶';
         this.dom.btnFullscreen.setAttribute(
             'aria-label',
+            isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'
+        );
+        this.dom.btnFullscreen.setAttribute(
+            'title',
             isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'
         );
         this.dom.btnFullscreen.setAttribute('aria-pressed', isFullscreen ? 'true' : 'false');
@@ -2692,8 +2640,6 @@ const ReportViewer = {
         this.updatePaletteOrientation();
         this.updateBlinkControls();
         this.updateInspectorData();
-        this.updateFocusHud();
-
         // Update images and labels
         this.updateImages();
         this.updateSlider();

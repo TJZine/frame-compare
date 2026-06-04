@@ -71,27 +71,21 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment(
             "size": "normal",
             "stringBlinkIntervalFallback": 700,
         },
-        "inspectorBlinkFocusState": {
+        "inspectorBlinkKeyboardState": {
             "currentFrameIdx": 1,
             "inspectorOpen": False,
             "inspectorTab": "export",
             "blinkIntervalMs": 300,
             "blinkPausedPersisted": False,
-            "focusModePersisted": False,
-            "focusModeActive": True,
             "closedInspectorInert": True,
             "closedInspectorTabIndex": "-1",
-            "restoredFocusToInfo": True,
-            "clearedRestoreFocus": True,
+            "restoredKeyboardFocusToInfo": True,
+            "clearedKeyboardFocusRestoreTarget": True,
         },
         "escapeOrder": {
             "inspectorClosedBeforeAlignment": True,
             "legacyInfoModalWins": True,
             "alignmentStillOpenAfterInspectorEscape": True,
-        },
-        "focusModeInspectorClose": {
-            "inspectorClosedOnEntry": True,
-            "inspectorStayedClosedAfterEscape": True,
         },
         "inspectorSlowpics": {
             "safeLinkTag": "A",

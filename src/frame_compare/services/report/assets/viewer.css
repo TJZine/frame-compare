@@ -636,41 +636,13 @@ select optgroup {
     letter-spacing: 0.5px;
 }
 
-.rv-focus-hud {
-    position: absolute;
-    left: 12px;
-    bottom: 16px;
-    z-index: 32;
-    display: none;
-    align-items: center;
-    gap: 0.5rem;
-    max-width: min(calc(100% - 2rem), 48rem);
-    padding: 0.35rem 0.65rem;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: rgba(11, 13, 16, 0.78);
-    color: var(--text-secondary);
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    pointer-events: none;
-    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.4);
-}
-
-.rv-focus-hud span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
 .rv-overlay-label,
-.rv-stage-overlay-info,
-.rv-focus-hud {
+.rv-stage-overlay-info {
     transition: opacity 0.15s ease, visibility 0.15s ease;
 }
 
 .rv-viewer-stage.rv-overlays-hidden .rv-overlay-label,
-.rv-viewer-stage.rv-overlays-hidden .rv-stage-overlay-info,
-.rv-viewer-stage.rv-overlays-hidden .rv-focus-hud {
+.rv-viewer-stage.rv-overlays-hidden .rv-stage-overlay-info {
     opacity: 0;
     visibility: hidden;
 }
@@ -924,6 +896,14 @@ select optgroup {
 
 .rv-bottom-panel--collapsed .rv-filmstrip {
     display: none;
+}
+
+.rv-bottom-panel--collapsed .rv-bottom-panel-bar {
+    justify-content: flex-end;
+}
+
+.rv-bottom-panel--collapsed .rv-filmstrip-controls {
+    margin-left: auto;
 }
 
 .rv-bottom-panel--collapsed .rv-filter-group {
@@ -1301,22 +1281,6 @@ body.rv-inspector-open .rv-viewer-stage {
     margin-right: min(360px, calc(100vw - 2rem));
 }
 
-body.rv-focus-mode .rv-header,
-body.rv-focus-mode .rv-controls,
-body.rv-focus-mode .rv-bottom-panel,
-body.rv-focus-mode .rv-footer,
-body.rv-focus-mode .rv-inspector {
-    display: none;
-}
-
-body.rv-focus-mode .rv-viewer-stage {
-    margin-right: 0;
-}
-
-body.rv-focus-mode .rv-focus-hud {
-    display: flex;
-}
-
 /* 11. Help Modal */
 .rv-modal {
     display: none;
@@ -1456,11 +1420,6 @@ body.rv-focus-mode .rv-focus-hud {
         width: min(360px, 92vw);
     }
 
-    .rv-focus-hud {
-        left: 12px;
-        bottom: 12px;
-        max-width: calc(100% - 1.5rem);
-    }
 }
 
 @media (max-width: 768px) {
@@ -1548,13 +1507,6 @@ body.rv-focus-mode .rv-focus-hud {
         width: min(360px, 92vw);
     }
 
-    .rv-focus-hud {
-        left: 8px;
-        bottom: 8px;
-        max-width: calc(100% - 1rem);
-        border-radius: 6px;
-        flex-wrap: wrap;
-    }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1569,7 +1521,6 @@ body.rv-focus-mode .rv-focus-hud {
 
     .rv-overlay-label,
     .rv-stage-overlay-info,
-    .rv-focus-hud,
     .rv-inspector {
         transition: none !important;
         animation: none !important;
