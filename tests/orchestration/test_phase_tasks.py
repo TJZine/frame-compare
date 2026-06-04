@@ -363,6 +363,24 @@ def test_select_initial_frame_plan_warns_when_user_frames_are_dropped(
     assert output.warnings == ["frame selection: dropped user frame(s) outside trims/windowing: 0"]
 
 
+def test_select_initial_frame_plan_labels_user_and_random_frames(
+    tmp_path: Path,
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.config.analysis = ctx.config.analysis.model_copy(
+        update={"user_frames": [0], "random_frame_count": 1}
+    )
+
+    output = phase_tasks.select_initial_frame_plan(ctx)
+
+    assert output.selection_breakdown.user == [0]
+    assert len(output.selection_breakdown.random) == 1
+    assert output.selection_breakdown.random[0] != 0
+    assert output.selection_details_by_source_frame[0].label == "User"
+    random_frame = output.selection_breakdown.random[0]
+    assert output.selection_details_by_source_frame[random_frame].label == "Random"
+
+
 def test_run_artifacts_uses_render_artifacts_carrier() -> None:
     artifacts = RunArtifacts()
     assert artifacts.render is None

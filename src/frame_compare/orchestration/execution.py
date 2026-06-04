@@ -108,6 +108,8 @@ def _apply_phase_output(*, ctx: RunContext, state: ExecutionState, output: Phase
     match output:
         case FramePlanPhaseOutput() as phase_output:
             state.selected_frames[:] = phase_output.selected_frames
+            ctx.selection_breakdown = phase_output.selection_breakdown
+            ctx.selection_details_by_source_frame = phase_output.selection_details_by_source_frame
             state.warnings.extend(phase_output.warnings)
         case AnalyzePhaseOutput() as phase_output:
             state.selected_frames[:] = phase_output.selected_frames

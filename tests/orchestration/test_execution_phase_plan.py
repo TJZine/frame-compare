@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+from frame_compare.analysis.types import SelectionBreakdown, SelectionDetail
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
 from frame_compare.orchestration.context import RunContext
@@ -14,6 +15,7 @@ from frame_compare.orchestration.types import (
     AlignPhaseOutput,
     ConfirmSlowpicsUploadPhaseOutput,
     ExecutionState,
+    FramePlanPhaseOutput,
     MetadataPrefetch,
     PostUploadActionResult,
     PrepState,
@@ -167,6 +169,47 @@ def test_run_request_cli_config_overrides_capture_runtime_override_contract(tmp_
     assert overrides.overlay_mode == OverlayMode.DIAGNOSTIC
     assert overrides.no_upload is True
     assert overrides.force_interactive_alignment is True
+
+
+def test_apply_phase_output_records_frame_plan_selection_labels(tmp_path: Path) -> None:
+    workspace = WorkspacePaths(
+        root=tmp_path,
+        input_dir=tmp_path / "comparison_videos",
+        run_dir=None,
+        screenshots_dir=tmp_path / "screenshots",
+        generated_dir=tmp_path / "generated",
+        config_dir=tmp_path / "config",
+        config_file=tmp_path / "config" / "config.toml",
+    )
+    reference = clip_state(tmp_path / "ref.mkv", label="Reference")
+    ctx = RunContext(
+        config=ConfigSchema(),
+        workspace=workspace,
+        reference=reference,
+        comparisons=[],
+        analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+    )
+    state = ExecutionState(artifacts=RunArtifacts())
+    breakdown = SelectionBreakdown(user=[0], random=[66])
+    details = {
+        0: SelectionDetail(frame_index=0, label="User", source="frame_plan"),
+        66: SelectionDetail(frame_index=66, label="Random", source="frame_plan"),
+    }
+
+    _apply_phase_output(
+        ctx=ctx,
+        state=state,
+        output=FramePlanPhaseOutput(
+            selected_frames=[0, 66],
+            selection_breakdown=breakdown,
+            selection_details_by_source_frame=details,
+        ),
+    )
+
+    assert state.selected_frames == [0, 66]
+    assert ctx.selection_breakdown == breakdown
+    assert ctx.selection_details_by_source_frame == details
 
 
 def test_apply_phase_output_handles_report_output_explicitly(tmp_path: Path) -> None:

@@ -130,6 +130,7 @@ def select_initial_frame_plan(ctx: RunContext) -> FramePlanPhaseOutput:
     user_frames = _user_frames_in_window(
         ctx.config.analysis, ctx.reference, window_start, frame_count
     )
+    user_frame_set = set(user_frames)
     dropped_user_frames = sorted(set(ctx.config.analysis.user_frames) - set(user_frames))
     random_count = min(
         ctx.config.analysis.random_frame_count,
@@ -142,6 +143,11 @@ def select_initial_frame_plan(ctx: RunContext) -> FramePlanPhaseOutput:
             count=random_count,
             seed=ctx.config.analysis.random_seed,
         ).frames
+    ]
+    random_source_frames = [
+        ctx.reference.trim.trim_start_frames + frame
+        for frame in random_frames
+        if ctx.reference.trim.trim_start_frames + frame not in user_frame_set
     ]
     selected_frames = sorted(
         {
@@ -168,8 +174,45 @@ def select_initial_frame_plan(ctx: RunContext) -> FramePlanPhaseOutput:
     )
     return FramePlanPhaseOutput(
         selected_frames=selected_frames,
+        selection_breakdown=SelectionBreakdown(user=user_frames, random=random_source_frames),
+        selection_details_by_source_frame=_initial_selection_details_by_source_frame(
+            user_source_frames=user_frames,
+            random_source_frames=random_source_frames,
+            fps=ctx.reference.effective_fps,
+        ),
         warnings=warnings,
     )
+
+
+def _initial_selection_details_by_source_frame(
+    *,
+    user_source_frames: list[int],
+    random_source_frames: list[int],
+    fps: Fraction,
+) -> SelectionDetailsByFrame:
+    details: SelectionDetailsByFrame = {}
+    for frame in user_source_frames:
+        details[frame] = SelectionDetail(
+            frame_index=frame,
+            label="User",
+            source="frame_plan",
+            timecode=_selection_timecode_for_frame(frame, fps),
+            clip_role="frame_plan",
+            notes="user",
+        )
+    for frame in random_source_frames:
+        details.setdefault(
+            frame,
+            SelectionDetail(
+                frame_index=frame,
+                label="Random",
+                source="frame_plan",
+                timecode=_selection_timecode_for_frame(frame, fps),
+                clip_role="frame_plan",
+                notes="random",
+            ),
+        )
+    return details
 
 
 def _user_frames_in_window(
@@ -787,21 +830,34 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
         reference=ctx.reference,
         selected_frames=selected_frames,
     )
-    normalized_selected_frames, used_fallback_frame_plan = (
-        _normalize_selected_frames_for_trimmed_domain(
-            selected_frames=selected_source_frames,
-            user_source_frames=set(ctx.config.analysis.user_frames),
-            reference=reference,
-            comparisons=comparisons,
-            selection_source_window=selection_source_window,
-            generated_requested_count=_generated_frame_count(ctx.config.analysis),
-            seed=ctx.config.analysis.random_seed,
-            allow_fallback=_generated_frame_count(ctx.config.analysis) > 0,
-        )
+    (
+        normalized_selected_frames,
+        used_fallback_frame_plan,
+        dropped_user_source_frames,
+    ) = _normalize_selected_frames_for_trimmed_domain(
+        selected_frames=selected_source_frames,
+        user_source_frames=set(ctx.config.analysis.user_frames),
+        reference=reference,
+        comparisons=comparisons,
+        selection_source_window=selection_source_window,
+        generated_requested_count=_generated_frame_count(ctx.config.analysis),
+        seed=ctx.config.analysis.random_seed,
+        allow_fallback=_generated_frame_count(ctx.config.analysis) > 0,
     )
+    if dropped_user_source_frames:
+        warnings.append(
+            "frame selection: dropped user frame(s) outside aligned renderable range: "
+            + ", ".join(str(frame) for frame in dropped_user_source_frames)
+        )
     selection_breakdown: SelectionBreakdown | None = None
     selection_details_by_source_frame: SelectionDetailsByFrame | None = None
     if used_fallback_frame_plan and ctx.analysis_metrics is not None:
+        configured_user_source_frames = set(ctx.config.analysis.user_frames)
+        normalized_user_frames = [
+            frame
+            for frame in normalized_selected_frames
+            if frame + reference.trim.trim_start_frames in configured_user_source_frames
+        ]
         trimmed_selection = _reselect_frames_for_trimmed_overlap(
             metrics=ctx.analysis_metrics,
             reference=reference,
@@ -810,9 +866,40 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
             config=ctx.config.analysis,
         )
         if trimmed_selection is not None:
-            normalized_selected_frames = trimmed_selection.selected_frames
+            normalized_selected_frames = sorted(
+                {*normalized_user_frames, *trimmed_selection.selected_frames}
+            )
             selection_breakdown = trimmed_selection.selection_breakdown
+            if normalized_user_frames:
+                selection_breakdown = SelectionBreakdown(
+                    user=[
+                        frame + reference.trim.trim_start_frames for frame in normalized_user_frames
+                    ],
+                    quantile_dark=selection_breakdown.quantile_dark,
+                    quantile_bright=selection_breakdown.quantile_bright,
+                    motion=selection_breakdown.motion,
+                    random=selection_breakdown.random,
+                )
             selection_details_by_source_frame = trimmed_selection.selection_details_by_source_frame
+            if normalized_user_frames:
+                user_selection_details = {
+                    frame + reference.trim.trim_start_frames: SelectionDetail(
+                        frame_index=frame + reference.trim.trim_start_frames,
+                        label="User",
+                        source="frame_plan",
+                        timecode=_selection_timecode_for_frame(
+                            frame + reference.trim.trim_start_frames,
+                            reference.effective_fps,
+                        ),
+                        clip_role="frame_plan",
+                        notes="user",
+                    )
+                    for frame in normalized_user_frames
+                }
+                selection_details_by_source_frame = {
+                    **selection_details_by_source_frame,
+                    **user_selection_details,
+                }
     return AlignPhaseOutput(
         reference=reference,
         comparisons=comparisons,
@@ -1241,7 +1328,7 @@ def _normalize_selected_frames_for_trimmed_domain(
     generated_requested_count: int,
     seed: int,
     allow_fallback: bool = True,
-) -> tuple[list[int], bool]:
+) -> tuple[list[int], bool, list[int]]:
     selectable_start, selectable_length = _selectable_aligned_source_window(
         reference=reference,
         comparisons=comparisons,
@@ -1266,6 +1353,13 @@ def _normalize_selected_frames_for_trimmed_domain(
             if selectable_start <= frame < selectable_end
         }
     )
+    selected_user_source_frames = sorted(set(selected_frames) & user_source_frames)
+    normalized_user_source_frames = {
+        frame + reference.trim.trim_start_frames for frame in normalized_user_frames
+    }
+    dropped_user_source_frames = [
+        frame for frame in selected_user_source_frames if frame not in normalized_user_source_frames
+    ]
     generated_target_count = min(
         generated_requested_count,
         max(0, selectable_length - len(normalized_user_frames)),
@@ -1275,14 +1369,14 @@ def _normalize_selected_frames_for_trimmed_domain(
     )
     if generated_target_count <= 0:
         if normalized_frames:
-            return normalized_frames, False
+            return normalized_frames, False, dropped_user_source_frames
         if not allow_fallback:
             raise AudioAlignmentError("No selected frames remain after alignment.")
-        return [], False
+        return [], False, dropped_user_source_frames
     if not allow_fallback:
         if not normalized_frames:
             raise AudioAlignmentError("No selected frames remain after alignment.")
-        return normalized_frames, False
+        return normalized_frames, False, dropped_user_source_frames
     if len(normalized_generated_frames) < generated_target_count:
         fallback_frames = _fallback_generated_frames_for_aligned_window(
             selectable_length=selectable_length,
@@ -1294,8 +1388,8 @@ def _normalize_selected_frames_for_trimmed_domain(
                 frame + reference.trim.trim_start_frames for frame in normalized_user_frames
             },
         )
-        return sorted({*normalized_user_frames, *fallback_frames}), True
-    return normalized_frames, False
+        return sorted({*normalized_user_frames, *fallback_frames}), True, dropped_user_source_frames
+    return normalized_frames, False, dropped_user_source_frames
 
 
 def _fallback_generated_frames_for_aligned_window(

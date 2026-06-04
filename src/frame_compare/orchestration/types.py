@@ -183,6 +183,10 @@ class RenderArtifacts:
 @dataclass(frozen=True)
 class FramePlanPhaseOutput:
     selected_frames: list[int]
+    selection_breakdown: SelectionBreakdown = field(default_factory=SelectionBreakdown)
+    selection_details_by_source_frame: SelectionDetailsByFrame = field(
+        default_factory=_empty_selection_details_by_source_frame
+    )
     warnings: list[str] = field(default_factory=_empty_str_list)
 
 
