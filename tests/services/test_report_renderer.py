@@ -1402,3 +1402,58 @@ def test_viewer_assets_preload_adjacent_visible_frames_and_active_clips() -> Non
     assert "const image = new Image();" in js
     assert "image.src = src;" in js
     assert "image.decode().catch(() => undefined).finally(finish);" in js
+
+
+def test_viewer_assets_offline_containment_and_tokens(report_payload: ReportPayload) -> None:
+    css = get_css()
+
+    # Ensure no external HTTP/HTTPS resources or font files are imported
+    # (Allowing only standard local SVG namespaces: http://www.w3.org/2000/svg)
+    import re
+    urls = re.findall(r'url\([\'"]?([^\'")]+)[\'"]?\)', css)
+    for url in urls:
+        if url.startswith(("http://", "https://")):
+            assert url.startswith("http://www.w3.org/")
+
+    # Check for external @imports
+    assert "@import" not in css
+
+    # Verify that the newly introduced styling tokens are present
+    assert "--bg-glass" in css
+    assert "--accent-glow" in css
+
+    # Verify color-mix uses in hsl color space for chip backgrounds
+    assert "color-mix(in hsl" in css
+
+    # Verify empty stage palette blocks pointer events
+    empty_palette_block = _css_block(css, ".rv-viewer-stage--empty .rv-viewport-palette")
+    assert "pointer-events: none" in empty_palette_block
+
+    # Verify sibling divider lines transparency rule is present
+    assert "border-left-color: transparent" in css
+
+    # Verify that vertical zoom tracks do not specify misalignment margins
+    vertical_palette_block = _css_block(css, '.rv-viewport-palette[data-orientation="vertical"]')
+    assert "margin-left" not in vertical_palette_block
+
+    # Scan get_js() for external HTTP/HTTPS URLs (excluding standard local SVG namespaces, localhost/127.0.0.1, or comparison URLs)
+    js = get_js()
+    js_urls = re.findall(r'https?://[^\s\'"<>]+', js)
+    for url in js_urls:
+        if not (
+            url.startswith("http://www.w3.org/")
+            or url.startswith("https://www.w3.org/")
+            or "slow.pics" in url
+        ) and not (url.startswith("http://localhost") or "127.0.0.1" in url):
+            raise AssertionError(f"Found forbidden external URL in JS: {url}")
+
+    # Scan build_html() for external HTTP/HTTPS URLs (excluding standard local SVG namespaces, localhost/127.0.0.1, or comparison URLs)
+    html = build_html(report_payload)
+    html_urls = re.findall(r'https?://[^\s\'"<>]+', html)
+    for url in html_urls:
+        if not (
+            url.startswith("http://www.w3.org/")
+            or url.startswith("https://www.w3.org/")
+            or "slow.pics" in url
+        ) and not (url.startswith("http://localhost") or "127.0.0.1" in url):
+            raise AssertionError(f"Found forbidden external URL in HTML: {url}")
