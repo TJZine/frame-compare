@@ -25,12 +25,6 @@ from frame_compare.vspreview.session_script import write_vspreview_session_scrip
 
 log = structlog.get_logger()
 
-_LSMAS_API3_WARNING_MARKERS = (
-    "libvslsmashsource.dll",
-    "is using API3 which is deprecated",
-    "will be removed shortly",
-)
-
 
 class VSPreviewAvailabilityStatus(Enum):
     """Status enum for VSPreview availability."""
@@ -227,23 +221,9 @@ def _run_vspreview_command(command: list[str], *, env: dict[str, str]) -> int:
         command,
         stdin=None,
         stdout=None,
-        stderr=subprocess.PIPE,
-        text=True,
         env=env,
-        bufsize=1,
     ) as process:
-        assert process.stderr is not None
-        for line in process.stderr:
-            if _should_suppress_vspreview_stderr(line):
-                continue
-            sys.stderr.write(line)
-        sys.stderr.flush()
         return process.wait()
-
-
-def _should_suppress_vspreview_stderr(line: str) -> bool:
-    # Temporary lsmas cleanup: remove once a current-API Windows plugin build is available.
-    return all(marker in line for marker in _LSMAS_API3_WARNING_MARKERS)
 
 
 def _write_vspreview_session_script(request: VSPreviewSessionRequest) -> Path:

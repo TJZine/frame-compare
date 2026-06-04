@@ -790,50 +790,6 @@ def test_run_render_phase_rejects_analysis_fallback_when_overlap_is_smaller_than
     }
 
 
-def test_run_report_phase_rejects_analysis_fallback_when_overlap_is_smaller_than_counts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
-    ctx = _context(tmp_path, comparisons=[comparison])
-    ctx.config.analysis = ctx.config.analysis.model_copy(
-        update={"random_frame_count": 0, "dark_frame_count": 2, "bright_frame_count": 2}
-    )
-    ctx.analysis_metrics = FrameMetrics(
-        luminance=[float(frame) / 99.0 for frame in range(100)],
-        motion=[0.0 for _ in range(100)],
-        metadata=MetricsMetadata(
-            frame_count=100,
-            fps=ctx.reference.effective_fps,
-            config_fingerprint="test",
-            clips=[],
-        ),
-    )
-
-    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
-        return [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode.mkv",
-                frame_offset=98,
-                time_offset_seconds=4.08,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
-            )
-        ]
-
-    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
-
-    with pytest.raises(SelectionError) as exc_info:
-        phase_tasks.run_align_phase(ctx, selected_frames=[0, 1, 2, 3])
-
-    assert exc_info.value.context.details == {
-        "reason": "insufficient generated candidates after alignment",
-        "requested": 4,
-        "found": 2,
-    }
-
-
 def test_output_phases_use_reselected_metric_metadata_after_real_initial_selection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

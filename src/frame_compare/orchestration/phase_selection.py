@@ -416,11 +416,16 @@ def source_frames_for_reference_base_domain(
 
 def map_aligned_to_source_frame(*, clip: ClipState, aligned_frame: int) -> int:
     source_frame = clip.trim.trim_start_frames + aligned_frame
+    trim_start = clip.trim.trim_start_frames
     trim_end = (
         clip.trim.trim_end_frame_inclusive
         if clip.trim.trim_end_frame_inclusive is not None
         else clip.probe.num_frames - 1
     )
+    if source_frame < trim_start:
+        raise AudioAlignmentError(
+            f"Aligned frame {aligned_frame} is before trimmed domain for {clip.path.name}."
+        )
     if source_frame > trim_end:
         raise AudioAlignmentError(
             f"Aligned frame {aligned_frame} exceeds trimmed domain for {clip.path.name}."

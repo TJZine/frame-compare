@@ -772,6 +772,16 @@ def test_map_aligned_to_source_frame_after_positive_negative_and_zero_offsets(
     )
 
 
+def test_map_aligned_to_source_frame_rejects_negative_aligned_frame(tmp_path: Path) -> None:
+    ctx = _context(tmp_path)
+
+    with pytest.raises(AudioAlignmentError, match="is before trimmed domain"):
+        phase_selection.map_aligned_to_source_frame(
+            clip=ctx.reference,
+            aligned_frame=-1,
+        )
+
+
 def test_run_align_phase_rejects_applied_result_without_frame_offset_even_when_mixed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
