@@ -113,6 +113,18 @@ def test_rich_progress_reporter_hides_parent_while_nested_phase_is_active(
     reporter.complete_phase()
 
 
+def test_rich_progress_reporter_indeterminate_phase_is_spinner_only() -> None:
+    reporter = RichProgressReporter()
+
+    reporter.start_indeterminate("Loading cached data")
+
+    task = reporter._progress.tasks[0]  # noqa: SLF001
+    assert task.total is None
+    assert task.fields["spinner_only"] is True
+
+    reporter.complete_phase()
+
+
 def test_rich_progress_reporter_restores_parent_when_nested_phase_fails(
     monkeypatch,
 ) -> None:
