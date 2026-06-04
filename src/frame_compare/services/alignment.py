@@ -230,6 +230,25 @@ def _compute_missing_alignments(
         results_map[f"{reference.stem}:{comp.stem}"] = res
 
 
+def _record_alignment_progress(
+    *,
+    progress: ProgressReporter | None,
+    result: AlignmentResult,
+) -> None:
+    if progress is None:
+        return
+
+    match result.source:
+        case "cached":
+            description = f"Loaded cached alignment for {result.comparison_clip}"
+        case "manual":
+            description = f"Using manual alignment for {result.comparison_clip}"
+        case _:
+            description = f"Checked alignment for {result.comparison_clip}"
+    progress.set_description(description)
+    progress.advance(1)
+
+
 def align_clips(
     reference: Path,
     comparisons: list[Path],
@@ -323,6 +342,12 @@ def align_clips(
                     config=config,
                     reference_fps=fps_reference,
                 )
+
+    for comp in comparisons:
+        _record_alignment_progress(
+            progress=progress,
+            result=results_map[f"{reference.stem}:{comp.stem}"],
+        )
 
     offsets_by_key = _build_offsets_map(
         reference=reference,

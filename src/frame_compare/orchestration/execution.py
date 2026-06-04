@@ -207,6 +207,7 @@ def build_phases_before_align(
             phase_timings=state.phase_timings,
             warnings=state.warnings,
             warn_only=True,
+            progress_total=max(1, len(input_videos)),
         ),
     ]
 

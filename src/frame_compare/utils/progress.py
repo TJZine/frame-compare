@@ -82,6 +82,7 @@ class RichProgressReporter:
         if not self._progress.live.is_started:
             self._progress.start()
         if self._task_id is not None:
+            self._progress.update(self._task_id, visible=False)
             self._task_stack.append(self._task_id)
         self._task_id = self._progress.add_task(name, total=total)
         self._task_totals[self._task_id] = total
@@ -121,6 +122,7 @@ class RichProgressReporter:
 
         if self._task_stack:
             self._task_id = self._task_stack.pop()
+            self._progress.update(self._task_id, visible=True)
             return
 
         if self._progress.live.is_started:

@@ -21,7 +21,6 @@ type Font = ImageFont.ImageFont | ImageFont.FreeTypeFont
 type ImageInput = Image.Image | np.ndarray | None
 
 _LABEL_POSITION = (10, 10)
-_BLOCK_GAP_PX = 0
 _DEFAULT_DETAILS_Y = 140
 _DEFAULT_DETAILS_OFFSET_Y = _DEFAULT_DETAILS_Y - _LABEL_POSITION[1]
 _FILL = (255, 255, 255, 255)
@@ -87,6 +86,16 @@ def _draw_text_block(
     )
 
 
+def _font_line_gap(font: Font) -> int:
+    try:
+        bbox = font.getbbox("Ag", stroke_width=_STROKE_WIDTH)
+    except TypeError:
+        bbox = font.getbbox("Ag")
+    except (AttributeError, OSError, ValueError, RuntimeError):
+        return 24
+    return max(1, int(bbox[3] - bbox[1]))
+
+
 def _resolve_details_y(
     draw: ImageDraw.ImageDraw,
     position: tuple[int, int],
@@ -102,7 +111,7 @@ def _resolve_details_y(
         )
     except (OSError, ValueError, RuntimeError):
         return position[1] + _DEFAULT_DETAILS_OFFSET_Y
-    return int(bbox[3]) + _BLOCK_GAP_PX
+    return int(bbox[3]) + _font_line_gap(font)
 
 
 def _resolve_display_frame_number(config: OverlayConfig) -> int:

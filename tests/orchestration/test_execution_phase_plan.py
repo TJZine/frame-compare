@@ -86,7 +86,7 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
     ]
 
     align_phase = next(phase for phase in plan.before_align if phase.name == "align")
-    assert align_phase.progress_total == 1
+    assert align_phase.progress_total == 3
 
 
 def test_build_execution_phase_plan_moves_report_before_publish_for_confirmed_upload(

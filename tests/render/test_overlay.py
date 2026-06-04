@@ -19,6 +19,14 @@ from frame_compare.render.types import (
 )
 
 
+def _line_gap_for_font(font: object) -> int:
+    try:
+        bbox = font.getbbox("Ag", stroke_width=2)
+    except TypeError:
+        bbox = font.getbbox("Ag")
+    return max(1, int(bbox[3] - bbox[1]))
+
+
 @pytest.fixture
 def captured_draw_calls(monkeypatch):
     """
@@ -272,7 +280,7 @@ def test_apply_overlay_standard_mode(captured_draw_calls):
 
     first_bbox = captured_draw_calls["multiline_textbbox"][0][3]
     assert isinstance(first_bbox, tuple)
-    assert xy2 == (10, first_bbox[3])
+    assert xy2 == (10, first_bbox[3] + _line_gap_for_font(kwargs1["font"]))
     assert text2 == "\n".join(
         compose_overlay_text_lines(
             mode=OverlayMode.STANDARD,
@@ -339,12 +347,12 @@ def test_apply_overlay_uses_explicit_origin_for_frame_and_detail_blocks(captured
 
     apply_overlay(img, config)
 
-    (xy1, text1, _kwargs1) = captured_draw_calls["multiline_text"][0]
+    (xy1, text1, kwargs1) = captured_draw_calls["multiline_text"][0]
     (xy2, _text2, _kwargs2) = captured_draw_calls["multiline_text"][1]
     assert xy1 == (26, 14)
     first_bbox = captured_draw_calls["multiline_textbbox"][0][3]
     assert isinstance(first_bbox, tuple)
-    assert xy2 == (26, first_bbox[3])
+    assert xy2 == (26, first_bbox[3] + _line_gap_for_font(kwargs1["font"]))
 
 
 def test_apply_overlay_standard_includes_selection_label_when_present(captured_draw_calls):
