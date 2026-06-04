@@ -61,6 +61,7 @@ def handle_preset_list(
     *,
     list_presets: ListPresetsFn,
     handle_error: HandleErrorFn,
+    no_color: bool,
 ) -> None:
     try:
         presets_dir = resolved_root / "config" / "presets"
@@ -70,7 +71,7 @@ def handle_preset_list(
         raise typer.Exit(
             code=handle_error(
                 error,
-                no_color=True,
+                no_color=no_color,
                 verbose=False,
                 verbose_hint=None,
             )
@@ -86,6 +87,7 @@ def handle_preset_apply(
     apply_preset: ApplyPresetFn,
     write_config_to: WriteConfigFn,
     handle_error: HandleErrorFn,
+    no_color: bool,
 ) -> None:
     try:
         presets_dir = resolved_root / "config" / "presets"
@@ -97,7 +99,7 @@ def handle_preset_apply(
         raise typer.Exit(
             code=handle_error(
                 error,
-                no_color=True,
+                no_color=no_color,
                 verbose=False,
                 verbose_hint=None,
             )
@@ -112,6 +114,7 @@ def handle_preset_save(
     load_config: LoadConfigFn,
     save_preset: SavePresetFn,
     handle_error: HandleErrorFn,
+    no_color: bool,
 ) -> None:
     try:
         presets_dir = resolved_root / "config" / "presets"
@@ -122,7 +125,7 @@ def handle_preset_save(
         raise typer.Exit(
             code=handle_error(
                 error,
-                no_color=True,
+                no_color=no_color,
                 verbose=False,
                 verbose_hint=None,
             )

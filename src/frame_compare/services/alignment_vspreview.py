@@ -12,6 +12,7 @@ import structlog
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig
 from frame_compare.utils.progress_protocol import ProgressReporter
+from frame_compare.utils.terminal import stream_is_tty
 from frame_compare.vspreview.adapter import (
     VSPreviewAvailabilityStatus,
     VSPreviewConfig,
@@ -45,9 +46,9 @@ class _LaunchDecision:
 
 def _current_tty_status() -> _TTYStatus:
     return _TTYStatus(
-        stdin=sys.stdin.isatty(),
-        stdout=sys.stdout.isatty(),
-        stderr=sys.stderr.isatty(),
+        stdin=stream_is_tty(sys.stdin),
+        stdout=stream_is_tty(sys.stdout),
+        stderr=stream_is_tty(sys.stderr),
     )
 
 

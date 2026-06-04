@@ -78,8 +78,12 @@ def test_current_cli_contract_documents_secondary_command_streams() -> None:
     normalized_preset = " ".join(preset_section.split())
 
     assert "confirmation to stderr including the resolved config path" in normalized_wizard
+    assert "honor the `NO_COLOR` environment variable" in normalized_wizard
+    assert "do not suggest unsupported `--verbose` usage" in normalized_wizard
     assert "neutral status marker for optional unavailable checks" in normalized_doctor
     assert "This does not change `doctor --json` status values." in normalized_doctor
+    assert "honor the `NO_COLOR` environment variable" in normalized_doctor
+    assert "do not suggest unsupported `--verbose` usage" in normalized_doctor
     assert "Prints preset names one per line to stdout." in normalized_preset
     assert "Emits no success confirmation." in normalized_preset
     assert "confirmation to stderr including the preset name and resolved config path" in (
@@ -88,6 +92,8 @@ def test_current_cli_contract_documents_secondary_command_streams() -> None:
     assert "confirmation to stderr including the preset name and saved preset path" in (
         normalized_preset
     )
+    assert "honor the `NO_COLOR` environment variable" in normalized_preset
+    assert "do not suggest unsupported `--verbose` usage" in normalized_preset
 
 
 def test_current_cli_contract_matches_live_override_map() -> None:

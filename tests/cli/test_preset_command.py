@@ -159,6 +159,40 @@ def test_preset_list_error_does_not_suggest_unsupported_verbose(
     assert "path:" in result.stderr
 
 
+def test_preset_list_error_uses_default_terminal_color_policy(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+    def _handle_error(
+        _error: Exception,
+        *,
+        no_color: bool,
+        verbose: bool,
+        verbose_hint: str | None = "--verbose",
+    ) -> int:
+        captured["no_color"] = no_color
+        captured["verbose"] = verbose
+        captured["verbose_hint"] = verbose_hint
+        return int(ExitCode.CONFIG_ERROR)
+
+    monkeypatch.setattr(
+        "frame_compare.cli.entry.list_presets",
+        lambda *, presets_dir: (_ for _ in ()).throw(ConfigNotFoundError(Path("missing.toml"))),
+    )
+    monkeypatch.setattr("frame_compare.cli.entry.handle_error", _handle_error)
+
+    result = runner.invoke(app, ["preset", "list"])
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert captured == {
+        "no_color": False,
+        "verbose": False,
+        "verbose_hint": None,
+    }
+
+
 def test_preset_save_respects_root_and_config_writes_preset_file() -> None:
     with runner.isolated_filesystem():
         root = Path("workspace")

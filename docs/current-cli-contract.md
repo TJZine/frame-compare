@@ -616,6 +616,9 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 - On success, it writes a concise confirmation to stderr including the resolved
   config path.
 - Interruptions during prompting exit with the interrupted exit code.
+- Typed validation/write failures use the standard CLI error contract on stderr,
+  honor the `NO_COLOR` environment variable, and do not suggest unsupported
+  `--verbose` usage.
 
 ## `doctor` Command Contract
 
@@ -624,6 +627,8 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 - If the `doctor` command hits a typed top-level failure before it can produce a
   `DoctorReport`, it uses the standard CLI error contract. In `--json` mode that means
   the standard error payload is written to stdout.
+- Human-mode typed top-level failures honor the `NO_COLOR` environment variable
+  and do not suggest unsupported `--verbose` usage.
 - Without `--json`, `doctor` writes a human-readable report to stdout.
 - Human output uses a neutral status marker for optional unavailable checks such as
   VSPreview, so optional availability gaps are visually distinct from critical
@@ -633,6 +638,10 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   expose raw probe exception messages.
 
 ## `preset` Command Contract
+
+- Typed preset command failures use the standard CLI error contract on stderr,
+  honor the `NO_COLOR` environment variable, and do not suggest unsupported
+  `--verbose` usage.
 
 ### `preset list`
 
