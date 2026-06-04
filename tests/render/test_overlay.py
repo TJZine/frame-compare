@@ -19,24 +19,14 @@ from frame_compare.render.types import (
 )
 
 
-def _line_gap_for_font(font: object) -> int:
-    try:
-        bbox = font.getbbox("Ag", stroke_width=2)
-    except TypeError:
-        bbox = font.getbbox("Ag")
-    return max(1, int(bbox[3] - bbox[1]))
-
-
-class _FontWithFailingFallbackGetbbox:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def getbbox(self, text: str, **kwargs: object) -> tuple[int, int, int, int]:
-        del text
-        self.calls += 1
-        if "stroke_width" in kwargs:
-            raise TypeError("stroke_width unsupported")
-        raise OSError("font metrics unavailable")
+def _line_spacing_from_captured_bboxes(calls: dict[str, list[object]]) -> int:
+    single_bbox = calls["multiline_textbbox"][1][3]
+    double_bbox = calls["multiline_textbbox"][2][3]
+    assert isinstance(single_bbox, tuple)
+    assert isinstance(double_bbox, tuple)
+    single_height = int(single_bbox[3] - single_bbox[1])
+    double_height = int(double_bbox[3] - double_bbox[1])
+    return max(1, double_height - (2 * single_height))
 
 
 @pytest.fixture
@@ -292,7 +282,7 @@ def test_apply_overlay_standard_mode(captured_draw_calls):
 
     first_bbox = captured_draw_calls["multiline_textbbox"][0][3]
     assert isinstance(first_bbox, tuple)
-    assert xy2 == (10, first_bbox[3] + _line_gap_for_font(kwargs1["font"]))
+    assert xy2 == (10, first_bbox[3] + _line_spacing_from_captured_bboxes(captured_draw_calls))
     assert text2 == "\n".join(
         compose_overlay_text_lines(
             mode=OverlayMode.STANDARD,
@@ -342,20 +332,23 @@ def test_apply_overlay_standard_uses_fallback_details_y_when_bbox_fails(monkeypa
     assert calls[1][0] == (26, 144)
 
 
-def test_apply_overlay_uses_fallback_gap_when_font_getbbox_retry_fails(monkeypatch):
+def test_apply_overlay_uses_fallback_gap_when_spacing_measurement_fails(monkeypatch):
     calls: list[tuple[tuple[int, int], str]] = []
-    fake_font = _FontWithFailingFallbackGetbbox()
+    bbox_calls = 0
 
     def mock_multiline_text(self, xy, text, *args, **kwargs):
         calls.append((xy, text))
         return None
 
     def mock_multiline_textbbox(self, xy, text, *args, **kwargs):
+        nonlocal bbox_calls
         del self, text, args, kwargs
+        bbox_calls += 1
+        if bbox_calls > 1:
+            raise RuntimeError("spacing metrics unavailable")
         x, y = xy
         return (x, y, x + 120, y + 40)
 
-    monkeypatch.setattr("frame_compare.render.overlay._load_font", lambda config: fake_font)
     monkeypatch.setattr(ImageDraw.ImageDraw, "multiline_text", mock_multiline_text)
     monkeypatch.setattr(ImageDraw.ImageDraw, "multiline_textbbox", mock_multiline_textbbox)
 
@@ -374,8 +367,8 @@ def test_apply_overlay_uses_fallback_gap_when_font_getbbox_retry_fails(monkeypat
 
     apply_overlay(img, config)
 
-    assert fake_font.calls == 2
-    assert calls[1][0] == (10, 74)
+    assert bbox_calls == 2
+    assert calls[1][0] == (10, 54)
 
 
 def test_apply_overlay_uses_explicit_origin_for_frame_and_detail_blocks(captured_draw_calls):
@@ -400,7 +393,7 @@ def test_apply_overlay_uses_explicit_origin_for_frame_and_detail_blocks(captured
     assert xy1 == (26, 14)
     first_bbox = captured_draw_calls["multiline_textbbox"][0][3]
     assert isinstance(first_bbox, tuple)
-    assert xy2 == (26, first_bbox[3] + _line_gap_for_font(kwargs1["font"]))
+    assert xy2 == (26, first_bbox[3] + _line_spacing_from_captured_bboxes(captured_draw_calls))
 
 
 def test_apply_overlay_standard_includes_selection_label_when_present(captured_draw_calls):

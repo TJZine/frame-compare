@@ -198,8 +198,51 @@ def test_align_clips_computed_results_advance_phase_progress(
 
     reporter.advance.assert_called_once_with(1)
     reporter.set_description.assert_any_call("Audio Alignment")
-    reporter.set_description.assert_any_call("Aligning comp.mkv")
+    reporter.set_description.assert_any_call("Checking alignment for comp.mkv")
     reporter.set_description.assert_any_call("Checked alignment for comp.mkv")
+
+
+@patch("frame_compare.services.alignment._probe_fps")
+@patch("frame_compare.services.alignment._extract_matching_audio")
+@patch("frame_compare.services.alignment._extract_reference_audio")
+@patch("frame_compare.services.alignment._estimate_consensus_offset")
+def test_align_clips_advances_each_computed_comparison_before_starting_next(
+    mock_estimate: MagicMock,
+    mock_extract_reference: MagicMock,
+    mock_extract_matching: MagicMock,
+    mock_probe: MagicMock,
+    tmp_path: Path,
+) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp_a = tmp_path / "comp_a.mkv"
+    comp_b = tmp_path / "comp_b.mkv"
+    ref.touch()
+    comp_a.touch()
+    comp_b.touch()
+    mock_probe.return_value = Fraction(24, 1)
+    mock_extract_reference.return_value = (np.ones(10, dtype=np.float32), object())
+    mock_extract_matching.return_value = np.ones(10, dtype=np.float32)
+    mock_estimate.return_value = AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, None)
+    reporter = MagicMock(spec=ProgressReporter)
+
+    align_clips(
+        ref,
+        [comp_a, comp_b],
+        AlignmentConfig(cache_results=False),
+        tmp_path,
+        progress=reporter,
+    )
+
+    relevant_calls = [
+        call for call in reporter.method_calls if call[0] in {"set_description", "advance"}
+    ]
+    assert relevant_calls.index(call.set_description("Checked alignment for comp_a.mkv")) < (
+        relevant_calls.index(call.set_description("Checking alignment for comp_b.mkv"))
+    )
+    assert relevant_calls.index(call.advance(1)) < (
+        relevant_calls.index(call.set_description("Checking alignment for comp_b.mkv"))
+    )
+    assert reporter.advance.call_count == 2
 
 
 def test_align_clips_cached_results_advance_phase_progress(tmp_path: Path) -> None:

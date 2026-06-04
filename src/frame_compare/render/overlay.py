@@ -86,17 +86,25 @@ def _draw_text_block(
     )
 
 
-def _font_line_gap(font: Font) -> int:
+def _font_line_spacing(draw: ImageDraw.ImageDraw, font: Font) -> int:
     try:
-        bbox = font.getbbox("Ag", stroke_width=_STROKE_WIDTH)
-    except TypeError:
-        try:
-            bbox = font.getbbox("Ag")
-        except (AttributeError, OSError, ValueError, RuntimeError):
-            return 24
-    except (AttributeError, OSError, ValueError, RuntimeError):
-        return 24
-    return max(1, int(bbox[3] - bbox[1]))
+        single_bbox = draw.multiline_textbbox(
+            (0, 0),
+            "Ag",
+            font=font,
+            stroke_width=_STROKE_WIDTH,
+        )
+        double_bbox = draw.multiline_textbbox(
+            (0, 0),
+            "Ag\nAg",
+            font=font,
+            stroke_width=_STROKE_WIDTH,
+        )
+    except (OSError, ValueError, RuntimeError):
+        return 4
+    single_height = int(single_bbox[3] - single_bbox[1])
+    double_height = int(double_bbox[3] - double_bbox[1])
+    return max(1, double_height - (2 * single_height))
 
 
 def _resolve_details_y(
@@ -114,7 +122,7 @@ def _resolve_details_y(
         )
     except (OSError, ValueError, RuntimeError):
         return position[1] + _DEFAULT_DETAILS_OFFSET_Y
-    return int(bbox[3]) + _font_line_gap(font)
+    return int(bbox[3]) + _font_line_spacing(draw, font)
 
 
 def _resolve_display_frame_number(config: OverlayConfig) -> int:

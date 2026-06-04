@@ -191,7 +191,7 @@ def _compute_missing_alignments(
     )
     for comp in requested_comparisons:
         if progress:
-            progress.set_description(f"Aligning {comp.name}")
+            progress.set_description(f"Checking alignment for {comp.name}")
 
         comp_audio = _extract_matching_audio(
             comp,
@@ -228,6 +228,7 @@ def _compute_missing_alignments(
             diagnostic=estimate.diagnostic,
         )
         results_map[f"{reference.stem}:{comp.stem}"] = res
+        _record_alignment_progress(progress=progress, result=res)
 
 
 def _record_alignment_progress(
@@ -247,6 +248,19 @@ def _record_alignment_progress(
             description = f"Checked alignment for {result.comparison_clip}"
     progress.set_description(description)
     progress.advance(1)
+
+
+def _record_resolved_alignment_progress(
+    *,
+    progress: ProgressReporter | None,
+    reference: Path,
+    comparisons: list[Path],
+    results_map: dict[str, AlignmentResult],
+) -> None:
+    for comp in comparisons:
+        result = results_map.get(f"{reference.stem}:{comp.stem}")
+        if result is not None:
+            _record_alignment_progress(progress=progress, result=result)
 
 
 def align_clips(
@@ -308,6 +322,13 @@ def align_clips(
                 action="degrade_to_computed_alignment",
             )
 
+    _record_resolved_alignment_progress(
+        progress=progress,
+        reference=reference,
+        comparisons=comparisons,
+        results_map=results_map,
+    )
+
     # 2. Compute missing
     if requested_comparisons:
         if fps_reference is None:
@@ -342,12 +363,6 @@ def align_clips(
                     config=config,
                     reference_fps=fps_reference,
                 )
-
-    for comp in comparisons:
-        _record_alignment_progress(
-            progress=progress,
-            result=results_map[f"{reference.stem}:{comp.stem}"],
-        )
 
     offsets_by_key = _build_offsets_map(
         reference=reference,
