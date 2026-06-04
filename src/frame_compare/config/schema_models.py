@@ -247,8 +247,6 @@ class DiagnosticsConfig(BaseModel):
     """Optional diagnostic outputs for development and debugging."""
 
     per_frame_nits: bool = False
-    show_hdr_info: bool = False
-    frame_timing: bool = False
 
 
 class LoggingConfig(BaseModel):

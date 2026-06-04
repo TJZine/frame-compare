@@ -107,8 +107,6 @@ cache_results = true
 
 [diagnostics]
 per_frame_nits = false
-show_hdr_info = false
-frame_timing = false
 
 [logging]
 level = "INFO"

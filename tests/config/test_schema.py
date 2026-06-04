@@ -230,8 +230,6 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert dovi.cache_results is True
     assert diagnostics.model_dump() == {
         "per_frame_nits": False,
-        "show_hdr_info": False,
-        "frame_timing": False,
     }
     assert logging.level == LogLevel.INFO
     assert logging.format == LogFormat.CONSOLE
