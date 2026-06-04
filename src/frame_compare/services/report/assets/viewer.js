@@ -1207,7 +1207,10 @@ const ReportViewer = {
         this.dom.btnFilmstripToggle.textContent = hasThumbnails
             ? (collapsed ? 'Show timeline' : 'Hide timeline')
             : 'Filmstrip disabled';
-        this.dom.btnFilmstripToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        this.dom.btnFilmstripToggle.setAttribute(
+            'aria-expanded',
+            hasThumbnails && !collapsed ? 'true' : 'false'
+        );
         this.dom.btnFilmstripToggle.setAttribute(
             'aria-label',
             hasThumbnails
@@ -1308,7 +1311,7 @@ const ReportViewer = {
             if (enabled) {
                 if (Object.hasOwn(element.dataset, 'inspectorPreviousTabindex')) {
                     const previous = element.dataset.inspectorPreviousTabindex;
-                    if (previous === '') {
+                    if (previous === '' || previous === '-1') {
                         element.removeAttribute('tabindex');
                     } else {
                         element.setAttribute('tabindex', previous);

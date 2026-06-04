@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -513,8 +514,13 @@ effective_fps = "24/1"
     )
 
     assert prep.analysis_selection_domain is not None
-    assert "effective_fps=24/1" in prep.analysis_selection_domain
-    assert "selection_window=0:100" in prep.analysis_selection_domain
+    selection_domain = json.loads(prep.analysis_selection_domain)
+    assert selection_domain["reference_path"] == (input_dir / "00-reference.mkv").as_posix()
+    assert selection_domain["clips"][0]["effective_fps"] == {"numerator": 24, "denominator": 1}
+    assert selection_domain["selection_window"] == {
+        "start_frame": 0,
+        "end_frame_exclusive": 100,
+    }
     assert prep.clips[0].source_fps == Fraction(24, 1)
     assert prep.clips[0].effective_fps == Fraction(24, 1)
 

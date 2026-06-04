@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import frame_compare.analysis.cache_io as cache_io
@@ -38,3 +39,58 @@ def test_write_metrics_cache_uses_cache_inputs_stats_when_video_paths_are_provid
     cache_path = cache_io.find_metrics_cache_file(cache_dir, fingerprint)
 
     assert cache_path is not None
+
+
+def test_analysis_selection_domain_for_cache_inputs_applies_source_overrides(
+    tmp_path: Path,
+) -> None:
+    create_config(
+        tmp_path,
+        content="""\
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "generated"
+config_dir = "config"
+use_run_folders = false
+
+[sources]
+reference = "b_comp.mkv"
+
+[sources.overrides."a_source.mkv"]
+trim_start_frames = 12
+trim_end_frames = 5
+effective_fps = "24000/1001"
+
+[audio_alignment]
+enable = false
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+""",
+    )
+    input_dir = tmp_path / "comparison_videos"
+    create_video_files(input_dir, "a_source.mkv", "b_comp.mkv")
+    config = load_config(tmp_path / "config" / "config.toml")
+
+    selection_domain = json.loads(
+        analysis_selection_domain_for_cache_inputs(
+            [input_dir / "a_source.mkv", input_dir / "b_comp.mkv"],
+            config,
+        )
+    )
+
+    assert selection_domain["reference_path"] == (input_dir / "b_comp.mkv").as_posix()
+    assert [clip["path"] for clip in selection_domain["clips"]] == [
+        (input_dir / "b_comp.mkv").as_posix(),
+        (input_dir / "a_source.mkv").as_posix(),
+    ]
+    assert selection_domain["clips"][1]["trim_start_frames"] == 12
+    assert selection_domain["clips"][1]["trim_end_frame_inclusive"] == 94
+    assert selection_domain["clips"][1]["effective_fps"] == {
+        "numerator": 24000,
+        "denominator": 1001,
+    }

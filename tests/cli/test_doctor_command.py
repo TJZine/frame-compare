@@ -12,6 +12,16 @@ from frame_compare.utils.progress_protocol import ProgressReporter
 from .cli_helpers import runner
 
 
+def _doctor_check_entry(payload: dict[str, object], check_id: str) -> dict[str, object]:
+    checks = payload["doctor"]["checks"]
+    assert isinstance(checks, list)
+    for entry in checks:
+        assert isinstance(entry, dict)
+        if entry.get("id") == check_id:
+            return entry
+    raise AssertionError(f"doctor check {check_id!r} missing from payload")
+
+
 def test_doctor_json_conforms_to_schema_shape(monkeypatch: MonkeyPatch) -> None:
     checks = [
         DoctorCheck(
@@ -186,6 +196,13 @@ def test_doctor_human_marks_optional_vspreview_unavailable_neutrally(
     assert "\u2705 vspreview" not in result.stdout
     assert "\u274c vspreview" not in result.stdout
 
+    json_result = runner.invoke(app, ["doctor", "--json"])
+    assert json_result.exit_code == 0
+    assert json_result.stderr == ""
+    check_entry = _doctor_check_entry(json.loads(json_result.stdout), "vspreview")
+    assert check_entry["status"] == "pass"
+    assert "available" not in check_entry
+
 
 def test_doctor_human_marks_optional_vspreview_probe_failure_neutrally(
     monkeypatch: MonkeyPatch,
@@ -221,6 +238,13 @@ def test_doctor_human_marks_optional_vspreview_probe_failure_neutrally(
     assert "\u2705 vspreview" not in result.stdout
     assert "\u274c vspreview" not in result.stdout
 
+    json_result = runner.invoke(app, ["doctor", "--json"])
+    assert json_result.exit_code == 0
+    assert json_result.stderr == ""
+    check_entry = _doctor_check_entry(json.loads(json_result.stdout), "vspreview")
+    assert check_entry["status"] == "pass"
+    assert "available" not in check_entry
+
 
 def test_doctor_human_marks_available_optional_vspreview_as_pass(
     monkeypatch: MonkeyPatch,
@@ -254,6 +278,13 @@ def test_doctor_human_marks_available_optional_vspreview_as_pass(
     assert result.stderr == ""
     assert "\u2705 vspreview" in result.stdout
     assert "- vspreview" not in result.stdout
+
+    json_result = runner.invoke(app, ["doctor", "--json"])
+    assert json_result.exit_code == 0
+    assert json_result.stderr == ""
+    check_entry = _doctor_check_entry(json.loads(json_result.stdout), "vspreview")
+    assert check_entry["status"] == "pass"
+    assert "available" not in check_entry
 
 
 def test_doctor_text_preserves_literal_brackets(monkeypatch: MonkeyPatch) -> None:

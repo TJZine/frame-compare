@@ -18,8 +18,10 @@ from frame_compare.orchestration.probing.probe_cache import (
 )
 from frame_compare.orchestration.selection_domain import (
     build_analysis_selection_domain_token,
+    build_selection_domain_clips,
     compute_selection_window_for_clips,
 )
+from frame_compare.orchestration.source_selection import resolve_source_selection
 from frame_compare.vs.types import HDRMetadata, SourceInfo
 
 if TYPE_CHECKING:
@@ -122,10 +124,20 @@ def analysis_selection_domain_for_cache_inputs(
     video_paths: list[Path],
     config: ConfigSchema,
 ) -> str:
-    clips = [
-        _clip_state_for_cache_input(path, label="Reference" if index == 0 else f"Encode {index}")
-        for index, path in enumerate(video_paths)
-    ]
+    input_dir = video_paths[0].parent
+    source_selection = resolve_source_selection(
+        input_dir=input_dir,
+        discovered_paths=video_paths,
+        config=config.sources,
+    )
+    snapshots_by_path = {
+        path: _clip_probe_snapshot_for_cache_input(path) for path in source_selection.ordered_paths
+    }
+    clips = build_selection_domain_clips(
+        ordered_paths=source_selection.ordered_paths,
+        snapshots_by_path=snapshots_by_path,
+        overrides_by_path=dict(source_selection.overrides_by_path),
+    )
     window = compute_selection_window_for_clips(clips=clips, config=config)
     return build_analysis_selection_domain_token(
         clips=clips,
@@ -154,21 +166,14 @@ def write_probe_cache_for_inputs(
     save_clip_probe_cache(cache_path, entries)
 
 
-def _clip_state_for_cache_input(path: Path, *, label: str) -> ClipState:
-    probe = ClipProbeSnapshot(
+def _clip_probe_snapshot_for_cache_input(path: Path) -> ClipProbeSnapshot:
+    return ClipProbeSnapshot(
         fingerprint=_clip_fingerprint_for_path(path),
         width=1920,
         height=1080,
         num_frames=100,
         fps=Fraction(24, 1),
         is_hdr=False,
-    )
-    return ClipState(
-        path=path,
-        label=label,
-        probe=probe,
-        source_fps=probe.fps,
-        effective_fps=probe.fps,
     )
 
 

@@ -202,6 +202,7 @@ def _render_bottom_panel(
     category_filter_controls: str, filmstrip: str, *, include_filmstrip: bool
 ) -> str:
     disabled_attr = " disabled" if not include_filmstrip else ""
+    aria_expanded = "true" if include_filmstrip else "false"
     expanded_label = "Hide timeline" if include_filmstrip else "Filmstrip disabled"
     aria_label = "Collapse timeline controls" if include_filmstrip else "Filmstrip disabled"
     title = "Toggle timeline (F)" if include_filmstrip else "Filmstrip disabled"
@@ -216,7 +217,7 @@ def _render_bottom_panel(
                 <button type="button" data-filmstrip-size="normal" class="active" role="radio" aria-checked="true"{disabled_attr}>Normal</button>
                 <button type="button" data-filmstrip-size="large" role="radio" aria-checked="false"{disabled_attr}>Large</button>
             </div>
-            <button id="btn-filmstrip-toggle" type="button" aria-expanded="true" aria-label="{aria_label}" title="{title}"{disabled_attr}>{expanded_label}</button>
+            <button id="btn-filmstrip-toggle" type="button" aria-expanded="{aria_expanded}" aria-label="{aria_label}" title="{title}"{disabled_attr}>{expanded_label}</button>
         </div>
     </div>
     {filmstrip}

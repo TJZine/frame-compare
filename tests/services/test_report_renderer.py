@@ -967,7 +967,7 @@ def test_build_html_toggles_filmstrip_visibility(report_payload: ReportPayload) 
     assert hidden_panel.attrs["data-filmstrip-enabled"] == "false"
     assert hidden_panel.attrs["aria-label"] == "Frame timeline"
     assert hidden_toggle.attrs["type"] == "button"
-    assert hidden_toggle.attrs["aria-expanded"] == "true"
+    assert hidden_toggle.attrs["aria-expanded"] == "false"
     assert hidden_toggle.attrs["aria-label"] == "Filmstrip disabled"
     assert hidden_toggle.attrs["title"] == "Filmstrip disabled"
     assert "disabled" in hidden_toggle.attrs
@@ -1343,6 +1343,7 @@ def test_viewer_assets_wire_bottom_panel_and_filmstrip_state() -> None:
     assert "Hide timeline" in js
     assert "timeline controls" in js
     assert "Toggle timeline (F)" in js
+    assert "hasThumbnails && !collapsed ? 'true' : 'false'" in js
 
 
 def test_viewer_assets_wire_inspector_blink_and_focus_state() -> None:
@@ -1353,6 +1354,7 @@ def test_viewer_assets_wire_inspector_blink_and_focus_state() -> None:
     reduced_motion_css = _css_block(css, "@media (prefers-reduced-motion: reduce)")
 
     assert ".rv-inspector" in css
+    assert "previous === '' || previous === '-1'" in get_js()
     assert ".rv-inspector.open" in css
     assert "body.rv-inspector-open .rv-viewer-stage" in css
     assert "body.rv-focus-mode .rv-header" in css

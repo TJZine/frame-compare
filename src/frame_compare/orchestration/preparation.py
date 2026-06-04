@@ -14,12 +14,11 @@ from frame_compare.config.overrides import apply_cli_overrides
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_models import SourceOverrideConfig
 from frame_compare.orchestration.context import (
-    ClipActiveRect,
     ClipFingerprint,
     ClipProbeSnapshot,
     ClipState,
 )
-from frame_compare.orchestration.errors import MixedSourceFpsError, SourceSelectionError
+from frame_compare.orchestration.errors import MixedSourceFpsError
 from frame_compare.orchestration.phase_tasks import resolve_run_metadata
 from frame_compare.orchestration.preflight import discover_inputs, prepare_preflight
 from frame_compare.orchestration.probing.probe_cache import (
@@ -33,6 +32,7 @@ from frame_compare.orchestration.probing.probe_props import (
 )
 from frame_compare.orchestration.selection_domain import (
     build_analysis_selection_domain_token,
+    build_selection_domain_clips,
     compute_selection_window_for_clips,
 )
 from frame_compare.orchestration.source_selection import resolve_source_selection
@@ -210,9 +210,9 @@ def _probe_input_videos(
 ) -> list[ClipState]:
     cache_paths = _probe_cache_paths_for_run(workspace)
     entries_by_key = _load_probe_cache_entries(cache_paths)
-    clips: list[ClipState] = []
+    snapshots_by_path: dict[Path, ClipProbeSnapshot] = {}
 
-    for index, path in enumerate(input_videos):
+    for path in input_videos:
         stats = path.stat()
         fingerprint = ClipFingerprint(
             path=path,
@@ -240,70 +240,14 @@ def _probe_input_videos(
             )
             entries_by_key[cache_key] = snapshot
 
-        clips.append(
-            _clip_state_from_probe(
-                index=index,
-                path=path,
-                snapshot=snapshot,
-                override=overrides_by_path.get(path),
-            )
-        )
+        snapshots_by_path[path] = snapshot
 
     for cache_path in cache_paths:
         save_clip_probe_cache(cache_path, entries_by_key)
-    return clips
-
-
-def _clip_state_from_probe(
-    *,
-    index: int,
-    path: Path,
-    snapshot: ClipProbeSnapshot,
-    override: SourceOverrideConfig | None,
-) -> ClipState:
-    trim_start_frames = override.trim_start_frames if override is not None else 0
-    trim_end_frames = override.trim_end_frames if override is not None else 0
-    end_inclusive = snapshot.num_frames - 1 - trim_end_frames if trim_end_frames > 0 else None
-    effective_end = end_inclusive if end_inclusive is not None else snapshot.num_frames - 1
-    if trim_start_frames > effective_end:
-        raise SourceSelectionError(
-            selector=path.name,
-            reason="source trims remove every frame",
-            role="sources.overrides",
-            matches=[path],
-        )
-    active_rect = None
-    if override is not None and override.active_rect is not None:
-        rect = override.active_rect
-        if rect.x + rect.width > snapshot.width or rect.y + rect.height > snapshot.height:
-            raise SourceSelectionError(
-                selector=path.name,
-                reason="active_rect is outside source dimensions",
-                role="sources.overrides",
-                matches=[path],
-            )
-        active_rect = ClipActiveRect(
-            x=rect.x,
-            y=rect.y,
-            width=rect.width,
-            height=rect.height,
-        )
-    label = "Reference" if index == 0 else f"Encode {index}"
-    effective_fps = (
-        override.effective_fps
-        if override is not None and override.effective_fps is not None
-        else snapshot.fps
-    )
-    return ClipState(
-        path=path,
-        label=label,
-        probe=snapshot,
-        source_fps=snapshot.fps,
-        effective_fps=effective_fps,
-        active_rect=active_rect,
-    ).with_trim(
-        trim_start_frames=trim_start_frames,
-        trim_end_frame_inclusive=end_inclusive,
+    return build_selection_domain_clips(
+        ordered_paths=input_videos,
+        snapshots_by_path=snapshots_by_path,
+        overrides_by_path=overrides_by_path,
     )
 
 
@@ -334,18 +278,11 @@ def _probe_input_videos_from_snapshots(
     overrides_by_path: dict[Path, SourceOverrideConfig],
     snapshots_by_path: dict[Path, ClipProbeSnapshot],
 ) -> list[ClipState]:
-    clips: list[ClipState] = []
-    for index, path in enumerate(input_videos):
-        snapshot = snapshots_by_path[path]
-        clips.append(
-            _clip_state_from_probe(
-                index=index,
-                path=path,
-                snapshot=snapshot,
-                override=overrides_by_path.get(path),
-            )
-        )
-    return clips
+    return build_selection_domain_clips(
+        ordered_paths=input_videos,
+        snapshots_by_path=snapshots_by_path,
+        overrides_by_path=overrides_by_path,
+    )
 
 
 async def execute_prep(
