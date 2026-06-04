@@ -14,6 +14,7 @@ import structlog
 
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import RunContext
+from frame_compare.orchestration.progress import phase_display_label, start_phase_progress
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 
 log = structlog.get_logger()
@@ -42,8 +43,16 @@ class Phase:
     execute: PhaseExecute
     skip_condition: PhaseSkipCondition | None = None
     progress_total: int = 1
+    display_label: str | None = None
     status: PhaseStatus = PhaseStatus.PENDING
     warn_only: bool = False
+
+    @property
+    def progress_label(self) -> str:
+        """Human label used by interactive progress reporters."""
+        if self.display_label is not None:
+            return self.display_label
+        return phase_display_label(self.name)
 
 
 async def execute_phases(
@@ -59,13 +68,23 @@ async def execute_phases(
     for phase in phases:
         if phase.skip_condition is not None and phase.skip_condition(context.config):
             phase.status = PhaseStatus.SKIPPED
-            reporter.start_phase(phase.name, total=phase.progress_total)
+            start_phase_progress(
+                reporter,
+                name=phase.name,
+                display_label=phase.progress_label,
+                total=phase.progress_total,
+            )
             reporter.set_description("Skipped")
             reporter.complete_phase(ProgressPhaseStatus.SKIPPED)
             continue
 
         phase.status = PhaseStatus.RUNNING
-        reporter.start_phase(phase.name, total=phase.progress_total)
+        start_phase_progress(
+            reporter,
+            name=phase.name,
+            display_label=phase.progress_label,
+            total=phase.progress_total,
+        )
         phase_progress_status = ProgressPhaseStatus.COMPLETED
         try:
             await phase.execute(context)

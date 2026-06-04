@@ -139,12 +139,37 @@ overrides.
 - `--quiet` suppresses the at-a-glance summary but still allows a minimal success summary.
 - `--quiet` is incompatible with report-confirmed slow.pics upload when that
   prompt would be needed.
+- Human-readable non-quiet runs emit a `Frame Alignment` diagnostic to stderr after
+  the alignment phase when accepted or rejected frame alignment changes need
+  explanation. The diagnostic reports normalized source-frame row 0, final trim
+  ranges, offsets, selected aligned frames, and rejected alignment warning context
+  for comparisons with material alignment information. It is suppressed by
+  `--quiet` and is never emitted to `run --json` stdout.
+- Human-readable non-quiet successful runs group final warnings by source in a
+  `Warnings` panel. Existing runtime warning strings and slow.pics post-upload
+  action warnings are bridged into presentation rows with source, severity,
+  message, and optional detail/action context, then de-duplicated for display.
+  The visible warning cap remains eight rows; truncated output includes the
+  number of hidden rows and counts by hidden source.
+- `run --json` does not emit the human warning panel, does not add warning
+  fields, and keeps warning text off stdout for successful runs. Runtime logs and
+  diagnostics may still use stderr.
 - When the at-a-glance summary reports optional VSPreview probe failures, it uses a
   sanitized summary rather than raw probe exception text.
+- The at-a-glance summary uses user-facing row labels such as `run folders`,
+  `FFmpeg audio`, `interactive alignment`, `force interactive`, and `VSPreview`
+  while preserving the same effective configuration facts.
 - The at-a-glance workspace paths are resolved base paths. When
   `paths.use_run_folders = true`, the `screenshots` and `generated` rows describe the
   configured base paths rather than the fresh per-run subdirectories reserved later in
   execution.
+- Human Rich progress uses product phase labels: `PLAN`, `ANALYZE`, `ALIGN`,
+  `RENDER`, `METADATA`, `DOVI`, `PUBLISH`, `REPORT`, `CONFIRM`, and `CLEANUP`.
+  Internal phase names in logs and `phase_timings` remain the runtime keys such
+  as `frame_plan`, `analyze`, `align`, and `confirm_slowpics_upload`.
+- `--no-color` disables ANSI color in interactive Rich progress output. It does
+  not switch an interactive human run to structlog progress. Quiet and JSON modes
+  still suppress Rich progress, and non-TTY runs still use log progress.
 - `--diagnose-paths` emits a pinned JSON object with keys `cache`, `config`, `input`,
   `output`, and `root`, then exits without invoking the runtime pipeline.
   The `cache` value is the resolved configured `paths.generated_dir`; the shared
@@ -157,21 +182,26 @@ overrides.
 - Analysis cache entries live under `<resolved paths.generated_dir>/cache/analysis`
   using labeled full-fingerprint filenames:
   `<safe-human-label>__<full-fingerprint>.compframes`.
-- The analysis cache fingerprint includes the selected reference identity and
-  source overrides that affect the selected reference frame/timing domain.
-  Cache entries for different selected references from the same input set do
+- The analysis cache fingerprint includes the selected reference identity and a
+  stable all-source selection-domain token. That token covers source identity,
+  source trims, effective FPS values, the configured analysis ignore-window
+  settings, and the final shared selectable window. Cache entries for different
+  selected references or different selection domains from the same input set do
   not satisfy each other.
 - The full fingerprint remains inside the cache payload and is validated on load.
   Legacy run-folder `cache.compframes` files are not used as analysis cache hits.
 - With `paths.use_run_folders = true`, runs that proceed reserve a fresh run folder;
   existing run folders are not reused to satisfy analysis cache hits.
 - `--no-cache` deletes only the matching shared analysis cache entry for the current
-  inputs, selected reference, selected reference-domain source overrides, and
-  analysis settings before continuing. It does not clear unrelated shared
-  analysis entries and does not delete alignment offset caches.
+  inputs, selected reference, all-source selection domain, and analysis settings
+  before continuing. It does not clear unrelated shared analysis entries and
+  does not delete alignment offset caches.
 - `--from-cache-only` is analysis-cache-only. When analysis is not skipped, it validates
   the matching shared analysis cache entry before metadata prefetch and before run-folder
   reservation, so a missing or invalid entry does not leave an empty run folder.
+- When the exact all-source selection-domain token requires probe data and the
+  probe cache is missing, `--from-cache-only` fails before metadata prefetch and
+  before run-folder reservation rather than validating a weaker fingerprint.
 - `--from-cache-only` does not require cached alignment offsets from a previous run.
   Alignment can compute or use the current run folder's run-scoped alignment cache after
   the analysis cache validation succeeds.
@@ -240,10 +270,13 @@ opened. If it is not opened, the CLI prints the report path before prompting.
   place where the uploaded slow.pics URL is shown.
 - If the report phase warns, fails, or produces no `report_path`, confirmation
   does not prompt and slow.pics upload is skipped with the deterministic warning
-  `slow.pics upload skipped because report confirmation was unavailable`.
+  `slow.pics upload skipped because report confirmation was unavailable`. Human
+  output includes that message as a neutral skipped Result row rather than a
+  successful artifact row.
 - If the user declines the prompt, the run still succeeds, no slow.pics upload
-  side effects run, human output includes `slow.pics upload skipped by
-  confirmation`, and `slowpics_url` remains `None`.
+  side effects run, human output includes a neutral skipped Result row
+  `slow.pics upload skipped by confirmation` rather than a successful artifact
+  row, and `slowpics_url` remains `None`.
 - `delete_after_upload` is local-only and report-safe. It is not mapped to
   slow.pics `removeAfter`; the current remote metadata request sends an empty
   `removeAfter` value.
@@ -345,6 +378,22 @@ These `run` flags currently map into config values through `CLI_OVERRIDE_MAP`:
 `--no-upload` is the only slow.pics-specific `run` flag. No runtime-only
 slow.pics `run` flags exist.
 
+## Config-Only Analysis Surface
+
+These `[analysis]` fields are config-only public surface; there are no dedicated
+`run` flags for them:
+
+- `ignore_lead_seconds = 0.0`
+- `ignore_trail_seconds = 0.0`
+- `min_window_seconds = 5.0`
+
+The lead/trail fields define a global selectable analysis window inside each
+clip's source-specific base trim domain. They do not physically trim sources or
+change reported source-frame numbers. `min_window_seconds` expands a too-small
+per-clip selectable window within clip bounds, preferring to extend the end
+first and then shift the start earlier. If a shared selectable intersection
+cannot be formed, the run fails with the standard typed selection error.
+
 ## Config-Only slow.pics Surface
 
 These ten fields are the full current public `[slowpics]` config surface:
@@ -394,6 +443,34 @@ The JSON output schema remains unchanged by report-confirmed upload:
 There are no current slow.pics config fields for collection suffix/name, image
 format or optimization toggles, tags, hentai flag, or remote remove-after
 behavior.
+
+## VSPreview Interactive Diagnostics
+
+VSPreview parent telemetry, generated Frame Compare session diagnostics,
+preview assumptions, ready text, and terminal confirmation prompts use stderr as
+the single human diagnostic stream. The VSPreview child process is still
+launched with inherited stdout/stderr so GUI/runtime compatibility is preserved;
+Frame Compare-owned generated script diagnostics are written to stderr.
+
+When interactive alignment launches a generated VSPreview session, the
+diagnostic order is:
+
+1. parent `VSPreview Session` telemetry
+2. generated `VSPreview Bootstrap`
+3. generated reference and loaded comparison rows
+4. generated `VSPreview Assumptions`, only when assumptions exist
+5. generated output slot rows
+6. generated `VSPreview Ready`
+7. parent `VSPreview Confirmation` prompt text
+
+Generated VSPreview assumptions are preview-only diagnostics derived from
+Frame Compare's existing clip probe metadata and serialized into the generated
+session script. Missing, unspecified, malformed, or unparseable `_Matrix`,
+`_Transfer`, or `_Primaries` frame properties are collected and shown in the
+`VSPreview Assumptions` section before output rows and before `VSPreview Ready`.
+The generated session does not decode source frames just to collect these
+assumptions. These assumptions do not change render, report, analysis, or
+alignment semantics.
 
 ## Config-Only Screenshot Surface
 
@@ -501,6 +578,8 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   - optional TMDB API key
 - It validates the generated payload against `ConfigSchema` before writing.
 - It does not advertise or accept unsupported slow.pics visibility values.
+- On success, it writes a concise confirmation to stderr including the resolved
+  config path.
 - Interruptions during prompting exit with the interrupted exit code.
 
 ## `doctor` Command Contract
@@ -511,6 +590,9 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   `DoctorReport`, it uses the standard CLI error contract. In `--json` mode that means
   the standard error payload is written to stdout.
 - Without `--json`, `doctor` writes a human-readable report to stdout.
+- Human output uses a neutral status marker for optional unavailable checks such as
+  VSPreview, so optional availability gaps are visually distinct from critical
+  dependency failures. This does not change `doctor --json` status values.
 - If any critical failures are present, `doctor` exits with the dependency error exit code.
 - Optional VSPreview probe diagnostics may include exception type metadata, but do not
   expose raw probe exception messages.
@@ -523,14 +605,19 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 - Accepts `--config` for interface consistency, but current behavior ignores the resolved
   config path and uses `--root` only when locating presets.
 - Prints preset names one per line to stdout.
+- Emits no success confirmation.
 
 ### `preset apply`
 
 - Loads the resolved config file.
 - Applies the named preset from `<root>/config/presets`.
 - Writes the updated config back to the resolved config path.
+- On success, writes a concise confirmation to stderr including the preset name and
+  resolved config path.
 
 ### `preset save`
 
 - Loads the resolved config file.
 - Saves the current config as a named preset under `<root>/config/presets`.
+- On success, writes a concise confirmation to stderr including the preset name and
+  saved preset path.

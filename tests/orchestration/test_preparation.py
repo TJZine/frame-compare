@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -123,7 +124,17 @@ def test_execute_prep_no_cache_removes_only_matching_shared_metrics_cache(tmp_pa
 
     config = preparation.prepare_preflight(root=tmp_path).config
     source_path = input_dir / "source.mkv"
-    fingerprint = cache_io.compute_cache_key([source_path], config.analysis)
+    prep_for_domain = asyncio.run(
+        preparation.execute_prep(
+            RunRequest(root=tmp_path),
+            RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
+        )
+    )
+    fingerprint = cache_io.compute_cache_key(
+        [source_path],
+        config.analysis,
+        selection_domain=prep_for_domain.analysis_selection_domain,
+    )
     metrics_dir = tmp_path / "generated" / "cache" / "analysis"
     metrics_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = metrics_dir / cache_io.metrics_cache_filename([source_path], fingerprint)
@@ -158,10 +169,20 @@ def test_execute_prep_no_cache_removes_only_selected_reference_metrics_cache(
     config = preparation.prepare_preflight(root=tmp_path).config
     default_order = [input_dir / "a-default.mkv", input_dir / "b-reference.mkv"]
     selected_order = [input_dir / "b-reference.mkv", input_dir / "a-default.mkv"]
+    prep_for_domain = asyncio.run(
+        preparation.execute_prep(
+            RunRequest(root=tmp_path),
+            RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
+        )
+    )
     metrics_dir = tmp_path / "generated" / "cache" / "analysis"
     metrics_dir.mkdir(parents=True, exist_ok=True)
     default_fingerprint = cache_io.compute_cache_key(default_order, config.analysis)
-    selected_fingerprint = cache_io.compute_cache_key(selected_order, config.analysis)
+    selected_fingerprint = cache_io.compute_cache_key(
+        selected_order,
+        config.analysis,
+        selection_domain=prep_for_domain.analysis_selection_domain,
+    )
     default_cache_path = metrics_dir / cache_io.metrics_cache_filename(
         default_order, default_fingerprint
     )
@@ -206,6 +227,12 @@ def test_execute_prep_from_cache_only_validates_metrics_cache_when_analysis_runs
     _create_video_files(input_dir, "source.mkv")
 
     request = RunRequest(root=tmp_path, from_cache_only=True, skip_analysis=False)
+    asyncio.run(
+        preparation.execute_prep(
+            RunRequest(root=tmp_path, skip_analysis=True),
+            RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
+        )
+    )
 
     with pytest.raises(MetricsCalculationError, match="Cached metrics missing"):
         asyncio.run(
@@ -230,7 +257,7 @@ def test_execute_prep_from_cache_only_misses_when_selected_reference_differs(
         encoding="utf-8",
     )
 
-    with pytest.raises(MetricsCalculationError, match="Cached metrics missing"):
+    with pytest.raises(MetricsCalculationError, match="Cached clip probe data is required"):
         asyncio.run(
             preparation.execute_prep(
                 RunRequest(root=tmp_path, from_cache_only=True),
@@ -262,7 +289,7 @@ effective_fps = "24000/1001"
         encoding="utf-8",
     )
 
-    with pytest.raises(MetricsCalculationError, match="Cached metrics missing"):
+    with pytest.raises(MetricsCalculationError, match="Cached clip probe data is required"):
         asyncio.run(
             preparation.execute_prep(
                 RunRequest(root=tmp_path, from_cache_only=True),
@@ -486,7 +513,14 @@ effective_fps = "24/1"
         )
     )
 
-    assert prep.reference_cache_domain == "trim_start=0|trim_end=0|effective_fps=24/1"
+    assert prep.analysis_selection_domain is not None
+    selection_domain = json.loads(prep.analysis_selection_domain)
+    assert selection_domain["reference_path"] == (input_dir / "00-reference.mkv").as_posix()
+    assert selection_domain["clips"][0]["effective_fps"] == {"numerator": 24, "denominator": 1}
+    assert selection_domain["selection_window"] == {
+        "start_frame": 0,
+        "end_frame_exclusive": 100,
+    }
     assert prep.clips[0].source_fps == Fraction(24, 1)
     assert prep.clips[0].effective_fps == Fraction(24, 1)
 

@@ -45,6 +45,9 @@ def test_default_config_values() -> None:
     config = get_default_config()
     assert config.analysis.frame_count == 10
     assert config.analysis.selection_mode == SelectionMode.MIXED
+    assert config.analysis.ignore_lead_seconds == 0.0
+    assert config.analysis.ignore_trail_seconds == 0.0
+    assert config.analysis.min_window_seconds == 5.0
     assert config.color.target_nits == 100
     assert config.paths.input_dir == "comparison_videos"
     assert config.sources.reference is None
@@ -73,6 +76,21 @@ def test_analysis_frame_count_bounds_too_high() -> None:
     with pytest.raises(ValidationError) as exc:
         AnalysisConfig(frame_count=101)
     assert "Input should be less than or equal to 100" in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"ignore_lead_seconds": -0.1},
+        {"ignore_trail_seconds": -0.1},
+        {"min_window_seconds": -0.1},
+    ],
+)
+def test_analysis_ignore_window_fields_reject_negative_values(
+    payload: dict[str, float],
+) -> None:
+    with pytest.raises(ValidationError, match="greater than or equal to 0"):
+        AnalysisConfig.model_validate(payload)
 
 
 def test_color_target_nits_bounds_too_low() -> None:
@@ -151,6 +169,9 @@ def test_schema_model_section_defaults_are_representative() -> None:
     }
     assert analysis.frame_count == 10
     assert analysis.selection_mode == SelectionMode.MIXED
+    assert analysis.ignore_lead_seconds == 0.0
+    assert analysis.ignore_trail_seconds == 0.0
+    assert analysis.min_window_seconds == 5.0
     assert analysis.dark_quantile == 0.05
     assert analysis.bright_quantile == 0.95
     assert audio.sample_rate == 8000
@@ -342,6 +363,25 @@ def test_default_config_toml_documents_sources_defaults() -> None:
     assert '# reference = "00-reference.mkv"' in DEFAULT_CONFIG_TOML
     assert '# [sources.overrides."encode-a.mkv"]' in DEFAULT_CONFIG_TOML
     assert '# effective_fps = "24000/1001"' in DEFAULT_CONFIG_TOML
+
+
+def test_default_config_toml_documents_analysis_ignore_window_defaults() -> None:
+    data = tomllib.loads(DEFAULT_CONFIG_TOML)
+
+    assert set(data["analysis"].keys()) == {
+        "frame_count",
+        "random_seed",
+        "save_frames_data",
+        "selection_mode",
+        "ignore_lead_seconds",
+        "ignore_trail_seconds",
+        "min_window_seconds",
+        "dark_quantile",
+        "bright_quantile",
+    }
+    assert data["analysis"]["ignore_lead_seconds"] == 0.0
+    assert data["analysis"]["ignore_trail_seconds"] == 0.0
+    assert data["analysis"]["min_window_seconds"] == 5.0
 
 
 def test_default_config_toml_documents_approved_slowpics_defaults() -> None:

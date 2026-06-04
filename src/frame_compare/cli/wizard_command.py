@@ -95,6 +95,7 @@ def handle_wizard(
     try:
         validate_config(config_data)
         write_payload(config_path, config_data)
+        typer.echo(f"Configuration written: {config_path}", err=True)
     except ValidationError as error:
         normalized = normalize_pydantic_errors(cast(Sequence[dict[str, object]], error.errors()))
         config_error = ConfigValidationError(normalized)

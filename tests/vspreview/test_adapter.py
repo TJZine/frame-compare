@@ -36,6 +36,7 @@ def _execute_generated_script(
     suggested_offsets_by_key: dict[str, int | None],
     comparison_stems: tuple[str, ...],
     num_frames_by_stem: dict[str, int] | None = None,
+    frame_props_by_stem: dict[str, dict[str, object]] | None = None,
 ) -> tuple[
     dict[str, list[tuple[int | None, int | None, int | None]]],
     list[int],
@@ -54,6 +55,11 @@ def _execute_generated_script(
     }
     output_indices: list[int] = []
     output_stems: list[str] = []
+    resolved_frame_props = {
+        stem: {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1} for stem in ("ref", *comparison_stems)
+    }
+    if frame_props_by_stem is not None:
+        resolved_frame_props.update(frame_props_by_stem)
 
     class FakeClip:
         def __init__(self, stem: str, num_frames: int) -> None:
@@ -69,6 +75,9 @@ def _execute_generated_script(
         def set_output(self, index: int) -> None:
             output_indices.append(index)
             output_stems.append(self.stem)
+
+        def get_frame(self, _index: int) -> object:
+            raise AssertionError("generated VSPreview diagnostics must not decode source frames")
 
     clips = {
         stem: FakeClip(stem, resolved_num_frames.get(stem, 20))
@@ -101,6 +110,7 @@ def _execute_generated_script(
         comparisons=comparisons,
         suggested_offsets_by_key=suggested_offsets_by_key,
         bootstrap_paths=[tmp_path],
+        frame_props_by_stem=resolved_frame_props,
     )
 
     exec(
@@ -196,7 +206,7 @@ def test_launch_alignment_verification_session_writes_launch_telemetry_to_stderr
     assert "VSPreview Session" in captured.err
     assert "script" in captured.err
     assert "command" in captured.err
-    assert "pass-through from the VSPreview process" in captured.err
+    assert "Frame Compare diagnostics inherited on stderr" in captured.err
     assert "\x1b[" not in captured.err
     assert "[bold cyan]" not in captured.err
     env = run_kwargs["env"]
@@ -464,16 +474,104 @@ def test_generated_script_output_order_matches_prompt_input_order_for_unsorted_c
     captured = capsys.readouterr()
     assert output_indices == [0, 1, 2, 3, 4, 5]
     assert output_stems == ["ref", "zeta", "ref", "alpha", "ref", "mid"]
-    assert captured.out.index("loaded") < captured.out.index("output 0")
-    assert captured.out.index("loaded") < captured.out.index("zeta")
-    assert captured.out.index("zeta") < captured.out.index("alpha") < captured.out.index("mid")
-    output_section = captured.out[captured.out.index("output 0") :]
+    assert captured.out == ""
+    assert captured.err.index("loaded") < captured.err.index("output 0")
+    assert captured.err.index("loaded") < captured.err.index("zeta")
+    assert captured.err.index("zeta") < captured.err.index("alpha") < captured.err.index("mid")
+    output_section = captured.err[captured.err.index("output 0") :]
     assert output_section.index("zeta (audio hint: 4 frames)") < output_section.index(
         "alpha (audio hint: no trusted audio hint)"
     )
     assert output_section.index("alpha (audio hint: no trusted audio hint)") < output_section.index(
         "mid (audio hint: -2 frames)"
     )
+
+
+def test_generated_script_current_human_output_organization_without_launching_vspreview(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _execute_generated_script(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        suggested_offsets_by_key={"ref:a": 4, "ref:b": None},
+        comparison_stems=("a", "b"),
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "VSPreview Bootstrap" in captured.err
+    assert "reference" in captured.err
+    assert "loaded" in captured.err
+    assert "output 0" in captured.err
+    assert "output 1" in captured.err
+    assert "output 2" in captured.err
+    assert "output 3" in captured.err
+    assert "VSPreview Ready" in captured.err
+    assert "VSPreview Assumptions" not in captured.err
+    assert captured.err.index("VSPreview Bootstrap") < captured.err.index("loaded")
+    assert captured.err.index("loaded") < captured.err.index("output 0")
+    assert captured.err.index("output 3") < captured.err.index("VSPreview Ready")
+    assert captured.err.index("a (audio hint: 4 frames)") < captured.err.index(
+        "b (audio hint: no trusted audio hint)"
+    )
+
+
+def test_generated_script_collects_preview_assumptions_before_outputs_and_ready(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _execute_generated_script(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        suggested_offsets_by_key={"ref:a": 4, "ref:b": None},
+        comparison_stems=("a", "b"),
+        frame_props_by_stem={
+            "ref": {"_Transfer": 2, "_Primaries": "oops"},
+            "a": {"_Matrix": "9", "_Transfer": "16", "_Primaries": 9},
+            "b": {"_Matrix": "not-an-int", "_Transfer": 1},
+        },
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "VSPreview Assumptions" in captured.err
+    for token in ("ref", "b", "_Matrix", "_Transfer", "_Primaries"):
+        assert token in captured.err
+    assert "display-safe defaults" in captured.err
+    assert "preview only" in captured.err
+    assert "render/report semantics" in captured.err
+    assert "a missing" not in captured.err
+    assert captured.err.index("VSPreview Bootstrap") < captured.err.index("VSPreview Assumptions")
+    assert captured.err.index("VSPreview Assumptions") < captured.err.index("output 0")
+    assert captured.err.index("output 3") < captured.err.index("VSPreview Ready")
+
+
+def test_generated_script_serializes_non_finite_preview_props_as_assumptions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _execute_generated_script(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        suggested_offsets_by_key={"ref:a": 4},
+        comparison_stems=("a",),
+        frame_props_by_stem={
+            "ref": {"_Matrix": float("nan"), "_Transfer": float("inf"), "_Primaries": 1},
+            "a": {"_Matrix": 1.0, "_Transfer": 1, "_Primaries": 1},
+        },
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "VSPreview Assumptions" in captured.err
+    assert "ref" in captured.err
+    assert "_Matrix" in captured.err
+    assert "_Transfer" in captured.err
+    assert "a missing" not in captured.err
 
 
 def test_generated_script_does_not_slice_source_clips_from_suggested_offsets(
@@ -508,8 +606,9 @@ def test_generated_script_omits_numeric_hint_when_suggestion_is_none(
     )
 
     captured = capsys.readouterr()
-    assert "no trusted audio hint" in captured.out
-    assert "audio hint: 0" not in captured.out
+    assert captured.out == ""
+    assert "no trusted audio hint" in captured.err
+    assert "audio hint: 0" not in captured.err
 
 
 def test_generated_script_reports_missing_lwlibavsource_without_traceback(tmp_path: Path) -> None:
@@ -547,8 +646,9 @@ core = _Core()
     )
 
     assert result.returncode == 1
-    assert "ERROR: Failed to resolve LWLibavSource loader:" in result.stdout
-    assert "LWLibavSource not found on core.lsmas or core.lw" in result.stdout
+    assert result.stdout == ""
+    assert "ERROR: Failed to resolve LWLibavSource loader:" in result.stderr
+    assert "LWLibavSource not found on core.lsmas or core.lw" in result.stderr
     assert "Traceback" not in result.stderr
 
 
@@ -677,6 +777,7 @@ def test_build_script_content_assert_by_section() -> None:
     assert json.dumps(str(bootstrap_paths[1])) in script
     assert "def safe_print(*args, **kwargs):" in script
     assert "def resolve_lwlibavsource(core):" in script
+    assert "get_frame" not in script
     assert "def trim_clip(clip, trim_start, trim_end_inclusive):" not in script
     assert "calculate_alignment_trims" not in script
     assert '"label": "ref"' in script
@@ -687,6 +788,7 @@ def test_build_script_content_assert_by_section() -> None:
     assert "hint pair: ref frame {suggested_offset} ~= comparison frame 0" in script
     assert "hint pair: ref frame 0 ~= comparison frame {-suggested_offset}" in script
     assert "VSPreview Bootstrap" in script
+    assert "VSPreview Assumptions" in script
     assert "VSPreview Ready" in script
     assert "def main():" in script
     assert script.rstrip().endswith("main()")

@@ -28,6 +28,13 @@ def test_rich_progress_reporter_smoke():
     reporter.complete_phase()
 
 
+def test_rich_progress_reporter_accepts_no_color() -> None:
+    reporter = RichProgressReporter(no_color=True)
+
+    assert reporter.no_color is True
+    assert reporter.writes_to_stderr is True
+
+
 def test_log_progress_reporter_smoke():
     """Smoke test for LogProgressReporter."""
     reporter = LogProgressReporter()

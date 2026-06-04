@@ -237,6 +237,7 @@ def align_clips(
     cache_dir: Path,
     progress: ProgressReporter | None = None,
     reference_fps: Fraction | None = None,
+    frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
 ) -> list[AlignmentResult]:
     """
     Align comparison clips to reference using audio cross-correlation.
@@ -335,6 +336,7 @@ def align_clips(
         cache_dir=cache_dir,
         config=config,
         progress=progress,
+        frame_props_by_stem=frame_props_by_stem,
     )
     fps_reference = _apply_confirmed_vspreview_offsets(
         reference=reference,

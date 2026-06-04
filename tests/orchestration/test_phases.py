@@ -8,7 +8,9 @@ from fractions import Fraction
 from pathlib import Path
 
 import pytest
+from structlog.testing import capture_logs
 
+from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import (
     ClipFingerprint,
@@ -24,7 +26,7 @@ from frame_compare.orchestration.types import (
     RunArtifacts,
     RunRequest,
 )
-from frame_compare.utils.progress import NullProgressReporter
+from frame_compare.utils.progress import LogProgressReporter, NullProgressReporter
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 from frame_compare.utils.types import WorkspacePaths
 
@@ -66,6 +68,8 @@ def _make_context(tmp_path: Path) -> RunContext:
         workspace=workspace,
         reference=reference,
         comparisons=[],
+        analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
         reporter=NullProgressReporter(),
     )
 
@@ -172,7 +176,7 @@ def test_execute_phases_reports_skipped_phase_lifecycle(tmp_path: Path) -> None:
 
     asyncio.run(execute_phases(phases, context, reporter))
 
-    assert reporter.start_phase_calls == [("skip", 1), ("next", 1)]
+    assert reporter.start_phase_calls == [("SKIP", 1), ("NEXT", 1)]
     assert reporter.set_description_calls == ["Skipped"]
     assert reporter.complete_phase_calls == [
         ProgressPhaseStatus.SKIPPED,
@@ -180,6 +184,28 @@ def test_execute_phases_reports_skipped_phase_lifecycle(tmp_path: Path) -> None:
     ]
     assert phases[0].status is PhaseStatus.SKIPPED
     assert phases[1].status is PhaseStatus.COMPLETED
+
+
+def test_execute_phases_preserves_internal_phase_name_for_log_progress(
+    tmp_path: Path,
+) -> None:
+    context = _make_context(tmp_path)
+    reporter = LogProgressReporter()
+
+    async def phase_analyze(_: RunContext) -> None:
+        return None
+
+    phases = [Phase(name="analyze", execute=phase_analyze)]
+
+    with capture_logs() as captured:
+        asyncio.run(execute_phases(phases, context, reporter))
+
+    assert any(
+        event.get("event") == "phase_started"
+        and event.get("phase") == "analyze"
+        and event.get("total") == 1
+        for event in captured
+    )
 
 
 def test_execute_phases_warn_only_failure_marks_warned_and_continues(

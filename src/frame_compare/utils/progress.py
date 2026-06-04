@@ -1,6 +1,7 @@
 """Progress reporting utilities for Frame Compare."""
 
 import structlog
+from rich.console import Console
 from rich.progress import (
     BarColumn,
     Progress,
@@ -51,7 +52,7 @@ class NullProgressReporter:
 class RichProgressReporter:
     """Progress reporter using the rich library for CLI display."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, no_color: bool = False) -> None:
         self._progress = Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -59,12 +60,22 @@ class RichProgressReporter:
             TaskProgressColumn(),
             TimeRemainingColumn(),
             transient=True,
-            console=None,  # Use default console (stderr)
+            console=Console(stderr=True, no_color=no_color),
         )
         self._task_id: TaskID | None = None
         self._task_stack: list[TaskID] = []
         self._task_totals: dict[TaskID, int] = {}
         self._suspend_depth = 0
+
+    @property
+    def no_color(self) -> bool:
+        """Return whether Rich rendering disables ANSI color."""
+        return self._progress.console.no_color
+
+    @property
+    def writes_to_stderr(self) -> bool:
+        """Return whether Rich progress targets stderr."""
+        return self._progress.console.stderr
 
     def start_phase(self, name: str, total: int) -> None:
         """Start a new phase with a rich progress bar."""

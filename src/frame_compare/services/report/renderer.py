@@ -179,6 +179,7 @@ def _render_filmstrip(
                     </span>
                     <span class="rv-filmstrip-caption">
                         <span class="rv-filmstrip-label">{_esc_text(_frame_filmstrip_label(frame))}</span>
+                        <span class="rv-filmstrip-compact-label">Frame {_esc_text(frame["number"])}</span>
                     </span>
                 </button>
                 """
@@ -195,6 +196,32 @@ def _render_filmstrip(
             {items}
         </nav>
         """
+
+
+def _render_bottom_panel(
+    category_filter_controls: str, filmstrip: str, *, include_filmstrip: bool
+) -> str:
+    disabled_attr = " disabled" if not include_filmstrip else ""
+    aria_expanded = "true" if include_filmstrip else "false"
+    expanded_label = "Hide timeline" if include_filmstrip else "Filmstrip disabled"
+    aria_label = "Collapse timeline controls" if include_filmstrip else "Filmstrip disabled"
+    title = "Toggle timeline (F)" if include_filmstrip else "Filmstrip disabled"
+    return f"""<section class="rv-bottom-panel" data-filmstrip-enabled="{str(include_filmstrip).lower()}" aria-label="Frame timeline">
+    <div class="rv-bottom-panel-bar">
+        <div class="rv-filter-group" data-control-scope="frame-filters" aria-label="Frame category filters">
+            {category_filter_controls}
+        </div>
+        <div class="rv-filmstrip-controls">
+            <div class="rv-filmstrip-size-control" role="radiogroup" aria-label="Filmstrip size">
+                <button type="button" data-filmstrip-size="compact" role="radio" aria-checked="false"{disabled_attr}>Compact</button>
+                <button type="button" data-filmstrip-size="normal" class="active" role="radio" aria-checked="true"{disabled_attr}>Normal</button>
+                <button type="button" data-filmstrip-size="large" role="radio" aria-checked="false"{disabled_attr}>Large</button>
+            </div>
+            <button id="btn-filmstrip-toggle" type="button" aria-expanded="{aria_expanded}" aria-label="{aria_label}" title="{title}"{disabled_attr}>{expanded_label}</button>
+        </div>
+    </div>
+    {filmstrip}
+</section>"""
 
 
 def _render_resolution(resolution: tuple[int, int]) -> str:
@@ -223,6 +250,7 @@ def _render_info_modal(
     report_id = data["report_id"]
     generated_at = data["generated_at"]
     default_mode = data["default_mode"]
+    default_mode_label = "Single" if default_mode == "overlay" else default_mode
 
     default_pair = (
         f"{_esc_text(_clip_label_for_index(clips, left_clip_index))} "
@@ -274,7 +302,7 @@ def _render_info_modal(
                         <div><dt>Generated</dt><dd>{_esc_text(generated_at)}</dd></div>
                         <div><dt>Frames</dt><dd>{stats["frame_count"]}</dd></div>
                         <div><dt>Clips</dt><dd>{stats["clip_count"]}</dd></div>
-                        <div><dt>Default Mode</dt><dd>{_esc_text(default_mode)}</dd></div>
+                        <div><dt>Default Mode</dt><dd>{_esc_text(default_mode_label)}</dd></div>
                         <div><dt>Default Pair</dt><dd>{default_pair}</dd></div>
                         {slowpics_row}
                     </dl>
@@ -298,7 +326,7 @@ def _render_header(
     clip_count: int,
     slowpics_link: str,
 ) -> str:
-    info_button = '<button id="btn-info" class="rv-header-info-btn" aria-label="Report information" title="Report Info (I)">ℹ</button>'
+    info_button = '<button id="btn-info" class="rv-header-info-btn" aria-label="Report information" title="Report Info">ℹ</button>'
     help_button = '<button id="btn-help" class="rv-header-help-btn" aria-label="Keyboard shortcuts" title="Help (?)">?</button>'
     slowpics_block = f"{slowpics_link} • " if slowpics_link else ""
     return f"""        <header class="rv-header">
@@ -319,17 +347,19 @@ def _render_controls(
     active_clip_options: str,
 ) -> str:
     return f"""    <div class="rv-controls" role="toolbar" aria-label="Viewer controls">
-        <div class="rv-control-group">
+        <div class="rv-primary-controls" aria-label="Primary viewer controls">
+        <div class="rv-control-group rv-frame-controls">
             <button id="btn-prev" aria-label="Previous frame">←</button>
             <select id="frame-select" aria-label="Select frame">
                 {frame_options}
             </select>
             <button id="btn-next" aria-label="Next frame">→</button>
+            <span id="active-filter-badge" class="rv-active-filter-badge" hidden></span>
         </div>
 
         <div class="rv-control-group" role="radiogroup" aria-label="View mode">
             <button data-mode="slider" class="active" role="radio" aria-checked="true" aria-label="Slider mode" title="Slider (S)">Slider</button>
-            <button data-mode="overlay" role="radio" aria-checked="false" aria-label="Overlay mode" title="Overlay (O)">Overlay</button>
+            <button data-mode="overlay" role="radio" aria-checked="false" aria-label="Single clip view" title="Single clip view (O)">Single</button>
             <button data-mode="diff" role="radio" aria-checked="false" aria-label="Difference mode" title="Difference (D)">Diff</button>
             <button data-mode="blink" role="radio" aria-checked="false" aria-label="Blink mode" title="Blink (B)">Blink</button>
         </div>
@@ -347,14 +377,24 @@ def _render_controls(
             </select>
         </div>
 
-        <div class="rv-control-group" data-control-scope="active" aria-label="Overlay clip" hidden>
+        <div class="rv-control-group" data-control-scope="active" aria-label="Single clip" hidden>
             <span class="rv-clip-prefix active">Clip:</span>
-            <select id="active-select" aria-label="Overlay clip">
+            <select id="active-select" aria-label="Single clip">
                 {active_clip_options}
             </select>
         </div>
+        <div id="alignment-status" class="rv-alignment-status" role="status" aria-live="polite">Aligned: none</div>
+        </div>
+    </div>"""
 
-        <div class="rv-control-group">
+
+def _render_viewport_palette() -> str:
+    return """        <div class="rv-viewport-palette" role="toolbar" aria-label="Viewport controls" data-orientation="horizontal">
+        <div class="rv-palette-group">
+            <button id="btn-palette-orientation" aria-label="Toggle palette orientation" title="Toggle palette orientation">↔</button>
+        </div>
+
+        <div class="rv-palette-group rv-palette-group--zoom">
             <button id="btn-zoom-out" aria-label="Zoom out">-</button>
             <input type="range" id="zoom-range" min="0.25" max="4.0" step="0.1" value="1.0" aria-label="Zoom level" aria-valuemin="0.25" aria-valuemax="4.0" aria-valuenow="1.0">
             <button id="btn-zoom-in" aria-label="Zoom in">+</button>
@@ -362,14 +402,14 @@ def _render_controls(
             <span id="zoom-val" class="rv-zoom-value">100%</span>
         </div>
 
-        <div class="rv-control-group" role="radiogroup" aria-label="Fit mode">
-            <button data-fit="actual" class="active" role="radio" aria-checked="true" aria-label="Actual size" title="Actual size">Actual</button>
-            <button data-fit="width" role="radio" aria-checked="false" aria-label="Fit width" title="Fit width">Fit width</button>
-            <button data-fit="height" role="radio" aria-checked="false" aria-label="Fit height" title="Fit height">Fit height</button>
-            <button data-fit="fill" role="radio" aria-checked="false" aria-label="Fill stage" title="Fill stage">Fill</button>
+        <div class="rv-palette-group" role="radiogroup" aria-label="Fit mode">
+            <button data-fit="actual" class="active" role="radio" aria-checked="true" aria-label="Actual size" title="Actual size (1:1)">1:1</button>
+            <button data-fit="width" role="radio" aria-checked="false" aria-label="Fit width" title="Fit width (↔)">↔</button>
+            <button data-fit="height" role="radio" aria-checked="false" aria-label="Fit height" title="Fit height (↕)">↕</button>
+            <button data-fit="fill" role="radio" aria-checked="false" aria-label="Fill stage" title="Fill stage (⛶)">⛶</button>
         </div>
 
-        <div class="rv-control-group rv-alignment-group">
+        <div class="rv-palette-group rv-alignment-group">
             <button id="btn-align-toggle" aria-label="Alignment settings" title="Alignment Settings (⚙)" aria-expanded="false" aria-haspopup="true">⚙</button>
             <div id="align-popover" class="rv-align-popover" aria-hidden="true" hidden>
                 <div class="rv-popover-row">
@@ -395,20 +435,31 @@ def _render_controls(
             </div>
         </div>
 
-        <div class="rv-control-group">
+        <div class="rv-palette-group">
             <button id="btn-fullscreen" aria-label="Enter fullscreen" aria-pressed="false" title="Fullscreen">Fullscreen</button>
+            <button id="btn-focus-mode" aria-label="Enter focus mode" aria-pressed="false" title="Focus mode (Z)">Focus</button>
         </div>
 
-        <div class="rv-control-group">
-            <button id="btn-overlays" class="active" aria-label="Hide overlays" aria-pressed="true" title="Hide overlays (H)">Overlays</button>
+        <div class="rv-palette-group">
+            <button id="btn-overlays" class="active" aria-label="Hide HUD" aria-pressed="true" title="Hide HUD (H)">HUD</button>
+        </div>
+
+        <div class="rv-palette-group rv-blink-controls" data-control-scope="blink" hidden>
+            <button id="btn-blink-pause" aria-label="Pause blink" aria-pressed="false" title="Pause blink (Space)">Pause</button>
+            <select id="blink-speed" aria-label="Blink speed">
+                <option value="300">0.3s</option>
+                <option value="700" selected>0.7s</option>
+                <option value="1200">1.2s</option>
+            </select>
+            <span id="blink-status" class="rv-blink-status" role="status" aria-live="polite"></span>
         </div>
     </div>"""
 
 
 def _render_stage() -> str:
-    return """    <div class="rv-viewer-stage rv-mode-slider" role="img" aria-label="Comparison viewer">
+    return f"""    <div class="rv-viewer-stage rv-mode-slider" role="region" aria-label="Comparison viewer">
         <div class="rv-empty-state" data-empty-state hidden></div>
-        <div class="rv-canvas">
+        <div class="rv-canvas" role="img" aria-label="Comparison image canvas">
             <img src="data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=" alt="" class="rv-sizer" aria-hidden="true">
             <div class="rv-layer rv-left">
                 <img src="" alt="" class="rv-image">
@@ -427,7 +478,63 @@ def _render_stage() -> str:
             <span class="rv-info-divider" data-current-frame-category-divider>•</span>
             <span class="rv-info-category" data-current-frame-category></span>
         </div>
+        <div class="rv-focus-hud" aria-hidden="true">
+            <span data-focus-frame></span>
+            <span data-focus-mode></span>
+            <span data-focus-pair></span>
+            <span>Esc exits</span>
+        </div>
+{_render_viewport_palette()}
     </div>"""
+
+
+def _render_inspector() -> str:
+    return """    <aside id="rv-inspector" class="rv-inspector" aria-hidden="true" aria-labelledby="rv-inspector-title" inert>
+        <div class="rv-inspector-header">
+            <div id="rv-inspector-title" class="rv-inspector-title">Inspector</div>
+            <button id="btn-inspector-close" type="button" aria-label="Close inspector" title="Close inspector (I)" tabindex="-1">Close</button>
+        </div>
+        <div class="rv-inspector-tabs" role="tablist" aria-label="Inspector tabs">
+            <button id="inspector-tab-frame" type="button" role="tab" data-inspector-tab="frame" aria-selected="true" aria-controls="inspector-panel-frame" tabindex="-1">Frame</button>
+            <button id="inspector-tab-clips" type="button" role="tab" data-inspector-tab="clips" aria-selected="false" aria-controls="inspector-panel-clips" tabindex="-1">Clips</button>
+            <button id="inspector-tab-align" type="button" role="tab" data-inspector-tab="align" aria-selected="false" aria-controls="inspector-panel-align" tabindex="-1">Align</button>
+            <button id="inspector-tab-export" type="button" role="tab" data-inspector-tab="export" aria-selected="false" aria-controls="inspector-panel-export" tabindex="-1">Export</button>
+        </div>
+        <section id="inspector-panel-frame" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-frame">
+            <dl class="rv-inspector-list">
+                <div><dt>Label</dt><dd data-inspector-frame-label></dd></div>
+                <div><dt>Number</dt><dd data-inspector-frame-number></dd></div>
+                <div><dt>Category</dt><dd data-inspector-frame-category></dd></div>
+                <div><dt>Detail</dt><dd data-inspector-frame-detail></dd></div>
+                <div><dt>Shown</dt><dd data-inspector-frame-position></dd></div>
+            </dl>
+        </section>
+        <section id="inspector-panel-clips" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-clips" hidden>
+            <ol class="rv-inspector-clip-list" data-inspector-clips></ol>
+        </section>
+        <section id="inspector-panel-align" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-align" hidden>
+            <dl class="rv-inspector-list">
+                <div><dt>Pair</dt><dd data-inspector-align-pair></dd></div>
+                <div><dt>Preset</dt><dd data-inspector-align-preset></dd></div>
+                <div><dt>X</dt><dd data-inspector-align-x></dd></div>
+                <div><dt>Y</dt><dd data-inspector-align-y></dd></div>
+            </dl>
+            <div class="rv-inspector-actions">
+                <button id="btn-inspector-reset-current-align" type="button" tabindex="-1">Reset current pair</button>
+                <button id="btn-inspector-reset-all-align" type="button" tabindex="-1">Reset all pairs</button>
+            </div>
+            <p class="rv-inspector-note">Offsets are scoped to the selected pair.</p>
+        </section>
+        <section id="inspector-panel-export" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-export" hidden>
+            <dl class="rv-inspector-list">
+                <div><dt>Title</dt><dd data-inspector-export-title></dd></div>
+                <div><dt>Report ID</dt><dd data-inspector-export-id></dd></div>
+                <div><dt>Generated</dt><dd data-inspector-export-generated></dd></div>
+                <div><dt>slow.pics</dt><dd data-inspector-export-slowpics></dd></div>
+                <div><dt>Summary</dt><dd data-inspector-export-summary></dd></div>
+            </dl>
+        </section>
+    </aside>"""
 
 
 def _render_help_modal() -> str:
@@ -441,12 +548,23 @@ def _render_help_modal() -> str:
                 <div class="rv-shortcut-row"><span>Cycle Clip</span><span class="rv-key">↑ / ↓</span></div>
                 <div class="rv-shortcut-row"><span>Direct Clip Select</span><span class="rv-key">1 - 9</span></div>
                 <div class="rv-shortcut-row"><span>Swap Clips</span><span class="rv-key">X</span></div>
-                <div class="rv-shortcut-row"><span>Modes (Slider/Overlay/Diff/Blink)</span><span class="rv-key">S / O / D / B</span></div>
-                <div class="rv-shortcut-row"><span>Toggle Overlays</span><span class="rv-key">H</span></div>
+                <div class="rv-shortcut-row"><span>Modes (Slider/Single/Diff/Blink)</span><span class="rv-key">S / O / D / B</span></div>
+                <div class="rv-shortcut-row"><span>Toggle HUD</span><span class="rv-key">H</span></div>
+                <div class="rv-shortcut-row"><span>Toggle Filmstrip</span><span class="rv-key">F</span></div>
+                <div class="rv-shortcut-row"><span>Toggle Inspector</span><span class="rv-key">I</span></div>
+                <div class="rv-shortcut-row"><span>Blink Pause / Speed</span><span class="rv-key">Space / [ / ]</span></div>
+                <div class="rv-shortcut-row"><span>Toggle Focus</span><span class="rv-key">Z</span></div>
                 <div class="rv-shortcut-row"><span>Zoom In / Out</span><span class="rv-key">+ / -</span></div>
                 <div class="rv-shortcut-row"><span>Reset Viewport</span><span class="rv-key">R / Double-click</span></div>
                 <div class="rv-shortcut-row"><span>Open Help</span><span class="rv-key">?</span></div>
-                <div class="rv-shortcut-row"><span>Close Help / Exit Fullscreen</span><span class="rv-key">Esc</span></div>
+                <div class="rv-shortcut-row"><span>Close Panel / Exit Focus / Exit Fullscreen</span><span class="rv-key">Esc</span></div>
+            </div>
+            <div class="rv-modal-subtitle">Viewport Fit Modes</div>
+            <div class="rv-legend-grid">
+                <div class="rv-legend-row"><span class="rv-key">1:1</span><span>Actual size</span></div>
+                <div class="rv-legend-row"><span class="rv-key">↔</span><span>Fit width</span></div>
+                <div class="rv-legend-row"><span class="rv-key">↕</span><span>Fit height</span></div>
+                <div class="rv-legend-row"><span class="rv-key">⛶</span><span>Fill stage</span></div>
             </div>
             <div class="rv-modal-actions">
                 <button id="btn-close-help">Close</button>
@@ -501,6 +619,11 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
         include_filmstrip=include_filmstrip,
         category_filter_keys=category_filter_keys,
     )
+    bottom_panel = _render_bottom_panel(
+        category_filter_controls,
+        filmstrip,
+        include_filmstrip=include_filmstrip,
+    )
 
     header_html = _render_header(
         title=title,
@@ -516,6 +639,7 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
         active_clip_options,
     )
     stage_html = _render_stage()
+    inspector_html = _render_inspector()
     modal_html = _render_help_modal()
     info_modal_html = _render_info_modal(
         data,
@@ -537,14 +661,10 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
 <div id="viewer-status" class="rv-status" role="status" aria-live="polite" hidden></div>
 {controls_html}
 {stage_html}
+{inspector_html}
 {modal_html}
 {info_modal_html}
-<div class="rv-category-filters-container">
-    <div class="rv-filter-group" data-control-scope="frame-filters" aria-label="Frame category filters">
-        {category_filter_controls}
-    </div>
-</div>
-{filmstrip}
+{bottom_panel}
 {footer_html}
 </body>
 </html>"""

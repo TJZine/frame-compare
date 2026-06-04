@@ -5,25 +5,20 @@
 
 ---
 
-## CLI Output Enhancements (follow-ups from CLI styling redesign)
+## CLI Output Follow-Ups
 
-### Phase-Badge Headers Around Runtime Progress
+### Optional Phase Section Headers
 
-**Context**: The legacy project renders colored phase badges (`[DISCOVER]`,
-`[PREPARE]`, `[ANALYZE]`, `[RENDER]`, `[PUBLISH]`) around each orchestration
-phase, giving the user clear visual context for what the pipeline is currently
-doing.
+**Context**: Current interactive progress now uses concise product phase labels
+inside the Rich progress task. It does not emit durable section headers around
+phase boundaries.
 
-**What**: Add styled phase-badge section headers (e.g. `[bold cyan][ANALYZE][/]`,
-`[bold bright_magenta][RENDER][/]`) emitted by the orchestration layer around
-phase progress output.
+**What**: If users still need more visible workflow landmarks after the progress
+label pass, evaluate lightweight phase section headers around runtime progress
+without duplicating the existing progress task labels.
 
-**Risk**: Touches orchestration hotspot files (`execution.py`, `coordinator.py`).
-Requires a formal plan with full verification. The rendering helpers already
-exist in `cli/output.py` after the styling redesign — the work is wiring the
-orchestration phases to emit them.
-
-**Depends on**: CLI styling redesign (completed).
+**Risk**: Touches orchestration hotspot files (`execution.py`, `coordinator.py`)
+and user-visible CLI output. Requires a focused plan and full verification.
 
 ### Frame Selection Plan Breakdown in Post-Analysis Summary
 
@@ -42,8 +37,6 @@ in the CLI output.
 `orchestration/types.py`) and wiring it through `execution.py`. Medium risk —
 not a behavioral change, but touches the orchestration data flow.
 
-**Depends on**: CLI styling redesign (completed).
-
 ### Post-Probe Clip Metadata Summary
 
 **Context**: The legacy project shows per-clip metadata (resolution, fps, frame
@@ -57,6 +50,3 @@ count, duration timecode) in a `[DISCOVER]` section.
 
 **Risk**: Same as the frame plan breakdown — requires expanding `RunResult` and
 the orchestration data flow.
-
-**Depends on**: CLI styling redesign (completed), phase-badge headers (optional
-but related).

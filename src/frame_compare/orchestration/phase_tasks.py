@@ -27,6 +27,7 @@ from frame_compare.analysis.types import (
     SelectionDetail,
     SelectionDetailsByFrame,
 )
+from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.errors import ConfigValidationError
 from frame_compare.config.schema import AnalysisConfig, ConfigSchema, OverlayMode
 from frame_compare.errors import JSONValue
@@ -125,13 +126,32 @@ async def resolve_run_metadata(
 
 
 def select_initial_frame_plan(ctx: RunContext) -> FramePlanPhaseOutput:
+    window_start, frame_count = _selection_window_for_context(ctx)
     return FramePlanPhaseOutput(
-        create_frame_plan(
-            num_frames=ctx.reference.effective_num_frames(),
-            count=ctx.config.analysis.frame_count,
-            seed=ctx.config.analysis.random_seed,
-        ).frames
+        [
+            frame + window_start
+            for frame in create_frame_plan(
+                num_frames=frame_count,
+                count=min(ctx.config.analysis.frame_count, frame_count),
+                seed=ctx.config.analysis.random_seed,
+            ).frames
+        ]
     )
+
+
+def _selection_window_for_context(ctx: RunContext) -> tuple[int, int]:
+    window = ctx.selection_window
+    if window.frame_count > 0:
+        return window.start_frame, window.frame_count
+    return 0, ctx.reference.effective_num_frames()
+
+
+def _target_selection_count(config: AnalysisConfig, frame_count: int) -> int:
+    return min(config.frame_count, frame_count)
+
+
+def _source_offset_for_reference_window(reference: ClipState, window_start: int) -> int:
+    return reference.trim.trim_start_frames + window_start
 
 
 def run_analyze_phase(
@@ -142,11 +162,11 @@ def run_analyze_phase(
     require_cache_only: bool = False,
     vs_loader: VSLoader | None = None,
 ) -> AnalyzePhaseOutput:
-    reference_domain = ctx.reference_cache_domain
+    selection_domain = ctx.analysis_selection_domain
     fingerprint = cache_io.compute_cache_key(
         input_videos,
         ctx.config.analysis,
-        reference_domain=reference_domain,
+        selection_domain=selection_domain,
     )
     cache_result = cache_io.load_cached_metrics(workspace.cache_dir, fingerprint, clips=[])
     metrics_cache_hit = cache_result.success and cache_result.metrics is not None
@@ -164,12 +184,13 @@ def run_analyze_phase(
             cache_dir=workspace.cache_dir,
             reporter=ctx.reporter,
             vs_loader=vs_loader,
-            reference_domain=reference_domain,
+            selection_domain=selection_domain,
             effective_fps=ctx.reference.effective_fps,
         )
-    selection = _select_frames_for_reference_domain(
+    selection = _select_frames_for_selection_domain(
         metrics=metrics,
         reference=ctx.reference,
+        selection_window=ctx.selection_window,
         config=ctx.config.analysis,
     )
     return AnalyzePhaseOutput(
@@ -203,39 +224,57 @@ def _require_cached_metrics(
     raise MetricsCalculationError(f"Cached metrics missing or mismatched ({reason}).")
 
 
-def _select_frames_for_reference_domain(
+def _select_frames_for_selection_domain(
     *,
     metrics: FrameMetrics,
     reference: ClipState,
+    selection_window: SelectionWindow,
     config: AnalysisConfig,
 ) -> FrameSelection:
-    if reference.trim.trim_start_frames == 0 and reference.trim.trim_end_frame_inclusive is None:
-        return select_frames(metrics=metrics, config=config)
+    window_start, frame_count = (
+        (selection_window.start_frame, selection_window.frame_count)
+        if selection_window.frame_count > 0
+        else (0, reference.effective_num_frames())
+    )
+    if (
+        reference.trim.trim_start_frames == 0
+        and reference.trim.trim_end_frame_inclusive is None
+        and frame_count == reference.effective_num_frames()
+        and window_start == 0
+    ):
+        return select_frames(
+            metrics=metrics,
+            config=config.model_copy(
+                update={"frame_count": _target_selection_count(config, frame_count)}
+            ),
+        )
 
-    frame_count = reference.effective_num_frames()
     if frame_count <= 0:
         raise SelectionError("reference source trims leave no selectable frames", 0, 0)
 
     trimmed_metrics = _trimmed_metrics_for_overlap(
         metrics=metrics,
-        trim_start_frame=reference.trim.trim_start_frames,
+        trim_start_frame=reference.trim.trim_start_frames + window_start,
         frame_count=frame_count,
     )
     selection = select_frames(
         metrics=trimmed_metrics,
-        config=config.model_copy(update={"frame_count": min(config.frame_count, frame_count)}),
+        config=config.model_copy(
+            update={"frame_count": _target_selection_count(config, frame_count)}
+        ),
     )
+    source_offset = _source_offset_for_reference_window(reference, window_start)
     return FrameSelection(
-        frames=list(selection.frames),
+        frames=[frame + window_start for frame in selection.frames],
         mode=selection.mode,
         seed=selection.seed,
         breakdown=_selection_breakdown_with_source_offset(
             selection.breakdown,
-            source_offset=reference.trim.trim_start_frames,
+            source_offset=source_offset,
         ),
         selection_details=_selection_details_with_source_offset(
             dict(selection.selection_details),
-            source_offset=reference.trim.trim_start_frames,
+            source_offset=source_offset,
             fps=trimmed_metrics.metadata.fps,
         ),
     )
@@ -621,6 +660,10 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
         cache_dir=ctx.workspace.generated_dir,
         progress=ctx.reporter,
         reference_fps=ctx.reference.effective_fps,
+        frame_props_by_stem={
+            ctx.reference.path.stem: dict(ctx.reference.probe.preserved_frame_props),
+            **{comp.path.stem: dict(comp.probe.preserved_frame_props) for comp in ctx.comparisons},
+        },
     )
 
     updated_comparisons: list[ClipState] = []
@@ -658,6 +701,7 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
         _compose_alignment_trim(comp, comp_trim)
         for comp, comp_trim in zip(updated_comparisons, comp_trims, strict=True)
     ]
+    selection_source_window = _selection_source_window_for_alignment(ctx)
     normalized_selected_frames, used_fallback_frame_plan = (
         _normalize_selected_frames_for_trimmed_domain(
             selected_frames=_source_frames_for_reference_base_domain(
@@ -666,6 +710,7 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
             ),
             reference=reference,
             comparisons=comparisons,
+            selection_source_window=selection_source_window,
             requested_count=ctx.config.analysis.frame_count,
             seed=ctx.config.analysis.random_seed,
         )
@@ -677,6 +722,7 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
             metrics=ctx.analysis_metrics,
             reference=reference,
             comparisons=comparisons,
+            selection_source_window=selection_source_window,
             config=ctx.config.analysis,
         )
         if trimmed_selection is not None:
@@ -697,6 +743,14 @@ def _source_frames_for_reference_base_domain(
     *, reference: ClipState, selected_frames: list[int]
 ) -> list[int]:
     return [reference.trim.trim_start_frames + frame for frame in selected_frames]
+
+
+def _selection_source_window_for_alignment(ctx: RunContext) -> tuple[int, int] | None:
+    if ctx.selection_window.frame_count <= 0:
+        return None
+    source_start = ctx.reference.trim.trim_start_frames + ctx.selection_window.start_frame
+    source_end = ctx.reference.trim.trim_start_frames + ctx.selection_window.end_frame_exclusive
+    return source_start, source_end
 
 
 def _compose_alignment_trim(clip: ClipState, alignment_trim: tuple[int, int | None]) -> ClipState:
@@ -1045,21 +1099,21 @@ def _reselect_frames_for_trimmed_overlap(
     metrics: FrameMetrics,
     reference: ClipState,
     comparisons: list[ClipState],
+    selection_source_window: tuple[int, int] | None,
     config: AnalysisConfig,
 ) -> _TrimmedOverlapSelection | None:
-    common_length = min(
-        [
-            reference.effective_num_frames(),
-            *[comparison.effective_num_frames() for comparison in comparisons],
-        ]
+    selectable_start, selectable_length = _selectable_aligned_source_window(
+        reference=reference,
+        comparisons=comparisons,
+        selection_source_window=selection_source_window,
     )
-    target_count = min(config.frame_count, common_length)
-    if common_length <= 0 or target_count <= 0:
+    target_count = min(config.frame_count, selectable_length)
+    if selectable_length <= 0 or target_count <= 0:
         return None
     trimmed_metrics = _trimmed_metrics_for_overlap(
         metrics=metrics,
-        trim_start_frame=reference.trim.trim_start_frames,
-        frame_count=common_length,
+        trim_start_frame=selectable_start,
+        frame_count=selectable_length,
     )
     try:
         trimmed_selection = select_frames(
@@ -1069,14 +1123,17 @@ def _reselect_frames_for_trimmed_overlap(
     except SelectionError:
         return None
     return _TrimmedOverlapSelection(
-        selected_frames=list(trimmed_selection.frames),
+        selected_frames=[
+            frame + selectable_start - reference.trim.trim_start_frames
+            for frame in trimmed_selection.frames
+        ],
         selection_breakdown=_selection_breakdown_with_source_offset(
             trimmed_selection.breakdown,
-            source_offset=reference.trim.trim_start_frames,
+            source_offset=selectable_start,
         ),
         selection_details_by_source_frame=_selection_details_with_source_offset(
             dict(trimmed_selection.selection_details),
-            source_offset=reference.trim.trim_start_frames,
+            source_offset=selectable_start,
             fps=trimmed_metrics.metadata.fps,
         ),
     )
@@ -1087,35 +1144,59 @@ def _normalize_selected_frames_for_trimmed_domain(
     selected_frames: list[int],
     reference: ClipState,
     comparisons: list[ClipState],
+    selection_source_window: tuple[int, int] | None,
     requested_count: int,
     seed: int,
 ) -> tuple[list[int], bool]:
+    selectable_start, selectable_length = _selectable_aligned_source_window(
+        reference=reference,
+        comparisons=comparisons,
+        selection_source_window=selection_source_window,
+    )
+    if selectable_length <= 0:
+        raise AudioAlignmentError("No overlapping frames remain after alignment.")
+
+    selectable_end = selectable_start + selectable_length
+    normalized_frames = sorted(
+        {
+            frame - reference.trim.trim_start_frames
+            for frame in selected_frames
+            if selectable_start <= frame < selectable_end
+        }
+    )
+    target_count = min(requested_count, selectable_length)
+    if target_count <= 0:
+        return [], False
+    if len(normalized_frames) < target_count:
+        fallback_offset = selectable_start - reference.trim.trim_start_frames
+        return [
+            frame + fallback_offset
+            for frame in create_frame_plan(
+                num_frames=selectable_length, count=target_count, seed=seed
+            ).frames
+        ], True
+    return normalized_frames[:target_count], False
+
+
+def _selectable_aligned_source_window(
+    *,
+    reference: ClipState,
+    comparisons: list[ClipState],
+    selection_source_window: tuple[int, int] | None,
+) -> tuple[int, int]:
     common_length = min(
         [
             reference.effective_num_frames(),
             *[comparison.effective_num_frames() for comparison in comparisons],
         ]
     )
-    if common_length <= 0:
-        raise AudioAlignmentError("No overlapping frames remain after alignment.")
-
-    reference_start = reference.trim.trim_start_frames
-    reference_end_exclusive = reference_start + common_length
-    normalized_frames = sorted(
-        {
-            frame - reference_start
-            for frame in selected_frames
-            if reference_start <= frame < reference_end_exclusive
-        }
-    )
-    target_count = min(requested_count, common_length)
-    if target_count <= 0:
-        return [], False
-    if len(normalized_frames) < target_count:
-        return create_frame_plan(
-            num_frames=common_length, count=target_count, seed=seed
-        ).frames, True
-    return normalized_frames[:target_count], False
+    overlap_start = reference.trim.trim_start_frames
+    overlap_end = overlap_start + common_length
+    if selection_source_window is not None:
+        selection_start, selection_end = selection_source_window
+        overlap_start = max(overlap_start, selection_start)
+        overlap_end = min(overlap_end, selection_end)
+    return overlap_start, max(0, overlap_end - overlap_start)
 
 
 def _map_aligned_to_source_frame(*, clip: ClipState, aligned_frame: int) -> int:

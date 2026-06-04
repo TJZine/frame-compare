@@ -9,16 +9,16 @@ import structlog
 
 import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError
+from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.overrides import apply_cli_overrides
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_models import SourceOverrideConfig
 from frame_compare.orchestration.context import (
-    ClipActiveRect,
     ClipFingerprint,
     ClipProbeSnapshot,
     ClipState,
 )
-from frame_compare.orchestration.errors import MixedSourceFpsError, SourceSelectionError
+from frame_compare.orchestration.errors import MixedSourceFpsError
 from frame_compare.orchestration.phase_tasks import resolve_run_metadata
 from frame_compare.orchestration.preflight import discover_inputs, prepare_preflight
 from frame_compare.orchestration.probing.probe_cache import (
@@ -30,10 +30,12 @@ from frame_compare.orchestration.probing.probe_props import (
     compute_preserved_frame_props,
     compute_tonemap_prop_keys,
 )
-from frame_compare.orchestration.source_selection import (
-    reference_cache_domain_token,
-    resolve_source_selection,
+from frame_compare.orchestration.selection_domain import (
+    build_analysis_selection_domain_token,
+    build_selection_domain_clips,
+    compute_selection_window_for_clips,
 )
+from frame_compare.orchestration.source_selection import resolve_source_selection
 from frame_compare.orchestration.types import (
     MetadataPrefetch,
     PrepState,
@@ -65,12 +67,12 @@ def _remove_cached_metrics(
     workspace: WorkspacePaths,
     config: ConfigSchema,
     input_videos: list[Path],
-    reference_domain: str | None,
+    selection_domain: str | None,
 ) -> None:
     fingerprint = cache_io.compute_cache_key(
         input_videos,
         config.analysis,
-        reference_domain=reference_domain,
+        selection_domain=selection_domain,
     )
     cache_io.delete_metrics_cache_entry(workspace.cache_dir, fingerprint)
 
@@ -120,21 +122,21 @@ def _validate_cache_state(
     workspace: WorkspacePaths,
     config: ConfigSchema,
     input_videos: list[Path],
-    reference_domain: str | None,
+    selection_domain: str | None,
 ) -> None:
     if request.no_cache:
         _remove_cached_metrics(
             workspace=workspace,
             config=config,
             input_videos=input_videos,
-            reference_domain=reference_domain,
+            selection_domain=selection_domain,
         )
 
     if request.from_cache_only and not request.skip_analysis:
         fingerprint = cache_io.compute_cache_key(
             input_videos,
             config.analysis,
-            reference_domain=reference_domain,
+            selection_domain=selection_domain,
         )
         cache_result = cache_io.load_cached_metrics(workspace.cache_dir, fingerprint, clips=[])
         if not cache_result.success:
@@ -153,6 +155,52 @@ def _validate_cache_state(
             )
 
 
+def _cached_probe_snapshots_for_cache_only(
+    *,
+    workspace: WorkspacePaths,
+    input_videos: list[Path],
+) -> dict[Path, ClipProbeSnapshot]:
+    cache_path = _shared_probe_cache_path(workspace)
+    cached_entries = load_clip_probe_cache(cache_path)
+    entries_by_key = dict(cached_entries)
+    snapshots: dict[Path, ClipProbeSnapshot] = {}
+    for path in input_videos:
+        stats = path.stat()
+        fingerprint = ClipFingerprint(
+            path=path,
+            size_bytes=stats.st_size,
+            mtime_ns=stats.st_mtime_ns,
+        )
+        snapshot = entries_by_key.get(compute_probe_cache_key(fingerprint))
+        if snapshot is None:
+            raise MetricsCalculationError(
+                "Cached clip probe data is required to validate --from-cache-only "
+                "analysis cache for the configured selection domain."
+            )
+        snapshots[path] = snapshot
+    return snapshots
+
+
+def _shared_probe_cache_path(workspace: WorkspacePaths) -> Path:
+    return workspace.shared_analysis_cache_dir.parent.parent / "clip_probe.toml"
+
+
+def _probe_cache_paths_for_run(workspace: WorkspacePaths) -> list[Path]:
+    paths = [workspace.generated_dir / "clip_probe.toml", _shared_probe_cache_path(workspace)]
+    unique_paths: list[Path] = []
+    for path in paths:
+        if path not in unique_paths:
+            unique_paths.append(path)
+    return unique_paths
+
+
+def _load_probe_cache_entries(cache_paths: list[Path]) -> dict[str, ClipProbeSnapshot]:
+    entries_by_key: dict[str, ClipProbeSnapshot] = {}
+    for cache_path in reversed(cache_paths):
+        entries_by_key.update(dict(load_clip_probe_cache(cache_path)))
+    return entries_by_key
+
+
 def _probe_input_videos(
     *,
     workspace: WorkspacePaths,
@@ -160,12 +208,11 @@ def _probe_input_videos(
     deps: RunDependencies,
     overrides_by_path: dict[Path, SourceOverrideConfig],
 ) -> list[ClipState]:
-    cache_path = workspace.generated_dir / "clip_probe.toml"
-    cached_entries = load_clip_probe_cache(cache_path)
-    entries_by_key = dict(cached_entries)
-    clips: list[ClipState] = []
+    cache_paths = _probe_cache_paths_for_run(workspace)
+    entries_by_key = _load_probe_cache_entries(cache_paths)
+    snapshots_by_path: dict[Path, ClipProbeSnapshot] = {}
 
-    for index, path in enumerate(input_videos):
+    for path in input_videos:
         stats = path.stat()
         fingerprint = ClipFingerprint(
             path=path,
@@ -193,56 +240,15 @@ def _probe_input_videos(
             )
             entries_by_key[cache_key] = snapshot
 
-        override = overrides_by_path.get(path)
-        trim_start_frames = override.trim_start_frames if override is not None else 0
-        trim_end_frames = override.trim_end_frames if override is not None else 0
-        end_inclusive = snapshot.num_frames - 1 - trim_end_frames if trim_end_frames > 0 else None
-        effective_end = end_inclusive if end_inclusive is not None else snapshot.num_frames - 1
-        if trim_start_frames > effective_end:
-            raise SourceSelectionError(
-                selector=path.name,
-                reason="source trims remove every frame",
-                role="sources.overrides",
-                matches=[path],
-            )
-        active_rect = None
-        if override is not None and override.active_rect is not None:
-            rect = override.active_rect
-            if rect.x + rect.width > snapshot.width or rect.y + rect.height > snapshot.height:
-                raise SourceSelectionError(
-                    selector=path.name,
-                    reason="active_rect is outside source dimensions",
-                    role="sources.overrides",
-                    matches=[path],
-                )
-            active_rect = ClipActiveRect(
-                x=rect.x,
-                y=rect.y,
-                width=rect.width,
-                height=rect.height,
-            )
-        label = "Reference" if index == 0 else f"Encode {index}"
-        effective_fps = (
-            override.effective_fps
-            if override is not None and override.effective_fps is not None
-            else snapshot.fps
-        )
-        clips.append(
-            ClipState(
-                path=path,
-                label=label,
-                probe=snapshot,
-                source_fps=snapshot.fps,
-                effective_fps=effective_fps,
-                active_rect=active_rect,
-            ).with_trim(
-                trim_start_frames=trim_start_frames,
-                trim_end_frame_inclusive=end_inclusive,
-            )
-        )
+        snapshots_by_path[path] = snapshot
 
-    save_clip_probe_cache(cache_path, entries_by_key)
-    return clips
+    for cache_path in cache_paths:
+        save_clip_probe_cache(cache_path, entries_by_key)
+    return build_selection_domain_clips(
+        ordered_paths=input_videos,
+        snapshots_by_path=snapshots_by_path,
+        overrides_by_path=overrides_by_path,
+    )
 
 
 def _validate_source_fps_compatibility(clips: list[ClipState]) -> None:
@@ -264,6 +270,19 @@ def _validate_source_fps_compatibility(clips: list[ClipState]) -> None:
 
 def _normalized_fps(fps: Fraction) -> Fraction:
     return Fraction(fps.numerator, fps.denominator)
+
+
+def _probe_input_videos_from_snapshots(
+    *,
+    input_videos: list[Path],
+    overrides_by_path: dict[Path, SourceOverrideConfig],
+    snapshots_by_path: dict[Path, ClipProbeSnapshot],
+) -> list[ClipState]:
+    return build_selection_domain_clips(
+        ordered_paths=input_videos,
+        snapshots_by_path=snapshots_by_path,
+        overrides_by_path=overrides_by_path,
+    )
 
 
 async def execute_prep(
@@ -297,18 +316,39 @@ async def execute_prep(
         config=config.sources,
     )
     input_videos = source_selection.ordered_paths
-    reference_domain = reference_cache_domain_token(
-        source_selection.overrides_by_path.get(input_videos[0])
-    )
+    overrides_by_path = dict(source_selection.overrides_by_path)
     artifacts = RunArtifacts()
+    prevalidated_clips: list[ClipState] | None = None
+    prevalidated_selection_window: SelectionWindow | None = None
+    prevalidated_selection_domain: str | None = None
 
-    _validate_cache_state(
-        request=request,
-        workspace=workspace,
-        config=config,
-        input_videos=input_videos,
-        reference_domain=reference_domain,
-    )
+    if request.from_cache_only and not request.skip_analysis:
+        cached_snapshots = _cached_probe_snapshots_for_cache_only(
+            workspace=workspace,
+            input_videos=input_videos,
+        )
+        prevalidated_clips = _probe_input_videos_from_snapshots(
+            input_videos=input_videos,
+            overrides_by_path=overrides_by_path,
+            snapshots_by_path=cached_snapshots,
+        )
+        _validate_source_fps_compatibility(prevalidated_clips)
+        prevalidated_selection_window = compute_selection_window_for_clips(
+            clips=prevalidated_clips,
+            config=config,
+        )
+        prevalidated_selection_domain = build_analysis_selection_domain_token(
+            clips=prevalidated_clips,
+            config=config,
+            selection_window=prevalidated_selection_window,
+        )
+        _validate_cache_state(
+            request=request,
+            workspace=workspace,
+            config=config,
+            input_videos=input_videos,
+            selection_domain=prevalidated_selection_domain,
+        )
 
     workspace, metadata_prefetch = await _resolve_run_directory(
         request=request,
@@ -318,19 +358,41 @@ async def execute_prep(
         deps=deps,
     )
 
-    clips = _probe_input_videos(
-        workspace=workspace,
-        input_videos=input_videos,
-        deps=deps,
-        overrides_by_path=dict(source_selection.overrides_by_path),
-    )
-    _validate_source_fps_compatibility(clips)
+    if prevalidated_clips is not None:
+        if prevalidated_selection_window is None or prevalidated_selection_domain is None:
+            raise RuntimeError("Prevalidated selection domain was not resolved.")
+        clips = prevalidated_clips
+        selection_window = prevalidated_selection_window
+        selection_domain = prevalidated_selection_domain
+    else:
+        clips = _probe_input_videos(
+            workspace=workspace,
+            input_videos=input_videos,
+            deps=deps,
+            overrides_by_path=overrides_by_path,
+        )
+        _validate_source_fps_compatibility(clips)
+        selection_window = compute_selection_window_for_clips(clips=clips, config=config)
+        selection_domain = build_analysis_selection_domain_token(
+            clips=clips,
+            config=config,
+            selection_window=selection_window,
+        )
+        if request.no_cache:
+            _validate_cache_state(
+                request=request,
+                workspace=workspace,
+                config=config,
+                input_videos=input_videos,
+                selection_domain=selection_domain,
+            )
 
     return PrepState(
         workspace=workspace,
         config=config,
         input_videos=input_videos,
-        reference_cache_domain=reference_domain,
+        analysis_selection_domain=selection_domain,
+        selection_window=selection_window,
         clips=clips,
         artifacts=artifacts,
         metadata_prefetch=metadata_prefetch,

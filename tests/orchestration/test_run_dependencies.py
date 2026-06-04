@@ -17,6 +17,7 @@ from frame_compare.orchestration.types import (
     SlowpicsUploadConfirmationDecision,
     SlowpicsUploadConfirmationRequest,
 )
+from frame_compare.utils.progress import NullProgressReporter
 from frame_compare.vs.loader import VSLoader
 from frame_compare.vs.types import HDRMetadata, SourceInfo
 
@@ -118,6 +119,45 @@ def test_execute_run_initializes_local_dependencies_without_mutating_injected_de
     assert deps.ffmpeg_runner is None
     assert deps.progress is None
     assert deps.http_client is None
+
+
+def test_execute_run_passes_no_color_to_progress_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from frame_compare.orchestration import coordinator
+
+    captured: dict[str, bool] = {}
+    progress = NullProgressReporter()
+
+    def fake_select_reporter(
+        *,
+        quiet: bool = False,
+        json_output: bool = False,
+        no_color: bool = False,
+        force_tty: bool | None = None,
+    ) -> NullProgressReporter:
+        captured["quiet"] = quiet
+        captured["json_output"] = json_output
+        captured["no_color"] = no_color
+        captured["force_tty_is_none"] = force_tty is None
+        return progress
+
+    async def fake_execute_prep(_request: RunRequest, local_deps: RunDependencies):
+        assert local_deps.progress is progress
+        raise StopAfterDependencyInit
+
+    monkeypatch.setattr(coordinator, "select_reporter", fake_select_reporter)
+    monkeypatch.setattr(coordinator, "execute_prep", fake_execute_prep)
+
+    with pytest.raises(StopAfterDependencyInit):
+        asyncio.run(execute_run(RunRequest(root=tmp_path, no_color=True), deps=RunDependencies()))
+
+    assert captured == {
+        "quiet": False,
+        "json_output": False,
+        "no_color": True,
+        "force_tty_is_none": True,
+    }
 
 
 def test_execute_run_preserves_slowpics_confirmation_callback_when_cloning_deps(

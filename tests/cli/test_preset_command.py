@@ -63,6 +63,7 @@ def test_preset_list_stub():
         result = runner.invoke(app, ["preset", "list", "--root", str(root)])
         assert result.exit_code == 0
         assert result.stdout.splitlines() == ["alpha", "Zebra"]
+        assert result.stderr == ""
 
 
 def test_preset_apply_stub():
@@ -83,6 +84,8 @@ def test_preset_apply_stub():
             ["preset", "apply", "boost", "--root", str(root), "--config", "config/config.toml"],
         )
         assert result.exit_code == 0
+        assert result.stdout == ""
+        assert f"Applied preset 'boost' to {config_path.resolve()}" in result.stderr
         data = tomllib.loads(config_path.read_text(encoding="utf-8"))
         assert data["analysis"]["frame_count"] == 12
 
@@ -99,8 +102,10 @@ def test_preset_save_stub():
             ["preset", "save", "demo", "--root", str(root), "--config", "config/config.toml"],
         )
         assert result.exit_code == 0
+        assert result.stdout == ""
         preset_path = root / "config" / "presets" / "demo.toml"
         assert preset_path.exists()
+        assert f"Saved preset 'demo' to {preset_path.resolve()}" in result.stderr
 
 
 def test_preset_list_prints_names_sorted_case_insensitive() -> None:
@@ -115,6 +120,7 @@ def test_preset_list_prints_names_sorted_case_insensitive() -> None:
         result = runner.invoke(app, ["preset", "list", "--root", str(root)])
         assert result.exit_code == 0
         assert result.stdout.splitlines() == ["alpha", "Bravo", "charlie"]
+        assert result.stderr == ""
 
 
 def test_preset_list_uses_root_presets_even_when_config_path_is_nondefault() -> None:
@@ -134,6 +140,7 @@ def test_preset_list_uses_root_presets_even_when_config_path_is_nondefault() -> 
         )
         assert result.exit_code == 0
         assert result.stdout.splitlines() == ["alpha"]
+        assert result.stderr == ""
 
 
 def test_preset_list_error_does_not_suggest_unsupported_verbose(
@@ -166,6 +173,7 @@ def test_preset_save_respects_root_and_config_writes_preset_file() -> None:
         assert result.exit_code == 0
         preset_path = root / "config" / "presets" / "sample.toml"
         assert preset_path.exists()
+        assert f"Saved preset 'sample' to {preset_path.resolve()}" in result.stderr
 
 
 def test_preset_save_write_error_uses_cli_error_contract(
@@ -212,5 +220,7 @@ def test_preset_apply_respects_root_and_config_updates_config_file() -> None:
             ["preset", "apply", "boost", "--root", str(root), "--config", "configs/config.toml"],
         )
         assert result.exit_code == 0
+        assert result.stdout == ""
+        assert f"Applied preset 'boost' to {config_path.resolve()}" in result.stderr
         data = tomllib.loads(config_path.read_text(encoding="utf-8"))
         assert data["analysis"]["frame_count"] == 22

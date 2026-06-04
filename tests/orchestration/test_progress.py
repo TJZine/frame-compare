@@ -119,7 +119,24 @@ def test_select_reporter_json_takes_precedence_over_force_tty():
     assert isinstance(reporter, LogProgressReporter)
 
 
-def test_select_reporter_no_color_returns_log():
-    """no_color=True should return LogProgressReporter."""
+def test_select_reporter_no_color_uses_rich_for_forced_tty():
+    """Interactive no-color runs should keep Rich progress with color disabled."""
+    reporter = select_reporter(no_color=True, force_tty=True)
+    assert isinstance(reporter, RichProgressReporter)
+    assert reporter.no_color is True
+
+
+def test_select_reporter_no_color_uses_rich_for_detected_tty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Auto-detected interactive no-color runs should keep Rich progress."""
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     reporter = select_reporter(no_color=True)
+    assert isinstance(reporter, RichProgressReporter)
+    assert reporter.no_color is True
+
+
+def test_select_reporter_no_color_non_tty_returns_log():
+    """Non-interactive no-color output should still use log progress."""
+    reporter = select_reporter(no_color=True, force_tty=False)
     assert isinstance(reporter, LogProgressReporter)

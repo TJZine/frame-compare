@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -90,7 +91,7 @@ def test_run_default_prints_at_a_glance_and_result_summary(monkeypatch: MonkeyPa
         assert "config" in output
         assert "input" in output
         assert "screenshots" in output
-        assert "run_folders" in output
+        assert "run folders" in output
         assert "base paths" in output
         assert "tonemap.preset" in output
         assert "reference" in output
@@ -105,6 +106,56 @@ def test_run_default_prints_at_a_glance_and_result_summary(monkeypatch: MonkeyPa
         assert "report" in output
         assert "enabled" in output
         assert "auto_open" in output
+
+
+def test_run_human_output_keeps_cli_summaries_on_stdout_and_runtime_diagnostics_on_stderr(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        assert dependencies is None
+        print("Clip Overview", file=sys.stderr)
+        print("Frame Alignment", file=sys.stderr)
+        return RunResult(
+            success=True,
+            screenshot_dir=Path("screenshots").resolve(),
+            report_path=Path("report.html").resolve(),
+            warnings=["metadata skipped", "alignment warning"],
+        )
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = _write_minimal_config(root)
+
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--root",
+                str(root),
+                "--config",
+                str(config_path.relative_to(root)),
+            ],
+            color=False,
+            terminal_width=200,
+            env={"NO_COLOR": "1", "TERM": "dumb"},
+        )
+
+    assert result.exit_code == 0
+    stdout = _normalize_cli_output(result.stdout)
+    stderr = _normalize_cli_output(result.stderr)
+    assert "At-a-Glance" in stdout
+    assert "Result" in stdout
+    assert "Warnings" in stdout
+    assert "metadata skipped" in stdout
+    assert "alignment warning" in stdout
+    assert "Clip Overview" not in stdout
+    assert "Frame Alignment" not in stdout
+    assert "Clip Overview" in stderr
+    assert "Frame Alignment" in stderr
+    assert "At-a-Glance" not in stderr
+    assert "Result" not in stderr
 
 
 def test_run_at_a_glance_prints_resolved_tonemap_preset_settings(
@@ -162,8 +213,8 @@ def test_run_at_a_glance_prints_vspreview_availability_when_enabled(
 
     assert result.exit_code == 0
     output = _normalize_cli_output(result.stdout)
-    assert "audio_alignment.use_vspreview" in output
-    assert "vspreview.available" in output
+    assert "interactive alignment" in output
+    assert "VSPreview" in output
     assert "true" in output
 
 
@@ -192,8 +243,8 @@ def test_run_at_a_glance_prints_vspreview_probe_failure(
 
     assert result.exit_code == 0
     output = _normalize_cli_output(result.stdout)
-    assert "audio_alignment.force_interactive" in output
-    assert "vspreview.available" in output
+    assert "force interactive" in output
+    assert "VSPreview" in output
     assert "probe failed (RuntimeError)" in output
     assert "no display" not in output
 
@@ -263,6 +314,8 @@ def test_run_result_summary_prints_declined_upload_as_information(
     assert result.exit_code == 0
     output = _normalize_cli_output(result.stdout)
     assert "slow.pics upload skipped by confirmation" in output
+    assert "✓ slow.pics" not in output
+    assert "- slow.pics" in output
     assert "Warnings" not in output
 
 
@@ -479,7 +532,11 @@ def test_run_quiet_suppresses_at_a_glance_but_keeps_minimal_summary(
 
 def test_run_json_outputs_json_only(monkeypatch: MonkeyPatch) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
-        return RunResult(success=True, screenshot_dir=Path("screenshots").resolve())
+        return RunResult(
+            success=True,
+            screenshot_dir=Path("screenshots").resolve(),
+            warnings=["metadata skipped", "alignment warning"],
+        )
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
@@ -504,8 +561,13 @@ def test_run_json_outputs_json_only(monkeypatch: MonkeyPatch) -> None:
         assert result.exit_code == 0
         payload = json.loads(result.stdout)
         assert payload["success"] is True
+        assert "warnings" not in payload
         assert "At-a-Glance" not in result.stdout
         assert "Screenshots:" not in result.stdout
+        assert "Warnings" not in result.stdout
+        assert "metadata skipped" not in result.stdout
+        assert "alignment warning" not in result.stdout
+        assert result.stderr == ""
 
 
 def test_run_stub_executes(monkeypatch: MonkeyPatch) -> None:

@@ -27,12 +27,14 @@ STYLE_BOOL_TRUE = "green"
 STYLE_BOOL_FALSE = "red"
 STYLE_SUCCESS = "bold green"
 STYLE_WARN = "yellow"
+STYLE_SKIPPED = "yellow"
 STYLE_HEADER = "bold cyan"
 STYLE_SUBHEADER = "bold bright_cyan"
 STYLE_CHECK = "green"
 STYLE_METRIC_KEY = "dim"
 
 type PostUploadActionPresentationKind = Literal["clipboard", "browser", "shortcut", "webhook"]
+type WarningPresentationSeverity = Literal["warning", "skipped"]
 
 
 class PostUploadActionPresentation(Protocol):
@@ -68,6 +70,17 @@ class PostUploadActionPresentationResult:
 
 
 type PostUploadActionPresentationResults = tuple[PostUploadActionPresentation, ...]
+
+
+@dataclass(frozen=True)
+class WarningPresentation:
+    """CLI-local warning presentation row bridged from existing runtime warnings."""
+
+    source: str
+    severity: WarningPresentationSeverity
+    message: str
+    detail: str | None = None
+    action: str | None = None
 
 
 # ── Formatting helpers ─────────────────────────────────────────────────────────
@@ -176,7 +189,7 @@ def print_at_a_glance(
         if config.paths.use_run_folders
         else _styled_value("disabled")
     )
-    _add_kv(table, "run_folders", run_folder_note)
+    _add_kv(table, "run folders", run_folder_note)
 
     # ── Analysis ──
     _add_separator(table)
@@ -194,18 +207,16 @@ def print_at_a_glance(
     # ── Audio Alignment ──
     _add_separator(table)
     _add_subheader(table, "Audio Alignment")
-    _add_kv(table, "audio_alignment.enabled", _styled_bool(config.audio_alignment.enable))
-    _add_kv(table, "audio_alignment.ffmpeg_available", _styled_bool(ffmpeg_available))
-    _add_kv(
-        table, "audio_alignment.use_vspreview", _styled_bool(config.audio_alignment.use_vspreview)
-    )
+    _add_kv(table, "alignment enabled", _styled_bool(config.audio_alignment.enable))
+    _add_kv(table, "FFmpeg audio", _styled_bool(ffmpeg_available))
+    _add_kv(table, "interactive alignment", _styled_bool(config.audio_alignment.use_vspreview))
     _add_kv(
         table,
-        "audio_alignment.force_interactive",
+        "force interactive",
         _styled_bool(config.audio_alignment.force_interactive),
     )
     if vspreview_status is not None:
-        _add_kv(table, "vspreview.available", _styled_value(vspreview_status))
+        _add_kv(table, "VSPreview", _styled_value(vspreview_status))
 
     # ── Tonemap ──
     _add_separator(table)
@@ -279,8 +290,14 @@ def print_result_summary(
     elif result.slowpics_upload_confirmation_status == "declined":
         has_artifacts = True
         table.add_row(
-            f"  [{STYLE_CHECK}]\u2713[/] slow.pics",
+            f"  [{STYLE_SKIPPED}]-[/] slow.pics",
             _styled_value("slow.pics upload skipped by confirmation"),
+        )
+    elif result.slowpics_upload_confirmation_status == "report_unavailable":
+        has_artifacts = True
+        table.add_row(
+            f"  [{STYLE_SKIPPED}]-[/] slow.pics",
+            _styled_value("slow.pics upload skipped because report confirmation was unavailable"),
         )
     for action in all_post_upload_actions:
         if not action.success:
@@ -324,14 +341,14 @@ def print_result_summary(
 
     console.print(Panel(table, title=f"[{STYLE_HEADER}]Result[/]", border_style="cyan"))
 
-    warnings = _merged_warnings(result.warnings, all_post_upload_actions)
+    warnings = _warning_presentations(result.warnings, all_post_upload_actions)
     if warnings:
         max_lines = 8
         visible = warnings[:max_lines]
         remaining = len(warnings) - len(visible)
-        warning_text = "\n".join(f"[{STYLE_WARN}]\u2022[/] {escape(w)}" for w in visible)
+        warning_text = _format_warning_panel_text(visible)
         if remaining > 0:
-            warning_text += f"\n[{STYLE_WARN}]\u2022[/] ... ({remaining} more)"
+            warning_text += _format_hidden_warning_counts(warnings[max_lines:])
         console.print(
             Panel(
                 warning_text,
@@ -352,20 +369,128 @@ def _post_upload_action_detail(action: PostUploadActionPresentation) -> str:
     return "completed"
 
 
-def _merged_warnings(
+def _warning_presentations(
     warnings: list[str],
     actions: PostUploadActionPresentationResults,
-) -> list[str]:
-    merged: list[str] = []
+) -> list[WarningPresentation]:
+    candidates: list[WarningPresentation] = []
     seen: set[str] = set()
+    action_warnings_by_message = {
+        action.warning: _post_upload_warning_presentation(action)
+        for action in actions
+        if action.warning is not None
+    }
+
     for warning in warnings:
-        if warning in seen:
+        row = action_warnings_by_message.get(warning)
+        if row is None:
+            row = _warning_presentation_from_string(warning)
+        if row.message in seen:
             continue
-        seen.add(warning)
-        merged.append(warning)
-    for action in actions:
-        if action.warning is None or action.warning in seen:
+        seen.add(row.message)
+        candidates.append(row)
+
+    for row in action_warnings_by_message.values():
+        if row.message in seen:
             continue
-        seen.add(action.warning)
-        merged.append(action.warning)
-    return merged
+        seen.add(row.message)
+        candidates.append(row)
+
+    return _group_warnings_by_source(candidates)
+
+
+def _post_upload_warning_presentation(
+    action: PostUploadActionPresentation,
+) -> WarningPresentation:
+    warning = action.warning
+    if warning is None:
+        raise ValueError("post-upload warning presentation requires action.warning")
+    row = _warning_presentation_from_string(warning)
+    return WarningPresentation(
+        source=row.source,
+        severity=row.severity,
+        message=row.message,
+        detail=row.detail,
+        action=action.kind,
+    )
+
+
+def _warning_presentation_from_string(warning: str) -> WarningPresentation:
+    stripped = warning.strip()
+    severity: WarningPresentationSeverity = (
+        "skipped" if "skipped" in stripped.lower() else "warning"
+    )
+
+    source = "run"
+    message = stripped
+    detail: str | None = None
+
+    if ":" in stripped:
+        prefix, _remainder = stripped.split(":", 1)
+        normalized_prefix = prefix.strip()
+        if normalized_prefix:
+            source = _normalize_warning_source(normalized_prefix)
+    elif stripped.lower().startswith("slow.pics "):
+        source = "slow.pics"
+
+    if " because " in message:
+        _message, detail = message.split(" because ", 1)
+        detail = f"because {detail.strip()}"
+
+    return WarningPresentation(
+        source=source,
+        severity=severity,
+        message=message,
+        detail=detail,
+    )
+
+
+def _normalize_warning_source(source: str) -> str:
+    normalized = source.lower().replace("_", " ").replace("-", " ").strip()
+    if normalized.startswith("slow.pics"):
+        return "slow.pics"
+    if normalized in {"align", "alignment"}:
+        return "alignment"
+    return normalized
+
+
+def _group_warnings_by_source(warnings: list[WarningPresentation]) -> list[WarningPresentation]:
+    sources: list[str] = []
+    grouped: dict[str, list[WarningPresentation]] = {}
+    for warning in warnings:
+        if warning.source not in grouped:
+            sources.append(warning.source)
+            grouped[warning.source] = []
+        grouped[warning.source].append(warning)
+    return [warning for source in sources for warning in grouped[source]]
+
+
+def _format_warning_panel_text(warnings: list[WarningPresentation]) -> str:
+    lines: list[str] = []
+    current_source: str | None = None
+    for warning in warnings:
+        if warning.source != current_source:
+            if lines:
+                lines.append("")
+            lines.append(f"[{STYLE_SUBHEADER}]{escape(warning.source)}[/]")
+            current_source = warning.source
+        lines.append(
+            f"[{STYLE_WARN}]\u2022[/] {escape(warning.message)} "
+            f"[{STYLE_METRIC_KEY}]({warning.severity})[/]"
+        )
+        if warning.detail is not None:
+            lines.append(f"  [{STYLE_METRIC_KEY}]detail[/] {escape(warning.detail)}")
+        if warning.action is not None:
+            lines.append(f"  [{STYLE_METRIC_KEY}]action[/] {escape(warning.action)}")
+    return "\n".join(lines)
+
+
+def _format_hidden_warning_counts(hidden: list[WarningPresentation]) -> str:
+    counts_by_source: dict[str, int] = {}
+    for warning in hidden:
+        counts_by_source[warning.source] = counts_by_source.get(warning.source, 0) + 1
+
+    count_text = ", ".join(
+        f"{escape(source)}={count}" for source, count in sorted(counts_by_source.items())
+    )
+    return f"\n[{STYLE_WARN}]\u2022[/] ... ({len(hidden)} more) hidden by source: {count_text}"

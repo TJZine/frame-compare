@@ -43,7 +43,7 @@ def print_vspreview_session(
     table = _group_table()
     table.add_row("script", f"[{STYLE_PATH}]{escape(str(script_path))}[/]")
     table.add_row("command", f"[{STYLE_PATH}]{escape(' '.join(command))}[/]")
-    table.add_row("output", "pass-through from the VSPreview process")
+    table.add_row("output", "Frame Compare diagnostics inherited on stderr")
 
     console = _console(no_color=no_color)
     console.print()

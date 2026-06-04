@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
+from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema import SelectionMode
 from frame_compare.orchestration import phase_tasks
 from frame_compare.services.errors import AudioAlignmentError
@@ -24,7 +25,21 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
+    comparison = replace(
+        comparison,
+        probe=replace(
+            comparison.probe,
+            preserved_frame_props={"_Matrix": 1, "_Transfer": 16, "_Primaries": 9},
+        ),
+    )
     ctx = _context(tmp_path, comparisons=[comparison])
+    ctx.reference = replace(
+        ctx.reference,
+        probe=replace(
+            ctx.reference.probe,
+            preserved_frame_props={"_Matrix": 1, "_Transfer": 1, "_Primaries": 1},
+        ),
+    )
     selected_frames = [0, 2, 50, 99]
     captured: dict[str, Any] = {}
 
@@ -50,6 +65,10 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     assert captured["comparisons"] == [comparison.path]
     assert captured["cache_dir"] == ctx.workspace.generated_dir
     assert captured["reference_fps"] == ctx.reference.effective_fps
+    assert captured["frame_props_by_stem"] == {
+        "reference": {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1},
+        "encode": {"_Matrix": 1, "_Transfer": 16, "_Primaries": 9},
+    }
     assert captured["config"].sample_rate == 12000
     assert captured["config"].max_offset_seconds == 4.5
     assert captured["config"].use_vspreview is True
@@ -174,6 +193,54 @@ def test_run_align_phase_reselects_trimmed_overlap_when_fallback_plan_would_drop
         detail.label in {"Dark", "Bright"}
         for detail in output.selection_details_by_source_frame.values()
     )
+
+
+def test_run_align_phase_fallback_reselects_only_inside_global_selection_window(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comparison = _clip(
+        tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1", num_frames=220
+    )
+    ctx = _context(tmp_path, comparisons=[comparison])
+    ctx.selection_window = SelectionWindow(start_frame=80, end_frame_exclusive=140)
+    ctx.config.analysis = ctx.config.analysis.model_copy(
+        update={"selection_mode": SelectionMode.QUANTILE, "frame_count": 4}
+    )
+    ctx.analysis_metrics = FrameMetrics(
+        luminance=[float(frame) / 219.0 for frame in range(220)],
+        motion=[0.0 for _ in range(220)],
+        metadata=MetricsMetadata(
+            frame_count=220,
+            fps=Fraction(24, 1),
+            config_fingerprint="test",
+            clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
+        ),
+    )
+
+    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+        return [
+            AlignmentResult(
+                reference_clip="reference.mkv",
+                comparison_clip="encode.mkv",
+                frame_offset=60,
+                time_offset_seconds=2.5,
+                correlation_score=0.9,
+                algorithm="cross_correlation",
+                source="computed",
+            )
+        ]
+
+    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+
+    output = phase_tasks.run_align_phase(ctx, selected_frames=[0, 1, 2, 3])
+
+    assert output.selection_details_by_source_frame is not None
+    selected_source_frames = {
+        output.reference.trim.trim_start_frames + frame for frame in output.selected_frames
+    }
+    assert selected_source_frames == set(output.selection_details_by_source_frame)
+    assert selected_source_frames
+    assert all(80 <= frame < 140 for frame in selected_source_frames)
 
 
 def test_run_align_phase_raises_when_alignment_leaves_no_overlap(

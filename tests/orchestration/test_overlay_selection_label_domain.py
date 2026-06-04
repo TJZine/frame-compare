@@ -7,6 +7,7 @@ import pytest
 from PIL import Image
 
 from frame_compare.analysis.types import SelectionBreakdown, SelectionDetail
+from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import (
     ClipFingerprint,
@@ -82,6 +83,8 @@ def test_selection_labels_are_looked_up_in_reference_source_frame_domain_after_t
         workspace=workspace,
         reference=reference,
         comparisons=[],
+        analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=190),
         reporter=None,
         selection_breakdown=SelectionBreakdown(quantile_dark=[10]),
     )
@@ -101,7 +104,9 @@ def test_selection_details_are_looked_up_in_reference_source_frame_domain_after_
     captured: list[tuple[str | None, str | None]] = []
 
     def _record_apply(_path: Path, overlay) -> None:  # type: ignore[no-untyped-def]
-        detail_label = overlay.selection_detail.label if overlay.selection_detail is not None else None
+        detail_label = (
+            overlay.selection_detail.label if overlay.selection_detail is not None else None
+        )
         captured.append((overlay.selection_label, detail_label))
 
     monkeypatch.setattr("frame_compare.render.encoders.apply_overlay_to_file", _record_apply)
@@ -139,6 +144,8 @@ def test_selection_details_are_looked_up_in_reference_source_frame_domain_after_
         workspace=workspace,
         reference=reference,
         comparisons=[],
+        analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=190),
         reporter=None,
         selection_details_by_source_frame={
             10: SelectionDetail(

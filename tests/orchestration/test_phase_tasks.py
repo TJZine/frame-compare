@@ -19,6 +19,7 @@ from frame_compare.analysis.types import (
     SelectionBreakdown,
     SelectionDetail,
 )
+from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.errors import ConfigValidationError
 from frame_compare.config.schema import SelectionMode
 from frame_compare.orchestration import phase_tasks
@@ -108,11 +109,11 @@ def test_run_analyze_phase_records_cache_hit_and_selection_breakdown(
 
 
 @pytest.mark.unit
-def test_run_analyze_phase_uses_prepared_reference_cache_domain(
+def test_run_analyze_phase_uses_prepared_analysis_selection_domain(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ctx = _context(tmp_path)
-    ctx.reference_cache_domain = "trim_start=0|trim_end=0|effective_fps=24/1"
+    ctx.analysis_selection_domain = "trim_start=0|trim_end=0|effective_fps=24/1"
     input_videos = [ctx.reference.path]
     metrics = FrameMetrics(
         luminance=[0.1, 0.9],
@@ -124,22 +125,22 @@ def test_run_analyze_phase_uses_prepared_reference_cache_domain(
             clips=[],
         ),
     )
-    observed_reference_domains: list[str | None] = []
+    observed_selection_domains: list[str | None] = []
 
     def _fake_compute_cache_key(
         _video_paths: list[Path],
         _config: object,
         *,
-        reference_domain: str | None = None,
+        selection_domain: str | None = None,
     ) -> str:
-        observed_reference_domains.append(reference_domain)
+        observed_selection_domains.append(selection_domain)
         return "fingerprint"
 
     def _fake_load_cached_metrics(*_args: object, **_kwargs: object) -> CacheLoadResult:
         return CacheLoadResult(success=True, metrics=metrics)
 
     def _fake_calculate_metrics(**kwargs: object) -> FrameMetrics:
-        observed_reference_domains.append(kwargs["reference_domain"])
+        observed_selection_domains.append(kwargs["selection_domain"])
         return metrics
 
     def _fake_select_frames(**_kwargs: object) -> FrameSelection:
@@ -161,7 +162,7 @@ def test_run_analyze_phase_uses_prepared_reference_cache_domain(
         workspace=ctx.workspace,
     )
 
-    assert observed_reference_domains == [
+    assert observed_selection_domains == [
         "trim_start=0|trim_end=0|effective_fps=24/1",
         "trim_start=0|trim_end=0|effective_fps=24/1",
     ]
@@ -197,6 +198,7 @@ def test_run_analyze_phase_selects_from_reference_base_trim_domain(
 ) -> None:
     ctx = _context(tmp_path)
     ctx.reference = ctx.reference.with_trim(trim_start_frames=10, trim_end_frame_inclusive=14)
+    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=5)
     input_videos = [ctx.reference.path]
     metrics = FrameMetrics(
         luminance=[float(frame) for frame in range(20)],
@@ -259,9 +261,64 @@ def test_run_analyze_phase_selects_from_reference_base_trim_domain(
     assert calls["select"]["config"].frame_count == 3
 
 
-def test_select_initial_frame_plan_uses_effective_reference_domain(tmp_path: Path) -> None:
+@pytest.mark.unit
+def test_run_analyze_phase_selects_from_global_selection_window(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.selection_window = SelectionWindow(start_frame=24, end_frame_exclusive=72)
+    input_videos = [ctx.reference.path]
+    metrics = FrameMetrics(
+        luminance=[float(frame) for frame in range(100)],
+        motion=[float(frame) / 10.0 for frame in range(100)],
+        metadata=MetricsMetadata(
+            frame_count=100,
+            fps=Fraction(24, 1),
+            config_fingerprint="fingerprint",
+            clips=[],
+        ),
+    )
+
+    def _fake_load_cached_metrics(*_args: object, **_kwargs: object) -> CacheLoadResult:
+        return CacheLoadResult(success=True, metrics=metrics)
+
+    def _fake_select_frames(**kwargs: object) -> FrameSelection:
+        received_metrics = kwargs["metrics"]
+        assert received_metrics.luminance[0] == 24.0
+        assert len(received_metrics.luminance) == 48
+        return FrameSelection(
+            frames=[0, 47],
+            mode=SelectionMode.MIXED,
+            seed=ctx.config.analysis.random_seed,
+            breakdown=SelectionBreakdown(quantile_dark=[0], quantile_bright=[47]),
+            selection_details={
+                0: SelectionDetail(frame_index=0, label="Dark", source="analysis"),
+                47: SelectionDetail(frame_index=47, label="Bright", source="analysis"),
+            },
+        )
+
+    monkeypatch.setattr(phase_tasks.cache_io, "load_cached_metrics", _fake_load_cached_metrics)
+    monkeypatch.setattr(phase_tasks, "select_frames", _fake_select_frames)
+
+    output = phase_tasks.run_analyze_phase(
+        ctx,
+        input_videos=input_videos,
+        workspace=ctx.workspace,
+        require_cache_only=True,
+    )
+
+    assert output.selected_frames == [24, 71]
+    assert output.selection_breakdown == SelectionBreakdown(
+        quantile_dark=[24],
+        quantile_bright=[71],
+    )
+    assert set(output.selection_details_by_source_frame) == {24, 71}
+
+
+def test_select_initial_frame_plan_uses_effective_selection_domain(tmp_path: Path) -> None:
     ctx = _context(tmp_path)
     ctx.reference = ctx.reference.with_trim(trim_start_frames=10, trim_end_frame_inclusive=19)
+    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=10)
     selected_frames: list[int] = []
 
     output = phase_tasks.select_initial_frame_plan(ctx)
@@ -269,6 +326,16 @@ def test_select_initial_frame_plan_uses_effective_reference_domain(tmp_path: Pat
     assert selected_frames == []
     assert len(output.selected_frames) == 3
     assert all(0 <= frame < 10 for frame in output.selected_frames)
+
+
+def test_select_initial_frame_plan_uses_global_selection_window(tmp_path: Path) -> None:
+    ctx = _context(tmp_path)
+    ctx.selection_window = SelectionWindow(start_frame=24, end_frame_exclusive=48)
+
+    output = phase_tasks.select_initial_frame_plan(ctx)
+
+    assert len(output.selected_frames) == 3
+    assert all(24 <= frame < 48 for frame in output.selected_frames)
 
 
 def test_run_artifacts_uses_render_artifacts_carrier() -> None:
