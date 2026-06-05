@@ -101,13 +101,16 @@ Primary owned paths:
 - `config/config.toml` and `config/presets/*.toml`: config owners
 - `<resolved paths.generated_dir>/cache/analysis/<label>__<fingerprint>.compframes`:
   shared analysis metrics cache (defaults to `generated/cache/analysis/` under the
-  workspace root, but follows the configured `paths.generated_dir`). The
-  fingerprint includes the selected reference identity and an all-source
-  selection-domain token covering selected analysis source path, source identity,
-  source trims, effective FPS values, configured analysis ignore windows, and the
-  final shared selectable window. Metric-array cache identity excludes frame-selection counts,
-  `user_frames`, random seed, and dark/bright quantile thresholds because those
-  affect frame choice rather than metric computation.
+  workspace root, but follows the configured `paths.generated_dir`). The full
+  fingerprint includes the selected reference identity plus an all-source
+  selection-domain token. The token stores `analysis_source_path`,
+  `reference_path`, source identities, source trims, effective FPS values,
+  configured analysis ignore windows, and the final shared selectable window.
+  Cache schema v4 stores `analysis_source_path` in `MetricsMetadata`, and the
+  metric arrays are for that selected analysis clip. Metric-array cache identity
+  excludes frame-selection counts, `user_frames`, random seed, and dark/bright
+  quantile thresholds because those affect frame choice rather than metric
+  computation.
 - `generated/clip_probe.toml` or `<resolved paths.generated_dir>/clip_probe.toml`:
   shared clip probe cache used by `--from-cache-only` prevalidation before
   run-folder reservation

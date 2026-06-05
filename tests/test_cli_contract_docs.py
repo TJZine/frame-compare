@@ -710,6 +710,10 @@ def test_current_cli_contract_documents_analysis_ignore_window_and_cache_domain(
     normalized_cache_section = " ".join(cache_section.split())
     for expected in (
         "stable all-source selection-domain token",
+        "`analysis_source_path`",
+        "`reference_path`",
+        "Cache schema v4 stores `analysis_source_path`",
+        'When `sources.analysis_source = "reference"`',
         "source trims",
         "effective FPS values",
         "configured analysis ignore-window settings",

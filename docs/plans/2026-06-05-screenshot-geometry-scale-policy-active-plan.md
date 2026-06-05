@@ -477,3 +477,12 @@ Verification gaps:
   `VapourSynth python module not found`; the lower-level render batch FFmpeg proof
   above covers geometry, FFmpeg extraction, crop/scale/pad filters, and PNG
   dimensions without the full CLI preflight path.
+
+Remediation path:
+
+- Because this work touched `src/frame_compare/render/**`, Docker/runtime
+  verification remains required by the runbook. Local Docker could not complete
+  in the implementation session, so merge/release must rely on a fresh successful
+  `.github/workflows/docker-integration.yml` run, or the maintainer/release
+  operator must schedule `bash tools/verify_docker_integration.sh` on a working
+  Docker host before release tagging.

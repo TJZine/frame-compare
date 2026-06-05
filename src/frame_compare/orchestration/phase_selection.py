@@ -262,8 +262,10 @@ def _select_frames_for_selection_domain(
         if selection_window.frame_count > 0
         else (0, reference.effective_num_frames())
     )
+    source_offset = _source_offset_for_reference_window(reference, window_start)
     if (
-        analysis_clip.trim.trim_start_frames == 0
+        source_offset == 0
+        and analysis_clip.trim.trim_start_frames == 0
         and analysis_clip.trim.trim_end_frame_inclusive is None
         and frame_count == reference.effective_num_frames()
         and frame_count == analysis_clip.effective_num_frames()
@@ -296,7 +298,6 @@ def _select_frames_for_selection_domain(
             frame_count=frame_count,
         ),
     )
-    source_offset = _source_offset_for_reference_window(reference, window_start)
     return FrameSelection(
         frames=[frame + window_start for frame in selection.frames],
         seed=selection.seed,

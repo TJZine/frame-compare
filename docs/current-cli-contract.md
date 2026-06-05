@@ -217,14 +217,17 @@ unchanged.
   using labeled full-fingerprint filenames:
   `<safe-human-label>__<full-fingerprint>.compframes`.
 - The analysis cache fingerprint includes the selected reference identity and a
-  stable all-source selection-domain token. That token covers the selected
-  analysis source path, source identity, source trims, effective FPS values, the
-  configured analysis ignore-window settings, and the final shared selectable
-  window. Cache entries for different selected references, selected analysis
-  sources, or different selection domains from the same input set do not satisfy
-  each other. Metric-array cache identity excludes `user_frames`, random seed,
-  frame-selection counts, `dark_quantile`, and `bright_quantile` because those
-  values affect frame choice rather than metric computation.
+  stable all-source selection-domain token. That token stores
+  `analysis_source_path`, `reference_path`, source identities, source trims,
+  effective FPS values, the configured analysis ignore-window settings, and the
+  final shared selectable window. Cache schema v4 stores `analysis_source_path`
+  in `MetricsMetadata`, and different selected references, selected analysis
+  sources, or selection domains from the same input set do not satisfy each
+  other. When `sources.analysis_source = "reference"`, `analysis_source_path`
+  is the selected reference path. Metric-array cache identity excludes
+  `user_frames`, random seed, frame-selection counts, `dark_quantile`, and
+  `bright_quantile` because those values affect frame choice rather than metric
+  computation.
 - The full fingerprint remains inside the cache payload and is validated on load.
   Legacy run-folder `cache.compframes` files are not used as analysis cache hits.
 - Analysis is skipped automatically when `dark_frame_count`, `bright_frame_count`,

@@ -224,6 +224,7 @@ def _run_vspreview_command(command: list[str], *, env: dict[str, str]) -> int:
         stdout=None,
         stderr=subprocess.PIPE,
         text=True,
+        errors="replace",
         env=env,
         bufsize=1,
     ) as process:

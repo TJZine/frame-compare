@@ -182,6 +182,7 @@ def test_launch_alignment_verification_session_waits_for_vspreview_completion(
     assert kwargs["stdout"] is None
     assert kwargs["stderr"] is subprocess.PIPE
     assert kwargs["text"] is True
+    assert kwargs["errors"] == "replace"
 
 
 def test_launch_alignment_verification_session_writes_launch_telemetry_to_stderr(

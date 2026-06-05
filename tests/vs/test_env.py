@@ -19,10 +19,16 @@ from frame_compare.vs.env import (
 )
 from frame_compare.vs.errors import PluginNotFoundError, VapourSynthError, VapourSynthNotFoundError
 
-_KNOWN_API3_WARNING_BYTES = (
-    b"Plugin C:\\Software\\video\\frame-compare\\.venv\\Lib\\site-packages\\vapoursynth"
-    b"\\plugins\\libvslsmashsource.dll is using API3 which is deprecated "
-    b"and will be removed shortly.\n"
+_KNOWN_API3_WARNING_VARIANTS = (
+    (
+        b"Plugin C:\\Software\\video\\frame-compare\\.venv\\Lib\\site-packages\\vapoursynth"
+        b"\\plugins\\libvslsmashsource.dll is using API3 which is deprecated "
+        b"and will be removed shortly.\n"
+    ),
+    (
+        b"Plugin /opt/vapoursynth/plugins/libvslsmashsource.dll is using API3 "
+        b"which is deprecated and will be removed shortly.\n"
+    ),
 )
 
 
@@ -74,15 +80,17 @@ def test_ensure_vs_environment_core_failure_raises_vs_error(mocker) -> None:
     assert exc.value.code == "FC-2002"
 
 
+@pytest.mark.parametrize("warning_bytes", _KNOWN_API3_WARNING_VARIANTS)
 def test_ensure_vs_environment_filters_known_lsmash_api3_warning(
     mocker,
     capfd,
+    warning_bytes: bytes,
 ) -> None:
     mock_module = SimpleNamespace(core=SimpleNamespace())
 
     def _fake_import_module(name: str) -> object:
         assert name == "vapoursynth"
-        env_module.os.write(2, _KNOWN_API3_WARNING_BYTES)
+        env_module.os.write(2, warning_bytes)
         env_module.os.write(2, b"real vapoursynth warning\n")
         return mock_module
 
@@ -486,10 +494,12 @@ def test_try_load_lsmas_plugin_continues_after_load_failure(
     assert load_calls == [str(first), str(second)]
 
 
+@pytest.mark.parametrize("warning_bytes", _KNOWN_API3_WARNING_VARIANTS)
 def test_try_load_lsmas_plugin_filters_known_lsmash_api3_warning(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
     capfd,
+    warning_bytes: bytes,
 ) -> None:
     plugin_path = tmp_path / "present" / "libvslsmashsource.dll"
     plugin_path.parent.mkdir()
@@ -497,7 +507,7 @@ def test_try_load_lsmas_plugin_filters_known_lsmash_api3_warning(
 
     def _load_plugin(*, path: str) -> None:
         assert path == str(plugin_path)
-        env_module.os.write(2, _KNOWN_API3_WARNING_BYTES)
+        env_module.os.write(2, warning_bytes)
         env_module.os.write(2, b"real plugin warning\n")
 
     core = SimpleNamespace(std=SimpleNamespace(LoadPlugin=_load_plugin))
