@@ -24,6 +24,23 @@ class ScreenshotGeometryMode(StrEnum):
     ALIGNED = "aligned"
 
 
+class ScreenshotActiveRectDetection(StrEnum):
+    """Active-image rectangle detection policy for aligned screenshots."""
+
+    PROVIDED = "provided"
+    DIMENSION = "dimension"
+    ASPECT_RATIO = "aspect_ratio"
+
+
+class ScreenshotAlignedScalePolicy(StrEnum):
+    """Canvas target policy for aligned screenshots."""
+
+    LARGEST_ACTIVE = "largest_active"
+    SMALLEST_ACTIVE = "smallest_active"
+    REFERENCE_ACTIVE = "reference_active"
+    EXPLICIT_SIZE = "explicit_size"
+
+
 class SourceMatchFpsMode(StrEnum):
     """Source FPS matching policy for mixed-FPS inputs."""
 
@@ -96,6 +113,8 @@ __all__ = [
     "LogFormat",
     "LogLevel",
     "OverlayMode",
+    "ScreenshotActiveRectDetection",
+    "ScreenshotAlignedScalePolicy",
     "ScreenshotGeometryMode",
     "SourceMatchFpsMode",
     "ToneCurve",

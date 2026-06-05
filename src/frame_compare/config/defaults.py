@@ -64,6 +64,10 @@ include_frame_number = true
 png_compression = 6
 ffmpeg_timeout_seconds = 30.0
 geometry_mode = "native"
+active_rect_detection = "aspect_ratio"
+aligned_scale_policy = "largest_active"
+# aligned_target_width = 3840
+# aligned_target_height = 2160
 vs_writer = "auto"
 
 [color]

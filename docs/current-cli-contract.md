@@ -550,8 +550,34 @@ dedicated `run` flags for them:
 
 - `geometry_mode = "native" | "aligned"` selects screenshot geometry behavior.
   `native` is the default and preserves current full-frame screenshot behavior.
-  `aligned` is accepted as the opt-in mode for deterministic mixed-geometry
-  screenshot alignment work.
+  `aligned` is the opt-in mode for deterministic mixed-geometry screenshot
+  alignment. Native mode ignores aligned-only geometry fields for behavior, but
+  the config schema still validates their enum values and target field types.
+- `active_rect_detection = "provided" | "dimension" | "aspect_ratio"` selects
+  the active-image rectangle evidence used by aligned screenshots. `provided`
+  uses only explicit per-source `active_rect` overrides and trusted metadata
+  active rectangles. `dimension` also allows same-height or same-width centered
+  crop inference. `aspect_ratio` is the aligned default and additionally allows
+  conservative centered vertical letterbox inference when a target content
+  aspect ratio has at least two matching sources or one explicit/trusted
+  metadata source.
+- `aligned_scale_policy = "largest_active" | "smallest_active" |
+  "reference_active" | "explicit_size"` selects the aligned output canvas policy.
+  `largest_active` is the aligned default and uses the active-source envelope
+  `{max(active_width), max(active_height)}`. `smallest_active` uses
+  `{min(active_width), min(active_height)}`. `reference_active` uses the selected
+  reference source active dimensions. `explicit_size` uses
+  `aligned_target_width x aligned_target_height`.
+- `aligned_target_width` and `aligned_target_height` are optional positive even
+  integers used only by `aligned_scale_policy = "explicit_size"` in aligned
+  mode. In aligned mode, both are required for `explicit_size` and both must be
+  omitted for all other scale policies. In native mode they are inert for
+  behavior, but any provided target value must still be positive and even.
+- Aligned scaling preserves aspect ratio, fits active content inside the selected
+  target width and height without exceeding either dimension, and centers black
+  padding on the final canvas. Derived policy targets are normalized downward to
+  mod-safe dimensions; explicit-size targets preserve the exact configured
+  canvas after validation.
 - `vs_writer = "auto" | "pillow" | "fpng"` selects the VapourSynth screenshot writer
   policy. `auto` is the default and preserves current behavior until a writer-specific
   runtime path is eligible. `pillow` means the existing Pillow PNG writer policy, and

@@ -294,11 +294,14 @@ persisted. It does not own slow.pics upload policy, prompting, or browser side
 effects.
 
 Screenshot rendering owns its geometry and writer policy inside `frame_compare.render`:
-`frame_compare.render.geometry` plans optional aligned crop/scale/pad geometry, render
-batch expansion attaches those plans to render requests, the FFmpeg backend applies
-geometry filters after exact frame selection, and the VapourSynth path chooses between
-the Pillow writer and eligible `core.fpng.Write` output without changing CLI import-time
-behavior.
+`frame_compare.render.geometry` plans optional aligned crop/scale/pad geometry,
+including active-rect fallback detection and fit-to-target scale/canvas policy.
+Render batch expansion converts explicit source overrides and trusted diagnostic
+metadata into provided active rectangles before geometry planning, attaches the
+resulting plans to render requests, and keeps metadata rejection warnings at the
+batch owner. The FFmpeg backend applies geometry filters after exact frame selection,
+and the VapourSynth path chooses between the Pillow writer and eligible
+`core.fpng.Write` output without changing CLI import-time behavior.
 
 Runtime ownership matrix:
 

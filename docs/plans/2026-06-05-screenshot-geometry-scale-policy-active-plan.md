@@ -1,6 +1,6 @@
-Status: Active
+Status: Historical
 Scope: Add explicit aligned screenshot scale policy and conservative aspect-ratio active-rect detection so mixed FHD/UHD scope sources align without unintended oversized canvases.
-Owner: Codex planning session on 2026-06-05; implementation owner TBD.
+Owner: Codex implementation session on 2026-06-05.
 
 # Screenshot Geometry Scale Policy And Active-Rect Detection Plan
 
@@ -443,3 +443,37 @@ Rollback should remove only:
 - focused tests and docs updates from this workstream.
 
 Do not roll back unrelated report, slow.pics, alignment, VSPreview, or cache changes.
+
+## Implementation Closeout - 2026-06-05
+
+Implemented in the 2026-06-05 Codex session.
+
+Verification completed:
+
+- `.venv/bin/pytest -q tests/config/test_schema.py tests/test_cli_contract_docs.py`
+- `.venv/bin/pytest -q tests/render/test_geometry.py tests/render/test_expansion.py tests/render/test_ffmpeg_frame.py tests/render/test_encoders.py`
+- `.venv/bin/pyright --warnings`
+- `.venv/bin/ruff check .`
+- `.venv/bin/bandit -c pyproject.toml -r src --severity-level medium`
+- `.venv/bin/pytest -q`
+- `UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini`
+
+Manual runtime proof completed through the render batch FFmpeg path with synthetic
+media containing two `1920x800` sources and one `3840x2160` source:
+
+- aligned + `aspect_ratio` + `largest_active`: all PNGs were `3840x1600`
+- aligned + `aspect_ratio` + `smallest_active`: all PNGs were `1920x800`
+- aligned + `aspect_ratio` + `explicit_size` `3840x2160`: all PNGs were exact
+  `3840x2160` canvases
+
+Verification gaps:
+
+- `bash tools/verify_docker_integration.sh` was attempted twice, but Docker failed
+  during base-image metadata resolution with `DeadlineExceeded: context deadline
+  exceeded` for `python:3.13.13-slim-trixie`; the Docker runtime gate did not reach
+  project verification.
+- The full CLI synthetic-media proof was attempted with FFmpeg screenshot rendering
+  configured, but this local environment failed before render with
+  `VapourSynth python module not found`; the lower-level render batch FFmpeg proof
+  above covers geometry, FFmpeg extraction, crop/scale/pad filters, and PNG
+  dimensions without the full CLI preflight path.

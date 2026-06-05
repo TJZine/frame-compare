@@ -20,6 +20,8 @@ from frame_compare.config.schema_enums import (
     LogFormat,
     LogLevel,
     OverlayMode,
+    ScreenshotActiveRectDetection,
+    ScreenshotAlignedScalePolicy,
     ScreenshotGeometryMode,
     SourceMatchFpsMode,
     Visibility,
@@ -58,6 +60,10 @@ def test_default_config_values() -> None:
     assert config.sources.match_fps == SourceMatchFpsMode.DISABLED
     assert config.sources.overrides == {}
     assert config.screenshots.geometry_mode == ScreenshotGeometryMode.NATIVE
+    assert config.screenshots.active_rect_detection == ScreenshotActiveRectDetection.ASPECT_RATIO
+    assert config.screenshots.aligned_scale_policy == ScreenshotAlignedScalePolicy.LARGEST_ACTIVE
+    assert config.screenshots.aligned_target_width is None
+    assert config.screenshots.aligned_target_height is None
     assert config.screenshots.vs_writer == VsScreenshotWriter.AUTO
     assert config.tmdb.year_tolerance == 2
     assert config.tmdb.category_preference is None
@@ -209,6 +215,10 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert screenshots.png_compression == 6
     assert screenshots.ffmpeg_timeout_seconds == 30.0
     assert screenshots.geometry_mode == ScreenshotGeometryMode.NATIVE
+    assert screenshots.active_rect_detection == ScreenshotActiveRectDetection.ASPECT_RATIO
+    assert screenshots.aligned_scale_policy == ScreenshotAlignedScalePolicy.LARGEST_ACTIVE
+    assert screenshots.aligned_target_width is None
+    assert screenshots.aligned_target_height is None
     assert screenshots.vs_writer == VsScreenshotWriter.AUTO
     assert color.target_nits == 100
     assert color.contrast_recovery == 0.3
@@ -404,6 +414,18 @@ def test_default_config_toml_documents_sources_defaults() -> None:
     assert '# effective_fps = "24000/1001"' in DEFAULT_CONFIG_TOML
 
 
+def test_default_config_toml_documents_screenshot_geometry_defaults() -> None:
+    data = tomllib.loads(DEFAULT_CONFIG_TOML)
+
+    assert data["screenshots"]["geometry_mode"] == "native"
+    assert data["screenshots"]["active_rect_detection"] == "aspect_ratio"
+    assert data["screenshots"]["aligned_scale_policy"] == "largest_active"
+    assert "aligned_target_width" not in data["screenshots"]
+    assert "aligned_target_height" not in data["screenshots"]
+    assert "# aligned_target_width = 3840" in DEFAULT_CONFIG_TOML
+    assert "# aligned_target_height = 2160" in DEFAULT_CONFIG_TOML
+
+
 def test_default_config_toml_documents_analysis_ignore_window_defaults() -> None:
     data = tomllib.loads(DEFAULT_CONFIG_TOML)
 
@@ -448,6 +470,8 @@ def test_schema_model_enums_accept_config_strings_and_reject_unknown_values() ->
     screenshots = ScreenshotsConfig.model_validate(
         {
             "geometry_mode": "aligned",
+            "active_rect_detection": "dimension",
+            "aligned_scale_policy": "smallest_active",
             "overlay_mode": "minimal",
             "vs_writer": "fpng",
         }
@@ -456,6 +480,8 @@ def test_schema_model_enums_accept_config_strings_and_reject_unknown_values() ->
     logging = LoggingConfig.model_validate({"level": "DEBUG", "format": "json"})
 
     assert screenshots.geometry_mode == ScreenshotGeometryMode.ALIGNED
+    assert screenshots.active_rect_detection == ScreenshotActiveRectDetection.DIMENSION
+    assert screenshots.aligned_scale_policy == ScreenshotAlignedScalePolicy.SMALLEST_ACTIVE
     assert screenshots.overlay_mode == OverlayMode.MINIMAL
     assert screenshots.vs_writer == VsScreenshotWriter.FPNG
     assert slowpics.visibility == Visibility.PUBLIC
@@ -469,10 +495,87 @@ def test_schema_model_enums_accept_config_strings_and_reject_unknown_values() ->
         ScreenshotsConfig.model_validate({"geometry_mode": "legacy"})
 
     with pytest.raises(ValidationError):
+        ScreenshotsConfig.model_validate({"active_rect_detection": "pixels"})
+
+    with pytest.raises(ValidationError):
+        ScreenshotsConfig.model_validate({"aligned_scale_policy": "largest_area"})
+
+    with pytest.raises(ValidationError):
         ScreenshotsConfig.model_validate({"vs_writer": "vapoursynth"})
 
     with pytest.raises(ValidationError):
         LoggingConfig.model_validate({"level": "debug"})
+
+
+def test_screenshots_explicit_size_requires_even_target_pair_in_aligned_mode() -> None:
+    config = ScreenshotsConfig.model_validate(
+        {
+            "geometry_mode": "aligned",
+            "aligned_scale_policy": "explicit_size",
+            "aligned_target_width": 3840,
+            "aligned_target_height": 2160,
+        }
+    )
+
+    assert config.aligned_scale_policy == ScreenshotAlignedScalePolicy.EXPLICIT_SIZE
+    assert config.aligned_target_width == 3840
+    assert config.aligned_target_height == 2160
+
+    for payload in (
+        {
+            "geometry_mode": "aligned",
+            "aligned_scale_policy": "explicit_size",
+            "aligned_target_width": 3840,
+        },
+        {
+            "geometry_mode": "aligned",
+            "aligned_scale_policy": "explicit_size",
+            "aligned_target_height": 2160,
+        },
+        {
+            "geometry_mode": "aligned",
+            "aligned_scale_policy": "largest_active",
+            "aligned_target_width": 3840,
+            "aligned_target_height": 2160,
+        },
+        {
+            "geometry_mode": "aligned",
+            "aligned_scale_policy": "explicit_size",
+            "aligned_target_width": 3839,
+            "aligned_target_height": 2160,
+        },
+        {
+            "geometry_mode": "aligned",
+            "aligned_scale_policy": "explicit_size",
+            "aligned_target_width": 0,
+            "aligned_target_height": 2160,
+        },
+    ):
+        with pytest.raises(ValidationError):
+            ScreenshotsConfig.model_validate(payload)
+
+
+def test_screenshots_native_mode_accepts_inert_aligned_policy_but_validates_targets() -> None:
+    config = ScreenshotsConfig.model_validate(
+        {
+            "geometry_mode": "native",
+            "aligned_scale_policy": "explicit_size",
+            "aligned_target_width": 3840,
+        }
+    )
+
+    assert config.geometry_mode == ScreenshotGeometryMode.NATIVE
+    assert config.aligned_scale_policy == ScreenshotAlignedScalePolicy.EXPLICIT_SIZE
+    assert config.aligned_target_width == 3840
+    assert config.aligned_target_height is None
+
+    with pytest.raises(ValidationError):
+        ScreenshotsConfig.model_validate(
+            {
+                "geometry_mode": "native",
+                "aligned_target_width": 3839,
+            }
+        )
 
 
 def test_slowpics_confirm_upload_after_report_accepts_explicit_bool() -> None:

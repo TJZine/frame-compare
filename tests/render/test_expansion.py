@@ -730,6 +730,137 @@ def test_expand_batch_render_requests_attaches_aligned_geometry_after_loading_di
 
 @pytest.mark.unit
 @patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
+def test_expand_batch_render_requests_maps_aligned_config_to_geometry_options(
+    mock_prepare: MagicMock,
+) -> None:
+    config = ConfigSchema(
+        screenshots={
+            "geometry_mode": "aligned",
+            "active_rect_detection": "aspect_ratio",
+            "aligned_scale_policy": "smallest_active",
+        }
+    )
+    ffmpeg_runner = MagicMock()
+    source_infos = []
+    for width, height in ((1920, 800), (1920, 800), (3840, 2160)):
+        source_info = MagicMock()
+        source_info.width = width
+        source_info.height = height
+        source_info.num_frames = 100
+        source_info.is_hdr = False
+        source_infos.append(source_info)
+    mock_prepare.side_effect = [
+        (MagicMock(name="fhd_a"), None, None, source_infos[0]),
+        (MagicMock(name="fhd_b"), None, None, source_infos[1]),
+        (MagicMock(name="uhd"), None, None, source_infos[2]),
+    ]
+    batch_requests = [
+        ScreenshotBatchRequest(
+            clip_path=Path(f"{label}.mkv"),
+            label=label,
+            source_frames=[10],
+            display_frames=[10],
+            selection_labels=[None],
+            probe_width=width,
+            probe_height=height,
+            probe_num_frames=100,
+            probe_is_hdr=False,
+        )
+        for label, width, height in (
+            ("FHD A", 1920, 800),
+            ("FHD B", 1920, 800),
+            ("UHD", 3840, 2160),
+        )
+    ]
+
+    requests, _ = expand_batch_render_requests(
+        batch_requests,
+        output_dir=Path("out"),
+        config=config,
+        overlay_mode=OverlayMode.STANDARD,
+        renderer="ffmpeg",
+        ffmpeg_runner=ffmpeg_runner,
+    )
+
+    plans = [request.geometry_plan for request in requests]
+    assert all(plan is not None for plan in plans)
+    assert [plan.final_canvas_size for plan in plans if plan is not None] == [(1920, 800)] * 3
+    assert plans[2] is not None
+    assert plans[2].active_rect_source == "aspect-ratio-derived"
+    assert plans[2].active_rect == GeometryRect(0, 280, 3840, 1600)
+    assert requests[2].overlay is not None
+    assert requests[2].overlay.resolution == (1920, 800)
+    assert requests[2].overlay.resolution_summary == "3840 × 2160 → 1920 × 800  (original → target)"
+
+
+@pytest.mark.unit
+@patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
+def test_expand_batch_render_requests_marks_same_canvas_aligned_transform_as_target(
+    mock_prepare: MagicMock,
+) -> None:
+    config = ConfigSchema(
+        screenshots={
+            "geometry_mode": "aligned",
+            "active_rect_detection": "aspect_ratio",
+            "aligned_scale_policy": "explicit_size",
+            "aligned_target_width": 3840,
+            "aligned_target_height": 2160,
+        }
+    )
+    ffmpeg_runner = MagicMock()
+    source_infos = []
+    for width, height in ((1920, 800), (1920, 800), (3840, 2160)):
+        source_info = MagicMock()
+        source_info.width = width
+        source_info.height = height
+        source_info.num_frames = 100
+        source_info.is_hdr = False
+        source_infos.append(source_info)
+    mock_prepare.side_effect = [
+        (MagicMock(name="fhd_a"), None, None, source_infos[0]),
+        (MagicMock(name="fhd_b"), None, None, source_infos[1]),
+        (MagicMock(name="uhd"), None, None, source_infos[2]),
+    ]
+    batch_requests = [
+        ScreenshotBatchRequest(
+            clip_path=Path(f"{label}.mkv"),
+            label=label,
+            source_frames=[10],
+            display_frames=[10],
+            selection_labels=[None],
+            probe_width=width,
+            probe_height=height,
+            probe_num_frames=100,
+            probe_is_hdr=False,
+        )
+        for label, width, height in (
+            ("FHD A", 1920, 800),
+            ("FHD B", 1920, 800),
+            ("UHD", 3840, 2160),
+        )
+    ]
+
+    requests, _ = expand_batch_render_requests(
+        batch_requests,
+        output_dir=Path("out"),
+        config=config,
+        overlay_mode=OverlayMode.STANDARD,
+        renderer="ffmpeg",
+        ffmpeg_runner=ffmpeg_runner,
+    )
+
+    uhd_plan = requests[2].geometry_plan
+    assert uhd_plan is not None
+    assert uhd_plan.final_canvas_size == (3840, 2160)
+    assert uhd_plan.crop == GeometryMargins(top=280, bottom=280)
+    assert requests[2].overlay is not None
+    assert (
+        requests[2].overlay.resolution_summary == "3840 × 2160 → 3840 × 2160  (original → target)"
+    )
+
+
+@pytest.mark.unit
+@patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
 def test_expand_batch_render_requests_aligns_mixed_dimensions_with_explicit_active_rects(
     mock_prepare: MagicMock,
 ) -> None:

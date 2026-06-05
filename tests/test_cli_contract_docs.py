@@ -745,6 +745,33 @@ def test_current_cli_contract_names_primary_executable_contract_checks() -> None
         assert expected in authority_section
 
 
+def test_current_cli_contract_documents_screenshot_geometry_config_surface() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
+    screenshot_heading = "## Config-Only Screenshot Surface"
+    audio_heading = "## Config-Only Audio Alignment Surface"
+    assert screenshot_heading in cli_contract, f"Missing heading: {screenshot_heading}"
+
+    screenshot_section = cli_contract.split(screenshot_heading, maxsplit=1)[1].split(
+        audio_heading,
+        maxsplit=1,
+    )[0]
+    normalized_screenshot_section = " ".join(screenshot_section.split())
+
+    for expected in (
+        '`geometry_mode = "native" | "aligned"`',
+        '`active_rect_detection = "provided" | "dimension" | "aspect_ratio"`',
+        '`aligned_scale_policy = "largest_active" | "smallest_active" |',
+        "`aligned_target_width` and `aligned_target_height`",
+        "Native mode ignores aligned-only geometry fields for behavior",
+        "fits active content inside the selected target width and height",
+        "without exceeding either dimension",
+        "Derived policy targets are normalized downward",
+        "explicit-size targets preserve the exact configured canvas",
+    ):
+        assert expected in normalized_screenshot_section
+
+
 def test_current_architecture_documents_shared_probe_cache_for_cache_only() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     architecture = (repo_root / "docs" / "current-architecture.md").read_text(encoding="utf-8")
