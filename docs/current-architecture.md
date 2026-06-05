@@ -157,6 +157,7 @@ Current Docker capability contract:
 | macOS Docker Desktop | Supported for backend rendering, reports, and software tonemap through the default headless software-Vulkan path; not a native GPU or first-class VSPreview GUI surface |
 | Linux Docker, CPU/software Vulkan | Canonical Docker default; deterministic, headless, CI-safe software Vulkan path |
 | Linux Docker with NVIDIA GPU | Optional `gpu-nvidia` compose override/profile plus `tools/verify_docker_gpu.sh`; documented-only/unverified until separately proved on a compatible Linux NVIDIA host |
+| Linux Docker with X11 GUI | Optional `gui-linux` compose override/profile plus `tools/verify_docker_gui.sh`; documented-only/unverified until separately proved on a compatible Linux X11 desktop host |
 | Native Windows portable | First-class native runtime with backend rendering, reports, and VSPreview GUI support outside Docker |
 
 Keep these integrations at their current owners:
@@ -190,8 +191,23 @@ Current Docker owner seams for optional profiles remain explicit:
 
 - `docker-compose.yml`: default headless software-Vulkan services
 - `docker-compose.gpu-nvidia.yml`: opt-in NVIDIA GPU override/profile only
+- `docker-compose.gui-linux.yml`: opt-in Linux X11/VSPreview override/profile only
 - `tools/verify_docker_integration.sh`: canonical default Docker gate
 - `tools/verify_docker_gpu.sh`: optional NVIDIA visibility/Vulkan/placebo proof
+- `tools/verify_docker_gui.sh`: optional Linux X11/VSPreview dependency and session-script proof
+
+The GUI profile stays container-boundary aware rather than changing CLI/runtime
+owners. Its explicit X11 contract is:
+
+- host `DISPLAY`
+- host `/tmp/.X11-unix` mounted into the container
+- optional host `XAUTHORITY` cookie file mount when required by the desktop
+- container process UID/GID aligned to the host user for narrow local-user X11 permission flows
+
+The optional GUI proof is non-CI and non-default. It must prove VSPreview
+availability through the existing doctor/adapter owners and prove session-script
+generation without requiring a real desktop launch. Any real UI launch remains a
+manual Linux desktop action outside the default Docker verification gate.
 
 slow.pics publishing is service-owned. `frame_compare.services.publishers` owns
 the browser-compatible slow.pics client flow: `GET /comparison`,

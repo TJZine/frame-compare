@@ -168,6 +168,7 @@ Current capability contract:
 | macOS Docker Desktop | Supported for backend rendering, reports, and software tonemap only; not for native GPU acceleration or first-class VSPreview GUI launch |
 | Linux Docker, CPU/software Vulkan | Canonical default Docker path; headless, deterministic, and CI-safe |
 | Linux Docker with NVIDIA GPU | Optional `gpu-nvidia` override/profile plus dedicated GPU proof path; documented-only/unverified unless separately proved on a compatible Linux NVIDIA host |
+| Linux Docker with X11 GUI | Optional `gui-linux` override/profile plus dedicated GUI proof path; documented-only/unverified unless separately proved on a compatible Linux X11 desktop host |
 | Native Windows portable | Separate first-class native runtime/release surface, not a Docker profile |
 
 When documenting or reviewing optional Docker GPU/profile work, cite the official
@@ -186,6 +187,30 @@ bash tools/verify_docker_gpu.sh
 That command is not part of the default Docker gate. It is a separate, fail-closed
 host-dependent proof for Linux NVIDIA systems only. If the local machine cannot run
 it, record GPU support as documented-only/unverified rather than supported.
+
+Optional Linux X11 GUI proof command:
+
+```bash
+bash tools/verify_docker_gui.sh
+```
+
+That command is not part of the default Docker gate. It is a separate,
+host-dependent proof for Linux X11 desktop systems only. The minimal X11 contract
+is explicit:
+
+- host `DISPLAY`
+- host `/tmp/.X11-unix` socket mount into the container
+- optional host `XAUTHORITY` cookie file mount when the X server requires it
+- container user/UID aligned to the host UID/GID for local-user X11 permissions
+
+Docs and scripts must not use `xhost +`. If temporary X11 permission widening is
+needed, use the narrower host-local form `xhost +si:localuser:<user>` and record
+the cleanup command `xhost -si:localuser:<user>`. Real UI launch remains manual
+only; the proof command should verify dependency availability and session-script
+generation without requiring a visible desktop launch.
+
+If the local machine cannot run the GUI proof command, record GUI support as
+documented-only/unverified rather than supported.
 
 ### Windows Portable / Release-Path Verification
 

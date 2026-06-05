@@ -209,3 +209,40 @@ ENV PATH="/home/framecompare/.local/bin:${PATH}"
 # Set entrypoint (use --entrypoint to override for Python checks)
 ENTRYPOINT ["frame-compare"]
 CMD ["--help"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stage 3: Optional Linux X11/VSPreview GUI runtime
+# ─────────────────────────────────────────────────────────────────────────────
+FROM runtime AS gui-linux
+
+USER root
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        libdbus-1-3 \
+        libegl1 \
+        libfontconfig1 \
+        libgl1 \
+        libopengl0 \
+        libx11-xcb1 \
+        libxcb-cursor0 \
+        libxcb-image0 \
+        libxcb-keysyms1 \
+        libxcb-render-util0 \
+        libxcb-xinerama0 \
+        libxkbcommon-x11-0 \
+        && \
+    rm -rf /var/lib/apt/lists/*
+
+USER framecompare
+WORKDIR /home/framecompare/frame-compare
+
+RUN uv export --frozen --no-dev --extra vspreview --no-emit-project --format requirements.txt \
+        --output-file /tmp/requirements.vspreview.lock.txt && \
+    python -m pip install --no-cache-dir --user --require-hashes \
+        -r /tmp/requirements.vspreview.lock.txt
+
+# Keep the default image target headless and CI-safe. The gui-linux target above is
+# opt-in via docker-compose.gui-linux.yml and should not become the implicit result
+# of `docker build .` or default compose builds.
+FROM runtime AS default-runtime
