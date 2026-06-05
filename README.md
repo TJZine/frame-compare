@@ -24,7 +24,7 @@
 | 📸 **Screenshot Rendering** | VapourSynth/FFmpeg with customizable overlays |
 | 🌐 **slow.pics Publishing** | Opt-in uploads with retry logic and rate limiting |
 | 📄 **HTML Reports** | Offline comparison viewer with slider, overlay, diff, and pair blink modes |
-| 🔧 **Zero-Config Docker** | Complete environment with single `docker compose up` |
+| 🔧 **Zero-Config Docker** | Reproducible container runtime for backend proof and CLI usage |
 
 ---
 
@@ -205,8 +205,7 @@ docker run --rm -it \
   -w /workspace \
   frame-compare:dev run \
     --root /workspace \
-    --input /workspace/comparison_videos \
-    --frame-count 10
+    --input /workspace/comparison_videos
 ```
 
 > [!TIP]
@@ -219,6 +218,32 @@ docker run --rm -it \
 ### Docker (Recommended)
 
 See [Quick Start](#quick-start) for Docker commands.
+
+The default Docker path is headless and deterministic: it uses software Vulkan and
+matches the CI-safe backend proof path rather than a desktop GUI workflow.
+
+#### Docker Capability Matrix
+
+| Environment | Current supported posture | Not first-class / not supported by default | Notes |
+| ----------- | ------------------------- | ------------------------------------------ | ----- |
+| macOS Docker Desktop | Backend rendering, HTML reports, software tonemap, `doctor`, non-GUI `run`, reproducible software Vulkan path | Native GPU acceleration, first-class VSPreview GUI launch | Supported for backend parity only. Docker Desktop on macOS does not provide the native GPU/desktop path this project treats as optional host-specific behavior. |
+| Linux Docker, CPU/software Vulkan | Full default Docker path: backend rendering, HTML reports, software tonemap, CI parity, deterministic headless verification | Native GPU acceleration, GUI/VSPreview unless separately configured | This is the canonical default Docker mode. |
+| Linux Docker with NVIDIA GPU | Documented-only host-dependent target pending a separate GPU profile/proof slice | Guaranteed parity without host setup, default CI path, GUI/VSPreview by default | Requires compatible host GPU/container setup and separate verification. Follow Docker's GPU/container guidance before treating this as available on a given machine. |
+| Native Windows portable | Full native app path including backend rendering, reports, VSPreview GUI, and Windows installer/update flow | Docker-specific container assumptions | This remains the first-class native desktop/runtime distribution. |
+
+Optional Docker GPU and GUI profiles require compatible host setup and separate
+verification. The default Docker behavior remains the deterministic headless
+software-Vulkan path even when a host could support more.
+
+If you are evaluating optional Docker GPU or profile wiring, use the official Docker
+GPU/container and profile docs as the source of truth for host prerequisites and
+compose semantics: Docker Engine GPU access, Docker Desktop GPU support notes,
+Compose profiles, and the Compose `gpus` service attribute are documented at
+[docs.docker.com/engine/containers/gpu](https://docs.docker.com/engine/containers/gpu/),
+[docs.docker.com/desktop/features/gpu](https://docs.docker.com/desktop/features/gpu/),
+[docs.docker.com/compose/how-tos/profiles](https://docs.docker.com/compose/how-tos/profiles/),
+and
+[docs.docker.com/reference/compose-file/services/#gpus](https://docs.docker.com/reference/compose-file/services/#gpus).
 
 ### Local Development
 

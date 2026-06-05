@@ -74,6 +74,16 @@ Docker integration gate:
 bash tools/verify_docker_integration.sh
 ```
 
+Default Docker posture:
+
+- Docker is a first-class runtime surface, but the default path is headless and
+  deterministic.
+- The canonical default Docker verification path uses software Vulkan and CI-safe
+  backend rendering rather than GPU passthrough or desktop GUI assumptions.
+- Optional Docker GPU or GUI profiles require compatible host setup and separate
+  verification; do not treat them as covered by the default gate unless the task
+  explicitly adds and proves them.
+
 Windows portable local packaging path:
 
 ```powershell
@@ -148,6 +158,22 @@ bash tools/verify_docker_integration.sh
 ```
 
 If this path cannot be run locally, record it as documented-only and rely on `.github/workflows/docker-integration.yml`.
+
+Current capability contract:
+
+| Environment | Default posture |
+| --- | --- |
+| macOS Docker Desktop | Supported for backend rendering, reports, and software tonemap only; not for native GPU acceleration or first-class VSPreview GUI launch |
+| Linux Docker, CPU/software Vulkan | Canonical default Docker path; headless, deterministic, and CI-safe |
+| Linux Docker with NVIDIA GPU | Optional host-dependent path that needs separate verification |
+| Native Windows portable | Separate first-class native runtime/release surface, not a Docker profile |
+
+When documenting or reviewing optional Docker GPU/profile work, cite the official
+Docker references in prose so the host/runtime assumptions stay explicit:
+[Docker Engine GPU access](https://docs.docker.com/engine/containers/gpu/),
+[Docker Desktop GPU support notes](https://docs.docker.com/desktop/features/gpu/),
+[Compose profiles](https://docs.docker.com/compose/how-tos/profiles/), and the
+[Compose `gpus` service attribute](https://docs.docker.com/reference/compose-file/services/#gpus).
 
 ### Windows Portable / Release-Path Verification
 

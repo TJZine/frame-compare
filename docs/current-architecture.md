@@ -150,6 +150,15 @@ External runtime boundaries:
 - Docker build/test runtime
 - Windows PowerShell installer and updater scripts
 
+Current Docker capability contract:
+
+| Environment | Current posture |
+| --- | --- |
+| macOS Docker Desktop | Supported for backend rendering, reports, and software tonemap through the default headless software-Vulkan path; not a native GPU or first-class VSPreview GUI surface |
+| Linux Docker, CPU/software Vulkan | Canonical Docker default; deterministic, headless, CI-safe software Vulkan path |
+| Linux Docker with NVIDIA GPU | Optional future/host-dependent acceleration profile that requires compatible host setup and separate verification |
+| Native Windows portable | First-class native runtime with backend rendering, reports, and VSPreview GUI support outside Docker |
+
 Keep these integrations at their current owners:
 
 - metadata lookups: `frame_compare.services.metadata` remains the facade owner;
@@ -168,6 +177,14 @@ Keep these integrations at their current owners:
 - HTML report generation: `frame_compare.services.report`
 - VS loading and HDR/tonemap logic: `frame_compare.vs.*`
 - packaging/install/update flow: `tools/windows_portable/**`
+
+The default Docker behavior is intentionally narrower than the native Windows
+portable runtime: it preserves deterministic headless software Vulkan for backend
+rendering and report generation. Optional Docker GPU or GUI profiles are
+host-dependent runtime variants and must be documented and verified separately from
+the default Docker gate. When those variants are discussed, use the official Docker
+GPU/container, Docker Desktop GPU support, Compose profiles, and Compose `gpus`
+documentation as the external contract reference.
 
 slow.pics publishing is service-owned. `frame_compare.services.publishers` owns
 the browser-compatible slow.pics client flow: `GET /comparison`,
