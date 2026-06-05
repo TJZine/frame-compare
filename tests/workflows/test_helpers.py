@@ -7,19 +7,19 @@ import pytest
 from tests.workflows import _helpers
 
 
-def test_skip_if_bash_unavailable_skips_when_bash_is_missing(
+def test_bash_executable_or_skip_skips_when_bash_is_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(_helpers.shutil, "which", lambda _: None)
 
     with pytest.raises(pytest.skip.Exception, match="bash is required"):
-        _helpers.skip_if_bash_unavailable()
+        _helpers.bash_executable_or_skip()
 
 
-def test_skip_if_bash_unavailable_skips_when_bash_launcher_cannot_execute(
+def test_bash_executable_or_skip_skips_when_bash_launcher_cannot_execute(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(_helpers.shutil, "which", lambda _: "bash")
+    monkeypatch.setattr(_helpers.shutil, "which", lambda _: "C:/Windows/System32/bash.exe")
 
     def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
@@ -32,13 +32,20 @@ def test_skip_if_bash_unavailable_skips_when_bash_launcher_cannot_execute(
     monkeypatch.setattr(_helpers.subprocess, "run", fake_run)
 
     with pytest.raises(pytest.skip.Exception, match="bash is not executable"):
-        _helpers.skip_if_bash_unavailable()
+        _helpers.bash_executable_or_skip()
 
 
-def test_skip_if_bash_unavailable_allows_working_bash(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(_helpers.shutil, "which", lambda _: "bash")
+def test_bash_executable_or_skip_returns_probed_bash_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected_path = "C:/Program Files/Git/bin/bash.exe"
+    captured_commands: list[list[str]] = []
+    monkeypatch.setattr(_helpers.shutil, "which", lambda _: expected_path)
 
     def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        command = args[0]
+        assert isinstance(command, list)
+        captured_commands.append(command)
         return subprocess.CompletedProcess(
             args=["bash", "-lc", "printf frame-compare-bash-ok"],
             returncode=0,
@@ -48,4 +55,5 @@ def test_skip_if_bash_unavailable_allows_working_bash(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(_helpers.subprocess, "run", fake_run)
 
-    _helpers.skip_if_bash_unavailable()
+    assert _helpers.bash_executable_or_skip() == expected_path
+    assert captured_commands[0][0] == expected_path

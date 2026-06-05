@@ -7,8 +7,8 @@ from pathlib import Path
 import yaml
 
 from ._helpers import SCRIPT_SUBPROCESS_TIMEOUT_SECONDS
+from ._helpers import bash_executable_or_skip as _bash_executable_or_skip
 from ._helpers import read_text_or_fail as _read_text_or_fail
-from ._helpers import skip_if_bash_unavailable as _skip_if_bash_unavailable
 from ._helpers import with_bash_env as _with_bash_env
 from ._helpers import write_bash_env as _write_bash_env
 
@@ -87,7 +87,7 @@ def test_verify_docker_gui_script_documents_narrow_x11_permissions(repo_root: Pa
 
 
 def test_verify_docker_gui_script_requires_linux_x11_host(repo_root: Path, tmp_path: Path) -> None:
-    _skip_if_bash_unavailable()
+    bash = _bash_executable_or_skip()
     bash_env = tmp_path / "gui-host-os.env"
     _write_bash_env(
         bash_env,
@@ -99,7 +99,7 @@ uname() {
     )
 
     result = subprocess.run(
-        ["bash", "tools/verify_docker_gui.sh", "--no-build"],
+        [bash, "tools/verify_docker_gui.sh", "--no-build"],
         cwd=repo_root,
         env=_with_bash_env({"DISPLAY": ""}, bash_env),
         check=False,

@@ -28,7 +28,7 @@ def with_bash_env(env: dict[str, str], bash_env_path: Path) -> dict[str, str]:
     return updated
 
 
-def skip_if_bash_unavailable() -> None:
+def bash_executable_or_skip() -> str:
     bash_path = shutil.which("bash")
     if bash_path is None:
         pytest.skip("bash is required for Docker shell-script contract tests")
@@ -44,3 +44,4 @@ def skip_if_bash_unavailable() -> None:
         pytest.skip(f"bash is not executable for Docker shell-script contract tests: {exc}")
     if result.returncode != 0 or result.stdout != "frame-compare-bash-ok":
         pytest.skip("bash is not executable for Docker shell-script contract tests")
+    return bash_path
