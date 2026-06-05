@@ -19,6 +19,12 @@ from frame_compare.vs.env import (
 )
 from frame_compare.vs.errors import PluginNotFoundError, VapourSynthError, VapourSynthNotFoundError
 
+_KNOWN_API3_WARNING_BYTES = (
+    b"Plugin C:\\Software\\video\\frame-compare\\.venv\\Lib\\site-packages\\vapoursynth"
+    b"\\plugins\\libvslsmashsource.dll is using API3 which is deprecated "
+    b"and will be removed shortly.\n"
+)
+
 
 def test_env_module_annotations_do_not_require_runtime_vapoursynth(repo_root) -> None:
     """Import-time annotations must not require the optional VS runtime."""
@@ -66,6 +72,26 @@ def test_ensure_vs_environment_core_failure_raises_vs_error(mocker) -> None:
     with pytest.raises(VapourSynthError) as exc:
         ensure_vs_environment()
     assert exc.value.code == "FC-2002"
+
+
+def test_ensure_vs_environment_filters_known_lsmash_api3_warning(
+    mocker,
+    capfd,
+) -> None:
+    mock_module = SimpleNamespace(core=SimpleNamespace())
+
+    def _fake_import_module(name: str) -> object:
+        assert name == "vapoursynth"
+        env_module.os.write(2, _KNOWN_API3_WARNING_BYTES)
+        env_module.os.write(2, b"real vapoursynth warning\n")
+        return mock_module
+
+    mocker.patch("frame_compare.vs.env.importlib.import_module", side_effect=_fake_import_module)
+
+    assert ensure_vs_environment() is mock_module.core
+    captured = capfd.readouterr()
+    assert "libvslsmashsource.dll is using API3" not in captured.err
+    assert "real vapoursynth warning" in captured.err
 
 
 def test_register_windows_dll_dirs_is_idempotent_per_process(monkeypatch, tmp_path) -> None:
@@ -458,6 +484,33 @@ def test_try_load_lsmas_plugin_continues_after_load_failure(
 
     assert try_load_lsmas_plugin(core) == str(second)
     assert load_calls == [str(first), str(second)]
+
+
+def test_try_load_lsmas_plugin_filters_known_lsmash_api3_warning(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    capfd,
+) -> None:
+    plugin_path = tmp_path / "present" / "libvslsmashsource.dll"
+    plugin_path.parent.mkdir()
+    plugin_path.write_text("")
+
+    def _load_plugin(*, path: str) -> None:
+        assert path == str(plugin_path)
+        env_module.os.write(2, _KNOWN_API3_WARNING_BYTES)
+        env_module.os.write(2, b"real plugin warning\n")
+
+    core = SimpleNamespace(std=SimpleNamespace(LoadPlugin=_load_plugin))
+    monkeypatch.setattr(
+        env_module,
+        "candidate_lsmas_plugin_paths",
+        lambda: [str(plugin_path)],
+    )
+
+    assert try_load_lsmas_plugin(core) == str(plugin_path)
+    captured = capfd.readouterr()
+    assert "libvslsmashsource.dll is using API3" not in captured.err
+    assert "real plugin warning" in captured.err
 
 
 def test_detect_plugins_all_present() -> None:

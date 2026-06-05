@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from types import ModuleType
 from typing import TYPE_CHECKING
 
+from frame_compare.utils.runtime_stderr import suppress_known_lsmash_api3_stderr
 from frame_compare.vs.errors import PluginNotFoundError, VapourSynthError, VapourSynthNotFoundError
 
 if TYPE_CHECKING:
@@ -108,10 +109,12 @@ def register_windows_dll_dirs() -> None:
 def import_vapoursynth_module() -> ModuleType:
     """Import VapourSynth, falling back to runtime-path registration on failure."""
     try:
-        return __import__("vapoursynth")
+        with suppress_known_lsmash_api3_stderr():
+            return __import__("vapoursynth")
     except ImportError:
         register_windows_dll_dirs()
-        return __import__("vapoursynth")
+        with suppress_known_lsmash_api3_stderr():
+            return __import__("vapoursynth")
 
 
 def _split_plugin_dirs(value: str) -> list[str]:
@@ -287,7 +290,8 @@ def try_load_lsmas_plugin(core: object) -> str | None:
         if not os.path.isfile(plugin_path):
             continue
         try:
-            load_plugin(path=plugin_path)
+            with suppress_known_lsmash_api3_stderr():
+                load_plugin(path=plugin_path)
         except Exception as exc:
             log.debug("Skipping L-SMASH plugin candidate %s due to error: %s", plugin_path, exc)
             continue
@@ -299,8 +303,9 @@ def is_vapoursynth_available() -> bool:
     """Check if VapourSynth is usable (import + core creation)."""
     try:
         register_windows_dll_dirs()
-        vs_module = importlib.import_module("vapoursynth")
-        _ = vs_module.core  # Validate core creation
+        with suppress_known_lsmash_api3_stderr():
+            vs_module = importlib.import_module("vapoursynth")
+            _ = vs_module.core  # Validate core creation
         return True
     except (ImportError, ModuleNotFoundError):
         return False
@@ -320,12 +325,14 @@ def ensure_vs_environment() -> vs.Core:
     """
     try:
         register_windows_dll_dirs()
-        vs_module = importlib.import_module("vapoursynth")
+        with suppress_known_lsmash_api3_stderr():
+            vs_module = importlib.import_module("vapoursynth")
     except (ImportError, ModuleNotFoundError) as e:
         raise VapourSynthNotFoundError() from e
 
     try:
-        return vs_module.core
+        with suppress_known_lsmash_api3_stderr():
+            return vs_module.core
     except Exception as e:
         raise VapourSynthError(f"Failed to initialize VapourSynth core: {e}") from e
 

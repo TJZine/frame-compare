@@ -184,7 +184,10 @@ unchanged.
   number of hidden rows and counts by hidden source.
 - `run --json` does not emit the human warning panel, does not add warning
   fields, and keeps warning text off stdout for successful runs. Runtime logs and
-  diagnostics may still use stderr.
+  diagnostics may still use stderr. The known native L-SMASH-Works
+  `libvslsmashsource.dll` API3 deprecation warning is filtered from stderr until
+  the bundled/installed plugin is updated; other native VapourSynth and plugin
+  stderr remains visible.
 - When the at-a-glance summary reports optional VSPreview probe failures, it uses a
   sanitized summary rather than raw probe exception text.
 - The at-a-glance summary uses user-facing row labels such as `run folders`,
@@ -515,9 +518,10 @@ behavior.
 
 VSPreview parent telemetry, generated Frame Compare session diagnostics,
 preview assumptions, ready text, and terminal confirmation prompts use stderr as
-the single human diagnostic stream. The VSPreview child process is still
-launched with inherited stdout/stderr so GUI/runtime compatibility is preserved;
-Frame Compare-owned generated script diagnostics are written to stderr.
+the single human diagnostic stream. The VSPreview child process is launched with
+inherited stdout, and its stderr is passed through except for the known native
+L-SMASH-Works `libvslsmashsource.dll` API3 deprecation warning. Frame
+Compare-owned generated script diagnostics are written to stderr.
 
 When interactive alignment launches a generated VSPreview session, the
 diagnostic order is:

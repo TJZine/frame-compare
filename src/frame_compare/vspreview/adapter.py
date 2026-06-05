@@ -19,6 +19,7 @@ from pathlib import Path
 
 import structlog
 
+from frame_compare.utils.runtime_stderr import write_stderr_unless_known_lsmash_api3_warning
 from frame_compare.vspreview.errors import VSPreviewError, VSPreviewNotFoundError
 from frame_compare.vspreview.output import print_vspreview_session
 from frame_compare.vspreview.session_script import write_vspreview_session_script
@@ -221,8 +222,15 @@ def _run_vspreview_command(command: list[str], *, env: dict[str, str]) -> int:
         command,
         stdin=None,
         stdout=None,
+        stderr=subprocess.PIPE,
+        text=True,
         env=env,
+        bufsize=1,
     ) as process:
+        assert process.stderr is not None
+        for line in process.stderr:
+            write_stderr_unless_known_lsmash_api3_warning(line)
+        sys.stderr.flush()
         return process.wait()
 
 
