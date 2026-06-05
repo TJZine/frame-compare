@@ -32,9 +32,10 @@ def resolve_source_selection(
         return SourceSelection(ordered_paths=[], overrides_by_path={})
 
     reference_path = discovered_paths[0]
-    if config.reference is not None:
+    reference_selector = config.reference
+    if reference_selector is not None and reference_selector != "auto":
         reference_path = _resolve_selector(
-            selector=config.reference,
+            selector=reference_selector,
             input_dir=input_dir,
             paths=discovered_paths,
             role="sources.reference",
@@ -62,6 +63,17 @@ def resolve_source_selection(
         overrides_by_path[path] = override
 
     return SourceSelection(ordered_paths=ordered_paths, overrides_by_path=overrides_by_path)
+
+
+def resolve_source_selector(
+    *,
+    selector: str,
+    input_dir: Path,
+    paths: list[Path],
+    role: str,
+) -> Path:
+    """Resolve a single source selector against discovered inputs."""
+    return _resolve_selector(selector=selector, input_dir=input_dir, paths=paths, role=role)
 
 
 def _ensure_unique_stems(paths: list[Path]) -> None:

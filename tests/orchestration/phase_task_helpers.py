@@ -111,4 +111,5 @@ def _context(tmp_path: Path, *, comparisons: list[ClipState] | None = None) -> R
         comparisons=[] if comparisons is None else comparisons,
         analysis_selection_domain="test-selection-domain",
         selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+        analysis_clip=reference,
     )

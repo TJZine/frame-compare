@@ -80,17 +80,28 @@ exists.
 ## Config-Only Sources Surface
 
 `[sources]` is a config-only public surface for source identity, explicit
-reference selection, and per-source overrides. There are no dedicated `run`
-flags for these fields.
+reference selection, analysis source selection, FPS matching, and per-source
+overrides. There are no dedicated `run` flags for these fields.
 
 Current fields:
 
-- `reference`: optional source selector. When omitted, the first discovered
-  input remains the reference. When set, the selected source moves to the front
-  of clip order and comparisons keep deterministic discovery order after it.
+- `reference`: optional source selector. When omitted or set to literal `"auto"`,
+  the first discovered input remains the selected reference. A non-auto value
+  resolves through source selector rules and moves the selected source to the
+  front of clip order; comparisons keep deterministic discovery order after it.
+- `analysis_source`: config-only string. Defaults to `"reference"`. `"reference"`
+  analyzes the selected reference clip when analysis metrics are required.
+  `"fastest"` benchmarks discovered clips and analyzes the fastest usable clip
+  when analysis metrics are required. Any other value resolves as a source
+  selector when analysis metrics are required. It never changes the selected
+  reference, comparison order, input order, or display order.
 - `match_fps`: FPS matching policy. Defaults to `disabled`. When set to
   `assume_reference`, every comparison source without an explicit
   `effective_fps` override inherits the selected reference effective FPS.
+  When set to `majority`, Frame Compare chooses the strict majority effective
+  FPS after explicit `effective_fps` overrides. If no strict majority exists,
+  it falls back to the selected reference effective FPS and emits a human
+  warning diagnostic.
   This is an AssumeFPS-style timing override; it does not resample, drop,
   interpolate, or duplicate frames.
 - `overrides`: mapping from source selector to per-source override table.
@@ -115,8 +126,22 @@ and invalid explicit rectangles fail instead of falling back silently.
 `effective_fps` is an explicit AssumeFPS-style timing override: it changes
 timing/FPS interpretation without resampling, dropping, interpolating, or
 duplicating source frames. Mixed-FPS validation compares effective FPS values
-after explicit overrides and after `match_fps = "assume_reference"` matching.
-Explicit per-source `effective_fps` values take precedence over `match_fps`.
+after explicit overrides and after `match_fps = "assume_reference"` or
+`match_fps = "majority"` matching. Explicit per-source `effective_fps` values
+take precedence over `match_fps`.
+
+When analysis is skipped because effective `[analysis]` requests only
+`user_frames` and/or `random_frame_count`, `sources.analysis_source` is not
+resolved for metrics, `fastest` is not benchmarked, and no analysis metrics
+cache is loaded, validated, written, or keyed by `analysis_source`.
+
+When analysis metrics are required, `sources.analysis_source = "fastest"` is
+incompatible with `run --from-cache-only` because fastest-source benchmark
+selection is runtime-state dependent. The run fails through the standard typed
+error path before probe loading, metadata prefetch, run-folder reservation,
+analysis cache validation, or fastest benchmarking. JSON error mode keeps the
+existing error payload shape, and the successful `run --json` schema is
+unchanged.
 
 ## `version` Command Contract
 
@@ -189,13 +214,14 @@ Explicit per-source `effective_fps` values take precedence over `match_fps`.
   using labeled full-fingerprint filenames:
   `<safe-human-label>__<full-fingerprint>.compframes`.
 - The analysis cache fingerprint includes the selected reference identity and a
-  stable all-source selection-domain token. That token covers source identity,
-  source trims, effective FPS values, the configured analysis ignore-window
-  settings, and the final shared selectable window. Cache entries for different
-  selected references or different selection domains from the same input set do
-  not satisfy each other. Metric-array cache identity excludes `user_frames`,
-  random seed, frame-selection counts, `dark_quantile`, and `bright_quantile`
-  because those values affect frame choice rather than metric computation.
+  stable all-source selection-domain token. That token covers the selected
+  analysis source path, source identity, source trims, effective FPS values, the
+  configured analysis ignore-window settings, and the final shared selectable
+  window. Cache entries for different selected references, selected analysis
+  sources, or different selection domains from the same input set do not satisfy
+  each other. Metric-array cache identity excludes `user_frames`, random seed,
+  frame-selection counts, `dark_quantile`, and `bright_quantile` because those
+  values affect frame choice rather than metric computation.
 - The full fingerprint remains inside the cache payload and is validated on load.
   Legacy run-folder `cache.compframes` files are not used as analysis cache hits.
 - Analysis is skipped automatically when `dark_frame_count`, `bright_frame_count`,

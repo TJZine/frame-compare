@@ -90,11 +90,19 @@ def write_metrics_cache(
     config: ConfigSchema,
     video_paths: list[Path] | None = None,
     selection_domain: str | None = None,
+    analysis_source_path: Path | None = None,
 ) -> None:
     cache_inputs = [source_path] if video_paths is None else video_paths
     ordered_cache_inputs = _resolved_cache_inputs(cache_inputs, config)
+    resolved_analysis_source_path = (
+        ordered_cache_inputs[0] if analysis_source_path is None else analysis_source_path
+    )
     if selection_domain is None:
-        selection_domain = analysis_selection_domain_for_cache_inputs(ordered_cache_inputs, config)
+        selection_domain = analysis_selection_domain_for_cache_inputs(
+            ordered_cache_inputs,
+            config,
+            analysis_source_path=resolved_analysis_source_path,
+        )
     write_probe_cache_for_inputs(
         cache_dir.parent.parent / "clip_probe.toml",
         ordered_cache_inputs,
@@ -121,6 +129,7 @@ def write_metrics_cache(
                 )
                 for path in ordered_cache_inputs
             ],
+            analysis_source_path=str(resolved_analysis_source_path),
             version=cache_io.CACHE_VERSION,
         ),
     )
@@ -130,6 +139,8 @@ def write_metrics_cache(
 def analysis_selection_domain_for_cache_inputs(
     video_paths: list[Path],
     config: ConfigSchema,
+    *,
+    analysis_source_path: Path | None = None,
 ) -> str:
     ordered_paths = _resolved_cache_inputs(video_paths, config)
     snapshots_by_path = {path: _clip_probe_snapshot_for_cache_input(path) for path in ordered_paths}
@@ -137,10 +148,15 @@ def analysis_selection_domain_for_cache_inputs(
         ordered_paths=ordered_paths,
         snapshots_by_path=snapshots_by_path,
         overrides_by_path=_resolved_cache_overrides(video_paths, config),
+        match_fps=config.sources.match_fps,
     )
     window = compute_selection_window_for_clips(clips=clips, config=config)
+    analysis_clip = clips[0]
+    if analysis_source_path is not None:
+        analysis_clip = next(clip for clip in clips if clip.path == analysis_source_path)
     return build_analysis_selection_domain_token(
         clips=clips,
+        analysis_clip=analysis_clip,
         config=config,
         selection_window=window,
     )

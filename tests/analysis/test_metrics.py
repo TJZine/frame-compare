@@ -338,7 +338,7 @@ def test_calculate_metrics_cache_save_is_best_effort(
 @patch("frame_compare.analysis.metrics._calculate_luminance")
 @patch("frame_compare.analysis.metrics.DefaultVSLoader")
 @patch("frame_compare.analysis.metrics.load_cached_metrics")
-def test_calculate_metrics_analyzes_reference_only(
+def test_calculate_metrics_analyzes_reference_by_default(
     mock_load, mock_loader_cls, mock_lum, mock_mot, tmp_path
 ):
     mock_load.return_value = MagicMock(success=False)
@@ -358,6 +358,64 @@ def test_calculate_metrics_analyzes_reference_only(
 
     # loader.load should only be called once with reference path
     mock_loader.load.assert_called_once_with(video_paths[0])
+
+
+@patch("frame_compare.analysis.metrics._calculate_motion")
+@patch("frame_compare.analysis.metrics._calculate_luminance")
+@patch("frame_compare.analysis.metrics.DefaultVSLoader")
+@patch("frame_compare.analysis.metrics.load_cached_metrics")
+def test_calculate_metrics_analyzes_selected_analysis_source(
+    mock_load, mock_loader_cls, mock_lum, mock_mot, tmp_path
+):
+    mock_load.return_value = MagicMock(success=False)
+    mock_loader = mock_loader_cls.return_value
+    mock_source = MagicMock()
+    mock_loader.load.return_value = mock_source
+    mock_clip = MagicMock()
+    mock_clip.num_frames = 10
+    mock_source.clip = mock_clip
+    mock_source.fps = Fraction(24, 1)
+
+    video_paths = [tmp_path / "ref.mkv", tmp_path / "analysis.mkv"]
+    for p in video_paths:
+        p.write_bytes(b"")
+
+    result = calculate_metrics(
+        video_paths,
+        AnalysisConfig(),
+        tmp_path,
+        analysis_source_path=video_paths[1],
+    )
+
+    mock_loader.load.assert_called_once_with(video_paths[1])
+    assert result.metadata.analysis_source_path == str(video_paths[1])
+
+
+@patch("frame_compare.analysis.metrics.DefaultVSLoader")
+@patch("frame_compare.analysis.metrics.load_cached_metrics")
+def test_calculate_metrics_zero_frame_analysis_source_error_is_not_reference_worded(
+    mock_load, mock_loader_cls, tmp_path
+):
+    mock_load.return_value = MagicMock(success=False)
+    mock_loader = mock_loader_cls.return_value
+    mock_source = MagicMock()
+    mock_loader.load.return_value = mock_source
+    mock_clip = MagicMock()
+    mock_clip.num_frames = 0
+    mock_source.clip = mock_clip
+    mock_source.fps = Fraction(24, 1)
+
+    video_paths = [tmp_path / "ref.mkv", tmp_path / "analysis.mkv"]
+    for p in video_paths:
+        p.write_bytes(b"")
+
+    with pytest.raises(MetricsCalculationError, match="Analysis clip has 0 frames"):
+        calculate_metrics(
+            video_paths,
+            AnalysisConfig(),
+            tmp_path,
+            analysis_source_path=video_paths[1],
+        )
 
 
 @patch("frame_compare.analysis.metrics.DefaultVSLoader")

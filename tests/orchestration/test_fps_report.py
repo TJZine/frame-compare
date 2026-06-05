@@ -153,12 +153,12 @@ def test_emit_consolidated_fps_report_json_mode_logs_without_human_output(
         note=None,
     )
 
-    log_calls: list[tuple[str, str, list[dict[str, object]]]] = []
+    log_calls: list[tuple[str, str, list[dict[str, object]], list[str]]] = []
 
     def _record_log(
-        event: str, *, stage: str, clips: list[dict[str, object]]
+        event: str, *, stage: str, clips: list[dict[str, object]], diagnostics: list[str]
     ) -> None:
-        log_calls.append((event, stage, clips))
+        log_calls.append((event, stage, clips, diagnostics))
 
     monkeypatch.setattr("frame_compare.orchestration.fps_report.log.info", _record_log)
 
@@ -192,6 +192,7 @@ def test_emit_consolidated_fps_report_json_mode_logs_without_human_output(
                     "note": None,
                 }
             ],
+            [],
         )
     ]
 
@@ -232,6 +233,10 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
         json_output=False,
         quiet=False,
         no_color=True,
+        diagnostics=[
+            "Analysis source: encode.mkv (configured)",
+            "FPS target: 24000/1001 (majority)",
+        ],
     )
 
     captured = capsys.readouterr()
@@ -252,6 +257,8 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
     assert "SDR" in captured.err
     assert "ref.mkv" in captured.err
     assert "encode.mkv" in captured.err
+    assert "Analysis source: encode.mkv (configured)" in captured.err
+    assert "FPS target: 24000/1001 (majority)" in captured.err
     assert "\x1b[" not in captured.err
     assert "[bold cyan]" not in captured.err
     assert "[dim]" not in captured.err

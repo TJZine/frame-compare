@@ -54,6 +54,7 @@ def test_default_config_values() -> None:
     assert config.color.target_nits == 100
     assert config.paths.input_dir == "comparison_videos"
     assert config.sources.reference is None
+    assert config.sources.analysis_source == "reference"
     assert config.sources.match_fps == SourceMatchFpsMode.DISABLED
     assert config.sources.overrides == {}
     assert config.screenshots.geometry_mode == ScreenshotGeometryMode.NATIVE
@@ -220,6 +221,7 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert slowpics.create_url_shortcut is True
     assert slowpics.webhook_url is None
     assert sources.reference is None
+    assert sources.analysis_source == "reference"
     assert sources.match_fps == SourceMatchFpsMode.DISABLED
     assert sources.overrides == {}
     assert tmdb.enabled is True
@@ -237,6 +239,25 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert logging.level == LogLevel.INFO
     assert logging.format == LogFormat.CONSOLE
     assert logging.file is None
+
+
+def test_sources_match_fps_accepts_majority() -> None:
+    sources = SourcesConfig.model_validate({"match_fps": "majority"})
+
+    assert sources.match_fps == SourceMatchFpsMode.MAJORITY
+
+
+def test_sources_match_fps_rejects_invalid_value() -> None:
+    with pytest.raises(ValidationError):
+        SourcesConfig.model_validate({"match_fps": "nearest"})
+
+
+def test_default_config_template_documents_analysis_source_and_majority() -> None:
+    parsed = tomllib.loads(DEFAULT_CONFIG_TOML)
+
+    assert "sources" in parsed
+    assert '# analysis_source = "reference"' in DEFAULT_CONFIG_TOML
+    assert '# match_fps = "majority"' in DEFAULT_CONFIG_TOML
 
 
 def test_slowpics_config_public_surface_is_frozen_to_approved_fields_and_defaults() -> None:
@@ -376,8 +397,9 @@ def test_default_config_toml_documents_sources_defaults() -> None:
     data = tomllib.loads(DEFAULT_CONFIG_TOML)
 
     assert data["sources"] == {}
-    assert '# reference = "00-reference.mkv"' in DEFAULT_CONFIG_TOML
-    assert '# match_fps = "assume_reference"' in DEFAULT_CONFIG_TOML
+    assert '# reference = "auto"' in DEFAULT_CONFIG_TOML
+    assert '# analysis_source = "reference"' in DEFAULT_CONFIG_TOML
+    assert '# match_fps = "majority"' in DEFAULT_CONFIG_TOML
     assert '# [sources.overrides."encode-a.mkv"]' in DEFAULT_CONFIG_TOML
     assert '# effective_fps = "24000/1001"' in DEFAULT_CONFIG_TOML
 

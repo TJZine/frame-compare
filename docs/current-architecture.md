@@ -103,9 +103,9 @@ Primary owned paths:
   shared analysis metrics cache (defaults to `generated/cache/analysis/` under the
   workspace root, but follows the configured `paths.generated_dir`). The
   fingerprint includes the selected reference identity and an all-source
-  selection-domain token covering source identity, source trims, effective FPS
-  values, configured analysis ignore windows, and the final shared selectable
-  window. Metric-array cache identity excludes frame-selection counts,
+  selection-domain token covering selected analysis source path, source identity,
+  source trims, effective FPS values, configured analysis ignore windows, and the
+  final shared selectable window. Metric-array cache identity excludes frame-selection counts,
   `user_frames`, random seed, and dark/bright quantile thresholds because those
   affect frame choice rather than metric computation.
 - `generated/clip_probe.toml` or `<resolved paths.generated_dir>/clip_probe.toml`:
@@ -305,6 +305,7 @@ Runtime ownership matrix:
 | Runtime concern | Owner |
 | --- | --- |
 | Source selector resolution, explicit reference ordering, duplicate-stem fail-fast, and per-source override application during preparation | `frame_compare.orchestration.source_selection` plus `frame_compare.orchestration.preparation` |
+| Analysis-source resolution and fastest-source benchmark policy | `frame_compare.orchestration.analysis_source` |
 | Audio alignment workflow, offset cache coordination, and precedence policy | `frame_compare.services.alignment` |
 | Audio stream probing, deterministic stream selection, stream overrides, and FFmpeg/channel-aware extraction policy | `frame_compare.services.alignment_audio` |
 | Audio correlation, preprocessing, and refinement estimation | `frame_compare.services.alignment_correlation` |

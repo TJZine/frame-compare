@@ -164,6 +164,7 @@ class SourcesConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reference: str | None = None
+    analysis_source: str = "reference"
     match_fps: SourceMatchFpsMode = SourceMatchFpsMode.DISABLED
     overrides: dict[str, SourceOverrideConfig] = Field(default_factory=dict)
 

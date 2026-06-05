@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 CACHE_FILE_EXTENSION: str = ".compframes"
 CACHE_LABEL_MAX_LENGTH: int = 80
-CACHE_VERSION: int = 3
+CACHE_VERSION: int = 4
 _SAFE_LABEL_CHARS = re.compile(r"[^a-z0-9._-]+")
 _MULTI_SEPARATOR = re.compile(r"[-_.]{2,}")
 
@@ -233,7 +233,9 @@ def _parse_numeric_series(value: object) -> list[float]:
 
 
 def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
-    _require_keys(data, {"frame_count", "fps", "config_fingerprint", "clips"})
+    _require_keys(
+        data, {"frame_count", "fps", "config_fingerprint", "clips", "analysis_source_path"}
+    )
 
     frame_count = data["frame_count"]
     if not isinstance(frame_count, int) or isinstance(frame_count, bool) or frame_count < 0:
@@ -247,12 +249,17 @@ def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
     if not isinstance(config_fingerprint, str):
         raise _CacheParseError
 
+    analysis_source_path = data["analysis_source_path"]
+    if not isinstance(analysis_source_path, str):
+        raise _CacheParseError
+
     try:
         return MetricsMetadata(
             frame_count=frame_count,
             fps=Fraction(fps),
             config_fingerprint=config_fingerprint,
             clips=_parse_clip_identities(data["clips"]),
+            analysis_source_path=analysis_source_path,
             version=_parse_cache_version(data.get("version", CACHE_VERSION)),
         )
     except (ValueError, TypeError, ZeroDivisionError) as exc:
@@ -310,6 +317,7 @@ def save_metrics_cache(metrics: FrameMetrics, cache_dir: Path) -> None:
             "frame_count": metrics.metadata.frame_count,
             "fps": str(metrics.metadata.fps),
             "config_fingerprint": metrics.metadata.config_fingerprint,
+            "analysis_source_path": metrics.metadata.analysis_source_path,
             "clips": [
                 {
                     "path": str(c.path),

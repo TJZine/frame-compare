@@ -520,8 +520,15 @@ def test_current_cli_contract_documents_sources_config_only_surface() -> None:
 
     for expected in (
         "`reference`: optional source selector",
+        'omitted or set to literal `"auto"`',
+        "`analysis_source`: config-only string",
+        '`"reference"` analyzes the selected reference clip',
+        '`"fastest"` benchmarks discovered clips',
+        "never changes the selected reference, comparison order, input order, or display order",
         "`match_fps`: FPS matching policy",
         "`assume_reference`",
+        "`majority`",
+        "falls back to the selected reference effective FPS",
         "`overrides`: mapping from source selector",
         "`trim_start_frames`",
         "`trim_end_frames`",
@@ -536,6 +543,12 @@ def test_current_cli_contract_documents_sources_config_only_surface() -> None:
         "AssumeFPS-style timing override",
         "Mixed-FPS validation compares effective FPS values",
         "Explicit per-source `effective_fps` values take precedence",
+        "`sources.analysis_source` is not resolved for metrics",
+        "`fastest` is not benchmarked",
+        "no analysis metrics cache is loaded, validated, written, or keyed by `analysis_source`",
+        '`sources.analysis_source = "fastest"` is incompatible with `run --from-cache-only`',
+        "before probe loading, metadata prefetch, run-folder reservation",
+        "successful `run --json` schema is unchanged",
     ):
         assert expected in normalized_sources_section
 
@@ -552,7 +565,13 @@ def test_current_cli_contract_documents_sources_config_only_surface() -> None:
         if config_path.startswith("sources.")
     }
     assert source_override_paths == set()
-    for unsupported_flag in ("--source-reference", "--reference-source", "--source-override"):
+    for unsupported_flag in (
+        "--source-reference",
+        "--reference-source",
+        "--source-override",
+        "--analysis-source",
+        "--match-fps",
+    ):
         assert unsupported_flag not in sources_surface
         assert unsupported_flag not in declared_options
         assert unsupported_flag not in override_flags

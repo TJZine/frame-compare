@@ -29,6 +29,7 @@ class SourceMatchFpsMode(StrEnum):
 
     DISABLED = "disabled"
     ASSUME_REFERENCE = "assume_reference"
+    MAJORITY = "majority"
 
 
 class VsScreenshotWriter(StrEnum):

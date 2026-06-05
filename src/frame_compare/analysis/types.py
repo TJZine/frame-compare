@@ -55,6 +55,7 @@ class MetricsMetadata:
     fps: Fraction
     config_fingerprint: str
     clips: Sequence[ClipIdentity]
+    analysis_source_path: str = ""
     version: int = 2
 
 

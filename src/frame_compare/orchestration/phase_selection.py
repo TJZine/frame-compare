@@ -182,6 +182,9 @@ def run_analyze_phase(
     require_cache_only: bool = False,
     vs_loader: VSLoader | None = None,
 ) -> AnalyzePhaseOutput:
+    if ctx.analysis_clip is None:
+        raise MetricsCalculationError("Analysis source was not resolved for metric analysis.")
+
     selection_domain = ctx.analysis_selection_domain
     fingerprint = cache_io.compute_cache_key(
         input_videos,
@@ -200,16 +203,18 @@ def run_analyze_phase(
     else:
         metrics = calculate_metrics(
             video_paths=input_videos,
+            analysis_source_path=ctx.analysis_clip.path,
             config=ctx.config.analysis,
             cache_dir=workspace.cache_dir,
             reporter=ctx.reporter,
             vs_loader=vs_loader,
             selection_domain=selection_domain,
-            effective_fps=ctx.reference.effective_fps,
+            effective_fps=ctx.analysis_clip.effective_fps,
         )
     selection = _select_frames_for_selection_domain(
         metrics=metrics,
         reference=ctx.reference,
+        analysis_clip=ctx.analysis_clip,
         selection_window=ctx.selection_window,
         config=ctx.config.analysis,
     )
@@ -248,6 +253,7 @@ def _select_frames_for_selection_domain(
     *,
     metrics: FrameMetrics,
     reference: ClipState,
+    analysis_clip: ClipState,
     selection_window: SelectionWindow,
     config: AnalysisConfig,
 ) -> FrameSelection:
@@ -257,9 +263,10 @@ def _select_frames_for_selection_domain(
         else (0, reference.effective_num_frames())
     )
     if (
-        reference.trim.trim_start_frames == 0
-        and reference.trim.trim_end_frame_inclusive is None
+        analysis_clip.trim.trim_start_frames == 0
+        and analysis_clip.trim.trim_end_frame_inclusive is None
         and frame_count == reference.effective_num_frames()
+        and frame_count == analysis_clip.effective_num_frames()
         and window_start == 0
     ):
         return select_frames(
@@ -277,7 +284,7 @@ def _select_frames_for_selection_domain(
 
     trimmed_metrics = _trimmed_metrics_for_overlap(
         metrics=metrics,
-        trim_start_frame=reference.trim.trim_start_frames + window_start,
+        trim_start_frame=analysis_clip.trim.trim_start_frames + window_start,
         frame_count=frame_count,
     )
     selection = select_frames(

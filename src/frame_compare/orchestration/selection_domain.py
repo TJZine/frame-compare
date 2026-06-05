@@ -8,7 +8,8 @@ helpers.
 from __future__ import annotations
 
 import json
-from dataclasses import replace
+from collections import Counter
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from frame_compare.analysis.window import (
@@ -27,6 +28,37 @@ from frame_compare.orchestration.context import (
 from frame_compare.orchestration.errors import SourceSelectionError
 
 
+@dataclass(frozen=True)
+class FpsMatchDiagnostics:
+    """Human-facing details about automatic FPS matching."""
+
+    target_fps: str | None = None
+    reason: str | None = None
+    changed_clips: tuple[str, ...] = ()
+
+    def messages(self) -> list[str]:
+        if not self.changed_clips and self.reason != "reference fallback; no FPS majority":
+            return []
+        messages: list[str] = []
+        if self.target_fps is not None and self.reason is not None:
+            messages.append(f"FPS target: {self.target_fps} ({self.reason})")
+        messages.extend(f"FPS matched: {changed}" for changed in self.changed_clips)
+        return messages
+
+    def warnings(self) -> list[str]:
+        if self.reason != "reference fallback; no FPS majority" or self.target_fps is None:
+            return []
+        return [f"sources: FPS target {self.target_fps} ({self.reason})"]
+
+
+@dataclass(frozen=True)
+class SelectionDomainClips:
+    """Prepared clips plus FPS matching diagnostics."""
+
+    clips: list[ClipState]
+    fps_diagnostics: FpsMatchDiagnostics
+
+
 def build_selection_domain_clips(
     *,
     ordered_paths: list[Path],
@@ -35,6 +67,22 @@ def build_selection_domain_clips(
     match_fps: SourceMatchFpsMode = SourceMatchFpsMode.DISABLED,
 ) -> list[ClipState]:
     """Build prepared clip states for selection-domain and cache decisions."""
+    return build_selection_domain_clips_with_diagnostics(
+        ordered_paths=ordered_paths,
+        snapshots_by_path=snapshots_by_path,
+        overrides_by_path=overrides_by_path,
+        match_fps=match_fps,
+    ).clips
+
+
+def build_selection_domain_clips_with_diagnostics(
+    *,
+    ordered_paths: list[Path],
+    snapshots_by_path: dict[Path, ClipProbeSnapshot],
+    overrides_by_path: dict[Path, SourceOverrideConfig],
+    match_fps: SourceMatchFpsMode = SourceMatchFpsMode.DISABLED,
+) -> SelectionDomainClips:
+    """Build prepared clip states and return automatic FPS matching diagnostics."""
     clips = [
         _build_selection_domain_clip(
             index=index,
@@ -45,12 +93,19 @@ def build_selection_domain_clips(
         for index, path in enumerate(ordered_paths)
     ]
     if match_fps == SourceMatchFpsMode.ASSUME_REFERENCE:
-        return _apply_reference_fps_match(
+        matched = _apply_reference_fps_match(
             clips=clips,
             ordered_paths=ordered_paths,
             overrides_by_path=overrides_by_path,
         )
-    return clips
+        return SelectionDomainClips(clips=matched, fps_diagnostics=FpsMatchDiagnostics())
+    if match_fps == SourceMatchFpsMode.MAJORITY:
+        return _apply_majority_fps_match(
+            clips=clips,
+            ordered_paths=ordered_paths,
+            overrides_by_path=overrides_by_path,
+        )
+    return SelectionDomainClips(clips=clips, fps_diagnostics=FpsMatchDiagnostics())
 
 
 def _apply_reference_fps_match(
@@ -71,6 +126,47 @@ def _apply_reference_fps_match(
             continue
         matched.append(replace(clip, effective_fps=reference_fps))
     return matched
+
+
+def _apply_majority_fps_match(
+    *,
+    clips: list[ClipState],
+    ordered_paths: list[Path],
+    overrides_by_path: dict[Path, SourceOverrideConfig],
+) -> SelectionDomainClips:
+    if len(clips) < 2:
+        return SelectionDomainClips(clips=clips, fps_diagnostics=FpsMatchDiagnostics())
+
+    counts = Counter(clip.effective_fps for clip in clips)
+    majority_fps = next((fps for fps, count in counts.items() if count > len(clips) / 2), None)
+    if majority_fps is None:
+        target_fps = clips[0].effective_fps
+        reason = "reference fallback; no FPS majority"
+    else:
+        target_fps = majority_fps
+        reason = "majority"
+
+    matched: list[ClipState] = []
+    changed: list[str] = []
+    for path, clip in zip(ordered_paths, clips, strict=True):
+        override = overrides_by_path.get(path)
+        if override is not None and override.effective_fps is not None:
+            matched.append(clip)
+            continue
+        if clip.effective_fps == target_fps:
+            matched.append(clip)
+            continue
+        matched.append(replace(clip, effective_fps=target_fps))
+        changed.append(f"{clip.path.name} {clip.effective_fps} -> {target_fps}")
+
+    return SelectionDomainClips(
+        clips=matched,
+        fps_diagnostics=FpsMatchDiagnostics(
+            target_fps=str(target_fps),
+            reason=reason,
+            changed_clips=tuple(changed),
+        ),
+    )
 
 
 def _build_selection_domain_clip(
@@ -148,6 +244,7 @@ def compute_selection_window_for_clips(
 def build_analysis_selection_domain_token(
     *,
     clips: list[ClipState],
+    analysis_clip: ClipState | None = None,
     config: ConfigSchema,
     selection_window: SelectionWindow,
 ) -> str:
@@ -173,6 +270,9 @@ def build_analysis_selection_domain_token(
             }
             for clip in clips
         ],
+        "analysis_source_path": analysis_clip.path.as_posix()
+        if analysis_clip is not None
+        else None,
         "reference_path": clips[0].path.as_posix() if clips else None,
         "selection_window": {
             "end_frame_exclusive": selection_window.end_frame_exclusive,
