@@ -165,6 +165,7 @@ RUN apt-get update && \
         libxxhash0 \
         mesa-vulkan-drivers \
         procps \
+        vulkan-tools \
         wget \
         which \
         && \

@@ -21,6 +21,17 @@ def test_docker_integration_workflow_watches_lockfile(repo_root: Path) -> None:
     assert re.search(r"paths:\s*(?:\n\s+- .*)*\n\s+- uv\.lock\b", workflow)
 
 
+def test_docker_integration_workflow_watches_docker_overrides_and_verify_scripts(
+    repo_root: Path,
+) -> None:
+    workflow_path = repo_root / ".github" / "workflows" / "docker-integration.yml"
+    workflow = _read_text_or_fail(workflow_path)
+
+    assert "- docker-compose*.yml" in workflow
+    assert "- tools/verify_docker_*.sh" in workflow
+    assert "- tests/workflows/**" in workflow
+
+
 def test_dockerfile_installs_lock_export_with_hashes(repo_root: Path) -> None:
     dockerfile_path = repo_root / "Dockerfile"
     dockerfile = _read_text_or_fail(dockerfile_path)

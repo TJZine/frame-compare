@@ -5,10 +5,11 @@ on:
     branches: [main, cleanup]
     paths:
       - Dockerfile
-      - docker-compose.yml
+      - docker-compose*.yml
       - pyproject.toml
       - uv.lock
-      - tools/verify_docker_integration.sh
+      - tools/verify_docker_*.sh
+      - tests/workflows/**
       - src/frame_compare/render/**
       - src/frame_compare/vs/**
       - tests/integration/**

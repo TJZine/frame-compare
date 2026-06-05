@@ -145,8 +145,10 @@ UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
 Required when changing:
 
 - `Dockerfile`
-- `docker-compose.yml`
-- `tools/verify_docker_integration.sh`
+- `docker-compose*.yml`
+- `tools/verify_docker_*.sh`
+- `.github/workflows/docker-integration.yml`
+- Docker workflow/contract tests that validate Docker/runtime script or profile semantics
 - `src/frame_compare/render/**`
 - `src/frame_compare/vs/**`
 - integration tests that validate real VS/FFmpeg behavior
@@ -165,7 +167,7 @@ Current capability contract:
 | --- | --- |
 | macOS Docker Desktop | Supported for backend rendering, reports, and software tonemap only; not for native GPU acceleration or first-class VSPreview GUI launch |
 | Linux Docker, CPU/software Vulkan | Canonical default Docker path; headless, deterministic, and CI-safe |
-| Linux Docker with NVIDIA GPU | Optional host-dependent path that needs separate verification |
+| Linux Docker with NVIDIA GPU | Optional `gpu-nvidia` override/profile plus dedicated GPU proof path; documented-only/unverified unless separately proved on a compatible Linux NVIDIA host |
 | Native Windows portable | Separate first-class native runtime/release surface, not a Docker profile |
 
 When documenting or reviewing optional Docker GPU/profile work, cite the official
@@ -174,6 +176,16 @@ Docker references in prose so the host/runtime assumptions stay explicit:
 [Docker Desktop GPU support notes](https://docs.docker.com/desktop/features/gpu/),
 [Compose profiles](https://docs.docker.com/compose/how-tos/profiles/), and the
 [Compose `gpus` service attribute](https://docs.docker.com/reference/compose-file/services/#gpus).
+
+Optional NVIDIA GPU proof command:
+
+```bash
+bash tools/verify_docker_gpu.sh
+```
+
+That command is not part of the default Docker gate. It is a separate, fail-closed
+host-dependent proof for Linux NVIDIA systems only. If the local machine cannot run
+it, record GPU support as documented-only/unverified rather than supported.
 
 ### Windows Portable / Release-Path Verification
 
@@ -287,7 +299,7 @@ Use this as the default routing shortcut before exploring deeper:
 | CLI/config contract change | `docs/current-cli-contract.md` | `src/frame_compare/cli/entry.py`, `src/frame_compare/config/overrides.py`, `tests/cli/test_cli_commands.py`, `tests/config/test_overrides.py`, `tests/test_cli_contract_docs.py` | High | Full verification |
 | Internal logic change outside hotspots/public CLI | `docs/current-architecture.md` | Existing owner module plus nearby tests | Medium | Logic verification |
 | Hotspot or runtime pipeline change | `docs/current-architecture.md` | `orchestration/`, `render/`, `vs/`, hotspot files, adjacent tests | High | Full verification, plus Docker when listed under Docker/runtime verification |
-| Docker/runtime environment change | this runbook + `docs/current-architecture.md` | `Dockerfile`, `docker-compose.yml`, `tools/verify_docker_integration.sh`, runtime integration tests | High | Full verification plus Docker/runtime verification |
+| Docker/runtime environment change | this runbook + `docs/current-architecture.md` | `Dockerfile`, `docker-compose*.yml`, `tools/verify_docker_*.sh`, runtime integration tests | High | Full verification plus Docker/runtime verification |
 | Windows portable or release-path change | this runbook | `tools/windows_portable/**`, `.github/workflows/windows-portable.yml`, release-path docs | High | Full verification plus Windows portable/release-path verification |
 | Workflow/authority doc change | this runbook or the affected authority doc | `AGENTS.md`, `.agents/rules/general-guidelines.md`, `.coderabbit.yaml`, `docs/ENGINEERING_RUNBOOK.md`, `docs/current-architecture.md`, `docs/current-cli-contract.md` | High | Full verification |
 

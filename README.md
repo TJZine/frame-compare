@@ -228,7 +228,7 @@ matches the CI-safe backend proof path rather than a desktop GUI workflow.
 | ----------- | ------------------------- | ------------------------------------------ | ----- |
 | macOS Docker Desktop | Backend rendering, HTML reports, software tonemap, `doctor`, non-GUI `run`, reproducible software Vulkan path | Native GPU acceleration, first-class VSPreview GUI launch | Supported for backend parity only. Docker Desktop on macOS does not provide the native GPU/desktop path this project treats as optional host-specific behavior. |
 | Linux Docker, CPU/software Vulkan | Full default Docker path: backend rendering, HTML reports, software tonemap, CI parity, deterministic headless verification | Native GPU acceleration, GUI/VSPreview unless separately configured | This is the canonical default Docker mode. |
-| Linux Docker with NVIDIA GPU | Documented-only host-dependent target pending a separate GPU profile/proof slice | Guaranteed parity without host setup, default CI path, GUI/VSPreview by default | Requires compatible host GPU/container setup and separate verification. Follow Docker's GPU/container guidance before treating this as available on a given machine. |
+| Linux Docker with NVIDIA GPU | Optional `gpu-nvidia` override/profile and GPU proof script for host-dependent Vulkan acceleration | Guaranteed parity without host setup, default CI path, GUI/VSPreview by default | Documented-only/unverified in this repo unless you run the dedicated proof on a compatible Linux NVIDIA host. |
 | Native Windows portable | Full native app path including backend rendering, reports, VSPreview GUI, and Windows installer/update flow | Docker-specific container assumptions | This remains the first-class native desktop/runtime distribution. |
 
 Optional Docker GPU and GUI profiles require compatible host setup and separate
@@ -252,6 +252,22 @@ Local invocations may require optional dependencies (notably VapourSynth). For r
 ```bash
 bash tools/verify_docker_integration.sh
 ```
+
+Optional Linux NVIDIA hosts can try the separate GPU proof path:
+
+```bash
+bash tools/verify_docker_gpu.sh
+```
+
+That path keeps the default Docker services unchanged unless you opt into
+`docker-compose.gpu-nvidia.yml` and the `gpu-nvidia` profile. The script requires a
+compatible Linux NVIDIA host with NVIDIA Container Toolkit. It preflights Docker
+Compose before using the Compose `gpus` attribute. If your Compose plugin is older
+than 2.30.0, the script stops and prints a copy/paste-friendly `docker run --gpus all`
+fallback instead of silently dropping to software Vulkan.
+
+GPU support here is still documented-only/unverified unless you run
+`bash tools/verify_docker_gpu.sh` successfully on a compatible Linux NVIDIA machine.
 
 ### Reports
 

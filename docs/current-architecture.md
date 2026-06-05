@@ -156,7 +156,7 @@ Current Docker capability contract:
 | --- | --- |
 | macOS Docker Desktop | Supported for backend rendering, reports, and software tonemap through the default headless software-Vulkan path; not a native GPU or first-class VSPreview GUI surface |
 | Linux Docker, CPU/software Vulkan | Canonical Docker default; deterministic, headless, CI-safe software Vulkan path |
-| Linux Docker with NVIDIA GPU | Optional future/host-dependent acceleration profile that requires compatible host setup and separate verification |
+| Linux Docker with NVIDIA GPU | Optional `gpu-nvidia` compose override/profile plus `tools/verify_docker_gpu.sh`; documented-only/unverified until separately proved on a compatible Linux NVIDIA host |
 | Native Windows portable | First-class native runtime with backend rendering, reports, and VSPreview GUI support outside Docker |
 
 Keep these integrations at their current owners:
@@ -185,6 +185,13 @@ host-dependent runtime variants and must be documented and verified separately f
 the default Docker gate. When those variants are discussed, use the official Docker
 GPU/container, Docker Desktop GPU support, Compose profiles, and Compose `gpus`
 documentation as the external contract reference.
+
+Current Docker owner seams for optional profiles remain explicit:
+
+- `docker-compose.yml`: default headless software-Vulkan services
+- `docker-compose.gpu-nvidia.yml`: opt-in NVIDIA GPU override/profile only
+- `tools/verify_docker_integration.sh`: canonical default Docker gate
+- `tools/verify_docker_gpu.sh`: optional NVIDIA visibility/Vulkan/placebo proof
 
 slow.pics publishing is service-owned. `frame_compare.services.publishers` owns
 the browser-compatible slow.pics client flow: `GET /comparison`,
