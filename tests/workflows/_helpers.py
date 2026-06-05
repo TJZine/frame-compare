@@ -45,3 +45,25 @@ def bash_executable_or_skip() -> str:
     if result.returncode != 0 or result.stdout != "frame-compare-bash-ok":
         pytest.skip("bash is not executable for Docker shell-script contract tests")
     return bash_path
+
+
+def bash_path_or_skip(bash: str, path: Path) -> str:
+    try:
+        result = subprocess.run(
+            [
+                bash,
+                "-lc",
+                'if command -v cygpath >/dev/null 2>&1; then cygpath -u "$1"; else printf "%s" "$1"; fi',
+                "_",
+                str(path),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=BASH_PROBE_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        pytest.skip(f"bash path conversion failed for Docker shell-script contract tests: {exc}")
+    if result.returncode != 0 or not result.stdout:
+        pytest.skip("bash path conversion failed for Docker shell-script contract tests")
+    return result.stdout.rstrip("\n")

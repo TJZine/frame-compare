@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -57,3 +58,28 @@ def test_bash_executable_or_skip_returns_probed_bash_path(
 
     assert _helpers.bash_executable_or_skip() == expected_path
     assert captured_commands[0][0] == expected_path
+
+
+def test_bash_path_or_skip_uses_cygpath_when_available(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured_commands: list[list[str]] = []
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        command = args[0]
+        assert isinstance(command, list)
+        captured_commands.append(command)
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout="/c/Users/runneradmin/AppData/Local/Temp/icd\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(_helpers.subprocess, "run", fake_run)
+
+    converted = _helpers.bash_path_or_skip("C:/Program Files/Git/bin/bash.exe", tmp_path / "icd")
+
+    assert converted == "/c/Users/runneradmin/AppData/Local/Temp/icd"
+    assert captured_commands[0][0] == "C:/Program Files/Git/bin/bash.exe"
+    assert "cygpath -u" in captured_commands[0][2]
