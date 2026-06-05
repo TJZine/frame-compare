@@ -154,7 +154,7 @@ Current Docker capability contract:
 
 | Environment | Current posture |
 | --- | --- |
-| macOS Docker Desktop | Supported for backend rendering, reports, and software tonemap through the default headless software-Vulkan path; not a native GPU or first-class VSPreview GUI surface |
+| macOS Docker Desktop | Supported for backend rendering, reports, and software tonemap through the default headless software-Vulkan path only; Docker-based VSPreview GUI launch is unsupported beyond those backend features, and macOS Docker is not a native GPU or native Qt desktop surface |
 | Linux Docker, CPU/software Vulkan | Canonical Docker default; deterministic, headless, CI-safe software Vulkan path |
 | Linux Docker with NVIDIA GPU | Optional `gpu-nvidia` compose override/profile plus `tools/verify_docker_gpu.sh`; documented-only/unverified until separately proved on a compatible Linux NVIDIA host |
 | Linux Docker with X11 GUI | Optional `gui-linux` compose override/profile plus `tools/verify_docker_gui.sh`; documented-only/unverified until separately proved on a compatible Linux X11 desktop host |
