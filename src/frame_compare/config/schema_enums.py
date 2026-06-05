@@ -24,6 +24,13 @@ class ScreenshotGeometryMode(StrEnum):
     ALIGNED = "aligned"
 
 
+class SourceMatchFpsMode(StrEnum):
+    """Source FPS matching policy for mixed-FPS inputs."""
+
+    DISABLED = "disabled"
+    ASSUME_REFERENCE = "assume_reference"
+
+
 class VsScreenshotWriter(StrEnum):
     """VapourSynth screenshot writer selection."""
 
@@ -89,6 +96,7 @@ __all__ = [
     "LogLevel",
     "OverlayMode",
     "ScreenshotGeometryMode",
+    "SourceMatchFpsMode",
     "ToneCurve",
     "TonemapPreset",
     "ViewerMode",

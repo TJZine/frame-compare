@@ -78,8 +78,10 @@ class MixedSourceFpsError(InputError):
                     f"but {comparison_label} ({comparison_path.name}) is {comparison_fps} fps."
                 ),
                 hint=(
-                    "Use comparison sources with the same source FPS as the reference, "
-                    "or preprocess them to a common frame rate before running frame-compare."
+                    "Use sources.match_fps = 'assume_reference' for AssumeFPS-style timing "
+                    "matching, add per-source sources.overrides.<selector>.effective_fps "
+                    "entries, or preprocess sources to a common frame rate before running "
+                    "frame-compare."
                 ),
                 details={
                     "reference_path": str(reference_path),

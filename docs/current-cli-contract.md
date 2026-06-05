@@ -88,6 +88,11 @@ Current fields:
 - `reference`: optional source selector. When omitted, the first discovered
   input remains the reference. When set, the selected source moves to the front
   of clip order and comparisons keep deterministic discovery order after it.
+- `match_fps`: FPS matching policy. Defaults to `disabled`. When set to
+  `assume_reference`, every comparison source without an explicit
+  `effective_fps` override inherits the selected reference effective FPS.
+  This is an AssumeFPS-style timing override; it does not resample, drop,
+  interpolate, or duplicate frames.
 - `overrides`: mapping from source selector to per-source override table.
   Current override fields are `trim_start_frames`, `trim_end_frames`, and
   `active_rect = { x, y, width, height }`, and `effective_fps = "num/den"`.
@@ -107,10 +112,11 @@ Configured source trims define each clip's base renderable domain. Alignment
 trims compose on top of those base trims rather than replacing them. Explicit
 config `active_rect` values are validated against the probed source dimensions
 and invalid explicit rectangles fail instead of falling back silently.
-`effective_fps` is an AssumeFPS-style timing override: it changes timing/FPS
-interpretation without resampling, dropping, interpolating, or duplicating
-source frames. Mixed-FPS validation compares effective FPS values after
-overrides.
+`effective_fps` is an explicit AssumeFPS-style timing override: it changes
+timing/FPS interpretation without resampling, dropping, interpolating, or
+duplicating source frames. Mixed-FPS validation compares effective FPS values
+after explicit overrides and after `match_fps = "assume_reference"` matching.
+Explicit per-source `effective_fps` values take precedence over `match_fps`.
 
 ## `version` Command Contract
 

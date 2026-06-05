@@ -520,6 +520,8 @@ def test_current_cli_contract_documents_sources_config_only_surface() -> None:
 
     for expected in (
         "`reference`: optional source selector",
+        "`match_fps`: FPS matching policy",
+        "`assume_reference`",
         "`overrides`: mapping from source selector",
         "`trim_start_frames`",
         "`trim_end_frames`",
@@ -533,6 +535,7 @@ def test_current_cli_contract_documents_sources_config_only_surface() -> None:
         "invalid explicit rectangles fail",
         "AssumeFPS-style timing override",
         "Mixed-FPS validation compares effective FPS values",
+        "Explicit per-source `effective_fps` values take precedence",
     ):
         assert expected in normalized_sources_section
 

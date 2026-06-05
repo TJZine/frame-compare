@@ -21,6 +21,7 @@ from frame_compare.config.schema_enums import (
     LogLevel,
     OverlayMode,
     ScreenshotGeometryMode,
+    SourceMatchFpsMode,
     ToneCurve,
     TonemapPreset,
     ViewerMode,
@@ -163,6 +164,7 @@ class SourcesConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reference: str | None = None
+    match_fps: SourceMatchFpsMode = SourceMatchFpsMode.DISABLED
     overrides: dict[str, SourceOverrideConfig] = Field(default_factory=dict)
 
 

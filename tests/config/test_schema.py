@@ -21,6 +21,7 @@ from frame_compare.config.schema_enums import (
     LogLevel,
     OverlayMode,
     ScreenshotGeometryMode,
+    SourceMatchFpsMode,
     Visibility,
     VsScreenshotWriter,
 )
@@ -53,6 +54,7 @@ def test_default_config_values() -> None:
     assert config.color.target_nits == 100
     assert config.paths.input_dir == "comparison_videos"
     assert config.sources.reference is None
+    assert config.sources.match_fps == SourceMatchFpsMode.DISABLED
     assert config.sources.overrides == {}
     assert config.screenshots.geometry_mode == ScreenshotGeometryMode.NATIVE
     assert config.screenshots.vs_writer == VsScreenshotWriter.AUTO
@@ -218,6 +220,7 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert slowpics.create_url_shortcut is True
     assert slowpics.webhook_url is None
     assert sources.reference is None
+    assert sources.match_fps == SourceMatchFpsMode.DISABLED
     assert sources.overrides == {}
     assert tmdb.enabled is True
     assert tmdb.api_key is None
@@ -259,6 +262,7 @@ def test_slowpics_config_public_surface_is_frozen_to_approved_fields_and_default
 def test_sources_config_defaults_and_override_schema() -> None:
     config = SourcesConfig(
         reference="00-reference.mkv",
+        match_fps="assume_reference",
         overrides={
             "01-encode.mkv": SourceOverrideConfig(
                 trim_start_frames=12,
@@ -271,6 +275,7 @@ def test_sources_config_defaults_and_override_schema() -> None:
 
     override = config.overrides["01-encode.mkv"]
     assert config.reference == "00-reference.mkv"
+    assert config.match_fps == SourceMatchFpsMode.ASSUME_REFERENCE
     assert override.trim_start_frames == 12
     assert override.trim_end_frames == 3
     assert override.effective_fps == Fraction(24000, 1001)
@@ -319,6 +324,7 @@ def test_source_override_rejects_negative_trims_and_invalid_active_rect(
     "payload",
     [
         {"unknown": True},
+        {"match_fps": "resample"},
         {"overrides": {"source.mkv": {"unknown": "value"}}},
         {
             "overrides": {
@@ -371,6 +377,7 @@ def test_default_config_toml_documents_sources_defaults() -> None:
 
     assert data["sources"] == {}
     assert '# reference = "00-reference.mkv"' in DEFAULT_CONFIG_TOML
+    assert '# match_fps = "assume_reference"' in DEFAULT_CONFIG_TOML
     assert '# [sources.overrides."encode-a.mkv"]' in DEFAULT_CONFIG_TOML
     assert '# effective_fps = "24000/1001"' in DEFAULT_CONFIG_TOML
 

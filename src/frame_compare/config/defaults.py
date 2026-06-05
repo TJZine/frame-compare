@@ -13,6 +13,7 @@ use_run_folders = true
 
 [sources]
 # reference = "00-reference.mkv"
+# match_fps = "assume_reference"  # opt-in; timing metadata only, no frame resampling
 # Add per-source overrides with tables such as:
 # [sources.overrides."encode-a.mkv"]
 # trim_start_frames = 0

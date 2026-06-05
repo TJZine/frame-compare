@@ -209,6 +209,7 @@ def _probe_input_videos(
     workspace: WorkspacePaths,
     input_videos: list[Path],
     deps: RunDependencies,
+    config: ConfigSchema,
     overrides_by_path: dict[Path, SourceOverrideConfig],
 ) -> list[ClipState]:
     cache_paths = _probe_cache_paths_for_run(workspace)
@@ -251,6 +252,7 @@ def _probe_input_videos(
         ordered_paths=input_videos,
         snapshots_by_path=snapshots_by_path,
         overrides_by_path=overrides_by_path,
+        match_fps=config.sources.match_fps,
     )
 
 
@@ -278,6 +280,7 @@ def _normalized_fps(fps: Fraction) -> Fraction:
 def _probe_input_videos_from_snapshots(
     *,
     input_videos: list[Path],
+    config: ConfigSchema,
     overrides_by_path: dict[Path, SourceOverrideConfig],
     snapshots_by_path: dict[Path, ClipProbeSnapshot],
 ) -> list[ClipState]:
@@ -285,6 +288,7 @@ def _probe_input_videos_from_snapshots(
         ordered_paths=input_videos,
         snapshots_by_path=snapshots_by_path,
         overrides_by_path=overrides_by_path,
+        match_fps=config.sources.match_fps,
     )
 
 
@@ -333,6 +337,7 @@ async def execute_prep(
         )
         prevalidated_clips = _probe_input_videos_from_snapshots(
             input_videos=input_videos,
+            config=config,
             overrides_by_path=overrides_by_path,
             snapshots_by_path=cached_snapshots,
         )
@@ -373,6 +378,7 @@ async def execute_prep(
             workspace=workspace,
             input_videos=input_videos,
             deps=deps,
+            config=config,
             overrides_by_path=overrides_by_path,
         )
         _validate_source_fps_compatibility(clips)
