@@ -172,6 +172,9 @@ Keep these integrations at their current owners:
   copy, report-confirmed upload prompting, and report/slow.pics browser
   precedence rules:
   `frame_compare.cli.entry`
+- host-side Docker report/URL opening helper for the default compose mount
+  layout and `https://slow.pics/...` URLs:
+  `tools/open_docker_host_target.py`
 - slow.pics URL shortcut creation: `frame_compare.services.slowpics_shortcut`
 - isolated slow.pics post-upload webhook delivery:
   `frame_compare.services.slowpics_webhook`
@@ -195,6 +198,7 @@ Current Docker owner seams for optional profiles remain explicit:
 - `tools/verify_docker_integration.sh`: canonical default Docker gate
 - `tools/verify_docker_gpu.sh`: optional NVIDIA visibility/Vulkan/placebo proof
 - `tools/verify_docker_gui.sh`: optional Linux X11/VSPreview dependency and session-script proof
+- `tools/open_docker_host_target.py`: host-side helper for default compose output mounts and explicit `https://slow.pics/...` URLs only
 
 The GUI profile stays container-boundary aware rather than changing CLI/runtime
 owners. Its explicit X11 contract is:
@@ -208,6 +212,13 @@ The optional GUI proof is non-CI and non-default. It must prove VSPreview
 availability through the existing doctor/adapter owners and prove session-script
 generation without requiring a real desktop launch. Any real UI launch remains a
 manual Linux desktop action outside the default Docker verification gate.
+
+The host open helper is also container-boundary aware rather than a CLI contract
+change. It does not alter in-container report auto-open or slow.pics browser
+behavior. Instead, it runs on the host, translates only the default compose
+mounts `/workspace/screenshots` -> `./screenshots` and `/workspace/generated` ->
+`./generated`, rejects `/workspace/config` and `/workspace/comparison_videos`,
+and allows remote opening only for explicit `https://slow.pics/...` URLs.
 
 slow.pics publishing is service-owned. `frame_compare.services.publishers` owns
 the browser-compatible slow.pics client flow: `GET /comparison`,

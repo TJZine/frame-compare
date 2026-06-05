@@ -324,6 +324,39 @@ fallback instead of silently dropping to software Vulkan.
 GPU support here is still documented-only/unverified unless you run
 `bash tools/verify_docker_gpu.sh` successfully on a compatible Linux NVIDIA machine.
 
+#### Host Open Helper
+
+Containerized runs cannot directly open the host browser for generated reports or
+slow.pics links. For the default `docker compose` volume layout, use the
+host-side helper instead:
+
+```bash
+python tools/open_docker_host_target.py "<report_path_from_run_output>"
+python tools/open_docker_host_target.py https://slow.pics/c/example
+```
+
+To translate a container path without opening it:
+
+```bash
+python tools/open_docker_host_target.py --print-only "<report_path_from_run_output>"
+```
+
+The helper only translates the default compose output mounts used by
+`docker-compose.yml`:
+
+- `/workspace/screenshots` -> `./screenshots`
+- `/workspace/generated` -> `./generated`
+
+Use the exact `report_path` printed by the run. With the default
+`report.output_dir = null`, reports are written under `/workspace/screenshots`,
+not `/workspace/generated`.
+
+The helper rejects `/workspace/config`, `/workspace/comparison_videos`,
+non-canonical paths, symlink escapes, and non-`https://slow.pics/...` URLs.
+This helper is host-side only; it does not change the existing CLI/browser
+ownership inside the container. It is not a general `docker run` path
+translator for arbitrary custom bind mounts.
+
 ### Reports
 
 Generated reports are static HTML viewers. By default, report image sources point
