@@ -53,13 +53,14 @@ def compose_overlay_text_lines(
     height: int,
     selection_type: str | None,
     diagnostic_lines: Sequence[str],
+    resolution_summary: str | None = None,
 ) -> list[str]:
     """
     Compose the "overlay-text" block lines for the overlay.
 
     Invariants:
     - STANDARD: optional base text, resolution, selection type.
-    - DIAGNOSTIC: like STANDARD, but inserts diagnostic lines before selection type.
+    - DIAGNOSTIC: optional base text, resolution, then diagnostic lines.
     - MINIMAL/NONE: no lines.
     """
     if mode in (OverlayMode.NONE, OverlayMode.MINIMAL):
@@ -69,11 +70,14 @@ def compose_overlay_text_lines(
     if base_text:
         lines.append(base_text)
 
-    if width > 0 and height > 0:
+    if resolution_summary:
+        lines.append(resolution_summary)
+    elif width > 0 and height > 0:
         lines.append(f"{width} × {height}  (native)")
 
     if mode == OverlayMode.DIAGNOSTIC:
         lines.extend(diagnostic_lines)
+        return lines
 
     selection = selection_type or "(unknown)"
     lines.append(f"Frame Selection Type: {selection}")

@@ -20,7 +20,7 @@ from frame_compare.config.loader import (
 def test_load_default_config() -> None:
     """Test loading default config without TOML or env."""
     config = get_default_config()
-    assert config.analysis.frame_count == 10
+    assert config.analysis.random_frame_count == 10
 
 
 def test_load_from_toml_file(tmp_path: Path) -> None:
@@ -29,13 +29,13 @@ def test_load_from_toml_file(tmp_path: Path) -> None:
     config_file.write_text(
         """
         [analysis]
-        frame_count = 20
+        random_frame_count = 20
         """,
         encoding="utf-8",
     )
 
     config = load_config(config_path=config_file)
-    assert config.analysis.frame_count == 20
+    assert config.analysis.random_frame_count == 20
     # Other values remain defaults
     assert config.paths.input_dir == "comparison_videos"
 
@@ -60,10 +60,10 @@ def test_toml_syntax_error_raises(tmp_path: Path) -> None:
 def test_toml_with_utf8_bom_is_accepted(tmp_path: Path) -> None:
     """UTF-8 BOM-prefixed TOML should load (common on Windows)."""
     config_file = tmp_path / "bom.toml"
-    config_file.write_bytes(b"\xef\xbb\xbf[analysis]\nframe_count = 20\n")
+    config_file.write_bytes(b"\xef\xbb\xbf[analysis]\nrandom_frame_count = 20\n")
 
     config = load_config(config_path=config_file)
-    assert config.analysis.frame_count == 20
+    assert config.analysis.random_frame_count == 20
 
 
 def test_validation_error_raises(tmp_path: Path) -> None:
@@ -72,7 +72,7 @@ def test_validation_error_raises(tmp_path: Path) -> None:
     config_file.write_text(
         """
         [analysis]
-        frame_count = -1
+        random_frame_count = -1
         """,
         encoding="utf-8",
     )
@@ -94,7 +94,7 @@ def test_config_validation_error_context_is_json_serializable(tmp_path: Path) ->
     config_file.write_text(
         """
         [analysis]
-        frame_count = -1
+        random_frame_count = -1
         """,
         encoding="utf-8",
     )
@@ -110,15 +110,15 @@ def test_config_validation_error_context_is_json_serializable(tmp_path: Path) ->
 
 def test_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test overriding config via environment variables."""
-    monkeypatch.setenv("FRAME_COMPARE_ANALYSIS__FRAME_COUNT", "30")
+    monkeypatch.setenv("FRAME_COMPARE_ANALYSIS__RANDOM_FRAME_COUNT", "30")
 
     config = load_config_from_env()
-    assert config.analysis.frame_count == 30
+    assert config.analysis.random_frame_count == 30
 
 
 def test_env_override_empty_string_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """Empty-string env var should raise ConfigValidationError."""
-    monkeypatch.setenv("FRAME_COMPARE_ANALYSIS__FRAME_COUNT", "")
+    monkeypatch.setenv("FRAME_COMPARE_ANALYSIS__RANDOM_FRAME_COUNT", "")
 
     with pytest.raises(ConfigValidationError):
         load_config_from_env()
@@ -130,15 +130,15 @@ def test_cli_override_takes_precedence(tmp_path: Path) -> None:
     config_file.write_text(
         """
         [analysis]
-        frame_count = 20
+        random_frame_count = 20
         """,
         encoding="utf-8",
     )
 
-    overrides: dict[str, Any] = {"analysis": {"frame_count": 50}}
+    overrides: dict[str, Any] = {"analysis": {"random_frame_count": 50}}
     config = load_config(config_path=config_file, overrides=overrides)
 
-    assert config.analysis.frame_count == 50
+    assert config.analysis.random_frame_count == 50
 
 
 def test_load_config_none_path_with_empty_overrides_returns_config(
@@ -146,7 +146,7 @@ def test_load_config_none_path_with_empty_overrides_returns_config(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     config = load_config(config_path=None, overrides={})
-    assert config.analysis.frame_count == 10
+    assert config.analysis.random_frame_count == 10
 
 
 def test_empty_overrides_leave_defaults_intact(
@@ -154,7 +154,7 @@ def test_empty_overrides_leave_defaults_intact(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     config = load_config(overrides={})
-    assert config.analysis.frame_count == 10
+    assert config.analysis.random_frame_count == 10
 
 
 def test_precedence_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -163,22 +163,22 @@ def test_precedence_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     config_file.write_text(
         """
         [analysis]
-        frame_count = 10  # TOML
+        random_frame_count = 10  # TOML
         """,
         encoding="utf-8",
     )
 
     # Env
-    monkeypatch.setenv("FRAME_COMPARE_ANALYSIS__FRAME_COUNT", "20")
+    monkeypatch.setenv("FRAME_COMPARE_ANALYSIS__RANDOM_FRAME_COUNT", "20")
 
     # 1. Env overrides TOML
     config = load_config(config_path=config_file)
-    assert config.analysis.frame_count == 20
+    assert config.analysis.random_frame_count == 20
 
     # 2. Explicit overrides override Env
-    overrides: dict[str, Any] = {"analysis": {"frame_count": 30}}
+    overrides: dict[str, Any] = {"analysis": {"random_frame_count": 30}}
     config = load_config(config_path=config_file, overrides=overrides)
-    assert config.analysis.frame_count == 30
+    assert config.analysis.random_frame_count == 30
 
 
 def test_tmdb_api_key_legacy_alias_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

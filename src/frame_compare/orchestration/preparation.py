@@ -10,16 +10,23 @@ import structlog
 import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.window import SelectionWindow
-from frame_compare.config.overrides import apply_cli_overrides
+from frame_compare.config.effective import (
+    build_preflight_input_dir_override,
+    resolve_effective_config,
+)
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_models import SourceOverrideConfig
+from frame_compare.orchestration.analysis_policy import (
+    needs_analysis,
+    validate_skip_analysis_frame_selection_contract,
+)
 from frame_compare.orchestration.context import (
     ClipFingerprint,
     ClipProbeSnapshot,
     ClipState,
 )
 from frame_compare.orchestration.errors import MixedSourceFpsError
-from frame_compare.orchestration.phase_tasks import resolve_run_metadata
+from frame_compare.orchestration.phase_post_render import resolve_run_metadata
 from frame_compare.orchestration.preflight import discover_inputs, prepare_preflight
 from frame_compare.orchestration.probing.probe_cache import (
     compute_probe_cache_key,
@@ -53,13 +60,6 @@ from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionM
 from frame_compare.utils.types import WorkspacePaths
 
 log = structlog.get_logger()
-
-
-def _build_preflight_overrides(request: RunRequest) -> dict[str, object] | None:
-    overrides: dict[str, object] = {}
-    if request.input_dir is not None:
-        overrides["paths"] = {"input_dir": str(request.input_dir)}
-    return overrides or None
 
 
 def _remove_cached_metrics(
@@ -124,6 +124,9 @@ def _validate_cache_state(
     input_videos: list[Path],
     selection_domain: str | None,
 ) -> None:
+    if not needs_analysis(config.analysis):
+        return
+
     if request.no_cache:
         _remove_cached_metrics(
             workspace=workspace,
@@ -206,6 +209,7 @@ def _probe_input_videos(
     workspace: WorkspacePaths,
     input_videos: list[Path],
     deps: RunDependencies,
+    config: ConfigSchema,
     overrides_by_path: dict[Path, SourceOverrideConfig],
 ) -> list[ClipState]:
     cache_paths = _probe_cache_paths_for_run(workspace)
@@ -248,6 +252,7 @@ def _probe_input_videos(
         ordered_paths=input_videos,
         snapshots_by_path=snapshots_by_path,
         overrides_by_path=overrides_by_path,
+        match_fps=config.sources.match_fps,
     )
 
 
@@ -275,6 +280,7 @@ def _normalized_fps(fps: Fraction) -> Fraction:
 def _probe_input_videos_from_snapshots(
     *,
     input_videos: list[Path],
+    config: ConfigSchema,
     overrides_by_path: dict[Path, SourceOverrideConfig],
     snapshots_by_path: dict[Path, ClipProbeSnapshot],
 ) -> list[ClipState]:
@@ -282,6 +288,7 @@ def _probe_input_videos_from_snapshots(
         ordered_paths=input_videos,
         snapshots_by_path=snapshots_by_path,
         overrides_by_path=overrides_by_path,
+        match_fps=config.sources.match_fps,
     )
 
 
@@ -298,16 +305,17 @@ async def execute_prep(
     preflight = prepare_preflight(
         root=request.root,
         config_path=request.config_path,
-        overrides=_build_preflight_overrides(request),
+        overrides=build_preflight_input_dir_override(request.input_dir),
     )
     preflight_end = deps.clock()
     preflight_duration = (preflight_end - preflight_start).total_seconds()
 
     load_sources_start = deps.clock()
     workspace = preflight.workspace
-    config = apply_cli_overrides(
-        preflight.config,
-        cli_args=request.cli_config_overrides(),
+    config = resolve_effective_config(preflight.config, request.cli_config_overrides())
+    validate_skip_analysis_frame_selection_contract(
+        skip_analysis=request.skip_analysis,
+        config=config.analysis,
     )
     discovered_videos = discover_inputs(workspace.input_dir)
     source_selection = resolve_source_selection(
@@ -322,13 +330,14 @@ async def execute_prep(
     prevalidated_selection_window: SelectionWindow | None = None
     prevalidated_selection_domain: str | None = None
 
-    if request.from_cache_only and not request.skip_analysis:
+    if request.from_cache_only and not request.skip_analysis and needs_analysis(config.analysis):
         cached_snapshots = _cached_probe_snapshots_for_cache_only(
             workspace=workspace,
             input_videos=input_videos,
         )
         prevalidated_clips = _probe_input_videos_from_snapshots(
             input_videos=input_videos,
+            config=config,
             overrides_by_path=overrides_by_path,
             snapshots_by_path=cached_snapshots,
         )
@@ -369,6 +378,7 @@ async def execute_prep(
             workspace=workspace,
             input_videos=input_videos,
             deps=deps,
+            config=config,
             overrides_by_path=overrides_by_path,
         )
         _validate_source_fps_compatibility(clips)

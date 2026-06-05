@@ -78,8 +78,12 @@ def test_current_cli_contract_documents_secondary_command_streams() -> None:
     normalized_preset = " ".join(preset_section.split())
 
     assert "confirmation to stderr including the resolved config path" in normalized_wizard
+    assert "honor the `NO_COLOR` environment variable" in normalized_wizard
+    assert "do not suggest unsupported `--verbose` usage" in normalized_wizard
     assert "neutral status marker for optional unavailable checks" in normalized_doctor
     assert "This does not change `doctor --json` status values." in normalized_doctor
+    assert "honor the `NO_COLOR` environment variable" in normalized_doctor
+    assert "do not suggest unsupported `--verbose` usage" in normalized_doctor
     assert "Prints preset names one per line to stdout." in normalized_preset
     assert "Emits no success confirmation." in normalized_preset
     assert "confirmation to stderr including the preset name and resolved config path" in (
@@ -88,6 +92,8 @@ def test_current_cli_contract_documents_secondary_command_streams() -> None:
     assert "confirmation to stderr including the preset name and saved preset path" in (
         normalized_preset
     )
+    assert "honor the `NO_COLOR` environment variable" in normalized_preset
+    assert "do not suggest unsupported `--verbose` usage" in normalized_preset
 
 
 def test_current_cli_contract_matches_live_override_map() -> None:
@@ -514,6 +520,8 @@ def test_current_cli_contract_documents_sources_config_only_surface() -> None:
 
     for expected in (
         "`reference`: optional source selector",
+        "`match_fps`: FPS matching policy",
+        "`assume_reference`",
         "`overrides`: mapping from source selector",
         "`trim_start_frames`",
         "`trim_end_frames`",
@@ -527,6 +535,7 @@ def test_current_cli_contract_documents_sources_config_only_surface() -> None:
         "invalid explicit rectangles fail",
         "AssumeFPS-style timing override",
         "Mixed-FPS validation compares effective FPS values",
+        "Explicit per-source `effective_fps` values take precedence",
     ):
         assert expected in normalized_sources_section
 
@@ -645,9 +654,16 @@ def test_current_cli_contract_documents_analysis_ignore_window_and_cache_domain(
     )[0]
     normalized_analysis_section = " ".join(analysis_section.split())
     for expected in (
+        "`user_frames = []`",
+        "`random_frame_count = 10`",
+        "`dark_frame_count = 0`",
+        "`bright_frame_count = 0`",
+        "`motion_frame_count = 0`",
         "`ignore_lead_seconds = 0.0`",
         "`ignore_trail_seconds = 0.0`",
         "`min_window_seconds = 5.0`",
+        "original selected-reference source-frame numbers",
+        "Removed stale analysis keys `selection_mode` and `frame_count` fail validation explicitly",
         "there are no dedicated `run` flags",
         "source-specific base trim domain",
         "do not physically trim sources",

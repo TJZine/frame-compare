@@ -61,6 +61,7 @@ def handle_wizard(
     write_payload: WriteWizardPayloadFn,
     handle_error: HandleErrorFn,
     stdin_is_tty: bool,
+    no_color: bool,
 ) -> None:
     """Interactive configuration wizard."""
     defaults = get_default_config()
@@ -102,7 +103,7 @@ def handle_wizard(
         raise typer.Exit(
             code=handle_error(
                 config_error,
-                no_color=True,
+                no_color=no_color,
                 verbose=False,
                 verbose_hint=None,
             )
@@ -111,7 +112,7 @@ def handle_wizard(
         raise typer.Exit(
             code=handle_error(
                 error,
-                no_color=True,
+                no_color=no_color,
                 verbose=False,
                 verbose_hint=None,
             )

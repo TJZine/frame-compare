@@ -88,6 +88,11 @@ Current fields:
 - `reference`: optional source selector. When omitted, the first discovered
   input remains the reference. When set, the selected source moves to the front
   of clip order and comparisons keep deterministic discovery order after it.
+- `match_fps`: FPS matching policy. Defaults to `disabled`. When set to
+  `assume_reference`, every comparison source without an explicit
+  `effective_fps` override inherits the selected reference effective FPS.
+  This is an AssumeFPS-style timing override; it does not resample, drop,
+  interpolate, or duplicate frames.
 - `overrides`: mapping from source selector to per-source override table.
   Current override fields are `trim_start_frames`, `trim_end_frames`, and
   `active_rect = { x, y, width, height }`, and `effective_fps = "num/den"`.
@@ -107,10 +112,11 @@ Configured source trims define each clip's base renderable domain. Alignment
 trims compose on top of those base trims rather than replacing them. Explicit
 config `active_rect` values are validated against the probed source dimensions
 and invalid explicit rectangles fail instead of falling back silently.
-`effective_fps` is an AssumeFPS-style timing override: it changes timing/FPS
-interpretation without resampling, dropping, interpolating, or duplicating
-source frames. Mixed-FPS validation compares effective FPS values after
-overrides.
+`effective_fps` is an explicit AssumeFPS-style timing override: it changes
+timing/FPS interpretation without resampling, dropping, interpolating, or
+duplicating source frames. Mixed-FPS validation compares effective FPS values
+after explicit overrides and after `match_fps = "assume_reference"` matching.
+Explicit per-source `effective_fps` values take precedence over `match_fps`.
 
 ## `version` Command Contract
 
@@ -187,10 +193,14 @@ overrides.
   source trims, effective FPS values, the configured analysis ignore-window
   settings, and the final shared selectable window. Cache entries for different
   selected references or different selection domains from the same input set do
-  not satisfy each other.
+  not satisfy each other. Metric-array cache identity excludes `user_frames`,
+  random seed, frame-selection counts, `dark_quantile`, and `bright_quantile`
+  because those values affect frame choice rather than metric computation.
 - The full fingerprint remains inside the cache payload and is validated on load.
   Legacy run-folder `cache.compframes` files are not used as analysis cache hits.
-- With `paths.use_run_folders = true`, runs that proceed reserve a fresh run folder;
+- Analysis is skipped automatically when `dark_frame_count`, `bright_frame_count`,
+  and `motion_frame_count` are all `0`; `frame_plan` still selects configured
+  user/random frames. With `paths.use_run_folders = true`, runs that proceed reserve a fresh run folder;
   existing run folders are not reused to satisfy analysis cache hits.
 - `--no-cache` deletes only the matching shared analysis cache entry for the current
   inputs, selected reference, all-source selection domain, and analysis settings
@@ -369,7 +379,11 @@ These `run` flags currently map into config values through `CLI_OVERRIDE_MAP`:
 | `--tm-preset` | `color.preset` | Tonemap preset override. |
 | `--tm-target` | `color.target_nits` | Tonemap target nits override. |
 | `--tm-curve` | `color.tone_curve` | Tonemap curve override. |
-| `--frame-count` | `analysis.frame_count` | Frame-selection override. |
+| `--frames` | `analysis.user_frames` | Comma-separated original reference source-frame numbers. Values outside the effective selectable domain are dropped with warnings at runtime. |
+| `--random-frame-count` | `analysis.random_frame_count` | Random frame count override. |
+| `--dark-frame-count` | `analysis.dark_frame_count` | Dark metric frame count override; requires analysis. |
+| `--bright-frame-count` | `analysis.bright_frame_count` | Bright metric frame count override; requires analysis. |
+| `--motion-frame-count` | `analysis.motion_frame_count` | Motion metric frame count override; requires analysis. |
 | `--seed` | `analysis.random_seed` | Deterministic frame-selection seed override. |
 | `--overlay` | `screenshots.overlay_mode` | Overlay mode override. |
 | `--no-upload` | `slowpics.auto_upload` | Inverted flag: passing it sets effective `auto_upload = false`, and persists that value when combined with `--write-config`. |
@@ -378,14 +392,41 @@ These `run` flags currently map into config values through `CLI_OVERRIDE_MAP`:
 `--no-upload` is the only slow.pics-specific `run` flag. No runtime-only
 slow.pics `run` flags exist.
 
+`--frame-count` and `-n` are removed. They may be parsed as hidden
+rejection-only traps so Frame Compare can return its standard typed error in
+human and JSON modes, but they are not supported aliases, do not appear in help,
+do not map to config, and do not persist through `--write-config`.
+
 ## Config-Only Analysis Surface
 
-These `[analysis]` fields are config-only public surface; there are no dedicated
-`run` flags for them:
+The default `[analysis]` frame-selection surface is:
+
+- `user_frames = []`
+- `random_frame_count = 10`
+- `dark_frame_count = 0`
+- `bright_frame_count = 0`
+- `motion_frame_count = 0`
+- `random_seed = 42`
+- `save_frames_data = true`
+
+`user_frames` are original selected-reference source-frame numbers. They are not
+trim-relative offsets and are not post-alignment frame numbers. Configured source
+trims and the global selection window constrain whether each requested frame is
+renderable.
+
+At least one of `user_frames`, `random_frame_count`, `dark_frame_count`,
+`bright_frame_count`, or `motion_frame_count` must request a frame, and the total
+requested selector count must not exceed 100. Removed stale analysis keys
+`selection_mode` and `frame_count` fail validation explicitly.
+
+These remaining `[analysis]` fields are config-only public surface; there are no
+dedicated `run` flags for them:
 
 - `ignore_lead_seconds = 0.0`
 - `ignore_trail_seconds = 0.0`
 - `min_window_seconds = 5.0`
+- `dark_quantile = 0.05`
+- `bright_quantile = 0.95`
 
 The lead/trail fields define a global selectable analysis window inside each
 clip's source-specific base trim domain. They do not physically trim sources or
@@ -581,6 +622,9 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 - On success, it writes a concise confirmation to stderr including the resolved
   config path.
 - Interruptions during prompting exit with the interrupted exit code.
+- Typed validation/write failures use the standard CLI error contract on stderr,
+  honor the `NO_COLOR` environment variable, and do not suggest unsupported
+  `--verbose` usage.
 
 ## `doctor` Command Contract
 
@@ -589,6 +633,8 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 - If the `doctor` command hits a typed top-level failure before it can produce a
   `DoctorReport`, it uses the standard CLI error contract. In `--json` mode that means
   the standard error payload is written to stdout.
+- Human-mode typed top-level failures honor the `NO_COLOR` environment variable
+  and do not suggest unsupported `--verbose` usage.
 - Without `--json`, `doctor` writes a human-readable report to stdout.
 - Human output uses a neutral status marker for optional unavailable checks such as
   VSPreview, so optional availability gaps are visually distinct from critical
@@ -598,6 +644,10 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   expose raw probe exception messages.
 
 ## `preset` Command Contract
+
+- Typed preset command failures use the standard CLI error contract on stderr,
+  honor the `NO_COLOR` environment variable, and do not suggest unsupported
+  `--verbose` usage.
 
 ### `preset list`
 

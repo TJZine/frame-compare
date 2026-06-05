@@ -575,9 +575,9 @@ enable = false
     async def _unexpected_publish(**_kwargs: object) -> object:
         raise AssertionError("publish should be skipped by effective slowpics config")
 
-    from frame_compare.orchestration import phase_tasks
+    from frame_compare.orchestration import phase_post_render
 
-    monkeypatch.setattr(phase_tasks, "publish_to_slowpics", _unexpected_publish)
+    monkeypatch.setattr(phase_post_render, "publish_to_slowpics", _unexpected_publish)
 
     request = RunRequest(
         root=tmp_path,

@@ -40,8 +40,11 @@ def test_run_help_shows_all_options():
         "--tm-preset",
         "--tm-target",
         "--tm-curve",
-        "--frame-count",
-        "-n",
+        "--frames",
+        "--random-frame-count",
+        "--dark-frame-count",
+        "--bright-frame-count",
+        "--motion-frame-count",
         "--seed",
         "--overlay",
         "--skip-analysis",
@@ -67,6 +70,8 @@ def test_run_help_shows_all_options():
     }
 
     assert set(REQUIRED_RUN_OPTIONS).issubset(declared_options)
+    assert "--frame-count" in declared_options
+    assert "-n" in declared_options
 
     result = runner.invoke(
         app,
@@ -77,8 +82,22 @@ def test_run_help_shows_all_options():
     )
     output = _normalize_cli_output(result.stdout)
     assert result.exit_code == 0
-    for opt in ["--root", "--config", "--input", "--json", "--quiet", "--verbose"]:
+    for opt in [
+        "--root",
+        "--config",
+        "--input",
+        "--frames",
+        "--random-frame-count",
+        "--dark-frame-count",
+        "--bright-frame-count",
+        "--motion-frame-count",
+        "--json",
+        "--quiet",
+        "--verbose",
+    ]:
         assert opt in output
+    assert "--frame-count" not in output
+    assert " -n " not in output
 
 
 def test_stabilize_typer_help_width_backfills_import_order_gap(monkeypatch: MonkeyPatch) -> None:

@@ -16,19 +16,24 @@ import httpx
 
 from frame_compare.analysis.metrics import ANALYZE_PROGRESS_TOTAL
 from frame_compare.config.schema import ConfigSchema
+from frame_compare.orchestration.analysis_policy import needs_analysis
 from frame_compare.orchestration.context import RunContext
-from frame_compare.orchestration.phase_tasks import (
+from frame_compare.orchestration.phase_post_render import (
     record_dovi_not_implemented_warning,
-    run_align_phase,
-    run_analyze_phase,
     run_confirm_slowpics_upload_phase,
     run_metadata_phase,
     run_post_report_cleanup_phase,
     run_publish_phase,
-    run_render_phase,
     run_report_phase,
+)
+from frame_compare.orchestration.phase_selection import (
+    run_analyze_phase,
     select_initial_frame_plan,
     selection_label_for_frame,
+)
+from frame_compare.orchestration.phase_tasks import (
+    run_align_phase,
+    run_render_phase,
 )
 from frame_compare.orchestration.phases import Phase
 from frame_compare.orchestration.types import (
@@ -107,9 +112,15 @@ def _apply_phase_output(*, ctx: RunContext, state: ExecutionState, output: Phase
     match output:
         case FramePlanPhaseOutput() as phase_output:
             state.selected_frames[:] = phase_output.selected_frames
+            ctx.selection_breakdown = phase_output.selection_breakdown
+            ctx.selection_details_by_source_frame = phase_output.selection_details_by_source_frame
+            state.warnings.extend(phase_output.warnings)
         case AnalyzePhaseOutput() as phase_output:
             state.selected_frames[:] = phase_output.selected_frames
             state.artifacts.metrics_cache_hit = phase_output.metrics_cache_hit
+            state.artifacts.metrics_cache_status = (
+                "hit" if phase_output.metrics_cache_hit else "miss"
+            )
             ctx.selection_breakdown = phase_output.selection_breakdown
             ctx.selection_details_by_source_frame = phase_output.selection_details_by_source_frame
             ctx.analysis_metrics = phase_output.analysis_metrics
@@ -175,7 +186,7 @@ def build_phases_before_align(
         _create_timed_phase(
             "analyze",
             "analyze",
-            lambda config: request.skip_analysis,
+            lambda config: not needs_analysis(config.analysis),
             partial(
                 run_analyze_phase,
                 input_videos=input_videos,
@@ -200,6 +211,7 @@ def build_phases_before_align(
             phase_timings=state.phase_timings,
             warnings=state.warnings,
             warn_only=True,
+            progress_total=max(1, len(input_videos)),
         ),
     ]
 

@@ -7,14 +7,21 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 
 from frame_compare.config.schema_enums import (
     LogFormat,
     LogLevel,
     OverlayMode,
     ScreenshotGeometryMode,
-    SelectionMode,
+    SourceMatchFpsMode,
     ToneCurve,
     TonemapPreset,
     ViewerMode,
@@ -23,6 +30,10 @@ from frame_compare.config.schema_enums import (
 )
 
 _EFFECTIVE_FPS_PATTERN = re.compile(r"^[0-9]+/[0-9]+$")
+
+
+def _empty_user_frames() -> list[int]:
+    return []
 
 
 class PathsConfig(BaseModel):
@@ -38,15 +49,42 @@ class PathsConfig(BaseModel):
 class AnalysisConfig(BaseModel):
     """Frame selection and analysis settings."""
 
-    frame_count: int = Field(default=10, ge=1, le=100)
+    model_config = ConfigDict(extra="forbid")
+
+    user_frames: list[int] = Field(default_factory=_empty_user_frames)
+    random_frame_count: int = Field(default=10, ge=0)
+    dark_frame_count: int = Field(default=0, ge=0)
+    bright_frame_count: int = Field(default=0, ge=0)
+    motion_frame_count: int = Field(default=0, ge=0)
     random_seed: int = 42
     save_frames_data: bool = True
-    selection_mode: SelectionMode = SelectionMode.MIXED
     ignore_lead_seconds: float = Field(default=0.0, ge=0.0)
     ignore_trail_seconds: float = Field(default=0.0, ge=0.0)
     min_window_seconds: float = Field(default=5.0, ge=0.0)
     dark_quantile: float = Field(default=0.05, ge=0.0, le=0.5)
     bright_quantile: float = Field(default=0.95, ge=0.5, le=1.0)
+
+    @field_validator("user_frames")
+    @classmethod
+    def validate_user_frames(cls, value: list[int]) -> list[int]:
+        if any(frame < 0 for frame in value):
+            raise ValueError("user_frames must contain non-negative integers")
+        return value
+
+    @model_validator(mode="after")
+    def validate_requested_frame_total(self) -> AnalysisConfig:
+        requested = (
+            len(self.user_frames)
+            + self.random_frame_count
+            + self.dark_frame_count
+            + self.bright_frame_count
+            + self.motion_frame_count
+        )
+        if requested == 0:
+            raise ValueError("at least one analysis frame selector must request a frame")
+        if requested > 100:
+            raise ValueError("total requested frame selectors must be less than or equal to 100")
+        return self
 
 
 class AudioAlignmentConfig(BaseModel):
@@ -126,6 +164,7 @@ class SourcesConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reference: str | None = None
+    match_fps: SourceMatchFpsMode = SourceMatchFpsMode.DISABLED
     overrides: dict[str, SourceOverrideConfig] = Field(default_factory=dict)
 
 
@@ -210,8 +249,6 @@ class DiagnosticsConfig(BaseModel):
     """Optional diagnostic outputs for development and debugging."""
 
     per_frame_nits: bool = False
-    show_hdr_info: bool = False
-    frame_timing: bool = False
 
 
 class LoggingConfig(BaseModel):

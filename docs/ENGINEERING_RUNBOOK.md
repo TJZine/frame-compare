@@ -74,6 +74,16 @@ Docker integration gate:
 bash tools/verify_docker_integration.sh
 ```
 
+Default Docker posture:
+
+- Docker is a first-class runtime surface, but the default path is headless and
+  deterministic.
+- The canonical default Docker verification path uses software Vulkan and CI-safe
+  backend rendering rather than GPU passthrough or desktop GUI assumptions.
+- Optional Docker GPU or GUI profiles require compatible host setup and separate
+  verification; do not treat them as covered by the default gate unless the task
+  explicitly adds and proves them.
+
 Windows portable local packaging path:
 
 ```powershell
@@ -135,8 +145,10 @@ UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
 Required when changing:
 
 - `Dockerfile`
-- `docker-compose.yml`
-- `tools/verify_docker_integration.sh`
+- `docker-compose*.yml`
+- `tools/verify_docker_*.sh`
+- `.github/workflows/docker-integration.yml`
+- Docker workflow/contract tests that validate Docker/runtime script or profile semantics
 - `src/frame_compare/render/**`
 - `src/frame_compare/vs/**`
 - integration tests that validate real VS/FFmpeg behavior
@@ -148,6 +160,57 @@ bash tools/verify_docker_integration.sh
 ```
 
 If this path cannot be run locally, record it as documented-only and rely on `.github/workflows/docker-integration.yml`.
+
+Current capability contract:
+
+| Environment | Default posture |
+| --- | --- |
+| macOS Docker Desktop | Supported for backend rendering, reports, and software tonemap only; Docker-based VSPreview GUI launch is unsupported beyond those backend features, and native GPU acceleration/native Qt desktop forwarding are not supported |
+| Linux Docker, CPU/software Vulkan | Canonical default Docker path; headless, deterministic, and CI-safe |
+| Linux Docker with NVIDIA GPU | Optional `gpu-nvidia` override/profile plus dedicated GPU proof path; documented-only/unverified unless separately proved on a compatible Linux NVIDIA host |
+| Linux Docker with X11 GUI | Optional `gui-linux` override/profile plus dedicated GUI proof path; documented-only/unverified unless separately proved on a compatible Linux X11 desktop host |
+| Native Windows portable | Separate first-class native runtime/release surface, not a Docker profile |
+
+When documenting or reviewing optional Docker GPU/profile work, cite the official
+Docker references in prose so the host/runtime assumptions stay explicit:
+[Docker Engine GPU access](https://docs.docker.com/engine/containers/gpu/),
+[Docker Desktop GPU support notes](https://docs.docker.com/desktop/features/gpu/),
+[Compose profiles](https://docs.docker.com/compose/how-tos/profiles/), and the
+[Compose `gpus` service attribute](https://docs.docker.com/reference/compose-file/services/#gpus).
+
+Optional NVIDIA GPU proof command:
+
+```bash
+bash tools/verify_docker_gpu.sh
+```
+
+That command is not part of the default Docker gate. It is a separate, fail-closed
+host-dependent proof for Linux NVIDIA systems only. If the local machine cannot run
+it, record GPU support as documented-only/unverified rather than supported.
+
+Optional Linux X11 GUI proof command:
+
+```bash
+bash tools/verify_docker_gui.sh
+```
+
+That command is not part of the default Docker gate. It is a separate,
+host-dependent proof for Linux X11 desktop systems only. The minimal X11 contract
+is explicit:
+
+- host `DISPLAY`
+- host `/tmp/.X11-unix` socket mount into the container
+- optional host `XAUTHORITY` cookie file mount when the X server requires it
+- container user/UID aligned to the host UID/GID for local-user X11 permissions
+
+Docs and scripts must not use `xhost +`. If temporary X11 permission widening is
+needed, use the narrower host-local form `xhost +si:localuser:<user>` and record
+the cleanup command `xhost -si:localuser:<user>`. Real UI launch remains manual
+only; the proof command should verify dependency availability and session-script
+generation without requiring a visible desktop launch.
+
+If the local machine cannot run the GUI proof command, record GUI support as
+documented-only/unverified rather than supported.
 
 ### Windows Portable / Release-Path Verification
 
@@ -261,7 +324,7 @@ Use this as the default routing shortcut before exploring deeper:
 | CLI/config contract change | `docs/current-cli-contract.md` | `src/frame_compare/cli/entry.py`, `src/frame_compare/config/overrides.py`, `tests/cli/test_cli_commands.py`, `tests/config/test_overrides.py`, `tests/test_cli_contract_docs.py` | High | Full verification |
 | Internal logic change outside hotspots/public CLI | `docs/current-architecture.md` | Existing owner module plus nearby tests | Medium | Logic verification |
 | Hotspot or runtime pipeline change | `docs/current-architecture.md` | `orchestration/`, `render/`, `vs/`, hotspot files, adjacent tests | High | Full verification, plus Docker when listed under Docker/runtime verification |
-| Docker/runtime environment change | this runbook + `docs/current-architecture.md` | `Dockerfile`, `docker-compose.yml`, `tools/verify_docker_integration.sh`, runtime integration tests | High | Full verification plus Docker/runtime verification |
+| Docker/runtime environment change | this runbook + `docs/current-architecture.md` | `Dockerfile`, `docker-compose*.yml`, `tools/verify_docker_*.sh`, `.github/workflows/docker-integration.yml`, Docker workflow/contract tests, runtime integration tests | High | Full verification plus Docker/runtime verification |
 | Windows portable or release-path change | this runbook | `tools/windows_portable/**`, `.github/workflows/windows-portable.yml`, release-path docs | High | Full verification plus Windows portable/release-path verification |
 | Workflow/authority doc change | this runbook or the affected authority doc | `AGENTS.md`, `.agents/rules/general-guidelines.md`, `.coderabbit.yaml`, `docs/ENGINEERING_RUNBOOK.md`, `docs/current-architecture.md`, `docs/current-cli-contract.md` | High | Full verification |
 

@@ -159,6 +159,14 @@ def test_wizard_cancel_exits_130_and_writes_nothing(monkeypatch: MonkeyPatch) ->
         assert not (Path("config") / "config.toml").exists()
 
 
+def test_wizard_eof_exits_130_and_writes_nothing() -> None:
+    with runner.isolated_filesystem():
+        result = runner.invoke(app, ["wizard"], input="")
+
+        assert result.exit_code == 130
+        assert not (Path("config") / "config.toml").exists()
+
+
 def test_wizard_write_error_uses_cli_error_contract(monkeypatch: MonkeyPatch) -> None:
     def _write_text_atomic(_path: Path, _content: str, *, encoding: str = "utf-8") -> None:
         raise PermissionError("permission denied")
@@ -189,6 +197,52 @@ def test_wizard_write_error_uses_cli_error_contract(monkeypatch: MonkeyPatch) ->
         assert "Details:" in result.stderr
         assert "Traceback" not in result.stderr
         assert not (root / "config" / "config.toml").exists()
+
+
+def test_wizard_error_uses_default_terminal_color_policy(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+    def _handle_error(
+        _error: Exception,
+        *,
+        no_color: bool,
+        verbose: bool,
+        verbose_hint: str | None = "--verbose",
+    ) -> int:
+        captured["no_color"] = no_color
+        captured["verbose"] = verbose
+        captured["verbose_hint"] = verbose_hint
+        return int(ExitCode.CONFIG_ERROR)
+
+    def _write_text_atomic(_path: Path, _content: str, *, encoding: str = "utf-8") -> None:
+        raise PermissionError("permission denied")
+
+    monkeypatch.setattr(
+        "frame_compare.cli.entry._prompt_input_dir",
+        lambda *_args, **_kwargs: "inputs",
+    )
+    monkeypatch.setattr("frame_compare.cli.entry.typer.confirm", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        "frame_compare.cli.entry._prompt_visibility",
+        lambda _default: "unlisted",
+    )
+    monkeypatch.setattr("frame_compare.cli.entry.typer.prompt", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr("frame_compare.cli.entry.handle_error", _handle_error)
+    monkeypatch.setattr("frame_compare.cli.entry.write_text_atomic", _write_text_atomic)
+
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        (root / "inputs").mkdir(parents=True)
+
+        result = runner.invoke(app, ["wizard", "--root", str(root)])
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert captured == {
+        "no_color": False,
+        "verbose": False,
+        "verbose_hint": None,
+    }
 
 
 def test_wizard_validation_error_uses_cli_error_contract(monkeypatch: MonkeyPatch) -> None:
@@ -245,6 +299,7 @@ def test_handle_wizard_uses_visible_secret_prompt_when_stdin_is_not_tty(tmp_path
         write_payload=lambda config_path, data: written_payloads.append((config_path, data)),
         handle_error=lambda _error, *, no_color, verbose, verbose_hint="--verbose": 1,
         stdin_is_tty=False,
+        no_color=False,
     )
 
     assert captured == {

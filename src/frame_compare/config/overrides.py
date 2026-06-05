@@ -28,7 +28,11 @@ class CLIConfigOverrides:
     tm_preset: TonemapPreset | None = None
     tm_target_nits: int | None = None
     tm_curve: ToneCurve | None = None
-    frame_count: int | None = None
+    user_frames: list[int] | None = None
+    random_frame_count: int | None = None
+    dark_frame_count: int | None = None
+    bright_frame_count: int | None = None
+    motion_frame_count: int | None = None
     seed: int | None = None
     overlay_mode: OverlayMode | None = None
     no_upload: bool = False
@@ -39,7 +43,11 @@ CLI_OVERRIDE_MAP: dict[str, str] = {
     "tm_preset": "color.preset",
     "tm_target": "color.target_nits",
     "tm_curve": "color.tone_curve",
-    "frame_count": "analysis.frame_count",
+    "frames": "analysis.user_frames",
+    "random_frame_count": "analysis.random_frame_count",
+    "dark_frame_count": "analysis.dark_frame_count",
+    "bright_frame_count": "analysis.bright_frame_count",
+    "motion_frame_count": "analysis.motion_frame_count",
     "seed": "analysis.random_seed",
     "overlay": "screenshots.overlay_mode",
     "no_upload": "slowpics.auto_upload",
@@ -129,7 +137,11 @@ def _cli_override_values(cli_args: CLIConfigOverrides) -> dict[str, object]:
         "tm_preset": cli_args.tm_preset,
         "tm_target": cli_args.tm_target_nits,
         "tm_curve": cli_args.tm_curve,
-        "frame_count": cli_args.frame_count,
+        "frames": cli_args.user_frames,
+        "random_frame_count": cli_args.random_frame_count,
+        "dark_frame_count": cli_args.dark_frame_count,
+        "bright_frame_count": cli_args.bright_frame_count,
+        "motion_frame_count": cli_args.motion_frame_count,
         "seed": cli_args.seed,
         "overlay": cli_args.overlay_mode,
         "no_upload": cli_args.no_upload,

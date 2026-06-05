@@ -13,6 +13,7 @@ use_run_folders = true
 
 [sources]
 # reference = "00-reference.mkv"
+# match_fps = "assume_reference"  # opt-in; timing metadata only, no frame resampling
 # Add per-source overrides with tables such as:
 # [sources.overrides."encode-a.mkv"]
 # trim_start_frames = 0
@@ -20,10 +21,13 @@ use_run_folders = true
 # effective_fps = "24000/1001"
 
 [analysis]
-frame_count = 10
+user_frames = []
+random_frame_count = 10
+dark_frame_count = 0
+bright_frame_count = 0
+motion_frame_count = 0
 random_seed = 42
 save_frames_data = true
-selection_mode = "mixed"
 ignore_lead_seconds = 0.0
 ignore_trail_seconds = 0.0
 min_window_seconds = 5.0
@@ -104,8 +108,6 @@ cache_results = true
 
 [diagnostics]
 per_frame_nits = false
-show_hdr_info = false
-frame_timing = false
 
 [logging]
 level = "INFO"

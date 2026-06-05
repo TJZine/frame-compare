@@ -326,8 +326,8 @@ def _render_header(
     clip_count: int,
     slowpics_link: str,
 ) -> str:
-    info_button = '<button id="btn-info" class="rv-header-info-btn" aria-label="Report information" title="Report Info">ℹ</button>'
-    help_button = '<button id="btn-help" class="rv-header-help-btn" aria-label="Keyboard shortcuts" title="Help (?)">?</button>'
+    info_button = '<button id="btn-info" class="rv-header-info-btn" aria-label="Report information" title="Report Info"><span class="rv-btn-icon">ℹ</span></button>'
+    help_button = '<button id="btn-help" class="rv-header-help-btn" aria-label="Keyboard shortcuts" title="Help (?)"><span class="rv-btn-icon">?</span></button>'
     slowpics_block = f"{slowpics_link} • " if slowpics_link else ""
     return f"""        <header class="rv-header">
             <div>
@@ -406,7 +406,6 @@ def _render_viewport_palette() -> str:
             <button data-fit="actual" class="active" role="radio" aria-checked="true" aria-label="Actual size" title="Actual size (1:1)">1:1</button>
             <button data-fit="width" role="radio" aria-checked="false" aria-label="Fit width" title="Fit width (↔)">↔</button>
             <button data-fit="height" role="radio" aria-checked="false" aria-label="Fit height" title="Fit height (↕)">↕</button>
-            <button data-fit="fill" role="radio" aria-checked="false" aria-label="Fill stage" title="Fill stage (⛶)">⛶</button>
         </div>
 
         <div class="rv-palette-group rv-alignment-group">
@@ -436,8 +435,7 @@ def _render_viewport_palette() -> str:
         </div>
 
         <div class="rv-palette-group">
-            <button id="btn-fullscreen" aria-label="Enter fullscreen" aria-pressed="false" title="Fullscreen">Fullscreen</button>
-            <button id="btn-focus-mode" aria-label="Enter focus mode" aria-pressed="false" title="Focus mode (Z)">Focus</button>
+            <button id="btn-fullscreen" aria-label="Enter fullscreen" aria-pressed="false" title="Enter fullscreen"><span class="rv-fullscreen-icon" aria-hidden="true">⛶</span></button>
         </div>
 
         <div class="rv-palette-group">
@@ -477,12 +475,6 @@ def _render_stage() -> str:
             <span class="rv-info-label" data-current-frame-label></span>
             <span class="rv-info-divider" data-current-frame-category-divider>•</span>
             <span class="rv-info-category" data-current-frame-category></span>
-        </div>
-        <div class="rv-focus-hud" aria-hidden="true">
-            <span data-focus-frame></span>
-            <span data-focus-mode></span>
-            <span data-focus-pair></span>
-            <span>Esc exits</span>
         </div>
 {_render_viewport_palette()}
     </div>"""
@@ -553,18 +545,16 @@ def _render_help_modal() -> str:
                 <div class="rv-shortcut-row"><span>Toggle Filmstrip</span><span class="rv-key">F</span></div>
                 <div class="rv-shortcut-row"><span>Toggle Inspector</span><span class="rv-key">I</span></div>
                 <div class="rv-shortcut-row"><span>Blink Pause / Speed</span><span class="rv-key">Space / [ / ]</span></div>
-                <div class="rv-shortcut-row"><span>Toggle Focus</span><span class="rv-key">Z</span></div>
                 <div class="rv-shortcut-row"><span>Zoom In / Out</span><span class="rv-key">+ / -</span></div>
                 <div class="rv-shortcut-row"><span>Reset Viewport</span><span class="rv-key">R / Double-click</span></div>
                 <div class="rv-shortcut-row"><span>Open Help</span><span class="rv-key">?</span></div>
-                <div class="rv-shortcut-row"><span>Close Panel / Exit Focus / Exit Fullscreen</span><span class="rv-key">Esc</span></div>
+                <div class="rv-shortcut-row"><span>Close Panel / Exit Fullscreen</span><span class="rv-key">Esc</span></div>
             </div>
             <div class="rv-modal-subtitle">Viewport Fit Modes</div>
             <div class="rv-legend-grid">
                 <div class="rv-legend-row"><span class="rv-key">1:1</span><span>Actual size</span></div>
                 <div class="rv-legend-row"><span class="rv-key">↔</span><span>Fit width</span></div>
                 <div class="rv-legend-row"><span class="rv-key">↕</span><span>Fit height</span></div>
-                <div class="rv-legend-row"><span class="rv-key">⛶</span><span>Fill stage</span></div>
             </div>
             <div class="rv-modal-actions">
                 <button id="btn-close-help">Close</button>

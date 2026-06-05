@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 import pytest
 
-from frame_compare.analysis.errors import MetricsCalculationError
+from frame_compare.analysis.errors import MetricsCalculationError, SelectionError
 from frame_compare.analysis.types import (
     CacheLoadResult,
     FrameMetrics,
@@ -21,8 +21,7 @@ from frame_compare.analysis.types import (
 )
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.errors import ConfigValidationError
-from frame_compare.config.schema import SelectionMode
-from frame_compare.orchestration import phase_tasks
+from frame_compare.orchestration import phase_post_render, phase_selection
 from frame_compare.orchestration.types import (
     RenderArtifacts,
     RunArtifacts,
@@ -66,7 +65,6 @@ def test_run_analyze_phase_records_cache_hit_and_selection_breakdown(
     }
     selection = FrameSelection(
         frames=[1, 8, 13],
-        mode=SelectionMode.MIXED,
         seed=ctx.config.analysis.random_seed,
         breakdown=breakdown,
         selection_details=selection_details,
@@ -84,12 +82,12 @@ def test_run_analyze_phase_records_cache_hit_and_selection_breakdown(
         calls["select"] = kwargs
         return selection
 
-    monkeypatch.setattr(phase_tasks.cache_io, "load_cached_metrics", _fake_load_cached_metrics)
-    monkeypatch.setattr(phase_tasks, "calculate_metrics", _fake_calculate_metrics)
-    monkeypatch.setattr(phase_tasks, "select_frames", _fake_select_frames)
+    monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics", _fake_load_cached_metrics)
+    monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
+    monkeypatch.setattr(phase_selection, "select_frames", _fake_select_frames)
     selected_frames: list[int] = []
 
-    output = phase_tasks.run_analyze_phase(
+    output = phase_selection.run_analyze_phase(
         ctx,
         input_videos=input_videos,
         workspace=ctx.workspace,
@@ -146,17 +144,16 @@ def test_run_analyze_phase_uses_prepared_analysis_selection_domain(
     def _fake_select_frames(**_kwargs: object) -> FrameSelection:
         return FrameSelection(
             frames=[0],
-            mode=SelectionMode.MIXED,
             seed=ctx.config.analysis.random_seed,
             breakdown=SelectionBreakdown(quantile_dark=[0]),
         )
 
-    monkeypatch.setattr(phase_tasks.cache_io, "compute_cache_key", _fake_compute_cache_key)
-    monkeypatch.setattr(phase_tasks.cache_io, "load_cached_metrics", _fake_load_cached_metrics)
-    monkeypatch.setattr(phase_tasks, "calculate_metrics", _fake_calculate_metrics)
-    monkeypatch.setattr(phase_tasks, "select_frames", _fake_select_frames)
+    monkeypatch.setattr(phase_selection.cache_io, "compute_cache_key", _fake_compute_cache_key)
+    monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics", _fake_load_cached_metrics)
+    monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
+    monkeypatch.setattr(phase_selection, "select_frames", _fake_select_frames)
 
-    phase_tasks.run_analyze_phase(
+    phase_selection.run_analyze_phase(
         ctx,
         input_videos=input_videos,
         workspace=ctx.workspace,
@@ -180,11 +177,11 @@ def test_run_analyze_phase_cache_only_missing_cache_does_not_recompute(
     def _fake_calculate_metrics(**_kwargs: object) -> FrameMetrics:
         raise AssertionError("cache-only analyze phase must not recompute metrics")
 
-    monkeypatch.setattr(phase_tasks.cache_io, "load_cached_metrics", _fake_load_cached_metrics)
-    monkeypatch.setattr(phase_tasks, "calculate_metrics", _fake_calculate_metrics)
+    monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics", _fake_load_cached_metrics)
+    monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
 
     with pytest.raises(MetricsCalculationError, match="Cached metrics missing"):
-        phase_tasks.run_analyze_phase(
+        phase_selection.run_analyze_phase(
             ctx,
             input_videos=input_videos,
             workspace=ctx.workspace,
@@ -221,7 +218,6 @@ def test_run_analyze_phase_selects_from_reference_base_trim_domain(
         assert received_metrics.luminance == [10.0, 11.0, 12.0, 13.0, 14.0]
         return FrameSelection(
             frames=[0, 4],
-            mode=SelectionMode.MIXED,
             seed=ctx.config.analysis.random_seed,
             breakdown=SelectionBreakdown(quantile_dark=[0], quantile_bright=[4]),
             selection_details={
@@ -240,10 +236,10 @@ def test_run_analyze_phase_selects_from_reference_base_trim_domain(
             },
         )
 
-    monkeypatch.setattr(phase_tasks.cache_io, "load_cached_metrics", _fake_load_cached_metrics)
-    monkeypatch.setattr(phase_tasks, "select_frames", _fake_select_frames)
+    monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics", _fake_load_cached_metrics)
+    monkeypatch.setattr(phase_selection, "select_frames", _fake_select_frames)
 
-    output = phase_tasks.run_analyze_phase(
+    output = phase_selection.run_analyze_phase(
         ctx,
         input_videos=input_videos,
         workspace=ctx.workspace,
@@ -258,7 +254,7 @@ def test_run_analyze_phase_selects_from_reference_base_trim_domain(
     assert output.selection_details_by_source_frame is not None
     assert set(output.selection_details_by_source_frame) == {10, 14}
     assert output.selection_details_by_source_frame[10].frame_index == 10
-    assert calls["select"]["config"].frame_count == 3
+    assert calls["select"]["config"].random_frame_count == 3
 
 
 @pytest.mark.unit
@@ -288,7 +284,6 @@ def test_run_analyze_phase_selects_from_global_selection_window(
         assert len(received_metrics.luminance) == 48
         return FrameSelection(
             frames=[0, 47],
-            mode=SelectionMode.MIXED,
             seed=ctx.config.analysis.random_seed,
             breakdown=SelectionBreakdown(quantile_dark=[0], quantile_bright=[47]),
             selection_details={
@@ -297,10 +292,10 @@ def test_run_analyze_phase_selects_from_global_selection_window(
             },
         )
 
-    monkeypatch.setattr(phase_tasks.cache_io, "load_cached_metrics", _fake_load_cached_metrics)
-    monkeypatch.setattr(phase_tasks, "select_frames", _fake_select_frames)
+    monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics", _fake_load_cached_metrics)
+    monkeypatch.setattr(phase_selection, "select_frames", _fake_select_frames)
 
-    output = phase_tasks.run_analyze_phase(
+    output = phase_selection.run_analyze_phase(
         ctx,
         input_videos=input_videos,
         workspace=ctx.workspace,
@@ -321,7 +316,7 @@ def test_select_initial_frame_plan_uses_effective_selection_domain(tmp_path: Pat
     ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=10)
     selected_frames: list[int] = []
 
-    output = phase_tasks.select_initial_frame_plan(ctx)
+    output = phase_selection.select_initial_frame_plan(ctx)
 
     assert selected_frames == []
     assert len(output.selected_frames) == 3
@@ -332,10 +327,91 @@ def test_select_initial_frame_plan_uses_global_selection_window(tmp_path: Path) 
     ctx = _context(tmp_path)
     ctx.selection_window = SelectionWindow(start_frame=24, end_frame_exclusive=48)
 
-    output = phase_tasks.select_initial_frame_plan(ctx)
+    output = phase_selection.select_initial_frame_plan(ctx)
 
     assert len(output.selected_frames) == 3
     assert all(24 <= frame < 48 for frame in output.selected_frames)
+
+
+def test_select_initial_frame_plan_fails_when_user_random_candidates_are_empty(
+    tmp_path: Path,
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.reference = ctx.reference.with_trim(trim_start_frames=10, trim_end_frame_inclusive=19)
+    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=10)
+    ctx.config.analysis = ctx.config.analysis.model_copy(
+        update={"user_frames": [0], "random_frame_count": 0}
+    )
+
+    with pytest.raises(SelectionError, match="no selectable user or random frames"):
+        phase_selection.select_initial_frame_plan(ctx)
+
+
+def test_select_initial_frame_plan_warns_when_user_frames_are_dropped(
+    tmp_path: Path,
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.reference = ctx.reference.with_trim(trim_start_frames=10, trim_end_frame_inclusive=19)
+    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=10)
+    ctx.config.analysis = ctx.config.analysis.model_copy(
+        update={"user_frames": [0, 12], "random_frame_count": 1}
+    )
+
+    output = phase_selection.select_initial_frame_plan(ctx)
+
+    assert 2 in output.selected_frames
+    assert output.warnings == ["frame selection: dropped user frame(s) outside trims/windowing: 0"]
+
+
+def test_select_initial_frame_plan_labels_user_and_random_frames(
+    tmp_path: Path,
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.config.analysis = ctx.config.analysis.model_copy(
+        update={"user_frames": [0], "random_frame_count": 1}
+    )
+
+    output = phase_selection.select_initial_frame_plan(ctx)
+
+    assert output.selection_breakdown.user == [0]
+    assert len(output.selection_breakdown.random) == 1
+    assert output.selection_breakdown.random[0] != 0
+    assert output.selection_details_by_source_frame[0].label == "User"
+    random_frame = output.selection_breakdown.random[0]
+    assert output.selection_details_by_source_frame[random_frame].label == "Random"
+
+
+def test_select_initial_frame_plan_refills_random_after_user_collision(tmp_path: Path) -> None:
+    ctx = _context(tmp_path)
+    ctx.config.analysis = ctx.config.analysis.model_copy(
+        update={"user_frames": [8], "random_frame_count": 10, "random_seed": 42}
+    )
+
+    output = phase_selection.select_initial_frame_plan(ctx)
+
+    assert output.selection_breakdown.user == [8]
+    assert len(output.selection_breakdown.random) == 10
+    assert 8 not in output.selection_breakdown.random
+    assert len(output.selected_frames) == 11
+
+
+def test_select_initial_frame_plan_fails_when_random_request_exceeds_remaining_domain(
+    tmp_path: Path,
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=2)
+    ctx.config.analysis = ctx.config.analysis.model_copy(
+        update={"user_frames": [0], "random_frame_count": 2}
+    )
+
+    with pytest.raises(SelectionError) as exc_info:
+        phase_selection.select_initial_frame_plan(ctx)
+
+    assert exc_info.value.context.details == {
+        "reason": "insufficient random candidates after user frames",
+        "requested": 2,
+        "found": 1,
+    }
 
 
 def test_run_artifacts_uses_render_artifacts_carrier() -> None:
@@ -364,7 +440,7 @@ def test_run_confirm_slowpics_upload_phase_marks_report_unavailable_without_prom
         callback_calls.append(request)
         return "confirmed"
 
-    output = phase_tasks.run_confirm_slowpics_upload_phase(
+    output = phase_post_render.run_confirm_slowpics_upload_phase(
         ctx,
         report_path=None,
         report_succeeded=False,
@@ -384,7 +460,7 @@ def test_run_confirm_slowpics_upload_phase_requires_callback_when_report_availab
     ctx = _context(tmp_path)
 
     with pytest.raises(ConfigValidationError, match="requires a confirmation callback"):
-        phase_tasks.run_confirm_slowpics_upload_phase(
+        phase_post_render.run_confirm_slowpics_upload_phase(
             ctx,
             report_path=tmp_path / "report.html",
             report_succeeded=True,
@@ -403,7 +479,7 @@ def test_run_confirm_slowpics_upload_phase_records_callback_decision(tmp_path: P
         callback_calls.append(request)
         return "declined"
 
-    output = phase_tasks.run_confirm_slowpics_upload_phase(
+    output = phase_post_render.run_confirm_slowpics_upload_phase(
         ctx,
         report_path=report_path,
         report_succeeded=True,
@@ -452,11 +528,11 @@ category_preference = "tv"
         captured["client"] = client
         return expected
 
-    monkeypatch.setattr(phase_tasks, "resolve_metadata", _fake_resolve_metadata)
+    monkeypatch.setattr(phase_post_render, "resolve_metadata", _fake_resolve_metadata)
 
     async def _run() -> TmdbMetadata | None:
         async with httpx.AsyncClient() as client:
-            result = await phase_tasks.resolve_run_metadata(
+            result = await phase_post_render.resolve_run_metadata(
                 filenames=["Heat.1995.mkv"],
                 config=config,
                 client=client,

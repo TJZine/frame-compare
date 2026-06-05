@@ -127,14 +127,85 @@ effective_fps = "24/1"
                 str(root),
                 "--config",
                 "configs/config.toml",
-                "--frame-count",
+                "--frames",
+                "3,5",
+                "--random-frame-count",
                 "17",
             ],
         )
         assert result.exit_code == 0
         data = tomllib.loads(config_path.read_text(encoding="utf-8"))
-        assert data["analysis"]["frame_count"] == 17
+        assert data["analysis"]["user_frames"] == [3, 5]
+        assert data["analysis"]["random_frame_count"] == 17
         assert data["sources"]["overrides"]["reference.mkv"]["effective_fps"] == "24/1"
+
+
+def test_run_removed_frame_count_uses_owned_human_error_contract(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for removed frame-count option")
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace(["-n", "12"])
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stdout == ""
+    assert "--frame-count/-n has been removed" in result.stderr
+    assert "Usage:" not in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_run_invalid_frames_uses_owned_human_error_contract(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for invalid frame selectors")
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace(["--frames", "-1"])
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stdout == ""
+    assert "--frames must contain only non-negative integers" in result.stderr
+    assert "Usage:" not in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_run_negative_metric_count_uses_owned_human_error_contract(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for invalid metric count")
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace(["--motion-frame-count", "-1"])
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stdout == ""
+    assert "--motion-frame-count must be a non-negative integer" in result.stderr
+    assert "Usage:" not in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_run_skip_analysis_metric_count_uses_owned_human_error_contract(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for --skip-analysis conflict")
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace(["--skip-analysis", "--dark-frame-count", "1"])
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stdout == ""
+    assert "Metric-based frame selection requires analysis" in result.stderr
+    assert "Usage:" not in result.stderr
+    assert "Traceback" not in result.stderr
 
 
 def test_run_write_config_write_error_uses_cli_error_contract(

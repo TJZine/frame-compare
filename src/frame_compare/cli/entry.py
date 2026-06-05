@@ -3,7 +3,6 @@
 # ruff: noqa: B008
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -56,6 +55,7 @@ from frame_compare.config.loader import load_config
 from frame_compare.config.presets import apply_preset, list_presets, save_preset
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.logging import configure_logging
+from frame_compare.utils.terminal import no_color_requested, stream_is_tty
 
 if TYPE_CHECKING:
     from frame_compare.config.schema import ConfigSchema
@@ -112,19 +112,15 @@ _validate_config = validate_config
 
 
 def _sys_stream_isatty(name: str) -> bool:
-    stream: object = getattr(sys, name, None)
-    isatty = getattr(stream, "isatty", None)
-    if not callable(isatty):
-        return False
-    return bool(isatty())
+    return stream_is_tty(getattr(sys, name, None))
 
 
 if TYPE_CHECKING:
 
-    def _option[T](default: T, *param_decls: str) -> T:
+    def _option[T](default: T, *param_decls: str, **kwargs: object) -> T:
         return default
 
-    def _path_option(default: str, *param_decls: str) -> Path:
+    def _path_option(default: str, *param_decls: str, **kwargs: object) -> Path:
         return Path(default)
 
 else:
@@ -167,7 +163,12 @@ def run(
     tm_preset: str | None = _option(None, "--tm-preset"),
     tm_target: int | None = _option(None, "--tm-target"),
     tm_curve: str | None = _option(None, "--tm-curve"),
-    frame_count: int | None = _option(None, "--frame-count", "-n"),
+    frames: str | None = _option(None, "--frames"),
+    random_frame_count: str | None = _option(None, "--random-frame-count"),
+    dark_frame_count: str | None = _option(None, "--dark-frame-count"),
+    bright_frame_count: str | None = _option(None, "--bright-frame-count"),
+    motion_frame_count: str | None = _option(None, "--motion-frame-count"),
+    removed_frame_count: str | None = _option(None, "--frame-count", "-n", hidden=True),
     seed: int | None = _option(None, "--seed"),
     overlay: str | None = _option(None, "--overlay"),
     skip_analysis: bool = _option(False, "--skip-analysis"),
@@ -192,7 +193,12 @@ def run(
         tm_preset=tm_preset,
         tm_target=tm_target,
         tm_curve=tm_curve,
-        frame_count=frame_count,
+        frames=frames,
+        random_frame_count=random_frame_count,
+        dark_frame_count=dark_frame_count,
+        bright_frame_count=bright_frame_count,
+        motion_frame_count=motion_frame_count,
+        removed_frame_count=removed_frame_count,
         seed=seed,
         overlay=overlay,
         skip_analysis=skip_analysis,
@@ -219,7 +225,7 @@ def run(
         confirm_upload=typer.confirm,
         stdout_is_tty=_sys_stream_isatty("stdout"),
         stdin_is_tty=_sys_stream_isatty("stdin"),
-        no_color_env_present="NO_COLOR" in os.environ,
+        no_color_env_present=no_color_requested(),
     )
     handle_run(args, deps)
 
@@ -230,6 +236,7 @@ def wizard(
     config: Path | None = _option(None, "--config", "-c"),
 ) -> None:
     resolved_root, config_path = _resolve_root_and_config(root, config)
+    effective_no_color = no_color_requested()
     handle_wizard(
         resolved_root,
         config_path,
@@ -239,13 +246,19 @@ def wizard(
         prompt_secret=typer.prompt,
         write_payload=_write_wizard_config_payload,
         handle_error=handle_error,
-        stdin_is_tty=sys.stdin.isatty(),
+        stdin_is_tty=_sys_stream_isatty("stdin"),
+        no_color=effective_no_color,
     )
 
 
 @app.command()
 def doctor(json_output: bool = _option(False, "--json")) -> None:
-    handle_doctor(json_output, run_doctor=run_doctor, handle_error=handle_error)
+    handle_doctor(
+        json_output,
+        run_doctor=run_doctor,
+        handle_error=handle_error,
+        no_color=no_color_requested(),
+    )
 
 
 preset_app = typer.Typer(name="preset", help="Manage configuration presets.", no_args_is_help=True)
@@ -262,6 +275,7 @@ def preset_list(
         resolved_root,
         list_presets=list_presets,
         handle_error=handle_error,
+        no_color=no_color_requested(),
     )
 
 
@@ -280,6 +294,7 @@ def preset_apply(
         apply_preset=apply_preset,
         write_config_to=_write_config_to,
         handle_error=handle_error,
+        no_color=no_color_requested(),
     )
 
 
@@ -297,6 +312,7 @@ def preset_save(
         load_config=load_config,
         save_preset=save_preset,
         handle_error=handle_error,
+        no_color=no_color_requested(),
     )
 
 

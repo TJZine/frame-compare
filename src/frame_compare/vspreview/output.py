@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -11,6 +10,8 @@ from rich.markup import escape
 from rich.table import Table
 from rich.text import Text
 
+from frame_compare.utils.terminal import no_color_requested
+
 STYLE_KEY = "blue"
 STYLE_VALUE = "bright_white"
 STYLE_PATH = "dim"
@@ -18,12 +19,8 @@ STYLE_HINT = "yellow"
 STYLE_HEADER = "bold cyan"
 
 
-def _no_color_requested(no_color: bool) -> bool:
-    return no_color or "NO_COLOR" in os.environ
-
-
 def _console(*, no_color: bool) -> Console:
-    return Console(stderr=True, no_color=_no_color_requested(no_color))
+    return Console(stderr=True, no_color=no_color_requested(explicit_no_color=no_color))
 
 
 def _group_table() -> Table:

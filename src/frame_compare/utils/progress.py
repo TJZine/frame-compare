@@ -1,16 +1,19 @@
 """Progress reporting utilities for Frame Compare."""
 
 import structlog
-from rich.console import Console
+from rich.console import Console, RenderableType
 from rich.progress import (
     BarColumn,
     Progress,
+    ProgressColumn,
     SpinnerColumn,
+    Task,
     TaskID,
     TaskProgressColumn,
     TextColumn,
     TimeRemainingColumn,
 )
+from rich.text import Text
 
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 
@@ -24,11 +27,25 @@ __all__ = [
 ]
 
 
+class _SpinnerAwareColumn(ProgressColumn):
+    def __init__(self, column: ProgressColumn) -> None:
+        super().__init__()
+        self._column = column
+
+    def render(self, task: Task) -> RenderableType:
+        if task.fields.get("spinner_only"):
+            return Text("")
+        return self._column.render(task)
+
+
 class NullProgressReporter:
     """No-op progress reporter."""
 
     def start_phase(self, name: str, total: int) -> None:
         del name, total
+
+    def start_indeterminate(self, name: str) -> None:
+        del name
 
     def advance(self, amount: int = 1) -> None:
         del amount
@@ -56,9 +73,9 @@ class RichProgressReporter:
         self._progress = Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TaskProgressColumn(),
-            TimeRemainingColumn(),
+            _SpinnerAwareColumn(BarColumn()),
+            _SpinnerAwareColumn(TaskProgressColumn()),
+            _SpinnerAwareColumn(TimeRemainingColumn()),
             transient=True,
             console=Console(stderr=True, no_color=no_color),
         )
@@ -79,12 +96,31 @@ class RichProgressReporter:
 
     def start_phase(self, name: str, total: int) -> None:
         """Start a new phase with a rich progress bar."""
+        self._start_task(name, total=total, spinner_only=False)
+
+    def start_indeterminate(self, name: str) -> None:
+        """Start a new phase with spinner-only activity."""
+        self._start_task(name, total=None, spinner_only=True)
+
+    def _start_task(
+        self,
+        name: str,
+        *,
+        total: int | None,
+        spinner_only: bool,
+    ) -> None:
         if not self._progress.live.is_started:
             self._progress.start()
         if self._task_id is not None:
+            self._progress.update(self._task_id, visible=False)
             self._task_stack.append(self._task_id)
-        self._task_id = self._progress.add_task(name, total=total)
-        self._task_totals[self._task_id] = total
+        self._task_id = self._progress.add_task(
+            name,
+            total=total,
+            spinner_only=spinner_only,
+        )
+        if total is not None:
+            self._task_totals[self._task_id] = total
 
     def advance(self, amount: int = 1) -> None:
         """Advance the rich progress bar."""
@@ -121,6 +157,7 @@ class RichProgressReporter:
 
         if self._task_stack:
             self._task_id = self._task_stack.pop()
+            self._progress.update(self._task_id, visible=True)
             return
 
         if self._progress.live.is_started:
@@ -167,6 +204,10 @@ class LogProgressReporter:
         self._current = 0
         self._last_logged_milestone = 0
         log.info("phase_started", phase=name, total=total)
+
+    def start_indeterminate(self, name: str) -> None:
+        """Start logging an activity with no measurable total."""
+        self.start_phase(name, total=0)
 
     def advance(self, amount: int = 1) -> None:
         """Advance progress and log milestones."""

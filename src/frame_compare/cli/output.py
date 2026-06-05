@@ -195,8 +195,11 @@ def print_at_a_glance(
     _add_separator(table)
     _add_subheader(table, "Analysis")
     selection_text = (
-        f"{_styled_value(config.analysis.selection_mode.value)}, "
-        f"n={_styled_value(str(config.analysis.frame_count))}, "
+        f"user={_styled_value(str(len(config.analysis.user_frames)))}, "
+        f"random={_styled_value(str(config.analysis.random_frame_count))}, "
+        f"dark={_styled_value(str(config.analysis.dark_frame_count))}, "
+        f"bright={_styled_value(str(config.analysis.bright_frame_count))}, "
+        f"motion={_styled_value(str(config.analysis.motion_frame_count))}, "
         f"seed={_styled_value(str(config.analysis.random_seed))}"
     )
     _add_kv(table, "selection", selection_text)
@@ -336,7 +339,7 @@ def print_result_summary(
         _add_kv(
             table,
             "cache",
-            _styled_value("hit" if result.cache_hit else "miss"),
+            _styled_value(result.metrics_cache_status),
         )
 
     console.print(Panel(table, title=f"[{STYLE_HEADER}]Result[/]", border_style="cyan"))

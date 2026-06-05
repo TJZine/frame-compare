@@ -60,7 +60,11 @@ class RunRequest:
     tm_curve: ToneCurve | None = None
 
     # Frame selection overrides
-    frame_count: int | None = None
+    user_frames: list[int] | None = None
+    random_frame_count: int | None = None
+    dark_frame_count: int | None = None
+    bright_frame_count: int | None = None
+    motion_frame_count: int | None = None
     seed: int | None = None
 
     # Output behavior
@@ -77,7 +81,11 @@ class RunRequest:
             tm_preset=self.tm_preset,
             tm_target_nits=self.tm_target_nits,
             tm_curve=self.tm_curve,
-            frame_count=self.frame_count,
+            user_frames=self.user_frames,
+            random_frame_count=self.random_frame_count,
+            dark_frame_count=self.dark_frame_count,
+            bright_frame_count=self.bright_frame_count,
+            motion_frame_count=self.motion_frame_count,
             seed=self.seed,
             overlay_mode=self.overlay_mode,
             no_upload=self.no_upload,
@@ -102,6 +110,7 @@ def _empty_selection_details_by_source_frame() -> SelectionDetailsByFrame:
 
 
 type SlowpicsUploadConfirmationDecision = Literal["confirmed", "declined"]
+type MetricsCacheStatus = Literal["skipped", "hit", "miss"]
 type SlowpicsUploadConfirmationStatus = Literal[
     "not_applicable",
     "confirmed",
@@ -144,6 +153,7 @@ class RunResult:
     clips_processed: int = 0
     duration_seconds: float = 0.0
     cache_hit: bool = False
+    metrics_cache_status: MetricsCacheStatus = "skipped"
 
     # Diagnostics
     errors: list[str] = field(default_factory=_empty_str_list)
@@ -173,6 +183,11 @@ class RenderArtifacts:
 @dataclass(frozen=True)
 class FramePlanPhaseOutput:
     selected_frames: list[int]
+    selection_breakdown: SelectionBreakdown = field(default_factory=SelectionBreakdown)
+    selection_details_by_source_frame: SelectionDetailsByFrame = field(
+        default_factory=_empty_selection_details_by_source_frame
+    )
+    warnings: list[str] = field(default_factory=_empty_str_list)
 
 
 @dataclass(frozen=True)
@@ -254,6 +269,7 @@ class RunArtifacts:
     """Internal carrier for artifacts accumulated during the run."""
 
     metrics_cache_hit: bool
+    metrics_cache_status: MetricsCacheStatus
     render: RenderArtifacts | None
     slowpics_url: str | None
     uploaded_slowpics_file_paths: tuple[Path, ...]
@@ -268,6 +284,7 @@ class RunArtifacts:
         self,
         *,
         metrics_cache_hit: bool = False,
+        metrics_cache_status: MetricsCacheStatus = "skipped",
         slowpics_url: str | None = None,
         uploaded_slowpics_file_paths: tuple[Path, ...] = (),
         post_upload_actions: PostUploadActionResults = (),
@@ -279,6 +296,7 @@ class RunArtifacts:
         render: RenderArtifacts | None = None,
     ) -> None:
         self.metrics_cache_hit = metrics_cache_hit
+        self.metrics_cache_status = metrics_cache_status
         self.render = render
         self.slowpics_url = slowpics_url
         self.uploaded_slowpics_file_paths = uploaded_slowpics_file_paths

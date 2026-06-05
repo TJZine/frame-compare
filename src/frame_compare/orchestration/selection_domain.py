@@ -8,6 +8,7 @@ helpers.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from frame_compare.analysis.window import (
@@ -16,6 +17,7 @@ from frame_compare.analysis.window import (
     compute_shared_selection_window,
 )
 from frame_compare.config.schema import ConfigSchema
+from frame_compare.config.schema_enums import SourceMatchFpsMode
 from frame_compare.config.schema_models import SourceOverrideConfig
 from frame_compare.orchestration.context import (
     ClipActiveRect,
@@ -30,9 +32,10 @@ def build_selection_domain_clips(
     ordered_paths: list[Path],
     snapshots_by_path: dict[Path, ClipProbeSnapshot],
     overrides_by_path: dict[Path, SourceOverrideConfig],
+    match_fps: SourceMatchFpsMode = SourceMatchFpsMode.DISABLED,
 ) -> list[ClipState]:
     """Build prepared clip states for selection-domain and cache decisions."""
-    return [
+    clips = [
         _build_selection_domain_clip(
             index=index,
             path=path,
@@ -41,6 +44,33 @@ def build_selection_domain_clips(
         )
         for index, path in enumerate(ordered_paths)
     ]
+    if match_fps == SourceMatchFpsMode.ASSUME_REFERENCE:
+        return _apply_reference_fps_match(
+            clips=clips,
+            ordered_paths=ordered_paths,
+            overrides_by_path=overrides_by_path,
+        )
+    return clips
+
+
+def _apply_reference_fps_match(
+    *,
+    clips: list[ClipState],
+    ordered_paths: list[Path],
+    overrides_by_path: dict[Path, SourceOverrideConfig],
+) -> list[ClipState]:
+    if len(clips) < 2:
+        return clips
+
+    reference_fps = clips[0].effective_fps
+    matched: list[ClipState] = [clips[0]]
+    for path, clip in zip(ordered_paths[1:], clips[1:], strict=True):
+        override = overrides_by_path.get(path)
+        if override is not None and override.effective_fps is not None:
+            matched.append(clip)
+            continue
+        matched.append(replace(clip, effective_fps=reference_fps))
+    return matched
 
 
 def _build_selection_domain_clip(

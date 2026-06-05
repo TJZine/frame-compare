@@ -15,7 +15,7 @@ from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema import AnalysisConfig
-from frame_compare.orchestration import phase_tasks, preparation
+from frame_compare.orchestration import phase_post_render, phase_selection, preparation
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.services.alignment import CACHE_FILE_NAME
 from frame_compare.services.errors import TmdbError
@@ -37,6 +37,16 @@ from .execute_run_helpers import (
 
 if TYPE_CHECKING:
     import vapoursynth as vs
+
+
+METRIC_RUN_FOLDERS_CONFIG = (
+    RUN_FOLDERS_CONFIG
+    + """
+[analysis]
+random_frame_count = 0
+dark_frame_count = 1
+"""
+)
 
 
 class ClipStub:
@@ -70,7 +80,7 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
     config = load_config(tmp_path / "config" / "config.toml")
@@ -100,12 +110,33 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
     request = RunRequest(
         root=tmp_path,
         no_cache=True,
-        skip_analysis=True,
+        skip_analysis=False,
         skip_metadata=True,
         skip_dovi=True,
         no_upload=True,
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+
+    def _fake_calculate_metrics(**_kwargs: object) -> FrameMetrics:
+        return FrameMetrics(
+            luminance=[0.1] * 100,
+            motion=[0.0] * 100,
+            metadata=MetricsMetadata(
+                frame_count=100,
+                fps=Fraction(24, 1),
+                config_fingerprint="fingerprint",
+                clips=[
+                    ClipIdentity(
+                        path=str(source_path),
+                        size=source_path.stat().st_size,
+                        mtime=source_path.stat().st_mtime,
+                        sha1=None,
+                    )
+                ],
+            ),
+        )
+
+    monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
+    deps = RunDependencies(vs_loader=AnalysisCapableVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
     asyncio.run(execute_run(request, deps=deps))
 
@@ -116,7 +147,7 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
 def test_execute_run_from_cache_only_does_not_reserve_run_folder_when_metrics_cache_missing(
     tmp_path: Path,
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
     run_name = derive_run_folder_name(filenames=["source.mkv"])
@@ -141,7 +172,7 @@ def test_execute_run_from_cache_only_does_not_reserve_run_folder_when_metrics_ca
 def test_execute_run_from_cache_only_uses_shared_cache_when_run_folders_enabled(
     tmp_path: Path,
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
 
@@ -182,6 +213,10 @@ screenshots_dir = "screenshots"
 generated_dir = "custom_generated"
 config_dir = "config"
 use_run_folders = true
+
+[analysis]
+random_frame_count = 0
+dark_frame_count = 1
 
 [audio_alignment]
 enable = false
@@ -239,7 +274,7 @@ enable = false
         cache_io.save_metrics_cache(metrics, cache_dir)
         return metrics
 
-    monkeypatch.setattr(phase_tasks, "calculate_metrics", _fake_calculate_metrics)
+    monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
 
     first = asyncio.run(
         execute_run(
@@ -268,7 +303,7 @@ enable = false
     def _fail_calculate_metrics(**_kwargs: object) -> NoReturn:
         raise AssertionError("from-cache-only should load the shared analysis cache")
 
-    monkeypatch.setattr(phase_tasks, "calculate_metrics", _fail_calculate_metrics)
+    monkeypatch.setattr(phase_selection, "calculate_metrics", _fail_calculate_metrics)
 
     second = asyncio.run(
         execute_run(
@@ -297,7 +332,7 @@ enable = false
 def test_execute_run_normal_rerun_creates_fresh_run_folder_and_uses_shared_cache(
     tmp_path: Path,
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
 
@@ -334,7 +369,7 @@ def test_execute_run_normal_rerun_creates_fresh_run_folder_and_uses_shared_cache
 def test_execute_run_from_cache_only_ignores_old_run_folder_cache(
     tmp_path: Path,
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
 
@@ -357,11 +392,17 @@ def test_execute_run_from_cache_only_ignores_old_run_folder_cache(
     with pytest.raises(MetricsCalculationError):
         asyncio.run(execute_run(request, deps=deps))
 
+    selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
+    fingerprint = cache_io.compute_cache_key(
+        [source_path],
+        config.analysis,
+        selection_domain=selection_domain,
+    )
     assert sorted(path.name for path in input_dir.iterdir() if path.is_dir()) == [run_name]
     assert (
         cache_io.find_metrics_cache_file(
             tmp_path / "generated" / "cache" / "analysis",
-            cache_io.compute_cache_key([source_path], config.analysis),
+            fingerprint,
         )
         is None
     )
@@ -378,6 +419,10 @@ screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
 use_run_folders = true
+
+[analysis]
+random_frame_count = 0
+dark_frame_count = 1
 
 [audio_alignment]
 enable = false
@@ -414,7 +459,7 @@ unattended = true
             media_type="movie",
         )
 
-    monkeypatch.setattr(phase_tasks, "resolve_metadata", _resolve_metadata)
+    monkeypatch.setattr(phase_post_render, "resolve_metadata", _resolve_metadata)
 
     request = RunRequest(
         root=tmp_path,
@@ -444,6 +489,10 @@ screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
 use_run_folders = true
+
+[analysis]
+random_frame_count = 0
+dark_frame_count = 1
 
 [audio_alignment]
 enable = false
@@ -505,7 +554,7 @@ unattended = true
         reserve_calls.append(filenames)
         return Path("should-not-be-used")
 
-    monkeypatch.setattr(phase_tasks, "resolve_metadata", _resolve_metadata)
+    monkeypatch.setattr(phase_post_render, "resolve_metadata", _resolve_metadata)
     monkeypatch.setattr(preparation, "reserve_run_folder", _reserve_run_folder)
 
     request = RunRequest(
@@ -563,7 +612,7 @@ def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(
         return expected_metadata
 
     monkeypatch.setattr(preparation, "reserve_run_folder", _capture_reserve_run_folder)
-    monkeypatch.setattr(phase_tasks, "resolve_metadata", _fake_resolve_metadata)
+    monkeypatch.setattr(phase_post_render, "resolve_metadata", _fake_resolve_metadata)
 
     request = RunRequest(
         root=tmp_path,
@@ -642,7 +691,7 @@ category_preference = "movie"
         phase_calls.append(filenames)
         return expected_metadata
 
-    monkeypatch.setattr(phase_tasks, "resolve_metadata", _resolve_metadata)
+    monkeypatch.setattr(phase_post_render, "resolve_metadata", _resolve_metadata)
 
     request = RunRequest(
         root=tmp_path,
@@ -717,7 +766,7 @@ timeout_seconds = 7.5
         del filenames, config, client
         raise RuntimeError("unexpected metadata failure")
 
-    monkeypatch.setattr(phase_tasks, "resolve_metadata", _resolve_metadata)
+    monkeypatch.setattr(phase_post_render, "resolve_metadata", _resolve_metadata)
 
     request = RunRequest(
         root=tmp_path,

@@ -27,6 +27,9 @@ The main run path is:
 6. Load or compute clip probe data.
 7. Execute orchestration phases in order:
    `frame_plan -> analyze -> align -> render -> metadata -> dovi -> publish -> report -> post_report_cleanup`
+   The `analyze` phase is automatically skipped when the effective `[analysis]`
+   frame selectors request only `user_frames` and/or `random_frame_count`.
+   Dark, bright, or motion frame counts require analysis.
 
 When effective config enables both `slowpics.auto_upload` and
 `slowpics.confirm_upload_after_report`, the opted-in interactive path changes
@@ -37,6 +40,11 @@ The non-confirmed flow keeps the normal ordering above.
 `frame_compare.orchestration.context.RunContext` carries the shared run state across phases.
 Phase task functions return explicit phase-output DTOs, and `execution.py` applies those
 outputs back to `ExecutionState`, `RunContext`, or collected artifacts at phase boundaries.
+Current phase-family owners are intentionally explicit:
+
+- `frame_compare.orchestration.phase_selection`: frame-plan and analyze phase bodies plus shared selection/frame-translation helpers
+- `frame_compare.orchestration.phase_tasks`: align and render phase bodies plus alignment/render-specific helpers
+- `frame_compare.orchestration.phase_post_render`: metadata, dovi warning, publish, report, confirmation, and cleanup phase bodies
 
 ## Module Boundaries
 
@@ -97,7 +105,9 @@ Primary owned paths:
   fingerprint includes the selected reference identity and an all-source
   selection-domain token covering source identity, source trims, effective FPS
   values, configured analysis ignore windows, and the final shared selectable
-  window.
+  window. Metric-array cache identity excludes frame-selection counts,
+  `user_frames`, random seed, and dark/bright quantile thresholds because those
+  affect frame choice rather than metric computation.
 - `generated/clip_probe.toml` or `<resolved paths.generated_dir>/clip_probe.toml`:
   shared clip probe cache used by `--from-cache-only` prevalidation before
   run-folder reservation
@@ -140,6 +150,16 @@ External runtime boundaries:
 - Docker build/test runtime
 - Windows PowerShell installer and updater scripts
 
+Current Docker capability contract:
+
+| Environment | Current posture |
+| --- | --- |
+| macOS Docker Desktop | Supported for backend rendering, reports, and software tonemap through the default headless software-Vulkan path only; Docker-based VSPreview GUI launch is unsupported beyond those backend features, and macOS Docker is not a native GPU or native Qt desktop surface |
+| Linux Docker, CPU/software Vulkan | Canonical Docker default; deterministic, headless, CI-safe software Vulkan path |
+| Linux Docker with NVIDIA GPU | Optional `gpu-nvidia` compose override/profile plus `tools/verify_docker_gpu.sh`; documented-only/unverified until separately proved on a compatible Linux NVIDIA host |
+| Linux Docker with X11 GUI | Optional `gui-linux` compose override/profile plus `tools/verify_docker_gui.sh`; documented-only/unverified until separately proved on a compatible Linux X11 desktop host |
+| Native Windows portable | First-class native runtime with backend rendering, reports, and VSPreview GUI support outside Docker |
+
 Keep these integrations at their current owners:
 
 - metadata lookups: `frame_compare.services.metadata` remains the facade owner;
@@ -152,12 +172,53 @@ Keep these integrations at their current owners:
   copy, report-confirmed upload prompting, and report/slow.pics browser
   precedence rules:
   `frame_compare.cli.entry`
+- host-side Docker report/URL opening helper for the default compose mount
+  layout and `https://slow.pics/...` URLs:
+  `tools/open_docker_host_target.py`
 - slow.pics URL shortcut creation: `frame_compare.services.slowpics_shortcut`
 - isolated slow.pics post-upload webhook delivery:
   `frame_compare.services.slowpics_webhook`
 - HTML report generation: `frame_compare.services.report`
 - VS loading and HDR/tonemap logic: `frame_compare.vs.*`
 - packaging/install/update flow: `tools/windows_portable/**`
+
+The default Docker behavior is intentionally narrower than the native Windows
+portable runtime: it preserves deterministic headless software Vulkan for backend
+rendering and report generation. Optional Docker GPU or GUI profiles are
+host-dependent runtime variants and must be documented and verified separately from
+the default Docker gate. When those variants are discussed, use the official Docker
+GPU/container, Docker Desktop GPU support, Compose profiles, and Compose `gpus`
+documentation as the external contract reference.
+
+Current Docker owner seams for optional profiles remain explicit:
+
+- `docker-compose.yml`: default headless software-Vulkan services
+- `docker-compose.gpu-nvidia.yml`: opt-in NVIDIA GPU override/profile only
+- `docker-compose.gui-linux.yml`: opt-in Linux X11/VSPreview override/profile only
+- `tools/verify_docker_integration.sh`: canonical default Docker gate
+- `tools/verify_docker_gpu.sh`: optional NVIDIA visibility/Vulkan/placebo proof
+- `tools/verify_docker_gui.sh`: optional Linux X11/VSPreview dependency and session-script proof
+- `tools/open_docker_host_target.py`: host-side helper for default compose output mounts and explicit `https://slow.pics/...` URLs only
+
+The GUI profile stays container-boundary aware rather than changing CLI/runtime
+owners. Its explicit X11 contract is:
+
+- host `DISPLAY`
+- host `/tmp/.X11-unix` mounted into the container
+- optional host `XAUTHORITY` cookie file mount when required by the desktop
+- container process UID/GID aligned to the host user for narrow local-user X11 permission flows
+
+The optional GUI proof is non-CI and non-default. It must prove VSPreview
+availability through the existing doctor/adapter owners and prove session-script
+generation without requiring a real desktop launch. Any real UI launch remains a
+manual Linux desktop action outside the default Docker verification gate.
+
+The host open helper is also container-boundary aware rather than a CLI contract
+change. It does not alter in-container report auto-open or slow.pics browser
+behavior. Instead, it runs on the host, translates only the default compose
+mounts `/workspace/screenshots` -> `./screenshots` and `/workspace/generated` ->
+`./generated`, rejects `/workspace/config` and `/workspace/comparison_videos`,
+and allows remote opening only for explicit `https://slow.pics/...` URLs.
 
 slow.pics publishing is service-owned. `frame_compare.services.publishers` owns
 the browser-compatible slow.pics client flow: `GET /comparison`,
@@ -223,14 +284,13 @@ users as Single where appropriate, diff, and pair-based blink modes; frame/categ
 navigation; a HUD toggle for stage labels and current-frame metadata; a primary
 toolbar plus floating viewport palette; a collapsible, compact/normal/large
 filmstrip bottom panel; an inspector drawer with Frame, Clips, Align, and Export
-tabs; focus mode for minimal chrome; viewport pan, zoom, fit, reveal, and adjacent-
-frame preloading. Blink mode supports 0.3s/0.7s/1.2s speeds, pause/resume, keyboard
+tabs; fullscreen support; viewport pan, zoom, actual/width/height fit, reveal, and
+adjacent-frame preloading. Blink mode supports 0.3s/0.7s/1.2s speeds, pause/resume, keyboard
 speed controls, and reduced-motion handling that enters Blink paused. Browser-local
 viewer state is scoped by report identity and persists current frame, view mode,
 clip selection, viewport/zoom/reveal, pair alignments, HUD visibility, filmstrip
-collapsed/size, inspector open/tab, and blink speed. Transient focus mode and
-blink paused state are not persisted. It does not own slow.pics upload policy,
-prompting, or browser side
+collapsed/size, inspector open/tab, and blink speed. Blink paused state is not
+persisted. It does not own slow.pics upload policy, prompting, or browser side
 effects.
 
 Screenshot rendering owns its geometry and writer policy inside `frame_compare.render`:

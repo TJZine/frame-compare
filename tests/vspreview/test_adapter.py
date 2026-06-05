@@ -29,6 +29,20 @@ from frame_compare.vspreview.session_script import (
 )
 
 
+class _FakeVSPreviewProcess:
+    def __init__(self, returncode: int = 0) -> None:
+        self._returncode = returncode
+
+    def __enter__(self) -> _FakeVSPreviewProcess:
+        return self
+
+    def __exit__(self, *_exc_info: object) -> None:
+        return None
+
+    def wait(self) -> int:
+        return self._returncode
+
+
 def _execute_generated_script(
     *,
     tmp_path: Path,
@@ -140,11 +154,11 @@ def test_launch_alignment_verification_session_waits_for_vspreview_completion(
 
     run_calls: list[tuple[object, object]] = []
 
-    def _fake_run(command: object, **kwargs: object) -> subprocess.CompletedProcess[object]:
+    def _fake_popen(command: object, **kwargs: object) -> _FakeVSPreviewProcess:
         run_calls.append((command, kwargs))
-        return subprocess.CompletedProcess(command, 0)
+        return _FakeVSPreviewProcess()
 
-    monkeypatch.setattr("frame_compare.vspreview.adapter.subprocess.run", _fake_run)
+    monkeypatch.setattr("frame_compare.vspreview.adapter.subprocess.Popen", _fake_popen)
 
     cfg = VSPreviewConfig(enabled=True, timeout_seconds=1.0)
     script_path = launch_alignment_verification_session(
@@ -164,7 +178,7 @@ def test_launch_alignment_verification_session_waits_for_vspreview_completion(
     assert "timeout" not in kwargs
     assert kwargs["stdin"] is None
     assert kwargs["stdout"] is None
-    assert kwargs["stderr"] is None
+    assert "stderr" not in kwargs
 
 
 def test_launch_alignment_verification_session_writes_launch_telemetry_to_stderr(
@@ -185,11 +199,11 @@ def test_launch_alignment_verification_session_writes_launch_telemetry_to_stderr
     )
     run_kwargs: dict[str, object] = {}
 
-    def _fake_run(command: object, **kwargs: object) -> subprocess.CompletedProcess[object]:
+    def _fake_popen(command: object, **kwargs: object) -> _FakeVSPreviewProcess:
         run_kwargs.update(kwargs)
-        return subprocess.CompletedProcess(command, 0)
+        return _FakeVSPreviewProcess()
 
-    monkeypatch.setattr("frame_compare.vspreview.adapter.subprocess.run", _fake_run)
+    monkeypatch.setattr("frame_compare.vspreview.adapter.subprocess.Popen", _fake_popen)
 
     launch_alignment_verification_session(
         request=VSPreviewSessionRequest(
@@ -265,7 +279,7 @@ def test_launch_alignment_verification_session_reports_missing_launcher(
     def _raise_missing_launcher(*_args: object, **_kwargs: object) -> object:
         raise FileNotFoundError("secret missing launcher path")
 
-    monkeypatch.setattr("frame_compare.vspreview.adapter.subprocess.run", _raise_missing_launcher)
+    monkeypatch.setattr("frame_compare.vspreview.adapter.subprocess.Popen", _raise_missing_launcher)
 
     cfg = VSPreviewConfig(enabled=True, timeout_seconds=1.0)
 
@@ -299,8 +313,8 @@ def test_launch_alignment_verification_session_reports_nonzero_exit(
         lambda script_path: ["vspreview", str(script_path)],
     )
     monkeypatch.setattr(
-        "frame_compare.vspreview.adapter.subprocess.run",
-        lambda command, **_kwargs: subprocess.CompletedProcess(command, 7),
+        "frame_compare.vspreview.adapter.subprocess.Popen",
+        lambda _command, **_kwargs: _FakeVSPreviewProcess(returncode=7),
     )
 
     with pytest.raises(VSPreviewError, match="launch exited with code 7"):

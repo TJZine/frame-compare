@@ -225,7 +225,7 @@ function loadViewer({ clipCount, savedState = null }) {
         rightSelect: fakeElement(),
         activeSelect: fakeElement(),
         btnSwapClips: fakeElement(),
-        fitBtns: ['actual', 'width', 'height', 'fill'].map((fit) => ({
+        fitBtns: ['actual', 'width', 'height'].map((fit) => ({
             ...fakeElement(),
             dataset: { fit },
         })),
@@ -271,10 +271,6 @@ function loadViewer({ clipCount, savedState = null }) {
         btnBlinkPause: fakeElement(),
         blinkSpeed: fakeElement(),
         blinkStatus: fakeElement(),
-        btnFocusMode: fakeElement(),
-        focusHudFrame: fakeElement(),
-        focusHudMode: fakeElement(),
-        focusHudPair: fakeElement(),
         viewportPalette: fakeElement(),
         btnPaletteOrientation: fakeElement(),
         bottomPanel: {
@@ -466,7 +462,6 @@ const summary = {};
             inspectorTab: 'align',
             blinkIntervalMs: 1200,
             blinkPaused: true,
-            focusMode: true,
         },
     });
 
@@ -475,7 +470,6 @@ const summary = {};
     assert.equal(viewer.state.inspectorTab, 'align');
     assert.equal(viewer.state.blinkIntervalMs, 1200);
     assert.equal(viewer.state.blinkPaused, false);
-    assert.equal(viewer.state.focusMode, false);
 
     viewer.setInspectorTab('export');
     const focusables = viewer.dom.inspectorFocusables;
@@ -501,26 +495,22 @@ const summary = {};
     viewer.setInspectorOpen(false);
     viewer.setBlinkIntervalMs(300);
     viewer.setBlinkPaused(true);
-    viewer.setFocusMode(true);
     const saved = persisted(storage, storageKey);
     assert.equal(saved.currentFrameIdx, 1);
     assert.equal(saved.inspectorOpen, false);
     assert.equal(saved.inspectorTab, 'export');
     assert.equal(saved.blinkIntervalMs, 300);
     assert.equal(saved.blinkPaused, undefined);
-    assert.equal(saved.focusMode, undefined);
-    summary.inspectorBlinkFocusState = {
+    summary.inspectorBlinkKeyboardState = {
         currentFrameIdx: saved.currentFrameIdx,
         inspectorOpen: saved.inspectorOpen,
         inspectorTab: saved.inspectorTab,
         blinkIntervalMs: saved.blinkIntervalMs,
         blinkPausedPersisted: Object.hasOwn(saved, 'blinkPaused'),
-        focusModePersisted: Object.hasOwn(saved, 'focusMode'),
-        focusModeActive: viewer.state.focusMode,
         closedInspectorInert: viewer.dom.inspector.inert,
         closedInspectorTabIndex: viewer.dom.btnInspectorClose.getAttribute('tabindex'),
-        restoredFocusToInfo: document.activeElement === viewer.dom.btnInfo,
-        clearedRestoreFocus: viewer.state.inspectorRestoreFocus === null,
+        restoredKeyboardFocusToInfo: document.activeElement === viewer.dom.btnInfo,
+        clearedKeyboardFocusRestoreTarget: viewer.state.inspectorRestoreFocus === null,
     };
 }
 
@@ -554,30 +544,6 @@ const summary = {};
         inspectorClosedBeforeAlignment: true,
         legacyInfoModalWins: true,
         alignmentStillOpenAfterInspectorEscape: true,
-    };
-}
-
-{
-    const { viewer } = loadViewer({ clipCount: 4 });
-
-    viewer.setInspectorOpen(true);
-    assert.equal(viewer.state.inspectorOpen, true);
-    assert.equal(viewer.dom.inspector.inert, false);
-    viewer.setFocusMode(true);
-    assert.equal(viewer.state.focusMode, true);
-    assert.equal(viewer.state.inspectorOpen, false);
-    assert.equal(viewer.dom.inspector.inert, true);
-
-    const escape = keyboardEvent('Escape');
-    viewer.handleKey(escape);
-    assert.equal(escape.defaultPrevented, true);
-    assert.equal(viewer.state.focusMode, false);
-    assert.equal(viewer.state.inspectorOpen, false);
-    assert.equal(viewer.isInspectorVisible(), false);
-
-    summary.focusModeInspectorClose = {
-        inspectorClosedOnEntry: true,
-        inspectorStayedClosedAfterEscape: true,
     };
 }
 

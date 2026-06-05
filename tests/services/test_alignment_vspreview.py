@@ -53,6 +53,15 @@ def _set_tty_streams(
     monkeypatch.setattr(alignment_vspreview.sys.stderr, "isatty", lambda: stderr)
 
 
+def _set_broken_tty_streams(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _raise_closed_stream() -> bool:
+        raise ValueError("closed stream")
+
+    monkeypatch.setattr(alignment_vspreview.sys.stdin, "isatty", _raise_closed_stream)
+    monkeypatch.setattr(alignment_vspreview.sys.stdout, "isatty", _raise_closed_stream)
+    monkeypatch.setattr(alignment_vspreview.sys.stderr, "isatty", _raise_closed_stream)
+
+
 def _availability(status: VSPreviewAvailabilityStatus) -> VSPreviewAvailability:
     if status == VSPreviewAvailabilityStatus.PROBE_FAILED:
         return VSPreviewAvailability(
@@ -173,6 +182,34 @@ def test_available_without_tty_generates_script_disabled_and_logs_no_tty(
     assert warning_args == ("vspreview_no_tty",)
     assert warning_kwargs["stdin_tty"] is False
     assert warning_kwargs["stdout_tty"] is True
+    assert warning_kwargs["stderr_tty"] is False
+
+
+def test_available_with_broken_tty_probe_treats_streams_as_non_tty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_broken_tty_streams(monkeypatch)
+    monkeypatch.setattr(
+        alignment_vspreview,
+        "check_vspreview_availability",
+        MagicMock(return_value=_availability(VSPreviewAvailabilityStatus.AVAILABLE)),
+    )
+    mock_launch = MagicMock(return_value=tmp_path / "vspreview.py")
+    mock_warning = MagicMock()
+    monkeypatch.setattr(alignment_vspreview, "launch_alignment_verification_session", mock_launch)
+    monkeypatch.setattr(alignment_vspreview.log, "warning", mock_warning)
+
+    _call_maybe_launch(tmp_path=tmp_path, config=AlignmentConfig(use_vspreview=True))
+
+    mock_launch.assert_called_once()
+    _, launch_kwargs = mock_launch.call_args
+    assert launch_kwargs["config"].enabled is False
+    mock_warning.assert_called_once()
+    warning_args, warning_kwargs = mock_warning.call_args
+    assert warning_args == ("vspreview_no_tty",)
+    assert warning_kwargs["stdin_tty"] is False
+    assert warning_kwargs["stdout_tty"] is False
     assert warning_kwargs["stderr_tty"] is False
 
 

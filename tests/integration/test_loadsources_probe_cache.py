@@ -35,7 +35,7 @@ _PROBE_CACHE_CONFIG = """\
 use_run_folders = false
 
 [analysis]
-frame_count = 1
+random_frame_count = 1
 
 [audio_alignment]
 enable = false

@@ -8,15 +8,6 @@ from enum import StrEnum
 # Exception: LogLevel uses uppercase values per standard Python logging convention.
 
 
-class SelectionMode(StrEnum):
-    """Frame selection strategy for choosing representative comparison frames."""
-
-    QUANTILE = "quantile"
-    MOTION = "motion"
-    RANDOM = "random"
-    MIXED = "mixed"
-
-
 class OverlayMode(StrEnum):
     """Overlay verbosity level for rendered screenshots."""
 
@@ -31,6 +22,13 @@ class ScreenshotGeometryMode(StrEnum):
 
     NATIVE = "native"
     ALIGNED = "aligned"
+
+
+class SourceMatchFpsMode(StrEnum):
+    """Source FPS matching policy for mixed-FPS inputs."""
+
+    DISABLED = "disabled"
+    ASSUME_REFERENCE = "assume_reference"
 
 
 class VsScreenshotWriter(StrEnum):
@@ -98,7 +96,7 @@ __all__ = [
     "LogLevel",
     "OverlayMode",
     "ScreenshotGeometryMode",
-    "SelectionMode",
+    "SourceMatchFpsMode",
     "ToneCurve",
     "TonemapPreset",
     "ViewerMode",

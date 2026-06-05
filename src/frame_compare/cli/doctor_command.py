@@ -48,6 +48,7 @@ def handle_doctor(
     *,
     run_doctor: RunDoctorFn,
     handle_error: HandleErrorFn,
+    no_color: bool,
 ) -> None:
     """Run dependency diagnostics."""
     try:
@@ -59,7 +60,7 @@ def handle_doctor(
         raise typer.Exit(
             code=handle_error(
                 error,
-                no_color=True,
+                no_color=no_color,
                 verbose=False,
                 verbose_hint=None,
             )

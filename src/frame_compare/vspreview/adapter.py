@@ -191,16 +191,7 @@ def launch_alignment_verification_session(
         env = os.environ.copy()
         if config.no_color:
             env["NO_COLOR"] = "1"
-        # command is a list from _resolve_launch_command; shell=True is never used.
-        result = subprocess.run(  # nosec B603
-            command,
-            check=False,
-            stdin=None,
-            stdout=None,
-            stderr=None,
-            text=True,
-            env=env,
-        )
+        returncode = _run_vspreview_command(command, env=env)
     except FileNotFoundError as e:
         raise VSPreviewError("launcher command was not found") from e
     except Exception as e:
@@ -211,17 +202,28 @@ def launch_alignment_verification_session(
         )
         raise VSPreviewError(f"unexpected launch error ({type(e).__name__})") from e
 
-    if result.returncode != 0:
-        public_reason = f"launch exited with code {result.returncode}"
+    if returncode != 0:
+        public_reason = f"launch exited with code {returncode}"
         log.warning(
             "vspreview_launch_failed",
             reason=public_reason,
-            returncode=result.returncode,
+            returncode=returncode,
             hint="Re-run with verbose mode to inspect VSPreview output",
         )
         raise VSPreviewError(public_reason)
 
     return script_path
+
+
+def _run_vspreview_command(command: list[str], *, env: dict[str, str]) -> int:
+    # command is a list from _resolve_launch_command; shell=True is never used.
+    with subprocess.Popen(  # nosec B603
+        command,
+        stdin=None,
+        stdout=None,
+        env=env,
+    ) as process:
+        return process.wait()
 
 
 def _write_vspreview_session_script(request: VSPreviewSessionRequest) -> Path:

@@ -171,7 +171,7 @@ def test_check_alignment_cached_corruption_raises(tmp_path: Path) -> None:
 @patch("frame_compare.services.alignment._extract_matching_audio")
 @patch("frame_compare.services.alignment._extract_reference_audio")
 @patch("frame_compare.services.alignment._estimate_consensus_offset")
-def test_align_clips_computed_results_do_not_advance_phase_progress(
+def test_align_clips_computed_results_advance_phase_progress(
     mock_estimate: MagicMock,
     mock_extract_reference: MagicMock,
     mock_extract_matching: MagicMock,
@@ -196,12 +196,60 @@ def test_align_clips_computed_results_do_not_advance_phase_progress(
         progress=reporter,
     )
 
-    reporter.advance.assert_not_called()
+    reporter.advance.assert_called_once_with(1)
+    reporter.start_indeterminate.assert_called_once_with("Loading alignment offsets")
     reporter.set_description.assert_any_call("Audio Alignment")
-    reporter.set_description.assert_any_call("Aligning comp.mkv")
+    reporter.set_description.assert_any_call("Checking alignment for comp.mkv")
+    reporter.set_description.assert_any_call("Checked alignment for comp.mkv")
 
 
-def test_align_clips_cached_results_do_not_advance_phase_progress(tmp_path: Path) -> None:
+@patch("frame_compare.services.alignment._probe_fps")
+@patch("frame_compare.services.alignment._extract_matching_audio")
+@patch("frame_compare.services.alignment._extract_reference_audio")
+@patch("frame_compare.services.alignment._estimate_consensus_offset")
+def test_align_clips_advances_each_computed_comparison_before_starting_next(
+    mock_estimate: MagicMock,
+    mock_extract_reference: MagicMock,
+    mock_extract_matching: MagicMock,
+    mock_probe: MagicMock,
+    tmp_path: Path,
+) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp_a = tmp_path / "comp_a.mkv"
+    comp_b = tmp_path / "comp_b.mkv"
+    ref.touch()
+    comp_a.touch()
+    comp_b.touch()
+    mock_probe.return_value = Fraction(24, 1)
+    mock_extract_reference.return_value = (np.ones(10, dtype=np.float32), object())
+    mock_extract_matching.return_value = np.ones(10, dtype=np.float32)
+    mock_estimate.return_value = AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, None)
+    reporter = MagicMock(spec=ProgressReporter)
+
+    align_clips(
+        ref,
+        [comp_a, comp_b],
+        AlignmentConfig(cache_results=False),
+        tmp_path,
+        progress=reporter,
+    )
+
+    relevant_calls = [
+        call for call in reporter.method_calls if call[0] in {"set_description", "advance"}
+    ]
+    comp_a_to_comp_b_progress = [
+        call.set_description("Checked alignment for comp_a.mkv"),
+        call.advance(1),
+        call.set_description("Checking alignment for comp_b.mkv"),
+    ]
+    assert any(
+        relevant_calls[index : index + len(comp_a_to_comp_b_progress)] == comp_a_to_comp_b_progress
+        for index in range(len(relevant_calls) - len(comp_a_to_comp_b_progress) + 1)
+    )
+    assert reporter.advance.call_count == 2
+
+
+def test_align_clips_full_cache_hit_uses_spinner_without_progress_bar(tmp_path: Path) -> None:
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
     ref.touch()
@@ -226,7 +274,69 @@ def test_align_clips_cached_results_do_not_advance_phase_progress(tmp_path: Path
 
     align_clips(ref, [comp], AlignmentConfig(cache_results=True), tmp_path, progress=reporter)
 
+    reporter.start_indeterminate.assert_called_once_with("Loading alignment offsets")
     reporter.advance.assert_not_called()
+    assert call("Checking alignment for comp.mkv") not in reporter.set_description.call_args_list
+
+
+def test_align_clips_partial_cache_hit_uses_spinner_then_checks_missing_progress(
+    tmp_path: Path,
+) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp_cached = tmp_path / "comp_cached.mkv"
+    comp_missing = tmp_path / "comp_missing.mkv"
+    ref.touch()
+    comp_cached.touch()
+    comp_missing.touch()
+    _write_cached_offsets(
+        tmp_path,
+        reference=ref,
+        comparisons=[comp_cached, comp_missing],
+        results=[
+            AlignmentResult(
+                reference_clip="ref.mkv",
+                comparison_clip="comp_cached.mkv",
+                frame_offset=12,
+                time_offset_seconds=0.5,
+                correlation_score=0.95,
+                algorithm="cross_correlation",
+                source="computed",
+            )
+        ],
+    )
+    reporter = MagicMock(spec=ProgressReporter)
+
+    with (
+        patch("frame_compare.services.alignment._probe_fps", return_value=Fraction(24, 1)),
+        patch(
+            "frame_compare.services.alignment._extract_reference_audio",
+            return_value=(np.ones(10, dtype=np.float32), object()),
+        ),
+        patch(
+            "frame_compare.services.alignment._extract_matching_audio",
+            return_value=np.ones(10, dtype=np.float32),
+        ),
+        patch(
+            "frame_compare.services.alignment._estimate_consensus_offset",
+            return_value=AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, None),
+        ),
+    ):
+        align_clips(
+            ref,
+            [comp_cached, comp_missing],
+            AlignmentConfig(cache_results=True),
+            tmp_path,
+            progress=reporter,
+        )
+
+    relevant_calls = [
+        call for call in reporter.method_calls if call[0] in {"set_description", "advance"}
+    ]
+    assert reporter.start_indeterminate.called
+    assert relevant_calls.index(
+        call.set_description("Loaded cached alignment for comp_cached.mkv")
+    ) < relevant_calls.index(call.set_description("Checking alignment for comp_missing.mkv"))
+    assert reporter.advance.call_count == 2
 
 
 @patch("frame_compare.services.alignment._probe_fps")
@@ -380,7 +490,7 @@ def test_align_clips_loads_cache_when_reference_fps_matches(
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_matching_audio")
 @patch("frame_compare.services.alignment._extract_reference_audio")
-def test_align_clips_manual_results_do_not_advance_phase_progress(
+def test_align_clips_full_manual_hit_uses_spinner_without_progress_bar(
     mock_extract_reference: MagicMock,
     mock_extract_matching: MagicMock,
     mock_probe: MagicMock,
@@ -411,7 +521,9 @@ def test_align_clips_manual_results_do_not_advance_phase_progress(
 
     align_clips(ref, [comp], AlignmentConfig(cache_results=True), tmp_path, progress=reporter)
 
+    reporter.start_indeterminate.assert_called_once_with("Loading alignment offsets")
     reporter.advance.assert_not_called()
+    assert call("Checking alignment for comp.mkv") not in reporter.set_description.call_args_list
 
 
 @patch("frame_compare.services.alignment._probe_fps")

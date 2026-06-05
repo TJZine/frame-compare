@@ -21,6 +21,17 @@ def test_docker_integration_workflow_watches_lockfile(repo_root: Path) -> None:
     assert re.search(r"paths:\s*(?:\n\s+- .*)*\n\s+- uv\.lock\b", workflow)
 
 
+def test_docker_integration_workflow_watches_docker_overrides_and_verify_scripts(
+    repo_root: Path,
+) -> None:
+    workflow_path = repo_root / ".github" / "workflows" / "docker-integration.yml"
+    workflow = _read_text_or_fail(workflow_path)
+
+    assert "- docker-compose*.yml" in workflow
+    assert "- tools/verify_docker_*.sh" in workflow
+    assert "- tests/workflows/**" in workflow
+
+
 def test_dockerfile_installs_lock_export_with_hashes(repo_root: Path) -> None:
     dockerfile_path = repo_root / "Dockerfile"
     dockerfile = _read_text_or_fail(dockerfile_path)
@@ -124,6 +135,29 @@ def test_docker_verify_script_asserts_runtime_proof_items(repo_root: Path) -> No
         "zero skips",
     ):
         assert proof_item in script
+
+
+def test_readme_docker_examples_do_not_use_removed_frame_count_flags(repo_root: Path) -> None:
+    readme_path = repo_root / "README.md"
+    readme = _read_text_or_fail(readme_path)
+
+    assert "single `docker compose up`" not in readme
+
+    docker_sections = [
+        match.group(0)
+        for match in re.finditer(
+            r"```bash\n(?:docker|bash tools/verify_docker_integration\.sh).*?\n```",
+            readme,
+            re.DOTALL,
+        )
+    ]
+
+    assert docker_sections, "Expected README to include Docker command examples."
+    assert all("--frame-count" not in section for section in docker_sections)
+    assert all(
+        not re.search(r"(?<![A-Za-z0-9_-])-n(?![A-Za-z0-9_-])", section)
+        for section in docker_sections
+    )
 
 
 def test_dockerfile_installs_project_without_dependency_resolution(repo_root: Path) -> None:

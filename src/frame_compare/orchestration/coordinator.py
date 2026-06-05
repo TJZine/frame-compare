@@ -53,6 +53,7 @@ def _assemble_run_result(
         clips_processed=1 + len(context.comparisons),
         duration_seconds=duration_seconds,
         cache_hit=artifacts.metrics_cache_hit,
+        metrics_cache_status=artifacts.metrics_cache_status,
         phase_timings=phase_timings,
         warnings=[*preflight_warnings, *sorted(artifacts.warnings)],
     )

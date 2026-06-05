@@ -66,8 +66,6 @@ def compute_cache_key(
         stat = p.stat()
         h.update(f"{p}|{stat.st_size}|{stat.st_mtime_ns}".encode())
     h.update(
-        f"{config.frame_count}|{config.selection_mode.value}|{config.random_seed}|"
-        f"{config.dark_quantile}|{config.bright_quantile}|"
         f"{config.ignore_lead_seconds}|{config.ignore_trail_seconds}|"
         f"{config.min_window_seconds}".encode()
     )

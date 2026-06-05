@@ -65,7 +65,7 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     assert "run folders" in output
     assert "base paths" in output
     assert "selection" in output
-    assert "mixed, n=10, seed=42" in output
+    assert "user=0, random=10, dark=0, bright=0, motion=0, seed=42" in output
     assert "FFmpeg audio" in output
     assert "interactive alignment" in output
     assert "force interactive" in output
@@ -339,6 +339,28 @@ def test_result_summary_omits_warnings_panel_when_no_warnings_exist() -> None:
     assert "slow.pics" in output
     assert "report" in output
     assert "Warnings" not in output
+
+
+def test_result_summary_reports_skipped_analysis_cache_status() -> None:
+    console = _console()
+
+    print_result_summary(
+        console,
+        result=RunResult(
+            success=True,
+            frame_count=1,
+            clips_processed=2,
+            duration_seconds=0.5,
+            cache_hit=False,
+            metrics_cache_status="skipped",
+        ),
+        quiet=False,
+    )
+
+    output = _render(console)
+    assert "cache" in output
+    assert "skipped" in output
+    assert "miss" not in output
 
 
 def test_result_summary_prints_success_fallback_and_truncates_warnings() -> None:

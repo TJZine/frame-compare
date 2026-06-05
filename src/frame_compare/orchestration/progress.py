@@ -13,6 +13,7 @@ from frame_compare.utils.progress import (
     RichProgressReporter,
 )
 from frame_compare.utils.progress_protocol import ProgressReporter
+from frame_compare.utils.terminal import stream_is_tty
 
 _PHASE_DISPLAY_LABELS = {
     "frame_plan": "PLAN",
@@ -45,17 +46,6 @@ def start_phase_progress(
         reporter.start_phase(name, total=total)
         return
     reporter.start_phase(display_label, total=total)
-
-
-def _stream_is_tty(stream: object) -> bool:
-    """Return True when a stream behaves like an interactive TTY."""
-    isatty = getattr(stream, "isatty", None)
-    if not callable(isatty):
-        return False
-    try:
-        return bool(isatty())
-    except (ValueError, OSError):
-        return False
 
 
 def select_reporter(
@@ -96,7 +86,7 @@ def select_reporter(
             return RichProgressReporter(no_color=no_color)
         return LogProgressReporter()
 
-    if _stream_is_tty(sys.stdout) or _stream_is_tty(sys.stderr):
+    if stream_is_tty(sys.stdout) or stream_is_tty(sys.stderr):
         return RichProgressReporter(no_color=no_color)
 
     return LogProgressReporter()

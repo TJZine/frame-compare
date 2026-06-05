@@ -29,7 +29,7 @@ from frame_compare.services.alignment_vspreview import maybe_launch_alignment_vs
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
-from frame_compare.utils.progress_protocol import ProgressReporter
+from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 from frame_compare.vspreview.overrides import load_manual_overrides
 
 log = structlog.get_logger()
@@ -191,7 +191,7 @@ def _compute_missing_alignments(
     )
     for comp in requested_comparisons:
         if progress:
-            progress.set_description(f"Aligning {comp.name}")
+            progress.set_description(f"Checking alignment for {comp.name}")
 
         comp_audio = _extract_matching_audio(
             comp,
@@ -228,6 +228,39 @@ def _compute_missing_alignments(
             diagnostic=estimate.diagnostic,
         )
         results_map[f"{reference.stem}:{comp.stem}"] = res
+        _record_alignment_progress(progress=progress, result=res)
+
+
+def _record_alignment_progress(
+    *,
+    progress: ProgressReporter | None,
+    result: AlignmentResult,
+) -> None:
+    if progress is None:
+        return
+
+    match result.source:
+        case "cached":
+            description = f"Loaded cached alignment for {result.comparison_clip}"
+        case "manual":
+            description = f"Using manual alignment for {result.comparison_clip}"
+        case _:
+            description = f"Checked alignment for {result.comparison_clip}"
+    progress.set_description(description)
+    progress.advance(1)
+
+
+def _record_resolved_alignment_progress(
+    *,
+    progress: ProgressReporter | None,
+    reference: Path,
+    comparisons: list[Path],
+    results_map: dict[str, AlignmentResult],
+) -> None:
+    for comp in comparisons:
+        result = results_map.get(f"{reference.stem}:{comp.stem}")
+        if result is not None:
+            _record_alignment_progress(progress=progress, result=result)
 
 
 def align_clips(
@@ -252,42 +285,60 @@ def align_clips(
         progress.set_description("Audio Alignment")
 
     results_map: dict[str, AlignmentResult] = {}
-    # 0. Load manual overrides (highest precedence per §2.4)
-    fps_reference = _apply_manual_overrides(
-        reference,
-        comparisons,
-        cache_dir,
-        results_map,
-        reference_fps,
-    )
+    cache_activity_status = ProgressPhaseStatus.COMPLETED
+    if progress:
+        progress.start_indeterminate("Loading alignment offsets")
+    try:
+        # 0. Load manual overrides (highest precedence per §2.4)
+        fps_reference = _apply_manual_overrides(
+            reference,
+            comparisons,
+            cache_dir,
+            results_map,
+            reference_fps,
+        )
 
-    # 1. Check cache for non-manual entries
-    requested_comparisons = [
-        c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
-    ]
-    if config.cache_results and requested_comparisons:
-        try:
-            cached = load_cached_offsets(
-                cache_dir,
-                reference,
-                requested_comparisons,
-                sample_rate=config.sample_rate,
-                max_offset_seconds=config.max_offset_seconds,
-                config=config,
-                reference_fps=reference_fps,
-            )
-            if cached is not None:
-                results_map.update(cached)
-                requested_comparisons = [
-                    c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
-                ]
-        except (CacheCorruptionError, CacheVersionMismatchError) as exc:
-            log.warning(
-                "audio_offsets_cache_load_failed",
-                path=str(cache_dir / CACHE_FILE_NAME),
-                error=str(exc),
-                action="degrade_to_computed_alignment",
-            )
+        # 1. Check cache for non-manual entries
+        requested_comparisons = [
+            c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
+        ]
+        if config.cache_results and requested_comparisons:
+            try:
+                cached = load_cached_offsets(
+                    cache_dir,
+                    reference,
+                    requested_comparisons,
+                    sample_rate=config.sample_rate,
+                    max_offset_seconds=config.max_offset_seconds,
+                    config=config,
+                    reference_fps=reference_fps,
+                )
+                if cached is not None:
+                    results_map.update(cached)
+                    requested_comparisons = [
+                        c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
+                    ]
+            except (CacheCorruptionError, CacheVersionMismatchError) as exc:
+                log.warning(
+                    "audio_offsets_cache_load_failed",
+                    path=str(cache_dir / CACHE_FILE_NAME),
+                    error=str(exc),
+                    action="degrade_to_computed_alignment",
+                )
+    except Exception:
+        cache_activity_status = ProgressPhaseStatus.FAILED
+        raise
+    finally:
+        if progress:
+            progress.complete_phase(cache_activity_status)
+
+    if requested_comparisons:
+        _record_resolved_alignment_progress(
+            progress=progress,
+            reference=reference,
+            comparisons=comparisons,
+            results_map=results_map,
+        )
 
     # 2. Compute missing
     if requested_comparisons:

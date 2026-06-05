@@ -21,7 +21,6 @@ type Font = ImageFont.ImageFont | ImageFont.FreeTypeFont
 type ImageInput = Image.Image | np.ndarray | None
 
 _LABEL_POSITION = (10, 10)
-_BLOCK_GAP_PX = 10
 _DEFAULT_DETAILS_Y = 140
 _DEFAULT_DETAILS_OFFSET_Y = _DEFAULT_DETAILS_Y - _LABEL_POSITION[1]
 _FILL = (255, 255, 255, 255)
@@ -87,6 +86,27 @@ def _draw_text_block(
     )
 
 
+def _font_line_spacing(draw: ImageDraw.ImageDraw, font: Font) -> int:
+    try:
+        single_bbox = draw.multiline_textbbox(
+            (0, 0),
+            "Ag",
+            font=font,
+            stroke_width=_STROKE_WIDTH,
+        )
+        double_bbox = draw.multiline_textbbox(
+            (0, 0),
+            "Ag\nAg",
+            font=font,
+            stroke_width=_STROKE_WIDTH,
+        )
+    except (OSError, ValueError, RuntimeError):
+        return 4
+    single_height = int(single_bbox[3] - single_bbox[1])
+    double_height = int(double_bbox[3] - double_bbox[1])
+    return max(1, double_height - (2 * single_height))
+
+
 def _resolve_details_y(
     draw: ImageDraw.ImageDraw,
     position: tuple[int, int],
@@ -102,7 +122,7 @@ def _resolve_details_y(
         )
     except (OSError, ValueError, RuntimeError):
         return position[1] + _DEFAULT_DETAILS_OFFSET_Y
-    return int(bbox[3]) + _BLOCK_GAP_PX
+    return int(bbox[3]) + _font_line_spacing(draw, font)
 
 
 def _resolve_display_frame_number(config: OverlayConfig) -> int:
@@ -322,11 +342,12 @@ def _compose_overlay_text(config: OverlayConfig, mode: OverlayMode) -> str | Non
     width, height = config.resolution
     overlay_lines = compose_overlay_text_lines(
         mode=mode,
-        base_text=None,
+        base_text=config.base_text,
         width=width,
         height=height,
         selection_type=_resolve_selection_label(config),
         diagnostic_lines=_diagnostic_lines(config, mode),
+        resolution_summary=config.resolution_summary,
     )
     if not overlay_lines:
         return None

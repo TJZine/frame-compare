@@ -27,6 +27,10 @@ class ProgressReporter(Protocol):
         """Start a new phase of the operation."""
         ...
 
+    def start_indeterminate(self, name: str) -> None:
+        """Start a phase with activity but no measurable total."""
+        ...
+
     def advance(self, amount: int = 1) -> None:
         """Advance the progress of the current phase."""
         ...

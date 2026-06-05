@@ -20,10 +20,13 @@ from frame_compare.cli.output import (
     print_at_a_glance,
     print_result_summary,
 )
+from frame_compare.config.effective import load_effective_config
 from frame_compare.config.errors import ConfigValidationError
-from frame_compare.config.overrides import apply_cli_overrides
 from frame_compare.config.schema import ConfigSchema, OverlayMode, ToneCurve, TonemapPreset
 from frame_compare.errors import FrameCompareError, JSONValue
+from frame_compare.orchestration.analysis_policy import (
+    validate_skip_analysis_frame_selection_contract as validate_skip_analysis_policy,
+)
 
 from .cli_helpers import format_enum_expected
 
@@ -146,7 +149,11 @@ class RunCliOptions:
     tm_preset: TonemapPreset | None
     tm_target_nits: int | None
     tm_curve: ToneCurve | None
-    frame_count: int | None
+    user_frames: list[int] | None
+    random_frame_count: int | None
+    dark_frame_count: int | None
+    bright_frame_count: int | None
+    motion_frame_count: int | None
     seed: int | None
     overlay_mode: OverlayMode | None
     skip_analysis: bool
@@ -173,7 +180,11 @@ def build_run_request_from_cli(options: RunCliOptions) -> RunRequest:
         tm_preset=options.tm_preset,
         tm_target_nits=options.tm_target_nits,
         tm_curve=options.tm_curve,
-        frame_count=options.frame_count,
+        user_frames=options.user_frames,
+        random_frame_count=options.random_frame_count,
+        dark_frame_count=options.dark_frame_count,
+        bright_frame_count=options.bright_frame_count,
+        motion_frame_count=options.motion_frame_count,
         seed=options.seed,
         overlay_mode=options.overlay_mode,
         skip_analysis=options.skip_analysis,
@@ -198,7 +209,12 @@ class RunCliRawArgs:
     tm_preset: str | None
     tm_target: int | None
     tm_curve: str | None
-    frame_count: int | None
+    frames: str | None
+    random_frame_count: str | None
+    dark_frame_count: str | None
+    bright_frame_count: str | None
+    motion_frame_count: str | None
+    removed_frame_count: str | None
     seed: int | None
     overlay: str | None
     skip_analysis: bool
@@ -353,6 +369,7 @@ def parse_run_options(args: RunCliRawArgs, *, no_color: bool) -> RunCliOptions:
     parsed_tm_preset = coerce_cli_choice(args.tm_preset, TonemapPreset, ("color", "preset"))
     parsed_tm_curve = coerce_cli_choice(args.tm_curve, ToneCurve, ("color", "tone_curve"))
     parsed_overlay = coerce_cli_choice(args.overlay, OverlayMode, ("screenshots", "overlay_mode"))
+    reject_removed_frame_count(args.removed_frame_count)
 
     return RunCliOptions(
         root=args.resolved_root,
@@ -364,7 +381,27 @@ def parse_run_options(args: RunCliRawArgs, *, no_color: bool) -> RunCliOptions:
         tm_preset=parsed_tm_preset,
         tm_target_nits=args.tm_target,
         tm_curve=parsed_tm_curve,
-        frame_count=args.frame_count,
+        user_frames=parse_frame_list(args.frames),
+        random_frame_count=parse_non_negative_int_option(
+            args.random_frame_count,
+            option_name="--random-frame-count",
+            loc=("analysis", "random_frame_count"),
+        ),
+        dark_frame_count=parse_non_negative_int_option(
+            args.dark_frame_count,
+            option_name="--dark-frame-count",
+            loc=("analysis", "dark_frame_count"),
+        ),
+        bright_frame_count=parse_non_negative_int_option(
+            args.bright_frame_count,
+            option_name="--bright-frame-count",
+            loc=("analysis", "bright_frame_count"),
+        ),
+        motion_frame_count=parse_non_negative_int_option(
+            args.motion_frame_count,
+            option_name="--motion-frame-count",
+            loc=("analysis", "motion_frame_count"),
+        ),
         seed=args.seed,
         overlay_mode=parsed_overlay,
         skip_analysis=args.skip_analysis,
@@ -378,17 +415,120 @@ def parse_run_options(args: RunCliRawArgs, *, no_color: bool) -> RunCliOptions:
     )
 
 
+def reject_removed_frame_count(value: str | None) -> None:
+    if value is None:
+        return
+    raise ConfigValidationError(
+        [
+            {
+                "type": "removed_option",
+                "loc": ["cli", "frame_count"],
+                "msg": (
+                    "--frame-count/-n has been removed; use --random-frame-count, "
+                    "--dark-frame-count, --bright-frame-count, --motion-frame-count, "
+                    "or --frames"
+                ),
+                "input": value,
+            }
+        ],
+        message="--frame-count/-n has been removed",
+        hint="Use explicit frame selection flags such as --random-frame-count or --frames",
+    )
+
+
+def parse_frame_list(value: str | None) -> list[int] | None:
+    if value is None:
+        return None
+    if value == "":
+        raise _frame_selection_cli_error(
+            loc=("analysis", "user_frames"),
+            msg="--frames must be a comma-separated list of non-negative integers",
+            input_value=value,
+        )
+    frames: list[int] = []
+    for raw_part in value.split(","):
+        part = raw_part.strip()
+        if part == "":
+            raise _frame_selection_cli_error(
+                loc=("analysis", "user_frames"),
+                msg="--frames must not contain empty entries",
+                input_value=value,
+            )
+        try:
+            frame = int(part, 10)
+        except ValueError as exc:
+            raise _frame_selection_cli_error(
+                loc=("analysis", "user_frames"),
+                msg="--frames must contain only non-negative integers",
+                input_value=value,
+            ) from exc
+        if frame < 0:
+            raise _frame_selection_cli_error(
+                loc=("analysis", "user_frames"),
+                msg="--frames must contain only non-negative integers",
+                input_value=value,
+            )
+        frames.append(frame)
+    return frames
+
+
+def parse_non_negative_int_option(
+    value: str | None,
+    *,
+    option_name: str,
+    loc: tuple[str, str],
+) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = int(value, 10)
+    except ValueError as exc:
+        raise _frame_selection_cli_error(
+            loc=loc,
+            msg=f"{option_name} must be a non-negative integer",
+            input_value=value,
+        ) from exc
+    if parsed < 0:
+        raise _frame_selection_cli_error(
+            loc=loc,
+            msg=f"{option_name} must be a non-negative integer",
+            input_value=value,
+        )
+    return parsed
+
+
+def _frame_selection_cli_error(
+    *,
+    loc: tuple[str, ...],
+    msg: str,
+    input_value: str,
+) -> ConfigValidationError:
+    return ConfigValidationError(
+        [
+            {
+                "type": "value_error",
+                "loc": list(loc),
+                "msg": msg,
+                "input": input_value,
+            }
+        ],
+        message=msg,
+    )
+
+
 def build_effective_config_loaders(
     args: RunCliRawArgs,
     deps: RunCommandDeps,
     request: RunRequest,
 ) -> tuple[EffectiveConfigLoader, EffectiveConfigLoader]:
     resolved_config: ConfigSchema | None = None
+    cli_overrides = request.cli_config_overrides()
 
     def _resolve_effective_config() -> ConfigSchema:
-        return apply_cli_overrides(
-            deps.load_config(args.config_path),
-            cli_args=request.cli_config_overrides(),
+        return load_effective_config(
+            args.config_path,
+            cli_overrides=cli_overrides,
+            load_config_fn=deps.load_config,
         )
 
     def _load_effective_config() -> ConfigSchema:
@@ -402,8 +542,19 @@ def build_effective_config_loaders(
 
 def validate_run_contracts(args: RunCliRawArgs, deps: RunCommandDeps, config: ConfigSchema) -> None:
     """Enforce public CLI mode combinations before entering the runtime pipeline."""
+    validate_skip_analysis_frame_selection_contract(args, config)
     validate_json_interactive_alignment_contract(args, config)
     validate_report_confirmed_slowpics_contract(args, deps, config)
+
+
+def validate_skip_analysis_frame_selection_contract(
+    args: RunCliRawArgs,
+    config: ConfigSchema,
+) -> None:
+    validate_skip_analysis_policy(
+        skip_analysis=args.skip_analysis,
+        config=config.analysis,
+    )
 
 
 def validate_json_interactive_alignment_contract(
@@ -562,12 +713,7 @@ def maybe_open_report_path(
     resolve_effective_config: EffectiveConfigLoader,
     suppress_report_open: bool = False,
 ) -> bool:
-    if (
-        suppress_report_open
-        or args.json_output
-        or args.quiet
-        or not deps.stdout_is_tty
-    ):
+    if suppress_report_open or args.json_output or args.quiet or not deps.stdout_is_tty:
         return False
 
     try:

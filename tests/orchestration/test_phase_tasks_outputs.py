@@ -10,12 +10,15 @@ from typing import Any, cast
 import httpx
 import pytest
 
+from frame_compare.analysis.errors import SelectionError
 from frame_compare.analysis.types import (
+    FrameMetrics,
+    MetricsMetadata,
     SelectionBreakdown,
     SelectionDetail,
 )
 from frame_compare.config.schema import OverlayMode
-from frame_compare.orchestration import phase_tasks
+from frame_compare.orchestration import phase_post_render, phase_tasks
 from frame_compare.orchestration.context import ClipActiveRect
 from frame_compare.orchestration.execution import build_phases_after_align
 from frame_compare.orchestration.phases import execute_phases
@@ -63,10 +66,10 @@ async def test_run_metadata_phase_resolves_when_enabled_and_client_present(
         captured.update(kwargs)
         return expected
 
-    monkeypatch.setattr(phase_tasks, "resolve_run_metadata", _fake_resolve_run_metadata)
+    monkeypatch.setattr(phase_post_render, "resolve_run_metadata", _fake_resolve_run_metadata)
 
     async with httpx.AsyncClient() as client:
-        output = await phase_tasks.run_metadata_phase(
+        output = await phase_post_render.run_metadata_phase(
             ctx,
             client=client,
             metadata_prefetch=MetadataPrefetch(None, False),
@@ -102,9 +105,9 @@ def test_run_report_phase_builds_report_data_and_records_path(
         captured["report_config"] = report_config
         return expected_path
 
-    monkeypatch.setattr(phase_tasks, "generate_report", _fake_generate_report)
+    monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
 
-    output = phase_tasks.run_report_phase(
+    output = phase_post_render.run_report_phase(
         ctx,
         frames=[5],
         render=artifacts.render,
@@ -151,9 +154,9 @@ def test_run_report_phase_builds_four_clip_payload_inputs_in_clip_order(
         captured["report_config"] = report_config
         return tmp_path / "report.html"
 
-    monkeypatch.setattr(phase_tasks, "generate_report", _fake_generate_report)
+    monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
 
-    phase_tasks.run_report_phase(
+    phase_post_render.run_report_phase(
         ctx,
         frames=[12],
         render=render,
@@ -216,9 +219,9 @@ def test_run_report_phase_passes_reference_source_frame_details(
         captured["report_config"] = report_config
         return expected_path
 
-    monkeypatch.setattr(phase_tasks, "generate_report", _fake_generate_report)
+    monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
 
-    output = phase_tasks.run_report_phase(
+    output = phase_post_render.run_report_phase(
         ctx,
         frames=[1, 2],
         render=render,
@@ -626,11 +629,283 @@ def test_run_render_phase_uses_alignment_reselected_source_domain_labels(
     ]
 
 
+def test_run_render_phase_labels_skipped_analysis_alignment_fallback_random_frame(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
+    ctx = _context(tmp_path, comparisons=[comparison])
+    ctx.config.analysis = ctx.config.analysis.model_copy(
+        update={"user_frames": [0], "random_frame_count": 1, "random_seed": 42}
+    )
+
+    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+        return [
+            AlignmentResult(
+                reference_clip="reference.mkv",
+                comparison_clip="encode.mkv",
+                frame_offset=80,
+                time_offset_seconds=3.33,
+                correlation_score=0.9,
+                algorithm="cross_correlation",
+                source="computed",
+            )
+        ]
+
+    captured: dict[str, Any] = {}
+
+    def _fake_render_screenshots_from_batch(**kwargs: object) -> dict[str, list[Path]]:
+        captured.update(kwargs)
+        return {"Reference": [tmp_path / "reference.png"]}
+
+    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(
+        "frame_compare.render.batch.orchestrator.render_screenshots_from_batch",
+        _fake_render_screenshots_from_batch,
+    )
+
+    align_output = phase_tasks.run_align_phase(ctx, selected_frames=[0, 66])
+    ctx.reference = align_output.reference
+    ctx.comparisons = align_output.comparisons
+    ctx.selection_breakdown = align_output.selection_breakdown
+    ctx.selection_details_by_source_frame = align_output.selection_details_by_source_frame
+
+    phase_tasks.run_render_phase(
+        ctx,
+        frames=align_output.selected_frames,
+        runner=cast(Any, _RenderRunner()),
+    )
+
+    requests = captured["batch_requests"]
+    assert align_output.selected_frames == [18]
+    assert requests[0].selection_labels == ["Random"]
+    assert requests[0].selection_details is not None
+    assert requests[0].selection_details[0] is not None
+    assert requests[0].selection_details[0].frame_index == 98
+    assert requests[0].selection_details[0].label == "Random"
+
+
+def test_run_report_phase_labels_skipped_analysis_alignment_fallback_random_frame(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
+    ctx = _context(tmp_path, comparisons=[comparison])
+    ctx.config.analysis = ctx.config.analysis.model_copy(
+        update={"user_frames": [0], "random_frame_count": 1, "random_seed": 42}
+    )
+
+    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+        return [
+            AlignmentResult(
+                reference_clip="reference.mkv",
+                comparison_clip="encode.mkv",
+                frame_offset=80,
+                time_offset_seconds=3.33,
+                correlation_score=0.9,
+                algorithm="cross_correlation",
+                source="computed",
+            )
+        ]
+
+    captured: dict[str, Any] = {}
+    expected_path = tmp_path / "report.html"
+
+    def _fake_generate_report(report_data: object, report_config: object) -> Path:
+        captured["report_data"] = report_data
+        captured["report_config"] = report_config
+        return expected_path
+
+    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
+
+    align_output = phase_tasks.run_align_phase(ctx, selected_frames=[0, 66])
+    ctx.reference = align_output.reference
+    ctx.comparisons = align_output.comparisons
+    ctx.selection_breakdown = align_output.selection_breakdown
+    ctx.selection_details_by_source_frame = align_output.selection_details_by_source_frame
+    render = RenderArtifacts(
+        screenshots_by_label={
+            "Reference": [tmp_path / "screenshots" / "reference.png"],
+            "Encode 1": [tmp_path / "screenshots" / "encode.png"],
+        },
+        screenshot_dir=tmp_path / "screenshots",
+    )
+
+    output = phase_post_render.run_report_phase(
+        ctx,
+        frames=align_output.selected_frames,
+        render=render,
+        metadata=None,
+        slowpics_url=None,
+    )
+
+    report_data = captured["report_data"]
+    assert output.report_path == expected_path
+    assert align_output.selected_frames == [18]
+    assert [
+        (detail.label, detail.detail, detail.category) for detail in report_data.frame_details
+    ] == [("Frame 98", "Source frame 98", "random")]
+
+
+def test_run_render_phase_rejects_analysis_fallback_when_overlap_is_smaller_than_counts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
+    ctx = _context(tmp_path, comparisons=[comparison])
+    ctx.config.analysis = ctx.config.analysis.model_copy(
+        update={"random_frame_count": 0, "dark_frame_count": 2, "bright_frame_count": 2}
+    )
+    ctx.analysis_metrics = FrameMetrics(
+        luminance=[float(frame) / 99.0 for frame in range(100)],
+        motion=[0.0 for _ in range(100)],
+        metadata=MetricsMetadata(
+            frame_count=100,
+            fps=ctx.reference.effective_fps,
+            config_fingerprint="test",
+            clips=[],
+        ),
+    )
+
+    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+        return [
+            AlignmentResult(
+                reference_clip="reference.mkv",
+                comparison_clip="encode.mkv",
+                frame_offset=98,
+                time_offset_seconds=4.08,
+                correlation_score=0.9,
+                algorithm="cross_correlation",
+                source="computed",
+            )
+        ]
+
+    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+
+    with pytest.raises(SelectionError) as exc_info:
+        phase_tasks.run_align_phase(ctx, selected_frames=[0, 1, 2, 3])
+
+    assert exc_info.value.context.details == {
+        "reason": "insufficient generated candidates after alignment",
+        "requested": 4,
+        "found": 2,
+    }
+
+
+def test_output_phases_use_reselected_metric_metadata_after_real_initial_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
+    ctx = _context(tmp_path, comparisons=[comparison])
+    ctx.config.analysis = ctx.config.analysis.model_copy(
+        update={"random_frame_count": 0, "dark_frame_count": 2, "bright_frame_count": 0}
+    )
+    luminance = [0.5 for _frame in range(100)]
+    luminance[0] = 0.0
+    luminance[1] = 0.01
+    luminance[50] = 0.99
+    luminance[60] = 1.0
+    ctx.analysis_metrics = FrameMetrics(
+        luminance=luminance,
+        motion=[0.0 for _ in range(100)],
+        metadata=MetricsMetadata(
+            frame_count=100,
+            fps=ctx.reference.effective_fps,
+            config_fingerprint="test",
+            clips=[],
+        ),
+    )
+    initial_selection = phase_tasks.select_frames(
+        metrics=ctx.analysis_metrics,
+        config=ctx.config.analysis,
+    )
+    ctx.selection_breakdown = initial_selection.breakdown
+    ctx.selection_details_by_source_frame = dict(initial_selection.selection_details)
+
+    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+        return [
+            AlignmentResult(
+                reference_clip="reference.mkv",
+                comparison_clip="encode.mkv",
+                frame_offset=98,
+                time_offset_seconds=4.08,
+                correlation_score=0.9,
+                algorithm="cross_correlation",
+                source="computed",
+            )
+        ]
+
+    render_capture: dict[str, Any] = {}
+    report_capture: dict[str, Any] = {}
+    expected_report_path = tmp_path / "report.html"
+
+    def _fake_render_screenshots_from_batch(**kwargs: object) -> dict[str, list[Path]]:
+        render_capture.update(kwargs)
+        return {"Reference": [tmp_path / "reference.png"]}
+
+    def _fake_generate_report(report_data: object, report_config: object) -> Path:
+        report_capture["report_data"] = report_data
+        report_capture["report_config"] = report_config
+        return expected_report_path
+
+    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(
+        "frame_compare.render.batch.orchestrator.render_screenshots_from_batch",
+        _fake_render_screenshots_from_batch,
+    )
+    monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
+
+    align_output = phase_tasks.run_align_phase(
+        ctx,
+        selected_frames=list(initial_selection.frames),
+    )
+    ctx.reference = align_output.reference
+    ctx.comparisons = align_output.comparisons
+    ctx.selection_breakdown = align_output.selection_breakdown
+    ctx.selection_details_by_source_frame = align_output.selection_details_by_source_frame
+
+    phase_tasks.run_render_phase(
+        ctx,
+        frames=align_output.selected_frames,
+        runner=cast(Any, _RenderRunner()),
+    )
+    render = RenderArtifacts(
+        screenshots_by_label={
+            "Reference": [
+                tmp_path / "screenshots" / "reference_1.png",
+                tmp_path / "screenshots" / "reference_2.png",
+            ],
+            "Encode 1": [
+                tmp_path / "screenshots" / "encode_1.png",
+                tmp_path / "screenshots" / "encode_2.png",
+            ],
+        },
+        screenshot_dir=tmp_path / "screenshots",
+    )
+    report_output = phase_post_render.run_report_phase(
+        ctx,
+        frames=align_output.selected_frames,
+        render=render,
+        metadata=None,
+        slowpics_url=None,
+    )
+
+    assert set(initial_selection.selection_details).isdisjoint({98, 99})
+    assert align_output.selected_frames == [0, 1]
+    assert render_capture["batch_requests"][0].selection_labels == ["Dark", "Dark"]
+    assert report_output.report_path == expected_report_path
+    report_data = report_capture["report_data"]
+    assert [
+        (detail.label, detail.detail, detail.category) for detail in report_data.frame_details
+    ] == [
+        ("Frame 98", "Source frame 98", "quantile_dark"),
+        ("Frame 99", "Source frame 99", "quantile_dark"),
+    ]
+
+
 def test_run_report_phase_without_screenshots_clears_existing_report_path(tmp_path: Path) -> None:
     ctx = _context(tmp_path)
     artifacts = RunArtifacts(report_path=tmp_path / "stale.html")
 
-    output = phase_tasks.run_report_phase(
+    output = phase_post_render.run_report_phase(
         ctx,
         frames=[1],
         render=artifacts.render,
@@ -673,7 +948,7 @@ async def test_run_publish_phase_sets_url_from_publish_result_and_delegates_post
     captured: dict[str, Any] = {}
     captured_clip_names: list[tuple[str, str]] = []
     captured_post_upload_request: SlowpicsPostUploadRequest | None = None
-    real_build_slowpics_upload_plan = phase_tasks.build_slowpics_upload_plan
+    real_build_slowpics_upload_plan = phase_post_render.build_slowpics_upload_plan
 
     def _capturing_build_slowpics_upload_plan(**kwargs: object) -> object:
         clips = cast(list[Any], kwargs["clips"])
@@ -709,17 +984,19 @@ async def test_run_publish_phase_sets_url_from_publish_result_and_delegates_post
         )
 
     monkeypatch.setattr(
-        phase_tasks, "build_slowpics_upload_plan", _capturing_build_slowpics_upload_plan
+        phase_post_render,
+        "build_slowpics_upload_plan",
+        _capturing_build_slowpics_upload_plan,
     )
-    monkeypatch.setattr(phase_tasks, "publish_to_slowpics", _fake_publish_to_slowpics)
+    monkeypatch.setattr(phase_post_render, "publish_to_slowpics", _fake_publish_to_slowpics)
     monkeypatch.setattr(
-        phase_tasks,
+        phase_post_render,
         "run_slowpics_post_upload_actions",
         _fake_run_slowpics_post_upload_actions,
     )
 
     async with httpx.AsyncClient() as client:
-        output = await phase_tasks.run_publish_phase(
+        output = await phase_post_render.run_publish_phase(
             ctx,
             client=client,
             metadata=metadata,
@@ -776,7 +1053,7 @@ async def test_run_publish_phase_rejects_duplicate_clip_labels_at_translation_se
 
     async with httpx.AsyncClient() as client:
         with pytest.raises(SlowpicsError, match="Duplicate clip label in slow.pics upload input"):
-            await phase_tasks.run_publish_phase(
+            await phase_post_render.run_publish_phase(
                 ctx,
                 client=client,
                 metadata=None,
@@ -813,15 +1090,15 @@ async def test_run_publish_phase_skips_shortcut_when_config_disabled(
     ) -> tuple[PostUploadActionResult, ...]:
         return ()
 
-    monkeypatch.setattr(phase_tasks, "publish_to_slowpics", _fake_publish_to_slowpics)
+    monkeypatch.setattr(phase_post_render, "publish_to_slowpics", _fake_publish_to_slowpics)
     monkeypatch.setattr(
-        phase_tasks,
+        phase_post_render,
         "run_slowpics_post_upload_actions",
         _no_post_upload_actions,
     )
 
     async with httpx.AsyncClient() as client:
-        output = await phase_tasks.run_publish_phase(
+        output = await phase_post_render.run_publish_phase(
             ctx,
             client=client,
             metadata=None,
@@ -884,10 +1161,10 @@ async def test_unresolved_comparison_remains_in_render_report_and_slowpics_membe
         "frame_compare.render.batch.orchestrator.render_screenshots_from_batch",
         _fake_render_screenshots_from_batch,
     )
-    monkeypatch.setattr(phase_tasks, "generate_report", _fake_generate_report)
-    monkeypatch.setattr(phase_tasks, "publish_to_slowpics", _fake_publish_to_slowpics)
+    monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
+    monkeypatch.setattr(phase_post_render, "publish_to_slowpics", _fake_publish_to_slowpics)
     monkeypatch.setattr(
-        phase_tasks,
+        phase_post_render,
         "run_slowpics_post_upload_actions",
         _no_post_upload_actions,
     )
@@ -897,7 +1174,7 @@ async def test_unresolved_comparison_remains_in_render_report_and_slowpics_membe
         frames=frames,
         runner=cast(Any, _RenderRunner()),
     )
-    phase_tasks.run_report_phase(
+    phase_post_render.run_report_phase(
         ctx,
         frames=frames,
         render=render_output.render,
@@ -905,7 +1182,7 @@ async def test_unresolved_comparison_remains_in_render_report_and_slowpics_membe
         slowpics_url=None,
     )
     async with httpx.AsyncClient() as client:
-        await phase_tasks.run_publish_phase(
+        await phase_post_render.run_publish_phase(
             ctx,
             client=client,
             metadata=None,
@@ -1129,7 +1406,7 @@ def test_post_report_cleanup_skips_non_embedded_reports(tmp_path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"\x89PNG\r\n\x1a\n")
 
-    output = phase_tasks.run_post_report_cleanup_phase(
+    output = phase_post_render.run_post_report_cleanup_phase(
         ctx,
         uploaded_file_paths=uploaded,
         report_succeeded=True,
@@ -1158,7 +1435,7 @@ def test_post_report_cleanup_deletes_planned_files_after_embedded_report_success
         path.write_bytes(b"\x89PNG\r\n\x1a\n")
     shortcut.write_text("[InternetShortcut]\nURL=https://slow.pics/c/example\n", encoding="utf-8")
 
-    output = phase_tasks.run_post_report_cleanup_phase(
+    output = phase_post_render.run_post_report_cleanup_phase(
         ctx,
         uploaded_file_paths=uploaded,
         report_succeeded=True,
@@ -1183,7 +1460,7 @@ def test_post_report_cleanup_deletes_planned_files_when_reports_disabled(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"\x89PNG\r\n\x1a\n")
 
-    output = phase_tasks.run_post_report_cleanup_phase(
+    output = phase_post_render.run_post_report_cleanup_phase(
         ctx,
         uploaded_file_paths=uploaded,
         report_succeeded=False,
@@ -1202,7 +1479,7 @@ def test_post_report_cleanup_skips_without_upload_handoff(tmp_path: Path) -> Non
     stale.parent.mkdir(parents=True, exist_ok=True)
     stale.write_bytes(b"\x89PNG\r\n\x1a\n")
 
-    output = phase_tasks.run_post_report_cleanup_phase(
+    output = phase_post_render.run_post_report_cleanup_phase(
         ctx,
         uploaded_file_paths=(),
         report_succeeded=False,
@@ -1223,7 +1500,7 @@ def test_post_report_cleanup_requires_report_success_when_report_enabled(
     uploaded[0].parent.mkdir(parents=True, exist_ok=True)
     uploaded[0].write_bytes(b"\x89PNG\r\n\x1a\n")
 
-    output = phase_tasks.run_post_report_cleanup_phase(
+    output = phase_post_render.run_post_report_cleanup_phase(
         ctx,
         uploaded_file_paths=uploaded,
         report_succeeded=False,
@@ -1254,9 +1531,9 @@ def test_post_report_cleanup_returns_warning_and_logs_for_delete_error(
         warning_calls.append((event, kwargs))
 
     monkeypatch.setattr(Path, "unlink", _raise_permission_error)
-    monkeypatch.setattr(phase_tasks.log, "warning", _capture_warning)
+    monkeypatch.setattr(phase_post_render.log, "warning", _capture_warning)
 
-    output = phase_tasks.run_post_report_cleanup_phase(
+    output = phase_post_render.run_post_report_cleanup_phase(
         ctx,
         uploaded_file_paths=uploaded,
         report_succeeded=False,

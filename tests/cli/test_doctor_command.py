@@ -349,6 +349,44 @@ def test_doctor_top_level_frame_compare_error_uses_cli_error_contract(
     assert "Traceback" not in result.stderr
 
 
+def test_doctor_top_level_error_uses_default_terminal_color_policy(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    error = ConfigNotFoundError(Path("missing.toml"))
+    captured: dict[str, object] = {}
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+    def _run_doctor(
+        checks: list[DoctorCheck] | None = None,
+        reporter: ProgressReporter | None = None,
+    ) -> DoctorReport:
+        raise error
+
+    def _handle_error(
+        _error: Exception,
+        *,
+        no_color: bool,
+        verbose: bool,
+        verbose_hint: str | None = "--verbose",
+    ) -> int:
+        captured["no_color"] = no_color
+        captured["verbose"] = verbose
+        captured["verbose_hint"] = verbose_hint
+        return int(ExitCode.CONFIG_ERROR)
+
+    monkeypatch.setattr("frame_compare.cli.entry.run_doctor", _run_doctor)
+    monkeypatch.setattr("frame_compare.cli.entry.handle_error", _handle_error)
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert captured == {
+        "no_color": False,
+        "verbose": False,
+        "verbose_hint": None,
+    }
+
+
 def test_doctor_json_top_level_frame_compare_error_uses_standard_error_schema(
     monkeypatch: MonkeyPatch,
 ) -> None:
