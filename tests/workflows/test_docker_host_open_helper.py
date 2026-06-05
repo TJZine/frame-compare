@@ -110,6 +110,24 @@ def test_validate_slowpics_url_accepts_only_https_slowpics(repo_root: Path) -> N
         helper.validate_slowpics_url("https://slow.pics:443/c/example")
 
 
+def test_validate_slowpics_url_requires_comparison_result_path(repo_root: Path) -> None:
+    helper = _load_helper_module(repo_root)
+
+    rejected_targets = (
+        "https://slow.pics/",
+        "https://slow.pics/comparison",
+        "https://slow.pics/upload/comparison",
+        "https://slow.pics/c/",
+        "https://slow.pics/c/example/extra",
+        "https://slow.pics/c/example#fragment",
+        "https://slow.pics/c/example;param",
+    )
+
+    for target in rejected_targets:
+        with pytest.raises(ValueError, match="must be a comparison URL"):
+            helper.validate_slowpics_url(target)
+
+
 def test_main_print_only_outputs_translated_host_path(
     repo_root: Path,
     tmp_path: Path,

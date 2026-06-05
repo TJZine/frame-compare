@@ -19,7 +19,11 @@ EOF
 
 readonly MIN_COMPOSE_GPUS_VERSION="2.30.0"
 readonly DEFAULT_SERVICE="frame-compare-test"
-readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if ! REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; then
+  echo "ERROR: unable to determine repository root" >&2
+  exit 2
+fi
+readonly REPO_ROOT
 readonly DEFAULT_IMAGE="frame-compare:dev"
 readonly CONTAINER_WORKDIR="/home/framecompare/frame-compare"
 readonly DEFAULT_DRIVER_CAPABILITIES="compute,utility,graphics"

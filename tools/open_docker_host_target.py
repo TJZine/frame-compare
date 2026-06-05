@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import webbrowser
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+SLOWPICS_COMPARISON_PATH_PATTERN = re.compile(r"^/c/[A-Za-z0-9_-]+/?$")
 ALLOWED_CONTAINER_ROOTS: tuple[tuple[PurePosixPath, str], ...] = (
     (PurePosixPath("/workspace/screenshots"), "screenshots"),
     (PurePosixPath("/workspace/generated"), "generated"),
@@ -48,8 +50,12 @@ def validate_slowpics_url(target: str) -> str:
         raise ValueError("only https://slow.pics/... URLs are allowed")
     if parsed.username is not None or parsed.password is not None or parsed.port is not None:
         raise ValueError("slow.pics URL must not include credentials or a port")
-    if not parsed.path.startswith("/"):
-        raise ValueError("slow.pics URL must include an absolute path")
+    if (
+        parsed.params
+        or parsed.fragment
+        or SLOWPICS_COMPARISON_PATH_PATTERN.fullmatch(parsed.path) is None
+    ):
+        raise ValueError("slow.pics URL must be a comparison URL")
     return target
 
 

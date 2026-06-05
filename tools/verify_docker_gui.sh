@@ -21,7 +21,6 @@ EOF
 }
 
 readonly DEFAULT_SERVICE="frame-compare-test"
-readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly COMPOSE_BASE=(-f docker-compose.yml -f docker-compose.gui-linux.yml)
 
 service="$DEFAULT_SERVICE"
@@ -183,8 +182,18 @@ if [[ -z "${FRAME_COMPARE_XAUTHORITY_PATH:-}" ]]; then
   fi
 fi
 
-export FRAME_COMPARE_HOST_UID="$(id -u)"
-export FRAME_COMPARE_HOST_GID="$(id -g)"
+if ! host_uid="$(id -u)"; then
+  echo "ERROR: unable to determine host UID for GUI Docker proof" >&2
+  exit 24
+fi
+readonly host_uid
+if ! host_gid="$(id -g)"; then
+  echo "ERROR: unable to determine host GID for GUI Docker proof" >&2
+  exit 24
+fi
+readonly host_gid
+export FRAME_COMPARE_HOST_UID="$host_uid"
+export FRAME_COMPARE_HOST_GID="$host_gid"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "ERROR: docker is required to run the GUI proof" >&2
@@ -202,7 +211,12 @@ if [[ "$run_build" == "1" ]]; then
   "${compose_cmd[@]}" build "${build_args[@]}" "$service"
 fi
 
-print_manual_ui_instructions "$(id -un)"
+if ! host_user_name="$(id -un)"; then
+  echo "ERROR: unable to determine host username for GUI Docker proof" >&2
+  exit 24
+fi
+readonly host_user_name
+print_manual_ui_instructions "$host_user_name"
 
 "${compose_cmd[@]}" run --rm --entrypoint /bin/bash "$service" -lc \
   'bash tools/verify_docker_gui.sh --inside-container'

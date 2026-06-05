@@ -5,7 +5,9 @@ from pathlib import Path
 
 import yaml
 
+from ._helpers import SCRIPT_SUBPROCESS_TIMEOUT_SECONDS
 from ._helpers import read_text_or_fail as _read_text_or_fail
+from ._helpers import skip_if_bash_unavailable as _skip_if_bash_unavailable
 from ._helpers import with_bash_env as _with_bash_env
 from ._helpers import write_bash_env as _write_bash_env
 
@@ -47,6 +49,7 @@ def test_gpu_override_keeps_default_services_unchanged(repo_root: Path) -> None:
 def test_verify_docker_gpu_script_emits_compose_version_fallback(
     repo_root: Path, tmp_path: Path
 ) -> None:
+    _skip_if_bash_unavailable()
     bash_env = tmp_path / "docker-fallback.env"
     _write_bash_env(
         bash_env,
@@ -76,6 +79,7 @@ docker() {
         check=False,
         capture_output=True,
         text=True,
+        timeout=SCRIPT_SUBPROCESS_TIMEOUT_SECONDS,
     )
 
     combined = result.stdout + result.stderr
@@ -90,6 +94,7 @@ docker() {
 def test_verify_docker_gpu_script_accepts_suffixed_compose_version(
     repo_root: Path, tmp_path: Path
 ) -> None:
+    _skip_if_bash_unavailable()
     bash_env = tmp_path / "docker-suffixed-version.env"
     _write_bash_env(
         bash_env,
@@ -123,6 +128,7 @@ docker() {
         check=False,
         capture_output=True,
         text=True,
+        timeout=SCRIPT_SUBPROCESS_TIMEOUT_SECONDS,
     )
 
     combined = result.stdout + result.stderr
@@ -135,6 +141,7 @@ docker() {
 def test_verify_docker_gpu_script_rejects_mixed_software_selected_device(
     repo_root: Path, tmp_path: Path
 ) -> None:
+    _skip_if_bash_unavailable()
     icd_dir = tmp_path / "icd"
     icd_dir.mkdir()
     _write_nvidia_icd(icd_dir / "nvidia_icd.json")
@@ -167,6 +174,7 @@ vulkaninfo() {
         check=False,
         capture_output=True,
         text=True,
+        timeout=SCRIPT_SUBPROCESS_TIMEOUT_SECONDS,
     )
 
     combined = result.stdout + result.stderr
@@ -182,6 +190,7 @@ vulkaninfo() {
 def test_verify_docker_gpu_script_accepts_selected_nvidia_device(
     repo_root: Path, tmp_path: Path
 ) -> None:
+    _skip_if_bash_unavailable()
     icd_dir = tmp_path / "icd"
     icd_dir.mkdir()
     nvidia_icd = icd_dir / "nvidia_icd.json"
@@ -215,6 +224,7 @@ vulkaninfo() {
         check=False,
         capture_output=True,
         text=True,
+        timeout=SCRIPT_SUBPROCESS_TIMEOUT_SECONDS,
     )
 
     combined = result.stdout + result.stderr
@@ -229,6 +239,7 @@ vulkaninfo() {
 def test_verify_docker_gpu_script_fails_closed_without_nvidia_icd(
     repo_root: Path, tmp_path: Path
 ) -> None:
+    _skip_if_bash_unavailable()
     empty_icd_dir = tmp_path / "empty-icd"
     empty_icd_dir.mkdir()
 
@@ -252,6 +263,7 @@ nvidia-smi() {
         check=False,
         capture_output=True,
         text=True,
+        timeout=SCRIPT_SUBPROCESS_TIMEOUT_SECONDS,
     )
 
     combined = result.stdout + result.stderr
