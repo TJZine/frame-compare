@@ -1,18 +1,13 @@
 from __future__ import annotations
 
-import os
-import stat
 import subprocess
 from pathlib import Path
 
 import yaml
 
-from tests.workflow_helpers import read_text_or_fail as _read_text_or_fail
-
-
-def _write_executable(path: Path, content: str) -> None:
-    path.write_text(content, encoding="utf-8")
-    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+from ._helpers import read_text_or_fail as _read_text_or_fail
+from ._helpers import with_bash_env as _with_bash_env
+from ._helpers import write_bash_env as _write_bash_env
 
 
 def _write_nvidia_icd(path: Path) -> None:
@@ -52,35 +47,32 @@ def test_gpu_override_keeps_default_services_unchanged(repo_root: Path) -> None:
 def test_verify_docker_gpu_script_emits_compose_version_fallback(
     repo_root: Path, tmp_path: Path
 ) -> None:
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-    docker_path = fake_bin / "docker"
-    _write_executable(
-        docker_path,
-        """#!/usr/bin/env bash
-set -euo pipefail
-if [[ "$1" == "compose" && "$2" == "version" && "${3:-}" == "--short" ]]; then
-  printf '2.29.7\\n'
-  exit 0
-fi
-if [[ "$1" == "compose" && "$2" == "version" ]]; then
-  printf 'Docker Compose version v2.29.7\\n'
-  exit 0
-fi
-if [[ "$1" == "info" ]]; then
-  exit 0
-fi
-echo "unexpected docker invocation: $*" >&2
-exit 99
+    bash_env = tmp_path / "docker-fallback.env"
+    _write_bash_env(
+        bash_env,
+        """
+docker() {
+  if [[ "$1" == "compose" && "$2" == "version" && "${3:-}" == "--short" ]]; then
+    printf '2.29.7\\n'
+    return 0
+  fi
+  if [[ "$1" == "compose" && "$2" == "version" ]]; then
+    printf 'Docker Compose version v2.29.7\\n'
+    return 0
+  fi
+  if [[ "$1" == "info" ]]; then
+    return 0
+  fi
+  echo "unexpected docker invocation: $*" >&2
+  return 99
+}
 """,
     )
 
-    env = os.environ.copy()
-    env["PATH"] = f"{fake_bin}:{env['PATH']}"
     result = subprocess.run(
         ["bash", "tools/verify_docker_gpu.sh", "--no-build"],
         cwd=repo_root,
-        env=env,
+        env=_with_bash_env({}, bash_env),
         check=False,
         capture_output=True,
         text=True,
@@ -98,39 +90,36 @@ exit 99
 def test_verify_docker_gpu_script_accepts_suffixed_compose_version(
     repo_root: Path, tmp_path: Path
 ) -> None:
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-    docker_path = fake_bin / "docker"
-    _write_executable(
-        docker_path,
-        """#!/usr/bin/env bash
-set -euo pipefail
-if [[ "$1" == "compose" && "$2" == "version" && "${3:-}" == "--short" ]]; then
-  printf '2.30.0-desktop.1\\n'
-  exit 0
-fi
-if [[ "$1" == "compose" && "$2" == "version" ]]; then
-  printf 'Docker Compose version v2.30.0-desktop.1\\n'
-  exit 0
-fi
-if [[ "$1" == "info" ]]; then
-  exit 0
-fi
-if [[ "$1" == "compose" && " $* " == *" run "* ]]; then
-  printf 'compose run ok\\n'
-  exit 0
-fi
-echo "unexpected docker invocation: $*" >&2
-exit 99
+    bash_env = tmp_path / "docker-suffixed-version.env"
+    _write_bash_env(
+        bash_env,
+        """
+docker() {
+  if [[ "$1" == "compose" && "$2" == "version" && "${3:-}" == "--short" ]]; then
+    printf '2.30.0-desktop.1\\n'
+    return 0
+  fi
+  if [[ "$1" == "compose" && "$2" == "version" ]]; then
+    printf 'Docker Compose version v2.30.0-desktop.1\\n'
+    return 0
+  fi
+  if [[ "$1" == "info" ]]; then
+    return 0
+  fi
+  if [[ "$1" == "compose" && " $* " == *" run "* ]]; then
+    printf 'compose run ok\\n'
+    return 0
+  fi
+  echo "unexpected docker invocation: $*" >&2
+  return 99
+}
 """,
     )
 
-    env = os.environ.copy()
-    env["PATH"] = f"{fake_bin}:{env['PATH']}"
     result = subprocess.run(
         ["bash", "tools/verify_docker_gpu.sh", "--no-build"],
         cwd=repo_root,
-        env=env,
+        env=_with_bash_env({}, bash_env),
         check=False,
         capture_output=True,
         text=True,
@@ -146,36 +135,35 @@ exit 99
 def test_verify_docker_gpu_script_rejects_mixed_software_selected_device(
     repo_root: Path, tmp_path: Path
 ) -> None:
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
     icd_dir = tmp_path / "icd"
     icd_dir.mkdir()
     _write_nvidia_icd(icd_dir / "nvidia_icd.json")
 
-    _write_executable(
-        fake_bin / "nvidia-smi",
-        """#!/usr/bin/env bash
-set -euo pipefail
-printf 'GPU 0: NVIDIA RTX 6000 Ada Generation (UUID: GPU-1234)\\n'
-""",
-    )
-    _write_executable(
-        fake_bin / "vulkaninfo",
-        """#!/usr/bin/env bash
-set -euo pipefail
-printf 'GPU0 : llvmpipe (LLVM 17.0.0, 256 bits)\\n'
-printf 'GPU1 : NVIDIA RTX 6000 Ada Generation\\n'
+    bash_env = tmp_path / "docker-mixed-device.env"
+    _write_bash_env(
+        bash_env,
+        """
+nvidia-smi() {
+  printf 'GPU 0: NVIDIA RTX 6000 Ada Generation (UUID: GPU-1234)\\n'
+}
+
+vulkaninfo() {
+  printf 'GPU0 : llvmpipe (LLVM 17.0.0, 256 bits)\\n'
+  printf 'GPU1 : NVIDIA RTX 6000 Ada Generation\\n'
+}
 """,
     )
 
-    env = os.environ.copy()
-    env["PATH"] = f"{fake_bin}:{env['PATH']}"
-    env["FRAME_COMPARE_GPU_ICD_SEARCH_DIRS"] = str(icd_dir)
-    env["FRAME_COMPARE_GPU_PLACEBO_PROOF_CMD"] = "printf 'DOCKER_GPU_PROOF placebo_tonemap=ok\\n'"
     result = subprocess.run(
         ["bash", "tools/verify_docker_gpu.sh", "--inside-container"],
         cwd=repo_root,
-        env=env,
+        env=_with_bash_env(
+            {
+                "FRAME_COMPARE_GPU_ICD_SEARCH_DIRS": str(icd_dir),
+                "FRAME_COMPARE_GPU_PLACEBO_PROOF_CMD": "printf 'DOCKER_GPU_PROOF placebo_tonemap=ok\\n'",
+            },
+            bash_env,
+        ),
         check=False,
         capture_output=True,
         text=True,
@@ -194,37 +182,36 @@ printf 'GPU1 : NVIDIA RTX 6000 Ada Generation\\n'
 def test_verify_docker_gpu_script_accepts_selected_nvidia_device(
     repo_root: Path, tmp_path: Path
 ) -> None:
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
     icd_dir = tmp_path / "icd"
     icd_dir.mkdir()
     nvidia_icd = icd_dir / "nvidia_icd.json"
     _write_nvidia_icd(nvidia_icd)
 
-    _write_executable(
-        fake_bin / "nvidia-smi",
-        """#!/usr/bin/env bash
-set -euo pipefail
-printf 'GPU 0: NVIDIA RTX 6000 Ada Generation (UUID: GPU-1234)\\n'
-""",
-    )
-    _write_executable(
-        fake_bin / "vulkaninfo",
-        """#!/usr/bin/env bash
-set -euo pipefail
-printf 'GPU0 : NVIDIA RTX 6000 Ada Generation\\n'
-printf 'GPU1 : lavapipe (LLVM 17.0.0, 256 bits)\\n'
+    bash_env = tmp_path / "docker-selected-nvidia.env"
+    _write_bash_env(
+        bash_env,
+        """
+nvidia-smi() {
+  printf 'GPU 0: NVIDIA RTX 6000 Ada Generation (UUID: GPU-1234)\\n'
+}
+
+vulkaninfo() {
+  printf 'GPU0 : NVIDIA RTX 6000 Ada Generation\\n'
+  printf 'GPU1 : lavapipe (LLVM 17.0.0, 256 bits)\\n'
+}
 """,
     )
 
-    env = os.environ.copy()
-    env["PATH"] = f"{fake_bin}:{env['PATH']}"
-    env["FRAME_COMPARE_GPU_ICD_SEARCH_DIRS"] = str(icd_dir)
-    env["FRAME_COMPARE_GPU_PLACEBO_PROOF_CMD"] = "printf 'DOCKER_GPU_PROOF placebo_tonemap=ok\\n'"
     result = subprocess.run(
         ["bash", "tools/verify_docker_gpu.sh", "--inside-container"],
         cwd=repo_root,
-        env=env,
+        env=_with_bash_env(
+            {
+                "FRAME_COMPARE_GPU_ICD_SEARCH_DIRS": str(icd_dir),
+                "FRAME_COMPARE_GPU_PLACEBO_PROOF_CMD": "printf 'DOCKER_GPU_PROOF placebo_tonemap=ok\\n'",
+            },
+            bash_env,
+        ),
         check=False,
         capture_output=True,
         text=True,
@@ -242,26 +229,26 @@ printf 'GPU1 : lavapipe (LLVM 17.0.0, 256 bits)\\n'
 def test_verify_docker_gpu_script_fails_closed_without_nvidia_icd(
     repo_root: Path, tmp_path: Path
 ) -> None:
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
     empty_icd_dir = tmp_path / "empty-icd"
     empty_icd_dir.mkdir()
 
-    _write_executable(
-        fake_bin / "nvidia-smi",
-        """#!/usr/bin/env bash
-set -euo pipefail
-printf 'GPU 0: NVIDIA RTX 6000 Ada Generation (UUID: GPU-1234)\\n'
+    bash_env = tmp_path / "docker-missing-icd.env"
+    _write_bash_env(
+        bash_env,
+        """
+nvidia-smi() {
+  printf 'GPU 0: NVIDIA RTX 6000 Ada Generation (UUID: GPU-1234)\\n'
+}
 """,
     )
 
-    env = os.environ.copy()
-    env["PATH"] = f"{fake_bin}:{env['PATH']}"
-    env["FRAME_COMPARE_GPU_ICD_SEARCH_DIRS"] = str(empty_icd_dir)
     result = subprocess.run(
         ["bash", "tools/verify_docker_gpu.sh", "--inside-container"],
         cwd=repo_root,
-        env=env,
+        env=_with_bash_env(
+            {"FRAME_COMPARE_GPU_ICD_SEARCH_DIRS": str(empty_icd_dir)},
+            bash_env,
+        ),
         check=False,
         capture_output=True,
         text=True,

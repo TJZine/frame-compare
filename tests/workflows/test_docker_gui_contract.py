@@ -1,19 +1,14 @@
 from __future__ import annotations
 
-import os
 import re
-import stat
 import subprocess
 from pathlib import Path
 
 import yaml
 
-from tests.workflow_helpers import read_text_or_fail as _read_text_or_fail
-
-
-def _write_executable(path: Path, content: str) -> None:
-    path.write_text(content, encoding="utf-8")
-    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+from ._helpers import read_text_or_fail as _read_text_or_fail
+from ._helpers import with_bash_env as _with_bash_env
+from ._helpers import write_bash_env as _write_bash_env
 
 
 def test_dockerfile_gui_target_uses_lock_derived_vspreview_install(repo_root: Path) -> None:
@@ -90,24 +85,20 @@ def test_verify_docker_gui_script_documents_narrow_x11_permissions(repo_root: Pa
 
 
 def test_verify_docker_gui_script_requires_linux_x11_host(repo_root: Path, tmp_path: Path) -> None:
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-
-    _write_executable(
-        fake_bin / "uname",
-        """#!/usr/bin/env bash
-set -euo pipefail
-printf 'Darwin\\n'
+    bash_env = tmp_path / "gui-host-os.env"
+    _write_bash_env(
+        bash_env,
+        """
+uname() {
+  printf 'Darwin\\n'
+}
 """,
     )
 
-    env = os.environ.copy()
-    env["PATH"] = f"{fake_bin}:{env['PATH']}"
-    env.pop("DISPLAY", None)
     result = subprocess.run(
         ["bash", "tools/verify_docker_gui.sh", "--no-build"],
         cwd=repo_root,
-        env=env,
+        env=_with_bash_env({"DISPLAY": ""}, bash_env),
         check=False,
         capture_output=True,
         text=True,
