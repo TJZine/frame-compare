@@ -334,7 +334,7 @@ def test_run_analyze_phase_offsets_labels_when_reference_trim_matches_untrimmed_
         motion=[float(frame) / 10.0 for frame in range(5)],
         metadata=MetricsMetadata(
             frame_count=5,
-            fps=Fraction(24, 1),
+            fps=Fraction(48, 1),
             config_fingerprint="fingerprint",
             clips=[],
         ),
@@ -385,6 +385,7 @@ def test_run_analyze_phase_offsets_labels_when_reference_trim_matches_untrimmed_
     assert set(output.selection_details_by_source_frame) == {10, 14}
     assert output.selection_details_by_source_frame[10].frame_index == 10
     assert output.selection_details_by_source_frame[10].timecode == "00:00:00.417"
+    assert output.selection_details_by_source_frame[14].timecode == "00:00:00.583"
 
 
 @pytest.mark.unit

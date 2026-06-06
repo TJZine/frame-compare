@@ -308,7 +308,7 @@ def _select_frames_for_selection_domain(
         selection_details=selection_details_with_source_offset(
             dict(selection.selection_details),
             source_offset=source_offset,
-            fps=trimmed_metrics.metadata.fps,
+            source_fps=reference.effective_fps,
         ),
     )
 
@@ -375,7 +375,7 @@ def selection_details_with_source_offset(
     details_by_frame: SelectionDetailsByFrame,
     *,
     source_offset: int,
-    fps: Fraction,
+    source_fps: Fraction,
 ) -> SelectionDetailsByFrame:
     shifted_details: SelectionDetailsByFrame = {}
     for frame_index, detail in details_by_frame.items():
@@ -384,7 +384,7 @@ def selection_details_with_source_offset(
             frame_index=source_frame,
             label=detail.label,
             source=detail.source,
-            timecode=selection_timecode_for_frame(source_frame, fps),
+            timecode=selection_timecode_for_frame(source_frame, source_fps),
             score=detail.score,
             clip_role=detail.clip_role,
             notes=detail.notes,
