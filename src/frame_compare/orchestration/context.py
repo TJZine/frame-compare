@@ -154,6 +154,7 @@ class RunContext:
     comparisons: list[ClipState]
     analysis_selection_domain: str
     selection_window: SelectionWindow
+    analysis_clip: ClipState | None = None
     reporter: ProgressReporter | None = None
     selection_breakdown: SelectionBreakdown | None = None
     selection_details_by_source_frame: dict[int, SelectionDetail] | None = None

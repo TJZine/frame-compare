@@ -6,10 +6,11 @@ from typing import TYPE_CHECKING, Literal
 
 import structlog
 
-from frame_compare.config.schema_enums import ScreenshotGeometryMode
+from frame_compare.config.schema_enums import ScreenshotAlignedScalePolicy, ScreenshotGeometryMode
 from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner, FFmpegRunner
 from frame_compare.render.geometry import (
     GeometryRect,
+    RenderGeometryOptions,
     RenderGeometryPlan,
     SourceGeometry,
     plan_render_geometry,
@@ -212,7 +213,7 @@ def _overlay_resolution_summary(
     else:
         original = source_size
         final = geometry_plan.final_canvas_size
-        transformed = final != source_size
+        transformed = not geometry_plan.is_noop
 
     original_width, original_height = original
     final_width, final_height = final
@@ -443,10 +444,10 @@ def _prepare_batch_requests(
 def _geometry_plans_for_batch(
     prepared_requests: list[_PreparedBatchRequest],
     *,
-    geometry_mode: ScreenshotGeometryMode,
+    config: ConfigSchema,
     warnings: list[str] | None = None,
 ) -> tuple[RenderGeometryPlan | None, ...]:
-    if geometry_mode == ScreenshotGeometryMode.NATIVE:
+    if config.screenshots.geometry_mode == ScreenshotGeometryMode.NATIVE:
         return tuple(None for _prepared in prepared_requests)
     if not any(prepared.request.source_frames for prepared in prepared_requests):
         return tuple(None for _prepared in prepared_requests)
@@ -475,7 +476,27 @@ def _geometry_plans_for_batch(
     sources = tuple(
         _source_geometry_for_request(prepared, warnings=warnings) for prepared in prepared_requests
     )
-    return plan_render_geometry(sources, mode="aligned")
+    return plan_render_geometry(
+        sources,
+        mode="aligned",
+        options=_geometry_options_from_config(config),
+    )
+
+
+def _geometry_options_from_config(config: ConfigSchema) -> RenderGeometryOptions:
+    target_size: tuple[int, int] | None = None
+    if config.screenshots.aligned_scale_policy == ScreenshotAlignedScalePolicy.EXPLICIT_SIZE:
+        target_width = config.screenshots.aligned_target_width
+        target_height = config.screenshots.aligned_target_height
+        if target_width is None or target_height is None:
+            raise ValueError("explicit screenshot geometry target size is incomplete")
+        target_size = (target_width, target_height)
+
+    return RenderGeometryOptions(
+        active_rect_detection=config.screenshots.active_rect_detection.value,
+        aligned_scale_policy=config.screenshots.aligned_scale_policy.value,
+        aligned_target_size=target_size,
+    )
 
 
 def _source_geometry_for_request(
@@ -519,7 +540,7 @@ def expand_batch_render_requests(
     )
     geometry_plans = _geometry_plans_for_batch(
         prepared_requests,
-        geometry_mode=config.screenshots.geometry_mode,
+        config=config,
         warnings=warnings,
     )
 

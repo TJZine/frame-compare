@@ -31,6 +31,7 @@ from frame_compare.orchestration.types import (
 from frame_compare.services.types import MetadataConfig, TmdbMetadata
 from tests.orchestration.phase_task_helpers import (
     MINIMAL_CONFIG,
+    _clip,
     _context,
     _create_config,
 )
@@ -195,6 +196,7 @@ def test_run_analyze_phase_selects_from_reference_base_trim_domain(
 ) -> None:
     ctx = _context(tmp_path)
     ctx.reference = ctx.reference.with_trim(trim_start_frames=10, trim_end_frame_inclusive=14)
+    ctx.analysis_clip = ctx.reference
     ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=5)
     input_videos = [ctx.reference.path]
     metrics = FrameMetrics(
@@ -255,6 +257,135 @@ def test_run_analyze_phase_selects_from_reference_base_trim_domain(
     assert set(output.selection_details_by_source_frame) == {10, 14}
     assert output.selection_details_by_source_frame[10].frame_index == 10
     assert calls["select"]["config"].random_frame_count == 3
+
+
+@pytest.mark.unit
+def test_run_analyze_phase_uses_analysis_clip_metrics_but_reference_frame_domain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _context(tmp_path)
+    analysis_clip = ctx.reference.with_trim(trim_start_frames=20, trim_end_frame_inclusive=80)
+    ctx.reference = ctx.reference.with_trim(trim_start_frames=10, trim_end_frame_inclusive=70)
+    ctx.analysis_clip = analysis_clip
+    ctx.selection_window = SelectionWindow(start_frame=5, end_frame_exclusive=15)
+    input_videos = [ctx.reference.path, analysis_clip.path]
+    metrics = FrameMetrics(
+        luminance=[float(frame) for frame in range(100)],
+        motion=[float(frame) / 10.0 for frame in range(100)],
+        metadata=MetricsMetadata(
+            frame_count=100,
+            fps=Fraction(24, 1),
+            config_fingerprint="fingerprint",
+            clips=[],
+        ),
+    )
+
+    def _fake_load_cached_metrics(*_args: object, **_kwargs: object) -> CacheLoadResult:
+        return CacheLoadResult(success=True, metrics=metrics)
+
+    def _fake_select_frames(**kwargs: object) -> FrameSelection:
+        received_metrics = kwargs["metrics"]
+        assert received_metrics.luminance == [float(frame) for frame in range(25, 35)]
+        return FrameSelection(
+            frames=[0],
+            seed=ctx.config.analysis.random_seed,
+            breakdown=SelectionBreakdown(quantile_dark=[0]),
+            selection_details={
+                0: SelectionDetail(
+                    frame_index=0,
+                    label="Dark",
+                    source="analysis",
+                    notes="quantile_dark",
+                )
+            },
+        )
+
+    monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics", _fake_load_cached_metrics)
+    monkeypatch.setattr(phase_selection, "select_frames", _fake_select_frames)
+
+    output = phase_selection.run_analyze_phase(
+        ctx,
+        input_videos=input_videos,
+        workspace=ctx.workspace,
+        require_cache_only=True,
+    )
+
+    assert output.selected_frames == [5]
+    assert output.selection_breakdown.quantile_dark == [15]
+    assert set(output.selection_details_by_source_frame) == {15}
+
+
+@pytest.mark.unit
+def test_run_analyze_phase_offsets_labels_when_reference_trim_matches_untrimmed_analysis_clip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.reference = ctx.reference.with_trim(trim_start_frames=10, trim_end_frame_inclusive=14)
+    ctx.analysis_clip = _clip(
+        tmp_path / "comparison_videos" / "analysis.mkv",
+        label="Analysis",
+        num_frames=5,
+    )
+    ctx.analysis_clip.path.write_bytes(b"analysis")
+    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=5)
+    input_videos = [ctx.reference.path, ctx.analysis_clip.path]
+    metrics = FrameMetrics(
+        luminance=[float(frame) for frame in range(5)],
+        motion=[float(frame) / 10.0 for frame in range(5)],
+        metadata=MetricsMetadata(
+            frame_count=5,
+            fps=Fraction(48, 1),
+            config_fingerprint="fingerprint",
+            clips=[],
+        ),
+    )
+
+    def _fake_load_cached_metrics(*_args: object, **_kwargs: object) -> CacheLoadResult:
+        return CacheLoadResult(success=True, metrics=metrics)
+
+    def _fake_select_frames(**kwargs: object) -> FrameSelection:
+        received_metrics = kwargs["metrics"]
+        assert received_metrics.luminance == [0.0, 1.0, 2.0, 3.0, 4.0]
+        return FrameSelection(
+            frames=[0, 4],
+            seed=ctx.config.analysis.random_seed,
+            breakdown=SelectionBreakdown(quantile_dark=[0], quantile_bright=[4]),
+            selection_details={
+                0: SelectionDetail(
+                    frame_index=0,
+                    label="Dark",
+                    source="analysis",
+                    notes="quantile_dark",
+                ),
+                4: SelectionDetail(
+                    frame_index=4,
+                    label="Bright",
+                    source="analysis",
+                    notes="quantile_bright",
+                ),
+            },
+        )
+
+    monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics", _fake_load_cached_metrics)
+    monkeypatch.setattr(phase_selection, "select_frames", _fake_select_frames)
+
+    output = phase_selection.run_analyze_phase(
+        ctx,
+        input_videos=input_videos,
+        workspace=ctx.workspace,
+        require_cache_only=True,
+    )
+
+    assert output.selected_frames == [0, 4]
+    assert output.selection_breakdown == SelectionBreakdown(
+        quantile_dark=[10],
+        quantile_bright=[14],
+    )
+    assert output.selection_details_by_source_frame is not None
+    assert set(output.selection_details_by_source_frame) == {10, 14}
+    assert output.selection_details_by_source_frame[10].frame_index == 10
+    assert output.selection_details_by_source_frame[10].timecode == "00:00:00.417"
+    assert output.selection_details_by_source_frame[14].timecode == "00:00:00.583"
 
 
 @pytest.mark.unit

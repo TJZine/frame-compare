@@ -5,6 +5,7 @@ These tests do NOT require VSPreview, VapourSynth, FFmpeg, or any display.
 
 from __future__ import annotations
 
+import io
 import json
 import subprocess
 import sys
@@ -30,7 +31,8 @@ from frame_compare.vspreview.session_script import (
 
 
 class _FakeVSPreviewProcess:
-    def __init__(self, returncode: int = 0) -> None:
+    def __init__(self, stderr: str = "", returncode: int = 0) -> None:
+        self.stderr = io.StringIO(stderr)
         self._returncode = returncode
 
     def __enter__(self) -> _FakeVSPreviewProcess:
@@ -178,7 +180,9 @@ def test_launch_alignment_verification_session_waits_for_vspreview_completion(
     assert "timeout" not in kwargs
     assert kwargs["stdin"] is None
     assert kwargs["stdout"] is None
-    assert "stderr" not in kwargs
+    assert kwargs["stderr"] is subprocess.PIPE
+    assert kwargs["text"] is True
+    assert kwargs["errors"] == "replace"
 
 
 def test_launch_alignment_verification_session_writes_launch_telemetry_to_stderr(
@@ -226,6 +230,48 @@ def test_launch_alignment_verification_session_writes_launch_telemetry_to_stderr
     env = run_kwargs["env"]
     assert isinstance(env, dict)
     assert env["NO_COLOR"] == "1"
+
+
+def test_launch_alignment_verification_session_filters_known_lsmash_api3_warning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.check_vspreview_availability",
+        lambda: VSPreviewAvailability(
+            status=VSPreviewAvailabilityStatus.AVAILABLE,
+            message="available",
+        ),
+    )
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter._resolve_launch_command",
+        lambda script_path: ["vspreview", str(script_path)],
+    )
+    child_stderr = (
+        "Plugin C:\\Software\\video\\frame-compare\\.venv\\Lib\\site-packages\\vapoursynth"
+        "\\plugins\\libvslsmashsource.dll is using API3 which is deprecated "
+        "and will be removed shortly.\n"
+        "real child warning\n"
+    )
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.subprocess.Popen",
+        lambda _command, **_kwargs: _FakeVSPreviewProcess(stderr=child_stderr),
+    )
+
+    launch_alignment_verification_session(
+        request=VSPreviewSessionRequest(
+            reference=Path("ref.mkv"),
+            comparisons=[Path("a.mkv")],
+            suggested_offsets_by_key={},
+            cache_dir=tmp_path,
+        ),
+        config=VSPreviewConfig(enabled=True),
+    )
+
+    captured = capsys.readouterr()
+    assert "libvslsmashsource.dll is using API3" not in captured.err
+    assert "real child warning" in captured.err
 
 
 def test_launch_alignment_verification_session_redacts_probe_failure_details(

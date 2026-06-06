@@ -20,6 +20,8 @@ from frame_compare.config.schema_enums import (
     LogFormat,
     LogLevel,
     OverlayMode,
+    ScreenshotActiveRectDetection,
+    ScreenshotAlignedScalePolicy,
     ScreenshotGeometryMode,
     SourceMatchFpsMode,
     ToneCurve,
@@ -164,6 +166,7 @@ class SourcesConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reference: str | None = None
+    analysis_source: str = "reference"
     match_fps: SourceMatchFpsMode = SourceMatchFpsMode.DISABLED
     overrides: dict[str, SourceOverrideConfig] = Field(default_factory=dict)
 
@@ -178,7 +181,46 @@ class ScreenshotsConfig(BaseModel):
     png_compression: int = Field(default=6, ge=0, le=9)
     ffmpeg_timeout_seconds: float = Field(default=30.0, ge=5.0)
     geometry_mode: ScreenshotGeometryMode = ScreenshotGeometryMode.NATIVE
+    active_rect_detection: ScreenshotActiveRectDetection = (
+        ScreenshotActiveRectDetection.ASPECT_RATIO
+    )
+    aligned_scale_policy: ScreenshotAlignedScalePolicy = ScreenshotAlignedScalePolicy.LARGEST_ACTIVE
+    aligned_target_width: int | None = None
+    aligned_target_height: int | None = None
     vs_writer: VsScreenshotWriter = VsScreenshotWriter.AUTO
+
+    @field_validator("aligned_target_width", "aligned_target_height")
+    @classmethod
+    def validate_aligned_target_dimension(cls, value: int | None) -> int | None:
+        if value is None:
+            return value
+        if value <= 0:
+            raise ValueError("aligned target dimensions must be positive")
+        if value % 2 != 0:
+            raise ValueError("aligned target dimensions must be even")
+        return value
+
+    @model_validator(mode="after")
+    def validate_aligned_target_policy(self) -> ScreenshotsConfig:
+        if self.geometry_mode != ScreenshotGeometryMode.ALIGNED:
+            return self
+
+        has_width = self.aligned_target_width is not None
+        has_height = self.aligned_target_height is not None
+        if self.aligned_scale_policy == ScreenshotAlignedScalePolicy.EXPLICIT_SIZE:
+            if not has_width or not has_height:
+                raise ValueError(
+                    "aligned_target_width and aligned_target_height are required "
+                    "when aligned_scale_policy is explicit_size"
+                )
+            return self
+
+        if has_width or has_height:
+            raise ValueError(
+                "aligned_target_width and aligned_target_height must be omitted unless "
+                "aligned_scale_policy is explicit_size"
+            )
+        return self
 
 
 class ColorConfig(BaseModel):

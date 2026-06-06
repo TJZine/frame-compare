@@ -216,6 +216,81 @@ enable = false
     assert result.cache_hit is True
 
 
+def test_execute_run_from_cache_only_uses_cache_for_configured_analysis_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_content = """\
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "generated"
+config_dir = "config"
+use_run_folders = false
+
+[sources]
+reference = "reference.mkv"
+analysis_source = "analysis.mkv"
+
+[analysis]
+random_frame_count = 0
+dark_frame_count = 1
+
+[audio_alignment]
+enable = false
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+"""
+    create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    create_video_files(input_dir, "reference.mkv", "analysis.mkv")
+    config = load_config(tmp_path / "config" / "config.toml")
+    reference_path = input_dir / "reference.mkv"
+    analysis_path = input_dir / "analysis.mkv"
+    write_metrics_cache(
+        tmp_path / "generated" / "cache" / "analysis",
+        source_path=reference_path,
+        config=config,
+        video_paths=[reference_path, analysis_path],
+        analysis_source_path=analysis_path,
+    )
+
+    request = RunRequest(
+        root=tmp_path,
+        from_cache_only=True,
+        skip_analysis=False,
+        skip_metadata=True,
+        skip_dovi=True,
+        no_upload=True,
+    )
+    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    diagnostics_by_stage: dict[str, list[str]] = {}
+
+    def _record_emit(
+        *,
+        stage: str,
+        diagnostics: list[str] | tuple[str, ...] = (),
+        **_kwargs: object,
+    ) -> None:
+        diagnostics_by_stage[stage] = list(diagnostics)
+
+    monkeypatch.setattr(
+        "frame_compare.orchestration.coordinator.emit_consolidated_fps_report",
+        _record_emit,
+    )
+
+    result = asyncio.run(execute_run(request, deps=deps))
+
+    assert result.success is True
+    assert result.cache_hit is True
+    assert diagnostics_by_stage["after_load_sources"] == [
+        "Analysis source: analysis.mkv (configured)"
+    ]
+
+
 def test_execute_run_from_cache_only_fails_when_metrics_cache_invalid(
     tmp_path: Path,
 ) -> None:

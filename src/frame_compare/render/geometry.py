@@ -7,8 +7,25 @@ from dataclasses import dataclass
 from typing import Literal
 
 GeometryMode = Literal["native", "aligned"]
+ActiveRectDetectionMode = Literal["provided", "dimension", "aspect_ratio"]
+AlignedScalePolicy = Literal[
+    "largest_active",
+    "smallest_active",
+    "reference_active",
+    "explicit_size",
+]
 ProvidedActiveRectSource = Literal["explicit", "metadata"]
-ActiveRectSource = Literal["explicit", "metadata", "dimension-derived", "full-frame"]
+ActiveRectSource = Literal[
+    "explicit",
+    "metadata",
+    "dimension-derived",
+    "aspect-ratio-derived",
+    "full-frame",
+]
+
+ASPECT_RATIO_MATCH_REL_TOLERANCE = 0.005
+ASPECT_RATIO_MIN_CROP_REL_DELTA = 0.005
+ASPECT_RATIO_MAX_HEIGHT_REMOVAL_FRACTION = 0.35
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +68,15 @@ class SourceGeometry:
 
 
 @dataclass(frozen=True, slots=True)
+class RenderGeometryOptions:
+    """Aligned screenshot geometry planning options."""
+
+    active_rect_detection: ActiveRectDetectionMode = "aspect_ratio"
+    aligned_scale_policy: AlignedScalePolicy = "largest_active"
+    aligned_target_size: tuple[int, int] | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class RenderGeometryPlan:
     """Pure crop/scale/pad plan for one rendered screenshot source."""
 
@@ -76,6 +102,13 @@ class RenderGeometryPlan:
             and self.pad == GeometryMargins()
             and self.final_canvas_size == (self.source.width, self.source.height)
         )
+
+
+@dataclass(frozen=True, slots=True)
+class _AspectCandidate:
+    ratio: float
+    first_source_index: int
+    evidence_rank: int
 
 
 def calculate_dimensions(
@@ -140,12 +173,13 @@ def plan_render_geometry(
     *,
     mode: GeometryMode = "native",
     overlay_margin: int = 10,
+    options: RenderGeometryOptions | None = None,
 ) -> tuple[RenderGeometryPlan, ...]:
     """Plan pure screenshot geometry for one or more sources.
 
     ``native`` preserves current full-frame behavior. ``aligned`` crops to safe
-    active rectangles, scales active content proportionally to a shared height,
-    and centers padding on a common canvas.
+    active rectangles, fits active content inside a selected target canvas, and
+    centers padding on that canvas.
     """
 
     if mode not in ("native", "aligned"):
@@ -157,13 +191,18 @@ def plan_render_geometry(
     if mode == "native":
         return tuple(_native_plan(source, overlay_margin=overlay_margin) for source in sources)
 
-    active_rects = _resolve_active_rects(sources)
+    resolved_options = options or RenderGeometryOptions()
+    _validate_options(resolved_options)
+    active_rects = _resolve_active_rects(
+        sources,
+        active_rect_detection=resolved_options.active_rect_detection,
+    )
     crop_rects = tuple(
         _mod_safe_rect(rect)
         for (rect, _source_kind), _source in zip(active_rects, sources, strict=True)
     )
-    scaled_sizes = _scale_to_common_height(crop_rects)
-    canvas_size = _common_canvas(scaled_sizes)
+    canvas_size = _target_canvas(crop_rects, options=resolved_options)
+    scaled_sizes = _fit_to_target(crop_rects, canvas_size)
 
     plans: list[RenderGeometryPlan] = []
     for source, active_info, crop_rect, scaled_size in zip(
@@ -211,6 +250,24 @@ def _validate_sources(sources: Sequence[SourceGeometry]) -> None:
             raise ValueError("source dimensions must be positive")
 
 
+def _validate_options(options: RenderGeometryOptions) -> None:
+    if options.active_rect_detection not in ("provided", "dimension", "aspect_ratio"):
+        raise ValueError("active rect detection must be 'provided', 'dimension', or 'aspect_ratio'")
+    if options.aligned_scale_policy not in (
+        "largest_active",
+        "smallest_active",
+        "reference_active",
+        "explicit_size",
+    ):
+        raise ValueError("aligned scale policy is not supported")
+    if options.aligned_scale_policy == "explicit_size":
+        if options.aligned_target_size is None:
+            raise ValueError("explicit_size requires an aligned target size")
+        width, height = options.aligned_target_size
+        if width <= 0 or height <= 0:
+            raise ValueError("aligned target dimensions must be positive")
+
+
 def _native_plan(source: SourceGeometry, *, overlay_margin: int) -> RenderGeometryPlan:
     source_rect = GeometryRect(0, 0, source.width, source.height)
     overlay_origin = (
@@ -236,8 +293,14 @@ def _native_plan(source: SourceGeometry, *, overlay_margin: int) -> RenderGeomet
 
 def _resolve_active_rects(
     sources: Sequence[SourceGeometry],
+    *,
+    active_rect_detection: ActiveRectDetectionMode,
 ) -> tuple[tuple[GeometryRect, ActiveRectSource], ...]:
-    dimension_rects = _dimension_derived_active_rects(sources)
+    dimension_rects = (
+        _dimension_derived_active_rects(sources)
+        if active_rect_detection in ("dimension", "aspect_ratio")
+        else tuple(None for _source in sources)
+    )
     resolved: list[tuple[GeometryRect, ActiveRectSource]] = []
     for source, dimension_rect in zip(sources, dimension_rects, strict=True):
         provided = source.active_rect
@@ -247,7 +310,10 @@ def _resolve_active_rects(
             resolved.append((dimension_rect, "dimension-derived"))
         else:
             resolved.append((GeometryRect(0, 0, source.width, source.height), "full-frame"))
-    return tuple(resolved)
+    resolved_tuple = tuple(resolved)
+    if active_rect_detection != "aspect_ratio":
+        return resolved_tuple
+    return _aspect_ratio_derived_active_rects(sources, resolved_tuple)
 
 
 def _dimension_derived_active_rects(
@@ -295,32 +361,180 @@ def _mod_safe_rect(rect: GeometryRect) -> GeometryRect:
     )
 
 
+def _mod_safe_contained_vertical_rect(
+    source: SourceGeometry,
+    *,
+    target_ratio: float,
+) -> GeometryRect | None:
+    computed_height = int(source.width / target_ratio)
+    crop_height = _mod_safe_size(computed_height)
+    if crop_height <= 0 or crop_height > source.height:
+        return None
+    removed_fraction = (source.height - crop_height) / source.height
+    if removed_fraction > ASPECT_RATIO_MAX_HEIGHT_REMOVAL_FRACTION:
+        return None
+
+    y = (source.height - crop_height) // 2
+    if y % 2 != 0:
+        y -= 1
+    y = max(0, min(y, source.height - crop_height))
+    return GeometryRect(0, y, _mod_safe_size(source.width), crop_height)
+
+
+def _aspect_ratio_derived_active_rects(
+    sources: Sequence[SourceGeometry],
+    resolved: tuple[tuple[GeometryRect, ActiveRectSource], ...],
+) -> tuple[tuple[GeometryRect, ActiveRectSource], ...]:
+    if len(sources) < 2:
+        return resolved
+
+    target_ratio = _select_aspect_ratio_candidate(resolved)
+    if target_ratio is None:
+        return resolved
+
+    updated: list[tuple[GeometryRect, ActiveRectSource]] = []
+    for source, active_info in zip(sources, resolved, strict=True):
+        _rect, rect_source = active_info
+        if rect_source != "full-frame":
+            updated.append(active_info)
+            continue
+
+        full_ratio = source.width / source.height
+        if (target_ratio - full_ratio) / target_ratio <= ASPECT_RATIO_MIN_CROP_REL_DELTA:
+            updated.append(active_info)
+            continue
+
+        inferred = _mod_safe_contained_vertical_rect(source, target_ratio=target_ratio)
+        if inferred is None:
+            updated.append(active_info)
+            continue
+        updated.append((inferred, "aspect-ratio-derived"))
+    return tuple(updated)
+
+
+def _select_aspect_ratio_candidate(
+    resolved: tuple[tuple[GeometryRect, ActiveRectSource], ...],
+) -> float | None:
+    candidates = _aspect_ratio_candidates(resolved)
+    if not candidates:
+        return None
+
+    reference_ratio = _rect_ratio(resolved[0][0])
+    return min(
+        candidates,
+        key=lambda candidate: (
+            -_aspect_candidate_support_count(candidate.ratio, resolved),
+            candidate.evidence_rank,
+            _ratio_relative_delta(candidate.ratio, reference_ratio),
+            candidate.first_source_index,
+        ),
+    ).ratio
+
+
+def _aspect_ratio_candidates(
+    resolved: tuple[tuple[GeometryRect, ActiveRectSource], ...],
+) -> tuple[_AspectCandidate, ...]:
+    raw_candidates: list[_AspectCandidate] = []
+    for evidence_rank, source_kind in ((0, "explicit"), (1, "metadata")):
+        for index, (rect, rect_source) in enumerate(resolved):
+            if rect_source == source_kind:
+                raw_candidates.append(_AspectCandidate(_rect_ratio(rect), index, evidence_rank))
+
+    for index, (rect, rect_source) in enumerate(resolved):
+        if rect_source not in ("dimension-derived", "full-frame"):
+            continue
+        ratio = _rect_ratio(rect)
+        if _aspect_candidate_support_count(ratio, resolved) >= 2:
+            raw_candidates.append(_AspectCandidate(ratio, index, 2))
+
+    merged: list[_AspectCandidate] = []
+    for candidate in raw_candidates:
+        if any(_ratio_matches(candidate.ratio, existing.ratio) for existing in merged):
+            continue
+        merged.append(candidate)
+    return tuple(merged)
+
+
+def _aspect_candidate_support_count(
+    candidate_ratio: float,
+    resolved: tuple[tuple[GeometryRect, ActiveRectSource], ...],
+) -> int:
+    return sum(
+        1 for rect, _source in resolved if _ratio_matches(candidate_ratio, _rect_ratio(rect))
+    )
+
+
+def _rect_ratio(rect: GeometryRect) -> float:
+    return rect.width / rect.height
+
+
+def _ratio_matches(candidate_ratio: float, observed_ratio: float) -> bool:
+    return _ratio_relative_delta(candidate_ratio, observed_ratio) <= (
+        ASPECT_RATIO_MATCH_REL_TOLERANCE
+    )
+
+
+def _ratio_relative_delta(candidate_ratio: float, observed_ratio: float) -> float:
+    return abs(candidate_ratio - observed_ratio) / max(candidate_ratio, observed_ratio)
+
+
 def _mod_safe_size(value: int) -> int:
     if value <= 1:
         return value
     return value - (value % 2)
 
 
-def _scale_to_common_height(rects: Sequence[GeometryRect]) -> tuple[tuple[int, int], ...]:
-    target_height = max((_mod_safe_size(rect.height) for rect in rects), default=0)
-    if target_height <= 0:
-        return ()
+def _target_canvas(
+    rects: Sequence[GeometryRect],
+    *,
+    options: RenderGeometryOptions,
+) -> tuple[int, int]:
+    if not rects:
+        return (1, 1)
+    if options.aligned_scale_policy == "explicit_size":
+        if options.aligned_target_size is None:
+            raise ValueError("explicit_size requires an aligned target size")
+        return options.aligned_target_size
+    if options.aligned_scale_policy == "largest_active":
+        target = (
+            max(rect.width for rect in rects),
+            max(rect.height for rect in rects),
+        )
+    elif options.aligned_scale_policy == "smallest_active":
+        target = (
+            min(rect.width for rect in rects),
+            min(rect.height for rect in rects),
+        )
+    elif options.aligned_scale_policy == "reference_active":
+        reference = rects[0]
+        target = (reference.width, reference.height)
+    else:
+        raise ValueError("aligned scale policy is not supported")
+    return _normalize_derived_target(target)
 
+
+def _normalize_derived_target(target: tuple[int, int]) -> tuple[int, int]:
+    width = _mod_safe_size(target[0])
+    height = _mod_safe_size(target[1])
+    if width <= 0 or height <= 0:
+        raise ValueError("aligned target dimensions must be positive after normalization")
+    return (width, height)
+
+
+def _fit_to_target(
+    rects: Sequence[GeometryRect],
+    target: tuple[int, int],
+) -> tuple[tuple[int, int], ...]:
+    target_width, target_height = target
     scaled_sizes: list[tuple[int, int]] = []
     for rect in rects:
-        if rect.height == target_height:
-            scaled_sizes.append((rect.width, rect.height))
-            continue
-        scale = target_height / rect.height
-        scaled_width = max(1, int(round(rect.width * scale)))
-        scaled_sizes.append(ensure_mod2(scaled_width, target_height))
+        scale = min(target_width / rect.width, target_height / rect.height)
+        scaled_width = min(target_width, _mod_safe_size(max(1, int(rect.width * scale))))
+        scaled_height = min(target_height, _mod_safe_size(max(1, int(rect.height * scale))))
+        if scaled_width <= 0 or scaled_height <= 0:
+            raise ValueError("scaled dimensions must be positive")
+        scaled_sizes.append((scaled_width, scaled_height))
     return tuple(scaled_sizes)
-
-
-def _common_canvas(scaled_sizes: Sequence[tuple[int, int]]) -> tuple[int, int]:
-    width = max((size[0] for size in scaled_sizes), default=1)
-    height = max((size[1] for size in scaled_sizes), default=1)
-    return ensure_mod2(width, height)
 
 
 def _center_pad(size: tuple[int, int], canvas_size: tuple[int, int]) -> GeometryMargins:

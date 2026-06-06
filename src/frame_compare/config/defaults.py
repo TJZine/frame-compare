@@ -12,8 +12,9 @@ config_dir = "config"
 use_run_folders = true
 
 [sources]
-# reference = "00-reference.mkv"
-# match_fps = "assume_reference"  # opt-in; timing metadata only, no frame resampling
+# reference = "auto"
+# analysis_source = "reference"  # reference, fastest, or a source selector
+# match_fps = "majority"  # opt-in; timing metadata only, no frame resampling
 # Add per-source overrides with tables such as:
 # [sources.overrides."encode-a.mkv"]
 # trim_start_frames = 0
@@ -63,6 +64,10 @@ include_frame_number = true
 png_compression = 6
 ffmpeg_timeout_seconds = 30.0
 geometry_mode = "native"
+active_rect_detection = "aspect_ratio"
+aligned_scale_policy = "largest_active"
+# aligned_target_width = 3840
+# aligned_target_height = 2160
 vs_writer = "auto"
 
 [color]

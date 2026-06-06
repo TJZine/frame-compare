@@ -3,6 +3,7 @@ import pytest
 from frame_compare.render.geometry import (
     GeometryMargins,
     GeometryRect,
+    RenderGeometryOptions,
     SourceGeometry,
     calculate_dimensions,
     ensure_mod2,
@@ -210,15 +211,15 @@ def test_plan_render_geometry_aligned_scales_proportionally_and_centers_padding(
 
     wide = plans[0]
     square = plans[1]
-    assert wide.scaled_size == (1600, 800)
-    assert wide.pad == GeometryMargins()
-    assert wide.final_canvas_size == (1600, 800)
+    assert wide.scaled_size == (1000, 500)
+    assert wide.pad == GeometryMargins(top=150, bottom=150)
+    assert wide.final_canvas_size == (1000, 800)
 
     assert square.scaled_size == (800, 800)
-    assert square.pad == GeometryMargins(left=400, right=400)
-    assert square.content_origin == (400, 0)
-    assert square.overlay_origin == (410, 10)
-    assert square.final_canvas_size == (1600, 800)
+    assert square.pad == GeometryMargins(left=100, right=100)
+    assert square.content_origin == (100, 0)
+    assert square.overlay_origin == (110, 10)
+    assert square.final_canvas_size == (1000, 800)
 
 
 def test_plan_render_geometry_clamps_overlay_origin_to_padded_content_bounds():
@@ -233,13 +234,13 @@ def test_plan_render_geometry_clamps_overlay_origin_to_padded_content_bounds():
 
     wide = plans[0]
     square = plans[1]
-    assert wide.content_origin == (0, 0)
-    assert wide.scaled_size == (1600, 800)
-    assert wide.overlay_origin == (1000, 799)
+    assert wide.content_origin == (0, 150)
+    assert wide.scaled_size == (1000, 500)
+    assert wide.overlay_origin == (999, 649)
 
-    assert square.content_origin == (400, 0)
+    assert square.content_origin == (100, 0)
     assert square.scaled_size == (800, 800)
-    assert square.overlay_origin == (1199, 799)
+    assert square.overlay_origin == (899, 799)
 
 
 @pytest.mark.unit
@@ -331,3 +332,187 @@ def test_plan_render_geometry_invalid_active_rect_falls_back_to_full_frame_witho
 
     assert plan.active_rect_source == "full-frame"
     assert plan.active_rect == GeometryRect(0, 0, 1920, 1080)
+
+
+def test_plan_render_geometry_aligned_aspect_ratio_largest_active_fight_club_shape():
+    plans = plan_render_geometry(
+        (
+            SourceGeometry(width=1920, height=800, label="fhd-a"),
+            SourceGeometry(width=1920, height=800, label="fhd-b"),
+            SourceGeometry(width=3840, height=2160, label="uhd"),
+        ),
+        mode="aligned",
+    )
+
+    assert plans[2].active_rect_source == "aspect-ratio-derived"
+    assert plans[2].active_rect == GeometryRect(0, 280, 3840, 1600)
+    assert [plan.final_canvas_size for plan in plans] == [(3840, 1600)] * 3
+    assert [plan.scaled_size for plan in plans] == [(3840, 1600)] * 3
+
+
+def test_plan_render_geometry_aligned_largest_active_never_exceeds_target_without_aspect_crop():
+    plans = plan_render_geometry(
+        (
+            SourceGeometry(width=1920, height=800, label="fhd-a"),
+            SourceGeometry(width=1920, height=800, label="fhd-b"),
+            SourceGeometry(width=3840, height=2160, label="uhd"),
+        ),
+        mode="aligned",
+        options=RenderGeometryOptions(active_rect_detection="provided"),
+    )
+
+    assert [plan.final_canvas_size for plan in plans] == [(3840, 2160)] * 3
+    assert [plan.scaled_size for plan in plans] == [(3840, 1600), (3840, 1600), (3840, 2160)]
+    assert plans[0].pad == GeometryMargins(top=280, bottom=280)
+
+
+def test_plan_render_geometry_aligned_smallest_active_downscales_aspect_crop():
+    plans = plan_render_geometry(
+        (
+            SourceGeometry(width=1920, height=800, label="fhd-a"),
+            SourceGeometry(width=1920, height=800, label="fhd-b"),
+            SourceGeometry(width=3840, height=2160, label="uhd"),
+        ),
+        mode="aligned",
+        options=RenderGeometryOptions(aligned_scale_policy="smallest_active"),
+    )
+
+    assert [plan.final_canvas_size for plan in plans] == [(1920, 800)] * 3
+    assert [plan.scaled_size for plan in plans] == [(1920, 800)] * 3
+
+
+def test_plan_render_geometry_aligned_reference_active_uses_first_source_active_size():
+    plans = plan_render_geometry(
+        (
+            SourceGeometry(width=1920, height=800, label="reference"),
+            SourceGeometry(width=3840, height=2160, label="uhd"),
+        ),
+        mode="aligned",
+        options=RenderGeometryOptions(aligned_scale_policy="reference_active"),
+    )
+
+    assert [plan.final_canvas_size for plan in plans] == [(1920, 800)] * 2
+    assert plans[1].scaled_size == (1422, 800)
+    assert plans[1].pad == GeometryMargins(left=249, right=249)
+
+
+def test_plan_render_geometry_aligned_explicit_size_preserves_exact_canvas():
+    plans = plan_render_geometry(
+        (
+            SourceGeometry(width=1920, height=800, label="fhd"),
+            SourceGeometry(width=3840, height=2160, label="uhd"),
+        ),
+        mode="aligned",
+        options=RenderGeometryOptions(
+            active_rect_detection="provided",
+            aligned_scale_policy="explicit_size",
+            aligned_target_size=(3840, 2160),
+        ),
+    )
+
+    assert [plan.final_canvas_size for plan in plans] == [(3840, 2160)] * 2
+    assert plans[0].scaled_size == (3840, 1600)
+    assert plans[0].pad == GeometryMargins(top=280, bottom=280)
+
+
+def test_plan_render_geometry_aligned_reduces_odd_derived_targets_to_mod_safe_canvas():
+    plans = plan_render_geometry(
+        (
+            SourceGeometry(width=1921, height=801, label="odd-wide"),
+            SourceGeometry(width=1281, height=721, label="odd-small"),
+        ),
+        mode="aligned",
+        options=RenderGeometryOptions(
+            active_rect_detection="provided",
+            aligned_scale_policy="largest_active",
+        ),
+    )
+
+    assert [plan.final_canvas_size for plan in plans] == [(1920, 800)] * 2
+    assert all(
+        plan.scaled_size[0] <= plan.final_canvas_size[0]
+        and plan.scaled_size[1] <= plan.final_canvas_size[1]
+        for plan in plans
+    )
+
+
+def test_plan_render_geometry_aligned_mixed_envelope_policy_uses_max_width_and_height():
+    plans = plan_render_geometry(
+        (
+            SourceGeometry(width=2000, height=500, label="wide"),
+            SourceGeometry(width=800, height=1000, label="tall"),
+        ),
+        mode="aligned",
+        options=RenderGeometryOptions(active_rect_detection="provided"),
+    )
+
+    assert [plan.final_canvas_size for plan in plans] == [(2000, 1000)] * 2
+    assert plans[0].scaled_size == (2000, 500)
+    assert plans[1].scaled_size == (800, 1000)
+
+
+def test_plan_render_geometry_aspect_ratio_does_not_crop_single_or_ultrawide_outlier():
+    (single,) = plan_render_geometry(
+        (SourceGeometry(width=3840, height=2160, label="single"),),
+        mode="aligned",
+    )
+    assert single.active_rect_source == "full-frame"
+
+    plans = plan_render_geometry(
+        (
+            SourceGeometry(width=3000, height=1000, label="ultrawide"),
+            SourceGeometry(width=3840, height=2160, label="uhd-a"),
+            SourceGeometry(width=3840, height=2160, label="uhd-b"),
+        ),
+        mode="aligned",
+    )
+    assert [plan.active_rect_source for plan in plans] == ["full-frame"] * 3
+
+
+def test_plan_render_geometry_aspect_ratio_uses_explicit_or_metadata_single_evidence():
+    plans = plan_render_geometry(
+        (
+            SourceGeometry(
+                width=1920,
+                height=1080,
+                active_rect=GeometryRect(0, 140, 1920, 800),
+                active_rect_source="explicit",
+                label="explicit",
+            ),
+            SourceGeometry(width=3840, height=2160, label="uhd"),
+        ),
+        mode="aligned",
+    )
+
+    assert plans[0].active_rect_source == "explicit"
+    assert plans[1].active_rect_source == "aspect-ratio-derived"
+    assert plans[1].active_rect == GeometryRect(0, 280, 3840, 1600)
+
+
+def test_plan_render_geometry_aspect_ratio_respects_removal_limit():
+    plans = plan_render_geometry(
+        (
+            SourceGeometry(width=3000, height=500, label="very-wide-a"),
+            SourceGeometry(width=3000, height=500, label="very-wide-b"),
+            SourceGeometry(width=1920, height=2160, label="tall"),
+        ),
+        mode="aligned",
+    )
+
+    assert plans[2].active_rect_source == "full-frame"
+
+
+def test_plan_render_geometry_aspect_ratio_prefers_reference_ratio_on_tie():
+    plans = plan_render_geometry(
+        (
+            SourceGeometry(width=2000, height=1000, label="ref-a"),
+            SourceGeometry(width=2000, height=1000, label="ref-b"),
+            SourceGeometry(width=2400, height=1000, label="wide-a"),
+            SourceGeometry(width=2400, height=1000, label="wide-b"),
+            SourceGeometry(width=3840, height=2160, label="uhd"),
+        ),
+        mode="aligned",
+    )
+
+    assert plans[4].active_rect_source == "aspect-ratio-derived"
+    assert plans[4].active_rect == GeometryRect(0, 120, 3840, 1920)

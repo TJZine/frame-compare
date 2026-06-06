@@ -340,6 +340,8 @@ class PrepState:
     load_sources_start: datetime
     analysis_selection_domain: str
     selection_window: SelectionWindow
+    analysis_clip: ClipState | None = None
+    load_source_diagnostics: list[str] = field(default_factory=_empty_str_list)
 
 
 @dataclass(frozen=True)

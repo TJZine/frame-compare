@@ -134,9 +134,7 @@ def _format_video_summary(clip: FpsReportClip) -> str:
 
 
 def _report_console_width() -> int:
-    columns = shutil.get_terminal_size(
-        fallback=(_REPORT_CONSOLE_WIDTH, 24)
-    ).columns
+    columns = shutil.get_terminal_size(fallback=(_REPORT_CONSOLE_WIDTH, 24)).columns
     return min(max(columns, _MIN_REPORT_CONSOLE_WIDTH), _REPORT_CONSOLE_WIDTH)
 
 
@@ -160,6 +158,20 @@ def _render_clip_overview(clips: Sequence[FpsReportClip]) -> Table:
         table.add_row("  fps", f"[bright_white]{_format_fps_transition(clip)}[/]")
         table.add_row("  path", f"[dim]{escape(str(clip.path))}[/]")
 
+    return table
+
+
+def _render_load_sources_overview(
+    *,
+    clips: Sequence[FpsReportClip],
+    diagnostics: Sequence[str],
+) -> Table:
+    table = _render_clip_overview(clips)
+    if diagnostics:
+        table.add_row("", "")
+        for index, diagnostic in enumerate(diagnostics):
+            key = "diagnostic" if index == 0 else ""
+            table.add_row(key, f"[bright_white]{escape(diagnostic)}[/]")
     return table
 
 
@@ -197,11 +209,12 @@ def _render_human_fps_report(
     *,
     stage: str,
     clips: Sequence[FpsReportClip],
+    diagnostics: Sequence[str],
     no_color: bool,
 ) -> None:
     if stage == "after_load_sources":
         title = "Clip Overview"
-        table = _render_clip_overview(clips)
+        table = _render_load_sources_overview(clips=clips, diagnostics=diagnostics)
     else:
         title = "Clip FPS"
         table = _render_fps_table(clips)
@@ -223,6 +236,7 @@ def emit_consolidated_fps_report(
     json_output: bool,
     quiet: bool,
     no_color: bool = False,
+    diagnostics: Sequence[str] = (),
 ) -> None:
     """Emit the consolidated FPS report in JSON or human-readable form."""
     if quiet:
@@ -230,7 +244,12 @@ def emit_consolidated_fps_report(
 
     if json_output:
         payload = [_serialize_clip(clip) for clip in clips]
-        log.info("fps_report", stage=stage, clips=payload)
+        log.info("fps_report", stage=stage, clips=payload, diagnostics=list(diagnostics))
         return
 
-    _render_human_fps_report(stage=stage, clips=clips, no_color=no_color)
+    _render_human_fps_report(
+        stage=stage,
+        clips=clips,
+        diagnostics=diagnostics,
+        no_color=no_color,
+    )

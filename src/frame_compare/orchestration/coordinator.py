@@ -110,6 +110,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             reference=reference,
             comparisons=comparisons,
             analysis_selection_domain=prep.analysis_selection_domain,
+            analysis_clip=prep.analysis_clip,
             selection_window=prep.selection_window,
             reporter=reporter,
             no_color=request.no_color,
@@ -117,6 +118,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         emit_consolidated_fps_report(
             stage="after_load_sources",
             clips=build_consolidated_fps_report(reference, comparisons),
+            diagnostics=prep.load_source_diagnostics,
             json_output=request.json_output,
             quiet=request.quiet,
             no_color=request.no_color,

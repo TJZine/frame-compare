@@ -80,17 +80,28 @@ exists.
 ## Config-Only Sources Surface
 
 `[sources]` is a config-only public surface for source identity, explicit
-reference selection, and per-source overrides. There are no dedicated `run`
-flags for these fields.
+reference selection, analysis source selection, FPS matching, and per-source
+overrides. There are no dedicated `run` flags for these fields.
 
 Current fields:
 
-- `reference`: optional source selector. When omitted, the first discovered
-  input remains the reference. When set, the selected source moves to the front
-  of clip order and comparisons keep deterministic discovery order after it.
+- `reference`: optional source selector. When omitted or set to literal `"auto"`,
+  the first discovered input remains the selected reference. A non-auto value
+  resolves through source selector rules and moves the selected source to the
+  front of clip order; comparisons keep deterministic discovery order after it.
+- `analysis_source`: config-only string. Defaults to `"reference"`. `"reference"`
+  analyzes the selected reference clip when analysis metrics are required.
+  `"fastest"` benchmarks discovered clips and analyzes the fastest usable clip
+  when analysis metrics are required. Any other value resolves as a source
+  selector when analysis metrics are required. It never changes the selected
+  reference, comparison order, input order, or display order.
 - `match_fps`: FPS matching policy. Defaults to `disabled`. When set to
   `assume_reference`, every comparison source without an explicit
   `effective_fps` override inherits the selected reference effective FPS.
+  When set to `majority`, Frame Compare chooses the strict majority effective
+  FPS after explicit `effective_fps` overrides. If no strict majority exists,
+  it falls back to the selected reference effective FPS and emits a human
+  warning diagnostic.
   This is an AssumeFPS-style timing override; it does not resample, drop,
   interpolate, or duplicate frames.
 - `overrides`: mapping from source selector to per-source override table.
@@ -115,8 +126,22 @@ and invalid explicit rectangles fail instead of falling back silently.
 `effective_fps` is an explicit AssumeFPS-style timing override: it changes
 timing/FPS interpretation without resampling, dropping, interpolating, or
 duplicating source frames. Mixed-FPS validation compares effective FPS values
-after explicit overrides and after `match_fps = "assume_reference"` matching.
-Explicit per-source `effective_fps` values take precedence over `match_fps`.
+after explicit overrides and after `match_fps = "assume_reference"` or
+`match_fps = "majority"` matching. Explicit per-source `effective_fps` values
+take precedence over `match_fps`.
+
+When analysis is skipped because effective `[analysis]` requests only
+`user_frames` and/or `random_frame_count`, `sources.analysis_source` is not
+resolved for metrics, `fastest` is not benchmarked, and no analysis metrics
+cache is loaded, validated, written, or keyed by `analysis_source`.
+
+When analysis metrics are required, `sources.analysis_source = "fastest"` is
+incompatible with `run --from-cache-only` because fastest-source benchmark
+selection is runtime-state dependent. The run fails through the standard typed
+error path before probe loading, metadata prefetch, run-folder reservation,
+analysis cache validation, or fastest benchmarking. JSON error mode keeps the
+existing error payload shape, and the successful `run --json` schema is
+unchanged.
 
 ## `version` Command Contract
 
@@ -159,7 +184,10 @@ Explicit per-source `effective_fps` values take precedence over `match_fps`.
   number of hidden rows and counts by hidden source.
 - `run --json` does not emit the human warning panel, does not add warning
   fields, and keeps warning text off stdout for successful runs. Runtime logs and
-  diagnostics may still use stderr.
+  diagnostics may still use stderr. The known native L-SMASH-Works
+  `libvslsmashsource.dll` API3 deprecation warning is filtered from stderr until
+  the bundled/installed plugin is updated; other native VapourSynth and plugin
+  stderr remains visible.
 - When the at-a-glance summary reports optional VSPreview probe failures, it uses a
   sanitized summary rather than raw probe exception text.
 - The at-a-glance summary uses user-facing row labels such as `run folders`,
@@ -189,13 +217,17 @@ Explicit per-source `effective_fps` values take precedence over `match_fps`.
   using labeled full-fingerprint filenames:
   `<safe-human-label>__<full-fingerprint>.compframes`.
 - The analysis cache fingerprint includes the selected reference identity and a
-  stable all-source selection-domain token. That token covers source identity,
-  source trims, effective FPS values, the configured analysis ignore-window
-  settings, and the final shared selectable window. Cache entries for different
-  selected references or different selection domains from the same input set do
-  not satisfy each other. Metric-array cache identity excludes `user_frames`,
-  random seed, frame-selection counts, `dark_quantile`, and `bright_quantile`
-  because those values affect frame choice rather than metric computation.
+  stable all-source selection-domain token. That token stores
+  `analysis_source_path`, `reference_path`, source identities, source trims,
+  effective FPS values, the configured analysis ignore-window settings, and the
+  final shared selectable window. Cache schema v4 stores `analysis_source_path`
+  in `MetricsMetadata`, and different selected references, selected analysis
+  sources, or selection domains from the same input set do not satisfy each
+  other. When `sources.analysis_source = "reference"`, `analysis_source_path`
+  is the selected reference path. Metric-array cache identity excludes
+  `user_frames`, random seed, frame-selection counts, `dark_quantile`, and
+  `bright_quantile` because those values affect frame choice rather than metric
+  computation.
 - The full fingerprint remains inside the cache payload and is validated on load.
   Legacy run-folder `cache.compframes` files are not used as analysis cache hits.
 - Analysis is skipped automatically when `dark_frame_count`, `bright_frame_count`,
@@ -489,9 +521,10 @@ behavior.
 
 VSPreview parent telemetry, generated Frame Compare session diagnostics,
 preview assumptions, ready text, and terminal confirmation prompts use stderr as
-the single human diagnostic stream. The VSPreview child process is still
-launched with inherited stdout/stderr so GUI/runtime compatibility is preserved;
-Frame Compare-owned generated script diagnostics are written to stderr.
+the single human diagnostic stream. The VSPreview child process is launched with
+inherited stdout, and its stderr is passed through except for the known native
+L-SMASH-Works `libvslsmashsource.dll` API3 deprecation warning. Frame
+Compare-owned generated script diagnostics are written to stderr.
 
 When interactive alignment launches a generated VSPreview session, the
 diagnostic order is:
@@ -520,8 +553,34 @@ dedicated `run` flags for them:
 
 - `geometry_mode = "native" | "aligned"` selects screenshot geometry behavior.
   `native` is the default and preserves current full-frame screenshot behavior.
-  `aligned` is accepted as the opt-in mode for deterministic mixed-geometry
-  screenshot alignment work.
+  `aligned` is the opt-in mode for deterministic mixed-geometry screenshot
+  alignment. Native mode ignores aligned-only geometry fields for behavior, but
+  the config schema still validates their enum values and target field types.
+- `active_rect_detection = "provided" | "dimension" | "aspect_ratio"` selects
+  the active-image rectangle evidence used by aligned screenshots. `provided`
+  uses only explicit per-source `active_rect` overrides and trusted metadata
+  active rectangles. `dimension` also allows same-height or same-width centered
+  crop inference. `aspect_ratio` is the aligned default and additionally allows
+  conservative centered vertical letterbox inference when a target content
+  aspect ratio has at least two matching sources or one explicit/trusted
+  metadata source.
+- `aligned_scale_policy = "largest_active" | "smallest_active" |
+  "reference_active" | "explicit_size"` selects the aligned output canvas policy.
+  `largest_active` is the aligned default and uses the active-source envelope
+  `{max(active_width), max(active_height)}`. `smallest_active` uses
+  `{min(active_width), min(active_height)}`. `reference_active` uses the selected
+  reference source active dimensions. `explicit_size` uses
+  `aligned_target_width x aligned_target_height`.
+- `aligned_target_width` and `aligned_target_height` are optional positive even
+  integers used only by `aligned_scale_policy = "explicit_size"` in aligned
+  mode. In aligned mode, both are required for `explicit_size` and both must be
+  omitted for all other scale policies. In native mode they are inert for
+  behavior, but any provided target value must still be positive and even.
+- Aligned scaling preserves aspect ratio, fits active content inside the selected
+  target width and height without exceeding either dimension, and centers black
+  padding on the final canvas. Derived policy targets are normalized downward to
+  mod-safe dimensions; explicit-size targets preserve the exact configured
+  canvas after validation.
 - `vs_writer = "auto" | "pillow" | "fpng"` selects the VapourSynth screenshot writer
   policy. `auto` is the default and preserves current behavior until a writer-specific
   runtime path is eligible. `pillow` means the existing Pillow PNG writer policy, and

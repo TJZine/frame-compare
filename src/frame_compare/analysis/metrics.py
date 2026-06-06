@@ -73,14 +73,14 @@ def _cached_metrics(
     return cache_result.metrics
 
 
-def _load_reference_source(reference_path: Path, vs_loader: VSLoader | None) -> SourceInfo:
+def _load_analysis_source(source_path: Path, vs_loader: VSLoader | None) -> SourceInfo:
     loader = vs_loader or DefaultVSLoader()
     try:
-        return loader.load(reference_path)
+        return loader.load(source_path)
     except (PluginNotFoundError, SourceLoadError):
         raise
     except Exception as e:
-        raise MetricsCalculationError(f"Failed to load reference video: {e}") from e
+        raise MetricsCalculationError(f"Failed to load analysis video: {e}") from e
 
 
 def _calculate_clip_metrics(
@@ -88,7 +88,7 @@ def _calculate_clip_metrics(
 ) -> tuple[list[float], list[float]]:
     clip = source.clip
     if clip.num_frames == 0:
-        raise MetricsCalculationError("Reference clip has 0 frames")
+        raise MetricsCalculationError("Analysis clip has 0 frames")
 
     total_frames = clip.num_frames
     with perf_span("analysis.calculate_metrics", frames=total_frames):
@@ -107,6 +107,7 @@ def _build_metrics(
     source: SourceInfo,
     fingerprint: str,
     clips: list[ClipIdentity],
+    analysis_source_path: Path,
     effective_fps: Fraction | None,
 ) -> FrameMetrics:
     return FrameMetrics(
@@ -117,6 +118,7 @@ def _build_metrics(
             fps=effective_fps if effective_fps is not None else source.fps,
             config_fingerprint=fingerprint,
             clips=clips,
+            analysis_source_path=str(analysis_source_path),
             version=CACHE_VERSION,
         ),
     )
@@ -142,16 +144,19 @@ def calculate_metrics(
     reporter: ProgressReporter | None = None,
     vs_loader: VSLoader | None = None,
     selection_domain: str | None = None,
+    analysis_source_path: Path | None = None,
     effective_fps: Fraction | None = None,
 ) -> FrameMetrics:
     """
     Calculate frame metrics for the given clips.
 
     Uses cached values if valid cache exists and config matches.
-    Only the reference clip (video_paths[0]) is analyzed.
+    Only the selected analysis source is analyzed.
 
     Args:
-        video_paths: Video file paths (first entry is the reference clip)
+        video_paths: Ordered video file paths (first entry is the selected reference clip)
+        analysis_source_path: Video path to load for metric analysis. Defaults to
+            the selected reference for compatibility with older callers.
         config: Analysis configuration
         cache_dir: Directory for cache files
         reporter: Optional progress reporter
@@ -167,12 +172,13 @@ def calculate_metrics(
 
     Raises:
         MetricsCalculationError (FC-4002): If frame extraction or metric
-            computation fails, OR if reference clip has 0 frames.
+            computation fails, OR if analysis clip has 0 frames.
         PluginNotFoundError (FC-2003): If VapourSynth lsmas plugin unavailable.
         SourceLoadError (FC-4015): If video file cannot be loaded.
     """
     if not video_paths:
         raise MetricsCalculationError("No input video paths provided")
+    source_path = video_paths[0] if analysis_source_path is None else analysis_source_path
 
     fingerprint = compute_cache_key(video_paths, config, selection_domain=selection_domain)
     clips = _clip_identities(video_paths)
@@ -181,8 +187,8 @@ def calculate_metrics(
     if cached:
         return cached
 
-    # Cache miss or invalid - compute metrics for reference clip only
-    source = _load_reference_source(video_paths[0], vs_loader)
+    # Cache miss or invalid - compute metrics for the selected analysis source only.
+    source = _load_analysis_source(source_path, vs_loader)
     luminance, motion = _calculate_clip_metrics(source, reporter)
     metrics = _build_metrics(
         luminance=luminance,
@@ -190,6 +196,7 @@ def calculate_metrics(
         source=source,
         fingerprint=fingerprint,
         clips=clips,
+        analysis_source_path=source_path,
         effective_fps=effective_fps,
     )
 

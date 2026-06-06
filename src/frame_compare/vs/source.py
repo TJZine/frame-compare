@@ -5,6 +5,7 @@ from __future__ import annotations
 from fractions import Fraction
 from typing import TYPE_CHECKING
 
+from frame_compare.utils.runtime_stderr import suppress_known_lsmash_api3_stderr
 from frame_compare.vs.env import ensure_vs_environment, require_plugin
 from frame_compare.vs.errors import SourceLoadError
 from frame_compare.vs.props import detect_hdr
@@ -38,7 +39,8 @@ def load_source(path: Path, core: vs.Core | None = None) -> SourceInfo:
         loader = core.lw
 
     try:
-        clip = loader.LWLibavSource(str(path))
+        with suppress_known_lsmash_api3_stderr():
+            clip = loader.LWLibavSource(str(path))
         frame = clip.get_frame(0)
         fps = Fraction(clip.fps.numerator, clip.fps.denominator)
         is_hdr, hdr_metadata = detect_hdr(dict(frame.props))

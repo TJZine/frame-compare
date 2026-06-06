@@ -101,13 +101,16 @@ Primary owned paths:
 - `config/config.toml` and `config/presets/*.toml`: config owners
 - `<resolved paths.generated_dir>/cache/analysis/<label>__<fingerprint>.compframes`:
   shared analysis metrics cache (defaults to `generated/cache/analysis/` under the
-  workspace root, but follows the configured `paths.generated_dir`). The
-  fingerprint includes the selected reference identity and an all-source
-  selection-domain token covering source identity, source trims, effective FPS
-  values, configured analysis ignore windows, and the final shared selectable
-  window. Metric-array cache identity excludes frame-selection counts,
-  `user_frames`, random seed, and dark/bright quantile thresholds because those
-  affect frame choice rather than metric computation.
+  workspace root, but follows the configured `paths.generated_dir`). The full
+  fingerprint includes the selected reference identity plus an all-source
+  selection-domain token. The token stores `analysis_source_path`,
+  `reference_path`, source identities, source trims, effective FPS values,
+  configured analysis ignore windows, and the final shared selectable window.
+  Cache schema v4 stores `analysis_source_path` in `MetricsMetadata`, and the
+  metric arrays are for that selected analysis clip. Metric-array cache identity
+  excludes frame-selection counts, `user_frames`, random seed, and dark/bright
+  quantile thresholds because those affect frame choice rather than metric
+  computation.
 - `generated/clip_probe.toml` or `<resolved paths.generated_dir>/clip_probe.toml`:
   shared clip probe cache used by `--from-cache-only` prevalidation before
   run-folder reservation
@@ -294,17 +297,21 @@ persisted. It does not own slow.pics upload policy, prompting, or browser side
 effects.
 
 Screenshot rendering owns its geometry and writer policy inside `frame_compare.render`:
-`frame_compare.render.geometry` plans optional aligned crop/scale/pad geometry, render
-batch expansion attaches those plans to render requests, the FFmpeg backend applies
-geometry filters after exact frame selection, and the VapourSynth path chooses between
-the Pillow writer and eligible `core.fpng.Write` output without changing CLI import-time
-behavior.
+`frame_compare.render.geometry` plans optional aligned crop/scale/pad geometry,
+including active-rect fallback detection and fit-to-target scale/canvas policy.
+Render batch expansion converts explicit source overrides and trusted diagnostic
+metadata into provided active rectangles before geometry planning, attaches the
+resulting plans to render requests, and keeps metadata rejection warnings at the
+batch owner. The FFmpeg backend applies geometry filters after exact frame selection,
+and the VapourSynth path chooses between the Pillow writer and eligible
+`core.fpng.Write` output without changing CLI import-time behavior.
 
 Runtime ownership matrix:
 
 | Runtime concern | Owner |
 | --- | --- |
 | Source selector resolution, explicit reference ordering, duplicate-stem fail-fast, and per-source override application during preparation | `frame_compare.orchestration.source_selection` plus `frame_compare.orchestration.preparation` |
+| Analysis-source resolution and fastest-source benchmark policy | `frame_compare.orchestration.analysis_source` |
 | Audio alignment workflow, offset cache coordination, and precedence policy | `frame_compare.services.alignment` |
 | Audio stream probing, deterministic stream selection, stream overrides, and FFmpeg/channel-aware extraction policy | `frame_compare.services.alignment_audio` |
 | Audio correlation, preprocessing, and refinement estimation | `frame_compare.services.alignment_correlation` |

@@ -186,6 +186,7 @@ def test_save_and_load_round_trip(tmp_path: Path) -> None:
     assert result.metrics.metadata.frame_count == 100
     assert result.metrics.metadata.fps == Fraction(24, 1)
     assert result.metrics.metadata.config_fingerprint == fingerprint
+    assert result.metrics.metadata.analysis_source_path == ""
 
 
 def test_load_not_found(tmp_path: Path) -> None:
@@ -278,6 +279,7 @@ def test_load_mismatched_inputs(tmp_path: Path) -> None:
                     "frame_count": 0,
                     "fps": "24/1",
                     "config_fingerprint": "fp1",
+                    "analysis_source_path": "",
                     "clips": [],
                     "version": CACHE_VERSION,
                 },
@@ -325,6 +327,35 @@ def test_save_writes_required_keys(tmp_path: Path) -> None:
     assert "metadata" in data
     assert data["metadata"]["frame_count"] == 10
     assert data["metadata"]["fps"] == "24000/1001"
+    assert data["metadata"]["analysis_source_path"] == ""
+
+
+def test_load_same_version_cache_without_analysis_source_path_is_corrupted(
+    tmp_path: Path,
+) -> None:
+    cache_file(tmp_path, "fp").write_text(
+        json.dumps(
+            {
+                "version": CACHE_VERSION,
+                "fingerprint": "fp",
+                "luminance": [],
+                "motion": [],
+                "metadata": {
+                    "frame_count": 0,
+                    "fps": "24/1",
+                    "config_fingerprint": "fp",
+                    "clips": [],
+                    "version": CACHE_VERSION,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = load_cached_metrics(tmp_path, "fp", [])
+
+    assert result.success is False
+    assert result.reason == "corrupted"
 
 
 def test_save_metrics_cache_uses_atomic_text_write(
@@ -403,6 +434,7 @@ def test_load_malformed_nested_payload_returns_corrupted(
             "frame_count": 1,
             "fps": "24",
             "config_fingerprint": "fp",
+            "analysis_source_path": "",
             "clips": [{"path": "video.mkv", "size": 10, "mtime": 1.0, "sha1": None}],
             "version": CACHE_VERSION,
         },

@@ -48,6 +48,7 @@ class MetricsMetadata:
         fps: Source video framerate
         config_fingerprint: Hash of analysis configuration
         clips: List of clip identities involved (usually just one)
+        analysis_source_path: Path to the source used for analysis, if any
         version: Cache schema version
     """
 
@@ -55,6 +56,7 @@ class MetricsMetadata:
     fps: Fraction
     config_fingerprint: str
     clips: Sequence[ClipIdentity]
+    analysis_source_path: str = ""
     version: int = 2
 
 

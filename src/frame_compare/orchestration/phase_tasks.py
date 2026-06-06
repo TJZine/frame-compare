@@ -671,7 +671,7 @@ def _reselect_frames_for_trimmed_overlap(
         selection_details_by_source_frame=selection_details_with_source_offset(
             dict(trimmed_selection.selection_details),
             source_offset=selectable_start,
-            fps=trimmed_metrics.metadata.fps,
+            source_fps=reference.effective_fps,
         ),
     )
 

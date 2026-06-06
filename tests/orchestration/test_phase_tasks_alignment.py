@@ -329,7 +329,7 @@ def test_run_align_phase_replaces_stale_analysis_metadata_after_tiny_overlap_fal
         motion=[0.0 for _ in range(100)],
         metadata=MetricsMetadata(
             frame_count=100,
-            fps=Fraction(24, 1),
+            fps=Fraction(48, 1),
             config_fingerprint="test",
             clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
         ),
@@ -374,6 +374,8 @@ def test_run_align_phase_replaces_stale_analysis_metadata_after_tiny_overlap_fal
         "Dark",
         "Dark",
     ]
+    assert output.selection_details_by_source_frame[98].timecode == "00:00:04.083"
+    assert output.selection_details_by_source_frame[99].timecode == "00:00:04.125"
 
 
 def test_run_align_phase_preserves_surviving_user_label_when_metrics_reselect_same_frame(

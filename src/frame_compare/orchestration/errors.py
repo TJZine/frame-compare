@@ -78,10 +78,10 @@ class MixedSourceFpsError(InputError):
                     f"but {comparison_label} ({comparison_path.name}) is {comparison_fps} fps."
                 ),
                 hint=(
-                    "Use sources.match_fps = 'assume_reference' for AssumeFPS-style timing "
-                    "matching, add per-source sources.overrides.<selector>.effective_fps "
-                    "entries, or preprocess sources to a common frame rate before running "
-                    "frame-compare."
+                    "Use sources.match_fps = 'majority' or sources.match_fps = "
+                    "'assume_reference' for AssumeFPS-style timing matching, add per-source "
+                    "sources.overrides.<selector>.effective_fps entries, or preprocess sources "
+                    "to a common frame rate before running frame-compare."
                 ),
                 details={
                     "reference_path": str(reference_path),
@@ -142,5 +142,41 @@ class DuplicateSourceStemError(InputError):
                     "stem": stem,
                     "matches": cast(JSONValue, [str(path) for path in matches]),
                 },
+            )
+        )
+
+
+class FastestAnalysisSourceCacheOnlyError(InputError):
+    """Runtime-dependent fastest analysis source cannot be resolved in cache-only mode."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            ErrorContext(
+                code="FC-3014",
+                name="FASTEST_ANALYSIS_SOURCE_CACHE_ONLY",
+                message=(
+                    "sources.analysis_source = 'fastest' is incompatible with "
+                    "--from-cache-only when analysis metrics are required."
+                ),
+                hint=(
+                    "Choose sources.analysis_source = 'reference' or a concrete source selector, "
+                    "or run without --from-cache-only so frame-compare can benchmark sources."
+                ),
+                details={"analysis_source": "fastest", "from_cache_only": True},
+            )
+        )
+
+
+class FastestAnalysisSourceError(InputError):
+    """No usable source could be benchmarked for fastest analysis source."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            ErrorContext(
+                code="FC-3015",
+                name="FASTEST_ANALYSIS_SOURCE_FAILED",
+                message="No source could be benchmarked for sources.analysis_source = 'fastest'.",
+                hint="Choose sources.analysis_source = 'reference' or a concrete source selector.",
+                details={"analysis_source": "fastest"},
             )
         )

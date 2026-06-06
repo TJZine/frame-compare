@@ -182,6 +182,9 @@ def run_analyze_phase(
     require_cache_only: bool = False,
     vs_loader: VSLoader | None = None,
 ) -> AnalyzePhaseOutput:
+    if ctx.analysis_clip is None:
+        raise MetricsCalculationError("Analysis source was not resolved for metric analysis.")
+
     selection_domain = ctx.analysis_selection_domain
     fingerprint = cache_io.compute_cache_key(
         input_videos,
@@ -200,16 +203,18 @@ def run_analyze_phase(
     else:
         metrics = calculate_metrics(
             video_paths=input_videos,
+            analysis_source_path=ctx.analysis_clip.path,
             config=ctx.config.analysis,
             cache_dir=workspace.cache_dir,
             reporter=ctx.reporter,
             vs_loader=vs_loader,
             selection_domain=selection_domain,
-            effective_fps=ctx.reference.effective_fps,
+            effective_fps=ctx.analysis_clip.effective_fps,
         )
     selection = _select_frames_for_selection_domain(
         metrics=metrics,
         reference=ctx.reference,
+        analysis_clip=ctx.analysis_clip,
         selection_window=ctx.selection_window,
         config=ctx.config.analysis,
     )
@@ -248,6 +253,7 @@ def _select_frames_for_selection_domain(
     *,
     metrics: FrameMetrics,
     reference: ClipState,
+    analysis_clip: ClipState,
     selection_window: SelectionWindow,
     config: AnalysisConfig,
 ) -> FrameSelection:
@@ -256,10 +262,13 @@ def _select_frames_for_selection_domain(
         if selection_window.frame_count > 0
         else (0, reference.effective_num_frames())
     )
+    source_offset = _source_offset_for_reference_window(reference, window_start)
     if (
-        reference.trim.trim_start_frames == 0
-        and reference.trim.trim_end_frame_inclusive is None
+        source_offset == 0
+        and analysis_clip.trim.trim_start_frames == 0
+        and analysis_clip.trim.trim_end_frame_inclusive is None
         and frame_count == reference.effective_num_frames()
+        and frame_count == analysis_clip.effective_num_frames()
         and window_start == 0
     ):
         return select_frames(
@@ -277,7 +286,7 @@ def _select_frames_for_selection_domain(
 
     trimmed_metrics = _trimmed_metrics_for_overlap(
         metrics=metrics,
-        trim_start_frame=reference.trim.trim_start_frames + window_start,
+        trim_start_frame=analysis_clip.trim.trim_start_frames + window_start,
         frame_count=frame_count,
     )
     selection = select_frames(
@@ -289,7 +298,6 @@ def _select_frames_for_selection_domain(
             frame_count=frame_count,
         ),
     )
-    source_offset = _source_offset_for_reference_window(reference, window_start)
     return FrameSelection(
         frames=[frame + window_start for frame in selection.frames],
         seed=selection.seed,
@@ -300,7 +308,7 @@ def _select_frames_for_selection_domain(
         selection_details=selection_details_with_source_offset(
             dict(selection.selection_details),
             source_offset=source_offset,
-            fps=trimmed_metrics.metadata.fps,
+            source_fps=reference.effective_fps,
         ),
     )
 
@@ -367,7 +375,7 @@ def selection_details_with_source_offset(
     details_by_frame: SelectionDetailsByFrame,
     *,
     source_offset: int,
-    fps: Fraction,
+    source_fps: Fraction,
 ) -> SelectionDetailsByFrame:
     shifted_details: SelectionDetailsByFrame = {}
     for frame_index, detail in details_by_frame.items():
@@ -376,7 +384,7 @@ def selection_details_with_source_offset(
             frame_index=source_frame,
             label=detail.label,
             source=detail.source,
-            timecode=selection_timecode_for_frame(source_frame, fps),
+            timecode=selection_timecode_for_frame(source_frame, source_fps),
             score=detail.score,
             clip_role=detail.clip_role,
             notes=detail.notes,

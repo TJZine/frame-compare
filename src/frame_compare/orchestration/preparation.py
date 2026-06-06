@@ -20,12 +20,16 @@ from frame_compare.orchestration.analysis_policy import (
     needs_analysis,
     validate_skip_analysis_frame_selection_contract,
 )
+from frame_compare.orchestration.analysis_source import resolve_analysis_source
 from frame_compare.orchestration.context import (
     ClipFingerprint,
     ClipProbeSnapshot,
     ClipState,
 )
-from frame_compare.orchestration.errors import MixedSourceFpsError
+from frame_compare.orchestration.errors import (
+    FastestAnalysisSourceCacheOnlyError,
+    MixedSourceFpsError,
+)
 from frame_compare.orchestration.phase_post_render import resolve_run_metadata
 from frame_compare.orchestration.preflight import discover_inputs, prepare_preflight
 from frame_compare.orchestration.probing.probe_cache import (
@@ -39,7 +43,7 @@ from frame_compare.orchestration.probing.probe_props import (
 )
 from frame_compare.orchestration.selection_domain import (
     build_analysis_selection_domain_token,
-    build_selection_domain_clips,
+    build_selection_domain_clips_with_diagnostics,
     compute_selection_window_for_clips,
 )
 from frame_compare.orchestration.source_selection import resolve_source_selection
@@ -211,7 +215,7 @@ def _probe_input_videos(
     deps: RunDependencies,
     config: ConfigSchema,
     overrides_by_path: dict[Path, SourceOverrideConfig],
-) -> list[ClipState]:
+) -> tuple[list[ClipState], list[str], list[str]]:
     cache_paths = _probe_cache_paths_for_run(workspace)
     entries_by_key = _load_probe_cache_entries(cache_paths)
     snapshots_by_path: dict[Path, ClipProbeSnapshot] = {}
@@ -248,12 +252,13 @@ def _probe_input_videos(
 
     for cache_path in cache_paths:
         save_clip_probe_cache(cache_path, entries_by_key)
-    return build_selection_domain_clips(
+    result = build_selection_domain_clips_with_diagnostics(
         ordered_paths=input_videos,
         snapshots_by_path=snapshots_by_path,
         overrides_by_path=overrides_by_path,
         match_fps=config.sources.match_fps,
     )
+    return result.clips, result.fps_diagnostics.messages(), result.fps_diagnostics.warnings()
 
 
 def _validate_source_fps_compatibility(clips: list[ClipState]) -> None:
@@ -283,13 +288,14 @@ def _probe_input_videos_from_snapshots(
     config: ConfigSchema,
     overrides_by_path: dict[Path, SourceOverrideConfig],
     snapshots_by_path: dict[Path, ClipProbeSnapshot],
-) -> list[ClipState]:
-    return build_selection_domain_clips(
+) -> tuple[list[ClipState], list[str], list[str]]:
+    result = build_selection_domain_clips_with_diagnostics(
         ordered_paths=input_videos,
         snapshots_by_path=snapshots_by_path,
         overrides_by_path=overrides_by_path,
         match_fps=config.sources.match_fps,
     )
+    return result.clips, result.fps_diagnostics.messages(), result.fps_diagnostics.warnings()
 
 
 async def execute_prep(
@@ -325,17 +331,32 @@ async def execute_prep(
     )
     input_videos = source_selection.ordered_paths
     overrides_by_path = dict(source_selection.overrides_by_path)
+    analysis_required = not request.skip_analysis and needs_analysis(config.analysis)
+    if (
+        request.from_cache_only
+        and analysis_required
+        and config.sources.analysis_source == "fastest"
+    ):
+        raise FastestAnalysisSourceCacheOnlyError()
+
     artifacts = RunArtifacts()
     prevalidated_clips: list[ClipState] | None = None
+    prevalidated_analysis_clip: ClipState | None = None
     prevalidated_selection_window: SelectionWindow | None = None
     prevalidated_selection_domain: str | None = None
+    load_source_diagnostics: list[str] = []
+    source_warnings: list[str] = []
 
-    if request.from_cache_only and not request.skip_analysis and needs_analysis(config.analysis):
+    if request.from_cache_only and analysis_required:
         cached_snapshots = _cached_probe_snapshots_for_cache_only(
             workspace=workspace,
             input_videos=input_videos,
         )
-        prevalidated_clips = _probe_input_videos_from_snapshots(
+        (
+            prevalidated_clips,
+            load_source_diagnostics,
+            source_warnings,
+        ) = _probe_input_videos_from_snapshots(
             input_videos=input_videos,
             config=config,
             overrides_by_path=overrides_by_path,
@@ -346,8 +367,18 @@ async def execute_prep(
             clips=prevalidated_clips,
             config=config,
         )
+        prevalidated_analysis_selection = resolve_analysis_source(
+            selector=config.sources.analysis_source,
+            input_dir=workspace.input_dir,
+            clips=prevalidated_clips,
+            vs_loader=deps.vs_loader,
+        )
+        prevalidated_analysis_clip = prevalidated_analysis_selection.clip
+        if prevalidated_analysis_selection.warning is not None:
+            load_source_diagnostics.append(prevalidated_analysis_selection.warning)
         prevalidated_selection_domain = build_analysis_selection_domain_token(
             clips=prevalidated_clips,
+            analysis_clip=prevalidated_analysis_clip,
             config=config,
             selection_window=prevalidated_selection_window,
         )
@@ -371,10 +402,11 @@ async def execute_prep(
         if prevalidated_selection_window is None or prevalidated_selection_domain is None:
             raise RuntimeError("Prevalidated selection domain was not resolved.")
         clips = prevalidated_clips
+        analysis_clip = prevalidated_analysis_clip
         selection_window = prevalidated_selection_window
         selection_domain = prevalidated_selection_domain
     else:
-        clips = _probe_input_videos(
+        clips, load_source_diagnostics, source_warnings = _probe_input_videos(
             workspace=workspace,
             input_videos=input_videos,
             deps=deps,
@@ -383,11 +415,25 @@ async def execute_prep(
         )
         _validate_source_fps_compatibility(clips)
         selection_window = compute_selection_window_for_clips(clips=clips, config=config)
-        selection_domain = build_analysis_selection_domain_token(
-            clips=clips,
-            config=config,
-            selection_window=selection_window,
-        )
+        analysis_clip = None
+        if analysis_required:
+            analysis_selection = resolve_analysis_source(
+                selector=config.sources.analysis_source,
+                input_dir=workspace.input_dir,
+                clips=clips,
+                vs_loader=deps.vs_loader,
+            )
+            analysis_clip = analysis_selection.clip
+            if analysis_selection.warning is not None:
+                load_source_diagnostics.append(analysis_selection.warning)
+            selection_domain = build_analysis_selection_domain_token(
+                clips=clips,
+                analysis_clip=analysis_clip,
+                config=config,
+                selection_window=selection_window,
+            )
+        else:
+            selection_domain = ""
         if request.no_cache:
             _validate_cache_state(
                 request=request,
@@ -402,11 +448,13 @@ async def execute_prep(
         config=config,
         input_videos=input_videos,
         analysis_selection_domain=selection_domain,
+        analysis_clip=analysis_clip,
         selection_window=selection_window,
         clips=clips,
         artifacts=artifacts,
         metadata_prefetch=metadata_prefetch,
-        preflight_warnings=preflight.warnings,
+        preflight_warnings=[*preflight.warnings, *source_warnings],
         preflight_duration=preflight_duration,
         load_sources_start=load_sources_start,
+        load_source_diagnostics=load_source_diagnostics,
     )

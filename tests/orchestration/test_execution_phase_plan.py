@@ -10,7 +10,11 @@ from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
 from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest
-from frame_compare.orchestration.execution import _apply_phase_output, build_execution_phase_plan
+from frame_compare.orchestration.execution import (
+    _apply_phase_output,
+    build_execution_phase_plan,
+    build_phases_before_align,
+)
 from frame_compare.orchestration.types import (
     AlignPhaseOutput,
     ConfirmSlowpicsUploadPhaseOutput,
@@ -26,7 +30,7 @@ from frame_compare.orchestration.types import (
 )
 from frame_compare.utils.types import WorkspacePaths
 
-from .execute_run_helpers import FakeFFmpegRunner, clip_state
+from .execute_run_helpers import FakeFFmpegRunner, FakeVSLoader, clip_state
 
 
 def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
@@ -135,6 +139,39 @@ def test_build_execution_phase_plan_moves_report_before_publish_for_confirmed_up
         "publish",
         "post_report_cleanup",
     ]
+
+
+def test_build_phases_before_align_skips_analyze_when_request_skips_analysis(
+    tmp_path: Path,
+) -> None:
+    workspace = WorkspacePaths(
+        root=tmp_path,
+        input_dir=tmp_path / "comparison_videos",
+        run_dir=None,
+        screenshots_dir=tmp_path / "screenshots",
+        generated_dir=tmp_path / "generated",
+        config_dir=tmp_path / "config",
+        config_file=tmp_path / "config" / "config.toml",
+    )
+    state = ExecutionState(artifacts=RunArtifacts())
+
+    phases = build_phases_before_align(
+        request=RunRequest(root=tmp_path, skip_analysis=True),
+        clock=datetime.now,
+        state=state,
+        input_videos=[tmp_path / "ref.mkv"],
+        workspace=workspace,
+        vs_loader=FakeVSLoader(),
+    )
+
+    analyze_phase = next(phase for phase in phases if phase.name == "analyze")
+    config = ConfigSchema()
+    config.analysis = config.analysis.model_copy(
+        update={"random_frame_count": 0, "dark_frame_count": 1}
+    )
+
+    assert analyze_phase.skip_condition is not None
+    assert analyze_phase.skip_condition(config) is True
 
 
 def test_run_request_cli_config_overrides_capture_runtime_override_contract(tmp_path: Path) -> None:
