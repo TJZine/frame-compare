@@ -33,6 +33,8 @@ def test_rich_progress_reporter_accepts_no_color() -> None:
 
     assert reporter.no_color is True
     assert reporter.writes_to_stderr is True
+    assert reporter._progress.live._redirect_stdout is False  # noqa: SLF001
+    assert reporter._progress.live._redirect_stderr is False  # noqa: SLF001
 
 
 def test_log_progress_reporter_smoke():
@@ -103,12 +105,12 @@ def test_rich_progress_reporter_hides_parent_while_nested_phase_is_active(
     outer_task_id = reporter._task_id  # noqa: SLF001
     reporter.start_phase("inner", 3)
 
-    assert (outer_task_id, {"visible": False}) in update_calls
+    assert (outer_task_id, {"visible": False, "refresh": True}) in update_calls
 
     reporter.complete_phase()
 
     assert reporter._task_id == outer_task_id  # noqa: SLF001
-    assert (outer_task_id, {"visible": True}) in update_calls
+    assert (outer_task_id, {"visible": True, "refresh": True}) in update_calls
 
     reporter.complete_phase()
 
@@ -145,7 +147,7 @@ def test_rich_progress_reporter_restores_parent_when_nested_phase_fails(
     reporter.complete_phase(ProgressPhaseStatus.FAILED)
 
     assert reporter._task_id == outer_task_id  # noqa: SLF001
-    assert (outer_task_id, {"visible": True}) in update_calls
+    assert (outer_task_id, {"visible": True, "refresh": True}) in update_calls
 
     reporter.complete_phase()
 
@@ -167,8 +169,31 @@ def test_rich_progress_reporter_warned_phase_does_not_force_total(
     reporter.advance(3)
     reporter.complete_phase(ProgressPhaseStatus.WARNED)
 
-    assert {"description": "Warning"} in update_calls
-    assert {"completed": 10} not in update_calls
+    assert {"description": "Warning", "refresh": True} in update_calls
+    assert {"completed": 10, "refresh": True} not in update_calls
+
+
+def test_rich_progress_reporter_refreshes_state_changes(monkeypatch) -> None:
+    reporter = RichProgressReporter()
+    refresh_count = 0
+    original_refresh = reporter._progress.refresh  # noqa: SLF001
+
+    def _recording_refresh() -> None:
+        nonlocal refresh_count
+        refresh_count += 1
+        original_refresh()
+
+    monkeypatch.setattr(reporter._progress, "refresh", _recording_refresh)  # noqa: SLF001
+
+    reporter.start_phase("test", 3)
+    started_refresh_count = refresh_count
+
+    reporter.set_description("Rendering")
+    reporter.advance(1)
+
+    assert refresh_count >= started_refresh_count + 2
+
+    reporter.complete_phase()
 
 
 def test_progress_reporter_protocol_is_single_source() -> None:

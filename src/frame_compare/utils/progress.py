@@ -77,6 +77,8 @@ class RichProgressReporter:
             _SpinnerAwareColumn(TaskProgressColumn()),
             _SpinnerAwareColumn(TimeRemainingColumn()),
             transient=True,
+            redirect_stdout=False,
+            redirect_stderr=False,
             console=Console(stderr=True, no_color=no_color),
         )
         self._task_id: TaskID | None = None
@@ -112,7 +114,7 @@ class RichProgressReporter:
         if not self._progress.live.is_started:
             self._progress.start()
         if self._task_id is not None:
-            self._progress.update(self._task_id, visible=False)
+            self._progress.update(self._task_id, visible=False, refresh=True)
             self._task_stack.append(self._task_id)
         self._task_id = self._progress.add_task(
             name,
@@ -126,11 +128,12 @@ class RichProgressReporter:
         """Advance the rich progress bar."""
         if self._task_id is not None:
             self._progress.advance(self._task_id, amount)
+            self._progress.refresh()
 
     def set_description(self, desc: str) -> None:
         """Update the rich progress bar description."""
         if self._task_id is not None:
-            self._progress.update(self._task_id, description=desc)
+            self._progress.update(self._task_id, description=desc, refresh=True)
 
     def complete_phase(
         self,
@@ -140,24 +143,24 @@ class RichProgressReporter:
         if self._task_id is not None:
             total = self._task_totals.get(self._task_id)
             if status == ProgressPhaseStatus.SKIPPED:
-                self._progress.update(self._task_id, description="Skipped")
+                self._progress.update(self._task_id, description="Skipped", refresh=True)
             elif status == ProgressPhaseStatus.WARNED:
-                self._progress.update(self._task_id, description="Warning")
+                self._progress.update(self._task_id, description="Warning", refresh=True)
             elif status == ProgressPhaseStatus.FAILED:
-                self._progress.update(self._task_id, description="Failed")
+                self._progress.update(self._task_id, description="Failed", refresh=True)
 
             if total is not None and status in {
                 ProgressPhaseStatus.COMPLETED,
                 ProgressPhaseStatus.SKIPPED,
             }:
-                self._progress.update(self._task_id, completed=total)
+                self._progress.update(self._task_id, completed=total, refresh=True)
             self._progress.remove_task(self._task_id)
             self._task_totals.pop(self._task_id, None)
             self._task_id = None
 
         if self._task_stack:
             self._task_id = self._task_stack.pop()
-            self._progress.update(self._task_id, visible=True)
+            self._progress.update(self._task_id, visible=True, refresh=True)
             return
 
         if self._progress.live.is_started:
