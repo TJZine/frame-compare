@@ -354,7 +354,7 @@ def test_run_align_then_render_phase_maps_four_clip_aligned_frames_in_clip_order
         comp_c.with_trim(trim_start_frames=13, trim_end_frame_inclusive=120),
     ]
 
-    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
         return [
             AlignmentResult(
                 reference_clip="reference.mkv",
@@ -385,7 +385,7 @@ def test_run_align_then_render_phase_maps_four_clip_aligned_frames_in_clip_order
             ),
         ]
 
-    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
     align_output = phase_tasks.run_align_phase(ctx, selected_frames=[10, 57, 81])
     ctx.reference = align_output.reference
     ctx.comparisons = align_output.comparisons
@@ -638,7 +638,7 @@ def test_run_render_phase_labels_skipped_analysis_alignment_fallback_random_fram
         update={"user_frames": [0], "random_frame_count": 1, "random_seed": 42}
     )
 
-    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
         return [
             AlignmentResult(
                 reference_clip="reference.mkv",
@@ -657,7 +657,7 @@ def test_run_render_phase_labels_skipped_analysis_alignment_fallback_random_fram
         captured.update(kwargs)
         return {"Reference": [tmp_path / "reference.png"]}
 
-    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
     monkeypatch.setattr(
         "frame_compare.render.batch.orchestrator.render_screenshots_from_batch",
         _fake_render_screenshots_from_batch,
@@ -693,7 +693,7 @@ def test_run_report_phase_labels_skipped_analysis_alignment_fallback_random_fram
         update={"user_frames": [0], "random_frame_count": 1, "random_seed": 42}
     )
 
-    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
         return [
             AlignmentResult(
                 reference_clip="reference.mkv",
@@ -714,7 +714,7 @@ def test_run_report_phase_labels_skipped_analysis_alignment_fallback_random_fram
         captured["report_config"] = report_config
         return expected_path
 
-    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
     monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
 
     align_output = phase_tasks.run_align_phase(ctx, selected_frames=[0, 66])
@@ -765,7 +765,7 @@ def test_run_render_phase_rejects_analysis_fallback_when_overlap_is_smaller_than
         ),
     )
 
-    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
         return [
             AlignmentResult(
                 reference_clip="reference.mkv",
@@ -778,7 +778,7 @@ def test_run_render_phase_rejects_analysis_fallback_when_overlap_is_smaller_than
             )
         ]
 
-    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
 
     with pytest.raises(SelectionError) as exc_info:
         phase_tasks.run_align_phase(ctx, selected_frames=[0, 1, 2, 3])
@@ -820,7 +820,7 @@ def test_output_phases_use_reselected_metric_metadata_after_real_initial_selecti
     ctx.selection_breakdown = initial_selection.breakdown
     ctx.selection_details_by_source_frame = dict(initial_selection.selection_details)
 
-    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
         return [
             AlignmentResult(
                 reference_clip="reference.mkv",
@@ -846,7 +846,7 @@ def test_output_phases_use_reselected_metric_metadata_after_real_initial_selecti
         report_capture["report_config"] = report_config
         return expected_report_path
 
-    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
     monkeypatch.setattr(
         "frame_compare.render.batch.orchestrator.render_screenshots_from_batch",
         _fake_render_screenshots_from_batch,

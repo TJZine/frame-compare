@@ -39,7 +39,7 @@ from frame_compare.orchestration.phase_selection import (
 from frame_compare.orchestration.types import AlignPhaseOutput, RenderArtifacts, RenderPhaseOutput
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
 from frame_compare.services.alignment import (
-    align_clips,
+    align_clips_from_request,
     calculate_alignment_trims,
     format_rejected_alignment_warning,
 )
@@ -327,11 +327,9 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
         previous_offsets=alignment_request.previous_offsets,
         shared_alignment_cache_dir=str(alignment_request.shared_alignment_cache_dir),
     )
-    results = align_clips(
-        reference=ctx.reference.path,
-        comparisons=[comp.path for comp in ctx.comparisons],
-        config=alignment_config,
-        cache_dir=ctx.workspace.generated_dir,
+    results = align_clips_from_request(
+        alignment_request,
+        alignment_config,
         progress=ctx.reporter,
         reference_fps=ctx.reference.effective_fps,
         frame_props_by_stem={

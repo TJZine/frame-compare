@@ -68,19 +68,22 @@ enable = false
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "a_ref.mkv", "b_comp1.mkv", "c_comp2.mkv")
 
-    def _fake_align_clips(
-        reference,
-        comparisons,
+    def _fake_align_clips_from_request(
+        request,
         config,
-        cache_dir,
         progress=None,
         reference_fps=None,
         frame_props_by_stem=None,
     ):
+        assert request.shared_alignment_cache_dir == tmp_path / "generated" / "cache" / "alignment"
+        assert request.reference.identity.path == request.reference.path
+        assert [comparison.identity.path for comparison in request.comparisons] == [
+            comparison.path for comparison in request.comparisons
+        ]
         return [
             AlignmentResult(
-                reference_clip=reference.name,
-                comparison_clip=comparisons[0].name,
+                reference_clip=request.reference.path.name,
+                comparison_clip=request.comparisons[0].path.name,
                 frame_offset=1,
                 time_offset_seconds=0.041,
                 correlation_score=0.9,
@@ -88,8 +91,8 @@ enable = false
                 source="computed",
             ),
             AlignmentResult(
-                reference_clip=reference.name,
-                comparison_clip=comparisons[1].name,
+                reference_clip=request.reference.path.name,
+                comparison_clip=request.comparisons[1].path.name,
                 frame_offset=-1,
                 time_offset_seconds=-0.041,
                 correlation_score=0.9,
@@ -98,7 +101,7 @@ enable = false
             ),
         ]
 
-    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
 
     ffmpeg = FakeFFmpegRunner()
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=ffmpeg)
