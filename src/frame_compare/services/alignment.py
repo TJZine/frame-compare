@@ -25,6 +25,10 @@ from frame_compare.services.alignment_math import (
     cross_correlate,
     samples_to_frames,
 )
+from frame_compare.services.alignment_reuse_prompt import (
+    PreviousOffsetPromptInput,
+    prompt_for_previous_offset_reuse,
+)
 from frame_compare.services.alignment_vspreview import maybe_launch_alignment_vspreview
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
@@ -55,6 +59,7 @@ __all__ = [
     "check_alignment_cached",
     "format_rejected_alignment_warning",
     "load_cached_offsets",
+    "prompt_for_previous_alignment_offset_reuse",
     "save_offsets_cache",
 ]
 
@@ -261,6 +266,20 @@ def _record_resolved_alignment_progress(
         result = results_map.get(f"{reference.stem}:{comp.stem}")
         if result is not None:
             _record_alignment_progress(progress=progress, result=result)
+
+
+def prompt_for_previous_alignment_offset_reuse(
+    *,
+    prompt_input: PreviousOffsetPromptInput,
+    progress: ProgressReporter | None,
+    no_color: bool,
+) -> bool:
+    """Prompt for shared previous-offset reuse without owning reuse precedence."""
+    return prompt_for_previous_offset_reuse(
+        prompt_input=prompt_input,
+        progress=progress,
+        no_color=no_color,
+    )
 
 
 def align_clips(
