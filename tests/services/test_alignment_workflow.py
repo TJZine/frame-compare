@@ -2,6 +2,7 @@
 
 # pyright: reportPrivateUsage=false
 
+import tomllib
 from fractions import Fraction
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
@@ -17,7 +18,14 @@ from frame_compare.services.alignment import (
 )
 from frame_compare.services.alignment_cache import save_offsets_cache
 from frame_compare.services.alignment_consensus import AlignmentConsensus
-from frame_compare.services.alignment_reuse_cache import comparison_cache_key, save_reusable_offsets
+from frame_compare.services.alignment_reuse_cache import (
+    CACHE_FILE_NAME as REUSE_CACHE_FILE_NAME,
+)
+from frame_compare.services.alignment_reuse_cache import (
+    comparison_cache_key,
+    save_reusable_offsets,
+    source_set_cache_key,
+)
 from frame_compare.services.alignment_reuse_prompt import PreviousOffsetPromptInput
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import (
@@ -857,7 +865,7 @@ def test_align_clips_from_request_disabled_skips_shared_reuse_io(
     assert results[0].frame_offset == 0
 
 
-def test_align_clips_from_request_always_reuses_shared_offsets_and_skips_compute(
+def test_align_clips_from_request_always_reuses_shared_offsets_skips_compute_and_allows_vspreview(
     tmp_path: Path,
 ) -> None:
     ref = tmp_path / "ref.mkv"
@@ -868,7 +876,7 @@ def test_align_clips_from_request_always_reuses_shared_offsets_and_skips_compute
     comp.touch()
     generated_dir.mkdir()
     shared_cache_dir.mkdir()
-    config = AlignmentConfig(previous_offsets="always")
+    config = AlignmentConfig(previous_offsets="always", use_vspreview=True)
     request = _alignment_request(
         tmp_path,
         reference=ref,
@@ -905,6 +913,7 @@ def test_align_clips_from_request_always_reuses_shared_offsets_and_skips_compute
         patch("frame_compare.services.alignment.maybe_launch_alignment_vspreview") as mock_vs,
         patch("frame_compare.services.alignment.save_reusable_offsets") as mock_save_shared,
     ):
+        mock_vs.return_value = None
         results = align_clips_from_request(request, config)
 
     assert results[0].source == "cached"
@@ -914,7 +923,8 @@ def test_align_clips_from_request_always_reuses_shared_offsets_and_skips_compute
     mock_probe.assert_not_called()
     mock_extract_ref.assert_not_called()
     mock_extract_comp.assert_not_called()
-    mock_vs.assert_not_called()
+    mock_vs.assert_called_once()
+    assert mock_vs.call_args.kwargs["offsets_by_key"] == {"ref:comp": 7}
     mock_save_shared.assert_not_called()
 
 
@@ -1164,6 +1174,7 @@ def test_align_clips_from_request_reuses_shared_offsets_for_unresolved_only_afte
         patch("frame_compare.services.alignment._estimate_consensus_offset") as mock_estimate,
         patch("frame_compare.services.alignment.maybe_launch_alignment_vspreview") as mock_vs,
     ):
+        mock_vs.return_value = None
         results = align_clips_from_request(
             request,
             config,
@@ -1178,10 +1189,14 @@ def test_align_clips_from_request_reuses_shared_offsets_for_unresolved_only_afte
     mock_extract_ref.assert_not_called()
     mock_extract_comp.assert_not_called()
     mock_estimate.assert_not_called()
-    mock_vs.assert_not_called()
+    mock_vs.assert_called_once()
+    assert mock_vs.call_args.kwargs["offsets_by_key"] == {
+        "ref:comp_manual": 2,
+        "ref:comp_shared": 7,
+    }
 
 
-def test_align_clips_from_request_does_not_attempt_shared_write_for_legacy_cache_result(
+def test_align_clips_from_request_ignores_legacy_cache_and_computes_missing_offset(
     tmp_path: Path,
 ) -> None:
     ref = tmp_path / "ref.mkv"
@@ -1220,15 +1235,86 @@ def test_align_clips_from_request_does_not_attempt_shared_write_for_legacy_cache
         reference_fps=Fraction(24, 1),
     )
 
-    with patch("frame_compare.services.alignment.save_reusable_offsets") as mock_save_shared:
+    with (
+        patch(
+            "frame_compare.services.alignment._extract_reference_audio",
+            return_value=(np.ones(10, dtype=np.float32), object()),
+        ) as mock_extract_ref,
+        patch(
+            "frame_compare.services.alignment._extract_matching_audio",
+            return_value=np.ones(10, dtype=np.float32),
+        ) as mock_extract_comp,
+        patch(
+            "frame_compare.services.alignment._estimate_consensus_offset",
+            return_value=AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, None),
+        ) as mock_estimate,
+    ):
         results = align_clips_from_request(
             request,
             config,
             reference_fps=Fraction(24, 1),
         )
 
-    assert results[0].source == "cached"
-    mock_save_shared.assert_not_called()
+    assert results[0].source == "computed"
+    assert results[0].frame_offset == 0
+    mock_extract_ref.assert_called_once()
+    mock_extract_comp.assert_called_once()
+    mock_estimate.assert_called_once()
+
+
+def test_align_clips_from_request_disabled_writes_shared_reuse_without_legacy_cache(
+    tmp_path: Path,
+) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    generated_dir = tmp_path / "generated"
+    shared_cache_dir = tmp_path / "shared-alignment"
+    ref.touch()
+    comp.touch()
+    generated_dir.mkdir()
+    config = AlignmentConfig(cache_results=True, previous_offsets="disabled")
+    request = _alignment_request(
+        tmp_path,
+        reference=ref,
+        comparisons=[comp],
+        config=config,
+        generated_dir=generated_dir,
+        shared_cache_dir=shared_cache_dir,
+    )
+
+    with (
+        patch("frame_compare.services.alignment._probe_fps", return_value=Fraction(24, 1)),
+        patch(
+            "frame_compare.services.alignment._extract_reference_audio",
+            return_value=(np.ones(10, dtype=np.float32), object()),
+        ),
+        patch(
+            "frame_compare.services.alignment._extract_matching_audio",
+            return_value=np.ones(10, dtype=np.float32),
+        ),
+        patch(
+            "frame_compare.services.alignment._estimate_consensus_offset",
+            return_value=AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, None),
+        ),
+        patch("frame_compare.services.alignment.load_reusable_offset_entries") as mock_load_shared,
+    ):
+        results = align_clips_from_request(request, config)
+
+    assert results[0].source == "computed"
+    cache_file = shared_cache_dir / REUSE_CACHE_FILE_NAME
+    assert cache_file.exists()
+    assert not (generated_dir / "audio_offsets.toml").exists()
+    mock_load_shared.assert_not_called()
+    with cache_file.open("rb") as handle:
+        cache_data = tomllib.load(handle)
+    source_set = cache_data["source_sets"][source_set_cache_key(request)]
+    entry = source_set["entries"][comparison_cache_key(request.comparisons[0])]
+    assert entry["origin"] == "computed"
+    assert entry["reference_clip"] == ref.name
+    assert entry["comparison_clip"] == comp.name
+    assert entry["frame_offset"] == 0
+    assert entry["time_offset_seconds"] == 0.0
+    assert entry["correlation_score"] == pytest.approx(0.99)
 
 
 def test_align_clips_from_request_does_not_attempt_shared_write_for_preexisting_manual_override(

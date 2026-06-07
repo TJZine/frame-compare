@@ -450,24 +450,6 @@ def _apply_shared_reuse(
         )
 
 
-def _record_legacy_cache_provenance(
-    *,
-    reference: Path,
-    comparisons: list[AlignmentClipRequest],
-    results_map: dict[str, AlignmentResult],
-    provenances: dict[str, AlignmentProvenance],
-) -> None:
-    for comparison in comparisons:
-        key = _alignment_key(reference, comparison.path)
-        if key in provenances or key not in results_map:
-            continue
-        provenances[key] = AlignmentProvenance(
-            result=results_map[key],
-            comparison_cache_key=comparison_cache_key(comparison),
-            provenance="legacy_audio_offsets",
-        )
-
-
 def _record_vspreview_provenance(
     *,
     request: AlignmentRequest,
@@ -494,11 +476,19 @@ def _shared_write_is_service_eligible(
     request: AlignmentRequest,
     provenances: dict[str, AlignmentProvenance],
 ) -> bool:
+    if not request.comparisons:
+        return False
     for comparison in request.comparisons:
         provenance = provenances.get(_alignment_key(request.reference.path, comparison.path))
         if provenance is None:
             return False
         if provenance.provenance not in {"computed_this_run", "vspreview_confirmed_this_run"}:
+            return False
+        if (
+            not provenance.result.applied
+            or provenance.result.frame_offset is None
+            or provenance.result.time_offset_seconds is None
+        ):
             return False
     return True
 
@@ -569,37 +559,6 @@ def align_clips_from_request(
             for comparison in request.comparisons
             if _alignment_key(reference, comparison.path) not in results_map
         ]
-        if config.cache_results and requested_comparisons:
-            try:
-                cached = load_cached_offsets(
-                    request.generated_dir,
-                    reference,
-                    [comparison.path for comparison in requested_comparisons],
-                    sample_rate=config.sample_rate,
-                    max_offset_seconds=config.max_offset_seconds,
-                    config=config,
-                    reference_fps=reference_fps,
-                )
-                if cached is not None:
-                    results_map.update(cached)
-                    _record_legacy_cache_provenance(
-                        reference=reference,
-                        comparisons=requested_comparisons,
-                        results_map=results_map,
-                        provenances=provenances,
-                    )
-                    requested_comparisons = [
-                        comparison
-                        for comparison in request.comparisons
-                        if _alignment_key(reference, comparison.path) not in results_map
-                    ]
-            except (CacheCorruptionError, CacheVersionMismatchError) as exc:
-                log.warning(
-                    "audio_offsets_cache_load_failed",
-                    path=str(request.generated_dir / CACHE_FILE_NAME),
-                    error=str(exc),
-                    action="degrade_to_computed_alignment",
-                )
     except Exception:
         cache_activity_status = ProgressPhaseStatus.FAILED
         raise
@@ -624,37 +583,6 @@ def align_clips_from_request(
             fps_reference=fps_reference,
             progress=progress,
         )
-
-        if config.cache_results:
-            computed_results = [
-                results_map[_alignment_key(reference, comparison.path)]
-                for comparison in request.comparisons
-                if (
-                    provenances.get(_alignment_key(reference, comparison.path)) is not None
-                    and provenances[_alignment_key(reference, comparison.path)].provenance
-                    == "computed_this_run"
-                    and results_map[_alignment_key(reference, comparison.path)].applied
-                )
-            ]
-            if computed_results:
-                save_offsets_cache(
-                    request.generated_dir,
-                    reference=reference,
-                    comparisons=comparisons,
-                    sample_rate=config.sample_rate,
-                    max_offset_seconds=config.max_offset_seconds,
-                    results=computed_results,
-                    config=config,
-                    reference_fps=fps_reference,
-                )
-
-    if not requested_comparisons and any(
-        provenance.provenance == "shared_previous_offsets" for provenance in provenances.values()
-    ):
-        return [
-            results_map[_alignment_key(reference, comparison.path)]
-            for comparison in request.comparisons
-        ]
 
     offsets_by_key = _build_offsets_map(
         reference=reference,
@@ -684,7 +612,7 @@ def align_clips_from_request(
         provenances=provenances,
     )
 
-    if config.previous_offsets != "disabled" and _shared_write_is_service_eligible(
+    if config.cache_results and _shared_write_is_service_eligible(
         request=request,
         provenances=provenances,
     ):

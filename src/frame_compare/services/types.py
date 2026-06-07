@@ -13,7 +13,6 @@ type AlignmentWriteProvenance = Literal[
     "computed_this_run",
     "vspreview_confirmed_this_run",
     "shared_previous_offsets",
-    "legacy_audio_offsets",
     "preexisting_manual_override",
 ]
 

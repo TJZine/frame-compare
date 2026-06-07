@@ -469,7 +469,7 @@ def test_shared_reuse_cache_missing_source_sets_warns_and_misses(
 
 @pytest.mark.parametrize(
     "provenance",
-    ["shared_previous_offsets", "legacy_audio_offsets", "preexisting_manual_override"],
+    ["shared_previous_offsets", "preexisting_manual_override"],
 )
 def test_shared_reuse_cache_does_not_write_ineligible_provenance(
     tmp_path: Path,
