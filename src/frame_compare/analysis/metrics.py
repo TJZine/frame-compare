@@ -19,6 +19,7 @@ from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.utils.perf import perf_span
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
+from frame_compare.utils.runtime_stderr import suppress_known_lsmash_api3_stderr
 from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError
 from frame_compare.vs.loader import DefaultVSLoader
 
@@ -189,16 +190,20 @@ def calculate_metrics(
 
     # Cache miss or invalid - compute metrics for the selected analysis source only.
     source = _load_analysis_source(source_path, vs_loader)
-    luminance, motion = _calculate_clip_metrics(source, reporter)
-    metrics = _build_metrics(
-        luminance=luminance,
-        motion=motion,
-        source=source,
-        fingerprint=fingerprint,
-        clips=clips,
-        analysis_source_path=source_path,
-        effective_fps=effective_fps,
-    )
+    try:
+        luminance, motion = _calculate_clip_metrics(source, reporter)
+        metrics = _build_metrics(
+            luminance=luminance,
+            motion=motion,
+            source=source,
+            fingerprint=fingerprint,
+            clips=clips,
+            analysis_source_path=source_path,
+            effective_fps=effective_fps,
+        )
+    finally:
+        with suppress_known_lsmash_api3_stderr():
+            del source
 
     _save_metrics_cache_best_effort(metrics, cache_dir, reporter)
 

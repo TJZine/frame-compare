@@ -18,6 +18,9 @@ _KNOWN_API3_WARNING = (
 
 def test_known_lsmash_api3_warning_match_is_exact_to_all_markers() -> None:
     assert is_known_lsmash_api3_warning(_KNOWN_API3_WARNING)
+    assert is_known_lsmash_api3_warning(
+        "Plugin /usr/lib/vapoursynth/libvslsmashsource.so is using API3 which is deprecated\n"
+    )
     assert not is_known_lsmash_api3_warning(
         "Plugin libvslsmashsource.dll failed to load because a dependency is missing.\n"
     )

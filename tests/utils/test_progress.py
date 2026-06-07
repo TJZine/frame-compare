@@ -1,5 +1,7 @@
 """Unit tests for progress reporting utilities."""
 
+from concurrent.futures import ThreadPoolExecutor
+
 from frame_compare.utils.progress import (
     LogProgressReporter,
     NullProgressReporter,
@@ -33,6 +35,7 @@ def test_rich_progress_reporter_accepts_no_color() -> None:
 
     assert reporter.no_color is True
     assert reporter.writes_to_stderr is True
+    assert reporter._progress.live.auto_refresh is False  # noqa: SLF001
     assert reporter._progress.live._redirect_stdout is False  # noqa: SLF001
     assert reporter._progress.live._redirect_stderr is False  # noqa: SLF001
 
@@ -192,6 +195,20 @@ def test_rich_progress_reporter_refreshes_state_changes(monkeypatch) -> None:
     reporter.advance(1)
 
     assert refresh_count >= started_refresh_count + 2
+
+    reporter.complete_phase()
+
+
+def test_rich_progress_reporter_serializes_concurrent_updates() -> None:
+    reporter = RichProgressReporter()
+    reporter.start_phase("test", 40)
+
+    def _update(index: int) -> None:
+        reporter.set_description(f"Rendering {index}")
+        reporter.advance(1)
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        list(executor.map(_update, range(40)))
 
     reporter.complete_phase()
 

@@ -14,9 +14,9 @@ from typing import BinaryIO
 # non-API3 build. Native VapourSynth emits this known deprecation line directly
 # to stderr, which corrupts otherwise clean CLI progress and human diagnostics.
 _LSMAS_API3_WARNING_MARKERS = (
-    "libvslsmashsource.dll",
-    "is using API3 which is deprecated",
-    "will be removed shortly",
+    "libvslsmashsource",
+    "API3",
+    "deprecated",
 )
 _STDERR_REDIRECT_LOCK = RLock()
 
@@ -66,7 +66,10 @@ def write_stderr_unless_known_lsmash_api3_warning(line: str) -> None:
     """Write a child-process stderr line unless it is the known L-SMASH warning."""
     if is_known_lsmash_api3_warning(line):
         return
-    sys.stderr.write(line)
+    try:
+        sys.stderr.write(line)
+    except (OSError, ValueError):
+        return
 
 
 def _stderr_fileno() -> int | None:
