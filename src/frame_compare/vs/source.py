@@ -41,9 +41,9 @@ def load_source(path: Path, core: vs.Core | None = None) -> SourceInfo:
     try:
         with suppress_known_lsmash_api3_stderr():
             clip = loader.LWLibavSource(str(path))
-        frame = clip.get_frame(0)
-        fps = Fraction(clip.fps.numerator, clip.fps.denominator)
-        is_hdr, hdr_metadata = detect_hdr(dict(frame.props))
+            frame = clip.get_frame(0)
+            fps = Fraction(clip.fps.numerator, clip.fps.denominator)
+            is_hdr, hdr_metadata = detect_hdr(dict(frame.props))
     except Exception as e:
         raise SourceLoadError(path, str(e)) from e
 

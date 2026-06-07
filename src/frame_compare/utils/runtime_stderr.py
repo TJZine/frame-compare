@@ -7,6 +7,7 @@ import sys
 import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager, suppress
+from threading import RLock
 from typing import BinaryIO
 
 # MUST KEEP until the bundled/installed L-SMASH-Works plugin is updated to a
@@ -17,6 +18,7 @@ _LSMAS_API3_WARNING_MARKERS = (
     "is using API3 which is deprecated",
     "will be removed shortly",
 )
+_STDERR_REDIRECT_LOCK = RLock()
 
 
 def is_known_lsmash_api3_warning(line: str) -> bool:
@@ -27,36 +29,37 @@ def is_known_lsmash_api3_warning(line: str) -> bool:
 @contextmanager
 def suppress_known_lsmash_api3_stderr() -> Generator[None]:
     """Suppress only the known native L-SMASH API3 warning emitted on stderr."""
-    stderr_fd = _stderr_fileno()
-    if stderr_fd is None:
-        yield
-        return
-
-    try:
-        saved_fd = os.dup(stderr_fd)
-    except OSError:
-        yield
-        return
-
-    with tempfile.TemporaryFile(mode="w+b") as captured:
-        try:
-            sys.stderr.flush()
-            os.dup2(captured.fileno(), stderr_fd)
-        except OSError:
-            os.close(saved_fd)
+    with _STDERR_REDIRECT_LOCK:
+        stderr_fd = _stderr_fileno()
+        if stderr_fd is None:
             yield
             return
 
         try:
+            saved_fd = os.dup(stderr_fd)
+        except OSError:
             yield
-        finally:
-            with suppress(OSError):
-                sys.stderr.flush()
+            return
+
+        with tempfile.TemporaryFile(mode="w+b") as captured:
             try:
-                os.dup2(saved_fd, stderr_fd)
-            finally:
+                sys.stderr.flush()
+                os.dup2(captured.fileno(), stderr_fd)
+            except OSError:
                 os.close(saved_fd)
-            _replay_filtered_stderr(captured)
+                yield
+                return
+
+            try:
+                yield
+            finally:
+                with suppress(OSError):
+                    sys.stderr.flush()
+                try:
+                    os.dup2(saved_fd, stderr_fd)
+                finally:
+                    os.close(saved_fd)
+                _replay_filtered_stderr(captured)
 
 
 def write_stderr_unless_known_lsmash_api3_warning(line: str) -> None:

@@ -1,9 +1,11 @@
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
+from contextlib import contextmanager
 from fractions import Fraction
 from types import SimpleNamespace
 
 import pytest
 
+import frame_compare.vs.source as source_module
 from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError
 from frame_compare.vs.source import apply_trim, load_source
 from frame_compare.vs.types import SourceInfo
@@ -98,6 +100,33 @@ def test_load_source_extracts_dimensions():
 def test_load_source_uses_lw_namespace_fallback():
     core = make_mock_core(with_lsmas=True, use_lw_namespace=True)
     source = load_source("video.mkv", core)  # type: ignore
+    assert source.num_frames == 1000
+
+
+def test_load_source_keeps_initial_frame_probe_inside_stderr_suppression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    suppression_active = False
+
+    @contextmanager
+    def suppress_stderr() -> Generator[None]:
+        nonlocal suppression_active
+        suppression_active = True
+        try:
+            yield
+        finally:
+            suppression_active = False
+
+    class ProbeClip(MockClip):
+        def get_frame(self, n: int) -> SimpleNamespace:
+            assert suppression_active
+            return super().get_frame(n)
+
+    monkeypatch.setattr(source_module, "suppress_known_lsmash_api3_stderr", suppress_stderr)
+    core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=lambda _path: ProbeClip()))
+
+    source = load_source("video.mkv", core)  # type: ignore
+
     assert source.num_frames == 1000
 
 

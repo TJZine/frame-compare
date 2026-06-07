@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from threading import Event, Thread
 
 from frame_compare.utils.runtime_stderr import (
     is_known_lsmash_api3_warning,
@@ -33,4 +34,43 @@ def test_suppress_known_lsmash_api3_stderr_filters_native_fd_writes(capfd) -> No
     captured = capfd.readouterr()
     assert "libvslsmashsource.dll is using API3" not in captured.err
     assert "real native runtime warning" in captured.err
+    assert captured.out == ""
+
+
+def test_suppress_known_lsmash_api3_stderr_serializes_concurrent_redirects(capfd) -> None:
+    worker_attempting = Event()
+    worker_entered = Event()
+    worker_done = Event()
+    worker_errors: list[BaseException] = []
+
+    def worker() -> None:
+        try:
+            worker_attempting.set()
+            with suppress_known_lsmash_api3_stderr():
+                worker_entered.set()
+                os.write(2, _KNOWN_API3_WARNING.encode("utf-8"))
+                os.write(2, b"worker runtime warning\n")
+        except BaseException as exc:
+            worker_errors.append(exc)
+        finally:
+            worker_done.set()
+
+    with suppress_known_lsmash_api3_stderr():
+        thread = Thread(target=worker, daemon=True)
+        thread.start()
+        assert worker_attempting.wait(timeout=1.0)
+        os.write(2, _KNOWN_API3_WARNING.encode("utf-8"))
+        os.write(2, b"outer runtime warning\n")
+        assert not worker_entered.wait(timeout=0.05)
+
+    assert worker_entered.wait(timeout=1.0)
+    assert worker_done.wait(timeout=1.0)
+    thread.join(timeout=1.0)
+
+    assert not thread.is_alive()
+    assert worker_errors == []
+    captured = capfd.readouterr()
+    assert "libvslsmashsource.dll is using API3" not in captured.err
+    assert "outer runtime warning" in captured.err
+    assert "worker runtime warning" in captured.err
     assert captured.out == ""
