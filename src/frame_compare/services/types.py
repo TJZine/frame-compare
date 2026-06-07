@@ -8,6 +8,14 @@ type AlignmentPreprocessingMode = Literal["none", "standard"]
 type AlignmentChannelStrategy = Literal["mono_downmix", "best_channel"]
 type AlignmentRefinementMode = Literal["disabled", "local"]
 type PreviousOffsetReusePolicy = Literal["disabled", "prompt", "always"]
+type AlignmentReuseCacheOrigin = Literal["computed", "vspreview_confirmed"]
+type AlignmentWriteProvenance = Literal[
+    "computed_this_run",
+    "vspreview_confirmed_this_run",
+    "shared_previous_offsets",
+    "legacy_audio_offsets",
+    "preexisting_manual_override",
+]
 
 
 def _empty_comparison_streams() -> dict[str, int]:
@@ -27,6 +35,15 @@ class AlignmentResult:
     source: AlignmentSource
     applied: bool = True
     diagnostic: str | None = None
+
+
+@dataclass(frozen=True)
+class AlignmentProvenance:
+    """Current-run provenance used to decide shared alignment-cache write eligibility."""
+
+    result: AlignmentResult
+    comparison_cache_key: str
+    provenance: AlignmentWriteProvenance
 
 
 @dataclass(frozen=True)
