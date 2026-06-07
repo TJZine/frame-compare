@@ -127,9 +127,11 @@ Primary owned paths:
   run-folder reservation
 - `<run-folder>/generated/clip_probe.toml`: current-run clip probe cache when
   run folders are enabled
-- `generated/audio_offsets.toml` or `<run-folder>/generated/audio_offsets.toml`:
-  run-scoped alignment cache
-- generated VSPreview session and override files under the current generated/run area
+- `generated/manual_overrides.toml` or `<run-folder>/generated/manual_overrides.toml`:
+  persisted VSPreview-confirmed manual alignment overrides. These live in the
+  stable generated area when run folders are disabled and in the current run
+  folder when run folders are enabled.
+- generated VSPreview session files under the current generated/run area
 - screenshot output directories and generated HTML reports
 - Windows portable bundle outputs under `dist/frame-compare-portable-win-x64`
 
@@ -145,8 +147,8 @@ folder.
 
 When `paths.use_run_folders = true`, normal runs and cache-only runs that proceed
 reserve a fresh run folder. Existing run folders are not reused for analysis cache
-hits. Screenshots, slow.pics upload inputs, alignment offsets, manual overrides,
-and VSPreview artifacts remain scoped to the current run folder. Probe snapshots
+hits. Screenshots, slow.pics upload inputs, manual overrides, and VSPreview
+artifacts remain scoped to the current run folder. Probe snapshots
 are written to both the current run folder and the shared generated probe cache
 so future `--from-cache-only` runs can validate the exact all-source analysis
 selection domain before metadata prefetch or run-folder reservation. Configured
@@ -171,7 +173,7 @@ Rich stderr prompt/table helper, including TTY fallback behavior and no-color
 rendering. `frame_compare.services.types.AlignmentProvenance` carries
 service-owned write-source provenance such as `computed_this_run`,
 `vspreview_confirmed_this_run`, `shared_previous_offsets`,
-`legacy_audio_offsets`, and `preexisting_manual_override`; shared-cache writes
+and `preexisting_manual_override`; shared-cache writes
 consume only current-run computed or VSPreview-confirmed provenance rather than
 inferring eligibility from the final flattened `AlignmentResult.source`.
 

@@ -617,6 +617,8 @@ def test_current_cli_contract_documents_audio_alignment_config_only_fields() -> 
     for expected in (
         "correlation algorithm",
         "not present in the CLI override map",
+        "`disabled` is the default and does not read or reuse shared previous offsets",
+        "eligible current-run computed or VSPreview-confirmed results still write",
         "asks `Reuse previous alignment offsets? [y/N]`",
         "requires both stdin and stderr to be TTYs before",
         "persisted `accepted_at` timestamp",
@@ -740,7 +742,8 @@ def test_current_cli_contract_documents_analysis_ignore_window_and_cache_domain(
         "Previous alignment reuse is not part of analysis cache-only prevalidation",
         '`previous_offsets = "always"`',
         "missing previous alignment offsets do not fail `--from-cache-only`",
-        "does not delete alignment offset caches, including shared previous-offset",
+        "does not delete shared previous-offset reuse entries",
+        "Alignment can compute current-run offsets",
         "<resolved paths.generated_dir>/cache/alignment/",
     ):
         assert expected in normalized_cache_section
@@ -790,6 +793,9 @@ def test_current_architecture_documents_shared_alignment_reuse_cache_seams() -> 
         "<resolved paths.generated_dir>/cache/alignment/alignment_reuse.toml",
         "`frame_compare.services.alignment_reuse_cache`",
         "shared previous alignment offset reuse cache",
+        "`generated/manual_overrides.toml` or `<run-folder>/generated/manual_overrides.toml`",
+        "stable generated area when run folders are disabled",
+        "current run folder when run folders are enabled",
         "`WorkspacePaths.shared_alignment_cache_dir`",
         "shared workspace-level `<resolved paths.generated_dir>/cache/alignment` path",
         "`frame_compare.utils.types.AlignmentRequest`",
@@ -802,11 +808,17 @@ def test_current_architecture_documents_shared_alignment_reuse_cache_seams() -> 
         "`computed_this_run`",
         "`vspreview_confirmed_this_run`",
         "`shared_previous_offsets`",
-        "`legacy_audio_offsets`",
         "`preexisting_manual_override`",
         "rather than inferring eligibility from the final flattened `AlignmentResult.source`",
     ):
         assert expected in normalized_architecture
+    for stale in (
+        "`generated/audio_offsets.toml`",
+        "`<run-folder>/generated/audio_offsets.toml`",
+        "run-scoped alignment cache",
+        "run-scoped VSPreview-confirmed manual alignment overrides",
+    ):
+        assert stale not in normalized_architecture
 
 
 def test_current_cli_contract_names_primary_executable_contract_checks() -> None:

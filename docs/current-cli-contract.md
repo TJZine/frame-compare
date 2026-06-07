@@ -250,8 +250,8 @@ unchanged.
 - `--no-cache` deletes only the matching shared analysis cache entry for the current
   inputs, selected reference, all-source selection domain, and analysis settings
   before continuing. It does not clear unrelated shared analysis entries and
-  does not delete alignment offset caches, including shared previous-offset
-  reuse entries under `<resolved paths.generated_dir>/cache/alignment/`.
+  does not delete shared previous-offset reuse entries under
+  `<resolved paths.generated_dir>/cache/alignment/`.
 - `--from-cache-only` is analysis-cache-only. When analysis is not skipped, it validates
   the matching shared analysis cache entry before metadata prefetch and before run-folder
   reservation, so a missing or invalid entry does not leave an empty run folder.
@@ -263,8 +263,8 @@ unchanged.
   cache-only run may reuse previous alignment offsets when
   `previous_offsets = "always"` and a complete valid set exists, but missing
   previous alignment offsets do not fail `--from-cache-only` by themselves.
-  Alignment can compute, use the current run folder's run-scoped alignment cache,
-  or use accepted shared previous offsets after analysis cache validation succeeds.
+  Alignment can compute current-run offsets or use accepted shared previous
+  offsets after analysis cache validation succeeds.
 - `--no-cache` and `--from-cache-only` are mutually exclusive.
 
 ### Report Auto-Open Ownership
@@ -620,12 +620,14 @@ enabled.
 
 - `previous_offsets = "disabled" | "prompt" | "always"` controls opt-in shared
   previous-offset reuse. It is config-only, has no `run` flag, and is not present
-  in the CLI override map. `disabled` is the default and preserves current
-  run-scoped behavior without reading or writing the shared reuse cache. `prompt`
-  shows a Rich stderr table for a complete valid previous-offset set and asks
-  `Reuse previous alignment offsets? [y/N]`; default, EOF, unavailable stdin, or
-  unavailable stderr all continue without reuse. `always` reuses a complete valid
-  set without prompting. Prompt mode writes no prompt/table to stdout.
+  in the CLI override map. `disabled` is the default and does not read or reuse
+  shared previous offsets, but eligible current-run computed or
+  VSPreview-confirmed results still write to the shared reuse cache when
+  `cache_results = true`. `prompt` shows a Rich stderr table for a complete
+  valid previous-offset set and asks `Reuse previous alignment offsets? [y/N]`;
+  default, EOF, unavailable stdin, or unavailable stderr all continue without
+  reuse. `always` reuses a complete valid set without prompting. Prompt mode
+  writes no prompt/table to stdout.
 - Previous-offset prompt mode requires both stdin and stderr to be TTYs before
   any blocking read. If stderr is not a TTY, the prompt is invisible and the run
   continues without reuse and without a human diagnostic. If stderr is a TTY but
