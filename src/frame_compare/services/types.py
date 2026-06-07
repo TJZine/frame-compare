@@ -47,6 +47,15 @@ class AlignmentProvenance:
 
 
 @dataclass(frozen=True)
+class ReusableAlignmentEntry:
+    """Shared-cache reusable alignment entry with prompt-display metadata."""
+
+    result: AlignmentResult
+    accepted_at: str
+    origin: AlignmentReuseCacheOrigin
+
+
+@dataclass(frozen=True)
 class AlignmentConfig:
     """Configuration for audio alignment."""
 

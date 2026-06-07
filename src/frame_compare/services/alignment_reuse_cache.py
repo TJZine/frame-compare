@@ -15,6 +15,7 @@ from frame_compare.services.types import (
     AlignmentProvenance,
     AlignmentResult,
     AlignmentReuseCacheOrigin,
+    ReusableAlignmentEntry,
 )
 from frame_compare.utils.atomic_write import write_bytes_atomic
 from frame_compare.utils.types import AlignmentClipRequest, AlignmentRequest
@@ -222,7 +223,7 @@ def _parse_entry(
     *,
     request: AlignmentRequest,
     comparison: AlignmentClipRequest,
-) -> AlignmentResult:
+) -> ReusableAlignmentEntry:
     origin = _entry_origin(entry)
     reference_clip = entry.get("reference_clip")
     comparison_clip = entry.get("comparison_clip")
@@ -250,19 +251,27 @@ def _parse_entry(
     if not _entry_matches_request(entry, request=request, comparison=comparison):
         raise ValueError("shared alignment cache entry identity mismatch")
 
-    return AlignmentResult(
-        reference_clip=reference_clip,
-        comparison_clip=comparison_clip,
-        frame_offset=frame_offset,
-        time_offset_seconds=float(time_offset_seconds),
-        correlation_score=replay_correlation_score,
-        algorithm="cross_correlation" if origin == "computed" else None,
-        source="cached",
+    return ReusableAlignmentEntry(
+        result=AlignmentResult(
+            reference_clip=reference_clip,
+            comparison_clip=comparison_clip,
+            frame_offset=frame_offset,
+            time_offset_seconds=float(time_offset_seconds),
+            correlation_score=replay_correlation_score,
+            algorithm="cross_correlation" if origin == "computed" else None,
+            source="cached",
+        ),
+        accepted_at=accepted_at,
+        origin=origin,
     )
 
 
-def load_reusable_offsets(request: AlignmentRequest) -> dict[str, AlignmentResult] | None:
-    """Load a complete reusable previous-offset source set, or return ``None``."""
+def load_reusable_offset_entries(
+    request: AlignmentRequest,
+    *,
+    comparisons: list[AlignmentClipRequest] | None = None,
+) -> dict[str, ReusableAlignmentEntry] | None:
+    """Load complete reusable previous-offset entries, or return ``None``."""
     cache_path = _cache_path(request)
     data = _load_cache_data(cache_path)
     if data is None:
@@ -287,8 +296,10 @@ def load_reusable_offsets(request: AlignmentRequest) -> dict[str, AlignmentResul
         return None
     entry_table = cast(dict[str, object], entries)
 
-    results: dict[str, AlignmentResult] = {}
-    for comparison in request.comparisons:
+    requested_comparisons = request.comparisons if comparisons is None else comparisons
+
+    results: dict[str, ReusableAlignmentEntry] = {}
+    for comparison in requested_comparisons:
         comparison_key = comparison_cache_key(comparison)
         entry = entry_table.get(comparison_key)
         if not isinstance(entry, dict):
@@ -311,6 +322,18 @@ def load_reusable_offsets(request: AlignmentRequest) -> dict[str, AlignmentResul
             )
             return None
     return results
+
+
+def load_reusable_offsets(
+    request: AlignmentRequest,
+    *,
+    comparisons: list[AlignmentClipRequest] | None = None,
+) -> dict[str, AlignmentResult] | None:
+    """Load a complete reusable previous-offset source set, or return ``None``."""
+    entries = load_reusable_offset_entries(request, comparisons=comparisons)
+    if entries is None:
+        return None
+    return {comparison_key: entry.result for comparison_key, entry in entries.items()}
 
 
 def _origin_for_provenance(provenance: AlignmentProvenance) -> AlignmentReuseCacheOrigin | None:

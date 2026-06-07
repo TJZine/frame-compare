@@ -14,6 +14,7 @@ from frame_compare.services.alignment_reuse_cache import (
     CACHE_FILE_NAME,
     CACHE_VERSION,
     comparison_cache_key,
+    load_reusable_offset_entries,
     load_reusable_offsets,
     save_reusable_offsets,
 )
@@ -155,11 +156,16 @@ def test_shared_reuse_cache_round_trips_computed_entry(tmp_path: Path) -> None:
     request = _request(tmp_path)
     _write_computed(request)
 
+    entries = load_reusable_offset_entries(request)
     loaded = load_reusable_offsets(request)
 
+    assert entries is not None
+    entry = next(iter(entries.values()))
     assert loaded is not None
     assert len(loaded) == 1
     result = next(iter(loaded.values()))
+    assert entry.accepted_at == "2026-06-06T12:00:00Z"
+    assert entry.origin == "computed"
     assert result.source == "cached"
     assert result.algorithm == "cross_correlation"
     assert result.correlation_score == 0.876
@@ -187,10 +193,15 @@ def test_shared_reuse_cache_round_trips_vspreview_confirmed_entry_with_score_one
         accepted_at="2026-06-06T12:00:00Z",
     )
 
+    entries = load_reusable_offset_entries(request)
     loaded = load_reusable_offsets(request)
 
+    assert entries is not None
+    entry = next(iter(entries.values()))
     assert loaded is not None
     result = next(iter(loaded.values()))
+    assert entry.accepted_at == "2026-06-06T12:00:00Z"
+    assert entry.origin == "vspreview_confirmed"
     assert result.source == "cached"
     assert result.algorithm is None
     assert result.correlation_score == 1.0
@@ -208,6 +219,32 @@ def test_shared_reuse_cache_requires_complete_source_set(tmp_path: Path) -> None
     )
 
     assert load_reusable_offsets(complete_request) is None
+
+
+def test_shared_reuse_cache_can_load_requested_subset_from_full_source_set(
+    tmp_path: Path,
+) -> None:
+    request = _request(tmp_path)
+    second = _clip(_touch_clip(tmp_path / "comp_b.mkv", b"second"), label="Encode 2", stream=2)
+    complete_request = replace(request, comparisons=[request.comparisons[0], second])
+
+    save_reusable_offsets(
+        complete_request,
+        [
+            _provenance(complete_request, comparison_index=0),
+            _provenance(complete_request, comparison_index=1),
+        ],
+        accepted_at="2026-06-06T12:00:00Z",
+    )
+
+    subset_entries = load_reusable_offset_entries(
+        complete_request,
+        comparisons=[second],
+    )
+
+    assert subset_entries is not None
+    assert list(subset_entries) == [comparison_cache_key(second)]
+    assert subset_entries[comparison_cache_key(second)].accepted_at == "2026-06-06T12:00:00Z"
 
 
 @pytest.mark.parametrize(
