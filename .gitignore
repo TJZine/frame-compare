@@ -1,5 +1,5 @@
 .DS_Store
-
+docs/archive
 # Local tool caches / indexes
 .codanna/
 .mcp_sequential_thinking/
