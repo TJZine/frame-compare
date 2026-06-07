@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Literal
 
 from _pytest.monkeypatch import MonkeyPatch
 from rich.console import Console
@@ -22,6 +23,13 @@ def _console() -> Console:
 
 def _render(console: Console) -> str:
     return console.export_text(styles=False)
+
+
+def _rendered_row_value(output: str, row_label: str) -> str:
+    for line in output.splitlines():
+        if row_label in line:
+            return line
+    raise AssertionError(f"Missing row label: {row_label}")
 
 
 def _config() -> ConfigSchema:
@@ -67,6 +75,8 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     assert "selection" in output
     assert "user=0, random=10, dark=0, bright=0, motion=0, seed=42" in output
     assert "FFmpeg audio" in output
+    assert "previous offsets" in output
+    assert "disabled" in output
     assert "interactive alignment" in output
     assert "force interactive" in output
     assert "tonemap.preset" in output
@@ -81,6 +91,30 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     assert "upload" in output
     assert "disabled" in output
     assert "VSPreview" not in output
+
+
+def test_at_a_glance_prints_previous_offsets_effective_mode(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("frame_compare.cli.output.shutil.which", lambda _command: None)
+    modes: tuple[Literal["disabled", "prompt", "always"], ...] = ("disabled", "prompt", "always")
+
+    for mode in modes:
+        config = _config()
+        config.audio_alignment.previous_offsets = mode
+        console = _console()
+
+        print_at_a_glance(
+            console,
+            request=_request(),
+            config=config,
+            root=_workspace_path(),
+            config_path=_workspace_path("config", "config.toml"),
+        )
+
+        output = _render(console)
+        previous_offsets_row = _rendered_row_value(output, "previous offsets")
+        assert mode in previous_offsets_row
 
 
 def test_at_a_glance_preserves_literal_brackets_in_dynamic_paths(

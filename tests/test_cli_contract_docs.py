@@ -590,6 +590,13 @@ def test_current_cli_contract_documents_audio_alignment_config_only_fields() -> 
     )[0]
 
     for expected in (
+        '`previous_offsets = "disabled" | "prompt" | "always"`',
+        "config-only, has no `run` flag",
+        "`disabled` is the default",
+        "Previous alignment offset reuse prompt unavailable; continuing without reuse.",
+        "<resolved paths.generated_dir>/cache/alignment/",
+        "`cache_results = true`",
+        "Successful `run --json` output remains unchanged by previous-offset reuse",
         '`correlation_mode = "raw_fft" | "gcc_phat"`',
         '`preprocessing_mode = "none" | "standard"`',
         '`channel_strategy = "mono_downmix" | "best_channel"`',
@@ -609,6 +616,13 @@ def test_current_cli_contract_documents_audio_alignment_config_only_fields() -> 
     normalized_audio_section = " ".join(audio_section.split())
     for expected in (
         "correlation algorithm",
+        "not present in the CLI override map",
+        "asks `Reuse previous alignment offsets? [y/N]`",
+        "requires both stdin and stderr to be TTYs before",
+        "persisted `accepted_at` timestamp",
+        "workspace-level cache state even when `paths.use_run_folders = true`",
+        '`previous_offsets = "prompt"` and `previous_offsets = "always"` require',
+        '`force_interactive = true` is incompatible with `previous_offsets = "prompt"`',
         "preprocessing",
         "audio channel handling",
         "It gates whether computed offsets are applied",
@@ -643,6 +657,7 @@ def test_current_cli_contract_documents_audio_alignment_config_only_fields() -> 
     )[0]
 
     for unsupported_flag in (
+        "--previous-offsets",
         "--correlation-mode",
         "--preprocessing-mode",
         "--channel-strategy",
@@ -658,6 +673,8 @@ def test_current_cli_contract_documents_audio_alignment_config_only_fields() -> 
         "--comparison-streams",
     ):
         assert unsupported_flag not in command_override_surface
+        assert unsupported_flag not in _declared_run_options()
+    assert "audio_alignment.previous_offsets" not in CLI_OVERRIDE_MAP.values()
 
 
 def test_current_cli_contract_documents_analysis_ignore_window_and_cache_domain() -> None:
@@ -720,8 +737,76 @@ def test_current_cli_contract_documents_analysis_ignore_window_and_cache_domain(
         "final shared selectable window",
         "probe cache is missing",
         "rather than validating a weaker fingerprint",
+        "Previous alignment reuse is not part of analysis cache-only prevalidation",
+        '`previous_offsets = "always"`',
+        "missing previous alignment offsets do not fail `--from-cache-only`",
+        "does not delete alignment offset caches, including shared previous-offset",
+        "<resolved paths.generated_dir>/cache/alignment/",
     ):
         assert expected in normalized_cache_section
+
+
+def test_current_cli_contract_documents_previous_offsets_output_and_persistence() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
+    run_section = cli_contract.split("## `run` Command Contract", maxsplit=1)[1].split(
+        "## CLI Flag To Config Mapping",
+        maxsplit=1,
+    )[0]
+    persistence_section = cli_contract.split("## Persistence Rules", maxsplit=1)[1].split(
+        "### Tonemap Preset And Target Resolution",
+        maxsplit=1,
+    )[0]
+    normalized_run = " ".join(run_section.split())
+    normalized_persistence = " ".join(persistence_section.split())
+
+    for expected in (
+        '`--json` is incompatible with `audio_alignment.previous_offsets = "prompt"`',
+        '`previous_offsets = "always"` is compatible with `--json`',
+        '`--quiet` is incompatible with `audio_alignment.previous_offsets = "prompt"`',
+        "`previous offsets` row reports only the effective config mode",
+        "`disabled`, `prompt`, or `always`",
+        "disables ANSI styling for the previous-offset reuse table and prompt",
+        "shared alignment reuse entries live below it at `cache/alignment`",
+        "`--diagnose-paths` does not report the shared alignment cache path separately",
+    ):
+        assert expected in normalized_run
+
+    for expected in (
+        '`audio_alignment.previous_offsets = "prompt"` or `"always"`',
+        "`audio_alignment.force_interactive = true`",
+        "`audio_alignment.cache_results = false`",
+        "The config is not written when either conflict is present",
+    ):
+        assert expected in normalized_persistence
+
+
+def test_current_architecture_documents_shared_alignment_reuse_cache_seams() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    architecture = (repo_root / "docs" / "current-architecture.md").read_text(encoding="utf-8")
+    normalized_architecture = " ".join(architecture.split())
+
+    for expected in (
+        "<resolved paths.generated_dir>/cache/alignment/alignment_reuse.toml",
+        "`frame_compare.services.alignment_reuse_cache`",
+        "shared previous alignment offset reuse cache",
+        "`WorkspacePaths.shared_alignment_cache_dir`",
+        "shared workspace-level `<resolved paths.generated_dir>/cache/alignment` path",
+        "`frame_compare.utils.types.AlignmentRequest`",
+        "`frame_compare.orchestration.phase_tasks.run_align_phase()`",
+        "typed orchestration-to-services request seam",
+        "layer-neutral primitives or dependency-light shared utility types",
+        "must not import orchestration-owned or analysis-owned identity types",
+        "`frame_compare.services.alignment_reuse_prompt`",
+        "`frame_compare.services.types.AlignmentProvenance`",
+        "`computed_this_run`",
+        "`vspreview_confirmed_this_run`",
+        "`shared_previous_offsets`",
+        "`legacy_audio_offsets`",
+        "`preexisting_manual_override`",
+        "rather than inferring eligibility from the final flattened `AlignmentResult.source`",
+    ):
+        assert expected in normalized_architecture
 
 
 def test_current_cli_contract_names_primary_executable_contract_checks() -> None:

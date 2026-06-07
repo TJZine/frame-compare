@@ -111,6 +111,17 @@ Primary owned paths:
   excludes frame-selection counts, `user_frames`, random seed, and dark/bright
   quantile thresholds because those affect frame choice rather than metric
   computation.
+- `<resolved paths.generated_dir>/cache/alignment/alignment_reuse.toml`:
+  shared previous alignment offset reuse cache owned by
+  `frame_compare.services.alignment_reuse_cache`. It stores accepted computed or
+  VSPreview-confirmed offsets keyed by a typed source-set identity, source
+  fingerprints, source trims, effective FPS values, selected reference
+  relationship, selected audio streams, and alignment settings that affect
+  computed offsets. Unreadable, corrupt, unsupported-version, malformed
+  source-table, or invalid-entry shared reuse data degrades to the normal
+  alignment path with a warning log event. Ordinary no-match, incomplete, or
+  stale source-set misses can silently return no reusable set and continue
+  through the normal alignment path.
 - `generated/clip_probe.toml` or `<resolved paths.generated_dir>/clip_probe.toml`:
   shared clip probe cache used by `--from-cache-only` prevalidation before
   run-folder reservation
@@ -124,9 +135,13 @@ Primary owned paths:
 
 `WorkspacePaths` resolves the runtime path set and can switch into run-folder mode so
 screenshots and generated files live inside an input-specific run directory. The
-analysis cache is the exception: `WorkspacePaths.cache_dir` remains the shared
-workspace-level `<resolved paths.generated_dir>/cache/analysis` path even after
-`with_run_dir()` moves `generated_dir` and `screenshots_dir` into a fresh run folder.
+analysis and shared alignment reuse caches are the exceptions:
+`WorkspacePaths.cache_dir` and `WorkspacePaths.shared_analysis_cache_dir` remain
+the shared workspace-level `<resolved paths.generated_dir>/cache/analysis` path,
+and `WorkspacePaths.shared_alignment_cache_dir` remains the shared
+workspace-level `<resolved paths.generated_dir>/cache/alignment` path, even after
+`with_run_dir()` moves `generated_dir` and `screenshots_dir` into a fresh run
+folder.
 
 When `paths.use_run_folders = true`, normal runs and cache-only runs that proceed
 reserve a fresh run folder. Existing run folders are not reused for analysis cache
@@ -137,6 +152,28 @@ so future `--from-cache-only` runs can validate the exact all-source analysis
 selection domain before metadata prefetch or run-folder reservation. Configured
 `report.output_dir` continues to own report placement; only fallback report
 placement follows the screenshot/current run output location.
+
+The align phase uses a typed orchestration-to-services request seam:
+`frame_compare.orchestration.phase_tasks.run_align_phase()` builds a
+`frame_compare.utils.types.AlignmentRequest` for
+`frame_compare.services.alignment`. The request carries current-run generated
+state, the workspace-level shared alignment cache path, reference/comparison
+labels, source identity facts, trims, effective FPS values, selected reference
+relationship, selected audio streams, cache-identity settings, and preserved
+frame props. These cache-identity DTOs use layer-neutral primitives or
+dependency-light shared utility types; `services` must not import
+orchestration-owned or analysis-owned identity types such as `ClipState`,
+`ClipIdentity`, or `ClipFingerprint`.
+
+`frame_compare.services.alignment` owns previous-offset reuse policy and
+alignment precedence. `frame_compare.services.alignment_reuse_prompt` owns the
+Rich stderr prompt/table helper, including TTY fallback behavior and no-color
+rendering. `frame_compare.services.types.AlignmentProvenance` carries
+service-owned write-source provenance such as `computed_this_run`,
+`vspreview_confirmed_this_run`, `shared_previous_offsets`,
+`legacy_audio_offsets`, and `preexisting_manual_override`; shared-cache writes
+consume only current-run computed or VSPreview-confirmed provenance rather than
+inferring eligibility from the final flattened `AlignmentResult.source`.
 
 ## External Boundaries
 
@@ -312,7 +349,9 @@ Runtime ownership matrix:
 | --- | --- |
 | Source selector resolution, explicit reference ordering, duplicate-stem fail-fast, and per-source override application during preparation | `frame_compare.orchestration.source_selection` plus `frame_compare.orchestration.preparation` |
 | Analysis-source resolution and fastest-source benchmark policy | `frame_compare.orchestration.analysis_source` |
-| Audio alignment workflow, offset cache coordination, and precedence policy | `frame_compare.services.alignment` |
+| Audio alignment workflow, offset cache coordination, previous-offset reuse policy, and precedence policy | `frame_compare.services.alignment` |
+| Shared previous alignment offset reuse cache persistence | `frame_compare.services.alignment_reuse_cache` |
+| Previous-offset reuse prompt/table display | `frame_compare.services.alignment_reuse_prompt` |
 | Audio stream probing, deterministic stream selection, stream overrides, and FFmpeg/channel-aware extraction policy | `frame_compare.services.alignment_audio` |
 | Audio correlation, preprocessing, and refinement estimation | `frame_compare.services.alignment_correlation` |
 | Audio alignment window collection, weak-window rejection, consensus selection, and ambiguity gating | `frame_compare.services.alignment_consensus` |
