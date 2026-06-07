@@ -45,6 +45,13 @@ from frame_compare.services.alignment import (
 )
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig
+from frame_compare.utils.types import (
+    AlignmentCacheSettings,
+    AlignmentClipIdentity,
+    AlignmentClipRequest,
+    AlignmentRequest,
+    AlignmentSelectedReferenceRelationship,
+)
 from frame_compare.vs.props import range_label_from_props
 
 log = structlog.get_logger()
@@ -309,7 +316,16 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
         refinement_sample_rate=ctx.config.audio_alignment.refinement_sample_rate,
         reference_stream=ctx.config.audio_alignment.reference_stream,
         comparison_streams=dict(ctx.config.audio_alignment.comparison_streams),
+        previous_offsets=ctx.config.audio_alignment.previous_offsets,
         no_color=ctx.no_color,
+    )
+    alignment_request = _alignment_request_from_context(ctx)
+    log.debug(
+        "alignment_request_prepared",
+        comparisons=len(alignment_request.comparisons),
+        generated_dir=str(alignment_request.generated_dir),
+        previous_offsets=alignment_request.previous_offsets,
+        shared_alignment_cache_dir=str(alignment_request.shared_alignment_cache_dir),
     )
     results = align_clips(
         reference=ctx.reference.path,
@@ -451,6 +467,72 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
         selection_breakdown=selection_breakdown,
         selection_details_by_source_frame=selection_details_by_source_frame,
         warnings=warnings,
+    )
+
+
+def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
+    settings = AlignmentCacheSettings(
+        sample_rate=ctx.config.audio_alignment.sample_rate,
+        max_offset_seconds=ctx.config.audio_alignment.max_offset_seconds,
+        correlation_mode=ctx.config.audio_alignment.correlation_mode,
+        preprocessing_mode=ctx.config.audio_alignment.preprocessing_mode,
+        channel_strategy=ctx.config.audio_alignment.channel_strategy,
+        confidence_threshold=ctx.config.audio_alignment.confidence_threshold,
+        ambiguity_peak_ratio=ctx.config.audio_alignment.ambiguity_peak_ratio,
+        window_length_seconds=ctx.config.audio_alignment.window_length_seconds,
+        window_stride_seconds=ctx.config.audio_alignment.window_stride_seconds,
+        minimum_valid_windows=ctx.config.audio_alignment.minimum_valid_windows,
+        consensus_minimum_ratio=ctx.config.audio_alignment.consensus_minimum_ratio,
+        refinement_mode=ctx.config.audio_alignment.refinement_mode,
+        refinement_sample_rate=ctx.config.audio_alignment.refinement_sample_rate,
+    )
+    return AlignmentRequest(
+        reference=_alignment_clip_request(
+            ctx.reference,
+            selected_audio_stream=ctx.config.audio_alignment.reference_stream,
+        ),
+        selected_reference_relationship=_selected_reference_relationship(ctx),
+        comparisons=[
+            _alignment_clip_request(
+                comparison,
+                selected_audio_stream=ctx.config.audio_alignment.comparison_streams.get(
+                    comparison.path.stem
+                ),
+            )
+            for comparison in ctx.comparisons
+        ],
+        previous_offsets=ctx.config.audio_alignment.previous_offsets,
+        generated_dir=ctx.workspace.generated_dir,
+        shared_alignment_cache_dir=ctx.workspace.shared_alignment_cache_dir,
+        settings=settings,
+    )
+
+
+def _selected_reference_relationship(ctx: RunContext) -> AlignmentSelectedReferenceRelationship:
+    configured_reference = ctx.config.sources.reference
+    if configured_reference is None or configured_reference == "auto":
+        return "auto"
+    return "configured"
+
+
+def _alignment_clip_request(
+    clip: ClipState, *, selected_audio_stream: int | None
+) -> AlignmentClipRequest:
+    fingerprint = clip.probe.fingerprint
+    return AlignmentClipRequest(
+        path=clip.path,
+        label=clip.label,
+        identity=AlignmentClipIdentity(
+            path=fingerprint.path,
+            size_bytes=fingerprint.size_bytes,
+            mtime_ns=fingerprint.mtime_ns,
+        ),
+        trim_start_frames=clip.trim.trim_start_frames,
+        trim_end_frame_inclusive=clip.trim.trim_end_frame_inclusive,
+        effective_fps_num=clip.effective_fps.numerator,
+        effective_fps_den=clip.effective_fps.denominator,
+        selected_audio_stream=selected_audio_stream,
+        preserved_frame_props=dict(clip.probe.preserved_frame_props),
     )
 
 

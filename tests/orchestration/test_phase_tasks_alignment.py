@@ -86,6 +86,40 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     assert captured["config"].refinement_sample_rate == 16000
     assert captured["config"].reference_stream == 1
     assert captured["config"].comparison_streams == {"encode": 2}
+    assert captured["config"].previous_offsets == "disabled"
+    alignment_request = phase_tasks._alignment_request_from_context(ctx)
+    assert alignment_request.reference.path == ctx.reference.path
+    assert alignment_request.reference.label == "Reference"
+    assert alignment_request.reference.identity.path == ctx.reference.probe.fingerprint.path
+    assert alignment_request.reference.identity.size_bytes == 0
+    assert alignment_request.reference.trim_start_frames == 0
+    assert alignment_request.reference.trim_end_frame_inclusive is None
+    assert alignment_request.reference.effective_fps_num == 24
+    assert alignment_request.reference.effective_fps_den == 1
+    assert alignment_request.reference.selected_audio_stream == 1
+    assert alignment_request.reference.preserved_frame_props == {
+        "_Matrix": 1,
+        "_Transfer": 1,
+        "_Primaries": 1,
+    }
+    assert [comparison_request.path for comparison_request in alignment_request.comparisons] == [
+        comparison.path
+    ]
+    assert alignment_request.comparisons[0].label == "Encode 1"
+    assert alignment_request.comparisons[0].selected_audio_stream == 2
+    assert alignment_request.comparisons[0].preserved_frame_props == {
+        "_Matrix": 1,
+        "_Transfer": 16,
+        "_Primaries": 9,
+    }
+    assert alignment_request.generated_dir == ctx.workspace.generated_dir
+    assert alignment_request.shared_alignment_cache_dir == ctx.workspace.shared_alignment_cache_dir
+    assert alignment_request.selected_reference_relationship == "auto"
+    assert alignment_request.previous_offsets == "disabled"
+    assert alignment_request.settings.sample_rate == 12000
+    assert alignment_request.settings.max_offset_seconds == 4.5
+    assert alignment_request.settings.correlation_mode == "gcc_phat"
+    assert alignment_request.settings.refinement_sample_rate == 16000
     assert output.reference.trim.trim_start_frames == 2
     assert output.comparisons[0].trim.trim_start_frames == 0
     assert output.comparisons[0].alignment is not None
@@ -96,6 +130,22 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     assert selected_frames == [0, 2, 50, 99]
     assert output.selection_breakdown is None
     assert output.selection_details_by_source_frame is None
+
+
+def test_alignment_request_records_configured_reference_relationship(tmp_path: Path) -> None:
+    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
+    ctx = _context(tmp_path, comparisons=[comparison])
+    ctx.config = ctx.config.model_copy(
+        update={"sources": ctx.config.sources.model_copy(update={"reference": "encode.mkv"})}
+    )
+
+    alignment_request = phase_tasks._alignment_request_from_context(ctx)
+
+    assert alignment_request.selected_reference_relationship == "configured"
+    assert alignment_request.reference.path == ctx.reference.path
+    assert [comparison_request.path for comparison_request in alignment_request.comparisons] == [
+        comparison.path
+    ]
 
 
 def test_run_align_phase_normalizes_analyze_selected_base_domain_frames_with_base_trims(

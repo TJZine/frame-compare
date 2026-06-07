@@ -403,6 +403,10 @@ enable = false
     assert prep.workspace.run_dir is not None
     assert prep.workspace.generated_dir == prep.workspace.run_dir / "generated"
     assert prep.workspace.cache_dir == tmp_path / "custom_generated" / "cache" / "analysis"
+    assert (
+        prep.workspace.shared_alignment_cache_dir
+        == tmp_path / "custom_generated" / "cache" / "alignment"
+    )
 
 
 def test_execute_prep_probes_uncached_clips_and_persists_probe_snapshot(tmp_path: Path) -> None:
