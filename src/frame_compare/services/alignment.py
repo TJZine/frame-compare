@@ -403,16 +403,16 @@ def _apply_shared_reuse(
     provenances: dict[str, AlignmentProvenance],
     progress: ProgressReporter | None,
     no_color: bool,
-) -> None:
+) -> bool:
     if request.previous_offsets == "disabled" or not unresolved_comparisons:
-        return
+        return False
 
     reusable_entries = load_reusable_offset_entries(
         request,
         comparisons=unresolved_comparisons,
     )
     if reusable_entries is None:
-        return
+        return False
     if request.previous_offsets == "prompt":
         accepted = prompt_for_previous_alignment_offset_reuse(
             prompt_input=_shared_reuse_prompt_input(
@@ -424,7 +424,7 @@ def _apply_shared_reuse(
             no_color=no_color,
         )
         if not accepted:
-            return
+            return False
 
     for comparison in unresolved_comparisons:
         key = _alignment_key(request.reference.path, comparison.path)
@@ -436,6 +436,7 @@ def _apply_shared_reuse(
             comparison_cache_key=comparison_key,
             provenance="shared_previous_offsets",
         )
+    return request.previous_offsets == "prompt"
 
 
 def _record_vspreview_provenance(
@@ -533,7 +534,7 @@ def align_clips_from_request(
             if _alignment_key(reference, comparison.path) not in results_map
         ]
 
-        _apply_shared_reuse(
+        accepted_prompt_reuse = _apply_shared_reuse(
             request=request,
             unresolved_comparisons=unresolved_comparisons,
             results_map=results_map,
@@ -571,6 +572,12 @@ def align_clips_from_request(
             fps_reference=fps_reference,
             progress=progress,
         )
+
+    if accepted_prompt_reuse and not requested_comparisons:
+        return [
+            results_map[_alignment_key(reference, comparison.path)]
+            for comparison in request.comparisons
+        ]
 
     offsets_by_key = _build_offsets_map(
         reference=reference,

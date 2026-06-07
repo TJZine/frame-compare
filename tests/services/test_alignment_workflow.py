@@ -441,6 +441,66 @@ def test_align_clips_from_request_always_reuses_shared_offsets_skips_compute_and
     mock_save_shared.assert_not_called()
 
 
+def test_align_clips_from_request_prompt_yes_reuses_shared_offsets_skips_compute_and_vspreview(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    generated_dir = tmp_path / "generated"
+    ref.touch()
+    comp.touch()
+    generated_dir.mkdir()
+    config = AlignmentConfig(previous_offsets="prompt", use_vspreview=True)
+    request = _alignment_request(
+        tmp_path,
+        reference=ref,
+        comparisons=[comp],
+        config=config,
+        generated_dir=generated_dir,
+    )
+    reusable = {
+        comparison_cache_key(request.comparisons[0]): ReusableAlignmentEntry(
+            result=AlignmentResult(
+                ref.name,
+                comp.name,
+                3,
+                0.125,
+                0.9,
+                "cross_correlation",
+                "cached",
+            ),
+            accepted_at="2026-06-06T12:00:00Z",
+            origin="computed",
+        )
+    }
+    monkeypatch.setattr(
+        "frame_compare.services.alignment.load_reusable_offset_entries",
+        lambda _request, *, comparisons=None: reusable,
+    )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment.prompt_for_previous_alignment_offset_reuse",
+        lambda **_: True,
+    )
+
+    with (
+        patch("frame_compare.services.alignment._probe_fps") as mock_probe,
+        patch("frame_compare.services.alignment._extract_reference_audio") as mock_extract_ref,
+        patch("frame_compare.services.alignment._extract_matching_audio") as mock_extract_comp,
+        patch("frame_compare.services.alignment._estimate_consensus_offset") as mock_estimate,
+        patch("frame_compare.services.alignment.maybe_launch_alignment_vspreview") as mock_vs,
+    ):
+        results = align_clips_from_request(request, config)
+
+    assert results[0].source == "cached"
+    assert results[0].frame_offset == 3
+    mock_probe.assert_not_called()
+    mock_extract_ref.assert_not_called()
+    mock_extract_comp.assert_not_called()
+    mock_estimate.assert_not_called()
+    mock_vs.assert_not_called()
+
+
 def test_align_clips_from_request_rejects_reuse_without_cache_results(tmp_path: Path) -> None:
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -9,6 +10,8 @@ from pathlib import Path
 from typing import Literal
 
 from rich.console import Console
+from rich.markup import escape
+from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
@@ -21,6 +24,8 @@ PROMPT_UNAVAILABLE_MESSAGE = (
     "Previous alignment offset reuse prompt unavailable; continuing without reuse."
 )
 REUSE_PREVIOUS_OFFSETS_PROMPT = "Reuse previous alignment offsets? [y/N]"
+_PROMPT_CONSOLE_WIDTH = 180
+_MIN_PROMPT_CONSOLE_WIDTH = 100
 
 __all__ = [
     "PROMPT_UNAVAILABLE_MESSAGE",
@@ -60,11 +65,12 @@ class PreviousOffsetPromptInput:
 
 
 def _console(*, no_color: bool) -> Console:
-    return Console(stderr=True, no_color=no_color, width=300)
+    return Console(stderr=True, no_color=no_color, width=_prompt_console_width())
 
 
-def _safe_text(value: object) -> Text:
-    return Text(str(value), overflow="fold")
+def _prompt_console_width() -> int:
+    columns = shutil.get_terminal_size(fallback=(_PROMPT_CONSOLE_WIDTH, 24)).columns
+    return min(max(columns, _MIN_PROMPT_CONSOLE_WIDTH), _PROMPT_CONSOLE_WIDTH)
 
 
 def _display_label(*, label: str, filename: str, stem: str) -> str:
@@ -74,18 +80,6 @@ def _display_label(*, label: str, filename: str, stem: str) -> str:
     if filename:
         return filename
     return stem
-
-
-def _clip_details_text(row: PreviousOffsetPromptRow) -> Text:
-    text = Text()
-    text.append(_display_label(label=row.label, filename=row.filename, stem=row.stem))
-    text.append("\n")
-    text.append(f"stem: {row.stem}")
-    text.append("\n")
-    text.append(f"file: {row.filename}")
-    text.append("\n")
-    text.append(f"path: {row.path}")
-    return text
 
 
 def _format_offset(value: int) -> str:
@@ -112,28 +106,39 @@ def previous_offset_prompt_input_from_rows(
 
 def _render_previous_offsets_table(
     *,
-    console: Console,
     prompt_input: PreviousOffsetPromptInput,
-) -> None:
-    table = Table(title=Text("Previous Alignment Offsets"))
-    table.add_column("Clip")
-    table.add_column("Offset", justify="right", no_wrap=True)
-    table.add_column("Seconds", justify="right", no_wrap=True)
-    table.add_column("Accepted At", no_wrap=True)
-    table.add_column("Source", no_wrap=True)
-    for row in prompt_input.rows:
-        table.add_row(
-            _clip_details_text(row),
-            _safe_text(_format_offset(row.frame_offset)),
-            _safe_text(f"{row.time_offset_seconds:.6g}"),
-            _safe_text(row.accepted_at),
-            _safe_text(row.source),
-        )
-    console.print(
-        _safe_text(f"Reference: {prompt_input.reference_label} ({prompt_input.reference_filename})")
+) -> Table:
+    table = Table(
+        show_header=False,
+        box=None,
+        pad_edge=False,
+        padding=(0, 2, 0, 0),
+        expand=False,
     )
-    console.print(_safe_text(f"Shared cache: {prompt_input.shared_cache_path}"))
-    console.print(table)
+    table.add_column("key", style="blue", no_wrap=True, min_width=12, overflow="fold")
+    table.add_column("value", overflow="fold")
+    table.add_row(
+        "reference",
+        "[bright_white]"
+        f"{escape(prompt_input.reference_label)} "
+        f"[dim]({escape(prompt_input.reference_filename)})[/]"
+        "[/]",
+    )
+    table.add_row("cache", f"[dim]{escape(str(prompt_input.shared_cache_path))}[/]")
+    for row in prompt_input.rows:
+        table.add_row("", "")
+        display_label = _display_label(label=row.label, filename=row.filename, stem=row.stem)
+        table.add_row("comparison", f"[bright_white]{escape(display_label)}[/]")
+        table.add_row(
+            "  offset",
+            f"[bright_white]{escape(_format_offset(row.frame_offset))}[/] "
+            f"[dim]({escape(f'{row.time_offset_seconds:.6g}s')})[/]",
+        )
+        table.add_row("  source", f"[bright_white]{escape(row.source)}[/]")
+        table.add_row("  accepted", f"[bright_white]{escape(row.accepted_at)}[/]")
+        table.add_row("  file", f"[bright_white]{escape(row.filename)}[/]")
+        table.add_row("  path", f"[dim]{escape(row.path)}[/]")
+    return table
 
 
 def _stderr_is_visible() -> bool:
@@ -148,7 +153,7 @@ def _print_prompt_unavailable(*, no_color: bool, leading_newline: bool = False) 
     console = _console(no_color=no_color)
     if leading_newline:
         console.print()
-    console.print(_safe_text(PROMPT_UNAVAILABLE_MESSAGE))
+    console.print(PROMPT_UNAVAILABLE_MESSAGE)
 
 
 def _read_reuse_response(*, no_color: bool) -> bool:
@@ -160,7 +165,7 @@ def _read_reuse_response(*, no_color: bool) -> bool:
         return False
 
     console = _console(no_color=no_color)
-    console.print(_safe_text(REUSE_PREVIOUS_OFFSETS_PROMPT), end="")
+    console.print(Text(REUSE_PREVIOUS_OFFSETS_PROMPT), end="")
     try:
         raw_response = sys.stdin.readline()
     except OSError:
@@ -195,9 +200,12 @@ def prompt_for_previous_offset_reuse(
         progress_suspended = True
     try:
         console = _console(no_color=no_color)
-        _render_previous_offsets_table(
-            console=console,
-            prompt_input=prompt_input,
+        console.print(
+            Panel(
+                _render_previous_offsets_table(prompt_input=prompt_input),
+                title="[bold cyan]Previous Alignment Offsets[/]",
+                border_style="cyan",
+            )
         )
         return _read_reuse_response(no_color=no_color)
     finally:

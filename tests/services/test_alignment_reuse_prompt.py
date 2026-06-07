@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import os
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -125,6 +126,7 @@ def test_prompt_prints_rich_safe_table_to_stderr_and_accepts_yes(
     assert accepted is True
     assert captured.out == ""
     assert "Previous Alignment Offsets" in stderr_output
+    assert "╭" in stderr_output or "+" in stderr_output
     assert str(
         request.shared_alignment_cache_dir / "alignment_reuse.toml"
     ) in stderr_output.replace("\n", "")
@@ -142,6 +144,39 @@ def test_prompt_prints_rich_safe_table_to_stderr_and_accepts_yes(
     assert "computed" in stderr_output
     assert "confirmed" in stderr_output
     assert "cached" not in stderr_output
+
+
+def test_prompt_uses_bounded_standard_panel_width(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _request(tmp_path)
+    console_widths: list[int | None] = []
+    original_console = reuse_prompt.Console
+
+    class RecordingConsole(original_console):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            console_widths.append(kwargs.get("width"))
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(
+        reuse_prompt.shutil,
+        "get_terminal_size",
+        lambda **_: os.terminal_size((240, 24)),
+    )
+    monkeypatch.setattr(reuse_prompt, "Console", RecordingConsole)
+    monkeypatch.setattr(reuse_prompt.sys, "stdin", _TTYStringIO("n\n", is_tty=True))
+    monkeypatch.setattr(reuse_prompt.sys, "stderr", _TTYStringIO("", is_tty=True))
+
+    accepted = prompt_for_previous_offset_reuse(
+        prompt_input=_prompt_input(request),
+        progress=None,
+        no_color=True,
+    )
+
+    assert accepted is False
+    assert console_widths
+    assert all(width == 180 for width in console_widths)
 
 
 @pytest.mark.parametrize("response", ["\n", "n\n", "NO\n", "anything else\n"])
@@ -353,5 +388,5 @@ def test_prompt_falls_back_to_filename_when_labels_are_blank(
     assert accepted is False
     stderr_output = reuse_prompt.sys.stderr.getvalue()
     assert captured.out == ""
-    assert f"Reference: {request.reference.path.name}" in stderr_output
+    assert request.reference.path.name in stderr_output
     assert request.comparisons[0].path.name in stderr_output
