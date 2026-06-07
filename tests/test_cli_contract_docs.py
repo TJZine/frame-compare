@@ -444,28 +444,12 @@ def test_current_architecture_documents_slowpics_post_upload_owner_seams() -> No
         assert expected in normalized_architecture
 
 
-def test_report_confirmed_slowpics_upload_starter_spec_is_historical_only() -> None:
+def test_report_confirmed_slowpics_upload_starter_spec_is_absent() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     starter_spec = (
         repo_root / "docs" / "plans" / "2026-06-01-report-confirmed-slowpics-upload-starter-spec.md"
     )
-    text = starter_spec.read_text(encoding="utf-8")
-    normalized_text = " ".join(text.split())
-
-    assert text.startswith("Status: Historical")
-    assert "Status: Active" not in text
-    for expected in (
-        "This is not an active implementation plan",
-        "This current workstream does not implement report UI controls",
-        "report-owned upload services",
-        "local services",
-        "background processes",
-        "custom protocol handlers",
-        "browser extensions",
-        "Do not add report UI upload controls",
-        "Do not add report-owned upload services",
-    ):
-        assert expected in normalized_text
+    assert not starter_spec.exists()
 
 
 def test_current_cli_contract_documents_screenshot_config_only_fields() -> None:
