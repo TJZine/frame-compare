@@ -157,6 +157,61 @@ def test_run_json_rejects_force_interactive_alignment_before_runner(
     }
 
 
+def test_run_json_aggregates_previous_offset_prompt_conflicts_before_runner(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for invalid CLI/config combinations")
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = _write_minimal_config(root)
+        config_path.write_text(
+            MINIMAL_CONFIG
+            + """
+[audio_alignment]
+previous_offsets = "prompt"
+cache_results = false
+""",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--root",
+                str(root),
+                "--config",
+                str(config_path.relative_to(root)),
+                "--json",
+                "--force-interactive-alignment",
+            ],
+        )
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stderr == ""
+    payload = json.loads(result.stdout)
+    validation_errors = payload["error"]["details"]["validation_errors"]
+    assert payload["error"]["message"] == "Interactive alignment is not supported with --json"
+    assert {tuple(entry["loc"]) for entry in validation_errors} == {
+        ("audio_alignment", "force_interactive"),
+        ("audio_alignment", "use_vspreview"),
+        ("audio_alignment", "previous_offsets"),
+        ("audio_alignment", "cache_results"),
+    }
+    assert (
+        sum(
+            1
+            for entry in validation_errors
+            if entry["loc"] == ["audio_alignment", "previous_offsets"]
+        )
+        == 3
+    )
+
+
 def test_run_json_rejects_report_confirmed_slowpics_before_runner(
     monkeypatch: MonkeyPatch,
 ) -> None:

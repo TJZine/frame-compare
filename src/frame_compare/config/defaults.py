@@ -42,6 +42,7 @@ max_offset_seconds = 30.0
 use_vspreview = false
 force_interactive = false
 cache_results = true
+previous_offsets = "disabled"
 correlation_mode = "raw_fft"
 preprocessing_mode = "none"
 channel_strategy = "mono_downmix"

@@ -7,6 +7,7 @@ type AlignmentCorrelationMode = Literal["raw_fft", "gcc_phat"]
 type AlignmentPreprocessingMode = Literal["none", "standard"]
 type AlignmentChannelStrategy = Literal["mono_downmix", "best_channel"]
 type AlignmentRefinementMode = Literal["disabled", "local"]
+type PreviousOffsetReusePolicy = Literal["disabled", "prompt", "always"]
 
 
 def _empty_comparison_streams() -> dict[str, int]:
@@ -38,6 +39,7 @@ class AlignmentConfig:
     use_vspreview: bool = False
     force_interactive: bool = False
     cache_results: bool = True
+    previous_offsets: PreviousOffsetReusePolicy = "disabled"
     correlation_mode: AlignmentCorrelationMode = "raw_fft"
     preprocessing_mode: AlignmentPreprocessingMode = "none"
     channel_strategy: AlignmentChannelStrategy = "mono_downmix"

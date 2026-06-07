@@ -98,6 +98,7 @@ class AudioAlignmentConfig(BaseModel):
     use_vspreview: bool = False
     force_interactive: bool = False
     cache_results: bool = True
+    previous_offsets: Literal["disabled", "prompt", "always"] = "disabled"
     correlation_mode: Literal["raw_fft", "gcc_phat"] = "raw_fft"
     preprocessing_mode: Literal["none", "standard"] = "none"
     channel_strategy: Literal["mono_downmix", "best_channel"] = "mono_downmix"

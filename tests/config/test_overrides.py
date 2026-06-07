@@ -54,6 +54,19 @@ def test_cli_overrides_do_not_map_confirm_upload_after_report() -> None:
     assert new_config.slowpics.confirm_upload_after_report is True
 
 
+def test_cli_overrides_do_not_map_previous_offsets() -> None:
+    """Previous offset reuse mode is config-only, not a CLI override surface."""
+    config = get_default_config()
+    config.audio_alignment.previous_offsets = "always"
+
+    new_config = apply_cli_overrides(config, CLIConfigOverrides(force_interactive_alignment=False))
+
+    assert "audio_alignment.previous_offsets" not in CLI_OVERRIDE_MAP.values()
+    cli_override_fields = {field.name for field in fields(CLIConfigOverrides)}
+    assert "previous_offsets" not in cli_override_fields
+    assert new_config.audio_alignment.previous_offsets == "always"
+
+
 def test_apply_cli_overrides_does_not_override_false_flag_defaults() -> None:
     """Flag-style booleans default False and must not override config when omitted."""
     config = get_default_config()

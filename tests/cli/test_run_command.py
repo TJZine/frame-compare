@@ -380,6 +380,104 @@ def test_handle_run_json_write_config_error_writes_machine_schema(
     assert payload["error"]["code"] == "FC-1007"
 
 
+def test_handle_run_rejects_previous_offset_prompt_with_quiet_before_runner() -> None:
+    runner = RecordingRunner()
+    handled_errors: list[ConfigValidationError] = []
+
+    def _load_config(
+        config_path: Path | None = None,
+        overrides: dict[str, object] | None = None,
+    ) -> ConfigSchema:
+        config = get_default_config()
+        config.audio_alignment.previous_offsets = "prompt"
+        return config
+
+    def _handle_validation_error(
+        error: Exception,
+        *,
+        no_color: bool,
+        verbose: bool,
+        verbose_hint: str | None = "--verbose",
+    ) -> int:
+        assert isinstance(error, ConfigValidationError)
+        handled_errors.append(error)
+        return int(ExitCode.CONFIG_ERROR)
+
+    with pytest.raises(typer.Exit) as exc_info:
+        handle_run(
+            replace(_base_args(), quiet=True),
+            _deps(
+                DepsOptions(
+                    runner=runner,
+                    load_config=_load_config,
+                    handle_error=_handle_validation_error,
+                )
+            ),
+        )
+
+    assert exc_info.value.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert runner.requests == []
+    assert handled_errors
+    assert handled_errors[0].validation_errors == [
+        {
+            "type": "value_error",
+            "loc": ["cli", "quiet"],
+            "msg": "Previous offset prompt mode is not supported with --quiet.",
+            "input": "prompt",
+        }
+    ]
+
+
+def test_handle_run_write_config_rejects_previous_offsets_before_writing() -> None:
+    runner = RecordingRunner()
+    handled_errors: list[ConfigValidationError] = []
+    written_paths: list[Path] = []
+
+    def _load_config(
+        config_path: Path | None = None,
+        overrides: dict[str, object] | None = None,
+    ) -> ConfigSchema:
+        config = get_default_config()
+        config.audio_alignment.previous_offsets = "always"
+        config.audio_alignment.force_interactive = True
+        return config
+
+    def _write_config(path: Path, config: ConfigSchema) -> None:
+        written_paths.append(path)
+
+    def _handle_validation_error(
+        error: Exception,
+        *,
+        no_color: bool,
+        verbose: bool,
+        verbose_hint: str | None = "--verbose",
+    ) -> int:
+        assert isinstance(error, ConfigValidationError)
+        handled_errors.append(error)
+        return int(ExitCode.CONFIG_ERROR)
+
+    with pytest.raises(typer.Exit) as exc_info:
+        handle_run(
+            replace(_base_args(), write_config=True),
+            _deps(
+                DepsOptions(
+                    runner=runner,
+                    load_config=_load_config,
+                    write_config_to=_write_config,
+                    handle_error=_handle_validation_error,
+                )
+            ),
+        )
+
+    assert exc_info.value.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert runner.requests == []
+    assert written_paths == []
+    assert {tuple(error["loc"]) for error in handled_errors[0].validation_errors} == {
+        ("audio_alignment", "force_interactive"),
+        ("audio_alignment", "previous_offsets"),
+    }
+
+
 @pytest.mark.parametrize(
     ("args_update", "deps_update", "config", "expected_message"),
     [

@@ -248,15 +248,18 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
             request,
         )
 
-        if args.write_config:
-            deps.write_config_to(args.config_path, load_effective_config())
-            return
+        effective_config = load_effective_config()
 
         if args.diagnose_paths:
-            handle_diagnose_paths(args.resolved_root, args.config_path, load_effective_config())
+            handle_diagnose_paths(args.resolved_root, args.config_path, effective_config)
             return
 
-        validate_run_contracts(args, deps, load_effective_config())
+        if args.write_config:
+            validate_write_config_contracts(effective_config)
+            deps.write_config_to(args.config_path, effective_config)
+            return
+
+        validate_run_contracts(args, deps, effective_config)
 
         if not args.json_output and not args.quiet:
             print_run_preview(console, args, request, load_effective_config)
@@ -543,8 +546,33 @@ def build_effective_config_loaders(
 def validate_run_contracts(args: RunCliRawArgs, deps: RunCommandDeps, config: ConfigSchema) -> None:
     """Enforce public CLI mode combinations before entering the runtime pipeline."""
     validate_skip_analysis_frame_selection_contract(args, config)
-    validate_json_interactive_alignment_contract(args, config)
-    validate_report_confirmed_slowpics_contract(args, deps, config)
+    validation_errors: list[dict[str, JSONValue]] = []
+    validation_errors.extend(json_interactive_alignment_contract_errors(args, config))
+    validation_errors.extend(previous_offset_reuse_contract_errors(args, config))
+    validation_errors.extend(report_confirmed_slowpics_contract_errors(args, deps, config))
+    if not validation_errors:
+        return
+
+    raise ConfigValidationError(
+        validation_errors,
+        message=validation_error_message(args, config),
+        hint=validation_error_hint(args, config),
+    )
+
+
+def validate_write_config_contracts(config: ConfigSchema) -> None:
+    """Reject persisted effective configs that normal runs would not accept."""
+    validation_errors = previous_offset_reuse_persisted_contract_errors(config)
+    if not validation_errors:
+        return
+    raise ConfigValidationError(
+        validation_errors,
+        message="Previous offset reuse is not supported with this run configuration",
+        hint=(
+            "Set audio_alignment.previous_offsets to disabled, enable "
+            "audio_alignment.cache_results, or disable force interactive alignment"
+        ),
+    )
 
 
 def validate_skip_analysis_frame_selection_contract(
@@ -561,26 +589,9 @@ def validate_json_interactive_alignment_contract(
     args: RunCliRawArgs,
     config: ConfigSchema,
 ) -> None:
-    if not args.json_output:
+    validation_errors = json_interactive_alignment_contract_errors(args, config)
+    if not validation_errors:
         return
-
-    interactive_fields: list[tuple[str, str]] = []
-    if config.audio_alignment.use_vspreview:
-        interactive_fields.append(("audio_alignment", "use_vspreview"))
-    if config.audio_alignment.force_interactive:
-        interactive_fields.append(("audio_alignment", "force_interactive"))
-    if not interactive_fields:
-        return
-
-    validation_errors: list[dict[str, JSONValue]] = [
-        {
-            "type": "value_error",
-            "loc": list(loc),
-            "msg": "Interactive alignment is not supported with --json.",
-            "input": True,
-        }
-        for loc in interactive_fields
-    ]
     raise ConfigValidationError(
         validation_errors,
         message="Interactive alignment is not supported with --json",
@@ -591,13 +602,134 @@ def validate_json_interactive_alignment_contract(
     )
 
 
+def json_interactive_alignment_contract_errors(
+    args: RunCliRawArgs,
+    config: ConfigSchema,
+) -> list[dict[str, JSONValue]]:
+    if not args.json_output:
+        return []
+
+    interactive_fields: list[tuple[str, str]] = []
+    if config.audio_alignment.use_vspreview:
+        interactive_fields.append(("audio_alignment", "use_vspreview"))
+    if config.audio_alignment.force_interactive:
+        interactive_fields.append(("audio_alignment", "force_interactive"))
+    if not interactive_fields:
+        return []
+
+    return [
+        {
+            "type": "value_error",
+            "loc": list(loc),
+            "msg": "Interactive alignment is not supported with --json.",
+            "input": True,
+        }
+        for loc in interactive_fields
+    ]
+
+
+def previous_offset_reuse_contract_errors(
+    args: RunCliRawArgs,
+    config: ConfigSchema,
+) -> list[dict[str, JSONValue]]:
+    previous_offsets = config.audio_alignment.previous_offsets
+    if previous_offsets == "disabled":
+        return []
+
+    validation_errors: list[dict[str, JSONValue]] = []
+    if args.json_output and previous_offsets == "prompt":
+        validation_errors.append(
+            {
+                "type": "value_error",
+                "loc": ["audio_alignment", "previous_offsets"],
+                "msg": "Previous offset prompt mode is not supported with --json.",
+                "input": previous_offsets,
+            }
+        )
+    if args.quiet and previous_offsets == "prompt":
+        validation_errors.append(
+            {
+                "type": "value_error",
+                "loc": ["cli", "quiet"],
+                "msg": "Previous offset prompt mode is not supported with --quiet.",
+                "input": previous_offsets,
+            }
+        )
+    validation_errors.extend(previous_offset_reuse_persisted_contract_errors(config))
+    return validation_errors
+
+
+def previous_offset_reuse_persisted_contract_errors(
+    config: ConfigSchema,
+) -> list[dict[str, JSONValue]]:
+    previous_offsets = config.audio_alignment.previous_offsets
+    if previous_offsets == "disabled":
+        return []
+
+    validation_errors: list[dict[str, JSONValue]] = []
+    if config.audio_alignment.force_interactive:
+        validation_errors.extend(
+            [
+                {
+                    "type": "value_error",
+                    "loc": ["audio_alignment", "force_interactive"],
+                    "msg": "Previous offset reuse is not supported with force interactive alignment.",
+                    "input": True,
+                },
+                {
+                    "type": "value_error",
+                    "loc": ["audio_alignment", "previous_offsets"],
+                    "msg": "Previous offset reuse is not supported with force interactive alignment.",
+                    "input": previous_offsets,
+                },
+            ]
+        )
+    if not config.audio_alignment.cache_results:
+        validation_errors.extend(
+            [
+                {
+                    "type": "value_error",
+                    "loc": ["audio_alignment", "cache_results"],
+                    "msg": "Previous offset reuse requires audio_alignment.cache_results = true.",
+                    "input": False,
+                },
+                {
+                    "type": "value_error",
+                    "loc": ["audio_alignment", "previous_offsets"],
+                    "msg": "Previous offset reuse requires audio_alignment.cache_results = true.",
+                    "input": previous_offsets,
+                },
+            ]
+        )
+    return validation_errors
+
+
 def validate_report_confirmed_slowpics_contract(
     args: RunCliRawArgs,
     deps: RunCommandDeps,
     config: ConfigSchema,
 ) -> None:
-    if not report_confirmed_slowpics_enabled(config):
+    validation_errors = report_confirmed_slowpics_contract_errors(args, deps, config)
+    if not validation_errors:
         return
+
+    raise ConfigValidationError(
+        validation_errors,
+        message="Report-confirmed slow.pics upload requires an interactive report-enabled run",
+        hint=(
+            "Disable slowpics.confirm_upload_after_report, disable slowpics.auto_upload, "
+            "enable reports, or run from an interactive terminal without --json/--quiet"
+        ),
+    )
+
+
+def report_confirmed_slowpics_contract_errors(
+    args: RunCliRawArgs,
+    deps: RunCommandDeps,
+    config: ConfigSchema,
+) -> list[dict[str, JSONValue]]:
+    if not report_confirmed_slowpics_enabled(config):
+        return []
 
     validation_errors: list[dict[str, JSONValue]] = []
     if args.json_output:
@@ -645,16 +777,38 @@ def validate_report_confirmed_slowpics_contract(
                 "input": False,
             }
         )
-    if not validation_errors:
-        return
+    return validation_errors
 
-    raise ConfigValidationError(
-        validation_errors,
-        message="Report-confirmed slow.pics upload requires an interactive report-enabled run",
-        hint=(
-            "Disable slowpics.confirm_upload_after_report, disable slowpics.auto_upload, "
-            "enable reports, or run from an interactive terminal without --json/--quiet"
-        ),
+
+def validation_error_message(args: RunCliRawArgs, config: ConfigSchema) -> str:
+    if args.json_output and (
+        config.audio_alignment.use_vspreview or config.audio_alignment.force_interactive
+    ):
+        return "Interactive alignment is not supported with --json"
+    if config.audio_alignment.previous_offsets != "disabled":
+        return "Previous offset reuse is not supported with this run configuration"
+    if report_confirmed_slowpics_enabled(config):
+        return "Report-confirmed slow.pics upload requires an interactive report-enabled run"
+    return "Run configuration is invalid"
+
+
+def validation_error_hint(args: RunCliRawArgs, config: ConfigSchema) -> str:
+    if args.json_output and (
+        config.audio_alignment.use_vspreview or config.audio_alignment.force_interactive
+    ):
+        return (
+            "Disable audio_alignment.use_vspreview and "
+            "audio_alignment.force_interactive, or run without --json"
+        )
+    if config.audio_alignment.previous_offsets != "disabled":
+        return (
+            "Set audio_alignment.previous_offsets to disabled, enable "
+            "audio_alignment.cache_results, disable force interactive alignment, "
+            "or run without --json/--quiet prompt mode"
+        )
+    return (
+        "Disable slowpics.confirm_upload_after_report, disable slowpics.auto_upload, "
+        "enable reports, or run from an interactive terminal without --json/--quiet"
     )
 
 

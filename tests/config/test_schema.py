@@ -71,8 +71,10 @@ def test_default_config_values() -> None:
     assert config.audio_alignment.preprocessing_mode == "none"
     assert config.audio_alignment.channel_strategy == "mono_downmix"
     assert config.audio_alignment.refinement_mode == "disabled"
+    assert config.audio_alignment.previous_offsets == "disabled"
     assert config.audio_alignment.comparison_streams == {}
     assert config.slowpics.confirm_upload_after_report is False
+    assert 'previous_offsets = "disabled"' in DEFAULT_CONFIG_TOML
 
 
 def test_analysis_requires_at_least_one_requested_frame() -> None:
@@ -198,6 +200,7 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert audio.sample_rate == 8000
     assert audio.max_offset_seconds == 30.0
     assert audio.force_interactive is False
+    assert audio.previous_offsets == "disabled"
     assert audio.correlation_mode == "raw_fft"
     assert audio.preprocessing_mode == "none"
     assert audio.channel_strategy == "mono_downmix"
@@ -599,6 +602,7 @@ def test_audio_alignment_new_config_controls_validate_and_reject_unknown_values(
             "refinement_mode": "local",
             "refinement_sample_rate": 16000,
             "reference_stream": 1,
+            "previous_offsets": "always",
             "comparison_streams": {"encode": 2},
         }
     )
@@ -615,6 +619,7 @@ def test_audio_alignment_new_config_controls_validate_and_reject_unknown_values(
     assert audio.refinement_mode == "local"
     assert audio.refinement_sample_rate == 16000
     assert audio.reference_stream == 1
+    assert audio.previous_offsets == "always"
     assert audio.comparison_streams == {"encode": 2}
 
     for invalid in (
@@ -633,6 +638,7 @@ def test_audio_alignment_new_config_controls_validate_and_reject_unknown_values(
         {"refinement_sample_rate": 3999},
         {"refinement_sample_rate": 48001},
         {"reference_stream": -1},
+        {"previous_offsets": "reuse"},
         {"comparison_streams": {"encode": -1}},
     ):
         with pytest.raises(ValidationError):
