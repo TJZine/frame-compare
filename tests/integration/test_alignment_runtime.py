@@ -9,10 +9,7 @@ import pytest
 from frame_compare.services.alignment import (
     align_clips,
     align_clips_from_request,
-    check_alignment_cached,
 )
-from frame_compare.services.alignment_cache import CACHE_FILE_NAME as LEGACY_CACHE_FILE_NAME
-from frame_compare.services.alignment_cache import save_offsets_cache
 from frame_compare.services.alignment_reuse_cache import CACHE_FILE_NAME as REUSE_CACHE_FILE_NAME
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.subproc import run_subprocess
@@ -269,7 +266,6 @@ def test_align_clips_recovers_known_offset_from_generated_media(
 
     assert len(results) == 1
     _assert_applied_offset(results[0], frame_offset=2)
-    assert check_alignment_cached(reference, [comparison], cache_dir, config=config) == []
     downmix_results = align_clips(reference, [comparison], downmix_config, downmix_cache_dir)
     assert downmix_results[0].applied is False
     assert downmix_results[0].diagnostic == "low_confidence"
@@ -310,22 +306,14 @@ def test_align_clips_selects_runtime_streams_and_keeps_cache_config_distinct(
     default_results = align_clips(reference, [comparison], default_config, cache_dir)
 
     _assert_applied_offset(default_results[0], frame_offset=2)
-    assert check_alignment_cached(reference, [comparison], cache_dir, config=default_config) == []
-    assert check_alignment_cached(reference, [comparison], cache_dir, config=override_config) == [
-        "reference:comparison"
-    ]
 
     override_results = align_clips(reference, [comparison], override_config, cache_dir)
 
     _assert_applied_offset(override_results[0], frame_offset=1)
-    assert check_alignment_cached(reference, [comparison], cache_dir, config=override_config) == []
-    assert check_alignment_cached(reference, [comparison], cache_dir, config=default_config) == [
-        "reference:comparison"
-    ]
 
 
 @pytest.mark.integration
-def test_typed_alignment_ignores_legacy_cache_and_writes_shared_reuse_when_disabled(
+def test_typed_alignment_writes_shared_reuse_when_previous_offsets_disabled(
     tmp_path: Path,
     require_ffmpeg: None,
 ) -> None:
@@ -351,33 +339,12 @@ def test_typed_alignment_ignores_legacy_cache_and_writes_shared_reuse_when_disab
         generated_dir=generated_dir,
         shared_alignment_cache_dir=shared_alignment_cache_dir,
     )
-    save_offsets_cache(
-        generated_dir,
-        reference=reference,
-        comparisons=[comparison],
-        sample_rate=config.sample_rate,
-        max_offset_seconds=config.max_offset_seconds,
-        results=[
-            AlignmentResult(
-                reference_clip=reference.name,
-                comparison_clip=comparison.name,
-                frame_offset=9,
-                time_offset_seconds=0.9,
-                correlation_score=1.0,
-                algorithm="cross_correlation",
-                source="computed",
-            )
-        ],
-        config=config,
-        reference_fps=None,
-    )
-
     results = align_clips_from_request(request, config)
 
     assert len(results) == 1
     _assert_applied_offset(results[0], frame_offset=2)
-    assert (generated_dir / LEGACY_CACHE_FILE_NAME).exists()
     assert (shared_alignment_cache_dir / REUSE_CACHE_FILE_NAME).exists()
+    assert not (generated_dir / "audio_offsets.toml").exists()
 
 
 @pytest.mark.integration
@@ -404,7 +371,3 @@ def test_align_clips_rejects_weak_signal_without_applying_or_caching(
     assert results[0].frame_offset is None
     assert results[0].time_offset_seconds is None
     assert results[0].diagnostic == "insufficient_valid_windows"
-    assert not (cache_dir / LEGACY_CACHE_FILE_NAME).exists()
-    assert check_alignment_cached(reference, [comparison], cache_dir, config=config) == [
-        "reference:comparison"
-    ]

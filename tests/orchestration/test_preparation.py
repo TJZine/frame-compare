@@ -22,8 +22,8 @@ from frame_compare.orchestration.errors import (
 )
 from frame_compare.orchestration.probing.probe_cache import load_clip_probe_cache
 from frame_compare.orchestration.types import RunDependencies, RunRequest
-from frame_compare.services.alignment import CACHE_FILE_NAME
 from frame_compare.vs.types import SourceInfo
+from frame_compare.vspreview.overrides import MANUAL_OVERRIDES_FILE
 from tests.orchestration.execute_run_helpers import write_probe_cache_for_inputs
 
 if TYPE_CHECKING:
@@ -199,9 +199,9 @@ def test_execute_prep_no_cache_removes_only_matching_shared_metrics_cache(tmp_pa
     metrics_path.write_text("{}", encoding="utf-8")
     other_metrics_path = metrics_dir / "other__other.compframes"
     other_metrics_path.write_text("{}", encoding="utf-8")
-    offsets_path = tmp_path / "generated" / CACHE_FILE_NAME
-    offsets_path.parent.mkdir(parents=True, exist_ok=True)
-    offsets_path.write_text('version = "1"\n', encoding="utf-8")
+    manual_overrides_path = tmp_path / "generated" / MANUAL_OVERRIDES_FILE
+    manual_overrides_path.parent.mkdir(parents=True, exist_ok=True)
+    manual_overrides_path.write_text('version = "1"\n', encoding="utf-8")
 
     prep = asyncio.run(
         preparation.execute_prep(
@@ -213,7 +213,7 @@ def test_execute_prep_no_cache_removes_only_matching_shared_metrics_cache(tmp_pa
     assert prep.clips[0].label == "Reference"
     assert not metrics_path.exists()
     assert other_metrics_path.exists()
-    assert offsets_path.exists()
+    assert manual_overrides_path.exists()
 
 
 def test_execute_prep_no_cache_removes_only_selected_reference_metrics_cache(

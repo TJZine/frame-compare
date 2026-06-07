@@ -10,44 +10,38 @@ import numpy as np
 import pytest
 
 from frame_compare.services.alignment import align_clips
-from frame_compare.services.alignment_cache import save_offsets_cache
 from frame_compare.services.alignment_consensus import AlignmentConsensus
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentConfig, AlignmentResult
+from frame_compare.services.types import AlignmentConfig
 from frame_compare.vspreview.adapter import (
     VSPreviewAvailability,
     VSPreviewAvailabilityStatus,
     VSPreviewSessionRequest,
 )
 from frame_compare.vspreview.errors import VSPreviewError
-from frame_compare.vspreview.overrides import load_manual_overrides
+from frame_compare.vspreview.overrides import (
+    ManualOverride,
+    load_manual_overrides,
+    save_manual_override,
+)
 
 
-def _write_cached_offset(
+def _write_manual_override_offset(
     workspace: Path,
     *,
     reference: Path,
     comparison: Path,
     frame_offset: int,
-    time_offset_seconds: float,
 ) -> None:
-    save_offsets_cache(
+    save_manual_override(
         workspace,
-        reference=reference,
-        comparisons=[comparison],
-        sample_rate=8000,
-        max_offset_seconds=30.0,
-        results=[
-            AlignmentResult(
-                reference_clip=reference.name,
-                comparison_clip=comparison.name,
-                frame_offset=frame_offset,
-                time_offset_seconds=time_offset_seconds,
-                correlation_score=0.95,
-                algorithm="cross_correlation",
-                source="computed",
-            )
-        ],
+        ManualOverride(
+            reference_clip=reference.stem,
+            comparison_clip=comparison.stem,
+            frame_offset=frame_offset,
+            timestamp="2026-06-07T00:00:00Z",
+            confirmed=True,
+        ),
     )
 
 
@@ -176,7 +170,7 @@ def test_align_clips_rejected_computed_result_passes_none_hint_to_vspreview(
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_matching_audio")
 @patch("frame_compare.services.alignment._extract_reference_audio")
-def test_align_clips_full_cache_hit_still_launches_vspreview_when_enabled(
+def test_align_clips_full_manual_override_still_launches_vspreview_when_enabled(
     mock_extract_reference: MagicMock,
     mock_extract_matching: MagicMock,
     mock_probe: MagicMock,
@@ -185,19 +179,18 @@ def test_align_clips_full_cache_hit_still_launches_vspreview_when_enabled(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Cached/manual-only runs should still build/launch VSPreview verification."""
+    """Manual-only runs should still build/launch VSPreview verification."""
     _set_interactive_terminal(monkeypatch, "skip\n")
 
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
     ref.touch()
     comp.touch()
-    _write_cached_offset(
+    _write_manual_override_offset(
         tmp_path,
         reference=ref,
         comparison=comp,
         frame_offset=12,
-        time_offset_seconds=0.5,
     )
 
     mock_probe.side_effect = AssertionError("should not be called")
@@ -210,7 +203,7 @@ def test_align_clips_full_cache_hit_still_launches_vspreview_when_enabled(
     mock_launch.return_value = tmp_path / "vspreview_script.py"
 
     config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=True)
-    results = align_clips(ref, [comp], config, tmp_path)
+    results = align_clips(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
 
     assert len(results) == 1
     assert results[0].frame_offset == 12
@@ -234,12 +227,11 @@ def test_align_clips_force_interactive_raises_when_vspreview_unavailable(
     comp = tmp_path / "comp.mkv"
     ref.touch()
     comp.touch()
-    _write_cached_offset(
+    _write_manual_override_offset(
         tmp_path,
         reference=ref,
         comparison=comp,
         frame_offset=2,
-        time_offset_seconds=0.083,
     )
 
     mock_check_availability.return_value = VSPreviewAvailability(
@@ -254,7 +246,7 @@ def test_align_clips_force_interactive_raises_when_vspreview_unavailable(
         cache_results=True,
     )
     with pytest.raises(AudioAlignmentError, match="Interactive alignment requested"):
-        align_clips(ref, [comp], config, tmp_path)
+        align_clips(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
 
     mock_launch.assert_not_called()
 
@@ -271,12 +263,11 @@ def test_align_clips_vspreview_unavailable_generates_script_without_launch(
     comp = tmp_path / "comp.mkv"
     ref.touch()
     comp.touch()
-    _write_cached_offset(
+    _write_manual_override_offset(
         tmp_path,
         reference=ref,
         comparison=comp,
         frame_offset=7,
-        time_offset_seconds=0.292,
     )
 
     mock_check_availability.return_value = VSPreviewAvailability(
@@ -286,7 +277,7 @@ def test_align_clips_vspreview_unavailable_generates_script_without_launch(
     mock_launch.return_value = tmp_path / "vspreview_script.py"
 
     config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=True)
-    align_clips(ref, [comp], config, tmp_path)
+    align_clips(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
 
     assert mock_launch.call_count == 1
     _, kwargs = mock_launch.call_args
@@ -417,12 +408,11 @@ def test_align_clips_optional_vspreview_probe_failure_generates_script_without_l
     comp = tmp_path / "comp.mkv"
     ref.touch()
     comp.touch()
-    _write_cached_offset(
+    _write_manual_override_offset(
         tmp_path,
         reference=ref,
         comparison=comp,
         frame_offset=7,
-        time_offset_seconds=0.292,
     )
 
     mock_check_availability.return_value = VSPreviewAvailability(
@@ -433,7 +423,7 @@ def test_align_clips_optional_vspreview_probe_failure_generates_script_without_l
     mock_launch.return_value = tmp_path / "vspreview_script.py"
 
     config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=True)
-    results = align_clips(ref, [comp], config, tmp_path)
+    results = align_clips(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
 
     assert len(results) == 1
     assert results[0].frame_offset == 7
@@ -462,12 +452,11 @@ def test_align_clips_force_interactive_launches_when_vspreview_available(
     comp = tmp_path / "comp.mkv"
     ref.touch()
     comp.touch()
-    _write_cached_offset(
+    _write_manual_override_offset(
         tmp_path,
         reference=ref,
         comparison=comp,
         frame_offset=3,
-        time_offset_seconds=0.125,
     )
 
     mock_check_availability.return_value = VSPreviewAvailability(
@@ -482,7 +471,7 @@ def test_align_clips_force_interactive_launches_when_vspreview_available(
         force_interactive=True,
         cache_results=True,
     )
-    results = align_clips(ref, [comp], config, tmp_path)
+    results = align_clips(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
 
     assert len(results) == 1
     assert results[0].frame_offset == 3
@@ -503,12 +492,11 @@ def test_align_clips_force_interactive_probe_failure_raises_alignment_error(
     comp = tmp_path / "comp.mkv"
     ref.touch()
     comp.touch()
-    _write_cached_offset(
+    _write_manual_override_offset(
         tmp_path,
         reference=ref,
         comparison=comp,
         frame_offset=3,
-        time_offset_seconds=0.125,
     )
 
     mock_check_availability.return_value = VSPreviewAvailability(
@@ -524,7 +512,7 @@ def test_align_clips_force_interactive_probe_failure_raises_alignment_error(
         cache_results=True,
     )
     with pytest.raises(AudioAlignmentError, match=r"availability probe failed \(RuntimeError\)"):
-        align_clips(ref, [comp], config, tmp_path)
+        align_clips(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
 
     mock_launch.assert_not_called()
 
@@ -543,12 +531,11 @@ def test_align_clips_vspreview_errors_are_warning_only_when_not_forced(
     comp = tmp_path / "comp.mkv"
     ref.touch()
     comp.touch()
-    _write_cached_offset(
+    _write_manual_override_offset(
         tmp_path,
         reference=ref,
         comparison=comp,
         frame_offset=1,
-        time_offset_seconds=0.042,
     )
 
     mock_check_availability.return_value = VSPreviewAvailability(
@@ -558,7 +545,7 @@ def test_align_clips_vspreview_errors_are_warning_only_when_not_forced(
     mock_launch.side_effect = VSPreviewError("launch exited with code 7")
 
     config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=True)
-    results = align_clips(ref, [comp], config, tmp_path)
+    results = align_clips(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
 
     assert len(results) == 1
     assert results[0].frame_offset == 1
@@ -588,12 +575,11 @@ def test_align_clips_vspreview_errors_raise_when_force_interactive(
     comp = tmp_path / "comp.mkv"
     ref.touch()
     comp.touch()
-    _write_cached_offset(
+    _write_manual_override_offset(
         tmp_path,
         reference=ref,
         comparison=comp,
         frame_offset=1,
-        time_offset_seconds=0.042,
     )
 
     mock_check_availability.return_value = VSPreviewAvailability(
@@ -609,4 +595,4 @@ def test_align_clips_vspreview_errors_raise_when_force_interactive(
         cache_results=True,
     )
     with pytest.raises(VSPreviewError, match="launch exited with code 7"):
-        align_clips(ref, [comp], config, tmp_path)
+        align_clips(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))

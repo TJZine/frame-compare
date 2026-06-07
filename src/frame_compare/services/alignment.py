@@ -13,12 +13,6 @@ from frame_compare.services.alignment_audio import (
     extract_reference_audio,
     probe_fps,
 )
-from frame_compare.services.alignment_cache import (
-    CACHE_FILE_NAME,
-    CACHE_VERSION,
-    load_cached_offsets,
-    save_offsets_cache,
-)
 from frame_compare.services.alignment_consensus import estimate_consensus_offset
 from frame_compare.services.alignment_math import (
     calculate_alignment_trims,
@@ -44,7 +38,6 @@ from frame_compare.services.types import (
     AlignmentResult,
     ReusableAlignmentEntry,
 )
-from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 from frame_compare.utils.types import AlignmentClipRequest, AlignmentRequest
 from frame_compare.vspreview.overrides import load_manual_overrides
@@ -60,8 +53,6 @@ _estimate_consensus_offset = estimate_consensus_offset
 _samples_to_frames = samples_to_frames
 
 __all__ = [
-    "CACHE_FILE_NAME",
-    "CACHE_VERSION",
     "_cross_correlate",
     "_extract_audio",
     "_estimate_consensus_offset",
@@ -70,11 +61,8 @@ __all__ = [
     "align_clips",
     "align_clips_from_request",
     "calculate_alignment_trims",
-    "check_alignment_cached",
     "format_rejected_alignment_warning",
-    "load_cached_offsets",
     "prompt_for_previous_alignment_offset_reuse",
-    "save_offsets_cache",
 ]
 
 
@@ -660,33 +648,9 @@ def align_clips(
             reference_fps,
         )
 
-        # 1. Check cache for non-manual entries
         requested_comparisons = [
             c for c in comparisons if _alignment_key(reference, c) not in results_map
         ]
-        if config.cache_results and requested_comparisons:
-            try:
-                cached = load_cached_offsets(
-                    cache_dir,
-                    reference,
-                    requested_comparisons,
-                    sample_rate=config.sample_rate,
-                    max_offset_seconds=config.max_offset_seconds,
-                    config=config,
-                    reference_fps=reference_fps,
-                )
-                if cached is not None:
-                    results_map.update(cached)
-                    requested_comparisons = [
-                        c for c in comparisons if _alignment_key(reference, c) not in results_map
-                    ]
-            except (CacheCorruptionError, CacheVersionMismatchError) as exc:
-                log.warning(
-                    "audio_offsets_cache_load_failed",
-                    path=str(cache_dir / CACHE_FILE_NAME),
-                    error=str(exc),
-                    action="degrade_to_computed_alignment",
-                )
     except Exception:
         cache_activity_status = ProgressPhaseStatus.FAILED
         raise
@@ -715,28 +679,6 @@ def align_clips(
             progress=progress,
         )
 
-        # 3. Save cache if needed (only computed results, not manual)
-        if config.cache_results:
-            computed_results = [
-                results_map[_alignment_key(reference, c)]
-                for c in comparisons
-                if (
-                    results_map[_alignment_key(reference, c)].source != "manual"
-                    and results_map[_alignment_key(reference, c)].applied
-                )
-            ]
-            if computed_results:
-                save_offsets_cache(
-                    cache_dir,
-                    reference=reference,
-                    comparisons=comparisons,
-                    sample_rate=config.sample_rate,
-                    max_offset_seconds=config.max_offset_seconds,
-                    results=computed_results,
-                    config=config,
-                    reference_fps=fps_reference,
-                )
-
     offsets_by_key = _build_offsets_map(
         reference=reference,
         comparisons=comparisons,
@@ -759,39 +701,4 @@ def align_clips(
         fps_reference=fps_reference,
     )
 
-    # Return results in the same order as input comparisons
     return [results_map[_alignment_key(reference, c)] for c in comparisons]
-
-
-def check_alignment_cached(
-    reference: Path,
-    comparisons: list[Path],
-    cache_dir: Path,
-    config: AlignmentConfig | None = None,
-    reference_fps: Fraction | None = None,
-) -> list[str]:
-    """Check if all comparison offsets are cached/overridden, returning missing keys."""
-    _check_duplicate_stems(comparisons)
-
-    manual_overrides = load_manual_overrides(cache_dir)
-    resolved_config = config if config is not None else AlignmentConfig()
-    cached_offsets = (
-        load_cached_offsets(
-            cache_dir,
-            reference,
-            comparisons,
-            sample_rate=resolved_config.sample_rate,
-            max_offset_seconds=resolved_config.max_offset_seconds,
-            config=resolved_config,
-            reference_fps=reference_fps,
-        )
-        or {}
-    )
-
-    missing: list[str] = []
-    for comp in comparisons:
-        key = _alignment_key(reference, comp)
-        if key in manual_overrides or key in cached_offsets:
-            continue
-        missing.append(key)
-    return missing

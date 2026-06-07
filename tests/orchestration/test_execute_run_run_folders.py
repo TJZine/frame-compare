@@ -17,12 +17,12 @@ from frame_compare.config.loader import load_config
 from frame_compare.config.schema import AnalysisConfig
 from frame_compare.orchestration import phase_post_render, phase_selection, preparation
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
-from frame_compare.services.alignment import CACHE_FILE_NAME
 from frame_compare.services.errors import TmdbError
 from frame_compare.services.run_folder import derive_run_folder_name
 from frame_compare.services.types import MetadataConfig, TmdbMetadata
 from frame_compare.utils.cache_errors import CacheCorruptionError
 from frame_compare.vs.types import SourceInfo
+from frame_compare.vspreview.overrides import MANUAL_OVERRIDES_FILE
 
 from .execute_run_helpers import (
     RUN_FOLDERS_CONFIG,
@@ -104,8 +104,8 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
     assert analysis_cache_path is not None
 
     run_generated_dir.mkdir(parents=True, exist_ok=True)
-    offsets_path = run_generated_dir / CACHE_FILE_NAME
-    offsets_path.write_text('version = "1"\n', encoding="utf-8")
+    manual_overrides_path = run_generated_dir / MANUAL_OVERRIDES_FILE
+    manual_overrides_path.write_text('version = "1"\n', encoding="utf-8")
 
     request = RunRequest(
         root=tmp_path,
@@ -141,7 +141,7 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
     asyncio.run(execute_run(request, deps=deps))
 
     assert not analysis_cache_path.exists()
-    assert offsets_path.exists()
+    assert manual_overrides_path.exists()
 
 
 def test_execute_run_from_cache_only_does_not_reserve_run_folder_when_metrics_cache_missing(
