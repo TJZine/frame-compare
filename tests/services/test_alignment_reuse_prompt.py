@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import frame_compare.services.alignment_reuse_prompt as reuse_prompt
+from frame_compare.services.alignment_reuse_cache import CACHE_FILE_NAME as REUSE_CACHE_FILE_NAME
 from frame_compare.services.alignment_reuse_prompt import (
     PROMPT_UNAVAILABLE_MESSAGE,
     REUSE_PREVIOUS_OFFSETS_PROMPT,
@@ -127,9 +128,7 @@ def test_prompt_prints_rich_safe_table_to_stderr_and_accepts_yes(
     assert captured.out == ""
     assert "Previous Alignment Offsets" in stderr_output
     assert "╭" in stderr_output or "+" in stderr_output
-    assert str(
-        request.shared_alignment_cache_dir / "alignment_reuse.toml"
-    ) in stderr_output.replace("\n", "")
+    assert REUSE_CACHE_FILE_NAME in stderr_output
     assert "Reuse previous alignment offsets? [y/N]" in stderr_output
     assert "Comparison [cyan]" in stderr_output
     assert "<one>" in stderr_output

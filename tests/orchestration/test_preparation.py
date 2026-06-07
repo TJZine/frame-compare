@@ -182,7 +182,8 @@ def test_execute_prep_no_cache_removes_only_matching_shared_metrics_cache(tmp_pa
     input_dir = tmp_path / "comparison_videos"
     _create_video_files(input_dir, "source.mkv")
 
-    config = preparation.prepare_preflight(root=tmp_path).config
+    preflight = preparation.prepare_preflight(root=tmp_path)
+    config = preflight.config
     source_path = input_dir / "source.mkv"
     prep_for_domain = asyncio.run(
         preparation.execute_prep(
@@ -204,6 +205,9 @@ def test_execute_prep_no_cache_removes_only_matching_shared_metrics_cache(tmp_pa
     manual_overrides_path = tmp_path / "generated" / MANUAL_OVERRIDES_FILE
     manual_overrides_path.parent.mkdir(parents=True, exist_ok=True)
     manual_overrides_path.write_text('version = "1"\n', encoding="utf-8")
+    alignment_cache_path = preflight.workspace.shared_alignment_cache_dir / "shared_prev_offset"
+    alignment_cache_path.parent.mkdir(parents=True, exist_ok=True)
+    alignment_cache_path.write_text("preserve me\n", encoding="utf-8")
 
     prep = asyncio.run(
         preparation.execute_prep(
@@ -216,6 +220,7 @@ def test_execute_prep_no_cache_removes_only_matching_shared_metrics_cache(tmp_pa
     assert not metrics_path.exists()
     assert other_metrics_path.exists()
     assert manual_overrides_path.exists()
+    assert alignment_cache_path.exists()
 
 
 def test_execute_prep_no_cache_removes_only_selected_reference_metrics_cache(

@@ -55,6 +55,12 @@ class ConfigureLoggingFn(Protocol):
     def __call__(self, *, level: str, format: str) -> None: ...
 
 
+class RunContractFailure(Enum):
+    JSON_INTERACTIVE_ALIGNMENT = "json_interactive_alignment"
+    PREVIOUS_OFFSETS = "previous_offsets"
+    REPORT_CONFIRMED_SLOWPICS = "report_confirmed_slowpics"
+
+
 @dataclass(frozen=True)
 class RunCommandDeps:
     runner: RunnerLike
@@ -547,16 +553,34 @@ def validate_run_contracts(args: RunCliRawArgs, deps: RunCommandDeps, config: Co
     """Enforce public CLI mode combinations before entering the runtime pipeline."""
     validate_skip_analysis_frame_selection_contract(args, config)
     validation_errors: list[dict[str, JSONValue]] = []
-    validation_errors.extend(json_interactive_alignment_contract_errors(args, config))
-    validation_errors.extend(previous_offset_reuse_contract_errors(args, config))
-    validation_errors.extend(report_confirmed_slowpics_contract_errors(args, deps, config))
+    failures: set[RunContractFailure] = set()
+
+    interactive_errors = json_interactive_alignment_contract_errors(args, config)
+    if interactive_errors:
+        failures.add(RunContractFailure.JSON_INTERACTIVE_ALIGNMENT)
+        validation_errors.extend(interactive_errors)
+
+    previous_offset_errors = previous_offset_reuse_contract_errors(args, config)
+    if previous_offset_errors:
+        failures.add(RunContractFailure.PREVIOUS_OFFSETS)
+        validation_errors.extend(previous_offset_errors)
+
+    report_confirmed_slowpics_errors = report_confirmed_slowpics_contract_errors(
+        args,
+        deps,
+        config,
+    )
+    if report_confirmed_slowpics_errors:
+        failures.add(RunContractFailure.REPORT_CONFIRMED_SLOWPICS)
+        validation_errors.extend(report_confirmed_slowpics_errors)
+
     if not validation_errors:
         return
 
     raise ConfigValidationError(
         validation_errors,
-        message=validation_error_message(args, config),
-        hint=validation_error_hint(args, config),
+        message=validation_error_message(frozenset(failures)),
+        hint=validation_error_hint(frozenset(failures)),
     )
 
 
@@ -780,36 +804,34 @@ def report_confirmed_slowpics_contract_errors(
     return validation_errors
 
 
-def validation_error_message(args: RunCliRawArgs, config: ConfigSchema) -> str:
-    if args.json_output and (
-        config.audio_alignment.use_vspreview or config.audio_alignment.force_interactive
-    ):
+def validation_error_message(failures: frozenset[RunContractFailure]) -> str:
+    if RunContractFailure.JSON_INTERACTIVE_ALIGNMENT in failures:
         return "Interactive alignment is not supported with --json"
-    if config.audio_alignment.previous_offsets != "disabled":
+    if RunContractFailure.PREVIOUS_OFFSETS in failures:
         return "Previous offset reuse is not supported with this run configuration"
-    if report_confirmed_slowpics_enabled(config):
+    if RunContractFailure.REPORT_CONFIRMED_SLOWPICS in failures:
         return "Report-confirmed slow.pics upload requires an interactive report-enabled run"
     return "Run configuration is invalid"
 
 
-def validation_error_hint(args: RunCliRawArgs, config: ConfigSchema) -> str:
-    if args.json_output and (
-        config.audio_alignment.use_vspreview or config.audio_alignment.force_interactive
-    ):
+def validation_error_hint(failures: frozenset[RunContractFailure]) -> str:
+    if RunContractFailure.JSON_INTERACTIVE_ALIGNMENT in failures:
         return (
             "Disable audio_alignment.use_vspreview and "
             "audio_alignment.force_interactive, or run without --json"
         )
-    if config.audio_alignment.previous_offsets != "disabled":
+    if RunContractFailure.PREVIOUS_OFFSETS in failures:
         return (
             "Set audio_alignment.previous_offsets to disabled, enable "
             "audio_alignment.cache_results, disable force interactive alignment, "
             "or run without --json/--quiet prompt mode"
         )
-    return (
-        "Disable slowpics.confirm_upload_after_report, disable slowpics.auto_upload, "
-        "enable reports, or run from an interactive terminal without --json/--quiet"
-    )
+    if RunContractFailure.REPORT_CONFIRMED_SLOWPICS in failures:
+        return (
+            "Disable slowpics.confirm_upload_after_report, disable slowpics.auto_upload, "
+            "enable reports, or run from an interactive terminal without --json/--quiet"
+        )
+    return "Review the validation errors and update the run configuration"
 
 
 def print_run_preview(

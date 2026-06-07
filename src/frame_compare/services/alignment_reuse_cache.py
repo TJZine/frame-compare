@@ -18,6 +18,7 @@ from frame_compare.services.types import (
     ReusableAlignmentEntry,
 )
 from frame_compare.utils.atomic_write import write_bytes_atomic
+from frame_compare.utils.file_lock import exclusive_file_lock
 from frame_compare.utils.types import AlignmentClipRequest, AlignmentRequest
 
 CACHE_VERSION = "1"
@@ -104,6 +105,10 @@ def comparison_cache_key(clip: AlignmentClipRequest) -> str:
 
 def _cache_path(request: AlignmentRequest) -> Path:
     return request.shared_alignment_cache_dir / CACHE_FILE_NAME
+
+
+def _cache_lock_path(cache_path: Path) -> Path:
+    return cache_path.with_name(f"{cache_path.name}.lock")
 
 
 def _load_cache_data(cache_path: Path) -> dict[str, object] | None:
@@ -434,15 +439,17 @@ def save_reusable_offsets(
             accepted_at=accepted_at_value,
         )
 
-    data = _initial_write_data(cache_path)
-    source_sets = cast(dict[str, object], data["source_sets"])
-    source_sets[source_set_key] = {
+    source_set: dict[str, object] = {
         "identity": _source_set_identity(request),
         "entries": entries,
     }
 
     try:
-        write_bytes_atomic(cache_path, tomli_w.dumps(data).encode("utf-8"))
+        with exclusive_file_lock(_cache_lock_path(cache_path)):
+            data = _initial_write_data(cache_path)
+            source_sets = cast(dict[str, object], data["source_sets"])
+            source_sets[source_set_key] = source_set
+            write_bytes_atomic(cache_path, tomli_w.dumps(data).encode("utf-8"))
     except OSError as exc:
         log.warning(
             "alignment_reuse_cache_write_failed",

@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import tomllib
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 import tomli_w
 
+import frame_compare.services.alignment_reuse_cache as reuse_cache
 from frame_compare.services.alignment_reuse_cache import (
     CACHE_FILE_NAME,
     CACHE_VERSION,
@@ -566,6 +568,47 @@ def test_shared_reuse_cache_uses_atomic_deterministic_write(
         request.shared_alignment_cache_dir / CACHE_FILE_NAME,
     ]
     assert first == second
+
+
+def test_shared_reuse_cache_locks_entire_read_modify_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _request(tmp_path)
+    cache_file = request.shared_alignment_cache_dir / CACHE_FILE_NAME
+    events: list[str] = []
+
+    @contextmanager
+    def _fake_lock(path: Path) -> Iterator[None]:
+        assert path == cache_file.with_name(f"{cache_file.name}.lock")
+        events.append("lock_enter")
+        try:
+            yield
+        finally:
+            events.append("lock_exit")
+
+    def _fake_initial_write_data(path: Path) -> dict[str, object]:
+        assert path == cache_file
+        assert events == ["lock_enter"]
+        events.append("read")
+        return {"version": CACHE_VERSION, "source_sets": {}}
+
+    def _fake_write(path: Path, content: bytes) -> None:
+        assert path == cache_file
+        assert events == ["lock_enter", "read"]
+        parsed = tomllib.loads(content.decode("utf-8"))
+        assert parsed["version"] == CACHE_VERSION
+        assert isinstance(parsed["source_sets"], dict)
+        assert parsed["source_sets"]
+        events.append("write")
+
+    monkeypatch.setattr(reuse_cache, "exclusive_file_lock", _fake_lock)
+    monkeypatch.setattr(reuse_cache, "_initial_write_data", _fake_initial_write_data)
+    monkeypatch.setattr(reuse_cache, "write_bytes_atomic", _fake_write)
+
+    _write_computed(request)
+
+    assert events == ["lock_enter", "read", "write", "lock_exit"]
 
 
 def test_shared_reuse_cache_write_failure_warns_without_raising(

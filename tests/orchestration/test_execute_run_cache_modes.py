@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 import frame_compare.analysis.cache_io as cache_io
+import frame_compare.services.alignment_reuse_cache as alignment_reuse_cache
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.config.loader import load_config
@@ -75,9 +76,14 @@ enable = false
     other_cache_path = analysis_cache_dir / "other__other.compframes"
     other_cache_path.write_text("{}", encoding="utf-8")
 
-    alignment_reuse_path = tmp_path / "generated" / "cache" / "alignment" / "alignment_reuse.toml"
+    alignment_reuse_path = (
+        tmp_path / "generated" / "cache" / "alignment" / alignment_reuse_cache.CACHE_FILE_NAME
+    )
     alignment_reuse_path.parent.mkdir(parents=True, exist_ok=True)
-    alignment_reuse_path.write_text('version = "1"\nsource_sets = {}\n', encoding="utf-8")
+    alignment_reuse_path.write_text(
+        f'version = "{alignment_reuse_cache.CACHE_VERSION}"\nsource_sets = {{}}\n',
+        encoding="utf-8",
+    )
 
     request = RunRequest(
         root=tmp_path,
