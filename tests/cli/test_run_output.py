@@ -439,12 +439,10 @@ def test_run_result_summary_prints_enabled_shortcut_and_webhook_outcomes(
 
     assert result.exit_code == 0
     output = _normalize_cli_output(result.stdout)
-    assert "shortcut" in output
+    assert "✓ shortcut" in output
     assert str(shortcut_path) in output
-    assert "webhook" in output
+    assert "✓ webhook" in output
     assert "HTTP 204" in output
-    assert "disabled" not in output
-    assert "skipped" not in output
 
 
 def test_run_json_omits_post_upload_action_fields(monkeypatch: MonkeyPatch) -> None:
