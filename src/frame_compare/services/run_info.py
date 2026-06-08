@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Literal, NotRequired, TypedDict
 
 import tomli_w
 
@@ -14,6 +14,29 @@ from frame_compare.services.run_folder import RunFolderNamingSource
 from frame_compare.utils.atomic_write import write_text_atomic
 
 type RunInfoTmdbSkipReason = Literal["disabled", "skip_metadata", "no_http_client"]
+
+
+class RunInfoTmdbPayload(TypedDict):
+    enabled: bool
+    attempted: bool
+    resolved: bool
+    failed: bool
+    skip_reason: NotRequired[RunInfoTmdbSkipReason]
+    error_type: NotRequired[str]
+    tmdb_id: NotRequired[int]
+    title: NotRequired[str]
+    year: NotRequired[int]
+    media_type: NotRequired[Literal["movie", "tv"]]
+
+
+class RunInfoPayload(TypedDict):
+    version: int
+    created_at: str
+    folder_name: str
+    naming_source: RunFolderNamingSource
+    source_filenames: list[str]
+    frame_compare_version: str
+    tmdb: NotRequired[RunInfoTmdbPayload]
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,8 +73,8 @@ def _format_created_at(created_at: datetime) -> str:
     return utc_created_at.isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
-def _tmdb_table(facts: RunInfoTmdbPrefetchFacts) -> dict[str, object]:
-    table: dict[str, object] = {
+def _tmdb_table(facts: RunInfoTmdbPrefetchFacts) -> RunInfoTmdbPayload:
+    table: RunInfoTmdbPayload = {
         "enabled": facts.enabled,
         "attempted": facts.attempted,
         "resolved": facts.resolved,
@@ -74,7 +97,7 @@ def _tmdb_table(facts: RunInfoTmdbPrefetchFacts) -> dict[str, object]:
 
 def serialize_run_info(info: RunInfo) -> str:
     """Serialize run identity as deterministic TOML without null placeholders."""
-    payload: dict[str, object] = {
+    payload: RunInfoPayload = {
         "version": info.version,
         "created_at": _format_created_at(info.created_at),
         "folder_name": info.folder_name,
