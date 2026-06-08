@@ -8,16 +8,25 @@ from __future__ import annotations
 
 import logging
 import re
-import time
 import uuid
-from datetime import datetime
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from frame_compare.services.metadata import parse_filename
 from frame_compare.services.types import ParsedMetadata, TmdbMetadata
 
 _UNNAMED_RUN_BASE = "unnamed_run"
-_MAX_FOLDER_NAME_LENGTH = 100
+_MAX_FOLDER_NAME_LENGTH = 64
+_NUMERIC_COLLISION_ATTEMPTS = 100
+_WINDOWS_RESERVED_FILENAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{index}" for index in range(1, 10)),
+    *(f"LPT{index}" for index in range(1, 10)),
+}
 
 # Characters illegal in Windows filenames (also avoid on Unix for portability)
 _ILLEGAL_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -25,6 +34,16 @@ _ILLEGAL_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _MULTI_SPACE = re.compile(r"[\s_]+")
 
 log = logging.getLogger(__name__)
+
+type RunFolderNamingSource = Literal["tmdb", "parsed_metadata", "filename_stems", "unnamed"]
+
+
+@dataclass(frozen=True, slots=True)
+class RunFolderReservation:
+    path: Path
+    folder_name: str
+    base_name: str
+    naming_source: RunFolderNamingSource
 
 
 def sanitize_folder_name(name: str) -> str:
@@ -47,7 +66,28 @@ def sanitize_folder_name(name: str) -> str:
             fallback = truncated.replace(".", "").replace(" ", "")
             sanitized = fallback if fallback else _UNNAMED_RUN_BASE
 
+    sanitized = _avoid_windows_reserved_filename(sanitized)
+
     return sanitized
+
+
+def _avoid_windows_reserved_filename(name: str) -> str:
+    if _windows_reserved_filename(name):
+        safe_name = f"{name.replace('.', ' ')} run"
+        safe_name = _MULTI_SPACE.sub(" ", safe_name).strip().rstrip(". ")
+        if len(safe_name) > _MAX_FOLDER_NAME_LENGTH:
+            safe_name = safe_name[:_MAX_FOLDER_NAME_LENGTH].rstrip(". ")
+        return (
+            safe_name
+            if safe_name and not _windows_reserved_filename(safe_name)
+            else _UNNAMED_RUN_BASE
+        )
+    return name
+
+
+def _windows_reserved_filename(name: str) -> bool:
+    stem = name.split(".", maxsplit=1)[0].upper()
+    return stem in _WINDOWS_RESERVED_FILENAMES
 
 
 def find_common_metadata(filenames: list[str]) -> tuple[str | None, int | None]:
@@ -106,17 +146,15 @@ def _combine_filename_stems(filenames: list[str]) -> str:
     return sanitize_folder_name(combined)
 
 
-def _format_timestamp() -> str:
-    """Format current timestamp for folder name suffix."""
-    return datetime.now().strftime("%Y%m%d-%H%M%S")
-
-
 def _append_collision_suffix(folder_name: str, suffix: str) -> str:
     """Append a suffix while keeping the result inside the path length budget."""
     allowed = _MAX_FOLDER_NAME_LENGTH - (len(suffix) + 1)
     if allowed < 1:
         allowed = 1
-    return f"{folder_name[:allowed]}_{suffix}"
+    trimmed = folder_name[:allowed].rstrip(". ")
+    if not trimmed:
+        trimmed = _UNNAMED_RUN_BASE[:allowed]
+    return f"{trimmed}_{suffix}"
 
 
 def _resolve_existing_folder_collision(
@@ -124,7 +162,6 @@ def _resolve_existing_folder_collision(
     existing_folders: list[str] | None,
     *,
     initial_candidate: str | None = None,
-    collision_timestamp: str | None = None,
 ) -> str:
     """Resolve a unique folder name against a caller-provided existing-folder snapshot."""
     candidate = base_name if initial_candidate is None else initial_candidate
@@ -135,23 +172,23 @@ def _resolve_existing_folder_collision(
     if candidate.lower() not in existing_lower:
         return candidate
 
-    timestamp = _format_timestamp() if collision_timestamp is None else collision_timestamp
-    attempt = 0
-    while True:
-        suffix = timestamp if attempt == 0 else f"{timestamp}-{attempt}"
+    for attempt in range(2, _NUMERIC_COLLISION_ATTEMPTS + 2):
+        suffix = str(attempt)
         candidate = _append_collision_suffix(base_name, suffix)
         if candidate.lower() not in existing_lower:
             return candidate
-        attempt += 1
+
+    random_suffix = uuid.uuid4().hex[:8]
+    return _append_collision_suffix(base_name, random_suffix)
 
 
 def _derive_base_folder_name(
     filenames: list[str],
     tmdb_metadata: TmdbMetadata | None = None,
-) -> str:
+) -> tuple[str, RunFolderNamingSource]:
     """Derive the canonical base run-folder name before collision handling."""
     if not filenames:
-        return _UNNAMED_RUN_BASE
+        return _UNNAMED_RUN_BASE, "unnamed"
 
     base_name: str | None = None
 
@@ -160,16 +197,17 @@ def _derive_base_folder_name(
         year = tmdb_metadata.year
         if title:
             base_name = f"{title} ({year})" if year and year > 0 else title
+            return sanitize_folder_name(base_name), "tmdb"
 
-    if base_name is None:
-        common_title, common_year = find_common_metadata(filenames)
-        if common_title:
-            base_name = f"{common_title} ({common_year})" if common_year else common_title
+    common_title, common_year = find_common_metadata(filenames)
+    if common_title:
+        base_name = f"{common_title} ({common_year})" if common_year else common_title
+        return sanitize_folder_name(base_name), "parsed_metadata"
 
-    if base_name is None:
-        return _combine_filename_stems(filenames)
-
-    return sanitize_folder_name(base_name)
+    combined = _combine_filename_stems(filenames)
+    if combined == _UNNAMED_RUN_BASE:
+        return combined, "unnamed"
+    return combined, "filename_stems"
 
 
 def derive_run_folder_name(
@@ -178,17 +216,7 @@ def derive_run_folder_name(
     existing_folders: list[str] | None = None,
 ) -> str:
     """Derive a filesystem-safe run folder name from video metadata."""
-    if not filenames:
-        timestamp = _format_timestamp()
-        unnamed_candidate = _append_collision_suffix(_UNNAMED_RUN_BASE, timestamp)
-        return _resolve_existing_folder_collision(
-            _UNNAMED_RUN_BASE,
-            existing_folders,
-            initial_candidate=unnamed_candidate,
-            collision_timestamp=timestamp,
-        )
-
-    folder_name = _derive_base_folder_name(filenames, tmdb_metadata)
+    folder_name, _naming_source = _derive_base_folder_name(filenames, tmdb_metadata)
     return _resolve_existing_folder_collision(folder_name, existing_folders)
 
 
@@ -206,11 +234,11 @@ def reserve_run_folder(
     input_dir: Path,
     filenames: list[str],
     tmdb_metadata: TmdbMetadata | None = None,
-) -> Path:
+) -> RunFolderReservation:
     """Derive and atomically reserve a unique run folder name by creating it.
 
     It derives the base folder name, then claims input_dir / candidate
-    with mkdir(parents=True, exist_ok=False), retrying with timestamp suffixes on collision.
+    with mkdir(parents=True, exist_ok=False), retrying with numeric suffixes on collision.
 
     Args:
         input_dir: Directory where the run folder should be created
@@ -218,37 +246,43 @@ def reserve_run_folder(
         tmdb_metadata: Optional TMDB metadata from lookup
 
     Returns:
-        Path to the reserved run folder
+        Reservation facts for the reserved run folder
     """
-    folder_name = _derive_base_folder_name(filenames, tmdb_metadata)
-    candidate_path = input_dir / folder_name
+    base_name, naming_source = _derive_base_folder_name(filenames, tmdb_metadata)
+
+    def _reservation(candidate_name: str) -> RunFolderReservation:
+        return RunFolderReservation(
+            path=input_dir / candidate_name,
+            folder_name=candidate_name,
+            base_name=base_name,
+            naming_source=naming_source,
+        )
+
+    reservation = _reservation(base_name)
 
     # Try creating base folder name
     try:
-        candidate_path.mkdir(parents=True, exist_ok=False)
-        return candidate_path
+        reservation.path.mkdir(parents=True, exist_ok=False)
+        return reservation
     except FileExistsError:
         log.debug(
             "Run folder collision on base path; will retry with suffixes. Path: %s",
-            candidate_path,
+            reservation.path,
         )
 
-    # Loop over suffix candidates with timestamp + sequence index to resolve collisions
-    for attempt in range(10):
-        ts = _format_timestamp()
-        if attempt > 0:
-            ts += f"-{attempt}"
-        suffix_name = _append_collision_suffix(folder_name, ts)
-        suffix_path = input_dir / suffix_name
+    # Loop over compact numeric suffix candidates to resolve collisions.
+    for attempt in range(2, _NUMERIC_COLLISION_ATTEMPTS + 2):
+        suffix_name = _append_collision_suffix(base_name, str(attempt))
+        suffix_reservation = _reservation(suffix_name)
         try:
-            suffix_path.mkdir(parents=True, exist_ok=False)
-            return suffix_path
+            suffix_reservation.path.mkdir(parents=True, exist_ok=False)
+            return suffix_reservation
         except FileExistsError:
-            time.sleep(0.1)
+            continue
 
     # Ultimate fallback with uuid
     random_suffix = uuid.uuid4().hex[:8]
-    fallback_name = _append_collision_suffix(folder_name[:80], random_suffix)
-    fallback_path = input_dir / fallback_name
-    fallback_path.mkdir(parents=True, exist_ok=False)
-    return fallback_path
+    fallback_name = _append_collision_suffix(base_name, random_suffix)
+    fallback_reservation = _reservation(fallback_name)
+    fallback_reservation.path.mkdir(parents=True, exist_ok=False)
+    return fallback_reservation

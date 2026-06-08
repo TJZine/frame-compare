@@ -36,7 +36,6 @@ _CHECK_ORDER: list[tuple[str, str]] = [
     ("vapoursynth", "core"),
     ("lsmas", "core"),
     ("ffmpeg", "optional"),
-    ("dovi_tool", "optional"),
     ("vspreview", "optional"),
     ("slowpics", "network"),
     ("tmdb_api_key", "network"),
@@ -171,22 +170,6 @@ def _check_ffmpeg() -> CheckResult:
         passed=False,
         message="FFmpeg not found in PATH",
         hint="Install FFmpeg and add to PATH",
-    )
-
-
-def _check_dovi_tool() -> CheckResult:
-    """Check dovi_tool is in PATH."""
-    path = shutil.which("dovi_tool")
-    if path:
-        return CheckResult(
-            passed=True,
-            message=f"dovi_tool found at {path}",
-            details={"path": path},
-        )
-    return CheckResult(
-        passed=False,
-        message="dovi_tool not found in PATH",
-        hint="Install dovi_tool for Dolby Vision support",
     )
 
 
@@ -354,17 +337,15 @@ def collect_checks() -> list[DoctorCheck]:
         2. vapoursynth (core)
         3. lsmas (core)
         4. ffmpeg (optional)
-        5. dovi_tool (optional)
-        6. vspreview (optional)
-        7. slowpics (network)
-        8. tmdb_api_key (network)
+        5. vspreview (optional)
+        6. slowpics (network)
+        7. tmdb_api_key (network)
     """
     check_fns: dict[str, Callable[[], CheckResult]] = {
         "python_version": _check_python_version,
         "vapoursynth": _check_vapoursynth,
         "lsmas": _check_lsmas,
         "ffmpeg": _check_ffmpeg,
-        "dovi_tool": _check_dovi_tool,
         "vspreview": _check_vspreview,
         "slowpics": _check_slowpics,
         "tmdb_api_key": _check_tmdb_api_key,

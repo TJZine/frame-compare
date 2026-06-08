@@ -110,11 +110,17 @@ class TestCollectChecks:
         assert "optional" in categories
         assert "network" in categories
 
-        # Verify exact count and order per SSOT §4.2.1
-        assert len(checks) == 8
-        assert checks[0].name == "python_version"
+        # Verify exact count and order for the current doctor contract.
+        assert [check.name for check in checks] == [
+            "python_version",
+            "vapoursynth",
+            "lsmas",
+            "ffmpeg",
+            "vspreview",
+            "slowpics",
+            "tmdb_api_key",
+        ]
         assert checks[0].category == "core"
-        assert checks[-1].name == "tmdb_api_key"
         assert checks[-1].category == "network"
 
 

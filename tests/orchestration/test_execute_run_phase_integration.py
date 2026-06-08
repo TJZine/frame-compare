@@ -110,7 +110,6 @@ enable = false
         random_frame_count=3,
         skip_analysis=True,
         skip_metadata=True,
-        skip_dovi=True,
         no_upload=True,
     )
 
@@ -176,7 +175,6 @@ enable = true
                 random_frame_count=1,
                 skip_analysis=True,
                 skip_metadata=True,
-                skip_dovi=True,
             ),
             deps=RunDependencies(
                 vs_loader=FakeVSLoader(),

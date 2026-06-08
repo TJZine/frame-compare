@@ -164,7 +164,6 @@ class RunCliOptions:
     overlay_mode: OverlayMode | None
     skip_analysis: bool
     skip_metadata: bool
-    skip_dovi: bool
     force_interactive_alignment: bool
     json_output: bool
     no_color: bool
@@ -195,7 +194,6 @@ def build_run_request_from_cli(options: RunCliOptions) -> RunRequest:
         overlay_mode=options.overlay_mode,
         skip_analysis=options.skip_analysis,
         skip_metadata=options.skip_metadata,
-        skip_dovi=options.skip_dovi,
         force_interactive_alignment=options.force_interactive_alignment,
         json_output=options.json_output,
         no_color=options.no_color,
@@ -225,7 +223,6 @@ class RunCliRawArgs:
     overlay: str | None
     skip_analysis: bool
     skip_metadata: bool
-    skip_dovi: bool
     force_interactive_alignment: bool
     json_output: bool
     no_color: bool
@@ -415,7 +412,6 @@ def parse_run_options(args: RunCliRawArgs, *, no_color: bool) -> RunCliOptions:
         overlay_mode=parsed_overlay,
         skip_analysis=args.skip_analysis,
         skip_metadata=args.skip_metadata,
-        skip_dovi=args.skip_dovi,
         force_interactive_alignment=args.force_interactive_alignment,
         json_output=args.json_output,
         no_color=no_color,

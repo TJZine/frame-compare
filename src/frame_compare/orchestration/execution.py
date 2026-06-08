@@ -19,7 +19,6 @@ from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.analysis_policy import needs_analysis
 from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.phase_post_render import (
-    record_dovi_not_implemented_warning,
     run_confirm_slowpics_upload_phase,
     run_metadata_phase,
     run_post_report_cleanup_phase,
@@ -40,7 +39,6 @@ from frame_compare.orchestration.types import (
     AlignPhaseOutput,
     AnalyzePhaseOutput,
     ConfirmSlowpicsUploadPhaseOutput,
-    DoviPhaseOutput,
     ExecutionPhasePlan,
     ExecutionState,
     FramePlanPhaseOutput,
@@ -140,8 +138,6 @@ def _apply_phase_output(*, ctx: RunContext, state: ExecutionState, output: Phase
             state.warnings.extend(phase_output.render.warnings)
         case MetadataPhaseOutput() as phase_output:
             state.artifacts.resolved_metadata = phase_output.resolved_metadata
-        case DoviPhaseOutput() as phase_output:
-            state.warnings.append(phase_output.warning)
         case PublishPhaseOutput() as phase_output:
             state.artifacts.slowpics_url = phase_output.slowpics_url
             state.artifacts.uploaded_slowpics_file_paths = phase_output.uploaded_file_paths
@@ -271,7 +267,7 @@ def build_phases_after_align(
             report_succeeded=state.artifacts.report_succeeded,
         )
 
-    render_metadata_dovi_phases = [
+    render_metadata_phases = [
         _create_timed_phase(
             "render",
             "render",
@@ -295,17 +291,6 @@ def build_phases_after_align(
                 client=http_client,
                 metadata_prefetch=metadata_prefetch,
             ),
-            state=state,
-            clock=clock,
-            phase_timings=state.phase_timings,
-            warnings=state.warnings,
-            warn_only=True,
-        ),
-        _create_timed_phase(
-            "dovi",
-            "dovi",
-            lambda config: request.skip_dovi,
-            record_dovi_not_implemented_warning,
             state=state,
             clock=clock,
             phase_timings=state.phase_timings,
@@ -357,14 +342,14 @@ def build_phases_after_align(
     )
     if not _requires_report_confirmed_slowpics(config):
         return [
-            *render_metadata_dovi_phases,
+            *render_metadata_phases,
             publish_phase,
             report_phase,
             post_report_cleanup_phase,
         ]
 
     return [
-        *render_metadata_dovi_phases,
+        *render_metadata_phases,
         report_phase,
         confirm_slowpics_upload_phase,
         publish_phase,

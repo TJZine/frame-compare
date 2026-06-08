@@ -205,7 +205,7 @@ unchanged.
   configured base paths rather than the fresh per-run subdirectories reserved later in
   execution.
 - Human Rich progress uses product phase labels: `PLAN`, `ANALYZE`, `ALIGN`,
-  `RENDER`, `METADATA`, `DOVI`, `PUBLISH`, `REPORT`, `CONFIRM`, and `CLEANUP`.
+  `RENDER`, `METADATA`, `PUBLISH`, `REPORT`, `CONFIRM`, and `CLEANUP`.
   Internal phase names in logs and `phase_timings` remain the runtime keys such
   as `frame_plan`, `analyze`, `align`, and `confirm_slowpics_upload`.
 - `--no-color` disables ANSI color in interactive Rich progress output. It does
@@ -244,6 +244,18 @@ unchanged.
   and `motion_frame_count` are all `0`; `frame_plan` still selects configured
   user/random frames. With `paths.use_run_folders = true`, runs that proceed reserve a fresh run folder;
   existing run folders are not reused to satisfy analysis cache hits.
+- In run-folder mode, folder names are capped at 64 characters and do not
+  include exact timestamps. The first successful reservation uses the title-first base
+  name, and collisions use compact numeric suffixes such as `_2` and `_3`.
+  Exact creation time and run identity are written to root-level
+  `<run-folder>/run_info.toml` immediately after reservation and before probing
+  or rendering. This file stores `version`, UTC `created_at` with a `Z` suffix,
+  final `folder_name`, `naming_source`, `source_filenames`,
+  `frame_compare_version`, and optional `[tmdb]` prefetch facts with absent
+  optional values omitted rather than serialized as null. It is not a final
+  outcome manifest and does not include report URL, timings, or success/failure
+  state. If `run_info.toml` cannot be written, the run fails immediately and
+  best-effort cleanup removes the empty reserved run folder when possible.
 - `--no-cache` deletes only the matching shared analysis cache entry for the current
   inputs, selected reference, all-source selection domain, and analysis settings
   before continuing. It does not clear unrelated shared analysis entries and
@@ -312,9 +324,9 @@ opened. If it is not opened, the CLI prints the report path before prompting.
   scanning the screenshot directory. The plan is built from selected frames,
   current render artifacts, and clip order.
 - The normal non-confirmed phase order remains:
-  `frame_plan -> analyze -> align -> render -> metadata -> dovi -> publish -> report -> post_report_cleanup`.
+  `frame_plan -> analyze -> align -> render -> metadata -> publish -> report -> post_report_cleanup`.
 - Report-confirmed upload changes only the opted-in interactive path:
-  `frame_plan -> analyze -> align -> render -> metadata -> dovi -> report -> confirm_slowpics_upload -> publish -> post_report_cleanup`.
+  `frame_plan -> analyze -> align -> render -> metadata -> report -> confirm_slowpics_upload -> publish -> post_report_cleanup`.
 - Report-confirmed upload requires an interactive report-enabled run when the
   prompt would be needed. If effective `slowpics.auto_upload = true` and
   `slowpics.confirm_upload_after_report = true`, the CLI rejects the run before
@@ -699,7 +711,6 @@ The following `run` flags are runtime-only and do not persist through `--write-c
 - `--from-cache-only`
 - `--skip-analysis`
 - `--skip-metadata`
-- `--skip-dovi`
 - `--json`
 - `--no-color`
 - `--write-config`

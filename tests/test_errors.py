@@ -18,8 +18,6 @@ from frame_compare.cli.errors import (
 from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.errors import (
     DirectoryNotWritableError,
-    DoviError,
-    DoviToolNotFoundError,
     ErrorContext,
     FileTooLargeError,
     FrameCompareError,
@@ -91,7 +89,6 @@ def _render_rich_markup(markup: str) -> str:
         (LibplaceboError, ("test",), "FC-2004"),
         (FFmpegNotFoundError, (), "FC-2005"),
         (FFmpegError, ("test", 1), "FC-2006"),
-        (DoviToolNotFoundError, (), "FC-2007"),
         (VSPreviewNotFoundError, (), "FC-2008"),
         (TonemapRequiresVapourSynthError, (), "FC-2009"),
         (PythonVersionError, ("3.11",), "FC-2010"),
@@ -121,7 +118,6 @@ def _render_rich_markup(markup: str) -> str:
         (SourceLoadError, (Path("/src"), "test"), "FC-4015"),
         (MetadataError, ("test",), "FC-4016"),
         (ReportError, ("test",), "FC-4017"),
-        (DoviError, (Path("/dv"), "test"), "FC-4018"),
         (VSPreviewError, ("test",), "FC-4019"),
         # NetworkError (FC-5xxx)
         (NetworkUnreachableError, (), "FC-5001"),

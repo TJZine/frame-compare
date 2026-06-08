@@ -26,7 +26,7 @@ The main run path is:
 5. Create a fresh run folder when configured.
 6. Load or compute clip probe data.
 7. Execute orchestration phases in order:
-   `frame_plan -> analyze -> align -> render -> metadata -> dovi -> publish -> report -> post_report_cleanup`
+   `frame_plan -> analyze -> align -> render -> metadata -> publish -> report -> post_report_cleanup`
    The `analyze` phase is automatically skipped when the effective `[analysis]`
    frame selectors request only `user_frames` and/or `random_frame_count`.
    Dark, bright, or motion frame counts require analysis.
@@ -34,7 +34,7 @@ The main run path is:
 When effective config enables both `slowpics.auto_upload` and
 `slowpics.confirm_upload_after_report`, the opted-in interactive path changes
 only the post-render ordering:
-`frame_plan -> analyze -> align -> render -> metadata -> dovi -> report -> confirm_slowpics_upload -> publish -> post_report_cleanup`.
+`frame_plan -> analyze -> align -> render -> metadata -> report -> confirm_slowpics_upload -> publish -> post_report_cleanup`.
 The non-confirmed flow keeps the normal ordering above.
 
 `frame_compare.orchestration.context.RunContext` carries the shared run state across phases.
@@ -44,7 +44,7 @@ Current phase-family owners are intentionally explicit:
 
 - `frame_compare.orchestration.phase_selection`: frame-plan and analyze phase bodies plus shared selection/frame-translation helpers
 - `frame_compare.orchestration.phase_tasks`: align and render phase bodies plus alignment/render-specific helpers
-- `frame_compare.orchestration.phase_post_render`: metadata, dovi warning, publish, report, confirmation, and cleanup phase bodies
+- `frame_compare.orchestration.phase_post_render`: metadata, publish, report, confirmation, and cleanup phase bodies
 
 ## Module Boundaries
 
@@ -128,6 +128,11 @@ Primary owned paths:
 - `generated/clip_probe.toml` or `<resolved paths.generated_dir>/clip_probe.toml`:
   shared clip probe cache used by `--from-cache-only` prevalidation before
   run-folder reservation
+- `<run-folder>/run_info.toml`: root-level run identity metadata written
+  immediately after run-folder reservation when run folders are enabled. It
+  stores creation time, final folder name, naming source, source filenames,
+  Frame Compare version, and optional TMDB prefetch facts. It is user-facing
+  creation-time identity, not an end-of-run outcome manifest.
 - `<run-folder>/generated/clip_probe.toml`: current-run clip probe cache when
   run folders are enabled
 - `generated/manual_overrides.toml` or `<run-folder>/generated/manual_overrides.toml`:
@@ -157,6 +162,16 @@ so future `--from-cache-only` runs can validate the exact all-source analysis
 selection domain before metadata prefetch or run-folder reservation. Configured
 `report.output_dir` continues to own report placement; only fallback report
 placement follows the screenshot/current run output location.
+
+Run-folder names are title-first and capped at 64 characters for Windows path
+headroom. The base name comes from resolved TMDB title/year, common parsed
+metadata, combined filename stems, or `unnamed_run`. Exact timestamps are not
+part of folder names; collisions use compact numeric suffixes such as `_2` and
+`_3`, then a short random suffix if bounded numeric claiming cannot reserve a
+directory. The exact creation time lives in `<run-folder>/run_info.toml`, which is
+written before probing, rendering, or other runtime-heavy work. If that write
+fails, the run fails immediately and cleanup attempts to remove the empty
+reserved directory as best effort.
 
 The align phase uses a typed orchestration-to-services request seam:
 `frame_compare.orchestration.phase_tasks.run_align_phase()` builds a

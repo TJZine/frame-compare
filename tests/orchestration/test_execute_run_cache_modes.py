@@ -90,7 +90,6 @@ enable = false
         no_cache=True,
         skip_analysis=False,
         skip_metadata=True,
-        skip_dovi=True,
         no_upload=True,
     )
 
@@ -158,7 +157,6 @@ enable = false
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader())
@@ -210,7 +208,6 @@ enable = false
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
@@ -268,7 +265,6 @@ enable = false
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
@@ -345,7 +341,6 @@ enable = false
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader())
@@ -423,7 +418,6 @@ enable = false
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader())
@@ -464,7 +458,6 @@ enable = false
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())

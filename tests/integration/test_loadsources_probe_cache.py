@@ -55,8 +55,6 @@ enabled = false
 [report]
 enable = false
 
-[dovi]
-enable = false
 """
 
 
@@ -94,7 +92,6 @@ async def test_loadsources_writes_clip_probe_cache_file(
         quiet=True,
         skip_analysis=True,
         skip_metadata=True,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=DefaultVSLoader())
@@ -136,7 +133,6 @@ async def test_loadsources_reuses_clip_probe_cache_file(
         quiet=True,
         skip_analysis=True,
         skip_metadata=True,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=DefaultVSLoader())

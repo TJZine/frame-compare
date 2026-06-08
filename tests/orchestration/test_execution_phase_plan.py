@@ -83,7 +83,6 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
     assert [phase.name for phase in plan.after_align] == [
         "render",
         "metadata",
-        "dovi",
         "publish",
         "report",
         "post_report_cleanup",
@@ -133,7 +132,6 @@ def test_build_execution_phase_plan_moves_report_before_publish_for_confirmed_up
     assert [phase.name for phase in plan.after_align] == [
         "render",
         "metadata",
-        "dovi",
         "report",
         "confirm_slowpics_upload",
         "publish",

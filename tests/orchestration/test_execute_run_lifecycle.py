@@ -63,7 +63,6 @@ def test_execute_run_returns_success_and_records_preflight_timing(
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
@@ -87,7 +86,6 @@ def test_execute_run_returns_success_and_records_preflight_timing(
         "align",
         "render",
         "metadata",
-        "dovi",
         "publish",
         "report",
         "post_report_cleanup",
@@ -98,7 +96,6 @@ def test_execute_run_returns_success_and_records_preflight_timing(
     assert result.phase_timings["analyze"] == 0.0
     assert result.phase_timings["align"] == 0.0
     assert result.phase_timings["metadata"] == 0.0
-    assert result.phase_timings["dovi"] == 0.0
     assert result.phase_timings["publish"] == 0.0
     assert result.phase_timings["report"] == 0.0
     assert result.phase_timings["post_report_cleanup"] >= 0.0
@@ -216,7 +213,6 @@ def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
-        skip_dovi=True,
         quiet=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
@@ -290,7 +286,6 @@ def test_execute_run_webhook_action_warning_is_warning_only(
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
-        skip_dovi=True,
         quiet=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
@@ -368,7 +363,6 @@ def test_execute_run_report_warning_blocks_delete_after_upload_cleanup(
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
-        skip_dovi=True,
         quiet=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
@@ -392,7 +386,6 @@ def test_execute_run_ffmpeg_render_rejects_hdr_when_tonemap_enabled(
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=FakeHDRVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
@@ -441,7 +434,6 @@ def test_execute_run_emits_reports_after_load_sources_and_after_align(
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
-        skip_dovi=True,
         no_upload=True,
         no_color=True,
     )
@@ -521,7 +513,6 @@ enable = false
         force_interactive_alignment=True,
         skip_analysis=True,
         skip_metadata=True,
-        skip_dovi=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
@@ -583,7 +574,6 @@ enable = false
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
-        skip_dovi=True,
         no_upload=False,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
@@ -605,7 +595,6 @@ def test_execute_run_uses_and_populates_probe_cache_without_reprobing(tmp_path: 
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
-        skip_dovi=True,
         no_upload=True,
     )
 
@@ -659,7 +648,6 @@ def test_execute_run_mixed_source_fps_rejects_before_phase_execution(
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=MixedFpsVSLoader(), ffmpeg_runner=FakeFFmpegRunner())

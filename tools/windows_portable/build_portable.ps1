@@ -21,6 +21,9 @@ $PSNativeCommandUseErrorActionPreference = $true
 
 . (Join-Path $PSScriptRoot "version_utils.ps1")
 
+$DownloadMaxAttempts = 4
+$DownloadRetryDelaySeconds = 5
+
 function Ensure-Directory([string]$Path) {
   if (!(Test-Path -LiteralPath $Path)) {
     New-Item -ItemType Directory -Path $Path | Out-Null
@@ -114,16 +117,24 @@ function Download-Artifact([pscustomobject]$Artifact) {
   }
 
   Write-Host "Downloading $id -> $fileName"
-  try {
-    Invoke-WebRequest -Uri $url -OutFile $dest | Out-Null
-  } catch {
-    if (Test-Path -LiteralPath $dest) {
-      Remove-Item -Force -LiteralPath $dest
+  $lastErrorMessage = ""
+  for ($attempt = 1; $attempt -le $DownloadMaxAttempts; $attempt++) {
+    try {
+      Invoke-WebRequest -Uri $url -OutFile $dest | Out-Null
+      Assert-Sha256 -FilePath $dest -ExpectedHex $sha256
+      return $dest
+    } catch {
+      $lastErrorMessage = $_.Exception.Message
+      if (Test-Path -LiteralPath $dest) {
+        Remove-Item -Force -LiteralPath $dest
+      }
+      if ($attempt -lt $DownloadMaxAttempts) {
+        Write-Warning "Download attempt $attempt/$DownloadMaxAttempts failed for artifact '$id': $lastErrorMessage. Retrying in $DownloadRetryDelaySeconds seconds."
+        Start-Sleep -Seconds $DownloadRetryDelaySeconds
+      }
     }
-    throw "Failed to download artifact '$id' from $url. The upstream artifact may have moved or expired; update $ManifestPath with a reachable URL and matching sha256. Original error: $($_.Exception.Message)"
   }
-  Assert-Sha256 -FilePath $dest -ExpectedHex $sha256
-  return $dest
+  throw "Failed to download artifact '$id' from $url after $DownloadMaxAttempts attempts. The upstream artifact may have moved or expired; update $ManifestPath with a reachable URL and matching sha256. Original error: $lastErrorMessage"
 }
 
 function Expand-ArchiveFile([string]$ArchivePath, [string]$Destination) {

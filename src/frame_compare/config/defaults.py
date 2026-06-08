@@ -107,11 +107,6 @@ include_filmstrip = true
 embed_images = false
 auto_open = true
 
-[dovi]
-enable = true
-# dovi_tool_path = null  # auto-detect from PATH
-cache_results = true
-
 [diagnostics]
 per_frame_nits = false
 

@@ -29,7 +29,6 @@ def test_run_request_defaults() -> None:
     assert request.from_cache_only is False
     assert request.skip_analysis is False
     assert request.skip_metadata is False
-    assert request.skip_dovi is False
     assert request.no_upload is False
     assert request.force_interactive_alignment is False
     assert request.no_color is False

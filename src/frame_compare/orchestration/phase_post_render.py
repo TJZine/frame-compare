@@ -19,7 +19,6 @@ from frame_compare.orchestration.phase_selection import (
 )
 from frame_compare.orchestration.types import (
     ConfirmSlowpicsUploadPhaseOutput,
-    DoviPhaseOutput,
     MetadataPhaseOutput,
     MetadataPrefetch,
     PostReportCleanupPhaseOutput,
@@ -57,7 +56,6 @@ REPORT_CONFIRMATION_UNAVAILABLE_WARNING = (
 __all__ = [
     "REPORT_CONFIRMATION_UNAVAILABLE_WARNING",
     "build_metadata_config",
-    "record_dovi_not_implemented_warning",
     "resolve_run_metadata",
     "run_confirm_slowpics_upload_phase",
     "run_metadata_phase",
@@ -108,12 +106,6 @@ async def run_metadata_phase(
         client=client,
     )
     return MetadataPhaseOutput(resolved_metadata=metadata)
-
-
-def record_dovi_not_implemented_warning(_ctx: RunContext) -> DoviPhaseOutput:
-    return DoviPhaseOutput(
-        warning="dovi: DOVI processing is not implemented yet; continuing without Dolby Vision extraction."
-    )
 
 
 async def run_publish_phase(

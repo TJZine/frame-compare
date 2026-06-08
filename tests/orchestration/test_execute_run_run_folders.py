@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import tomllib
+from datetime import UTC, datetime
 from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn, cast
@@ -18,7 +20,7 @@ from frame_compare.config.schema import AnalysisConfig
 from frame_compare.orchestration import phase_post_render, phase_selection, preparation
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.services.errors import TmdbError
-from frame_compare.services.run_folder import derive_run_folder_name
+from frame_compare.services.run_folder import RunFolderReservation, derive_run_folder_name
 from frame_compare.services.types import MetadataConfig, TmdbMetadata
 from frame_compare.utils.cache_errors import CacheCorruptionError
 from frame_compare.vs.types import SourceInfo
@@ -76,6 +78,15 @@ class AnalysisCapableVSLoader:
         raise RuntimeError("ensure_core should not be called in this test")
 
 
+class NoProbeVSLoader:
+    def load(self, path: Path) -> SourceInfo:
+        del path
+        raise AssertionError("run_info write failure should happen before probing")
+
+    def ensure_core(self) -> object:
+        raise AssertionError("run_info write failure should happen before VS core access")
+
+
 def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -87,7 +98,14 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
 
     run_name = "Movie (2024)"
     monkeypatch.setattr(
-        preparation, "reserve_run_folder", lambda input_dir, **_kwargs: input_dir / run_name
+        preparation,
+        "reserve_run_folder",
+        lambda input_dir, **_kwargs: RunFolderReservation(
+            path=input_dir / run_name,
+            folder_name=run_name,
+            base_name=run_name,
+            naming_source="parsed_metadata",
+        ),
     )
     run_generated_dir = input_dir / run_name / "generated"
 
@@ -112,7 +130,6 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
         no_cache=True,
         skip_analysis=False,
         skip_metadata=True,
-        skip_dovi=True,
         no_upload=True,
     )
 
@@ -158,7 +175,6 @@ def test_execute_run_from_cache_only_does_not_reserve_run_folder_when_metrics_ca
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader())
@@ -186,7 +202,6 @@ def test_execute_run_from_cache_only_uses_shared_cache_when_run_folders_enabled(
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
@@ -200,6 +215,7 @@ def test_execute_run_from_cache_only_uses_shared_cache_when_run_folders_enabled(
     assert result.screenshot_dir == (input_dir / run_name / "screenshots").resolve()
     assert result.slowpics_url is None
     assert not (input_dir / run_name / "generated" / "cache" / "analysis").exists()
+    assert (input_dir / run_name / "run_info.toml").exists()
 
 
 def test_execute_run_custom_generated_dir_run_folders_saves_and_loads_shared_cache(
@@ -282,7 +298,6 @@ enable = false
                 root=tmp_path,
                 skip_analysis=False,
                 skip_metadata=True,
-                skip_dovi=True,
                 no_upload=True,
             ),
             deps=RunDependencies(
@@ -312,7 +327,6 @@ enable = false
                 from_cache_only=True,
                 skip_analysis=False,
                 skip_metadata=True,
-                skip_dovi=True,
                 no_upload=True,
             ),
             deps=RunDependencies(
@@ -351,7 +365,6 @@ def test_execute_run_normal_rerun_creates_fresh_run_folder_and_uses_shared_cache
         root=tmp_path,
         skip_analysis=False,
         skip_metadata=True,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
@@ -384,7 +397,6 @@ def test_execute_run_from_cache_only_ignores_old_run_folder_cache(
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
@@ -466,7 +478,6 @@ unattended = true
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=False,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
@@ -549,10 +560,15 @@ unattended = true
         input_dir: Path,
         filenames: list[str],
         tmdb_metadata: TmdbMetadata | None,
-    ) -> Path:
+    ) -> RunFolderReservation:
         del input_dir, tmdb_metadata
         reserve_calls.append(filenames)
-        return Path("should-not-be-used")
+        return RunFolderReservation(
+            path=Path("should-not-be-used"),
+            folder_name="should-not-be-used",
+            base_name="should-not-be-used",
+            naming_source="filename_stems",
+        )
 
     monkeypatch.setattr(phase_post_render, "resolve_metadata", _resolve_metadata)
     monkeypatch.setattr(preparation, "reserve_run_folder", _reserve_run_folder)
@@ -562,7 +578,6 @@ unattended = true
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=False,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
@@ -596,10 +611,15 @@ def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(
 
     def _capture_reserve_run_folder(
         input_dir: Path, filenames: list[str], tmdb_metadata: TmdbMetadata | None
-    ) -> Path:
+    ) -> RunFolderReservation:
         del filenames
         captured_tmdb_metadata.append(tmdb_metadata)
-        return input_dir / "Fight Club (1999)"
+        return RunFolderReservation(
+            path=input_dir / "Fight Club (1999)",
+            folder_name="Fight Club (1999)",
+            base_name="Fight Club (1999)",
+            naming_source="tmdb",
+        )
 
     async def _fake_resolve_metadata(
         *,
@@ -618,7 +638,6 @@ def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=False,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
@@ -630,6 +649,22 @@ def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(
     assert resolve_calls == [["source.mkv"]]
     assert result.screenshot_dir is not None
     assert result.screenshot_dir == (input_dir / "Fight Club (1999)" / "screenshots").resolve()
+    run_info = tomllib.loads(
+        (input_dir / "Fight Club (1999)" / "run_info.toml").read_text(encoding="utf-8")
+    )
+    assert run_info["folder_name"] == "Fight Club (1999)"
+    assert run_info["naming_source"] == "tmdb"
+    assert run_info["source_filenames"] == ["source.mkv"]
+    assert run_info["tmdb"] == {
+        "enabled": True,
+        "attempted": True,
+        "resolved": True,
+        "failed": False,
+        "tmdb_id": 123,
+        "title": "Fight Club",
+        "year": 1999,
+        "media_type": "movie",
+    }
 
 
 def test_execute_run_retries_metadata_phase_when_run_folder_prefetch_fails(
@@ -697,7 +732,6 @@ category_preference = "movie"
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=False,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
@@ -724,6 +758,152 @@ category_preference = "movie"
             category_preference="movie",
         ),
     ]
+    run_info_path = input_dir / "source" / "run_info.toml"
+    run_info = tomllib.loads(run_info_path.read_text(encoding="utf-8"))
+    assert run_info["tmdb"] == {
+        "enabled": True,
+        "attempted": True,
+        "resolved": False,
+        "failed": True,
+        "error_type": "TmdbError",
+    }
+
+
+def test_execute_prep_writes_run_info_with_clock_and_no_http_client_skip(
+    tmp_path: Path,
+) -> None:
+    config_content = """\
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "generated"
+config_dir = "config"
+use_run_folders = true
+
+[audio_alignment]
+enable = false
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+
+[tmdb]
+enabled = true
+api_key = "test-key"
+unattended = true
+"""
+    create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    create_video_files(input_dir, "source.mkv", "encode.mkv")
+
+    request = RunRequest(
+        root=tmp_path,
+        skip_analysis=True,
+        skip_metadata=False,
+        no_upload=True,
+    )
+    deps = RunDependencies(
+        vs_loader=FakeVSLoader(),
+        ffmpeg_runner=FakeFFmpegRunner(),
+        clock=lambda: datetime(2026, 6, 8, 15, 30, 45, tzinfo=UTC),
+    )
+
+    result = asyncio.run(preparation.execute_prep(request, deps=deps))
+
+    assert result.workspace.run_dir is not None
+    run_info_path = result.workspace.run_dir / "run_info.toml"
+    run_info = tomllib.loads(run_info_path.read_text(encoding="utf-8"))
+    assert run_info["created_at"] == "2026-06-08T15:30:45Z"
+    assert run_info["source_filenames"] == ["encode.mkv", "source.mkv"]
+    assert run_info["tmdb"] == {
+        "enabled": True,
+        "attempted": False,
+        "resolved": False,
+        "failed": False,
+        "skip_reason": "no_http_client",
+    }
+
+
+def test_execute_run_writes_run_info_with_skip_metadata_facts(
+    tmp_path: Path,
+) -> None:
+    config_content = """\
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "generated"
+config_dir = "config"
+use_run_folders = true
+
+[audio_alignment]
+enable = false
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+
+[tmdb]
+enabled = true
+api_key = "test-key"
+unattended = true
+"""
+    create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    create_video_files(input_dir, "source.mkv")
+
+    request = RunRequest(
+        root=tmp_path,
+        skip_analysis=True,
+        skip_metadata=True,
+        no_upload=True,
+    )
+    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+
+    result = asyncio.run(execute_run(request, deps=deps))
+
+    assert result.success is True
+    assert result.screenshot_dir is not None
+    run_info = tomllib.loads(
+        (result.screenshot_dir.parent / "run_info.toml").read_text(encoding="utf-8")
+    )
+    assert run_info["tmdb"] == {
+        "enabled": True,
+        "attempted": False,
+        "resolved": False,
+        "failed": False,
+        "skip_reason": "skip_metadata",
+    }
+
+
+def test_execute_run_run_info_write_failure_happens_before_probing_and_cleans_empty_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    input_dir = tmp_path / "comparison_videos"
+    create_video_files(input_dir, "source.mkv")
+
+    def _fail_write_run_info(*_args: object, **_kwargs: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(preparation, "write_run_info", _fail_write_run_info)
+
+    request = RunRequest(
+        root=tmp_path,
+        skip_analysis=True,
+        skip_metadata=True,
+        no_upload=True,
+    )
+    deps = RunDependencies(vs_loader=NoProbeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+
+    with pytest.raises(OSError, match="disk full"):
+        asyncio.run(execute_run(request, deps=deps))
+
+    assert [path.name for path in input_dir.iterdir() if path.is_dir()] == []
 
 
 def test_execute_run_propagates_unexpected_run_folder_metadata_prefetch_errors(
@@ -772,7 +952,6 @@ timeout_seconds = 7.5
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=False,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
