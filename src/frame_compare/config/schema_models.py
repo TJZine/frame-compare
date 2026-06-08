@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from fractions import Fraction
-from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -280,14 +279,6 @@ class ReportConfig(BaseModel):
         return v
 
 
-class DoviConfig(BaseModel):
-    """Dolby Vision metadata extraction configuration."""
-
-    enable: bool = True
-    dovi_tool_path: Path | None = None
-    cache_results: bool = True
-
-
 class DiagnosticsConfig(BaseModel):
     """Optional diagnostic outputs for development and debugging."""
 
@@ -307,7 +298,6 @@ __all__ = [
     "AudioAlignmentConfig",
     "ColorConfig",
     "DiagnosticsConfig",
-    "DoviConfig",
     "LoggingConfig",
     "PathsConfig",
     "ReportConfig",

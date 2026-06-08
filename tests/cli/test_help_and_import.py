@@ -49,7 +49,6 @@ def test_run_help_shows_all_options():
         "--overlay",
         "--skip-analysis",
         "--skip-metadata",
-        "--skip-dovi",
         "--force-interactive-alignment",
         "--json",
         "--no-color",

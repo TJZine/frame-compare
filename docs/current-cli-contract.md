@@ -205,7 +205,7 @@ unchanged.
   configured base paths rather than the fresh per-run subdirectories reserved later in
   execution.
 - Human Rich progress uses product phase labels: `PLAN`, `ANALYZE`, `ALIGN`,
-  `RENDER`, `METADATA`, `DOVI`, `PUBLISH`, `REPORT`, `CONFIRM`, and `CLEANUP`.
+  `RENDER`, `METADATA`, `PUBLISH`, `REPORT`, `CONFIRM`, and `CLEANUP`.
   Internal phase names in logs and `phase_timings` remain the runtime keys such
   as `frame_plan`, `analyze`, `align`, and `confirm_slowpics_upload`.
 - `--no-color` disables ANSI color in interactive Rich progress output. It does
@@ -312,9 +312,9 @@ opened. If it is not opened, the CLI prints the report path before prompting.
   scanning the screenshot directory. The plan is built from selected frames,
   current render artifacts, and clip order.
 - The normal non-confirmed phase order remains:
-  `frame_plan -> analyze -> align -> render -> metadata -> dovi -> publish -> report -> post_report_cleanup`.
+  `frame_plan -> analyze -> align -> render -> metadata -> publish -> report -> post_report_cleanup`.
 - Report-confirmed upload changes only the opted-in interactive path:
-  `frame_plan -> analyze -> align -> render -> metadata -> dovi -> report -> confirm_slowpics_upload -> publish -> post_report_cleanup`.
+  `frame_plan -> analyze -> align -> render -> metadata -> report -> confirm_slowpics_upload -> publish -> post_report_cleanup`.
 - Report-confirmed upload requires an interactive report-enabled run when the
   prompt would be needed. If effective `slowpics.auto_upload = true` and
   `slowpics.confirm_upload_after_report = true`, the CLI rejects the run before
@@ -699,7 +699,6 @@ The following `run` flags are runtime-only and do not persist through `--write-c
 - `--from-cache-only`
 - `--skip-analysis`
 - `--skip-metadata`
-- `--skip-dovi`
 - `--json`
 - `--no-color`
 - `--write-config`

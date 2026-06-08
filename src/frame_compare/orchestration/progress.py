@@ -21,7 +21,6 @@ _PHASE_DISPLAY_LABELS = {
     "align": "ALIGN",
     "render": "RENDER",
     "metadata": "METADATA",
-    "dovi": "DOVI",
     "publish": "PUBLISH",
     "report": "REPORT",
     "confirm_slowpics_upload": "CONFIRM",

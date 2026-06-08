@@ -15,18 +15,6 @@ import frame_compare.errors as error_facade
     "facade_class,module_class,args,expected",
     [
         (
-            error_facade.DoviToolNotFoundError,
-            error_dependency.DoviToolNotFoundError,
-            (),
-            {
-                "code": "FC-2007",
-                "name": "DOVI_TOOL_NOT_FOUND",
-                "message": "dovi_tool binary not found",
-                "hint": "Install dovi_tool and add to PATH or config",
-                "details": None,
-            },
-        ),
-        (
             error_facade.PythonVersionError,
             error_dependency.PythonVersionError,
             ("3.12.1",),
@@ -132,18 +120,6 @@ import frame_compare.errors as error_facade
                 "message": "Operation 'render' timed out after 12.5s",
                 "hint": "Increase timeout in config",
                 "details": {"operation": "render", "timeout": 12.5},
-            },
-        ),
-        (
-            error_facade.DoviError,
-            error_processing.DoviError,
-            (Path("/media/dv.mkv"), "missing RPU"),
-            {
-                "code": "FC-4018",
-                "name": "DOVI_ERROR",
-                "message": f"Dolby Vision error for {Path('/media/dv.mkv')}: missing RPU",
-                "hint": "Check RPU validity or dovi_tool version",
-                "details": {"path": str(Path("/media/dv.mkv")), "reason": "missing RPU"},
             },
         ),
         (

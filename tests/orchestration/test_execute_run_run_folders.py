@@ -112,7 +112,6 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
         no_cache=True,
         skip_analysis=False,
         skip_metadata=True,
-        skip_dovi=True,
         no_upload=True,
     )
 
@@ -158,7 +157,6 @@ def test_execute_run_from_cache_only_does_not_reserve_run_folder_when_metrics_ca
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader())
@@ -186,7 +184,6 @@ def test_execute_run_from_cache_only_uses_shared_cache_when_run_folders_enabled(
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
@@ -282,7 +279,6 @@ enable = false
                 root=tmp_path,
                 skip_analysis=False,
                 skip_metadata=True,
-                skip_dovi=True,
                 no_upload=True,
             ),
             deps=RunDependencies(
@@ -312,7 +308,6 @@ enable = false
                 from_cache_only=True,
                 skip_analysis=False,
                 skip_metadata=True,
-                skip_dovi=True,
                 no_upload=True,
             ),
             deps=RunDependencies(
@@ -351,7 +346,6 @@ def test_execute_run_normal_rerun_creates_fresh_run_folder_and_uses_shared_cache
         root=tmp_path,
         skip_analysis=False,
         skip_metadata=True,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
@@ -384,7 +378,6 @@ def test_execute_run_from_cache_only_ignores_old_run_folder_cache(
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
@@ -466,7 +459,6 @@ unattended = true
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=False,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
@@ -562,7 +554,6 @@ unattended = true
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=False,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
@@ -618,7 +609,6 @@ def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=False,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
@@ -697,7 +687,6 @@ category_preference = "movie"
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=False,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
@@ -772,7 +761,6 @@ timeout_seconds = 7.5
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=False,
-        skip_dovi=True,
         no_upload=True,
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())

@@ -50,7 +50,6 @@ class RunRequest:
     # Skip flags
     skip_analysis: bool = False
     skip_metadata: bool = False
-    skip_dovi: bool = False
     no_upload: bool = False
     force_interactive_alignment: bool = False
 
@@ -222,11 +221,6 @@ class MetadataPhaseOutput:
 
 
 @dataclass(frozen=True)
-class DoviPhaseOutput:
-    warning: str
-
-
-@dataclass(frozen=True)
 class PublishPhaseOutput:
     slowpics_url: str | None
     uploaded_file_paths: tuple[Path, ...] = ()
@@ -256,7 +250,6 @@ type PhaseOutput = (
     | AlignPhaseOutput
     | RenderPhaseOutput
     | MetadataPhaseOutput
-    | DoviPhaseOutput
     | PublishPhaseOutput
     | ReportPhaseOutput
     | ConfirmSlowpicsUploadPhaseOutput

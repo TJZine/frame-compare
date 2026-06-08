@@ -26,7 +26,7 @@ The main run path is:
 5. Create a fresh run folder when configured.
 6. Load or compute clip probe data.
 7. Execute orchestration phases in order:
-   `frame_plan -> analyze -> align -> render -> metadata -> dovi -> publish -> report -> post_report_cleanup`
+   `frame_plan -> analyze -> align -> render -> metadata -> publish -> report -> post_report_cleanup`
    The `analyze` phase is automatically skipped when the effective `[analysis]`
    frame selectors request only `user_frames` and/or `random_frame_count`.
    Dark, bright, or motion frame counts require analysis.
@@ -34,7 +34,7 @@ The main run path is:
 When effective config enables both `slowpics.auto_upload` and
 `slowpics.confirm_upload_after_report`, the opted-in interactive path changes
 only the post-render ordering:
-`frame_plan -> analyze -> align -> render -> metadata -> dovi -> report -> confirm_slowpics_upload -> publish -> post_report_cleanup`.
+`frame_plan -> analyze -> align -> render -> metadata -> report -> confirm_slowpics_upload -> publish -> post_report_cleanup`.
 The non-confirmed flow keeps the normal ordering above.
 
 `frame_compare.orchestration.context.RunContext` carries the shared run state across phases.
@@ -44,7 +44,7 @@ Current phase-family owners are intentionally explicit:
 
 - `frame_compare.orchestration.phase_selection`: frame-plan and analyze phase bodies plus shared selection/frame-translation helpers
 - `frame_compare.orchestration.phase_tasks`: align and render phase bodies plus alignment/render-specific helpers
-- `frame_compare.orchestration.phase_post_render`: metadata, dovi warning, publish, report, confirmation, and cleanup phase bodies
+- `frame_compare.orchestration.phase_post_render`: metadata, publish, report, confirmation, and cleanup phase bodies
 
 ## Module Boundaries
 

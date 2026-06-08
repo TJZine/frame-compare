@@ -13,7 +13,6 @@ from frame_compare.config.loader import get_default_config
 from frame_compare.config.schema import (
     AnalysisConfig,
     ColorConfig,
-    DoviConfig,
     ReportConfig,
 )
 from frame_compare.config.schema_enums import (
@@ -139,12 +138,6 @@ def test_analysis_rejects_removed_public_keys(stale_key: str) -> None:
         AnalysisConfig.model_validate({stale_key: 10})
 
 
-def test_optional_path_accepts_none() -> None:
-    """Test that optional path fields accept None."""
-    config = DoviConfig(dovi_tool_path=None)
-    assert config.dovi_tool_path is None
-
-
 def test_report_output_dir_empty_string_to_none() -> None:
     """Test that empty string output_dir is normalized to None."""
     config = ReportConfig(output_dir="")
@@ -176,7 +169,6 @@ def test_schema_model_section_defaults_are_representative() -> None:
     sources = SourcesConfig()
     tmdb = TmdbConfig()
     report = ReportConfig()
-    dovi = DoviConfig()
     diagnostics = DiagnosticsConfig()
     logging = LoggingConfig()
 
@@ -244,8 +236,6 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert tmdb.category_preference is None
     assert report.default_mode == "slider"
     assert report.embed_images is False
-    assert dovi.dovi_tool_path is None
-    assert dovi.cache_results is True
     assert diagnostics.model_dump() == {
         "per_frame_nits": False,
     }

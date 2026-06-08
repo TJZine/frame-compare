@@ -15,7 +15,7 @@ from frame_compare.error_context import (
     FrameCompareError,
     JSONValue,
 )
-from frame_compare.error_dependency import DoviToolNotFoundError, PythonVersionError
+from frame_compare.error_dependency import PythonVersionError
 from frame_compare.error_formatting import normalize_pydantic_errors, redact_url_for_error
 from frame_compare.error_input import (
     DirectoryNotWritableError,
@@ -30,17 +30,11 @@ from frame_compare.error_internal import (
     InvariantViolationError,
     UnexpectedStateError,
 )
-from frame_compare.error_processing import (
-    DoviError,
-    ProcessingOutOfMemoryError,
-    ProcessingTimeoutError,
-)
+from frame_compare.error_processing import ProcessingOutOfMemoryError, ProcessingTimeoutError
 
 __all__ = [
     "DependencyError",
     "DirectoryNotWritableError",
-    "DoviError",
-    "DoviToolNotFoundError",
     "ErrorContext",
     "ErrorDetails",
     "FileTooLargeError",

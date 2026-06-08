@@ -330,9 +330,9 @@ def test_current_cli_contract_documents_report_confirmed_slowpics_workflow() -> 
         "There is no dedicated `run` flag for report-confirmed upload",
         "`--no-upload` remains the only slow.pics-specific `run` flag",
         "normal non-confirmed phase order remains",
-        "`frame_plan -> analyze -> align -> render -> metadata -> dovi -> publish -> report -> post_report_cleanup`",
+        "`frame_plan -> analyze -> align -> render -> metadata -> publish -> report -> post_report_cleanup`",
         "Report-confirmed upload changes only the opted-in interactive path",
-        "`frame_plan -> analyze -> align -> render -> metadata -> dovi -> report -> confirm_slowpics_upload -> publish -> post_report_cleanup`",
+        "`frame_plan -> analyze -> align -> render -> metadata -> report -> confirm_slowpics_upload -> publish -> post_report_cleanup`",
         "`--json` was passed",
         "`--quiet` was passed",
         "stdin is not attached to a TTY",
@@ -405,7 +405,7 @@ def test_current_architecture_documents_report_confirmed_phase_order_and_owner_s
 
     for expected in (
         "`slowpics.confirm_upload_after_report`",
-        "`frame_plan -> analyze -> align -> render -> metadata -> dovi -> report -> confirm_slowpics_upload -> publish -> post_report_cleanup`",
+        "`frame_plan -> analyze -> align -> render -> metadata -> report -> confirm_slowpics_upload -> publish -> post_report_cleanup`",
         "The non-confirmed flow keeps the normal ordering above",
         "report-confirmed upload prompting",
         "Report-confirmed slow.pics upload uses a CLI-owned confirmation callback seam",
