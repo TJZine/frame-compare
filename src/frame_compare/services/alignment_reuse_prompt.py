@@ -23,7 +23,7 @@ from frame_compare.utils.types import AlignmentRequest
 PROMPT_UNAVAILABLE_MESSAGE = (
     "Previous alignment offset reuse prompt unavailable; continuing without reuse."
 )
-REUSE_PREVIOUS_OFFSETS_PROMPT = "Reuse previous alignment offsets? [y/N]"
+REUSE_PREVIOUS_OFFSETS_PROMPT = "Reuse previous preview-confirmed alignment offsets? [y/N]"
 _PROMPT_CONSOLE_WIDTH = 180
 _MIN_PROMPT_CONSOLE_WIDTH = 100
 

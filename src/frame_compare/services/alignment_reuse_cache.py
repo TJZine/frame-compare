@@ -256,18 +256,62 @@ def _parse_entry(
     if not _entry_matches_request(entry, request=request, comparison=comparison):
         raise ValueError("shared alignment cache entry identity mismatch")
 
+    computed_result = _parse_cached_computed_result(entry.get("computed_result"), entry=entry)
+
+    result = AlignmentResult(
+        reference_clip=reference_clip,
+        comparison_clip=comparison_clip,
+        frame_offset=frame_offset,
+        time_offset_seconds=float(time_offset_seconds),
+        correlation_score=replay_correlation_score,
+        algorithm="cross_correlation" if origin == "computed" else None,
+        source="cached",
+    )
     return ReusableAlignmentEntry(
-        result=AlignmentResult(
-            reference_clip=reference_clip,
-            comparison_clip=comparison_clip,
-            frame_offset=frame_offset,
-            time_offset_seconds=float(time_offset_seconds),
-            correlation_score=replay_correlation_score,
-            algorithm="cross_correlation" if origin == "computed" else None,
-            source="cached",
-        ),
+        result=result,
         accepted_at=accepted_at,
         origin=origin,
+        computed_result=result if origin == "computed" else computed_result,
+    )
+
+
+def _parse_cached_computed_result(
+    value: object,
+    *,
+    entry: dict[str, object],
+) -> AlignmentResult | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise TypeError("computed_result must be table")
+    computed = cast(dict[str, object], value)
+    frame_offset = computed.get("frame_offset")
+    time_offset_seconds = computed.get("time_offset_seconds")
+    correlation_score = computed.get("correlation_score")
+    if not isinstance(frame_offset, int) or isinstance(frame_offset, bool):
+        raise TypeError("computed_result.frame_offset must be int")
+    if not isinstance(time_offset_seconds, int | float) or isinstance(
+        time_offset_seconds, bool
+    ):
+        raise TypeError("computed_result.time_offset_seconds must be number")
+    if not isinstance(correlation_score, int | float) or isinstance(
+        correlation_score, bool
+    ):
+        raise TypeError("computed_result.correlation_score must be number")
+    reference_clip = entry.get("reference_clip")
+    comparison_clip = entry.get("comparison_clip")
+    if not isinstance(reference_clip, str):
+        raise TypeError("reference_clip must be str")
+    if not isinstance(comparison_clip, str):
+        raise TypeError("comparison_clip must be str")
+    return AlignmentResult(
+        reference_clip=reference_clip,
+        comparison_clip=comparison_clip,
+        frame_offset=frame_offset,
+        time_offset_seconds=float(time_offset_seconds),
+        correlation_score=float(correlation_score),
+        algorithm="cross_correlation",
+        source="cached",
     )
 
 
@@ -342,7 +386,7 @@ def load_reusable_offsets(
 
 
 def _origin_for_provenance(provenance: AlignmentProvenance) -> AlignmentReuseCacheOrigin | None:
-    if provenance.provenance == "computed_this_run":
+    if provenance.provenance in {"computed_this_run", "shared_computed_offsets"}:
         return "computed"
     if provenance.provenance == "vspreview_confirmed_this_run":
         return "vspreview_confirmed"
@@ -384,6 +428,14 @@ def _entry_from_provenance(
     }
     if origin == "computed":
         entry["correlation_score"] = result.correlation_score
+    elif provenance.computed_result is not None:
+        computed = provenance.computed_result
+        if computed.frame_offset is not None and computed.time_offset_seconds is not None:
+            entry["computed_result"] = {
+                "frame_offset": computed.frame_offset,
+                "time_offset_seconds": computed.time_offset_seconds,
+                "correlation_score": computed.correlation_score,
+            }
     return entry
 
 

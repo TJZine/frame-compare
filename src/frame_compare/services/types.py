@@ -12,6 +12,7 @@ type AlignmentReuseCacheOrigin = Literal["computed", "vspreview_confirmed"]
 type AlignmentWriteProvenance = Literal[
     "computed_this_run",
     "vspreview_confirmed_this_run",
+    "shared_computed_offsets",
     "shared_previous_offsets",
     "preexisting_manual_override",
 ]
@@ -43,6 +44,7 @@ class AlignmentProvenance:
     result: AlignmentResult
     comparison_cache_key: str
     provenance: AlignmentWriteProvenance
+    computed_result: AlignmentResult | None = None
 
 
 @dataclass(frozen=True)
@@ -52,6 +54,7 @@ class ReusableAlignmentEntry:
     result: AlignmentResult
     accepted_at: str
     origin: AlignmentReuseCacheOrigin
+    computed_result: AlignmentResult | None = None
 
 
 @dataclass(frozen=True)

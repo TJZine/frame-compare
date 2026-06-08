@@ -129,7 +129,7 @@ def test_prompt_prints_rich_safe_table_to_stderr_and_accepts_yes(
     assert "Previous Alignment Offsets" in stderr_output
     assert "╭" in stderr_output or "+" in stderr_output
     assert REUSE_CACHE_FILE_NAME in stderr_output
-    assert "Reuse previous alignment offsets? [y/N]" in stderr_output
+    assert "Reuse previous preview-confirmed alignment offsets? [y/N]" in stderr_output
     assert "Comparison [cyan]" in stderr_output
     assert "<one>" in stderr_output
     assert "A [red].mkv" in stderr_output
@@ -219,7 +219,7 @@ def test_prompt_non_tty_stdin_prints_only_fallback_line(
     assert captured.out == ""
     assert _fallback_only_output(stderr_output)
     assert "Previous Alignment Offsets" not in stderr_output
-    assert "Reuse previous alignment offsets? [y/N]" not in stderr_output
+    assert "Reuse previous preview-confirmed alignment offsets? [y/N]" not in stderr_output
     assert "Comparison [cyan] <one>" not in stderr_output
 
 
@@ -248,7 +248,7 @@ def test_prompt_visible_prompt_path_fallbacks_on_eof_or_read_failure(
     assert captured.out == ""
     stderr_output = stderr.getvalue()
     assert "Previous Alignment Offsets" in stderr_output
-    assert "Reuse previous alignment offsets? [y/N]" in stderr_output
+    assert "Reuse previous preview-confirmed alignment offsets? [y/N]" in stderr_output
     assert f"{REUSE_PREVIOUS_OFFSETS_PROMPT}\n{PROMPT_UNAVAILABLE_MESSAGE}" in stderr_output
 
 

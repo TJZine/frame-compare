@@ -90,6 +90,7 @@ def _result(
     request: AlignmentRequest,
     *,
     comparison_index: int = 0,
+    frame_offset: int = 42,
     correlation_score: float = 0.987,
     source: str = "computed",
     comparison_clip: str | None = None,
@@ -98,7 +99,7 @@ def _result(
     return AlignmentResult(
         reference_clip=request.reference.path.name,
         comparison_clip=comparison.path.name if comparison_clip is None else comparison_clip,
-        frame_offset=42,
+        frame_offset=frame_offset,
         time_offset_seconds=1.751,
         correlation_score=correlation_score,
         algorithm="cross_correlation",
@@ -112,11 +113,13 @@ def _provenance(
     result: AlignmentResult | None = None,
     provenance: str = "computed_this_run",
     comparison_index: int = 0,
+    computed_result: AlignmentResult | None = None,
 ) -> AlignmentProvenance:
     return AlignmentProvenance(
         result=_result(request, comparison_index=comparison_index) if result is None else result,
         comparison_cache_key=comparison_cache_key(request.comparisons[comparison_index]),
         provenance=provenance,  # type: ignore[arg-type]
+        computed_result=computed_result,
     )
 
 
@@ -180,6 +183,31 @@ def test_shared_reuse_cache_round_trips_computed_entry(tmp_path: Path) -> None:
     assert 'accepted_at = "2026-06-06T12:00:00Z"' in content
 
 
+def test_shared_reuse_cache_writes_shared_computed_provenance_as_computed(
+    tmp_path: Path,
+) -> None:
+    request = _request(tmp_path)
+    save_reusable_offsets(
+        request,
+        [
+            _provenance(
+                request,
+                result=_result(request, correlation_score=0.876),
+                provenance="shared_computed_offsets",
+            )
+        ],
+        accepted_at="2026-06-06T12:00:00Z",
+    )
+
+    entries = load_reusable_offset_entries(request)
+
+    assert entries is not None
+    entry = next(iter(entries.values()))
+    assert entry.origin == "computed"
+    assert entry.result.source == "cached"
+    assert entry.result.correlation_score == pytest.approx(0.876)
+
+
 def test_shared_reuse_cache_round_trips_vspreview_confirmed_entry_with_score_one(
     tmp_path: Path,
 ) -> None:
@@ -208,6 +236,46 @@ def test_shared_reuse_cache_round_trips_vspreview_confirmed_entry_with_score_one
     assert result.source == "cached"
     assert result.algorithm is None
     assert result.correlation_score == 1.0
+    assert entry.computed_result is None
+
+
+def test_shared_reuse_cache_round_trips_vspreview_entry_with_computed_fallback(
+    tmp_path: Path,
+) -> None:
+    request = _request(tmp_path)
+    computed = _result(request, frame_offset=42, correlation_score=0.876)
+    confirmed = AlignmentResult(
+        reference_clip=request.reference.path.name,
+        comparison_clip=request.comparisons[0].path.name,
+        frame_offset=47,
+        time_offset_seconds=1.96,
+        correlation_score=1.0,
+        algorithm=None,
+        source="manual",
+    )
+    save_reusable_offsets(
+        request,
+        [
+            _provenance(
+                request,
+                result=confirmed,
+                provenance="vspreview_confirmed_this_run",
+                computed_result=computed,
+            )
+        ],
+        accepted_at="2026-06-06T12:00:00Z",
+    )
+
+    entries = load_reusable_offset_entries(request)
+
+    assert entries is not None
+    entry = next(iter(entries.values()))
+    assert entry.origin == "vspreview_confirmed"
+    assert entry.result.frame_offset == 47
+    assert entry.computed_result is not None
+    assert entry.computed_result.frame_offset == 42
+    assert entry.computed_result.algorithm == "cross_correlation"
+    assert entry.computed_result.correlation_score == pytest.approx(0.876)
 
 
 def test_shared_reuse_cache_requires_complete_source_set(tmp_path: Path) -> None:

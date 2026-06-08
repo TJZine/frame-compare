@@ -395,16 +395,36 @@ def _shared_reuse_prompt_input(
     )
 
 
+def _apply_cached_alignment_result(
+    *,
+    request: AlignmentRequest,
+    comparison: AlignmentClipRequest,
+    result: AlignmentResult,
+    results_map: dict[str, AlignmentResult],
+    provenances: dict[str, AlignmentProvenance],
+    computed_cache_hit: bool,
+) -> None:
+    key = _alignment_key(request.reference.path, comparison.path)
+    comparison_key = comparison_cache_key(comparison)
+    results_map[key] = result
+    provenances[key] = AlignmentProvenance(
+        result=result,
+        comparison_cache_key=comparison_key,
+        provenance="shared_computed_offsets" if computed_cache_hit else "shared_previous_offsets",
+    )
+
+
 def _apply_shared_reuse(
     *,
     request: AlignmentRequest,
     unresolved_comparisons: list[AlignmentClipRequest],
     results_map: dict[str, AlignmentResult],
     provenances: dict[str, AlignmentProvenance],
+    cache_results: bool,
     progress: ProgressReporter | None,
     no_color: bool,
 ) -> bool:
-    if request.previous_offsets == "disabled" or not unresolved_comparisons:
+    if not cache_results or not unresolved_comparisons:
         return False
 
     reusable_entries = load_reusable_offset_entries(
@@ -413,30 +433,79 @@ def _apply_shared_reuse(
     )
     if reusable_entries is None:
         return False
+
+    confirmed_comparisons: list[AlignmentClipRequest] = []
+    for comparison in unresolved_comparisons:
+        entry = reusable_entries[comparison_cache_key(comparison)]
+        if entry.origin == "computed":
+            _apply_cached_alignment_result(
+                request=request,
+                comparison=comparison,
+                result=entry.result,
+                results_map=results_map,
+                provenances=provenances,
+                computed_cache_hit=True,
+            )
+            continue
+        confirmed_comparisons.append(comparison)
+
+    if not confirmed_comparisons:
+        return False
+
+    if request.previous_offsets == "disabled":
+        for comparison in confirmed_comparisons:
+            entry = reusable_entries[comparison_cache_key(comparison)]
+            if entry.computed_result is None:
+                continue
+            _apply_cached_alignment_result(
+                request=request,
+                comparison=comparison,
+                result=entry.computed_result,
+                results_map=results_map,
+                provenances=provenances,
+                computed_cache_hit=True,
+            )
+        return False
+
+    prompt_accepted_confirmed = False
     if request.previous_offsets == "prompt":
         accepted = prompt_for_previous_alignment_offset_reuse(
             prompt_input=_shared_reuse_prompt_input(
                 request=request,
-                unresolved_comparisons=unresolved_comparisons,
+                unresolved_comparisons=confirmed_comparisons,
                 reusable_entries=reusable_entries,
             ),
             progress=progress,
             no_color=no_color,
         )
         if not accepted:
+            for comparison in confirmed_comparisons:
+                entry = reusable_entries[comparison_cache_key(comparison)]
+                if entry.computed_result is None:
+                    continue
+                _apply_cached_alignment_result(
+                    request=request,
+                    comparison=comparison,
+                    result=entry.computed_result,
+                    results_map=results_map,
+                    provenances=provenances,
+                    computed_cache_hit=True,
+                )
             return False
+        prompt_accepted_confirmed = True
 
-    for comparison in unresolved_comparisons:
-        key = _alignment_key(request.reference.path, comparison.path)
+    for comparison in confirmed_comparisons:
         comparison_key = comparison_cache_key(comparison)
         result = reusable_entries[comparison_key].result
-        results_map[key] = result
-        provenances[key] = AlignmentProvenance(
+        _apply_cached_alignment_result(
+            request=request,
+            comparison=comparison,
             result=result,
-            comparison_cache_key=comparison_key,
-            provenance="shared_previous_offsets",
+            results_map=results_map,
+            provenances=provenances,
+            computed_cache_hit=False,
         )
-    return request.previous_offsets == "prompt"
+    return prompt_accepted_confirmed
 
 
 def _record_vspreview_provenance(
@@ -453,10 +522,21 @@ def _record_vspreview_provenance(
         if key not in confirmed_offsets_by_key:
             continue
         result = results_map[key]
+        existing = provenances.get(key)
+        computed_result = (
+            existing.result
+            if existing is not None
+            and existing.result.algorithm == "cross_correlation"
+            and existing.result.applied
+            and existing.result.frame_offset is not None
+            and existing.result.time_offset_seconds is not None
+            else None
+        )
         provenances[key] = AlignmentProvenance(
             result=result,
             comparison_cache_key=comparison_cache_key(comparison),
             provenance="vspreview_confirmed_this_run",
+            computed_result=computed_result,
         )
 
 
@@ -467,11 +547,18 @@ def _shared_write_is_service_eligible(
 ) -> bool:
     if not request.comparisons:
         return False
+    has_current_run_write = False
     for comparison in request.comparisons:
         provenance = provenances.get(_alignment_key(request.reference.path, comparison.path))
         if provenance is None:
             return False
-        if provenance.provenance not in {"computed_this_run", "vspreview_confirmed_this_run"}:
+        if provenance.provenance in {"computed_this_run", "vspreview_confirmed_this_run"}:
+            has_current_run_write = True
+        if provenance.provenance not in {
+            "computed_this_run",
+            "shared_computed_offsets",
+            "vspreview_confirmed_this_run",
+        }:
             return False
         if (
             not provenance.result.applied
@@ -479,7 +566,7 @@ def _shared_write_is_service_eligible(
             or provenance.result.time_offset_seconds is None
         ):
             return False
-    return True
+    return has_current_run_write
 
 
 def prompt_for_previous_alignment_offset_reuse(
@@ -539,6 +626,7 @@ def align_clips_from_request(
             unresolved_comparisons=unresolved_comparisons,
             results_map=results_map,
             provenances=provenances,
+            cache_results=config.cache_results,
             progress=progress,
             no_color=config.no_color,
         )
