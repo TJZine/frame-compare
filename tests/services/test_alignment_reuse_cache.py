@@ -21,6 +21,7 @@ from frame_compare.services.alignment_reuse_cache import (
     save_reusable_offsets,
 )
 from frame_compare.services.types import AlignmentProvenance, AlignmentResult
+from frame_compare.utils.file_lock import FileLockTimeoutError
 from frame_compare.utils.types import (
     AlignmentCacheSettings,
     AlignmentClipIdentity,
@@ -628,6 +629,27 @@ def test_shared_reuse_cache_write_failure_warns_without_raising(
         "frame_compare.services.alignment_reuse_cache.write_bytes_atomic", _raise_write
     )
     monkeypatch.setattr("frame_compare.services.alignment_reuse_cache.log.warning", _warning)
+
+    _write_computed(request)
+
+    assert warnings == ["alignment_reuse_cache_write_failed"]
+
+
+def test_shared_reuse_cache_lock_timeout_warns_without_raising(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _request(tmp_path)
+    warnings: list[str] = []
+
+    def _raise_lock_timeout(_path: Path) -> None:
+        raise FileLockTimeoutError("timed out acquiring lock file")
+
+    def _warning(event: str, **_kwargs: object) -> None:
+        warnings.append(event)
+
+    monkeypatch.setattr(reuse_cache, "exclusive_file_lock", _raise_lock_timeout)
+    monkeypatch.setattr(reuse_cache.log, "warning", _warning)
 
     _write_computed(request)
 
