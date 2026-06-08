@@ -232,7 +232,7 @@ def test_launch_alignment_verification_session_writes_launch_telemetry_to_stderr
     assert env["NO_COLOR"] == "1"
 
 
-def test_launch_alignment_verification_session_filters_known_lsmash_api3_warning(
+def test_launch_alignment_verification_session_forwards_child_stderr(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -270,7 +270,7 @@ def test_launch_alignment_verification_session_filters_known_lsmash_api3_warning
     )
 
     captured = capsys.readouterr()
-    assert "libvslsmashsource.dll is using API3" not in captured.err
+    assert "libvslsmashsource.dll is using API3" in captured.err
     assert "real child warning" in captured.err
 
 

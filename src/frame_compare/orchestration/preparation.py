@@ -61,7 +61,6 @@ from frame_compare.services.errors import (
 )
 from frame_compare.services.run_folder import reserve_run_folder
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
-from frame_compare.utils.runtime_stderr import suppress_known_lsmash_api3_stderr
 from frame_compare.utils.types import WorkspacePaths
 
 log = structlog.get_logger()
@@ -233,22 +232,21 @@ def _probe_input_videos(
         if snapshot is None:
             if deps.vs_loader is None:
                 raise RuntimeError("VS loader must be initialized before probing clips.")
-            with suppress_known_lsmash_api3_stderr():
-                source_info = deps.vs_loader.load(path)
-                tonemap_prop_keys = compute_tonemap_prop_keys(source_info.frame_props)
-                preserved_props = compute_preserved_frame_props(source_info.frame_props)
-                snapshot = ClipProbeSnapshot(
-                    fingerprint=fingerprint,
-                    width=source_info.width,
-                    height=source_info.height,
-                    num_frames=source_info.num_frames,
-                    fps=source_info.fps,
-                    is_hdr=source_info.is_hdr,
-                    hdr_metadata=source_info.hdr_metadata,
-                    preserved_frame_props=preserved_props,
-                    tonemap_prop_keys=tonemap_prop_keys,
-                )
-                del source_info
+            source_info = deps.vs_loader.load(path)
+            tonemap_prop_keys = compute_tonemap_prop_keys(source_info.frame_props)
+            preserved_props = compute_preserved_frame_props(source_info.frame_props)
+            snapshot = ClipProbeSnapshot(
+                fingerprint=fingerprint,
+                width=source_info.width,
+                height=source_info.height,
+                num_frames=source_info.num_frames,
+                fps=source_info.fps,
+                is_hdr=source_info.is_hdr,
+                hdr_metadata=source_info.hdr_metadata,
+                preserved_frame_props=preserved_props,
+                tonemap_prop_keys=tonemap_prop_keys,
+            )
+            del source_info
             entries_by_key[cache_key] = snapshot
 
         snapshots_by_path[path] = snapshot

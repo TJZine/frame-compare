@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Generator
-from contextlib import contextmanager
 from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -981,61 +979,6 @@ effective_fps = "25/1"
     assert exc_info.value.context.details["comparison_fps"] == "25"
 
 
-def test_execute_prep_releases_probe_source_inside_stderr_suppression(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_content = MINIMAL_CONFIG
-    _create_config(tmp_path, content=config_content)
-    input_dir = tmp_path / "comparison_videos"
-    _create_video_files(input_dir, "00-reference.mkv")
-    suppression_active = False
-    release_states: list[bool] = []
-
-    @contextmanager
-    def suppress_stderr() -> Generator[None]:
-        nonlocal suppression_active
-        suppression_active = True
-        try:
-            yield
-        finally:
-            suppression_active = False
-
-    class ReleaseTrackingClip:
-        def __del__(self) -> None:
-            release_states.append(suppression_active)
-
-    class ReleaseTrackingVSLoader(FakeVSLoader):
-        def load(self, path: Path) -> SourceInfo:
-            self.loaded.append(path)
-            return SourceInfo(
-                clip=cast(Any, ReleaseTrackingClip()),
-                width=1920,
-                height=1080,
-                num_frames=100,
-                fps=Fraction(24000, 1001),
-                format=cast(Any, object()),
-                frame_props={},
-                is_hdr=False,
-                hdr_metadata=None,
-            )
-
-    monkeypatch.setattr(
-        "frame_compare.orchestration.preparation.suppress_known_lsmash_api3_stderr",
-        suppress_stderr,
-    )
-    loader = ReleaseTrackingVSLoader()
-
-    asyncio.run(
-        preparation.execute_prep(
-            RunRequest(root=tmp_path),
-            RunDependencies(vs_loader=cast(Any, loader)),
-        )
-    )
-
-    assert release_states == [True]
-
-
 def test_execute_prep_analysis_source_fastest_selects_lowest_timing_and_ties_by_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1065,81 +1008,6 @@ def test_execute_prep_analysis_source_fastest_selects_lowest_timing_and_ties_by_
 
     assert prep.analysis_clip is not None
     assert prep.analysis_clip.path.name == "01-fast.mkv"
-
-
-def test_execute_prep_analysis_source_fastest_releases_benchmark_source_inside_stderr_suppression(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_content = METRIC_CONFIG + '\n[sources]\nanalysis_source = "fastest"\n'
-    _create_config(tmp_path, content=config_content)
-    input_dir = tmp_path / "comparison_videos"
-    _create_video_files(input_dir, "00-reference.mkv")
-    clock = [0.0]
-    suppression_active = False
-    release_states: list[bool] = []
-
-    @contextmanager
-    def suppress_stderr() -> Generator[None]:
-        nonlocal suppression_active
-        suppression_active = True
-        try:
-            yield
-        finally:
-            suppression_active = False
-
-    class ReleaseTrackingBenchmarkClip(FakeBenchmarkClip):
-        def __del__(self) -> None:
-            release_states.append(suppression_active)
-
-    class ReleaseTrackingBenchmarkVSLoader(FakeBenchmarkVSLoader):
-        def load(self, path: Path) -> SourceInfo:
-            self.loaded.append(path)
-            return SourceInfo(
-                clip=cast(
-                    Any,
-                    ReleaseTrackingBenchmarkClip(
-                        num_frames=100,
-                        delay=self._delays_by_name[path.name],
-                        clock=self._clock,
-                    ),
-                ),
-                width=1920,
-                height=1080,
-                num_frames=100,
-                fps=Fraction(24000, 1001),
-                format=cast(Any, object()),
-                frame_props={},
-                is_hdr=False,
-                hdr_metadata=None,
-            )
-
-    monkeypatch.setattr(
-        "frame_compare.orchestration.analysis_source.suppress_known_lsmash_api3_stderr",
-        suppress_stderr,
-    )
-    monkeypatch.setattr(
-        "frame_compare.orchestration.preparation.suppress_known_lsmash_api3_stderr",
-        suppress_stderr,
-    )
-    monkeypatch.setattr(
-        "frame_compare.orchestration.analysis_source.perf_counter", lambda: clock[0]
-    )
-    loader = ReleaseTrackingBenchmarkVSLoader(
-        delays_by_name={"00-reference.mkv": 1.0},
-        clock=clock,
-    )
-
-    prep = asyncio.run(
-        preparation.execute_prep(
-            RunRequest(root=tmp_path),
-            RunDependencies(vs_loader=cast(Any, loader)),
-        )
-    )
-
-    assert prep.analysis_clip is not None
-    assert prep.analysis_clip.path.name == "00-reference.mkv"
-    assert release_states == [True, True]
 
 
 def test_execute_prep_analysis_source_fastest_compares_per_sample_time(

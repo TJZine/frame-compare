@@ -5,9 +5,8 @@ from __future__ import annotations
 from fractions import Fraction
 from typing import TYPE_CHECKING
 
-from frame_compare.utils.runtime_stderr import suppress_known_lsmash_api3_stderr
 from frame_compare.vs.env import ensure_vs_environment, require_plugin
-from frame_compare.vs.errors import SourceLoadError
+from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError
 from frame_compare.vs.props import detect_hdr
 from frame_compare.vs.types import SourceInfo
 
@@ -27,23 +26,24 @@ def load_source(path: Path, core: vs.Core | None = None) -> SourceInfo:
     if core is None:
         core = ensure_vs_environment()
 
-    # Propagates PluginNotFoundError (FC-2003) if lsmas missing
-    require_plugin(core, "lsmas")
-
-    # Loader selection:
-    # Check for LWLibavSource on the namespace, not just namespace existence
-    if hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource"):
-        loader = core.lsmas
-    else:
-        # require_plugin passed, so core.lw.LWLibavSource must exist
-        loader = core.lw
-
     try:
-        with suppress_known_lsmash_api3_stderr():
-            clip = loader.LWLibavSource(str(path))
-            frame = clip.get_frame(0)
-            fps = Fraction(clip.fps.numerator, clip.fps.denominator)
-            is_hdr, hdr_metadata = detect_hdr(dict(frame.props))
+        # Propagates PluginNotFoundError (FC-2003) if lsmas missing
+        require_plugin(core, "lsmas")
+
+        # Loader selection:
+        # Check for LWLibavSource on the namespace, not just namespace existence
+        if hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource"):
+            loader = core.lsmas
+        else:
+            # require_plugin passed, so core.lw.LWLibavSource must exist
+            loader = core.lw
+
+        clip = loader.LWLibavSource(str(path))
+        frame = clip.get_frame(0)
+        fps = Fraction(clip.fps.numerator, clip.fps.denominator)
+        is_hdr, hdr_metadata = detect_hdr(dict(frame.props))
+    except PluginNotFoundError:
+        raise
     except Exception as e:
         raise SourceLoadError(path, str(e)) from e
 
