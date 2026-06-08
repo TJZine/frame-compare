@@ -424,6 +424,7 @@ def _apply_shared_reuse(
     progress: ProgressReporter | None,
     no_color: bool,
 ) -> bool:
+    """Apply shared cache hits and return whether confirmed reuse completed alignment."""
     if not cache_results or not unresolved_comparisons:
         return False
 
@@ -505,7 +506,7 @@ def _apply_shared_reuse(
             provenances=provenances,
             computed_cache_hit=False,
         )
-    return prompt_accepted_confirmed
+    return prompt_accepted_confirmed or request.previous_offsets == "always"
 
 
 def _record_vspreview_provenance(
@@ -621,7 +622,7 @@ def align_clips_from_request(
             if _alignment_key(reference, comparison.path) not in results_map
         ]
 
-        accepted_prompt_reuse = _apply_shared_reuse(
+        completed_confirmed_reuse = _apply_shared_reuse(
             request=request,
             unresolved_comparisons=unresolved_comparisons,
             results_map=results_map,
@@ -661,7 +662,7 @@ def align_clips_from_request(
             progress=progress,
         )
 
-    if accepted_prompt_reuse and not requested_comparisons:
+    if completed_confirmed_reuse and not requested_comparisons:
         return [
             results_map[_alignment_key(reference, comparison.path)]
             for comparison in request.comparisons

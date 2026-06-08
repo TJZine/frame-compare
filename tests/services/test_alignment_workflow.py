@@ -634,6 +634,65 @@ def test_align_clips_from_request_prompt_yes_reuses_confirmed_offsets_skips_vspr
     mock_vs.assert_not_called()
 
 
+def test_align_clips_from_request_always_reuses_confirmed_offsets_skips_vspreview(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    generated_dir = tmp_path / "generated"
+    ref.touch()
+    comp.touch()
+    generated_dir.mkdir()
+    config = AlignmentConfig(previous_offsets="always", use_vspreview=True)
+    request = _alignment_request(
+        tmp_path,
+        reference=ref,
+        comparisons=[comp],
+        config=config,
+        generated_dir=generated_dir,
+    )
+    reusable = {
+        comparison_cache_key(request.comparisons[0]): ReusableAlignmentEntry(
+            result=AlignmentResult(ref.name, comp.name, 9, 0.375, 1.0, None, "cached"),
+            accepted_at="2026-06-06T12:00:00Z",
+            origin="vspreview_confirmed",
+            computed_result=AlignmentResult(
+                ref.name,
+                comp.name,
+                3,
+                0.125,
+                0.9,
+                "cross_correlation",
+                "cached",
+            ),
+        )
+    }
+    monkeypatch.setattr(
+        "frame_compare.services.alignment.load_reusable_offset_entries",
+        lambda _request, *, comparisons=None: reusable,
+    )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment.prompt_for_previous_alignment_offset_reuse",
+        lambda **_: (_ for _ in ()).throw(AssertionError("always mode prompt")),
+    )
+
+    with (
+        patch("frame_compare.services.alignment._probe_fps") as mock_probe,
+        patch("frame_compare.services.alignment._extract_reference_audio") as mock_extract_ref,
+        patch("frame_compare.services.alignment._extract_matching_audio") as mock_extract_comp,
+        patch("frame_compare.services.alignment.maybe_launch_alignment_vspreview") as mock_vs,
+    ):
+        results = align_clips_from_request(request, config)
+
+    assert results[0].source == "cached"
+    assert results[0].frame_offset == 9
+    mock_probe.assert_not_called()
+    mock_extract_ref.assert_not_called()
+    mock_extract_comp.assert_not_called()
+    mock_vs.assert_not_called()
+
+
 def test_align_clips_from_request_prompt_no_uses_computed_fallback_for_confirmed_entry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
