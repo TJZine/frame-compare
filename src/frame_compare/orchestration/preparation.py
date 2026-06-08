@@ -60,6 +60,13 @@ from frame_compare.services.errors import (
     TmdbRateLimitedError,
 )
 from frame_compare.services.run_folder import reserve_run_folder
+from frame_compare.services.run_info import (
+    RunInfo,
+    RunInfoTmdbPrefetchFacts,
+    RunInfoTmdbSkipReason,
+    write_run_info,
+)
+from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 from frame_compare.utils.types import WorkspacePaths
 
@@ -92,6 +99,11 @@ async def _resolve_run_directory(
     metadata = None
     was_attempted = False
     if config.paths.use_run_folders:
+        tmdb_facts = _skipped_run_info_tmdb_prefetch_facts(
+            enabled=config.tmdb.enabled,
+            skip_metadata=request.skip_metadata,
+            has_http_client=deps.http_client is not None,
+        )
         if deps.http_client is not None and config.tmdb.enabled and not request.skip_metadata:
             try:
                 metadata = await resolve_run_metadata(
@@ -100,7 +112,15 @@ async def _resolve_run_directory(
                     client=deps.http_client,
                 )
                 was_attempted = True
+                tmdb_facts = _attempted_run_info_tmdb_prefetch_facts(metadata)
             except (MetadataError, TmdbError, TmdbRateLimitedError) as exc:
+                tmdb_facts = RunInfoTmdbPrefetchFacts(
+                    enabled=config.tmdb.enabled,
+                    attempted=True,
+                    resolved=False,
+                    failed=True,
+                    error_type=type(exc).__name__,
+                )
                 log.warning(
                     "metadata_prefetch_degraded",
                     filenames=[input_videos[0].name],
@@ -115,9 +135,82 @@ async def _resolve_run_directory(
             filenames=filenames,
             tmdb_metadata=metadata,
         )
-        new_workspace = workspace.with_run_dir(run_dir)
+        try:
+            write_run_info(
+                run_dir.path / "run_info.toml",
+                RunInfo(
+                    created_at=deps.clock(),
+                    folder_name=run_dir.folder_name,
+                    naming_source=run_dir.naming_source,
+                    source_filenames=filenames,
+                    tmdb=tmdb_facts,
+                ),
+            )
+        except OSError as exc:
+            _cleanup_empty_reserved_run_dir(run_dir.path, original_error=exc)
+            raise
+        new_workspace = workspace.with_run_dir(run_dir.path)
         return new_workspace, MetadataPrefetch(metadata=metadata, was_attempted=was_attempted)
     return workspace, MetadataPrefetch(metadata=None, was_attempted=False)
+
+
+def _skipped_run_info_tmdb_prefetch_facts(
+    *,
+    enabled: bool,
+    skip_metadata: bool,
+    has_http_client: bool,
+) -> RunInfoTmdbPrefetchFacts:
+    skipped_reason: RunInfoTmdbSkipReason | None = None
+    if not enabled:
+        skipped_reason = "disabled"
+    elif skip_metadata:
+        skipped_reason = "skip_metadata"
+    elif not has_http_client:
+        skipped_reason = "no_http_client"
+    return RunInfoTmdbPrefetchFacts(
+        enabled=enabled,
+        attempted=False,
+        resolved=False,
+        failed=False,
+        skipped_reason=skipped_reason,
+    )
+
+
+def _attempted_run_info_tmdb_prefetch_facts(
+    metadata: TmdbMetadata | None,
+) -> RunInfoTmdbPrefetchFacts:
+    if metadata is None:
+        return RunInfoTmdbPrefetchFacts(
+            enabled=True,
+            attempted=True,
+            resolved=False,
+            failed=False,
+        )
+    return RunInfoTmdbPrefetchFacts(
+        enabled=True,
+        attempted=True,
+        resolved=True,
+        failed=False,
+        tmdb_id=metadata.tmdb_id,
+        title=metadata.title,
+        year=metadata.year,
+        media_type=metadata.media_type,
+    )
+
+
+def _cleanup_empty_reserved_run_dir(run_dir: Path, *, original_error: OSError) -> None:
+    try:
+        run_dir.rmdir()
+    except OSError as cleanup_error:
+        log.warning(
+            "run_info_write_cleanup_degraded",
+            run_dir=str(run_dir),
+            error_type=type(cleanup_error).__name__,
+            error=str(cleanup_error),
+        )
+        original_error.add_note(
+            f"Could not remove empty reserved run folder {run_dir}: {cleanup_error}"
+        )
 
 
 def _validate_cache_state(

@@ -257,6 +257,36 @@ def test_current_cli_contract_documents_slowpics_json_shape(
     assert "slowpics_upload_confirmation_status" not in payload
 
 
+def test_current_cli_contract_documents_run_folder_identity_contract() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
+    architecture = (repo_root / "docs" / "current-architecture.md").read_text(encoding="utf-8")
+    normalized_cli_contract = " ".join(cli_contract.split())
+    normalized_architecture = " ".join(architecture.split())
+
+    for expected in (
+        "folder names are capped at 64 characters",
+        "do not include exact timestamps",
+        "collisions use compact numeric suffixes such as `_2` and `_3`",
+        "`<run-folder>/run_info.toml`",
+        "UTC `created_at` with a `Z` suffix",
+        "`naming_source`",
+        "`source_filenames`",
+        "absent optional values omitted rather than serialized as null",
+        "not a final outcome manifest",
+        "If `run_info.toml` cannot be written, the run fails immediately",
+    ):
+        assert expected in normalized_cli_contract
+
+    for expected in (
+        "`<run-folder>/run_info.toml`: root-level run identity metadata",
+        "Exact timestamps are not part of folder names",
+        "The exact creation time lives in `<run-folder>/run_info.toml`",
+        "written before probing, rendering, or other runtime-heavy work",
+    ):
+        assert expected in normalized_architecture
+
+
 def test_current_cli_contract_documents_slowpics_post_upload_behavior() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")

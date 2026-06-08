@@ -244,6 +244,18 @@ unchanged.
   and `motion_frame_count` are all `0`; `frame_plan` still selects configured
   user/random frames. With `paths.use_run_folders = true`, runs that proceed reserve a fresh run folder;
   existing run folders are not reused to satisfy analysis cache hits.
+- In run-folder mode, folder names are capped at 64 characters and do not
+  include exact timestamps. The first successful reservation uses the title-first base
+  name, and collisions use compact numeric suffixes such as `_2` and `_3`.
+  Exact creation time and run identity are written to root-level
+  `<run-folder>/run_info.toml` immediately after reservation and before probing
+  or rendering. This file stores `version`, UTC `created_at` with a `Z` suffix,
+  final `folder_name`, `naming_source`, `source_filenames`,
+  `frame_compare_version`, and optional `[tmdb]` prefetch facts with absent
+  optional values omitted rather than serialized as null. It is not a final
+  outcome manifest and does not include report URL, timings, or success/failure
+  state. If `run_info.toml` cannot be written, the run fails immediately and
+  best-effort cleanup removes the empty reserved run folder when possible.
 - `--no-cache` deletes only the matching shared analysis cache entry for the current
   inputs, selected reference, all-source selection domain, and analysis settings
   before continuing. It does not clear unrelated shared analysis entries and

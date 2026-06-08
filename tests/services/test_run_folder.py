@@ -42,7 +42,7 @@ def test_sanitize_folder_name_trims_trailing_periods() -> None:
 def test_sanitize_folder_name_limits_length() -> None:
     long_name = "A" * 200
     result = sanitize_folder_name(long_name)
-    assert len(result) <= 100
+    assert len(result) <= 64
 
 
 def test_sanitize_folder_name_truncation_never_returns_empty() -> None:
@@ -50,6 +50,12 @@ def test_sanitize_folder_name_truncation_never_returns_empty() -> None:
     result = sanitize_folder_name(long_name)
     assert result != ""
     assert result == "unnamed_run"
+
+
+def test_sanitize_folder_name_avoids_windows_reserved_device_name() -> None:
+    assert sanitize_folder_name("CON") == "CON run"
+    assert sanitize_folder_name("nul") == "nul run"
+    assert sanitize_folder_name("COM1.txt") == "COM1 txt run"
 
 
 # ─── find_common_metadata Tests ───────────────────────────────────────────────
@@ -156,6 +162,53 @@ def test_derive_run_folder_name_uses_tmdb_first() -> None:
     assert result == "Fight Club (1999)"
 
 
+def test_derive_run_folder_name_avoids_reserved_tmdb_title_without_year() -> None:
+    tmdb = TmdbMetadata(
+        tmdb_id=1,
+        title="NUL",
+        original_title="NUL",
+        year=0,
+        media_type="movie",
+    )
+    result = derive_run_folder_name(
+        filenames=["random.filename.mkv"],
+        tmdb_metadata=tmdb,
+    )
+    assert result == "NUL run"
+
+
+def test_derive_run_folder_name_avoids_reserved_parsed_metadata_title(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "frame_compare.services.run_folder.parse_filename",
+        lambda _filename: ParsedMetadata(title="CON", year=None),
+    )
+
+    result = derive_run_folder_name(
+        filenames=["CON.mkv"],
+        tmdb_metadata=None,
+    )
+
+    assert result == "CON run"
+
+
+def test_derive_run_folder_name_avoids_reserved_filename_stem_fallback(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "frame_compare.services.run_folder.parse_filename",
+        lambda _filename: ParsedMetadata(title="", year=None),
+    )
+
+    result = derive_run_folder_name(
+        filenames=["AUX.mkv"],
+        tmdb_metadata=None,
+    )
+
+    assert result == "AUX run"
+
+
 def test_derive_run_folder_name_falls_back_to_guessit() -> None:
     result = derive_run_folder_name(
         filenames=["Inception.2010.BluRay.1080p.mkv"],
@@ -180,13 +233,11 @@ def test_derive_run_folder_name_handles_collision() -> None:
         tmdb_metadata=None,
         existing_folders=["Fight Club (1999)"],
     )
-    # Should append timestamp
-    assert "Fight Club" in result
-    assert "_" in result  # Timestamp separator
+    assert result == "Fight Club (1999)_2"
 
 
 def test_derive_run_folder_name_collision_respects_max_length() -> None:
-    long_title = "A" * 100
+    long_title = "A" * 64
     tmdb = TmdbMetadata(
         tmdb_id=1,
         title=long_title,
@@ -194,32 +245,26 @@ def test_derive_run_folder_name_collision_respects_max_length() -> None:
         year=0,
         media_type="movie",
     )
-    with patch(
-        "frame_compare.services.run_folder._format_timestamp", return_value="20260208-020749"
-    ):
-        result = derive_run_folder_name(
-            filenames=["source.mkv"],
-            tmdb_metadata=tmdb,
-            existing_folders=[long_title],
-        )
-    assert len(result) <= 100
-    assert result.endswith("_20260208-020749")
+    result = derive_run_folder_name(
+        filenames=["source.mkv"],
+        tmdb_metadata=tmdb,
+        existing_folders=[long_title],
+    )
+    assert len(result) <= 64
+    assert result.endswith("_2")
 
 
-def test_derive_run_folder_name_retries_when_timestamped_name_exists() -> None:
-    with patch(
-        "frame_compare.services.run_folder._format_timestamp", return_value="20260208-020749"
-    ):
-        result = derive_run_folder_name(
-            filenames=["Fight.Club.1999.mkv"],
-            tmdb_metadata=None,
-            existing_folders=[
-                "Fight Club (1999)",
-                "Fight Club (1999)_20260208-020749",
-            ],
-        )
+def test_derive_run_folder_name_retries_when_numeric_name_exists() -> None:
+    result = derive_run_folder_name(
+        filenames=["Fight.Club.1999.mkv"],
+        tmdb_metadata=None,
+        existing_folders=[
+            "Fight Club (1999)",
+            "Fight Club (1999)_2",
+        ],
+    )
 
-    assert result == "Fight Club (1999)_20260208-020749-1"
+    assert result == "Fight Club (1999)_3"
 
 
 def test_derive_run_folder_name_no_collision() -> None:
@@ -233,23 +278,29 @@ def test_derive_run_folder_name_no_collision() -> None:
 
 
 def test_derive_run_folder_name_empty_filenames() -> None:
-    with patch(
-        "frame_compare.services.run_folder._format_timestamp", return_value="20260208-020749"
-    ):
-        result = derive_run_folder_name(filenames=[], existing_folders=["unnamed_run"])
-    assert result == "unnamed_run_20260208-020749"
+    result = derive_run_folder_name(filenames=[], existing_folders=[])
+    assert result == "unnamed_run"
 
 
-def test_derive_run_folder_name_empty_filenames_retries_when_generated_name_exists() -> None:
-    with patch(
-        "frame_compare.services.run_folder._format_timestamp", return_value="20260208-020749"
-    ):
+def test_derive_run_folder_name_empty_filenames_retries_when_base_exists() -> None:
+    result = derive_run_folder_name(
+        filenames=[],
+        existing_folders=["unnamed_run"],
+    )
+
+    assert result == "unnamed_run_2"
+
+
+def test_derive_run_folder_name_falls_back_to_random_suffix_after_numeric_window() -> None:
+    existing_folders = ["Fight Club (1999)", *(f"Fight Club (1999)_{i}" for i in range(2, 102))]
+    with patch("frame_compare.services.run_folder.uuid.uuid4") as uuid4:
+        uuid4.return_value.hex = "abcdef1234567890"
         result = derive_run_folder_name(
-            filenames=[],
-            existing_folders=["unnamed_run_20260208-020749"],
+            filenames=["Fight.Club.1999.mkv"],
+            existing_folders=existing_folders,
         )
 
-    assert result == "unnamed_run_20260208-020749-1"
+    assert result == "Fight Club (1999)_abcdef12"
 
 
 # ─── get_existing_run_folders Tests ───────────────────────────────────────────
@@ -291,14 +342,17 @@ def test_reserve_run_folder_creates_non_colliding_dir(tmp_path: Path) -> None:
         year=1999,
         media_type="movie",
     )
-    result_path = reserve_run_folder(
+    result = reserve_run_folder(
         input_dir=tmp_path,
         filenames=["random.filename.mkv"],
         tmdb_metadata=tmdb,
     )
-    assert result_path == tmp_path / "Fight Club (1999)"
-    assert result_path.exists()
-    assert result_path.is_dir()
+    assert result.path == tmp_path / "Fight Club (1999)"
+    assert result.folder_name == "Fight Club (1999)"
+    assert result.base_name == "Fight Club (1999)"
+    assert result.naming_source == "tmdb"
+    assert result.path.exists()
+    assert result.path.is_dir()
 
 
 def test_reserve_run_folder_handles_collisions_atomically(tmp_path: Path) -> None:
@@ -313,27 +367,50 @@ def test_reserve_run_folder_handles_collisions_atomically(tmp_path: Path) -> Non
         media_type="movie",
     )
 
-    with patch(
-        "frame_compare.services.run_folder._format_timestamp", return_value="20260208-020749"
-    ):
-        result_path = reserve_run_folder(
-            input_dir=tmp_path,
-            filenames=["random.filename.mkv"],
-            tmdb_metadata=tmdb,
-        )
+    result = reserve_run_folder(
+        input_dir=tmp_path,
+        filenames=["random.filename.mkv"],
+        tmdb_metadata=tmdb,
+    )
 
-    assert result_path == tmp_path / "Fight Club (1999)_20260208-020749"
-    assert result_path.exists()
-    assert result_path.is_dir()
+    assert result.path == tmp_path / "Fight Club (1999)_2"
+    assert result.folder_name == "Fight Club (1999)_2"
+    assert result.base_name == "Fight Club (1999)"
+    assert result.naming_source == "tmdb"
+    assert result.path.exists()
+    assert result.path.is_dir()
 
 
 def test_reserve_run_folder_empty_filenames_uses_canonical_fallback(tmp_path: Path) -> None:
-    result_path = reserve_run_folder(
+    result = reserve_run_folder(
         input_dir=tmp_path,
         filenames=[],
         tmdb_metadata=None,
     )
 
-    assert result_path == tmp_path / "unnamed_run"
-    assert result_path.exists()
-    assert result_path.is_dir()
+    assert result.path == tmp_path / "unnamed_run"
+    assert result.folder_name == "unnamed_run"
+    assert result.naming_source == "unnamed"
+    assert result.path.exists()
+    assert result.path.is_dir()
+
+
+def test_reserve_run_folder_reports_parsed_metadata_source(tmp_path: Path) -> None:
+    result = reserve_run_folder(
+        input_dir=tmp_path,
+        filenames=["Inception.2010.BluRay.1080p.mkv"],
+        tmdb_metadata=None,
+    )
+
+    assert result.naming_source == "parsed_metadata"
+    assert result.folder_name == "Inception (2010)"
+
+
+def test_reserve_run_folder_reports_filename_stems_source(tmp_path: Path) -> None:
+    result = reserve_run_folder(
+        input_dir=tmp_path,
+        filenames=["video1.mkv", "video2.mkv"],
+        tmdb_metadata=None,
+    )
+
+    assert result.naming_source == "filename_stems"
