@@ -10,12 +10,12 @@ from pathlib import Path
 import pytest
 
 import frame_compare.analysis.cache_io as cache_io
+import frame_compare.services.alignment_reuse_cache as alignment_reuse_cache
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.config.loader import load_config
 from frame_compare.orchestration import phase_selection
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
-from frame_compare.services.alignment import CACHE_FILE_NAME
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 
 from .execute_run_helpers import (
@@ -76,9 +76,14 @@ enable = false
     other_cache_path = analysis_cache_dir / "other__other.compframes"
     other_cache_path.write_text("{}", encoding="utf-8")
 
-    offsets_path = tmp_path / "generated" / CACHE_FILE_NAME
-    offsets_path.parent.mkdir(parents=True, exist_ok=True)
-    offsets_path.write_text('version = "1"\n', encoding="utf-8")
+    alignment_reuse_path = (
+        tmp_path / "generated" / "cache" / "alignment" / alignment_reuse_cache.CACHE_FILE_NAME
+    )
+    alignment_reuse_path.parent.mkdir(parents=True, exist_ok=True)
+    alignment_reuse_path.write_text(
+        f'version = "{alignment_reuse_cache.CACHE_VERSION}"\nsource_sets = {{}}\n',
+        encoding="utf-8",
+    )
 
     request = RunRequest(
         root=tmp_path,
@@ -115,7 +120,7 @@ enable = false
 
     assert not analysis_cache_path.exists()
     assert other_cache_path.exists()
-    assert offsets_path.exists()
+    assert alignment_reuse_path.exists()
 
 
 def test_execute_run_from_cache_only_fails_when_metrics_cache_missing(
@@ -427,7 +432,7 @@ enable = false
         asyncio.run(execute_run(request, deps=deps))
 
 
-def test_execute_run_from_cache_only_requires_probe_cache_before_audio_offsets_when_alignment_enabled(
+def test_execute_run_from_cache_only_requires_probe_cache_before_alignment_when_alignment_enabled(
     tmp_path: Path,
 ) -> None:
     config_content = """\

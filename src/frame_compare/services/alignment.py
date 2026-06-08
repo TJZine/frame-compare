@@ -13,23 +13,33 @@ from frame_compare.services.alignment_audio import (
     extract_reference_audio,
     probe_fps,
 )
-from frame_compare.services.alignment_cache import (
-    CACHE_FILE_NAME,
-    CACHE_VERSION,
-    load_cached_offsets,
-    save_offsets_cache,
-)
 from frame_compare.services.alignment_consensus import estimate_consensus_offset
 from frame_compare.services.alignment_math import (
     calculate_alignment_trims,
     cross_correlate,
     samples_to_frames,
 )
+from frame_compare.services.alignment_reuse_cache import (
+    comparison_cache_key,
+    load_reusable_offset_entries,
+    save_reusable_offsets,
+)
+from frame_compare.services.alignment_reuse_prompt import (
+    PreviousOffsetPromptInput,
+    PreviousOffsetPromptRow,
+    previous_offset_prompt_input_from_rows,
+    prompt_for_previous_offset_reuse,
+)
 from frame_compare.services.alignment_vspreview import maybe_launch_alignment_vspreview
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentConfig, AlignmentResult
-from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
+from frame_compare.services.types import (
+    AlignmentConfig,
+    AlignmentProvenance,
+    AlignmentResult,
+    ReusableAlignmentEntry,
+)
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
+from frame_compare.utils.types import AlignmentClipRequest, AlignmentRequest
 from frame_compare.vspreview.overrides import load_manual_overrides
 
 log = structlog.get_logger()
@@ -43,20 +53,21 @@ _estimate_consensus_offset = estimate_consensus_offset
 _samples_to_frames = samples_to_frames
 
 __all__ = [
-    "CACHE_FILE_NAME",
-    "CACHE_VERSION",
     "_cross_correlate",
     "_extract_audio",
     "_estimate_consensus_offset",
     "_probe_fps",
     "_samples_to_frames",
     "align_clips",
+    "align_clips_from_request",
     "calculate_alignment_trims",
-    "check_alignment_cached",
     "format_rejected_alignment_warning",
-    "load_cached_offsets",
-    "save_offsets_cache",
+    "prompt_for_previous_alignment_offset_reuse",
 ]
+
+
+def _alignment_key(reference: Path, comparison: Path) -> str:
+    return f"{reference.stem}:{comparison.stem}"
 
 
 def _safe_alignment_diagnostic(diagnostic: str | None) -> str:
@@ -90,7 +101,7 @@ def _build_offsets_map(
     """Build stable `{reference:comparison -> frame_offset}` map for VSPreview."""
     offsets_by_key: dict[str, int | None] = {}
     for comp in comparisons:
-        key = f"{reference.stem}:{comp.stem}"
+        key = _alignment_key(reference, comp)
         res = results_map.get(key)
         offsets_by_key[key] = res.frame_offset if res is not None and res.applied else None
     return offsets_by_key
@@ -112,7 +123,7 @@ def _apply_confirmed_vspreview_offsets(
         resolved_fps_reference = _probe_fps(reference)
 
     for comp in comparisons:
-        key = f"{reference.stem}:{comp.stem}"
+        key = _alignment_key(reference, comp)
         if key not in confirmed_offsets_by_key:
             continue
         frame_offset = int(confirmed_offsets_by_key[key])
@@ -156,7 +167,7 @@ def _apply_manual_overrides(
     manual_overrides = load_manual_overrides(cache_dir)
 
     for comp in comparisons:
-        key = f"{reference.stem}:{comp.stem}"
+        key = _alignment_key(reference, comp)
         if key in manual_overrides:
             override = manual_overrides[key]
             if fps_reference is None:
@@ -170,6 +181,42 @@ def _apply_manual_overrides(
                 algorithm=None,
                 source="manual",
             )
+    return fps_reference
+
+
+def _apply_manual_overrides_with_provenance(
+    *,
+    reference: Path,
+    comparisons: list[AlignmentClipRequest],
+    cache_dir: Path,
+    results_map: dict[str, AlignmentResult],
+    provenances: dict[str, AlignmentProvenance],
+    fps_reference: Fraction | None,
+) -> Fraction | None:
+    manual_overrides = load_manual_overrides(cache_dir)
+
+    for comp in comparisons:
+        key = _alignment_key(reference, comp.path)
+        if key not in manual_overrides:
+            continue
+        override = manual_overrides[key]
+        if fps_reference is None:
+            fps_reference = _probe_fps(reference)
+        result = AlignmentResult(
+            reference_clip=reference.name,
+            comparison_clip=comp.path.name,
+            frame_offset=override.frame_offset,
+            time_offset_seconds=override.frame_offset / float(fps_reference),
+            correlation_score=1.0,
+            algorithm=None,
+            source="manual",
+        )
+        results_map[key] = result
+        provenances[key] = AlignmentProvenance(
+            result=result,
+            comparison_cache_key=comparison_cache_key(comp),
+            provenance="preexisting_manual_override",
+        )
     return fps_reference
 
 
@@ -227,8 +274,36 @@ def _compute_missing_alignments(
             applied=estimate.applied,
             diagnostic=estimate.diagnostic,
         )
-        results_map[f"{reference.stem}:{comp.stem}"] = res
+        results_map[_alignment_key(reference, comp)] = res
         _record_alignment_progress(progress=progress, result=res)
+
+
+def _compute_missing_alignments_with_provenance(
+    *,
+    reference: Path,
+    requested_comparisons: list[AlignmentClipRequest],
+    config: AlignmentConfig,
+    results_map: dict[str, AlignmentResult],
+    provenances: dict[str, AlignmentProvenance],
+    fps_reference: Fraction,
+    progress: ProgressReporter | None,
+) -> None:
+    _compute_missing_alignments(
+        reference=reference,
+        requested_comparisons=[comparison.path for comparison in requested_comparisons],
+        config=config,
+        results_map=results_map,
+        fps_reference=fps_reference,
+        progress=progress,
+    )
+    for comparison in requested_comparisons:
+        key = _alignment_key(reference, comparison.path)
+        result = results_map[key]
+        provenances[key] = AlignmentProvenance(
+            result=result,
+            comparison_cache_key=comparison_cache_key(comparison),
+            provenance="computed_this_run",
+        )
 
 
 def _record_alignment_progress(
@@ -258,9 +333,379 @@ def _record_resolved_alignment_progress(
     results_map: dict[str, AlignmentResult],
 ) -> None:
     for comp in comparisons:
-        result = results_map.get(f"{reference.stem}:{comp.stem}")
+        result = results_map.get(_alignment_key(reference, comp))
         if result is not None:
             _record_alignment_progress(progress=progress, result=result)
+
+
+def _record_resolved_alignment_request_progress(
+    *,
+    progress: ProgressReporter | None,
+    request: AlignmentRequest,
+    results_map: dict[str, AlignmentResult],
+) -> None:
+    _record_resolved_alignment_progress(
+        progress=progress,
+        reference=request.reference.path,
+        comparisons=[comparison.path for comparison in request.comparisons],
+        results_map=results_map,
+    )
+
+
+def _validate_previous_offsets_policy(config: AlignmentConfig) -> None:
+    if config.previous_offsets == "disabled":
+        return
+    if not config.cache_results:
+        raise AudioAlignmentError(
+            "audio_alignment.previous_offsets requires audio_alignment.cache_results = true."
+        )
+    if config.force_interactive:
+        raise AudioAlignmentError(
+            "audio_alignment.force_interactive is incompatible with previous offset reuse."
+        )
+
+
+def _shared_reuse_prompt_input(
+    *,
+    request: AlignmentRequest,
+    unresolved_comparisons: list[AlignmentClipRequest],
+    reusable_entries: dict[str, ReusableAlignmentEntry],
+) -> PreviousOffsetPromptInput:
+    rows: list[PreviousOffsetPromptRow] = []
+    for comparison in unresolved_comparisons:
+        entry = reusable_entries[comparison_cache_key(comparison)]
+        result = entry.result
+        if result.frame_offset is None or result.time_offset_seconds is None:
+            raise AudioAlignmentError("Reusable alignment offset is missing required values.")
+        rows.append(
+            PreviousOffsetPromptRow(
+                label=comparison.label,
+                filename=comparison.path.name,
+                stem=comparison.path.stem,
+                path=str(comparison.path),
+                frame_offset=result.frame_offset,
+                time_offset_seconds=result.time_offset_seconds,
+                accepted_at=entry.accepted_at,
+                source="computed" if entry.origin == "computed" else "confirmed",
+            )
+        )
+    return previous_offset_prompt_input_from_rows(
+        request=request,
+        rows=rows,
+    )
+
+
+def _apply_cached_alignment_result(
+    *,
+    request: AlignmentRequest,
+    comparison: AlignmentClipRequest,
+    result: AlignmentResult,
+    results_map: dict[str, AlignmentResult],
+    provenances: dict[str, AlignmentProvenance],
+    computed_cache_hit: bool,
+) -> None:
+    key = _alignment_key(request.reference.path, comparison.path)
+    comparison_key = comparison_cache_key(comparison)
+    results_map[key] = result
+    provenances[key] = AlignmentProvenance(
+        result=result,
+        comparison_cache_key=comparison_key,
+        provenance="shared_computed_offsets" if computed_cache_hit else "shared_previous_offsets",
+    )
+
+
+def _apply_shared_reuse(
+    *,
+    request: AlignmentRequest,
+    unresolved_comparisons: list[AlignmentClipRequest],
+    results_map: dict[str, AlignmentResult],
+    provenances: dict[str, AlignmentProvenance],
+    cache_results: bool,
+    progress: ProgressReporter | None,
+    no_color: bool,
+) -> bool:
+    """Apply shared cache hits and return whether confirmed reuse completed alignment."""
+    if not cache_results or not unresolved_comparisons:
+        return False
+
+    reusable_entries = load_reusable_offset_entries(
+        request,
+        comparisons=unresolved_comparisons,
+    )
+    if reusable_entries is None:
+        return False
+
+    confirmed_comparisons: list[AlignmentClipRequest] = []
+    for comparison in unresolved_comparisons:
+        entry = reusable_entries[comparison_cache_key(comparison)]
+        if entry.origin == "computed":
+            _apply_cached_alignment_result(
+                request=request,
+                comparison=comparison,
+                result=entry.result,
+                results_map=results_map,
+                provenances=provenances,
+                computed_cache_hit=True,
+            )
+            continue
+        confirmed_comparisons.append(comparison)
+
+    if not confirmed_comparisons:
+        return False
+
+    if request.previous_offsets == "disabled":
+        for comparison in confirmed_comparisons:
+            entry = reusable_entries[comparison_cache_key(comparison)]
+            if entry.computed_result is None:
+                continue
+            _apply_cached_alignment_result(
+                request=request,
+                comparison=comparison,
+                result=entry.computed_result,
+                results_map=results_map,
+                provenances=provenances,
+                computed_cache_hit=True,
+            )
+        return False
+
+    prompt_accepted_confirmed = False
+    if request.previous_offsets == "prompt":
+        accepted = prompt_for_previous_alignment_offset_reuse(
+            prompt_input=_shared_reuse_prompt_input(
+                request=request,
+                unresolved_comparisons=confirmed_comparisons,
+                reusable_entries=reusable_entries,
+            ),
+            progress=progress,
+            no_color=no_color,
+        )
+        if not accepted:
+            for comparison in confirmed_comparisons:
+                entry = reusable_entries[comparison_cache_key(comparison)]
+                if entry.computed_result is None:
+                    continue
+                _apply_cached_alignment_result(
+                    request=request,
+                    comparison=comparison,
+                    result=entry.computed_result,
+                    results_map=results_map,
+                    provenances=provenances,
+                    computed_cache_hit=True,
+                )
+            return False
+        prompt_accepted_confirmed = True
+
+    for comparison in confirmed_comparisons:
+        comparison_key = comparison_cache_key(comparison)
+        result = reusable_entries[comparison_key].result
+        _apply_cached_alignment_result(
+            request=request,
+            comparison=comparison,
+            result=result,
+            results_map=results_map,
+            provenances=provenances,
+            computed_cache_hit=False,
+        )
+    return prompt_accepted_confirmed or request.previous_offsets == "always"
+
+
+def _record_vspreview_provenance(
+    *,
+    request: AlignmentRequest,
+    confirmed_offsets_by_key: dict[str, int] | None,
+    results_map: dict[str, AlignmentResult],
+    provenances: dict[str, AlignmentProvenance],
+) -> None:
+    if not confirmed_offsets_by_key:
+        return
+    for comparison in request.comparisons:
+        key = _alignment_key(request.reference.path, comparison.path)
+        if key not in confirmed_offsets_by_key:
+            continue
+        result = results_map[key]
+        existing = provenances.get(key)
+        computed_result = (
+            existing.result
+            if existing is not None
+            and existing.result.algorithm == "cross_correlation"
+            and existing.result.applied
+            and existing.result.frame_offset is not None
+            and existing.result.time_offset_seconds is not None
+            else None
+        )
+        provenances[key] = AlignmentProvenance(
+            result=result,
+            comparison_cache_key=comparison_cache_key(comparison),
+            provenance="vspreview_confirmed_this_run",
+            computed_result=computed_result,
+        )
+
+
+def _shared_write_is_service_eligible(
+    *,
+    request: AlignmentRequest,
+    provenances: dict[str, AlignmentProvenance],
+) -> bool:
+    if not request.comparisons:
+        return False
+    has_current_run_write = False
+    for comparison in request.comparisons:
+        provenance = provenances.get(_alignment_key(request.reference.path, comparison.path))
+        if provenance is None:
+            return False
+        if provenance.provenance in {"computed_this_run", "vspreview_confirmed_this_run"}:
+            has_current_run_write = True
+        if provenance.provenance not in {
+            "computed_this_run",
+            "shared_computed_offsets",
+            "vspreview_confirmed_this_run",
+        }:
+            return False
+        if (
+            not provenance.result.applied
+            or provenance.result.frame_offset is None
+            or provenance.result.time_offset_seconds is None
+        ):
+            return False
+    return has_current_run_write
+
+
+def prompt_for_previous_alignment_offset_reuse(
+    *,
+    prompt_input: PreviousOffsetPromptInput,
+    progress: ProgressReporter | None,
+    no_color: bool,
+) -> bool:
+    """Prompt for shared previous-offset reuse without owning reuse precedence."""
+    return prompt_for_previous_offset_reuse(
+        prompt_input=prompt_input,
+        progress=progress,
+        no_color=no_color,
+    )
+
+
+def align_clips_from_request(
+    request: AlignmentRequest,
+    config: AlignmentConfig,
+    progress: ProgressReporter | None = None,
+    reference_fps: Fraction | None = None,
+    frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
+) -> list[AlignmentResult]:
+    """Align clips from the typed request seam with shared previous-offset reuse."""
+    reference = request.reference.path
+    comparisons = [comparison.path for comparison in request.comparisons]
+    _check_duplicate_stems(comparisons)
+    if request.previous_offsets != config.previous_offsets:
+        raise AudioAlignmentError("Alignment request previous_offsets does not match config.")
+    _validate_previous_offsets_policy(config)
+
+    if progress:
+        progress.set_description("Audio Alignment")
+
+    results_map: dict[str, AlignmentResult] = {}
+    provenances: dict[str, AlignmentProvenance] = {}
+    cache_activity_status = ProgressPhaseStatus.COMPLETED
+    if progress:
+        progress.start_indeterminate("Loading alignment offsets")
+    try:
+        fps_reference = _apply_manual_overrides_with_provenance(
+            reference=reference,
+            comparisons=request.comparisons,
+            cache_dir=request.generated_dir,
+            results_map=results_map,
+            provenances=provenances,
+            fps_reference=reference_fps,
+        )
+        unresolved_comparisons = [
+            comparison
+            for comparison in request.comparisons
+            if _alignment_key(reference, comparison.path) not in results_map
+        ]
+
+        completed_confirmed_reuse = _apply_shared_reuse(
+            request=request,
+            unresolved_comparisons=unresolved_comparisons,
+            results_map=results_map,
+            provenances=provenances,
+            cache_results=config.cache_results,
+            progress=progress,
+            no_color=config.no_color,
+        )
+
+        requested_comparisons = [
+            comparison
+            for comparison in request.comparisons
+            if _alignment_key(reference, comparison.path) not in results_map
+        ]
+    except Exception:
+        cache_activity_status = ProgressPhaseStatus.FAILED
+        raise
+    finally:
+        if progress:
+            progress.complete_phase(cache_activity_status)
+
+    if requested_comparisons:
+        _record_resolved_alignment_request_progress(
+            progress=progress,
+            request=request,
+            results_map=results_map,
+        )
+        if fps_reference is None:
+            fps_reference = _probe_fps(reference)
+        _compute_missing_alignments_with_provenance(
+            reference=reference,
+            requested_comparisons=requested_comparisons,
+            config=config,
+            results_map=results_map,
+            provenances=provenances,
+            fps_reference=fps_reference,
+            progress=progress,
+        )
+
+    if completed_confirmed_reuse and not requested_comparisons:
+        return [
+            results_map[_alignment_key(reference, comparison.path)]
+            for comparison in request.comparisons
+        ]
+
+    offsets_by_key = _build_offsets_map(
+        reference=reference,
+        comparisons=comparisons,
+        results_map=results_map,
+    )
+    confirmed_offsets = maybe_launch_alignment_vspreview(
+        reference=reference,
+        comparisons=comparisons,
+        offsets_by_key=offsets_by_key,
+        cache_dir=request.generated_dir,
+        config=config,
+        progress=progress,
+        frame_props_by_stem=frame_props_by_stem,
+    )
+    fps_reference = _apply_confirmed_vspreview_offsets(
+        reference=reference,
+        comparisons=comparisons,
+        confirmed_offsets_by_key=confirmed_offsets,
+        results_map=results_map,
+        fps_reference=fps_reference,
+    )
+    _record_vspreview_provenance(
+        request=request,
+        confirmed_offsets_by_key=confirmed_offsets,
+        results_map=results_map,
+        provenances=provenances,
+    )
+
+    if config.cache_results and _shared_write_is_service_eligible(
+        request=request,
+        provenances=provenances,
+    ):
+        save_reusable_offsets(request, list(provenances.values()))
+
+    return [
+        results_map[_alignment_key(reference, comparison.path)]
+        for comparison in request.comparisons
+    ]
 
 
 def align_clips(
@@ -280,6 +725,7 @@ def align_clips(
         as the input `comparisons` list.
     """
     _check_duplicate_stems(comparisons)
+    _validate_previous_offsets_policy(config)
 
     if progress:
         progress.set_description("Audio Alignment")
@@ -298,33 +744,9 @@ def align_clips(
             reference_fps,
         )
 
-        # 1. Check cache for non-manual entries
         requested_comparisons = [
-            c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
+            c for c in comparisons if _alignment_key(reference, c) not in results_map
         ]
-        if config.cache_results and requested_comparisons:
-            try:
-                cached = load_cached_offsets(
-                    cache_dir,
-                    reference,
-                    requested_comparisons,
-                    sample_rate=config.sample_rate,
-                    max_offset_seconds=config.max_offset_seconds,
-                    config=config,
-                    reference_fps=reference_fps,
-                )
-                if cached is not None:
-                    results_map.update(cached)
-                    requested_comparisons = [
-                        c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
-                    ]
-            except (CacheCorruptionError, CacheVersionMismatchError) as exc:
-                log.warning(
-                    "audio_offsets_cache_load_failed",
-                    path=str(cache_dir / CACHE_FILE_NAME),
-                    error=str(exc),
-                    action="degrade_to_computed_alignment",
-                )
     except Exception:
         cache_activity_status = ProgressPhaseStatus.FAILED
         raise
@@ -353,28 +775,6 @@ def align_clips(
             progress=progress,
         )
 
-        # 3. Save cache if needed (only computed results, not manual)
-        if config.cache_results:
-            computed_results = [
-                results_map[f"{reference.stem}:{c.stem}"]
-                for c in comparisons
-                if (
-                    results_map[f"{reference.stem}:{c.stem}"].source != "manual"
-                    and results_map[f"{reference.stem}:{c.stem}"].applied
-                )
-            ]
-            if computed_results:
-                save_offsets_cache(
-                    cache_dir,
-                    reference=reference,
-                    comparisons=comparisons,
-                    sample_rate=config.sample_rate,
-                    max_offset_seconds=config.max_offset_seconds,
-                    results=computed_results,
-                    config=config,
-                    reference_fps=fps_reference,
-                )
-
     offsets_by_key = _build_offsets_map(
         reference=reference,
         comparisons=comparisons,
@@ -397,39 +797,4 @@ def align_clips(
         fps_reference=fps_reference,
     )
 
-    # Return results in the same order as input comparisons
-    return [results_map[f"{reference.stem}:{c.stem}"] for c in comparisons]
-
-
-def check_alignment_cached(
-    reference: Path,
-    comparisons: list[Path],
-    cache_dir: Path,
-    config: AlignmentConfig | None = None,
-    reference_fps: Fraction | None = None,
-) -> list[str]:
-    """Check if all comparison offsets are cached/overridden, returning missing keys."""
-    _check_duplicate_stems(comparisons)
-
-    manual_overrides = load_manual_overrides(cache_dir)
-    resolved_config = config if config is not None else AlignmentConfig()
-    cached_offsets = (
-        load_cached_offsets(
-            cache_dir,
-            reference,
-            comparisons,
-            sample_rate=resolved_config.sample_rate,
-            max_offset_seconds=resolved_config.max_offset_seconds,
-            config=resolved_config,
-            reference_fps=reference_fps,
-        )
-        or {}
-    )
-
-    missing: list[str] = []
-    for comp in comparisons:
-        key = f"{reference.stem}:{comp.stem}"
-        if key in manual_overrides or key in cached_offsets:
-            continue
-        missing.append(key)
-    return missing
+    return [results_map[_alignment_key(reference, c)] for c in comparisons]

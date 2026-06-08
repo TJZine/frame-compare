@@ -157,6 +157,61 @@ def test_run_json_rejects_force_interactive_alignment_before_runner(
     }
 
 
+def test_run_json_aggregates_previous_offset_prompt_conflicts_before_runner(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for invalid CLI/config combinations")
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = _write_minimal_config(root)
+        config_path.write_text(
+            MINIMAL_CONFIG
+            + """
+[audio_alignment]
+previous_offsets = "prompt"
+cache_results = false
+""",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--root",
+                str(root),
+                "--config",
+                str(config_path.relative_to(root)),
+                "--json",
+                "--force-interactive-alignment",
+            ],
+        )
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stderr == ""
+    payload = json.loads(result.stdout)
+    validation_errors = payload["error"]["details"]["validation_errors"]
+    assert payload["error"]["message"] == "Interactive alignment is not supported with --json"
+    assert {tuple(entry["loc"]) for entry in validation_errors} == {
+        ("audio_alignment", "force_interactive"),
+        ("audio_alignment", "use_vspreview"),
+        ("audio_alignment", "previous_offsets"),
+        ("audio_alignment", "cache_results"),
+    }
+    assert (
+        sum(
+            1
+            for entry in validation_errors
+            if entry["loc"] == ["audio_alignment", "previous_offsets"]
+        )
+        == 3
+    )
+
+
 def test_run_json_rejects_report_confirmed_slowpics_before_runner(
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -200,6 +255,59 @@ def test_run_json_rejects_report_confirmed_slowpics_before_runner(
         tuple(entry["loc"]): entry["msg"]
         for entry in payload["error"]["details"]["validation_errors"]
     }[("cli", "json")] == "Report-confirmed slow.pics upload is not supported with --json."
+
+
+def test_run_json_report_confirmed_slowpics_message_uses_actual_failure(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for invalid CLI/config combinations")
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = _write_minimal_config(root)
+        config_path.write_text(
+            MINIMAL_CONFIG
+            + """
+[audio_alignment]
+previous_offsets = "always"
+
+[slowpics]
+auto_upload = true
+confirm_upload_after_report = true
+""",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--root",
+                str(root),
+                "--config",
+                str(config_path.relative_to(root)),
+                "--json",
+            ],
+        )
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stderr == ""
+    payload = json.loads(result.stdout)
+    assert payload["error"]["message"] == (
+        "Report-confirmed slow.pics upload requires an interactive report-enabled run"
+    )
+    assert payload["error"]["hint"] == (
+        "Disable slowpics.confirm_upload_after_report, disable slowpics.auto_upload, "
+        "enable reports, or run from an interactive terminal without --json/--quiet"
+    )
+    validation_locs = {
+        tuple(entry["loc"]) for entry in payload["error"]["details"]["validation_errors"]
+    }
+    assert ("cli", "json") in validation_locs
+    assert ("audio_alignment", "previous_offsets") not in validation_locs
 
 
 def test_run_json_outputs_error_schema_and_exit_code(

@@ -90,16 +90,23 @@ def _select_fastest_clip(*, clips: list[ClipState], vs_loader: VSLoader | None) 
 def _benchmark_clip(*, clip: ClipState, vs_loader: VSLoader) -> float | None:
     try:
         source = vs_loader.load(clip.path)
-        node: _FrameReadable = source.clip
-        benchmark_node = _plane_stats_node(node)
-        frames = list(_benchmark_frames(max(0, int(node.num_frames))))
-        if not frames:
-            return None
+        node: _FrameReadable | None = None
+        benchmark_node: _FrameReadable | None = None
+        try:
+            node = source.clip
+            benchmark_node = _plane_stats_node(node)
+            frames = list(_benchmark_frames(max(0, int(node.num_frames))))
+            if not frames:
+                return None
 
-        started = perf_counter()
-        for frame in frames:
-            benchmark_node.get_frame(frame)
-        return (perf_counter() - started) / len(frames)
+            started = perf_counter()
+            for frame in frames:
+                benchmark_node.get_frame(frame)
+            return (perf_counter() - started) / len(frames)
+        finally:
+            benchmark_node = None
+            node = None
+            del source
     except Exception:
         return None
 

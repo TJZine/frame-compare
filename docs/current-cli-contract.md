@@ -162,12 +162,20 @@ unchanged.
   `audio_alignment.use_vspreview` or `audio_alignment.force_interactive`, the CLI exits
   with the standard config-error payload and exit code before entering the runtime
   pipeline.
+- `--json` is incompatible with `audio_alignment.previous_offsets = "prompt"`
+  because prompt mode is an interactive human surface. The CLI exits with the
+  standard config-error JSON payload before entering the runtime pipeline.
+  `previous_offsets = "always"` is compatible with `--json` and does not add
+  fields to the successful JSON schema.
 - `--json` is incompatible with report-confirmed slow.pics upload when that
   prompt would be needed. If effective config has `slowpics.auto_upload = true`
   and `slowpics.confirm_upload_after_report = true`, the CLI rejects `--json`
   before entering the runtime pipeline with the standard config-error JSON
   payload on stdout.
 - `--quiet` suppresses the at-a-glance summary but still allows a minimal success summary.
+- `--quiet` is incompatible with `audio_alignment.previous_offsets = "prompt"`
+  and is rejected before entering the runtime pipeline. It is compatible with
+  `previous_offsets = "always"`.
 - `--quiet` is incompatible with report-confirmed slow.pics upload when that
   prompt would be needed.
 - Human-readable non-quiet runs emit a `Frame Alignment` diagnostic to stderr after
@@ -183,16 +191,15 @@ unchanged.
   The visible warning cap remains eight rows; truncated output includes the
   number of hidden rows and counts by hidden source.
 - `run --json` does not emit the human warning panel, does not add warning
-  fields, and keeps warning text off stdout for successful runs. Runtime logs and
-  diagnostics may still use stderr. The known native L-SMASH-Works
-  `libvslsmashsource.dll` API3 deprecation warning is filtered from stderr until
-  the bundled/installed plugin is updated; other native VapourSynth and plugin
-  stderr remains visible.
+  fields, and keeps warning text off stdout for successful runs. Runtime logs,
+  native VapourSynth diagnostics, and plugin stderr may still use stderr.
 - When the at-a-glance summary reports optional VSPreview probe failures, it uses a
   sanitized summary rather than raw probe exception text.
 - The at-a-glance summary uses user-facing row labels such as `run folders`,
-  `FFmpeg audio`, `interactive alignment`, `force interactive`, and `VSPreview`
-  while preserving the same effective configuration facts.
+  `FFmpeg audio`, `previous offsets`, `interactive alignment`,
+  `force interactive`, and `VSPreview` while preserving the same effective
+  configuration facts. The `previous offsets` row reports only the effective
+  config mode: `disabled`, `prompt`, or `always`.
 - The at-a-glance workspace paths are resolved base paths. When
   `paths.use_run_folders = true`, the `screenshots` and `generated` rows describe the
   configured base paths rather than the fresh per-run subdirectories reserved later in
@@ -202,12 +209,15 @@ unchanged.
   Internal phase names in logs and `phase_timings` remain the runtime keys such
   as `frame_plan`, `analyze`, `align`, and `confirm_slowpics_upload`.
 - `--no-color` disables ANSI color in interactive Rich progress output. It does
-  not switch an interactive human run to structlog progress. Quiet and JSON modes
-  still suppress Rich progress, and non-TTY runs still use log progress.
+  not switch an interactive human run to structlog progress. It also disables
+  ANSI styling for the previous-offset reuse table and prompt. Quiet and JSON
+  modes still suppress Rich progress, and non-TTY runs still use log progress.
 - `--diagnose-paths` emits a pinned JSON object with keys `cache`, `config`, `input`,
   `output`, and `root`, then exits without invoking the runtime pipeline.
   The `cache` value is the resolved configured `paths.generated_dir`; the shared
-  analysis cache lives below it at `cache/analysis`.
+  analysis cache lives below it at `cache/analysis`, and shared alignment reuse
+  entries live below it at `cache/alignment`. `--diagnose-paths` does not report
+  the shared alignment cache path separately.
 - `--write-config` writes the effective config to disk, then exits without invoking the
   runtime pipeline.
 
@@ -237,7 +247,8 @@ unchanged.
 - `--no-cache` deletes only the matching shared analysis cache entry for the current
   inputs, selected reference, all-source selection domain, and analysis settings
   before continuing. It does not clear unrelated shared analysis entries and
-  does not delete alignment offset caches.
+  does not delete shared previous-offset reuse entries under
+  `<resolved paths.generated_dir>/cache/alignment/`.
 - `--from-cache-only` is analysis-cache-only. When analysis is not skipped, it validates
   the matching shared analysis cache entry before metadata prefetch and before run-folder
   reservation, so a missing or invalid entry does not leave an empty run folder.
@@ -245,8 +256,12 @@ unchanged.
   probe cache is missing, `--from-cache-only` fails before metadata prefetch and
   before run-folder reservation rather than validating a weaker fingerprint.
 - `--from-cache-only` does not require cached alignment offsets from a previous run.
-  Alignment can compute or use the current run folder's run-scoped alignment cache after
-  the analysis cache validation succeeds.
+  Previous alignment reuse is not part of analysis cache-only prevalidation. A
+  cache-only run may reuse previous alignment offsets when
+  `previous_offsets = "always"` and a complete valid set exists, but missing
+  previous alignment offsets do not fail `--from-cache-only` by themselves.
+  Alignment can compute current-run offsets or use accepted shared previous
+  offsets after analysis cache validation succeeds.
 - `--no-cache` and `--from-cache-only` are mutually exclusive.
 
 ### Report Auto-Open Ownership
@@ -522,9 +537,8 @@ behavior.
 VSPreview parent telemetry, generated Frame Compare session diagnostics,
 preview assumptions, ready text, and terminal confirmation prompts use stderr as
 the single human diagnostic stream. The VSPreview child process is launched with
-inherited stdout, and its stderr is passed through except for the known native
-L-SMASH-Works `libvslsmashsource.dll` API3 deprecation warning. Frame
-Compare-owned generated script diagnostics are written to stderr.
+inherited stdout, and its stderr is passed through. Frame Compare-owned generated
+script diagnostics are written to stderr.
 
 When interactive alignment launches a generated VSPreview session, the
 diagnostic order is:
@@ -600,6 +614,43 @@ audio-alignment accuracy workstream. There are no dedicated `run` flags for them
 These fields affect current computed alignment behavior when audio alignment is
 enabled.
 
+- `previous_offsets = "disabled" | "prompt" | "always"` controls opt-in reuse of
+  shared VSPreview-confirmed offsets. It is config-only, has no `run` flag, and
+  is not present in the CLI override map. Exact-match computed audio alignment
+  offsets are deterministic cache hits when `cache_results = true`, regardless
+  of `previous_offsets`; the policy only controls whether prior human-confirmed
+  offsets are reused. `disabled` is the default and does not read or reuse shared
+  VSPreview-confirmed offsets, but eligible current-run computed or
+  VSPreview-confirmed results still write to the shared reuse cache when
+  `cache_results = true`. `prompt` shows a Rich stderr table for a complete
+  valid VSPreview-confirmed offset set and asks
+  `Reuse previous preview-confirmed alignment offsets? [y/N]`; default, EOF,
+  unavailable stdin, or unavailable stderr all continue without confirmed-offset
+  reuse. If a confirmed cache entry also contains the computed audio alignment
+  result that produced the preview suggestion, declining the prompt reuses that
+  computed result instead of rerunning audio alignment. `always` reuses a
+  complete valid confirmed set without prompting. Prompt mode writes no
+  prompt/table to stdout.
+- Previous-offset prompt mode requires both stdin and stderr to be TTYs before
+  any blocking read. If stderr is not a TTY, the prompt is invisible and the run
+  continues without reuse and without a human diagnostic. If stderr is a TTY but
+  stdin is not a TTY, or EOF occurs while prompting, the CLI emits
+  `Previous alignment offset reuse prompt unavailable; continuing without reuse.`
+  to stderr and continues without reuse.
+- The previous-offset reuse table displays reference and comparison labels,
+  signed frame offset, time offset seconds, source label `confirmed`, the shared
+  cache path, and each entry's persisted `accepted_at` timestamp. It does not
+  derive freshness from file mtime or index mtime.
+- Shared previous-offset entries live under
+  `<resolved paths.generated_dir>/cache/alignment/`. This is shared
+  workspace-level cache state even when `paths.use_run_folders = true`; it does
+  not live inside a fresh run folder.
+- `previous_offsets = "prompt"` and `previous_offsets = "always"` require
+  `cache_results = true`. `previous_offsets = "disabled"` remains compatible
+  with `cache_results = false`.
+- `force_interactive = true` is incompatible with `previous_offsets = "prompt"`
+  and `previous_offsets = "always"` because reuse can skip VSPreview.
+- Successful `run --json` output remains unchanged by previous-offset reuse.
 - `correlation_mode = "raw_fft" | "gcc_phat"` selects the correlation algorithm
   used by the computed estimator. `raw_fft` is the default.
 - `preprocessing_mode = "none" | "standard"` selects signal preprocessing before
@@ -633,6 +684,12 @@ enabled.
 `run --write-config` persists the effective config after applying the mapped overrides
 above. That means the flags in the previous section are persistent when combined with
 `--write-config`.
+
+Before writing, `run --write-config` rejects effective configs that combine
+`audio_alignment.previous_offsets = "prompt"` or `"always"` with
+`audio_alignment.force_interactive = true`, and rejects those reuse modes when
+`audio_alignment.cache_results = false`. The config is not written when either
+conflict is present.
 
 The following `run` flags are runtime-only and do not persist through `--write-config`:
 

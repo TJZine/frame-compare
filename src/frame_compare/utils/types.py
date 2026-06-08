@@ -3,8 +3,17 @@
 This module contains cross-cutting type definitions used by multiple layers.
 """
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Literal
+
+type AlignmentPreviousOffsetsPolicy = Literal["disabled", "prompt", "always"]
+type AlignmentSelectedReferenceRelationship = Literal["auto", "configured"]
+type PreservedFrameProps = dict[str, str | int | float]
+
+
+def _empty_preserved_frame_props() -> PreservedFrameProps:
+    return {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +40,7 @@ class WorkspacePaths:
         screenshots_dir: Screenshot output directory
         generated_dir: Generated files directory for the current run
         analysis_cache_dir: Workspace-level shared analysis cache directory
+        alignment_cache_dir: Workspace-level shared alignment cache directory
         config_dir: Config and presets directory
         config_file: Path to config.toml (or None if using defaults)
     """
@@ -43,6 +53,7 @@ class WorkspacePaths:
     config_dir: Path
     config_file: Path | None
     analysis_cache_dir: Path | None = None
+    alignment_cache_dir: Path | None = None
 
     @property
     def shared_analysis_cache_dir(self) -> Path:
@@ -50,6 +61,13 @@ class WorkspacePaths:
         if self.analysis_cache_dir is not None:
             return self.analysis_cache_dir
         return self.generated_dir / "cache" / "analysis"
+
+    @property
+    def shared_alignment_cache_dir(self) -> Path:
+        """Workspace-level shared alignment reuse cache directory."""
+        if self.alignment_cache_dir is not None:
+            return self.alignment_cache_dir
+        return self.generated_dir / "cache" / "alignment"
 
     @property
     def cache_dir(self) -> Path:
@@ -79,4 +97,66 @@ class WorkspacePaths:
             screenshots_dir=run_dir / "screenshots",
             generated_dir=run_dir / "generated",
             analysis_cache_dir=self.shared_analysis_cache_dir,
+            alignment_cache_dir=self.shared_alignment_cache_dir,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class AlignmentClipIdentity:
+    """Layer-neutral source identity facts for alignment cache validation."""
+
+    path: Path
+    size_bytes: int
+    mtime_ns: int
+
+
+@dataclass(frozen=True, slots=True)
+class AlignmentClipRequest:
+    """Layer-neutral per-clip facts needed by alignment cache/request owners."""
+
+    path: Path
+    label: str
+    identity: AlignmentClipIdentity
+    trim_start_frames: int
+    trim_end_frame_inclusive: int | None
+    effective_fps_num: int
+    effective_fps_den: int
+    selected_audio_stream: int | None = None
+    preserved_frame_props: PreservedFrameProps = field(default_factory=_empty_preserved_frame_props)
+
+
+@dataclass(frozen=True, slots=True)
+class AlignmentCacheSettings:
+    """Alignment settings that participate in shared cache identity."""
+
+    sample_rate: int
+    max_offset_seconds: float
+    correlation_mode: str
+    preprocessing_mode: str
+    channel_strategy: str
+    confidence_threshold: float
+    ambiguity_peak_ratio: float
+    window_length_seconds: float
+    window_stride_seconds: float
+    minimum_valid_windows: int
+    consensus_minimum_ratio: float
+    refinement_mode: str
+    refinement_sample_rate: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class AlignmentRequest:
+    """Layer-neutral alignment request and cache-identity seam.
+
+    The DTO deliberately lives in utils and uses only primitive or dependency-light
+    fields so services can consume it later without importing orchestration or
+    analysis-owned clip identity types.
+    """
+
+    reference: AlignmentClipRequest
+    selected_reference_relationship: AlignmentSelectedReferenceRelationship
+    comparisons: list[AlignmentClipRequest]
+    previous_offsets: AlignmentPreviousOffsetsPolicy
+    generated_dir: Path
+    shared_alignment_cache_dir: Path
+    settings: AlignmentCacheSettings

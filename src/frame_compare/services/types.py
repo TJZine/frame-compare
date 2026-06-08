@@ -7,6 +7,15 @@ type AlignmentCorrelationMode = Literal["raw_fft", "gcc_phat"]
 type AlignmentPreprocessingMode = Literal["none", "standard"]
 type AlignmentChannelStrategy = Literal["mono_downmix", "best_channel"]
 type AlignmentRefinementMode = Literal["disabled", "local"]
+type PreviousOffsetReusePolicy = Literal["disabled", "prompt", "always"]
+type AlignmentReuseCacheOrigin = Literal["computed", "vspreview_confirmed"]
+type AlignmentWriteProvenance = Literal[
+    "computed_this_run",
+    "vspreview_confirmed_this_run",
+    "shared_computed_offsets",
+    "shared_previous_offsets",
+    "preexisting_manual_override",
+]
 
 
 def _empty_comparison_streams() -> dict[str, int]:
@@ -29,6 +38,26 @@ class AlignmentResult:
 
 
 @dataclass(frozen=True)
+class AlignmentProvenance:
+    """Current-run provenance used to decide shared alignment-cache write eligibility."""
+
+    result: AlignmentResult
+    comparison_cache_key: str
+    provenance: AlignmentWriteProvenance
+    computed_result: AlignmentResult | None = None
+
+
+@dataclass(frozen=True)
+class ReusableAlignmentEntry:
+    """Shared-cache reusable alignment entry with prompt-display metadata."""
+
+    result: AlignmentResult
+    accepted_at: str
+    origin: AlignmentReuseCacheOrigin
+    computed_result: AlignmentResult | None = None
+
+
+@dataclass(frozen=True)
 class AlignmentConfig:
     """Configuration for audio alignment."""
 
@@ -38,6 +67,7 @@ class AlignmentConfig:
     use_vspreview: bool = False
     force_interactive: bool = False
     cache_results: bool = True
+    previous_offsets: PreviousOffsetReusePolicy = "disabled"
     correlation_mode: AlignmentCorrelationMode = "raw_fft"
     preprocessing_mode: AlignmentPreprocessingMode = "none"
     channel_strategy: AlignmentChannelStrategy = "mono_downmix"

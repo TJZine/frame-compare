@@ -246,6 +246,7 @@ def _probe_input_videos(
                 preserved_frame_props=preserved_props,
                 tonemap_prop_keys=tonemap_prop_keys,
             )
+            del source_info
             entries_by_key[cache_key] = snapshot
 
         snapshots_by_path[path] = snapshot

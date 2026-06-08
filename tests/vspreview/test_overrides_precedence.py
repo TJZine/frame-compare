@@ -48,13 +48,11 @@ class TestManualOverridePrecedence:
         with (
             patch("frame_compare.services.alignment._probe_fps") as mock_probe_fps,
             patch("frame_compare.services.alignment._extract_audio") as mock_extract_audio,
-            patch("frame_compare.services.alignment.load_cached_offsets") as mock_load_cached,
         ):
             mock_probe_fps.return_value = Fraction(24, 1)
             mock_extract_audio.side_effect = AssertionError(
                 "FFmpeg should NOT be called for overridden entries"
             )
-            mock_load_cached.return_value = None  # No cache
 
             # Import and call align_clips
             from frame_compare.services.alignment import align_clips

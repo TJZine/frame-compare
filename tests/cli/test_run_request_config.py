@@ -140,6 +140,96 @@ effective_fps = "24/1"
         assert data["sources"]["overrides"]["reference.mkv"]["effective_fps"] == "24/1"
 
 
+def test_run_write_config_json_preserves_previous_offsets_and_writes_config(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for --write-config")
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = root / "config" / "config.toml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            MINIMAL_CONFIG
+            + """
+[audio_alignment]
+previous_offsets = "prompt"
+""",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--write-config",
+                "--json",
+                "--root",
+                str(root),
+                "--config",
+                "config/config.toml",
+            ],
+        )
+
+        data = tomllib.loads(config_path.read_text(encoding="utf-8"))
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert result.stdout == ""
+    assert data["audio_alignment"]["previous_offsets"] == "prompt"
+
+
+def test_run_write_config_json_rejects_cache_conflict_before_disk_write(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for invalid --write-config")
+
+    def _write_text_atomic(_path: Path, _content: str, *, encoding: str = "utf-8") -> None:
+        raise AssertionError("config should not be written for invalid effective config")
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.write_text_atomic", _write_text_atomic)
+
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = root / "config" / "config.toml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            MINIMAL_CONFIG
+            + """
+[audio_alignment]
+cache_results = false
+previous_offsets = "always"
+""",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--write-config",
+                "--json",
+                "--root",
+                str(root),
+                "--config",
+                "config/config.toml",
+            ],
+        )
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stderr == ""
+    payload = json.loads(result.stdout)
+    assert {tuple(error["loc"]) for error in payload["error"]["details"]["validation_errors"]} == {
+        ("audio_alignment", "cache_results"),
+        ("audio_alignment", "previous_offsets"),
+    }
+
+
 def test_run_removed_frame_count_uses_owned_human_error_contract(
     monkeypatch: MonkeyPatch,
 ) -> None:

@@ -43,7 +43,13 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     selected_frames = [0, 2, 50, 99]
     captured: dict[str, Any] = {}
 
-    def _fake_align_clips(**kwargs: object) -> list[AlignmentResult]:
+    def _fake_align_clips_from_request(*args: object, **kwargs: object) -> list[AlignmentResult]:
+        assert len(args) == 2
+        assert "reference" not in kwargs
+        assert "comparisons" not in kwargs
+        assert "cache_dir" not in kwargs
+        captured["request"] = args[0]
+        captured["config"] = args[1]
         captured.update(kwargs)
         return [
             AlignmentResult(
@@ -57,13 +63,10 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
             )
         ]
 
-    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
 
     output = phase_tasks.run_align_phase(ctx, selected_frames=selected_frames)
 
-    assert captured["reference"] == ctx.reference.path
-    assert captured["comparisons"] == [comparison.path]
-    assert captured["cache_dir"] == ctx.workspace.generated_dir
     assert captured["reference_fps"] == ctx.reference.effective_fps
     assert captured["frame_props_by_stem"] == {
         "reference": {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1},
@@ -86,6 +89,46 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     assert captured["config"].refinement_sample_rate == 16000
     assert captured["config"].reference_stream == 1
     assert captured["config"].comparison_streams == {"encode": 2}
+    assert captured["config"].previous_offsets == "disabled"
+    alignment_request = captured["request"]
+    assert alignment_request.reference.path == ctx.reference.path
+    assert alignment_request.reference.label == "Reference"
+    assert alignment_request.reference.identity.path == ctx.reference.probe.fingerprint.path
+    assert alignment_request.reference.identity.size_bytes == 0
+    assert alignment_request.reference.identity.mtime_ns == ctx.reference.probe.fingerprint.mtime_ns
+    assert alignment_request.reference.trim_start_frames == 0
+    assert alignment_request.reference.trim_end_frame_inclusive is None
+    assert alignment_request.reference.effective_fps_num == 24
+    assert alignment_request.reference.effective_fps_den == 1
+    assert alignment_request.reference.selected_audio_stream == 1
+    assert alignment_request.reference.preserved_frame_props == {
+        "_Matrix": 1,
+        "_Transfer": 1,
+        "_Primaries": 1,
+    }
+    assert [comparison_request.path for comparison_request in alignment_request.comparisons] == [
+        comparison.path
+    ]
+    assert alignment_request.comparisons[0].label == "Encode 1"
+    assert alignment_request.comparisons[0].identity.path == comparison.probe.fingerprint.path
+    assert alignment_request.comparisons[0].identity.size_bytes == 0
+    assert (
+        alignment_request.comparisons[0].identity.mtime_ns == comparison.probe.fingerprint.mtime_ns
+    )
+    assert alignment_request.comparisons[0].selected_audio_stream == 2
+    assert alignment_request.comparisons[0].preserved_frame_props == {
+        "_Matrix": 1,
+        "_Transfer": 16,
+        "_Primaries": 9,
+    }
+    assert alignment_request.generated_dir == ctx.workspace.generated_dir
+    assert alignment_request.shared_alignment_cache_dir == ctx.workspace.shared_alignment_cache_dir
+    assert alignment_request.selected_reference_relationship == "auto"
+    assert alignment_request.previous_offsets == "disabled"
+    assert alignment_request.settings.sample_rate == 12000
+    assert alignment_request.settings.max_offset_seconds == 4.5
+    assert alignment_request.settings.correlation_mode == "gcc_phat"
+    assert alignment_request.settings.refinement_sample_rate == 16000
     assert output.reference.trim.trim_start_frames == 2
     assert output.comparisons[0].trim.trim_start_frames == 0
     assert output.comparisons[0].alignment is not None
@@ -98,6 +141,22 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     assert output.selection_details_by_source_frame is None
 
 
+def test_alignment_request_records_configured_reference_relationship(tmp_path: Path) -> None:
+    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
+    ctx = _context(tmp_path, comparisons=[comparison])
+    ctx.config = ctx.config.model_copy(
+        update={"sources": ctx.config.sources.model_copy(update={"reference": "encode.mkv"})}
+    )
+
+    alignment_request = phase_tasks._alignment_request_from_context(ctx)
+
+    assert alignment_request.selected_reference_relationship == "configured"
+    assert alignment_request.reference.path == ctx.reference.path
+    assert [comparison_request.path for comparison_request in alignment_request.comparisons] == [
+        comparison.path
+    ]
+
+
 def test_run_align_phase_normalizes_analyze_selected_base_domain_frames_with_base_trims(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -106,7 +165,7 @@ def test_run_align_phase_normalizes_analyze_selected_base_domain_frames_with_bas
     ctx.reference = ctx.reference.with_trim(trim_start_frames=3, trim_end_frame_inclusive=80)
     ctx.comparisons = [comparison.with_trim(trim_start_frames=7, trim_end_frame_inclusive=90)]
 
-    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
         return [
             AlignmentResult(
                 reference_clip="reference.mkv",
@@ -119,7 +178,7 @@ def test_run_align_phase_normalizes_analyze_selected_base_domain_frames_with_bas
             )
         ]
 
-    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
 
     output = phase_tasks.run_align_phase(ctx, selected_frames=[2, 4, 52])
 
@@ -141,7 +200,7 @@ def test_run_align_phase_does_not_backfill_dropped_user_frames_with_random(
         update={"user_frames": [0], "random_frame_count": 1, "random_seed": 42}
     )
 
-    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
         return [
             AlignmentResult(
                 reference_clip="reference.mkv",
@@ -154,7 +213,7 @@ def test_run_align_phase_does_not_backfill_dropped_user_frames_with_random(
             )
         ]
 
-    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
 
     output = phase_tasks.run_align_phase(ctx, selected_frames=[0, 50])
 
@@ -174,7 +233,7 @@ def test_run_align_phase_labels_skipped_analysis_fallback_random_frame(
         update={"user_frames": [0], "random_frame_count": 1, "random_seed": 42}
     )
 
-    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
         return [
             AlignmentResult(
                 reference_clip="reference.mkv",
@@ -187,7 +246,7 @@ def test_run_align_phase_labels_skipped_analysis_fallback_random_frame(
             )
         ]
 
-    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
 
     output = phase_tasks.run_align_phase(ctx, selected_frames=[0, 66])
 
@@ -226,7 +285,7 @@ def test_run_align_phase_reselects_trimmed_overlap_when_fallback_plan_would_drop
     )
     selected_frames = [0, 1, 2, 3]
 
-    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
         return [
             AlignmentResult(
                 reference_clip="reference.mkv",
@@ -239,7 +298,7 @@ def test_run_align_phase_reselects_trimmed_overlap_when_fallback_plan_would_drop
             )
         ]
 
-    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
 
     output = phase_tasks.run_align_phase(ctx, selected_frames=selected_frames)
     overlap_start = output.reference.trim.trim_start_frames
@@ -286,7 +345,7 @@ def test_run_align_phase_raises_when_overlap_is_smaller_than_generated_counts(
         ),
     )
 
-    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
         return [
             AlignmentResult(
                 reference_clip="reference.mkv",
@@ -299,7 +358,7 @@ def test_run_align_phase_raises_when_overlap_is_smaller_than_generated_counts(
             )
         ]
 
-    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
 
     with pytest.raises(SelectionError) as exc_info:
         phase_tasks.run_align_phase(ctx, selected_frames=[0, 1, 2, 3])
@@ -341,7 +400,7 @@ def test_run_align_phase_replaces_stale_analysis_metadata_after_tiny_overlap_fal
     ctx.selection_breakdown = initial_selection.breakdown
     ctx.selection_details_by_source_frame = dict(initial_selection.selection_details)
 
-    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
         return [
             AlignmentResult(
                 reference_clip="reference.mkv",
@@ -354,7 +413,7 @@ def test_run_align_phase_replaces_stale_analysis_metadata_after_tiny_overlap_fal
             )
         ]
 
-    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
 
     output = phase_tasks.run_align_phase(
         ctx,
@@ -397,7 +456,7 @@ def test_run_align_phase_preserves_surviving_user_label_when_metrics_reselect_sa
         ),
     )
 
-    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
         return [
             AlignmentResult(
                 reference_clip="reference.mkv",
@@ -410,7 +469,7 @@ def test_run_align_phase_preserves_surviving_user_label_when_metrics_reselect_sa
             )
         ]
 
-    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
 
     output = phase_tasks.run_align_phase(ctx, selected_frames=[98, 0])
 
@@ -444,7 +503,7 @@ def test_run_align_phase_fallback_reselects_only_inside_global_selection_window(
         ),
     )
 
-    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
         return [
             AlignmentResult(
                 reference_clip="reference.mkv",
@@ -457,7 +516,7 @@ def test_run_align_phase_fallback_reselects_only_inside_global_selection_window(
             )
         ]
 
-    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
 
     output = phase_tasks.run_align_phase(ctx, selected_frames=[0, 1, 2, 3])
 
@@ -481,7 +540,7 @@ def test_run_align_phase_raises_when_alignment_leaves_no_overlap(
     ctx = _context(tmp_path, comparisons=[comparison])
     selected_frames = [0, 1]
 
-    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
         return [
             AlignmentResult(
                 reference_clip="reference.mkv",
@@ -494,7 +553,7 @@ def test_run_align_phase_raises_when_alignment_leaves_no_overlap(
             )
         ]
 
-    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
 
     with pytest.raises(AudioAlignmentError, match="No overlapping frames"):
         phase_tasks.run_align_phase(ctx, selected_frames=selected_frames)
@@ -508,7 +567,7 @@ def test_run_align_phase_preserves_accepted_alignment_when_another_result_is_rej
     ctx = _context(tmp_path, comparisons=[comp_a, comp_b])
     selected_frames = [0, 2, 50, 99]
 
-    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
         return [
             AlignmentResult(
                 reference_clip="reference.mkv",
@@ -532,7 +591,7 @@ def test_run_align_phase_preserves_accepted_alignment_when_another_result_is_rej
             ),
         ]
 
-    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
 
     output = phase_tasks.run_align_phase(ctx, selected_frames=selected_frames)
 
@@ -562,7 +621,7 @@ def test_run_align_phase_normalizes_three_comparisons_with_rejected_zero_offset_
     comp_c = _clip(tmp_path / "comparison_videos" / "encode_c.mkv", label="Encode C")
     ctx = _context(tmp_path, comparisons=[comp_a, comp_b, comp_c])
 
-    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
         return [
             AlignmentResult(
                 reference_clip="reference.mkv",
@@ -595,7 +654,7 @@ def test_run_align_phase_normalizes_three_comparisons_with_rejected_zero_offset_
             ),
         ]
 
-    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
 
     output = phase_tasks.run_align_phase(ctx, selected_frames=[2, 50, 96])
 
@@ -625,7 +684,7 @@ def test_run_align_phase_legacy_normalizes_positive_negative_and_zero_offsets_wi
         comp_c.with_trim(trim_start_frames=13, trim_end_frame_inclusive=97),
     ]
 
-    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
         return [
             AlignmentResult(
                 reference_clip="reference.mkv",
@@ -656,7 +715,7 @@ def test_run_align_phase_legacy_normalizes_positive_negative_and_zero_offsets_wi
             ),
         ]
 
-    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
 
     output = phase_tasks.run_align_phase(ctx, selected_frames=[10, 57, 81])
 
@@ -686,7 +745,7 @@ def test_run_align_phase_normalizes_manual_source_frame_pair_offsets_globally(
     comp_b = _clip(tmp_path / "comparison_videos" / "encode_b.mkv", label="Encode B")
     ctx = _context(tmp_path, comparisons=[comp_a, comp_b])
 
-    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
         return [
             AlignmentResult(
                 reference_clip="reference.mkv",
@@ -710,7 +769,7 @@ def test_run_align_phase_normalizes_manual_source_frame_pair_offsets_globally(
             ),
         ]
 
-    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
 
     output = phase_tasks.run_align_phase(ctx, selected_frames=[12, 40, 95])
 
@@ -741,7 +800,7 @@ def test_map_aligned_to_source_frame_after_positive_negative_and_zero_offsets(
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
     ctx = _context(tmp_path, comparisons=[comparison])
 
-    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
         return [
             AlignmentResult(
                 reference_clip="reference.mkv",
@@ -754,7 +813,7 @@ def test_map_aligned_to_source_frame_after_positive_negative_and_zero_offsets(
             )
         ]
 
-    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
 
     output = phase_tasks.run_align_phase(ctx, selected_frames=[0, 20, 40])
 
@@ -791,7 +850,7 @@ def test_run_align_phase_rejects_applied_result_without_frame_offset_even_when_m
     comp_b = _clip(tmp_path / "comparison_videos" / "encode_b.mkv", label="Encode B")
     ctx = _context(tmp_path, comparisons=[comp_a, comp_b])
 
-    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
+    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
         return [
             AlignmentResult(
                 reference_clip="reference.mkv",
@@ -815,7 +874,7 @@ def test_run_align_phase_rejects_applied_result_without_frame_offset_even_when_m
             ),
         ]
 
-    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
 
     with pytest.raises(
         AudioAlignmentError, match="Applied alignment result is missing frame offset."
@@ -829,10 +888,10 @@ def test_run_align_phase_no_comparisons_is_noop(
     ctx = _context(tmp_path)
     selected_frames = [2, 4]
 
-    def _unexpected_align(**_kwargs: object) -> list[AlignmentResult]:
+    def _unexpected_align(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
         raise AssertionError("No comparisons should skip alignment work")
 
-    monkeypatch.setattr(phase_tasks, "align_clips", _unexpected_align)
+    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _unexpected_align)
 
     output = phase_tasks.run_align_phase(ctx, selected_frames=selected_frames)
 

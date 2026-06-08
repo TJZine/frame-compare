@@ -22,8 +22,8 @@ from frame_compare.orchestration.errors import (
 )
 from frame_compare.orchestration.probing.probe_cache import load_clip_probe_cache
 from frame_compare.orchestration.types import RunDependencies, RunRequest
-from frame_compare.services.alignment import CACHE_FILE_NAME
 from frame_compare.vs.types import SourceInfo
+from frame_compare.vspreview.overrides import MANUAL_OVERRIDES_FILE
 from tests.orchestration.execute_run_helpers import write_probe_cache_for_inputs
 
 if TYPE_CHECKING:
@@ -180,7 +180,8 @@ def test_execute_prep_no_cache_removes_only_matching_shared_metrics_cache(tmp_pa
     input_dir = tmp_path / "comparison_videos"
     _create_video_files(input_dir, "source.mkv")
 
-    config = preparation.prepare_preflight(root=tmp_path).config
+    preflight = preparation.prepare_preflight(root=tmp_path)
+    config = preflight.config
     source_path = input_dir / "source.mkv"
     prep_for_domain = asyncio.run(
         preparation.execute_prep(
@@ -199,9 +200,12 @@ def test_execute_prep_no_cache_removes_only_matching_shared_metrics_cache(tmp_pa
     metrics_path.write_text("{}", encoding="utf-8")
     other_metrics_path = metrics_dir / "other__other.compframes"
     other_metrics_path.write_text("{}", encoding="utf-8")
-    offsets_path = tmp_path / "generated" / CACHE_FILE_NAME
-    offsets_path.parent.mkdir(parents=True, exist_ok=True)
-    offsets_path.write_text('version = "1"\n', encoding="utf-8")
+    manual_overrides_path = tmp_path / "generated" / MANUAL_OVERRIDES_FILE
+    manual_overrides_path.parent.mkdir(parents=True, exist_ok=True)
+    manual_overrides_path.write_text('version = "1"\n', encoding="utf-8")
+    alignment_cache_path = preflight.workspace.shared_alignment_cache_dir / "shared_prev_offset"
+    alignment_cache_path.parent.mkdir(parents=True, exist_ok=True)
+    alignment_cache_path.write_text("preserve me\n", encoding="utf-8")
 
     prep = asyncio.run(
         preparation.execute_prep(
@@ -213,7 +217,8 @@ def test_execute_prep_no_cache_removes_only_matching_shared_metrics_cache(tmp_pa
     assert prep.clips[0].label == "Reference"
     assert not metrics_path.exists()
     assert other_metrics_path.exists()
-    assert offsets_path.exists()
+    assert manual_overrides_path.exists()
+    assert alignment_cache_path.exists()
 
 
 def test_execute_prep_no_cache_removes_only_selected_reference_metrics_cache(
@@ -403,6 +408,10 @@ enable = false
     assert prep.workspace.run_dir is not None
     assert prep.workspace.generated_dir == prep.workspace.run_dir / "generated"
     assert prep.workspace.cache_dir == tmp_path / "custom_generated" / "cache" / "analysis"
+    assert (
+        prep.workspace.shared_alignment_cache_dir
+        == tmp_path / "custom_generated" / "cache" / "alignment"
+    )
 
 
 def test_execute_prep_probes_uncached_clips_and_persists_probe_snapshot(tmp_path: Path) -> None:

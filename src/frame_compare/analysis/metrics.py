@@ -189,16 +189,19 @@ def calculate_metrics(
 
     # Cache miss or invalid - compute metrics for the selected analysis source only.
     source = _load_analysis_source(source_path, vs_loader)
-    luminance, motion = _calculate_clip_metrics(source, reporter)
-    metrics = _build_metrics(
-        luminance=luminance,
-        motion=motion,
-        source=source,
-        fingerprint=fingerprint,
-        clips=clips,
-        analysis_source_path=source_path,
-        effective_fps=effective_fps,
-    )
+    try:
+        luminance, motion = _calculate_clip_metrics(source, reporter)
+        metrics = _build_metrics(
+            luminance=luminance,
+            motion=motion,
+            source=source,
+            fingerprint=fingerprint,
+            clips=clips,
+            analysis_source_path=source_path,
+            effective_fps=effective_fps,
+        )
+    finally:
+        del source
 
     _save_metrics_cache_best_effort(metrics, cache_dir, reporter)
 

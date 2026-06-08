@@ -212,6 +212,7 @@ def print_at_a_glance(
     _add_subheader(table, "Audio Alignment")
     _add_kv(table, "alignment enabled", _styled_bool(config.audio_alignment.enable))
     _add_kv(table, "FFmpeg audio", _styled_bool(ffmpeg_available))
+    _add_kv(table, "previous offsets", _styled_value(config.audio_alignment.previous_offsets))
     _add_kv(table, "interactive alignment", _styled_bool(config.audio_alignment.use_vspreview))
     _add_kv(
         table,

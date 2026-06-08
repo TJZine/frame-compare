@@ -6,10 +6,19 @@ from pathlib import Path
 
 import pytest
 
-from frame_compare.services.alignment import align_clips, check_alignment_cached
-from frame_compare.services.alignment_cache import CACHE_FILE_NAME
+from frame_compare.services.alignment import (
+    align_clips,
+    align_clips_from_request,
+)
+from frame_compare.services.alignment_reuse_cache import CACHE_FILE_NAME as REUSE_CACHE_FILE_NAME
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.subproc import run_subprocess
+from frame_compare.utils.types import (
+    AlignmentCacheSettings,
+    AlignmentClipIdentity,
+    AlignmentClipRequest,
+    AlignmentRequest,
+)
 
 _DURATION_SECONDS = 3
 _SAMPLE_RATE = 48000
@@ -175,6 +184,56 @@ def _assert_applied_offset(result: AlignmentResult, *, frame_offset: int) -> Non
     assert result.correlation_score > 0.9
 
 
+def _request_clip(path: Path) -> AlignmentClipRequest:
+    stat = path.stat()
+    return AlignmentClipRequest(
+        path=path,
+        label=path.stem,
+        identity=AlignmentClipIdentity(
+            path=path,
+            size_bytes=stat.st_size,
+            mtime_ns=stat.st_mtime_ns,
+        ),
+        trim_start_frames=0,
+        trim_end_frame_inclusive=None,
+        effective_fps_num=_FPS,
+        effective_fps_den=1,
+    )
+
+
+def _alignment_request(
+    *,
+    reference: Path,
+    comparison: Path,
+    config: AlignmentConfig,
+    generated_dir: Path,
+    shared_alignment_cache_dir: Path,
+) -> AlignmentRequest:
+    return AlignmentRequest(
+        reference=_request_clip(reference),
+        selected_reference_relationship="auto",
+        comparisons=[_request_clip(comparison)],
+        previous_offsets=config.previous_offsets,
+        generated_dir=generated_dir,
+        shared_alignment_cache_dir=shared_alignment_cache_dir,
+        settings=AlignmentCacheSettings(
+            sample_rate=config.sample_rate,
+            max_offset_seconds=config.max_offset_seconds,
+            correlation_mode=config.correlation_mode,
+            preprocessing_mode=config.preprocessing_mode,
+            channel_strategy=config.channel_strategy,
+            confidence_threshold=config.confidence_threshold,
+            ambiguity_peak_ratio=config.ambiguity_peak_ratio,
+            window_length_seconds=config.window_length_seconds,
+            window_stride_seconds=config.window_stride_seconds,
+            minimum_valid_windows=config.minimum_valid_windows,
+            consensus_minimum_ratio=config.consensus_minimum_ratio,
+            refinement_mode=config.refinement_mode,
+            refinement_sample_rate=config.refinement_sample_rate,
+        ),
+    )
+
+
 @pytest.mark.integration
 def test_align_clips_recovers_known_offset_from_generated_media(
     tmp_path: Path,
@@ -207,7 +266,6 @@ def test_align_clips_recovers_known_offset_from_generated_media(
 
     assert len(results) == 1
     _assert_applied_offset(results[0], frame_offset=2)
-    assert check_alignment_cached(reference, [comparison], cache_dir, config=config) == []
     downmix_results = align_clips(reference, [comparison], downmix_config, downmix_cache_dir)
     assert downmix_results[0].applied is False
     assert downmix_results[0].diagnostic == "low_confidence"
@@ -248,18 +306,45 @@ def test_align_clips_selects_runtime_streams_and_keeps_cache_config_distinct(
     default_results = align_clips(reference, [comparison], default_config, cache_dir)
 
     _assert_applied_offset(default_results[0], frame_offset=2)
-    assert check_alignment_cached(reference, [comparison], cache_dir, config=default_config) == []
-    assert check_alignment_cached(reference, [comparison], cache_dir, config=override_config) == [
-        "reference:comparison"
-    ]
 
     override_results = align_clips(reference, [comparison], override_config, cache_dir)
 
     _assert_applied_offset(override_results[0], frame_offset=1)
-    assert check_alignment_cached(reference, [comparison], cache_dir, config=override_config) == []
-    assert check_alignment_cached(reference, [comparison], cache_dir, config=default_config) == [
-        "reference:comparison"
-    ]
+
+
+@pytest.mark.integration
+def test_typed_alignment_writes_shared_reuse_when_previous_offsets_disabled(
+    tmp_path: Path,
+    require_ffmpeg: None,
+) -> None:
+    reference = tmp_path / "reference.mkv"
+    comparison = tmp_path / "comparison.mkv"
+    generated_dir = tmp_path / "generated"
+    shared_alignment_cache_dir = tmp_path / "generated" / "cache" / "alignment"
+    generated_dir.mkdir()
+    _write_hostile_stereo_clip(reference)
+    _write_hostile_stereo_clip(comparison, target_delay_ms=200)
+    config = AlignmentConfig(
+        cache_results=True,
+        previous_offsets="disabled",
+        sample_rate=_SAMPLE_RATE,
+        max_offset_seconds=1.0,
+        channel_strategy="best_channel",
+        confidence_threshold=0.9,
+    )
+    request = _alignment_request(
+        reference=reference,
+        comparison=comparison,
+        config=config,
+        generated_dir=generated_dir,
+        shared_alignment_cache_dir=shared_alignment_cache_dir,
+    )
+    results = align_clips_from_request(request, config)
+
+    assert len(results) == 1
+    _assert_applied_offset(results[0], frame_offset=2)
+    assert (shared_alignment_cache_dir / REUSE_CACHE_FILE_NAME).exists()
+    assert not (generated_dir / "audio_offsets.toml").exists()
 
 
 @pytest.mark.integration
@@ -286,7 +371,3 @@ def test_align_clips_rejects_weak_signal_without_applying_or_caching(
     assert results[0].frame_offset is None
     assert results[0].time_offset_seconds is None
     assert results[0].diagnostic == "insufficient_valid_windows"
-    assert not (cache_dir / CACHE_FILE_NAME).exists()
-    assert check_alignment_cached(reference, [comparison], cache_dir, config=config) == [
-        "reference:comparison"
-    ]
