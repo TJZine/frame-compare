@@ -618,16 +618,23 @@ audio-alignment accuracy workstream. There are no dedicated `run` flags for them
 These fields affect current computed alignment behavior when audio alignment is
 enabled.
 
-- `previous_offsets = "disabled" | "prompt" | "always"` controls opt-in shared
-  previous-offset reuse. It is config-only, has no `run` flag, and is not present
-  in the CLI override map. `disabled` is the default and does not read or reuse
-  shared previous offsets, but eligible current-run computed or
+- `previous_offsets = "disabled" | "prompt" | "always"` controls opt-in reuse of
+  shared VSPreview-confirmed offsets. It is config-only, has no `run` flag, and
+  is not present in the CLI override map. Exact-match computed audio alignment
+  offsets are deterministic cache hits when `cache_results = true`, regardless
+  of `previous_offsets`; the policy only controls whether prior human-confirmed
+  offsets are reused. `disabled` is the default and does not read or reuse shared
+  VSPreview-confirmed offsets, but eligible current-run computed or
   VSPreview-confirmed results still write to the shared reuse cache when
   `cache_results = true`. `prompt` shows a Rich stderr table for a complete
-  valid previous-offset set and asks `Reuse previous alignment offsets? [y/N]`;
-  default, EOF, unavailable stdin, or unavailable stderr all continue without
-  reuse. `always` reuses a complete valid set without prompting. Prompt mode
-  writes no prompt/table to stdout.
+  valid VSPreview-confirmed offset set and asks
+  `Reuse previous preview-confirmed alignment offsets? [y/N]`; default, EOF,
+  unavailable stdin, or unavailable stderr all continue without confirmed-offset
+  reuse. If a confirmed cache entry also contains the computed audio alignment
+  result that produced the preview suggestion, declining the prompt reuses that
+  computed result instead of rerunning audio alignment. `always` reuses a
+  complete valid confirmed set without prompting. Prompt mode writes no
+  prompt/table to stdout.
 - Previous-offset prompt mode requires both stdin and stderr to be TTYs before
   any blocking read. If stderr is not a TTY, the prompt is invisible and the run
   continues without reuse and without a human diagnostic. If stderr is a TTY but
@@ -635,9 +642,9 @@ enabled.
   `Previous alignment offset reuse prompt unavailable; continuing without reuse.`
   to stderr and continues without reuse.
 - The previous-offset reuse table displays reference and comparison labels,
-  signed frame offset, time offset seconds, source label `computed` or
-  `confirmed`, the shared cache path, and each entry's persisted `accepted_at`
-  timestamp. It does not derive freshness from file mtime or index mtime.
+  signed frame offset, time offset seconds, source label `confirmed`, the shared
+  cache path, and each entry's persisted `accepted_at` timestamp. It does not
+  derive freshness from file mtime or index mtime.
 - Shared previous-offset entries live under
   `<resolved paths.generated_dir>/cache/alignment/`. This is shared
   workspace-level cache state even when `paths.use_run_folders = true`; it does

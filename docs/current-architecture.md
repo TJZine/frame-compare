@@ -117,11 +117,14 @@ Primary owned paths:
   VSPreview-confirmed offsets keyed by a typed source-set identity, source
   fingerprints, source trims, effective FPS values, selected reference
   relationship, selected audio streams, and alignment settings that affect
-  computed offsets. Unreadable, corrupt, unsupported-version, malformed
-  source-table, or invalid-entry shared reuse data degrades to the normal
-  alignment path with a warning log event. Ordinary no-match, incomplete, or
-  stale source-set misses can silently return no reusable set and continue
-  through the normal alignment path.
+  computed offsets. VSPreview-confirmed entries may also retain the computed
+  audio alignment result that produced the preview suggestion so a later run can
+  decline the human-confirmed offset without rerunning deterministic audio
+  alignment. Unreadable, corrupt, unsupported-version, malformed source-table, or
+  invalid-entry shared reuse data degrades to the normal alignment path with a
+  warning log event. Ordinary no-match, incomplete, or stale source-set misses
+  can silently return no reusable set and continue through the normal alignment
+  path.
 - `generated/clip_probe.toml` or `<resolved paths.generated_dir>/clip_probe.toml`:
   shared clip probe cache used by `--from-cache-only` prevalidation before
   run-folder reservation
@@ -168,14 +171,18 @@ orchestration-owned or analysis-owned identity types such as `ClipState`,
 `ClipIdentity`, or `ClipFingerprint`.
 
 `frame_compare.services.alignment` owns previous-offset reuse policy and
-alignment precedence. `frame_compare.services.alignment_reuse_prompt` owns the
-Rich stderr prompt/table helper, including TTY fallback behavior and no-color
-rendering. `frame_compare.services.types.AlignmentProvenance` carries
-service-owned write-source provenance such as `computed_this_run`,
-`vspreview_confirmed_this_run`, `shared_previous_offsets`,
-and `preexisting_manual_override`; shared-cache writes
-consume only current-run computed or VSPreview-confirmed provenance rather than
-inferring eligibility from the final flattened `AlignmentResult.source`.
+alignment precedence. Exact-match computed audio alignment cache hits are treated
+as deterministic and can be reused independently of the human confirmed-offset
+policy; `previous_offsets` governs only VSPreview-confirmed offset reuse.
+`frame_compare.services.alignment_reuse_prompt` owns the Rich stderr
+prompt/table helper, including TTY fallback behavior and no-color rendering.
+`frame_compare.services.types.AlignmentProvenance` carries service-owned
+write-source provenance such as `computed_this_run`,
+`vspreview_confirmed_this_run`, `shared_computed_offsets`,
+`shared_previous_offsets`, and
+`preexisting_manual_override`; shared-cache writes consume only current-run
+computed or VSPreview-confirmed provenance rather than inferring eligibility from
+the final flattened `AlignmentResult.source`.
 
 ## External Boundaries
 
