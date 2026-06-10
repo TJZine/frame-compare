@@ -14,6 +14,7 @@ import frame_compare.services.alignment_reuse_cache as alignment_reuse_cache
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.config.loader import load_config
+from frame_compare.config.schema_enums import AnalysisPerformanceMode
 from frame_compare.orchestration import phase_selection
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
@@ -122,6 +123,101 @@ enable = false
     assert alignment_reuse_path.exists()
 
 
+def test_execute_run_no_cache_deletes_only_current_performance_mode_metrics_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    create_config(
+        tmp_path,
+        content="""\
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "generated"
+config_dir = "config"
+use_run_folders = false
+
+[analysis]
+random_frame_count = 0
+dark_frame_count = 1
+performance_mode = "balanced"
+
+[audio_alignment]
+enable = false
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+""",
+    )
+    input_dir = tmp_path / "comparison_videos"
+    create_video_files(input_dir, "source.mkv")
+    config = load_config(tmp_path / "config" / "config.toml")
+    quality_config = config.model_copy(
+        update={
+            "analysis": config.analysis.model_copy(
+                update={"performance_mode": AnalysisPerformanceMode.QUALITY}
+            )
+        }
+    )
+    analysis_cache_dir = tmp_path / "generated" / "cache" / "analysis"
+    source_path = input_dir / "source.mkv"
+    write_metrics_cache(analysis_cache_dir, source_path=source_path, config=quality_config)
+    write_metrics_cache(analysis_cache_dir, source_path=source_path, config=config)
+
+    selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
+    quality_fingerprint = cache_io.compute_cache_key(
+        [source_path],
+        quality_config.analysis,
+        selection_domain=selection_domain,
+    )
+    balanced_fingerprint = cache_io.compute_cache_key(
+        [source_path],
+        config.analysis,
+        selection_domain=selection_domain,
+    )
+    quality_cache_path = cache_io.find_metrics_cache_file(analysis_cache_dir, quality_fingerprint)
+    balanced_cache_path = cache_io.find_metrics_cache_file(analysis_cache_dir, balanced_fingerprint)
+    assert quality_cache_path is not None
+    assert balanced_cache_path is not None
+
+    def _fake_calculate_metrics(**_kwargs: object) -> FrameMetrics:
+        return FrameMetrics(
+            luminance=[0.1] * 100,
+            motion=[0.0] * 100,
+            metadata=MetricsMetadata(
+                frame_count=100,
+                fps=Fraction(24, 1),
+                config_fingerprint="fingerprint",
+                clips=[
+                    ClipIdentity(
+                        path=str(source_path),
+                        size=source_path.stat().st_size,
+                        mtime=source_path.stat().st_mtime,
+                        sha1=None,
+                    )
+                ],
+            ),
+        )
+
+    monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
+    request = RunRequest(
+        root=tmp_path,
+        no_cache=True,
+        skip_analysis=False,
+        skip_metadata=True,
+        no_upload=True,
+    )
+    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+
+    asyncio.run(execute_run(request, deps=deps))
+
+    assert quality_cache_path.exists()
+    assert not balanced_cache_path.exists()
+
+
 def test_execute_run_from_cache_only_fails_when_metrics_cache_missing(
     tmp_path: Path,
 ) -> None:
@@ -162,6 +258,64 @@ enable = false
     deps = RunDependencies(vs_loader=FakeVSLoader())
 
     with pytest.raises(MetricsCalculationError):
+        asyncio.run(execute_run(request, deps=deps))
+
+
+def test_execute_run_from_cache_only_rejects_cache_for_other_performance_mode(
+    tmp_path: Path,
+) -> None:
+    create_config(
+        tmp_path,
+        content="""\
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "generated"
+config_dir = "config"
+use_run_folders = false
+
+[analysis]
+random_frame_count = 0
+dark_frame_count = 1
+performance_mode = "balanced"
+
+[audio_alignment]
+enable = false
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+""",
+    )
+    input_dir = tmp_path / "comparison_videos"
+    create_video_files(input_dir, "source.mkv")
+    config = load_config(tmp_path / "config" / "config.toml")
+    quality_config = config.model_copy(
+        update={
+            "analysis": config.analysis.model_copy(
+                update={"performance_mode": AnalysisPerformanceMode.QUALITY}
+            )
+        }
+    )
+    source_path = input_dir / "source.mkv"
+    write_metrics_cache(
+        tmp_path / "generated" / "cache" / "analysis",
+        source_path=source_path,
+        config=quality_config,
+    )
+
+    request = RunRequest(
+        root=tmp_path,
+        from_cache_only=True,
+        skip_analysis=False,
+        skip_metadata=True,
+        no_upload=True,
+    )
+    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+
+    with pytest.raises(MetricsCalculationError, match="Cached metrics missing or mismatched"):
         asyncio.run(execute_run(request, deps=deps))
 
 

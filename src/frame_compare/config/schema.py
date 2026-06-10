@@ -10,6 +10,7 @@ from pydantic_settings import (
 )
 
 from frame_compare.config.schema_enums import (
+    AnalysisPerformanceMode,
     LogFormat,
     LogLevel,
     OverlayMode,
@@ -85,6 +86,7 @@ class ConfigSchema(BaseSettings):
 
 
 __all__ = [
+    "AnalysisPerformanceMode",
     "AnalysisConfig",
     "AudioAlignmentConfig",
     "ColorConfig",
