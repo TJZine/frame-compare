@@ -122,6 +122,15 @@ From a GitHub release zip:
 .\install.cmd
 ```
 
+Source builds produce `dist/frame-compare-portable-win-x64`; that bundle root is
+not the repository root. The installed bundle keeps the default config/ and comparison_videos/ directories in the bundle root, includes VSPreview + PyQt6,
+and ships the `frame-compare-update apply` updater command. For source builds
+with the interactive preview stack, use:
+
+```bash
+uv sync --group dev --extra vspreview --frozen
+```
+
 Full details (source builds, directory layout, updater): **[Windows Portable Guide](docs/windows-portable.md)**
 
 ---
@@ -132,6 +141,10 @@ Full details (source builds, directory layout, updater): **[Windows Portable Gui
 > The full pipeline depends on external tools (FFmpeg, VapourSynth + plugins). The most reproducible way to run end-to-end commands is via **Docker**.
 
 ### Docker (Recommended)
+
+```bash
+docker run --rm frame-compare:dev doctor --json
+```
 
 ```bash
 # Build
@@ -174,6 +187,19 @@ frame-compare run --root . --input ./comparison_videos
 ---
 
 ## Usage
+
+### Analysis Performance
+
+The `[analysis]` config supports `performance_mode`:
+
+```toml
+[analysis]
+performance_mode = "quality"  # quality, balanced, or fast
+```
+
+`quality` is the default and preserves the current full-resolution analysis
+behavior. `balanced` and `fast` are approximate modes that can reduce analysis
+work, but they may select different dark, bright, or motion frames.
 
 ### Reports
 

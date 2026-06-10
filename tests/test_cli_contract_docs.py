@@ -9,7 +9,8 @@ from typer.main import get_command
 from frame_compare.cli.entry import app
 from frame_compare.cli.run_command import handle_json_output
 from frame_compare.config.overrides import CLI_OVERRIDE_MAP
-from frame_compare.config.schema import SlowpicsConfig, Visibility
+from frame_compare.config.schema import AnalysisConfig, SlowpicsConfig, Visibility
+from frame_compare.config.schema_enums import AnalysisPerformanceMode
 from frame_compare.orchestration.types import RunResult
 
 
@@ -214,6 +215,31 @@ def test_current_cli_contract_documents_only_no_upload_slowpics_run_flag() -> No
     assert "slowpics.confirm_upload_after_report" not in CLI_OVERRIDE_MAP.values()
     assert "`--no-upload` is the only slow.pics-specific `run` flag." in mapping_section
     assert "No runtime-only slow.pics `run` flags exist." in normalized_mapping_section
+
+
+def test_current_cli_contract_documents_analysis_performance_mode_config_only() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
+    analysis_heading = "## Config-Only Analysis Surface"
+    slowpics_heading = "## Config-Only slow.pics Surface"
+    assert analysis_heading in cli_contract, f"Missing heading: {analysis_heading}"
+
+    analysis_section = cli_contract.split(analysis_heading, maxsplit=1)[1].split(
+        slowpics_heading,
+        maxsplit=1,
+    )[0]
+    normalized_analysis_section = " ".join(analysis_section.split())
+    declared_options = _declared_run_options()
+
+    assert AnalysisConfig().performance_mode == AnalysisPerformanceMode.QUALITY
+    assert 'performance_mode = "quality"' in analysis_section
+    assert '`performance_mode = "quality" | "balanced" | "fast"`' in analysis_section
+    assert "There is no dedicated `run` flag for analysis performance mode in v1." in (
+        analysis_section
+    )
+    assert "--analysis-performance" not in declared_options
+    assert "analysis.performance_mode" not in CLI_OVERRIDE_MAP.values()
+    assert "cache-isolated from `quality` and from each other" in normalized_analysis_section
 
 
 def test_current_cli_contract_documents_slowpics_json_shape(
@@ -747,7 +773,8 @@ def test_current_cli_contract_documents_analysis_ignore_window_and_cache_domain(
         "stable all-source selection-domain token",
         "`analysis_source_path`",
         "`reference_path`",
-        "Cache schema v4 stores `analysis_source_path`",
+        "Cache schema v5 stores `analysis_source_path`, `performance_mode`, `algorithm_id`",
+        "performance modes, or metric algorithm identities",
         'When `sources.analysis_source = "reference"`',
         "source trims",
         "effective FPS values",

@@ -46,6 +46,16 @@ Current phase-family owners are intentionally explicit:
 - `frame_compare.orchestration.phase_tasks`: align and render phase bodies plus alignment/render-specific helpers
 - `frame_compare.orchestration.phase_post_render`: metadata, publish, report, confirmation, and cleanup phase bodies
 
+Analysis metric algorithm identity is analysis-owned. `frame_compare.analysis.metric_identity`
+builds the stable cache identity for `analysis.performance_mode`; cache I/O stores that
+identity in schema v5 payload metadata, and orchestration only passes the effective
+analysis config plus selection-domain token into the analysis/cache owner.
+`frame_compare.analysis.metric_strategies` owns the metric implementations:
+`quality` is the default/current full-frame Python/NumPy behavior, while
+`balanced` and `fast` are approximate VapourSynth PlaneStats modes that can
+choose different dark, bright, or motion frames. All modes still return dense
+source-frame-indexed luminance and motion arrays for the selected analysis clip.
+
 ## Module Boundaries
 
 Import boundaries are enforced by `importlinter.ini`.
@@ -106,11 +116,13 @@ Primary owned paths:
   selection-domain token. The token stores `analysis_source_path`,
   `reference_path`, source identities, source trims, effective FPS values,
   configured analysis ignore windows, and the final shared selectable window.
-  Cache schema v4 stores `analysis_source_path` in `MetricsMetadata`, and the
-  metric arrays are for that selected analysis clip. Metric-array cache identity
-  excludes frame-selection counts, `user_frames`, random seed, and dark/bright
-  quantile thresholds because those affect frame choice rather than metric
-  computation.
+  Cache schema v5 stores `analysis_source_path`, `performance_mode`,
+  `algorithm_id`, `metric_backend`, and stable `algorithm_identity_json` in
+  `MetricsMetadata`, and the metric arrays are for that selected analysis clip.
+  Metric-array cache identity includes the selected analysis performance mode
+  and algorithm identity. It excludes frame-selection counts, `user_frames`,
+  random seed, and dark/bright quantile thresholds because those affect frame
+  choice rather than metric computation.
 - `<resolved paths.generated_dir>/cache/alignment/alignment_reuse.toml`:
   shared previous alignment offset reuse cache owned by
   `frame_compare.services.alignment_reuse_cache`. It stores accepted computed or
