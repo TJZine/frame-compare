@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import math
 import sys
 from fractions import Fraction
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
 import numpy as np
@@ -33,11 +35,22 @@ else:
 
     vs_mock = vs_module
 
+from frame_compare.analysis.cache_io import compute_cache_key  # noqa: E402
 from frame_compare.analysis.errors import MetricsCalculationError  # noqa: E402
+from frame_compare.analysis.metric_identity import (  # noqa: E402
+    stable_metric_algorithm_identity_json,
+)
+from frame_compare.analysis.metric_strategies import (  # noqa: E402
+    MetricComputationResult,
+    _fast_candidate_count,
+    _fast_refinement_indices,
+    _fast_sampled_motion_indices,
+    calculate_metric_strategy,
+    calculate_quality_luminance,
+    calculate_quality_motion,
+)
 from frame_compare.analysis.metrics import (  # noqa: E402
     ProgressReporter,
-    _calculate_luminance,
-    _calculate_motion,
     calculate_metrics,
 )
 from frame_compare.analysis.types import FrameMetrics  # noqa: E402
@@ -84,6 +97,119 @@ class MockClip:
         raise Exception(f"Frame {n} out of range")
 
 
+class FakePlaneStatsFrame:
+    def __init__(self, props: dict[str, float]):
+        self.props = props
+
+
+class FakePlaneStatsClip:
+    def __init__(self, props_by_frame: list[dict[str, float]]):
+        self._props_by_frame = props_by_frame
+        self.num_frames = len(props_by_frame)
+
+    def get_frame(self, n: int) -> FakePlaneStatsFrame:
+        return FakePlaneStatsFrame(self._props_by_frame[n])
+
+
+class FakeStd:
+    def __init__(self, clip: FakeBalancedClip):
+        self._clip = clip
+
+    def PlaneStats(self, clipb: FakeBalancedClip | None = None) -> FakePlaneStatsClip:
+        if clipb is None:
+            return FakePlaneStatsClip([{"PlaneStatsAverage": value} for value in self._clip.values])
+        return FakePlaneStatsClip(
+            [
+                {"PlaneStatsDiff": abs(current - previous)}
+                for current, previous in zip(self._clip.values, clipb.values, strict=True)
+            ]
+        )
+
+
+class FakeResize:
+    def __init__(self, clip: FakeBalancedClip):
+        self._clip = clip
+
+    def Bicubic(
+        self,
+        *,
+        width: int | None = None,
+        height: int | None = None,
+        format: int | None = None,
+    ) -> FakeBalancedClip:
+        color_family = self._clip.format.color_family
+        if format is not None:
+            color_family = FAKE_VS.YUV if format == FAKE_VS.YUV420P8 else color_family
+        return FakeBalancedClip(
+            self._clip.values,
+            width=self._clip.width if width is None else width,
+            height=self._clip.height if height is None else height,
+            color_family=color_family,
+        )
+
+
+class FakeBalancedClip:
+    def __init__(
+        self,
+        values: list[float],
+        *,
+        width: int = 640,
+        height: int = 360,
+        color_family: int = 1,
+    ):
+        self.values = values
+        self.num_frames = len(values)
+        self.width = width
+        self.height = height
+        self.format = SimpleNamespace(color_family=color_family)
+        self.resize = FakeResize(self)
+        self.std = FakeStd(self)
+
+    def __getitem__(self, item: slice) -> FakeBalancedClip:
+        return FakeBalancedClip(
+            self.values[item],
+            width=self.width,
+            height=self.height,
+            color_family=self.format.color_family,
+        )
+
+    def __add__(self, other: object) -> FakeBalancedClip:
+        if not isinstance(other, FakeBalancedClip):
+            return NotImplemented
+        return FakeBalancedClip(
+            [*self.values, *other.values],
+            width=self.width,
+            height=self.height,
+            color_family=self.format.color_family,
+        )
+
+
+class FakeCoreStd:
+    def ShufflePlanes(
+        self,
+        *,
+        clips: FakeBalancedClip,
+        planes: int,
+        colorfamily: int,
+    ) -> FakeBalancedClip:
+        assert planes == 0
+        return FakeBalancedClip(
+            clips.values,
+            width=clips.width,
+            height=clips.height,
+            color_family=colorfamily,
+        )
+
+
+FAKE_VS = SimpleNamespace(
+    YUV=1,
+    YUV420P8=2,
+    GRAY=3,
+    FLOAT=1,
+    core=SimpleNamespace(std=FakeCoreStd()),
+)
+
+
 @pytest.fixture
 def mock_reporter():
     return MagicMock(spec=ProgressReporter)
@@ -92,21 +218,21 @@ def mock_reporter():
 def test_calculate_luminance_black_frames_returns_zeros():
     frames = [np.zeros((10, 10), dtype=np.uint8) for _ in range(3)]
     clip = MockClip(frames)
-    luminance = _calculate_luminance(clip)  # type: ignore
+    luminance = calculate_quality_luminance(clip)  # type: ignore
     assert luminance == [0.0, 0.0, 0.0]
 
 
 def test_calculate_luminance_white_frames_returns_ones():
     frames = [np.full((10, 10), 255, dtype=np.uint8) for _ in range(3)]
     clip = MockClip(frames)
-    luminance = _calculate_luminance(clip)  # type: ignore
+    luminance = calculate_quality_luminance(clip)  # type: ignore
     assert luminance == [1.0, 1.0, 1.0]
 
 
 def test_calculate_luminance_single_frame():
     frames = [np.full((10, 10), 127, dtype=np.uint8)]
     clip = MockClip(frames)
-    luminance = _calculate_luminance(clip)  # type: ignore
+    luminance = calculate_quality_luminance(clip)  # type: ignore
     assert len(luminance) == 1
     assert pytest.approx(luminance[0], abs=1e-2) == 127 / 255
 
@@ -114,7 +240,7 @@ def test_calculate_luminance_single_frame():
 def test_calculate_luminance_calls_progress_reporter(mock_reporter):
     frames = [np.zeros((10, 10), dtype=np.uint8) for _ in range(5)]
     clip = MockClip(frames)
-    _calculate_luminance(clip, reporter=mock_reporter)  # type: ignore
+    calculate_quality_luminance(clip, reporter=mock_reporter)  # type: ignore
     mock_reporter.start_phase.assert_called_once_with("Calculating luminance", 5)
     assert mock_reporter.advance.call_count == 5
     mock_reporter.complete_phase.assert_called_once()
@@ -123,7 +249,7 @@ def test_calculate_luminance_calls_progress_reporter(mock_reporter):
 def test_calculate_motion_static_clip_returns_zeros():
     frames = [np.full((10, 10), 100, dtype=np.uint8) for _ in range(3)]
     clip = MockClip(frames)
-    motion = _calculate_motion(clip)  # type: ignore
+    motion = calculate_quality_motion(clip)  # type: ignore
     assert motion == [0.0, 0.0, 0.0]
 
 
@@ -133,7 +259,7 @@ def test_calculate_motion_first_frame_is_zero():
         np.full((10, 10), 255, dtype=np.uint8),
     ]
     clip = MockClip(frames)
-    motion = _calculate_motion(clip)  # type: ignore
+    motion = calculate_quality_motion(clip)  # type: ignore
     assert motion[0] == 0.0
     assert motion[1] == 1.0
 
@@ -144,7 +270,7 @@ def test_calculate_motion_changing_frames_returns_positive():
         np.full((10, 10), 127, dtype=np.uint8),
     ]
     clip = MockClip(frames)
-    motion = _calculate_motion(clip)  # type: ignore
+    motion = calculate_quality_motion(clip)  # type: ignore
     assert motion[0] == 0.0
     assert 0.0 < motion[1] < 1.0
 
@@ -152,21 +278,21 @@ def test_calculate_motion_changing_frames_returns_positive():
 def test_calculate_motion_single_frame_returns_single_zero():
     frames = [np.zeros((10, 10), dtype=np.uint8)]
     clip = MockClip(frames)
-    motion = _calculate_motion(clip)  # type: ignore
+    motion = calculate_quality_motion(clip)  # type: ignore
     assert motion == [0.0]
 
 
 def test_calculate_motion_output_length_equals_num_frames():
     frames = [np.zeros((10, 10), dtype=np.uint8) for _ in range(10)]
     clip = MockClip(frames)
-    motion = _calculate_motion(clip)  # type: ignore
+    motion = calculate_quality_motion(clip)  # type: ignore
     assert len(motion) == 10
 
 
 def test_calculate_motion_calls_progress_reporter(mock_reporter):
     frames = [np.zeros((10, 10), dtype=np.uint8) for _ in range(5)]
     clip = MockClip(frames)
-    _calculate_motion(clip, reporter=mock_reporter)  # type: ignore
+    calculate_quality_motion(clip, reporter=mock_reporter)  # type: ignore
     mock_reporter.start_phase.assert_called_once_with("Calculating motion", 4)
     assert mock_reporter.advance.call_count == 4
     mock_reporter.complete_phase.assert_called_once()
@@ -175,13 +301,13 @@ def test_calculate_motion_calls_progress_reporter(mock_reporter):
 def test_calculate_luminance_empty_clip_raises_error():
     clip = MockClip([])
     with pytest.raises(MetricsCalculationError, match="Empty clip"):
-        _calculate_luminance(clip)  # type: ignore
+        calculate_quality_luminance(clip)  # type: ignore
 
 
 def test_calculate_motion_empty_clip_raises_error():
     clip = MockClip([])
     with pytest.raises(MetricsCalculationError, match="Empty clip"):
-        _calculate_motion(clip)  # type: ignore
+        calculate_quality_motion(clip)  # type: ignore
 
 
 def test_calculate_metrics_frame_access_failure_raises_fc4002():
@@ -193,7 +319,7 @@ def test_calculate_metrics_frame_access_failure_raises_fc4002():
     clip.get_frame.side_effect = Exception("VS Error")
 
     with pytest.raises(MetricsCalculationError) as exc:
-        _calculate_luminance(clip)  # type: ignore
+        calculate_quality_luminance(clip)  # type: ignore
     assert exc.value.code == "FC-4002"
 
 
@@ -222,13 +348,12 @@ def test_calculate_metrics_empty_video_paths_raises_fc4002(tmp_path: Path) -> No
 
 
 @patch("frame_compare.analysis.metrics.save_metrics_cache")
-@patch("frame_compare.analysis.metrics._calculate_motion")
-@patch("frame_compare.analysis.metrics._calculate_luminance")
+@patch("frame_compare.analysis.metrics.calculate_metric_strategy")
 @patch("frame_compare.analysis.metrics.DefaultVSLoader")
 @patch("frame_compare.analysis.metrics.load_cached_metrics")
 @patch("frame_compare.analysis.metrics.compute_cache_key")
 def test_calculate_metrics_computes_on_cache_miss(
-    mock_key, mock_load, mock_loader_cls, mock_lum, mock_mot, mock_save, tmp_path
+    mock_key, mock_load, mock_loader_cls, mock_strategy, mock_save, tmp_path
 ):
     mock_key.return_value = "fp"
     mock_load.return_value = MagicMock(success=False)
@@ -240,10 +365,14 @@ def test_calculate_metrics_computes_on_cache_miss(
     mock_clip.num_frames = 10
     mock_source.clip = mock_clip
     mock_source.fps = Fraction(24, 1)
-
-    mock_lum.return_value = [0.1] * 10
-    mock_motion_vals = [0.0] + [0.1] * 9
-    mock_mot.return_value = mock_motion_vals
+    mock_strategy.return_value = MetricComputationResult(
+        luminance=[0.1] * 10,
+        motion=[0.0] + [0.1] * 9,
+        performance_mode="quality",
+        algorithm_id="algorithm-id",
+        metric_backend="python_numpy",
+        algorithm_identity_json='{"backend":"python_numpy"}',
+    )
 
     video_paths = [tmp_path / "v1.mkv"]
     video_paths[0].write_bytes(b"")
@@ -253,19 +382,284 @@ def test_calculate_metrics_computes_on_cache_miss(
 
     assert len(result.luminance) == 10
     assert len(result.motion) == 10
-    mock_lum.assert_called_once_with(mock_clip, None)
-    mock_mot.assert_called_once_with(mock_clip, reporter=None)
+    mock_strategy.assert_called_once_with(mock_source, config, None)
     mock_save.assert_called_once()
 
 
+def test_quality_strategy_dispatch_matches_direct_quality_helpers() -> None:
+    frames = [
+        np.zeros((4, 4), dtype=np.uint8),
+        np.full((4, 4), 64, dtype=np.uint8),
+        np.full((4, 4), 255, dtype=np.uint8),
+    ]
+    clip = MockClip(frames)
+    source = MagicMock()
+    source.clip = clip
+
+    direct_luminance = calculate_quality_luminance(clip)
+    direct_motion = calculate_quality_motion(clip)
+    result = calculate_metric_strategy(source, AnalysisConfig(), reporter=None)
+
+    assert result.luminance == direct_luminance
+    assert result.motion == direct_motion
+    assert len(result.luminance) == clip.num_frames
+    assert len(result.motion) == clip.num_frames
+    assert result.motion[0] == 0.0
+    assert result.performance_mode == "quality"
+    assert result.metric_backend == "python_numpy"
+
+
+def test_balanced_strategy_rejects_empty_clip(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
+    source = MagicMock()
+    source.clip = FakeBalancedClip([])
+
+    with pytest.raises(MetricsCalculationError, match="Analysis clip has 0 frames"):
+        calculate_metric_strategy(
+            source,
+            AnalysisConfig(performance_mode="balanced"),
+            reporter=None,
+        )
+
+
+def test_balanced_strategy_returns_full_length_dense_arrays(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
+    source = MagicMock()
+    source.clip = FakeBalancedClip([0.0, 0.25, 0.75, 1.0])
+
+    result = calculate_metric_strategy(
+        source,
+        AnalysisConfig(performance_mode="balanced"),
+        reporter=None,
+    )
+
+    assert result.luminance == [0.0, 0.25, 0.75, 1.0]
+    assert result.motion == [0.0, 0.25, 0.5, 0.25]
+    assert len(result.luminance) == source.clip.num_frames
+    assert len(result.motion) == source.clip.num_frames
+    assert result.motion[0] == 0.0
+    assert result.performance_mode == "balanced"
+    assert result.metric_backend == "vapoursynth_planestats"
+
+
+def test_balanced_strategy_one_frame_motion_is_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
+    source = MagicMock()
+    source.clip = FakeBalancedClip([0.5])
+
+    result = calculate_metric_strategy(
+        source,
+        AnalysisConfig(performance_mode="balanced"),
+        reporter=None,
+    )
+
+    assert result.luminance == [0.5]
+    assert result.motion == [0.0]
+
+
+def test_balanced_strategy_constant_clip_is_deterministic_with_zero_motion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
+    source = MagicMock()
+    source.clip = FakeBalancedClip([0.25, 0.25, 0.25], width=160, height=90)
+    config = AnalysisConfig(performance_mode="balanced")
+
+    first = calculate_metric_strategy(source, config, reporter=None)
+    second = calculate_metric_strategy(source, config, reporter=None)
+
+    assert first.luminance == [0.25, 0.25, 0.25]
+    assert first.motion == [0.0, 0.0, 0.0]
+    assert second.luminance == first.luminance
+    assert second.motion == first.motion
+
+
+def test_balanced_strategy_simple_transition_has_motion_at_current_frame(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
+    source = MagicMock()
+    source.clip = FakeBalancedClip([0.0, 1.0], width=640, height=360)
+
+    result = calculate_metric_strategy(
+        source,
+        AnalysisConfig(performance_mode="balanced"),
+        reporter=None,
+    )
+
+    assert result.motion[0] == 0.0
+    assert result.motion[1] > result.motion[0]
+
+
+def test_fast_sampled_motion_indices_follow_phase_rule() -> None:
+    assert _fast_sampled_motion_indices(1) == []
+    assert _fast_sampled_motion_indices(2) == [1]
+    assert _fast_sampled_motion_indices(10) == [1, 4, 8, 9]
+
+
+def test_fast_candidate_count_ignores_selection_counts() -> None:
+    assert _fast_candidate_count(0) == 0
+    assert _fast_candidate_count(100) == 100
+    assert _fast_candidate_count(1000) == 256
+    assert _fast_candidate_count(100000) == 1000
+
+
+def test_fast_refinement_indices_use_radius_eight() -> None:
+    assert _fast_refinement_indices(10, [4]) == list(range(1, 10))
+
+
+def test_fast_metric_identity_is_distinct_and_stable() -> None:
+    quality = stable_metric_algorithm_identity_json(AnalysisConfig(performance_mode="quality"))
+    balanced = stable_metric_algorithm_identity_json(AnalysisConfig(performance_mode="balanced"))
+    first_fast = stable_metric_algorithm_identity_json(AnalysisConfig(performance_mode="fast"))
+    second_fast = stable_metric_algorithm_identity_json(AnalysisConfig(performance_mode="fast"))
+
+    assert first_fast == second_fast
+    assert len({quality, balanced, first_fast}) == 3
+
+
+def test_fast_cache_key_ignores_selection_counts_and_quantiles(tmp_path: Path) -> None:
+    video_path = tmp_path / "v1.mkv"
+    video_path.write_bytes(b"")
+
+    base = AnalysisConfig(performance_mode="fast")
+    changed_selection = AnalysisConfig(
+        performance_mode="fast",
+        random_seed=99,
+        random_frame_count=23,
+        dark_frame_count=17,
+        bright_frame_count=19,
+        motion_frame_count=29,
+        user_frames=[3, 7],
+    )
+    changed_quantiles = AnalysisConfig(
+        performance_mode="fast",
+        dark_quantile=0.05,
+        bright_quantile=0.95,
+    )
+
+    assert compute_cache_key([video_path], base) == compute_cache_key(
+        [video_path], changed_selection
+    )
+    assert compute_cache_key([video_path], base) == compute_cache_key(
+        [video_path], changed_quantiles
+    )
+    assert compute_cache_key([video_path], base) != compute_cache_key(
+        [video_path],
+        AnalysisConfig(performance_mode="quality"),
+    )
+
+
+def test_fast_strategy_rejects_empty_clip(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
+    source = MagicMock()
+    source.clip = FakeBalancedClip([])
+
+    with pytest.raises(MetricsCalculationError, match="Analysis clip has 0 frames"):
+        calculate_metric_strategy(
+            source,
+            AnalysisConfig(performance_mode="fast"),
+            reporter=None,
+        )
+
+
+def test_fast_strategy_one_frame_motion_is_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
+    source = MagicMock()
+    source.clip = FakeBalancedClip([0.5])
+
+    result = calculate_metric_strategy(
+        source,
+        AnalysisConfig(performance_mode="fast"),
+        reporter=None,
+    )
+
+    assert result.luminance == [0.5]
+    assert result.motion == [0.0]
+
+
+def test_fast_strategy_two_frame_arrays_are_dense(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
+    source = MagicMock()
+    source.clip = FakeBalancedClip([0.0, 1.0])
+
+    result = calculate_metric_strategy(
+        source,
+        AnalysisConfig(performance_mode="fast"),
+        reporter=None,
+    )
+
+    assert result.luminance == [0.0, 1.0]
+    assert result.motion == [0.0, 1.0]
+    assert len(result.luminance) == 2
+    assert len(result.motion) == 2
+    assert result.performance_mode == "fast"
+    assert result.metric_backend == "vapoursynth_planestats"
+
+
+def test_fast_strategy_multiframe_arrays_are_deterministic_and_finite(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
+    source = MagicMock()
+    source.clip = FakeBalancedClip([0.0, 0.0, 0.75, 0.75, 0.25, 1.0], width=640)
+    config = AnalysisConfig(performance_mode="fast")
+
+    first = calculate_metric_strategy(source, config, reporter=None)
+    second = calculate_metric_strategy(source, config, reporter=None)
+
+    assert first.luminance == second.luminance
+    assert first.motion == second.motion
+    assert len(first.luminance) == source.clip.num_frames
+    assert len(first.motion) == source.clip.num_frames
+    assert first.motion[0] == 0.0
+    assert all(math.isfinite(score) for score in first.luminance)
+    assert all(math.isfinite(score) for score in first.motion)
+
+
+def test_fast_strategy_static_clip_has_zero_motion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
+    source = MagicMock()
+    source.clip = FakeBalancedClip([0.25, 0.25, 0.25], width=160)
+
+    result = calculate_metric_strategy(
+        source,
+        AnalysisConfig(performance_mode="fast"),
+        reporter=None,
+    )
+
+    assert result.luminance == [0.25, 0.25, 0.25]
+    assert result.motion == [0.0, 0.0, 0.0]
+
+
+def _quality_strategy_result(frame_count: int = 10) -> MetricComputationResult:
+    return MetricComputationResult(
+        luminance=[0.1] * frame_count,
+        motion=[0.0] + [0.1] * max(0, frame_count - 1),
+        performance_mode="quality",
+        algorithm_id="algorithm-id",
+        metric_backend="python_numpy",
+        algorithm_identity_json='{"backend":"python_numpy"}',
+    )
+
+
 @patch("frame_compare.analysis.metrics.save_metrics_cache")
-@patch("frame_compare.analysis.metrics._calculate_motion")
-@patch("frame_compare.analysis.metrics._calculate_luminance")
+@patch("frame_compare.analysis.metrics.calculate_metric_strategy")
 @patch("frame_compare.analysis.metrics.DefaultVSLoader")
 @patch("frame_compare.analysis.metrics.load_cached_metrics")
 @patch("frame_compare.analysis.metrics.compute_cache_key")
 def test_calculate_metrics_uses_effective_fps_in_metadata(
-    mock_key, mock_load, mock_loader_cls, mock_lum, mock_mot, mock_save, tmp_path
+    mock_key, mock_load, mock_loader_cls, mock_strategy, mock_save, tmp_path
 ):
     mock_key.return_value = "fp"
     mock_load.return_value = MagicMock(success=False)
@@ -276,8 +670,7 @@ def test_calculate_metrics_uses_effective_fps_in_metadata(
     mock_clip.num_frames = 10
     mock_source.clip = mock_clip
     mock_source.fps = Fraction(30000, 1001)
-    mock_lum.return_value = [0.1] * 10
-    mock_mot.return_value = [0.0] * 10
+    mock_strategy.return_value = _quality_strategy_result()
 
     video_paths = [tmp_path / "v1.mkv"]
     video_paths[0].write_bytes(b"")
@@ -294,13 +687,12 @@ def test_calculate_metrics_uses_effective_fps_in_metadata(
 
 
 @patch("frame_compare.analysis.metrics.save_metrics_cache")
-@patch("frame_compare.analysis.metrics._calculate_motion")
-@patch("frame_compare.analysis.metrics._calculate_luminance")
+@patch("frame_compare.analysis.metrics.calculate_metric_strategy")
 @patch("frame_compare.analysis.metrics.DefaultVSLoader")
 @patch("frame_compare.analysis.metrics.load_cached_metrics")
 @patch("frame_compare.analysis.metrics.compute_cache_key")
 def test_calculate_metrics_cache_save_is_best_effort(
-    mock_key, mock_load, mock_loader_cls, mock_lum, mock_mot, mock_save, tmp_path
+    mock_key, mock_load, mock_loader_cls, mock_strategy, mock_save, tmp_path
 ):
     mock_key.return_value = "fp"
     mock_load.return_value = MagicMock(success=False)
@@ -313,9 +705,16 @@ def test_calculate_metrics_cache_save_is_best_effort(
     mock_source.clip = mock_clip
     mock_source.fps = Fraction(24, 1)
 
-    mock_lum.return_value = [0.1] * 10
-    mock_motion_vals = [0.0] + [0.1] * 9
-    mock_mot.return_value = mock_motion_vals
+    def _strategy_side_effect(
+        _source: object,
+        _config: object,
+        strategy_reporter: ProgressReporter | None,
+    ) -> MetricComputationResult:
+        if strategy_reporter:
+            strategy_reporter.advance(1)
+        return _quality_strategy_result()
+
+    mock_strategy.side_effect = _strategy_side_effect
     mock_save.side_effect = RuntimeError("disk full")
 
     video_paths = [tmp_path / "v1.mkv"]
@@ -334,14 +733,14 @@ def test_calculate_metrics_cache_save_is_best_effort(
     reporter.set_description.assert_called()
 
 
-@patch("frame_compare.analysis.metrics._calculate_motion")
-@patch("frame_compare.analysis.metrics._calculate_luminance")
+@patch("frame_compare.analysis.metrics.calculate_metric_strategy")
 @patch("frame_compare.analysis.metrics.DefaultVSLoader")
 @patch("frame_compare.analysis.metrics.load_cached_metrics")
 def test_calculate_metrics_analyzes_reference_by_default(
-    mock_load, mock_loader_cls, mock_lum, mock_mot, tmp_path
+    mock_load, mock_loader_cls, mock_strategy, tmp_path
 ):
     mock_load.return_value = MagicMock(success=False)
+    mock_strategy.return_value = _quality_strategy_result()
     mock_loader = mock_loader_cls.return_value
     mock_source = MagicMock()
     mock_loader.load.return_value = mock_source
@@ -360,14 +759,14 @@ def test_calculate_metrics_analyzes_reference_by_default(
     mock_loader.load.assert_called_once_with(video_paths[0])
 
 
-@patch("frame_compare.analysis.metrics._calculate_motion")
-@patch("frame_compare.analysis.metrics._calculate_luminance")
+@patch("frame_compare.analysis.metrics.calculate_metric_strategy")
 @patch("frame_compare.analysis.metrics.DefaultVSLoader")
 @patch("frame_compare.analysis.metrics.load_cached_metrics")
 def test_calculate_metrics_analyzes_selected_analysis_source(
-    mock_load, mock_loader_cls, mock_lum, mock_mot, tmp_path
+    mock_load, mock_loader_cls, mock_strategy, tmp_path
 ):
     mock_load.return_value = MagicMock(success=False)
+    mock_strategy.return_value = _quality_strategy_result()
     mock_loader = mock_loader_cls.return_value
     mock_source = MagicMock()
     mock_loader.load.return_value = mock_source

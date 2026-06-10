@@ -5,8 +5,6 @@ from __future__ import annotations
 from fractions import Fraction
 from typing import TYPE_CHECKING
 
-import numpy as np
-import numpy.typing as npt
 import structlog
 
 from frame_compare.analysis.cache_io import (
@@ -16,16 +14,17 @@ from frame_compare.analysis.cache_io import (
     save_metrics_cache,
 )
 from frame_compare.analysis.errors import MetricsCalculationError
+from frame_compare.analysis.metric_strategies import (
+    MetricComputationResult,
+    calculate_metric_strategy,
+)
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
-from frame_compare.utils.perf import perf_span
-from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
+from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError
 from frame_compare.vs.loader import DefaultVSLoader
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import vapoursynth as vs
 
     from frame_compare.config.schema import AnalysisConfig
     from frame_compare.vs.loader import VSLoader
@@ -40,10 +39,6 @@ log = structlog.get_logger()
 # - `calculate_metrics()` advances the remaining steps (total - 1) on cache hit,
 #   and advances twice (after luminance + after cache-save attempt) on cache miss.
 ANALYZE_PROGRESS_TOTAL = 3
-
-
-def _y_plane_array(frame: vs.VideoFrame) -> npt.NDArray[np.generic]:
-    return np.asarray(frame[0])
 
 
 def _clip_identities(video_paths: list[Path]) -> list[ClipIdentity]:
@@ -83,27 +78,9 @@ def _load_analysis_source(source_path: Path, vs_loader: VSLoader | None) -> Sour
         raise MetricsCalculationError(f"Failed to load analysis video: {e}") from e
 
 
-def _calculate_clip_metrics(
-    source: SourceInfo, reporter: ProgressReporter | None
-) -> tuple[list[float], list[float]]:
-    clip = source.clip
-    if clip.num_frames == 0:
-        raise MetricsCalculationError("Analysis clip has 0 frames")
-
-    total_frames = clip.num_frames
-    with perf_span("analysis.calculate_metrics", frames=total_frames):
-        luminance = _calculate_luminance(clip, reporter)
-        if reporter:
-            reporter.advance(1)
-        motion = _calculate_motion(clip, reporter=reporter)
-
-    return luminance, motion
-
-
 def _build_metrics(
     *,
-    luminance: list[float],
-    motion: list[float],
+    result: MetricComputationResult,
     source: SourceInfo,
     fingerprint: str,
     clips: list[ClipIdentity],
@@ -111,14 +88,18 @@ def _build_metrics(
     effective_fps: Fraction | None,
 ) -> FrameMetrics:
     return FrameMetrics(
-        luminance=luminance,
-        motion=motion,
+        luminance=result.luminance,
+        motion=result.motion,
         metadata=MetricsMetadata(
             frame_count=source.clip.num_frames,
             fps=effective_fps if effective_fps is not None else source.fps,
             config_fingerprint=fingerprint,
             clips=clips,
             analysis_source_path=str(analysis_source_path),
+            performance_mode=result.performance_mode,
+            algorithm_id=result.algorithm_id,
+            metric_backend=result.metric_backend,
+            algorithm_identity_json=result.algorithm_identity_json,
             version=CACHE_VERSION,
         ),
     )
@@ -190,10 +171,9 @@ def calculate_metrics(
     # Cache miss or invalid - compute metrics for the selected analysis source only.
     source = _load_analysis_source(source_path, vs_loader)
     try:
-        luminance, motion = _calculate_clip_metrics(source, reporter)
+        strategy_result = calculate_metric_strategy(source, config, reporter)
         metrics = _build_metrics(
-            luminance=luminance,
-            motion=motion,
+            result=strategy_result,
             source=source,
             fingerprint=fingerprint,
             clips=clips,
@@ -208,119 +188,3 @@ def calculate_metrics(
     if reporter:
         reporter.advance(1)
     return metrics
-
-
-def _calculate_luminance(
-    clip: vs.VideoNode,
-    reporter: ProgressReporter | None = None,
-) -> list[float]:
-    """
-    Calculate Y channel mean for each frame.
-
-    Args:
-        clip: VapourSynth clip to analyze
-        reporter: Optional progress reporter
-
-    Returns:
-        List of per-frame luminance values (0.0-1.0)
-    """
-    import vapoursynth as vs
-
-    if clip.num_frames == 0:
-        raise MetricsCalculationError("Empty clip")
-
-    total_frames = clip.num_frames
-    with perf_span("analysis.luminance", frames=total_frames):
-        # Format handling: convert to YUV if needed
-        if clip.format.color_family != vs.YUV:
-            clip = clip.resize.Bicubic(format=vs.YUV420P8)
-
-        max_value: float = (
-            1.0
-            if clip.format.sample_type == vs.FLOAT
-            else float((1 << clip.format.bits_per_sample) - 1)
-        )
-
-        if reporter:
-            reporter.start_phase("Calculating luminance", clip.num_frames)
-
-        luminance: list[float] = []
-        phase_status = ProgressPhaseStatus.COMPLETED
-        try:
-            for n in range(clip.num_frames):
-                frame = clip.get_frame(n)
-                arr = _y_plane_array(frame)
-                mean_val = float(arr.mean())
-                luminance.append(mean_val / max_value)
-                if reporter:
-                    reporter.advance(1)
-        except Exception as e:
-            phase_status = ProgressPhaseStatus.FAILED
-            # Re-raise with FC-4002 context
-            raise MetricsCalculationError(
-                f"Frame access failed at frame {len(luminance)}: {e}"
-            ) from e
-        finally:
-            if reporter:
-                reporter.complete_phase(phase_status)
-
-        return luminance
-
-
-def _calculate_motion(
-    clip: vs.VideoNode,
-    reporter: ProgressReporter | None = None,
-) -> list[float]:
-    """
-    Calculate frame-to-frame difference scores.
-
-    Args:
-        clip: VapourSynth clip to analyze
-        reporter: Optional progress reporter to receive progress updates during motion calculation.
-
-    Returns:
-        List of per-frame motion scores (0.0-1.0)
-    """
-    import vapoursynth as vs
-
-    if clip.num_frames == 0:
-        raise MetricsCalculationError("Empty clip")
-
-    total_frames = clip.num_frames
-    with perf_span("analysis.motion", frames=total_frames):
-        # Format handling: convert to YUV if needed
-        if clip.format.color_family != vs.YUV:
-            clip = clip.resize.Bicubic(format=vs.YUV420P8)
-
-        width, height = clip.width, clip.height
-        max_value: float = (
-            1.0
-            if clip.format.sample_type == vs.FLOAT
-            else float((1 << clip.format.bits_per_sample) - 1)
-        )
-        norm_factor = float(width * height) * max_value
-
-        if reporter:
-            reporter.start_phase("Calculating motion", max(1, total_frames - 1))
-
-        motion = [0.0] * clip.num_frames
-        phase_status = ProgressPhaseStatus.COMPLETED
-        try:
-            for n in range(1, clip.num_frames):
-                prev_frame = clip.get_frame(n - 1)
-                curr_frame = clip.get_frame(n)
-                prev_arr = _y_plane_array(prev_frame).astype(np.float32)
-                curr_arr = _y_plane_array(curr_frame).astype(np.float32)
-                diff = np.abs(curr_arr - prev_arr)
-                motion[n] = float(np.sum(diff)) / norm_factor
-                if reporter:
-                    reporter.advance(1)
-        except Exception as e:
-            phase_status = ProgressPhaseStatus.FAILED
-            # Re-raise with FC-4002 context
-            raise MetricsCalculationError(f"Frame access failed during motion analysis: {e}") from e
-        finally:
-            if reporter:
-                reporter.complete_phase(phase_status)
-
-        return motion
