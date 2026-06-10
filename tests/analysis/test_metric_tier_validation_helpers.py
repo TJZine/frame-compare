@@ -24,6 +24,7 @@ from frame_compare.analysis.types import (
     MetricsMetadata,
     SelectionBreakdown,
 )
+from frame_compare.config.schema import ConfigSchema
 
 
 def test_nearest_frame_distances_returns_one_distance_per_candidate() -> None:
@@ -102,6 +103,75 @@ def test_benchmark_script_comparison_schema_contains_required_sections() -> None
         "motion_spearman",
     }
     assert result["selected"]["frames"] == [0, 2]
+
+
+def test_benchmark_script_resolves_configured_analysis_source_and_effective_fps(
+    tmp_path: Path,
+) -> None:
+    script = _load_benchmark_script()
+    input_dir = tmp_path / "comparison_videos"
+    input_dir.mkdir()
+    reference = input_dir / "reference.mkv"
+    analysis = input_dir / "analysis.mkv"
+    reference.write_bytes(b"ref")
+    analysis.write_bytes(b"analysis")
+    config = ConfigSchema.model_validate(
+        {
+            "sources": {
+                "analysis_source": "analysis.mkv",
+                "overrides": {"analysis.mkv": {"effective_fps": "24000/1001"}},
+            }
+        }
+    )
+
+    source_path = script._resolve_benchmark_analysis_source_path(
+        input_dir=input_dir,
+        input_paths=[reference, analysis],
+        config=config,
+    )
+    effective_fps = script._effective_fps_override_for_path(
+        input_dir=input_dir,
+        input_paths=[reference, analysis],
+        config=config,
+        source_path=source_path,
+    )
+
+    assert source_path == analysis
+    assert effective_fps == Fraction(24000, 1001)
+
+
+def test_benchmark_script_uses_configured_generated_dir_for_default_cache(tmp_path: Path) -> None:
+    script = _load_benchmark_script()
+
+    assert (
+        script._resolve_config_path(tmp_path, "custom-generated") == tmp_path / "custom-generated"
+    )
+
+
+@pytest.mark.parametrize(
+    "sources",
+    [
+        {"analysis_source": "fastest"},
+        {"match_fps": "assume_reference"},
+    ],
+)
+def test_benchmark_script_rejects_unsupported_production_contexts(
+    tmp_path: Path,
+    sources: dict[str, str],
+) -> None:
+    script = _load_benchmark_script()
+    input_dir = tmp_path / "comparison_videos"
+    input_dir.mkdir()
+    source = input_dir / "source.mkv"
+    source.write_bytes(b"source")
+    config = ConfigSchema.model_validate({"sources": sources})
+
+    with pytest.raises(SystemExit):
+        script._resolve_benchmark_analysis_source_path(
+            input_dir=input_dir,
+            input_paths=[source],
+            config=config,
+        )
 
 
 def _load_benchmark_script() -> ModuleType:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -215,9 +216,12 @@ def _validate_cache_identity(data: Mapping[str, object], fingerprint: str) -> No
 
 def _parse_cache_payload(data: Mapping[str, object]) -> _ValidatedCachePayload:
     metadata = _parse_metrics_metadata(_as_mapping(data["metadata"]))
+    luminance = _parse_numeric_series(data["luminance"])
+    motion = _parse_numeric_series(data["motion"])
+    _validate_metric_arrays(luminance=luminance, motion=motion, frame_count=metadata.frame_count)
     return _ValidatedCachePayload(
-        luminance=_parse_numeric_series(data["luminance"]),
-        motion=_parse_numeric_series(data["motion"]),
+        luminance=luminance,
+        motion=motion,
         metadata=metadata,
     )
 
@@ -230,8 +234,23 @@ def _parse_numeric_series(value: object) -> list[float]:
     for item in cast(list[object], value):
         if not isinstance(item, (int, float)) or isinstance(item, bool):
             raise _CacheParseError
-        series.append(float(item))
+        value = float(item)
+        if not math.isfinite(value):
+            raise _CacheParseError
+        series.append(value)
     return series
+
+
+def _validate_metric_arrays(
+    *,
+    luminance: list[float],
+    motion: list[float],
+    frame_count: int,
+) -> None:
+    if len(luminance) != frame_count or len(motion) != frame_count:
+        raise _CacheParseError
+    if motion and motion[0] != 0.0:
+        raise _CacheParseError
 
 
 def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:

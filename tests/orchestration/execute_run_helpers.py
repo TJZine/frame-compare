@@ -121,7 +121,7 @@ def write_metrics_cache(
     stats_by_path = {path: path.stat() for path in ordered_cache_inputs}
     metrics = FrameMetrics(
         luminance=[0.1] * 100,
-        motion=[0.2] * 100,
+        motion=[0.0] + [0.2] * 99,
         metadata=MetricsMetadata(
             frame_count=100,
             fps=Fraction(24, 1),

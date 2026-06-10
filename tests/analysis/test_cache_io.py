@@ -236,7 +236,7 @@ def test_save_and_load_round_trip(tmp_path: Path) -> None:
 
     clips = [ClipIdentity(path=str(v1), size=v1.stat().st_size, mtime=v1.stat().st_mtime)]
     metadata = metrics_metadata(
-        frame_count=100,
+        frame_count=3,
         fps=Fraction(24, 1),
         config_fingerprint=fingerprint,
         clips=clips,
@@ -256,7 +256,7 @@ def test_save_and_load_round_trip(tmp_path: Path) -> None:
     assert result.metrics is not None
     assert result.metrics.luminance == [0.1, 0.2, 0.3]
     assert result.metrics.motion == [0.0, 0.5, 0.1]
-    assert result.metrics.metadata.frame_count == 100
+    assert result.metrics.metadata.frame_count == 3
     assert result.metrics.metadata.fps == Fraction(24, 1)
     assert result.metrics.metadata.config_fingerprint == fingerprint
     assert result.metrics.metadata.analysis_source_path == ""
@@ -543,6 +543,54 @@ def test_load_same_version_cache_with_malformed_algorithm_identity_is_corrupted(
     assert result.reason == "corrupted"
 
 
+@pytest.mark.parametrize(
+    ("luminance", "motion", "frame_count"),
+    [
+        ([0.1], [0.0, 0.2], 2),
+        ([0.1, 0.2], [0.0], 2),
+        ([0.1], [0.0], 2),
+        ([0.1], [0.1], 1),
+        ([float("nan")], [0.0], 1),
+        ([0.1], [float("inf")], 1),
+    ],
+)
+def test_load_metric_array_contract_violation_is_corrupted(
+    tmp_path: Path,
+    luminance: list[float],
+    motion: list[float],
+    frame_count: int,
+) -> None:
+    config = AnalysisConfig()
+    cache_file(tmp_path, "fp").write_text(
+        json.dumps(
+            {
+                "version": CACHE_VERSION,
+                "fingerprint": "fp",
+                "luminance": luminance,
+                "motion": motion,
+                "metadata": {
+                    "frame_count": frame_count,
+                    "fps": "24/1",
+                    "config_fingerprint": "fp",
+                    "analysis_source_path": "",
+                    "clips": [],
+                    "performance_mode": "quality",
+                    "algorithm_id": metric_algorithm_id(config),
+                    "metric_backend": "python_numpy",
+                    "algorithm_identity_json": stable_metric_algorithm_identity_json(config),
+                    "version": CACHE_VERSION,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = load_cached_metrics(tmp_path, "fp", [])
+
+    assert result.success is False
+    assert result.reason == "corrupted"
+
+
 def test_save_metrics_cache_uses_atomic_text_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -614,13 +662,17 @@ def test_load_malformed_nested_payload_returns_corrupted(
         "version": CACHE_VERSION,
         "fingerprint": "fp",
         "luminance": [0.1],
-        "motion": [0.2],
+        "motion": [0.0],
         "metadata": {
             "frame_count": 1,
-            "fps": "24",
+            "fps": "24/1",
             "config_fingerprint": "fp",
             "analysis_source_path": "",
             "clips": [{"path": "video.mkv", "size": 10, "mtime": 1.0, "sha1": None}],
+            "performance_mode": "quality",
+            "algorithm_id": metric_algorithm_id(AnalysisConfig()),
+            "metric_backend": "python_numpy",
+            "algorithm_identity_json": stable_metric_algorithm_identity_json(AnalysisConfig()),
             "version": CACHE_VERSION,
         },
     }

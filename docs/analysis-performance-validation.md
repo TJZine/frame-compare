@@ -27,6 +27,13 @@ from a prepared run, pass it with `--selection-domain` so cache identity matches
 that run. Without those arguments, the script records warnings and compares the
 full analysis metric domain.
 
+The benchmark script uses the configured `paths.generated_dir` for analysis
+cache by default and resolves explicit `sources.analysis_source` selectors before
+running metrics. It supports per-source `effective_fps` overrides. It does not
+support `sources.analysis_source = "fastest"` or automatic `sources.match_fps`
+policies; use an explicit analysis source and explicit effective-FPS overrides
+for benchmark evidence.
+
 ## Clip Classes
 
 Manual validation should cover local examples of:

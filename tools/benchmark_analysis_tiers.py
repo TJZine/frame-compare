@@ -8,6 +8,7 @@ import json
 import time
 from collections.abc import Sequence
 from dataclasses import asdict, replace
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, cast
 
@@ -21,7 +22,12 @@ from frame_compare.analysis.tier_validation import (
 )
 from frame_compare.analysis.types import FrameMetrics, FrameSelection
 from frame_compare.config.loader import load_config
-from frame_compare.config.schema import AnalysisConfig
+from frame_compare.config.schema import AnalysisConfig, ConfigSchema
+from frame_compare.config.schema_enums import SourceMatchFpsMode
+from frame_compare.orchestration.source_selection import (
+    resolve_source_selection,
+    resolve_source_selector,
+)
 
 type JsonObject = dict[str, Any]
 
@@ -34,13 +40,26 @@ def main() -> int:
     input_paths = [
         path if path.is_absolute() else root / path for path in cast(Sequence[Path], args.inputs)
     ]
+    config = load_config(config_path)
+    input_dir = _resolve_config_path(root, config.paths.input_dir)
     cache_dir = (
-        args.cache_dir if args.cache_dir is not None else root / "generated" / "cache" / "analysis"
+        args.cache_dir
+        if args.cache_dir is not None
+        else _resolve_config_path(root, config.paths.generated_dir) / "cache" / "analysis"
     )
     if not cache_dir.is_absolute():
         cache_dir = root / cache_dir
-
-    config = load_config(config_path)
+    analysis_source_path = _resolve_benchmark_analysis_source_path(
+        input_dir=input_dir,
+        input_paths=input_paths,
+        config=config,
+    )
+    effective_fps = _effective_fps_override_for_path(
+        input_dir=input_dir,
+        input_paths=input_paths,
+        config=config,
+        source_path=analysis_source_path,
+    )
     warnings = [
         "Per-subphase luminance and motion timings are unavailable; only total analysis wall-clock is recorded.",
         "Cache hit/miss state is not exposed by calculate_metrics; benchmark output records cache_state as unknown.",
@@ -51,6 +70,8 @@ def main() -> int:
         video_paths=input_paths,
         analysis_config=config.analysis,
         cache_dir=cache_dir,
+        analysis_source_path=analysis_source_path,
+        effective_fps=effective_fps,
         selection_domain=args.selection_domain,
         window_start=args.window_start,
         window_end_exclusive=args.window_end_exclusive,
@@ -63,6 +84,8 @@ def main() -> int:
             video_paths=input_paths,
             analysis_config=config.analysis,
             cache_dir=cache_dir,
+            analysis_source_path=analysis_source_path,
+            effective_fps=effective_fps,
             selection_domain=args.selection_domain,
             window_start=args.window_start,
             window_end_exclusive=args.window_end_exclusive,
@@ -83,6 +106,8 @@ def main() -> int:
         "config": {
             "config_path": config_path.as_posix(),
             "analysis_source": config.sources.analysis_source,
+            "analysis_source_path": analysis_source_path.as_posix(),
+            "effective_fps": str(effective_fps) if effective_fps is not None else None,
             "selection_window": {
                 "start_frame": quality["window"]["start_frame"],
                 "end_frame_exclusive": quality["window"]["end_frame_exclusive"],
@@ -112,6 +137,59 @@ def main() -> int:
     )
     print(output_path.as_posix())
     return 0
+
+
+def _resolve_config_path(root: Path, configured_path: str) -> Path:
+    path = Path(configured_path)
+    return path if path.is_absolute() else root / path
+
+
+def _resolve_benchmark_analysis_source_path(
+    *,
+    input_dir: Path,
+    input_paths: Sequence[Path],
+    config: ConfigSchema,
+) -> Path:
+    if config.sources.analysis_source == "fastest":
+        raise SystemExit(
+            "sources.analysis_source = 'fastest' is not supported by this benchmark tool; "
+            "use an explicit source selector so benchmark evidence names the analyzed clip."
+        )
+    if config.sources.match_fps != SourceMatchFpsMode.DISABLED:
+        raise SystemExit(
+            "sources.match_fps automatic FPS policies are not supported by this benchmark tool; "
+            "use explicit sources.overrides effective_fps values for benchmark evidence."
+        )
+
+    selection = resolve_source_selection(
+        input_dir=input_dir,
+        discovered_paths=list(input_paths),
+        config=config.sources,
+    )
+    if config.sources.analysis_source == "reference":
+        return selection.ordered_paths[0]
+    return resolve_source_selector(
+        selector=config.sources.analysis_source,
+        input_dir=input_dir,
+        paths=selection.ordered_paths,
+        role="sources.analysis_source",
+    )
+
+
+def _effective_fps_override_for_path(
+    *,
+    input_dir: Path,
+    input_paths: Sequence[Path],
+    config: ConfigSchema,
+    source_path: Path,
+) -> Fraction | None:
+    selection = resolve_source_selection(
+        input_dir=input_dir,
+        discovered_paths=list(input_paths),
+        config=config.sources,
+    )
+    override = selection.overrides_by_path.get(source_path)
+    return None if override is None else override.effective_fps
 
 
 def _parse_args() -> argparse.Namespace:
@@ -168,6 +246,8 @@ def _run_tier(
     video_paths: Sequence[Path],
     analysis_config: AnalysisConfig,
     cache_dir: Path,
+    analysis_source_path: Path,
+    effective_fps: Fraction | None,
     selection_domain: str | None,
     window_start: int,
     window_end_exclusive: int | None,
@@ -178,6 +258,8 @@ def _run_tier(
         list(video_paths),
         tier_config,
         cache_dir,
+        analysis_source_path=analysis_source_path,
+        effective_fps=effective_fps,
         selection_domain=selection_domain,
     )
     analyze_seconds = time.perf_counter() - started
