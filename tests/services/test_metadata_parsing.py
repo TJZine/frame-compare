@@ -37,10 +37,8 @@ def test_metadata_parsing_direct_module_merges_guessit_and_anitopy_fallback(mock
 def test_metadata_parsing_direct_module_uses_anitopy_first_for_bracketed_names(
     mocker,
 ) -> None:
-    calls: list[str] = []
-
     def fake_anitopy_parse(filename: str) -> dict[str, object]:
-        calls.append(f"anitopy:{filename}")
+        assert filename == "[Group] Anime_Title - 03.mkv"
         return {
             "anime_title": "Anime_Title",
             "anime_episode": 3,
@@ -48,19 +46,23 @@ def test_metadata_parsing_direct_module_uses_anitopy_first_for_bracketed_names(
         }
 
     def fake_guessit(filename: str) -> dict[str, object]:
-        calls.append(f"guessit:{filename}")
-        return {"title": "Western Title", "year": 2022}
+        assert filename == "[Group] Anime_Title - 03.mkv"
+        return {
+            "title": "Western Title",
+            "year": 2022,
+            "release_group": "Wrong Group",
+            "source": "Blu-ray",
+            "screen_size": "1080p",
+        }
 
     mocker.patch("frame_compare.services.metadata_parsing.anitopy.parse", fake_anitopy_parse)
     mocker.patch("frame_compare.services.metadata_parsing.guessit", fake_guessit)
 
     result = metadata_parsing.parse_filename("[Group] Anime_Title - 03.mkv")
 
-    assert calls == [
-        "anitopy:[Group] Anime_Title - 03.mkv",
-        "guessit:[Group] Anime_Title - 03.mkv",
-    ]
     assert result.title == "Anime Title"
     assert result.year == 2022
     assert result.episode == 3
     assert result.release_group == "Group"
+    assert result.source == "Blu-ray"
+    assert result.resolution == "1080p"

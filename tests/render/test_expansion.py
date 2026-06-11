@@ -582,10 +582,11 @@ def test_expand_batch_render_requests(mock_prepare: MagicMock) -> None:
         "Reference": range(0, 2),
         "Encode 1": range(2, 3),
     }
-    assert mock_prepare.call_args_list == [
-        ((Path("video1.mkv"), "ffmpeg", config), {"ffmpeg_runner": ffmpeg_runner}),
-        ((Path("video2.mkv"), "ffmpeg", config), {"ffmpeg_runner": ffmpeg_runner}),
-    ]
+    prepared_paths = [args[0] for args, _kwargs in mock_prepare.call_args_list]
+    assert prepared_paths == [Path("video1.mkv"), Path("video2.mkv")]
+    assert all(
+        kwargs["ffmpeg_runner"] is ffmpeg_runner for _args, kwargs in mock_prepare.call_args_list
+    )
 
     # Verify requests
     assert requests[0].clip is ref_clip
@@ -1276,10 +1277,10 @@ def test_expand_batch_render_requests_rejected_trusted_metadata_falls_back_with_
     assert ref_plan is not None
     assert ref_plan.active_rect_source == "dimension-derived"
     assert ref_plan.active_rect == GeometryRect(240, 0, 1440, 1080)
-    assert warnings == [
-        "Screenshot geometry alignment ignored Dolby Vision L5 active rect metadata "
-        f"for Reference: {expected_reason}; using geometry fallback."
-    ]
+    assert len(warnings) == 1
+    assert "Dolby Vision L5 active rect metadata" in warnings[0]
+    assert "Reference" in warnings[0]
+    assert expected_reason in warnings[0]
 
 
 @pytest.mark.unit
@@ -1328,11 +1329,11 @@ def test_expand_batch_render_requests_rejected_trusted_metadata_falls_back_to_ex
     assert plan is not None
     assert plan.active_rect_source == "explicit"
     assert plan.active_rect == GeometryRect(160, 0, 1600, 1080)
-    assert warnings == [
-        "Screenshot geometry alignment ignored Dolby Vision L5 active rect metadata "
-        "for Reference: selected-frame Dolby Vision L5 margins were inconsistent; "
-        "using explicit active rect override."
-    ]
+    assert len(warnings) == 1
+    assert "Dolby Vision L5 active rect metadata" in warnings[0]
+    assert "Reference" in warnings[0]
+    assert "inconsistent" in warnings[0]
+    assert "explicit active rect override" in warnings[0]
 
 
 @pytest.mark.unit

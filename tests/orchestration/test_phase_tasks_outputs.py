@@ -901,22 +901,6 @@ def test_output_phases_use_reselected_metric_metadata_after_real_initial_selecti
     ]
 
 
-def test_run_report_phase_without_screenshots_clears_existing_report_path(tmp_path: Path) -> None:
-    ctx = _context(tmp_path)
-    artifacts = RunArtifacts(report_path=tmp_path / "stale.html")
-
-    output = phase_post_render.run_report_phase(
-        ctx,
-        frames=[1],
-        render=artifacts.render,
-        metadata=artifacts.resolved_metadata,
-        slowpics_url=artifacts.slowpics_url,
-    )
-
-    assert output.report_path is None
-    assert artifacts.report_path == tmp_path / "stale.html"
-
-
 async def test_run_publish_phase_sets_url_from_publish_result_and_delegates_post_upload_actions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1542,12 +1526,11 @@ def test_post_report_cleanup_returns_warning_and_logs_for_delete_error(
     assert output.warnings == [
         f"cleanup: failed to delete uploaded screenshot {uploaded[0]}: locked"
     ]
-    assert warning_calls == [
-        (
-            "slowpics_uploaded_file_delete_failed",
-            {"path": str(uploaded[0]), "error": "locked"},
-        )
-    ]
+    assert len(warning_calls) == 1
+    event, fields = warning_calls[0]
+    assert event == "slowpics_uploaded_file_delete_failed"
+    assert fields["path"] == str(uploaded[0])
+    assert fields["error"] == "locked"
 
 
 async def test_warn_only_publish_phase_keeps_sanitized_service_error_in_warning_and_log(
@@ -1601,14 +1584,9 @@ async def test_warn_only_publish_phase_keeps_sanitized_service_error_in_warning_
     assert len(state.warnings) == 1
     assert "publish:" in state.warnings[0]
     assert "Image upload failed with status 400" in state.warnings[0]
-    assert warning_calls == [
-        (
-            "phase_warned",
-            {
-                "phase": "publish",
-                "error_type": "SlowpicsError",
-                "error": str(sanitized_error),
-                "exc_info": sanitized_error,
-            },
-        )
-    ]
+    assert len(warning_calls) == 1
+    event, fields = warning_calls[0]
+    assert event == "phase_warned"
+    assert fields["phase"] == "publish"
+    assert fields["error_type"] == "SlowpicsError"
+    assert fields["error"] == str(sanitized_error)

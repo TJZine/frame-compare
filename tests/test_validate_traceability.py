@@ -81,9 +81,7 @@ def test_validate_test_function_requires_exact_def(
     vt = cast(Any, vt_module)
 
     repo_tests = tmp_path / "tests"
-    scaffold_tests = tmp_path / "scaffold"
     repo_tests.mkdir()
-    scaffold_tests.mkdir()
 
     test_file = repo_tests / "render" / "test_report.py"
     test_file.parent.mkdir(parents=True, exist_ok=True)
@@ -99,7 +97,6 @@ def test_validate_test_function_requires_exact_def(
     )
 
     monkeypatch.setattr(vt, "REPO_TESTS_DIR", repo_tests)
-    monkeypatch.setattr(vt, "SCAFFOLD_TESTS_DIR", scaffold_tests)
 
     ref = vt.TraceRef(
         kind="test", ref="tests/render/test_report.py::test_report", planned=False, line_no=7

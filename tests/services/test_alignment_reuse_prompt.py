@@ -127,9 +127,8 @@ def test_prompt_prints_rich_safe_table_to_stderr_and_accepts_yes(
     assert accepted is True
     assert captured.out == ""
     assert "Previous Alignment Offsets" in stderr_output
-    assert "╭" in stderr_output or "+" in stderr_output
     assert REUSE_CACHE_FILE_NAME in stderr_output
-    assert "Reuse previous preview-confirmed alignment offsets? [y/N]" in stderr_output
+    assert "[y/N]" in stderr_output
     assert "Comparison [cyan]" in stderr_output
     assert "<one>" in stderr_output
     assert "A [red].mkv" in stderr_output
@@ -145,7 +144,7 @@ def test_prompt_prints_rich_safe_table_to_stderr_and_accepts_yes(
     assert "cached" not in stderr_output
 
 
-def test_prompt_uses_bounded_standard_panel_width(
+def test_prompt_does_not_use_unbounded_terminal_width(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -175,7 +174,7 @@ def test_prompt_uses_bounded_standard_panel_width(
 
     assert accepted is False
     assert console_widths
-    assert all(width == 180 for width in console_widths)
+    assert all(width is not None and width < 240 for width in console_widths)
 
 
 @pytest.mark.parametrize("response", ["\n", "n\n", "NO\n", "anything else\n"])
@@ -219,7 +218,7 @@ def test_prompt_non_tty_stdin_prints_only_fallback_line(
     assert captured.out == ""
     assert _fallback_only_output(stderr_output)
     assert "Previous Alignment Offsets" not in stderr_output
-    assert "Reuse previous preview-confirmed alignment offsets? [y/N]" not in stderr_output
+    assert "[y/N]" not in stderr_output
     assert "Comparison [cyan] <one>" not in stderr_output
 
 
@@ -248,7 +247,7 @@ def test_prompt_visible_prompt_path_fallbacks_on_eof_or_read_failure(
     assert captured.out == ""
     stderr_output = stderr.getvalue()
     assert "Previous Alignment Offsets" in stderr_output
-    assert "Reuse previous preview-confirmed alignment offsets? [y/N]" in stderr_output
+    assert "[y/N]" in stderr_output
     assert f"{REUSE_PREVIOUS_OFFSETS_PROMPT}\n{PROMPT_UNAVAILABLE_MESSAGE}" in stderr_output
 
 

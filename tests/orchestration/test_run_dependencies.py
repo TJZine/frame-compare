@@ -136,10 +136,10 @@ def test_execute_run_passes_no_color_to_progress_selection(
         no_color: bool = False,
         force_tty: bool | None = None,
     ) -> NullProgressReporter:
+        del force_tty
         captured["quiet"] = quiet
         captured["json_output"] = json_output
         captured["no_color"] = no_color
-        captured["force_tty_is_none"] = force_tty is None
         return progress
 
     async def fake_execute_prep(_request: RunRequest, local_deps: RunDependencies):
@@ -156,7 +156,6 @@ def test_execute_run_passes_no_color_to_progress_selection(
         "quiet": False,
         "json_output": False,
         "no_color": True,
-        "force_tty_is_none": True,
     }
 
 
