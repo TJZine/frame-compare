@@ -33,7 +33,7 @@ from frame_compare.analysis.tier_validation import (
 from frame_compare.analysis.types import FrameMetrics, FrameSelection
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema import AnalysisConfig, ConfigSchema
-from frame_compare.config.schema_enums import SourceMatchFpsMode
+from frame_compare.config.schema_enums import AnalysisPerformanceMode, SourceMatchFpsMode
 from frame_compare.orchestration.source_selection import (
     resolve_source_selection,
     resolve_source_selector,
@@ -316,7 +316,9 @@ def _run_tier(
     window_start: int,
     window_end_exclusive: int | None,
 ) -> JsonObject:
-    tier_config = analysis_config.model_copy(update={"performance_mode": mode})
+    tier_config = analysis_config.model_copy(
+        update={"performance_mode": AnalysisPerformanceMode(mode)}
+    )
     started = time.perf_counter()
     metrics = calculate_metrics(
         list(video_paths),

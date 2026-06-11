@@ -25,6 +25,7 @@ from frame_compare.analysis.types import (
     SelectionBreakdown,
 )
 from frame_compare.config.schema import ConfigSchema
+from frame_compare.config.schema_enums import AnalysisPerformanceMode
 
 
 def test_nearest_frame_distances_returns_one_distance_per_candidate() -> None:
@@ -181,6 +182,57 @@ def test_benchmark_script_progress_wraps_quality_and_candidate_tiers(
     assert progress_events.count(("advance", 7)) == 3
 
 
+def test_benchmark_script_run_tier_preserves_typed_performance_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    script = _load_benchmark_script()
+    observed_modes: list[AnalysisPerformanceMode] = []
+
+    def fake_calculate_metrics(
+        video_paths: list[Path],
+        analysis_config: object,
+        cache_dir: Path,
+        *,
+        analysis_source_path: Path,
+        effective_fps: object,
+        selection_domain: str | None,
+    ) -> FrameMetrics:
+        assert video_paths == [tmp_path / "reference.mkv"]
+        assert cache_dir == tmp_path / "cache"
+        assert analysis_source_path == tmp_path / "reference.mkv"
+        assert effective_fps is None
+        assert selection_domain is None
+        observed_modes.append(analysis_config.performance_mode)
+        return _metrics_payload("balanced", [0.0, 0.2, 1.0], [0.0, 0.1, 0.7])
+
+    monkeypatch.setattr(script, "calculate_metrics", fake_calculate_metrics)
+
+    result = script._run_tier(
+        mode="balanced",
+        video_paths=[tmp_path / "reference.mkv"],
+        analysis_config=ConfigSchema.model_validate(
+            {
+                "analysis": {
+                    "random_frame_count": 0,
+                    "dark_frame_count": 1,
+                    "bright_frame_count": 0,
+                    "motion_frame_count": 0,
+                }
+            }
+        ).analysis,
+        cache_dir=tmp_path / "cache",
+        analysis_source_path=tmp_path / "reference.mkv",
+        effective_fps=None,
+        selection_domain=None,
+        window_start=0,
+        window_end_exclusive=None,
+    )
+
+    assert observed_modes == [AnalysisPerformanceMode.BALANCED]
+    assert result["metadata"]["performance_mode"] == "balanced"
+
+
 def test_benchmark_script_resolves_configured_analysis_source_and_effective_fps(
     tmp_path: Path,
 ) -> None:
@@ -267,20 +319,7 @@ def _tier_payload(
     motion: list[float],
     selected_frames: list[int],
 ) -> dict[str, Any]:
-    metrics = FrameMetrics(
-        luminance=luminance,
-        motion=motion,
-        metadata=MetricsMetadata(
-            frame_count=len(luminance),
-            fps=Fraction(24, 1),
-            config_fingerprint="fingerprint",
-            clips=[ClipIdentity(path="clip.mkv", size=1, mtime=1.0)],
-            performance_mode=mode,
-            algorithm_id=f"{mode}-algorithm",
-            metric_backend="test",
-            algorithm_identity_json="{}",
-        ),
-    )
+    metrics = _metrics_payload(mode, luminance, motion)
     selection = FrameSelection(
         frames=selected_frames,
         seed=0,
@@ -305,3 +344,24 @@ def _tier_payload(
         "windowed_metrics": metrics,
         "selection": selection,
     }
+
+
+def _metrics_payload(
+    mode: str,
+    luminance: list[float],
+    motion: list[float],
+) -> FrameMetrics:
+    return FrameMetrics(
+        luminance=luminance,
+        motion=motion,
+        metadata=MetricsMetadata(
+            frame_count=len(luminance),
+            fps=Fraction(24, 1),
+            config_fingerprint="fingerprint",
+            clips=[ClipIdentity(path="clip.mkv", size=1, mtime=1.0)],
+            performance_mode=mode,
+            algorithm_id=f"{mode}-algorithm",
+            metric_backend="test",
+            algorithm_identity_json="{}",
+        ),
+    )
