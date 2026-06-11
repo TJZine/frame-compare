@@ -20,6 +20,10 @@ comparisons, selected-frame overlap, nearest-frame distances, miss rates,
 Spearman rank correlations, top-K overlap, total analysis wall-clock time,
 algorithm identity, and warnings for unavailable runtime details.
 
+By default, the script renders tier-level Rich progress to stderr while keeping
+stdout reserved for the final output JSON path. Pass `--no-progress` when a
+scripted run needs no terminal progress display.
+
 When source trims, effective FPS overrides, or shared selection windows matter,
 pass the exact source-frame window used for review with `--window-start` and
 `--window-end-exclusive`. If an orchestration selection-domain token is available

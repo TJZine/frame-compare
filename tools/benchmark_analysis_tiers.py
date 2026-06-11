@@ -12,6 +12,16 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any, cast
 
+from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+)
+
 from frame_compare.analysis.metrics import calculate_metrics
 from frame_compare.analysis.selection import select_frames
 from frame_compare.analysis.tier_validation import (
@@ -65,8 +75,8 @@ def main() -> int:
         "Cache hit/miss state is not exposed by calculate_metrics; benchmark output records cache_state as unknown.",
     ]
 
-    quality = _run_tier(
-        mode="quality",
+    quality, comparisons = _run_benchmark_tiers(
+        candidate_modes=cast(Sequence[str], args.modes),
         video_paths=input_paths,
         analysis_config=config.analysis,
         cache_dir=cache_dir,
@@ -75,22 +85,8 @@ def main() -> int:
         selection_domain=args.selection_domain,
         window_start=args.window_start,
         window_end_exclusive=args.window_end_exclusive,
+        progress_enabled=not args.no_progress,
     )
-
-    comparisons: dict[str, JsonObject] = {}
-    for mode in cast(Sequence[str], args.modes):
-        tier = _run_tier(
-            mode=mode,
-            video_paths=input_paths,
-            analysis_config=config.analysis,
-            cache_dir=cache_dir,
-            analysis_source_path=analysis_source_path,
-            effective_fps=effective_fps,
-            selection_domain=args.selection_domain,
-            window_start=args.window_start,
-            window_end_exclusive=args.window_end_exclusive,
-        )
-        comparisons[mode] = _compare_tier(quality=quality, candidate=tier)
 
     if args.window_end_exclusive is None:
         warnings.append(
@@ -230,6 +226,11 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="Source-frame window end. Defaults to metric frame count.",
     )
+    parser.add_argument(
+        "--no-progress",
+        action="store_true",
+        help="Disable stderr progress display for scripted runs.",
+    )
     args = parser.parse_args()
     if args.modes is None:
         args.modes = ["balanced", "fast"]
@@ -238,6 +239,69 @@ def _parse_args() -> argparse.Namespace:
     if args.window_end_exclusive is not None and args.window_end_exclusive <= args.window_start:
         parser.error("--window-end-exclusive must be greater than --window-start")
     return args
+
+
+def _run_benchmark_tiers(
+    *,
+    candidate_modes: Sequence[str],
+    video_paths: Sequence[Path],
+    analysis_config: AnalysisConfig,
+    cache_dir: Path,
+    analysis_source_path: Path,
+    effective_fps: Fraction | None,
+    selection_domain: str | None,
+    window_start: int,
+    window_end_exclusive: int | None,
+    progress_enabled: bool,
+) -> tuple[JsonObject, dict[str, JsonObject]]:
+    console = Console(stderr=True)
+    progress = Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TimeElapsedColumn(),
+        console=console,
+        disable=not progress_enabled,
+    )
+    total = 1 + len(candidate_modes)
+    comparisons: dict[str, JsonObject] = {}
+
+    with progress:
+        task_id = progress.add_task("Starting analysis benchmark", total=total)
+        progress.update(task_id, description="Running quality analysis")
+        quality = _run_tier(
+            mode="quality",
+            video_paths=video_paths,
+            analysis_config=analysis_config,
+            cache_dir=cache_dir,
+            analysis_source_path=analysis_source_path,
+            effective_fps=effective_fps,
+            selection_domain=selection_domain,
+            window_start=window_start,
+            window_end_exclusive=window_end_exclusive,
+        )
+        progress.advance(task_id)
+
+        for mode in candidate_modes:
+            progress.update(task_id, description=f"Running {mode} analysis")
+            tier = _run_tier(
+                mode=mode,
+                video_paths=video_paths,
+                analysis_config=analysis_config,
+                cache_dir=cache_dir,
+                analysis_source_path=analysis_source_path,
+                effective_fps=effective_fps,
+                selection_domain=selection_domain,
+                window_start=window_start,
+                window_end_exclusive=window_end_exclusive,
+            )
+            comparisons[mode] = _compare_tier(quality=quality, candidate=tier)
+            progress.advance(task_id)
+
+        progress.update(task_id, description="Analysis benchmark complete")
+
+    return quality, comparisons
 
 
 def _run_tier(

@@ -105,6 +105,82 @@ def test_benchmark_script_comparison_schema_contains_required_sections() -> None
     assert result["selected"]["frames"] == [0, 2]
 
 
+def test_benchmark_script_progress_wraps_quality_and_candidate_tiers(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    script = _load_benchmark_script()
+    calls: list[str] = []
+    progress_events: list[tuple[str, object]] = []
+
+    class FakeProgress:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            progress_events.append(("disable", kwargs["disable"]))
+
+        def __enter__(self) -> FakeProgress:
+            progress_events.append(("enter", None))
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            progress_events.append(("exit", None))
+
+        def add_task(self, description: str, *, total: int) -> int:
+            progress_events.append(("add_task", (description, total)))
+            return 7
+
+        def update(self, task_id: int, *, description: str) -> None:
+            progress_events.append(("update", (task_id, description)))
+
+        def advance(self, task_id: int) -> None:
+            progress_events.append(("advance", task_id))
+
+    def fake_run_tier(**kwargs: object) -> dict[str, object]:
+        mode = cast(str, kwargs["mode"])
+        calls.append(mode)
+        return {"mode": mode, "analyze_seconds": 0.1}
+
+    def fake_compare_tier(
+        *,
+        quality: dict[str, object],
+        candidate: dict[str, object],
+    ) -> dict[str, object]:
+        return {
+            "quality_mode": quality["mode"],
+            "candidate_mode": candidate["mode"],
+        }
+
+    monkeypatch.setattr(script, "Progress", FakeProgress)
+    monkeypatch.setattr(script, "_run_tier", fake_run_tier)
+    monkeypatch.setattr(script, "_compare_tier", fake_compare_tier)
+
+    quality, comparisons = script._run_benchmark_tiers(
+        candidate_modes=["balanced", "fast"],
+        video_paths=[tmp_path / "reference.mkv"],
+        analysis_config=ConfigSchema().analysis,
+        cache_dir=tmp_path / "cache",
+        analysis_source_path=tmp_path / "reference.mkv",
+        effective_fps=None,
+        selection_domain=None,
+        window_start=0,
+        window_end_exclusive=None,
+        progress_enabled=True,
+    )
+
+    assert quality["mode"] == "quality"
+    assert calls == ["quality", "balanced", "fast"]
+    assert comparisons == {
+        "balanced": {"quality_mode": "quality", "candidate_mode": "balanced"},
+        "fast": {"quality_mode": "quality", "candidate_mode": "fast"},
+    }
+    assert ("disable", False) in progress_events
+    assert ("add_task", ("Starting analysis benchmark", 3)) in progress_events
+    assert ("update", (7, "Running quality analysis")) in progress_events
+    assert ("update", (7, "Running balanced analysis")) in progress_events
+    assert ("update", (7, "Running fast analysis")) in progress_events
+    assert ("update", (7, "Analysis benchmark complete")) in progress_events
+    assert progress_events.count(("advance", 7)) == 3
+
+
 def test_benchmark_script_resolves_configured_analysis_source_and_effective_fps(
     tmp_path: Path,
 ) -> None:
@@ -119,6 +195,7 @@ def test_benchmark_script_resolves_configured_analysis_source_and_effective_fps(
         {
             "sources": {
                 "analysis_source": "analysis.mkv",
+                "match_fps": "disabled",
                 "overrides": {"analysis.mkv": {"effective_fps": "24000/1001"}},
             }
         }
