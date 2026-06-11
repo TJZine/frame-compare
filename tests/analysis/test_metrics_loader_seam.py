@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from frame_compare.analysis.metric_strategies import MetricComputationResult
 from frame_compare.analysis.metrics import calculate_metrics
 from frame_compare.config.schema import AnalysisConfig
 from frame_compare.vs.loader import VSLoader
@@ -25,9 +26,18 @@ def test_calculate_metrics_uses_custom_vs_loader(mock_key, mock_load, tmp_path):
     video_paths[0].write_bytes(b"")
     config = AnalysisConfig()
 
+    strategy_result = MetricComputationResult(
+        luminance=[0.1] * 5,
+        motion=[0.0] * 5,
+        performance_mode="quality",
+        algorithm_id="algorithm-id",
+        metric_backend="python_numpy",
+        algorithm_identity_json='{"backend":"python_numpy"}',
+    )
     with (
-        patch("frame_compare.analysis.metrics._calculate_motion", return_value=[0.0] * 5),
-        patch("frame_compare.analysis.metrics._calculate_luminance", return_value=[0.1] * 5),
+        patch(
+            "frame_compare.analysis.metrics.calculate_metric_strategy", return_value=strategy_result
+        ),
         patch("frame_compare.analysis.metrics.save_metrics_cache"),
     ):
         calculate_metrics(video_paths, config, tmp_path, vs_loader=mock_loader)

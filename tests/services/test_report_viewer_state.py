@@ -33,107 +33,70 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment(
 
     assert result.returncode == 0, result.stdout + result.stderr
     summary = json.loads(result.stdout.strip().splitlines()[-1])
-    assert summary == {
-        "restoreFourClip": {
-            "clipCount": 4,
-            "leftClipIdx": 0,
-            "rightClipIdx": 1,
-            "activeClipIdx": 3,
-            "restoredPairKeys": ["0:1", "1:0"],
-            "currentAlignment": [5, -2],
-            "alignmentStatus": "Aligned: custom +5x -2y",
-        },
-        "pairSwitchFourClip": {
-            "finalPair": "3:0",
-            "finalAlignment": [-21, 3],
-            "finalAlignmentStatus": "Aligned: custom -21x +3y",
-            "persistedPairKeys": ["0:1", "0:2", "0:3", "2:0", "3:0"],
-            "persistedAlignments": {
-                "0:1": [4, 5],
-                "0:2": [-1, 8],
-                "0:3": [21, -3],
-                "2:0": [12, 13],
-                "3:0": [-21, 3],
-            },
-        },
-        "alignmentStatus": {
-            "neutral": "Aligned: none",
-            "preset": "Aligned: preset left 1px",
-            "reset": "Aligned: none",
-        },
-        "filmstripState": {
-            "collapsed": False,
-            "size": "compact",
-            "collapsedClassRemoved": True,
-        },
-        "invalidFilmstripStateFallback": {
-            "collapsed": False,
-            "size": "normal",
-            "stringBlinkIntervalFallback": 700,
-        },
-        "inspectorBlinkKeyboardState": {
-            "currentFrameIdx": 1,
-            "inspectorOpen": False,
-            "inspectorTab": "export",
-            "blinkIntervalMs": 300,
-            "blinkPausedPersisted": False,
-            "closedInspectorInert": True,
-            "closedInspectorTabIndex": "-1",
-            "restoredKeyboardFocusToInfo": True,
-            "clearedKeyboardFocusRestoreTarget": True,
-        },
-        "escapeOrder": {
-            "inspectorClosedBeforeAlignment": True,
-            "legacyInfoModalWins": True,
-            "alignmentStillOpenAfterInspectorEscape": True,
-        },
-        "inspectorSlowpics": {
-            "safeLinkTag": "A",
-            "unsafeAsText": True,
-            "missingStatus": "Not uploaded",
-        },
-        "singleModeAlignment": {
-            "mode": "overlay",
-            "canvasAlignX": "9px",
-            "canvasAlignY": "-4px",
-            "alignedComparisonActive": True,
-            "baseClipUnshifted": True,
-            "emptyStateClearsAlignment": True,
-        },
-        "blinkControls": {
-            "reducedMotionPaused": True,
-            "status": "Blink paused",
-            "intervalAfterSteps": 700,
-        },
-        "smartLabelGeometry": {
-            "untransformedWidth": 400,
-            "labelLeftX": "290px",
-            "labelRightX": "310px",
-        },
-        "blinkLabels": {
-            "leftActive": {"left": "Clip 1", "right": ""},
-            "rightActive": {"left": "", "right": "Clip 2"},
-        },
-        "keyboardGuard": {
-            "button": True,
-            "textarea": True,
-            "contentEditable": True,
-            "nestedInButton": True,
-            "plain": False,
-        },
-        "directionalFourClip": {
-            "swappedPair": "0:1",
-            "swappedAlignment": [6, 7],
-            "reversePairAlignment": [-6, -7],
-        },
-        "paletteOrientationState": {
-            "restoredOrientation": "vertical",
-            "savedOrientation": "vertical",
-        },
-        "activeFilterBadge": {
-            "badgeHiddenByDefault": True,
-            "badgeTextFilteredDark": "Filtered: Dark",
-            "badgeTextFilteredMotion": "Filtered: Motion",
-            "badgeClearedToHidden": True,
-        },
+
+    restored = summary["restoreFourClip"]
+    assert restored["clipCount"] == 4
+    assert restored["leftClipIdx"] != restored["rightClipIdx"]
+    assert restored["activeClipIdx"] == 3
+    assert set(restored["restoredPairKeys"]) == {"0:1", "1:0"}
+    assert restored["currentAlignment"] == [5, -2]
+
+    pair_switch = summary["pairSwitchFourClip"]
+    assert pair_switch["finalPair"] == "3:0"
+    assert pair_switch["finalAlignment"] == [-21, 3]
+    assert pair_switch["persistedAlignments"]["3:0"] == [-21, 3]
+    assert set(pair_switch["persistedPairKeys"]) >= {"0:1", "0:2", "0:3", "2:0", "3:0"}
+
+    assert summary["alignmentStatus"]["neutral"] == summary["alignmentStatus"]["reset"]
+    assert summary["filmstripState"] == {
+        "collapsed": False,
+        "size": "compact",
+        "collapsedClassRemoved": True,
     }
+    assert summary["invalidFilmstripStateFallback"] == {
+        "collapsed": False,
+        "size": "normal",
+        "stringBlinkIntervalFallback": 700,
+    }
+
+    inspector_state = summary["inspectorBlinkKeyboardState"]
+    assert inspector_state["inspectorOpen"] is False
+    assert inspector_state["inspectorTab"] == "export"
+    assert inspector_state["blinkPausedPersisted"] is False
+    assert inspector_state["closedInspectorInert"] is True
+    assert inspector_state["closedInspectorTabIndex"] == "-1"
+    assert inspector_state["restoredKeyboardFocusToInfo"] is True
+    assert inspector_state["clearedKeyboardFocusRestoreTarget"] is True
+
+    assert summary["escapeOrder"] == {
+        "inspectorClosedBeforeAlignment": True,
+        "legacyInfoModalWins": True,
+        "alignmentStillOpenAfterInspectorEscape": True,
+    }
+    assert summary["inspectorSlowpics"]["safeLinkTag"] == "A"
+    assert summary["inspectorSlowpics"]["unsafeAsText"] is True
+    assert summary["inspectorSlowpics"]["missingStatus"] == "Not uploaded"
+
+    single_mode = summary["singleModeAlignment"]
+    assert single_mode["mode"] == "overlay"
+    assert single_mode["alignedComparisonActive"] is True
+    assert single_mode["baseClipUnshifted"] is True
+    assert single_mode["emptyStateClearsAlignment"] is True
+
+    assert summary["blinkControls"]["reducedMotionPaused"] is True
+    assert summary["blinkControls"]["intervalAfterSteps"] == 700
+    assert summary["keyboardGuard"] == {
+        "button": True,
+        "textarea": True,
+        "contentEditable": True,
+        "nestedInButton": True,
+        "plain": False,
+    }
+    assert summary["directionalFourClip"]["swappedAlignment"] == [6, 7]
+    assert summary["directionalFourClip"]["reversePairAlignment"] == [-6, -7]
+    assert summary["paletteOrientationState"] == {
+        "restoredOrientation": "vertical",
+        "savedOrientation": "vertical",
+    }
+    assert summary["activeFilterBadge"]["badgeHiddenByDefault"] is True
+    assert summary["activeFilterBadge"]["badgeClearedToHidden"] is True

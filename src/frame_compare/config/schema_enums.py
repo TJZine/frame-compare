@@ -49,6 +49,13 @@ class SourceMatchFpsMode(StrEnum):
     MAJORITY = "majority"
 
 
+class AnalysisPerformanceMode(StrEnum):
+    """Analysis metric performance/quality policy."""
+
+    QUALITY = "quality"
+    PERFORMANCE = "performance"
+
+
 class VsScreenshotWriter(StrEnum):
     """VapourSynth screenshot writer selection."""
 
@@ -110,6 +117,7 @@ class LogFormat(StrEnum):
 
 
 __all__ = [
+    "AnalysisPerformanceMode",
     "LogFormat",
     "LogLevel",
     "OverlayMode",

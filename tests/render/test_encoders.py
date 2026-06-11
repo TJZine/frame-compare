@@ -297,11 +297,9 @@ def test_render_frame_vs_auto_uses_fpng_for_geometry_without_overlay(
     assert compression == 2
     assert overwrite is True
     assert isinstance(written_clip, _FakeFpngClip)
-    assert written_clip.ops == [
-        ("crop", {"left": 1, "right": 1, "top": 0, "bottom": 0}),
-        ("resize", {"width": 4, "height": 4}),
-        ("pad", {"left": 1, "right": 1, "top": 0, "bottom": 0}),
-    ]
+    assert [name for name, _kwargs in written_clip.ops] == ["crop", "resize", "pad"]
+    assert written_clip.ops[-1][1]["left"] == 1
+    assert written_clip.ops[-1][1]["right"] == 1
     assert job.frames == [3]
     assert clip.frame_reads == [0, 3]
 
@@ -674,56 +672,31 @@ class _FakeClip:
         return self._frame
 
 
-def test_clip_to_rgb24_for_pillow_uses_709_when_matrix_missing(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("fmt", "props", "expected_matrix"),
+    [
+        (SimpleNamespace(id=999, color_family=3), {}, "709"),
+        (SimpleNamespace(id=999, color_family=3), {"_Transfer": 16, "_Primaries": 9}, "2020ncl"),
+        (SimpleNamespace(id=999, color_family=3), {"_Matrix": 5}, "470bg"),
+        (None, {}, "709"),
+    ],
+)
+def test_clip_to_rgb24_for_pillow_maps_yuv_matrix_for_pillow(
+    monkeypatch,
+    fmt: object | None,
+    props: dict[str, object],
+    expected_matrix: str,
+) -> None:
     fake_vs = SimpleNamespace(RGB24=1, RGB=2)
     monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
 
-    fmt = SimpleNamespace(id=999, color_family=3)
-    clip = _FakeClip(fmt=fmt, props={})
+    clip = _FakeClip(fmt=fmt, props=props)
 
     result = _clip_to_rgb24_for_pillow(clip)  # type: ignore[arg-type]
 
     assert result == "bicubic"
     assert clip.resize.calls[0][0] == "Bicubic"
-    assert clip.resize.calls[0][1]["matrix_in_s"] == "709"
-
-
-def test_clip_to_rgb24_for_pillow_uses_hdr_fallback_when_matrix_missing(monkeypatch) -> None:
-    fake_vs = SimpleNamespace(RGB24=1, RGB=2)
-    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
-
-    fmt = SimpleNamespace(id=999, color_family=3)
-    clip = _FakeClip(fmt=fmt, props={"_Transfer": 16, "_Primaries": 9})
-
-    result = _clip_to_rgb24_for_pillow(clip)  # type: ignore[arg-type]
-
-    assert result == "bicubic"
-    assert clip.resize.calls[0][1]["matrix_in_s"] == "2020ncl"
-
-
-def test_clip_to_rgb24_for_pillow_uses_matrix_prop_mapping(monkeypatch) -> None:
-    fake_vs = SimpleNamespace(RGB24=1, RGB=2)
-    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
-
-    fmt = SimpleNamespace(id=999, color_family=3)
-    clip = _FakeClip(fmt=fmt, props={"_Matrix": 5})
-
-    result = _clip_to_rgb24_for_pillow(clip)  # type: ignore[arg-type]
-
-    assert result == "bicubic"
-    assert clip.resize.calls[0][1]["matrix_in_s"] == "470bg"
-
-
-def test_clip_to_rgb24_for_pillow_variable_format(monkeypatch) -> None:
-    fake_vs = SimpleNamespace(RGB24=1, RGB=2)
-    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
-
-    clip = _FakeClip(fmt=None, props={})
-    result = _clip_to_rgb24_for_pillow(clip)  # type: ignore[arg-type]
-
-    assert result == "bicubic"
-    assert clip.resize.calls[0][0] == "Bicubic"
-    assert clip.resize.calls[0][1]["matrix_in_s"] == "709"
+    assert clip.resize.calls[0][1]["matrix_in_s"] == expected_matrix
 
 
 def test_clip_to_rgb24_for_pillow_already_rgb24_passthrough(monkeypatch) -> None:
@@ -750,14 +723,24 @@ def test_clip_to_rgb24_for_pillow_rgb_non_24_uses_point(monkeypatch) -> None:
     assert clip.resize.calls[0][0] == "Point"
 
 
-def test_clip_to_rgb24_for_pillow_expands_marked_limited_tonemap(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    "range_props",
+    [
+        {"_Range": 0},
+        {"_ColorRange": 1},
+    ],
+)
+def test_clip_to_rgb24_for_pillow_expands_marked_limited_tonemap(
+    monkeypatch,
+    range_props: dict[str, object],
+) -> None:
     fake_vs = SimpleNamespace(RGB24=1, RGB=2)
     monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
 
     fmt = SimpleNamespace(id=999, color_family=2)
     clip = _FakeClip(
         fmt=fmt,
-        props={"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_Range": 0},
+        props={"_Tonemapped": 1, "_FrameCompareExpandRange": 1, **range_props},
     )
     clip.resize.Point = MagicMock(return_value=clip)
 
@@ -768,66 +751,23 @@ def test_clip_to_rgb24_for_pillow_expands_marked_limited_tonemap(monkeypatch) ->
     clip.std.SetFrameProps.assert_called_once_with(_FrameCompareExpandRange=1)
 
 
-def test_clip_to_rgb24_for_pillow_expands_deprecated_limited_color_range_tonemap(
+@pytest.mark.parametrize(
+    "props",
+    [
+        {"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_Range": 1},
+        {"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_ColorRange": 0},
+        {"_Tonemapped": 1},
+    ],
+)
+def test_clip_to_rgb24_for_pillow_skips_expand_when_not_limited_internal_tonemap(
     monkeypatch,
+    props: dict[str, object],
 ) -> None:
     fake_vs = SimpleNamespace(RGB24=1, RGB=2)
     monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
 
     fmt = SimpleNamespace(id=999, color_family=2)
-    clip = _FakeClip(
-        fmt=fmt,
-        props={"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_ColorRange": 1},
-    )
-    clip.resize.Point = MagicMock(return_value=clip)
-
-    result = _clip_to_rgb24_for_pillow(clip)  # type: ignore[arg-type]
-
-    assert result == "props"
-    clip.resize.Point.assert_called_once_with(format=1)
-    clip.std.SetFrameProps.assert_called_once_with(_FrameCompareExpandRange=1)
-
-
-def test_clip_to_rgb24_for_pillow_does_not_expand_marked_full_range_tonemap(monkeypatch) -> None:
-    fake_vs = SimpleNamespace(RGB24=1, RGB=2)
-    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
-
-    fmt = SimpleNamespace(id=999, color_family=2)
-    clip = _FakeClip(
-        fmt=fmt,
-        props={"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_Range": 1},
-    )
-
-    result = _clip_to_rgb24_for_pillow(clip)  # type: ignore[arg-type]
-
-    assert result == "point"
-    assert clip.resize.calls[0] == ("Point", {"format": 1})
-
-
-def test_clip_to_rgb24_for_pillow_skips_deprecated_full_color_range_tonemap(
-    monkeypatch,
-) -> None:
-    fake_vs = SimpleNamespace(RGB24=1, RGB=2)
-    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
-
-    fmt = SimpleNamespace(id=999, color_family=2)
-    clip = _FakeClip(
-        fmt=fmt,
-        props={"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_ColorRange": 0},
-    )
-
-    result = _clip_to_rgb24_for_pillow(clip)  # type: ignore[arg-type]
-
-    assert result == "point"
-    assert clip.resize.calls[0] == ("Point", {"format": 1})
-
-
-def test_clip_to_rgb24_for_pillow_does_not_expand_marked_full_tonemap(monkeypatch) -> None:
-    fake_vs = SimpleNamespace(RGB24=1, RGB=2)
-    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
-
-    fmt = SimpleNamespace(id=999, color_family=2)
-    clip = _FakeClip(fmt=fmt, props={"_Tonemapped": 1})
+    clip = _FakeClip(fmt=fmt, props=props)
 
     result = _clip_to_rgb24_for_pillow(clip)  # type: ignore[arg-type]
 

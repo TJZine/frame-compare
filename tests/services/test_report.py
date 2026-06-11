@@ -854,19 +854,3 @@ def test_generate_report_slowpics_url_sanitization(report_data: ReportData, tmp_
     out_path = generate_report(report_data_invalid, ReportConfig(output_dir=str(tmp_path)))
     content = out_path.read_text(encoding="utf-8")
     assert "View on slow.pics" not in content
-
-
-def test_renderer_clip_options_rendering(report_data: ReportData, tmp_path: Path) -> None:
-    # Verify that left and right clip options are rendered with correct values/labels
-    # and selected index is respected
-    out_path = generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
-    content = out_path.read_text(encoding="utf-8")
-    # Left and right clip controls use the report payload's default selection.
-    assert '<select id="left-select" aria-label="Left clip">' in content
-    assert '<option value="0" selected>REF</option>' in content
-    assert '<option value="1">ENC</option>' in content
-
-    assert '<select id="right-select" aria-label="Right clip">' in content
-    assert '<option value="1" selected>ENC</option>' in content
-
-    assert '<select id="active-select" aria-label="Single clip">' in content

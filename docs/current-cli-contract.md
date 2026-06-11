@@ -230,14 +230,16 @@ unchanged.
   stable all-source selection-domain token. That token stores
   `analysis_source_path`, `reference_path`, source identities, source trims,
   effective FPS values, the configured analysis ignore-window settings, and the
-  final shared selectable window. Cache schema v4 stores `analysis_source_path`
-  in `MetricsMetadata`, and different selected references, selected analysis
-  sources, or selection domains from the same input set do not satisfy each
-  other. When `sources.analysis_source = "reference"`, `analysis_source_path`
-  is the selected reference path. Metric-array cache identity excludes
-  `user_frames`, random seed, frame-selection counts, `dark_quantile`, and
-  `bright_quantile` because those values affect frame choice rather than metric
-  computation.
+  final shared selectable window. Cache schema v5 stores
+  `analysis_source_path`, `performance_mode`, `algorithm_id`, `metric_backend`,
+  and stable `algorithm_identity_json` in `MetricsMetadata`, and different
+  selected references, selected analysis sources, selection domains,
+  performance modes, or metric algorithm identities from the same input set do
+  not satisfy each other. When `sources.analysis_source = "reference"`,
+  `analysis_source_path` is the selected reference path. Metric-array cache
+  identity excludes `user_frames`, random seed, frame-selection counts,
+  `dark_quantile`, and `bright_quantile` because those values affect frame
+  choice rather than metric computation.
 - The full fingerprint remains inside the cache payload and is validated on load.
   Legacy run-folder `cache.compframes` files are not used as analysis cache hits.
 - Analysis is skipped automatically when `dark_frame_count`, `bright_frame_count`,
@@ -257,13 +259,16 @@ unchanged.
   state. If `run_info.toml` cannot be written, the run fails immediately and
   best-effort cleanup removes the empty reserved run folder when possible.
 - `--no-cache` deletes only the matching shared analysis cache entry for the current
-  inputs, selected reference, all-source selection domain, and analysis settings
-  before continuing. It does not clear unrelated shared analysis entries and
-  does not delete shared previous-offset reuse entries under
+  inputs, selected reference, all-source selection domain, performance mode,
+  metric algorithm identity, and analysis settings before continuing. It does
+  not clear unrelated shared analysis entries and does not delete shared
+  previous-offset reuse entries under
   `<resolved paths.generated_dir>/cache/alignment/`.
 - `--from-cache-only` is analysis-cache-only. When analysis is not skipped, it validates
-  the matching shared analysis cache entry before metadata prefetch and before run-folder
-  reservation, so a missing or invalid entry does not leave an empty run folder.
+  the matching shared analysis cache entry for the exact current performance mode
+  and metric algorithm identity before metadata prefetch and before run-folder
+  reservation, so a missing, wrong-mode, or invalid entry does not leave an empty
+  run folder.
 - When the exact all-source selection-domain token requires probe data and the
   probe cache is missing, `--from-cache-only` fails before metadata prefetch and
   before run-folder reservation rather than validating a weaker fingerprint.
@@ -458,7 +463,7 @@ do not map to config, and do not persist through `--write-config`.
 
 ## Config-Only Analysis Surface
 
-The default `[analysis]` frame-selection surface is:
+The default `[analysis]` frame-selection and metric surface is:
 
 - `user_frames = []`
 - `random_frame_count = 10`
@@ -467,6 +472,7 @@ The default `[analysis]` frame-selection surface is:
 - `motion_frame_count = 0`
 - `random_seed = 42`
 - `save_frames_data = true`
+- `performance_mode = "quality"`
 
 `user_frames` are original selected-reference source-frame numbers. They are not
 trim-relative offsets and are not post-alignment frame numbers. Configured source
@@ -481,11 +487,19 @@ requested selector count must not exceed 100. Removed stale analysis keys
 These remaining `[analysis]` fields are config-only public surface; there are no
 dedicated `run` flags for them:
 
+- `performance_mode = "quality" | "performance"`
 - `ignore_lead_seconds = 0.0`
 - `ignore_trail_seconds = 0.0`
 - `min_window_seconds = 5.0`
 - `dark_quantile = 0.05`
 - `bright_quantile = 0.95`
+
+`performance_mode` selects the analysis metric algorithm identity used for
+luminance and motion arrays. `quality` is the default and preserves the current
+full-frame Python/NumPy metric behavior. `performance` is an approximate
+VapourSynth PlaneStats metric mode; it can select different dark, bright, or
+motion frames than `quality` and is cache-isolated from `quality`.
+There is no dedicated `run` flag for analysis performance mode in v1.
 
 The lead/trail fields define a global selectable analysis window inside each
 clip's source-specific base trim domain. They do not physically trim sources or

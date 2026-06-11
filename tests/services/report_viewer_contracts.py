@@ -277,14 +277,27 @@ def find_first(
     tag: str | None = None,
     element_id: str | None = None,
     class_name: str | None = None,
+    attr_name: str | None = None,
+    attr_value: str | None = None,
 ) -> ParsedElement | None:
     tag_matches = tag is None or element.tag == tag
     id_matches = element_id is None or element.attrs.get("id") == element_id
     class_matches = class_name is None or class_name in element.classes
-    if tag_matches and id_matches and class_matches:
+    attr_matches = attr_name is None or (
+        attr_name in element.attrs
+        and (attr_value is None or element.attrs[attr_name] == attr_value)
+    )
+    if tag_matches and id_matches and class_matches and attr_matches:
         return element
     for child in element.children:
-        match = find_first(child, tag=tag, element_id=element_id, class_name=class_name)
+        match = find_first(
+            child,
+            tag=tag,
+            element_id=element_id,
+            class_name=class_name,
+            attr_name=attr_name,
+            attr_value=attr_value,
+        )
         if match is not None:
             return match
     return None
@@ -296,8 +309,17 @@ def require_first(
     tag: str | None = None,
     element_id: str | None = None,
     class_name: str | None = None,
+    attr_name: str | None = None,
+    attr_value: str | None = None,
 ) -> ParsedElement:
-    match = find_first(element, tag=tag, element_id=element_id, class_name=class_name)
+    match = find_first(
+        element,
+        tag=tag,
+        element_id=element_id,
+        class_name=class_name,
+        attr_name=attr_name,
+        attr_value=attr_value,
+    )
     assert match is not None
     return match
 
@@ -313,6 +335,39 @@ def find_children(
         for child in element.children
         if (tag is None or child.tag == tag) and (class_name is None or class_name in child.classes)
     ]
+
+
+def find_all(
+    element: ParsedElement,
+    *,
+    tag: str | None = None,
+    element_id: str | None = None,
+    class_name: str | None = None,
+    attr_name: str | None = None,
+    attr_value: str | None = None,
+) -> list[ParsedElement]:
+    matches: list[ParsedElement] = []
+    tag_matches = tag is None or element.tag == tag
+    id_matches = element_id is None or element.attrs.get("id") == element_id
+    class_matches = class_name is None or class_name in element.classes
+    attr_matches = attr_name is None or (
+        attr_name in element.attrs
+        and (attr_value is None or element.attrs[attr_name] == attr_value)
+    )
+    if tag_matches and id_matches and class_matches and attr_matches:
+        matches.append(element)
+    for child in element.children:
+        matches.extend(
+            find_all(
+                child,
+                tag=tag,
+                element_id=element_id,
+                class_name=class_name,
+                attr_name=attr_name,
+                attr_value=attr_value,
+            )
+        )
+    return matches
 
 
 def css_block(css: str, selector: str) -> str:

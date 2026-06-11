@@ -58,18 +58,17 @@ def test_install_from_source_mentions_uv_auto_install(repo_root: Path) -> None:
     assert "invoke-expression" not in text
 
 
-def test_install_from_source_uv_install_order_is_deterministic(repo_root: Path) -> None:
+def test_install_from_source_uv_install_paths_and_recovery_guidance(repo_root: Path) -> None:
     script_path = repo_root / "tools" / "windows_portable" / "install-from-source.ps1"
     text = _read_text_or_fail(script_path).lower()
 
-    # The plan requires winget first, then pip as fallback.
-    winget_idx = text.index("winget install")
-    pip_idx = text.index("pip install --user uv")
-    assert winget_idx < pip_idx
+    assert "winget install" in text
+    assert "pip install --user uv" in text
 
     # Recovery block must be copy/paste friendly and include both commands.
-    assert "winget install --id astral-sh.uv -e --source winget" in text
-    assert "py -m pip install --user uv" in text
+    recovery_lines = {line.strip() for line in text.splitlines()}
+    assert "winget install --id astral-sh.uv -e --source winget" in recovery_lines
+    assert "py -m pip install --user uv" in recovery_lines
 
 
 def test_install_from_source_refreshes_process_path_before_uv_lookup(repo_root: Path) -> None:

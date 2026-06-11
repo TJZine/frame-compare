@@ -16,6 +16,7 @@ from pydantic import (
 )
 
 from frame_compare.config.schema_enums import (
+    AnalysisPerformanceMode,
     LogFormat,
     LogLevel,
     OverlayMode,
@@ -59,6 +60,7 @@ class AnalysisConfig(BaseModel):
     motion_frame_count: int = Field(default=0, ge=0)
     random_seed: int = 42
     save_frames_data: bool = True
+    performance_mode: AnalysisPerformanceMode = AnalysisPerformanceMode.QUALITY
     ignore_lead_seconds: float = Field(default=0.0, ge=0.0)
     ignore_trail_seconds: float = Field(default=0.0, ge=0.0)
     min_window_seconds: float = Field(default=5.0, ge=0.0)

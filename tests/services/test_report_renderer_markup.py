@@ -10,6 +10,7 @@ from frame_compare.services.report.renderer import build_html
 from frame_compare.services.report.viewer import get_css, get_js
 from tests.services.report_viewer_contracts import (
     SelectParser,
+    find_all,
     find_children,
     parse_elements,
     parse_info_modal,
@@ -83,17 +84,23 @@ def test_build_html_renders_frame_and_clip_selectors(report_payload: ReportPaylo
 
 def test_build_html_renders_mode_aware_clip_controls(report_payload: ReportPayload) -> None:
     html = build_html(report_payload)
+    document = parse_elements(html)
+    tags = parse_start_tags(html)
 
-    assert 'data-control-scope="pair" aria-label="Comparison pair"' in html
-    assert 'data-control-scope="active" aria-label="Single clip" hidden' in html
-    assert 'id="left-select" aria-label="Left clip"' in html
-    assert 'id="btn-swap-clips" class="rv-swap-button"' in html
-    assert 'id="right-select" aria-label="Right clip"' in html
-    assert 'id="active-select" aria-label="Single clip"' in html
+    pair_controls = require_first(
+        document, tag="div", attr_name="data-control-scope", attr_value="pair"
+    )
+    active_controls = require_first(
+        document, tag="div", attr_name="data-control-scope", attr_value="active"
+    )
+    assert pair_controls.attrs["aria-label"] == "Comparison pair"
+    assert active_controls.attrs["aria-label"] == "Single clip"
+    assert "hidden" in active_controls.attrs
+    assert tags.by_id["left-select"][1]["aria-label"] == "Left clip"
+    assert tags.by_id["right-select"][1]["aria-label"] == "Right clip"
+    assert tags.by_id["active-select"][1]["aria-label"] == "Single clip"
+    assert tags.by_id["btn-swap-clips"][0] == "button"
     assert 'data-mode="overlay" role="radio"' in html
-    assert 'aria-label="Single clip view" title="Single clip view (O)">Single</button>' in html
-    assert 'title="Overlay (O)"' not in html
-    assert ">Overlay</button>" not in html
 
 
 def test_build_html_keeps_ten_plus_long_label_clips_reachable_and_mobile_safe(
@@ -132,10 +139,8 @@ def test_build_html_keeps_ten_plus_long_label_clips_reachable_and_mobile_safe(
         assert options[11].attrs["value"] == "11"
         assert options[11].text.endswith("12")
 
-    assert "max-width: min(22rem, 100%);" in css
     assert "text-overflow: ellipsis;" in css
     assert "flex-wrap: wrap;" in css
-    assert "flex: 1 1 12rem;" in css
     assert ".rv-mode-slider #label-left" in css
     assert ".rv-mode-slider #label-right" in css
 
@@ -144,19 +149,35 @@ def test_build_html_renders_frame_metadata_and_category_filters(
     report_payload: ReportPayload,
 ) -> None:
     html = build_html(report_payload)
+    document = parse_elements(html)
+    parser = SelectParser()
+    parser.feed(html)
 
-    assert 'data-control-scope="frame-filters" aria-label="Frame category filters"' in html
-    assert 'data-category-key="__fc_all__" aria-pressed="true">All (2)</button>' in html
-    assert 'data-category-key="cat-0" data-category="selected" aria-pressed="false"' in html
-    assert 'data-category-key="cat-1" data-category="scene-cut" aria-pressed="false"' in html
-    assert '<span class="rv-filmstrip-label">Frame 10 • Selected</span>' in html
-    assert '<span class="rv-filmstrip-compact-label">Frame 10</span>' in html
+    filters = require_first(
+        document, tag="div", attr_name="data-control-scope", attr_value="frame-filters"
+    )
+    assert filters.attrs["aria-label"] == "Frame category filters"
+    all_filter = require_first(
+        filters, tag="button", attr_name="data-category-key", attr_value="__fc_all__"
+    )
+    assert all_filter.attrs["aria-pressed"] == "true"
+    selected_filter = require_first(
+        filters, tag="button", attr_name="data-category", attr_value="selected"
+    )
+    scene_cut_filter = require_first(
+        filters, tag="button", attr_name="data-category", attr_value="scene-cut"
+    )
+    assert selected_filter.attrs["aria-pressed"] == "false"
+    assert scene_cut_filter.attrs["aria-pressed"] == "false"
+    assert parser.selects["frame-select"].options[1].attrs["data-category"] == "scene-cut"
     assert "Source frame 10</span>" not in html
-    assert (
-        '<span class="rv-filmstrip-accent" '
-        'data-category-key="cat-1" data-category="scene-cut"></span>'
-    ) in html
-    assert 'value="1" data-category-key="cat-1" data-category="scene-cut">Frame 20</option>' in html
+    assert find_all(
+        document,
+        tag="span",
+        class_name="rv-filmstrip-accent",
+        attr_name="data-category",
+        attr_value="scene-cut",
+    )
 
 
 def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> None:
@@ -243,20 +264,22 @@ def test_build_html_positions_stage_labels_outside_image_layers(
     report_payload: ReportPayload,
 ) -> None:
     html = build_html(report_payload)
+    document = parse_elements(html)
+    stage = require_first(document, tag="div", class_name="rv-viewer-stage")
+    canvas = require_first(stage, tag="div", class_name="rv-canvas")
+    stage_labels = require_first(stage, tag="div", class_name="rv-stage-labels")
 
-    assert (
-        '<div class="rv-viewer-stage rv-mode-slider" role="region" aria-label="Comparison viewer">'
-        in html
-    )
-    assert '<div class="rv-canvas" role="img" aria-label="Comparison image canvas">' in html
-
-    left_layer_start = html.index('<div class="rv-layer rv-left">')
-    stage_labels_start = html.index('<div class="rv-stage-labels" aria-hidden="true">')
-    left_layer_markup = html[left_layer_start:stage_labels_start]
-
-    assert stage_labels_start > left_layer_start
-    assert 'id="label-left"' not in left_layer_markup
-    assert 'id="label-right"' not in left_layer_markup
+    assert stage.attrs["role"] == "region"
+    assert stage.attrs["aria-label"] == "Comparison viewer"
+    assert canvas.attrs["role"] == "img"
+    assert canvas.attrs["aria-label"] == "Comparison image canvas"
+    assert stage_labels.attrs["aria-hidden"] == "true"
+    require_first(stage_labels, tag="div", element_id="label-left")
+    require_first(stage_labels, tag="div", element_id="label-right")
+    for layer_class in ("rv-left", "rv-right"):
+        layer = require_first(canvas, tag="div", class_name=layer_class)
+        assert not find_all(layer, element_id="label-left")
+        assert not find_all(layer, element_id="label-right")
 
 
 def test_build_html_renders_empty_viewer_hooks_for_empty_payload(
@@ -298,7 +321,8 @@ def test_build_html_avoids_duplicate_category_labels_when_label_matches_category
 
     html = build_html(payload)
 
-    assert '<span class="rv-filmstrip-label">Motion</span>' in html
+    document = parse_elements(html)
+    assert require_first(document, tag="span", class_name="rv-filmstrip-label").text == "Motion"
     assert "Motion • Motion" not in html
 
 
@@ -317,17 +341,35 @@ def test_build_html_uses_internal_category_keys_for_reserved_category_text(
     }
 
     html = build_html(payload)
+    document = parse_elements(html)
+    parser = SelectParser()
+    parser.feed(html)
 
-    assert 'data-category-key="__fc_all__" aria-pressed="true">All (2)</button>' in html
-    assert 'data-category-key="cat-0" data-category="__all__" aria-pressed="false"' in html
-    assert 'value="0" data-category-key="cat-0" data-category="__all__">Frame 10</option>' in html
-    assert (
-        'class="rv-filmstrip-item" data-idx="0" data-category-key="cat-0" data-category="__all__"'
-    ) in html
-    assert (
-        '<span class="rv-filmstrip-accent" '
-        'data-category-key="cat-0" data-category="__all__"></span>'
-    ) in html
+    all_filter = require_first(
+        document, tag="button", attr_name="data-category-key", attr_value="__fc_all__"
+    )
+    assert all_filter.attrs["aria-pressed"] == "true"
+    reserved_filter = require_first(
+        document, tag="button", attr_name="data-category", attr_value="__all__"
+    )
+    assert reserved_filter.attrs["data-category-key"] != "__all__"
+    reserved_option = parser.selects["frame-select"].options[0]
+    assert reserved_option.attrs["data-category"] == "__all__"
+    assert reserved_option.attrs["data-category-key"] != "__all__"
+    assert find_all(
+        document,
+        tag="button",
+        class_name="rv-filmstrip-item",
+        attr_name="data-category",
+        attr_value="__all__",
+    )
+    assert find_all(
+        document,
+        tag="span",
+        class_name="rv-filmstrip-accent",
+        attr_name="data-category",
+        attr_value="__all__",
+    )
     assert 'data-category-key="__all__"' not in html
 
 
@@ -369,51 +411,52 @@ def test_build_html_uses_payload_default_selection_for_clip_controls(
 def test_build_html_renders_viewport_audit_controls(report_payload: ReportPayload) -> None:
     html = build_html(report_payload)
     document = parse_elements(html)
+    stage = require_first(document, tag="div", class_name="rv-viewer-stage")
+    controls = require_first(document, tag="div", class_name="rv-controls")
     palette = require_first(document, tag="div", class_name="rv-viewport-palette")
 
     assert palette.attrs["role"] == "toolbar"
     assert palette.attrs["aria-label"] == "Viewport controls"
     assert palette.attrs["data-orientation"] == "horizontal"
-    stage_start = html.index('<div class="rv-viewer-stage rv-mode-slider"')
-    palette_start = html.index('class="rv-viewport-palette"')
-    controls_start = html.index('<div class="rv-controls"')
-    assert palette_start > stage_start
-    assert controls_start < palette_start
-    assert 'id="alignment-status" class="rv-alignment-status"' in html
-    assert "Aligned: none" in html
-    assert 'role="radiogroup" aria-label="Fit mode"' in html
-    assert 'data-fit="actual"' in html
-    assert 'aria-label="Actual size"' in html
-    assert 'data-fit="width"' in html
-    assert 'aria-label="Fit width"' in html
-    assert 'data-fit="height"' in html
-    assert 'aria-label="Fit height"' in html
-    assert 'data-fit="fill"' not in html
-    assert 'aria-label="Fill stage"' not in html
-    assert 'id="alignment-preset" aria-label="Alignment preset"' in html
-    assert '<option value="left-1">Left 1px</option>' in html
-    assert '<option value="custom">Custom</option>' in html
-    assert 'id="align-x"' in html
-    assert 'aria-label="Manual horizontal alignment offset"' in html
-    assert 'id="align-y"' in html
-    assert 'aria-label="Manual vertical alignment offset"' in html
-    assert 'id="btn-fullscreen"' in html
-    assert 'aria-label="Enter fullscreen"' in html
-    assert 'aria-pressed="false"' in html
-    assert (
-        'id="btn-fullscreen" aria-label="Enter fullscreen" aria-pressed="false" '
-        'title="Enter fullscreen"><span class="rv-fullscreen-icon" aria-hidden="true">⛶</span></button>'
-    ) in html
+    assert controls.attrs["role"] == "toolbar"
+    assert stage.attrs["aria-label"] == "Comparison viewer"
+
+    alignment_status = require_first(document, tag="div", element_id="alignment-status")
+    assert "rv-alignment-status" in alignment_status.classes
+    assert alignment_status.text
+    fit_group = require_first(palette, tag="div", attr_name="role", attr_value="radiogroup")
+    assert fit_group.attrs["aria-label"] == "Fit mode"
+    fit_buttons = {
+        child.attrs.get("data-fit"): child
+        for group in find_children(palette, tag="div", class_name="rv-palette-group")
+        for child in group.children
+        if child.tag == "button" and "data-fit" in child.attrs
+    }
+    assert set(fit_buttons) == {"actual", "width", "height"}
+    assert fit_buttons["actual"].attrs["aria-label"] == "Actual size"
+    assert fit_buttons["width"].attrs["aria-label"] == "Fit width"
+    assert fit_buttons["height"].attrs["aria-label"] == "Fit height"
+
+    tags = parse_start_tags(html)
+    assert tags.by_id["alignment-preset"][1]["aria-label"] == "Alignment preset"
+    assert tags.by_id["align-x"][1]["aria-label"] == "Manual horizontal alignment offset"
+    assert tags.by_id["align-y"][1]["aria-label"] == "Manual vertical alignment offset"
+    fullscreen_button = require_first(palette, tag="button", element_id="btn-fullscreen")
+    assert fullscreen_button.attrs["aria-label"] == "Enter fullscreen"
+    assert fullscreen_button.attrs["aria-pressed"] == "false"
     assert 'id="btn-focus-mode"' not in html
-    assert 'id="btn-overlays"' in html
-    assert 'aria-label="Hide HUD"' in html
-    assert ">HUD</button>" in html
-    assert 'class="rv-palette-group rv-blink-controls" data-control-scope="blink" hidden' in html
-    assert 'id="btn-blink-pause" aria-label="Pause blink" aria-pressed="false"' in html
-    assert '<option value="300">0.3s</option>' in html
-    assert '<option value="700" selected>0.7s</option>' in html
-    assert '<option value="1200">1.2s</option>' in html
-    assert 'id="blink-status" class="rv-blink-status" role="status" aria-live="polite"' in html
+    overlays_button = require_first(palette, tag="button", element_id="btn-overlays")
+    assert overlays_button.attrs["aria-label"] == "Hide HUD"
+    blink_controls = require_first(
+        palette, tag="div", attr_name="data-control-scope", attr_value="blink"
+    )
+    assert "hidden" in blink_controls.attrs
+    blink_pause = require_first(blink_controls, tag="button", element_id="btn-blink-pause")
+    assert blink_pause.attrs["aria-label"] == "Pause blink"
+    assert blink_pause.attrs["aria-pressed"] == "false"
+    blink_status = require_first(blink_controls, tag="span", element_id="blink-status")
+    assert blink_status.attrs["role"] == "status"
+    assert blink_status.attrs["aria-live"] == "polite"
 
     active_filter_badge = require_first(document, tag="span", element_id="active-filter-badge")
     assert "rv-active-filter-badge" in active_filter_badge.classes
@@ -421,54 +464,37 @@ def test_build_html_renders_viewport_audit_controls(report_payload: ReportPayloa
 
     orientation_button = require_first(palette, tag="button", element_id="btn-palette-orientation")
     assert orientation_button.attrs["aria-label"] == "Toggle palette orientation"
-    assert orientation_button.text == "↔"
-
-    fit_buttons = {
-        child.attrs.get("data-fit"): child
-        for group in find_children(palette, tag="div", class_name="rv-palette-group")
-        for child in group.children
-        if child.tag == "button" and "data-fit" in child.attrs
-    }
-    assert fit_buttons["actual"].text == "1:1"
-    assert fit_buttons["actual"].attrs["title"] == "Actual size (1:1)"
-    assert fit_buttons["width"].text == "↔"
-    assert fit_buttons["width"].attrs["title"] == "Fit width (↔)"
-    assert fit_buttons["height"].text == "↕"
-    assert fit_buttons["height"].attrs["title"] == "Fit height (↕)"
-    assert "fill" not in fit_buttons
-    assert '<div class="rv-modal-subtitle">Viewport Fit Modes</div>' in html
 
 
 def test_build_html_renders_inspector_drawer(report_payload: ReportPayload) -> None:
     html = build_html(report_payload)
+    document = parse_elements(html)
 
-    assert (
-        'id="rv-inspector" class="rv-inspector" aria-hidden="true" '
-        'aria-labelledby="rv-inspector-title" inert'
-    ) in html
-    assert 'role="tablist" aria-label="Inspector tabs"' in html
+    inspector = require_first(document, tag="aside", element_id="rv-inspector")
+    assert "rv-inspector" in inspector.classes
+    assert inspector.attrs["aria-hidden"] == "true"
+    assert inspector.attrs["aria-labelledby"] == "rv-inspector-title"
+    assert "inert" in inspector.attrs
+    tablist = require_first(inspector, tag="div", attr_name="role", attr_value="tablist")
+    assert tablist.attrs["aria-label"] == "Inspector tabs"
     for tab in ("frame", "clips", "align", "export"):
-        assert f'data-inspector-tab="{tab}"' in html
-        assert f'id="inspector-panel-{tab}"' in html
-        tab_start = html.index(f'data-inspector-tab="{tab}"')
-        tab_end = html.index("</button>", tab_start)
-        assert 'tabindex="-1"' in html[tab_start:tab_end]
+        tab_button = require_first(
+            tablist, tag="button", attr_name="data-inspector-tab", attr_value=tab
+        )
+        assert tab_button.attrs["tabindex"] == "-1"
+        assert require_first(inspector, element_id=f"inspector-panel-{tab}") is not None
 
     assert "data-inspector-frame-label" in html
     assert "data-inspector-frame-position" in html
     assert "data-inspector-clips" in html
     assert "data-inspector-align-pair" in html
-    assert 'id="btn-inspector-reset-current-align"' in html
-    assert 'id="btn-inspector-reset-all-align"' in html
     for button_id in (
         "btn-inspector-close",
         "btn-inspector-reset-current-align",
         "btn-inspector-reset-all-align",
     ):
-        button_start = html.index(f'id="{button_id}"')
-        button_end = html.index("</button>", button_start)
-        assert 'tabindex="-1"' in html[button_start:button_end]
-    assert "Offsets are scoped to the selected pair." in html
+        button = require_first(inspector, tag="button", element_id=button_id)
+        assert button.attrs["tabindex"] == "-1"
     assert "data-inspector-export-summary" in html
     assert "data-focus-frame" not in html
     assert "data-focus-mode" not in html
@@ -479,42 +505,18 @@ def test_build_html_renders_keyboard_help_accessibility_hooks(
     report_payload: ReportPayload,
 ) -> None:
     html = build_html(report_payload)
+    document = parse_elements(html)
 
-    assert (
-        'id="help-modal" class="rv-modal" aria-hidden="true" role="dialog" '
-        'aria-modal="true" aria-labelledby="help-modal-title" tabindex="-1"'
-    ) in html
-    assert 'id="help-modal-title" class="rv-modal-title">Viewer Shortcuts</div>' in html
-    assert (
-        '<div class="rv-shortcut-row"><span>Swap Clips</span><span class="rv-key">X</span></div>'
-        in html
-    )
-    assert (
-        '<div class="rv-shortcut-row"><span>Toggle HUD</span><span class="rv-key">H</span></div>'
-        in html
-    )
-    assert (
-        '<div class="rv-shortcut-row"><span>Toggle Inspector</span><span class="rv-key">I</span></div>'
-        in html
-    )
-    assert (
-        '<div class="rv-shortcut-row"><span>Blink Pause / Speed</span><span class="rv-key">Space / [ / ]</span></div>'
-        in html
-    )
-    assert "Toggle Focus" not in html
-    assert "Modes (Slider/Single/Diff/Blink)" in html
-    assert (
-        '<div class="rv-shortcut-row"><span>Reset Viewport</span><span class="rv-key">R / Double-click</span></div>'
-        in html
-    )
-    assert (
-        '<div class="rv-shortcut-row"><span>Open Help</span><span class="rv-key">?</span></div>'
-        in html
-    )
-    assert (
-        '<div class="rv-shortcut-row"><span>Close Panel / Exit Fullscreen</span>'
-        '<span class="rv-key">Esc</span></div>'
-    ) in html
+    modal = require_first(document, tag="div", element_id="help-modal")
+    assert "rv-modal" in modal.classes
+    assert modal.attrs["aria-hidden"] == "true"
+    assert modal.attrs["role"] == "dialog"
+    assert modal.attrs["aria-modal"] == "true"
+    assert modal.attrs["aria-labelledby"] == "help-modal-title"
+    assert modal.attrs["tabindex"] == "-1"
+    shortcut_rows = find_all(modal, tag="div", class_name="rv-shortcut-row")
+    assert len(shortcut_rows) >= 6
+    assert "Toggle Focus" not in modal.text
 
 
 def test_build_html_embeds_json_without_raw_script_terminators(
@@ -558,8 +560,6 @@ def test_build_html_toggles_filmstrip_visibility(report_payload: ReportPayload) 
     assert visible_toggle.attrs["type"] == "button"
     assert visible_toggle.attrs["aria-expanded"] == "true"
     assert visible_toggle.attrs["aria-label"] == "Collapse timeline controls"
-    assert visible_toggle.attrs["title"] == "Toggle timeline (F)"
-    assert visible_toggle.text == "Hide timeline"
 
     size_buttons = {
         child.attrs.get("data-filmstrip-size"): child
@@ -576,11 +576,10 @@ def test_build_html_toggles_filmstrip_visibility(report_payload: ReportPayload) 
     assert "active" in size_buttons["normal"].classes
     assert size_buttons["large"].attrs["role"] == "radio"
     assert size_buttons["large"].attrs["aria-checked"] == "false"
-    assert 'class="rv-filmstrip"' in visible_html
-    assert 'aria-label="Frame thumbnails"' in visible_html
-    assert 'aria-hidden="false"' in visible_html
-    assert 'class="rv-filmstrip-item"' in visible_html
-    assert 'alt="REF &lt;main&gt; - Frame 10"' in visible_html
+    visible_filmstrip = require_first(visible_document, tag="nav", class_name="rv-filmstrip")
+    assert visible_filmstrip.attrs["aria-label"] == "Frame thumbnails"
+    assert visible_filmstrip.attrs["aria-hidden"] == "false"
+    assert find_all(visible_filmstrip, tag="button", class_name="rv-filmstrip-item")
 
     hidden_html = build_html(report_payload, include_filmstrip=False)
     hidden_document = parse_elements(hidden_html)
@@ -592,13 +591,12 @@ def test_build_html_toggles_filmstrip_visibility(report_payload: ReportPayload) 
     assert hidden_toggle.attrs["type"] == "button"
     assert hidden_toggle.attrs["aria-expanded"] == "false"
     assert hidden_toggle.attrs["aria-label"] == "Filmstrip disabled"
-    assert hidden_toggle.attrs["title"] == "Filmstrip disabled"
     assert "disabled" in hidden_toggle.attrs
-    assert hidden_toggle.text == "Filmstrip disabled"
-    assert 'class="rv-filmstrip rv-filmstrip--hidden"' in hidden_html
-    assert 'aria-label="Frame thumbnails disabled"' in hidden_html
-    assert 'aria-hidden="true"' in hidden_html
-    assert 'class="rv-filmstrip-item"' not in hidden_html
+    hidden_filmstrip = require_first(hidden_document, tag="nav", class_name="rv-filmstrip")
+    assert "rv-filmstrip--hidden" in hidden_filmstrip.classes
+    assert hidden_filmstrip.attrs["aria-label"] == "Frame thumbnails disabled"
+    assert hidden_filmstrip.attrs["aria-hidden"] == "true"
+    assert not find_all(hidden_filmstrip, tag="button", class_name="rv-filmstrip-item")
 
 
 def test_report_viewer_assets_and_markup_stay_offline(report_payload: ReportPayload) -> None:

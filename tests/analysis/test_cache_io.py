@@ -15,6 +15,11 @@ from frame_compare.analysis.cache_io import (
     metrics_cache_filename,
     save_metrics_cache,
 )
+from frame_compare.analysis.metric_identity import (
+    metric_algorithm_id,
+    metric_backend,
+    stable_metric_algorithm_identity_json,
+)
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.config.schema import AnalysisConfig
 
@@ -31,6 +36,29 @@ def create_video_file(tmp_path: Path, name: str = "video.mkv", content: bytes = 
 
 def cache_file(cache_dir: Path, fingerprint: str, *video_paths: Path) -> Path:
     return cache_dir / metrics_cache_filename(list(video_paths), fingerprint)
+
+
+def metrics_metadata(
+    *,
+    frame_count: int,
+    fps: Fraction,
+    config_fingerprint: str,
+    clips: list[ClipIdentity],
+    config: AnalysisConfig,
+    analysis_source_path: str = "",
+) -> MetricsMetadata:
+    return MetricsMetadata(
+        frame_count=frame_count,
+        fps=fps,
+        config_fingerprint=config_fingerprint,
+        clips=clips,
+        analysis_source_path=analysis_source_path,
+        performance_mode=config.performance_mode.value,
+        algorithm_id=metric_algorithm_id(config),
+        metric_backend=metric_backend(config),
+        algorithm_identity_json=stable_metric_algorithm_identity_json(config),
+        version=CACHE_VERSION,
+    )
 
 
 def test_compute_cache_key_deterministic(tmp_path: Path) -> None:
@@ -71,6 +99,16 @@ def test_compute_cache_key_changes_on_ignore_window_config(tmp_path: Path) -> No
     assert len({default_key, lead_key, trail_key, min_window_key}) == 4
 
 
+def test_compute_cache_key_changes_by_analysis_performance_mode(tmp_path: Path) -> None:
+    v1 = create_video_file(tmp_path, "v1.mkv")
+    keys = {
+        compute_cache_key([v1], AnalysisConfig(performance_mode=mode))
+        for mode in ("quality", "performance")
+    }
+
+    assert len(keys) == 2
+
+
 def test_metrics_cache_filename_order_independent(tmp_path: Path) -> None:
     fingerprint = "f" * 64
     v1 = create_video_file(tmp_path, "b-source.mkv")
@@ -98,6 +136,46 @@ def test_compute_cache_key_ignores_selection_counts(tmp_path: Path) -> None:
         ),
     )
     assert key1 == key2
+
+
+def test_compute_cache_key_ignores_user_frames_only_change(tmp_path: Path) -> None:
+    v1 = create_video_file(tmp_path, "v1.mkv")
+    key1 = compute_cache_key([v1], AnalysisConfig(user_frames=[1, 2]))
+    key2 = compute_cache_key([v1], AnalysisConfig(user_frames=[3, 4]))
+
+    assert key1 == key2
+
+
+def test_compute_cache_key_ignores_selection_counts_within_performance_mode(
+    tmp_path: Path,
+) -> None:
+    v1 = create_video_file(tmp_path, "v1.mkv")
+    key1 = compute_cache_key(
+        [v1], AnalysisConfig(performance_mode="performance", motion_frame_count=1)
+    )
+    key2 = compute_cache_key(
+        [v1],
+        AnalysisConfig(
+            performance_mode="performance",
+            random_frame_count=3,
+            dark_frame_count=4,
+            bright_frame_count=5,
+            motion_frame_count=6,
+        ),
+    )
+
+    assert key1 == key2
+
+
+def test_metric_algorithm_identity_serialization_is_deterministic() -> None:
+    first = stable_metric_algorithm_identity_json(AnalysisConfig(performance_mode="performance"))
+    second = stable_metric_algorithm_identity_json(AnalysisConfig(performance_mode="performance"))
+
+    assert first == second
+    assert '"performance_mode":"performance"' in first
+    assert '"target_max_width":320' in first
+    assert '"resize":"bicubic"' in first
+    assert '"temporal":"all_adjacent_pairs"' in first
 
 
 def test_compute_cache_key_ignores_random_seed(tmp_path: Path) -> None:
@@ -163,11 +241,12 @@ def test_save_and_load_round_trip(tmp_path: Path) -> None:
     fingerprint = compute_cache_key([v1], config)
 
     clips = [ClipIdentity(path=str(v1), size=v1.stat().st_size, mtime=v1.stat().st_mtime)]
-    metadata = MetricsMetadata(
-        frame_count=100,
+    metadata = metrics_metadata(
+        frame_count=3,
         fps=Fraction(24, 1),
         config_fingerprint=fingerprint,
         clips=clips,
+        config=config,
     )
     metrics = FrameMetrics(
         luminance=[0.1, 0.2, 0.3],
@@ -183,10 +262,16 @@ def test_save_and_load_round_trip(tmp_path: Path) -> None:
     assert result.metrics is not None
     assert result.metrics.luminance == [0.1, 0.2, 0.3]
     assert result.metrics.motion == [0.0, 0.5, 0.1]
-    assert result.metrics.metadata.frame_count == 100
+    assert result.metrics.metadata.frame_count == 3
     assert result.metrics.metadata.fps == Fraction(24, 1)
     assert result.metrics.metadata.config_fingerprint == fingerprint
     assert result.metrics.metadata.analysis_source_path == ""
+    assert result.metrics.metadata.performance_mode == "quality"
+    assert result.metrics.metadata.metric_backend == "python_numpy"
+    assert result.metrics.metadata.algorithm_id == metric_algorithm_id(config)
+    assert result.metrics.metadata.algorithm_identity_json == (
+        stable_metric_algorithm_identity_json(config)
+    )
 
 
 def test_load_not_found(tmp_path: Path) -> None:
@@ -266,6 +351,23 @@ def test_load_version_mismatch(tmp_path: Path) -> None:
     assert result.reason == "version_mismatch"
 
 
+def test_load_v4_payload_returns_version_mismatch(tmp_path: Path) -> None:
+    cache_file(tmp_path, "fp").write_text(
+        json.dumps(
+            {
+                "version": 4,
+                "fingerprint": "fp",
+                "luminance": [],
+                "motion": [],
+                "metadata": {},
+            }
+        )
+    )
+    result = load_cached_metrics(tmp_path, "fp", [])
+    assert result.success is False
+    assert result.reason == "version_mismatch"
+
+
 def test_load_mismatched_inputs(tmp_path: Path) -> None:
     """Wrong fingerprint → reason="mismatched_inputs"."""
     cache_file(tmp_path, "fp2").write_text(
@@ -294,11 +396,12 @@ def test_load_mismatched_inputs(tmp_path: Path) -> None:
 def test_save_creates_directory(tmp_path: Path) -> None:
     """Non-existent dir → created."""
     sub_dir = tmp_path / "new_dir"
-    metadata = MetricsMetadata(
+    metadata = metrics_metadata(
         frame_count=0,
         fps=Fraction(24, 1),
         config_fingerprint="fp",
         clips=[],
+        config=AnalysisConfig(),
     )
     metrics = FrameMetrics(luminance=[], motion=[], metadata=metadata)
     save_metrics_cache(metrics, sub_dir)
@@ -308,11 +411,13 @@ def test_save_creates_directory(tmp_path: Path) -> None:
 
 def test_save_writes_required_keys(tmp_path: Path) -> None:
     """Cache file JSON has all required keys + version == CACHE_VERSION."""
-    metadata = MetricsMetadata(
+    config = AnalysisConfig()
+    metadata = metrics_metadata(
         frame_count=10,
         fps=Fraction(24000, 1001),
         config_fingerprint="fp",
         clips=[],
+        config=config,
     )
     metrics = FrameMetrics(luminance=[0.5], motion=[0.1], metadata=metadata)
     save_metrics_cache(metrics, tmp_path)
@@ -328,6 +433,12 @@ def test_save_writes_required_keys(tmp_path: Path) -> None:
     assert data["metadata"]["frame_count"] == 10
     assert data["metadata"]["fps"] == "24000/1001"
     assert data["metadata"]["analysis_source_path"] == ""
+    assert data["metadata"]["performance_mode"] == "quality"
+    assert data["metadata"]["algorithm_id"] == metric_algorithm_id(config)
+    assert data["metadata"]["metric_backend"] == "python_numpy"
+    assert data["metadata"]["algorithm_identity_json"] == stable_metric_algorithm_identity_json(
+        config
+    )
 
 
 def test_load_same_version_cache_without_analysis_source_path_is_corrupted(
@@ -345,6 +456,134 @@ def test_load_same_version_cache_without_analysis_source_path_is_corrupted(
                     "fps": "24/1",
                     "config_fingerprint": "fp",
                     "clips": [],
+                    "version": CACHE_VERSION,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = load_cached_metrics(tmp_path, "fp", [])
+
+    assert result.success is False
+    assert result.reason == "corrupted"
+
+
+@pytest.mark.parametrize(
+    "removed_key",
+    [
+        "performance_mode",
+        "algorithm_id",
+        "metric_backend",
+        "algorithm_identity_json",
+    ],
+)
+def test_load_same_version_cache_without_algorithm_metadata_is_corrupted(
+    tmp_path: Path,
+    removed_key: str,
+) -> None:
+    config = AnalysisConfig()
+    metadata = {
+        "frame_count": 0,
+        "fps": "24/1",
+        "config_fingerprint": "fp",
+        "analysis_source_path": "",
+        "clips": [],
+        "performance_mode": "quality",
+        "algorithm_id": metric_algorithm_id(config),
+        "metric_backend": "python_numpy",
+        "algorithm_identity_json": stable_metric_algorithm_identity_json(config),
+        "version": CACHE_VERSION,
+    }
+    del metadata[removed_key]
+    cache_file(tmp_path, "fp").write_text(
+        json.dumps(
+            {
+                "version": CACHE_VERSION,
+                "fingerprint": "fp",
+                "luminance": [],
+                "motion": [],
+                "metadata": metadata,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = load_cached_metrics(tmp_path, "fp", [])
+
+    assert result.success is False
+    assert result.reason == "corrupted"
+
+
+def test_load_same_version_cache_with_malformed_algorithm_identity_is_corrupted(
+    tmp_path: Path,
+) -> None:
+    config = AnalysisConfig()
+    cache_file(tmp_path, "fp").write_text(
+        json.dumps(
+            {
+                "version": CACHE_VERSION,
+                "fingerprint": "fp",
+                "luminance": [],
+                "motion": [],
+                "metadata": {
+                    "frame_count": 0,
+                    "fps": "24/1",
+                    "config_fingerprint": "fp",
+                    "analysis_source_path": "",
+                    "clips": [],
+                    "performance_mode": "quality",
+                    "algorithm_id": metric_algorithm_id(config),
+                    "metric_backend": "python_numpy",
+                    "algorithm_identity_json": "not-json",
+                    "version": CACHE_VERSION,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = load_cached_metrics(tmp_path, "fp", [])
+
+    assert result.success is False
+    assert result.reason == "corrupted"
+
+
+@pytest.mark.parametrize(
+    ("luminance", "motion", "frame_count"),
+    [
+        ([0.1], [0.0, 0.2], 2),
+        ([0.1, 0.2], [0.0], 2),
+        ([0.1], [0.0], 2),
+        ([0.1], [0.1], 1),
+        ([float("nan")], [0.0], 1),
+        ([0.1], [float("inf")], 1),
+    ],
+)
+def test_load_metric_array_contract_violation_is_corrupted(
+    tmp_path: Path,
+    luminance: list[float],
+    motion: list[float],
+    frame_count: int,
+) -> None:
+    config = AnalysisConfig()
+    cache_file(tmp_path, "fp").write_text(
+        json.dumps(
+            {
+                "version": CACHE_VERSION,
+                "fingerprint": "fp",
+                "luminance": luminance,
+                "motion": motion,
+                "metadata": {
+                    "frame_count": frame_count,
+                    "fps": "24/1",
+                    "config_fingerprint": "fp",
+                    "analysis_source_path": "",
+                    "clips": [],
+                    "performance_mode": "quality",
+                    "algorithm_id": metric_algorithm_id(config),
+                    "metric_backend": "python_numpy",
+                    "algorithm_identity_json": stable_metric_algorithm_identity_json(config),
                     "version": CACHE_VERSION,
                 },
             }
@@ -429,13 +668,17 @@ def test_load_malformed_nested_payload_returns_corrupted(
         "version": CACHE_VERSION,
         "fingerprint": "fp",
         "luminance": [0.1],
-        "motion": [0.2],
+        "motion": [0.0],
         "metadata": {
             "frame_count": 1,
-            "fps": "24",
+            "fps": "24/1",
             "config_fingerprint": "fp",
             "analysis_source_path": "",
             "clips": [{"path": "video.mkv", "size": 10, "mtime": 1.0, "sha1": None}],
+            "performance_mode": "quality",
+            "algorithm_id": metric_algorithm_id(AnalysisConfig()),
+            "metric_backend": "python_numpy",
+            "algorithm_identity_json": stable_metric_algorithm_identity_json(AnalysisConfig()),
             "version": CACHE_VERSION,
         },
     }

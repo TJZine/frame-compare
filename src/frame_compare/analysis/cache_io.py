@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -11,6 +12,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+from frame_compare.analysis.metric_identity import stable_metric_algorithm_identity_json
 from frame_compare.analysis.types import (
     CacheLoadResult,
     ClipIdentity,
@@ -24,7 +26,7 @@ if TYPE_CHECKING:
 
 CACHE_FILE_EXTENSION: str = ".compframes"
 CACHE_LABEL_MAX_LENGTH: int = 80
-CACHE_VERSION: int = 4
+CACHE_VERSION: int = 5
 _SAFE_LABEL_CHARS = re.compile(r"[^a-z0-9._-]+")
 _MULTI_SEPARATOR = re.compile(r"[-_.]{2,}")
 
@@ -69,6 +71,7 @@ def compute_cache_key(
         f"{config.ignore_lead_seconds}|{config.ignore_trail_seconds}|"
         f"{config.min_window_seconds}".encode()
     )
+    h.update(f"metric_algorithm|{stable_metric_algorithm_identity_json(config)}".encode())
     h.update(str(CACHE_VERSION).encode("utf-8"))
     return h.hexdigest()
 
@@ -213,9 +216,12 @@ def _validate_cache_identity(data: Mapping[str, object], fingerprint: str) -> No
 
 def _parse_cache_payload(data: Mapping[str, object]) -> _ValidatedCachePayload:
     metadata = _parse_metrics_metadata(_as_mapping(data["metadata"]))
+    luminance = _parse_numeric_series(data["luminance"])
+    motion = _parse_numeric_series(data["motion"])
+    _validate_metric_arrays(luminance=luminance, motion=motion, frame_count=metadata.frame_count)
     return _ValidatedCachePayload(
-        luminance=_parse_numeric_series(data["luminance"]),
-        motion=_parse_numeric_series(data["motion"]),
+        luminance=luminance,
+        motion=motion,
         metadata=metadata,
     )
 
@@ -228,13 +234,39 @@ def _parse_numeric_series(value: object) -> list[float]:
     for item in cast(list[object], value):
         if not isinstance(item, (int, float)) or isinstance(item, bool):
             raise _CacheParseError
-        series.append(float(item))
+        value = float(item)
+        if not math.isfinite(value):
+            raise _CacheParseError
+        series.append(value)
     return series
+
+
+def _validate_metric_arrays(
+    *,
+    luminance: list[float],
+    motion: list[float],
+    frame_count: int,
+) -> None:
+    if len(luminance) != frame_count or len(motion) != frame_count:
+        raise _CacheParseError
+    if motion and motion[0] != 0.0:
+        raise _CacheParseError
 
 
 def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
     _require_keys(
-        data, {"frame_count", "fps", "config_fingerprint", "clips", "analysis_source_path"}
+        data,
+        {
+            "frame_count",
+            "fps",
+            "config_fingerprint",
+            "clips",
+            "analysis_source_path",
+            "performance_mode",
+            "algorithm_id",
+            "metric_backend",
+            "algorithm_identity_json",
+        },
     )
 
     frame_count = data["frame_count"]
@@ -253,6 +285,23 @@ def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
     if not isinstance(analysis_source_path, str):
         raise _CacheParseError
 
+    performance_mode = data["performance_mode"]
+    if not isinstance(performance_mode, str):
+        raise _CacheParseError
+
+    algorithm_id = data["algorithm_id"]
+    if not isinstance(algorithm_id, str):
+        raise _CacheParseError
+
+    metric_backend = data["metric_backend"]
+    if not isinstance(metric_backend, str):
+        raise _CacheParseError
+
+    algorithm_identity_json = data["algorithm_identity_json"]
+    if not isinstance(algorithm_identity_json, str):
+        raise _CacheParseError
+    _parse_algorithm_identity_json(algorithm_identity_json)
+
     try:
         return MetricsMetadata(
             frame_count=frame_count,
@@ -260,6 +309,10 @@ def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
             config_fingerprint=config_fingerprint,
             clips=_parse_clip_identities(data["clips"]),
             analysis_source_path=analysis_source_path,
+            performance_mode=performance_mode,
+            algorithm_id=algorithm_id,
+            metric_backend=metric_backend,
+            algorithm_identity_json=algorithm_identity_json,
             version=_parse_cache_version(data.get("version", CACHE_VERSION)),
         )
     except (ValueError, TypeError, ZeroDivisionError) as exc:
@@ -270,6 +323,14 @@ def _parse_clip_identities(value: object) -> list[ClipIdentity]:
     if not isinstance(value, list):
         raise _CacheParseError
     return [_parse_clip_identity(_as_mapping(entry)) for entry in cast(list[object], value)]
+
+
+def _parse_algorithm_identity_json(value: str) -> Mapping[str, object]:
+    try:
+        raw_data: object = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise _CacheParseError from exc
+    return _as_mapping(raw_data)
 
 
 def _parse_clip_identity(data: Mapping[str, object]) -> ClipIdentity:
@@ -318,6 +379,10 @@ def save_metrics_cache(metrics: FrameMetrics, cache_dir: Path) -> None:
             "fps": str(metrics.metadata.fps),
             "config_fingerprint": metrics.metadata.config_fingerprint,
             "analysis_source_path": metrics.metadata.analysis_source_path,
+            "performance_mode": metrics.metadata.performance_mode,
+            "algorithm_id": metrics.metadata.algorithm_id,
+            "metric_backend": metrics.metadata.metric_backend,
+            "algorithm_identity_json": metrics.metadata.algorithm_identity_json,
             "clips": [
                 {
                     "path": str(c.path),

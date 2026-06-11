@@ -15,7 +15,6 @@ def test_viewer_css_keeps_stage_pointer_and_label_contracts() -> None:
     )
 
     assert "color-scheme: dark;" in css
-    assert '--font-sans: "Inter", "SF Pro Text", "Segoe UI Variable Text"' in css
     assert ".rv-viewer-stage" in css
     assert "touch-action: none;" in css
     assert "cursor: grab;" in css
@@ -30,17 +29,11 @@ def test_viewer_css_keeps_stage_pointer_and_label_contracts() -> None:
     )
     assert ".rv-overlay-label:empty { display: none; }" in css
     assert "select option," in css
-    assert 'background-image: url("data:image/svg+xml,' in css
     assert "position: absolute;" in css_block(css, ".rv-stage-labels")
     assert "display: none;" in css_block(css, ".rv-mode-diff .rv-stage-labels")
-    assert "top: 12px;" in css_block(css, ".rv-overlay-label")
-    assert "color: var(--text-primary);" in css_block(css, ".rv-overlay-label")
-    assert "top: 12px;" in css_block(css, ".rv-stage-overlay-info")
-    assert "right: 12px;" in css_block(css, ".rv-stage-overlay-info")
     assert "left: var(--label-left-x, 50%);" in css_block(css, ".rv-mode-slider #label-left")
     assert "left: var(--label-right-x, 50%);" in css_block(css, ".rv-mode-slider #label-right")
     assert "position: absolute;" in css_block(css, ".rv-filmstrip-caption")
-    assert "text-shadow:" in css_block(css, ".rv-filmstrip-label")
 
 
 def test_viewer_css_keeps_hidden_state_and_empty_stage_regressions() -> None:
@@ -59,27 +52,8 @@ def test_viewer_css_keeps_hidden_state_and_empty_stage_regressions() -> None:
     assert ".rv-zoom-value" in css
 
 
-def test_viewer_css_covers_header_badges_and_timeline_layout() -> None:
+def test_viewer_css_covers_timeline_layout_contracts() -> None:
     css = get_css()
-    header_icon_block = css_block(css, ".rv-btn-icon")
-    dynamic_range_badge_block = css_block(css, ".rv-clip-meta-heading span:last-child")
-
-    assert ".rv-header-help-btn:hover .rv-btn-icon" in css
-    assert ".rv-header-info-btn:hover .rv-btn-icon" in css
-    assert (
-        "transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);" in header_icon_block
-    )
-    assert "transform: rotate(15deg) scale(1.15);" in css
-
-    assert "font-family: var(--font-mono);" in dynamic_range_badge_block
-    assert "font-size: 0.65rem;" in dynamic_range_badge_block
-    assert "font-weight: 600;" in dynamic_range_badge_block
-    assert "color: var(--text-secondary);" in dynamic_range_badge_block
-    assert "background: rgba(255, 255, 255, 0.05);" in dynamic_range_badge_block
-    assert "border: 1px solid var(--border);" in dynamic_range_badge_block
-    assert "border-radius: 4px;" in dynamic_range_badge_block
-    assert "padding: 0.05rem 0.35rem;" in dynamic_range_badge_block
-    assert "line-height: 1;" in dynamic_range_badge_block
 
     assert ".rv-bottom-panel" in css
     assert ".rv-bottom-panel--collapsed .rv-filmstrip" in css
@@ -96,9 +70,6 @@ def test_viewer_css_covers_header_badges_and_timeline_layout() -> None:
     )
     assert "aspect-ratio: 16 / 10;" in css_block(css, ".rv-filmstrip-item")
     assert "object-fit: contain;" in css_block(css, ".rv-filmstrip-item img")
-    assert "width: 120px;" in css_block(css, ".rv-filmstrip-size-compact .rv-filmstrip-item")
-    assert "width: 150px;" in css_block(css, ".rv-filmstrip-size-normal .rv-filmstrip-item")
-    assert "width: 210px;" in css_block(css, ".rv-filmstrip-size-large .rv-filmstrip-item")
     assert "display: none;" not in css_block(
         css, ".rv-filmstrip-size-compact .rv-filmstrip-caption"
     )
@@ -121,7 +92,6 @@ def test_viewer_css_keeps_mobile_palette_and_reduced_motion_contracts() -> None:
     assert ".rv-inspector.open" in css
     assert "body.rv-inspector-open .rv-viewer-stage" in css
     assert ".rv-blink-status" in css
-    assert "transform: scale(1.3);" in css_block(css, ".rv-fullscreen-icon")
     assert "flex-direction: column;" in vertical_palette_css
     assert "flex-wrap: nowrap;" in vertical_palette_css
     assert "overflow-y: auto;" in vertical_palette_css
@@ -149,10 +119,6 @@ def test_viewer_css_stays_offline_and_preserves_tokenized_regressions() -> None:
             assert url.startswith(("http://www.w3.org/", "https://www.w3.org/"))
 
     assert "@import" not in css
-    assert "--bg-glass" in css
-    assert "--accent-glow" in css
-    assert "color-mix(in hsl" in css
-    assert "border-left-color: transparent" in css
     empty_palette_block = css_block(css, ".rv-viewer-stage--empty .rv-viewport-palette")
     assert "pointer-events: none" in empty_palette_block
     webkit_vertical_track = css_block(

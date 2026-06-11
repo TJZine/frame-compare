@@ -172,29 +172,32 @@ def test_emit_consolidated_fps_report_json_mode_logs_without_human_output(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == ""
-    assert log_calls == [
-        (
-            "fps_report",
-            "after_load_sources",
-            [
-                {
-                    "path": "ref.mkv",
-                    "label": "Reference",
-                    "width": 1920,
-                    "height": 1080,
-                    "num_frames": 100,
-                    "is_hdr": False,
-                    "source_fps_num": 24,
-                    "source_fps_den": 1,
-                    "effective_fps_num": 24,
-                    "effective_fps_den": 1,
-                    "fps_divergent": False,
-                    "note": None,
-                }
-            ],
-            [],
-        )
-    ]
+    assert len(log_calls) == 1
+    event, stage, clips, diagnostics = log_calls[0]
+    assert event == "fps_report"
+    assert stage == "after_load_sources"
+    assert diagnostics == []
+    assert len(clips) == 1
+    assert set(clips[0]) == {
+        "path",
+        "label",
+        "width",
+        "height",
+        "num_frames",
+        "is_hdr",
+        "source_fps_num",
+        "source_fps_den",
+        "effective_fps_num",
+        "effective_fps_den",
+        "fps_divergent",
+        "note",
+    }
+    assert clips[0]["path"] == "ref.mkv"
+    assert clips[0]["label"] == "Reference"
+    assert clips[0]["source_fps_num"] == 24
+    assert clips[0]["source_fps_den"] == 1
+    assert clips[0]["effective_fps_num"] == 24
+    assert clips[0]["fps_divergent"] is False
 
 
 def test_emit_consolidated_fps_report_renders_human_table_to_stderr(

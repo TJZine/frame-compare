@@ -16,6 +16,7 @@ from frame_compare.config.schema import (
     ReportConfig,
 )
 from frame_compare.config.schema_enums import (
+    AnalysisPerformanceMode,
     LogFormat,
     LogLevel,
     OverlayMode,
@@ -49,6 +50,7 @@ def test_default_config_values() -> None:
     assert config.analysis.dark_frame_count == 0
     assert config.analysis.bright_frame_count == 0
     assert config.analysis.motion_frame_count == 0
+    assert config.analysis.performance_mode == AnalysisPerformanceMode.QUALITY
     assert config.analysis.ignore_lead_seconds == 0.0
     assert config.analysis.ignore_trail_seconds == 0.0
     assert config.analysis.min_window_seconds == 5.0
@@ -138,6 +140,28 @@ def test_analysis_rejects_removed_public_keys(stale_key: str) -> None:
         AnalysisConfig.model_validate({stale_key: 10})
 
 
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        ("quality", AnalysisPerformanceMode.QUALITY),
+        ("performance", AnalysisPerformanceMode.PERFORMANCE),
+    ],
+)
+def test_analysis_performance_mode_accepts_approved_values(
+    mode: str,
+    expected: AnalysisPerformanceMode,
+) -> None:
+    config = AnalysisConfig.model_validate({"performance_mode": mode})
+
+    assert config.performance_mode == expected
+
+
+@pytest.mark.parametrize("mode", ["turbo"])
+def test_analysis_performance_mode_rejects_invalid_value(mode: str) -> None:
+    with pytest.raises(ValidationError):
+        AnalysisConfig.model_validate({"performance_mode": mode})
+
+
 def test_report_output_dir_empty_string_to_none() -> None:
     """Test that empty string output_dir is normalized to None."""
     config = ReportConfig(output_dir="")
@@ -184,6 +208,7 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert analysis.dark_frame_count == 0
     assert analysis.bright_frame_count == 0
     assert analysis.motion_frame_count == 0
+    assert analysis.performance_mode == AnalysisPerformanceMode.QUALITY
     assert analysis.ignore_lead_seconds == 0.0
     assert analysis.ignore_trail_seconds == 0.0
     assert analysis.min_window_seconds == 5.0
@@ -430,12 +455,14 @@ def test_default_config_toml_documents_analysis_ignore_window_defaults() -> None
         "motion_frame_count",
         "random_seed",
         "save_frames_data",
+        "performance_mode",
         "ignore_lead_seconds",
         "ignore_trail_seconds",
         "min_window_seconds",
         "dark_quantile",
         "bright_quantile",
     }
+    assert data["analysis"]["performance_mode"] == "quality"
     assert data["analysis"]["ignore_lead_seconds"] == 0.0
     assert data["analysis"]["ignore_trail_seconds"] == 0.0
     assert data["analysis"]["min_window_seconds"] == 5.0

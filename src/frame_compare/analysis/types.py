@@ -49,6 +49,10 @@ class MetricsMetadata:
         config_fingerprint: Hash of analysis configuration
         clips: List of clip identities involved (usually just one)
         analysis_source_path: Path to the source used for analysis, if any
+        performance_mode: Analysis performance mode that produced the arrays
+        algorithm_id: Stable ID for the metric algorithm identity
+        metric_backend: Metric backend family that produced the arrays
+        algorithm_identity_json: Stable JSON identity payload for cache/debugging
         version: Cache schema version
     """
 
@@ -57,7 +61,11 @@ class MetricsMetadata:
     config_fingerprint: str
     clips: Sequence[ClipIdentity]
     analysis_source_path: str = ""
-    version: int = 2
+    performance_mode: str = "quality"
+    algorithm_id: str = ""
+    metric_backend: str = ""
+    algorithm_identity_json: str = "{}"
+    version: int = 5
 
 
 @dataclass(frozen=True, slots=True)

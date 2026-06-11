@@ -39,11 +39,13 @@ def test_metrics_metadata_creation():
     assert mm.fps == Fraction(24)
     assert mm.config_fingerprint == "fp"
     assert mm.clips == []
+    assert mm.performance_mode == "quality"
+    assert mm.algorithm_identity_json == "{}"
 
 
 def test_metrics_metadata_default_version():
     mm = MetricsMetadata(frame_count=100, fps=Fraction(24), config_fingerprint="fp", clips=[])
-    assert mm.version == 2
+    assert mm.version == 5
 
 
 def test_frame_metrics_creation():

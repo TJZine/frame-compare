@@ -10,6 +10,11 @@ from typing import TYPE_CHECKING, Any, cast
 from PIL import Image
 
 import frame_compare.analysis.cache_io as cache_io
+from frame_compare.analysis.metric_identity import (
+    metric_algorithm_id,
+    metric_backend,
+    stable_metric_algorithm_identity_json,
+)
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_models import SourceOverrideConfig
@@ -116,7 +121,7 @@ def write_metrics_cache(
     stats_by_path = {path: path.stat() for path in ordered_cache_inputs}
     metrics = FrameMetrics(
         luminance=[0.1] * 100,
-        motion=[0.2] * 100,
+        motion=[0.0] + [0.2] * 99,
         metadata=MetricsMetadata(
             frame_count=100,
             fps=Fraction(24, 1),
@@ -130,6 +135,10 @@ def write_metrics_cache(
                 for path in ordered_cache_inputs
             ],
             analysis_source_path=str(resolved_analysis_source_path),
+            performance_mode=config.analysis.performance_mode.value,
+            algorithm_id=metric_algorithm_id(config.analysis),
+            metric_backend=metric_backend(config.analysis),
+            algorithm_identity_json=stable_metric_algorithm_identity_json(config.analysis),
             version=cache_io.CACHE_VERSION,
         ),
     )

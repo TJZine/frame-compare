@@ -97,7 +97,7 @@ def test_windows_portable_ffmpeg_manifest_uses_reachable_pinned_asset_shape(
         artifact for artifact in manifest["artifacts"] if artifact["id"].startswith("ffmpeg-")
     )
 
-    assert "autobuild-2026-02-04-14-23" not in ffmpeg["url"]
+    assert "autobuild-2026-05-25-14-02" not in ffmpeg["url"]
     assert "/releases/download/autobuild-" in ffmpeg["url"]
     assert ffmpeg["url"].endswith(".zip")
     assert len(ffmpeg["sha256"]) == 64

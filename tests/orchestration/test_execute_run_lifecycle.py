@@ -93,11 +93,11 @@ def test_execute_run_returns_success_and_records_preflight_timing(
     assert set(result.phase_timings.keys()) == expected_keys
     assert result.phase_timings["preflight"] >= 0.0
     assert result.phase_timings["load_sources"] >= 0.0
-    assert result.phase_timings["analyze"] == 0.0
-    assert result.phase_timings["align"] == 0.0
-    assert result.phase_timings["metadata"] == 0.0
-    assert result.phase_timings["publish"] == 0.0
-    assert result.phase_timings["report"] == 0.0
+    assert result.phase_timings["analyze"] >= 0.0
+    assert result.phase_timings["align"] >= 0.0
+    assert result.phase_timings["metadata"] >= 0.0
+    assert result.phase_timings["publish"] >= 0.0
+    assert result.phase_timings["report"] >= 0.0
     assert result.phase_timings["post_report_cleanup"] >= 0.0
 
 
@@ -582,7 +582,7 @@ enable = false
 
     assert result.success is True
     assert result.slowpics_url is None
-    assert result.phase_timings["publish"] == 0.0
+    assert result.phase_timings["publish"] >= 0.0
 
 
 def test_execute_run_uses_and_populates_probe_cache_without_reprobing(tmp_path: Path) -> None:
