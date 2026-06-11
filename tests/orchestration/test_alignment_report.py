@@ -118,8 +118,9 @@ def test_emit_frame_alignment_report_renders_human_panel_to_stderr(
     assert "Encode [candidate]" in captured.err
     assert "manual" in captured.err
     assert "+155f" in captured.err
-    for fact in ("155", "999", "0", "844", "28", "83"):
-        assert fact in captured.err
+    assert "Reference source 155 <-> Encode [candidate] source 0" in captured.err
+    assert "Reference 155..999, Encode [candidate] 0..844" in captured.err
+    assert "aligned 0, 28, 83" in captured.err
     assert "\x1b[" not in captured.err
     assert "[bold cyan]" not in captured.err
 

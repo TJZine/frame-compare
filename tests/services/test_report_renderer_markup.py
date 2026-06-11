@@ -274,6 +274,8 @@ def test_build_html_positions_stage_labels_outside_image_layers(
     assert canvas.attrs["role"] == "img"
     assert canvas.attrs["aria-label"] == "Comparison image canvas"
     assert stage_labels.attrs["aria-hidden"] == "true"
+    require_first(stage_labels, tag="div", element_id="label-left")
+    require_first(stage_labels, tag="div", element_id="label-right")
     for layer_class in ("rv-left", "rv-right"):
         layer = require_first(canvas, tag="div", class_name=layer_class)
         assert not find_all(layer, element_id="label-left")

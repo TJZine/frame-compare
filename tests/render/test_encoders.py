@@ -297,7 +297,7 @@ def test_render_frame_vs_auto_uses_fpng_for_geometry_without_overlay(
     assert compression == 2
     assert overwrite is True
     assert isinstance(written_clip, _FakeFpngClip)
-    assert {name for name, _kwargs in written_clip.ops} == {"crop", "resize", "pad"}
+    assert [name for name, _kwargs in written_clip.ops] == ["crop", "resize", "pad"]
     assert written_clip.ops[-1][1]["left"] == 1
     assert written_clip.ops[-1][1]["right"] == 1
     assert job.frames == [3]

@@ -178,10 +178,26 @@ def test_emit_consolidated_fps_report_json_mode_logs_without_human_output(
     assert stage == "after_load_sources"
     assert diagnostics == []
     assert len(clips) == 1
+    assert set(clips[0]) == {
+        "path",
+        "label",
+        "width",
+        "height",
+        "num_frames",
+        "is_hdr",
+        "source_fps_num",
+        "source_fps_den",
+        "effective_fps_num",
+        "effective_fps_den",
+        "fps_divergent",
+        "note",
+    }
     assert clips[0]["path"] == "ref.mkv"
     assert clips[0]["label"] == "Reference"
     assert clips[0]["source_fps_num"] == 24
+    assert clips[0]["source_fps_den"] == 1
     assert clips[0]["effective_fps_num"] == 24
+    assert clips[0]["fps_divergent"] is False
 
 
 def test_emit_consolidated_fps_report_renders_human_table_to_stderr(

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from frame_compare.services.report.viewer import get_js
-from tests.services.report_viewer_contracts import js_method_block
+from tests.services.report_viewer_contracts import assert_in_order, js_method_block
 
 
 def test_viewer_js_preserves_modal_escape_and_focus_restore_contracts() -> None:
@@ -37,13 +37,36 @@ def test_viewer_js_preserves_modal_escape_and_focus_restore_contracts() -> None:
 
 def test_viewer_js_closes_alignment_popover_before_global_escape_shortcuts() -> None:
     js = get_js()
+    bind_interaction_block = js_method_block(js, "bindInteractionEvents()")
     alignment_block = js_method_block(js, "bindAlignmentEvents()")
+    bind_keyboard_block = js_method_block(js, "bindKeyboardEvents()")
+    handle_key_block = js_method_block(js, "handleKey(e)")
 
     assert "isAlignmentPopoverOpen()" in js
     assert "setAlignmentPopoverOpen(isOpen, options = {})" in js
     assert "this.closeAlignmentPopover({ restoreFocus: false });" in js
-    assert "this.dom.alignPopover.addEventListener('keydown', (e) => {" in alignment_block
-    assert "this.closeAlignmentPopover();" in alignment_block
+    assert "document.addEventListener('keydown', (e) => this.handleKey(e));" in bind_keyboard_block
+    assert_in_order(
+        bind_interaction_block,
+        ["this.bindAlignmentEvents();", "this.bindKeyboardEvents();"],
+    )
+    assert_in_order(
+        alignment_block,
+        [
+            "this.dom.alignPopover.addEventListener('keydown', (e) => {",
+            "if (e.key === 'Escape') {",
+            "e.preventDefault();",
+            "e.stopPropagation();",
+            "this.closeAlignmentPopover();",
+        ],
+    )
+    assert_in_order(
+        handle_key_block,
+        [
+            "if (this.isAlignmentPopoverOpen()) {",
+            "this.closeAlignmentPopover();",
+        ],
+    )
 
 
 def test_viewer_js_persists_report_scoped_viewport_state() -> None:
