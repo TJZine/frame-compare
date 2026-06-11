@@ -76,7 +76,7 @@ def test_fast_strategy_constant_clip_has_zero_motion() -> None:
 
 
 @pytest.mark.vs_required
-def test_fast_strategy_black_to_white_motion_is_inside_refined_window() -> None:
+def test_fast_strategy_black_to_white_motion_is_dense() -> None:
     black = vs.core.std.BlankClip(width=16, height=16, length=4, format=vs.GRAY8, color=0)
     white = vs.core.std.BlankClip(width=16, height=16, length=1, format=vs.GRAY8, color=255)
     clip = black + white

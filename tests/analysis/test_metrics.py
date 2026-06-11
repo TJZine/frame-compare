@@ -42,9 +42,6 @@ from frame_compare.analysis.metric_identity import (  # noqa: E402
 )
 from frame_compare.analysis.metric_strategies import (  # noqa: E402
     MetricComputationResult,
-    _fast_candidate_count,
-    _fast_refinement_indices,
-    _fast_sampled_motion_indices,
     calculate_metric_strategy,
     calculate_quality_luminance,
     calculate_quality_motion,
@@ -140,11 +137,28 @@ class FakeResize:
         color_family = self._clip.format.color_family
         if format is not None:
             color_family = FAKE_VS.YUV if format == FAKE_VS.YUV420P8 else color_family
+        self._clip.resize_calls.append(("Bicubic", width, height))
         return FakeBalancedClip(
             self._clip.values,
             width=self._clip.width if width is None else width,
             height=self._clip.height if height is None else height,
             color_family=color_family,
+            resize_calls=self._clip.resize_calls,
+        )
+
+    def Bilinear(
+        self,
+        *,
+        width: int,
+        height: int,
+    ) -> FakeBalancedClip:
+        self._clip.resize_calls.append(("Bilinear", width, height))
+        return FakeBalancedClip(
+            self._clip.values,
+            width=width,
+            height=height,
+            color_family=self._clip.format.color_family,
+            resize_calls=self._clip.resize_calls,
         )
 
 
@@ -156,12 +170,14 @@ class FakeBalancedClip:
         width: int = 640,
         height: int = 360,
         color_family: int = 1,
+        resize_calls: list[tuple[str, int | None, int | None]] | None = None,
     ):
         self.values = values
         self.num_frames = len(values)
         self.width = width
         self.height = height
         self.format = SimpleNamespace(color_family=color_family)
+        self.resize_calls = [] if resize_calls is None else resize_calls
         self.resize = FakeResize(self)
         self.std = FakeStd(self)
 
@@ -171,6 +187,7 @@ class FakeBalancedClip:
             width=self.width,
             height=self.height,
             color_family=self.format.color_family,
+            resize_calls=self.resize_calls,
         )
 
     def __add__(self, other: object) -> FakeBalancedClip:
@@ -181,6 +198,7 @@ class FakeBalancedClip:
             width=self.width,
             height=self.height,
             color_family=self.format.color_family,
+            resize_calls=self.resize_calls,
         )
 
 
@@ -198,6 +216,7 @@ class FakeCoreStd:
             width=clips.width,
             height=clips.height,
             color_family=colorfamily,
+            resize_calls=clips.resize_calls,
         )
 
 
@@ -495,23 +514,6 @@ def test_balanced_strategy_simple_transition_has_motion_at_current_frame(
     assert result.motion[1] > result.motion[0]
 
 
-def test_fast_sampled_motion_indices_follow_phase_rule() -> None:
-    assert _fast_sampled_motion_indices(1) == []
-    assert _fast_sampled_motion_indices(2) == [1]
-    assert _fast_sampled_motion_indices(10) == [1, 4, 8, 9]
-
-
-def test_fast_candidate_count_ignores_selection_counts() -> None:
-    assert _fast_candidate_count(0) == 0
-    assert _fast_candidate_count(100) == 100
-    assert _fast_candidate_count(1000) == 256
-    assert _fast_candidate_count(100000) == 1000
-
-
-def test_fast_refinement_indices_use_radius_eight() -> None:
-    assert _fast_refinement_indices(10, [4]) == list(range(1, 10))
-
-
 def test_fast_metric_identity_is_distinct_and_stable() -> None:
     quality = stable_metric_algorithm_identity_json(AnalysisConfig(performance_mode="quality"))
     balanced = stable_metric_algorithm_identity_json(AnalysisConfig(performance_mode="balanced"))
@@ -520,6 +522,10 @@ def test_fast_metric_identity_is_distinct_and_stable() -> None:
 
     assert first_fast == second_fast
     assert len({quality, balanced, first_fast}) == 3
+    assert '"target_max_width":160' in first_fast
+    assert '"resize":"bilinear"' in first_fast
+    assert '"temporal":"all_adjacent_pairs"' in first_fast
+    assert "coarse_to_refined" not in first_fast
 
 
 def test_fast_cache_key_ignores_selection_counts_and_quantiles(tmp_path: Path) -> None:
@@ -603,6 +609,25 @@ def test_fast_strategy_two_frame_arrays_are_dense(
     assert len(result.motion) == 2
     assert result.performance_mode == "fast"
     assert result.metric_backend == "vapoursynth_planestats"
+
+
+def test_fast_strategy_uses_bilinear_160_luma_resize(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
+    source = MagicMock()
+    clip = FakeBalancedClip([0.0, 0.5, 1.0], width=640, height=360)
+    source.clip = clip
+
+    result = calculate_metric_strategy(
+        source,
+        AnalysisConfig(performance_mode="fast"),
+        reporter=None,
+    )
+
+    assert result.luminance == [0.0, 0.5, 1.0]
+    assert result.motion == [0.0, 0.5, 0.5]
+    assert clip.resize_calls == [("Bilinear", 160, 90)]
 
 
 def test_fast_strategy_multiframe_arrays_are_deterministic_and_finite(

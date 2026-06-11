@@ -169,7 +169,9 @@ def test_metric_algorithm_identity_serialization_is_deterministic() -> None:
 
     assert first == second
     assert '"performance_mode":"fast"' in first
-    assert '"temporal_stride":4' in first
+    assert '"target_max_width":160' in first
+    assert '"resize":"bilinear"' in first
+    assert '"temporal":"all_adjacent_pairs"' in first
 
 
 def test_compute_cache_key_ignores_random_seed(tmp_path: Path) -> None:

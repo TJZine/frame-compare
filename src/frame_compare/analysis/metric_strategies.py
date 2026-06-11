@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, cast
@@ -39,8 +38,8 @@ class _FrameReadable(Protocol):
     def get_frame(self, n: int) -> object: ...
 
 
-class _ConcatableClip(Protocol):
-    def __add__(self, other: object) -> object: ...
+class _ResizeFn(Protocol):
+    def __call__(self, *, width: int, height: int) -> object: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,11 +263,21 @@ def _calculate_fast_metrics(
 
 
 def _balanced_luma_clip(clip: vs.VideoNode) -> vs.VideoNode:
-    return _planestats_luma_clip(clip, target_max_width=320, mode_name="Balanced")
+    return _planestats_luma_clip(
+        clip,
+        target_max_width=320,
+        mode_name="Balanced",
+        resize_filter="Bicubic",
+    )
 
 
 def _fast_luma_clip(clip: vs.VideoNode) -> vs.VideoNode:
-    return _planestats_luma_clip(clip, target_max_width=160, mode_name="Fast")
+    return _planestats_luma_clip(
+        clip,
+        target_max_width=160,
+        mode_name="Fast",
+        resize_filter="Bilinear",
+    )
 
 
 def _planestats_luma_clip(
@@ -276,6 +285,7 @@ def _planestats_luma_clip(
     *,
     target_max_width: int,
     mode_name: str,
+    resize_filter: str,
 ) -> vs.VideoNode:
     import vapoursynth as vs
 
@@ -296,7 +306,8 @@ def _planestats_luma_clip(
 
         target_width = target_max_width
         target_height = max(1, round(luma.height * target_width / luma.width))
-        return luma.resize.Bicubic(width=target_width, height=target_height)
+        resize = cast(_ResizeFn, _dynamic_attr(luma.resize, resize_filter))
+        return cast("vs.VideoNode", resize(width=target_width, height=target_height))
     except Exception as exc:
         raise MetricsCalculationError(f"{mode_name} luma preparation failed: {exc}") from exc
 
@@ -371,13 +382,26 @@ def _calculate_balanced_motion(
     luma: vs.VideoNode,
     reporter: ProgressReporter | None = None,
 ) -> list[float]:
+    return _calculate_dense_planestats_motion(
+        luma,
+        reporter,
+        span_name="analysis.balanced_motion",
+    )
+
+
+def _calculate_dense_planestats_motion(
+    luma: vs.VideoNode,
+    reporter: ProgressReporter | None,
+    *,
+    span_name: str,
+) -> list[float]:
     if luma.num_frames == 0:
         raise MetricsCalculationError("Empty clip")
     if luma.num_frames == 1:
         return [0.0]
 
     total_pairs = luma.num_frames - 1
-    with perf_span("analysis.balanced_motion", frames=luma.num_frames):
+    with perf_span(span_name, frames=luma.num_frames):
         if reporter:
             reporter.start_phase("Calculating motion", total_pairs)
 
@@ -409,109 +433,11 @@ def _calculate_fast_motion(
     luma: vs.VideoNode,
     reporter: ProgressReporter | None = None,
 ) -> list[float]:
-    if luma.num_frames == 0:
-        raise MetricsCalculationError("Empty clip")
-    if luma.num_frames == 1:
-        return [0.0]
-
-    with perf_span("analysis.fast_motion", frames=luma.num_frames):
-        sampled_indices = _fast_sampled_motion_indices(luma.num_frames)
-        coarse_scores = _motion_scores_for_indices(luma, sampled_indices)
-        candidate_count = _fast_candidate_count(luma.num_frames - 1)
-        candidate_indices = [
-            frame_index
-            for frame_index, _score in sorted(
-                coarse_scores.items(),
-                key=lambda item: (-item[1], item[0]),
-            )[:candidate_count]
-        ]
-        refined_indices = _fast_refinement_indices(luma.num_frames, candidate_indices)
-
-        if reporter:
-            reporter.start_phase("Calculating motion", len(refined_indices))
-
-        motion = [0.0] * luma.num_frames
-        phase_status = ProgressPhaseStatus.COMPLETED
-        try:
-            refined_scores = _motion_scores_for_indices(luma, refined_indices)
-            for frame_index, score in refined_scores.items():
-                motion[frame_index] = score
-                if reporter:
-                    reporter.advance(1)
-        except Exception as exc:
-            phase_status = ProgressPhaseStatus.FAILED
-            raise MetricsCalculationError(
-                f"Frame access failed during motion analysis: {exc}"
-            ) from exc
-        finally:
-            if reporter:
-                reporter.complete_phase(phase_status)
-
-    return motion
-
-
-def _fast_sampled_motion_indices(frame_count: int) -> list[int]:
-    if frame_count <= 1:
-        return []
-    last = frame_count - 1
-    sampled = {1, last}
-    sampled.update(n for n in range(1, last + 1) if n % 4 == 0)
-    return sorted(sampled)
-
-
-def _fast_candidate_count(valid_pair_count: int) -> int:
-    if valid_pair_count <= 0:
-        return 0
-    return min(valid_pair_count, max(256, math.ceil(valid_pair_count * 0.01)))
-
-
-def _fast_refinement_indices(
-    frame_count: int,
-    candidate_indices: list[int],
-    *,
-    radius: int = 8,
-) -> list[int]:
-    if frame_count <= 1 or not candidate_indices:
-        return []
-    last = frame_count - 1
-    refined: set[int] = set()
-    for frame_index in candidate_indices:
-        start = max(1, frame_index - radius)
-        end = min(last, frame_index + radius)
-        refined.update(range(start, end + 1))
-    return sorted(refined)
-
-
-def _motion_scores_for_indices(
-    luma: vs.VideoNode,
-    current_frame_indices: list[int],
-) -> dict[int, float]:
-    if not current_frame_indices:
-        return {}
-
-    try:
-        previous = _concat_frame_slices(luma, [n - 1 for n in current_frame_indices])
-        current = _concat_frame_slices(luma, current_frame_indices)
-        plane_stats = cast(_PlaneStatsFn, _dynamic_attr(current.std, "PlaneStats"))
-        stats = cast(_FrameReadable, plane_stats(previous))
-        return {
-            frame_index: _frame_prop_float(stats.get_frame(result_index), "PlaneStatsDiff")
-            for result_index, frame_index in enumerate(current_frame_indices)
-        }
-    except Exception as exc:
-        raise MetricsCalculationError(f"Frame access failed during motion analysis: {exc}") from exc
-
-
-def _concat_frame_slices(clip: vs.VideoNode, frame_indices: list[int]) -> vs.VideoNode:
-    if not frame_indices:
-        raise MetricsCalculationError("Cannot concatenate an empty frame slice list")
-
-    result = clip[frame_indices[0] : frame_indices[0] + 1]
-    for frame_index in frame_indices[1:]:
-        result = cast(
-            "vs.VideoNode", cast(_ConcatableClip, result) + clip[frame_index : frame_index + 1]
-        )
-    return result
+    return _calculate_dense_planestats_motion(
+        luma,
+        reporter,
+        span_name="analysis.fast_motion",
+    )
 
 
 def _y_plane_array(frame: vs.VideoFrame) -> npt.NDArray[np.generic]:
