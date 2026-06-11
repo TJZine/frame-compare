@@ -28,15 +28,23 @@ When source trims, effective FPS overrides, or shared selection windows matter,
 pass the exact source-frame window used for review with `--window-start` and
 `--window-end-exclusive`. If an orchestration selection-domain token is available
 from a prepared run, pass it with `--selection-domain` so cache identity matches
-that run. Without those arguments, the script records warnings and compares the
-full analysis metric domain.
+that run. When the resolved analysis source is not the first input path,
+`--selection-domain` is required so benchmark cache identity cannot reuse metrics
+for a different analysis source. Without explicit window arguments, the script
+records warnings and compares the full analysis metric domain.
 
 The benchmark script uses the configured `paths.generated_dir` for analysis
 cache by default and resolves explicit `sources.analysis_source` selectors before
-running metrics. It supports per-source `effective_fps` overrides. It does not
-support `sources.analysis_source = "fastest"` or automatic `sources.match_fps`
-policies; use an explicit analysis source and explicit effective-FPS overrides
-for benchmark evidence.
+running metrics. It supports per-source `effective_fps` overrides and explicit
+`sources.overrides.<selector>.active_rect` overrides for the selected analysis
+source. Active rectangles affect both `quality` and `performance` metric arrays
+and cache identity, so benchmark evidence for letterboxed or pillarboxed sources
+should use the same configured analysis source and explicit active rectangle as
+a normal run. The benchmark and runtime analysis do not use screenshot
+`active_rect_detection`, render metadata rectangles, or dimension/aspect-ratio
+inference. It does not support `sources.analysis_source = "fastest"` or
+automatic `sources.match_fps` policies; use an explicit analysis source and
+explicit effective-FPS overrides for benchmark evidence.
 
 ## Local Evidence
 
@@ -67,7 +75,7 @@ Configuration:
 - Counts: 20 random, 10 dark, 10 bright, 10 motion
 - Warm source indexes were present before this run.
 - No orchestration selection-domain token was provided, so cache identity may
-  differ from a full run with trims or source overrides.
+  differ from a full run with trims, active rectangles, or source overrides.
 
 Timing:
 

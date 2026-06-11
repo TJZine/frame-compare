@@ -230,16 +230,19 @@ unchanged.
   stable all-source selection-domain token. That token stores
   `analysis_source_path`, `reference_path`, source identities, source trims,
   effective FPS values, the configured analysis ignore-window settings, and the
-  final shared selectable window. Cache schema v5 stores
+  final shared selectable window. Cache schema v6 stores
   `analysis_source_path`, `performance_mode`, `algorithm_id`, `metric_backend`,
-  and stable `algorithm_identity_json` in `MetricsMetadata`, and different
+  stable `algorithm_identity_json`, and `metric_active_rect` in
+  `MetricsMetadata`, and different
   selected references, selected analysis sources, selection domains,
-  performance modes, or metric algorithm identities from the same input set do
-  not satisfy each other. When `sources.analysis_source = "reference"`,
-  `analysis_source_path` is the selected reference path. Metric-array cache
-  identity excludes `user_frames`, random seed, frame-selection counts,
-  `dark_quantile`, and `bright_quantile` because those values affect frame
-  choice rather than metric computation.
+  performance modes, metric algorithm identities, or active-rect metric domains
+  from the same input set do not satisfy each other. When
+  `sources.analysis_source = "reference"`, `analysis_source_path` is the selected
+  reference path. `metric_active_rect = null` represents full-frame analysis;
+  configured analysis-source `active_rect` values produce coordinate-specific
+  metric/cache identities. Metric-array cache identity excludes `user_frames`,
+  random seed, frame-selection counts, `dark_quantile`, and `bright_quantile`
+  because those values affect frame choice rather than metric computation.
 - The full fingerprint remains inside the cache payload and is validated on load.
   Legacy run-folder `cache.compframes` files are not used as analysis cache hits.
 - Analysis is skipped automatically when `dark_frame_count`, `bright_frame_count`,
@@ -495,10 +498,15 @@ dedicated `run` flags for them:
 - `bright_quantile = 0.95`
 
 `performance_mode` selects the analysis metric algorithm identity used for
-luminance and motion arrays. `quality` is the default and preserves the current
-full-frame Python/NumPy metric behavior. `performance` is an approximate
-VapourSynth PlaneStats metric mode; it can select different dark, bright, or
-motion frames than `quality` and is cache-isolated from `quality`.
+luminance and motion arrays. `quality` is the default Python/NumPy metric mode.
+`performance` is an approximate VapourSynth PlaneStats metric mode; it can select
+different dark, bright, or motion frames than `quality` and is cache-isolated
+from `quality`. Both modes apply the configured active rectangle for the selected
+analysis source before metric calculation and use active-rect-specific cache
+identity; sources without an active rectangle use full-frame metrics. Analysis
+uses only explicit `sources.overrides.<selector>.active_rect` values. It does
+not use screenshot `active_rect_detection`, metadata rectangles, or
+dimension/aspect-ratio inference from screenshot geometry.
 There is no dedicated `run` flag for analysis performance mode in v1.
 
 The lead/trail fields define a global selectable analysis window inside each

@@ -12,6 +12,7 @@ import pytest
 
 import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError
+from frame_compare.analysis.types import MetricActiveRect
 from frame_compare.config.errors import ConfigValidationError
 from frame_compare.orchestration import preparation
 from frame_compare.orchestration.context import ClipActiveRect
@@ -219,6 +220,58 @@ def test_execute_prep_no_cache_removes_only_matching_shared_metrics_cache(tmp_pa
     assert other_metrics_path.exists()
     assert manual_overrides_path.exists()
     assert alignment_cache_path.exists()
+
+
+def test_execute_prep_no_cache_uses_analysis_active_rect_fingerprint(tmp_path: Path) -> None:
+    config_content = (
+        METRIC_CONFIG
+        + """
+[sources.overrides."source.mkv"]
+active_rect = { x = 10, y = 20, width = 300, height = 200 }
+"""
+    )
+    _create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    source_path = _create_video_files(input_dir, "source.mkv")[0]
+    preflight = preparation.prepare_preflight(root=tmp_path)
+    config = preflight.config
+    prep_for_domain = asyncio.run(
+        preparation.execute_prep(
+            RunRequest(root=tmp_path),
+            RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
+        )
+    )
+    rect = MetricActiveRect(x=10, y=20, width=300, height=200)
+    rect_fingerprint = cache_io.compute_cache_key(
+        [source_path],
+        config.analysis,
+        selection_domain=prep_for_domain.analysis_selection_domain,
+        metric_active_rect=rect,
+    )
+    full_frame_fingerprint = cache_io.compute_cache_key(
+        [source_path],
+        config.analysis,
+        selection_domain=prep_for_domain.analysis_selection_domain,
+    )
+    metrics_dir = tmp_path / "generated" / "cache" / "analysis"
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+    rect_cache_path = metrics_dir / cache_io.metrics_cache_filename([source_path], rect_fingerprint)
+    full_frame_cache_path = metrics_dir / cache_io.metrics_cache_filename(
+        [source_path],
+        full_frame_fingerprint,
+    )
+    rect_cache_path.write_text("{}", encoding="utf-8")
+    full_frame_cache_path.write_text("{}", encoding="utf-8")
+
+    asyncio.run(
+        preparation.execute_prep(
+            RunRequest(root=tmp_path, no_cache=True),
+            RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
+        )
+    )
+
+    assert not rect_cache_path.exists()
+    assert full_frame_cache_path.exists()
 
 
 def test_execute_prep_no_cache_removes_only_selected_reference_metrics_cache(

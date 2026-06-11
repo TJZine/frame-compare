@@ -24,6 +24,7 @@ from frame_compare.analysis.types import (
     ClipIdentity,
     FrameMetrics,
     FrameSelection,
+    MetricActiveRect,
     MetricsMetadata,
     SelectionBreakdown,
 )
@@ -180,6 +181,7 @@ def test_benchmark_script_progress_wraps_quality_and_candidate_tiers(
 
     def fake_run_tier(**kwargs: object) -> dict[str, object]:
         mode = cast(str, kwargs["mode"])
+        assert kwargs["metric_active_rect"] == MetricActiveRect(x=10, y=20, width=300, height=200)
         calls.append(mode)
         return {"mode": mode, "analyze_seconds": 0.1}
 
@@ -204,6 +206,7 @@ def test_benchmark_script_progress_wraps_quality_and_candidate_tiers(
         cache_dir=tmp_path / "cache",
         analysis_source_path=tmp_path / "reference.mkv",
         effective_fps=None,
+        metric_active_rect=MetricActiveRect(x=10, y=20, width=300, height=200),
         selection_domain=None,
         window_start=0,
         window_end_exclusive=None,
@@ -237,12 +240,14 @@ def test_benchmark_script_run_tier_preserves_typed_performance_mode(
         *,
         analysis_source_path: Path,
         effective_fps: object,
+        metric_active_rect: MetricActiveRect | None,
         selection_domain: str | None,
     ) -> FrameMetrics:
         assert video_paths == [tmp_path / "reference.mkv"]
         assert cache_dir == tmp_path / "cache"
         assert analysis_source_path == tmp_path / "reference.mkv"
         assert effective_fps is None
+        assert metric_active_rect == MetricActiveRect(x=10, y=20, width=300, height=200)
         assert selection_domain is None
         observed_modes.append(analysis_config.performance_mode)
         return _metrics_payload("performance", [0.0, 0.2, 1.0], [0.0, 0.1, 0.7])
@@ -265,6 +270,7 @@ def test_benchmark_script_run_tier_preserves_typed_performance_mode(
         cache_dir=tmp_path / "cache",
         analysis_source_path=tmp_path / "reference.mkv",
         effective_fps=None,
+        metric_active_rect=MetricActiveRect(x=10, y=20, width=300, height=200),
         selection_domain=None,
         window_start=0,
         window_end_exclusive=None,
@@ -274,7 +280,7 @@ def test_benchmark_script_run_tier_preserves_typed_performance_mode(
     assert result["metadata"]["performance_mode"] == "performance"
 
 
-def test_benchmark_script_resolves_configured_analysis_source_and_effective_fps(
+def test_benchmark_script_resolves_configured_analysis_source_effective_fps_and_active_rect(
     tmp_path: Path,
 ) -> None:
     script = _load_benchmark_script()
@@ -289,17 +295,22 @@ def test_benchmark_script_resolves_configured_analysis_source_and_effective_fps(
             "sources": {
                 "analysis_source": "analysis.mkv",
                 "match_fps": "disabled",
-                "overrides": {"analysis.mkv": {"effective_fps": "24000/1001"}},
+                "overrides": {
+                    "analysis.mkv": {
+                        "effective_fps": "24000/1001",
+                        "active_rect": {"x": 10, "y": 20, "width": 300, "height": 200},
+                    }
+                },
             }
         }
     )
 
-    source_path = script._resolve_benchmark_analysis_source_path(
+    source_path, effective_fps, metric_active_rect = script._resolve_benchmark_analysis_source(
         input_dir=input_dir,
         input_paths=[reference, analysis],
         config=config,
     )
-    effective_fps = script._effective_fps_override_for_path(
+    legacy_effective_fps = script._effective_fps_override_for_path(
         input_dir=input_dir,
         input_paths=[reference, analysis],
         config=config,
@@ -308,6 +319,34 @@ def test_benchmark_script_resolves_configured_analysis_source_and_effective_fps(
 
     assert source_path == analysis
     assert effective_fps == Fraction(24000, 1001)
+    assert legacy_effective_fps == Fraction(24000, 1001)
+    assert metric_active_rect == MetricActiveRect(x=10, y=20, width=300, height=200)
+
+
+def test_benchmark_script_requires_selection_domain_for_non_first_analysis_source(
+    tmp_path: Path,
+) -> None:
+    script = _load_benchmark_script()
+    reference = tmp_path / "reference.mkv"
+    analysis = tmp_path / "analysis.mkv"
+
+    with pytest.raises(SystemExit, match="selection-domain token is required"):
+        script._require_selection_domain_for_analysis_cache_identity(
+            selection_domain=None,
+            video_paths=[reference, analysis],
+            analysis_source_path=analysis,
+        )
+
+    script._require_selection_domain_for_analysis_cache_identity(
+        selection_domain="benchmark-domain",
+        video_paths=[reference, analysis],
+        analysis_source_path=analysis,
+    )
+    script._require_selection_domain_for_analysis_cache_identity(
+        selection_domain=None,
+        video_paths=[reference, analysis],
+        analysis_source_path=reference,
+    )
 
 
 def test_benchmark_script_uses_configured_generated_dir_for_default_cache(tmp_path: Path) -> None:

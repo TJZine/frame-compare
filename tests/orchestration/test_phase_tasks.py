@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ from frame_compare.analysis.types import (
     CacheLoadResult,
     FrameMetrics,
     FrameSelection,
+    MetricActiveRect,
     MetricsMetadata,
     SelectionBreakdown,
     SelectionDetail,
@@ -22,6 +24,7 @@ from frame_compare.analysis.types import (
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.errors import ConfigValidationError
 from frame_compare.orchestration import phase_post_render, phase_selection
+from frame_compare.orchestration.context import ClipActiveRect
 from frame_compare.orchestration.types import (
     RenderArtifacts,
     RunArtifacts,
@@ -131,7 +134,9 @@ def test_run_analyze_phase_uses_prepared_analysis_selection_domain(
         _config: object,
         *,
         selection_domain: str | None = None,
+        metric_active_rect: MetricActiveRect | None = None,
     ) -> str:
+        del metric_active_rect
         observed_selection_domains.append(selection_domain)
         return "fingerprint"
 
@@ -163,6 +168,71 @@ def test_run_analyze_phase_uses_prepared_analysis_selection_domain(
     assert observed_selection_domains == [
         "trim_start=0|trim_end=0|effective_fps=24/1",
         "trim_start=0|trim_end=0|effective_fps=24/1",
+    ]
+
+
+@pytest.mark.unit
+def test_run_analyze_phase_forwards_analysis_clip_active_rect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _context(tmp_path)
+    assert ctx.analysis_clip is not None
+    ctx.analysis_clip = replace(
+        ctx.analysis_clip,
+        active_rect=ClipActiveRect(x=10, y=20, width=300, height=200),
+    )
+    input_videos = [ctx.reference.path]
+    metrics = FrameMetrics(
+        luminance=[0.1, 0.9],
+        motion=[0.0, 0.8],
+        metadata=MetricsMetadata(
+            frame_count=2,
+            fps=Fraction(24, 1),
+            config_fingerprint="fingerprint",
+            clips=[],
+        ),
+    )
+    observed_rects: list[MetricActiveRect | None] = []
+
+    def _fake_compute_cache_key(
+        _video_paths: list[Path],
+        _config: object,
+        *,
+        selection_domain: str | None = None,
+        metric_active_rect: MetricActiveRect | None = None,
+    ) -> str:
+        del selection_domain
+        observed_rects.append(metric_active_rect)
+        return "fingerprint"
+
+    def _fake_load_cached_metrics(*_args: object, **_kwargs: object) -> CacheLoadResult:
+        return CacheLoadResult(success=False, reason="not_found")
+
+    def _fake_calculate_metrics(**kwargs: object) -> FrameMetrics:
+        observed_rects.append(kwargs["metric_active_rect"])
+        return metrics
+
+    def _fake_select_frames(**_kwargs: object) -> FrameSelection:
+        return FrameSelection(
+            frames=[0],
+            seed=ctx.config.analysis.random_seed,
+            breakdown=SelectionBreakdown(quantile_dark=[0]),
+        )
+
+    monkeypatch.setattr(phase_selection.cache_io, "compute_cache_key", _fake_compute_cache_key)
+    monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics", _fake_load_cached_metrics)
+    monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
+    monkeypatch.setattr(phase_selection, "select_frames", _fake_select_frames)
+
+    phase_selection.run_analyze_phase(
+        ctx,
+        input_videos=input_videos,
+        workspace=ctx.workspace,
+    )
+
+    assert observed_rects == [
+        MetricActiveRect(x=10, y=20, width=300, height=200),
+        MetricActiveRect(x=10, y=20, width=300, height=200),
     ]
 
 

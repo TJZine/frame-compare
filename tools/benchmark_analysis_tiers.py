@@ -30,10 +30,11 @@ from frame_compare.analysis.tier_validation import (
     compare_selection_category,
     tier_category_tolerance,
 )
-from frame_compare.analysis.types import FrameMetrics, FrameSelection
+from frame_compare.analysis.types import FrameMetrics, FrameSelection, MetricActiveRect
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema import AnalysisConfig, ConfigSchema
 from frame_compare.config.schema_enums import AnalysisPerformanceMode, SourceMatchFpsMode
+from frame_compare.config.schema_models import SourceOverrideConfig
 from frame_compare.orchestration.source_selection import (
     resolve_source_selection,
     resolve_source_selector,
@@ -59,16 +60,15 @@ def main() -> int:
     )
     if not cache_dir.is_absolute():
         cache_dir = root / cache_dir
-    analysis_source_path = _resolve_benchmark_analysis_source_path(
+    analysis_source_path, effective_fps, metric_active_rect = _resolve_benchmark_analysis_source(
         input_dir=input_dir,
         input_paths=input_paths,
         config=config,
     )
-    effective_fps = _effective_fps_override_for_path(
-        input_dir=input_dir,
-        input_paths=input_paths,
-        config=config,
-        source_path=analysis_source_path,
+    _require_selection_domain_for_analysis_cache_identity(
+        selection_domain=args.selection_domain,
+        video_paths=input_paths,
+        analysis_source_path=analysis_source_path,
     )
     warnings = [
         "Per-subphase luminance and motion timings are unavailable; only total analysis wall-clock is recorded.",
@@ -82,6 +82,7 @@ def main() -> int:
         cache_dir=cache_dir,
         analysis_source_path=analysis_source_path,
         effective_fps=effective_fps,
+        metric_active_rect=metric_active_rect,
         selection_domain=args.selection_domain,
         window_start=args.window_start,
         window_end_exclusive=args.window_end_exclusive,
@@ -104,6 +105,7 @@ def main() -> int:
             "analysis_source": config.sources.analysis_source,
             "analysis_source_path": analysis_source_path.as_posix(),
             "effective_fps": str(effective_fps) if effective_fps is not None else None,
+            "metric_active_rect": _metric_active_rect_json(metric_active_rect),
             "selection_window": {
                 "start_frame": quality["window"]["start_frame"],
                 "end_frame_exclusive": quality["window"]["end_frame_exclusive"],
@@ -172,6 +174,27 @@ def _resolve_benchmark_analysis_source_path(
     )
 
 
+def _resolve_benchmark_analysis_source(
+    *,
+    input_dir: Path,
+    input_paths: Sequence[Path],
+    config: ConfigSchema,
+) -> tuple[Path, Fraction | None, MetricActiveRect | None]:
+    source_path = _resolve_benchmark_analysis_source_path(
+        input_dir=input_dir,
+        input_paths=input_paths,
+        config=config,
+    )
+    selection = resolve_source_selection(
+        input_dir=input_dir,
+        discovered_paths=list(input_paths),
+        config=config.sources,
+    )
+    override = selection.overrides_by_path.get(source_path)
+    effective_fps = None if override is None else override.effective_fps
+    return source_path, effective_fps, _metric_active_rect_from_override(override)
+
+
 def _effective_fps_override_for_path(
     *,
     input_dir: Path,
@@ -186,6 +209,49 @@ def _effective_fps_override_for_path(
     )
     override = selection.overrides_by_path.get(source_path)
     return None if override is None else override.effective_fps
+
+
+def _metric_active_rect_from_override(
+    override: SourceOverrideConfig | None,
+) -> MetricActiveRect | None:
+    if override is None or override.active_rect is None:
+        return None
+    rect = override.active_rect
+    return MetricActiveRect(
+        x=rect.x,
+        y=rect.y,
+        width=rect.width,
+        height=rect.height,
+    )
+
+
+def _metric_active_rect_json(rect: MetricActiveRect | None) -> JsonObject | None:
+    if rect is None:
+        return None
+    return {
+        "x": rect.x,
+        "y": rect.y,
+        "width": rect.width,
+        "height": rect.height,
+    }
+
+
+def _require_selection_domain_for_analysis_cache_identity(
+    *,
+    selection_domain: str | None,
+    video_paths: Sequence[Path],
+    analysis_source_path: Path,
+) -> None:
+    if selection_domain is not None:
+        return
+    if video_paths and analysis_source_path == video_paths[0]:
+        return
+    raise SystemExit(
+        "A benchmark selection-domain token is required when the resolved analysis source "
+        "is not the first input path, because analysis cache identity otherwise cannot "
+        "distinguish the selected analysis source. Pass --selection-domain from a prepared "
+        "run or benchmark with the analysis source as the first input."
+    )
 
 
 def _parse_args() -> argparse.Namespace:
@@ -249,6 +315,7 @@ def _run_benchmark_tiers(
     cache_dir: Path,
     analysis_source_path: Path,
     effective_fps: Fraction | None,
+    metric_active_rect: MetricActiveRect | None,
     selection_domain: str | None,
     window_start: int,
     window_end_exclusive: int | None,
@@ -277,6 +344,7 @@ def _run_benchmark_tiers(
             cache_dir=cache_dir,
             analysis_source_path=analysis_source_path,
             effective_fps=effective_fps,
+            metric_active_rect=metric_active_rect,
             selection_domain=selection_domain,
             window_start=window_start,
             window_end_exclusive=window_end_exclusive,
@@ -292,6 +360,7 @@ def _run_benchmark_tiers(
                 cache_dir=cache_dir,
                 analysis_source_path=analysis_source_path,
                 effective_fps=effective_fps,
+                metric_active_rect=metric_active_rect,
                 selection_domain=selection_domain,
                 window_start=window_start,
                 window_end_exclusive=window_end_exclusive,
@@ -312,6 +381,7 @@ def _run_tier(
     cache_dir: Path,
     analysis_source_path: Path,
     effective_fps: Fraction | None,
+    metric_active_rect: MetricActiveRect | None,
     selection_domain: str | None,
     window_start: int,
     window_end_exclusive: int | None,
@@ -326,6 +396,7 @@ def _run_tier(
         cache_dir,
         analysis_source_path=analysis_source_path,
         effective_fps=effective_fps,
+        metric_active_rect=metric_active_rect,
         selection_domain=selection_domain,
     )
     analyze_seconds = time.perf_counter() - started

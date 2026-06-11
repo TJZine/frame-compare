@@ -240,6 +240,10 @@ def test_current_cli_contract_documents_analysis_performance_mode_config_only() 
     assert "--analysis-performance" not in declared_options
     assert "analysis.performance_mode" not in CLI_OVERRIDE_MAP.values()
     assert "cache-isolated from `quality`" in normalized_analysis_section
+    assert "uses only explicit `sources.overrides.<selector>.active_rect` values" in (
+        normalized_analysis_section
+    )
+    assert "does not use screenshot `active_rect_detection`" in normalized_analysis_section
 
 
 def test_current_cli_contract_documents_slowpics_json_shape(
@@ -773,8 +777,11 @@ def test_current_cli_contract_documents_analysis_ignore_window_and_cache_domain(
         "stable all-source selection-domain token",
         "`analysis_source_path`",
         "`reference_path`",
-        "Cache schema v5 stores `analysis_source_path`, `performance_mode`, `algorithm_id`",
-        "performance modes, or metric algorithm identities",
+        "Cache schema v6 stores `analysis_source_path`, `performance_mode`, `algorithm_id`",
+        "`metric_active_rect`",
+        "performance modes, metric algorithm identities, or active-rect metric domains",
+        "active-rect metric domains",
+        "active_rect` values produce coordinate-specific",
         'When `sources.analysis_source = "reference"`',
         "source trims",
         "effective FPS values",

@@ -8,6 +8,7 @@ from frame_compare.analysis.types import (
     ClipIdentity,
     FrameMetrics,
     FrameSelection,
+    MetricActiveRect,
     MetricsMetadata,
     SelectionBreakdown,
     SelectionDetail,
@@ -41,11 +42,20 @@ def test_metrics_metadata_creation():
     assert mm.clips == []
     assert mm.performance_mode == "quality"
     assert mm.algorithm_identity_json == "{}"
+    assert mm.metric_active_rect is None
 
 
 def test_metrics_metadata_default_version():
     mm = MetricsMetadata(frame_count=100, fps=Fraction(24), config_fingerprint="fp", clips=[])
-    assert mm.version == 5
+    assert mm.version == 6
+
+
+def test_metric_active_rect_creation():
+    rect = MetricActiveRect(x=10, y=20, width=300, height=200)
+    assert rect.x == 10
+    assert rect.y == 20
+    assert rect.width == 300
+    assert rect.height == 200
 
 
 def test_frame_metrics_creation():

@@ -18,7 +18,12 @@ from frame_compare.analysis.metric_strategies import (
     MetricComputationResult,
     calculate_metric_strategy,
 )
-from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
+from frame_compare.analysis.types import (
+    ClipIdentity,
+    FrameMetrics,
+    MetricActiveRect,
+    MetricsMetadata,
+)
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError
 from frame_compare.vs.loader import DefaultVSLoader
@@ -86,6 +91,7 @@ def _build_metrics(
     clips: list[ClipIdentity],
     analysis_source_path: Path,
     effective_fps: Fraction | None,
+    metric_active_rect: MetricActiveRect | None,
 ) -> FrameMetrics:
     return FrameMetrics(
         luminance=result.luminance,
@@ -100,6 +106,7 @@ def _build_metrics(
             algorithm_id=result.algorithm_id,
             metric_backend=result.metric_backend,
             algorithm_identity_json=result.algorithm_identity_json,
+            metric_active_rect=metric_active_rect,
             version=CACHE_VERSION,
         ),
     )
@@ -127,6 +134,7 @@ def calculate_metrics(
     selection_domain: str | None = None,
     analysis_source_path: Path | None = None,
     effective_fps: Fraction | None = None,
+    metric_active_rect: MetricActiveRect | None = None,
 ) -> FrameMetrics:
     """
     Calculate frame metrics for the given clips.
@@ -161,7 +169,12 @@ def calculate_metrics(
         raise MetricsCalculationError("No input video paths provided")
     source_path = video_paths[0] if analysis_source_path is None else analysis_source_path
 
-    fingerprint = compute_cache_key(video_paths, config, selection_domain=selection_domain)
+    fingerprint = compute_cache_key(
+        video_paths,
+        config,
+        selection_domain=selection_domain,
+        metric_active_rect=metric_active_rect,
+    )
     clips = _clip_identities(video_paths)
 
     cached = _cached_metrics(cache_dir, fingerprint, clips, reporter)
@@ -171,7 +184,7 @@ def calculate_metrics(
     # Cache miss or invalid - compute metrics for the selected analysis source only.
     source = _load_analysis_source(source_path, vs_loader)
     try:
-        strategy_result = calculate_metric_strategy(source, config, reporter)
+        strategy_result = calculate_metric_strategy(source, config, reporter, metric_active_rect)
         metrics = _build_metrics(
             result=strategy_result,
             source=source,
@@ -179,6 +192,7 @@ def calculate_metrics(
             clips=clips,
             analysis_source_path=source_path,
             effective_fps=effective_fps,
+            metric_active_rect=metric_active_rect,
         )
     finally:
         del source

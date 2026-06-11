@@ -14,7 +14,17 @@ import pytest
 
 import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError
-from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
+from frame_compare.analysis.metric_identity import (
+    metric_algorithm_id,
+    metric_backend,
+    stable_metric_algorithm_identity_json,
+)
+from frame_compare.analysis.types import (
+    ClipIdentity,
+    FrameMetrics,
+    MetricActiveRect,
+    MetricsMetadata,
+)
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema import AnalysisConfig
 from frame_compare.orchestration import phase_post_render, phase_selection, preparation
@@ -260,6 +270,8 @@ enable = false
         video_paths: list[Path],
         config: AnalysisConfig,
         cache_dir: Path,
+        analysis_source_path: Path | None = None,
+        metric_active_rect: MetricActiveRect | None = None,
         selection_domain: str | None = None,
         **_kwargs: object,
     ) -> FrameMetrics:
@@ -267,8 +279,12 @@ enable = false
             video_paths,
             config,
             selection_domain=selection_domain,
+            metric_active_rect=metric_active_rect,
         )
         stats_by_path = {path: path.stat() for path in video_paths}
+        resolved_analysis_source_path = (
+            video_paths[0] if analysis_source_path is None else analysis_source_path
+        )
         metrics = FrameMetrics(
             luminance=[0.1] * 100,
             motion=[0.0] * 100,
@@ -284,6 +300,12 @@ enable = false
                     )
                     for path in video_paths
                 ],
+                analysis_source_path=str(resolved_analysis_source_path),
+                performance_mode=config.performance_mode.value,
+                algorithm_id=metric_algorithm_id(config),
+                metric_backend=metric_backend(config),
+                algorithm_identity_json=stable_metric_algorithm_identity_json(config),
+                metric_active_rect=metric_active_rect,
                 version=cache_io.CACHE_VERSION,
             ),
         )

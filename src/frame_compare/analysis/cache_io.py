@@ -17,6 +17,7 @@ from frame_compare.analysis.types import (
     CacheLoadResult,
     ClipIdentity,
     FrameMetrics,
+    MetricActiveRect,
     MetricsMetadata,
 )
 from frame_compare.utils.atomic_write import write_text_atomic
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
 
 CACHE_FILE_EXTENSION: str = ".compframes"
 CACHE_LABEL_MAX_LENGTH: int = 80
-CACHE_VERSION: int = 5
+CACHE_VERSION: int = 6
 _SAFE_LABEL_CHARS = re.compile(r"[^a-z0-9._-]+")
 _MULTI_SEPARATOR = re.compile(r"[-_.]{2,}")
 
@@ -55,6 +56,7 @@ def compute_cache_key(
     config: AnalysisConfig,
     *,
     selection_domain: str | None = None,
+    metric_active_rect: MetricActiveRect | None = None,
 ) -> str:
     """Generate deterministic cache key from video files and analysis config."""
     h = hashlib.sha256()
@@ -71,9 +73,16 @@ def compute_cache_key(
         f"{config.ignore_lead_seconds}|{config.ignore_trail_seconds}|"
         f"{config.min_window_seconds}".encode()
     )
+    h.update(f"metric_active_rect|{_metric_active_rect_token(metric_active_rect)}".encode())
     h.update(f"metric_algorithm|{stable_metric_algorithm_identity_json(config)}".encode())
     h.update(str(CACHE_VERSION).encode("utf-8"))
     return h.hexdigest()
+
+
+def _metric_active_rect_token(rect: MetricActiveRect | None) -> str:
+    if rect is None:
+        return "full_frame"
+    return f"rect:{rect.x},{rect.y},{rect.width},{rect.height}"
 
 
 def build_cache_label(video_paths: list[Path]) -> str:
@@ -266,6 +275,7 @@ def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
             "algorithm_id",
             "metric_backend",
             "algorithm_identity_json",
+            "metric_active_rect",
         },
     )
 
@@ -300,7 +310,14 @@ def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
     algorithm_identity_json = data["algorithm_identity_json"]
     if not isinstance(algorithm_identity_json, str):
         raise _CacheParseError
-    _parse_algorithm_identity_json(algorithm_identity_json)
+    algorithm_identity = _parse_algorithm_identity_json(algorithm_identity_json)
+    _validate_algorithm_metadata_fields(
+        algorithm_id=algorithm_id,
+        metric_backend=metric_backend,
+        performance_mode=performance_mode,
+        algorithm_identity_json=algorithm_identity_json,
+        algorithm_identity=algorithm_identity,
+    )
 
     try:
         return MetricsMetadata(
@@ -313,6 +330,7 @@ def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
             algorithm_id=algorithm_id,
             metric_backend=metric_backend,
             algorithm_identity_json=algorithm_identity_json,
+            metric_active_rect=_parse_metric_active_rect(data["metric_active_rect"]),
             version=_parse_cache_version(data.get("version", CACHE_VERSION)),
         )
     except (ValueError, TypeError, ZeroDivisionError) as exc:
@@ -325,12 +343,60 @@ def _parse_clip_identities(value: object) -> list[ClipIdentity]:
     return [_parse_clip_identity(_as_mapping(entry)) for entry in cast(list[object], value)]
 
 
+def _parse_metric_active_rect(value: object) -> MetricActiveRect | None:
+    if value is None:
+        return None
+    data = _as_mapping(value)
+    _require_keys(data, {"x", "y", "width", "height"})
+    fields: dict[str, int] = {}
+    for key in ("x", "y", "width", "height"):
+        item = data[key]
+        if not isinstance(item, int) or isinstance(item, bool):
+            raise _CacheParseError
+        fields[key] = item
+    if fields["x"] < 0 or fields["y"] < 0 or fields["width"] <= 0 or fields["height"] <= 0:
+        raise _CacheParseError
+    try:
+        return MetricActiveRect(
+            x=fields["x"],
+            y=fields["y"],
+            width=fields["width"],
+            height=fields["height"],
+        )
+    except TypeError as exc:
+        raise _CacheParseError from exc
+
+
 def _parse_algorithm_identity_json(value: str) -> Mapping[str, object]:
     try:
         raw_data: object = json.loads(value)
     except json.JSONDecodeError as exc:
         raise _CacheParseError from exc
     return _as_mapping(raw_data)
+
+
+def _validate_algorithm_metadata_fields(
+    *,
+    algorithm_id: str,
+    metric_backend: str,
+    performance_mode: str,
+    algorithm_identity_json: str,
+    algorithm_identity: Mapping[str, object],
+) -> None:
+    expected_algorithm_id = hashlib.sha256(algorithm_identity_json.encode("utf-8")).hexdigest()
+    if algorithm_id != expected_algorithm_id:
+        raise _CacheParseError
+
+    identity_backend = algorithm_identity.get("backend")
+    if not isinstance(identity_backend, str) or metric_backend != identity_backend:
+        raise _CacheParseError
+
+    identity_performance_mode = algorithm_identity.get("performance_mode")
+    if (
+        not isinstance(identity_performance_mode, str)
+        or performance_mode != identity_performance_mode
+    ):
+        raise _CacheParseError
 
 
 def _parse_clip_identity(data: Mapping[str, object]) -> ClipIdentity:
@@ -383,6 +449,9 @@ def save_metrics_cache(metrics: FrameMetrics, cache_dir: Path) -> None:
             "algorithm_id": metrics.metadata.algorithm_id,
             "metric_backend": metrics.metadata.metric_backend,
             "algorithm_identity_json": metrics.metadata.algorithm_identity_json,
+            "metric_active_rect": _serialize_metric_active_rect(
+                metrics.metadata.metric_active_rect
+            ),
             "clips": [
                 {
                     "path": str(c.path),
@@ -397,3 +466,14 @@ def save_metrics_cache(metrics: FrameMetrics, cache_dir: Path) -> None:
     }
 
     write_text_atomic(cache_path, json.dumps(data, indent=2), encoding="utf-8")
+
+
+def _serialize_metric_active_rect(rect: MetricActiveRect | None) -> dict[str, int] | None:
+    if rect is None:
+        return None
+    return {
+        "x": rect.x,
+        "y": rect.y,
+        "width": rect.width,
+        "height": rect.height,
+    }

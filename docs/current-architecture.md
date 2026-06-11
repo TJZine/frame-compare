@@ -48,13 +48,19 @@ Current phase-family owners are intentionally explicit:
 
 Analysis metric algorithm identity is analysis-owned. `frame_compare.analysis.metric_identity`
 builds the stable cache identity for `analysis.performance_mode`; cache I/O stores that
-identity in schema v5 payload metadata, and orchestration only passes the effective
-analysis config plus selection-domain token into the analysis/cache owner.
+identity in schema v6 payload metadata, and orchestration only passes the effective
+analysis config, selection-domain token, and analysis-owned metric active rectangle
+into the analysis/cache owner.
 `frame_compare.analysis.metric_strategies` owns the metric implementations:
-`quality` is the default/current full-frame Python/NumPy behavior, while
-`performance` is an approximate VapourSynth PlaneStats mode that can choose
-different dark, bright, or motion frames. Both modes still return dense
-source-frame-indexed luminance and motion arrays for the selected analysis clip.
+`quality` is the default Python/NumPy behavior and computes luminance and motion
+in one frame pass, while `performance` is an approximate VapourSynth PlaneStats
+mode that can choose different dark, bright, or motion frames. Both modes apply
+the configured `sources.overrides.<selector>.active_rect` for the analysis source
+before metric calculation when one exists, otherwise they analyze the full frame.
+Analysis metrics do not consume screenshot `active_rect_detection`, trusted
+metadata rectangles, or dimension/aspect-ratio inference from render geometry.
+Both modes still return dense source-frame-indexed luminance and motion arrays
+for the selected analysis clip.
 
 ## Module Boundaries
 
@@ -116,13 +122,14 @@ Primary owned paths:
   selection-domain token. The token stores `analysis_source_path`,
   `reference_path`, source identities, source trims, effective FPS values,
   configured analysis ignore windows, and the final shared selectable window.
-  Cache schema v5 stores `analysis_source_path`, `performance_mode`,
-  `algorithm_id`, `metric_backend`, and stable `algorithm_identity_json` in
-  `MetricsMetadata`, and the metric arrays are for that selected analysis clip.
-  Metric-array cache identity includes the selected analysis performance mode
-  and algorithm identity. It excludes frame-selection counts, `user_frames`,
-  random seed, and dark/bright quantile thresholds because those affect frame
-  choice rather than metric computation.
+  Cache schema v6 stores `analysis_source_path`, `performance_mode`,
+  `algorithm_id`, `metric_backend`, stable `algorithm_identity_json`, and
+  `metric_active_rect` in `MetricsMetadata`, and the metric arrays are for that
+  selected analysis clip. Metric-array cache identity includes the selected
+  analysis performance mode, algorithm identity, and the concrete metric active
+  rectangle token, with `null` representing full-frame analysis. It excludes
+  frame-selection counts, `user_frames`, random seed, and dark/bright quantile
+  thresholds because those affect frame choice rather than metric computation.
 - `<resolved paths.generated_dir>/cache/alignment/alignment_reuse.toml`:
   shared previous alignment offset reuse cache owned by
   `frame_compare.services.alignment_reuse_cache`. It stores accepted computed or

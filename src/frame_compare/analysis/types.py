@@ -40,6 +40,16 @@ class ClipIdentity:
 
 
 @dataclass(frozen=True, slots=True)
+class MetricActiveRect:
+    """Analysis-owned active image rectangle in source-frame coordinates."""
+
+    x: int
+    y: int
+    width: int
+    height: int
+
+
+@dataclass(frozen=True, slots=True)
 class MetricsMetadata:
     """Metadata about the analysis run stored with cache.
 
@@ -53,6 +63,7 @@ class MetricsMetadata:
         algorithm_id: Stable ID for the metric algorithm identity
         metric_backend: Metric backend family that produced the arrays
         algorithm_identity_json: Stable JSON identity payload for cache/debugging
+        metric_active_rect: Active rectangle used for metric arrays; None means full frame
         version: Cache schema version
     """
 
@@ -65,7 +76,8 @@ class MetricsMetadata:
     algorithm_id: str = ""
     metric_backend: str = ""
     algorithm_identity_json: str = "{}"
-    version: int = 5
+    metric_active_rect: MetricActiveRect | None = None
+    version: int = 6
 
 
 @dataclass(frozen=True, slots=True)

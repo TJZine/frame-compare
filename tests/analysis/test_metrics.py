@@ -49,7 +49,7 @@ from frame_compare.analysis.metrics import (  # noqa: E402
     ProgressReporter,
     calculate_metrics,
 )
-from frame_compare.analysis.types import FrameMetrics  # noqa: E402
+from frame_compare.analysis.types import FrameMetrics, MetricActiveRect  # noqa: E402
 from frame_compare.config.schema import AnalysisConfig  # noqa: E402
 from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError  # noqa: E402
 
@@ -121,6 +121,24 @@ class FakeStd:
             ]
         )
 
+    def CropAbs(
+        self,
+        *,
+        width: int,
+        height: int,
+        left: int,
+        top: int,
+    ) -> FakeBalancedClip:
+        self._clip.crop_calls.append(("CropAbs", left, top, width, height))
+        return FakeBalancedClip(
+            self._clip.values,
+            width=width,
+            height=height,
+            color_family=self._clip.format.color_family,
+            resize_calls=self._clip.resize_calls,
+            crop_calls=self._clip.crop_calls,
+        )
+
 
 class FakeResize:
     def __init__(self, clip: FakeBalancedClip):
@@ -143,6 +161,7 @@ class FakeResize:
             height=self._clip.height if height is None else height,
             color_family=color_family,
             resize_calls=self._clip.resize_calls,
+            crop_calls=self._clip.crop_calls,
         )
 
     def Bilinear(
@@ -158,6 +177,7 @@ class FakeResize:
             height=height,
             color_family=self._clip.format.color_family,
             resize_calls=self._clip.resize_calls,
+            crop_calls=self._clip.crop_calls,
         )
 
 
@@ -170,6 +190,7 @@ class FakeBalancedClip:
         height: int = 360,
         color_family: int = 1,
         resize_calls: list[tuple[str, int | None, int | None]] | None = None,
+        crop_calls: list[tuple[str, int, int, int, int]] | None = None,
     ):
         self.values = values
         self.num_frames = len(values)
@@ -177,6 +198,7 @@ class FakeBalancedClip:
         self.height = height
         self.format = SimpleNamespace(color_family=color_family)
         self.resize_calls = [] if resize_calls is None else resize_calls
+        self.crop_calls = [] if crop_calls is None else crop_calls
         self.resize = FakeResize(self)
         self.std = FakeStd(self)
 
@@ -187,6 +209,7 @@ class FakeBalancedClip:
             height=self.height,
             color_family=self.format.color_family,
             resize_calls=self.resize_calls,
+            crop_calls=self.crop_calls,
         )
 
     def __add__(self, other: object) -> FakeBalancedClip:
@@ -198,6 +221,7 @@ class FakeBalancedClip:
             height=self.height,
             color_family=self.format.color_family,
             resize_calls=self.resize_calls,
+            crop_calls=self.crop_calls,
         )
 
 
@@ -216,6 +240,7 @@ class FakeCoreStd:
             height=clips.height,
             color_family=colorfamily,
             resize_calls=clips.resize_calls,
+            crop_calls=clips.crop_calls,
         )
 
 
@@ -400,7 +425,7 @@ def test_calculate_metrics_computes_on_cache_miss(
 
     assert len(result.luminance) == 10
     assert len(result.motion) == 10
-    mock_strategy.assert_called_once_with(mock_source, config, None)
+    mock_strategy.assert_called_once_with(mock_source, config, None, None)
     mock_save.assert_called_once()
 
 
@@ -425,6 +450,74 @@ def test_quality_strategy_dispatch_matches_direct_quality_helpers() -> None:
     assert result.motion[0] == 0.0
     assert result.performance_mode == "quality"
     assert result.metric_backend == "python_numpy"
+
+
+def test_quality_active_rect_ignores_border_pixels_for_luminance() -> None:
+    frame = np.full((4, 4), 255, dtype=np.uint8)
+    frame[1:3, 1:3] = 0
+    clip = MockClip([frame])
+    source = MagicMock()
+    source.clip = clip
+
+    result = calculate_metric_strategy(
+        source,
+        AnalysisConfig(),
+        reporter=None,
+        metric_active_rect=MetricActiveRect(x=1, y=1, width=2, height=2),
+    )
+
+    assert result.luminance == [0.0]
+    assert result.motion == [0.0]
+
+
+def test_quality_active_rect_ignores_cropped_out_changes_for_motion() -> None:
+    first = np.zeros((4, 4), dtype=np.uint8)
+    second = np.zeros((4, 4), dtype=np.uint8)
+    second[:, 0] = 255
+    second[:, 3] = 255
+    clip = MockClip([first, second])
+    source = MagicMock()
+    source.clip = clip
+
+    result = calculate_metric_strategy(
+        source,
+        AnalysisConfig(),
+        reporter=None,
+        metric_active_rect=MetricActiveRect(x=1, y=0, width=2, height=4),
+    )
+
+    assert result.motion == [0.0, 0.0]
+
+
+def test_quality_default_strategy_reads_each_frame_once() -> None:
+    frames = [
+        np.zeros((4, 4), dtype=np.uint8),
+        np.full((4, 4), 64, dtype=np.uint8),
+        np.full((4, 4), 255, dtype=np.uint8),
+    ]
+    clip = MockClip(frames)
+    clip.get_frame = MagicMock(side_effect=clip.get_frame)
+    source = MagicMock()
+    source.clip = clip
+
+    result = calculate_metric_strategy(source, AnalysisConfig(), reporter=None)
+
+    assert result.motion[0] == 0.0
+    assert clip.get_frame.call_args_list == [call(0), call(1), call(2)]
+
+
+def test_invalid_active_rect_raises_metrics_calculation_error() -> None:
+    clip = MockClip([np.zeros((4, 4), dtype=np.uint8)])
+    source = MagicMock()
+    source.clip = clip
+
+    with pytest.raises(MetricsCalculationError, match="active_rect is outside"):
+        calculate_metric_strategy(
+            source,
+            AnalysisConfig(),
+            reporter=None,
+            metric_active_rect=MetricActiveRect(x=3, y=0, width=2, height=4),
+        )
 
 
 def test_performance_strategy_rejects_empty_clip(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -460,6 +553,29 @@ def test_performance_strategy_returns_full_length_dense_arrays(
     assert result.motion[0] == 0.0
     assert result.performance_mode == "performance"
     assert result.metric_backend == "vapoursynth_planestats"
+
+
+def test_performance_strategy_crops_before_resize_and_remains_dense(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
+    source = MagicMock()
+    source.clip = FakeBalancedClip([0.0, 0.25, 0.75], width=640, height=360)
+
+    result = calculate_metric_strategy(
+        source,
+        AnalysisConfig(performance_mode="performance"),
+        reporter=None,
+        metric_active_rect=MetricActiveRect(x=10, y=20, width=400, height=200),
+    )
+
+    assert source.clip.crop_calls == [("CropAbs", 10, 20, 400, 200)]
+    assert source.clip.resize_calls == [("Bicubic", 320, 160)]
+    assert result.luminance == [0.0, 0.25, 0.75]
+    assert result.motion == [0.0, 0.25, 0.5]
+    assert len(result.luminance) == 3
+    assert len(result.motion) == 3
+    assert result.motion[0] == 0.0
 
 
 def test_performance_strategy_one_frame_motion_is_zero(
@@ -528,6 +644,8 @@ def test_performance_metric_identity_is_distinct_and_stable() -> None:
     assert '"target_max_width":320' in first_performance
     assert '"resize":"bicubic"' in first_performance
     assert '"temporal":"all_adjacent_pairs"' in first_performance
+    assert "active_rect_aware" in first_performance
+    assert '"x"' not in first_performance
     assert "coarse_to_refined" not in first_performance
 
 
@@ -561,6 +679,26 @@ def test_performance_cache_key_ignores_selection_counts_and_quantiles(tmp_path: 
         [video_path],
         AnalysisConfig(performance_mode="quality"),
     )
+
+
+def test_cache_key_changes_when_metric_active_rect_changes(tmp_path: Path) -> None:
+    video_path = tmp_path / "v1.mkv"
+    video_path.write_bytes(b"")
+    config = AnalysisConfig()
+
+    full_frame = compute_cache_key([video_path], config)
+    first_rect = compute_cache_key(
+        [video_path],
+        config,
+        metric_active_rect=MetricActiveRect(x=0, y=0, width=100, height=100),
+    )
+    second_rect = compute_cache_key(
+        [video_path],
+        config,
+        metric_active_rect=MetricActiveRect(x=10, y=0, width=100, height=100),
+    )
+
+    assert len({full_frame, first_rect, second_rect}) == 3
 
 
 def test_performance_strategy_static_clip_has_zero_motion(
@@ -647,6 +785,7 @@ def test_calculate_metrics_cache_save_is_best_effort(
         _source: object,
         _config: object,
         strategy_reporter: ProgressReporter | None,
+        _metric_active_rect: MetricActiveRect | None,
     ) -> MetricComputationResult:
         if strategy_reporter:
             strategy_reporter.advance(1)

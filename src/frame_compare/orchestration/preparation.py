@@ -9,6 +9,7 @@ import structlog
 
 import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError
+from frame_compare.analysis.types import MetricActiveRect
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.effective import (
     build_preflight_input_dir_override,
@@ -79,11 +80,13 @@ def _remove_cached_metrics(
     config: ConfigSchema,
     input_videos: list[Path],
     selection_domain: str | None,
+    metric_active_rect: MetricActiveRect | None,
 ) -> None:
     fingerprint = cache_io.compute_cache_key(
         input_videos,
         config.analysis,
         selection_domain=selection_domain,
+        metric_active_rect=metric_active_rect,
     )
     cache_io.delete_metrics_cache_entry(workspace.cache_dir, fingerprint)
 
@@ -220,6 +223,7 @@ def _validate_cache_state(
     config: ConfigSchema,
     input_videos: list[Path],
     selection_domain: str | None,
+    metric_active_rect: MetricActiveRect | None,
 ) -> None:
     if not needs_analysis(config.analysis):
         return
@@ -230,6 +234,7 @@ def _validate_cache_state(
             config=config,
             input_videos=input_videos,
             selection_domain=selection_domain,
+            metric_active_rect=metric_active_rect,
         )
 
     if request.from_cache_only and not request.skip_analysis:
@@ -237,6 +242,7 @@ def _validate_cache_state(
             input_videos,
             config.analysis,
             selection_domain=selection_domain,
+            metric_active_rect=metric_active_rect,
         )
         cache_result = cache_io.load_cached_metrics(workspace.cache_dir, fingerprint, clips=[])
         if not cache_result.success:
@@ -283,6 +289,18 @@ def _cached_probe_snapshots_for_cache_only(
 
 def _shared_probe_cache_path(workspace: WorkspacePaths) -> Path:
     return workspace.shared_analysis_cache_dir.parent.parent / "clip_probe.toml"
+
+
+def _metric_active_rect_for_clip(clip: ClipState | None) -> MetricActiveRect | None:
+    if clip is None or clip.active_rect is None:
+        return None
+    rect = clip.active_rect
+    return MetricActiveRect(
+        x=rect.x,
+        y=rect.y,
+        width=rect.width,
+        height=rect.height,
+    )
 
 
 def _probe_cache_paths_for_run(workspace: WorkspacePaths) -> list[Path]:
@@ -482,6 +500,7 @@ async def execute_prep(
             config=config,
             input_videos=input_videos,
             selection_domain=prevalidated_selection_domain,
+            metric_active_rect=_metric_active_rect_for_clip(prevalidated_analysis_clip),
         )
 
     workspace, metadata_prefetch = await _resolve_run_directory(
@@ -535,6 +554,7 @@ async def execute_prep(
                 config=config,
                 input_videos=input_videos,
                 selection_domain=selection_domain,
+                metric_active_rect=_metric_active_rect_for_clip(analysis_clip),
             )
 
     return PrepState(

@@ -15,7 +15,12 @@ from frame_compare.analysis.metric_identity import (
     metric_backend,
     stable_metric_algorithm_identity_json,
 )
-from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
+from frame_compare.analysis.types import (
+    ClipIdentity,
+    FrameMetrics,
+    MetricActiveRect,
+    MetricsMetadata,
+)
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_models import SourceOverrideConfig
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot, ClipState
@@ -108,6 +113,11 @@ def write_metrics_cache(
             config,
             analysis_source_path=resolved_analysis_source_path,
         )
+    metric_active_rect = metric_active_rect_for_cache_inputs(
+        ordered_cache_inputs,
+        config,
+        analysis_source_path=resolved_analysis_source_path,
+    )
     write_probe_cache_for_inputs(
         cache_dir.parent.parent / "clip_probe.toml",
         ordered_cache_inputs,
@@ -117,6 +127,7 @@ def write_metrics_cache(
         ordered_cache_inputs,
         config.analysis,
         selection_domain=selection_domain,
+        metric_active_rect=metric_active_rect,
     )
     stats_by_path = {path: path.stat() for path in ordered_cache_inputs}
     metrics = FrameMetrics(
@@ -139,6 +150,7 @@ def write_metrics_cache(
             algorithm_id=metric_algorithm_id(config.analysis),
             metric_backend=metric_backend(config.analysis),
             algorithm_identity_json=stable_metric_algorithm_identity_json(config.analysis),
+            metric_active_rect=metric_active_rect,
             version=cache_io.CACHE_VERSION,
         ),
     )
@@ -169,6 +181,29 @@ def analysis_selection_domain_for_cache_inputs(
         config=config,
         selection_window=window,
     )
+
+
+def metric_active_rect_for_cache_inputs(
+    video_paths: list[Path],
+    config: ConfigSchema,
+    *,
+    analysis_source_path: Path | None = None,
+) -> MetricActiveRect | None:
+    ordered_paths = _resolved_cache_inputs(video_paths, config)
+    snapshots_by_path = {path: _clip_probe_snapshot_for_cache_input(path) for path in ordered_paths}
+    clips = build_selection_domain_clips(
+        ordered_paths=ordered_paths,
+        snapshots_by_path=snapshots_by_path,
+        overrides_by_path=_resolved_cache_overrides(video_paths, config),
+        match_fps=config.sources.match_fps,
+    )
+    analysis_clip = clips[0]
+    if analysis_source_path is not None:
+        analysis_clip = next(clip for clip in clips if clip.path == analysis_source_path)
+    if analysis_clip.active_rect is None:
+        return None
+    rect = analysis_clip.active_rect
+    return MetricActiveRect(x=rect.x, y=rect.y, width=rect.width, height=rect.height)
 
 
 def write_probe_cache_for_inputs(

@@ -20,7 +20,12 @@ from frame_compare.analysis.metric_identity import (
     metric_backend,
     stable_metric_algorithm_identity_json,
 )
-from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
+from frame_compare.analysis.types import (
+    ClipIdentity,
+    FrameMetrics,
+    MetricActiveRect,
+    MetricsMetadata,
+)
 from frame_compare.config.schema import AnalysisConfig
 
 FIXED_MTIME = 1704067200.0  # 2024-01-01 00:00:00 UTC
@@ -46,6 +51,7 @@ def metrics_metadata(
     clips: list[ClipIdentity],
     config: AnalysisConfig,
     analysis_source_path: str = "",
+    metric_active_rect: MetricActiveRect | None = None,
 ) -> MetricsMetadata:
     return MetricsMetadata(
         frame_count=frame_count,
@@ -57,6 +63,7 @@ def metrics_metadata(
         algorithm_id=metric_algorithm_id(config),
         metric_backend=metric_backend(config),
         algorithm_identity_json=stable_metric_algorithm_identity_json(config),
+        metric_active_rect=metric_active_rect,
         version=CACHE_VERSION,
     )
 
@@ -107,6 +114,25 @@ def test_compute_cache_key_changes_by_analysis_performance_mode(tmp_path: Path) 
     }
 
     assert len(keys) == 2
+
+
+def test_compute_cache_key_changes_by_metric_active_rect(tmp_path: Path) -> None:
+    v1 = create_video_file(tmp_path, "v1.mkv")
+    config = AnalysisConfig()
+
+    full_frame = compute_cache_key([v1], config)
+    first_rect = compute_cache_key(
+        [v1],
+        config,
+        metric_active_rect=MetricActiveRect(x=0, y=0, width=100, height=100),
+    )
+    second_rect = compute_cache_key(
+        [v1],
+        config,
+        metric_active_rect=MetricActiveRect(x=10, y=0, width=100, height=100),
+    )
+
+    assert len({full_frame, first_rect, second_rect}) == 3
 
 
 def test_metrics_cache_filename_order_independent(tmp_path: Path) -> None:
@@ -272,6 +298,36 @@ def test_save_and_load_round_trip(tmp_path: Path) -> None:
     assert result.metrics.metadata.algorithm_identity_json == (
         stable_metric_algorithm_identity_json(config)
     )
+    assert result.metrics.metadata.metric_active_rect is None
+
+
+def test_save_and_load_round_trip_serializes_metric_active_rect(tmp_path: Path) -> None:
+    v1 = create_video_file(tmp_path, "v1.mkv")
+    config = AnalysisConfig(random_frame_count=10)
+    rect = MetricActiveRect(x=4, y=8, width=320, height=180)
+    fingerprint = compute_cache_key([v1], config, metric_active_rect=rect)
+
+    clips = [ClipIdentity(path=str(v1), size=v1.stat().st_size, mtime=v1.stat().st_mtime)]
+    metadata = metrics_metadata(
+        frame_count=2,
+        fps=Fraction(24, 1),
+        config_fingerprint=fingerprint,
+        clips=clips,
+        config=config,
+        metric_active_rect=rect,
+    )
+    metrics = FrameMetrics(
+        luminance=[0.1, 0.2],
+        motion=[0.0, 0.3],
+        metadata=metadata,
+    )
+
+    save_metrics_cache(metrics, tmp_path)
+    result = load_cached_metrics(tmp_path, fingerprint, clips)
+
+    assert result.success is True
+    assert result.metrics is not None
+    assert result.metrics.metadata.metric_active_rect == rect
 
 
 def test_load_not_found(tmp_path: Path) -> None:
@@ -439,6 +495,7 @@ def test_save_writes_required_keys(tmp_path: Path) -> None:
     assert data["metadata"]["algorithm_identity_json"] == stable_metric_algorithm_identity_json(
         config
     )
+    assert data["metadata"]["metric_active_rect"] is None
 
 
 def test_load_same_version_cache_without_analysis_source_path_is_corrupted(
@@ -493,6 +550,7 @@ def test_load_same_version_cache_without_algorithm_metadata_is_corrupted(
         "algorithm_id": metric_algorithm_id(config),
         "metric_backend": "python_numpy",
         "algorithm_identity_json": stable_metric_algorithm_identity_json(config),
+        "metric_active_rect": None,
         "version": CACHE_VERSION,
     }
     del metadata[removed_key]
@@ -504,6 +562,90 @@ def test_load_same_version_cache_without_algorithm_metadata_is_corrupted(
                 "luminance": [],
                 "motion": [],
                 "metadata": metadata,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = load_cached_metrics(tmp_path, "fp", [])
+
+    assert result.success is False
+    assert result.reason == "corrupted"
+
+
+def test_load_same_version_cache_without_metric_active_rect_metadata_is_corrupted(
+    tmp_path: Path,
+) -> None:
+    config = AnalysisConfig()
+    cache_file(tmp_path, "fp").write_text(
+        json.dumps(
+            {
+                "version": CACHE_VERSION,
+                "fingerprint": "fp",
+                "luminance": [],
+                "motion": [],
+                "metadata": {
+                    "frame_count": 0,
+                    "fps": "24/1",
+                    "config_fingerprint": "fp",
+                    "analysis_source_path": "",
+                    "clips": [],
+                    "performance_mode": "quality",
+                    "algorithm_id": metric_algorithm_id(config),
+                    "metric_backend": "python_numpy",
+                    "algorithm_identity_json": stable_metric_algorithm_identity_json(config),
+                    "version": CACHE_VERSION,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = load_cached_metrics(tmp_path, "fp", [])
+
+    assert result.success is False
+    assert result.reason == "corrupted"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("x", -1),
+        ("y", -1),
+        ("width", 0),
+        ("height", 0),
+        ("width", -1),
+        ("height", -1),
+    ],
+)
+def test_load_same_version_cache_with_invalid_metric_active_rect_is_corrupted(
+    tmp_path: Path,
+    field: str,
+    value: int,
+) -> None:
+    config = AnalysisConfig()
+    rect = {"x": 0, "y": 0, "width": 100, "height": 100}
+    rect[field] = value
+    cache_file(tmp_path, "fp").write_text(
+        json.dumps(
+            {
+                "version": CACHE_VERSION,
+                "fingerprint": "fp",
+                "luminance": [],
+                "motion": [],
+                "metadata": {
+                    "frame_count": 0,
+                    "fps": "24/1",
+                    "config_fingerprint": "fp",
+                    "analysis_source_path": "",
+                    "clips": [],
+                    "performance_mode": "quality",
+                    "algorithm_id": metric_algorithm_id(config),
+                    "metric_backend": "python_numpy",
+                    "algorithm_identity_json": stable_metric_algorithm_identity_json(config),
+                    "metric_active_rect": rect,
+                    "version": CACHE_VERSION,
+                },
             }
         ),
         encoding="utf-8",
@@ -550,6 +692,53 @@ def test_load_same_version_cache_with_malformed_algorithm_identity_is_corrupted(
 
 
 @pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("algorithm_id", "wrong"),
+        ("metric_backend", "wrong"),
+        ("performance_mode", "performance"),
+    ],
+)
+def test_load_same_version_cache_with_inconsistent_algorithm_metadata_is_corrupted(
+    tmp_path: Path,
+    field: str,
+    value: str,
+) -> None:
+    config = AnalysisConfig()
+    metadata = {
+        "frame_count": 0,
+        "fps": "24/1",
+        "config_fingerprint": "fp",
+        "analysis_source_path": "",
+        "clips": [],
+        "performance_mode": "quality",
+        "algorithm_id": metric_algorithm_id(config),
+        "metric_backend": "python_numpy",
+        "algorithm_identity_json": stable_metric_algorithm_identity_json(config),
+        "metric_active_rect": None,
+        "version": CACHE_VERSION,
+    }
+    metadata[field] = value
+    cache_file(tmp_path, "fp").write_text(
+        json.dumps(
+            {
+                "version": CACHE_VERSION,
+                "fingerprint": "fp",
+                "luminance": [],
+                "motion": [],
+                "metadata": metadata,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = load_cached_metrics(tmp_path, "fp", [])
+
+    assert result.success is False
+    assert result.reason == "corrupted"
+
+
+@pytest.mark.parametrize(
     ("luminance", "motion", "frame_count"),
     [
         ([0.1], [0.0, 0.2], 2),
@@ -584,6 +773,7 @@ def test_load_metric_array_contract_violation_is_corrupted(
                     "algorithm_id": metric_algorithm_id(config),
                     "metric_backend": "python_numpy",
                     "algorithm_identity_json": stable_metric_algorithm_identity_json(config),
+                    "metric_active_rect": None,
                     "version": CACHE_VERSION,
                 },
             }
@@ -679,6 +869,7 @@ def test_load_malformed_nested_payload_returns_corrupted(
             "algorithm_id": metric_algorithm_id(AnalysisConfig()),
             "metric_backend": "python_numpy",
             "algorithm_identity_json": stable_metric_algorithm_identity_json(AnalysisConfig()),
+            "metric_active_rect": None,
             "version": CACHE_VERSION,
         },
     }

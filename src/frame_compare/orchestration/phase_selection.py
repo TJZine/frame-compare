@@ -16,6 +16,7 @@ from frame_compare.analysis.types import (
     CacheLoadResult,
     FrameMetrics,
     FrameSelection,
+    MetricActiveRect,
     SelectionBreakdown,
     SelectionDetail,
     SelectionDetailsByFrame,
@@ -186,10 +187,12 @@ def run_analyze_phase(
         raise MetricsCalculationError("Analysis source was not resolved for metric analysis.")
 
     selection_domain = ctx.analysis_selection_domain
+    metric_active_rect = _metric_active_rect_for_clip(ctx.analysis_clip)
     fingerprint = cache_io.compute_cache_key(
         input_videos,
         ctx.config.analysis,
         selection_domain=selection_domain,
+        metric_active_rect=metric_active_rect,
     )
     cache_result = cache_io.load_cached_metrics(workspace.cache_dir, fingerprint, clips=[])
     metrics_cache_hit = cache_result.success and cache_result.metrics is not None
@@ -210,6 +213,7 @@ def run_analyze_phase(
             vs_loader=vs_loader,
             selection_domain=selection_domain,
             effective_fps=ctx.analysis_clip.effective_fps,
+            metric_active_rect=metric_active_rect,
         )
     selection = _select_frames_for_selection_domain(
         metrics=metrics,
@@ -224,6 +228,18 @@ def run_analyze_phase(
         metrics_cache_hit=metrics_cache_hit,
         analysis_metrics=metrics,
         selection_details_by_source_frame=dict(selection.selection_details),
+    )
+
+
+def _metric_active_rect_for_clip(clip: ClipState) -> MetricActiveRect | None:
+    rect = clip.active_rect
+    if rect is None:
+        return None
+    return MetricActiveRect(
+        x=rect.x,
+        y=rect.y,
+        width=rect.width,
+        height=rect.height,
     )
 
 
