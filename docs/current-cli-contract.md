@@ -122,7 +122,11 @@ source IDs.
 Configured source trims define each clip's base renderable domain. Alignment
 trims compose on top of those base trims rather than replacing them. Explicit
 config `active_rect` values are validated against the probed source dimensions
-and invalid explicit rectangles fail instead of falling back silently.
+and invalid explicit rectangles fail instead of falling back silently. Explicit
+active rectangles are the highest-precedence active-picture evidence during
+preparation; when omitted, preparation may use trusted static metadata,
+dimension/aspect-ratio inference, or a full-frame fallback according to
+`screenshots.active_rect_detection`.
 `effective_fps` is an explicit AssumeFPS-style timing override: it changes
 timing/FPS interpretation without resampling, dropping, interpolating, or
 duplicating source frames. Mixed-FPS validation compares effective FPS values
@@ -229,20 +233,23 @@ unchanged.
 - The analysis cache fingerprint includes the selected reference identity and a
   stable all-source selection-domain token. That token stores
   `analysis_source_path`, `reference_path`, source identities, source trims,
-  effective FPS values, the configured analysis ignore-window settings, and the
-  final shared selectable window. Cache schema v6 stores
+  effective FPS values, the configured analysis ignore-window settings,
+  active-rect resolver policy, each clip's resolved active rectangle, and the final
+  shared selectable window. Cache schema v6 stores
   `analysis_source_path`, `performance_mode`, `algorithm_id`, `metric_backend`,
-  stable `algorithm_identity_json`, and `metric_active_rect` in
+  stable `algorithm_identity_json`, `metric_active_rect`, active-rect source,
+  detection mode, and active-rect resolver algorithm ID in
   `MetricsMetadata`, and different
   selected references, selected analysis sources, selection domains,
   performance modes, metric algorithm identities, or active-rect metric domains
   from the same input set do not satisfy each other. When
   `sources.analysis_source = "reference"`, `analysis_source_path` is the selected
-  reference path. `metric_active_rect = null` represents full-frame analysis;
-  configured analysis-source `active_rect` values produce coordinate-specific
-  metric/cache identities. Metric-array cache identity excludes `user_frames`,
-  random seed, frame-selection counts, `dark_quantile`, and `bright_quantile`
-  because those values affect frame choice rather than metric computation.
+  reference path. Prepared full-frame active rectangles represent no crop;
+  explicit, metadata, dimension-derived, or aspect-ratio-derived rectangles
+  produce coordinate-specific metric/cache identities. Metric-array cache
+  identity excludes `user_frames`, random seed, frame-selection counts,
+  `dark_quantile`, and `bright_quantile` because those values affect frame
+  choice rather than metric computation.
 - The full fingerprint remains inside the cache payload and is validated on load.
   Legacy run-folder `cache.compframes` files are not used as analysis cache hits.
 - Analysis is skipped automatically when `dark_frame_count`, `bright_frame_count`,
@@ -501,12 +508,12 @@ dedicated `run` flags for them:
 luminance and motion arrays. `quality` is the default Python/NumPy metric mode.
 `performance` is an approximate VapourSynth PlaneStats metric mode; it can select
 different dark, bright, or motion frames than `quality` and is cache-isolated
-from `quality`. Both modes apply the configured active rectangle for the selected
-analysis source before metric calculation and use active-rect-specific cache
-identity; sources without an active rectangle use full-frame metrics. Analysis
-uses only explicit `sources.overrides.<selector>.active_rect` values. It does
-not use screenshot `active_rect_detection`, metadata rectangles, or
-dimension/aspect-ratio inference from screenshot geometry.
+from `quality`. Both modes apply the prepared active picture rectangle for the
+selected analysis source before metric calculation and use active-rect-specific
+cache identity. The prepared rectangle can come from an explicit
+`sources.overrides.<selector>.active_rect`, trusted static metadata, configured
+dimension/aspect-ratio detection, or full-frame fallback. There are no `fast` or
+`balanced` analysis performance aliases.
 There is no dedicated `run` flag for analysis performance mode in v1.
 
 The lead/trail fields define a global selectable analysis window inside each
@@ -605,13 +612,15 @@ dedicated `run` flags for them:
   alignment. Native mode ignores aligned-only geometry fields for behavior, but
   the config schema still validates their enum values and target field types.
 - `active_rect_detection = "provided" | "dimension" | "aspect_ratio"` selects
-  the active-image rectangle evidence used by aligned screenshots. `provided`
-  uses only explicit per-source `active_rect` overrides and trusted metadata
+  the shared active-picture evidence used during preparation. `provided` uses
+  only explicit per-source `active_rect` overrides and trusted static metadata
   active rectangles. `dimension` also allows same-height or same-width centered
-  crop inference. `aspect_ratio` is the aligned default and additionally allows
+  crop inference. `aspect_ratio` is the default and additionally allows
   conservative centered vertical letterbox inference when a target content
   aspect ratio has at least two matching sources or one explicit/trusted
-  metadata source.
+  metadata source. Metric analysis uses the resolved active picture. Aligned
+  screenshot render uses the same resolved active picture for crop/scale/pad
+  planning. Native screenshot render remains native/full-frame output.
 - `aligned_scale_policy = "largest_active" | "smallest_active" |
   "reference_active" | "explicit_size"` selects the aligned output canvas policy.
   `largest_active` is the aligned default and uses the active-source envelope

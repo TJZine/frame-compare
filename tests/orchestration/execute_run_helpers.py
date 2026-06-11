@@ -170,6 +170,7 @@ def analysis_selection_domain_for_cache_inputs(
         snapshots_by_path=snapshots_by_path,
         overrides_by_path=_resolved_cache_overrides(video_paths, config),
         match_fps=config.sources.match_fps,
+        active_rect_detection=config.screenshots.active_rect_detection,
     )
     window = compute_selection_window_for_clips(clips=clips, config=config)
     analysis_clip = clips[0]
@@ -196,6 +197,7 @@ def metric_active_rect_for_cache_inputs(
         snapshots_by_path=snapshots_by_path,
         overrides_by_path=_resolved_cache_overrides(video_paths, config),
         match_fps=config.sources.match_fps,
+        active_rect_detection=config.screenshots.active_rect_detection,
     )
     analysis_clip = clips[0]
     if analysis_source_path is not None:

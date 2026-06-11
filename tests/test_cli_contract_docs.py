@@ -240,10 +240,15 @@ def test_current_cli_contract_documents_analysis_performance_mode_config_only() 
     assert "--analysis-performance" not in declared_options
     assert "analysis.performance_mode" not in CLI_OVERRIDE_MAP.values()
     assert "cache-isolated from `quality`" in normalized_analysis_section
-    assert "uses only explicit `sources.overrides.<selector>.active_rect` values" in (
+    assert "Both modes apply the prepared active picture rectangle" in (
         normalized_analysis_section
     )
-    assert "does not use screenshot `active_rect_detection`" in normalized_analysis_section
+    assert "trusted static metadata, configured dimension/aspect-ratio detection" in (
+        normalized_analysis_section
+    )
+    assert "There are no `fast` or `balanced` analysis performance aliases." in (
+        normalized_analysis_section
+    )
 
 
 def test_current_cli_contract_documents_slowpics_json_shape(
@@ -779,9 +784,12 @@ def test_current_cli_contract_documents_analysis_ignore_window_and_cache_domain(
         "`reference_path`",
         "Cache schema v6 stores `analysis_source_path`, `performance_mode`, `algorithm_id`",
         "`metric_active_rect`",
+        "active-rect source, detection mode, and active-rect resolver algorithm ID",
         "performance modes, metric algorithm identities, or active-rect metric domains",
         "active-rect metric domains",
-        "active_rect` values produce coordinate-specific",
+        "active-rect resolver policy",
+        "each clip's resolved active rectangle",
+        "produce coordinate-specific metric/cache identities",
         'When `sources.analysis_source = "reference"`',
         "source trims",
         "effective FPS values",
@@ -916,6 +924,9 @@ def test_current_cli_contract_documents_screenshot_geometry_config_surface() -> 
         '`aligned_scale_policy = "largest_active" | "smallest_active" |',
         "`aligned_target_width` and `aligned_target_height`",
         "Native mode ignores aligned-only geometry fields for behavior",
+        "shared active-picture evidence used during preparation",
+        "Metric analysis uses the resolved active picture",
+        "Native screenshot render remains native/full-frame output",
         "fits active content inside the selected target width and height",
         "without exceeding either dimension",
         "Derived policy targets are normalized downward",

@@ -441,7 +441,14 @@ def test_run_render_phase_passes_clip_active_rect_to_batch_request(
     ctx = _context(tmp_path, comparisons=[comparison])
     ctx.reference = replace(
         ctx.reference,
-        active_rect=ClipActiveRect(x=240, y=140, width=1440, height=800),
+        active_rect=ClipActiveRect(
+            x=240,
+            y=140,
+            width=1440,
+            height=800,
+            source="explicit",
+            detection_mode="aspect_ratio",
+        ),
     )
     captured: dict[str, Any] = {}
 
@@ -469,7 +476,16 @@ def test_run_render_phase_passes_clip_active_rect_to_batch_request(
         requests[0].active_rect.width,
         requests[0].active_rect.height,
     ) == (240, 140, 1440, 800)
-    assert requests[1].active_rect is None
+    assert requests[0].active_rect_source == "explicit"
+    assert requests[0].active_rect_detection_mode == "aspect_ratio"
+    assert requests[1].active_rect is not None
+    assert (
+        requests[1].active_rect.x,
+        requests[1].active_rect.y,
+        requests[1].active_rect.width,
+        requests[1].active_rect.height,
+    ) == (0, 0, comparison.probe.width, comparison.probe.height)
+    assert requests[1].active_rect_source == "full-frame"
 
 
 def test_run_render_phase_prefers_typed_selection_details_in_reference_source_domain(

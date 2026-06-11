@@ -1135,6 +1135,75 @@ def test_expand_batch_render_requests_ignores_overlay_metadata_for_geometry_with
 
 @pytest.mark.unit
 @patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
+def test_expand_batch_render_requests_uses_prepared_active_rect_provenance_without_redetection(
+    mock_prepare: MagicMock,
+) -> None:
+    config = ConfigSchema(screenshots={"geometry_mode": "aligned"})
+    ffmpeg_runner = MagicMock()
+    ref_source_info = MagicMock()
+    ref_source_info.width = 1920
+    ref_source_info.height = 1080
+    ref_source_info.num_frames = 150
+    ref_source_info.is_hdr = False
+    enc_source_info = MagicMock()
+    enc_source_info.width = 1440
+    enc_source_info.height = 1080
+    enc_source_info.num_frames = 150
+    enc_source_info.is_hdr = False
+    mock_prepare.side_effect = [
+        (MagicMock(name="ref_clip"), None, None, ref_source_info),
+        (MagicMock(name="enc_clip"), None, None, enc_source_info),
+    ]
+    req1 = ScreenshotBatchRequest(
+        clip_path=Path("wide.mkv"),
+        label="Reference",
+        source_frames=[10],
+        display_frames=[10],
+        selection_labels=[None],
+        active_rect=GeometryRect(0, 0, 1920, 1080),
+        active_rect_source="full-frame",
+        active_rect_detection_mode="provided",
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=100,
+        probe_is_hdr=False,
+    )
+    req2 = ScreenshotBatchRequest(
+        clip_path=Path("active.mkv"),
+        label="Encode",
+        source_frames=[10],
+        display_frames=[10],
+        selection_labels=[None],
+        active_rect=GeometryRect(0, 0, 1440, 1080),
+        active_rect_source="full-frame",
+        active_rect_detection_mode="provided",
+        probe_width=1440,
+        probe_height=1080,
+        probe_num_frames=100,
+        probe_is_hdr=False,
+    )
+
+    requests, _ = expand_batch_render_requests(
+        [req1, req2],
+        output_dir=Path("out"),
+        config=config,
+        overlay_mode=OverlayMode.STANDARD,
+        renderer="ffmpeg",
+        ffmpeg_runner=ffmpeg_runner,
+    )
+
+    ref_plan = requests[0].geometry_plan
+    enc_plan = requests[1].geometry_plan
+    assert ref_plan is not None
+    assert enc_plan is not None
+    assert ref_plan.active_rect == GeometryRect(0, 0, 1920, 1080)
+    assert ref_plan.active_rect_source == "full-frame"
+    assert enc_plan.active_rect == GeometryRect(0, 0, 1440, 1080)
+    assert enc_plan.active_rect_source == "full-frame"
+
+
+@pytest.mark.unit
+@patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
 def test_expand_batch_render_requests_explicit_active_rect_beats_metadata_rect(
     mock_prepare: MagicMock,
 ) -> None:

@@ -64,6 +64,9 @@ class MetricsMetadata:
         metric_backend: Metric backend family that produced the arrays
         algorithm_identity_json: Stable JSON identity payload for cache/debugging
         metric_active_rect: Active rectangle used for metric arrays; None means full frame
+        active_rect_source: Provenance for the metric active rectangle
+        active_rect_detection_mode: Active-rect detection mode used by preparation
+        active_rect_algorithm_id: Resolver algorithm ID used by preparation
         version: Cache schema version
     """
 
@@ -77,6 +80,9 @@ class MetricsMetadata:
     metric_backend: str = ""
     algorithm_identity_json: str = "{}"
     metric_active_rect: MetricActiveRect | None = None
+    active_rect_source: str = "full-frame"
+    active_rect_detection_mode: str = "aspect_ratio"
+    active_rect_algorithm_id: str = "active_rect_resolution_v1"
     version: int = 6
 
 

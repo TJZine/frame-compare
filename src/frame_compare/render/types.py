@@ -133,6 +133,8 @@ class ScreenshotBatchRequest:
     diagnostic_metadata: list[OverlayDiagnosticMetadata | None] | None = None
     diagnostic_metadata_trusted_for_geometry: bool = False
     active_rect: GeometryRect | None = None
+    active_rect_source: str | None = None
+    active_rect_detection_mode: str | None = None
     filename_label: str | None = None
 
 

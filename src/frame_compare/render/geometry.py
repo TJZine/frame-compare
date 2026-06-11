@@ -14,7 +14,6 @@ AlignedScalePolicy = Literal[
     "reference_active",
     "explicit_size",
 ]
-ProvidedActiveRectSource = Literal["explicit", "metadata"]
 ActiveRectSource = Literal[
     "explicit",
     "metadata",
@@ -22,6 +21,7 @@ ActiveRectSource = Literal[
     "aspect-ratio-derived",
     "full-frame",
 ]
+ProvidedActiveRectSource = ActiveRectSource
 
 ASPECT_RATIO_MATCH_REL_TOLERANCE = 0.005
 ASPECT_RATIO_MIN_CROP_REL_DELTA = 0.005

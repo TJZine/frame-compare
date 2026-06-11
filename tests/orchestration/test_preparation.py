@@ -96,24 +96,36 @@ def _create_video_files(input_dir: Path, *filenames: str) -> list[Path]:
 
 
 class FakeVSLoader:
-    def __init__(self, *, fps_by_name: dict[str, Fraction] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        fps_by_name: dict[str, Fraction] | None = None,
+        dimensions_by_name: dict[str, tuple[int, int]] | None = None,
+        frame_props_by_name: dict[str, dict[str, object]] | None = None,
+    ) -> None:
         self.loaded: list[Path] = []
         self._fps_by_name = fps_by_name or {}
+        self._dimensions_by_name = dimensions_by_name or {}
+        self._frame_props_by_name = frame_props_by_name or {}
 
     def load(self, path: Path) -> SourceInfo:
         self.loaded.append(path)
+        width, height = self._dimensions_by_name.get(path.name, (1920, 1080))
         return SourceInfo(
             clip=cast(Any, object()),
-            width=1920,
-            height=1080,
+            width=width,
+            height=height,
             num_frames=100,
             fps=self._fps_by_name.get(path.name, Fraction(24000, 1001)),
             format=cast(Any, object()),
-            frame_props={
-                "_Transfer": 16,
-                "DolbyVisionRPU": b"opaque-rpu",
-                "Ignored": {"not": "toml-safe"},
-            },
+            frame_props=self._frame_props_by_name.get(
+                path.name,
+                {
+                    "_Transfer": 16,
+                    "DolbyVisionRPU": b"opaque-rpu",
+                    "Ignored": {"not": "toml-safe"},
+                },
+            ),
             is_hdr=False,
             hdr_metadata=None,
         )
@@ -194,6 +206,7 @@ def test_execute_prep_no_cache_removes_only_matching_shared_metrics_cache(tmp_pa
         [source_path],
         config.analysis,
         selection_domain=prep_for_domain.analysis_selection_domain,
+        metric_active_rect=MetricActiveRect(x=0, y=0, width=1920, height=1080),
     )
     metrics_dir = tmp_path / "generated" / "cache" / "analysis"
     metrics_dir.mkdir(parents=True, exist_ok=True)
@@ -298,6 +311,7 @@ def test_execute_prep_no_cache_removes_only_selected_reference_metrics_cache(
         selected_order,
         config.analysis,
         selection_domain=prep_for_domain.analysis_selection_domain,
+        metric_active_rect=MetricActiveRect(x=0, y=0, width=1920, height=1080),
     )
     default_cache_path = metrics_dir / cache_io.metrics_cache_filename(
         default_order, default_fingerprint
@@ -526,6 +540,121 @@ def test_execute_prep_preserves_deterministic_four_clip_order_and_labels(tmp_pat
     ]
 
 
+def test_execute_prep_resolves_dimension_active_rects_during_preparation(
+    tmp_path: Path,
+) -> None:
+    config_content = (
+        MINIMAL_CONFIG.replace(
+            "[screenshots]\nuse_ffmpeg = true",
+            '[screenshots]\nuse_ffmpeg = true\nactive_rect_detection = "dimension"',
+        )
+    )
+    _create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "00-reference.mkv", "01-encode.mkv")
+    loader = FakeVSLoader(
+        dimensions_by_name={
+            "00-reference.mkv": (1920, 1080),
+            "01-encode.mkv": (1440, 1080),
+        }
+    )
+
+    prep = asyncio.run(
+        preparation.execute_prep(
+            RunRequest(root=tmp_path),
+            RunDependencies(vs_loader=cast(Any, loader)),
+        )
+    )
+
+    assert prep.clips[0].active_rect == ClipActiveRect(
+        240,
+        0,
+        1440,
+        1080,
+        "dimension-derived",
+        "dimension",
+    )
+    assert prep.clips[1].active_rect == ClipActiveRect(
+        0,
+        0,
+        1440,
+        1080,
+        "dimension-derived",
+        "dimension",
+    )
+
+
+def test_execute_prep_resolves_metadata_active_rect_from_preserved_probe_props(
+    tmp_path: Path,
+) -> None:
+    _create_config(tmp_path)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "00-reference.mkv")
+    loader = FakeVSLoader(
+        frame_props_by_name={
+            "00-reference.mkv": {
+                "DolbyVision_L5_Left": 100,
+                "DolbyVision_L5_Right": 120,
+                "DolbyVision_L5_Top": 40,
+                "DolbyVision_L5_Bottom": 60,
+            }
+        }
+    )
+
+    prep = asyncio.run(
+        preparation.execute_prep(
+            RunRequest(root=tmp_path),
+            RunDependencies(vs_loader=cast(Any, loader)),
+        )
+    )
+
+    assert prep.clips[0].active_rect == ClipActiveRect(
+        100,
+        40,
+        1700,
+        980,
+        "metadata",
+        "aspect_ratio",
+    )
+
+
+def test_execute_prep_selection_domain_includes_resolved_active_rect_identity(
+    tmp_path: Path,
+) -> None:
+    _create_config(tmp_path, content=METRIC_CONFIG)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "00-reference.mkv", "01-encode.mkv", "02-encode.mkv")
+    loader = FakeVSLoader(
+        dimensions_by_name={
+            "00-reference.mkv": (3840, 2160),
+            "01-encode.mkv": (1920, 800),
+            "02-encode.mkv": (1920, 800),
+        }
+    )
+
+    prep = asyncio.run(
+        preparation.execute_prep(
+            RunRequest(root=tmp_path),
+            RunDependencies(vs_loader=cast(Any, loader)),
+        )
+    )
+
+    selection_domain = json.loads(prep.analysis_selection_domain)
+    assert selection_domain["active_rect_policy"] == {
+        "detection_mode": "aspect_ratio",
+        "algorithm_id": "active_rect_resolution_v1",
+    }
+    assert selection_domain["clips"][0]["active_rect"] == {
+        "x": 0,
+        "y": 280,
+        "width": 3840,
+        "height": 1600,
+        "source": "aspect-ratio-derived",
+        "detection_mode": "aspect_ratio",
+        "algorithm_id": "active_rect_resolution_v1",
+    }
+
+
 def test_execute_prep_explicit_reference_moves_selected_source_to_front(
     tmp_path: Path,
 ) -> None:
@@ -725,6 +854,8 @@ active_rect = { x = 240, y = 0, width = 1440, height = 1080 }
         y=0,
         width=1440,
         height=1080,
+        source="explicit",
+        detection_mode="aspect_ratio",
     )
 
 

@@ -369,6 +369,7 @@ def _probe_input_videos(
         snapshots_by_path=snapshots_by_path,
         overrides_by_path=overrides_by_path,
         match_fps=config.sources.match_fps,
+        active_rect_detection=config.screenshots.active_rect_detection,
     )
     return result.clips, result.fps_diagnostics.messages(), result.fps_diagnostics.warnings()
 
@@ -406,6 +407,7 @@ def _probe_input_videos_from_snapshots(
         snapshots_by_path=snapshots_by_path,
         overrides_by_path=overrides_by_path,
         match_fps=config.sources.match_fps,
+        active_rect_detection=config.screenshots.active_rect_detection,
     )
     return result.clips, result.fps_diagnostics.messages(), result.fps_diagnostics.warnings()
 

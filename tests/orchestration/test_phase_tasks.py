@@ -179,7 +179,14 @@ def test_run_analyze_phase_forwards_analysis_clip_active_rect(
     assert ctx.analysis_clip is not None
     ctx.analysis_clip = replace(
         ctx.analysis_clip,
-        active_rect=ClipActiveRect(x=10, y=20, width=300, height=200),
+        active_rect=ClipActiveRect(
+            x=10,
+            y=20,
+            width=300,
+            height=200,
+            source="explicit",
+            detection_mode="aspect_ratio",
+        ),
     )
     input_videos = [ctx.reference.path]
     metrics = FrameMetrics(

@@ -299,6 +299,9 @@ def test_save_and_load_round_trip(tmp_path: Path) -> None:
         stable_metric_algorithm_identity_json(config)
     )
     assert result.metrics.metadata.metric_active_rect is None
+    assert result.metrics.metadata.active_rect_source == "full-frame"
+    assert result.metrics.metadata.active_rect_detection_mode == "aspect_ratio"
+    assert result.metrics.metadata.active_rect_algorithm_id == "active_rect_resolution_v1"
 
 
 def test_save_and_load_round_trip_serializes_metric_active_rect(tmp_path: Path) -> None:
@@ -496,6 +499,9 @@ def test_save_writes_required_keys(tmp_path: Path) -> None:
         config
     )
     assert data["metadata"]["metric_active_rect"] is None
+    assert data["metadata"]["active_rect_source"] == "full-frame"
+    assert data["metadata"]["active_rect_detection_mode"] == "aspect_ratio"
+    assert data["metadata"]["active_rect_algorithm_id"] == "active_rect_resolution_v1"
 
 
 def test_load_same_version_cache_without_analysis_source_path_is_corrupted(
@@ -596,6 +602,55 @@ def test_load_same_version_cache_without_metric_active_rect_metadata_is_corrupte
                     "algorithm_identity_json": stable_metric_algorithm_identity_json(config),
                     "version": CACHE_VERSION,
                 },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = load_cached_metrics(tmp_path, "fp", [])
+
+    assert result.success is False
+    assert result.reason == "corrupted"
+
+
+@pytest.mark.parametrize(
+    "removed_key",
+    [
+        "active_rect_source",
+        "active_rect_detection_mode",
+        "active_rect_algorithm_id",
+    ],
+)
+def test_load_same_version_cache_without_active_rect_provenance_is_corrupted(
+    tmp_path: Path,
+    removed_key: str,
+) -> None:
+    config = AnalysisConfig()
+    metadata = {
+        "frame_count": 0,
+        "fps": "24/1",
+        "config_fingerprint": "fp",
+        "analysis_source_path": "",
+        "clips": [],
+        "performance_mode": "quality",
+        "algorithm_id": metric_algorithm_id(config),
+        "metric_backend": "python_numpy",
+        "algorithm_identity_json": stable_metric_algorithm_identity_json(config),
+        "metric_active_rect": None,
+        "active_rect_source": "full-frame",
+        "active_rect_detection_mode": "aspect_ratio",
+        "active_rect_algorithm_id": "active_rect_resolution_v1",
+        "version": CACHE_VERSION,
+    }
+    del metadata[removed_key]
+    cache_file(tmp_path, "fp").write_text(
+        json.dumps(
+            {
+                "version": CACHE_VERSION,
+                "fingerprint": "fp",
+                "luminance": [],
+                "motion": [],
+                "metadata": metadata,
             }
         ),
         encoding="utf-8",
@@ -870,6 +925,9 @@ def test_load_malformed_nested_payload_returns_corrupted(
             "metric_backend": "python_numpy",
             "algorithm_identity_json": stable_metric_algorithm_identity_json(AnalysisConfig()),
             "metric_active_rect": None,
+            "active_rect_source": "full-frame",
+            "active_rect_detection_mode": "aspect_ratio",
+            "active_rect_algorithm_id": "active_rect_resolution_v1",
             "version": CACHE_VERSION,
         },
     }

@@ -276,6 +276,9 @@ def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
             "metric_backend",
             "algorithm_identity_json",
             "metric_active_rect",
+            "active_rect_source",
+            "active_rect_detection_mode",
+            "active_rect_algorithm_id",
         },
     )
 
@@ -319,6 +322,14 @@ def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
         algorithm_identity=algorithm_identity,
     )
 
+    active_rect_source = _parse_active_rect_source(data["active_rect_source"])
+    active_rect_detection_mode = _parse_active_rect_detection_mode(
+        data["active_rect_detection_mode"]
+    )
+    active_rect_algorithm_id = data["active_rect_algorithm_id"]
+    if not isinstance(active_rect_algorithm_id, str) or not active_rect_algorithm_id:
+        raise _CacheParseError
+
     try:
         return MetricsMetadata(
             frame_count=frame_count,
@@ -331,6 +342,9 @@ def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
             metric_backend=metric_backend,
             algorithm_identity_json=algorithm_identity_json,
             metric_active_rect=_parse_metric_active_rect(data["metric_active_rect"]),
+            active_rect_source=active_rect_source,
+            active_rect_detection_mode=active_rect_detection_mode,
+            active_rect_algorithm_id=active_rect_algorithm_id,
             version=_parse_cache_version(data.get("version", CACHE_VERSION)),
         )
     except (ValueError, TypeError, ZeroDivisionError) as exc:
@@ -365,6 +379,24 @@ def _parse_metric_active_rect(value: object) -> MetricActiveRect | None:
         )
     except TypeError as exc:
         raise _CacheParseError from exc
+
+
+def _parse_active_rect_source(value: object) -> str:
+    if value not in {
+        "explicit",
+        "metadata",
+        "dimension-derived",
+        "aspect-ratio-derived",
+        "full-frame",
+    }:
+        raise _CacheParseError
+    return cast(str, value)
+
+
+def _parse_active_rect_detection_mode(value: object) -> str:
+    if value not in {"provided", "dimension", "aspect_ratio"}:
+        raise _CacheParseError
+    return cast(str, value)
 
 
 def _parse_algorithm_identity_json(value: str) -> Mapping[str, object]:
@@ -452,6 +484,9 @@ def save_metrics_cache(metrics: FrameMetrics, cache_dir: Path) -> None:
             "metric_active_rect": _serialize_metric_active_rect(
                 metrics.metadata.metric_active_rect
             ),
+            "active_rect_source": metrics.metadata.active_rect_source,
+            "active_rect_detection_mode": metrics.metadata.active_rect_detection_mode,
+            "active_rect_algorithm_id": metrics.metadata.active_rect_algorithm_id,
             "clips": [
                 {
                     "path": str(c.path),

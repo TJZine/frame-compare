@@ -92,6 +92,9 @@ def _build_metrics(
     analysis_source_path: Path,
     effective_fps: Fraction | None,
     metric_active_rect: MetricActiveRect | None,
+    active_rect_source: str,
+    active_rect_detection_mode: str,
+    active_rect_algorithm_id: str,
 ) -> FrameMetrics:
     return FrameMetrics(
         luminance=result.luminance,
@@ -107,6 +110,9 @@ def _build_metrics(
             metric_backend=result.metric_backend,
             algorithm_identity_json=result.algorithm_identity_json,
             metric_active_rect=metric_active_rect,
+            active_rect_source=active_rect_source,
+            active_rect_detection_mode=active_rect_detection_mode,
+            active_rect_algorithm_id=active_rect_algorithm_id,
             version=CACHE_VERSION,
         ),
     )
@@ -135,6 +141,9 @@ def calculate_metrics(
     analysis_source_path: Path | None = None,
     effective_fps: Fraction | None = None,
     metric_active_rect: MetricActiveRect | None = None,
+    active_rect_source: str = "full-frame",
+    active_rect_detection_mode: str = "aspect_ratio",
+    active_rect_algorithm_id: str = "active_rect_resolution_v1",
 ) -> FrameMetrics:
     """
     Calculate frame metrics for the given clips.
@@ -193,6 +202,9 @@ def calculate_metrics(
             analysis_source_path=source_path,
             effective_fps=effective_fps,
             metric_active_rect=metric_active_rect,
+            active_rect_source=active_rect_source,
+            active_rect_detection_mode=active_rect_detection_mode,
+            active_rect_algorithm_id=active_rect_algorithm_id,
         )
     finally:
         del source

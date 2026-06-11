@@ -25,7 +25,7 @@ class ScreenshotGeometryMode(StrEnum):
 
 
 class ScreenshotActiveRectDetection(StrEnum):
-    """Active-image rectangle detection policy for aligned screenshots."""
+    """Shared active-picture rectangle detection policy."""
 
     PROVIDED = "provided"
     DIMENSION = "dimension"

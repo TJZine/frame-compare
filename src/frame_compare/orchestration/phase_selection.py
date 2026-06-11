@@ -214,6 +214,15 @@ def run_analyze_phase(
             selection_domain=selection_domain,
             effective_fps=ctx.analysis_clip.effective_fps,
             metric_active_rect=metric_active_rect,
+            active_rect_source=ctx.analysis_clip.active_rect.source
+            if ctx.analysis_clip.active_rect is not None
+            else "full-frame",
+            active_rect_detection_mode=ctx.analysis_clip.active_rect.detection_mode
+            if ctx.analysis_clip.active_rect is not None
+            else ctx.config.screenshots.active_rect_detection.value,
+            active_rect_algorithm_id=ctx.analysis_clip.active_rect.algorithm_id
+            if ctx.analysis_clip.active_rect is not None
+            else "active_rect_resolution_v1",
         )
     selection = _select_frames_for_selection_domain(
         metrics=metrics,

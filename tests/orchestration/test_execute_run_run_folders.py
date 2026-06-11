@@ -43,6 +43,7 @@ from .execute_run_helpers import (
     analysis_selection_domain_for_cache_inputs,
     create_config,
     create_video_files,
+    metric_active_rect_for_cache_inputs,
     write_metrics_cache,
     write_probe_cache_for_inputs,
 )
@@ -127,6 +128,7 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
         [source_path],
         config.analysis,
         selection_domain=selection_domain,
+        metric_active_rect=metric_active_rect_for_cache_inputs([source_path], config),
     )
     analysis_cache_path = cache_io.find_metrics_cache_file(analysis_cache_dir, fingerprint)
     assert analysis_cache_path is not None
@@ -263,6 +265,7 @@ enable = false
         [source_path],
         config.analysis,
         selection_domain=selection_domain,
+        metric_active_rect=metric_active_rect_for_cache_inputs([source_path], config),
     )
 
     def _fake_calculate_metrics(
@@ -431,6 +434,7 @@ def test_execute_run_from_cache_only_ignores_old_run_folder_cache(
         [source_path],
         config.analysis,
         selection_domain=selection_domain,
+        metric_active_rect=metric_active_rect_for_cache_inputs([source_path], config),
     )
     assert sorted(path.name for path in input_dir.iterdir() if path.is_dir()) == [run_name]
     assert (
@@ -552,6 +556,7 @@ unattended = true
         [source_path],
         config.analysis,
         selection_domain=selection_domain,
+        metric_active_rect=metric_active_rect_for_cache_inputs([source_path], config),
     )
     cache_dir = tmp_path / "generated" / "cache" / "analysis"
     cache_dir.mkdir(parents=True)

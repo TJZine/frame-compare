@@ -49,18 +49,18 @@ Current phase-family owners are intentionally explicit:
 Analysis metric algorithm identity is analysis-owned. `frame_compare.analysis.metric_identity`
 builds the stable cache identity for `analysis.performance_mode`; cache I/O stores that
 identity in schema v6 payload metadata, and orchestration only passes the effective
-analysis config, selection-domain token, and analysis-owned metric active rectangle
-into the analysis/cache owner.
+analysis config, active-rect-aware selection-domain token, analysis-owned metric
+active rectangle, and active-rect provenance into the analysis/cache owner.
 `frame_compare.analysis.metric_strategies` owns the metric implementations:
 `quality` is the default Python/NumPy behavior and computes luminance and motion
 in one frame pass, while `performance` is an approximate VapourSynth PlaneStats
 mode that can choose different dark, bright, or motion frames. Both modes apply
-the configured `sources.overrides.<selector>.active_rect` for the analysis source
-before metric calculation when one exists, otherwise they analyze the full frame.
-Analysis metrics do not consume screenshot `active_rect_detection`, trusted
-metadata rectangles, or dimension/aspect-ratio inference from render geometry.
-Both modes still return dense source-frame-indexed luminance and motion arrays
-for the selected analysis clip.
+the prepared active picture rectangle for the analysis source before metric
+calculation. Preparation resolves that rectangle through
+`frame_compare.orchestration.active_rect`, using explicit source overrides,
+trusted static metadata, configured dimension/aspect-ratio detection, or a
+full-frame fallback. Both modes still return dense source-frame-indexed luminance
+and motion arrays for the selected analysis clip.
 
 ## Module Boundaries
 
@@ -121,13 +121,16 @@ Primary owned paths:
   fingerprint includes the selected reference identity plus an all-source
   selection-domain token. The token stores `analysis_source_path`,
   `reference_path`, source identities, source trims, effective FPS values,
-  configured analysis ignore windows, and the final shared selectable window.
+  configured analysis ignore windows, active-rect resolver policy, each clip's
+  resolved active rectangle, and the final shared selectable window.
   Cache schema v6 stores `analysis_source_path`, `performance_mode`,
   `algorithm_id`, `metric_backend`, stable `algorithm_identity_json`, and
-  `metric_active_rect` in `MetricsMetadata`, and the metric arrays are for that
+  `metric_active_rect`, active-rect source, detection mode, and active-rect
+  resolver algorithm ID in `MetricsMetadata`, and the metric arrays are for that
   selected analysis clip. Metric-array cache identity includes the selected
-  analysis performance mode, algorithm identity, and the concrete metric active
-  rectangle token, with `null` representing full-frame analysis. It excludes
+  analysis performance mode, algorithm identity, active-rect resolver policy,
+  every prepared clip's resolved active rectangle, and the concrete metric active
+  rectangle token, with a full-frame rectangle representing no crop. It excludes
   frame-selection counts, `user_frames`, random seed, and dark/bright quantile
   thresholds because those affect frame choice rather than metric computation.
 - `<resolved paths.generated_dir>/cache/alignment/alignment_reuse.toml`:
@@ -376,14 +379,19 @@ collapsed/size, inspector open/tab, and blink speed. Blink paused state is not
 persisted. It does not own slow.pics upload policy, prompting, or browser side
 effects.
 
-Screenshot rendering owns its geometry and writer policy inside `frame_compare.render`:
-`frame_compare.render.geometry` plans optional aligned crop/scale/pad geometry,
-including active-rect fallback detection and fit-to-target scale/canvas policy.
-Render batch expansion converts explicit source overrides and trusted diagnostic
-metadata into provided active rectangles before geometry planning, attaches the
-resulting plans to render requests, and keeps metadata rejection warnings at the
-batch owner. The FFmpeg backend applies geometry filters after exact frame selection,
-and the VapourSynth path chooses between the Pillow writer and eligible
+Active-picture resolution is owned by `frame_compare.orchestration.active_rect`
+during preparation. It produces a final `ClipState.active_rect` for each prepared
+clip with provenance: explicit, metadata, dimension-derived,
+aspect-ratio-derived, or full-frame. Analysis consumes that prepared rectangle
+through analysis-owned `MetricActiveRect`; render consumes it through
+render-local request fields. Screenshot rendering still owns geometry and writer
+policy inside `frame_compare.render`: `frame_compare.render.geometry` plans
+optional aligned crop/scale/pad geometry, mod-safe crop rectangles, fit-to-target
+scale/canvas policy, padding, and overlay origins. Render batch expansion treats
+prepared active rectangles as already resolved for normal orchestration requests,
+while direct render batch calls without provenance can still use render-local
+geometry inference. The FFmpeg backend applies geometry filters after exact frame
+selection, and the VapourSynth path chooses between the Pillow writer and eligible
 `core.fpng.Write` output without changing CLI import-time behavior.
 
 Runtime ownership matrix:

@@ -626,15 +626,19 @@ def run_render_phase(
                 selection_labels=selection_labels,
                 selection_details=selection_details,
                 diagnostic_metadata=diagnostic_metadata,
-                active_rect=(
-                    GeometryRect(
-                        clip.active_rect.x,
-                        clip.active_rect.y,
-                        clip.active_rect.width,
-                        clip.active_rect.height,
-                    )
+                active_rect=GeometryRect(
+                    clip.active_rect.x if clip.active_rect is not None else 0,
+                    clip.active_rect.y if clip.active_rect is not None else 0,
+                    clip.active_rect.width if clip.active_rect is not None else clip.probe.width,
+                    clip.active_rect.height if clip.active_rect is not None else clip.probe.height,
+                ),
+                active_rect_source=(
+                    clip.active_rect.source if clip.active_rect is not None else "full-frame"
+                ),
+                active_rect_detection_mode=(
+                    clip.active_rect.detection_mode
                     if clip.active_rect is not None
-                    else None
+                    else ctx.config.screenshots.active_rect_detection.value
                 ),
                 probe_width=clip.probe.width,
                 probe_height=clip.probe.height,
