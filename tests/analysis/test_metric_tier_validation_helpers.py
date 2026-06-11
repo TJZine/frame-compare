@@ -11,10 +11,13 @@ from typing import Any, cast
 import pytest
 
 from frame_compare.analysis.tier_validation import (
+    PerformanceTier,
+    SelectionCategory,
     compare_rankings,
     compare_selection_category,
     nearest_frame_distances,
     spearman_rank_correlation,
+    tier_category_tolerance,
     top_k_overlap,
 )
 from frame_compare.analysis.types import (
@@ -46,6 +49,23 @@ def test_compare_selection_category_reports_overlap_and_miss_rate() -> None:
     assert result.max_nearest_distance == 20
     assert result.median_nearest_distance == 2.0
     assert result.miss_rate_at_tolerance == pytest.approx(1 / 3)
+
+
+def test_tier_category_tolerance_handles_known_tiers_and_categories() -> None:
+    assert tier_category_tolerance("balanced", "dark") == 2
+    assert tier_category_tolerance("balanced", "bright") == 2
+    assert tier_category_tolerance("balanced", "motion") == 3
+    assert tier_category_tolerance("fast", "dark") == 3
+    assert tier_category_tolerance("fast", "bright") == 3
+    assert tier_category_tolerance("fast", "motion") == 5
+
+
+def test_tier_category_tolerance_rejects_unknown_values() -> None:
+    with pytest.raises(ValueError, match="Unsupported PerformanceTier"):
+        tier_category_tolerance(cast(PerformanceTier, "quality"), "motion")
+
+    with pytest.raises(ValueError, match="Unsupported SelectionCategory"):
+        tier_category_tolerance("fast", cast(SelectionCategory, "invalid"))
 
 
 def test_top_k_overlap_uses_source_offsets_and_stable_ordering() -> None:
@@ -85,6 +105,32 @@ def test_compare_rankings_builds_required_top_k_sections() -> None:
     assert result.lowest_luminance_top_k.k == 3
     assert result.highest_luminance_top_k.quality_indices == [12, 11, 10]
     assert result.highest_motion_top_k.candidate_indices == [12, 11, 10]
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected_field"),
+    [
+        ({"candidate_luminance": [0.0, 0.1]}, "candidate_luminance"),
+        ({"candidate_motion": [0.0, 0.1]}, "candidate_motion"),
+        ({"quality_motion": [0.0, 0.8]}, "quality_motion"),
+    ],
+)
+def test_compare_rankings_rejects_mismatched_vector_lengths(
+    overrides: dict[str, list[float]],
+    expected_field: str,
+) -> None:
+    kwargs = {
+        "quality_luminance": [0.0, 0.2, 1.0],
+        "candidate_luminance": [0.0, 0.1, 1.0],
+        "quality_motion": [0.0, 0.8, 0.2],
+        "candidate_motion": [0.0, 0.1, 0.9],
+        "dark_count": 1,
+        "bright_count": 1,
+        "motion_count": 1,
+    } | overrides
+
+    with pytest.raises(ValueError, match=f"compare_rankings.*{expected_field}"):
+        compare_rankings(**kwargs)
 
 
 def test_benchmark_script_comparison_schema_contains_required_sections() -> None:

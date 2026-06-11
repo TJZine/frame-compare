@@ -143,11 +143,6 @@ Full details (source builds, directory layout, updater): **[Windows Portable Gui
 ### Docker (Recommended)
 
 ```bash
-docker run --rm frame-compare:dev doctor --json
-```
-
-```bash
-# Build
 docker build -t frame-compare:dev .
 
 # Diagnostics

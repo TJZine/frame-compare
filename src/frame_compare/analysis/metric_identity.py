@@ -14,6 +14,8 @@ if TYPE_CHECKING:
 
 type MetricAlgorithmIdentity = Mapping[str, object]
 
+_ALGORITHM_VERSION = "analysis_metrics_v2"
+
 
 def build_metric_algorithm_identity(config: AnalysisConfig) -> MetricAlgorithmIdentity:
     """Build the cache identity payload for the configured analysis metric algorithm."""
@@ -51,7 +53,7 @@ def _stable_json(payload: MetricAlgorithmIdentity) -> str:
 
 def _quality_identity() -> dict[str, object]:
     return {
-        "algorithm_version": "analysis_metrics_v2",
+        "algorithm_version": _ALGORITHM_VERSION,
         "backend": "python_numpy",
         "performance_mode": "quality",
         "luminance": {
@@ -69,7 +71,7 @@ def _quality_identity() -> dict[str, object]:
 
 def _balanced_identity() -> dict[str, object]:
     return {
-        "algorithm_version": "analysis_metrics_v2",
+        "algorithm_version": _ALGORITHM_VERSION,
         "backend": "vapoursynth_planestats",
         "performance_mode": "balanced",
         "luminance": {
@@ -93,7 +95,7 @@ def _balanced_identity() -> dict[str, object]:
 
 def _fast_identity() -> dict[str, object]:
     return {
-        "algorithm_version": "analysis_metrics_v2",
+        "algorithm_version": _ALGORITHM_VERSION,
         "backend": "vapoursynth_planestats",
         "performance_mode": "fast",
         "luminance": {

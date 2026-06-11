@@ -50,9 +50,13 @@ class RankingComparison:
 
 def tier_category_tolerance(tier: PerformanceTier, category: SelectionCategory) -> int:
     """Return the v1 review tolerance for a tier/category pair."""
+    if category not in ("dark", "bright", "motion"):
+        raise ValueError(f"Unsupported SelectionCategory for tier_category_tolerance: {category!r}")
     if tier == "balanced":
         return 3 if category == "motion" else 2
-    return 5 if category == "motion" else 3
+    if tier == "fast":
+        return 5 if category == "motion" else 3
+    raise ValueError(f"Unsupported PerformanceTier for tier_category_tolerance: {tier!r}")
 
 
 def nearest_frame_distances(
@@ -169,7 +173,16 @@ def compare_rankings(
     source_offset: int = 0,
 ) -> RankingComparison:
     """Build ranking diagnostics for one candidate tier."""
-    window_frame_count = len(quality_luminance)
+    vector_lengths = {
+        "quality_luminance": len(quality_luminance),
+        "candidate_luminance": len(candidate_luminance),
+        "quality_motion": len(quality_motion),
+        "candidate_motion": len(candidate_motion),
+    }
+    if len(set(vector_lengths.values())) != 1:
+        raise ValueError(f"compare_rankings requires matching vector lengths: {vector_lengths}")
+
+    window_frame_count = vector_lengths["quality_luminance"]
     return RankingComparison(
         luminance_spearman=spearman_rank_correlation(quality_luminance, candidate_luminance),
         motion_spearman=spearman_rank_correlation(quality_motion, candidate_motion),
