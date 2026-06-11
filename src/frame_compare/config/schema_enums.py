@@ -53,8 +53,7 @@ class AnalysisPerformanceMode(StrEnum):
     """Analysis metric performance/quality policy."""
 
     QUALITY = "quality"
-    BALANCED = "balanced"
-    FAST = "fast"
+    PERFORMANCE = "performance"
 
 
 class VsScreenshotWriter(StrEnum):

@@ -1,6 +1,6 @@
 # Analysis Performance Validation
 
-Use `tools/benchmark_analysis_tiers.py` to compare `balanced` and `fast` against
+Use `tools/benchmark_analysis_tiers.py` to compare `performance` against
 `quality` on local clips that are not committed to the repository.
 
 Example:
@@ -15,7 +15,7 @@ Example:
   reference.mkv comparison.mkv
 ```
 
-The script writes deterministic JSON with the quality baseline, candidate tier
+The script writes deterministic JSON with the quality baseline, candidate mode
 comparisons, selected-frame overlap, nearest-frame distances, miss rates,
 Spearman rank correlations, top-K overlap, total analysis wall-clock time,
 algorithm identity, and warnings for unavailable runtime details.
@@ -41,19 +41,17 @@ for benchmark evidence.
 ## Local Evidence
 
 This evidence is local, hardware-dependent, and not a full validation matrix.
-Treat it as support for tuning decisions, not a release-wide guarantee. Entries
-that cover superseded algorithms are labeled as such.
+Treat it as support for tuning decisions, not a release-wide guarantee.
 
-### 2026-06-10: The Witch UHD Clip Pair, Pre-Dense `fast`
+### 2026-06-10: The Witch UHD Clip Pair, Mode Simplification Decision
 
 Benchmark artifact:
 `generated/analysis-tier-benchmark-warm-index.json`
 
-This run used the previous `fast` algorithm: 160px Bicubic luma with
-coarse-to-refined adjacent-pair motion and zero-filled motion outside refined
-windows. It motivated replacing `fast` with dense 160px Bilinear Planestats
-motion; it should not be used as validation evidence for the current `fast`
-implementation.
+This run compared the old three-mode experiment before the public surface was
+reduced to `quality` and `performance`. The result favored keeping the
+320px Bicubic dense PlaneStats implementation as `performance` and removing the
+extra experimental low-resolution mode.
 
 Inputs:
 
@@ -76,36 +74,36 @@ Timing:
 | Mode | Analyze time | Relative to `quality` |
 | --- | ---: | ---: |
 | `quality` | 430.34s | 1.00x |
-| `balanced` | 130.27s | 3.30x faster |
-| `fast` | 171.11s | 2.51x faster |
+| `performance` | 130.27s | 3.30x faster |
+| removed experimental mode | 171.11s | 2.51x faster |
 
 Selection agreement versus `quality`:
 
 | Mode | Category | Exact overlap | Miss rate at tolerance | Max nearest distance |
 | --- | --- | ---: | ---: | ---: |
-| `balanced` | bright | 10/10 | 0.0 | 0 |
-| `balanced` | dark | 7/10 | 0.3 | 32 |
-| `balanced` | motion | 10/10 | 0.0 | 0 |
-| `fast` | bright | 9/10 | 0.0 | 1 |
-| `fast` | dark | 6/10 | 0.3 | 102 |
-| `fast` | motion | 8/10 | 0.2 | 1036 |
+| `performance` | bright | 10/10 | 0.0 | 0 |
+| `performance` | dark | 7/10 | 0.3 | 32 |
+| `performance` | motion | 10/10 | 0.0 | 0 |
+| removed experimental mode | bright | 9/10 | 0.0 | 1 |
+| removed experimental mode | dark | 6/10 | 0.3 | 102 |
+| removed experimental mode | motion | 8/10 | 0.2 | 1036 |
 
 Ranking agreement:
 
 | Mode | Luminance Spearman | Motion Spearman | Highest motion top-50 overlap |
 | --- | ---: | ---: | ---: |
-| `balanced` | 0.999970 | 0.957701 | 50/50 |
-| `fast` | 0.999969 | 0.689946 | 45/50 |
+| `performance` | 0.999970 | 0.957701 | 50/50 |
+| removed experimental mode | 0.999969 | 0.689946 | 45/50 |
 
 Decision signal:
 
-- `balanced` is the preferred candidate for this clip pair: it was faster than
-  both `quality` and `fast`, preserved all bright and motion selections, and
-  kept high motion-rank agreement.
-- `fast` is not accepted from this evidence alone: it was slower than
-  `balanced`, had a large motion miss, and had materially weaker motion-rank
+- `performance` is the preferred candidate for this clip pair: it was faster
+  than `quality` and the removed experimental mode, preserved all bright and
+  motion selections, and kept high motion-rank agreement.
+- The removed experimental mode is not accepted: it was slower than
+  `performance`, had a large motion miss, and had materially weaker motion-rank
   agreement.
-- The `balanced` dark-frame differences should be visually reviewed before
+- The `performance` dark-frame differences should be visually reviewed before
   treating this clip class as validated.
 
 ## Clip Classes
@@ -142,5 +140,4 @@ Inspect category misses beyond tolerance and label each as one of:
 - `source trim/window issue`
 - `bug requiring implementation fix`
 
-Balanced tolerances are 2 frames for dark/bright and 3 frames for motion. Fast
-tolerances are 3 frames for dark/bright and 5 frames for motion.
+Performance tolerances are 2 frames for dark/bright and 3 frames for motion.

@@ -140,7 +140,7 @@ use_run_folders = false
 [analysis]
 random_frame_count = 0
 dark_frame_count = 1
-performance_mode = "balanced"
+performance_mode = "performance"
 
 [audio_alignment]
 enable = false
@@ -173,15 +173,17 @@ enable = false
         quality_config.analysis,
         selection_domain=selection_domain,
     )
-    balanced_fingerprint = cache_io.compute_cache_key(
+    performance_fingerprint = cache_io.compute_cache_key(
         [source_path],
         config.analysis,
         selection_domain=selection_domain,
     )
     quality_cache_path = cache_io.find_metrics_cache_file(analysis_cache_dir, quality_fingerprint)
-    balanced_cache_path = cache_io.find_metrics_cache_file(analysis_cache_dir, balanced_fingerprint)
+    performance_cache_path = cache_io.find_metrics_cache_file(
+        analysis_cache_dir, performance_fingerprint
+    )
     assert quality_cache_path is not None
-    assert balanced_cache_path is not None
+    assert performance_cache_path is not None
 
     def _fake_calculate_metrics(**_kwargs: object) -> FrameMetrics:
         return FrameMetrics(
@@ -215,7 +217,7 @@ enable = false
     asyncio.run(execute_run(request, deps=deps))
 
     assert quality_cache_path.exists()
-    assert not balanced_cache_path.exists()
+    assert not performance_cache_path.exists()
 
 
 def test_execute_run_from_cache_only_fails_when_metrics_cache_missing(
@@ -277,7 +279,7 @@ use_run_folders = false
 [analysis]
 random_frame_count = 0
 dark_frame_count = 1
-performance_mode = "balanced"
+performance_mode = "performance"
 
 [audio_alignment]
 enable = false

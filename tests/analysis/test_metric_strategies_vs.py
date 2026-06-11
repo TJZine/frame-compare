@@ -18,12 +18,12 @@ def _source(clip: object) -> SimpleNamespace:
 
 
 @pytest.mark.vs_required
-def test_balanced_strategy_black_clip_has_zero_luminance_and_motion() -> None:
+def test_performance_strategy_black_clip_has_zero_luminance_and_motion() -> None:
     clip = vs.core.std.BlankClip(width=16, height=16, length=3, format=vs.GRAY8, color=0)
 
     result = calculate_metric_strategy(
         _source(clip),
-        AnalysisConfig(performance_mode="balanced"),
+        AnalysisConfig(performance_mode="performance"),
         reporter=None,
     )
 
@@ -32,12 +32,12 @@ def test_balanced_strategy_black_clip_has_zero_luminance_and_motion() -> None:
 
 
 @pytest.mark.vs_required
-def test_balanced_strategy_white_clip_has_full_luminance_and_zero_motion() -> None:
+def test_performance_strategy_white_clip_has_full_luminance_and_zero_motion() -> None:
     clip = vs.core.std.BlankClip(width=16, height=16, length=3, format=vs.GRAY8, color=255)
 
     result = calculate_metric_strategy(
         _source(clip),
-        AnalysisConfig(performance_mode="balanced"),
+        AnalysisConfig(performance_mode="performance"),
         reporter=None,
     )
 
@@ -46,14 +46,14 @@ def test_balanced_strategy_white_clip_has_full_luminance_and_zero_motion() -> No
 
 
 @pytest.mark.vs_required
-def test_balanced_strategy_black_to_white_motion_is_at_current_frame() -> None:
+def test_performance_strategy_black_to_white_motion_is_at_current_frame() -> None:
     black = vs.core.std.BlankClip(width=16, height=16, length=1, format=vs.GRAY8, color=0)
     white = vs.core.std.BlankClip(width=16, height=16, length=1, format=vs.GRAY8, color=255)
     clip = black + white
 
     result = calculate_metric_strategy(
         _source(clip),
-        AnalysisConfig(performance_mode="balanced"),
+        AnalysisConfig(performance_mode="performance"),
         reporter=None,
     )
 
@@ -62,45 +62,14 @@ def test_balanced_strategy_black_to_white_motion_is_at_current_frame() -> None:
 
 
 @pytest.mark.vs_required
-def test_fast_strategy_constant_clip_has_zero_motion() -> None:
+def test_performance_strategy_repeated_runs_are_identical() -> None:
     clip = vs.core.std.BlankClip(width=16, height=16, length=4, format=vs.GRAY8, color=64)
-
-    result = calculate_metric_strategy(
-        _source(clip),
-        AnalysisConfig(performance_mode="fast"),
-        reporter=None,
-    )
-
-    assert result.luminance == pytest.approx([64 / 255] * 4)
-    assert result.motion == pytest.approx([0.0, 0.0, 0.0, 0.0])
-
-
-@pytest.mark.vs_required
-def test_fast_strategy_black_to_white_motion_is_dense() -> None:
-    black = vs.core.std.BlankClip(width=16, height=16, length=4, format=vs.GRAY8, color=0)
-    white = vs.core.std.BlankClip(width=16, height=16, length=1, format=vs.GRAY8, color=255)
-    clip = black + white
-
-    result = calculate_metric_strategy(
-        _source(clip),
-        AnalysisConfig(performance_mode="fast"),
-        reporter=None,
-    )
-
-    assert result.motion[0] == 0.0
-    assert result.motion[4] > 0.0
-
-
-@pytest.mark.vs_required
-def test_fast_strategy_repeated_runs_are_identical() -> None:
-    black = vs.core.std.BlankClip(width=16, height=16, length=1, format=vs.GRAY8, color=0)
-    gray = vs.core.std.BlankClip(width=16, height=16, length=1, format=vs.GRAY8, color=128)
-    white = vs.core.std.BlankClip(width=16, height=16, length=1, format=vs.GRAY8, color=255)
-    clip = black + gray + white
-    config = AnalysisConfig(performance_mode="fast")
+    config = AnalysisConfig(performance_mode="performance")
 
     first = calculate_metric_strategy(_source(clip), config, reporter=None)
     second = calculate_metric_strategy(_source(clip), config, reporter=None)
 
+    assert first.luminance == pytest.approx([64 / 255] * 4)
+    assert first.motion == pytest.approx([0.0, 0.0, 0.0, 0.0])
     assert second.luminance == first.luminance
     assert second.motion == first.motion

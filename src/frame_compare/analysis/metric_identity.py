@@ -21,10 +21,8 @@ def build_metric_algorithm_identity(config: AnalysisConfig) -> MetricAlgorithmId
     """Build the cache identity payload for the configured analysis metric algorithm."""
     if config.performance_mode == AnalysisPerformanceMode.QUALITY:
         return _quality_identity()
-    if config.performance_mode == AnalysisPerformanceMode.BALANCED:
-        return _balanced_identity()
-    if config.performance_mode == AnalysisPerformanceMode.FAST:
-        return _fast_identity()
+    if config.performance_mode == AnalysisPerformanceMode.PERFORMANCE:
+        return _performance_identity()
     raise ValueError(f"Unsupported analysis performance mode: {config.performance_mode}")
 
 
@@ -69,11 +67,11 @@ def _quality_identity() -> dict[str, object]:
     }
 
 
-def _balanced_identity() -> dict[str, object]:
+def _performance_identity() -> dict[str, object]:
     return {
         "algorithm_version": _ALGORITHM_VERSION,
         "backend": "vapoursynth_planestats",
-        "performance_mode": "balanced",
+        "performance_mode": "performance",
         "luminance": {
             "temporal": "all_frames",
             "spatial": "luma_resize",
@@ -87,30 +85,6 @@ def _balanced_identity() -> dict[str, object]:
             "spatial": "luma_resize",
             "target_max_width": 320,
             "resize": "bicubic",
-            "upscale": False,
-            "operation": "planestats_diff",
-        },
-    }
-
-
-def _fast_identity() -> dict[str, object]:
-    return {
-        "algorithm_version": _ALGORITHM_VERSION,
-        "backend": "vapoursynth_planestats",
-        "performance_mode": "fast",
-        "luminance": {
-            "temporal": "all_frames",
-            "spatial": "luma_resize",
-            "target_max_width": 160,
-            "resize": "bilinear",
-            "upscale": False,
-            "operation": "planestats_average",
-        },
-        "motion": {
-            "temporal": "all_adjacent_pairs",
-            "spatial": "luma_resize",
-            "target_max_width": 160,
-            "resize": "bilinear",
             "upscale": False,
             "operation": "planestats_diff",
         },

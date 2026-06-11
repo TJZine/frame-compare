@@ -103,10 +103,10 @@ def test_compute_cache_key_changes_by_analysis_performance_mode(tmp_path: Path) 
     v1 = create_video_file(tmp_path, "v1.mkv")
     keys = {
         compute_cache_key([v1], AnalysisConfig(performance_mode=mode))
-        for mode in ("quality", "balanced", "fast")
+        for mode in ("quality", "performance")
     }
 
-    assert len(keys) == 3
+    assert len(keys) == 2
 
 
 def test_metrics_cache_filename_order_independent(tmp_path: Path) -> None:
@@ -146,13 +146,17 @@ def test_compute_cache_key_ignores_user_frames_only_change(tmp_path: Path) -> No
     assert key1 == key2
 
 
-def test_compute_cache_key_ignores_selection_counts_within_fast_mode(tmp_path: Path) -> None:
+def test_compute_cache_key_ignores_selection_counts_within_performance_mode(
+    tmp_path: Path,
+) -> None:
     v1 = create_video_file(tmp_path, "v1.mkv")
-    key1 = compute_cache_key([v1], AnalysisConfig(performance_mode="fast", motion_frame_count=1))
+    key1 = compute_cache_key(
+        [v1], AnalysisConfig(performance_mode="performance", motion_frame_count=1)
+    )
     key2 = compute_cache_key(
         [v1],
         AnalysisConfig(
-            performance_mode="fast",
+            performance_mode="performance",
             random_frame_count=3,
             dark_frame_count=4,
             bright_frame_count=5,
@@ -164,13 +168,13 @@ def test_compute_cache_key_ignores_selection_counts_within_fast_mode(tmp_path: P
 
 
 def test_metric_algorithm_identity_serialization_is_deterministic() -> None:
-    first = stable_metric_algorithm_identity_json(AnalysisConfig(performance_mode="fast"))
-    second = stable_metric_algorithm_identity_json(AnalysisConfig(performance_mode="fast"))
+    first = stable_metric_algorithm_identity_json(AnalysisConfig(performance_mode="performance"))
+    second = stable_metric_algorithm_identity_json(AnalysisConfig(performance_mode="performance"))
 
     assert first == second
-    assert '"performance_mode":"fast"' in first
-    assert '"target_max_width":160' in first
-    assert '"resize":"bilinear"' in first
+    assert '"performance_mode":"performance"' in first
+    assert '"target_max_width":320' in first
+    assert '"resize":"bicubic"' in first
     assert '"temporal":"all_adjacent_pairs"' in first
 
 

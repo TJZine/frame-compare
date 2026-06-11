@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Benchmark analysis performance tiers against quality on local clips."""
+"""Benchmark analysis performance mode against quality on local clips."""
 
 from __future__ import annotations
 
@@ -190,7 +190,7 @@ def _effective_fps_override_for_path(
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Compare balanced/fast analysis tiers against quality and write JSON.",
+        description="Compare performance analysis mode against quality and write JSON.",
     )
     parser.add_argument("inputs", nargs="+", type=Path, help="Input video paths in run order.")
     parser.add_argument("--root", type=Path, default=Path("."), help="Workspace root.")
@@ -205,8 +205,8 @@ def _parse_args() -> argparse.Namespace:
         "--mode",
         dest="modes",
         action="append",
-        choices=["balanced", "fast"],
-        help="Candidate mode to compare. Repeatable; defaults to balanced and fast.",
+        choices=["performance"],
+        help="Candidate mode to compare. Repeatable; defaults to performance.",
     )
     parser.add_argument(
         "--cache-dir",
@@ -233,7 +233,7 @@ def _parse_args() -> argparse.Namespace:
     )
     args = parser.parse_args()
     if args.modes is None:
-        args.modes = ["balanced", "fast"]
+        args.modes = ["performance"]
     if args.window_start < 0:
         parser.error("--window-start must be non-negative")
     if args.window_end_exclusive is not None and args.window_end_exclusive <= args.window_start:

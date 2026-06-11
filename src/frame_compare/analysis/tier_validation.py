@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 type SelectionCategory = Literal["dark", "bright", "motion"]
-type PerformanceTier = Literal["balanced", "fast"]
+type PerformanceTier = Literal["performance"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,10 +52,8 @@ def tier_category_tolerance(tier: PerformanceTier, category: SelectionCategory) 
     """Return the v1 review tolerance for a tier/category pair."""
     if category not in ("dark", "bright", "motion"):
         raise ValueError(f"Unsupported SelectionCategory for tier_category_tolerance: {category!r}")
-    if tier == "balanced":
+    if tier == "performance":
         return 3 if category == "motion" else 2
-    if tier == "fast":
-        return 5 if category == "motion" else 3
     raise ValueError(f"Unsupported PerformanceTier for tier_category_tolerance: {tier!r}")
 
 

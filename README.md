@@ -189,12 +189,12 @@ The `[analysis]` config supports `performance_mode`:
 
 ```toml
 [analysis]
-performance_mode = "quality"  # quality, balanced, or fast
+performance_mode = "quality"  # quality or performance
 ```
 
 `quality` is the default and preserves the current full-resolution analysis
-behavior. `balanced` and `fast` are approximate modes that can reduce analysis
-work, but they may select different dark, bright, or motion frames.
+behavior. `performance` is an approximate VapourSynth PlaneStats mode that can
+reduce analysis work, but it may select different dark, bright, or motion frames.
 
 ### Reports
 

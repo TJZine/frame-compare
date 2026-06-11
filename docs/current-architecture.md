@@ -52,8 +52,8 @@ identity in schema v5 payload metadata, and orchestration only passes the effect
 analysis config plus selection-domain token into the analysis/cache owner.
 `frame_compare.analysis.metric_strategies` owns the metric implementations:
 `quality` is the default/current full-frame Python/NumPy behavior, while
-`balanced` and `fast` are approximate VapourSynth PlaneStats modes that can
-choose different dark, bright, or motion frames. All modes still return dense
+`performance` is an approximate VapourSynth PlaneStats mode that can choose
+different dark, bright, or motion frames. Both modes still return dense
 source-frame-indexed luminance and motion arrays for the selected analysis clip.
 
 ## Module Boundaries

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 import sys
 from fractions import Fraction
 from pathlib import Path
@@ -428,7 +427,7 @@ def test_quality_strategy_dispatch_matches_direct_quality_helpers() -> None:
     assert result.metric_backend == "python_numpy"
 
 
-def test_balanced_strategy_rejects_empty_clip(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_performance_strategy_rejects_empty_clip(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
     source = MagicMock()
     source.clip = FakeBalancedClip([])
@@ -436,12 +435,12 @@ def test_balanced_strategy_rejects_empty_clip(monkeypatch: pytest.MonkeyPatch) -
     with pytest.raises(MetricsCalculationError, match="Analysis clip has 0 frames"):
         calculate_metric_strategy(
             source,
-            AnalysisConfig(performance_mode="balanced"),
+            AnalysisConfig(performance_mode="performance"),
             reporter=None,
         )
 
 
-def test_balanced_strategy_returns_full_length_dense_arrays(
+def test_performance_strategy_returns_full_length_dense_arrays(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
@@ -450,7 +449,7 @@ def test_balanced_strategy_returns_full_length_dense_arrays(
 
     result = calculate_metric_strategy(
         source,
-        AnalysisConfig(performance_mode="balanced"),
+        AnalysisConfig(performance_mode="performance"),
         reporter=None,
     )
 
@@ -459,11 +458,11 @@ def test_balanced_strategy_returns_full_length_dense_arrays(
     assert len(result.luminance) == source.clip.num_frames
     assert len(result.motion) == source.clip.num_frames
     assert result.motion[0] == 0.0
-    assert result.performance_mode == "balanced"
+    assert result.performance_mode == "performance"
     assert result.metric_backend == "vapoursynth_planestats"
 
 
-def test_balanced_strategy_one_frame_motion_is_zero(
+def test_performance_strategy_one_frame_motion_is_zero(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
@@ -472,7 +471,7 @@ def test_balanced_strategy_one_frame_motion_is_zero(
 
     result = calculate_metric_strategy(
         source,
-        AnalysisConfig(performance_mode="balanced"),
+        AnalysisConfig(performance_mode="performance"),
         reporter=None,
     )
 
@@ -480,13 +479,13 @@ def test_balanced_strategy_one_frame_motion_is_zero(
     assert result.motion == [0.0]
 
 
-def test_balanced_strategy_constant_clip_is_deterministic_with_zero_motion(
+def test_performance_strategy_constant_clip_is_deterministic_with_zero_motion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
     source = MagicMock()
     source.clip = FakeBalancedClip([0.25, 0.25, 0.25], width=160, height=90)
-    config = AnalysisConfig(performance_mode="balanced")
+    config = AnalysisConfig(performance_mode="performance")
 
     first = calculate_metric_strategy(source, config, reporter=None)
     second = calculate_metric_strategy(source, config, reporter=None)
@@ -497,7 +496,7 @@ def test_balanced_strategy_constant_clip_is_deterministic_with_zero_motion(
     assert second.motion == first.motion
 
 
-def test_balanced_strategy_simple_transition_has_motion_at_current_frame(
+def test_performance_strategy_simple_transition_has_motion_at_current_frame(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
@@ -506,7 +505,7 @@ def test_balanced_strategy_simple_transition_has_motion_at_current_frame(
 
     result = calculate_metric_strategy(
         source,
-        AnalysisConfig(performance_mode="balanced"),
+        AnalysisConfig(performance_mode="performance"),
         reporter=None,
     )
 
@@ -514,27 +513,31 @@ def test_balanced_strategy_simple_transition_has_motion_at_current_frame(
     assert result.motion[1] > result.motion[0]
 
 
-def test_fast_metric_identity_is_distinct_and_stable() -> None:
+def test_performance_metric_identity_is_distinct_and_stable() -> None:
     quality = stable_metric_algorithm_identity_json(AnalysisConfig(performance_mode="quality"))
-    balanced = stable_metric_algorithm_identity_json(AnalysisConfig(performance_mode="balanced"))
-    first_fast = stable_metric_algorithm_identity_json(AnalysisConfig(performance_mode="fast"))
-    second_fast = stable_metric_algorithm_identity_json(AnalysisConfig(performance_mode="fast"))
+    first_performance = stable_metric_algorithm_identity_json(
+        AnalysisConfig(performance_mode="performance")
+    )
+    second_performance = stable_metric_algorithm_identity_json(
+        AnalysisConfig(performance_mode="performance")
+    )
 
-    assert first_fast == second_fast
-    assert len({quality, balanced, first_fast}) == 3
-    assert '"target_max_width":160' in first_fast
-    assert '"resize":"bilinear"' in first_fast
-    assert '"temporal":"all_adjacent_pairs"' in first_fast
-    assert "coarse_to_refined" not in first_fast
+    assert first_performance == second_performance
+    assert len({quality, first_performance}) == 2
+    assert '"performance_mode":"performance"' in first_performance
+    assert '"target_max_width":320' in first_performance
+    assert '"resize":"bicubic"' in first_performance
+    assert '"temporal":"all_adjacent_pairs"' in first_performance
+    assert "coarse_to_refined" not in first_performance
 
 
-def test_fast_cache_key_ignores_selection_counts_and_quantiles(tmp_path: Path) -> None:
+def test_performance_cache_key_ignores_selection_counts_and_quantiles(tmp_path: Path) -> None:
     video_path = tmp_path / "v1.mkv"
     video_path.write_bytes(b"")
 
-    base = AnalysisConfig(performance_mode="fast")
+    base = AnalysisConfig(performance_mode="performance")
     changed_selection = AnalysisConfig(
-        performance_mode="fast",
+        performance_mode="performance",
         random_seed=99,
         random_frame_count=23,
         dark_frame_count=17,
@@ -543,7 +546,7 @@ def test_fast_cache_key_ignores_selection_counts_and_quantiles(tmp_path: Path) -
         user_frames=[3, 7],
     )
     changed_quantiles = AnalysisConfig(
-        performance_mode="fast",
+        performance_mode="performance",
         dark_quantile=0.05,
         bright_quantile=0.95,
     )
@@ -560,97 +563,7 @@ def test_fast_cache_key_ignores_selection_counts_and_quantiles(tmp_path: Path) -
     )
 
 
-def test_fast_strategy_rejects_empty_clip(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
-    source = MagicMock()
-    source.clip = FakeBalancedClip([])
-
-    with pytest.raises(MetricsCalculationError, match="Analysis clip has 0 frames"):
-        calculate_metric_strategy(
-            source,
-            AnalysisConfig(performance_mode="fast"),
-            reporter=None,
-        )
-
-
-def test_fast_strategy_one_frame_motion_is_zero(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
-    source = MagicMock()
-    source.clip = FakeBalancedClip([0.5])
-
-    result = calculate_metric_strategy(
-        source,
-        AnalysisConfig(performance_mode="fast"),
-        reporter=None,
-    )
-
-    assert result.luminance == [0.5]
-    assert result.motion == [0.0]
-
-
-def test_fast_strategy_two_frame_arrays_are_dense(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
-    source = MagicMock()
-    source.clip = FakeBalancedClip([0.0, 1.0])
-
-    result = calculate_metric_strategy(
-        source,
-        AnalysisConfig(performance_mode="fast"),
-        reporter=None,
-    )
-
-    assert result.luminance == [0.0, 1.0]
-    assert result.motion == [0.0, 1.0]
-    assert len(result.luminance) == 2
-    assert len(result.motion) == 2
-    assert result.performance_mode == "fast"
-    assert result.metric_backend == "vapoursynth_planestats"
-
-
-def test_fast_strategy_uses_bilinear_160_luma_resize(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
-    source = MagicMock()
-    clip = FakeBalancedClip([0.0, 0.5, 1.0], width=640, height=360)
-    source.clip = clip
-
-    result = calculate_metric_strategy(
-        source,
-        AnalysisConfig(performance_mode="fast"),
-        reporter=None,
-    )
-
-    assert result.luminance == [0.0, 0.5, 1.0]
-    assert result.motion == [0.0, 0.5, 0.5]
-    assert clip.resize_calls == [("Bilinear", 160, 90)]
-
-
-def test_fast_strategy_multiframe_arrays_are_deterministic_and_finite(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
-    source = MagicMock()
-    source.clip = FakeBalancedClip([0.0, 0.0, 0.75, 0.75, 0.25, 1.0], width=640)
-    config = AnalysisConfig(performance_mode="fast")
-
-    first = calculate_metric_strategy(source, config, reporter=None)
-    second = calculate_metric_strategy(source, config, reporter=None)
-
-    assert first.luminance == second.luminance
-    assert first.motion == second.motion
-    assert len(first.luminance) == source.clip.num_frames
-    assert len(first.motion) == source.clip.num_frames
-    assert first.motion[0] == 0.0
-    assert all(math.isfinite(score) for score in first.luminance)
-    assert all(math.isfinite(score) for score in first.motion)
-
-
-def test_fast_strategy_static_clip_has_zero_motion(
+def test_performance_strategy_static_clip_has_zero_motion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
@@ -659,7 +572,7 @@ def test_fast_strategy_static_clip_has_zero_motion(
 
     result = calculate_metric_strategy(
         source,
-        AnalysisConfig(performance_mode="fast"),
+        AnalysisConfig(performance_mode="performance"),
         reporter=None,
     )
 

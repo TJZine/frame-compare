@@ -233,13 +233,13 @@ def test_current_cli_contract_documents_analysis_performance_mode_config_only() 
 
     assert AnalysisConfig().performance_mode == AnalysisPerformanceMode.QUALITY
     assert 'performance_mode = "quality"' in analysis_section
-    assert '`performance_mode = "quality" | "balanced" | "fast"`' in analysis_section
+    assert '`performance_mode = "quality" | "performance"`' in analysis_section
     assert "There is no dedicated `run` flag for analysis performance mode in v1." in (
         analysis_section
     )
     assert "--analysis-performance" not in declared_options
     assert "analysis.performance_mode" not in CLI_OVERRIDE_MAP.values()
-    assert "cache-isolated from `quality` and from each other" in normalized_analysis_section
+    assert "cache-isolated from `quality`" in normalized_analysis_section
 
 
 def test_current_cli_contract_documents_slowpics_json_shape(

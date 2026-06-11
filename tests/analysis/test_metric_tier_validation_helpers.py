@@ -52,12 +52,9 @@ def test_compare_selection_category_reports_overlap_and_miss_rate() -> None:
 
 
 def test_tier_category_tolerance_handles_known_tiers_and_categories() -> None:
-    assert tier_category_tolerance("balanced", "dark") == 2
-    assert tier_category_tolerance("balanced", "bright") == 2
-    assert tier_category_tolerance("balanced", "motion") == 3
-    assert tier_category_tolerance("fast", "dark") == 3
-    assert tier_category_tolerance("fast", "bright") == 3
-    assert tier_category_tolerance("fast", "motion") == 5
+    assert tier_category_tolerance("performance", "dark") == 2
+    assert tier_category_tolerance("performance", "bright") == 2
+    assert tier_category_tolerance("performance", "motion") == 3
 
 
 def test_tier_category_tolerance_rejects_unknown_values() -> None:
@@ -65,7 +62,7 @@ def test_tier_category_tolerance_rejects_unknown_values() -> None:
         tier_category_tolerance(cast(PerformanceTier, "quality"), "motion")
 
     with pytest.raises(ValueError, match="Unsupported SelectionCategory"):
-        tier_category_tolerance("fast", cast(SelectionCategory, "invalid"))
+        tier_category_tolerance("performance", cast(SelectionCategory, "invalid"))
 
 
 def test_top_k_overlap_uses_source_offsets_and_stable_ordering() -> None:
@@ -136,11 +133,11 @@ def test_compare_rankings_rejects_mismatched_vector_lengths(
 def test_benchmark_script_comparison_schema_contains_required_sections() -> None:
     script = _load_benchmark_script()
     quality = _tier_payload("quality", [0.0, 0.2, 1.0], [0.0, 0.1, 0.7], [0, 1, 2])
-    candidate = _tier_payload("fast", [0.0, 0.1, 1.0], [0.0, 0.0, 0.8], [0, 2])
+    candidate = _tier_payload("performance", [0.0, 0.1, 1.0], [0.0, 0.0, 0.8], [0, 2])
 
     result = cast(dict[str, Any], script._compare_tier(quality=quality, candidate=candidate))
 
-    assert result["mode"] == "fast"
+    assert result["mode"] == "performance"
     assert set(result["comparisons"]) == {"dark", "bright", "motion"}
     assert set(result["ranking"]) == {
         "highest_luminance_top_k",
@@ -201,7 +198,7 @@ def test_benchmark_script_progress_wraps_quality_and_candidate_tiers(
     monkeypatch.setattr(script, "_compare_tier", fake_compare_tier)
 
     quality, comparisons = script._run_benchmark_tiers(
-        candidate_modes=["balanced", "fast"],
+        candidate_modes=["performance"],
         video_paths=[tmp_path / "reference.mkv"],
         analysis_config=ConfigSchema().analysis,
         cache_dir=tmp_path / "cache",
@@ -214,18 +211,16 @@ def test_benchmark_script_progress_wraps_quality_and_candidate_tiers(
     )
 
     assert quality["mode"] == "quality"
-    assert calls == ["quality", "balanced", "fast"]
+    assert calls == ["quality", "performance"]
     assert comparisons == {
-        "balanced": {"quality_mode": "quality", "candidate_mode": "balanced"},
-        "fast": {"quality_mode": "quality", "candidate_mode": "fast"},
+        "performance": {"quality_mode": "quality", "candidate_mode": "performance"},
     }
     assert ("disable", False) in progress_events
-    assert ("add_task", ("Starting analysis benchmark", 3)) in progress_events
+    assert ("add_task", ("Starting analysis benchmark", 2)) in progress_events
     assert ("update", (7, "Running quality analysis")) in progress_events
-    assert ("update", (7, "Running balanced analysis")) in progress_events
-    assert ("update", (7, "Running fast analysis")) in progress_events
+    assert ("update", (7, "Running performance analysis")) in progress_events
     assert ("update", (7, "Analysis benchmark complete")) in progress_events
-    assert progress_events.count(("advance", 7)) == 3
+    assert progress_events.count(("advance", 7)) == 2
 
 
 def test_benchmark_script_run_tier_preserves_typed_performance_mode(
@@ -250,12 +245,12 @@ def test_benchmark_script_run_tier_preserves_typed_performance_mode(
         assert effective_fps is None
         assert selection_domain is None
         observed_modes.append(analysis_config.performance_mode)
-        return _metrics_payload("balanced", [0.0, 0.2, 1.0], [0.0, 0.1, 0.7])
+        return _metrics_payload("performance", [0.0, 0.2, 1.0], [0.0, 0.1, 0.7])
 
     monkeypatch.setattr(script, "calculate_metrics", fake_calculate_metrics)
 
     result = script._run_tier(
-        mode="balanced",
+        mode="performance",
         video_paths=[tmp_path / "reference.mkv"],
         analysis_config=ConfigSchema.model_validate(
             {
@@ -275,8 +270,8 @@ def test_benchmark_script_run_tier_preserves_typed_performance_mode(
         window_end_exclusive=None,
     )
 
-    assert observed_modes == [AnalysisPerformanceMode.BALANCED]
-    assert result["metadata"]["performance_mode"] == "balanced"
+    assert observed_modes == [AnalysisPerformanceMode.PERFORMANCE]
+    assert result["metadata"]["performance_mode"] == "performance"
 
 
 def test_benchmark_script_resolves_configured_analysis_source_and_effective_fps(

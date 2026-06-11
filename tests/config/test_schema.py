@@ -144,8 +144,7 @@ def test_analysis_rejects_removed_public_keys(stale_key: str) -> None:
     ("mode", "expected"),
     [
         ("quality", AnalysisPerformanceMode.QUALITY),
-        ("balanced", AnalysisPerformanceMode.BALANCED),
-        ("fast", AnalysisPerformanceMode.FAST),
+        ("performance", AnalysisPerformanceMode.PERFORMANCE),
     ],
 )
 def test_analysis_performance_mode_accepts_approved_values(
@@ -157,9 +156,10 @@ def test_analysis_performance_mode_accepts_approved_values(
     assert config.performance_mode == expected
 
 
-def test_analysis_performance_mode_rejects_invalid_value() -> None:
+@pytest.mark.parametrize("mode", ["turbo"])
+def test_analysis_performance_mode_rejects_invalid_value(mode: str) -> None:
     with pytest.raises(ValidationError):
-        AnalysisConfig.model_validate({"performance_mode": "turbo"})
+        AnalysisConfig.model_validate({"performance_mode": mode})
 
 
 def test_report_output_dir_empty_string_to_none() -> None:

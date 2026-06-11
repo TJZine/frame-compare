@@ -487,7 +487,7 @@ requested selector count must not exceed 100. Removed stale analysis keys
 These remaining `[analysis]` fields are config-only public surface; there are no
 dedicated `run` flags for them:
 
-- `performance_mode = "quality" | "balanced" | "fast"`
+- `performance_mode = "quality" | "performance"`
 - `ignore_lead_seconds = 0.0`
 - `ignore_trail_seconds = 0.0`
 - `min_window_seconds = 5.0`
@@ -496,9 +496,9 @@ dedicated `run` flags for them:
 
 `performance_mode` selects the analysis metric algorithm identity used for
 luminance and motion arrays. `quality` is the default and preserves the current
-full-frame Python/NumPy metric behavior. `balanced` and `fast` are approximate
-VapourSynth metric modes; they can select different dark, bright, or motion
-frames than `quality` and are cache-isolated from `quality` and from each other.
+full-frame Python/NumPy metric behavior. `performance` is an approximate
+VapourSynth PlaneStats metric mode; it can select different dark, bright, or
+motion frames than `quality` and is cache-isolated from `quality`.
 There is no dedicated `run` flag for analysis performance mode in v1.
 
 The lead/trail fields define a global selectable analysis window inside each

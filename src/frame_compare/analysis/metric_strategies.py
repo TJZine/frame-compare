@@ -38,10 +38,6 @@ class _FrameReadable(Protocol):
     def get_frame(self, n: int) -> object: ...
 
 
-class _ResizeFn(Protocol):
-    def __call__(self, *, width: int, height: int) -> object: ...
-
-
 @dataclass(frozen=True, slots=True)
 class MetricComputationResult:
     """Metric arrays and algorithm metadata produced by one strategy."""
@@ -70,18 +66,8 @@ def calculate_metric_strategy(
             metric_backend=metric_backend(config),
             algorithm_identity_json=stable_metric_algorithm_identity_json(config),
         )
-    if config.performance_mode == AnalysisPerformanceMode.BALANCED:
-        luminance, motion = _calculate_balanced_metrics(source.clip, reporter)
-        return MetricComputationResult(
-            luminance=luminance,
-            motion=motion,
-            performance_mode=config.performance_mode.value,
-            algorithm_id=metric_algorithm_id(config),
-            metric_backend=metric_backend(config),
-            algorithm_identity_json=stable_metric_algorithm_identity_json(config),
-        )
-    if config.performance_mode == AnalysisPerformanceMode.FAST:
-        luminance, motion = _calculate_fast_metrics(source.clip, reporter)
+    if config.performance_mode == AnalysisPerformanceMode.PERFORMANCE:
+        luminance, motion = _calculate_performance_metrics(source.clip, reporter)
         return MetricComputationResult(
             luminance=luminance,
             motion=motion,
@@ -226,7 +212,7 @@ def _calculate_quality_metrics(
     return luminance, motion
 
 
-def _calculate_balanced_metrics(
+def _calculate_performance_metrics(
     clip: vs.VideoNode,
     reporter: ProgressReporter | None,
 ) -> tuple[list[float], list[float]]:
@@ -235,48 +221,20 @@ def _calculate_balanced_metrics(
 
     total_frames = clip.num_frames
     with perf_span("analysis.calculate_metrics", frames=total_frames):
-        luma = _balanced_luma_clip(clip)
-        luminance = _calculate_balanced_luminance(luma, reporter)
+        luma = _performance_luma_clip(clip)
+        luminance = _calculate_performance_luminance(luma, reporter)
         if reporter:
             reporter.advance(1)
-        motion = _calculate_balanced_motion(luma, reporter)
+        motion = _calculate_performance_motion(luma, reporter)
 
     return luminance, motion
 
 
-def _calculate_fast_metrics(
-    clip: vs.VideoNode,
-    reporter: ProgressReporter | None,
-) -> tuple[list[float], list[float]]:
-    if clip.num_frames == 0:
-        raise MetricsCalculationError("Analysis clip has 0 frames")
-
-    total_frames = clip.num_frames
-    with perf_span("analysis.calculate_metrics", frames=total_frames):
-        luma = _fast_luma_clip(clip)
-        luminance = _calculate_fast_luminance(luma, reporter)
-        if reporter:
-            reporter.advance(1)
-        motion = _calculate_fast_motion(luma, reporter)
-
-    return luminance, motion
-
-
-def _balanced_luma_clip(clip: vs.VideoNode) -> vs.VideoNode:
+def _performance_luma_clip(clip: vs.VideoNode) -> vs.VideoNode:
     return _planestats_luma_clip(
         clip,
         target_max_width=320,
-        mode_name="Balanced",
-        resize_filter="Bicubic",
-    )
-
-
-def _fast_luma_clip(clip: vs.VideoNode) -> vs.VideoNode:
-    return _planestats_luma_clip(
-        clip,
-        target_max_width=160,
-        mode_name="Fast",
-        resize_filter="Bilinear",
+        mode_name="Performance",
     )
 
 
@@ -285,7 +243,6 @@ def _planestats_luma_clip(
     *,
     target_max_width: int,
     mode_name: str,
-    resize_filter: str,
 ) -> vs.VideoNode:
     import vapoursynth as vs
 
@@ -306,20 +263,19 @@ def _planestats_luma_clip(
 
         target_width = target_max_width
         target_height = max(1, round(luma.height * target_width / luma.width))
-        resize = cast(_ResizeFn, _dynamic_attr(luma.resize, resize_filter))
-        return cast("vs.VideoNode", resize(width=target_width, height=target_height))
+        return luma.resize.Bicubic(width=target_width, height=target_height)
     except Exception as exc:
         raise MetricsCalculationError(f"{mode_name} luma preparation failed: {exc}") from exc
 
 
-def _calculate_fast_luminance(
+def _calculate_performance_luminance(
     luma: vs.VideoNode,
     reporter: ProgressReporter | None = None,
 ) -> list[float]:
     if luma.num_frames == 0:
         raise MetricsCalculationError("Empty clip")
 
-    with perf_span("analysis.fast_luminance", frames=luma.num_frames):
+    with perf_span("analysis.performance_luminance", frames=luma.num_frames):
         if reporter:
             reporter.start_phase("Calculating luminance", luma.num_frames)
 
@@ -345,47 +301,14 @@ def _calculate_fast_luminance(
     return luminance
 
 
-def _calculate_balanced_luminance(
-    luma: vs.VideoNode,
-    reporter: ProgressReporter | None = None,
-) -> list[float]:
-    if luma.num_frames == 0:
-        raise MetricsCalculationError("Empty clip")
-
-    with perf_span("analysis.balanced_luminance", frames=luma.num_frames):
-        if reporter:
-            reporter.start_phase("Calculating luminance", luma.num_frames)
-
-        plane_stats = cast(_PlaneStatsFn, _dynamic_attr(luma.std, "PlaneStats"))
-        stats = cast(_FrameReadable, plane_stats())
-        luminance: list[float] = []
-        phase_status = ProgressPhaseStatus.COMPLETED
-        try:
-            for n in range(luma.num_frames):
-                frame = stats.get_frame(n)
-                luminance.append(_frame_prop_float(frame, "PlaneStatsAverage"))
-                if reporter:
-                    reporter.advance(1)
-        except Exception as exc:
-            phase_status = ProgressPhaseStatus.FAILED
-            raise MetricsCalculationError(
-                f"Frame access failed at frame {len(luminance)}: {exc}"
-            ) from exc
-        finally:
-            if reporter:
-                reporter.complete_phase(phase_status)
-
-    return luminance
-
-
-def _calculate_balanced_motion(
+def _calculate_performance_motion(
     luma: vs.VideoNode,
     reporter: ProgressReporter | None = None,
 ) -> list[float]:
     return _calculate_dense_planestats_motion(
         luma,
         reporter,
-        span_name="analysis.balanced_motion",
+        span_name="analysis.performance_motion",
     )
 
 
@@ -427,17 +350,6 @@ def _calculate_dense_planestats_motion(
                 reporter.complete_phase(phase_status)
 
     return motion
-
-
-def _calculate_fast_motion(
-    luma: vs.VideoNode,
-    reporter: ProgressReporter | None = None,
-) -> list[float]:
-    return _calculate_dense_planestats_motion(
-        luma,
-        reporter,
-        span_name="analysis.fast_motion",
-    )
 
 
 def _y_plane_array(frame: vs.VideoFrame) -> npt.NDArray[np.generic]:
