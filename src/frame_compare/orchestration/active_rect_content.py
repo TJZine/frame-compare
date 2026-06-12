@@ -198,6 +198,9 @@ def detect_content_active_rect(
     frame_height: int | None = None,
 ) -> ContentActiveRect | None:
     """Detect a conservative active rect from normalized luma sample frames."""
+    if len(frames) < CONTENT_MIN_VALID_FRAME_CANDIDATES:
+        return None
+
     candidates: list[_Margins] = []
     for frame in frames:
         candidate = _candidate_margins_for_frame(frame)
@@ -210,7 +213,7 @@ def detect_content_active_rect(
     cluster = _largest_margin_cluster(candidates)
     if cluster is None:
         return None
-    required_support = ceil(len(candidates) * CONTENT_MIN_AGREEMENT_FRACTION)
+    required_support = ceil(len(frames) * CONTENT_MIN_AGREEMENT_FRACTION)
     if len(cluster) < required_support:
         return None
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 
@@ -9,12 +10,15 @@ import numpy as np
 import numpy.typing as npt
 
 from frame_compare.analysis.window import SelectionWindow
+from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 from frame_compare.orchestration.active_rect_content import (
     ContentActiveRect,
     detect_content_active_rect,
+    refine_auto_content_active_rects_for_clips,
     sample_source_frame_indices,
 )
 from frame_compare.orchestration.context import (
+    ClipActiveRect,
     ClipFingerprint,
     ClipProbeSnapshot,
     ClipState,
@@ -113,8 +117,32 @@ def test_inconsistent_margins_return_no_detection() -> None:
     assert detect_content_active_rect(frames) is None
 
 
+def test_sparse_scene_specific_bars_do_not_meet_sample_agreement() -> None:
+    frames = [
+        *[_letterbox_frame(top=10, bottom=10) for _index in range(4)],
+        *[_content_pattern(80, 100) for _index in range(12)],
+    ]
+
+    assert detect_content_active_rect(frames) is None
+
+
 def test_all_dark_frames_return_no_detection() -> None:
     frames = [np.full((80, 100), 0.06, dtype=np.float32) for _index in range(8)]
+
+    assert detect_content_active_rect(frames) is None
+
+
+def test_fade_like_low_contrast_frames_return_no_detection() -> None:
+    frame = np.full((80, 100), 0.065, dtype=np.float32)
+    frame[10:70, :] = 0.085
+    frames = [frame.copy() for _index in range(8)]
+
+    assert detect_content_active_rect(frames) is None
+
+
+def test_noisy_content_near_borders_does_not_overcrop() -> None:
+    rng = np.random.default_rng(seed=1234)
+    frames = [rng.uniform(0.05, 0.45, size=(80, 100)).astype(np.float32) for _index in range(8)]
 
     assert detect_content_active_rect(frames) is None
 
@@ -154,3 +182,39 @@ def test_sample_indices_use_trimmed_selection_window_source_domain() -> None:
     )
 
     assert indices == (17, 22, 27, 32)
+
+
+def test_auto_refinement_does_not_sample_static_non_full_frame_rects() -> None:
+    clips = [
+        _clip(num_frames=100),
+        _clip(num_frames=100),
+        _clip(num_frames=100),
+        _clip(num_frames=100),
+    ]
+    clips = [
+        replace(clips[0], active_rect=ClipActiveRect(0, 10, 100, 60, "explicit", "auto")),
+        replace(clips[1], active_rect=ClipActiveRect(0, 10, 100, 60, "metadata", "auto")),
+        replace(
+            clips[2],
+            active_rect=ClipActiveRect(0, 10, 100, 60, "dimension-derived", "auto"),
+        ),
+        replace(
+            clips[3],
+            active_rect=ClipActiveRect(0, 10, 100, 60, "aspect-ratio-derived", "auto"),
+        ),
+    ]
+
+    class FailingSampler:
+        def sample_luma_frames(self, _clip: ClipState, _indices: list[int]) -> list[object]:
+            raise AssertionError("sampler should not be called")
+
+    refined, warnings = refine_auto_content_active_rects_for_clips(
+        clips=clips,
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+        detection=ScreenshotActiveRectDetection.AUTO,
+        sampler=FailingSampler(),
+        fail_closed=True,
+    )
+
+    assert refined == clips
+    assert warnings == []
