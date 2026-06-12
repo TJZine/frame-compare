@@ -7,7 +7,7 @@ import argparse
 import json
 import time
 from collections.abc import Sequence
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, cast
@@ -43,6 +43,16 @@ from frame_compare.orchestration.source_selection import (
 type JsonObject = dict[str, Any]
 
 
+@dataclass(frozen=True, slots=True)
+class BenchmarkActiveRect:
+    """Active-rect geometry and provenance used for benchmark cache metadata."""
+
+    rect: MetricActiveRect | None
+    source: str
+    detection_mode: str
+    algorithm_id: str = "active_rect_resolution_v1"
+
+
 def main() -> int:
     args = _parse_args()
     root = args.root.resolve()
@@ -60,7 +70,7 @@ def main() -> int:
     )
     if not cache_dir.is_absolute():
         cache_dir = root / cache_dir
-    analysis_source_path, effective_fps, metric_active_rect = _resolve_benchmark_analysis_source(
+    analysis_source_path, effective_fps, active_rect = _resolve_benchmark_analysis_source(
         input_dir=input_dir,
         input_paths=input_paths,
         config=config,
@@ -82,7 +92,7 @@ def main() -> int:
         cache_dir=cache_dir,
         analysis_source_path=analysis_source_path,
         effective_fps=effective_fps,
-        metric_active_rect=metric_active_rect,
+        active_rect=active_rect,
         selection_domain=args.selection_domain,
         window_start=args.window_start,
         window_end_exclusive=args.window_end_exclusive,
@@ -105,7 +115,10 @@ def main() -> int:
             "analysis_source": config.sources.analysis_source,
             "analysis_source_path": analysis_source_path.as_posix(),
             "effective_fps": str(effective_fps) if effective_fps is not None else None,
-            "metric_active_rect": _metric_active_rect_json(metric_active_rect),
+            "metric_active_rect": _metric_active_rect_json(active_rect.rect),
+            "active_rect_source": active_rect.source,
+            "active_rect_detection_mode": active_rect.detection_mode,
+            "active_rect_algorithm_id": active_rect.algorithm_id,
             "selection_window": {
                 "start_frame": quality["window"]["start_frame"],
                 "end_frame_exclusive": quality["window"]["end_frame_exclusive"],
@@ -179,7 +192,7 @@ def _resolve_benchmark_analysis_source(
     input_dir: Path,
     input_paths: Sequence[Path],
     config: ConfigSchema,
-) -> tuple[Path, Fraction | None, MetricActiveRect | None]:
+) -> tuple[Path, Fraction | None, BenchmarkActiveRect]:
     source_path = _resolve_benchmark_analysis_source_path(
         input_dir=input_dir,
         input_paths=input_paths,
@@ -192,7 +205,7 @@ def _resolve_benchmark_analysis_source(
     )
     override = selection.overrides_by_path.get(source_path)
     effective_fps = None if override is None else override.effective_fps
-    return source_path, effective_fps, _metric_active_rect_from_override(override)
+    return source_path, effective_fps, _benchmark_active_rect_from_override(override)
 
 
 def _effective_fps_override_for_path(
@@ -211,17 +224,25 @@ def _effective_fps_override_for_path(
     return None if override is None else override.effective_fps
 
 
-def _metric_active_rect_from_override(
+def _benchmark_active_rect_from_override(
     override: SourceOverrideConfig | None,
-) -> MetricActiveRect | None:
+) -> BenchmarkActiveRect:
     if override is None or override.active_rect is None:
-        return None
+        return BenchmarkActiveRect(
+            rect=None,
+            source="full-frame",
+            detection_mode="aspect_ratio",
+        )
     rect = override.active_rect
-    return MetricActiveRect(
-        x=rect.x,
-        y=rect.y,
-        width=rect.width,
-        height=rect.height,
+    return BenchmarkActiveRect(
+        rect=MetricActiveRect(
+            x=rect.x,
+            y=rect.y,
+            width=rect.width,
+            height=rect.height,
+        ),
+        source="explicit",
+        detection_mode="provided",
     )
 
 
@@ -315,7 +336,7 @@ def _run_benchmark_tiers(
     cache_dir: Path,
     analysis_source_path: Path,
     effective_fps: Fraction | None,
-    metric_active_rect: MetricActiveRect | None,
+    active_rect: BenchmarkActiveRect,
     selection_domain: str | None,
     window_start: int,
     window_end_exclusive: int | None,
@@ -344,7 +365,7 @@ def _run_benchmark_tiers(
             cache_dir=cache_dir,
             analysis_source_path=analysis_source_path,
             effective_fps=effective_fps,
-            metric_active_rect=metric_active_rect,
+            active_rect=active_rect,
             selection_domain=selection_domain,
             window_start=window_start,
             window_end_exclusive=window_end_exclusive,
@@ -360,7 +381,7 @@ def _run_benchmark_tiers(
                 cache_dir=cache_dir,
                 analysis_source_path=analysis_source_path,
                 effective_fps=effective_fps,
-                metric_active_rect=metric_active_rect,
+                active_rect=active_rect,
                 selection_domain=selection_domain,
                 window_start=window_start,
                 window_end_exclusive=window_end_exclusive,
@@ -381,7 +402,7 @@ def _run_tier(
     cache_dir: Path,
     analysis_source_path: Path,
     effective_fps: Fraction | None,
-    metric_active_rect: MetricActiveRect | None,
+    active_rect: BenchmarkActiveRect,
     selection_domain: str | None,
     window_start: int,
     window_end_exclusive: int | None,
@@ -396,7 +417,10 @@ def _run_tier(
         cache_dir,
         analysis_source_path=analysis_source_path,
         effective_fps=effective_fps,
-        metric_active_rect=metric_active_rect,
+        metric_active_rect=active_rect.rect,
+        active_rect_source=active_rect.source,
+        active_rect_detection_mode=active_rect.detection_mode,
+        active_rect_algorithm_id=active_rect.algorithm_id,
         selection_domain=selection_domain,
     )
     analyze_seconds = time.perf_counter() - started

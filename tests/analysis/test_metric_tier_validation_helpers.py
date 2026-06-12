@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 from fractions import Fraction
 from pathlib import Path
 from types import ModuleType
@@ -181,7 +182,10 @@ def test_benchmark_script_progress_wraps_quality_and_candidate_tiers(
 
     def fake_run_tier(**kwargs: object) -> dict[str, object]:
         mode = cast(str, kwargs["mode"])
-        assert kwargs["metric_active_rect"] == MetricActiveRect(x=10, y=20, width=300, height=200)
+        active_rect = cast(Any, kwargs["active_rect"])
+        assert active_rect.rect == MetricActiveRect(x=10, y=20, width=300, height=200)
+        assert active_rect.source == "explicit"
+        assert active_rect.detection_mode == "provided"
         calls.append(mode)
         return {"mode": mode, "analyze_seconds": 0.1}
 
@@ -206,7 +210,11 @@ def test_benchmark_script_progress_wraps_quality_and_candidate_tiers(
         cache_dir=tmp_path / "cache",
         analysis_source_path=tmp_path / "reference.mkv",
         effective_fps=None,
-        metric_active_rect=MetricActiveRect(x=10, y=20, width=300, height=200),
+        active_rect=script.BenchmarkActiveRect(
+            rect=MetricActiveRect(x=10, y=20, width=300, height=200),
+            source="explicit",
+            detection_mode="provided",
+        ),
         selection_domain=None,
         window_start=0,
         window_end_exclusive=None,
@@ -241,6 +249,9 @@ def test_benchmark_script_run_tier_preserves_typed_performance_mode(
         analysis_source_path: Path,
         effective_fps: object,
         metric_active_rect: MetricActiveRect | None,
+        active_rect_source: str,
+        active_rect_detection_mode: str,
+        active_rect_algorithm_id: str,
         selection_domain: str | None,
     ) -> FrameMetrics:
         assert video_paths == [tmp_path / "reference.mkv"]
@@ -248,6 +259,9 @@ def test_benchmark_script_run_tier_preserves_typed_performance_mode(
         assert analysis_source_path == tmp_path / "reference.mkv"
         assert effective_fps is None
         assert metric_active_rect == MetricActiveRect(x=10, y=20, width=300, height=200)
+        assert active_rect_source == "explicit"
+        assert active_rect_detection_mode == "provided"
+        assert active_rect_algorithm_id == "active_rect_resolution_v1"
         assert selection_domain is None
         observed_modes.append(analysis_config.performance_mode)
         return _metrics_payload("performance", [0.0, 0.2, 1.0], [0.0, 0.1, 0.7])
@@ -270,7 +284,11 @@ def test_benchmark_script_run_tier_preserves_typed_performance_mode(
         cache_dir=tmp_path / "cache",
         analysis_source_path=tmp_path / "reference.mkv",
         effective_fps=None,
-        metric_active_rect=MetricActiveRect(x=10, y=20, width=300, height=200),
+        active_rect=script.BenchmarkActiveRect(
+            rect=MetricActiveRect(x=10, y=20, width=300, height=200),
+            source="explicit",
+            detection_mode="provided",
+        ),
         selection_domain=None,
         window_start=0,
         window_end_exclusive=None,
@@ -305,7 +323,7 @@ def test_benchmark_script_resolves_configured_analysis_source_effective_fps_and_
         }
     )
 
-    source_path, effective_fps, metric_active_rect = script._resolve_benchmark_analysis_source(
+    source_path, effective_fps, active_rect = script._resolve_benchmark_analysis_source(
         input_dir=input_dir,
         input_paths=[reference, analysis],
         config=config,
@@ -320,7 +338,32 @@ def test_benchmark_script_resolves_configured_analysis_source_effective_fps_and_
     assert source_path == analysis
     assert effective_fps == Fraction(24000, 1001)
     assert legacy_effective_fps == Fraction(24000, 1001)
-    assert metric_active_rect == MetricActiveRect(x=10, y=20, width=300, height=200)
+    assert active_rect.rect == MetricActiveRect(x=10, y=20, width=300, height=200)
+    assert active_rect.source == "explicit"
+    assert active_rect.detection_mode == "provided"
+
+
+def test_benchmark_script_uses_full_frame_active_rect_provenance_by_default(
+    tmp_path: Path,
+) -> None:
+    script = _load_benchmark_script()
+    input_dir = tmp_path / "comparison_videos"
+    input_dir.mkdir()
+    reference = input_dir / "reference.mkv"
+    reference.write_bytes(b"ref")
+
+    source_path, effective_fps, active_rect = script._resolve_benchmark_analysis_source(
+        input_dir=input_dir,
+        input_paths=[reference],
+        config=ConfigSchema(),
+    )
+
+    assert source_path == reference
+    assert effective_fps is None
+    assert active_rect.rect is None
+    assert active_rect.source == "full-frame"
+    assert active_rect.detection_mode == "aspect_ratio"
+    assert active_rect.algorithm_id == "active_rect_resolution_v1"
 
 
 def test_benchmark_script_requires_selection_domain_for_non_first_analysis_source(
@@ -389,6 +432,7 @@ def _load_benchmark_script() -> ModuleType:
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 

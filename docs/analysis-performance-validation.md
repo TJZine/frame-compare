@@ -40,11 +40,15 @@ running metrics. It supports per-source `effective_fps` overrides and explicit
 source. Active rectangles affect both `quality` and `performance` metric arrays
 and cache identity, so benchmark evidence for letterboxed or pillarboxed sources
 should use the same configured analysis source and explicit active rectangle as
-a normal run. The benchmark and runtime analysis do not use screenshot
-`active_rect_detection`, render metadata rectangles, or dimension/aspect-ratio
-inference. It does not support `sources.analysis_source = "fastest"` or
-automatic `sources.match_fps` policies; use an explicit analysis source and
-explicit effective-FPS overrides for benchmark evidence.
+a normal run. The benchmark analysis does not run the normal active-picture
+resolver, so it does not use screenshot `active_rect_detection`, trusted render
+metadata rectangles, or dimension/aspect-ratio inference. Normal runtime
+analysis uses the resolved active picture prepared from explicit
+`sources.overrides.<selector>.active_rect`, trusted static metadata, configured
+dimension/aspect-ratio inference, or full-frame fallback. The benchmark tool
+does not support `sources.analysis_source = "fastest"` or automatic
+`sources.match_fps` policies; use an explicit analysis source and explicit
+effective-FPS overrides for benchmark evidence.
 
 ## Local Evidence
 

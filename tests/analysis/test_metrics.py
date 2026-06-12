@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from fractions import Fraction
 from pathlib import Path
@@ -52,6 +53,8 @@ from frame_compare.analysis.metrics import (  # noqa: E402
 from frame_compare.analysis.types import FrameMetrics, MetricActiveRect  # noqa: E402
 from frame_compare.config.schema import AnalysisConfig  # noqa: E402
 from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError  # noqa: E402
+
+type FakeClipOp = tuple[str, int | None, int | None] | tuple[str, int, int, int, int]
 
 
 class MockFrame:
@@ -130,6 +133,7 @@ class FakeStd:
         top: int,
     ) -> FakeBalancedClip:
         self._clip.crop_calls.append(("CropAbs", left, top, width, height))
+        self._clip.ops.append(("CropAbs", left, top, width, height))
         return FakeBalancedClip(
             self._clip.values,
             width=width,
@@ -137,6 +141,7 @@ class FakeStd:
             color_family=self._clip.format.color_family,
             resize_calls=self._clip.resize_calls,
             crop_calls=self._clip.crop_calls,
+            ops=self._clip.ops,
         )
 
 
@@ -155,6 +160,7 @@ class FakeResize:
         if format is not None:
             color_family = FAKE_VS.YUV if format == FAKE_VS.YUV420P8 else color_family
         self._clip.resize_calls.append(("Bicubic", width, height))
+        self._clip.ops.append(("Bicubic", width, height))
         return FakeBalancedClip(
             self._clip.values,
             width=self._clip.width if width is None else width,
@@ -162,6 +168,7 @@ class FakeResize:
             color_family=color_family,
             resize_calls=self._clip.resize_calls,
             crop_calls=self._clip.crop_calls,
+            ops=self._clip.ops,
         )
 
     def Bilinear(
@@ -171,6 +178,7 @@ class FakeResize:
         height: int,
     ) -> FakeBalancedClip:
         self._clip.resize_calls.append(("Bilinear", width, height))
+        self._clip.ops.append(("Bilinear", width, height))
         return FakeBalancedClip(
             self._clip.values,
             width=width,
@@ -178,6 +186,7 @@ class FakeResize:
             color_family=self._clip.format.color_family,
             resize_calls=self._clip.resize_calls,
             crop_calls=self._clip.crop_calls,
+            ops=self._clip.ops,
         )
 
 
@@ -191,6 +200,7 @@ class FakeBalancedClip:
         color_family: int = 1,
         resize_calls: list[tuple[str, int | None, int | None]] | None = None,
         crop_calls: list[tuple[str, int, int, int, int]] | None = None,
+        ops: list[FakeClipOp] | None = None,
     ):
         self.values = values
         self.num_frames = len(values)
@@ -199,6 +209,7 @@ class FakeBalancedClip:
         self.format = SimpleNamespace(color_family=color_family)
         self.resize_calls = [] if resize_calls is None else resize_calls
         self.crop_calls = [] if crop_calls is None else crop_calls
+        self.ops = [] if ops is None else ops
         self.resize = FakeResize(self)
         self.std = FakeStd(self)
 
@@ -210,6 +221,7 @@ class FakeBalancedClip:
             color_family=self.format.color_family,
             resize_calls=self.resize_calls,
             crop_calls=self.crop_calls,
+            ops=self.ops,
         )
 
     def __add__(self, other: object) -> FakeBalancedClip:
@@ -222,6 +234,7 @@ class FakeBalancedClip:
             color_family=self.format.color_family,
             resize_calls=self.resize_calls,
             crop_calls=self.crop_calls,
+            ops=self.ops,
         )
 
 
@@ -241,6 +254,7 @@ class FakeCoreStd:
             color_family=colorfamily,
             resize_calls=clips.resize_calls,
             crop_calls=clips.crop_calls,
+            ops=clips.ops,
         )
 
 
@@ -571,6 +585,7 @@ def test_performance_strategy_crops_before_resize_and_remains_dense(
 
     assert source.clip.crop_calls == [("CropAbs", 10, 20, 400, 200)]
     assert source.clip.resize_calls == [("Bicubic", 320, 160)]
+    assert source.clip.ops == [("CropAbs", 10, 20, 400, 200), ("Bicubic", 320, 160)]
     assert result.luminance == [0.0, 0.25, 0.75]
     assert result.motion == [0.0, 0.25, 0.5]
     assert len(result.luminance) == 3
@@ -644,7 +659,9 @@ def test_performance_metric_identity_is_distinct_and_stable() -> None:
     assert '"target_max_width":320' in first_performance
     assert '"resize":"bicubic"' in first_performance
     assert '"temporal":"all_adjacent_pairs"' in first_performance
-    assert "active_rect_aware" in first_performance
+    parsed_performance = json.loads(first_performance)
+    assert parsed_performance["luminance"]["spatial"] == "active_rect_aware_luma_resize"
+    assert parsed_performance["motion"]["spatial"] == "active_rect_aware_luma_resize"
     assert '"x"' not in first_performance
     assert "coarse_to_refined" not in first_performance
 

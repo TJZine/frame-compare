@@ -31,6 +31,32 @@ from frame_compare.config.schema import AnalysisConfig
 FIXED_MTIME = 1704067200.0  # 2024-01-01 00:00:00 UTC
 
 
+def valid_cache_metadata_payload(
+    config: AnalysisConfig,
+    *,
+    frame_count: int = 0,
+    metric_active_rect: dict[str, int] | None = None,
+    active_rect_source: str = "full-frame",
+    active_rect_detection_mode: str = "aspect_ratio",
+) -> dict[str, object]:
+    return {
+        "frame_count": frame_count,
+        "fps": "24/1",
+        "config_fingerprint": "fp",
+        "analysis_source_path": "",
+        "clips": [],
+        "performance_mode": config.performance_mode.value,
+        "algorithm_id": metric_algorithm_id(config),
+        "metric_backend": metric_backend(config),
+        "algorithm_identity_json": stable_metric_algorithm_identity_json(config),
+        "metric_active_rect": metric_active_rect,
+        "active_rect_source": active_rect_source,
+        "active_rect_detection_mode": active_rect_detection_mode,
+        "active_rect_algorithm_id": "active_rect_resolution_v1",
+        "version": CACHE_VERSION,
+    }
+
+
 def create_video_file(tmp_path: Path, name: str = "video.mkv", content: bytes = b"test") -> Path:
     """Create a dummy video file with fixed mtime."""
     f = tmp_path / name
@@ -546,19 +572,7 @@ def test_load_same_version_cache_without_algorithm_metadata_is_corrupted(
     removed_key: str,
 ) -> None:
     config = AnalysisConfig()
-    metadata = {
-        "frame_count": 0,
-        "fps": "24/1",
-        "config_fingerprint": "fp",
-        "analysis_source_path": "",
-        "clips": [],
-        "performance_mode": "quality",
-        "algorithm_id": metric_algorithm_id(config),
-        "metric_backend": "python_numpy",
-        "algorithm_identity_json": stable_metric_algorithm_identity_json(config),
-        "metric_active_rect": None,
-        "version": CACHE_VERSION,
-    }
+    metadata = valid_cache_metadata_payload(config)
     del metadata[removed_key]
     cache_file(tmp_path, "fp").write_text(
         json.dumps(
@@ -681,6 +695,12 @@ def test_load_same_version_cache_with_invalid_metric_active_rect_is_corrupted(
     config = AnalysisConfig()
     rect = {"x": 0, "y": 0, "width": 100, "height": 100}
     rect[field] = value
+    metadata = valid_cache_metadata_payload(
+        config,
+        metric_active_rect=rect,
+        active_rect_source="explicit",
+        active_rect_detection_mode="provided",
+    )
     cache_file(tmp_path, "fp").write_text(
         json.dumps(
             {
@@ -688,19 +708,7 @@ def test_load_same_version_cache_with_invalid_metric_active_rect_is_corrupted(
                 "fingerprint": "fp",
                 "luminance": [],
                 "motion": [],
-                "metadata": {
-                    "frame_count": 0,
-                    "fps": "24/1",
-                    "config_fingerprint": "fp",
-                    "analysis_source_path": "",
-                    "clips": [],
-                    "performance_mode": "quality",
-                    "algorithm_id": metric_algorithm_id(config),
-                    "metric_backend": "python_numpy",
-                    "algorithm_identity_json": stable_metric_algorithm_identity_json(config),
-                    "metric_active_rect": rect,
-                    "version": CACHE_VERSION,
-                },
+                "metadata": metadata,
             }
         ),
         encoding="utf-8",
@@ -716,6 +724,8 @@ def test_load_same_version_cache_with_malformed_algorithm_identity_is_corrupted(
     tmp_path: Path,
 ) -> None:
     config = AnalysisConfig()
+    metadata = valid_cache_metadata_payload(config)
+    metadata["algorithm_identity_json"] = "not-json"
     cache_file(tmp_path, "fp").write_text(
         json.dumps(
             {
@@ -723,18 +733,7 @@ def test_load_same_version_cache_with_malformed_algorithm_identity_is_corrupted(
                 "fingerprint": "fp",
                 "luminance": [],
                 "motion": [],
-                "metadata": {
-                    "frame_count": 0,
-                    "fps": "24/1",
-                    "config_fingerprint": "fp",
-                    "analysis_source_path": "",
-                    "clips": [],
-                    "performance_mode": "quality",
-                    "algorithm_id": metric_algorithm_id(config),
-                    "metric_backend": "python_numpy",
-                    "algorithm_identity_json": "not-json",
-                    "version": CACHE_VERSION,
-                },
+                "metadata": metadata,
             }
         ),
         encoding="utf-8",
@@ -760,19 +759,7 @@ def test_load_same_version_cache_with_inconsistent_algorithm_metadata_is_corrupt
     value: str,
 ) -> None:
     config = AnalysisConfig()
-    metadata = {
-        "frame_count": 0,
-        "fps": "24/1",
-        "config_fingerprint": "fp",
-        "analysis_source_path": "",
-        "clips": [],
-        "performance_mode": "quality",
-        "algorithm_id": metric_algorithm_id(config),
-        "metric_backend": "python_numpy",
-        "algorithm_identity_json": stable_metric_algorithm_identity_json(config),
-        "metric_active_rect": None,
-        "version": CACHE_VERSION,
-    }
+    metadata = valid_cache_metadata_payload(config)
     metadata[field] = value
     cache_file(tmp_path, "fp").write_text(
         json.dumps(
@@ -811,6 +798,7 @@ def test_load_metric_array_contract_violation_is_corrupted(
     frame_count: int,
 ) -> None:
     config = AnalysisConfig()
+    metadata = valid_cache_metadata_payload(config, frame_count=frame_count)
     cache_file(tmp_path, "fp").write_text(
         json.dumps(
             {
@@ -818,19 +806,7 @@ def test_load_metric_array_contract_violation_is_corrupted(
                 "fingerprint": "fp",
                 "luminance": luminance,
                 "motion": motion,
-                "metadata": {
-                    "frame_count": frame_count,
-                    "fps": "24/1",
-                    "config_fingerprint": "fp",
-                    "analysis_source_path": "",
-                    "clips": [],
-                    "performance_mode": "quality",
-                    "algorithm_id": metric_algorithm_id(config),
-                    "metric_backend": "python_numpy",
-                    "algorithm_identity_json": stable_metric_algorithm_identity_json(config),
-                    "metric_active_rect": None,
-                    "version": CACHE_VERSION,
-                },
+                "metadata": metadata,
             }
         ),
         encoding="utf-8",
