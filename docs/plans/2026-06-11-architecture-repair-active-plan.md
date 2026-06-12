@@ -1036,8 +1036,9 @@ Chosen owner seam:
   command construction, process lifecycle, and availability result typing.
 - `src/frame_compare/services/alignment_vspreview.py` owns alignment-specific
   prompt/override policy and consumes adapter outputs.
-- `src/frame_compare/orchestration/doctor.py` owns diagnostic presentation of
-  adapter availability.
+- `src/frame_compare/orchestration/doctor_checks.py` owns the doctor availability
+  check that presents adapter availability as an optional diagnostic result;
+  `doctor.py` owns execution/result aggregation only.
 
 Files in scope:
 
@@ -1077,7 +1078,7 @@ Verification:
 - Classification: new tests required if launch/probe result objects or failure
   branches are introduced.
 - Commands:
-  - `.venv/bin/pytest -q tests/vspreview/test_adapter.py tests/services/test_alignment_vspreview.py tests/services/test_alignment_workflow_vspreview.py tests/orchestration/test_doctor.py`
+  - `.venv/bin/pytest -q tests/vspreview/test_adapter.py tests/services/test_alignment_vspreview.py tests/services/test_alignment_workflow_vspreview.py tests/orchestration/test_doctor.py tests/orchestration/test_doctor_runner.py`
   - Full gate before package closeout.
   - Record any live VSPreview desktop launch as documented-only unless a local
     runtime proof is actually executed.
@@ -1086,6 +1087,36 @@ Review gate:
 
 - Package-specific read-only plan review before implementation.
 - Read-only adversarial implementation review after refactor.
+
+Package-specific audit brief:
+
+- Current code already has explicit typed adapter boundaries:
+  `VSPreviewAvailabilityStatus`, `VSPreviewAvailability`,
+  `VSPreviewConfig`, and `VSPreviewSessionRequest` live in
+  `src/frame_compare/vspreview/adapter.py`.
+- Adapter availability probing returns structured statuses and redacted public
+  probe-failure details; launch writes the session script, resolves the command,
+  runs the process, maps missing launcher/nonzero/probe-failure errors, and owns
+  subprocess mechanics.
+- `src/frame_compare/services/alignment_vspreview.py` consumes adapter outputs
+  and owns alignment-specific optional/forced policy, TTY decisions, prompt
+  parsing, confirmed-offset persistence, progress suspension, and optional
+  warning versus forced error behavior.
+- `src/frame_compare/orchestration/doctor_checks.py` lazily imports the adapter
+  inside `_check_vspreview()` and maps adapter availability to optional doctor
+  `CheckResult` values.
+- Existing tests cover adapter availability statuses, probe-failure redaction,
+  launch error mapping, optional and forced alignment behavior, malformed prompt
+  input, TTY handling, manual override persistence, and optional doctor
+  VSPreview probe handling.
+- Proposed closeout stance: no code change unless package-specific review finds
+  a material boundary or maintainability issue. Update docs only for the
+  `doctor_checks.py` owner correction above.
+- Package-specific adversarial review accepted no-code closeout with no P0-P2
+  findings. P3 follow-ups were applied by correcting the `doctor_checks.py`
+  adapter docstring and adding `tests/orchestration/test_doctor_runner.py` to
+  the focused verification command because that file contains the explicit
+  optional VSPreview probe-failure assertion.
 
 Rollback:
 

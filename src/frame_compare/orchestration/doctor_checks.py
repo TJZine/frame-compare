@@ -139,7 +139,7 @@ def _check_ffmpeg() -> CheckResult:
 def _check_vspreview() -> CheckResult:
     """Check VSPreview is available.
 
-    Uses frame_compare.vspreview.check_vspreview_availability() for consistent detection.
+    Uses frame_compare.vspreview.adapter.check_vspreview_availability() for consistent detection.
     Per vspreview spec §6.1, this is an optional check that reports passed=True
     even when VSPreview is missing or the availability probe itself fails.
     """
