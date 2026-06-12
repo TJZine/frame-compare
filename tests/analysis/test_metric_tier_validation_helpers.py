@@ -264,7 +264,14 @@ def test_benchmark_script_run_tier_preserves_typed_performance_mode(
         assert active_rect_algorithm_id == "active_rect_resolution_v1"
         assert selection_domain is None
         observed_modes.append(analysis_config.performance_mode)
-        return _metrics_payload("performance", [0.0, 0.2, 1.0], [0.0, 0.1, 0.7])
+        return _metrics_payload(
+            "performance",
+            [0.0, 0.2, 1.0],
+            [0.0, 0.1, 0.7],
+            metric_active_rect=MetricActiveRect(x=10, y=20, width=300, height=200),
+            active_rect_source="explicit",
+            active_rect_detection_mode="provided",
+        )
 
     monkeypatch.setattr(script, "calculate_metrics", fake_calculate_metrics)
 
@@ -296,6 +303,73 @@ def test_benchmark_script_run_tier_preserves_typed_performance_mode(
 
     assert observed_modes == [AnalysisPerformanceMode.PERFORMANCE]
     assert result["metadata"]["performance_mode"] == "performance"
+
+
+def test_benchmark_script_recomputes_stale_active_rect_provenance_cache(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    script = _load_benchmark_script()
+    reference = tmp_path / "reference.mkv"
+    reference.write_bytes(b"ref")
+    active_rect = script.BenchmarkActiveRect(
+        rect=MetricActiveRect(x=10, y=20, width=300, height=200),
+        source="explicit",
+        detection_mode="provided",
+    )
+    calls = 0
+    deleted: list[tuple[Path, str]] = []
+
+    def fake_calculate_metrics(*args: object, **kwargs: object) -> FrameMetrics:
+        nonlocal calls
+        calls += 1
+        assert kwargs["metric_active_rect"] == active_rect.rect
+        if calls == 1:
+            return _metrics_payload(
+                "performance",
+                [0.0, 0.2, 1.0],
+                [0.0, 0.1, 0.7],
+                metric_active_rect=active_rect.rect,
+                active_rect_source="full-frame",
+                active_rect_detection_mode="aspect_ratio",
+            )
+        return _metrics_payload(
+            "performance",
+            [0.0, 0.2, 1.0],
+            [0.0, 0.1, 0.7],
+            metric_active_rect=active_rect.rect,
+            active_rect_source="explicit",
+            active_rect_detection_mode="provided",
+        )
+
+    def fake_compute_cache_key(*args: object, **kwargs: object) -> str:
+        assert args[0] == [reference]
+        assert kwargs["metric_active_rect"] == active_rect.rect
+        return "stale-fingerprint"
+
+    def fake_delete_metrics_cache_entry(cache_dir: Path, fingerprint: str) -> None:
+        deleted.append((cache_dir, fingerprint))
+
+    monkeypatch.setattr(script, "calculate_metrics", fake_calculate_metrics)
+    monkeypatch.setattr(script, "compute_cache_key", fake_compute_cache_key)
+    monkeypatch.setattr(script, "delete_metrics_cache_entry", fake_delete_metrics_cache_entry)
+
+    result = script._calculate_metrics_with_expected_active_rect(
+        video_paths=[reference],
+        config=ConfigSchema.model_validate(
+            {"analysis": {"performance_mode": "performance"}}
+        ).analysis,
+        cache_dir=tmp_path / "cache",
+        analysis_source_path=reference,
+        effective_fps=None,
+        active_rect=active_rect,
+        selection_domain=None,
+    )
+
+    assert calls == 2
+    assert deleted == [(tmp_path / "cache", "stale-fingerprint")]
+    assert result.metadata.active_rect_source == "explicit"
+    assert result.metadata.active_rect_detection_mode == "provided"
 
 
 def test_benchmark_script_resolves_configured_analysis_source_effective_fps_and_active_rect(
@@ -474,6 +548,10 @@ def _metrics_payload(
     mode: str,
     luminance: list[float],
     motion: list[float],
+    *,
+    metric_active_rect: MetricActiveRect | None = None,
+    active_rect_source: str = "full-frame",
+    active_rect_detection_mode: str = "aspect_ratio",
 ) -> FrameMetrics:
     return FrameMetrics(
         luminance=luminance,
@@ -487,5 +565,8 @@ def _metrics_payload(
             algorithm_id=f"{mode}-algorithm",
             metric_backend="test",
             algorithm_identity_json="{}",
+            metric_active_rect=metric_active_rect,
+            active_rect_source=active_rect_source,
+            active_rect_detection_mode=active_rect_detection_mode,
         ),
     )

@@ -22,6 +22,7 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
+from frame_compare.analysis.cache_io import compute_cache_key, delete_metrics_cache_entry
 from frame_compare.analysis.metrics import calculate_metrics
 from frame_compare.analysis.selection import select_frames
 from frame_compare.analysis.tier_validation import (
@@ -411,16 +412,13 @@ def _run_tier(
         update={"performance_mode": AnalysisPerformanceMode(mode)}
     )
     started = time.perf_counter()
-    metrics = calculate_metrics(
-        list(video_paths),
-        tier_config,
-        cache_dir,
+    metrics = _calculate_metrics_with_expected_active_rect(
+        video_paths=video_paths,
+        config=tier_config,
+        cache_dir=cache_dir,
         analysis_source_path=analysis_source_path,
         effective_fps=effective_fps,
-        metric_active_rect=active_rect.rect,
-        active_rect_source=active_rect.source,
-        active_rect_detection_mode=active_rect.detection_mode,
-        active_rect_algorithm_id=active_rect.algorithm_id,
+        active_rect=active_rect,
         selection_domain=selection_domain,
     )
     analyze_seconds = time.perf_counter() - started
@@ -456,6 +454,91 @@ def _run_tier(
             "algorithm_identity": json.loads(metrics.metadata.algorithm_identity_json),
         },
     }
+
+
+def _calculate_metrics_with_expected_active_rect(
+    *,
+    video_paths: Sequence[Path],
+    config: AnalysisConfig,
+    cache_dir: Path,
+    analysis_source_path: Path,
+    effective_fps: Fraction | None,
+    active_rect: BenchmarkActiveRect,
+    selection_domain: str | None,
+) -> FrameMetrics:
+    metrics = _calculate_metrics_once(
+        video_paths=video_paths,
+        config=config,
+        cache_dir=cache_dir,
+        analysis_source_path=analysis_source_path,
+        effective_fps=effective_fps,
+        active_rect=active_rect,
+        selection_domain=selection_domain,
+    )
+    if _metrics_active_rect_metadata_matches(metrics, active_rect):
+        return metrics
+
+    cache_key = compute_cache_key(
+        list(video_paths),
+        config,
+        selection_domain=selection_domain,
+        metric_active_rect=active_rect.rect,
+    )
+    delete_metrics_cache_entry(cache_dir, cache_key)
+    metrics = _calculate_metrics_once(
+        video_paths=video_paths,
+        config=config,
+        cache_dir=cache_dir,
+        analysis_source_path=analysis_source_path,
+        effective_fps=effective_fps,
+        active_rect=active_rect,
+        selection_domain=selection_domain,
+    )
+    if _metrics_active_rect_metadata_matches(metrics, active_rect):
+        return metrics
+
+    raise SystemExit(
+        "Benchmark analysis cache active-rect metadata does not match the requested "
+        "benchmark active rectangle after recomputing. Remove the benchmark analysis "
+        "cache entry and rerun."
+    )
+
+
+def _calculate_metrics_once(
+    *,
+    video_paths: Sequence[Path],
+    config: AnalysisConfig,
+    cache_dir: Path,
+    analysis_source_path: Path,
+    effective_fps: Fraction | None,
+    active_rect: BenchmarkActiveRect,
+    selection_domain: str | None,
+) -> FrameMetrics:
+    return calculate_metrics(
+        list(video_paths),
+        config,
+        cache_dir,
+        analysis_source_path=analysis_source_path,
+        effective_fps=effective_fps,
+        metric_active_rect=active_rect.rect,
+        active_rect_source=active_rect.source,
+        active_rect_detection_mode=active_rect.detection_mode,
+        active_rect_algorithm_id=active_rect.algorithm_id,
+        selection_domain=selection_domain,
+    )
+
+
+def _metrics_active_rect_metadata_matches(
+    metrics: FrameMetrics,
+    active_rect: BenchmarkActiveRect,
+) -> bool:
+    metadata = metrics.metadata
+    return (
+        metadata.metric_active_rect == active_rect.rect
+        and metadata.active_rect_source == active_rect.source
+        and metadata.active_rect_detection_mode == active_rect.detection_mode
+        and metadata.active_rect_algorithm_id == active_rect.algorithm_id
+    )
 
 
 def _compare_tier(*, quality: JsonObject, candidate: JsonObject) -> JsonObject:
