@@ -135,14 +135,18 @@ def refine_auto_content_active_rects_for_clips(
         try:
             frames = sampler.sample_luma_frames(clip, sample_indices)
         except Exception as exc:
-            return _handle_detection_error(
-                clips,
-                fail_closed=fail_closed,
-                message=(
-                    f"active-rect auto detection failed for {clip.path.name}: "
-                    f"{type(exc).__name__}: {exc}"
-                ),
+            message = (
+                f"active-rect auto detection failed for {clip.path.name}: "
+                f"{type(exc).__name__}: {exc}"
             )
+            if fail_closed:
+                return _handle_detection_error(
+                    clips,
+                    fail_closed=fail_closed,
+                    message=message,
+                )
+            warnings.append(message)
+            continue
 
         rect = detect_content_active_rect(
             frames,

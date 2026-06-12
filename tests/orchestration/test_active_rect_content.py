@@ -25,8 +25,13 @@ from frame_compare.orchestration.context import (
 )
 
 
-def _clip(*, num_frames: int = 100, trim_start_frames: int = 0) -> ClipState:
-    path = Path("source.mkv")
+def _clip(
+    *,
+    name: str = "source.mkv",
+    num_frames: int = 100,
+    trim_start_frames: int = 0,
+) -> ClipState:
+    path = Path(name)
     return ClipState(
         path=path,
         label="source",
@@ -218,3 +223,39 @@ def test_auto_refinement_does_not_sample_static_non_full_frame_rects() -> None:
 
     assert refined == clips
     assert warnings == []
+
+
+def test_normal_auto_refinement_keeps_successful_clip_when_later_clip_sampling_fails() -> None:
+    clips = [
+        replace(
+            _clip(name="detected.mkv"),
+            active_rect=ClipActiveRect(0, 0, 100, 80, "full-frame", "auto"),
+        ),
+        replace(
+            _clip(name="failed.mkv"),
+            active_rect=ClipActiveRect(0, 0, 100, 80, "full-frame", "auto"),
+        ),
+    ]
+
+    class PartiallyFailingSampler:
+        def sample_luma_frames(
+            self,
+            clip: ClipState,
+            indices: list[int],
+        ) -> list[np.ndarray[tuple[int, int], np.dtype[np.float32]]]:
+            if clip.path.name == "failed.mkv":
+                raise RuntimeError("sample boom")
+            return [_letterbox_frame(top=10, bottom=10) for _index in indices]
+
+    refined, warnings = refine_auto_content_active_rects_for_clips(
+        clips=clips,
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+        detection=ScreenshotActiveRectDetection.AUTO,
+        sampler=PartiallyFailingSampler(),
+        fail_closed=False,
+    )
+
+    assert refined[0].active_rect == ClipActiveRect(0, 10, 100, 60, "content-derived", "auto")
+    assert refined[1].active_rect == ClipActiveRect(0, 0, 100, 80, "full-frame", "auto")
+    assert len(warnings) == 1
+    assert "active-rect auto detection failed for failed.mkv" in warnings[0]
