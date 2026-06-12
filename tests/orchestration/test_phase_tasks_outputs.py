@@ -21,15 +21,16 @@ from frame_compare.config.schema import OverlayMode
 from frame_compare.orchestration import phase_post_render, phase_tasks
 from frame_compare.orchestration.context import ClipActiveRect
 from frame_compare.orchestration.execution import build_phases_after_align
-from frame_compare.orchestration.phases import execute_phases
-from frame_compare.orchestration.types import (
+from frame_compare.orchestration.execution_types import (
     ExecutionState,
     MetadataPrefetch,
-    PostUploadActionResult,
     PublishPhaseOutput,
     RenderArtifacts,
     ReportPhaseOutput,
     RunArtifacts,
+)
+from frame_compare.orchestration.phases import execute_phases
+from frame_compare.orchestration.types import (
     RunRequest,
     SlowpicsUploadConfirmationDecision,
     SlowpicsUploadConfirmationRequest,
@@ -40,6 +41,7 @@ from frame_compare.services.slowpics_post_upload import (
     SlowpicsPostUploadRequest,
 )
 from frame_compare.services.types import AlignmentResult, TmdbMetadata
+from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.progress import NullProgressReporter
 from frame_compare.vs.types import HDRMetadata
 from tests.orchestration.phase_task_helpers import (

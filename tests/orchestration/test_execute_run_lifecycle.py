@@ -16,15 +16,15 @@ from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
 from frame_compare.orchestration import coordinator
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.orchestration.errors import MixedSourceFpsError
-from frame_compare.orchestration.types import (
+from frame_compare.orchestration.execution_types import (
     MetadataPrefetch,
-    PostUploadActionResult,
     PrepState,
     PublishPhaseOutput,
     RenderArtifacts,
     RenderPhaseOutput,
     RunArtifacts,
 )
+from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 from frame_compare.vs.types import SourceInfo

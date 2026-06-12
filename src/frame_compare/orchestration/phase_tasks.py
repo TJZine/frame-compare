@@ -24,6 +24,11 @@ from frame_compare.orchestration.context import (
     ClipState,
     RunContext,
 )
+from frame_compare.orchestration.execution_types import (
+    AlignPhaseOutput,
+    RenderArtifacts,
+    RenderPhaseOutput,
+)
 from frame_compare.orchestration.phase_selection import (
     build_initial_selection_details_by_source_frame,
     generated_frame_count,
@@ -36,7 +41,6 @@ from frame_compare.orchestration.phase_selection import (
     source_frames_for_reference_base_domain,
     to_overlay_selection_detail,
 )
-from frame_compare.orchestration.types import AlignPhaseOutput, RenderArtifacts, RenderPhaseOutput
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
 from frame_compare.services.alignment import (
     align_clips_from_request,

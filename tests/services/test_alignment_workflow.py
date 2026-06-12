@@ -341,7 +341,7 @@ def test_align_clips_from_request_disabled_skips_shared_reuse_io(
         generated_dir=generated_dir,
     )
     monkeypatch.setattr(
-        "frame_compare.services.alignment.load_reusable_offset_entries",
+        "frame_compare.services.alignment_previous_offsets.load_reusable_offset_entries",
         lambda _request: (_ for _ in ()).throw(AssertionError("shared cache read")),
     )
     monkeypatch.setattr(
@@ -467,11 +467,11 @@ def test_align_clips_from_request_prompt_mode_auto_reuses_computed_offsets_witho
         )
     }
     monkeypatch.setattr(
-        "frame_compare.services.alignment.load_reusable_offset_entries",
+        "frame_compare.services.alignment_previous_offsets.load_reusable_offset_entries",
         lambda _request, *, comparisons=None: reusable,
     )
     monkeypatch.setattr(
-        "frame_compare.services.alignment.prompt_for_previous_alignment_offset_reuse",
+        "frame_compare.services.alignment_previous_offsets.prompt_for_previous_alignment_offset_reuse",
         lambda **_: (_ for _ in ()).throw(AssertionError("computed offset prompt")),
     )
 
@@ -540,11 +540,11 @@ def test_align_clips_from_request_prompt_no_reuses_computed_offsets_without_audi
         )
     }
     monkeypatch.setattr(
-        "frame_compare.services.alignment.load_reusable_offset_entries",
+        "frame_compare.services.alignment_previous_offsets.load_reusable_offset_entries",
         lambda _request, *, comparisons=None: reusable,
     )
     monkeypatch.setattr(
-        "frame_compare.services.alignment.prompt_for_previous_alignment_offset_reuse",
+        "frame_compare.services.alignment_previous_offsets.prompt_for_previous_alignment_offset_reuse",
         lambda **_: (_ for _ in ()).throw(AssertionError("computed offset prompt")),
     )
 
@@ -602,11 +602,11 @@ def test_align_clips_from_request_prompt_yes_reuses_confirmed_offsets_skips_vspr
         )
     }
     monkeypatch.setattr(
-        "frame_compare.services.alignment.load_reusable_offset_entries",
+        "frame_compare.services.alignment_previous_offsets.load_reusable_offset_entries",
         lambda _request, *, comparisons=None: reusable,
     )
     monkeypatch.setattr(
-        "frame_compare.services.alignment.prompt_for_previous_alignment_offset_reuse",
+        "frame_compare.services.alignment_previous_offsets.prompt_for_previous_alignment_offset_reuse",
         lambda **_: True,
     )
 
@@ -661,11 +661,11 @@ def test_align_clips_from_request_always_reuses_confirmed_offsets_skips_vsprevie
         )
     }
     monkeypatch.setattr(
-        "frame_compare.services.alignment.load_reusable_offset_entries",
+        "frame_compare.services.alignment_previous_offsets.load_reusable_offset_entries",
         lambda _request, *, comparisons=None: reusable,
     )
     monkeypatch.setattr(
-        "frame_compare.services.alignment.prompt_for_previous_alignment_offset_reuse",
+        "frame_compare.services.alignment_previous_offsets.prompt_for_previous_alignment_offset_reuse",
         lambda **_: (_ for _ in ()).throw(AssertionError("always mode prompt")),
     )
 
@@ -720,11 +720,11 @@ def test_align_clips_from_request_prompt_no_uses_computed_fallback_for_confirmed
         )
     }
     monkeypatch.setattr(
-        "frame_compare.services.alignment.load_reusable_offset_entries",
+        "frame_compare.services.alignment_previous_offsets.load_reusable_offset_entries",
         lambda _request, *, comparisons=None: reusable,
     )
     monkeypatch.setattr(
-        "frame_compare.services.alignment.prompt_for_previous_alignment_offset_reuse",
+        "frame_compare.services.alignment_previous_offsets.prompt_for_previous_alignment_offset_reuse",
         lambda **_: False,
     )
 
@@ -795,11 +795,11 @@ def test_align_clips_from_request_mixed_cached_computed_and_new_computed_write_b
         ),
     }
     monkeypatch.setattr(
-        "frame_compare.services.alignment.load_reusable_offset_entries",
+        "frame_compare.services.alignment_previous_offsets.load_reusable_offset_entries",
         lambda _request, *, comparisons=None: reusable,
     )
     monkeypatch.setattr(
-        "frame_compare.services.alignment.prompt_for_previous_alignment_offset_reuse",
+        "frame_compare.services.alignment_previous_offsets.prompt_for_previous_alignment_offset_reuse",
         lambda **_: False,
     )
 
@@ -879,11 +879,11 @@ def test_align_clips_from_request_prompt_passes_real_shared_prompt_metadata(
         return False
 
     monkeypatch.setattr(
-        "frame_compare.services.alignment.load_reusable_offset_entries",
+        "frame_compare.services.alignment_previous_offsets.load_reusable_offset_entries",
         lambda _request, *, comparisons=None: reusable,
     )
     monkeypatch.setattr(
-        "frame_compare.services.alignment.prompt_for_previous_alignment_offset_reuse",
+        "frame_compare.services.alignment_previous_offsets.prompt_for_previous_alignment_offset_reuse",
         _capture_prompt,
     )
 
@@ -1064,7 +1064,7 @@ def test_align_clips_from_request_disabled_writes_shared_reuse_without_legacy_ca
             return_value=AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, None),
         ),
         patch(
-            "frame_compare.services.alignment.load_reusable_offset_entries",
+            "frame_compare.services.alignment_previous_offsets.load_reusable_offset_entries",
             return_value=None,
         ) as mock_load_shared,
     ):

@@ -25,9 +25,11 @@ from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.errors import ConfigValidationError
 from frame_compare.orchestration import phase_post_render, phase_selection
 from frame_compare.orchestration.context import ClipActiveRect
-from frame_compare.orchestration.types import (
+from frame_compare.orchestration.execution_types import (
     RenderArtifacts,
     RunArtifacts,
+)
+from frame_compare.orchestration.types import (
     SlowpicsUploadConfirmationDecision,
     SlowpicsUploadConfirmationRequest,
 )

@@ -23,7 +23,7 @@ from frame_compare.analysis.types import (
 )
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.orchestration.context import ClipState, RunContext
-from frame_compare.orchestration.types import AnalyzePhaseOutput, FramePlanPhaseOutput
+from frame_compare.orchestration.execution_types import AnalyzePhaseOutput, FramePlanPhaseOutput
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 from frame_compare.utils.types import WorkspacePaths

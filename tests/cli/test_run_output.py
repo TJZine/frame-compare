@@ -7,7 +7,7 @@ from pytest import MonkeyPatch
 
 from frame_compare.cli.entry import app
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
-from frame_compare.orchestration.types import PostUploadActionResult
+from frame_compare.utils.post_upload_actions import PostUploadActionResult
 
 from .cli_helpers import (
     MINIMAL_CONFIG,

@@ -31,6 +31,11 @@ from frame_compare.orchestration.errors import (
     FastestAnalysisSourceCacheOnlyError,
     MixedSourceFpsError,
 )
+from frame_compare.orchestration.execution_types import (
+    MetadataPrefetch,
+    PrepState,
+    RunArtifacts,
+)
 from frame_compare.orchestration.phase_post_render import resolve_run_metadata
 from frame_compare.orchestration.preflight import discover_inputs, prepare_preflight
 from frame_compare.orchestration.probing.probe_cache import (
@@ -49,9 +54,6 @@ from frame_compare.orchestration.selection_domain import (
 )
 from frame_compare.orchestration.source_selection import resolve_source_selection
 from frame_compare.orchestration.types import (
-    MetadataPrefetch,
-    PrepState,
-    RunArtifacts,
     RunDependencies,
     RunRequest,
 )

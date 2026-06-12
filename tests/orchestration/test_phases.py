@@ -19,13 +19,13 @@ from frame_compare.orchestration.context import (
     RunContext,
 )
 from frame_compare.orchestration.execution import build_phases_after_align
-from frame_compare.orchestration.phases import Phase, PhaseStatus, execute_phases
-from frame_compare.orchestration.types import (
+from frame_compare.orchestration.execution_types import (
     ExecutionState,
     MetadataPrefetch,
     RunArtifacts,
-    RunRequest,
 )
+from frame_compare.orchestration.phases import Phase, PhaseStatus, execute_phases
+from frame_compare.orchestration.types import RunRequest
 from frame_compare.utils.progress import LogProgressReporter, NullProgressReporter
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 from frame_compare.utils.types import WorkspacePaths

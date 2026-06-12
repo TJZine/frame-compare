@@ -38,8 +38,14 @@ only the post-render ordering:
 The non-confirmed flow keeps the normal ordering above.
 
 `frame_compare.orchestration.context.RunContext` carries the shared run state across phases.
-Phase task functions return explicit phase-output DTOs, and `execution.py` applies those
-outputs back to `ExecutionState`, `RunContext`, or collected artifacts at phase boundaries.
+Phase task functions return explicit phase-output DTOs. `execution.py` owns phase
+plan construction and timed phase execution, while
+`frame_compare.orchestration.phase_output_application` applies phase outputs
+back to `ExecutionState`, `RunContext`, or collected artifacts at phase
+boundaries. `frame_compare.orchestration.types` owns the public run request,
+dependency, result, and callback DTO contract; internal phase outputs and
+mutable preparation/execution carriers live in
+`frame_compare.orchestration.execution_types`.
 Current phase-family owners are intentionally explicit:
 
 - `frame_compare.orchestration.phase_selection`: frame-plan and analyze phase bodies plus shared selection/frame-translation helpers
@@ -207,10 +213,14 @@ dependency-light shared utility types; `services` must not import
 orchestration-owned or analysis-owned identity types such as `ClipState`,
 `ClipIdentity`, or `ClipFingerprint`.
 
-`frame_compare.services.alignment` owns previous-offset reuse policy and
-alignment precedence. Exact-match computed audio alignment cache hits are treated
-as deterministic and can be reused independently of the human confirmed-offset
-policy; `previous_offsets` governs only VSPreview-confirmed offset reuse.
+`frame_compare.services.alignment` owns alignment entrypoint sequencing and
+precedence, while `frame_compare.services.alignment_previous_offsets` owns
+previous-offset reuse policy. Exact-match computed audio alignment cache hits are
+treated as deterministic and can be reused independently of the human
+confirmed-offset policy; `previous_offsets` governs only VSPreview-confirmed
+offset reuse.
+`frame_compare.services.alignment_keys` owns the stable reference/comparison
+alignment key shared by alignment sequencing and previous-offset policy.
 `frame_compare.services.alignment_reuse_prompt` owns the Rich stderr
 prompt/table helper, including TTY fallback behavior and no-color rendering.
 `frame_compare.services.types.AlignmentProvenance` carries service-owned
@@ -400,7 +410,9 @@ Runtime ownership matrix:
 | --- | --- |
 | Source selector resolution, explicit reference ordering, duplicate-stem fail-fast, and per-source override application during preparation | `frame_compare.orchestration.source_selection` plus `frame_compare.orchestration.preparation` |
 | Analysis-source resolution and fastest-source benchmark policy | `frame_compare.orchestration.analysis_source` |
-| Audio alignment workflow, offset cache coordination, previous-offset reuse policy, and precedence policy | `frame_compare.services.alignment` |
+| Audio alignment workflow, offset cache write coordination, and precedence policy | `frame_compare.services.alignment` |
+| Previous-offset reuse policy and shared-reuse eligibility | `frame_compare.services.alignment_previous_offsets` |
+| Stable reference/comparison alignment key construction | `frame_compare.services.alignment_keys` |
 | Shared previous alignment offset reuse cache persistence | `frame_compare.services.alignment_reuse_cache` |
 | Previous-offset reuse prompt/table display | `frame_compare.services.alignment_reuse_prompt` |
 | Audio stream probing, deterministic stream selection, stream overrides, and FFmpeg/channel-aware extraction policy | `frame_compare.services.alignment_audio` |
@@ -409,7 +421,9 @@ Runtime ownership matrix:
 | Alignment-specific VSPreview verification display and override policy | `frame_compare.services.alignment_vspreview` |
 | VSPreview availability and launch adapter | `frame_compare.vspreview.adapter` |
 | VapourSynth import, Windows DLL registration, plugin detection/loading helpers | `frame_compare.vs.env` |
-| Doctor check ordering, categories, and diagnostic result mapping | `frame_compare.orchestration.doctor` |
+| Doctor execution and diagnostic result mapping | `frame_compare.orchestration.doctor` |
+| Doctor check ordering, categories, and check implementations | `frame_compare.orchestration.doctor_checks` |
+| Doctor diagnostic DTOs | `frame_compare.orchestration.doctor_types` |
 
 ## Public Boundaries
 
@@ -432,7 +446,8 @@ These files currently carry disproportionate change risk:
   (`alignment_audio.py`, `alignment_correlation.py`, `alignment_consensus.py`,
   `alignment_vspreview.py`)
 - `src/frame_compare/render/batch/orchestrator.py`
-- `src/frame_compare/orchestration/doctor.py`
+- `src/frame_compare/orchestration/doctor.py` and its focused diagnostic owners
+  (`doctor_checks.py`, `doctor_types.py`)
 - `src/frame_compare/vspreview/adapter.py`
 
 Working rule: changes to these files should usually trigger full verification and, when they reshape behavior or ownership, a same-pass update to this document.

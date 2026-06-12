@@ -12,6 +12,10 @@ from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.execution import (
     build_execution_phase_plan,
 )
+from frame_compare.orchestration.execution_types import (
+    ExecutionState,
+    RunArtifacts,
+)
 from frame_compare.orchestration.fps_report import (
     build_consolidated_fps_report,
     emit_consolidated_fps_report,
@@ -20,8 +24,6 @@ from frame_compare.orchestration.phases import execute_phases
 from frame_compare.orchestration.preparation import execute_prep
 from frame_compare.orchestration.progress import select_reporter
 from frame_compare.orchestration.types import (
-    ExecutionState,
-    RunArtifacts,
     RunDependencies,
     RunRequest,
     RunResult,
