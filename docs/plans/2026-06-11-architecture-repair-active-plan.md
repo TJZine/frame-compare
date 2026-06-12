@@ -1204,6 +1204,26 @@ Review gate:
 - Package-specific read-only audit before implementation or no-code closeout.
 - Read-only adversarial implementation review after any refactor.
 
+Package-specific audit closeout:
+
+- Earlier packages did not change report generation, CLI JSON output, report
+  auto-open, slow.pics browser precedence, clipboard behavior, or prompt
+  behavior.
+- Direct owner review confirmed CLI side effects remain injected through
+  `RunCommandDeps` in `src/frame_compare/cli/entry.py` and executed only by
+  `src/frame_compare/cli/run_command.py`.
+- `src/frame_compare/services/report/**` remains limited to report payload,
+  rendering, viewer assets, validation, and atomic HTML writes. A side-effect
+  search for browser, clipboard, and prompt hooks found no report-service owner
+  violations.
+- `src/frame_compare/orchestration/phase_post_render.py` carries report state
+  and invokes only the typed slow.pics confirmation callback; it does not own
+  browser or clipboard effects.
+- Package-specific adversarial review reported no P0-P2 findings and accepted
+  no-code closeout with `PACKAGE_6_NO_CODE_CLOSEOUT_ACCEPTABLE: yes`.
+- Focused verification passed:
+  `.venv/bin/pytest -q tests/cli/test_run_report_open.py tests/cli/test_run_command.py tests/cli/test_run_output.py tests/services/test_report_entry.py tests/services/test_report.py`.
+
 ## Package Ranking
 
 1. Package 1: central hotspot, strong existing proof, enables later work.
