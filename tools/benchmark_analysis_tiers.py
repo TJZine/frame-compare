@@ -36,6 +36,7 @@ from frame_compare.config.loader import load_config
 from frame_compare.config.schema import AnalysisConfig, ConfigSchema
 from frame_compare.config.schema_enums import AnalysisPerformanceMode, SourceMatchFpsMode
 from frame_compare.config.schema_models import SourceOverrideConfig
+from frame_compare.orchestration.context import ACTIVE_RECT_RESOLUTION_ALGORITHM
 from frame_compare.orchestration.source_selection import (
     resolve_source_selection,
     resolve_source_selector,
@@ -51,7 +52,7 @@ class BenchmarkActiveRect:
     rect: MetricActiveRect | None
     source: str
     detection_mode: str
-    algorithm_id: str = "active_rect_resolution_v1"
+    algorithm_id: str = ACTIVE_RECT_RESOLUTION_ALGORITHM
 
 
 def main() -> int:
