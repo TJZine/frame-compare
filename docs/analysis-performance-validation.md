@@ -40,16 +40,21 @@ running metrics. It supports per-source `effective_fps` overrides and explicit
 source. Active rectangles affect both `quality` and `performance` metric arrays
 and cache identity, so benchmark evidence for letterboxed or pillarboxed sources
 should use the same configured analysis source and explicit active rectangle as
-a normal run. The benchmark analysis does not run the normal active-picture
-resolver, so it does not use screenshot `active_rect_detection`, trusted render
-metadata rectangles, or dimension/aspect-ratio inference. Normal runtime
-analysis uses the resolved active picture prepared from explicit
-`sources.overrides.<selector>.active_rect`, trusted static metadata, configured
-dimension/aspect-ratio inference, opt-in content detection, or full-frame
-fallback. The benchmark tool
-does not support `sources.analysis_source = "fastest"` or automatic
-`sources.match_fps` policies; use an explicit analysis source and explicit
-effective-FPS overrides for benchmark evidence.
+a normal run. When no explicit active rectangle is configured, the benchmark
+loads `generated/clip_probe.toml` and applies the same static active-picture
+resolver used by preparation so metric metadata preserves the prepared rectangle,
+source, detection mode, and resolver algorithm ID. If the probe snapshot is not
+available, the tool fails instead of fabricating full-frame provenance; run a
+normal preparation path first or configure an explicit active rectangle for the
+selected analysis source. For `screenshots.active_rect_detection = "auto"`, the
+benchmark cannot run content refinement by itself and fails when the prepared
+static rectangle remains full-frame. Normal runtime analysis uses the resolved
+active picture prepared from explicit `sources.overrides.<selector>.active_rect`,
+trusted static metadata, configured dimension/aspect-ratio inference, opt-in
+content detection, or full-frame fallback. The benchmark tool does not support
+`sources.analysis_source = "fastest"` or automatic `sources.match_fps` policies;
+use an explicit analysis source and explicit effective-FPS overrides for
+benchmark evidence.
 
 ## Local Evidence
 

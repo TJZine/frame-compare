@@ -31,12 +31,35 @@ from frame_compare.analysis.tier_validation import (
     compare_selection_category,
     tier_category_tolerance,
 )
-from frame_compare.analysis.types import FrameMetrics, FrameSelection, MetricActiveRect
+from frame_compare.analysis.types import (
+    ActiveRectAlgorithmId,
+    ActiveRectDetectionMode,
+    ActiveRectSource,
+    FrameMetrics,
+    FrameSelection,
+    MetricActiveRect,
+)
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema import AnalysisConfig, ConfigSchema
-from frame_compare.config.schema_enums import AnalysisPerformanceMode, SourceMatchFpsMode
+from frame_compare.config.schema_enums import (
+    AnalysisPerformanceMode,
+    ScreenshotActiveRectDetection,
+    SourceMatchFpsMode,
+)
 from frame_compare.config.schema_models import SourceOverrideConfig
-from frame_compare.orchestration.context import ACTIVE_RECT_RESOLUTION_ALGORITHM
+from frame_compare.orchestration.context import (
+    ACTIVE_RECT_RESOLUTION_ALGORITHM,
+    ClipFingerprint,
+    ClipProbeSnapshot,
+    ClipState,
+)
+from frame_compare.orchestration.probing.probe_cache import (
+    compute_probe_cache_key,
+    load_clip_probe_cache,
+)
+from frame_compare.orchestration.selection_domain import (
+    build_selection_domain_clips_with_diagnostics,
+)
 from frame_compare.orchestration.source_selection import (
     resolve_source_selection,
     resolve_source_selector,
@@ -50,9 +73,9 @@ class BenchmarkActiveRect:
     """Active-rect geometry and provenance used for benchmark cache metadata."""
 
     rect: MetricActiveRect | None
-    source: str
-    detection_mode: str
-    algorithm_id: str = ACTIVE_RECT_RESOLUTION_ALGORITHM
+    source: ActiveRectSource
+    detection_mode: ActiveRectDetectionMode
+    algorithm_id: ActiveRectAlgorithmId = ACTIVE_RECT_RESOLUTION_ALGORITHM
 
 
 def main() -> int:
@@ -73,6 +96,7 @@ def main() -> int:
     if not cache_dir.is_absolute():
         cache_dir = root / cache_dir
     analysis_source_path, effective_fps, active_rect = _resolve_benchmark_analysis_source(
+        root=root,
         input_dir=input_dir,
         input_paths=input_paths,
         config=config,
@@ -191,6 +215,7 @@ def _resolve_benchmark_analysis_source_path(
 
 def _resolve_benchmark_analysis_source(
     *,
+    root: Path,
     input_dir: Path,
     input_paths: Sequence[Path],
     config: ConfigSchema,
@@ -207,7 +232,19 @@ def _resolve_benchmark_analysis_source(
     )
     override = selection.overrides_by_path.get(source_path)
     effective_fps = None if override is None else override.effective_fps
-    return source_path, effective_fps, _benchmark_active_rect_from_override(override)
+    active_rect = _benchmark_active_rect_from_prepared_clip(
+        source_path=source_path,
+        override=override,
+        prepared_clip=_prepared_benchmark_clip(
+            root=root,
+            input_paths=input_paths,
+            config=config,
+            source_path=source_path,
+            overrides_by_path=selection.overrides_by_path,
+        ),
+        config=config,
+    )
+    return source_path, effective_fps, active_rect
 
 
 def _effective_fps_override_for_path(
@@ -226,25 +263,89 @@ def _effective_fps_override_for_path(
     return None if override is None else override.effective_fps
 
 
-def _benchmark_active_rect_from_override(
-    override: SourceOverrideConfig | None,
-) -> BenchmarkActiveRect:
-    if override is None or override.active_rect is None:
-        return BenchmarkActiveRect(
-            rect=None,
-            source="full-frame",
-            detection_mode="aspect_ratio",
+def _prepared_benchmark_clip(
+    *,
+    root: Path,
+    input_paths: Sequence[Path],
+    config: ConfigSchema,
+    source_path: Path,
+    overrides_by_path: dict[Path, SourceOverrideConfig],
+) -> ClipState | None:
+    cache_path = _resolve_config_path(root, config.paths.generated_dir) / "clip_probe.toml"
+    entries_by_key = dict(load_clip_probe_cache(cache_path))
+    snapshots_by_path: dict[Path, ClipProbeSnapshot] = {}
+    for path in input_paths:
+        stats = path.stat()
+        fingerprint = ClipFingerprint(
+            path=path,
+            size_bytes=stats.st_size,
+            mtime_ns=stats.st_mtime_ns,
         )
-    rect = override.active_rect
+        snapshot = entries_by_key.get(compute_probe_cache_key(fingerprint))
+        if snapshot is None:
+            return None
+        snapshots_by_path[path] = snapshot
+
+    result = build_selection_domain_clips_with_diagnostics(
+        ordered_paths=list(input_paths),
+        snapshots_by_path=snapshots_by_path,
+        overrides_by_path=overrides_by_path,
+        match_fps=config.sources.match_fps,
+        active_rect_detection=config.screenshots.active_rect_detection,
+    )
+    return next(clip for clip in result.clips if clip.path == source_path)
+
+
+def _benchmark_active_rect_from_prepared_clip(
+    *,
+    source_path: Path,
+    override: SourceOverrideConfig | None,
+    prepared_clip: ClipState | None,
+    config: ConfigSchema,
+) -> BenchmarkActiveRect:
+    if override is not None and override.active_rect is not None:
+        rect = override.active_rect
+        return BenchmarkActiveRect(
+            rect=MetricActiveRect(
+                x=rect.x,
+                y=rect.y,
+                width=rect.width,
+                height=rect.height,
+            ),
+            source="explicit",
+            detection_mode=cast(
+                ActiveRectDetectionMode,
+                config.screenshots.active_rect_detection.value,
+            ),
+        )
+    if prepared_clip is None or prepared_clip.active_rect is None:
+        raise SystemExit(
+            "Benchmark active-rect provenance is unavailable because prepared clip probe "
+            f"data for {source_path.name} is missing. Run a normal preparation path to "
+            "write generated/clip_probe.toml, or configure an explicit "
+            "sources.overrides.<selector>.active_rect for benchmark evidence."
+        )
+    prepared = prepared_clip.active_rect
+    if (
+        config.screenshots.active_rect_detection == ScreenshotActiveRectDetection.AUTO
+        and prepared.source == "full-frame"
+    ):
+        raise SystemExit(
+            "Benchmark active-rect provenance is incomplete for "
+            "screenshots.active_rect_detection = 'auto' because content refinement is not "
+            "run by this benchmark tool. Run the normal pipeline and benchmark with an "
+            "explicit prepared active_rect, or use a non-auto detection mode."
+        )
     return BenchmarkActiveRect(
         rect=MetricActiveRect(
-            x=rect.x,
-            y=rect.y,
-            width=rect.width,
-            height=rect.height,
+            x=prepared.x,
+            y=prepared.y,
+            width=prepared.width,
+            height=prepared.height,
         ),
-        source="explicit",
-        detection_mode="provided",
+        source=cast(ActiveRectSource, prepared.source),
+        detection_mode=cast(ActiveRectDetectionMode, prepared.detection_mode),
+        algorithm_id=cast(ActiveRectAlgorithmId, prepared.algorithm_id),
     )
 
 

@@ -5,7 +5,7 @@ Profile-Status: explicit
 Last-Updated: 2026-05-20
 Repo-Name: frame-compare
 Default-Branch: main
-Profile-Scope: review-suggestion-adjudication and pr-commit-review
+Profile-Scope: suggestion-review and pr-commit-review
 Profile-Basis: stage1 branch inspection; main branch is sparse and stage1 contains active app/workflow implementation
 
 ## Precedence
@@ -46,7 +46,7 @@ Current truth:
 - `docs/current-cli-contract.md`
 - `importlinter.ini`
 - `pyproject.toml`
-- `.codex/review-context.md` for `review-suggestion-adjudication` and `pr-commit-review`
+- `.codex/review-context.md` for `suggestion-review` and `pr-commit-review`
 - `.codex/config.toml`
 - `.codex/agents/*.toml`
 - `.agents/skills/**`

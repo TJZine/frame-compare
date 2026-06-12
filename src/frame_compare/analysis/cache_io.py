@@ -14,6 +14,9 @@ from typing import TYPE_CHECKING, cast
 
 from frame_compare.analysis.metric_identity import stable_metric_algorithm_identity_json
 from frame_compare.analysis.types import (
+    ActiveRectAlgorithmId,
+    ActiveRectDetectionMode,
+    ActiveRectSource,
     CacheLoadResult,
     ClipIdentity,
     FrameMetrics,
@@ -326,9 +329,7 @@ def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
     active_rect_detection_mode = _parse_active_rect_detection_mode(
         data["active_rect_detection_mode"]
     )
-    active_rect_algorithm_id = data["active_rect_algorithm_id"]
-    if not isinstance(active_rect_algorithm_id, str) or not active_rect_algorithm_id:
-        raise _CacheParseError
+    active_rect_algorithm_id = _parse_active_rect_algorithm_id(data["active_rect_algorithm_id"])
 
     try:
         return MetricsMetadata(
@@ -381,7 +382,7 @@ def _parse_metric_active_rect(value: object) -> MetricActiveRect | None:
         raise _CacheParseError from exc
 
 
-def _parse_active_rect_source(value: object) -> str:
+def _parse_active_rect_source(value: object) -> ActiveRectSource:
     if value not in {
         "explicit",
         "metadata",
@@ -391,13 +392,19 @@ def _parse_active_rect_source(value: object) -> str:
         "full-frame",
     }:
         raise _CacheParseError
-    return cast(str, value)
+    return cast(ActiveRectSource, value)
 
 
-def _parse_active_rect_detection_mode(value: object) -> str:
+def _parse_active_rect_detection_mode(value: object) -> ActiveRectDetectionMode:
     if value not in {"provided", "dimension", "aspect_ratio", "auto"}:
         raise _CacheParseError
-    return cast(str, value)
+    return cast(ActiveRectDetectionMode, value)
+
+
+def _parse_active_rect_algorithm_id(value: object) -> ActiveRectAlgorithmId:
+    if value != "active_rect_resolution_v2":
+        raise _CacheParseError
+    return cast(ActiveRectAlgorithmId, value)
 
 
 def _parse_algorithm_identity_json(value: str) -> Mapping[str, object]:

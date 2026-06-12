@@ -11,6 +11,16 @@ if TYPE_CHECKING:
 
 
 CacheLoadReason = Literal["not_found", "corrupted", "version_mismatch", "mismatched_inputs"]
+ActiveRectSource = Literal[
+    "explicit",
+    "metadata",
+    "dimension-derived",
+    "aspect-ratio-derived",
+    "content-derived",
+    "full-frame",
+]
+ActiveRectDetectionMode = Literal["provided", "dimension", "aspect_ratio", "auto"]
+ActiveRectAlgorithmId = Literal["active_rect_resolution_v2"]
 type SelectionDetailsByFrame = dict[int, SelectionDetail]
 
 
@@ -80,9 +90,9 @@ class MetricsMetadata:
     metric_backend: str = ""
     algorithm_identity_json: str = "{}"
     metric_active_rect: MetricActiveRect | None = None
-    active_rect_source: str = "full-frame"
-    active_rect_detection_mode: str = "aspect_ratio"
-    active_rect_algorithm_id: str = "active_rect_resolution_v2"
+    active_rect_source: ActiveRectSource = "full-frame"
+    active_rect_detection_mode: ActiveRectDetectionMode = "aspect_ratio"
+    active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v2"
     version: int = 6
 
 

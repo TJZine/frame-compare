@@ -354,11 +354,15 @@ def _is_safe_active_rect(rect: GeometryRect, source: SourceGeometry) -> bool:
 
 
 def _mod_safe_rect(rect: GeometryRect) -> GeometryRect:
-    width = _mod_safe_size(rect.width)
-    height = _mod_safe_size(rect.height)
+    x_offset = rect.x % 2 if rect.width > 1 else 0
+    y_offset = rect.y % 2 if rect.height > 1 else 0
+    width = _mod_safe_size(rect.width - x_offset)
+    height = _mod_safe_size(rect.height - y_offset)
+    if width <= 1 or height <= 1:
+        return rect
     return GeometryRect(
-        rect.x + ((rect.width - width) // 2),
-        rect.y + ((rect.height - height) // 2),
+        rect.x + x_offset + ((rect.width - x_offset - width) // 2),
+        rect.y + y_offset + ((rect.height - y_offset - height) // 2),
         width,
         height,
     )

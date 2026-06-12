@@ -31,6 +31,7 @@ from frame_compare.analysis.types import (
 )
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_enums import AnalysisPerformanceMode
+from tests.orchestration.execute_run_helpers import write_probe_cache_for_inputs
 
 
 def test_nearest_frame_distances_returns_one_distance_per_candidate() -> None:
@@ -398,6 +399,7 @@ def test_benchmark_script_resolves_configured_analysis_source_effective_fps_and_
     )
 
     source_path, effective_fps, active_rect = script._resolve_benchmark_analysis_source(
+        root=tmp_path,
         input_dir=input_dir,
         input_paths=[reference, analysis],
         config=config,
@@ -414,7 +416,7 @@ def test_benchmark_script_resolves_configured_analysis_source_effective_fps_and_
     assert legacy_effective_fps == Fraction(24000, 1001)
     assert active_rect.rect == MetricActiveRect(x=10, y=20, width=300, height=200)
     assert active_rect.source == "explicit"
-    assert active_rect.detection_mode == "provided"
+    assert active_rect.detection_mode == "aspect_ratio"
 
 
 def test_benchmark_script_uses_full_frame_active_rect_provenance_by_default(
@@ -425,19 +427,40 @@ def test_benchmark_script_uses_full_frame_active_rect_provenance_by_default(
     input_dir.mkdir()
     reference = input_dir / "reference.mkv"
     reference.write_bytes(b"ref")
+    config = ConfigSchema()
+    write_probe_cache_for_inputs(tmp_path / "generated" / "clip_probe.toml", [reference], config)
 
     source_path, effective_fps, active_rect = script._resolve_benchmark_analysis_source(
+        root=tmp_path,
         input_dir=input_dir,
         input_paths=[reference],
-        config=ConfigSchema(),
+        config=config,
     )
 
     assert source_path == reference
     assert effective_fps is None
-    assert active_rect.rect is None
+    assert active_rect.rect == MetricActiveRect(x=0, y=0, width=1920, height=1080)
     assert active_rect.source == "full-frame"
     assert active_rect.detection_mode == "aspect_ratio"
     assert active_rect.algorithm_id == "active_rect_resolution_v2"
+
+
+def test_benchmark_script_requires_prepared_probe_for_implicit_active_rect(
+    tmp_path: Path,
+) -> None:
+    script = _load_benchmark_script()
+    input_dir = tmp_path / "comparison_videos"
+    input_dir.mkdir()
+    reference = input_dir / "reference.mkv"
+    reference.write_bytes(b"ref")
+
+    with pytest.raises(SystemExit, match="prepared clip probe data"):
+        script._resolve_benchmark_analysis_source(
+            root=tmp_path,
+            input_dir=input_dir,
+            input_paths=[reference],
+            config=ConfigSchema(),
+        )
 
 
 def test_benchmark_script_requires_selection_domain_for_non_first_analysis_source(

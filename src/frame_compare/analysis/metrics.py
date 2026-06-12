@@ -19,6 +19,9 @@ from frame_compare.analysis.metric_strategies import (
     calculate_metric_strategy,
 )
 from frame_compare.analysis.types import (
+    ActiveRectAlgorithmId,
+    ActiveRectDetectionMode,
+    ActiveRectSource,
     ClipIdentity,
     FrameMetrics,
     MetricActiveRect,
@@ -92,9 +95,9 @@ def _build_metrics(
     analysis_source_path: Path,
     effective_fps: Fraction | None,
     metric_active_rect: MetricActiveRect | None,
-    active_rect_source: str,
-    active_rect_detection_mode: str,
-    active_rect_algorithm_id: str,
+    active_rect_source: ActiveRectSource,
+    active_rect_detection_mode: ActiveRectDetectionMode,
+    active_rect_algorithm_id: ActiveRectAlgorithmId,
 ) -> FrameMetrics:
     return FrameMetrics(
         luminance=result.luminance,
@@ -141,9 +144,9 @@ def calculate_metrics(
     analysis_source_path: Path | None = None,
     effective_fps: Fraction | None = None,
     metric_active_rect: MetricActiveRect | None = None,
-    active_rect_source: str = "full-frame",
-    active_rect_detection_mode: str = "aspect_ratio",
-    active_rect_algorithm_id: str = "active_rect_resolution_v2",
+    active_rect_source: ActiveRectSource = "full-frame",
+    active_rect_detection_mode: ActiveRectDetectionMode = "aspect_ratio",
+    active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v2",
 ) -> FrameMetrics:
     """
     Calculate frame metrics for the given clips.

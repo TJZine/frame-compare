@@ -327,6 +327,26 @@ def _load_probe_cache_entries(cache_paths: list[Path]) -> dict[str, ClipProbeSna
     return entries_by_key
 
 
+def _persist_probe_snapshots_for_run(
+    *,
+    workspace: WorkspacePaths,
+    snapshots_by_path: dict[Path, ClipProbeSnapshot],
+) -> None:
+    current_entries = {
+        compute_probe_cache_key(snapshot.fingerprint): snapshot
+        for snapshot in snapshots_by_path.values()
+    }
+    run_cache_path = workspace.generated_dir / "clip_probe.toml"
+    shared_cache_path = _shared_probe_cache_path(workspace)
+    save_clip_probe_cache(run_cache_path, current_entries)
+    if shared_cache_path == run_cache_path:
+        return
+    entries_by_key = dict(load_clip_probe_cache(shared_cache_path))
+    for snapshot in snapshots_by_path.values():
+        entries_by_key[compute_probe_cache_key(snapshot.fingerprint)] = snapshot
+    save_clip_probe_cache(shared_cache_path, entries_by_key)
+
+
 def _probe_input_videos(
     *,
     workspace: WorkspacePaths,
@@ -490,11 +510,12 @@ async def execute_prep(
     prevalidated_analysis_clip: ClipState | None = None
     prevalidated_selection_window: SelectionWindow | None = None
     prevalidated_selection_domain: str | None = None
+    prevalidated_snapshots_by_path: dict[Path, ClipProbeSnapshot] | None = None
     load_source_diagnostics: list[str] = []
     source_warnings: list[str] = []
 
     if request.from_cache_only and analysis_required:
-        cached_snapshots = _cached_probe_snapshots_for_cache_only(
+        prevalidated_snapshots_by_path = _cached_probe_snapshots_for_cache_only(
             workspace=workspace,
             input_videos=input_videos,
         )
@@ -506,7 +527,7 @@ async def execute_prep(
             input_videos=input_videos,
             config=config,
             overrides_by_path=overrides_by_path,
-            snapshots_by_path=cached_snapshots,
+            snapshots_by_path=prevalidated_snapshots_by_path,
         )
         _validate_source_fps_compatibility(prevalidated_clips)
         prevalidated_selection_window = compute_selection_window_for_clips(
@@ -554,8 +575,16 @@ async def execute_prep(
     )
 
     if prevalidated_clips is not None:
-        if prevalidated_selection_window is None or prevalidated_selection_domain is None:
+        if (
+            prevalidated_selection_window is None
+            or prevalidated_selection_domain is None
+            or prevalidated_snapshots_by_path is None
+        ):
             raise RuntimeError("Prevalidated selection domain was not resolved.")
+        _persist_probe_snapshots_for_run(
+            workspace=workspace,
+            snapshots_by_path=prevalidated_snapshots_by_path,
+        )
         clips = prevalidated_clips
         analysis_clip = prevalidated_analysis_clip
         selection_window = prevalidated_selection_window

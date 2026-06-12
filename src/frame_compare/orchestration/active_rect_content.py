@@ -431,29 +431,14 @@ def _median_margins(cluster: Sequence[_Margins]) -> _Margins:
 def _rect_from_margins(margins: _Margins, *, width: int, height: int) -> ContentActiveRect | None:
     if not _margins_are_sane(margins, width=width, height=height):
         return None
-    x = _normalize_even_offset(margins.left)
-    y = _normalize_even_offset(margins.top)
-    right = width - _normalize_even_offset(margins.right)
-    bottom = height - _normalize_even_offset(margins.bottom)
-    rect_width = _normalize_even_size(right - x)
-    rect_height = _normalize_even_size(bottom - y)
+    x = margins.left
+    y = margins.top
+    right = width - margins.right
+    bottom = height - margins.bottom
+    rect_width = right - x
+    rect_height = bottom - y
     if rect_width <= 0 or rect_height <= 0:
         return None
     if x + rect_width > width or y + rect_height > height:
         return None
-    return ContentActiveRect(
-        x=x,
-        y=y,
-        width=rect_width,
-        height=rect_height,
-    )
-
-
-def _normalize_even_offset(value: int) -> int:
-    return value if value % 2 == 0 else value + 1
-
-
-def _normalize_even_size(value: int) -> int:
-    if value <= 1:
-        return value
-    return value - (value % 2)
+    return ContentActiveRect(x=x, y=y, width=rect_width, height=rect_height)

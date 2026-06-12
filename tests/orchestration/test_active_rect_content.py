@@ -164,12 +164,12 @@ def test_tiny_margins_below_threshold_return_no_detection() -> None:
     assert detect_content_active_rect(frames) is None
 
 
-def test_odd_detected_margins_normalize_to_even_rect_inside_content() -> None:
+def test_odd_detected_margins_preserve_source_frame_identity() -> None:
     frames = [_letterbox_frame(top=9, bottom=9) for _index in range(8)]
 
     rect = detect_content_active_rect(frames)
 
-    assert rect == ContentActiveRect(x=0, y=10, width=100, height=60)
+    assert rect == ContentActiveRect(x=0, y=9, width=100, height=62)
 
 
 def test_one_frame_evidence_is_rejected() -> None:

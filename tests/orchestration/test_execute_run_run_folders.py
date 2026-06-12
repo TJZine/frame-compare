@@ -29,6 +29,7 @@ from frame_compare.config.loader import load_config
 from frame_compare.config.schema import AnalysisConfig
 from frame_compare.orchestration import phase_post_render, phase_selection, preparation
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
+from frame_compare.orchestration.probing.probe_cache import load_clip_probe_cache
 from frame_compare.services.errors import TmdbError
 from frame_compare.services.run_folder import RunFolderReservation, derive_run_folder_name
 from frame_compare.services.types import MetadataConfig, TmdbMetadata
@@ -365,7 +366,55 @@ enable = false
     assert second.cache_hit is True
     assert second.screenshot_dir is not None
     assert second.screenshot_dir.parent.parent == input_dir
-    assert len([path for path in input_dir.iterdir() if path.is_dir()]) == 2
+    run_dirs = [path for path in input_dir.iterdir() if path.is_dir()]
+    assert len(run_dirs) == 2
+    assert all((run_dir / "generated" / "clip_probe.toml").exists() for run_dir in run_dirs)
+
+
+def test_execute_run_cache_only_run_folder_probe_snapshot_excludes_unrelated_shared_entries(
+    tmp_path: Path,
+) -> None:
+    create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
+    input_dir = tmp_path / "comparison_videos"
+    create_video_files(input_dir, "source.mkv", "unrelated.mkv")
+    source_path = input_dir / "source.mkv"
+    unrelated_path = input_dir / "unrelated.mkv"
+    config = load_config(tmp_path / "config" / "config.toml")
+    write_probe_cache_for_inputs(
+        tmp_path / "generated" / "clip_probe.toml",
+        [source_path, unrelated_path],
+        config,
+    )
+    write_metrics_cache(
+        tmp_path / "generated" / "cache" / "analysis",
+        source_path=source_path,
+        config=config,
+    )
+    unrelated_path.unlink()
+
+    result = asyncio.run(
+        execute_run(
+            RunRequest(
+                root=tmp_path,
+                from_cache_only=True,
+                skip_analysis=False,
+                skip_metadata=True,
+                no_upload=True,
+            ),
+            deps=RunDependencies(
+                vs_loader=AnalysisCapableVSLoader(),
+                ffmpeg_runner=FakeFFmpegRunner(),
+            ),
+        )
+    )
+
+    assert result.success is True
+    assert result.cache_hit is True
+    assert result.screenshot_dir is not None
+    run_probe_cache = load_clip_probe_cache(
+        result.screenshot_dir.parent / "generated" / "clip_probe.toml"
+    )
+    assert {snapshot.fingerprint.path for snapshot in run_probe_cache.values()} == {source_path}
 
 
 def test_execute_run_normal_rerun_creates_fresh_run_folder_and_uses_shared_cache(

@@ -715,6 +715,41 @@ def test_load_same_version_cache_without_active_rect_provenance_is_corrupted(
 @pytest.mark.parametrize(
     ("field", "value"),
     [
+        ("active_rect_source", "unknown"),
+        ("active_rect_detection_mode", "unknown"),
+        ("active_rect_algorithm_id", "unknown"),
+    ],
+)
+def test_load_same_version_cache_with_invalid_active_rect_provenance_is_corrupted(
+    tmp_path: Path,
+    field: str,
+    value: str,
+) -> None:
+    config = AnalysisConfig()
+    metadata = valid_cache_metadata_payload(config)
+    metadata[field] = value
+    cache_file(tmp_path, "fp").write_text(
+        json.dumps(
+            {
+                "version": CACHE_VERSION,
+                "fingerprint": "fp",
+                "luminance": [],
+                "motion": [],
+                "metadata": metadata,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = load_cached_metrics(tmp_path, "fp", [])
+
+    assert result.success is False
+    assert result.reason == "corrupted"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
         ("x", -1),
         ("y", -1),
         ("width", 0),

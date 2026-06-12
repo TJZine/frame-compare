@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError, SelectionError
@@ -13,6 +13,7 @@ from frame_compare.analysis.frame_plan import create_frame_plan
 from frame_compare.analysis.metrics import calculate_metrics
 from frame_compare.analysis.selection import select_frames
 from frame_compare.analysis.types import (
+    ActiveRectAlgorithmId,
     CacheLoadResult,
     FrameMetrics,
     FrameSelection,
@@ -224,9 +225,12 @@ def run_analyze_phase(
             active_rect_detection_mode=ctx.analysis_clip.active_rect.detection_mode
             if ctx.analysis_clip.active_rect is not None
             else ctx.config.screenshots.active_rect_detection.value,
-            active_rect_algorithm_id=ctx.analysis_clip.active_rect.algorithm_id
-            if ctx.analysis_clip.active_rect is not None
-            else ACTIVE_RECT_RESOLUTION_ALGORITHM,
+            active_rect_algorithm_id=cast(
+                ActiveRectAlgorithmId,
+                ctx.analysis_clip.active_rect.algorithm_id
+                if ctx.analysis_clip.active_rect is not None
+                else ACTIVE_RECT_RESOLUTION_ALGORITHM,
+            ),
         )
     selection = _select_frames_for_selection_domain(
         metrics=metrics,

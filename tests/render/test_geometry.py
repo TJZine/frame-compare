@@ -402,6 +402,55 @@ def test_plan_render_geometry_aligned_accepts_content_derived_active_rect() -> N
     assert plans[0].active_rect == GeometryRect(0, 280, 3840, 1600)
 
 
+def test_plan_render_geometry_aligned_mod_safes_odd_content_derived_crop() -> None:
+    (plan,) = plan_render_geometry(
+        (
+            SourceGeometry(
+                width=100,
+                height=80,
+                active_rect=GeometryRect(0, 9, 100, 62),
+                active_rect_source="content-derived",
+                label="odd-content",
+            ),
+        ),
+        mode="aligned",
+        options=RenderGeometryOptions(active_rect_detection="provided"),
+    )
+
+    assert plan.active_rect_source == "content-derived"
+    assert plan.active_rect == GeometryRect(0, 9, 100, 62)
+    assert plan.crop_rect == GeometryRect(0, 10, 100, 60)
+    assert plan.crop == GeometryMargins(top=10, bottom=10)
+
+
+@pytest.mark.parametrize(
+    "active_rect",
+    [
+        GeometryRect(1, 1, 2, 2),
+        GeometryRect(1, 1, 1, 1),
+    ],
+)
+def test_plan_render_geometry_aligned_preserves_tiny_odd_active_rect_when_no_even_crop_fits(
+    active_rect: GeometryRect,
+) -> None:
+    (plan,) = plan_render_geometry(
+        (
+            SourceGeometry(
+                width=10,
+                height=10,
+                active_rect=active_rect,
+                active_rect_source="content-derived",
+                label="tiny-odd-content",
+            ),
+        ),
+        mode="aligned",
+        options=RenderGeometryOptions(active_rect_detection="provided"),
+    )
+
+    assert plan.active_rect == active_rect
+    assert plan.crop_rect == active_rect
+
+
 def test_plan_render_geometry_aligned_largest_active_never_exceeds_target_without_aspect_crop():
     plans = plan_render_geometry(
         (
