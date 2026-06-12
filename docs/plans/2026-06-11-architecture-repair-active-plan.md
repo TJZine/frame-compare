@@ -962,6 +962,56 @@ Package-specific implementation brief:
 - Update tests only if they need to patch or directly exercise the new
   accumulator; do not change artifact ordering expectations.
 
+Package plan review:
+
+- Reviewer Avicenna reported no P0-P2 blockers and
+  `MAY_PROCEED_AFTER_ADJUDICATION: yes`.
+- Non-blocking findings accepted:
+  - Keep `results.py` free of scheduling concepts, progress reporter, and
+    `render_frame` imports.
+  - Preserve empty-batch behavior where `render_batch([])` returns `[]` before
+    starting/completing a progress phase.
+  - Add `tests/integration/test_render_pipeline.py` to focused verification.
+  - Record Docker/runtime proof as not touched because the implementation is a
+    pure accumulator extraction.
+
+Implementation record:
+
+- Implemented in this session.
+- Added `src/frame_compare/render/batch/results.py` with `RenderBatchResults`
+  owning slot initialization, indexed path recording, and ordered completion
+  validation.
+- Updated `src/frame_compare/render/batch/orchestrator.py` so sequential and
+  parallel scheduling record rendered paths through the accumulator while
+  scheduling, progress, fail-fast behavior, in-flight wait behavior, and
+  `render_frame` call sites remain in the orchestrator.
+- Added direct accumulator tests for ordering and missing-slot error behavior.
+- Docker/runtime integration semantics were not touched, so no Docker proof is
+  claimed for this package.
+
+Observed verification:
+
+- `.venv/bin/pytest -q tests/render/test_orchestrator.py tests/render/test_orchestrator_batch_screenshots.py tests/render/test_orchestrator_screenshots.py tests/integration/test_render_orchestrator.py tests/integration/test_render_pipeline.py tests/orchestration/test_phase_tasks_outputs.py` passed.
+- `UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_api_docs.py --check` passed with no drift.
+- `.venv/bin/pyright --warnings` passed: 0 errors, 0 warnings.
+- `.venv/bin/ruff check .` passed.
+- `UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini` passed: both contracts kept.
+- `.venv/bin/bandit -c pyproject.toml -r src --severity-level medium` passed with no medium/high issues.
+- `.venv/bin/pytest -q` passed; expected runtime/platform skips remained.
+
+Implementation review:
+
+- Read-only reviewer Godel reported no P0/P1 runtime findings.
+- P2 finding: `src/frame_compare/render/batch/results.py` was untracked while
+  `orchestrator.py` and tests imported it. Adjudication: accepted as
+  closeout/git hygiene; Package 4 must be staged and committed with the new file
+  before moving on.
+- Reviewer confirmed ordering remains index-based, empty batches return before
+  progress starts, failure/progress behavior remains in `orchestrator.py`, no
+  new parallel submissions occur after first exception, and label/range
+  projection remains in `expansion.py`.
+- Verdict: Package 4 is closed after adjudication and commit hygiene.
+
 Rollback:
 
 - Re-inline result accumulation helper into `render/batch/orchestrator.py`.
