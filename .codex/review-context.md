@@ -46,6 +46,7 @@ Current truth:
 - `docs/current-cli-contract.md`
 - `importlinter.ini`
 - `pyproject.toml`
+- `.codex/review-context.md` for `review-suggestion-adjudication` and `pr-commit-review`
 - `.codex/config.toml`
 - `.codex/agents/*.toml`
 - `.agents/skills/**`

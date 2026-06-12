@@ -32,6 +32,8 @@ If a task needs a broader compatibility promise, the maintainer must confirm it 
 - `docs/current-cli-contract.md`: present-day CLI command, flag, and persistence contract
 - `docs/DECISIONS.md`: decision log and historical exceptions
 - `docs/api.md`: generated reference, not a stability promise by itself
+- `.codex/review-context.md`: repo review profile for `review-suggestion-adjudication`
+  and `pr-commit-review`
 - `README.md`: product overview, install, quickstart
 - `CONTRIBUTING.md`: contributor onboarding and PR mechanics
 - `docs/plans/**`: reference-only unless the file starts with `Status: Active`
