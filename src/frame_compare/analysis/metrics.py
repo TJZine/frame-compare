@@ -143,7 +143,7 @@ def calculate_metrics(
     metric_active_rect: MetricActiveRect | None = None,
     active_rect_source: str = "full-frame",
     active_rect_detection_mode: str = "aspect_ratio",
-    active_rect_algorithm_id: str = "active_rect_resolution_v1",
+    active_rect_algorithm_id: str = "active_rect_resolution_v2",
 ) -> FrameMetrics:
     """
     Calculate frame metrics for the given clips.

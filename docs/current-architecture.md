@@ -63,10 +63,14 @@ in one frame pass, while `performance` is an approximate VapourSynth PlaneStats
 mode that can choose different dark, bright, or motion frames. Both modes apply
 the prepared active picture rectangle for the analysis source before metric
 calculation. Preparation resolves that rectangle through
-`frame_compare.orchestration.active_rect`, using explicit source overrides,
-trusted static metadata, configured dimension/aspect-ratio detection, or a
-full-frame fallback. Both modes still return dense source-frame-indexed luminance
-and motion arrays for the selected analysis clip.
+`frame_compare.orchestration.active_rect` for static evidence, using explicit
+source overrides, trusted static metadata, configured dimension/aspect-ratio
+detection, or a full-frame fallback. When
+`screenshots.active_rect_detection = "auto"`, preparation then runs optional
+post-selection-window content refinement through
+`frame_compare.orchestration.active_rect_content` before analysis-source
+resolution and analysis-cache validation. Both modes still return dense
+source-frame-indexed luminance and motion arrays for the selected analysis clip.
 
 ## Module Boundaries
 
@@ -136,7 +140,9 @@ Primary owned paths:
   selected analysis clip. Metric-array cache identity includes the selected
   analysis performance mode, algorithm identity, active-rect resolver policy,
   every prepared clip's resolved active rectangle, and the concrete metric active
-  rectangle token, with a full-frame rectangle representing no crop. It excludes
+  rectangle token, with a full-frame rectangle representing no crop.
+  Content-derived active rectangles from opt-in `auto` detection are final
+  prepared rectangles and are included in the same token/provenance fields. It excludes
   frame-selection counts, `user_frames`, random seed, and dark/bright quantile
   thresholds because those affect frame choice rather than metric computation.
 - `<resolved paths.generated_dir>/cache/alignment/alignment_reuse.toml`:
@@ -390,19 +396,23 @@ persisted. It does not own slow.pics upload policy, prompting, or browser side
 effects.
 
 Active-picture resolution is owned by `frame_compare.orchestration.active_rect`
-during preparation. It produces a final `ClipState.active_rect` for each prepared
-clip with provenance: explicit, metadata, dimension-derived,
-aspect-ratio-derived, or full-frame. Analysis consumes that prepared rectangle
-through analysis-owned `MetricActiveRect`; render consumes it through
-render-local request fields. Screenshot rendering still owns geometry and writer
-policy inside `frame_compare.render`: `frame_compare.render.geometry` plans
+and optional `frame_compare.orchestration.active_rect_content` during
+preparation. Static resolution produces explicit, metadata, dimension-derived,
+aspect-ratio-derived, or full-frame rectangles from probe/config evidence.
+Opt-in `auto` content refinement runs only after the shared `SelectionWindow`
+exists, samples a bounded deterministic set of luma frames for unresolved
+full-frame clips, and can produce `content-derived` provenance. Analysis consumes
+the final prepared rectangle through analysis-owned `MetricActiveRect`; render
+consumes it through render-local request fields. Screenshot rendering still owns
+geometry and writer policy inside `frame_compare.render`: `frame_compare.render.geometry` plans
 optional aligned crop/scale/pad geometry, mod-safe crop rectangles, fit-to-target
 scale/canvas policy, padding, and overlay origins. Render batch expansion treats
 prepared active rectangles as already resolved for normal orchestration requests,
 while direct render batch calls without provenance can still use render-local
-geometry inference. The FFmpeg backend applies geometry filters after exact frame
-selection, and the VapourSynth path chooses between the Pillow writer and eligible
-`core.fpng.Write` output without changing CLI import-time behavior.
+static geometry inference; render does not sample content. Native screenshot
+render remains full-frame. The FFmpeg backend applies geometry filters after
+exact frame selection, and the VapourSynth path chooses between the Pillow writer
+and eligible `core.fpng.Write` output without changing CLI import-time behavior.
 
 Runtime ownership matrix:
 

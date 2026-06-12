@@ -508,6 +508,9 @@ def test_schema_model_enums_accept_config_strings_and_reject_unknown_values() ->
     assert logging.level == LogLevel.DEBUG
     assert logging.format == LogFormat.JSON
 
+    auto_screenshots = ScreenshotsConfig.model_validate({"active_rect_detection": "auto"})
+    assert auto_screenshots.active_rect_detection == ScreenshotActiveRectDetection.AUTO
+
     with pytest.raises(ValidationError):
         ScreenshotsConfig.model_validate({"overlay_mode": "verbose"})
 

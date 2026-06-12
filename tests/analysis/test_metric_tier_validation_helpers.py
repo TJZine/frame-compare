@@ -261,7 +261,7 @@ def test_benchmark_script_run_tier_preserves_typed_performance_mode(
         assert metric_active_rect == MetricActiveRect(x=10, y=20, width=300, height=200)
         assert active_rect_source == "explicit"
         assert active_rect_detection_mode == "provided"
-        assert active_rect_algorithm_id == "active_rect_resolution_v1"
+        assert active_rect_algorithm_id == "active_rect_resolution_v2"
         assert selection_domain is None
         observed_modes.append(analysis_config.performance_mode)
         return _metrics_payload(
@@ -437,7 +437,7 @@ def test_benchmark_script_uses_full_frame_active_rect_provenance_by_default(
     assert active_rect.rect is None
     assert active_rect.source == "full-frame"
     assert active_rect.detection_mode == "aspect_ratio"
-    assert active_rect.algorithm_id == "active_rect_resolution_v1"
+    assert active_rect.algorithm_id == "active_rect_resolution_v2"
 
 
 def test_benchmark_script_requires_selection_domain_for_non_first_analysis_source(

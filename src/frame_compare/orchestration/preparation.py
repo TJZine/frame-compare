@@ -16,7 +16,13 @@ from frame_compare.config.effective import (
     resolve_effective_config,
 )
 from frame_compare.config.schema import ConfigSchema
+from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 from frame_compare.config.schema_models import SourceOverrideConfig
+from frame_compare.orchestration.active_rect_content import (
+    ActiveRectContentDetectionError,
+    VSActiveRectFrameSampler,
+    refine_auto_content_active_rects_for_clips,
+)
 from frame_compare.orchestration.analysis_policy import (
     needs_analysis,
     validate_skip_analysis_frame_selection_contract,
@@ -397,6 +403,30 @@ def _normalized_fps(fps: Fraction) -> Fraction:
     return Fraction(fps.numerator, fps.denominator)
 
 
+def _refine_auto_active_rects_after_selection_window(
+    *,
+    clips: list[ClipState],
+    selection_window: SelectionWindow,
+    config: ConfigSchema,
+    deps: RunDependencies,
+    fail_closed: bool,
+) -> tuple[list[ClipState], list[str]]:
+    if config.screenshots.active_rect_detection != ScreenshotActiveRectDetection.AUTO:
+        return clips, []
+
+    sampler = VSActiveRectFrameSampler(deps.vs_loader) if deps.vs_loader is not None else None
+    try:
+        return refine_auto_content_active_rects_for_clips(
+            clips=clips,
+            selection_window=selection_window,
+            detection=config.screenshots.active_rect_detection,
+            sampler=sampler,
+            fail_closed=fail_closed,
+        )
+    except ActiveRectContentDetectionError as exc:
+        raise MetricsCalculationError(str(exc)) from exc
+
+
 def _probe_input_videos_from_snapshots(
     *,
     input_videos: list[Path],
@@ -483,6 +513,14 @@ async def execute_prep(
             clips=prevalidated_clips,
             config=config,
         )
+        prevalidated_clips, auto_warnings = _refine_auto_active_rects_after_selection_window(
+            clips=prevalidated_clips,
+            selection_window=prevalidated_selection_window,
+            config=config,
+            deps=deps,
+            fail_closed=True,
+        )
+        source_warnings.extend(auto_warnings)
         prevalidated_analysis_selection = resolve_analysis_source(
             selector=config.sources.analysis_source,
             input_dir=workspace.input_dir,
@@ -532,6 +570,14 @@ async def execute_prep(
         )
         _validate_source_fps_compatibility(clips)
         selection_window = compute_selection_window_for_clips(clips=clips, config=config)
+        clips, auto_warnings = _refine_auto_active_rects_after_selection_window(
+            clips=clips,
+            selection_window=selection_window,
+            config=config,
+            deps=deps,
+            fail_closed=False,
+        )
+        source_warnings.extend(auto_warnings)
         analysis_clip = None
         if analysis_required:
             analysis_selection = resolve_analysis_source(

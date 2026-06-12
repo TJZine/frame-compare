@@ -30,6 +30,7 @@ class ScreenshotActiveRectDetection(StrEnum):
     PROVIDED = "provided"
     DIMENSION = "dimension"
     ASPECT_RATIO = "aspect_ratio"
+    AUTO = "auto"
 
 
 class ScreenshotAlignedScalePolicy(StrEnum):

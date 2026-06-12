@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 GeometryMode = Literal["native", "aligned"]
-ActiveRectDetectionMode = Literal["provided", "dimension", "aspect_ratio"]
+ActiveRectDetectionMode = Literal["provided", "dimension", "aspect_ratio", "auto"]
 AlignedScalePolicy = Literal[
     "largest_active",
     "smallest_active",
@@ -19,6 +19,7 @@ ActiveRectSource = Literal[
     "metadata",
     "dimension-derived",
     "aspect-ratio-derived",
+    "content-derived",
     "full-frame",
 ]
 ProvidedActiveRectSource = ActiveRectSource
@@ -251,8 +252,10 @@ def _validate_sources(sources: Sequence[SourceGeometry]) -> None:
 
 
 def _validate_options(options: RenderGeometryOptions) -> None:
-    if options.active_rect_detection not in ("provided", "dimension", "aspect_ratio"):
-        raise ValueError("active rect detection must be 'provided', 'dimension', or 'aspect_ratio'")
+    if options.active_rect_detection not in ("provided", "dimension", "aspect_ratio", "auto"):
+        raise ValueError(
+            "active rect detection must be 'provided', 'dimension', 'aspect_ratio', or 'auto'"
+        )
     if options.aligned_scale_policy not in (
         "largest_active",
         "smallest_active",
@@ -298,7 +301,7 @@ def _resolve_active_rects(
 ) -> tuple[tuple[GeometryRect, ActiveRectSource], ...]:
     dimension_rects = (
         _dimension_derived_active_rects(sources)
-        if active_rect_detection in ("dimension", "aspect_ratio")
+        if active_rect_detection in ("dimension", "aspect_ratio", "auto")
         else tuple(None for _source in sources)
     )
     resolved: list[tuple[GeometryRect, ActiveRectSource]] = []
@@ -311,7 +314,7 @@ def _resolve_active_rects(
         else:
             resolved.append((GeometryRect(0, 0, source.width, source.height), "full-frame"))
     resolved_tuple = tuple(resolved)
-    if active_rect_detection != "aspect_ratio":
+    if active_rect_detection not in ("aspect_ratio", "auto"):
         return resolved_tuple
     return _aspect_ratio_derived_active_rects(sources, resolved_tuple)
 

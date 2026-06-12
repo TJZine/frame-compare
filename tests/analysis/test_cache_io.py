@@ -52,7 +52,7 @@ def valid_cache_metadata_payload(
         "metric_active_rect": metric_active_rect,
         "active_rect_source": active_rect_source,
         "active_rect_detection_mode": active_rect_detection_mode,
-        "active_rect_algorithm_id": "active_rect_resolution_v1",
+        "active_rect_algorithm_id": "active_rect_resolution_v2",
         "version": CACHE_VERSION,
     }
 
@@ -327,7 +327,7 @@ def test_save_and_load_round_trip(tmp_path: Path) -> None:
     assert result.metrics.metadata.metric_active_rect is None
     assert result.metrics.metadata.active_rect_source == "full-frame"
     assert result.metrics.metadata.active_rect_detection_mode == "aspect_ratio"
-    assert result.metrics.metadata.active_rect_algorithm_id == "active_rect_resolution_v1"
+    assert result.metrics.metadata.active_rect_algorithm_id == "active_rect_resolution_v2"
 
 
 def test_save_and_load_round_trip_serializes_metric_active_rect(tmp_path: Path) -> None:
@@ -357,6 +357,42 @@ def test_save_and_load_round_trip_serializes_metric_active_rect(tmp_path: Path) 
     assert result.success is True
     assert result.metrics is not None
     assert result.metrics.metadata.metric_active_rect == rect
+
+
+def test_load_cache_accepts_content_derived_auto_active_rect_metadata(tmp_path: Path) -> None:
+    config = AnalysisConfig()
+    metadata = valid_cache_metadata_payload(
+        config,
+        frame_count=1,
+        metric_active_rect={"x": 0, "y": 10, "width": 100, "height": 60},
+        active_rect_source="content-derived",
+        active_rect_detection_mode="auto",
+    )
+    cache_file(tmp_path, "fp").write_text(
+        json.dumps(
+            {
+                "version": CACHE_VERSION,
+                "fingerprint": "fp",
+                "luminance": [0.1],
+                "motion": [0.0],
+                "metadata": metadata,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = load_cached_metrics(tmp_path, "fp", [])
+
+    assert result.success is True
+    assert result.metrics is not None
+    assert result.metrics.metadata.metric_active_rect == MetricActiveRect(
+        x=0,
+        y=10,
+        width=100,
+        height=60,
+    )
+    assert result.metrics.metadata.active_rect_source == "content-derived"
+    assert result.metrics.metadata.active_rect_detection_mode == "auto"
 
 
 def test_load_not_found(tmp_path: Path) -> None:
@@ -527,7 +563,7 @@ def test_save_writes_required_keys(tmp_path: Path) -> None:
     assert data["metadata"]["metric_active_rect"] is None
     assert data["metadata"]["active_rect_source"] == "full-frame"
     assert data["metadata"]["active_rect_detection_mode"] == "aspect_ratio"
-    assert data["metadata"]["active_rect_algorithm_id"] == "active_rect_resolution_v1"
+    assert data["metadata"]["active_rect_algorithm_id"] == "active_rect_resolution_v2"
 
 
 def test_load_same_version_cache_without_analysis_source_path_is_corrupted(
@@ -653,7 +689,7 @@ def test_load_same_version_cache_without_active_rect_provenance_is_corrupted(
         "metric_active_rect": None,
         "active_rect_source": "full-frame",
         "active_rect_detection_mode": "aspect_ratio",
-        "active_rect_algorithm_id": "active_rect_resolution_v1",
+        "active_rect_algorithm_id": "active_rect_resolution_v2",
         "version": CACHE_VERSION,
     }
     del metadata[removed_key]
@@ -903,7 +939,7 @@ def test_load_malformed_nested_payload_returns_corrupted(
             "metric_active_rect": None,
             "active_rect_source": "full-frame",
             "active_rect_detection_mode": "aspect_ratio",
-            "active_rect_algorithm_id": "active_rect_resolution_v1",
+            "active_rect_algorithm_id": "active_rect_resolution_v2",
             "version": CACHE_VERSION,
         },
     }

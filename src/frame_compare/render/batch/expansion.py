@@ -386,6 +386,7 @@ def _validated_active_rect_source(value: str) -> ActiveRectSource:
         "metadata",
         "dimension-derived",
         "aspect-ratio-derived",
+        "content-derived",
         "full-frame",
     ):
         raise ValueError(f"Unsupported active rect source {value!r}")

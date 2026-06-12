@@ -387,6 +387,7 @@ def _parse_active_rect_source(value: object) -> str:
         "metadata",
         "dimension-derived",
         "aspect-ratio-derived",
+        "content-derived",
         "full-frame",
     }:
         raise _CacheParseError
@@ -394,7 +395,7 @@ def _parse_active_rect_source(value: object) -> str:
 
 
 def _parse_active_rect_detection_mode(value: object) -> str:
-    if value not in {"provided", "dimension", "aspect_ratio"}:
+    if value not in {"provided", "dimension", "aspect_ratio", "auto"}:
         raise _CacheParseError
     return cast(str, value)
 

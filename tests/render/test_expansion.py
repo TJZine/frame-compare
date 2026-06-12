@@ -1160,9 +1160,9 @@ def test_expand_batch_render_requests_uses_prepared_active_rect_provenance_witho
         source_frames=[10],
         display_frames=[10],
         selection_labels=[None],
-        active_rect=GeometryRect(0, 0, 1920, 1080),
-        active_rect_source="full-frame",
-        active_rect_detection_mode="provided",
+        active_rect=GeometryRect(0, 140, 1920, 800),
+        active_rect_source="content-derived",
+        active_rect_detection_mode="auto",
         probe_width=1920,
         probe_height=1080,
         probe_num_frames=100,
@@ -1196,8 +1196,8 @@ def test_expand_batch_render_requests_uses_prepared_active_rect_provenance_witho
     enc_plan = requests[1].geometry_plan
     assert ref_plan is not None
     assert enc_plan is not None
-    assert ref_plan.active_rect == GeometryRect(0, 0, 1920, 1080)
-    assert ref_plan.active_rect_source == "full-frame"
+    assert ref_plan.active_rect == GeometryRect(0, 140, 1920, 800)
+    assert ref_plan.active_rect_source == "content-derived"
     assert enc_plan.active_rect == GeometryRect(0, 0, 1440, 1080)
     assert enc_plan.active_rect_source == "full-frame"
 

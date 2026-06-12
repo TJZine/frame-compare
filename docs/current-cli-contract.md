@@ -245,11 +245,17 @@ unchanged.
   from the same input set do not satisfy each other. When
   `sources.analysis_source = "reference"`, `analysis_source_path` is the selected
   reference path. Prepared full-frame active rectangles represent no crop;
-  explicit, metadata, dimension-derived, or aspect-ratio-derived rectangles
-  produce coordinate-specific metric/cache identities. Metric-array cache
+  explicit, metadata, dimension-derived, aspect-ratio-derived, or
+  content-derived rectangles produce coordinate-specific metric/cache
+  identities. Metric-array cache
   identity excludes `user_frames`, random seed, frame-selection counts,
   `dark_quantile`, and `bright_quantile` because those values affect frame
   choice rather than metric computation.
+- When `screenshots.active_rect_detection = "auto"` and analysis metrics are
+  required, `run --from-cache-only` must validate the exact content-derived
+  active-rect domain before runtime side effects. If content probing cannot run,
+  the command fails through the standard typed metrics/preparation error path
+  rather than silently validating a full-frame cache identity.
 - The full fingerprint remains inside the cache payload and is validated on load.
   Legacy run-folder `cache.compframes` files are not used as analysis cache hits.
 - Analysis is skipped automatically when `dark_frame_count`, `bright_frame_count`,
@@ -512,8 +518,9 @@ from `quality`. Both modes apply the prepared active picture rectangle for the
 selected analysis source before metric calculation and use active-rect-specific
 cache identity. The prepared rectangle can come from an explicit
 `sources.overrides.<selector>.active_rect`, trusted static metadata, configured
-dimension/aspect-ratio detection, or full-frame fallback. There are no `fast` or
-`balanced` analysis performance aliases.
+dimension/aspect-ratio detection, opt-in sampled content detection, or full-frame
+fallback. There are no new analysis performance modes or aliases for active-rect
+detection; `quality` and `performance` consume the same prepared rectangle.
 There is no dedicated `run` flag for analysis performance mode in v1.
 
 The lead/trail fields define a global selectable analysis window inside each
@@ -611,16 +618,23 @@ dedicated `run` flags for them:
   `aligned` is the opt-in mode for deterministic mixed-geometry screenshot
   alignment. Native mode ignores aligned-only geometry fields for behavior, but
   the config schema still validates their enum values and target field types.
-- `active_rect_detection = "provided" | "dimension" | "aspect_ratio"` selects
-  the shared active-picture evidence used during preparation. `provided` uses
-  only explicit per-source `active_rect` overrides and trusted static metadata
-  active rectangles. `dimension` also allows same-height or same-width centered
-  crop inference. `aspect_ratio` is the default and additionally allows
-  conservative centered vertical letterbox inference when a target content
-  aspect ratio has at least two matching sources or one explicit/trusted
-  metadata source. Metric analysis uses the resolved active picture. Aligned
-  screenshot render uses the same resolved active picture for crop/scale/pad
-  planning. Native screenshot render remains native/full-frame output.
+- `active_rect_detection = "provided" | "dimension" | "aspect_ratio" | "auto"`
+  selects the shared active-picture evidence used during preparation.
+  `provided` uses only explicit per-source `active_rect` overrides and trusted
+  static metadata active rectangles. `dimension` also allows same-height or
+  same-width centered crop inference. `aspect_ratio` is the default and
+  additionally allows conservative centered vertical letterbox inference when a
+  target content aspect ratio has at least two matching sources or one
+  explicit/trusted metadata source. `auto` is opt-in; it first applies the same
+  static evidence as `aspect_ratio`, then conservatively samples luma frames
+  after the shared selectable window is known and only refines clips that still
+  have unresolved full-frame static rectangles. It returns full frame when
+  uncertain and is not ML, OCR, perceptual HDR analysis, or exhaustive scanning.
+  Metric analysis uses the resolved active picture. Aligned screenshot render
+  uses the same resolved active picture for crop/scale/pad planning. Native
+  screenshot render remains native/full-frame output. Analysis cache identity
+  includes the resolved active rectangle and provenance, including
+  `content-derived` rectangles from `auto`.
 - `aligned_scale_policy = "largest_active" | "smallest_active" |
   "reference_active" | "explicit_size"` selects the aligned output canvas policy.
   `largest_active` is the aligned default and uses the active-source envelope

@@ -44,9 +44,11 @@ def resolve_active_rects_for_clips(
     metadata_rects = tuple(_metadata_active_rect_for_clip(clip, mode) for clip in clips)
     dimension_rects = (
         _dimension_derived_active_rects(clips, mode)
-        if detection in (
+        if detection
+        in (
             ScreenshotActiveRectDetection.DIMENSION,
             ScreenshotActiveRectDetection.ASPECT_RATIO,
+            ScreenshotActiveRectDetection.AUTO,
         )
         else tuple(None for _clip in clips)
     )
@@ -68,7 +70,10 @@ def resolve_active_rects_for_clips(
         else:
             resolved.append(_full_frame_rect(clip, mode))
 
-    if detection == ScreenshotActiveRectDetection.ASPECT_RATIO:
+    if detection in (
+        ScreenshotActiveRectDetection.ASPECT_RATIO,
+        ScreenshotActiveRectDetection.AUTO,
+    ):
         resolved = list(_aspect_ratio_derived_active_rects(clips, tuple(resolved), mode))
 
     return [replace(clip, active_rect=rect) for clip, rect in zip(clips, resolved, strict=True)]
@@ -102,6 +107,8 @@ def _detection_mode(detection: ScreenshotActiveRectDetection) -> ClipActiveRectD
         return "dimension"
     if detection == ScreenshotActiveRectDetection.ASPECT_RATIO:
         return "aspect_ratio"
+    if detection == ScreenshotActiveRectDetection.AUTO:
+        return "auto"
     raise ValueError(f"Unsupported active rect detection mode: {detection}")
 
 

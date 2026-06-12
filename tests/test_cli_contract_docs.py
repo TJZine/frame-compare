@@ -240,13 +240,14 @@ def test_current_cli_contract_documents_analysis_performance_mode_config_only() 
     assert "--analysis-performance" not in declared_options
     assert "analysis.performance_mode" not in CLI_OVERRIDE_MAP.values()
     assert "cache-isolated from `quality`" in normalized_analysis_section
-    assert "Both modes apply the prepared active picture rectangle" in (
-        normalized_analysis_section
-    )
+    assert "Both modes apply the prepared active picture rectangle" in (normalized_analysis_section)
     assert "trusted static metadata, configured dimension/aspect-ratio detection" in (
         normalized_analysis_section
     )
-    assert "There are no `fast` or `balanced` analysis performance aliases." in (
+    assert "There are no new analysis performance modes or aliases for active-rect detection" in (
+        normalized_analysis_section
+    )
+    assert "`quality` and `performance` consume the same prepared rectangle" in (
         normalized_analysis_section
     )
 
@@ -920,13 +921,19 @@ def test_current_cli_contract_documents_screenshot_geometry_config_surface() -> 
 
     for expected in (
         '`geometry_mode = "native" | "aligned"`',
-        '`active_rect_detection = "provided" | "dimension" | "aspect_ratio"`',
+        '`active_rect_detection = "provided" | "dimension" | "aspect_ratio" | "auto"`',
         '`aligned_scale_policy = "largest_active" | "smallest_active" |',
         "`aligned_target_width` and `aligned_target_height`",
         "Native mode ignores aligned-only geometry fields for behavior",
         "shared active-picture evidence used during preparation",
+        "`auto` is opt-in",
+        "samples luma frames",
+        "returns full frame when uncertain",
+        "is not ML, OCR, perceptual HDR analysis, or exhaustive scanning",
         "Metric analysis uses the resolved active picture",
         "Native screenshot render remains native/full-frame output",
+        "includes the resolved active rectangle and provenance",
+        "`content-derived` rectangles from `auto`",
         "fits active content inside the selected target width and height",
         "without exceeding either dimension",
         "Derived policy targets are normalized downward",

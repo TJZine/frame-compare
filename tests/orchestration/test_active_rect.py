@@ -249,6 +249,26 @@ def test_aspect_ratio_detection_crops_letterboxed_source_with_two_source_evidenc
     )
 
 
+def test_auto_static_resolution_preserves_aspect_ratio_behavior_before_content_refinement() -> None:
+    resolved = _resolve(
+        [
+            _clip("ref.mkv", width=3840, height=2160),
+            _clip("enc-a.mkv", width=1920, height=800),
+            _clip("enc-b.mkv", width=1920, height=800),
+        ],
+        detection=ScreenshotActiveRectDetection.AUTO,
+    )
+
+    assert resolved[0].active_rect == ClipActiveRect(
+        0,
+        280,
+        3840,
+        1600,
+        "aspect-ratio-derived",
+        "auto",
+    )
+
+
 def test_aspect_ratio_detection_uses_one_explicit_source_as_evidence() -> None:
     ref = _clip("ref.mkv", width=3840, height=2160)
     enc = _clip("enc.mkv", width=1920, height=1080)
@@ -353,5 +373,12 @@ def test_aspect_ratio_candidate_tie_is_reference_biased_and_identity_is_stable()
     }
     assert active_rect_policy_identity(ScreenshotActiveRectDetection.ASPECT_RATIO) == {
         "detection_mode": "aspect_ratio",
+        "algorithm_id": ACTIVE_RECT_RESOLUTION_ALGORITHM,
+    }
+
+
+def test_auto_policy_identity_is_stable() -> None:
+    assert active_rect_policy_identity(ScreenshotActiveRectDetection.AUTO) == {
+        "detection_mode": "auto",
         "algorithm_id": ACTIVE_RECT_RESOLUTION_ALGORITHM,
     }

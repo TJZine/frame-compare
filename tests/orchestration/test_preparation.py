@@ -8,6 +8,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+import numpy as np
 import pytest
 
 import frame_compare.analysis.cache_io as cache_io
@@ -57,6 +58,16 @@ dark_frame_count = 1
 """
 )
 
+AUTO_METRIC_CONFIG = METRIC_CONFIG.replace(
+    "[screenshots]\nuse_ffmpeg = true",
+    '[screenshots]\nuse_ffmpeg = true\nactive_rect_detection = "auto"',
+)
+
+AUTO_MINIMAL_CONFIG = MINIMAL_CONFIG.replace(
+    "[screenshots]\nuse_ffmpeg = true",
+    '[screenshots]\nuse_ffmpeg = true\nactive_rect_detection = "auto"',
+)
+
 
 ALIGNMENT_CONFIG = """\
 [paths]
@@ -93,6 +104,20 @@ def _create_video_files(input_dir: Path, *filenames: str) -> list[Path]:
         path.write_bytes(b"video")
         paths.append(path)
     return paths
+
+
+def _letterbox_luma_frame(
+    *,
+    width: int = 100,
+    height: int = 80,
+    top: int = 10,
+    bottom: int = 10,
+) -> np.ndarray[tuple[int, int], np.dtype[np.float32]]:
+    frame = np.full((height, width), 0.065, dtype=np.float32)
+    content_y = np.linspace(0.20, 0.80, height - top - bottom, dtype=np.float32)[:, None]
+    content_x = np.linspace(0.0, 0.20, width, dtype=np.float32)[None, :]
+    frame[top : height - bottom, :] = content_y + content_x
+    return frame
 
 
 class FakeVSLoader:
@@ -543,11 +568,9 @@ def test_execute_prep_preserves_deterministic_four_clip_order_and_labels(tmp_pat
 def test_execute_prep_resolves_dimension_active_rects_during_preparation(
     tmp_path: Path,
 ) -> None:
-    config_content = (
-        MINIMAL_CONFIG.replace(
-            "[screenshots]\nuse_ffmpeg = true",
-            '[screenshots]\nuse_ffmpeg = true\nactive_rect_detection = "dimension"',
-        )
+    config_content = MINIMAL_CONFIG.replace(
+        "[screenshots]\nuse_ffmpeg = true",
+        '[screenshots]\nuse_ffmpeg = true\nactive_rect_detection = "dimension"',
     )
     _create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"
@@ -642,7 +665,7 @@ def test_execute_prep_selection_domain_includes_resolved_active_rect_identity(
     selection_domain = json.loads(prep.analysis_selection_domain)
     assert selection_domain["active_rect_policy"] == {
         "detection_mode": "aspect_ratio",
-        "algorithm_id": "active_rect_resolution_v1",
+        "algorithm_id": "active_rect_resolution_v2",
     }
     assert selection_domain["clips"][0]["active_rect"] == {
         "x": 0,
@@ -651,8 +674,131 @@ def test_execute_prep_selection_domain_includes_resolved_active_rect_identity(
         "height": 1600,
         "source": "aspect-ratio-derived",
         "detection_mode": "aspect_ratio",
-        "algorithm_id": "active_rect_resolution_v1",
+        "algorithm_id": "active_rect_resolution_v2",
     }
+
+
+def test_execute_prep_auto_content_refinement_updates_selection_domain_after_window(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _create_config(tmp_path, content=AUTO_METRIC_CONFIG)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "00-reference.mkv", "01-encode.mkv")
+    loader = FakeVSLoader(
+        dimensions_by_name={
+            "00-reference.mkv": (100, 80),
+            "01-encode.mkv": (100, 80),
+        }
+    )
+    sampled_indices: dict[str, tuple[int, ...]] = {}
+
+    class FakeContentSampler:
+        def __init__(self, _loader: object) -> None:
+            pass
+
+        def sample_luma_frames(
+            self,
+            clip: object,
+            source_frame_indices: object,
+        ) -> list[np.ndarray[tuple[int, int], np.dtype[np.float32]]]:
+            clip_state = cast(Any, clip)
+            indices = tuple(cast(Any, source_frame_indices))
+            sampled_indices[clip_state.path.name] = indices
+            return [_letterbox_luma_frame() for _index in indices]
+
+    monkeypatch.setattr(preparation, "VSActiveRectFrameSampler", FakeContentSampler)
+
+    prep = asyncio.run(
+        preparation.execute_prep(
+            RunRequest(root=tmp_path),
+            RunDependencies(vs_loader=cast(Any, loader)),
+        )
+    )
+
+    assert sampled_indices["00-reference.mkv"]
+    assert len(sampled_indices["00-reference.mkv"]) == 16
+    assert prep.clips[0].active_rect == ClipActiveRect(
+        0,
+        10,
+        100,
+        60,
+        "content-derived",
+        "auto",
+    )
+    selection_domain = json.loads(prep.analysis_selection_domain)
+    assert selection_domain["active_rect_policy"] == {
+        "detection_mode": "auto",
+        "algorithm_id": "active_rect_resolution_v2",
+    }
+    assert selection_domain["clips"][0]["active_rect"] == {
+        "x": 0,
+        "y": 10,
+        "width": 100,
+        "height": 60,
+        "source": "content-derived",
+        "detection_mode": "auto",
+        "algorithm_id": "active_rect_resolution_v2",
+    }
+
+
+def test_execute_prep_auto_sampling_failure_warns_and_leaves_full_frame(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _create_config(tmp_path, content=AUTO_MINIMAL_CONFIG)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "00-reference.mkv")
+    loader = FakeVSLoader(dimensions_by_name={"00-reference.mkv": (100, 80)})
+
+    class FailingContentSampler:
+        def __init__(self, _loader: object) -> None:
+            pass
+
+        def sample_luma_frames(self, _clip: object, _source_frame_indices: object) -> object:
+            raise RuntimeError("sample boom")
+
+    monkeypatch.setattr(preparation, "VSActiveRectFrameSampler", FailingContentSampler)
+
+    prep = asyncio.run(
+        preparation.execute_prep(
+            RunRequest(root=tmp_path),
+            RunDependencies(vs_loader=cast(Any, loader)),
+        )
+    )
+
+    assert prep.clips[0].active_rect == ClipActiveRect(0, 0, 100, 80, "full-frame", "auto")
+    assert any(
+        "active-rect auto detection failed" in warning for warning in prep.preflight_warnings
+    )
+
+
+def test_execute_prep_from_cache_only_auto_sampling_failure_fails_before_cache_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _create_config(tmp_path, content=AUTO_METRIC_CONFIG)
+    input_dir = tmp_path / "comparison_videos"
+    source_path = _create_video_files(input_dir, "source.mkv")[0]
+    config = preparation.prepare_preflight(root=tmp_path).config
+    write_probe_cache_for_inputs(tmp_path / "generated" / "clip_probe.toml", [source_path], config)
+
+    class FailingContentSampler:
+        def __init__(self, _loader: object) -> None:
+            pass
+
+        def sample_luma_frames(self, _clip: object, _source_frame_indices: object) -> object:
+            raise RuntimeError("sample boom")
+
+    monkeypatch.setattr(preparation, "VSActiveRectFrameSampler", FailingContentSampler)
+
+    with pytest.raises(MetricsCalculationError, match="active-rect auto detection failed"):
+        asyncio.run(
+            preparation.execute_prep(
+                RunRequest(root=tmp_path, from_cache_only=True),
+                RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
+            )
+        )
 
 
 def test_execute_prep_explicit_reference_moves_selected_source_to_front(

@@ -27,10 +27,11 @@ ClipActiveRectSource = Literal[
     "metadata",
     "dimension-derived",
     "aspect-ratio-derived",
+    "content-derived",
     "full-frame",
 ]
-ClipActiveRectDetectionMode = Literal["provided", "dimension", "aspect_ratio"]
-ACTIVE_RECT_RESOLUTION_ALGORITHM = "active_rect_resolution_v1"
+ClipActiveRectDetectionMode = Literal["provided", "dimension", "aspect_ratio", "auto"]
+ACTIVE_RECT_RESOLUTION_ALGORITHM = "active_rect_resolution_v2"
 
 
 @dataclass(frozen=True)
