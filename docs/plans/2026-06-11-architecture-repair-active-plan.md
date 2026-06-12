@@ -1,4 +1,4 @@
-Status: Active
+Status: Historical
 Scope: Production architecture repair program across Frame Compare hotspots
 Owner: Codex session
 
@@ -1272,3 +1272,34 @@ before final goal closeout.
 | Shared errors facade | `src/frame_compare/errors.py` and focused `error_*` modules | Low current architecture risk because the facade is already split and covered by `tests/test_errors.py` and `tests/test_error_modules.py`; medium blast radius if downstream packages need new error ownership. | Any package changes error classes, error JSON, CLI error mapping, traceback behavior, or service-specific error ownership; otherwise run a final no-code adversarial audit before closing the goal. |
 | Docker, Windows portable, dependency, lockfile, build, and packaging surfaces | Runbook-listed owners under Docker files, workflows, `tools/windows_portable/**`, and packaging metadata | High release-path risk if touched; currently out of architecture repair implementation scope because no package proposes changing those surfaces. | Any package requires runtime/release-path changes, dependency updates, lockfile changes, packaging behavior changes, or Docker/Windows proof; otherwise record final documented-only non-touch status before closing the goal. |
 | Live VSPreview desktop launch proof | `src/frame_compare/vspreview/adapter.py`, `src/frame_compare/services/alignment_vspreview.py`, and local runtime environment | High runtime-environment risk; automated tests can prove adapter semantics but not a real desktop launch without a compatible environment. | Package 5 changes launch behavior or maintainer provides a compatible local proof path; otherwise record documented-only status and exact unverified surface. |
+
+## Final Closeout Evidence
+
+- Package implementation and audit commits:
+  - `af4bc37 refactor: repair orchestration ownership boundaries`
+  - `a3df26a refactor: isolate render batch results`
+  - `cc3c52f docs: close vspreview boundary audit`
+  - `c5a41bc docs: close report cli boundary audit`
+- Full verification passed:
+  - `.venv/bin/pyright --warnings`
+  - `.venv/bin/ruff check .`
+  - `.venv/bin/bandit -c pyproject.toml -r src --severity-level medium`
+  - `.venv/bin/pytest -q`
+  - `UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini`
+  - `UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_api_docs.py --check`
+- Final deferral audit:
+  - `src/frame_compare/errors.py`, focused error modules, error JSON, CLI error
+    mapping, and service-specific error classes were not changed by the
+    architecture repair commits; existing facade coverage remains
+    `tests/test_errors.py` and `tests/test_error_modules.py`.
+  - Docker, Windows portable, dependency, lockfile, build, packaging, release,
+    and workflow files were not changed by the architecture repair commits.
+  - Package 5 did not change VSPreview launch behavior; live desktop launch proof
+    remains documented-only because no compatible local runtime proof path was
+    provided or required by the no-code boundary audit.
+- Remaining risk:
+  - Full pytest skipped environment-gated VapourSynth integration, live slow.pics,
+    PowerShell/Windows portable, and Windows process-semantics tests in this
+    local environment.
+- Final read-only closeout review reported no P0-P2 findings and accepted goal
+  closeout with `GOAL_CLOSEOUT_ACCEPTABLE: yes`.
