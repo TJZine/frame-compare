@@ -448,7 +448,7 @@ def _aspect_ratio_candidates(
                 raw_candidates.append(_AspectCandidate(_rect_ratio(rect), index, evidence_rank))
 
     for index, (rect, rect_source) in enumerate(resolved):
-        if rect_source not in ("dimension-derived", "full-frame"):
+        if rect_source not in ("dimension-derived", "full-frame", "content-derived"):
             continue
         ratio = _rect_ratio(rect)
         if _aspect_candidate_support_count(ratio, resolved) >= 2:
