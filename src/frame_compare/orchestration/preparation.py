@@ -338,12 +338,22 @@ def _persist_probe_snapshots_for_run(
     }
     run_cache_path = workspace.generated_dir / "clip_probe.toml"
     shared_cache_path = _shared_probe_cache_path(workspace)
-    save_clip_probe_cache(run_cache_path, current_entries)
+
     if shared_cache_path == run_cache_path:
+        # Non-run-folder / legacy layout: single file is both run-local and
+        # shared.  Merge current entries on top of existing shared entries so
+        # probes from earlier runs are preserved.
+        entries_by_key = dict(load_clip_probe_cache(shared_cache_path))
+        entries_by_key.update(current_entries)
+        save_clip_probe_cache(shared_cache_path, entries_by_key)
         return
+
+    # Run-folder layout: run-local cache gets only this run's entries.
+    save_clip_probe_cache(run_cache_path, current_entries)
+
+    # Shared cache merges current entries on top of any existing entries.
     entries_by_key = dict(load_clip_probe_cache(shared_cache_path))
-    for snapshot in snapshots_by_path.values():
-        entries_by_key[compute_probe_cache_key(snapshot.fingerprint)] = snapshot
+    entries_by_key.update(current_entries)
     save_clip_probe_cache(shared_cache_path, entries_by_key)
 
 
