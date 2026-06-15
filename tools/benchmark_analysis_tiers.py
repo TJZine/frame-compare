@@ -95,16 +95,20 @@ def main() -> int:
     )
     if not cache_dir.is_absolute():
         cache_dir = root / cache_dir
-    analysis_source_path, effective_fps, active_rect = _resolve_benchmark_analysis_source(
-        root=root,
-        input_dir=input_dir,
-        input_paths=input_paths,
-        config=config,
+    analysis_source_path, effective_fps, active_rect, overrides_by_path = (
+        _resolve_benchmark_analysis_source(
+            root=root,
+            input_dir=input_dir,
+            input_paths=input_paths,
+            config=config,
+        )
     )
     _require_selection_domain_for_analysis_cache_identity(
         selection_domain=args.selection_domain,
         video_paths=input_paths,
         analysis_source_path=analysis_source_path,
+        effective_fps=effective_fps,
+        overrides_by_path=overrides_by_path,
     )
     warnings = [
         "Per-subphase luminance and motion timings are unavailable; only total analysis wall-clock is recorded.",
@@ -219,7 +223,7 @@ def _resolve_benchmark_analysis_source(
     input_dir: Path,
     input_paths: Sequence[Path],
     config: ConfigSchema,
-) -> tuple[Path, Fraction | None, BenchmarkActiveRect]:
+) -> tuple[Path, Fraction | None, BenchmarkActiveRect, dict[Path, SourceOverrideConfig]]:
     source_path = _resolve_benchmark_analysis_source_path(
         input_dir=input_dir,
         input_paths=input_paths,
@@ -244,7 +248,7 @@ def _resolve_benchmark_analysis_source(
         ),
         config=config,
     )
-    return source_path, effective_fps, active_rect
+    return source_path, effective_fps, active_rect, selection.overrides_by_path
 
 
 def _effective_fps_override_for_path(
@@ -365,16 +369,34 @@ def _require_selection_domain_for_analysis_cache_identity(
     selection_domain: str | None,
     video_paths: Sequence[Path],
     analysis_source_path: Path,
+    effective_fps: Fraction | None = None,
+    overrides_by_path: dict[Path, SourceOverrideConfig] | None = None,
 ) -> None:
+    """Require an explicit selection-domain token when benchmark inputs
+    affect analysis cache identity beyond the default first-path case.
+
+    Domain-affecting inputs include: non-first analysis source path,
+    effective FPS overrides, and configured source trims.
+    """
     if selection_domain is not None:
         return
-    if video_paths and analysis_source_path == video_paths[0]:
+    has_non_default_overrides = overrides_by_path is not None and any(
+        override.trim_start_frames or override.trim_end_frames or override.effective_fps is not None
+        for override in overrides_by_path.values()
+    )
+    domain_is_default = (
+        bool(video_paths)
+        and analysis_source_path == video_paths[0]
+        and effective_fps is None
+        and not has_non_default_overrides
+    )
+    if domain_is_default:
         return
     raise SystemExit(
-        "A benchmark selection-domain token is required when the resolved analysis source "
-        "is not the first input path, because analysis cache identity otherwise cannot "
-        "distinguish the selected analysis source. Pass --selection-domain from a prepared "
-        "run or benchmark with the analysis source as the first input."
+        "A benchmark selection-domain token is required when benchmark inputs affect "
+        "analysis cache identity. Domain-affecting inputs include: non-first analysis "
+        "source path, effective FPS overrides, and configured source trims. Pass "
+        "--selection-domain from a prepared run or benchmark with default inputs."
     )
 
 

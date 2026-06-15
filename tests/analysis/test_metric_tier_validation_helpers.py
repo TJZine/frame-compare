@@ -398,7 +398,7 @@ def test_benchmark_script_resolves_configured_analysis_source_effective_fps_and_
         }
     )
 
-    source_path, effective_fps, active_rect = script._resolve_benchmark_analysis_source(
+    source_path, effective_fps, active_rect, _overrides = script._resolve_benchmark_analysis_source(
         root=tmp_path,
         input_dir=input_dir,
         input_paths=[reference, analysis],
@@ -430,7 +430,7 @@ def test_benchmark_script_uses_full_frame_active_rect_provenance_by_default(
     config = ConfigSchema()
     write_probe_cache_for_inputs(tmp_path / "generated" / "clip_probe.toml", [reference], config)
 
-    source_path, effective_fps, active_rect = script._resolve_benchmark_analysis_source(
+    source_path, effective_fps, active_rect, _overrides = script._resolve_benchmark_analysis_source(
         root=tmp_path,
         input_dir=input_dir,
         input_paths=[reference],
@@ -486,6 +486,63 @@ def test_benchmark_script_requires_selection_domain_for_non_first_analysis_sourc
         selection_domain=None,
         video_paths=[reference, analysis],
         analysis_source_path=reference,
+    )
+
+
+def test_benchmark_script_requires_selection_domain_for_effective_fps_override(
+    tmp_path: Path,
+) -> None:
+    script = _load_benchmark_script()
+    reference = tmp_path / "reference.mkv"
+
+    with pytest.raises(SystemExit, match="selection-domain token is required"):
+        script._require_selection_domain_for_analysis_cache_identity(
+            selection_domain=None,
+            video_paths=[reference],
+            analysis_source_path=reference,
+            effective_fps=Fraction(24, 1),
+        )
+
+    # Providing a domain suppresses the guard.
+    script._require_selection_domain_for_analysis_cache_identity(
+        selection_domain="fps-domain",
+        video_paths=[reference],
+        analysis_source_path=reference,
+        effective_fps=Fraction(24, 1),
+    )
+
+
+def test_benchmark_script_requires_selection_domain_for_trim_overrides(
+    tmp_path: Path,
+) -> None:
+    script = _load_benchmark_script()
+    reference = tmp_path / "reference.mkv"
+
+    from frame_compare.config.schema_models import SourceOverrideConfig
+
+    overrides = {reference: SourceOverrideConfig(trim_start_frames=10)}
+    with pytest.raises(SystemExit, match="selection-domain token is required"):
+        script._require_selection_domain_for_analysis_cache_identity(
+            selection_domain=None,
+            video_paths=[reference],
+            analysis_source_path=reference,
+            overrides_by_path=overrides,
+        )
+
+    # Providing a domain suppresses the guard.
+    script._require_selection_domain_for_analysis_cache_identity(
+        selection_domain="trim-domain",
+        video_paths=[reference],
+        analysis_source_path=reference,
+        overrides_by_path=overrides,
+    )
+
+    # Default overrides (no trims, no fps) should not trigger.
+    script._require_selection_domain_for_analysis_cache_identity(
+        selection_domain=None,
+        video_paths=[reference],
+        analysis_source_path=reference,
+        overrides_by_path={reference: SourceOverrideConfig()},
     )
 
 
