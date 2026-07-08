@@ -74,6 +74,8 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     assert "base paths" in output
     assert "selection" in output
     assert "user=0, random=10, dark=0, bright=0, motion=0, seed=42" in output
+    assert "analysis mode" in output
+    assert "quality" in _rendered_row_value(output, "analysis mode")
     assert "FFmpeg audio" in output
     assert "previous offsets" in output
     assert "disabled" in output
