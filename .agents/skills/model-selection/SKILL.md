@@ -7,9 +7,11 @@ description: Use when a user asks which model or reasoning effort to use for a F
 
 ## Overview
 
-Use this skill to recommend the cheapest model setup that is still reliable for the next Frame Compare session.
+Use this skill to recommend the least expensive GPT-5.6 setup that is still reliable for the next Frame Compare session.
 
-Default low, escalate only when risk is real.
+Use the tracked `worker` (`gpt-5.6-sol medium`) for normal implementation. Use
+`worker_terra` (`gpt-5.6-terra medium`) only for explicitly approved, bounded,
+exact, cheap-to-verify units with clear stop conditions.
 
 ## Use This Skill For
 
@@ -32,11 +34,37 @@ Start at `0` and add `+1` for each:
 
 ## Recommendation Rules
 
-- Score `0-1`: omit `MODEL_SUGGESTION` unless asked; if asked, use current model or `gpt-5.5 medium`.
-- Score `2-3`: include `MODEL_SUGGESTION`; planner/implementer `gpt-5.5 medium`, reviewer `gpt-5.5 medium` or `high` for hidden architecture risk.
-- Score `4+`: include `MODEL_SUGGESTION`; planner `gpt-5.5 high`, implementer `gpt-5.5 medium` by default, reviewer `gpt-5.5 high`.
+- Score `0-1`: omit `MODEL_SUGGESTION` unless asked; if asked, use the current
+  model or `gpt-5.6-sol medium`. `gpt-5.6-terra medium` is appropriate through
+  `worker_terra` only when the unit is exact, bounded, cheap to verify, and has
+  explicit stop/escalation rules.
+- Score `2-3`: include `MODEL_SUGGESTION`; planner `gpt-5.6-sol medium`,
+  implementer `gpt-5.6-sol medium`, reviewer `gpt-5.6-sol medium` or `high`
+  when hidden architecture risk is present.
+- Score `4+`: include `MODEL_SUGGESTION`; planner `gpt-5.6-sol high`,
+  implementer `gpt-5.6-sol medium` by default, reviewer `gpt-5.6-sol high`.
 
-Use `gpt-5.4` as fallback when `gpt-5.5` is unavailable. Use smaller models only for low-risk read-only sidecars.
+## Role Defaults
+
+- `planner`: `gpt-5.6-sol high`
+- `reviewer`: `gpt-5.6-sol high`
+- `worker`: `gpt-5.6-sol medium`; normal implementation default
+- `worker_terra`: `gpt-5.6-terra medium`; explicitly eligible cost-sensitive units only
+- `docs_researcher`: `gpt-5.6-terra medium`
+- `explorer`: keep `gpt-5.3-codex-spark xhigh` for intentionally latency-sensitive code exploration
+- `explorer_fallback`: `gpt-5.6-terra high`
+- `monitor`: keep `gpt-5.3-codex-spark low`
+- `monitor_fallback`: `gpt-5.6-luna low`
+
+Preserve the current reasoning effort for the first GPT-5.6 run, then compare
+the same effort with one level lower on representative tasks. Use `xhigh` only
+for unusually difficult quality-first work. Reserve `max` for measured cases
+where `xhigh` is insufficient; do not make `max` or host-specific `ultra` a
+tracked default.
+
+Use `gpt-5.5` at the same effort as the reliability fallback for Sol/Terra
+roles when GPT-5.6 is unavailable. Use `gpt-5.4-mini` only for low-risk,
+cost-sensitive work that would otherwise use Luna or a lightweight Terra role.
 
 ## Handoff Format
 
@@ -53,3 +81,4 @@ WHY: <short reason tied to risk signals>
 - Emitting model advice for every handoff
 - Using high effort just because work is important
 - Recommending mini models for ambiguous release, runtime, or public-contract work
+- Routing ordinary or ambiguous implementation through `worker_terra` only to save cost
