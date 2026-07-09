@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from fractions import Fraction
 from typing import TYPE_CHECKING
 
@@ -11,7 +10,7 @@ import structlog
 from frame_compare.analysis.cache_io import (
     CACHE_VERSION,
     compute_cache_key,
-    load_cached_metrics,
+    load_cached_metrics_for_request,
     save_metrics_cache,
 )
 from frame_compare.analysis.errors import MetricsCalculationError
@@ -26,6 +25,7 @@ from frame_compare.analysis.types import (
     ClipIdentity,
     FrameMetrics,
     MetricActiveRect,
+    MetricCacheRequest,
     MetricsMetadata,
 )
 from frame_compare.utils.progress_protocol import ProgressReporter
@@ -50,16 +50,6 @@ log = structlog.get_logger()
 ANALYZE_PROGRESS_TOTAL = 3
 
 
-@dataclass(frozen=True, slots=True)
-class _MetricCacheRequest:
-    analysis_source_path: Path
-    effective_fps: Fraction | None
-    metric_active_rect: MetricActiveRect | None
-    active_rect_source: ActiveRectSource
-    active_rect_detection_mode: ActiveRectDetectionMode
-    active_rect_algorithm_id: ActiveRectAlgorithmId
-
-
 def _clip_identities(video_paths: list[Path]) -> list[ClipIdentity]:
     return [
         ClipIdentity(
@@ -76,34 +66,16 @@ def _cached_metrics(
     fingerprint: str,
     clips: list[ClipIdentity],
     reporter: ProgressReporter | None,
-    request: _MetricCacheRequest,
+    request: MetricCacheRequest,
 ) -> FrameMetrics | None:
-    cache_result = load_cached_metrics(cache_dir, fingerprint, clips)
+    cache_result = load_cached_metrics_for_request(cache_dir, fingerprint, clips, request)
     if not (cache_result.success and cache_result.metrics):
-        return None
-    if not _cached_metrics_match_request(cache_result.metrics, request):
-        log.info("analysis_cache_request_metadata_mismatch", fingerprint=fingerprint)
         return None
 
     if reporter:
         reporter.set_description("Cache hit")
         reporter.advance(ANALYZE_PROGRESS_TOTAL - 1)
     return cache_result.metrics
-
-
-def _cached_metrics_match_request(
-    metrics: FrameMetrics,
-    request: _MetricCacheRequest,
-) -> bool:
-    metadata = metrics.metadata
-    return (
-        metadata.analysis_source_path == str(request.analysis_source_path)
-        and metadata.metric_active_rect == request.metric_active_rect
-        and metadata.active_rect_source == request.active_rect_source
-        and metadata.active_rect_detection_mode == request.active_rect_detection_mode
-        and metadata.active_rect_algorithm_id == request.active_rect_algorithm_id
-        and (request.effective_fps is None or metadata.fps == request.effective_fps)
-    )
 
 
 def _load_analysis_source(source_path: Path, vs_loader: VSLoader | None) -> SourceInfo:
@@ -210,7 +182,7 @@ def calculate_metrics(
     if not video_paths:
         raise MetricsCalculationError("No input video paths provided")
     source_path = video_paths[0] if analysis_source_path is None else analysis_source_path
-    cache_request = _MetricCacheRequest(
+    cache_request = MetricCacheRequest(
         analysis_source_path=source_path,
         effective_fps=effective_fps,
         metric_active_rect=metric_active_rect,
@@ -223,7 +195,7 @@ def calculate_metrics(
         video_paths,
         config,
         selection_domain=selection_domain,
-        metric_active_rect=metric_active_rect,
+        metric_request=cache_request,
     )
     clips = _clip_identities(video_paths)
 

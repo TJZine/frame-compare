@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from frame_compare.orchestration.active_rect import (
     ACTIVE_RECT_RESOLUTION_ALGORITHM,
     active_rect_identity,
     active_rect_policy_identity,
+    propagate_resolved_aspect_ratio_evidence,
     resolve_active_rects_for_clips,
 )
 from frame_compare.orchestration.context import (
@@ -457,3 +459,69 @@ def test_auto_policy_identity_is_stable() -> None:
         "detection_mode": "auto",
         "algorithm_id": ACTIVE_RECT_RESOLUTION_ALGORITHM,
     }
+
+
+def test_post_refinement_ratio_requires_supported_content_evidence() -> None:
+    content = replace(
+        _clip("content.mkv", width=100, height=80),
+        active_rect=ClipActiveRect(0, 10, 100, 60, "content-derived", "auto"),
+    )
+    unresolved = replace(
+        _clip("unresolved.mkv", width=100, height=80),
+        active_rect=ClipActiveRect(0, 0, 100, 80, "full-frame", "auto"),
+    )
+
+    propagated = propagate_resolved_aspect_ratio_evidence(
+        clips=[content, unresolved],
+        detection=ScreenshotActiveRectDetection.AUTO,
+    )
+
+    assert [clip.active_rect for clip in propagated] == [
+        content.active_rect,
+        unresolved.active_rect,
+    ]
+
+
+def test_post_refinement_ratio_preserves_non_full_frame_rectangles() -> None:
+    sources = (
+        "explicit",
+        "metadata",
+        "dimension-derived",
+        "aspect-ratio-derived",
+        "content-derived",
+    )
+    clips = [
+        replace(
+            _clip(f"{source}.mkv", width=100, height=80),
+            active_rect=ClipActiveRect(0, 10, 100, 60, source, "auto"),
+        )
+        for source in sources
+    ]
+
+    propagated = propagate_resolved_aspect_ratio_evidence(
+        clips=clips,
+        detection=ScreenshotActiveRectDetection.AUTO,
+    )
+
+    assert [clip.active_rect for clip in propagated] == [clip.active_rect for clip in clips]
+
+
+def test_post_refinement_ratio_respects_maximum_removal_limit() -> None:
+    content_clips = [
+        replace(
+            _clip(f"content-{index}.mkv", width=100, height=80),
+            active_rect=ClipActiveRect(0, 30, 100, 20, "content-derived", "auto"),
+        )
+        for index in range(2)
+    ]
+    unresolved = replace(
+        _clip("unresolved.mkv", width=100, height=80),
+        active_rect=ClipActiveRect(0, 0, 100, 80, "full-frame", "auto"),
+    )
+
+    propagated = propagate_resolved_aspect_ratio_evidence(
+        clips=[*content_clips, unresolved],
+        detection=ScreenshotActiveRectDetection.AUTO,
+    )
+
+    assert propagated[-1].active_rect == unresolved.active_rect

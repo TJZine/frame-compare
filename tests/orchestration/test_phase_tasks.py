@@ -17,6 +17,7 @@ from frame_compare.analysis.types import (
     FrameMetrics,
     FrameSelection,
     MetricActiveRect,
+    MetricCacheRequest,
     MetricsMetadata,
     SelectionBreakdown,
     SelectionDetail,
@@ -88,7 +89,9 @@ def test_run_analyze_phase_records_cache_hit_and_selection_breakdown(
         calls["select"] = kwargs
         return selection
 
-    monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics", _fake_load_cached_metrics)
+    monkeypatch.setattr(
+        phase_selection.cache_io, "load_cached_metrics_for_request", _fake_load_cached_metrics
+    )
     monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
     monkeypatch.setattr(phase_selection, "select_frames", _fake_select_frames)
     selected_frames: list[int] = []
@@ -136,9 +139,9 @@ def test_run_analyze_phase_uses_prepared_analysis_selection_domain(
         _config: object,
         *,
         selection_domain: str | None = None,
-        metric_active_rect: MetricActiveRect | None = None,
+        metric_request: MetricCacheRequest | None = None,
     ) -> str:
-        del metric_active_rect
+        del metric_request
         observed_selection_domains.append(selection_domain)
         return "fingerprint"
 
@@ -157,7 +160,9 @@ def test_run_analyze_phase_uses_prepared_analysis_selection_domain(
         )
 
     monkeypatch.setattr(phase_selection.cache_io, "compute_cache_key", _fake_compute_cache_key)
-    monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics", _fake_load_cached_metrics)
+    monkeypatch.setattr(
+        phase_selection.cache_io, "load_cached_metrics_for_request", _fake_load_cached_metrics
+    )
     monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
     monkeypatch.setattr(phase_selection, "select_frames", _fake_select_frames)
 
@@ -208,10 +213,10 @@ def test_run_analyze_phase_forwards_analysis_clip_active_rect(
         _config: object,
         *,
         selection_domain: str | None = None,
-        metric_active_rect: MetricActiveRect | None = None,
+        metric_request: MetricCacheRequest | None = None,
     ) -> str:
         del selection_domain
-        observed_rects.append(metric_active_rect)
+        observed_rects.append(None if metric_request is None else metric_request.metric_active_rect)
         return "fingerprint"
 
     def _fake_load_cached_metrics(*_args: object, **_kwargs: object) -> CacheLoadResult:
@@ -229,7 +234,9 @@ def test_run_analyze_phase_forwards_analysis_clip_active_rect(
         )
 
     monkeypatch.setattr(phase_selection.cache_io, "compute_cache_key", _fake_compute_cache_key)
-    monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics", _fake_load_cached_metrics)
+    monkeypatch.setattr(
+        phase_selection.cache_io, "load_cached_metrics_for_request", _fake_load_cached_metrics
+    )
     monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
     monkeypatch.setattr(phase_selection, "select_frames", _fake_select_frames)
 
@@ -257,13 +264,94 @@ def test_run_analyze_phase_cache_only_missing_cache_does_not_recompute(
     def _fake_calculate_metrics(**_kwargs: object) -> FrameMetrics:
         raise AssertionError("cache-only analyze phase must not recompute metrics")
 
-    monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics", _fake_load_cached_metrics)
+    monkeypatch.setattr(
+        phase_selection.cache_io, "load_cached_metrics_for_request", _fake_load_cached_metrics
+    )
     monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
 
     with pytest.raises(MetricsCalculationError, match="Cached metrics missing"):
         phase_selection.run_analyze_phase(
             ctx,
             input_videos=input_videos,
+            workspace=ctx.workspace,
+            require_cache_only=True,
+        )
+
+
+def test_run_analyze_phase_metadata_mismatch_recomputes_and_reports_cache_miss(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = _context(tmp_path)
+    input_videos = [ctx.reference.path]
+    metrics = FrameMetrics(
+        luminance=[0.1, 0.9],
+        motion=[0.0, 0.8],
+        metadata=MetricsMetadata(
+            frame_count=2,
+            fps=Fraction(24, 1),
+            config_fingerprint="fingerprint",
+            clips=[],
+        ),
+    )
+    calculate_calls = 0
+
+    def _fake_load_cached_metrics(*_args: object, **_kwargs: object) -> CacheLoadResult:
+        return CacheLoadResult(success=False, reason="mismatched_inputs")
+
+    def _fake_calculate_metrics(**_kwargs: object) -> FrameMetrics:
+        nonlocal calculate_calls
+        calculate_calls += 1
+        return metrics
+
+    def _fake_select_frames(**_kwargs: object) -> FrameSelection:
+        return FrameSelection(
+            frames=[0],
+            seed=ctx.config.analysis.random_seed,
+            breakdown=SelectionBreakdown(quantile_dark=[0]),
+        )
+
+    monkeypatch.setattr(
+        phase_selection.cache_io,
+        "load_cached_metrics_for_request",
+        _fake_load_cached_metrics,
+    )
+    monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
+    monkeypatch.setattr(phase_selection, "select_frames", _fake_select_frames)
+
+    output = phase_selection.run_analyze_phase(
+        ctx,
+        input_videos=input_videos,
+        workspace=ctx.workspace,
+    )
+
+    assert output.metrics_cache_hit is False
+    assert calculate_calls == 1
+
+
+def test_run_analyze_phase_cache_only_metadata_mismatch_does_not_recompute(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = _context(tmp_path)
+
+    def _fake_load_cached_metrics(*_args: object, **_kwargs: object) -> CacheLoadResult:
+        return CacheLoadResult(success=False, reason="mismatched_inputs")
+
+    def _fake_calculate_metrics(**_kwargs: object) -> FrameMetrics:
+        raise AssertionError("cache-only analyze phase must not recompute metrics")
+
+    monkeypatch.setattr(
+        phase_selection.cache_io,
+        "load_cached_metrics_for_request",
+        _fake_load_cached_metrics,
+    )
+    monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
+
+    with pytest.raises(MetricsCalculationError, match="mismatched_inputs"):
+        phase_selection.run_analyze_phase(
+            ctx,
+            input_videos=[ctx.reference.path],
             workspace=ctx.workspace,
             require_cache_only=True,
         )
@@ -317,7 +405,9 @@ def test_run_analyze_phase_selects_from_reference_base_trim_domain(
             },
         )
 
-    monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics", _fake_load_cached_metrics)
+    monkeypatch.setattr(
+        phase_selection.cache_io, "load_cached_metrics_for_request", _fake_load_cached_metrics
+    )
     monkeypatch.setattr(phase_selection, "select_frames", _fake_select_frames)
 
     output = phase_selection.run_analyze_phase(
@@ -379,7 +469,9 @@ def test_run_analyze_phase_uses_analysis_clip_metrics_but_reference_frame_domain
             },
         )
 
-    monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics", _fake_load_cached_metrics)
+    monkeypatch.setattr(
+        phase_selection.cache_io, "load_cached_metrics_for_request", _fake_load_cached_metrics
+    )
     monkeypatch.setattr(phase_selection, "select_frames", _fake_select_frames)
 
     output = phase_selection.run_analyze_phase(
@@ -445,7 +537,9 @@ def test_run_analyze_phase_offsets_labels_when_reference_trim_matches_untrimmed_
             },
         )
 
-    monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics", _fake_load_cached_metrics)
+    monkeypatch.setattr(
+        phase_selection.cache_io, "load_cached_metrics_for_request", _fake_load_cached_metrics
+    )
     monkeypatch.setattr(phase_selection, "select_frames", _fake_select_frames)
 
     output = phase_selection.run_analyze_phase(
@@ -502,7 +596,9 @@ def test_run_analyze_phase_selects_from_global_selection_window(
             },
         )
 
-    monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics", _fake_load_cached_metrics)
+    monkeypatch.setattr(
+        phase_selection.cache_io, "load_cached_metrics_for_request", _fake_load_cached_metrics
+    )
     monkeypatch.setattr(phase_selection, "select_frames", _fake_select_frames)
 
     output = phase_selection.run_analyze_phase(

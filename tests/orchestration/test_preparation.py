@@ -13,9 +13,9 @@ import pytest
 
 import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError
-from frame_compare.analysis.types import MetricActiveRect
 from frame_compare.config.errors import ConfigValidationError
 from frame_compare.orchestration import preparation
+from frame_compare.orchestration.active_rect import metric_cache_request_for_clip
 from frame_compare.orchestration.context import ClipActiveRect
 from frame_compare.orchestration.errors import (
     DuplicateSourceStemError,
@@ -26,7 +26,12 @@ from frame_compare.orchestration.probing.probe_cache import load_clip_probe_cach
 from frame_compare.orchestration.types import RunDependencies, RunRequest
 from frame_compare.vs.types import SourceInfo
 from frame_compare.vspreview.overrides import MANUAL_OVERRIDES_FILE
-from tests.orchestration.execute_run_helpers import write_probe_cache_for_inputs
+from tests.orchestration.execute_run_helpers import (
+    analysis_selection_domain_for_cache_inputs,
+    metric_cache_request_for_cache_inputs,
+    write_metrics_cache,
+    write_probe_cache_for_inputs,
+)
 
 if TYPE_CHECKING:
     import vapoursynth as vs
@@ -231,7 +236,10 @@ def test_execute_prep_no_cache_removes_only_matching_shared_metrics_cache(tmp_pa
         [source_path],
         config.analysis,
         selection_domain=prep_for_domain.analysis_selection_domain,
-        metric_active_rect=MetricActiveRect(x=0, y=0, width=1920, height=1080),
+        metric_request=metric_cache_request_for_clip(
+            prep_for_domain.analysis_clip,
+            fallback_detection_mode=config.screenshots.active_rect_detection.value,
+        ),
     )
     metrics_dir = tmp_path / "generated" / "cache" / "analysis"
     metrics_dir.mkdir(parents=True, exist_ok=True)
@@ -279,12 +287,14 @@ active_rect = { x = 10, y = 20, width = 300, height = 200 }
             RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
         )
     )
-    rect = MetricActiveRect(x=10, y=20, width=300, height=200)
     rect_fingerprint = cache_io.compute_cache_key(
         [source_path],
         config.analysis,
         selection_domain=prep_for_domain.analysis_selection_domain,
-        metric_active_rect=rect,
+        metric_request=metric_cache_request_for_clip(
+            prep_for_domain.analysis_clip,
+            fallback_detection_mode=config.screenshots.active_rect_detection.value,
+        ),
     )
     full_frame_fingerprint = cache_io.compute_cache_key(
         [source_path],
@@ -336,7 +346,10 @@ def test_execute_prep_no_cache_removes_only_selected_reference_metrics_cache(
         selected_order,
         config.analysis,
         selection_domain=prep_for_domain.analysis_selection_domain,
-        metric_active_rect=MetricActiveRect(x=0, y=0, width=1920, height=1080),
+        metric_request=metric_cache_request_for_clip(
+            prep_for_domain.analysis_clip,
+            fallback_detection_mode=config.screenshots.active_rect_detection.value,
+        ),
     )
     default_cache_path = metrics_dir / cache_io.metrics_cache_filename(
         default_order, default_fingerprint
@@ -389,6 +402,40 @@ def test_execute_prep_from_cache_only_validates_metrics_cache_when_analysis_runs
         asyncio.run(
             preparation.execute_prep(request, RunDependencies(vs_loader=cast(Any, FakeVSLoader())))
         )
+
+
+def test_execute_prep_cache_only_rejects_metadata_mismatch_before_run_folder_reservation(
+    tmp_path: Path,
+) -> None:
+    config_content = METRIC_CONFIG.replace("use_run_folders = false", "use_run_folders = true")
+    _create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    source_path = _create_video_files(input_dir, "source.mkv")[0]
+    config = preparation.prepare_preflight(root=tmp_path).config
+    cache_dir = tmp_path / "generated" / "cache" / "analysis"
+    write_metrics_cache(cache_dir, source_path=source_path, config=config)
+    selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
+    fingerprint = cache_io.compute_cache_key(
+        [source_path],
+        config.analysis,
+        selection_domain=selection_domain,
+        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
+    )
+    cache_path = cache_io.find_metrics_cache_file(cache_dir, fingerprint)
+    assert cache_path is not None
+    payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    payload["metadata"]["active_rect_source"] = "explicit"
+    cache_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(MetricsCalculationError, match="mismatched_inputs"):
+        asyncio.run(
+            preparation.execute_prep(
+                RunRequest(root=tmp_path, from_cache_only=True),
+                RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
+            )
+        )
+
+    assert not any(path.is_dir() for path in input_dir.iterdir())
 
 
 def test_execute_prep_rejects_skip_analysis_with_metric_frame_selection(tmp_path: Path) -> None:

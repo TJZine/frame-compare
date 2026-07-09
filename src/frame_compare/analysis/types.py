@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from pathlib import Path
 
 
 CacheLoadReason = Literal["not_found", "corrupted", "version_mismatch", "mismatched_inputs"]
@@ -57,6 +58,18 @@ class MetricActiveRect:
     y: int
     width: int
     height: int
+
+
+@dataclass(frozen=True, slots=True)
+class MetricCacheRequest:
+    """Complete requested identity for metric-array cache lookup and validation."""
+
+    analysis_source_path: Path | None
+    effective_fps: Fraction | None = None
+    metric_active_rect: MetricActiveRect | None = None
+    active_rect_source: ActiveRectSource = "full-frame"
+    active_rect_detection_mode: ActiveRectDetectionMode = "aspect_ratio"
+    active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v2"
 
 
 @dataclass(frozen=True, slots=True)

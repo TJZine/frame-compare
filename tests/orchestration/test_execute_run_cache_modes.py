@@ -15,7 +15,6 @@ from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.types import (
     ClipIdentity,
     FrameMetrics,
-    MetricActiveRect,
     MetricsMetadata,
 )
 from frame_compare.config.loader import load_config
@@ -30,7 +29,7 @@ from .execute_run_helpers import (
     analysis_selection_domain_for_cache_inputs,
     create_config,
     create_video_files,
-    metric_active_rect_for_cache_inputs,
+    metric_cache_request_for_cache_inputs,
     write_metrics_cache,
     write_probe_cache_for_inputs,
 )
@@ -76,7 +75,7 @@ enable = false
         [source_path],
         config.analysis,
         selection_domain=selection_domain,
-        metric_active_rect=metric_active_rect_for_cache_inputs([source_path], config),
+        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
     )
     analysis_cache_path = cache_io.find_metrics_cache_file(analysis_cache_dir, fingerprint)
     assert analysis_cache_path is not None
@@ -179,13 +178,13 @@ enable = false
         [source_path],
         quality_config.analysis,
         selection_domain=selection_domain,
-        metric_active_rect=metric_active_rect_for_cache_inputs([source_path], quality_config),
+        metric_request=metric_cache_request_for_cache_inputs([source_path], quality_config),
     )
     performance_fingerprint = cache_io.compute_cache_key(
         [source_path],
         config.analysis,
         selection_domain=selection_domain,
-        metric_active_rect=metric_active_rect_for_cache_inputs([source_path], config),
+        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
     )
     quality_cache_path = cache_io.find_metrics_cache_file(analysis_cache_dir, quality_fingerprint)
     performance_cache_path = cache_io.find_metrics_cache_file(
@@ -558,7 +557,7 @@ enable = false
         [source_path],
         config.analysis,
         selection_domain=analysis_selection_domain_for_cache_inputs([source_path], config),
-        metric_active_rect=MetricActiveRect(x=10, y=20, width=300, height=200),
+        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
     )
     assert cache_io.find_metrics_cache_file(
         tmp_path / "generated" / "cache" / "analysis",
@@ -620,7 +619,7 @@ enable = false
         [source_path],
         config.analysis,
         selection_domain=selection_domain,
-        metric_active_rect=metric_active_rect_for_cache_inputs([source_path], config),
+        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
     )
     cache_path = cache_dir / cache_io.metrics_cache_filename([source_path], fingerprint)
     cache_path.write_text("{not-json", encoding="utf-8")
@@ -678,7 +677,7 @@ enable = false
         [source_path],
         config.analysis,
         selection_domain=selection_domain,
-        metric_active_rect=metric_active_rect_for_cache_inputs([source_path], config),
+        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
     )
     cache_path = cache_dir / cache_io.metrics_cache_filename([source_path], fingerprint)
     cache_payload = {

@@ -23,6 +23,7 @@ from frame_compare.analysis.types import (
     ClipIdentity,
     FrameMetrics,
     MetricActiveRect,
+    MetricCacheRequest,
     MetricsMetadata,
 )
 from frame_compare.config.loader import load_config
@@ -44,7 +45,7 @@ from .execute_run_helpers import (
     analysis_selection_domain_for_cache_inputs,
     create_config,
     create_video_files,
-    metric_active_rect_for_cache_inputs,
+    metric_cache_request_for_cache_inputs,
     write_metrics_cache,
     write_probe_cache_for_inputs,
 )
@@ -129,7 +130,7 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
         [source_path],
         config.analysis,
         selection_domain=selection_domain,
-        metric_active_rect=metric_active_rect_for_cache_inputs([source_path], config),
+        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
     )
     analysis_cache_path = cache_io.find_metrics_cache_file(analysis_cache_dir, fingerprint)
     assert analysis_cache_path is not None
@@ -266,7 +267,7 @@ enable = false
         [source_path],
         config.analysis,
         selection_domain=selection_domain,
-        metric_active_rect=metric_active_rect_for_cache_inputs([source_path], config),
+        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
     )
 
     def _fake_calculate_metrics(
@@ -279,16 +280,20 @@ enable = false
         selection_domain: str | None = None,
         **_kwargs: object,
     ) -> FrameMetrics:
+        resolved_analysis_source_path = (
+            video_paths[0] if analysis_source_path is None else analysis_source_path
+        )
         cache_fingerprint = cache_io.compute_cache_key(
             video_paths,
             config,
             selection_domain=selection_domain,
-            metric_active_rect=metric_active_rect,
+            metric_request=MetricCacheRequest(
+                analysis_source_path=resolved_analysis_source_path,
+                effective_fps=Fraction(24, 1),
+                metric_active_rect=metric_active_rect,
+            ),
         )
         stats_by_path = {path: path.stat() for path in video_paths}
-        resolved_analysis_source_path = (
-            video_paths[0] if analysis_source_path is None else analysis_source_path
-        )
         metrics = FrameMetrics(
             luminance=[0.1] * 100,
             motion=[0.0] * 100,
@@ -483,7 +488,7 @@ def test_execute_run_from_cache_only_ignores_old_run_folder_cache(
         [source_path],
         config.analysis,
         selection_domain=selection_domain,
-        metric_active_rect=metric_active_rect_for_cache_inputs([source_path], config),
+        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
     )
     assert sorted(path.name for path in input_dir.iterdir() if path.is_dir()) == [run_name]
     assert (
@@ -605,7 +610,7 @@ unattended = true
         [source_path],
         config.analysis,
         selection_domain=selection_domain,
-        metric_active_rect=metric_active_rect_for_cache_inputs([source_path], config),
+        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
     )
     cache_dir = tmp_path / "generated" / "cache" / "analysis"
     cache_dir.mkdir(parents=True)

@@ -9,7 +9,7 @@ import structlog
 
 import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError
-from frame_compare.analysis.types import MetricActiveRect
+from frame_compare.analysis.types import MetricCacheRequest
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.effective import (
     build_preflight_input_dir_override,
@@ -19,7 +19,7 @@ from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 from frame_compare.config.schema_models import SourceOverrideConfig
 from frame_compare.orchestration.active_rect import (
-    metric_active_rect_for_clip,
+    metric_cache_request_for_clip,
     propagate_resolved_aspect_ratio_evidence,
 )
 from frame_compare.orchestration.active_rect_content import (
@@ -92,13 +92,13 @@ def _remove_cached_metrics(
     config: ConfigSchema,
     input_videos: list[Path],
     selection_domain: str | None,
-    metric_active_rect: MetricActiveRect | None,
+    metric_request: MetricCacheRequest,
 ) -> None:
     fingerprint = cache_io.compute_cache_key(
         input_videos,
         config.analysis,
         selection_domain=selection_domain,
-        metric_active_rect=metric_active_rect,
+        metric_request=metric_request,
     )
     cache_io.delete_metrics_cache_entry(workspace.cache_dir, fingerprint)
 
@@ -235,7 +235,7 @@ def _validate_cache_state(
     config: ConfigSchema,
     input_videos: list[Path],
     selection_domain: str | None,
-    metric_active_rect: MetricActiveRect | None,
+    metric_request: MetricCacheRequest,
 ) -> None:
     if not needs_analysis(config.analysis):
         return
@@ -246,7 +246,7 @@ def _validate_cache_state(
             config=config,
             input_videos=input_videos,
             selection_domain=selection_domain,
-            metric_active_rect=metric_active_rect,
+            metric_request=metric_request,
         )
 
     if request.from_cache_only and not request.skip_analysis:
@@ -254,9 +254,14 @@ def _validate_cache_state(
             input_videos,
             config.analysis,
             selection_domain=selection_domain,
-            metric_active_rect=metric_active_rect,
+            metric_request=metric_request,
         )
-        cache_result = cache_io.load_cached_metrics(workspace.cache_dir, fingerprint, clips=[])
+        cache_result = cache_io.load_cached_metrics_for_request(
+            workspace.cache_dir,
+            fingerprint,
+            clips=[],
+            request=metric_request,
+        )
         if not cache_result.success:
             cache_path = cache_io.find_metrics_cache_file(workspace.cache_dir, fingerprint)
             expected_cache_path = workspace.cache_dir / cache_io.metrics_cache_filename(
@@ -574,7 +579,10 @@ async def execute_prep(
             config=config,
             input_videos=input_videos,
             selection_domain=prevalidated_selection_domain,
-            metric_active_rect=metric_active_rect_for_clip(prevalidated_analysis_clip),
+            metric_request=metric_cache_request_for_clip(
+                prevalidated_analysis_clip,
+                fallback_detection_mode=config.screenshots.active_rect_detection.value,
+            ),
         )
 
     workspace, metadata_prefetch = await _resolve_run_directory(
@@ -644,7 +652,10 @@ async def execute_prep(
                 config=config,
                 input_videos=input_videos,
                 selection_domain=selection_domain,
-                metric_active_rect=metric_active_rect_for_clip(analysis_clip),
+                metric_request=metric_cache_request_for_clip(
+                    analysis_clip,
+                    fallback_detection_mode=config.screenshots.active_rect_detection.value,
+                ),
             )
 
     return PrepState(

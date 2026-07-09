@@ -12,6 +12,7 @@ from frame_compare.analysis.cache_io import (
     compute_cache_key,
     delete_metrics_cache_entry,
     load_cached_metrics,
+    load_cached_metrics_for_request,
     metrics_cache_filename,
     save_metrics_cache,
 )
@@ -24,6 +25,7 @@ from frame_compare.analysis.types import (
     ClipIdentity,
     FrameMetrics,
     MetricActiveRect,
+    MetricCacheRequest,
     MetricsMetadata,
 )
 from frame_compare.config.schema import AnalysisConfig
@@ -150,15 +152,53 @@ def test_compute_cache_key_changes_by_metric_active_rect(tmp_path: Path) -> None
     first_rect = compute_cache_key(
         [v1],
         config,
-        metric_active_rect=MetricActiveRect(x=0, y=0, width=100, height=100),
+        metric_request=MetricCacheRequest(
+            analysis_source_path=v1,
+            metric_active_rect=MetricActiveRect(x=0, y=0, width=100, height=100),
+        ),
     )
     second_rect = compute_cache_key(
         [v1],
         config,
-        metric_active_rect=MetricActiveRect(x=10, y=0, width=100, height=100),
+        metric_request=MetricCacheRequest(
+            analysis_source_path=v1,
+            metric_active_rect=MetricActiveRect(x=10, y=0, width=100, height=100),
+        ),
     )
 
     assert len({full_frame, first_rect, second_rect}) == 3
+
+
+def test_compute_cache_key_changes_by_complete_metric_request_identity(tmp_path: Path) -> None:
+    video = create_video_file(tmp_path, "v1.mkv")
+    config = AnalysisConfig()
+    rect = MetricActiveRect(x=0, y=10, width=100, height=60)
+    base = MetricCacheRequest(
+        analysis_source_path=video,
+        metric_active_rect=rect,
+        active_rect_source="content-derived",
+        active_rect_detection_mode="auto",
+    )
+    requests = (
+        base,
+        MetricCacheRequest(
+            analysis_source_path=video,
+            effective_fps=Fraction(48, 1),
+            metric_active_rect=rect,
+            active_rect_source="content-derived",
+            active_rect_detection_mode="auto",
+        ),
+        MetricCacheRequest(
+            analysis_source_path=video,
+            metric_active_rect=rect,
+            active_rect_source="explicit",
+            active_rect_detection_mode="provided",
+        ),
+    )
+
+    keys = {compute_cache_key([video], config, metric_request=request) for request in requests}
+
+    assert len(keys) == len(requests)
 
 
 def test_metrics_cache_filename_order_independent(tmp_path: Path) -> None:
@@ -330,11 +370,54 @@ def test_save_and_load_round_trip(tmp_path: Path) -> None:
     assert result.metrics.metadata.active_rect_algorithm_id == "active_rect_resolution_v2"
 
 
+def test_request_aware_cache_load_rejects_mismatched_provenance(tmp_path: Path) -> None:
+    video = create_video_file(tmp_path, "v1.mkv")
+    config = AnalysisConfig()
+    rect = MetricActiveRect(x=0, y=10, width=100, height=60)
+    request = MetricCacheRequest(
+        analysis_source_path=video,
+        effective_fps=Fraction(24, 1),
+        metric_active_rect=rect,
+        active_rect_source="explicit",
+        active_rect_detection_mode="provided",
+    )
+    fingerprint = compute_cache_key([video], config, metric_request=request)
+    clips = [ClipIdentity(path=str(video), size=video.stat().st_size, mtime=video.stat().st_mtime)]
+    metrics = FrameMetrics(
+        luminance=[0.5],
+        motion=[0.0],
+        metadata=MetricsMetadata(
+            frame_count=1,
+            fps=Fraction(24, 1),
+            config_fingerprint=fingerprint,
+            clips=clips,
+            analysis_source_path=str(video),
+            performance_mode=config.performance_mode.value,
+            algorithm_id=metric_algorithm_id(config),
+            metric_backend=metric_backend(config),
+            algorithm_identity_json=stable_metric_algorithm_identity_json(config),
+            metric_active_rect=rect,
+            active_rect_source="metadata",
+            active_rect_detection_mode="aspect_ratio",
+        ),
+    )
+    save_metrics_cache(metrics, tmp_path)
+
+    result = load_cached_metrics_for_request(tmp_path, fingerprint, clips, request)
+
+    assert result.success is False
+    assert result.reason == "mismatched_inputs"
+
+
 def test_save_and_load_round_trip_serializes_metric_active_rect(tmp_path: Path) -> None:
     v1 = create_video_file(tmp_path, "v1.mkv")
     config = AnalysisConfig(random_frame_count=10)
     rect = MetricActiveRect(x=4, y=8, width=320, height=180)
-    fingerprint = compute_cache_key([v1], config, metric_active_rect=rect)
+    fingerprint = compute_cache_key(
+        [v1],
+        config,
+        metric_request=MetricCacheRequest(analysis_source_path=v1, metric_active_rect=rect),
+    )
 
     clips = [ClipIdentity(path=str(v1), size=v1.stat().st_size, mtime=v1.stat().st_mtime)]
     metadata = metrics_metadata(

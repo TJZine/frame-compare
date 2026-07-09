@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
-from frame_compare.analysis.types import MetricActiveRect
+from frame_compare.analysis.types import MetricActiveRect, MetricCacheRequest
 from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 from frame_compare.config.schema_models import SourceOverrideConfig
 from frame_compare.orchestration.context import (
@@ -118,6 +118,27 @@ def metric_active_rect_for_clip(clip: ClipState | None) -> MetricActiveRect | No
         y=rect.y,
         width=rect.width,
         height=rect.height,
+    )
+
+
+def metric_cache_request_for_clip(
+    clip: ClipState | None,
+    *,
+    fallback_detection_mode: ClipActiveRectDetectionMode,
+) -> MetricCacheRequest:
+    """Build the complete analysis cache request for a prepared clip."""
+    rect = clip.active_rect if clip is not None else None
+    return MetricCacheRequest(
+        analysis_source_path=clip.path if clip is not None else None,
+        effective_fps=clip.effective_fps if clip is not None else None,
+        metric_active_rect=metric_active_rect_for_clip(clip),
+        active_rect_source=rect.source if rect is not None else "full-frame",
+        active_rect_detection_mode=(
+            rect.detection_mode if rect is not None else fallback_detection_mode
+        ),
+        active_rect_algorithm_id=(
+            rect.algorithm_id if rect is not None else ACTIVE_RECT_RESOLUTION_ALGORITHM
+        ),
     )
 
 

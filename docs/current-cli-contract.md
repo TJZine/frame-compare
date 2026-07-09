@@ -249,7 +249,10 @@ unchanged.
   reference path. Prepared full-frame active rectangles represent no crop;
   explicit, metadata, dimension-derived, aspect-ratio-derived, or
   content-derived rectangles produce coordinate-specific metric/cache
-  identities. Metric-array cache
+  identities. A typed metric request also keys the analysis source, explicit
+  effective FPS versus source-FPS semantics, metric rectangle, and active-rect
+  provenance, and cache loading validates that request before accepting a hit.
+  Metric-array cache
   identity excludes `user_frames`, random seed, frame-selection counts,
   `dark_quantile`, and `bright_quantile` because those values affect frame
   choice rather than metric computation.

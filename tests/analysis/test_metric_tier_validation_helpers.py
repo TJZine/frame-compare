@@ -349,7 +349,7 @@ def test_benchmark_script_recomputes_stale_active_rect_provenance_cache(
 
     def fake_compute_cache_key(*args: object, **kwargs: object) -> str:
         assert args[0] == [reference]
-        assert kwargs["metric_active_rect"] == active_rect.rect
+        assert kwargs["metric_request"].metric_active_rect == active_rect.rect
         return "stale-fingerprint"
 
     def fake_delete_metrics_cache_entry(cache_dir: Path, fingerprint: str) -> None:

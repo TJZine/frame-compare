@@ -38,6 +38,7 @@ from frame_compare.analysis.types import (
     FrameMetrics,
     FrameSelection,
     MetricActiveRect,
+    MetricCacheRequest,
 )
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema import AnalysisConfig, ConfigSchema
@@ -633,7 +634,14 @@ def _calculate_metrics_with_expected_active_rect(
         list(video_paths),
         config,
         selection_domain=selection_domain,
-        metric_active_rect=active_rect.rect,
+        metric_request=MetricCacheRequest(
+            analysis_source_path=analysis_source_path,
+            effective_fps=effective_fps,
+            metric_active_rect=active_rect.rect,
+            active_rect_source=active_rect.source,
+            active_rect_detection_mode=active_rect.detection_mode,
+            active_rect_algorithm_id=active_rect.algorithm_id,
+        ),
     )
     delete_metrics_cache_entry(cache_dir, cache_key)
     metrics = _calculate_metrics_once(

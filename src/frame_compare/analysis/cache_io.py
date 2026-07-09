@@ -21,6 +21,7 @@ from frame_compare.analysis.types import (
     ClipIdentity,
     FrameMetrics,
     MetricActiveRect,
+    MetricCacheRequest,
     MetricsMetadata,
 )
 from frame_compare.utils.atomic_write import write_text_atomic
@@ -59,7 +60,7 @@ def compute_cache_key(
     config: AnalysisConfig,
     *,
     selection_domain: str | None = None,
-    metric_active_rect: MetricActiveRect | None = None,
+    metric_request: MetricCacheRequest | None = None,
 ) -> str:
     """Generate deterministic cache key from video files and analysis config."""
     h = hashlib.sha256()
@@ -76,7 +77,10 @@ def compute_cache_key(
         f"{config.ignore_lead_seconds}|{config.ignore_trail_seconds}|"
         f"{config.min_window_seconds}".encode()
     )
-    h.update(f"metric_active_rect|{_metric_active_rect_token(metric_active_rect)}".encode())
+    request = metric_request or MetricCacheRequest(
+        analysis_source_path=video_paths[0] if video_paths else None
+    )
+    h.update(f"metric_request|{_metric_cache_request_token(request)}".encode())
     h.update(f"metric_algorithm|{stable_metric_algorithm_identity_json(config)}".encode())
     h.update(str(CACHE_VERSION).encode("utf-8"))
     return h.hexdigest()
@@ -86,6 +90,25 @@ def _metric_active_rect_token(rect: MetricActiveRect | None) -> str:
     if rect is None:
         return "full_frame"
     return f"rect:{rect.x},{rect.y},{rect.width},{rect.height}"
+
+
+def _metric_cache_request_token(request: MetricCacheRequest) -> str:
+    effective_fps = (
+        "source"
+        if request.effective_fps is None
+        else f"{request.effective_fps.numerator}/{request.effective_fps.denominator}"
+    )
+    source_path = "" if request.analysis_source_path is None else str(request.analysis_source_path)
+    return "|".join(
+        (
+            f"source:{source_path}",
+            f"effective_fps:{effective_fps}",
+            f"rect:{_metric_active_rect_token(request.metric_active_rect)}",
+            f"rect_source:{request.active_rect_source}",
+            f"detection:{request.active_rect_detection_mode}",
+            f"algorithm:{request.active_rect_algorithm_id}",
+        )
+    )
 
 
 def build_cache_label(video_paths: list[Path]) -> str:
@@ -196,6 +219,38 @@ def load_cached_metrics(
         metadata=payload.metadata,
     )
     return CacheLoadResult(success=True, metrics=metrics)
+
+
+def load_cached_metrics_for_request(
+    cache_dir: Path,
+    fingerprint: str,
+    clips: list[ClipIdentity],
+    request: MetricCacheRequest,
+) -> CacheLoadResult:
+    """Load metrics only when stored metadata matches the complete request identity."""
+    result = load_cached_metrics(cache_dir, fingerprint, clips)
+    if not (result.success and result.metrics is not None):
+        return result
+    if not _metrics_metadata_matches_request(result.metrics.metadata, request):
+        return CacheLoadResult(success=False, reason="mismatched_inputs")
+    return result
+
+
+def _metrics_metadata_matches_request(
+    metadata: MetricsMetadata,
+    request: MetricCacheRequest,
+) -> bool:
+    expected_source = (
+        "" if request.analysis_source_path is None else str(request.analysis_source_path)
+    )
+    return (
+        metadata.analysis_source_path == expected_source
+        and metadata.metric_active_rect == request.metric_active_rect
+        and metadata.active_rect_source == request.active_rect_source
+        and metadata.active_rect_detection_mode == request.active_rect_detection_mode
+        and metadata.active_rect_algorithm_id == request.active_rect_algorithm_id
+        and (request.effective_fps is None or metadata.fps == request.effective_fps)
+    )
 
 
 class _CacheVersionMismatch(_CacheParseError):

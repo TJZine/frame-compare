@@ -139,8 +139,11 @@ Primary owned paths:
   resolver algorithm ID in `MetricsMetadata`, and the metric arrays are for that
   selected analysis clip. Metric-array cache identity includes the selected
   analysis performance mode, algorithm identity, active-rect resolver policy,
-  every prepared clip's resolved active rectangle, and the concrete metric active
-  rectangle token, with a full-frame rectangle representing no crop.
+  every prepared clip's resolved active rectangle, and a typed metric request
+  containing the analysis source, effective-FPS semantics, concrete metric active
+  rectangle, and active-rect provenance. Request-aware cache loading validates the
+  same typed identity before reporting or accepting a hit, with a full-frame
+  rectangle representing no crop.
   Content-derived active rectangles from opt-in `auto` detection are final
   prepared rectangles and are included in the same token/provenance fields. It excludes
   frame-selection counts, `user_frames`, random seed, and dark/bright quantile

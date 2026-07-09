@@ -53,6 +53,7 @@ from frame_compare.analysis.metrics import (  # noqa: E402
 from frame_compare.analysis.types import (  # noqa: E402
     FrameMetrics,
     MetricActiveRect,
+    MetricCacheRequest,
     MetricsMetadata,
 )
 from frame_compare.config.schema import AnalysisConfig  # noqa: E402
@@ -384,7 +385,7 @@ def test_calculate_metrics_frame_access_failure_raises_fc4002():
     assert exc.value.code == "FC-4002"
 
 
-@patch("frame_compare.analysis.metrics.load_cached_metrics")
+@patch("frame_compare.analysis.metrics.load_cached_metrics_for_request")
 @patch("frame_compare.analysis.metrics.compute_cache_key")
 def test_calculate_metrics_uses_cache_on_hit(mock_key, mock_load, tmp_path):
     mock_key.return_value = "fp"
@@ -412,7 +413,7 @@ def test_calculate_metrics_uses_cache_on_hit(mock_key, mock_load, tmp_path):
 @patch("frame_compare.analysis.metrics.save_metrics_cache")
 @patch("frame_compare.analysis.metrics.calculate_metric_strategy")
 @patch("frame_compare.analysis.metrics.DefaultVSLoader")
-@patch("frame_compare.analysis.metrics.load_cached_metrics")
+@patch("frame_compare.analysis.metrics.load_cached_metrics_for_request")
 @patch("frame_compare.analysis.metrics.compute_cache_key")
 def test_calculate_metrics_recomputes_cache_with_mismatched_active_rect_provenance(
     mock_key,
@@ -426,21 +427,11 @@ def test_calculate_metrics_recomputes_cache_with_mismatched_active_rect_provenan
     video_path = tmp_path / "v1.mkv"
     video_path.write_bytes(b"")
     rect = MetricActiveRect(x=10, y=20, width=300, height=200)
-    stale = FrameMetrics(
-        luminance=[0.5],
-        motion=[0.0],
-        metadata=MetricsMetadata(
-            frame_count=1,
-            fps=Fraction(24, 1),
-            config_fingerprint="fp",
-            clips=[],
-            analysis_source_path=str(video_path),
-            metric_active_rect=rect,
-            active_rect_source="full-frame",
-            active_rect_detection_mode="aspect_ratio",
-        ),
+    mock_load.return_value = MagicMock(
+        success=False,
+        metrics=None,
+        reason="mismatched_inputs",
     )
-    mock_load.return_value = MagicMock(success=True, metrics=stale)
     mock_source = mock_loader_cls.return_value.load.return_value
     mock_source.clip.num_frames = 1
     mock_source.fps = Fraction(24, 1)
@@ -472,7 +463,7 @@ def test_calculate_metrics_empty_video_paths_raises_fc4002(tmp_path: Path) -> No
 @patch("frame_compare.analysis.metrics.save_metrics_cache")
 @patch("frame_compare.analysis.metrics.calculate_metric_strategy")
 @patch("frame_compare.analysis.metrics.DefaultVSLoader")
-@patch("frame_compare.analysis.metrics.load_cached_metrics")
+@patch("frame_compare.analysis.metrics.load_cached_metrics_for_request")
 @patch("frame_compare.analysis.metrics.compute_cache_key")
 def test_calculate_metrics_computes_on_cache_miss(
     mock_key, mock_load, mock_loader_cls, mock_strategy, mock_save, tmp_path
@@ -772,12 +763,18 @@ def test_cache_key_changes_when_metric_active_rect_changes(tmp_path: Path) -> No
     first_rect = compute_cache_key(
         [video_path],
         config,
-        metric_active_rect=MetricActiveRect(x=0, y=0, width=100, height=100),
+        metric_request=MetricCacheRequest(
+            analysis_source_path=video_path,
+            metric_active_rect=MetricActiveRect(x=0, y=0, width=100, height=100),
+        ),
     )
     second_rect = compute_cache_key(
         [video_path],
         config,
-        metric_active_rect=MetricActiveRect(x=10, y=0, width=100, height=100),
+        metric_request=MetricCacheRequest(
+            analysis_source_path=video_path,
+            metric_active_rect=MetricActiveRect(x=10, y=0, width=100, height=100),
+        ),
     )
 
     assert len({full_frame, first_rect, second_rect}) == 3
@@ -814,7 +811,7 @@ def _quality_strategy_result(frame_count: int = 10) -> MetricComputationResult:
 @patch("frame_compare.analysis.metrics.save_metrics_cache")
 @patch("frame_compare.analysis.metrics.calculate_metric_strategy")
 @patch("frame_compare.analysis.metrics.DefaultVSLoader")
-@patch("frame_compare.analysis.metrics.load_cached_metrics")
+@patch("frame_compare.analysis.metrics.load_cached_metrics_for_request")
 @patch("frame_compare.analysis.metrics.compute_cache_key")
 def test_calculate_metrics_uses_effective_fps_in_metadata(
     mock_key, mock_load, mock_loader_cls, mock_strategy, mock_save, tmp_path
@@ -847,7 +844,7 @@ def test_calculate_metrics_uses_effective_fps_in_metadata(
 @patch("frame_compare.analysis.metrics.save_metrics_cache")
 @patch("frame_compare.analysis.metrics.calculate_metric_strategy")
 @patch("frame_compare.analysis.metrics.DefaultVSLoader")
-@patch("frame_compare.analysis.metrics.load_cached_metrics")
+@patch("frame_compare.analysis.metrics.load_cached_metrics_for_request")
 @patch("frame_compare.analysis.metrics.compute_cache_key")
 def test_calculate_metrics_cache_save_is_best_effort(
     mock_key, mock_load, mock_loader_cls, mock_strategy, mock_save, tmp_path
@@ -894,7 +891,7 @@ def test_calculate_metrics_cache_save_is_best_effort(
 
 @patch("frame_compare.analysis.metrics.calculate_metric_strategy")
 @patch("frame_compare.analysis.metrics.DefaultVSLoader")
-@patch("frame_compare.analysis.metrics.load_cached_metrics")
+@patch("frame_compare.analysis.metrics.load_cached_metrics_for_request")
 def test_calculate_metrics_analyzes_reference_by_default(
     mock_load, mock_loader_cls, mock_strategy, tmp_path
 ):
@@ -920,7 +917,7 @@ def test_calculate_metrics_analyzes_reference_by_default(
 
 @patch("frame_compare.analysis.metrics.calculate_metric_strategy")
 @patch("frame_compare.analysis.metrics.DefaultVSLoader")
-@patch("frame_compare.analysis.metrics.load_cached_metrics")
+@patch("frame_compare.analysis.metrics.load_cached_metrics_for_request")
 def test_calculate_metrics_analyzes_selected_analysis_source(
     mock_load, mock_loader_cls, mock_strategy, tmp_path
 ):
@@ -950,7 +947,7 @@ def test_calculate_metrics_analyzes_selected_analysis_source(
 
 
 @patch("frame_compare.analysis.metrics.DefaultVSLoader")
-@patch("frame_compare.analysis.metrics.load_cached_metrics")
+@patch("frame_compare.analysis.metrics.load_cached_metrics_for_request")
 def test_calculate_metrics_zero_frame_analysis_source_error_is_not_reference_worded(
     mock_load, mock_loader_cls, tmp_path
 ):
@@ -977,7 +974,7 @@ def test_calculate_metrics_zero_frame_analysis_source_error_is_not_reference_wor
 
 
 @patch("frame_compare.analysis.metrics.DefaultVSLoader")
-@patch("frame_compare.analysis.metrics.load_cached_metrics")
+@patch("frame_compare.analysis.metrics.load_cached_metrics_for_request")
 def test_calculate_metrics_propagates_plugin_not_found(mock_load, mock_loader_cls, tmp_path):
     """Verify PluginNotFoundError bubbles up unwrapped."""
     mock_load.return_value = MagicMock(success=False)
@@ -993,7 +990,7 @@ def test_calculate_metrics_propagates_plugin_not_found(mock_load, mock_loader_cl
 
 
 @patch("frame_compare.analysis.metrics.DefaultVSLoader")
-@patch("frame_compare.analysis.metrics.load_cached_metrics")
+@patch("frame_compare.analysis.metrics.load_cached_metrics_for_request")
 def test_calculate_metrics_propagates_source_load_error(mock_load, mock_loader_cls, tmp_path):
     """Verify SourceLoadError bubbles up unwrapped."""
     mock_load.return_value = MagicMock(success=False)
