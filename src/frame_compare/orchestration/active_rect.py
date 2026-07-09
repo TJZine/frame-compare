@@ -329,7 +329,7 @@ def _aspect_ratio_candidates(resolved: tuple[ClipActiveRect, ...]) -> tuple[_Asp
                 raw_candidates.append(_AspectCandidate(_rect_ratio(rect), index, evidence_rank))
 
     for index, rect in enumerate(resolved):
-        if rect.source not in ("dimension-derived", "full-frame", "content-derived"):
+        if rect.source not in ("dimension-derived", "full-frame"):
             continue
         ratio = _rect_ratio(rect)
         if _aspect_candidate_support_count(ratio, resolved) >= 2:

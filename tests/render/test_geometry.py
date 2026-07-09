@@ -402,6 +402,31 @@ def test_plan_render_geometry_aligned_accepts_content_derived_active_rect() -> N
     assert plans[0].active_rect == GeometryRect(0, 280, 3840, 1600)
 
 
+def test_plan_render_geometry_uses_supported_content_derived_ratio() -> None:
+    plans = plan_render_geometry(
+        (
+            SourceGeometry(
+                width=1920,
+                height=1080,
+                active_rect=GeometryRect(0, 140, 1920, 800),
+                active_rect_source="content-derived",
+            ),
+            SourceGeometry(
+                width=1440,
+                height=900,
+                active_rect=GeometryRect(0, 150, 1440, 600),
+                active_rect_source="content-derived",
+            ),
+            SourceGeometry(width=3840, height=2160),
+        ),
+        mode="aligned",
+        options=RenderGeometryOptions(active_rect_detection="auto"),
+    )
+
+    assert plans[2].active_rect_source == "aspect-ratio-derived"
+    assert plans[2].active_rect == GeometryRect(0, 280, 3840, 1600)
+
+
 def test_plan_render_geometry_aligned_mod_safes_odd_content_derived_crop() -> None:
     (plan,) = plan_render_geometry(
         (

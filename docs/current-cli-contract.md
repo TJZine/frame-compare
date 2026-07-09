@@ -635,6 +635,14 @@ dedicated `run` flags for them:
   screenshot render remains native/full-frame output. Analysis cache identity
   includes the resolved active rectangle and provenance, including
   `content-derived` rectangles from `auto`.
+
+  Example opt-in configuration:
+
+  ```toml
+  [screenshots]
+  active_rect_detection = "auto"
+  ```
+
 - `aligned_scale_policy = "largest_active" | "smallest_active" |
   "reference_active" | "explicit_size"` selects the aligned output canvas policy.
   `largest_active` is the aligned default and uses the active-source envelope

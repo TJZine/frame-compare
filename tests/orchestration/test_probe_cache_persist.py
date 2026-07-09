@@ -4,6 +4,7 @@ from fractions import Fraction
 from pathlib import Path
 
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot
+from frame_compare.orchestration.preparation import _persist_probe_snapshots_for_run
 from frame_compare.orchestration.probing.probe_cache import (
     compute_probe_cache_key,
     load_clip_probe_cache,
@@ -12,10 +13,16 @@ from frame_compare.orchestration.probing.probe_cache import (
 from frame_compare.utils.types import WorkspacePaths
 
 
-def _snapshot(name: str, size: int = 1024, mtime: int = 5000) -> ClipProbeSnapshot:
+def _snapshot(
+    name: str,
+    *,
+    size: int = 1024,
+    mtime: int = 5000,
+    width: int = 1920,
+) -> ClipProbeSnapshot:
     return ClipProbeSnapshot(
         fingerprint=ClipFingerprint(Path(name), size, mtime),
-        width=1920,
+        width=width,
         height=1080,
         num_frames=100,
         fps=Fraction(24000, 1001),
@@ -48,14 +55,10 @@ def test_same_path_preserves_existing_shared_entries(tmp_path: Path) -> None:
     workspace = _legacy_workspace(tmp_path)
     cache_path = workspace.generated_dir / "clip_probe.toml"
 
-    # Pre-populate with an existing entry for video_a.
     snap_a = _snapshot("video_a.mkv")
     key_a = compute_probe_cache_key(snap_a.fingerprint)
     save_clip_probe_cache(cache_path, {key_a: snap_a})
     assert key_a in load_clip_probe_cache(cache_path)
-
-    # Persist a new entry for video_b via the preparation helper.
-    from frame_compare.orchestration.preparation import _persist_probe_snapshots_for_run
 
     snap_b = _snapshot("video_b.mkv", size=2048, mtime=9000)
     _persist_probe_snapshots_for_run(
@@ -63,11 +66,9 @@ def test_same_path_preserves_existing_shared_entries(tmp_path: Path) -> None:
         snapshots_by_path={Path("video_b.mkv"): snap_b},
     )
 
-    # Both entries must survive in the shared/run cache.
     result = load_clip_probe_cache(cache_path)
     key_b = compute_probe_cache_key(snap_b.fingerprint)
-    assert key_a in result, "pre-existing entry was lost"
-    assert key_b in result, "new entry was not written"
+    assert set(result) == {key_a, key_b}
 
 
 def test_run_folder_preserves_existing_shared_entries(tmp_path: Path) -> None:
@@ -75,12 +76,9 @@ def test_run_folder_preserves_existing_shared_entries(tmp_path: Path) -> None:
     workspace = _run_folder_workspace(tmp_path)
     shared_path = workspace.shared_analysis_cache_dir.parent.parent / "clip_probe.toml"
 
-    # Pre-populate the shared cache.
     snap_a = _snapshot("video_a.mkv")
     key_a = compute_probe_cache_key(snap_a.fingerprint)
     save_clip_probe_cache(shared_path, {key_a: snap_a})
-
-    from frame_compare.orchestration.preparation import _persist_probe_snapshots_for_run
 
     snap_b = _snapshot("video_b.mkv", size=2048, mtime=9000)
     _persist_probe_snapshots_for_run(
@@ -88,20 +86,17 @@ def test_run_folder_preserves_existing_shared_entries(tmp_path: Path) -> None:
         snapshots_by_path={Path("video_b.mkv"): snap_b},
     )
 
-    # Shared cache keeps both.
     shared_result = load_clip_probe_cache(shared_path)
     key_b = compute_probe_cache_key(snap_b.fingerprint)
-    assert key_a in shared_result, "pre-existing shared entry was lost"
-    assert key_b in shared_result, "new entry was not written to shared cache"
+    assert set(shared_result) == {key_a, key_b}
 
-    # Run-local cache has only the current run's entries.
     run_path = workspace.generated_dir / "clip_probe.toml"
     run_result = load_clip_probe_cache(run_path)
-    assert key_b in run_result, "new entry missing from run-local cache"
+    assert set(run_result) == {key_b}
 
 
-def test_same_path_updates_stale_entry(tmp_path: Path) -> None:
-    """When a video's fingerprint changes, the current entry wins over stale."""
+def test_same_path_preserves_historical_fingerprint(tmp_path: Path) -> None:
+    """A changed fingerprint is retained alongside the prior cache entry."""
     workspace = _legacy_workspace(tmp_path)
     cache_path = workspace.generated_dir / "clip_probe.toml"
 
@@ -109,11 +104,8 @@ def test_same_path_updates_stale_entry(tmp_path: Path) -> None:
     key_old = compute_probe_cache_key(snap_old.fingerprint)
     save_clip_probe_cache(cache_path, {key_old: snap_old})
 
-    # New run probes the same video with an updated mtime → different key.
     snap_new = _snapshot("video.mkv", size=1024, mtime=2000)
     key_new = compute_probe_cache_key(snap_new.fingerprint)
-
-    from frame_compare.orchestration.preparation import _persist_probe_snapshots_for_run
 
     _persist_probe_snapshots_for_run(
         workspace=workspace,
@@ -121,6 +113,20 @@ def test_same_path_updates_stale_entry(tmp_path: Path) -> None:
     )
 
     result = load_clip_probe_cache(cache_path)
-    # Both keys are present (old stale entry and new entry).
-    assert key_old in result, "old key should remain until evicted"
-    assert key_new in result, "new key must be present"
+    assert set(result) == {key_old, key_new}
+
+
+def test_same_path_current_entry_wins_on_cache_key_conflict(tmp_path: Path) -> None:
+    workspace = _legacy_workspace(tmp_path)
+    cache_path = workspace.generated_dir / "clip_probe.toml"
+    existing = _snapshot("video.mkv", width=1280)
+    current = _snapshot("video.mkv", width=1920)
+    cache_key = compute_probe_cache_key(current.fingerprint)
+    save_clip_probe_cache(cache_path, {cache_key: existing})
+
+    _persist_probe_snapshots_for_run(
+        workspace=workspace,
+        snapshots_by_path={Path("video.mkv"): current},
+    )
+
+    assert load_clip_probe_cache(cache_path)[cache_key].width == 1920

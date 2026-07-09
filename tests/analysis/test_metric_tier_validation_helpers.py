@@ -30,7 +30,11 @@ from frame_compare.analysis.types import (
     SelectionBreakdown,
 )
 from frame_compare.config.schema import ConfigSchema
-from frame_compare.config.schema_enums import AnalysisPerformanceMode
+from frame_compare.config.schema_enums import (
+    AnalysisPerformanceMode,
+    ScreenshotActiveRectDetection,
+)
+from frame_compare.config.schema_models import SourceOverrideConfig
 from tests.orchestration.execute_run_helpers import write_probe_cache_for_inputs
 
 
@@ -398,7 +402,7 @@ def test_benchmark_script_resolves_configured_analysis_source_effective_fps_and_
         }
     )
 
-    source_path, effective_fps, active_rect, _overrides = script._resolve_benchmark_analysis_source(
+    source = script._resolve_benchmark_analysis_source(
         root=tmp_path,
         input_dir=input_dir,
         input_paths=[reference, analysis],
@@ -408,15 +412,16 @@ def test_benchmark_script_resolves_configured_analysis_source_effective_fps_and_
         input_dir=input_dir,
         input_paths=[reference, analysis],
         config=config,
-        source_path=source_path,
+        source_path=source.path,
     )
 
-    assert source_path == analysis
-    assert effective_fps == Fraction(24000, 1001)
+    assert source.path == analysis
+    assert source.reference_path == reference
+    assert source.effective_fps == Fraction(24000, 1001)
     assert legacy_effective_fps == Fraction(24000, 1001)
-    assert active_rect.rect == MetricActiveRect(x=10, y=20, width=300, height=200)
-    assert active_rect.source == "explicit"
-    assert active_rect.detection_mode == "aspect_ratio"
+    assert source.active_rect.rect == MetricActiveRect(x=10, y=20, width=300, height=200)
+    assert source.active_rect.source == "explicit"
+    assert source.active_rect.detection_mode == "aspect_ratio"
 
 
 def test_benchmark_script_uses_full_frame_active_rect_provenance_by_default(
@@ -430,19 +435,20 @@ def test_benchmark_script_uses_full_frame_active_rect_provenance_by_default(
     config = ConfigSchema()
     write_probe_cache_for_inputs(tmp_path / "generated" / "clip_probe.toml", [reference], config)
 
-    source_path, effective_fps, active_rect, _overrides = script._resolve_benchmark_analysis_source(
+    source = script._resolve_benchmark_analysis_source(
         root=tmp_path,
         input_dir=input_dir,
         input_paths=[reference],
         config=config,
     )
 
-    assert source_path == reference
-    assert effective_fps is None
-    assert active_rect.rect == MetricActiveRect(x=0, y=0, width=1920, height=1080)
-    assert active_rect.source == "full-frame"
-    assert active_rect.detection_mode == "aspect_ratio"
-    assert active_rect.algorithm_id == "active_rect_resolution_v2"
+    assert source.path == reference
+    assert source.reference_path == reference
+    assert source.effective_fps is None
+    assert source.active_rect.rect == MetricActiveRect(x=0, y=0, width=1920, height=1080)
+    assert source.active_rect.source == "full-frame"
+    assert source.active_rect.detection_mode == "aspect_ratio"
+    assert source.active_rect.algorithm_id == "active_rect_resolution_v2"
 
 
 def test_benchmark_script_requires_prepared_probe_for_implicit_active_rect(
@@ -474,18 +480,21 @@ def test_benchmark_script_requires_selection_domain_for_non_first_analysis_sourc
         script._require_selection_domain_for_analysis_cache_identity(
             selection_domain=None,
             video_paths=[reference, analysis],
-            analysis_source_path=analysis,
+            analysis_source=_benchmark_analysis_source(script, path=analysis, reference=reference),
+            active_rect_detection=ScreenshotActiveRectDetection.ASPECT_RATIO,
         )
 
     script._require_selection_domain_for_analysis_cache_identity(
         selection_domain="benchmark-domain",
         video_paths=[reference, analysis],
-        analysis_source_path=analysis,
+        analysis_source=_benchmark_analysis_source(script, path=analysis, reference=reference),
+        active_rect_detection=ScreenshotActiveRectDetection.ASPECT_RATIO,
     )
     script._require_selection_domain_for_analysis_cache_identity(
         selection_domain=None,
         video_paths=[reference, analysis],
-        analysis_source_path=reference,
+        analysis_source=_benchmark_analysis_source(script, path=reference, reference=reference),
+        active_rect_detection=ScreenshotActiveRectDetection.ASPECT_RATIO,
     )
 
 
@@ -499,16 +508,25 @@ def test_benchmark_script_requires_selection_domain_for_effective_fps_override(
         script._require_selection_domain_for_analysis_cache_identity(
             selection_domain=None,
             video_paths=[reference],
-            analysis_source_path=reference,
-            effective_fps=Fraction(24, 1),
+            analysis_source=_benchmark_analysis_source(
+                script,
+                path=reference,
+                reference=reference,
+                effective_fps=Fraction(24, 1),
+            ),
+            active_rect_detection=ScreenshotActiveRectDetection.ASPECT_RATIO,
         )
 
-    # Providing a domain suppresses the guard.
     script._require_selection_domain_for_analysis_cache_identity(
         selection_domain="fps-domain",
         video_paths=[reference],
-        analysis_source_path=reference,
-        effective_fps=Fraction(24, 1),
+        analysis_source=_benchmark_analysis_source(
+            script,
+            path=reference,
+            reference=reference,
+            effective_fps=Fraction(24, 1),
+        ),
+        active_rect_detection=ScreenshotActiveRectDetection.ASPECT_RATIO,
     )
 
 
@@ -518,32 +536,88 @@ def test_benchmark_script_requires_selection_domain_for_trim_overrides(
     script = _load_benchmark_script()
     reference = tmp_path / "reference.mkv"
 
-    from frame_compare.config.schema_models import SourceOverrideConfig
-
     overrides = {reference: SourceOverrideConfig(trim_start_frames=10)}
     with pytest.raises(SystemExit, match="selection-domain token is required"):
         script._require_selection_domain_for_analysis_cache_identity(
             selection_domain=None,
             video_paths=[reference],
-            analysis_source_path=reference,
-            overrides_by_path=overrides,
+            analysis_source=_benchmark_analysis_source(
+                script,
+                path=reference,
+                reference=reference,
+                overrides=overrides,
+            ),
+            active_rect_detection=ScreenshotActiveRectDetection.ASPECT_RATIO,
         )
 
-    # Providing a domain suppresses the guard.
     script._require_selection_domain_for_analysis_cache_identity(
         selection_domain="trim-domain",
         video_paths=[reference],
-        analysis_source_path=reference,
-        overrides_by_path=overrides,
+        analysis_source=_benchmark_analysis_source(
+            script,
+            path=reference,
+            reference=reference,
+            overrides=overrides,
+        ),
+        active_rect_detection=ScreenshotActiveRectDetection.ASPECT_RATIO,
     )
 
-    # Default overrides (no trims, no fps) should not trigger.
     script._require_selection_domain_for_analysis_cache_identity(
         selection_domain=None,
         video_paths=[reference],
-        analysis_source_path=reference,
-        overrides_by_path={reference: SourceOverrideConfig()},
+        analysis_source=_benchmark_analysis_source(
+            script,
+            path=reference,
+            reference=reference,
+            overrides={reference: SourceOverrideConfig()},
+        ),
+        active_rect_detection=ScreenshotActiveRectDetection.ASPECT_RATIO,
     )
+
+
+def test_benchmark_script_requires_selection_domain_for_other_domain_facts(
+    tmp_path: Path,
+) -> None:
+    script = _load_benchmark_script()
+    reference = tmp_path / "reference.mkv"
+    configured_reference = tmp_path / "configured-reference.mkv"
+
+    cases = (
+        (
+            _benchmark_analysis_source(
+                script,
+                path=reference,
+                reference=configured_reference,
+            ),
+            ScreenshotActiveRectDetection.ASPECT_RATIO,
+        ),
+        (
+            _benchmark_analysis_source(
+                script,
+                path=reference,
+                reference=reference,
+                overrides={
+                    reference: SourceOverrideConfig.model_validate(
+                        {"active_rect": {"x": 0, "y": 0, "width": 100, "height": 100}}
+                    )
+                },
+            ),
+            ScreenshotActiveRectDetection.ASPECT_RATIO,
+        ),
+        (
+            _benchmark_analysis_source(script, path=reference, reference=reference),
+            ScreenshotActiveRectDetection.AUTO,
+        ),
+    )
+
+    for source, detection in cases:
+        with pytest.raises(SystemExit, match="selection-domain token is required"):
+            script._require_selection_domain_for_analysis_cache_identity(
+                selection_domain=None,
+                video_paths=[reference, configured_reference],
+                analysis_source=source,
+                active_rect_detection=detection,
+            )
 
 
 def test_benchmark_script_uses_configured_generated_dir_for_default_cache(tmp_path: Path) -> None:
@@ -578,6 +652,27 @@ def test_benchmark_script_rejects_unsupported_production_contexts(
             input_paths=[source],
             config=config,
         )
+
+
+def _benchmark_analysis_source(
+    script: ModuleType,
+    *,
+    path: Path,
+    reference: Path,
+    effective_fps: Fraction | None = None,
+    overrides: dict[Path, SourceOverrideConfig] | None = None,
+) -> Any:
+    return script.BenchmarkAnalysisSource(
+        path=path,
+        reference_path=reference,
+        effective_fps=effective_fps,
+        active_rect=script.BenchmarkActiveRect(
+            rect=None,
+            source="full-frame",
+            detection_mode="aspect_ratio",
+        ),
+        overrides_by_path={} if overrides is None else overrides,
+    )
 
 
 def _load_benchmark_script() -> ModuleType:

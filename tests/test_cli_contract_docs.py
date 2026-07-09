@@ -934,6 +934,7 @@ def test_current_cli_contract_documents_screenshot_geometry_config_surface() -> 
         "Native screenshot render remains native/full-frame output",
         "includes the resolved active rectangle and provenance",
         "`content-derived` rectangles from `auto`",
+        '[screenshots] active_rect_detection = "auto"',
         "fits active content inside the selected target width and height",
         "without exceeding either dimension",
         "Derived policy targets are normalized downward",

@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from fractions import Fraction
 from pathlib import Path
@@ -78,6 +78,17 @@ class BenchmarkActiveRect:
     algorithm_id: ActiveRectAlgorithmId = ACTIVE_RECT_RESOLUTION_ALGORITHM
 
 
+@dataclass(frozen=True, slots=True)
+class BenchmarkAnalysisSource:
+    """Resolved benchmark source and cache-domain facts."""
+
+    path: Path
+    reference_path: Path
+    effective_fps: Fraction | None
+    active_rect: BenchmarkActiveRect
+    overrides_by_path: Mapping[Path, SourceOverrideConfig]
+
+
 def main() -> int:
     args = _parse_args()
     root = args.root.resolve()
@@ -95,20 +106,17 @@ def main() -> int:
     )
     if not cache_dir.is_absolute():
         cache_dir = root / cache_dir
-    analysis_source_path, effective_fps, active_rect, overrides_by_path = (
-        _resolve_benchmark_analysis_source(
-            root=root,
-            input_dir=input_dir,
-            input_paths=input_paths,
-            config=config,
-        )
+    analysis_source = _resolve_benchmark_analysis_source(
+        root=root,
+        input_dir=input_dir,
+        input_paths=input_paths,
+        config=config,
     )
     _require_selection_domain_for_analysis_cache_identity(
         selection_domain=args.selection_domain,
         video_paths=input_paths,
-        analysis_source_path=analysis_source_path,
-        effective_fps=effective_fps,
-        overrides_by_path=overrides_by_path,
+        analysis_source=analysis_source,
+        active_rect_detection=config.screenshots.active_rect_detection,
     )
     warnings = [
         "Per-subphase luminance and motion timings are unavailable; only total analysis wall-clock is recorded.",
@@ -120,9 +128,9 @@ def main() -> int:
         video_paths=input_paths,
         analysis_config=config.analysis,
         cache_dir=cache_dir,
-        analysis_source_path=analysis_source_path,
-        effective_fps=effective_fps,
-        active_rect=active_rect,
+        analysis_source_path=analysis_source.path,
+        effective_fps=analysis_source.effective_fps,
+        active_rect=analysis_source.active_rect,
         selection_domain=args.selection_domain,
         window_start=args.window_start,
         window_end_exclusive=args.window_end_exclusive,
@@ -143,12 +151,16 @@ def main() -> int:
         "config": {
             "config_path": config_path.as_posix(),
             "analysis_source": config.sources.analysis_source,
-            "analysis_source_path": analysis_source_path.as_posix(),
-            "effective_fps": str(effective_fps) if effective_fps is not None else None,
-            "metric_active_rect": _metric_active_rect_json(active_rect.rect),
-            "active_rect_source": active_rect.source,
-            "active_rect_detection_mode": active_rect.detection_mode,
-            "active_rect_algorithm_id": active_rect.algorithm_id,
+            "analysis_source_path": analysis_source.path.as_posix(),
+            "effective_fps": (
+                str(analysis_source.effective_fps)
+                if analysis_source.effective_fps is not None
+                else None
+            ),
+            "metric_active_rect": _metric_active_rect_json(analysis_source.active_rect.rect),
+            "active_rect_source": analysis_source.active_rect.source,
+            "active_rect_detection_mode": analysis_source.active_rect.detection_mode,
+            "active_rect_algorithm_id": analysis_source.active_rect.algorithm_id,
             "selection_window": {
                 "start_frame": quality["window"]["start_frame"],
                 "end_frame_exclusive": quality["window"]["end_frame_exclusive"],
@@ -223,7 +235,7 @@ def _resolve_benchmark_analysis_source(
     input_dir: Path,
     input_paths: Sequence[Path],
     config: ConfigSchema,
-) -> tuple[Path, Fraction | None, BenchmarkActiveRect, dict[Path, SourceOverrideConfig]]:
+) -> BenchmarkAnalysisSource:
     source_path = _resolve_benchmark_analysis_source_path(
         input_dir=input_dir,
         input_paths=input_paths,
@@ -248,7 +260,13 @@ def _resolve_benchmark_analysis_source(
         ),
         config=config,
     )
-    return source_path, effective_fps, active_rect, selection.overrides_by_path
+    return BenchmarkAnalysisSource(
+        path=source_path,
+        reference_path=selection.ordered_paths[0],
+        effective_fps=effective_fps,
+        active_rect=active_rect,
+        overrides_by_path=selection.overrides_by_path,
+    )
 
 
 def _effective_fps_override_for_path(
@@ -368,35 +386,40 @@ def _require_selection_domain_for_analysis_cache_identity(
     *,
     selection_domain: str | None,
     video_paths: Sequence[Path],
-    analysis_source_path: Path,
-    effective_fps: Fraction | None = None,
-    overrides_by_path: dict[Path, SourceOverrideConfig] | None = None,
+    analysis_source: BenchmarkAnalysisSource,
+    active_rect_detection: ScreenshotActiveRectDetection,
 ) -> None:
-    """Require an explicit selection-domain token when benchmark inputs
-    affect analysis cache identity beyond the default first-path case.
-
-    Domain-affecting inputs include: non-first analysis source path,
-    effective FPS overrides, and configured source trims.
-    """
+    """Require the production token whenever the benchmark domain is non-default."""
     if selection_domain is not None:
         return
-    has_non_default_overrides = overrides_by_path is not None and any(
-        override.trim_start_frames or override.trim_end_frames or override.effective_fps is not None
-        for override in overrides_by_path.values()
-    )
     domain_is_default = (
         bool(video_paths)
-        and analysis_source_path == video_paths[0]
-        and effective_fps is None
-        and not has_non_default_overrides
+        and analysis_source.reference_path == video_paths[0]
+        and analysis_source.path == video_paths[0]
+        and analysis_source.effective_fps is None
+        and active_rect_detection == ScreenshotActiveRectDetection.ASPECT_RATIO
+        and not any(
+            _source_override_affects_selection_domain(override)
+            for override in analysis_source.overrides_by_path.values()
+        )
     )
     if domain_is_default:
         return
     raise SystemExit(
         "A benchmark selection-domain token is required when benchmark inputs affect "
-        "analysis cache identity. Domain-affecting inputs include: non-first analysis "
-        "source path, effective FPS overrides, and configured source trims. Pass "
-        "--selection-domain from a prepared run or benchmark with default inputs."
+        "analysis cache identity. Domain-affecting inputs include: a non-default reference "
+        "or analysis source, active-rect detection policy, source trims, effective FPS "
+        "overrides, and explicit active rectangles. Pass --selection-domain from a "
+        "prepared run or benchmark with default inputs."
+    )
+
+
+def _source_override_affects_selection_domain(override: SourceOverrideConfig) -> bool:
+    return bool(
+        override.trim_start_frames
+        or override.trim_end_frames
+        or override.effective_fps is not None
+        or override.active_rect is not None
     )
 
 

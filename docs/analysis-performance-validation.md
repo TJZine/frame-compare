@@ -24,14 +24,14 @@ By default, the script renders tier-level Rich progress to stderr while keeping
 stdout reserved for the final output JSON path. Pass `--no-progress` when a
 scripted run needs no terminal progress display.
 
-When source trims, effective FPS overrides, or shared selection windows matter,
-pass the exact source-frame window used for review with `--window-start` and
-`--window-end-exclusive`. If an orchestration selection-domain token is available
-from a prepared run, pass it with `--selection-domain` so cache identity matches
-that run. When the resolved analysis source is not the first input path,
-`--selection-domain` is required so benchmark cache identity cannot reuse metrics
-for a different analysis source. Without explicit window arguments, the script
-records warnings and compares the full analysis metric domain.
+Pass the exact source-frame window used for review with `--window-start` and
+`--window-end-exclusive`. Pass the orchestration selection-domain token from a
+prepared run with `--selection-domain` whenever the benchmark uses a non-default
+reference or analysis source, active-rect detection policy, source trim, effective
+FPS override, or explicit active rectangle. The tool rejects those non-default
+domains without the token so its cache cannot alias production analysis state.
+Without explicit window arguments, the script records warnings and compares the
+full analysis metric domain.
 
 The benchmark script uses the configured `paths.generated_dir` for analysis
 cache by default and resolves explicit `sources.analysis_source` selectors before
