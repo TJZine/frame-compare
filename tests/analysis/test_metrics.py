@@ -50,7 +50,11 @@ from frame_compare.analysis.metrics import (  # noqa: E402
     ProgressReporter,
     calculate_metrics,
 )
-from frame_compare.analysis.types import FrameMetrics, MetricActiveRect  # noqa: E402
+from frame_compare.analysis.types import (  # noqa: E402
+    FrameMetrics,
+    MetricActiveRect,
+    MetricsMetadata,
+)
 from frame_compare.config.schema import AnalysisConfig  # noqa: E402
 from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError  # noqa: E402
 
@@ -384,16 +388,77 @@ def test_calculate_metrics_frame_access_failure_raises_fc4002():
 @patch("frame_compare.analysis.metrics.compute_cache_key")
 def test_calculate_metrics_uses_cache_on_hit(mock_key, mock_load, tmp_path):
     mock_key.return_value = "fp"
-    metrics = MagicMock(spec=FrameMetrics)
-    mock_load.return_value = MagicMock(success=True, metrics=metrics)
-
     video_paths = [tmp_path / "v1.mkv"]
     video_paths[0].write_bytes(b"")
     config = AnalysisConfig()
+    metrics = FrameMetrics(
+        luminance=[0.5],
+        motion=[0.0],
+        metadata=MetricsMetadata(
+            frame_count=1,
+            fps=Fraction(24, 1),
+            config_fingerprint="fp",
+            clips=[],
+            analysis_source_path=str(video_paths[0]),
+        ),
+    )
+    mock_load.return_value = MagicMock(success=True, metrics=metrics)
 
     result = calculate_metrics(video_paths, config, tmp_path)
     assert result == metrics
     mock_load.assert_called_once()
+
+
+@patch("frame_compare.analysis.metrics.save_metrics_cache")
+@patch("frame_compare.analysis.metrics.calculate_metric_strategy")
+@patch("frame_compare.analysis.metrics.DefaultVSLoader")
+@patch("frame_compare.analysis.metrics.load_cached_metrics")
+@patch("frame_compare.analysis.metrics.compute_cache_key")
+def test_calculate_metrics_recomputes_cache_with_mismatched_active_rect_provenance(
+    mock_key,
+    mock_load,
+    mock_loader_cls,
+    mock_strategy,
+    mock_save,
+    tmp_path: Path,
+) -> None:
+    mock_key.return_value = "fp"
+    video_path = tmp_path / "v1.mkv"
+    video_path.write_bytes(b"")
+    rect = MetricActiveRect(x=10, y=20, width=300, height=200)
+    stale = FrameMetrics(
+        luminance=[0.5],
+        motion=[0.0],
+        metadata=MetricsMetadata(
+            frame_count=1,
+            fps=Fraction(24, 1),
+            config_fingerprint="fp",
+            clips=[],
+            analysis_source_path=str(video_path),
+            metric_active_rect=rect,
+            active_rect_source="full-frame",
+            active_rect_detection_mode="aspect_ratio",
+        ),
+    )
+    mock_load.return_value = MagicMock(success=True, metrics=stale)
+    mock_source = mock_loader_cls.return_value.load.return_value
+    mock_source.clip.num_frames = 1
+    mock_source.fps = Fraction(24, 1)
+    mock_strategy.return_value = _quality_strategy_result(frame_count=1)
+
+    result = calculate_metrics(
+        [video_path],
+        AnalysisConfig(),
+        tmp_path,
+        metric_active_rect=rect,
+        active_rect_source="explicit",
+        active_rect_detection_mode="provided",
+    )
+
+    mock_strategy.assert_called_once()
+    mock_save.assert_called_once()
+    assert result.metadata.active_rect_source == "explicit"
+    assert result.metadata.active_rect_detection_mode == "provided"
 
 
 def test_calculate_metrics_empty_video_paths_raises_fc4002(tmp_path: Path) -> None:
