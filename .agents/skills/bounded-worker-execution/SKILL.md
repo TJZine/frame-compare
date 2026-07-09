@@ -40,6 +40,14 @@ Every delegated slice should specify:
 
 Do not make the worker infer the slice from a broad plan alone.
 
+## Delegation Record
+
+Before dispatch, record the selected role and its `.codex/agents/<role>.toml`
+path in the worker packet. At closeout, report that role, config path, `model`,
+and `model_reasoning_effort` read from the TOML. Treat the worker's
+`CONFIGURED ROLE` opening line as a visibility aid, not independent proof of
+the model selection.
+
 ## Execution Pattern
 
 1. Decide whether delegation is justified.

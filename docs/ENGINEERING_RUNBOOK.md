@@ -389,6 +389,15 @@ Review should prioritize:
 
 Changes in `orchestration/coordinator.py`, `errors.py`, `services/report.py`, or packaging workflows should receive extra scrutiny because they are current hotspots or blast-radius multipliers.
 
+## Subagent Transparency
+
+When dispatching a subagent, record the selected role and its
+`.codex/agents/<role>.toml` path. At task closeout, list each role used with
+the `model` and `model_reasoning_effort` read from that TOML. The child role's
+`CONFIGURED ROLE` opening line is a visible confirmation of the selected role;
+the TOML remains the authoritative configuration and avoids duplicating model
+names in prompts or workflow docs.
+
 ## Documentation Freshness Triggers
 
 Update `docs/current-architecture.md` in the same pass when changing:
