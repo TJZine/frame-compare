@@ -2,17 +2,26 @@
 
 from __future__ import annotations
 
+import gc
+import sys
+import weakref
+from collections.abc import Iterator, Sequence
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
+from types import GeneratorType, SimpleNamespace
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import numpy.typing as npt
+import pytest
 
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 from frame_compare.orchestration.active_rect_content import (
+    ActiveRectContentDetectionError,
     ContentActiveRect,
+    VSActiveRectFrameSampler,
     detect_content_active_rect,
     refine_auto_content_active_rects_for_clips,
     sample_source_frame_indices,
@@ -23,6 +32,9 @@ from frame_compare.orchestration.context import (
     ClipProbeSnapshot,
     ClipState,
 )
+
+if TYPE_CHECKING:
+    from frame_compare.vs.loader import VSLoader
 
 
 def _clip(
@@ -89,6 +101,68 @@ def test_stable_top_bottom_letterbox_bars_produce_content_rect() -> None:
     rect = detect_content_active_rect(frames)
 
     assert rect == ContentActiveRect(x=0, y=10, width=100, height=60)
+
+
+def test_detector_streams_frames_without_retaining_previous_arrays() -> None:
+    def stream_frames() -> Iterator[npt.NDArray[np.float32]]:
+        for _index in range(8):
+            frame = _letterbox_frame(top=10, bottom=10)
+            reference = weakref.ref(frame)
+            yield frame
+            del frame
+            gc.collect()
+            assert reference() is None
+
+    rect = detect_content_active_rect(stream_frames())
+
+    assert rect == ContentActiveRect(x=0, y=10, width=100, height=60)
+
+
+def test_vs_sampler_fetches_frames_lazily_and_releases_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    source_references: list[weakref.ReferenceType[FakeSource]] = []
+
+    class FakeFrame:
+        def __getitem__(self, plane: int) -> npt.NDArray[np.float32]:
+            assert plane == 0
+            return _letterbox_frame(top=10, bottom=10)
+
+    class FakeNode:
+        format = SimpleNamespace(color_family=1, sample_type=2, bits_per_sample=32)
+
+        def get_frame(self, index: int) -> FakeFrame:
+            events.append(f"frame:{index}")
+            return FakeFrame()
+
+    class FakeSource:
+        def __init__(self) -> None:
+            self.clip = FakeNode()
+
+    class FakeLoader:
+        def load(self, _path: Path) -> FakeSource:
+            events.append("load")
+            source = FakeSource()
+            source_references.append(weakref.ref(source))
+            return source
+
+    fake_vs = SimpleNamespace(YUV=1, FLOAT=2, YUV420P8=3)
+    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
+    sampler = VSActiveRectFrameSampler(cast("VSLoader", FakeLoader()))
+
+    frames = sampler.sample_luma_frames(_clip(), (3, 7, 11))
+
+    assert isinstance(frames, GeneratorType)
+    assert events == []
+    sampled = next(frames)
+    assert sampled.shape == (80, 100)
+    assert events == ["load", "frame:3"]
+
+    del sampled
+    frames.close()
+    gc.collect()
+    assert source_references[0]() is None
 
 
 def test_limited_range_off_black_bars_are_detected_when_stable() -> None:
@@ -259,3 +333,40 @@ def test_normal_auto_refinement_keeps_successful_clip_when_later_clip_sampling_f
     assert refined[1].active_rect == ClipActiveRect(0, 0, 100, 80, "full-frame", "auto")
     assert len(warnings) == 1
     assert "active-rect auto detection failed for failed.mkv" in warnings[0]
+
+
+def test_auto_refinement_maps_failure_raised_during_iterator_consumption() -> None:
+    clip = replace(
+        _clip(name="failed-during-iteration.mkv"),
+        active_rect=ClipActiveRect(0, 0, 100, 80, "full-frame", "auto"),
+    )
+
+    class IterationFailingSampler:
+        def sample_luma_frames(
+            self,
+            _clip: ClipState,
+            _indices: Sequence[int],
+        ) -> Iterator[npt.NDArray[np.float32]]:
+            yield _letterbox_frame(top=10, bottom=10)
+            raise RuntimeError("iteration boom")
+
+    refined, warnings = refine_auto_content_active_rects_for_clips(
+        clips=[clip],
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+        detection=ScreenshotActiveRectDetection.AUTO,
+        sampler=IterationFailingSampler(),
+        fail_closed=False,
+    )
+
+    assert refined == [clip]
+    assert len(warnings) == 1
+    assert "RuntimeError: iteration boom" in warnings[0]
+
+    with pytest.raises(ActiveRectContentDetectionError, match="RuntimeError: iteration boom"):
+        refine_auto_content_active_rects_for_clips(
+            clips=[clip],
+            selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+            detection=ScreenshotActiveRectDetection.AUTO,
+            sampler=IterationFailingSampler(),
+            fail_closed=True,
+        )

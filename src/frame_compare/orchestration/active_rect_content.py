@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, replace
 from math import ceil
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import numpy as np
 import numpy.typing as npt
@@ -58,8 +58,8 @@ class ActiveRectFrameSampler(Protocol):
         self,
         clip: ClipState,
         source_frame_indices: Sequence[int],
-    ) -> Sequence[npt.NDArray[np.float32]]:
-        """Return normalized luma frames for the requested source-frame indices."""
+    ) -> Iterable[npt.NDArray[np.float32]]:
+        """Yield normalized luma frames for the requested source-frame indices."""
         ...
 
 
@@ -73,7 +73,7 @@ class VSActiveRectFrameSampler:
         self,
         clip: ClipState,
         source_frame_indices: Sequence[int],
-    ) -> Sequence[npt.NDArray[np.float32]]:
+    ) -> Iterator[npt.NDArray[np.float32]]:
         import vapoursynth as vs
 
         source = self._loader.load(Path(clip.path))
@@ -86,12 +86,16 @@ class VSActiveRectFrameSampler:
                 if node.format.sample_type == vs.FLOAT
                 else float((1 << node.format.bits_per_sample) - 1)
             )
-            frames: list[npt.NDArray[np.float32]] = []
             for index in source_frame_indices:
                 frame = node.get_frame(index)
-                frames.append(np.asarray(frame[0], dtype=np.float32) / max_value)
-                del frame
-            return frames
+                try:
+                    normalized = np.asarray(frame[0], dtype=np.float32) / max_value
+                finally:
+                    del frame
+                try:
+                    yield normalized
+                finally:
+                    del normalized
         finally:
             del source
 
@@ -134,6 +138,11 @@ def refine_auto_content_active_rects_for_clips(
             continue
         try:
             frames = sampler.sample_luma_frames(clip, sample_indices)
+            rect = detect_content_active_rect(
+                frames,
+                frame_width=clip.probe.width,
+                frame_height=clip.probe.height,
+            )
         except Exception as exc:
             message = (
                 f"active-rect auto detection failed for {clip.path.name}: "
@@ -148,11 +157,6 @@ def refine_auto_content_active_rects_for_clips(
             warnings.append(message)
             continue
 
-        rect = detect_content_active_rect(
-            frames,
-            frame_width=clip.probe.width,
-            frame_height=clip.probe.height,
-        )
         if rect is None:
             continue
         refined_by_path[clip.path] = ClipActiveRect(
@@ -196,38 +200,57 @@ def sample_source_frame_indices(
 
 
 def detect_content_active_rect(
-    frames: Sequence[npt.NDArray[np.float32]],
+    frames: Iterable[npt.NDArray[np.float32]],
     *,
     frame_width: int | None = None,
     frame_height: int | None = None,
 ) -> ContentActiveRect | None:
     """Detect a conservative active rect from normalized luma sample frames."""
-    if len(frames) < CONTENT_MIN_VALID_FRAME_CANDIDATES:
-        return None
-
+    iterator = iter(frames)
     candidates: list[_Margins] = []
-    for frame in frames:
-        candidate = _candidate_margins_for_frame(frame)
-        if candidate is not None:
-            candidates.append(candidate)
+    frame_count = 0
+    first_dimensions: tuple[int, int] | None = None
+    try:
+        for frame in iterator:
+            frame_count += 1
+            if frame_count == 1 and frame.ndim == 2:
+                first_dimensions = frame.shape
+            candidate = _candidate_margins_for_frame(frame)
+            if candidate is not None:
+                candidates.append(candidate)
+            del frame
+    finally:
+        if isinstance(iterator, _ClosableIterator):
+            iterator.close()
 
-    if len(candidates) < CONTENT_MIN_VALID_FRAME_CANDIDATES:
+    if (
+        frame_count < CONTENT_MIN_VALID_FRAME_CANDIDATES
+        or len(candidates) < CONTENT_MIN_VALID_FRAME_CANDIDATES
+        or first_dimensions is None
+    ):
         return None
 
     cluster = _largest_margin_cluster(candidates)
     if cluster is None:
         return None
-    required_support = ceil(len(frames) * CONTENT_MIN_AGREEMENT_FRACTION)
+    required_support = ceil(frame_count * CONTENT_MIN_AGREEMENT_FRACTION)
     if len(cluster) < required_support:
         return None
 
     margins = _median_margins(cluster)
-    height, width = frames[0].shape
+    height, width = first_dimensions
     if frame_width is not None and width != frame_width:
         return None
     if frame_height is not None and height != frame_height:
         return None
     return _rect_from_margins(margins, width=width, height=height)
+
+
+@runtime_checkable
+class _ClosableIterator(Protocol):
+    def close(self) -> None:
+        """Release resources retained by an unfinished iterator."""
+        ...
 
 
 def _handle_detection_error(
