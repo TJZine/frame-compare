@@ -451,6 +451,59 @@ def test_benchmark_script_uses_full_frame_active_rect_provenance_by_default(
     assert source.active_rect.algorithm_id == "active_rect_resolution_v2"
 
 
+def test_benchmark_script_uses_resolved_reference_order_for_metrics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    script = _load_benchmark_script()
+    input_dir = tmp_path / "comparison_videos"
+    input_dir.mkdir()
+    first = input_dir / "first.mkv"
+    reference = input_dir / "reference.mkv"
+    first.write_bytes(b"first")
+    reference.write_bytes(b"reference")
+    config = ConfigSchema.model_validate(
+        {
+            "sources": {
+                "reference": reference.name,
+                "overrides": {
+                    reference.name: {"active_rect": {"x": 0, "y": 0, "width": 100, "height": 100}}
+                },
+            }
+        }
+    )
+    source = script._resolve_benchmark_analysis_source(
+        root=tmp_path,
+        input_dir=input_dir,
+        input_paths=[first, reference],
+        config=config,
+    )
+    captured_paths: list[Path] = []
+    sentinel = object()
+
+    def fake_calculate_metrics(
+        video_paths: list[Path], *_args: object, **_kwargs: object
+    ) -> object:
+        captured_paths.extend(video_paths)
+        return sentinel
+
+    monkeypatch.setattr(script, "calculate_metrics", fake_calculate_metrics)
+
+    result = script._calculate_metrics_once(
+        video_paths=source.ordered_paths,
+        config=config.analysis,
+        cache_dir=tmp_path / "cache",
+        analysis_source_path=source.path,
+        effective_fps=source.effective_fps,
+        active_rect=source.active_rect,
+        selection_domain="prepared-domain",
+    )
+
+    assert source.ordered_paths == (reference, first)
+    assert captured_paths == [reference, first]
+    assert result is sentinel
+
+
 def test_benchmark_script_requires_prepared_probe_for_implicit_active_rect(
     tmp_path: Path,
 ) -> None:
@@ -664,7 +717,7 @@ def _benchmark_analysis_source(
 ) -> Any:
     return script.BenchmarkAnalysisSource(
         path=path,
-        reference_path=reference,
+        ordered_paths=(reference,) if path == reference else (reference, path),
         effective_fps=effective_fps,
         active_rect=script.BenchmarkActiveRect(
             rect=None,

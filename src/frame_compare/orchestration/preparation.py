@@ -400,8 +400,10 @@ def _probe_input_videos(
 
         snapshots_by_path[path] = snapshot
 
-    for cache_path in cache_paths:
-        save_clip_probe_cache(cache_path, entries_by_key)
+    _persist_probe_snapshots_for_run(
+        workspace=workspace,
+        snapshots_by_path=snapshots_by_path,
+    )
     result = build_selection_domain_clips_with_diagnostics(
         ordered_paths=input_videos,
         snapshots_by_path=snapshots_by_path,

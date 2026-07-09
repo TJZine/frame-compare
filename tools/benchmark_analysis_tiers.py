@@ -83,10 +83,14 @@ class BenchmarkAnalysisSource:
     """Resolved benchmark source and cache-domain facts."""
 
     path: Path
-    reference_path: Path
+    ordered_paths: tuple[Path, ...]
     effective_fps: Fraction | None
     active_rect: BenchmarkActiveRect
     overrides_by_path: Mapping[Path, SourceOverrideConfig]
+
+    @property
+    def reference_path(self) -> Path:
+        return self.ordered_paths[0]
 
 
 def main() -> int:
@@ -94,9 +98,9 @@ def main() -> int:
     root = args.root.resolve()
     config_path = args.config if args.config.is_absolute() else root / args.config
     output_path = args.output if args.output.is_absolute() else root / args.output
-    input_paths = [
+    input_paths = tuple(
         path if path.is_absolute() else root / path for path in cast(Sequence[Path], args.inputs)
-    ]
+    )
     config = load_config(config_path)
     input_dir = _resolve_config_path(root, config.paths.input_dir)
     cache_dir = (
@@ -125,7 +129,7 @@ def main() -> int:
 
     quality, comparisons = _run_benchmark_tiers(
         candidate_modes=cast(Sequence[str], args.modes),
-        video_paths=input_paths,
+        video_paths=analysis_source.ordered_paths,
         analysis_config=config.analysis,
         cache_dir=cache_dir,
         analysis_source_path=analysis_source.path,
@@ -147,7 +151,7 @@ def main() -> int:
         )
 
     report: JsonObject = {
-        "inputs": [path.as_posix() for path in input_paths],
+        "inputs": [path.as_posix() for path in analysis_source.ordered_paths],
         "config": {
             "config_path": config_path.as_posix(),
             "analysis_source": config.sources.analysis_source,
@@ -253,7 +257,7 @@ def _resolve_benchmark_analysis_source(
         override=override,
         prepared_clip=_prepared_benchmark_clip(
             root=root,
-            input_paths=input_paths,
+            input_paths=selection.ordered_paths,
             config=config,
             source_path=source_path,
             overrides_by_path=selection.overrides_by_path,
@@ -262,7 +266,7 @@ def _resolve_benchmark_analysis_source(
     )
     return BenchmarkAnalysisSource(
         path=source_path,
-        reference_path=selection.ordered_paths[0],
+        ordered_paths=tuple(selection.ordered_paths),
         effective_fps=effective_fps,
         active_rect=active_rect,
         overrides_by_path=selection.overrides_by_path,

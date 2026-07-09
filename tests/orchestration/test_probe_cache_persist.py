@@ -3,13 +3,18 @@
 from fractions import Fraction
 from pathlib import Path
 
+from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot
-from frame_compare.orchestration.preparation import _persist_probe_snapshots_for_run
+from frame_compare.orchestration.preparation import (
+    _persist_probe_snapshots_for_run,
+    _probe_input_videos,
+)
 from frame_compare.orchestration.probing.probe_cache import (
     compute_probe_cache_key,
     load_clip_probe_cache,
     save_clip_probe_cache,
 )
+from frame_compare.orchestration.types import RunDependencies
 from frame_compare.utils.types import WorkspacePaths
 
 
@@ -130,3 +135,44 @@ def test_same_path_current_entry_wins_on_cache_key_conflict(tmp_path: Path) -> N
     )
 
     assert load_clip_probe_cache(cache_path)[cache_key].width == 1920
+
+
+def test_normal_run_folder_probe_cache_excludes_unrelated_shared_entries(tmp_path: Path) -> None:
+    workspace = _run_folder_workspace(tmp_path)
+    current_path = tmp_path / "current.mkv"
+    unrelated_path = tmp_path / "unrelated.mkv"
+    current_path.write_bytes(b"current")
+    unrelated_path.write_bytes(b"unrelated")
+    current = _snapshot_from_file(current_path)
+    unrelated = _snapshot_from_file(unrelated_path)
+    current_key = compute_probe_cache_key(current.fingerprint)
+    unrelated_key = compute_probe_cache_key(unrelated.fingerprint)
+    shared_path = workspace.shared_analysis_cache_dir.parent.parent / "clip_probe.toml"
+    save_clip_probe_cache(
+        shared_path,
+        {current_key: current, unrelated_key: unrelated},
+    )
+
+    _probe_input_videos(
+        workspace=workspace,
+        input_videos=[current_path],
+        deps=RunDependencies(),
+        config=ConfigSchema(),
+        overrides_by_path={},
+    )
+
+    run_path = workspace.generated_dir / "clip_probe.toml"
+    assert set(load_clip_probe_cache(run_path)) == {current_key}
+    assert set(load_clip_probe_cache(shared_path)) == {current_key, unrelated_key}
+
+
+def _snapshot_from_file(path: Path) -> ClipProbeSnapshot:
+    stats = path.stat()
+    return ClipProbeSnapshot(
+        fingerprint=ClipFingerprint(path, stats.st_size, stats.st_mtime_ns),
+        width=1920,
+        height=1080,
+        num_frames=100,
+        fps=Fraction(24000, 1001),
+        is_hdr=False,
+    )
