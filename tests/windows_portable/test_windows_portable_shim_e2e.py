@@ -72,6 +72,7 @@ def test_windows_portable_shim_preset_apply_injection_e2e(tmp_path: Path, repo_r
         capture_output=True,
         text=True,
         check=True,
+        timeout=30,
     )
     assert proc.stdout.strip() == "2"
 
@@ -187,9 +188,7 @@ def test_windows_portable_shim_missing_state_config_toml_skips_injection(
 
 
 @pytest.mark.integration
-def test_windows_portable_shim_preserves_bundle_stdout(
-    tmp_path: Path, repo_root: Path
-) -> None:
+def test_windows_portable_shim_preserves_bundle_stdout(tmp_path: Path, repo_root: Path) -> None:
     exe = _powershell_exe()
     if exe is None:
         pytest.skip("pwsh/powershell not available")
@@ -319,7 +318,7 @@ def test_windows_portable_shim_restores_environment_on_repeat_path_invocation(
                 '$env:PYTHONUTF8 = "bundle-utf8"',
                 '$env:PYTHONPATH = "bundle-pythonpath"',
                 '$env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = "bundle-extra-plugins"',
-                'Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue',
+                "Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue",
                 'Write-Output "bundle launcher ran"',
                 "exit 0",
             ]
