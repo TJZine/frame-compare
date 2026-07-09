@@ -217,7 +217,7 @@ def test_current_cli_contract_documents_only_no_upload_slowpics_run_flag() -> No
     assert "No runtime-only slow.pics `run` flags exist." in normalized_mapping_section
 
 
-def test_current_cli_contract_documents_analysis_performance_mode_config_only() -> None:
+def test_current_cli_contract_documents_analysis_performance_mode_config_and_summary() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
     analysis_heading = "## Config-Only Analysis Surface"
@@ -226,6 +226,10 @@ def test_current_cli_contract_documents_analysis_performance_mode_config_only() 
 
     analysis_section = cli_contract.split(analysis_heading, maxsplit=1)[1].split(
         slowpics_heading,
+        maxsplit=1,
+    )[0]
+    run_section = cli_contract.split("## `run` Command Contract", maxsplit=1)[1].split(
+        "## CLI Flag To Config Mapping",
         maxsplit=1,
     )[0]
     normalized_analysis_section = " ".join(analysis_section.split())
@@ -250,6 +254,10 @@ def test_current_cli_contract_documents_analysis_performance_mode_config_only() 
     assert "`quality` and `performance` consume the same prepared rectangle" in (
         normalized_analysis_section
     )
+    assert "The `analysis mode` row reports the effective `analysis.performance_mode`:" in (
+        run_section
+    )
+    assert "`quality` or `performance`." in run_section
 
 
 def test_current_cli_contract_documents_slowpics_json_shape(

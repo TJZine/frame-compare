@@ -204,6 +204,8 @@ unchanged.
   `force interactive`, and `VSPreview` while preserving the same effective
   configuration facts. The `previous offsets` row reports only the effective
   config mode: `disabled`, `prompt`, or `always`.
+- The `analysis mode` row reports the effective `analysis.performance_mode`:
+  `quality` or `performance`.
 - The at-a-glance workspace paths are resolved base paths. When
   `paths.use_run_folders = true`, the `screenshots` and `generated` rows describe the
   configured base paths rather than the fresh per-run subdirectories reserved later in
