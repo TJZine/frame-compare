@@ -1,5 +1,7 @@
 from dataclasses import FrozenInstanceError
 from fractions import Fraction
+from pathlib import Path
+from typing import get_type_hints
 
 import pytest
 
@@ -9,10 +11,17 @@ from frame_compare.analysis.types import (
     FrameMetrics,
     FrameSelection,
     MetricActiveRect,
+    MetricCacheRequest,
     MetricsMetadata,
     SelectionBreakdown,
     SelectionDetail,
 )
+
+
+def test_metric_cache_request_runtime_annotations_resolve() -> None:
+    hints = get_type_hints(MetricCacheRequest)
+
+    assert hints["analysis_source_path"] == Path | None
 
 
 def test_clip_identity_creation():
