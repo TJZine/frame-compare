@@ -18,6 +18,10 @@ from frame_compare.config.effective import (
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 from frame_compare.config.schema_models import SourceOverrideConfig
+from frame_compare.orchestration.active_rect import (
+    metric_active_rect_for_clip,
+    propagate_resolved_aspect_ratio_evidence,
+)
 from frame_compare.orchestration.active_rect_content import (
     ActiveRectContentDetectionError,
     VSActiveRectFrameSampler,
@@ -299,18 +303,6 @@ def _shared_probe_cache_path(workspace: WorkspacePaths) -> Path:
     return workspace.shared_analysis_cache_dir.parent.parent / "clip_probe.toml"
 
 
-def _metric_active_rect_for_clip(clip: ClipState | None) -> MetricActiveRect | None:
-    if clip is None or clip.active_rect is None:
-        return None
-    rect = clip.active_rect
-    return MetricActiveRect(
-        x=rect.x,
-        y=rect.y,
-        width=rect.width,
-        height=rect.height,
-    )
-
-
 def _probe_cache_paths_for_run(workspace: WorkspacePaths) -> list[Path]:
     paths = [workspace.generated_dir / "clip_probe.toml", _shared_probe_cache_path(workspace)]
     unique_paths: list[Path] = []
@@ -448,12 +440,19 @@ def _refine_auto_active_rects_after_selection_window(
 
     sampler = VSActiveRectFrameSampler(deps.vs_loader) if deps.vs_loader is not None else None
     try:
-        return refine_auto_content_active_rects_for_clips(
+        refined, warnings = refine_auto_content_active_rects_for_clips(
             clips=clips,
             selection_window=selection_window,
             detection=config.screenshots.active_rect_detection,
             sampler=sampler,
             fail_closed=fail_closed,
+        )
+        return (
+            propagate_resolved_aspect_ratio_evidence(
+                clips=refined,
+                detection=config.screenshots.active_rect_detection,
+            ),
+            warnings,
         )
     except ActiveRectContentDetectionError as exc:
         raise MetricsCalculationError(str(exc)) from exc
@@ -575,7 +574,7 @@ async def execute_prep(
             config=config,
             input_videos=input_videos,
             selection_domain=prevalidated_selection_domain,
-            metric_active_rect=_metric_active_rect_for_clip(prevalidated_analysis_clip),
+            metric_active_rect=metric_active_rect_for_clip(prevalidated_analysis_clip),
         )
 
     workspace, metadata_prefetch = await _resolve_run_directory(
@@ -645,7 +644,7 @@ async def execute_prep(
                 config=config,
                 input_videos=input_videos,
                 selection_domain=selection_domain,
-                metric_active_rect=_metric_active_rect_for_clip(analysis_clip),
+                metric_active_rect=metric_active_rect_for_clip(analysis_clip),
             )
 
     return PrepState(

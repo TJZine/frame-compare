@@ -742,6 +742,66 @@ def test_execute_prep_auto_content_refinement_updates_selection_domain_after_win
     }
 
 
+def test_execute_prep_auto_propagates_supported_content_ratio_to_unresolved_clip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _create_config(tmp_path, content=AUTO_METRIC_CONFIG)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "00-reference.mkv", "01-encode.mkv", "02-full-frame.mkv")
+    loader = FakeVSLoader(
+        dimensions_by_name={
+            "00-reference.mkv": (100, 80),
+            "01-encode.mkv": (100, 80),
+            "02-full-frame.mkv": (100, 80),
+        }
+    )
+
+    class PartiallyDetectedContentSampler:
+        def __init__(self, _loader: object) -> None:
+            pass
+
+        def sample_luma_frames(
+            self,
+            clip: object,
+            source_frame_indices: object,
+        ) -> list[np.ndarray[tuple[int, int], np.dtype[np.float32]]]:
+            clip_state = cast(Any, clip)
+            indices = tuple(cast(Any, source_frame_indices))
+            if clip_state.path.name == "02-full-frame.mkv":
+                return [np.full((80, 100), 0.5, dtype=np.float32) for _index in indices]
+            return [_letterbox_luma_frame() for _index in indices]
+
+    monkeypatch.setattr(
+        preparation,
+        "VSActiveRectFrameSampler",
+        PartiallyDetectedContentSampler,
+    )
+
+    prep = asyncio.run(
+        preparation.execute_prep(
+            RunRequest(root=tmp_path),
+            RunDependencies(vs_loader=cast(Any, loader)),
+        )
+    )
+
+    assert [clip.active_rect for clip in prep.clips] == [
+        ClipActiveRect(0, 10, 100, 60, "content-derived", "auto"),
+        ClipActiveRect(0, 10, 100, 60, "content-derived", "auto"),
+        ClipActiveRect(0, 10, 100, 60, "aspect-ratio-derived", "auto"),
+    ]
+    selection_domain = json.loads(prep.analysis_selection_domain)
+    assert selection_domain["clips"][2]["active_rect"] == {
+        "x": 0,
+        "y": 10,
+        "width": 100,
+        "height": 60,
+        "source": "aspect-ratio-derived",
+        "detection_mode": "auto",
+        "algorithm_id": "active_rect_resolution_v2",
+    }
+
+
 def test_execute_prep_auto_sampling_failure_warns_and_leaves_full_frame(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

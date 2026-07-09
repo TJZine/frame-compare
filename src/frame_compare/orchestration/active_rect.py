@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
+from frame_compare.analysis.types import MetricActiveRect
 from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 from frame_compare.config.schema_models import SourceOverrideConfig
 from frame_compare.orchestration.context import (
@@ -87,6 +88,37 @@ def resolve_active_rects_for_clips(
         resolved = list(_aspect_ratio_derived_active_rects(clips, tuple(resolved), mode))
 
     return [replace(clip, active_rect=rect) for clip, rect in zip(clips, resolved, strict=True)]
+
+
+def propagate_resolved_aspect_ratio_evidence(
+    *,
+    clips: Sequence[ClipState],
+    detection: ScreenshotActiveRectDetection,
+) -> list[ClipState]:
+    """Apply supported ratio evidence after later active-rect refinement stages."""
+    if detection not in (
+        ScreenshotActiveRectDetection.ASPECT_RATIO,
+        ScreenshotActiveRectDetection.AUTO,
+    ):
+        return list(clips)
+
+    mode = _detection_mode(detection)
+    resolved = tuple(clip.active_rect or _full_frame_rect(clip, mode) for clip in clips)
+    updated = _aspect_ratio_derived_active_rects(clips, resolved, mode)
+    return [replace(clip, active_rect=rect) for clip, rect in zip(clips, updated, strict=True)]
+
+
+def metric_active_rect_for_clip(clip: ClipState | None) -> MetricActiveRect | None:
+    """Adapt a prepared clip rectangle to the analysis-owned metric domain."""
+    if clip is None or clip.active_rect is None:
+        return None
+    rect = clip.active_rect
+    return MetricActiveRect(
+        x=rect.x,
+        y=rect.y,
+        width=rect.width,
+        height=rect.height,
+    )
 
 
 def active_rect_identity(rect: ClipActiveRect) -> dict[str, object]:
@@ -332,7 +364,7 @@ def _aspect_ratio_candidates(resolved: tuple[ClipActiveRect, ...]) -> tuple[_Asp
                 raw_candidates.append(_AspectCandidate(_rect_ratio(rect), index, evidence_rank))
 
     for index, rect in enumerate(resolved):
-        if rect.source not in ("dimension-derived", "full-frame"):
+        if rect.source not in ("dimension-derived", "full-frame", "content-derived"):
             continue
         ratio = _rect_ratio(rect)
         if _aspect_candidate_support_count(ratio, resolved) >= 2:
