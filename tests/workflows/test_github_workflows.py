@@ -1,10 +1,38 @@
+import ast
+import json
 import re
+import tomllib
 from pathlib import Path
 
 from tests.workflow_helpers import (
     assert_release_asset_name_hardening as _assert_release_asset_name_hardening,
 )
 from tests.workflow_helpers import read_text_or_fail as _read_text_or_fail
+
+
+def test_release_please_owns_python_version_sources(repo_root: Path) -> None:
+    release_config = json.loads(_read_text_or_fail(repo_root / "release-please-config.json"))
+    release_manifest = json.loads(_read_text_or_fail(repo_root / ".release-please-manifest.json"))
+
+    with (repo_root / "pyproject.toml").open("rb") as pyproject_file:
+        project = tomllib.load(pyproject_file)["project"]
+
+    package_name = project["name"].replace("-", "_")
+    package_source = _read_text_or_fail(repo_root / "src" / package_name / "__init__.py")
+    package_module = ast.parse(package_source)
+    package_version = next(
+        ast.literal_eval(statement.value)
+        for statement in package_module.body
+        if isinstance(statement, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "__version__"
+            for target in statement.targets
+        )
+    )
+
+    assert release_config["release-type"] == "python"
+    assert release_config["packages"]["."]["release-type"] == "python"
+    assert release_manifest["."] == project["version"] == package_version
 
 
 def test_docker_integration_workflow_covers_supported_pull_request_bases(repo_root: Path) -> None:
