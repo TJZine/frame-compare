@@ -31,7 +31,8 @@ ClipActiveRectSource = Literal[
     "full-frame",
 ]
 ClipActiveRectDetectionMode = Literal["provided", "dimension", "aspect_ratio", "auto"]
-ACTIVE_RECT_RESOLUTION_ALGORITHM = "active_rect_resolution_v2"
+ClipActiveRectAlgorithmId = Literal["active_rect_resolution_v2"]
+ACTIVE_RECT_RESOLUTION_ALGORITHM: ClipActiveRectAlgorithmId = "active_rect_resolution_v2"
 
 
 @dataclass(frozen=True)
@@ -102,7 +103,7 @@ class ClipActiveRect:
     height: int
     source: ClipActiveRectSource
     detection_mode: ClipActiveRectDetectionMode
-    algorithm_id: str = ACTIVE_RECT_RESOLUTION_ALGORITHM
+    algorithm_id: ClipActiveRectAlgorithmId = ACTIVE_RECT_RESOLUTION_ALGORITHM
 
 
 @dataclass(frozen=True)

@@ -380,7 +380,7 @@ def _resolve_request_active_rect(
     return _ResolvedRequestActiveRect(None, "explicit")
 
 
-def _validated_active_rect_source(value: str) -> ActiveRectSource:
+def _validated_active_rect_source(value: ActiveRectSource) -> ActiveRectSource:
     if value not in (
         "explicit",
         "metadata",
