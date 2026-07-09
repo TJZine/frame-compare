@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Literal
 
 from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 from frame_compare.config.schema_models import SourceOverrideConfig
@@ -20,6 +21,15 @@ from frame_compare.orchestration.errors import SourceSelectionError
 ASPECT_RATIO_MATCH_REL_TOLERANCE = 0.005
 ASPECT_RATIO_MIN_CROP_REL_DELTA = 0.005
 ASPECT_RATIO_MAX_HEIGHT_REMOVAL_FRACTION = 0.35
+
+type _L5MarginName = Literal["left", "right", "top", "bottom"]
+
+_DOLBY_VISION_L5_MARGIN_KEYS: dict[str, _L5MarginName] = {
+    "dolbyvision_l5_left": "left",
+    "dolbyvision_l5_right": "right",
+    "dolbyvision_l5_top": "top",
+    "dolbyvision_l5_bottom": "bottom",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,14 +182,14 @@ def _metadata_active_rect_for_clip(
 def _dolby_vision_l5_margins(
     preserved_props: Mapping[str, str | int | float],
 ) -> tuple[int, int, int, int] | None:
-    margins: dict[str, int] = {}
+    margins: dict[_L5MarginName, int] = {}
     for key, value in preserved_props.items():
         normalized = _normalize_preserved_prop_key(key)
-        if "l5" not in normalized:
+        margin_name = _DOLBY_VISION_L5_MARGIN_KEYS.get(normalized)
+        if margin_name is None:
             continue
-        margin_name = _l5_margin_name(normalized)
-        if margin_name is None or margin_name in margins:
-            continue
+        if margin_name in margins:
+            return None
         coerced = _coerce_int(value)
         if coerced is None or coerced < 0:
             return None
@@ -191,13 +201,6 @@ def _dolby_vision_l5_margins(
 
 def _normalize_preserved_prop_key(key: str) -> str:
     return key.lstrip("_").lower()
-
-
-def _l5_margin_name(normalized_key: str) -> str | None:
-    for name in ("left", "right", "top", "bottom"):
-        if name in normalized_key:
-            return name
-    return None
 
 
 def _coerce_int(value: str | int | float) -> int | None:

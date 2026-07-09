@@ -169,17 +169,37 @@ def test_unsafe_metadata_falls_back_to_full_frame(props: dict[str, int]) -> None
     )
 
 
-def test_metadata_l5_margins_resolve_active_rect() -> None:
-    clip = _clip(
-        "ref.mkv",
-        width=1920,
-        height=1080,
-        props={
+@pytest.mark.parametrize(
+    "props",
+    [
+        {
+            "DolbyVision_L5_Left": 100,
+            "DolbyVision_L5_Right": 120,
+            "DolbyVision_L5_Top": 40,
+            "DolbyVision_L5_Bottom": 60,
+        },
+        {
+            "_DolbyVision_L5_Left": 100,
+            "_DolbyVision_L5_Right": 120,
+            "_DolbyVision_L5_Top": 40,
+            "_DolbyVision_L5_Bottom": 60,
+        },
+        {
             "DolbyVision_L5_Left": "100",
             "DolbyVision_L5_Right": "120",
             "DolbyVision_L5_Top": "40",
             "DolbyVision_L5_Bottom": "60",
         },
+    ],
+)
+def test_metadata_l5_margins_resolve_active_rect(
+    props: dict[str, str | int | float],
+) -> None:
+    clip = _clip(
+        "ref.mkv",
+        width=1920,
+        height=1080,
+        props=props,
     )
 
     resolved = _resolve([clip], detection=ScreenshotActiveRectDetection.PROVIDED)
@@ -190,6 +210,61 @@ def test_metadata_l5_margins_resolve_active_rect() -> None:
         width=1700,
         height=980,
         source="metadata",
+        detection_mode="provided",
+    )
+
+
+@pytest.mark.parametrize(
+    "props",
+    [
+        {
+            "DolbyVision_L50_Left": 100,
+            "DolbyVision_L50_Right": 120,
+            "DolbyVision_L50_Top": 40,
+            "DolbyVision_L50_Bottom": 60,
+        },
+        {
+            "DolbyVision_L5_LeftMargin": 100,
+            "DolbyVision_L5_RightMargin": 120,
+            "DolbyVision_L5_TopMargin": 40,
+            "DolbyVision_L5_BottomMargin": 60,
+        },
+        {
+            "DolbyVision_L5_Left": 100,
+            "_DolbyVision_L5_Left": 101,
+            "DolbyVision_L5_Right": 120,
+            "DolbyVision_L5_Top": 40,
+            "DolbyVision_L5_Bottom": 60,
+        },
+        {
+            "_DolbyVision_L5_Left": 101,
+            "DolbyVision_L5_Left": 100,
+            "DolbyVision_L5_Right": 120,
+            "DolbyVision_L5_Top": 40,
+            "DolbyVision_L5_Bottom": 60,
+        },
+        {
+            "DolbyVision_L5_Left": 100,
+            "_DolbyVision_L5_Left": 100,
+            "DolbyVision_L5_Right": 120,
+            "DolbyVision_L5_Top": 40,
+            "DolbyVision_L5_Bottom": 60,
+        },
+    ],
+)
+def test_near_miss_or_duplicate_l5_metadata_falls_back_to_full_frame(
+    props: dict[str, str | int | float],
+) -> None:
+    clip = _clip("ref.mkv", width=1920, height=1080, props=props)
+
+    resolved = _resolve([clip], detection=ScreenshotActiveRectDetection.PROVIDED)
+
+    assert resolved[0].active_rect == ClipActiveRect(
+        x=0,
+        y=0,
+        width=1920,
+        height=1080,
+        source="full-frame",
         detection_mode="provided",
     )
 
