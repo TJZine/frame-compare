@@ -16,7 +16,6 @@ from uuid import uuid4
 import httpx
 import structlog
 
-from frame_compare import __version__
 from frame_compare.config.schema import SlowpicsConfig, Visibility
 from frame_compare.services.errors import (
     SlowpicsError,
@@ -37,13 +36,29 @@ SLOWPICS_RETRY_BASE_DELAY_SECONDS = 1.0
 SLOWPICS_RETRY_MAX_DELAY_SECONDS = 30.0
 SLOWPICS_RETRY_JITTER_FACTOR = 0.1
 SLOWPICS_BROWSER_ID_SENTINEL = "eb80db10-97a7-11ee-8f6f-bfa69501bb51"
-SLOWPICS_USER_AGENT = f"frame-compare/{__version__} slowpics-direct"
+SLOWPICS_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/113.0.0.0 Safari/537.36"
+)
 SLOWPICS_UPLOAD_HEADERS = {
+    "Accept": "*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Access-Control-Allow-Origin": "*",
     "Origin": SLOWPICS_BASE_URL,
     "Referer": SLOWPICS_COMPARISON_URL,
     "User-Agent": SLOWPICS_USER_AGENT,
 }
 SLOWPICS_NAVIGATION_HEADERS = {"User-Agent": SLOWPICS_USER_AGENT}
+
+_SLOWPICS_REJECTION_REASONS = {
+    "LIMIT_INCOMPLETE_UPLOAD": (
+        "an incomplete collection already exists; complete or remove it, or wait 5 minutes"
+    ),
+    "LIMIT_UPLOAD": "uploads are temporarily limited; wait 1 minute before retrying",
+    "DAILY_LIMIT_UPLOAD": "the daily upload limit has been reached",
+    "LIMIT_COMPARISON_UPLOAD": "the request contains more than 512 comparisons",
+}
 
 type _MultipartTextFields = list[tuple[str, tuple[None, str]]]
 
@@ -183,7 +198,12 @@ class SlowpicsPublisher:
         return attempt <= max_retries
 
     async def _handle_retryable_status(
-        self, response: httpx.Response, attempt: int, max_retries: int
+        self,
+        response: httpx.Response,
+        attempt: int,
+        max_retries: int,
+        *,
+        step: str,
     ) -> None:
         if response.status_code == 429:
             if not self._has_retry_budget(attempt, max_retries):
@@ -212,7 +232,7 @@ class SlowpicsPublisher:
             )
             return
 
-        raise SlowpicsError(f"Upload failed with status {response.status_code}")
+        raise SlowpicsError(_slowpics_rejection_reason(response, step=step))
 
     async def _handle_timeout(
         self, error: httpx.TimeoutException, attempt: int, max_retries: int
@@ -380,7 +400,12 @@ class SlowpicsPublisher:
                 if response.is_success or _is_complete_image_response(step, response):
                     return response
 
-                await self._handle_retryable_status(response, attempt, max_retries)
+                await self._handle_retryable_status(
+                    response,
+                    attempt,
+                    max_retries,
+                    step=step,
+                )
 
             except httpx.TimeoutException as e:
                 if not retry_timeout:
@@ -464,6 +489,46 @@ def _browser_id_from_cookies(client: httpx.AsyncClient) -> str:
 
 def _slowpics_upload_headers(xsrf_token: str) -> dict[str, str]:
     return {**SLOWPICS_UPLOAD_HEADERS, "X-XSRF-TOKEN": xsrf_token}
+
+
+def _slowpics_rejection_reason(response: httpx.Response, *, step: str) -> str:
+    step_label = {
+        "comparison_page": "Comparison page request",
+        "metadata": "Metadata upload",
+        "image": "Image upload",
+    }.get(step, "Upload")
+    application_code = _slowpics_application_error_code(response)
+    if application_code is None:
+        return f"{step_label} failed with status {response.status_code}"
+    detail = _SLOWPICS_REJECTION_REASONS[application_code]
+    return (
+        f"{step_label} rejected with status {response.status_code}: {detail} ({application_code})"
+    )
+
+
+def _slowpics_application_error_code(response: httpx.Response) -> str | None:
+    try:
+        payload: object = response.json()
+    except ValueError:
+        return None
+
+    candidates: tuple[object, ...]
+    if isinstance(payload, str):
+        candidates = (payload,)
+    elif isinstance(payload, dict):
+        payload_fields = cast(dict[object, object], payload)
+        candidates = (payload_fields.get("error"), payload_fields.get("message"))
+    else:
+        return None
+
+    return next(
+        (
+            candidate
+            for candidate in candidates
+            if isinstance(candidate, str) and candidate in _SLOWPICS_REJECTION_REASONS
+        ),
+        None,
+    )
 
 
 def _metadata_multipart_fields(

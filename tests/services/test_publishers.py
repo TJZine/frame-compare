@@ -252,8 +252,14 @@ async def test_publish_to_slowpics_sends_decoded_xsrf_browser_id_headers_and_use
     assert image_request.headers["User-Agent"] == SLOWPICS_USER_AGENT
     assert metadata_request.headers["X-XSRF-TOKEN"] == "token+decoded"
     assert image_request.headers["X-XSRF-TOKEN"] == "token+decoded"
+    assert metadata_request.headers["Accept"] == "*/*"
+    assert metadata_request.headers["Accept-Language"] == "en-US,en;q=0.9"
+    assert metadata_request.headers["Access-Control-Allow-Origin"] == "*"
     assert metadata_request.headers["Origin"] == "https://slow.pics"
     assert metadata_request.headers["Referer"] == "https://slow.pics/comparison"
+    assert image_request.headers["Accept"] == "*/*"
+    assert image_request.headers["Accept-Language"] == "en-US,en;q=0.9"
+    assert image_request.headers["Access-Control-Allow-Origin"] == "*"
     assert image_request.headers["Origin"] == "https://slow.pics"
     assert image_request.headers["Referer"] == "https://slow.pics/comparison"
     assert browser_id
@@ -785,6 +791,90 @@ async def test_publish_to_slowpics_malformed_metadata_response_fails_before_imag
         )
 
     assert image_route.call_count == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("payload", "expected_detail"),
+    [
+        (
+            {"error": "LIMIT_INCOMPLETE_UPLOAD", "message": "sensitive server detail"},
+            "an incomplete collection already exists; complete or remove it, or wait 5 minutes "
+            "(LIMIT_INCOMPLETE_UPLOAD)",
+        ),
+        (
+            {"message": "LIMIT_UPLOAD"},
+            "uploads are temporarily limited; wait 1 minute before retrying (LIMIT_UPLOAD)",
+        ),
+        (
+            "DAILY_LIMIT_UPLOAD",
+            "the daily upload limit has been reached (DAILY_LIMIT_UPLOAD)",
+        ),
+        (
+            {"error": "LIMIT_COMPARISON_UPLOAD"},
+            "the request contains more than 512 comparisons (LIMIT_COMPARISON_UPLOAD)",
+        ),
+    ],
+)
+async def test_publish_to_slowpics_reports_known_metadata_rejection_safely(
+    tmp_path: Path,
+    async_client: httpx.AsyncClient,
+    respx_mock,
+    payload: object,
+    expected_detail: str,
+) -> None:
+    upload_plan = _plan(tmp_path, rows=1, cols=1)
+    respx_mock.get("https://slow.pics/comparison").mock(
+        return_value=httpx.Response(
+            200,
+            headers={"Set-Cookie": "XSRF-TOKEN=token; Domain=.slow.pics; Path=/"},
+        )
+    )
+    respx_mock.post("https://slow.pics/upload/comparison").mock(
+        return_value=httpx.Response(403, json=payload)
+    )
+
+    with pytest.raises(SlowpicsError) as exc:
+        await publish_to_slowpics(
+            _collection_metadata(), SlowpicsConfig(), async_client, upload_plan=upload_plan
+        )
+
+    message = str(exc.value)
+    assert "Metadata upload rejected with status 403" in message
+    assert expected_detail in message
+    assert "sensitive server detail" not in message
+
+
+@pytest.mark.anyio
+async def test_publish_to_slowpics_does_not_expose_unknown_metadata_rejection_body(
+    tmp_path: Path,
+    async_client: httpx.AsyncClient,
+    respx_mock,
+) -> None:
+    upload_plan = _plan(tmp_path, rows=1, cols=1)
+    respx_mock.get("https://slow.pics/comparison").mock(
+        return_value=httpx.Response(
+            200,
+            headers={"Set-Cookie": "XSRF-TOKEN=token; Domain=.slow.pics; Path=/"},
+        )
+    )
+    respx_mock.post("https://slow.pics/upload/comparison").mock(
+        return_value=httpx.Response(
+            403,
+            json={"error": "UNKNOWN_ERROR", "message": "token-secret private server detail"},
+        )
+    )
+
+    with pytest.raises(SlowpicsError) as exc:
+        await publish_to_slowpics(
+            _collection_metadata(), SlowpicsConfig(), async_client, upload_plan=upload_plan
+        )
+
+    message = str(exc.value)
+    assert "Metadata upload failed with status 403" in message
+    assert "UNKNOWN_ERROR" not in message
+    assert "token-secret" not in message
+    assert "private server detail" not in message
 
 
 @pytest.mark.anyio
