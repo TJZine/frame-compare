@@ -169,6 +169,16 @@ def calculate_metrics(
             selection.
         effective_fps: Optional FPS value stored in metrics metadata for
             timing and selection-detail normalization.
+        metric_active_rect: Optional active-picture rectangle applied during
+            metric calculation and included in cache identity. ``None`` uses
+            the full source frame.
+        active_rect_source: Provenance for ``metric_active_rect`` stored in
+            cache metadata. Defaults to ``"full-frame"``.
+        active_rect_detection_mode: Detection policy that produced the active
+            rectangle. Defaults to ``"aspect_ratio"``.
+        active_rect_algorithm_id: Stable active-rectangle resolver algorithm
+            identity used for cache isolation. Defaults to
+            ``"active_rect_resolution_v2"``.
 
     Returns:
         FrameMetrics with luminance and motion arrays
