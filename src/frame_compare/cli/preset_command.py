@@ -9,6 +9,10 @@ import typer
 
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.errors import FrameCompareError
+from frame_compare.orchestration.preflight import (
+    resolve_selected_config_path,
+    validate_and_normalize_config_paths,
+)
 
 
 class LoadConfigFn(Protocol):
@@ -91,8 +95,11 @@ def handle_preset_apply(
 ) -> None:
     try:
         presets_dir = resolved_root / "config" / "presets"
+        resolve_selected_config_path(config_path, resolved_root)
         config_data = load_config(config_path)
+        validate_and_normalize_config_paths(config_data, resolved_root)
         updated = apply_preset(config_data, name, presets_dir=presets_dir)
+        validate_and_normalize_config_paths(updated, resolved_root)
         write_config_to(config_path, updated)
         typer.echo(f"Applied preset '{name}' to {config_path}", err=True)
     except FrameCompareError as error:
@@ -118,7 +125,9 @@ def handle_preset_save(
 ) -> None:
     try:
         presets_dir = resolved_root / "config" / "presets"
+        resolve_selected_config_path(config_path, resolved_root)
         config_data = load_config(config_path)
+        validate_and_normalize_config_paths(config_data, resolved_root)
         saved_path = save_preset(name, config_data, presets_dir=presets_dir)
         typer.echo(f"Saved preset '{name}' to {saved_path}", err=True)
     except FrameCompareError as error:

@@ -1,8 +1,15 @@
 """Tests for _persist_probe_snapshots_for_run merge semantics."""
 
+import multiprocessing
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from fractions import Fraction
 from pathlib import Path
+from typing import Protocol
 
+import pytest
+
+import frame_compare.orchestration.probing.probe_cache as probe_cache
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot
 from frame_compare.orchestration.preparation import (
@@ -12,10 +19,21 @@ from frame_compare.orchestration.preparation import (
 from frame_compare.orchestration.probing.probe_cache import (
     compute_probe_cache_key,
     load_clip_probe_cache,
+    merge_shared_clip_probe_cache,
     save_clip_probe_cache,
 )
 from frame_compare.orchestration.types import RunDependencies
+from frame_compare.utils.file_lock import exclusive_file_lock
 from frame_compare.utils.types import WorkspacePaths
+
+_PROCESS_TIMEOUT_SECONDS = 5.0
+_LOCK_BLOCK_PROBE_SECONDS = 0.2
+
+
+class _ProcessEvent(Protocol):
+    def set(self) -> None: ...
+
+    def wait(self, timeout: float | None = None) -> bool: ...
 
 
 def _snapshot(
@@ -53,6 +71,29 @@ def _run_folder_workspace(root: Path) -> WorkspacePaths:
     base = _legacy_workspace(root)
     run_dir = root / "input" / "run1"
     return base.with_run_dir(run_dir)
+
+
+def _merge_cache_in_child(
+    cache_path: Path,
+    snapshot: ClipProbeSnapshot,
+    started: _ProcessEvent,
+    completed: _ProcessEvent,
+) -> None:
+    cache_key = compute_probe_cache_key(snapshot.fingerprint)
+    started.set()
+    merge_shared_clip_probe_cache(cache_path, {cache_key: snapshot})
+    completed.set()
+
+
+def _clean_up_process(process: multiprocessing.Process) -> None:
+    if process.pid is None:
+        return
+    if process.is_alive():
+        process.terminate()
+    process.join(timeout=_PROCESS_TIMEOUT_SECONDS)
+    if process.is_alive():
+        process.kill()
+        process.join(timeout=_PROCESS_TIMEOUT_SECONDS)
 
 
 def test_same_path_preserves_existing_shared_entries(tmp_path: Path) -> None:
@@ -98,6 +139,80 @@ def test_run_folder_preserves_existing_shared_entries(tmp_path: Path) -> None:
     run_path = workspace.generated_dir / "clip_probe.toml"
     run_result = load_clip_probe_cache(run_path)
     assert set(run_result) == {key_b}
+
+
+def test_shared_merge_locks_cross_process_read_modify_write(tmp_path: Path) -> None:
+    cache_path = tmp_path / "clip_probe.toml"
+    lock_path = cache_path.with_name(f"{cache_path.name}.lock")
+    snap_a = _snapshot("video_a.mkv")
+    snap_b = _snapshot("video_b.mkv", size=2048, mtime=9000)
+    key_a = compute_probe_cache_key(snap_a.fingerprint)
+    key_b = compute_probe_cache_key(snap_b.fingerprint)
+    context = multiprocessing.get_context("spawn")
+    started = context.Event()
+    completed = context.Event()
+    process = context.Process(
+        target=_merge_cache_in_child,
+        args=(cache_path, snap_b, started, completed),
+    )
+
+    try:
+        with exclusive_file_lock(lock_path):
+            process.start()
+            assert started.wait(timeout=_PROCESS_TIMEOUT_SECONDS)
+            assert not completed.wait(timeout=_LOCK_BLOCK_PROBE_SECONDS)
+            save_clip_probe_cache(cache_path, {key_a: snap_a})
+
+        assert completed.wait(timeout=_PROCESS_TIMEOUT_SECONDS)
+        process.join(timeout=_PROCESS_TIMEOUT_SECONDS)
+        assert not process.is_alive()
+        assert process.exitcode == 0
+    finally:
+        _clean_up_process(process)
+
+    assert set(load_clip_probe_cache(cache_path)) == {key_a, key_b}
+
+
+def test_shared_merge_keeps_load_and_save_inside_lock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache_path = tmp_path / "clip_probe.toml"
+    lock_path = cache_path.with_name(f"{cache_path.name}.lock")
+    existing = _snapshot("video_a.mkv")
+    current = _snapshot("video_b.mkv", size=2048, mtime=9000)
+    existing_key = compute_probe_cache_key(existing.fingerprint)
+    current_key = compute_probe_cache_key(current.fingerprint)
+    events: list[str] = []
+
+    @contextmanager
+    def _fake_lock(path: Path) -> Iterator[None]:
+        assert path == lock_path
+        events.append("lock_enter")
+        try:
+            yield
+        finally:
+            events.append("lock_exit")
+
+    def _fake_load(path: Path) -> dict[str, ClipProbeSnapshot]:
+        assert path == cache_path
+        assert events == ["lock_enter"]
+        events.append("load")
+        return {existing_key: existing}
+
+    def _fake_save(path: Path, entries: Mapping[str, ClipProbeSnapshot]) -> None:
+        assert path == cache_path
+        assert events == ["lock_enter", "load"]
+        assert set(entries) == {existing_key, current_key}
+        events.append("save")
+
+    monkeypatch.setattr(probe_cache, "exclusive_file_lock", _fake_lock)
+    monkeypatch.setattr(probe_cache, "_load_shared_clip_probe_cache_for_update", _fake_load)
+    monkeypatch.setattr(probe_cache, "save_clip_probe_cache", _fake_save)
+
+    probe_cache.merge_shared_clip_probe_cache(cache_path, {current_key: current})
+
+    assert events == ["lock_enter", "load", "save", "lock_exit"]
 
 
 def test_same_path_preserves_historical_fingerprint(tmp_path: Path) -> None:

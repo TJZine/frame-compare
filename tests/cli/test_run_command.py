@@ -36,6 +36,7 @@ from frame_compare.config.schema import (
     ToneCurve,
     TonemapPreset,
 )
+from frame_compare.errors import PathEscapesRootError
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
 from frame_compare.orchestration.types import SlowpicsUploadConfirmationRequest
 
@@ -320,6 +321,166 @@ def test_handle_run_write_config_applies_cli_overrides_and_skips_runner() -> Non
     assert written_configs[0].color.preset == TonemapPreset.FILMIC
     assert written_configs[0].screenshots.overlay_mode == OverlayMode.DIAGNOSTIC
     assert written_configs[0].slowpics.auto_upload is False
+
+
+def test_handle_run_write_config_preserves_relative_report_output_after_validation() -> None:
+    runner = RecordingRunner()
+    config = get_default_config().model_copy(
+        update={"report": ReportConfig(output_dir="reports/custom")}
+    )
+    written: list[ConfigSchema] = []
+
+    handle_run(
+        replace(_base_args(), write_config=True),
+        _deps(
+            DepsOptions(
+                runner=runner,
+                load_config=lambda *_args, **_kwargs: config,
+                write_config_to=lambda _path, value: written.append(value),
+            )
+        ),
+    )
+
+    assert runner.requests == []
+    assert written == [config]
+    assert written[0].report.output_dir == "reports/custom"
+
+
+@pytest.mark.parametrize("mode", ["run", "diagnose", "write"])
+def test_handle_run_rejects_external_config_before_load_or_side_effects(mode: str) -> None:
+    runner = RecordingRunner()
+    handled: list[PathEscapesRootError] = []
+
+    def _handle_path_error(
+        error: Exception,
+        *,
+        no_color: bool,
+        verbose: bool,
+        verbose_hint: str | None = "--verbose",
+    ) -> int:
+        del no_color, verbose, verbose_hint
+        assert isinstance(error, PathEscapesRootError)
+        handled.append(error)
+        return int(ExitCode.INPUT_ERROR)
+
+    with pytest.raises(typer.Exit) as exc_info:
+        handle_run(
+            replace(
+                _base_args(),
+                config_path=Path("/outside/config.toml"),
+                diagnose_paths=mode == "diagnose",
+                write_config=mode == "write",
+            ),
+            _deps(
+                DepsOptions(
+                    runner=runner,
+                    load_config=_raise_unexpected_load,
+                    write_config_to=_raise_unexpected_write,
+                    handle_error=_handle_path_error,
+                )
+            ),
+        )
+
+    assert exc_info.value.exit_code == int(ExitCode.INPUT_ERROR)
+    assert runner.requests == []
+    assert len(handled) == 1
+
+
+@pytest.mark.parametrize("mode", ["run", "diagnose", "write"])
+def test_handle_run_rejects_contained_config_value_escape_before_side_effects(
+    mode: str,
+) -> None:
+    runner = RecordingRunner()
+    config = get_default_config().model_copy(
+        update={
+            "paths": get_default_config().paths.model_copy(
+                update={"generated_dir": "/outside/generated"}
+            )
+        }
+    )
+    handled: list[PathEscapesRootError] = []
+
+    def _handle_path_error(
+        error: Exception,
+        *,
+        no_color: bool,
+        verbose: bool,
+        verbose_hint: str | None = "--verbose",
+    ) -> int:
+        del no_color, verbose, verbose_hint
+        assert isinstance(error, PathEscapesRootError)
+        handled.append(error)
+        return int(ExitCode.INPUT_ERROR)
+
+    with pytest.raises(typer.Exit) as exc_info:
+        handle_run(
+            replace(
+                _base_args(),
+                diagnose_paths=mode == "diagnose",
+                write_config=mode == "write",
+            ),
+            _deps(
+                DepsOptions(
+                    runner=runner,
+                    load_config=lambda *_args, **_kwargs: config,
+                    write_config_to=_raise_unexpected_write,
+                    handle_error=_handle_path_error,
+                )
+            ),
+        )
+
+    assert exc_info.value.exit_code == int(ExitCode.INPUT_ERROR)
+    assert runner.requests == []
+    assert len(handled) == 1
+
+
+def test_handle_run_allows_external_input_override() -> None:
+    runner = RecordingRunner()
+    external_input = Path("/external/media")
+
+    handle_run(
+        replace(_base_args(), input_dir=external_input),
+        _deps(
+            DepsOptions(
+                runner=runner,
+                load_config=lambda *_args, **_kwargs: get_default_config(),
+            )
+        ),
+    )
+
+    assert len(runner.requests) == 1
+    assert runner.requests[0].input_dir == external_input
+
+
+def test_handle_run_allows_exact_windows_portable_state_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    portable_config = tmp_path / "portable-state" / "config.toml"
+    monkeypatch.setattr(
+        "frame_compare.orchestration.preflight._windows_portable_state_config_path",
+        lambda: portable_config,
+    )
+    runner = RecordingRunner()
+
+    handle_run(
+        replace(
+            _base_args(),
+            resolved_root=root,
+            config_path=portable_config,
+        ),
+        _deps(
+            DepsOptions(
+                runner=runner,
+                load_config=lambda *_args, **_kwargs: get_default_config(),
+            )
+        ),
+    )
+
+    assert len(runner.requests) == 1
+    assert runner.requests[0].config_path == portable_config
 
 
 def test_handle_run_write_config_error_uses_injected_error_handler() -> None:

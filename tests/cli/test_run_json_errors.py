@@ -38,6 +38,45 @@ def test_run_write_config_json_write_error_outputs_error_schema(
     assert payload["error"]["details"]["error"] == "permission denied"
 
 
+def test_run_json_rejects_external_config_before_load_write_or_runner(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _unexpected(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("external config must be rejected before side effects")
+
+    monkeypatch.setattr("frame_compare.cli.entry.load_config", _unexpected)
+    monkeypatch.setattr("frame_compare.cli.entry.write_config_to", _unexpected)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _unexpected)
+
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        root.mkdir()
+        external_config = Path("outside") / "config.toml"
+        resolved_root = root.resolve()
+        resolved_external_config = external_config.resolve()
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--root",
+                str(root),
+                "--config",
+                str(resolved_external_config),
+                "--json",
+            ],
+        )
+
+    assert result.exit_code == int(ExitCode.INPUT_ERROR)
+    assert result.stderr == ""
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert payload["error"]["code"] == "FC-3009"
+    assert payload["error"]["details"] == {
+        "path": str(resolved_external_config),
+        "root": str(resolved_root),
+    }
+
+
 def test_run_json_outputs_pinned_success_schema_and_stdout_is_pure_json(
     monkeypatch: MonkeyPatch,
 ) -> None:

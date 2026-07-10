@@ -10,6 +10,8 @@ import pytest
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot
 from frame_compare.orchestration.probing.probe_cache import (
     compute_probe_cache_key,
+    load_clip_probe_cache,
+    merge_shared_clip_probe_cache,
     save_clip_probe_cache,
 )
 from frame_compare.vs.types import HDRMetadata
@@ -98,20 +100,97 @@ def test_save_clip_probe_cache_writes_version_first_and_keys_sorted(
     assert contents.index(f"[{key_a}]") < contents.index(f"[{key_b}]")
 
 
-def test_save_clip_probe_cache_logs_and_continues_on_write_os_error(
+def test_save_clip_probe_cache_atomic_write_failure_preserves_existing_cache(
     tmp_path: Path, sample_snapshot: ClipProbeSnapshot
 ) -> None:
     """Probe cache writes are best-effort generated-state acceleration."""
-    f = tmp_path / "unwritable" / "cache.toml"
-    key = compute_probe_cache_key(sample_snapshot.fingerprint)
+    f = tmp_path / "cache.toml"
+    existing = ClipProbeSnapshot(
+        fingerprint=ClipFingerprint(Path("existing.mkv"), 2048, 6000),
+        width=1280,
+        height=720,
+        num_frames=50,
+        fps=Fraction(24, 1),
+        is_hdr=False,
+    )
+    existing_key = compute_probe_cache_key(existing.fingerprint)
+    current_key = compute_probe_cache_key(sample_snapshot.fingerprint)
+    save_clip_probe_cache(f, {existing_key: existing})
 
     with (
-        patch("pathlib.Path.open", side_effect=OSError("disk full")),
+        patch(
+            "frame_compare.orchestration.probing.probe_cache.write_bytes_atomic",
+            side_effect=OSError("disk full"),
+        ),
         patch("frame_compare.orchestration.probing.probe_cache.log.warning") as warning,
     ):
-        save_clip_probe_cache(f, {key: sample_snapshot})
+        save_clip_probe_cache(f, {current_key: sample_snapshot})
 
     assert warning.call_args.args[0] == "probe_cache_write_error"
+    assert set(load_clip_probe_cache(f)) == {existing_key}
+
+
+def test_merge_shared_clip_probe_cache_lock_failure_warns_without_replacing(
+    tmp_path: Path, sample_snapshot: ClipProbeSnapshot
+) -> None:
+    f = tmp_path / "cache.toml"
+    existing = ClipProbeSnapshot(
+        fingerprint=ClipFingerprint(Path("existing.mkv"), 2048, 6000),
+        width=1280,
+        height=720,
+        num_frames=50,
+        fps=Fraction(24, 1),
+        is_hdr=False,
+    )
+    existing_key = compute_probe_cache_key(existing.fingerprint)
+    current_key = compute_probe_cache_key(sample_snapshot.fingerprint)
+    save_clip_probe_cache(f, {existing_key: existing})
+
+    with (
+        patch(
+            "frame_compare.orchestration.probing.probe_cache.exclusive_file_lock",
+            side_effect=OSError("lock unavailable"),
+        ),
+        patch("frame_compare.orchestration.probing.probe_cache.log.warning") as warning,
+    ):
+        merge_shared_clip_probe_cache(f, {current_key: sample_snapshot})
+
+    assert warning.call_args.args[0] == "probe_cache_write_error"
+    assert set(load_clip_probe_cache(f)) == {existing_key}
+
+
+def test_merge_shared_clip_probe_cache_read_failure_aborts_without_replacing(
+    tmp_path: Path, sample_snapshot: ClipProbeSnapshot
+) -> None:
+    f = tmp_path / "cache.toml"
+    existing = ClipProbeSnapshot(
+        fingerprint=ClipFingerprint(Path("existing.mkv"), 2048, 6000),
+        width=1280,
+        height=720,
+        num_frames=50,
+        fps=Fraction(24, 1),
+        is_hdr=False,
+    )
+    existing_key = compute_probe_cache_key(existing.fingerprint)
+    current_key = compute_probe_cache_key(sample_snapshot.fingerprint)
+    save_clip_probe_cache(f, {existing_key: existing})
+    existing_bytes = f.read_bytes()
+
+    with (
+        patch(
+            "frame_compare.orchestration.probing.probe_cache.tomllib.load",
+            side_effect=PermissionError("temporarily unavailable"),
+        ),
+        patch("frame_compare.orchestration.probing.probe_cache.write_bytes_atomic") as atomic_write,
+        patch("frame_compare.orchestration.probing.probe_cache.log.warning") as warning,
+    ):
+        merge_shared_clip_probe_cache(f, {current_key: sample_snapshot})
+
+    assert f.read_bytes() == existing_bytes
+    assert set(load_clip_probe_cache(f)) == {existing_key}
+    assert warning.call_args_list[0].args[0] == "probe_cache_read_error"
+    assert [call.args[0] for call in warning.call_args_list] == ["probe_cache_read_error"]
+    atomic_write.assert_not_called()
 
 
 def test_save_clip_probe_cache_creates_parent_directories(

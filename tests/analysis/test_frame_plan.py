@@ -44,6 +44,7 @@ print(','.join(map(str, plan.frames)))
         capture_output=True,
         text=True,
         check=True,
+        timeout=30,
     )
     assert result.stdout.strip() == expected_frames
 

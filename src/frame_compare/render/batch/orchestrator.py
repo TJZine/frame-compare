@@ -43,7 +43,10 @@ def _resolve_probe_is_hdr(
     target_renderer = resolve_target_renderer(config, renderer)
     if target_renderer != "ffmpeg" or not config.color.enable_tonemap:
         return None
-    resolved_ffmpeg_runner = resolve_batch_ffmpeg_runner(ffmpeg_runner)
+    resolved_ffmpeg_runner = resolve_batch_ffmpeg_runner(
+        ffmpeg_runner,
+        extraction_timeout_seconds=config.screenshots.ffmpeg_timeout_seconds,
+    )
     return is_hdr_via_runner(clip_path, resolved_ffmpeg_runner)
 
 
@@ -195,6 +198,10 @@ def render_screenshots(
         RenderError: For other rendering failures
     """
     resolved_options = options or ScreenshotRenderOptions()
+    resolved_ffmpeg_runner = resolve_batch_ffmpeg_runner(
+        resolved_options.ffmpeg_runner,
+        extraction_timeout_seconds=config.screenshots.ffmpeg_timeout_seconds,
+    )
     label_map = resolved_options.label_map or {}
 
     if resolved_options.display_frames is not None and len(resolved_options.display_frames) != len(
@@ -234,7 +241,7 @@ def render_screenshots(
                 clip_path,
                 config=config,
                 renderer=resolved_options.renderer,
-                ffmpeg_runner=resolved_options.ffmpeg_runner,
+                ffmpeg_runner=resolved_ffmpeg_runner,
             ),
         )
         batch_requests.append(req)
@@ -247,7 +254,7 @@ def render_screenshots(
             renderer=resolved_options.renderer,
             overlay_mode=resolved_options.overlay_mode,
             reporter=resolved_options.reporter,
-            ffmpeg_runner=resolved_options.ffmpeg_runner,
+            ffmpeg_runner=resolved_ffmpeg_runner,
         ),
     )
 
@@ -270,7 +277,10 @@ def render_screenshots_from_batch(
         Dict mapping label -> list of rendered screenshot paths
     """
     resolved_options = options or BatchRenderOptions()
-    resolved_ffmpeg_runner = resolve_batch_ffmpeg_runner(resolved_options.ffmpeg_runner)
+    resolved_ffmpeg_runner = resolve_batch_ffmpeg_runner(
+        resolved_options.ffmpeg_runner,
+        extraction_timeout_seconds=config.screenshots.ffmpeg_timeout_seconds,
+    )
     target_renderer = resolve_target_renderer(config, resolved_options.renderer)
 
     validate_ffmpeg_batch_tonemap_gate(batch_requests, config, target_renderer)

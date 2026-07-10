@@ -99,11 +99,15 @@ def validate_ffmpeg_batch_tonemap_gate(
         raise TonemapRequiresVapourSynthError()
 
 
-def resolve_batch_ffmpeg_runner(ffmpeg_runner: FFmpegRunner | None) -> FFmpegRunner:
+def resolve_batch_ffmpeg_runner(
+    ffmpeg_runner: FFmpegRunner | None,
+    *,
+    extraction_timeout_seconds: float = 30.0,
+) -> FFmpegRunner:
     if ffmpeg_runner is not None:
         return ffmpeg_runner
 
-    return DefaultFFmpegRunner()
+    return DefaultFFmpegRunner(extraction_timeout_seconds=extraction_timeout_seconds)
 
 
 def validate_batch_requests(batch_requests: list[ScreenshotBatchRequest]) -> None:

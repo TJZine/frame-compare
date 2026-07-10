@@ -69,6 +69,88 @@ def test_render_screenshots_from_batch_happy_path(tmp_path) -> None:
         assert mock_batch.call_args.kwargs["parallelism"] == 1
 
 
+def test_render_screenshots_from_batch_constructs_configured_default_ffmpeg_runner(
+    tmp_path: Path,
+) -> None:
+    config = ConfigSchema(
+        color=ColorConfig(enable_tonemap=False),
+        screenshots={"use_ffmpeg": True, "ffmpeg_timeout_seconds": 47.0},
+    )
+    configured_runner = MagicMock()
+    request = ScreenshotBatchRequest(
+        clip_path=Path("clip.mkv"),
+        label="clip",
+        source_frames=[1],
+        display_frames=[1],
+        selection_labels=[None],
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=240,
+        probe_is_hdr=False,
+    )
+
+    with (
+        patch(
+            "frame_compare.render.batch.expansion.DefaultFFmpegRunner",
+            return_value=configured_runner,
+        ) as default_runner_class,
+        patch(
+            "frame_compare.render.batch.orchestrator.expand_batch_render_requests",
+            return_value=([], {}),
+        ) as expand_requests,
+        patch("frame_compare.render.batch.orchestrator.render_batch", return_value=[]),
+        patch(
+            "frame_compare.render.batch.orchestrator.render_batch_results_by_label",
+            return_value={},
+        ),
+    ):
+        render_screenshots_from_batch([request], tmp_path, config)
+
+    default_runner_class.assert_called_once_with(extraction_timeout_seconds=47.0)
+    assert expand_requests.call_args.kwargs["ffmpeg_runner"] is configured_runner
+
+
+def test_render_screenshots_from_batch_preserves_injected_ffmpeg_runner(tmp_path: Path) -> None:
+    config = ConfigSchema(
+        color=ColorConfig(enable_tonemap=False),
+        screenshots={"use_ffmpeg": True, "ffmpeg_timeout_seconds": 47.0},
+    )
+    injected_runner = MagicMock()
+    request = ScreenshotBatchRequest(
+        clip_path=Path("clip.mkv"),
+        label="clip",
+        source_frames=[1],
+        display_frames=[1],
+        selection_labels=[None],
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=240,
+        probe_is_hdr=False,
+    )
+
+    with (
+        patch("frame_compare.render.batch.expansion.DefaultFFmpegRunner") as default_runner_class,
+        patch(
+            "frame_compare.render.batch.orchestrator.expand_batch_render_requests",
+            return_value=([], {}),
+        ) as expand_requests,
+        patch("frame_compare.render.batch.orchestrator.render_batch", return_value=[]),
+        patch(
+            "frame_compare.render.batch.orchestrator.render_batch_results_by_label",
+            return_value={},
+        ),
+    ):
+        render_screenshots_from_batch(
+            [request],
+            tmp_path,
+            config,
+            BatchRenderOptions(ffmpeg_runner=injected_runner),
+        )
+
+    default_runner_class.assert_not_called()
+    assert expand_requests.call_args.kwargs["ffmpeg_runner"] is injected_runner
+
+
 def test_render_screenshots_from_batch_passes_internal_parallelism(tmp_path) -> None:
     config = ConfigSchema(color=ColorConfig(enable_tonemap=False), screenshots={"use_ffmpeg": True})
     ffmpeg_runner = MagicMock()

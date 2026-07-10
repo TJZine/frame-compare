@@ -82,9 +82,6 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
     if local_deps.vs_loader is None:
         local_deps.vs_loader = DefaultVSLoader()
 
-    if local_deps.ffmpeg_runner is None:
-        local_deps.ffmpeg_runner = DefaultFFmpegRunner()
-
     if local_deps.progress is None:
         local_deps.progress = select_reporter(
             quiet=request.quiet,
@@ -99,6 +96,10 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             raise RuntimeError("Progress reporter must be initialized before execution.")
 
         prep = await execute_prep(request, local_deps)
+        if local_deps.ffmpeg_runner is None:
+            local_deps.ffmpeg_runner = DefaultFFmpegRunner(
+                extraction_timeout_seconds=prep.config.screenshots.ffmpeg_timeout_seconds
+            )
         state = ExecutionState(artifacts=prep.artifacts)
 
         state.phase_timings["preflight"] = prep.preflight_duration

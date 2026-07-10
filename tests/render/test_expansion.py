@@ -293,11 +293,15 @@ def test_validate_ffmpeg_batch_tonemap_gate() -> None:
 
 def test_resolve_batch_ffmpeg_runner() -> None:
     custom_runner = MagicMock()
-    assert resolve_batch_ffmpeg_runner(custom_runner) is custom_runner
+    assert (
+        resolve_batch_ffmpeg_runner(custom_runner, extraction_timeout_seconds=47.0) is custom_runner
+    )
 
-    from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
+    with patch("frame_compare.render.batch.expansion.DefaultFFmpegRunner") as default_runner_class:
+        default_runner = default_runner_class.return_value
 
-    assert isinstance(resolve_batch_ffmpeg_runner(None), DefaultFFmpegRunner)
+        assert resolve_batch_ffmpeg_runner(None, extraction_timeout_seconds=47.0) is default_runner
+        default_runner_class.assert_called_once_with(extraction_timeout_seconds=47.0)
 
 
 def test_validate_batch_requests_rejects_duplicate_labels() -> None:
