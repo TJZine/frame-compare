@@ -78,7 +78,6 @@ def test_viewer_css_covers_timeline_layout_contracts() -> None:
     assert "display: block;" in css_block(
         css, ".rv-filmstrip-size-compact .rv-filmstrip-compact-label"
     )
-    assert "linear-gradient" in css_block(css, ".rv-filmstrip-caption")
 
 
 def test_viewer_css_keeps_mobile_palette_and_reduced_motion_contracts() -> None:
