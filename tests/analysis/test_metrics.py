@@ -11,6 +11,7 @@ import pytest
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.metric_strategies import MetricComputationResult
 from frame_compare.analysis.metrics import calculate_metrics
+from frame_compare.analysis.timing import AnalysisTimingRecorder
 from frame_compare.analysis.types import (
     FrameMetrics,
     MetricActiveRect,
@@ -44,6 +45,38 @@ def test_calculate_metrics_uses_cache_on_hit(mock_key, mock_load, tmp_path):
     result = calculate_metrics(video_paths, config, tmp_path)
     assert result == metrics
     mock_load.assert_called_once()
+
+
+@patch("frame_compare.analysis.metrics.load_cached_metrics_for_request")
+@patch("frame_compare.analysis.metrics.compute_cache_key")
+def test_calculate_metrics_records_proven_cache_hit(mock_key, mock_load, tmp_path: Path) -> None:
+    mock_key.return_value = "fp"
+    video_path = tmp_path / "v1.mkv"
+    video_path.write_bytes(b"")
+    metrics = FrameMetrics(
+        luminance=[0.5],
+        motion=[0.0],
+        metadata=MetricsMetadata(
+            frame_count=1,
+            fps=Fraction(24, 1),
+            config_fingerprint="fp",
+            clips=[],
+            analysis_source_path=str(video_path),
+        ),
+    )
+    mock_load.return_value = MagicMock(success=True, metrics=metrics)
+    recorder = AnalysisTimingRecorder()
+
+    result = calculate_metrics(
+        [video_path],
+        AnalysisConfig(),
+        tmp_path,
+        timing_recorder=recorder,
+    )
+
+    assert result == metrics
+    assert recorder.cache_state == "hit"
+    assert recorder.as_dict()["cache_lookup"] >= 0.0
 
 
 @patch("frame_compare.analysis.metrics.save_metrics_cache")

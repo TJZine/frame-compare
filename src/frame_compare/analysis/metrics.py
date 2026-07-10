@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fractions import Fraction
+from time import perf_counter
 from typing import TYPE_CHECKING
 
 import structlog
@@ -18,6 +19,7 @@ from frame_compare.analysis.metric_strategies import (
     MetricComputationResult,
     calculate_metric_strategy,
 )
+from frame_compare.analysis.timing import AnalysisTimingRecorder
 from frame_compare.analysis.types import (
     ActiveRectAlgorithmId,
     ActiveRectDetectionMode,
@@ -67,14 +69,22 @@ def _cached_metrics(
     clips: list[ClipIdentity],
     reporter: ProgressReporter | None,
     request: MetricCacheRequest,
+    timing_recorder: AnalysisTimingRecorder | None,
 ) -> FrameMetrics | None:
+    started = perf_counter() if timing_recorder is not None else 0.0
     cache_result = load_cached_metrics_for_request(cache_dir, fingerprint, clips, request)
+    if timing_recorder is not None:
+        timing_recorder.add_seconds("cache_lookup", perf_counter() - started)
     if not (cache_result.success and cache_result.metrics):
+        if timing_recorder is not None:
+            timing_recorder.cache_state = "miss"
         return None
 
     if reporter:
         reporter.set_description("Cache hit")
         reporter.advance(ANALYZE_PROGRESS_TOTAL - 1)
+    if timing_recorder is not None:
+        timing_recorder.cache_state = "hit"
     return cache_result.metrics
 
 
@@ -127,13 +137,20 @@ def _save_metrics_cache_best_effort(
     metrics: FrameMetrics,
     cache_dir: Path,
     reporter: ProgressReporter | None,
+    timing_recorder: AnalysisTimingRecorder | None,
 ) -> None:
+    started = perf_counter() if timing_recorder is not None else 0.0
     try:
         save_metrics_cache(metrics, cache_dir)
     except Exception as e:
+        if timing_recorder is not None:
+            timing_recorder.cache_state = "write_failed"
         if reporter:
             reporter.set_description(f"Cache save failed: {e}")
         log.warning("analysis_cache_save_failed", error=str(e), exc_info=True)
+    finally:
+        if timing_recorder is not None:
+            timing_recorder.add_seconds("cache_write", perf_counter() - started)
 
 
 def calculate_metrics(
@@ -149,6 +166,7 @@ def calculate_metrics(
     active_rect_source: ActiveRectSource = "full-frame",
     active_rect_detection_mode: ActiveRectDetectionMode = "aspect_ratio",
     active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v2",
+    timing_recorder: AnalysisTimingRecorder | None = None,
 ) -> FrameMetrics:
     """
     Calculate frame metrics for the given clips.
@@ -209,14 +227,38 @@ def calculate_metrics(
     )
     clips = _clip_identities(video_paths)
 
-    cached = _cached_metrics(cache_dir, fingerprint, clips, reporter, cache_request)
+    cached = _cached_metrics(
+        cache_dir,
+        fingerprint,
+        clips,
+        reporter,
+        cache_request,
+        timing_recorder,
+    )
     if cached:
         return cached
 
     # Cache miss or invalid - compute metrics for the selected analysis source only.
+    source_load_started = perf_counter() if timing_recorder is not None else 0.0
     source = _load_analysis_source(source_path, vs_loader)
+    if timing_recorder is not None:
+        timing_recorder.add_seconds("source_load", perf_counter() - source_load_started)
     try:
-        strategy_result = calculate_metric_strategy(source, config, reporter, metric_active_rect)
+        if timing_recorder is None:
+            strategy_result = calculate_metric_strategy(
+                source,
+                config,
+                reporter,
+                metric_active_rect,
+            )
+        else:
+            strategy_result = calculate_metric_strategy(
+                source,
+                config,
+                reporter,
+                metric_active_rect,
+                timing_recorder=timing_recorder,
+            )
         metrics = _build_metrics(
             result=strategy_result,
             source=source,
@@ -232,7 +274,7 @@ def calculate_metrics(
     finally:
         del source
 
-    _save_metrics_cache_best_effort(metrics, cache_dir, reporter)
+    _save_metrics_cache_best_effort(metrics, cache_dir, reporter, timing_recorder)
 
     if reporter:
         reporter.advance(1)
