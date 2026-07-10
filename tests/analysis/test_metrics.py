@@ -436,20 +436,31 @@ def test_calculate_metrics_recomputes_cache_with_mismatched_active_rect_provenan
     mock_source.clip.num_frames = 1
     mock_source.fps = Fraction(24, 1)
     mock_strategy.return_value = _quality_strategy_result(frame_count=1)
+    config = AnalysisConfig()
 
     result = calculate_metrics(
         [video_path],
-        AnalysisConfig(),
+        config,
         tmp_path,
         metric_active_rect=rect,
         active_rect_source="explicit",
         active_rect_detection_mode="provided",
     )
 
-    mock_strategy.assert_called_once()
+    mock_strategy.assert_called_once_with(mock_source, config, None, rect)
+    assert mock_load.call_args.args[3] == MetricCacheRequest(
+        analysis_source_path=video_path,
+        effective_fps=None,
+        metric_active_rect=rect,
+        active_rect_source="explicit",
+        active_rect_detection_mode="provided",
+        active_rect_algorithm_id="active_rect_resolution_v2",
+    )
     mock_save.assert_called_once()
+    assert result.metadata.metric_active_rect == rect
     assert result.metadata.active_rect_source == "explicit"
     assert result.metadata.active_rect_detection_mode == "provided"
+    assert result.metadata.active_rect_algorithm_id == "active_rect_resolution_v2"
 
 
 def test_calculate_metrics_empty_video_paths_raises_fc4002(tmp_path: Path) -> None:

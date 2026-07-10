@@ -411,8 +411,10 @@ def test_execute_prep_cache_only_rejects_metadata_mismatch_before_run_folder_res
     _create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"
     source_path = _create_video_files(input_dir, "source.mkv")[0]
-    config = preparation.prepare_preflight(root=tmp_path).config
-    cache_dir = tmp_path / "generated" / "cache" / "analysis"
+    preflight = preparation.prepare_preflight(root=tmp_path)
+    config = preflight.config
+    generated_dir = preflight.workspace.generated_dir
+    cache_dir = generated_dir / "cache" / "analysis"
     write_metrics_cache(cache_dir, source_path=source_path, config=config)
     selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
     fingerprint = cache_io.compute_cache_key(
@@ -426,6 +428,7 @@ def test_execute_prep_cache_only_rejects_metadata_mismatch_before_run_folder_res
     payload = json.loads(cache_path.read_text(encoding="utf-8"))
     payload["metadata"]["active_rect_source"] = "explicit"
     cache_path.write_text(json.dumps(payload), encoding="utf-8")
+    directories_before = {path for path in generated_dir.iterdir() if path.is_dir()}
 
     with pytest.raises(MetricsCalculationError, match="mismatched_inputs"):
         asyncio.run(
@@ -435,7 +438,8 @@ def test_execute_prep_cache_only_rejects_metadata_mismatch_before_run_folder_res
             )
         )
 
-    assert not any(path.is_dir() for path in input_dir.iterdir())
+    directories_after = {path for path in generated_dir.iterdir() if path.is_dir()}
+    assert directories_after == directories_before
 
 
 def test_execute_prep_rejects_skip_analysis_with_metric_frame_selection(tmp_path: Path) -> None:
