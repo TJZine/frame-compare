@@ -212,15 +212,20 @@ def _load_clip_probe_cache(
         return {}
     except tomllib.TOMLDecodeError as e:
         log.warning("probe_cache_parse_error", path=str(cache_path), error=str(e))
+        if abort_on_read_error:
+            raise _ProbeCacheReadError("Malformed shared probe cache") from e
         return {}
 
-    if str(data.get("version")) != "1":
+    found_version = str(data.get("version"))
+    if found_version != "1":
         log.warning(
             "probe_cache_version_mismatch",
             path=str(cache_path),
             found=data.get("version"),
             expected="1",
         )
+        if abort_on_read_error:
+            raise _ProbeCacheReadError(f"Unsupported shared probe cache version: {found_version!r}")
         return {}
 
     snapshots: dict[str, ClipProbeSnapshot] = {}
@@ -251,7 +256,7 @@ def load_clip_probe_cache(cache_path: Path) -> dict[str, ClipProbeSnapshot]:
 def _load_shared_clip_probe_cache_for_update(
     cache_path: Path,
 ) -> dict[str, ClipProbeSnapshot]:
-    """Load shared entries, aborting the transaction on filesystem read errors."""
+    """Load shared entries, aborting when existing state cannot be read safely."""
     return _load_clip_probe_cache(cache_path, abort_on_read_error=True)
 
 
