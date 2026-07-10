@@ -28,7 +28,6 @@ dark_frame_count = 0
 bright_frame_count = 0
 motion_frame_count = 0
 random_seed = 42
-save_frames_data = true
 performance_mode = "quality"
 ignore_lead_seconds = 0.0
 ignore_trail_seconds = 0.0
@@ -60,7 +59,6 @@ comparison_streams = {}
 
 [screenshots]
 use_ffmpeg = false
-directory_name = "screenshots"
 overlay_mode = "standard"
 include_frame_number = true
 png_compression = 6
@@ -114,5 +112,4 @@ per_frame_nits = false
 [logging]
 level = "INFO"
 format = "console"
-# file = null
 """

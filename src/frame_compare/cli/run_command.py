@@ -238,9 +238,6 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
         stderr=False,
         no_color=effective_no_color,
     )
-    log_level = "WARNING" if args.quiet else ("DEBUG" if args.verbose else "INFO")
-    log_format = "json" if args.json_output else "console"
-    deps.configure_logging(level=log_level, format=log_format)
 
     try:
         run_options = parse_run_options(args, no_color=effective_no_color)
@@ -252,6 +249,13 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
         )
 
         effective_config = load_effective_config()
+        log_level = (
+            "WARNING"
+            if args.quiet
+            else ("DEBUG" if args.verbose else effective_config.logging.level.value)
+        )
+        log_format = "json" if args.json_output else effective_config.logging.format.value
+        deps.configure_logging(level=log_level, format=log_format)
 
         if args.diagnose_paths:
             handle_diagnose_paths(args.resolved_root, args.config_path, effective_config)

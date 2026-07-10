@@ -951,6 +951,50 @@ def test_current_cli_contract_documents_screenshot_geometry_config_surface() -> 
         assert expected in normalized_screenshot_section
 
 
+def test_current_cli_contract_documents_config_strictness_logging_and_migration() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
+    validation_heading = "## Config Validation, Logging, And Migration"
+    audio_heading = "## Config-Only Audio Alignment Surface"
+    assert validation_heading in cli_contract, f"Missing heading: {validation_heading}"
+
+    validation_section = cli_contract.split(validation_heading, maxsplit=1)[1].split(
+        audio_heading,
+        maxsplit=1,
+    )[0]
+    normalized_validation = " ".join(validation_section.split())
+
+    for expected in (
+        "Unknown keys at the root of the config remain ignored",
+        "Every Frame Compare-owned nested config table rejects unknown keys",
+        '`level = "INFO"`',
+        "accepting `DEBUG`, `INFO`, `WARNING`, or `ERROR`",
+        '`format = "console"`',
+        "`--quiet` forces level `WARNING`",
+        "`--verbose` forces `DEBUG`",
+        "`--json` forces JSON-formatted logs on stderr",
+        "Remove `analysis.save_frames_data`",
+        "Replace `screenshots.directory_name` with `paths.screenshots_dir`",
+        "Remove `logging.file`",
+        "does not support config-driven file logging",
+    ):
+        assert expected in normalized_validation
+    assert "CRITICAL" not in validation_section
+
+    normalized_screenshot = " ".join(
+        cli_contract.split("## Config-Only Screenshot Surface", maxsplit=1)[1]
+        .split(validation_heading, maxsplit=1)[0]
+        .split()
+    )
+    assert "`ffmpeg_timeout_seconds` defaults to `30.0` and must be at least `5.0`" in (
+        normalized_screenshot
+    )
+    assert "controls only FFmpeg frame extraction" in normalized_screenshot
+    assert "ffprobe HDR metadata probe keeps its fixed `15.0` second timeout" in (
+        normalized_screenshot
+    )
+
+
 def test_current_architecture_documents_shared_probe_cache_for_cache_only() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     architecture = (repo_root / "docs" / "current-architecture.md").read_text(encoding="utf-8")

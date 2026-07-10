@@ -133,6 +133,55 @@ def test_render_screenshots_dict_order(tmp_path, default_config):
         assert len(results["a"]) == 2
 
 
+def test_render_screenshots_constructs_configured_default_ffmpeg_runner(tmp_path: Path) -> None:
+    config = ConfigSchema(
+        color=ColorConfig(enable_tonemap=False),
+        screenshots={"use_ffmpeg": True, "ffmpeg_timeout_seconds": 47.0},
+    )
+    configured_runner = MagicMock()
+
+    with (
+        patch(
+            "frame_compare.render.batch.expansion.DefaultFFmpegRunner",
+            return_value=configured_runner,
+        ) as default_runner_class,
+        patch(
+            "frame_compare.render.batch.orchestrator.render_screenshots_from_batch",
+            return_value={},
+        ) as render_from_batch,
+    ):
+        render_screenshots([Path("clip.mkv")], [1], tmp_path, config)
+
+    default_runner_class.assert_called_once_with(extraction_timeout_seconds=47.0)
+    assert render_from_batch.call_args.kwargs["options"].ffmpeg_runner is configured_runner
+
+
+def test_render_screenshots_preserves_injected_ffmpeg_runner(tmp_path: Path) -> None:
+    config = ConfigSchema(
+        color=ColorConfig(enable_tonemap=False),
+        screenshots={"use_ffmpeg": True, "ffmpeg_timeout_seconds": 47.0},
+    )
+    injected_runner = MagicMock()
+
+    with (
+        patch("frame_compare.render.batch.expansion.DefaultFFmpegRunner") as default_runner_class,
+        patch(
+            "frame_compare.render.batch.orchestrator.render_screenshots_from_batch",
+            return_value={},
+        ) as render_from_batch,
+    ):
+        render_screenshots(
+            [Path("clip.mkv")],
+            [1],
+            tmp_path,
+            config,
+            ScreenshotRenderOptions(ffmpeg_runner=injected_runner),
+        )
+
+    default_runner_class.assert_not_called()
+    assert render_from_batch.call_args.kwargs["options"].ffmpeg_runner is injected_runner
+
+
 def test_render_screenshots_vs_loading(tmp_path, default_config):
     clips = [Path("vid1.mkv")]
     frames = [10, 20]

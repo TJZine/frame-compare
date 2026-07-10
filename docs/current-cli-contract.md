@@ -492,7 +492,6 @@ The default `[analysis]` frame-selection and metric surface is:
 - `bright_frame_count = 0`
 - `motion_frame_count = 0`
 - `random_seed = 42`
-- `save_frames_data = true`
 - `performance_mode = "quality"`
 
 `user_frames` are original selected-reference source-frame numbers. They are not
@@ -676,6 +675,39 @@ dedicated `run` flags for them:
   compression input for Pillow and VapourSynth fpng. Pillow receives the value
   directly. Fpng maps `0..3` to `0`, `4..6` to `1`, and `7..9` to `2`;
   unsupported values fail config validation rather than being silently clamped.
+- `ffmpeg_timeout_seconds` defaults to `30.0` and must be at least `5.0`. It
+  controls only FFmpeg frame extraction. The separate ffprobe HDR metadata
+  probe keeps its fixed `15.0` second timeout.
+
+## Config Validation, Logging, And Migration
+
+Unknown keys at the root of the config remain ignored so a config can carry
+top-level sections owned by other tools. Every Frame Compare-owned nested
+config table rejects unknown keys, including nested source override and active
+rectangle tables. A misspelled or stale key inside an owned table therefore
+fails config validation instead of silently using a default.
+
+The implemented `[logging]` surface contains only:
+
+- `level = "INFO"`, accepting `DEBUG`, `INFO`, `WARNING`, or `ERROR`
+- `format = "console"`, accepting `console` or `json`
+
+For `run`, logging is configured only after the effective config loads and
+validates. `--quiet` forces level `WARNING`; otherwise `--verbose` forces
+`DEBUG`; otherwise `[logging].level` applies. `--json` forces JSON-formatted
+logs on stderr; otherwise `[logging].format` applies. This does not change the
+successful `run --json` stdout schema or permit human diagnostics on JSON
+stdout.
+
+Configs created before this contract must remove these inert keys because they
+now fail nested validation:
+
+- Remove `analysis.save_frames_data`; it never controlled persisted frame data
+  and has no replacement.
+- Replace `screenshots.directory_name` with `paths.screenshots_dir`, which owns
+  the screenshot destination.
+- Remove `logging.file`; Frame Compare does not support config-driven file
+  logging.
 
 ## Config-Only Audio Alignment Surface
 
