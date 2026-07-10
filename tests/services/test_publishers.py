@@ -1,11 +1,12 @@
 """Tests for slow.pics publisher service."""
 
+import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
 from http.cookies import SimpleCookie
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import UUID
 
 import httpx
@@ -28,6 +29,7 @@ from frame_compare.services.slowpics_upload_plan import (
     SlowpicsUploadRow,
 )
 from frame_compare.services.types import SlowpicsCollectionMetadata
+from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 
 
 def _collection_metadata(
@@ -181,6 +183,82 @@ async def test_publish_to_slowpics_success_returns_url(
     assert result.url == "https://slow.pics/c/first-key"
     assert result.screenshot_count == 4
     assert result.upload_duration_seconds >= 0.0
+
+
+@pytest.mark.anyio
+async def test_publish_to_slowpics_reports_progress_for_each_completed_image(
+    tmp_path: Path,
+    async_client: httpx.AsyncClient,
+    respx_mock,
+) -> None:
+    upload_plan = _plan(tmp_path, rows=2, cols=2)
+    _mock_successful_browser_flow(respx_mock)
+    progress = Mock(spec=ProgressReporter)
+
+    await publish_to_slowpics(
+        _collection_metadata("My Comparison"),
+        SlowpicsConfig(),
+        async_client,
+        progress=progress,
+        upload_plan=upload_plan,
+    )
+
+    progress.start_phase.assert_called_once_with(
+        "Uploading My Comparison to slow.pics",
+        total=4,
+    )
+    assert progress.advance.call_count == 4
+    progress.complete_phase.assert_called_once_with(ProgressPhaseStatus.COMPLETED)
+
+
+@pytest.mark.anyio
+async def test_publish_to_slowpics_uploads_at_most_three_images_concurrently(
+    tmp_path: Path,
+    async_client: httpx.AsyncClient,
+    respx_mock,
+) -> None:
+    upload_plan = _plan(tmp_path, rows=2, cols=2)
+    active_uploads = 0
+    maximum_active_uploads = 0
+    three_uploads_started = asyncio.Event()
+
+    respx_mock.get("https://slow.pics/comparison").mock(
+        return_value=httpx.Response(
+            200,
+            headers={"Set-Cookie": "XSRF-TOKEN=token; Domain=.slow.pics; Path=/"},
+        )
+    )
+    respx_mock.post("https://slow.pics/upload/comparison").mock(
+        return_value=httpx.Response(200, json=_metadata_payload())
+    )
+
+    async def _upload_image(_request: httpx.Request) -> httpx.Response:
+        nonlocal active_uploads, maximum_active_uploads
+        active_uploads += 1
+        maximum_active_uploads = max(maximum_active_uploads, active_uploads)
+        if active_uploads == 3:
+            three_uploads_started.set()
+        try:
+            await asyncio.wait_for(three_uploads_started.wait(), timeout=1.0)
+            await asyncio.sleep(0)
+            return httpx.Response(200)
+        finally:
+            active_uploads -= 1
+
+    for row in range(2):
+        for col in range(2):
+            respx_mock.post(f"https://slow.pics/upload/image/image-{row}-{col}-secret").mock(
+                side_effect=_upload_image
+            )
+
+    await publish_to_slowpics(
+        _collection_metadata(),
+        SlowpicsConfig(),
+        async_client,
+        upload_plan=upload_plan,
+    )
+
+    assert maximum_active_uploads == 3
 
 
 @pytest.mark.anyio
@@ -887,6 +965,7 @@ async def test_publish_to_slowpics_partial_image_failure_does_not_delete_files(
 ) -> None:
     upload_plan = _plan(tmp_path, rows=1, cols=2)
     files = upload_plan.file_paths
+    progress = Mock(spec=ProgressReporter)
     _mock_successful_browser_flow(respx_mock, rows=1, cols=2)
     respx_mock.post("https://slow.pics/upload/image/image-0-0-secret").mock(
         return_value=httpx.Response(200)
@@ -900,11 +979,13 @@ async def test_publish_to_slowpics_partial_image_failure_does_not_delete_files(
             _collection_metadata(),
             SlowpicsConfig(delete_after_upload=True, max_retries=1),
             async_client,
+            progress=progress,
             upload_plan=upload_plan,
         )
 
     assert all(path.exists() for path in files)
     assert mock_sleep.await_count == 1
+    progress.complete_phase.assert_called_once_with(ProgressPhaseStatus.FAILED)
 
 
 @pytest.mark.anyio

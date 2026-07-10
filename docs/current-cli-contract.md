@@ -383,8 +383,9 @@ opened. If it is not opened, the CLI prints the report path before prompting.
 - When enabled and not suppressed by `--no-upload`, the current upload path uses
   the browser-compatible slow.pics flow owned by
   `frame_compare.services.publishers`: fetch `/comparison`, create metadata at
-  `/upload/comparison`, then upload each planned image to
-  `/upload/image/{imageUuid}`.
+  `/upload/comparison`, then upload planned images to
+  `/upload/image/{imageUuid}` with at most three image requests in flight. Human
+  progress reports completed images against the exact planned image total.
 - Upload membership comes from the explicit current-render upload plan, not from
   scanning the screenshot directory. The plan is built from selected frames,
   current render artifacts, and clip order.

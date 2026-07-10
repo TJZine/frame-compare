@@ -348,12 +348,14 @@ and allows remote opening only for explicit `https://slow.pics/...` URLs.
 slow.pics publishing is service-owned. `frame_compare.services.publishers` owns
 the browser-compatible slow.pics client flow: `GET /comparison`,
 `POST /upload/comparison`, and planned `POST /upload/image/{imageUuid}` image
-requests. `frame_compare.services.slowpics_upload_plan` owns the explicit
-upload-plan seam for current render artifacts, row/image names, and upload
-ordering; the final upload path uses that plan and does not scan the screenshot
-directory for membership. After a successful upload, orchestration carries the
-exact uploaded planned local file paths into `post_report_cleanup` and carries
-typed post-upload action results plus warnings returned by
+requests. Image requests use a bounded concurrency of three, retain per-image
+retry/idempotency handling, and advance a nested image-count progress task after
+each completed upload. `frame_compare.services.slowpics_upload_plan` owns the
+explicit upload-plan seam for current render artifacts, row/image names, and
+upload ordering; the final upload path uses that plan and does not scan the
+screenshot directory for membership. After a successful upload, orchestration
+carries the exact uploaded planned local file paths into `post_report_cleanup`
+and carries typed post-upload action results plus warnings returned by
 `frame_compare.services.slowpics_post_upload` into the final `RunResult`.
 Orchestration does not own clipboard, browser, shortcut, or webhook side-effect
 policy. That cleanup phase owns report-safe local deletion policy for

@@ -24,7 +24,7 @@ from frame_compare.services.errors import (
 )
 from frame_compare.services.slowpics_upload_plan import SlowpicsUploadPlan
 from frame_compare.services.types import SlowpicsCollectionMetadata
-from frame_compare.utils.progress_protocol import ProgressReporter
+from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 
 log = structlog.get_logger()
 
@@ -35,6 +35,7 @@ SLOWPICS_IMAGE_UPLOAD_URL_TEMPLATE = f"{SLOWPICS_BASE_URL}/upload/image/{{image_
 SLOWPICS_RETRY_BASE_DELAY_SECONDS = 1.0
 SLOWPICS_RETRY_MAX_DELAY_SECONDS = 30.0
 SLOWPICS_RETRY_JITTER_FACTOR = 0.1
+SLOWPICS_IMAGE_UPLOAD_CONCURRENCY = 3
 SLOWPICS_BROWSER_ID_SENTINEL = "eb80db10-97a7-11ee-8f6f-bfa69501bb51"
 SLOWPICS_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -86,9 +87,15 @@ class _SlowpicsMetadataResponse:
 class SlowpicsPublisher:
     """Handles uploading screenshots to slow.pics."""
 
-    def __init__(self, config: SlowpicsConfig, client: httpx.AsyncClient) -> None:
+    def __init__(
+        self,
+        config: SlowpicsConfig,
+        client: httpx.AsyncClient,
+        progress: ProgressReporter | None = None,
+    ) -> None:
         self.config = config
         self._client = client
+        self._progress = progress
 
     async def upload(
         self,
@@ -312,15 +319,31 @@ class SlowpicsPublisher:
         xsrf_token: str,
         browser_id: str,
     ) -> None:
-        for row, image_uuids in zip(upload_plan.rows, metadata_response.image_uuids, strict=True):
-            for image, image_uuid in zip(row.images, image_uuids, strict=True):
+        semaphore = asyncio.Semaphore(SLOWPICS_IMAGE_UPLOAD_CONCURRENCY)
+
+        async def _upload_one(image_path: Path, image_uuid: str) -> None:
+            async with semaphore:
                 await self._upload_image_with_retry(
-                    image_path=image.screenshot_path,
+                    image_path=image_path,
                     image_uuid=image_uuid,
                     collection_uuid=metadata_response.collection_uuid,
                     xsrf_token=xsrf_token,
                     browser_id=browser_id,
                 )
+            if self._progress is not None:
+                self._progress.advance()
+
+        try:
+            async with asyncio.TaskGroup() as task_group:
+                for row, image_uuids in zip(
+                    upload_plan.rows,
+                    metadata_response.image_uuids,
+                    strict=True,
+                ):
+                    for image, image_uuid in zip(row.images, image_uuids, strict=True):
+                        task_group.create_task(_upload_one(image.screenshot_path, image_uuid))
+        except ExceptionGroup as caught_group:
+            raise _first_exception(caught_group) from None
 
     async def _upload_image_with_retry(
         self,
@@ -450,11 +473,20 @@ async def publish_to_slowpics(
         raise SlowpicsError("No PNG files found to upload")
     _validate_upload_files(files)
 
-    if progress:
-        progress.set_description(f"Uploading {collection_metadata.title} to slow.pics")
+    if progress is not None:
+        progress.start_phase(
+            f"Uploading {collection_metadata.title} to slow.pics",
+            total=len(files),
+        )
 
-    publisher = SlowpicsPublisher(config, client)
-    url = await publisher.upload(upload_plan, collection_metadata)
+    publisher = SlowpicsPublisher(config, client, progress)
+    upload_progress_status = ProgressPhaseStatus.FAILED
+    try:
+        url = await publisher.upload(upload_plan, collection_metadata)
+        upload_progress_status = ProgressPhaseStatus.COMPLETED
+    finally:
+        if progress is not None:
+            progress.complete_phase(upload_progress_status)
 
     duration = monotonic() - start_time
 
@@ -470,6 +502,14 @@ def _validate_upload_files(files: list[Path]) -> None:
     for file_path in files:
         if not file_path.is_file():
             raise SlowpicsError(f"PNG file planned for slow.pics upload is missing: {file_path}")
+
+
+def _first_exception(error_group: ExceptionGroup[Exception]) -> Exception:
+    first = error_group.exceptions[0]
+    if isinstance(first, ExceptionGroup):
+        nested_group = cast(ExceptionGroup[Exception], first)
+        return _first_exception(nested_group)
+    return first
 
 
 def _xsrf_token_from_cookies(client: httpx.AsyncClient) -> str:
