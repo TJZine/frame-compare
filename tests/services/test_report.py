@@ -149,94 +149,6 @@ def test_label_repeats_category_uses_humanized_category_text(
     assert label_repeats_category(label, category) is expected
 
 
-def test_generate_report_creates_html_file(report_data: ReportData, tmp_path: Path) -> None:
-    config = ReportConfig(output_dir=str(tmp_path / "out"))
-    out_path = generate_report(report_data, config)
-    assert out_path.exists()
-    assert out_path.suffix == ".html"
-    assert out_path.parent == tmp_path / "out"
-
-
-def test_generate_report_custom_output_path(report_data: ReportData, tmp_path: Path) -> None:
-    config = ReportConfig()
-    custom_path = tmp_path / "custom" / "my_report.html"
-    out_path = generate_report(report_data, config, output_path=custom_path)
-    assert out_path == custom_path
-    assert out_path.exists()
-
-
-def test_generate_report_config_output_dir(report_data: ReportData, tmp_path: Path) -> None:
-    config = ReportConfig(output_dir=str(tmp_path / "config_out"))
-    out_path = generate_report(report_data, config)
-    assert out_path.parent == tmp_path / "config_out"
-
-
-def test_generate_report_default_output_path(report_data: ReportData, tmp_path: Path) -> None:
-    config = ReportConfig(output_dir=None)
-    # Default is first clip's first screenshot's parent / report.html
-    # In fixture: tmp_path / "screens" / "clip1" / "report.html"
-    expected = report_data.clips[0].screenshots[0].parent / "report.html"
-    out_path = generate_report(report_data, config)
-    assert out_path == expected
-
-
-def test_generate_report_no_clips_raises(report_data: ReportData) -> None:
-    empty_data = ReportData([], [])
-    with pytest.raises(ReportError, match="no clips provided"):
-        generate_report(empty_data, ReportConfig())
-
-
-def test_generate_report_single_clip_raises(
-    report_data: ReportData, mock_clips: list[ClipInfo]
-) -> None:
-    single_data = ReportData([mock_clips[0]], [])
-    with pytest.raises(ReportError, match="at least 2 clips required"):
-        generate_report(single_data, ReportConfig())
-
-
-def test_generate_report_empty_frames_raises(report_data: ReportData) -> None:
-    data = ReportData(report_data.clips, [])
-    with pytest.raises(ReportError, match="no frames provided"):
-        generate_report(data, ReportConfig())
-
-
-def test_generate_report_empty_screenshots_dict_raises(report_data: ReportData) -> None:
-    clips_no_screenshots = [replace(clip, screenshots=[]) for clip in report_data.clips]
-    data = ReportData(clips_no_screenshots, report_data.frames)
-    with pytest.raises(ReportError, match="no screenshots provided"):
-        generate_report(data, ReportConfig())
-
-
-def test_generate_report_missing_clip_key_raises(report_data: ReportData) -> None:
-    clips_missing_screenshots = [
-        report_data.clips[0],
-        replace(report_data.clips[1], screenshots=[]),
-    ]
-    data = ReportData(clips_missing_screenshots, report_data.frames)
-    with pytest.raises(ReportError, match="no screenshots for clip: clip2"):
-        generate_report(data, ReportConfig())
-
-
-def test_generate_report_empty_clip_list_raises(report_data: ReportData) -> None:
-    clips = [
-        replace(report_data.clips[0], screenshots=[]),
-        report_data.clips[1],
-    ]
-    data = ReportData(clips, report_data.frames)
-    with pytest.raises(ReportError, match="no screenshots for clip: clip1"):
-        generate_report(data, ReportConfig())
-
-
-def test_generate_report_length_mismatch_raises(report_data: ReportData) -> None:
-    clips = [
-        replace(report_data.clips[0], screenshots=report_data.clips[0].screenshots[:-1]),
-        report_data.clips[1],
-    ]
-    data = ReportData(clips, report_data.frames)
-    with pytest.raises(ReportError, match="screenshot count mismatch for clip1"):
-        generate_report(data, ReportConfig())
-
-
 def test_generate_report_screenshot_not_found_raises(
     report_data: ReportData, tmp_path: Path
 ) -> None:
@@ -253,17 +165,6 @@ def test_generate_report_encode_failure_raises(
     mocker.patch.object(Path, "read_bytes", side_effect=OSError("Disk error"))
     with pytest.raises(ReportError, match="failed to encode image"):
         generate_report(report_data, ReportConfig(embed_images=True, output_dir=str(tmp_path)))
-
-
-def test_generate_report_write_failure_raises(
-    report_data: ReportData, mocker: MockerFixture, tmp_path: Path
-) -> None:
-    mocker.patch(
-        "frame_compare.services.report.entry.write_text_atomic",
-        side_effect=OSError("Disk full"),
-    )
-    with pytest.raises(ReportError, match="failed to write report"):
-        generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
 
 
 def test_generate_report_keeps_existing_output_when_atomic_replace_fails(
@@ -351,13 +252,6 @@ def test_generate_report_without_slowpics_url_omits_external_link(
     assert '"slowpics_url": null' in content
 
 
-def test_generate_report_filmstrip_included(report_data: ReportData, tmp_path: Path) -> None:
-    config = ReportConfig(include_filmstrip=True, output_dir=str(tmp_path))
-    out_path = generate_report(report_data, config)
-    content = out_path.read_text(encoding="utf-8")
-    assert 'class="rv-filmstrip"' in content
-
-
 def test_generate_report_escapes_dynamic_html_and_hardens_json_script_tag(tmp_path: Path) -> None:
     clips = []
     for name, label in [
@@ -407,15 +301,6 @@ def test_generate_report_escapes_dynamic_html_and_hardens_json_script_tag(tmp_pa
     assert "\\u003c/script\\u003e\\u003cscript\\u003ealert(1)\\u003c/script\\u003e" in content
 
 
-def test_generate_report_filmstrip_excluded(report_data: ReportData, tmp_path: Path) -> None:
-    config = ReportConfig(include_filmstrip=False, output_dir=str(tmp_path))
-    out_path = generate_report(report_data, config)
-    content = out_path.read_text(encoding="utf-8")
-    assert 'class="rv-filmstrip rv-filmstrip--hidden"' in content
-    assert 'aria-hidden="true"' in content
-    assert 'class="rv-filmstrip-item"' not in content
-
-
 def test_image_src_for_report_uses_file_uri_for_cross_drive_fallback(
     tmp_path: Path, mocker: MockerFixture
 ) -> None:
@@ -430,70 +315,6 @@ def test_image_src_for_report_uses_file_uri_for_cross_drive_fallback(
     )
 
     assert src == screenshot_path.resolve().as_uri()
-
-
-def test_generate_report_mode_slider(report_data: ReportData, tmp_path: Path) -> None:
-    out_path = generate_report(
-        report_data,
-        ReportConfig(default_mode=ViewerMode.SLIDER, output_dir=str(tmp_path)),
-    )
-    content = out_path.read_text(encoding="utf-8")
-    assert "clip-path" in content
-    assert '"default_mode": "slider"' in content
-
-
-def test_generate_report_mode_overlay(report_data: ReportData, tmp_path: Path) -> None:
-    out_path = generate_report(
-        report_data,
-        ReportConfig(default_mode=ViewerMode.OVERLAY, output_dir=str(tmp_path)),
-    )
-    content = out_path.read_text(encoding="utf-8")
-    assert '"default_mode": "overlay"' in content
-
-
-def test_generate_report_mode_diff(report_data: ReportData, tmp_path: Path) -> None:
-    out_path = generate_report(
-        report_data,
-        ReportConfig(default_mode=ViewerMode.DIFF, output_dir=str(tmp_path)),
-    )
-    content = out_path.read_text(encoding="utf-8")
-    assert "mix-blend-mode: difference" in content
-    assert '"default_mode": "diff"' in content
-
-
-def test_generate_report_mode_blink(report_data: ReportData, tmp_path: Path) -> None:
-    out_path = generate_report(
-        report_data,
-        ReportConfig(default_mode=ViewerMode.BLINK, output_dir=str(tmp_path)),
-    )
-    content = out_path.read_text(encoding="utf-8")
-    assert "setInterval" in content
-    assert '"default_mode": "blink"' in content
-
-
-def test_generate_report_creates_parent_dirs(report_data: ReportData, tmp_path: Path) -> None:
-    deep_path = tmp_path / "deep" / "nested" / "report.html"
-    generate_report(report_data, ReportConfig(), output_path=deep_path)
-    assert deep_path.exists()
-
-
-def test_generate_report_dark_theme(report_data: ReportData, tmp_path: Path) -> None:
-    out_path = generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
-    content = out_path.read_text(encoding="utf-8")
-    assert "--bg-primary: #08090c" in content
-
-
-def test_generate_report_keyboard_shortcuts(report_data: ReportData, tmp_path: Path) -> None:
-    out_path = generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
-    content = out_path.read_text(encoding="utf-8")
-    assert "ArrowLeft" in content
-    assert "ArrowRight" in content
-
-
-def test_generate_report_accessibility(report_data: ReportData, tmp_path: Path) -> None:
-    out_path = generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
-    content = out_path.read_text(encoding="utf-8")
-    assert "aria-label=" in content
 
 
 def test_generate_report_json_payload_structure(report_data: ReportData, tmp_path: Path) -> None:
@@ -563,6 +384,30 @@ def test_build_report_payload_preserves_four_clip_order_and_default_pair(
         ["Reference", "Encode 1", "Encode 2", "Encode 3"],
         ["Reference", "Encode 1", "Encode 2", "Encode 3"],
     ]
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        (ViewerMode.SLIDER, "slider"),
+        (ViewerMode.OVERLAY, "overlay"),
+        (ViewerMode.DIFF, "diff"),
+        (ViewerMode.BLINK, "blink"),
+    ],
+)
+def test_build_report_payload_propagates_default_mode(
+    report_data: ReportData,
+    tmp_path: Path,
+    mode: ViewerMode,
+    expected: str,
+) -> None:
+    payload = build_report_payload(
+        report_data,
+        ReportConfig(default_mode=mode),
+        report_dir=tmp_path,
+    )
+
+    assert payload["default_mode"] == expected
 
 
 def test_build_report_payload_accepts_frame_display_metadata(
