@@ -26,9 +26,9 @@ config_file = "agents/planner.toml"
 description = "Implementation-focused role for narrow, disjoint write scopes once the task is understood."
 config_file = "agents/worker.toml"
 
-[agents.worker_terra]
+[agents.worker_luna]
 description = "Lower-cost implementation role for explicitly approved, bounded, exact, cheap-to-verify write scopes."
-config_file = "agents/worker-terra.toml"
+config_file = "agents/worker-luna.toml"
 
 [agents.monitor]
 description = "Long-running command and polling role for status checks, verification waits, and runtime/release gate monitoring."

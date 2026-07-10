@@ -182,7 +182,7 @@ Preferred roles when available:
 - reviewer: normal correctness/regression/security/test review
 - maintainability_reviewer: code-health, strict typing, brittle tests, file shape, unnecessary indirection, harmful duplication
 - architecture_reviewer: CLI/config contracts, runtime/render/VS boundaries, release/Docker/Windows paths, import boundaries, persistence/subprocess/network risk
-- worker_terra: explicitly approved, exact, bounded, cheap-to-verify fixes with no unresolved owner/product/architecture decision
+- worker_luna: explicitly approved, exact, bounded, cheap-to-verify fixes with no unresolved owner/product/architecture decision
 - worker: normal, ambiguous, or high-risk implementation/fix work
 - docs_researcher: official docs/API/tooling/runtime behavior checks
 
