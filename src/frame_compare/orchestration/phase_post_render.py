@@ -141,6 +141,7 @@ async def run_publish_phase(
         parsed_reference=parse_filename(
             ctx.reference.path.name,
             parser_priority=ctx.config.sources.label_parser,
+            alternate_policy="fallback",
         ),
         resolved_tmdb=metadata,
     )

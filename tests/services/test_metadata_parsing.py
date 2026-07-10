@@ -68,7 +68,7 @@ def test_metadata_parsing_direct_module_uses_anitopy_first_for_bracketed_names(
     assert result.resolution == "1080p"
 
 
-def test_metadata_parsing_explicit_priority_and_episode_title(mocker) -> None:
+def test_metadata_parsing_fallback_policy_stops_after_successful_primary(mocker) -> None:
     calls: list[str] = []
 
     def fake_anitopy(_filename: str) -> dict[str, object]:
@@ -93,3 +93,93 @@ def test_metadata_parsing_explicit_priority_and_episode_title(mocker) -> None:
     assert result.season == 1
     assert result.episode == 4
     assert result.episode_title == "The Arrival"
+
+    calls.clear()
+    result = metadata_parsing.parse_filename(
+        "show.mkv",
+        parser_priority="anitopy",
+        alternate_policy="fallback",
+    )
+
+    assert calls == ["anitopy"]
+    assert result.title == "Anime"
+    assert result.season is None
+    assert result.episode == 4
+    assert result.episode_title == "The Arrival"
+
+
+def test_metadata_parsing_fallback_policy_uses_alternate_for_missing_primary_title(
+    mocker,
+) -> None:
+    calls: list[str] = []
+
+    def fake_anitopy(_filename: str) -> dict[str, object]:
+        calls.append("anitopy")
+        return {"anime_episode": 4}
+
+    def fake_guessit(_filename: str) -> dict[str, object]:
+        calls.append("guessit")
+        return {"title": "Fallback", "season": 1}
+
+    mocker.patch("frame_compare.services.metadata_parsing.anitopy.parse", fake_anitopy)
+    mocker.patch("frame_compare.services.metadata_parsing.guessit", fake_guessit)
+
+    result = metadata_parsing.parse_filename(
+        "show.mkv",
+        parser_priority="anitopy",
+        alternate_policy="fallback",
+    )
+
+    assert calls == ["anitopy", "guessit"]
+    assert result.title == "Fallback"
+    assert result.season == 1
+    assert result.episode == 4
+
+
+def test_metadata_parsing_fallback_policy_rejects_malformed_primary_fields(mocker) -> None:
+    calls: list[str] = []
+
+    def fake_anitopy(_filename: str) -> dict[str, object]:
+        calls.append("anitopy")
+        return {
+            "anime_title": {"unexpected": "mapping"},
+            "anime_episode": True,
+            "release_group": ["unexpected"],
+        }
+
+    def fake_guessit(_filename: str) -> dict[str, object]:
+        calls.append("guessit")
+        return {"title": "Fallback", "episode": 2, "release_group": "Group"}
+
+    mocker.patch("frame_compare.services.metadata_parsing.anitopy.parse", fake_anitopy)
+    mocker.patch("frame_compare.services.metadata_parsing.guessit", fake_guessit)
+
+    result = metadata_parsing.parse_filename(
+        "show.mkv",
+        parser_priority="anitopy",
+        alternate_policy="fallback",
+    )
+
+    assert calls == ["anitopy", "guessit"]
+    assert result.title == "Fallback"
+    assert result.episode == 2
+    assert result.release_group == "Group"
+
+
+def test_metadata_parsing_fallback_policy_recovers_from_primary_exception(mocker) -> None:
+    def fake_anitopy(_filename: str) -> dict[str, object]:
+        raise RuntimeError("parser failed")
+
+    mocker.patch("frame_compare.services.metadata_parsing.anitopy.parse", fake_anitopy)
+    mocker.patch(
+        "frame_compare.services.metadata_parsing.guessit",
+        return_value={"title": "Fallback"},
+    )
+
+    result = metadata_parsing.parse_filename(
+        "show.mkv",
+        parser_priority="anitopy",
+        alternate_policy="fallback",
+    )
+
+    assert result.title == "Fallback"

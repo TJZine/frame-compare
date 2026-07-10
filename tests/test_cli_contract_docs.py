@@ -155,6 +155,7 @@ def test_current_cli_contract_documents_slowpics_config_surface_and_defaults() -
         "`tmdb_media_type = null`",
         "`remove_after_days = 0`",
         "`image_upload_timeout_seconds = 180.0`",
+        "`is_hentai` is a strict boolean",
         "`copy_url_to_clipboard = true`",
         "`open_in_browser = true`",
         "`create_url_shortcut = true`",

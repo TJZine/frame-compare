@@ -96,7 +96,11 @@ def _label_candidate(
     if label_mode == "filename":
         label = normalize_derived_display_text(path.name)
     elif label_mode == "parsed":
-        parsed = parse_filename(path.name, parser_priority=label_parser)
+        parsed = parse_filename(
+            path.name,
+            parser_priority=label_parser,
+            alternate_policy="fallback",
+        )
         label = _parsed_label(parsed, fallback=path.stem)
     else:
         label = normalize_derived_display_text(path.stem)

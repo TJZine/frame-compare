@@ -1,12 +1,18 @@
 """Source display-label policy tests."""
 
+from dataclasses import replace
+from fractions import Fraction
 from pathlib import Path
 from typing import Literal
 
 import pytest
 
+from frame_compare.analysis.window import SelectionWindow
+from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_models import SourceOverrideConfig
+from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot, ClipState
 from frame_compare.orchestration.errors import SourceSelectionError
+from frame_compare.orchestration.selection_domain import build_analysis_selection_domain_token
 from frame_compare.orchestration.source_labels import resolve_source_labels
 
 
@@ -35,10 +41,10 @@ def test_stem_and_filename_modes_preserve_order() -> None:
 def test_parsed_mode_and_parser_priority(monkeypatch: pytest.MonkeyPatch) -> None:
     priorities: list[str] = []
 
-    def fake_parse(_filename: str, parser_priority: str):
+    def fake_parse(_filename: str, parser_priority: str, *, alternate_policy: str):
         from frame_compare.services.types import ParsedMetadata
 
-        priorities.append(parser_priority)
+        priorities.append(f"{parser_priority}:{alternate_policy}")
         return ParsedMetadata(
             title="Episode Name",
             season=1,
@@ -51,7 +57,7 @@ def test_parsed_mode_and_parser_priority(monkeypatch: pytest.MonkeyPatch) -> Non
     assert _labels([Path("source.mkv")], mode="parsed", parser="guessit") == [
         "[Group] Episode Name S01E02 – Arrival"
     ]
-    assert priorities == ["guessit"]
+    assert priorities == ["guessit:fallback"]
 
 
 def test_explicit_override_wins_and_controls_are_normalized_for_derived_text() -> None:
@@ -87,3 +93,50 @@ def test_derived_collision_qualification_is_stable_by_source_order(
     )
     paths = [Path("one.mkv"), Path("two.mkv")]
     assert _labels(paths, mode="parsed") == ["Same [one]", "Same [two]"]
+
+
+def test_explicit_label_collisions_are_case_sensitive() -> None:
+    paths = [Path("a.mkv"), Path("b.mkv")]
+    overrides = {
+        paths[0]: SourceOverrideConfig(label="Same"),
+        paths[1]: SourceOverrideConfig(label="same"),
+    }
+
+    assert _labels(paths, overrides=overrides) == ["Same", "same"]
+
+
+def test_display_labels_do_not_change_analysis_cache_identity() -> None:
+    path = Path("source.mkv")
+    probe = ClipProbeSnapshot(
+        fingerprint=ClipFingerprint(path=path, size_bytes=1024, mtime_ns=1234),
+        width=1920,
+        height=1080,
+        num_frames=100,
+        fps=Fraction(24, 1),
+        is_hdr=False,
+    )
+    clip = ClipState(
+        path=path,
+        label="source",
+        probe=probe,
+        source_fps=probe.fps,
+        effective_fps=probe.fps,
+    )
+    relabeled = replace(clip, label="Custom Source")
+    config = ConfigSchema()
+    window = SelectionWindow(start_frame=0, end_frame_exclusive=100)
+
+    original_identity = build_analysis_selection_domain_token(
+        clips=[clip],
+        analysis_clip=clip,
+        config=config,
+        selection_window=window,
+    )
+    relabeled_identity = build_analysis_selection_domain_token(
+        clips=[relabeled],
+        analysis_clip=relabeled,
+        config=config,
+        selection_window=window,
+    )
+
+    assert relabeled_identity == original_identity

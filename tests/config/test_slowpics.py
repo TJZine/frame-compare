@@ -43,8 +43,9 @@ def test_slowpics_config_trims_title_fields_and_rejects_conflicts_and_controls()
     with pytest.raises(ValidationError):
         SlowpicsConfig(title="Example", title_template="${Title}")
     for field_name in ("title", "title_template", "title_suffix"):
-        with pytest.raises(ValidationError):
-            SlowpicsConfig.model_validate({field_name: "bad\nvalue"})
+        for value in ("bad\nvalue", "\nwrapped\n", "\twrapped\r"):
+            with pytest.raises(ValidationError):
+                SlowpicsConfig.model_validate({field_name: value})
 
 
 @pytest.mark.parametrize(
@@ -78,9 +79,15 @@ def test_slowpics_config_accepts_remote_retention_bounds_and_timeout_floor() -> 
         SlowpicsConfig(image_upload_timeout_seconds=9.99)
 
 
+@pytest.mark.parametrize("value", ["true", "false", "yes", "off", 0, 1])
+def test_slowpics_config_requires_strict_hentai_boolean(value: object) -> None:
+    with pytest.raises(ValidationError):
+        SlowpicsConfig.model_validate({"is_hentai": value})
+
+
 def test_source_override_label_is_trimmed_and_strict() -> None:
     assert SourceOverrideConfig(label="  Reference Source  ").label == "Reference Source"
-    for value in ("", "   ", "bad\tlabel"):
+    for value in ("", "   ", "bad\tlabel", "\nwrapped\n", "\twrapped\r"):
         with pytest.raises(ValidationError):
             SourceOverrideConfig(label=value)
 

@@ -19,6 +19,7 @@ from frame_compare.services.alignment_reuse_cache import (
     load_reusable_offset_entries,
     load_reusable_offsets,
     save_reusable_offsets,
+    source_set_cache_key,
 )
 from frame_compare.services.types import AlignmentProvenance, AlignmentResult
 from frame_compare.utils.file_lock import FileLockTimeoutError
@@ -833,6 +834,20 @@ def test_shared_reuse_cache_writes_by_typed_comparison_identity_not_result_label
     entry = _first_entry(data)
 
     assert entry["comparison_clip"] == request.comparisons[0].path.name
+
+
+def test_shared_reuse_cache_identity_excludes_display_labels(tmp_path: Path) -> None:
+    request = _request(tmp_path)
+    relabeled = replace(
+        request,
+        reference=replace(request.reference, label="Custom Reference"),
+        comparisons=[replace(request.comparisons[0], label="Custom Encode")],
+    )
+
+    assert source_set_cache_key(relabeled) == source_set_cache_key(request)
+    assert comparison_cache_key(relabeled.comparisons[0]) == comparison_cache_key(
+        request.comparisons[0]
+    )
 
 
 def test_shared_reuse_cache_ignores_unrelated_ineligible_provenance_items(

@@ -505,13 +505,23 @@ async def test_publish_to_slowpics_response_matrix_maps_to_matching_image_upload
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("file_size_bytes", "image_timeout_floor", "expected_write_timeout"),
+    [
+        (1024 * 1024, 10.0, 19.0),
+        (8, 180.0, 180.0),
+    ],
+)
 async def test_publish_to_slowpics_uses_general_metadata_timeout_and_size_aware_image_write_timeout(
     tmp_path: Path,
     async_client: httpx.AsyncClient,
     respx_mock,
+    file_size_bytes: int,
+    image_timeout_floor: float,
+    expected_write_timeout: float,
 ) -> None:
     upload_plan = _plan(tmp_path, rows=1, cols=1)
-    upload_plan.file_paths[0].write_bytes(b"x" * (1024 * 1024))
+    upload_plan.file_paths[0].write_bytes(b"x" * file_size_bytes)
     requests: list[httpx.Request] = []
 
     def capture(request: httpx.Request) -> httpx.Response:
@@ -531,13 +541,16 @@ async def test_publish_to_slowpics_uses_general_metadata_timeout_and_size_aware_
 
     await publish_to_slowpics(
         _collection_metadata(),
-        SlowpicsConfig(timeout_seconds=60.0, image_upload_timeout_seconds=10.0),
+        SlowpicsConfig(
+            timeout_seconds=60.0,
+            image_upload_timeout_seconds=image_timeout_floor,
+        ),
         async_client,
         upload_plan=upload_plan,
     )
 
     assert requests[1].extensions["timeout"]["write"] == 60.0
-    assert requests[2].extensions["timeout"]["write"] == 19.0
+    assert requests[2].extensions["timeout"]["write"] == expected_write_timeout
 
 
 @pytest.mark.anyio

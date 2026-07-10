@@ -112,8 +112,22 @@ def test_run_write_config_respects_root_and_config_and_does_not_invoke_runner(
         config_path.write_text(
             MINIMAL_CONFIG
             + """
+[sources]
+label_mode = "parsed"
+label_parser = "anitopy"
+
 [sources.overrides."reference.mkv"]
 effective_fps = "24/1"
+label = "Reference Source"
+
+[slowpics]
+title = "Persisted Title"
+title_suffix = "[Persisted]"
+is_hentai = true
+tmdb_id = 42
+tmdb_media_type = "movie"
+remove_after_days = 30
+image_upload_timeout_seconds = 240.0
 """,
             encoding="utf-8",
         )
@@ -138,11 +152,17 @@ effective_fps = "24/1"
         assert data["analysis"]["user_frames"] == [3, 5]
         assert data["analysis"]["random_frame_count"] == 17
         assert data["sources"]["overrides"]["reference.mkv"]["effective_fps"] == "24/1"
-        assert data["sources"]["label_mode"] == "stem"
-        assert data["sources"]["label_parser"] == "auto"
+        assert data["sources"]["overrides"]["reference.mkv"]["label"] == "Reference Source"
+        assert data["sources"]["label_mode"] == "parsed"
+        assert data["sources"]["label_parser"] == "anitopy"
         assert data["slowpics"]["visibility"] == "public"
-        assert data["slowpics"]["remove_after_days"] == 0
-        assert data["slowpics"]["image_upload_timeout_seconds"] == 180.0
+        assert data["slowpics"]["title"] == "Persisted Title"
+        assert data["slowpics"]["title_suffix"] == "[Persisted]"
+        assert data["slowpics"]["is_hentai"] is True
+        assert data["slowpics"]["tmdb_id"] == 42
+        assert data["slowpics"]["tmdb_media_type"] == "movie"
+        assert data["slowpics"]["remove_after_days"] == 30
+        assert data["slowpics"]["image_upload_timeout_seconds"] == 240.0
 
 
 def test_run_write_config_json_preserves_previous_offsets_and_writes_config(

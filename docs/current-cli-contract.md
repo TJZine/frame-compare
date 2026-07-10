@@ -412,8 +412,9 @@ opened. If it is not opened, the CLI prints the report path before prompting.
   `slow.pics upload skipped by confirmation` rather than a successful artifact
   row, and `slowpics_url` remains `None`.
 - `delete_after_upload` is local-only and report-safe. It is not mapped to
-  slow.pics `removeAfter`; the current remote metadata request sends an empty
-  `removeAfter` value.
+  slow.pics `removeAfter`. Remote retention is controlled independently by
+  `remove_after_days`, which sends an empty `removeAfter` for zero and decimal
+  days for a positive value.
 - When `delete_after_upload = true`, Frame Compare deletes only the exact
   planned local screenshot files that were successfully uploaded. Deletion runs
   after the report phase, not inside the slow.pics publisher, and never scans the
@@ -619,12 +620,12 @@ deterministic `.url` shortcut naming.
 retains parsed reference fallback values, and emits a sanitized warning. Absent
 association omits multipart `tmdbId`.
 
-`is_hentai` maps to lowercase collection and per-comparison fields. Public maps
-to `public=true`/`PUBLIC`; explicit unlisted maps to
-`public=false`/`LINK_ONLY`. `remove_after_days` is a strict `0..999999` remote
-retention value: zero sends empty `removeAfter`, positive values send decimal
-days. `image_upload_timeout_seconds` is at least 10 seconds and is the image
-write-timeout floor; the floor also cannot be lower than
+`is_hentai` is a strict boolean and maps to lowercase collection and
+per-comparison fields. Public maps to `public=true`/`PUBLIC`; explicit unlisted
+maps to `public=false`/`LINK_ONLY`. `remove_after_days` is a strict `0..999999`
+remote retention value: zero sends empty `removeAfter`, positive values send
+decimal days. `image_upload_timeout_seconds` is at least 10 seconds and is the
+image write-timeout floor; the floor also cannot be lower than
 `file_size / 256 KiB/s + 15 seconds`. Navigation and metadata continue using
 `timeout_seconds`.
 

@@ -148,10 +148,10 @@ class SourceOverrideConfig(BaseModel):
     def validate_label(cls, value: str | None) -> str | None:
         if value is None:
             return None
+        _reject_control_characters(value, field_name="label")
         normalized = value.strip()
         if not normalized:
             raise ValueError("label must not be empty")
-        _reject_control_characters(normalized, field_name="label")
         return normalized
 
     @field_validator("effective_fps", mode="before")
@@ -273,7 +273,7 @@ class SlowpicsConfig(BaseModel):
     title: str = ""
     title_template: str = ""
     title_suffix: str = ""
-    is_hentai: bool = False
+    is_hentai: Annotated[bool, Field(strict=True)] = False
     tmdb_id: Annotated[int, Field(strict=True, gt=0)] | None = None
     tmdb_media_type: Literal["movie", "tv"] | None = None
     remove_after_days: Annotated[int, Field(strict=True, ge=0, le=999999)] = 0
@@ -286,9 +286,9 @@ class SlowpicsConfig(BaseModel):
     @field_validator("title", "title_template", "title_suffix")
     @classmethod
     def validate_title_text(cls, value: str, info: ValidationInfo) -> str:
-        normalized = value.strip()
         field_name = info.field_name or "slowpics title"
-        _reject_control_characters(normalized, field_name=field_name)
+        _reject_control_characters(value, field_name=field_name)
+        normalized = value.strip()
         if field_name == "title_template" and normalized:
             validate_slowpics_title_template(normalized)
         return normalized

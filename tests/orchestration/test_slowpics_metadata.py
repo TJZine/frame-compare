@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from frame_compare.config.schema_models import SlowpicsConfig
 from frame_compare.orchestration.slowpics_metadata import (
     resolve_slowpics_collection_metadata,
@@ -52,6 +54,51 @@ def test_automatic_title_precedence_tmdb_parsed_stem_and_final_fallback() -> Non
     assert _resolve(parsed=ParsedMetadata(title=""), path=Path("")).metadata.title == (
         "Frame Comparison"
     )
+
+
+@pytest.mark.parametrize(
+    ("parsed", "tmdb", "path", "expected"),
+    [
+        (
+            ParsedMetadata(title="Parsed", year=2021),
+            TmdbMetadata(1, "TMDB Title", "Original", 2024, "movie"),
+            Path("Reference.mkv"),
+            "TMDB Title (2024) [X]",
+        ),
+        (
+            ParsedMetadata(title="Parsed", year=2021),
+            None,
+            Path("Reference.mkv"),
+            "Parsed (2021) [X]",
+        ),
+        (
+            ParsedMetadata(title=""),
+            None,
+            Path("Reference.mkv"),
+            "Reference [X]",
+        ),
+        (
+            ParsedMetadata(title=""),
+            None,
+            Path(""),
+            "Frame Comparison [X]",
+        ),
+    ],
+)
+def test_suffix_is_applied_to_every_automatic_title_path(
+    parsed: ParsedMetadata,
+    tmdb: TmdbMetadata | None,
+    path: Path,
+    expected: str,
+) -> None:
+    result = _resolve(
+        SlowpicsConfig(title_suffix="[X]"),
+        parsed=parsed,
+        tmdb=tmdb,
+        path=path,
+    )
+
+    assert result.metadata.title == expected
 
 
 def test_zero_year_is_omitted_and_blank_template_continues_to_automatic_fallback() -> None:
