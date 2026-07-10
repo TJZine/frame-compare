@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from fractions import Fraction
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.services.types import AlignmentSource
@@ -20,6 +20,19 @@ if TYPE_CHECKING:
     from frame_compare.config.schema import ConfigSchema
     from frame_compare.utils.progress_protocol import ProgressReporter
     from frame_compare.utils.types import WorkspacePaths
+
+
+ClipActiveRectSource = Literal[
+    "explicit",
+    "metadata",
+    "dimension-derived",
+    "aspect-ratio-derived",
+    "content-derived",
+    "full-frame",
+]
+ClipActiveRectDetectionMode = Literal["provided", "dimension", "aspect_ratio", "auto"]
+ClipActiveRectAlgorithmId = Literal["active_rect_resolution_v2"]
+ACTIVE_RECT_RESOLUTION_ALGORITHM: ClipActiveRectAlgorithmId = "active_rect_resolution_v2"
 
 
 @dataclass(frozen=True)
@@ -82,12 +95,15 @@ class ClipAlignmentState:
 
 @dataclass(frozen=True)
 class ClipActiveRect:
-    """Explicit active image rectangle in source-frame coordinates."""
+    """Resolved active picture rectangle in source-frame coordinates."""
 
     x: int
     y: int
     width: int
     height: int
+    source: ClipActiveRectSource
+    detection_mode: ClipActiveRectDetectionMode
+    algorithm_id: ClipActiveRectAlgorithmId = ACTIVE_RECT_RESOLUTION_ALGORITHM
 
 
 @dataclass(frozen=True)

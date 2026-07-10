@@ -18,10 +18,15 @@ from frame_compare.analysis.window import (
     compute_shared_selection_window,
 )
 from frame_compare.config.schema import ConfigSchema
-from frame_compare.config.schema_enums import SourceMatchFpsMode
+from frame_compare.config.schema_enums import ScreenshotActiveRectDetection, SourceMatchFpsMode
 from frame_compare.config.schema_models import SourceOverrideConfig
+from frame_compare.orchestration.active_rect import (
+    active_rect_identity,
+    active_rect_policy_identity,
+    resolve_active_rects_for_clips,
+)
 from frame_compare.orchestration.context import (
-    ClipActiveRect,
+    ACTIVE_RECT_RESOLUTION_ALGORITHM,
     ClipProbeSnapshot,
     ClipState,
 )
@@ -65,6 +70,9 @@ def build_selection_domain_clips(
     snapshots_by_path: dict[Path, ClipProbeSnapshot],
     overrides_by_path: dict[Path, SourceOverrideConfig],
     match_fps: SourceMatchFpsMode = SourceMatchFpsMode.DISABLED,
+    active_rect_detection: ScreenshotActiveRectDetection = (
+        ScreenshotActiveRectDetection.ASPECT_RATIO
+    ),
 ) -> list[ClipState]:
     """Build prepared clip states for selection-domain and cache decisions."""
     return build_selection_domain_clips_with_diagnostics(
@@ -72,6 +80,7 @@ def build_selection_domain_clips(
         snapshots_by_path=snapshots_by_path,
         overrides_by_path=overrides_by_path,
         match_fps=match_fps,
+        active_rect_detection=active_rect_detection,
     ).clips
 
 
@@ -81,6 +90,9 @@ def build_selection_domain_clips_with_diagnostics(
     snapshots_by_path: dict[Path, ClipProbeSnapshot],
     overrides_by_path: dict[Path, SourceOverrideConfig],
     match_fps: SourceMatchFpsMode = SourceMatchFpsMode.DISABLED,
+    active_rect_detection: ScreenshotActiveRectDetection = (
+        ScreenshotActiveRectDetection.ASPECT_RATIO
+    ),
 ) -> SelectionDomainClips:
     """Build prepared clip states and return automatic FPS matching diagnostics."""
     clips = [
@@ -92,6 +104,11 @@ def build_selection_domain_clips_with_diagnostics(
         )
         for index, path in enumerate(ordered_paths)
     ]
+    clips = resolve_active_rects_for_clips(
+        clips=clips,
+        overrides_by_path=overrides_by_path,
+        detection=active_rect_detection,
+    )
     if match_fps == SourceMatchFpsMode.ASSUME_REFERENCE:
         matched = _apply_reference_fps_match(
             clips=clips,
@@ -188,23 +205,6 @@ def _build_selection_domain_clip(
             matches=[path],
         )
 
-    active_rect = None
-    if override is not None and override.active_rect is not None:
-        rect = override.active_rect
-        if rect.x + rect.width > snapshot.width or rect.y + rect.height > snapshot.height:
-            raise SourceSelectionError(
-                selector=path.name,
-                reason="active_rect is outside source dimensions",
-                role="sources.overrides",
-                matches=[path],
-            )
-        active_rect = ClipActiveRect(
-            x=rect.x,
-            y=rect.y,
-            width=rect.width,
-            height=rect.height,
-        )
-
     effective_fps = (
         override.effective_fps
         if override is not None and override.effective_fps is not None
@@ -217,7 +217,6 @@ def _build_selection_domain_clip(
         probe=snapshot,
         source_fps=snapshot.fps,
         effective_fps=effective_fps,
-        active_rect=active_rect,
     ).with_trim(
         trim_start_frames=trim_start_frames,
         trim_end_frame_inclusive=end_inclusive,
@@ -256,8 +255,16 @@ def build_analysis_selection_domain_token(
             "ignore_trail_seconds": analysis.ignore_trail_seconds,
             "min_window_seconds": analysis.min_window_seconds,
         },
+        "active_rect_policy": active_rect_policy_identity(
+            config.screenshots.active_rect_detection
+        ),
         "clips": [
             {
+                "active_rect": (
+                    active_rect_identity(clip.active_rect)
+                    if clip.active_rect is not None
+                    else _full_frame_active_rect_identity_fallback(clip, config)
+                ),
                 "effective_fps": {
                     "denominator": clip.effective_fps.denominator,
                     "numerator": clip.effective_fps.numerator,
@@ -284,3 +291,18 @@ def build_analysis_selection_domain_token(
         sort_keys=True,
         separators=(",", ":"),
     )
+
+
+def _full_frame_active_rect_identity_fallback(
+    clip: ClipState,
+    config: ConfigSchema,
+) -> object:
+    return {
+        "x": 0,
+        "y": 0,
+        "width": clip.probe.width,
+        "height": clip.probe.height,
+        "source": "full-frame",
+        "detection_mode": config.screenshots.active_rect_detection.value,
+        "algorithm_id": ACTIVE_RECT_RESOLUTION_ALGORITHM,
+    }

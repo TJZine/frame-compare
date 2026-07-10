@@ -55,7 +55,7 @@ class TestCheckLsmas:
         with (
             patch.dict(sys.modules, {"vapoursynth": mock_vs}),
             patch(
-                "frame_compare.orchestration.doctor.candidate_lsmas_plugin_path_details",
+                "frame_compare.orchestration.doctor_checks.candidate_lsmas_plugin_path_details",
                 return_value=[
                     PluginPathCandidate(
                         path="/opt/vs/plugins/libvslsmashsource.so",
@@ -118,7 +118,8 @@ class TestCheckLsmas:
         lsmas_check = next(c for c in checks if c.name == "lsmas")
 
         with patch(
-            "frame_compare.orchestration.doctor.import_vapoursynth_module", return_value=mock_vs
+            "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
+            return_value=mock_vs,
         ):
             result = lsmas_check.check_fn()
 
@@ -132,7 +133,7 @@ class TestCheckLsmas:
         lsmas_check = next(c for c in checks if c.name == "lsmas")
 
         with patch(
-            "frame_compare.orchestration.doctor.import_vapoursynth_module",
+            "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
             side_effect=RuntimeError("secret path /Users/example/private"),
         ):
             result = lsmas_check.check_fn()

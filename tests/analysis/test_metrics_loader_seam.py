@@ -8,7 +8,7 @@ from frame_compare.config.schema import AnalysisConfig
 from frame_compare.vs.loader import VSLoader
 
 
-@patch("frame_compare.analysis.metrics.load_cached_metrics")
+@patch("frame_compare.analysis.metrics.load_cached_metrics_for_request")
 @patch("frame_compare.analysis.metrics.compute_cache_key")
 def test_calculate_metrics_uses_custom_vs_loader(mock_key, mock_load, tmp_path):
     mock_key.return_value = "fp"

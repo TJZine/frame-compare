@@ -10,6 +10,7 @@ from .execute_run_helpers import (
     analysis_selection_domain_for_cache_inputs,
     create_config,
     create_video_files,
+    metric_cache_request_for_cache_inputs,
     write_metrics_cache,
 )
 
@@ -35,6 +36,7 @@ def test_write_metrics_cache_uses_cache_inputs_stats_when_video_paths_are_provid
         cache_inputs,
         config.analysis,
         selection_domain=analysis_selection_domain_for_cache_inputs(cache_inputs, config),
+        metric_request=metric_cache_request_for_cache_inputs(cache_inputs, config),
     )
     cache_path = cache_io.find_metrics_cache_file(cache_dir, fingerprint)
 
@@ -140,6 +142,7 @@ enable = false
         [input_dir / "b_comp.mkv", input_dir / "a_source.mkv"],
         config.analysis,
         selection_domain=selection_domain,
+        metric_request=metric_cache_request_for_cache_inputs(discovered_paths, config),
     )
 
     cache_path = cache_io.find_metrics_cache_file(cache_dir, fingerprint)

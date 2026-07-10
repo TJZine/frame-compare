@@ -13,11 +13,13 @@ from frame_compare.config.loader import load_config
 from frame_compare.orchestration import phase_post_render, phase_tasks
 from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
-from frame_compare.orchestration.types import (
+from frame_compare.orchestration.execution_types import (
     MetadataPrefetch,
     PublishPhaseOutput,
     RenderArtifacts,
     RunArtifacts,
+)
+from frame_compare.orchestration.types import (
     SlowpicsUploadConfirmationDecision,
     SlowpicsUploadConfirmationRequest,
 )

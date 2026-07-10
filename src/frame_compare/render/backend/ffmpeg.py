@@ -47,6 +47,9 @@ class DefaultFFmpegRunner:
     _FFPROBE_TIMEOUT_SECONDS = 15.0
     _FFMPEG_TIMEOUT_SECONDS = 30.0
 
+    def __init__(self, extraction_timeout_seconds: float = _FFMPEG_TIMEOUT_SECONDS) -> None:
+        self._extraction_timeout_seconds = extraction_timeout_seconds
+
     def extract_frame(
         self,
         video: Path,
@@ -64,7 +67,7 @@ class DefaultFFmpegRunner:
             geometry_plan=geometry_plan,
         )
         try:
-            run_subprocess(argv, timeout_seconds=self._FFMPEG_TIMEOUT_SECONDS)
+            run_subprocess(argv, timeout_seconds=self._extraction_timeout_seconds)
         except FileNotFoundError as exc:
             raise FFmpegNotFoundError() from exc
         except TimeoutExpired as exc:

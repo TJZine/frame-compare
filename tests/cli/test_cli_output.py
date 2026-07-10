@@ -13,7 +13,7 @@ from frame_compare.cli.output import (
     print_result_summary,
 )
 from frame_compare.config.loader import get_default_config
-from frame_compare.config.schema import ConfigSchema
+from frame_compare.config.schema import AnalysisPerformanceMode, ConfigSchema
 from frame_compare.orchestration import RunRequest, RunResult
 
 
@@ -74,6 +74,8 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     assert "base paths" in output
     assert "selection" in output
     assert "user=0, random=10, dark=0, bright=0, motion=0, seed=42" in output
+    assert "analysis mode" in output
+    assert "quality" in _rendered_row_value(output, "analysis mode")
     assert "FFmpeg audio" in output
     assert "previous offsets" in output
     assert "disabled" in output
@@ -115,6 +117,27 @@ def test_at_a_glance_prints_previous_offsets_effective_mode(
         output = _render(console)
         previous_offsets_row = _rendered_row_value(output, "previous offsets")
         assert mode in previous_offsets_row
+
+
+def test_at_a_glance_prints_effective_analysis_performance_mode(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    config = _config()
+    config.analysis.performance_mode = AnalysisPerformanceMode.PERFORMANCE
+    console = _console()
+
+    monkeypatch.setattr("frame_compare.cli.output.shutil.which", lambda _command: None)
+
+    print_at_a_glance(
+        console,
+        request=_request(),
+        config=config,
+        root=_workspace_path(),
+        config_path=_workspace_path("config", "config.toml"),
+    )
+
+    analysis_mode_row = _rendered_row_value(_render(console), "analysis mode")
+    assert "performance" in analysis_mode_row
 
 
 def test_at_a_glance_preserves_literal_brackets_in_dynamic_paths(

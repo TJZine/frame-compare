@@ -1,6 +1,7 @@
 import tomllib
 from pathlib import Path
 
+import pytest
 from _pytest.monkeypatch import MonkeyPatch
 
 from frame_compare.cli.entry import app
@@ -106,6 +107,184 @@ def test_preset_save_stub():
         preset_path = root / "config" / "presets" / "demo.toml"
         assert preset_path.exists()
         assert f"Saved preset 'demo' to {preset_path.resolve()}" in result.stderr
+
+
+@pytest.mark.parametrize("operation", ["apply", "save"])
+def test_preset_config_writes_reject_external_config_before_load_or_write(
+    operation: str,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _unexpected(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("external config must be rejected before load or write")
+
+    monkeypatch.setattr("frame_compare.cli.entry.load_config", _unexpected)
+    monkeypatch.setattr("frame_compare.cli.entry.write_config_to", _unexpected)
+    monkeypatch.setattr("frame_compare.cli.entry.apply_preset", _unexpected)
+    monkeypatch.setattr("frame_compare.cli.entry.save_preset", _unexpected)
+
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        root.mkdir()
+        external_config = (Path("outside") / "config.toml").resolve()
+        result = runner.invoke(
+            app,
+            [
+                "preset",
+                operation,
+                "demo",
+                "--root",
+                str(root),
+                "--config",
+                str(external_config),
+            ],
+        )
+
+    assert result.exit_code == int(ExitCode.INPUT_ERROR)
+    assert result.stdout == ""
+    assert "FC-3009" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+@pytest.mark.parametrize("operation", ["apply", "save"])
+def test_preset_config_writes_allow_exact_windows_portable_state_config(
+    operation: str,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        root.mkdir()
+        portable_config = Path("portable-state") / "config.toml"
+        portable_config.parent.mkdir()
+        portable_config.write_text(MINIMAL_CONFIG, encoding="utf-8")
+        resolved_portable_config = portable_config.resolve()
+        monkeypatch.setattr(
+            "frame_compare.orchestration.preflight._windows_portable_state_config_path",
+            lambda: resolved_portable_config,
+        )
+        if operation == "apply":
+            presets_dir = root / "config" / "presets"
+            presets_dir.mkdir(parents=True)
+            (presets_dir / "demo.toml").write_text(
+                "[analysis]\nrandom_frame_count = 12\n",
+                encoding="utf-8",
+            )
+
+        result = runner.invoke(
+            app,
+            [
+                "preset",
+                operation,
+                "demo",
+                "--root",
+                str(root),
+                "--config",
+                str(resolved_portable_config),
+            ],
+        )
+
+        assert result.exit_code == 0
+        if operation == "apply":
+            persisted = tomllib.loads(portable_config.read_text(encoding="utf-8"))
+            assert persisted["analysis"]["random_frame_count"] == 12
+        else:
+            assert (root / "config" / "presets" / "demo.toml").exists()
+
+
+@pytest.mark.parametrize("operation", ["apply", "save"])
+def test_preset_config_writes_preserve_relative_report_output(operation: str) -> None:
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = root / "config" / "config.toml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            MINIMAL_CONFIG + '\n[report]\noutput_dir = "reports/custom"\n',
+            encoding="utf-8",
+        )
+        if operation == "apply":
+            presets_dir = root / "config" / "presets"
+            presets_dir.mkdir(parents=True, exist_ok=True)
+            (presets_dir / "demo.toml").write_text(
+                "[analysis]\nrandom_frame_count = 12\n",
+                encoding="utf-8",
+            )
+
+        result = runner.invoke(
+            app,
+            [
+                "preset",
+                operation,
+                "demo",
+                "--root",
+                str(root),
+                "--config",
+                "config/config.toml",
+            ],
+        )
+
+        assert result.exit_code == 0
+        persisted_path = (
+            config_path if operation == "apply" else root / "config" / "presets" / "demo.toml"
+        )
+        persisted = tomllib.loads(persisted_path.read_text(encoding="utf-8"))
+        assert persisted["report"]["output_dir"] == "reports/custom"
+
+
+@pytest.mark.parametrize("operation", ["apply", "save"])
+def test_preset_config_writes_reject_loaded_path_escape(operation: str) -> None:
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = root / "config" / "config.toml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            MINIMAL_CONFIG.replace('generated_dir = "generated"', 'generated_dir = "../../out"'),
+            encoding="utf-8",
+        )
+        result = runner.invoke(
+            app,
+            [
+                "preset",
+                operation,
+                "demo",
+                "--root",
+                str(root),
+                "--config",
+                "config/config.toml",
+            ],
+        )
+
+        assert result.exit_code == int(ExitCode.INPUT_ERROR)
+        assert "FC-3009" in result.stderr
+        assert not (root / "config" / "presets" / "demo.toml").exists()
+
+
+def test_preset_apply_rejects_path_escape_added_by_preset_before_config_write() -> None:
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = _write_minimal_config(root)
+        original = config_path.read_text(encoding="utf-8")
+        presets_dir = root / "config" / "presets"
+        presets_dir.mkdir(parents=True, exist_ok=True)
+        (presets_dir / "escape.toml").write_text(
+            '[paths]\ngenerated_dir = "../../out"\n',
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "preset",
+                "apply",
+                "escape",
+                "--root",
+                str(root),
+                "--config",
+                "config/config.toml",
+            ],
+        )
+
+        assert result.exit_code == int(ExitCode.INPUT_ERROR)
+        assert "FC-3009" in result.stderr
+        assert config_path.read_text(encoding="utf-8") == original
 
 
 def test_preset_list_prints_names_sorted_case_insensitive() -> None:

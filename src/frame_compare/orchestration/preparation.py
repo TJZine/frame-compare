@@ -9,13 +9,24 @@ import structlog
 
 import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError
+from frame_compare.analysis.types import MetricCacheRequest
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.effective import (
     build_preflight_input_dir_override,
     resolve_effective_config,
 )
 from frame_compare.config.schema import ConfigSchema
+from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 from frame_compare.config.schema_models import SourceOverrideConfig
+from frame_compare.orchestration.active_rect import (
+    metric_cache_request_for_clip,
+    propagate_resolved_aspect_ratio_evidence,
+)
+from frame_compare.orchestration.active_rect_content import (
+    ActiveRectContentDetectionError,
+    VSActiveRectFrameSampler,
+    refine_auto_content_active_rects_for_clips,
+)
 from frame_compare.orchestration.analysis_policy import (
     needs_analysis,
     validate_skip_analysis_frame_selection_contract,
@@ -30,11 +41,17 @@ from frame_compare.orchestration.errors import (
     FastestAnalysisSourceCacheOnlyError,
     MixedSourceFpsError,
 )
+from frame_compare.orchestration.execution_types import (
+    MetadataPrefetch,
+    PrepState,
+    RunArtifacts,
+)
 from frame_compare.orchestration.phase_post_render import resolve_run_metadata
 from frame_compare.orchestration.preflight import discover_inputs, prepare_preflight
 from frame_compare.orchestration.probing.probe_cache import (
     compute_probe_cache_key,
     load_clip_probe_cache,
+    merge_shared_clip_probe_cache,
     save_clip_probe_cache,
 )
 from frame_compare.orchestration.probing.probe_props import (
@@ -48,9 +65,6 @@ from frame_compare.orchestration.selection_domain import (
 )
 from frame_compare.orchestration.source_selection import resolve_source_selection
 from frame_compare.orchestration.types import (
-    MetadataPrefetch,
-    PrepState,
-    RunArtifacts,
     RunDependencies,
     RunRequest,
 )
@@ -79,11 +93,13 @@ def _remove_cached_metrics(
     config: ConfigSchema,
     input_videos: list[Path],
     selection_domain: str | None,
+    metric_request: MetricCacheRequest,
 ) -> None:
     fingerprint = cache_io.compute_cache_key(
         input_videos,
         config.analysis,
         selection_domain=selection_domain,
+        metric_request=metric_request,
     )
     cache_io.delete_metrics_cache_entry(workspace.cache_dir, fingerprint)
 
@@ -131,7 +147,7 @@ async def _resolve_run_directory(
 
         filenames = [video.name for video in input_videos]
         run_dir = reserve_run_folder(
-            input_dir=workspace.input_dir,
+            input_dir=workspace.generated_dir,
             filenames=filenames,
             tmdb_metadata=metadata,
         )
@@ -220,6 +236,7 @@ def _validate_cache_state(
     config: ConfigSchema,
     input_videos: list[Path],
     selection_domain: str | None,
+    metric_request: MetricCacheRequest,
 ) -> None:
     if not needs_analysis(config.analysis):
         return
@@ -230,6 +247,7 @@ def _validate_cache_state(
             config=config,
             input_videos=input_videos,
             selection_domain=selection_domain,
+            metric_request=metric_request,
         )
 
     if request.from_cache_only and not request.skip_analysis:
@@ -237,8 +255,14 @@ def _validate_cache_state(
             input_videos,
             config.analysis,
             selection_domain=selection_domain,
+            metric_request=metric_request,
         )
-        cache_result = cache_io.load_cached_metrics(workspace.cache_dir, fingerprint, clips=[])
+        cache_result = cache_io.load_cached_metrics_for_request(
+            workspace.cache_dir,
+            fingerprint,
+            clips=[],
+            request=metric_request,
+        )
         if not cache_result.success:
             cache_path = cache_io.find_metrics_cache_file(workspace.cache_dir, fingerprint)
             expected_cache_path = workspace.cache_dir / cache_io.metrics_cache_filename(
@@ -301,6 +325,32 @@ def _load_probe_cache_entries(cache_paths: list[Path]) -> dict[str, ClipProbeSna
     return entries_by_key
 
 
+def _persist_probe_snapshots_for_run(
+    *,
+    workspace: WorkspacePaths,
+    snapshots_by_path: dict[Path, ClipProbeSnapshot],
+) -> None:
+    current_entries = {
+        compute_probe_cache_key(snapshot.fingerprint): snapshot
+        for snapshot in snapshots_by_path.values()
+    }
+    run_cache_path = workspace.generated_dir / "clip_probe.toml"
+    shared_cache_path = _shared_probe_cache_path(workspace)
+
+    if shared_cache_path == run_cache_path:
+        # Non-run-folder / legacy layout: single file is both run-local and
+        # shared.  Merge current entries on top of existing shared entries so
+        # probes from earlier runs are preserved.
+        merge_shared_clip_probe_cache(shared_cache_path, current_entries)
+        return
+
+    # Run-folder layout: run-local cache gets only this run's entries.
+    save_clip_probe_cache(run_cache_path, current_entries)
+
+    # Shared cache merges current entries on top of any existing entries.
+    merge_shared_clip_probe_cache(shared_cache_path, current_entries)
+
+
 def _probe_input_videos(
     *,
     workspace: WorkspacePaths,
@@ -344,13 +394,16 @@ def _probe_input_videos(
 
         snapshots_by_path[path] = snapshot
 
-    for cache_path in cache_paths:
-        save_clip_probe_cache(cache_path, entries_by_key)
+    _persist_probe_snapshots_for_run(
+        workspace=workspace,
+        snapshots_by_path=snapshots_by_path,
+    )
     result = build_selection_domain_clips_with_diagnostics(
         ordered_paths=input_videos,
         snapshots_by_path=snapshots_by_path,
         overrides_by_path=overrides_by_path,
         match_fps=config.sources.match_fps,
+        active_rect_detection=config.screenshots.active_rect_detection,
     )
     return result.clips, result.fps_diagnostics.messages(), result.fps_diagnostics.warnings()
 
@@ -376,6 +429,37 @@ def _normalized_fps(fps: Fraction) -> Fraction:
     return Fraction(fps.numerator, fps.denominator)
 
 
+def _refine_auto_active_rects_after_selection_window(
+    *,
+    clips: list[ClipState],
+    selection_window: SelectionWindow,
+    config: ConfigSchema,
+    deps: RunDependencies,
+    fail_closed: bool,
+) -> tuple[list[ClipState], list[str]]:
+    if config.screenshots.active_rect_detection != ScreenshotActiveRectDetection.AUTO:
+        return clips, []
+
+    sampler = VSActiveRectFrameSampler(deps.vs_loader) if deps.vs_loader is not None else None
+    try:
+        refined, warnings = refine_auto_content_active_rects_for_clips(
+            clips=clips,
+            selection_window=selection_window,
+            detection=config.screenshots.active_rect_detection,
+            sampler=sampler,
+            fail_closed=fail_closed,
+        )
+        return (
+            propagate_resolved_aspect_ratio_evidence(
+                clips=refined,
+                detection=config.screenshots.active_rect_detection,
+            ),
+            warnings,
+        )
+    except ActiveRectContentDetectionError as exc:
+        raise MetricsCalculationError(str(exc)) from exc
+
+
 def _probe_input_videos_from_snapshots(
     *,
     input_videos: list[Path],
@@ -388,6 +472,7 @@ def _probe_input_videos_from_snapshots(
         snapshots_by_path=snapshots_by_path,
         overrides_by_path=overrides_by_path,
         match_fps=config.sources.match_fps,
+        active_rect_detection=config.screenshots.active_rect_detection,
     )
     return result.clips, result.fps_diagnostics.messages(), result.fps_diagnostics.warnings()
 
@@ -438,11 +523,12 @@ async def execute_prep(
     prevalidated_analysis_clip: ClipState | None = None
     prevalidated_selection_window: SelectionWindow | None = None
     prevalidated_selection_domain: str | None = None
+    prevalidated_snapshots_by_path: dict[Path, ClipProbeSnapshot] | None = None
     load_source_diagnostics: list[str] = []
     source_warnings: list[str] = []
 
     if request.from_cache_only and analysis_required:
-        cached_snapshots = _cached_probe_snapshots_for_cache_only(
+        prevalidated_snapshots_by_path = _cached_probe_snapshots_for_cache_only(
             workspace=workspace,
             input_videos=input_videos,
         )
@@ -454,13 +540,21 @@ async def execute_prep(
             input_videos=input_videos,
             config=config,
             overrides_by_path=overrides_by_path,
-            snapshots_by_path=cached_snapshots,
+            snapshots_by_path=prevalidated_snapshots_by_path,
         )
         _validate_source_fps_compatibility(prevalidated_clips)
         prevalidated_selection_window = compute_selection_window_for_clips(
             clips=prevalidated_clips,
             config=config,
         )
+        prevalidated_clips, auto_warnings = _refine_auto_active_rects_after_selection_window(
+            clips=prevalidated_clips,
+            selection_window=prevalidated_selection_window,
+            config=config,
+            deps=deps,
+            fail_closed=True,
+        )
+        source_warnings.extend(auto_warnings)
         prevalidated_analysis_selection = resolve_analysis_source(
             selector=config.sources.analysis_source,
             input_dir=workspace.input_dir,
@@ -482,6 +576,10 @@ async def execute_prep(
             config=config,
             input_videos=input_videos,
             selection_domain=prevalidated_selection_domain,
+            metric_request=metric_cache_request_for_clip(
+                prevalidated_analysis_clip,
+                fallback_detection_mode=config.screenshots.active_rect_detection.value,
+            ),
         )
 
     workspace, metadata_prefetch = await _resolve_run_directory(
@@ -493,8 +591,16 @@ async def execute_prep(
     )
 
     if prevalidated_clips is not None:
-        if prevalidated_selection_window is None or prevalidated_selection_domain is None:
+        if (
+            prevalidated_selection_window is None
+            or prevalidated_selection_domain is None
+            or prevalidated_snapshots_by_path is None
+        ):
             raise RuntimeError("Prevalidated selection domain was not resolved.")
+        _persist_probe_snapshots_for_run(
+            workspace=workspace,
+            snapshots_by_path=prevalidated_snapshots_by_path,
+        )
         clips = prevalidated_clips
         analysis_clip = prevalidated_analysis_clip
         selection_window = prevalidated_selection_window
@@ -509,6 +615,14 @@ async def execute_prep(
         )
         _validate_source_fps_compatibility(clips)
         selection_window = compute_selection_window_for_clips(clips=clips, config=config)
+        clips, auto_warnings = _refine_auto_active_rects_after_selection_window(
+            clips=clips,
+            selection_window=selection_window,
+            config=config,
+            deps=deps,
+            fail_closed=False,
+        )
+        source_warnings.extend(auto_warnings)
         analysis_clip = None
         if analysis_required:
             analysis_selection = resolve_analysis_source(
@@ -535,6 +649,10 @@ async def execute_prep(
                 config=config,
                 input_videos=input_videos,
                 selection_domain=selection_domain,
+                metric_request=metric_cache_request_for_clip(
+                    analysis_clip,
+                    fallback_detection_mode=config.screenshots.active_rect_detection.value,
+                ),
             )
 
     return PrepState(

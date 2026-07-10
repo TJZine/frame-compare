@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 type MetricAlgorithmIdentity = Mapping[str, object]
 
-_ALGORITHM_VERSION = "analysis_metrics_v2"
+_ALGORITHM_VERSION = "analysis_metrics_v3"
 
 
 def build_metric_algorithm_identity(config: AnalysisConfig) -> MetricAlgorithmIdentity:
@@ -56,12 +56,12 @@ def _quality_identity() -> dict[str, object]:
         "performance_mode": "quality",
         "luminance": {
             "temporal": "all_frames",
-            "spatial": "full_frame",
+            "spatial": "active_rect_aware_y_plane",
             "operation": "y_plane_mean",
         },
         "motion": {
             "temporal": "all_adjacent_pairs",
-            "spatial": "full_frame",
+            "spatial": "active_rect_aware_y_plane",
             "operation": "adjacent_y_mad",
         },
     }
@@ -74,7 +74,7 @@ def _performance_identity() -> dict[str, object]:
         "performance_mode": "performance",
         "luminance": {
             "temporal": "all_frames",
-            "spatial": "luma_resize",
+            "spatial": "active_rect_aware_luma_resize",
             "target_max_width": 320,
             "resize": "bicubic",
             "upscale": False,
@@ -82,7 +82,7 @@ def _performance_identity() -> dict[str, object]:
         },
         "motion": {
             "temporal": "all_adjacent_pairs",
-            "spatial": "luma_resize",
+            "spatial": "active_rect_aware_luma_resize",
             "target_max_width": 320,
             "resize": "bicubic",
             "upscale": False,

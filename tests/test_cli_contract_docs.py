@@ -217,7 +217,7 @@ def test_current_cli_contract_documents_only_no_upload_slowpics_run_flag() -> No
     assert "No runtime-only slow.pics `run` flags exist." in normalized_mapping_section
 
 
-def test_current_cli_contract_documents_analysis_performance_mode_config_only() -> None:
+def test_current_cli_contract_documents_analysis_performance_mode_config_and_summary() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
     analysis_heading = "## Config-Only Analysis Surface"
@@ -226,6 +226,10 @@ def test_current_cli_contract_documents_analysis_performance_mode_config_only() 
 
     analysis_section = cli_contract.split(analysis_heading, maxsplit=1)[1].split(
         slowpics_heading,
+        maxsplit=1,
+    )[0]
+    run_section = cli_contract.split("## `run` Command Contract", maxsplit=1)[1].split(
+        "## CLI Flag To Config Mapping",
         maxsplit=1,
     )[0]
     normalized_analysis_section = " ".join(analysis_section.split())
@@ -240,6 +244,20 @@ def test_current_cli_contract_documents_analysis_performance_mode_config_only() 
     assert "--analysis-performance" not in declared_options
     assert "analysis.performance_mode" not in CLI_OVERRIDE_MAP.values()
     assert "cache-isolated from `quality`" in normalized_analysis_section
+    assert "Both modes apply the prepared active picture rectangle" in (normalized_analysis_section)
+    assert "trusted static metadata, configured dimension/aspect-ratio detection" in (
+        normalized_analysis_section
+    )
+    assert "There are no new analysis performance modes or aliases for active-rect detection" in (
+        normalized_analysis_section
+    )
+    assert "`quality` and `performance` consume the same prepared rectangle" in (
+        normalized_analysis_section
+    )
+    assert "The `analysis mode` row reports the effective `analysis.performance_mode`:" in (
+        run_section
+    )
+    assert "`quality` or `performance`." in run_section
 
 
 def test_current_cli_contract_documents_slowpics_json_shape(
@@ -773,8 +791,14 @@ def test_current_cli_contract_documents_analysis_ignore_window_and_cache_domain(
         "stable all-source selection-domain token",
         "`analysis_source_path`",
         "`reference_path`",
-        "Cache schema v5 stores `analysis_source_path`, `performance_mode`, `algorithm_id`",
-        "performance modes, or metric algorithm identities",
+        "Cache schema v6 stores `analysis_source_path`, `performance_mode`, `algorithm_id`",
+        "`metric_active_rect`",
+        "active-rect source, detection mode, and active-rect resolver algorithm ID",
+        "performance modes, metric algorithm identities, or active-rect metric domains",
+        "active-rect metric domains",
+        "active-rect resolver policy",
+        "each clip's resolved active rectangle",
+        "produce coordinate-specific metric/cache identities",
         'When `sources.analysis_source = "reference"`',
         "source trims",
         "effective FPS values",
@@ -905,16 +929,70 @@ def test_current_cli_contract_documents_screenshot_geometry_config_surface() -> 
 
     for expected in (
         '`geometry_mode = "native" | "aligned"`',
-        '`active_rect_detection = "provided" | "dimension" | "aspect_ratio"`',
+        '`active_rect_detection = "provided" | "dimension" | "aspect_ratio" | "auto"`',
         '`aligned_scale_policy = "largest_active" | "smallest_active" |',
         "`aligned_target_width` and `aligned_target_height`",
         "Native mode ignores aligned-only geometry fields for behavior",
+        "shared active-picture evidence used during preparation",
+        "`auto` is opt-in",
+        "samples luma frames",
+        "returns full frame when uncertain",
+        "is not ML, OCR, perceptual HDR analysis, or exhaustive scanning",
+        "Metric analysis uses the resolved active picture",
+        "Native screenshot render remains native/full-frame output",
+        "includes the resolved active rectangle and provenance",
+        "`content-derived` rectangles from `auto`",
+        '[screenshots] active_rect_detection = "auto"',
         "fits active content inside the selected target width and height",
         "without exceeding either dimension",
         "Derived policy targets are normalized downward",
         "explicit-size targets preserve the exact configured canvas",
     ):
         assert expected in normalized_screenshot_section
+
+
+def test_current_cli_contract_documents_config_strictness_logging_and_migration() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
+    validation_heading = "## Config Validation, Logging, And Migration"
+    audio_heading = "## Config-Only Audio Alignment Surface"
+    assert validation_heading in cli_contract, f"Missing heading: {validation_heading}"
+
+    validation_section = cli_contract.split(validation_heading, maxsplit=1)[1].split(
+        audio_heading,
+        maxsplit=1,
+    )[0]
+    normalized_validation = " ".join(validation_section.split())
+
+    for expected in (
+        "Unknown keys at the root of the config remain ignored",
+        "Every Frame Compare-owned nested config table rejects unknown keys",
+        '`level = "INFO"`',
+        "accepting `DEBUG`, `INFO`, `WARNING`, or `ERROR`",
+        '`format = "console"`',
+        "`--quiet` forces level `WARNING`",
+        "`--verbose` forces `DEBUG`",
+        "`--json` forces JSON-formatted logs on stderr",
+        "Remove `analysis.save_frames_data`",
+        "Replace `screenshots.directory_name` with `paths.screenshots_dir`",
+        "Remove `logging.file`",
+        "does not support config-driven file logging",
+    ):
+        assert expected in normalized_validation
+    assert "CRITICAL" not in validation_section
+
+    normalized_screenshot = " ".join(
+        cli_contract.split("## Config-Only Screenshot Surface", maxsplit=1)[1]
+        .split(validation_heading, maxsplit=1)[0]
+        .split()
+    )
+    assert "`ffmpeg_timeout_seconds` defaults to `30.0` and must be at least `5.0`" in (
+        normalized_screenshot
+    )
+    assert "controls only FFmpeg frame extraction" in normalized_screenshot
+    assert "ffprobe HDR metadata probe keeps its fixed `15.0` second timeout" in (
+        normalized_screenshot
+    )
 
 
 def test_current_architecture_documents_shared_probe_cache_for_cache_only() -> None:
@@ -953,3 +1031,25 @@ def test_current_cli_contract_matches_wizard_visibility_choices() -> None:
         "visibility: private",
     ):
         assert unsupported_token not in wizard_section
+
+
+def test_current_contract_docs_define_hybrid_workspace_path_policy() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
+    architecture = (repo_root / "docs" / "current-architecture.md").read_text(encoding="utf-8")
+    security = (repo_root / "SECURITY.md").read_text(encoding="utf-8")
+    normalized_cli_contract = " ".join(cli_contract.split())
+
+    for phrase in (
+        "Media input is a read boundary, not a write boundary",
+        "`PathEscapesRootError` / `FC-3009`",
+        "beneath the contained resolved `paths.generated_dir`, never beneath `paths.input_dir`",
+        "sole selected-config containment exception",
+        "`run`, `wizard`, `preset apply`, and `preset save`",
+    ):
+        assert phrase in normalized_cli_contract
+
+    assert "permitting external media reads" in architecture
+    assert "never beneath an external media input" in architecture
+    assert "Media inputs may be read from outside the workspace" in security
+    assert "%LOCALAPPDATA%/Programs/FrameCompare/state/config.toml" in security

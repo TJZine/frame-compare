@@ -14,11 +14,23 @@ import pytest
 
 import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError
-from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
+from frame_compare.analysis.metric_identity import (
+    metric_algorithm_id,
+    metric_backend,
+    stable_metric_algorithm_identity_json,
+)
+from frame_compare.analysis.types import (
+    ClipIdentity,
+    FrameMetrics,
+    MetricActiveRect,
+    MetricCacheRequest,
+    MetricsMetadata,
+)
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema import AnalysisConfig
 from frame_compare.orchestration import phase_post_render, phase_selection, preparation
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
+from frame_compare.orchestration.probing.probe_cache import load_clip_probe_cache
 from frame_compare.services.errors import TmdbError
 from frame_compare.services.run_folder import RunFolderReservation, derive_run_folder_name
 from frame_compare.services.types import MetadataConfig, TmdbMetadata
@@ -33,6 +45,7 @@ from .execute_run_helpers import (
     analysis_selection_domain_for_cache_inputs,
     create_config,
     create_video_files,
+    metric_cache_request_for_cache_inputs,
     write_metrics_cache,
     write_probe_cache_for_inputs,
 )
@@ -107,7 +120,7 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
             naming_source="parsed_metadata",
         ),
     )
-    run_generated_dir = input_dir / run_name / "generated"
+    run_generated_dir = tmp_path / "generated" / run_name / "generated"
 
     analysis_cache_dir = tmp_path / "generated" / "cache" / "analysis"
     source_path = input_dir / "source.mkv"
@@ -117,6 +130,7 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
         [source_path],
         config.analysis,
         selection_domain=selection_domain,
+        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
     )
     analysis_cache_path = cache_io.find_metrics_cache_file(analysis_cache_dir, fingerprint)
     assert analysis_cache_path is not None
@@ -168,7 +182,7 @@ def test_execute_run_from_cache_only_does_not_reserve_run_folder_when_metrics_ca
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
     run_name = derive_run_folder_name(filenames=["source.mkv"])
-    run_dir = input_dir / run_name
+    run_dir = tmp_path / "generated" / run_name
 
     request = RunRequest(
         root=tmp_path,
@@ -212,10 +226,43 @@ def test_execute_run_from_cache_only_uses_shared_cache_when_run_folders_enabled(
     assert result.success is True
     assert result.cache_hit is True
     assert result.warnings == []
-    assert result.screenshot_dir == (input_dir / run_name / "screenshots").resolve()
+    assert result.screenshot_dir == (tmp_path / "generated" / run_name / "screenshots").resolve()
     assert result.slowpics_url is None
-    assert not (input_dir / run_name / "generated" / "cache" / "analysis").exists()
-    assert (input_dir / run_name / "run_info.toml").exists()
+    assert not (tmp_path / "generated" / run_name / "generated" / "cache" / "analysis").exists()
+    assert (tmp_path / "generated" / run_name / "run_info.toml").exists()
+    assert [path for path in input_dir.iterdir() if path.is_dir()] == []
+
+
+def test_execute_prep_external_input_reserves_outputs_only_under_generated(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "workspace"
+    create_config(root, content=RUN_FOLDERS_CONFIG)
+    external_input = tmp_path / "external-media"
+    create_video_files(external_input, "source.mkv")
+
+    prep = asyncio.run(
+        preparation.execute_prep(
+            RunRequest(
+                root=root,
+                input_dir=external_input,
+                skip_analysis=True,
+                skip_metadata=True,
+                no_upload=True,
+            ),
+            deps=RunDependencies(
+                vs_loader=FakeVSLoader(),
+                ffmpeg_runner=FakeFFmpegRunner(),
+            ),
+        )
+    )
+
+    assert prep.workspace.input_dir == external_input.resolve()
+    assert prep.workspace.run_dir is not None
+    assert prep.workspace.run_dir.is_relative_to((root / "generated").resolve())
+    assert prep.workspace.screenshots_dir.is_relative_to(prep.workspace.run_dir)
+    assert prep.workspace.generated_dir.is_relative_to(prep.workspace.run_dir)
+    assert [path for path in external_input.iterdir() if path.is_dir()] == []
 
 
 def test_execute_run_custom_generated_dir_run_folders_saves_and_loads_shared_cache(
@@ -253,6 +300,7 @@ enable = false
         [source_path],
         config.analysis,
         selection_domain=selection_domain,
+        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
     )
 
     def _fake_calculate_metrics(
@@ -260,13 +308,23 @@ enable = false
         video_paths: list[Path],
         config: AnalysisConfig,
         cache_dir: Path,
+        analysis_source_path: Path | None = None,
+        metric_active_rect: MetricActiveRect | None = None,
         selection_domain: str | None = None,
         **_kwargs: object,
     ) -> FrameMetrics:
+        resolved_analysis_source_path = (
+            video_paths[0] if analysis_source_path is None else analysis_source_path
+        )
         cache_fingerprint = cache_io.compute_cache_key(
             video_paths,
             config,
             selection_domain=selection_domain,
+            metric_request=MetricCacheRequest(
+                analysis_source_path=resolved_analysis_source_path,
+                effective_fps=Fraction(24, 1),
+                metric_active_rect=metric_active_rect,
+            ),
         )
         stats_by_path = {path: path.stat() for path in video_paths}
         metrics = FrameMetrics(
@@ -284,6 +342,12 @@ enable = false
                     )
                     for path in video_paths
                 ],
+                analysis_source_path=str(resolved_analysis_source_path),
+                performance_mode=config.performance_mode.value,
+                algorithm_id=metric_algorithm_id(config),
+                metric_backend=metric_backend(config),
+                algorithm_identity_json=stable_metric_algorithm_identity_json(config),
+                metric_active_rect=metric_active_rect,
                 version=cache_io.CACHE_VERSION,
             ),
         )
@@ -339,8 +403,60 @@ enable = false
     assert second.success is True
     assert second.cache_hit is True
     assert second.screenshot_dir is not None
-    assert second.screenshot_dir.parent.parent == input_dir
-    assert len([path for path in input_dir.iterdir() if path.is_dir()]) == 2
+    assert second.screenshot_dir.parent.parent == tmp_path / "custom_generated"
+    run_dirs = [
+        path
+        for path in (tmp_path / "custom_generated").iterdir()
+        if (path / "run_info.toml").exists()
+    ]
+    assert len(run_dirs) == 2
+    assert all((run_dir / "generated" / "clip_probe.toml").exists() for run_dir in run_dirs)
+
+
+def test_execute_run_cache_only_run_folder_probe_snapshot_excludes_unrelated_shared_entries(
+    tmp_path: Path,
+) -> None:
+    create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
+    input_dir = tmp_path / "comparison_videos"
+    create_video_files(input_dir, "source.mkv", "unrelated.mkv")
+    source_path = input_dir / "source.mkv"
+    unrelated_path = input_dir / "unrelated.mkv"
+    config = load_config(tmp_path / "config" / "config.toml")
+    write_probe_cache_for_inputs(
+        tmp_path / "generated" / "clip_probe.toml",
+        [source_path, unrelated_path],
+        config,
+    )
+    write_metrics_cache(
+        tmp_path / "generated" / "cache" / "analysis",
+        source_path=source_path,
+        config=config,
+    )
+    unrelated_path.unlink()
+
+    result = asyncio.run(
+        execute_run(
+            RunRequest(
+                root=tmp_path,
+                from_cache_only=True,
+                skip_analysis=False,
+                skip_metadata=True,
+                no_upload=True,
+            ),
+            deps=RunDependencies(
+                vs_loader=AnalysisCapableVSLoader(),
+                ffmpeg_runner=FakeFFmpegRunner(),
+            ),
+        )
+    )
+
+    assert result.success is True
+    assert result.cache_hit is True
+    assert result.screenshot_dir is not None
+    run_probe_cache = load_clip_probe_cache(
+        result.screenshot_dir.parent / "generated" / "clip_probe.toml"
+    )
+    assert {snapshot.fingerprint.path for snapshot in run_probe_cache.values()} == {source_path}
 
 
 def test_execute_run_normal_rerun_creates_fresh_run_folder_and_uses_shared_cache(
@@ -351,8 +467,8 @@ def test_execute_run_normal_rerun_creates_fresh_run_folder_and_uses_shared_cache
     create_video_files(input_dir, "source.mkv")
 
     run_name = derive_run_folder_name(filenames=["source.mkv"])
-    existing_run_dir = input_dir / run_name
-    existing_run_dir.mkdir()
+    existing_run_dir = tmp_path / "generated" / run_name
+    existing_run_dir.mkdir(parents=True)
     config = load_config(tmp_path / "config" / "config.toml")
     source_path = input_dir / "source.mkv"
     write_metrics_cache(
@@ -375,8 +491,14 @@ def test_execute_run_normal_rerun_creates_fresh_run_folder_and_uses_shared_cache
     assert result.cache_hit is True
     assert result.screenshot_dir != (existing_run_dir / "screenshots").resolve()
     assert result.screenshot_dir is not None
-    assert result.screenshot_dir.parent.parent == input_dir
-    assert len([path for path in input_dir.iterdir() if path.is_dir()]) == 2
+    assert result.screenshot_dir.parent.parent == tmp_path / "generated"
+    run_dirs = [
+        path
+        for path in (tmp_path / "generated").iterdir()
+        if path.is_dir() and (path.name == run_name or path.name.startswith(f"{run_name}_"))
+    ]
+    assert len(run_dirs) == 2
+    assert [path for path in input_dir.iterdir() if path.is_dir()] == []
 
 
 def test_execute_run_from_cache_only_ignores_old_run_folder_cache(
@@ -387,7 +509,7 @@ def test_execute_run_from_cache_only_ignores_old_run_folder_cache(
     create_video_files(input_dir, "source.mkv")
 
     run_name = derive_run_folder_name(filenames=["source.mkv"])
-    run_generated_dir = input_dir / run_name / "generated"
+    run_generated_dir = tmp_path / "generated" / run_name / "generated"
     source_path = input_dir / "source.mkv"
     config = load_config(tmp_path / "config" / "config.toml")
     write_metrics_cache(run_generated_dir / "cache", source_path=source_path, config=config)
@@ -409,8 +531,10 @@ def test_execute_run_from_cache_only_ignores_old_run_folder_cache(
         [source_path],
         config.analysis,
         selection_domain=selection_domain,
+        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
     )
-    assert sorted(path.name for path in input_dir.iterdir() if path.is_dir()) == [run_name]
+    assert run_generated_dir.exists()
+    assert [path for path in input_dir.iterdir() if path.is_dir()] == []
     assert (
         cache_io.find_metrics_cache_file(
             tmp_path / "generated" / "cache" / "analysis",
@@ -530,6 +654,7 @@ unattended = true
         [source_path],
         config.analysis,
         selection_domain=selection_domain,
+        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
     )
     cache_dir = tmp_path / "generated" / "cache" / "analysis"
     cache_dir.mkdir(parents=True)
@@ -648,9 +773,12 @@ def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(
     assert captured_tmdb_metadata == [expected_metadata]
     assert resolve_calls == [["source.mkv"]]
     assert result.screenshot_dir is not None
-    assert result.screenshot_dir == (input_dir / "Fight Club (1999)" / "screenshots").resolve()
+    assert (
+        result.screenshot_dir
+        == (tmp_path / "generated" / "Fight Club (1999)" / "screenshots").resolve()
+    )
     run_info = tomllib.loads(
-        (input_dir / "Fight Club (1999)" / "run_info.toml").read_text(encoding="utf-8")
+        (tmp_path / "generated" / "Fight Club (1999)" / "run_info.toml").read_text(encoding="utf-8")
     )
     assert run_info["folder_name"] == "Fight Club (1999)"
     assert run_info["naming_source"] == "tmdb"
@@ -758,7 +886,7 @@ category_preference = "movie"
             category_preference="movie",
         ),
     ]
-    run_info_path = input_dir / "source" / "run_info.toml"
+    run_info_path = tmp_path / "generated" / "source" / "run_info.toml"
     run_info = tomllib.loads(run_info_path.read_text(encoding="utf-8"))
     assert run_info["tmdb"] == {
         "enabled": True,

@@ -24,6 +24,11 @@ from frame_compare.orchestration.context import (
     ClipState,
     RunContext,
 )
+from frame_compare.orchestration.execution_types import (
+    AlignPhaseOutput,
+    RenderArtifacts,
+    RenderPhaseOutput,
+)
 from frame_compare.orchestration.phase_selection import (
     build_initial_selection_details_by_source_frame,
     generated_frame_count,
@@ -36,7 +41,6 @@ from frame_compare.orchestration.phase_selection import (
     source_frames_for_reference_base_domain,
     to_overlay_selection_detail,
 )
-from frame_compare.orchestration.types import AlignPhaseOutput, RenderArtifacts, RenderPhaseOutput
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
 from frame_compare.services.alignment import (
     align_clips_from_request,
@@ -626,15 +630,19 @@ def run_render_phase(
                 selection_labels=selection_labels,
                 selection_details=selection_details,
                 diagnostic_metadata=diagnostic_metadata,
-                active_rect=(
-                    GeometryRect(
-                        clip.active_rect.x,
-                        clip.active_rect.y,
-                        clip.active_rect.width,
-                        clip.active_rect.height,
-                    )
+                active_rect=GeometryRect(
+                    clip.active_rect.x if clip.active_rect is not None else 0,
+                    clip.active_rect.y if clip.active_rect is not None else 0,
+                    clip.active_rect.width if clip.active_rect is not None else clip.probe.width,
+                    clip.active_rect.height if clip.active_rect is not None else clip.probe.height,
+                ),
+                active_rect_source=(
+                    clip.active_rect.source if clip.active_rect is not None else "full-frame"
+                ),
+                active_rect_detection_mode=(
+                    clip.active_rect.detection_mode
                     if clip.active_rect is not None
-                    else None
+                    else ctx.config.screenshots.active_rect_detection.value
                 ),
                 probe_width=clip.probe.width,
                 probe_height=clip.probe.height,

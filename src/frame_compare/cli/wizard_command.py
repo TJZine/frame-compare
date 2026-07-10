@@ -15,6 +15,7 @@ from frame_compare.config.errors import ConfigValidationError, ConfigWriteError
 from frame_compare.config.loader import get_default_config
 from frame_compare.config.schema import ConfigSchema, Visibility
 from frame_compare.errors import FrameCompareError, normalize_pydantic_errors
+from frame_compare.orchestration.preflight import resolve_selected_config_path
 
 from .cli_helpers import TextWriter, prepare_toml_payload
 
@@ -65,6 +66,18 @@ def handle_wizard(
 ) -> None:
     """Interactive configuration wizard."""
     defaults = get_default_config()
+
+    try:
+        resolve_selected_config_path(config_path, root)
+    except FrameCompareError as error:
+        raise typer.Exit(
+            code=handle_error(
+                error,
+                no_color=no_color,
+                verbose=False,
+                verbose_hint=None,
+            )
+        ) from error
 
     try:
         input_dir = prompt_input_dir(defaults.paths.input_dir, base_dir=root)

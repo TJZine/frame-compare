@@ -21,8 +21,12 @@ from frame_compare.analysis.types import (
     SelectionDetailsByFrame,
 )
 from frame_compare.analysis.window import SelectionWindow
-from frame_compare.orchestration.context import ClipState, RunContext
-from frame_compare.orchestration.types import AnalyzePhaseOutput, FramePlanPhaseOutput
+from frame_compare.orchestration.active_rect import metric_cache_request_for_clip
+from frame_compare.orchestration.context import (
+    ClipState,
+    RunContext,
+)
+from frame_compare.orchestration.execution_types import AnalyzePhaseOutput, FramePlanPhaseOutput
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 from frame_compare.utils.types import WorkspacePaths
@@ -186,12 +190,22 @@ def run_analyze_phase(
         raise MetricsCalculationError("Analysis source was not resolved for metric analysis.")
 
     selection_domain = ctx.analysis_selection_domain
+    metric_request = metric_cache_request_for_clip(
+        ctx.analysis_clip,
+        fallback_detection_mode=ctx.config.screenshots.active_rect_detection.value,
+    )
     fingerprint = cache_io.compute_cache_key(
         input_videos,
         ctx.config.analysis,
         selection_domain=selection_domain,
+        metric_request=metric_request,
     )
-    cache_result = cache_io.load_cached_metrics(workspace.cache_dir, fingerprint, clips=[])
+    cache_result = cache_io.load_cached_metrics_for_request(
+        workspace.cache_dir,
+        fingerprint,
+        clips=[],
+        request=metric_request,
+    )
     metrics_cache_hit = cache_result.success and cache_result.metrics is not None
     if require_cache_only:
         metrics = _require_cached_metrics(
@@ -210,6 +224,10 @@ def run_analyze_phase(
             vs_loader=vs_loader,
             selection_domain=selection_domain,
             effective_fps=ctx.analysis_clip.effective_fps,
+            metric_active_rect=metric_request.metric_active_rect,
+            active_rect_source=metric_request.active_rect_source,
+            active_rect_detection_mode=metric_request.active_rect_detection_mode,
+            active_rect_algorithm_id=metric_request.active_rect_algorithm_id,
         )
     selection = _select_frames_for_selection_domain(
         metrics=metrics,

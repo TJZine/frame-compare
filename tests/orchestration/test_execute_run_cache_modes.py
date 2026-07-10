@@ -12,7 +12,11 @@ import pytest
 import frame_compare.analysis.cache_io as cache_io
 import frame_compare.services.alignment_reuse_cache as alignment_reuse_cache
 from frame_compare.analysis.errors import MetricsCalculationError
-from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
+from frame_compare.analysis.types import (
+    ClipIdentity,
+    FrameMetrics,
+    MetricsMetadata,
+)
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema_enums import AnalysisPerformanceMode
 from frame_compare.orchestration import phase_selection
@@ -25,6 +29,7 @@ from .execute_run_helpers import (
     analysis_selection_domain_for_cache_inputs,
     create_config,
     create_video_files,
+    metric_cache_request_for_cache_inputs,
     write_metrics_cache,
     write_probe_cache_for_inputs,
 )
@@ -70,6 +75,7 @@ enable = false
         [source_path],
         config.analysis,
         selection_domain=selection_domain,
+        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
     )
     analysis_cache_path = cache_io.find_metrics_cache_file(analysis_cache_dir, fingerprint)
     assert analysis_cache_path is not None
@@ -172,11 +178,13 @@ enable = false
         [source_path],
         quality_config.analysis,
         selection_domain=selection_domain,
+        metric_request=metric_cache_request_for_cache_inputs([source_path], quality_config),
     )
     performance_fingerprint = cache_io.compute_cache_key(
         [source_path],
         config.analysis,
         selection_domain=selection_domain,
+        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
     )
     quality_cache_path = cache_io.find_metrics_cache_file(analysis_cache_dir, quality_fingerprint)
     performance_cache_path = cache_io.find_metrics_cache_file(
@@ -448,6 +456,129 @@ enable = false
     ]
 
 
+def test_execute_run_from_cache_only_rejects_full_frame_cache_for_active_rect_source(
+    tmp_path: Path,
+) -> None:
+    config_content = """\
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "generated"
+config_dir = "config"
+use_run_folders = false
+
+[sources.overrides."source.mkv"]
+active_rect = { x = 10, y = 20, width = 300, height = 200 }
+
+[analysis]
+random_frame_count = 0
+dark_frame_count = 1
+
+[audio_alignment]
+enable = false
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+"""
+    create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    create_video_files(input_dir, "source.mkv")
+    config = load_config(tmp_path / "config" / "config.toml")
+    source_path = input_dir / "source.mkv"
+    selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
+    write_probe_cache_for_inputs(tmp_path / "generated" / "clip_probe.toml", [source_path], config)
+    full_frame_fingerprint = cache_io.compute_cache_key(
+        [source_path],
+        config.analysis,
+        selection_domain=selection_domain,
+    )
+    cache_dir = tmp_path / "generated" / "cache" / "analysis"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    full_frame_cache_path = cache_dir / cache_io.metrics_cache_filename(
+        [source_path],
+        full_frame_fingerprint,
+    )
+    full_frame_cache_path.write_text("{}", encoding="utf-8")
+
+    request = RunRequest(
+        root=tmp_path,
+        from_cache_only=True,
+        skip_analysis=False,
+        skip_metadata=True,
+        no_upload=True,
+    )
+    deps = RunDependencies(vs_loader=FakeVSLoader())
+
+    with pytest.raises(MetricsCalculationError, match="Cached metrics missing"):
+        asyncio.run(execute_run(request, deps=deps))
+
+
+def test_execute_run_from_cache_only_uses_active_rect_specific_cache(
+    tmp_path: Path,
+) -> None:
+    config_content = """\
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "generated"
+config_dir = "config"
+use_run_folders = false
+
+[sources.overrides."source.mkv"]
+active_rect = { x = 10, y = 20, width = 300, height = 200 }
+
+[analysis]
+random_frame_count = 0
+dark_frame_count = 1
+
+[audio_alignment]
+enable = false
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+"""
+    create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    create_video_files(input_dir, "source.mkv")
+    config = load_config(tmp_path / "config" / "config.toml")
+    source_path = input_dir / "source.mkv"
+    write_metrics_cache(
+        tmp_path / "generated" / "cache" / "analysis",
+        source_path=source_path,
+        config=config,
+    )
+    active_rect_fingerprint = cache_io.compute_cache_key(
+        [source_path],
+        config.analysis,
+        selection_domain=analysis_selection_domain_for_cache_inputs([source_path], config),
+        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
+    )
+    assert cache_io.find_metrics_cache_file(
+        tmp_path / "generated" / "cache" / "analysis",
+        active_rect_fingerprint,
+    )
+
+    request = RunRequest(
+        root=tmp_path,
+        from_cache_only=True,
+        skip_analysis=False,
+        skip_metadata=True,
+        no_upload=True,
+    )
+    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+
+    result = asyncio.run(execute_run(request, deps=deps))
+
+    assert result.success is True
+    assert result.cache_hit is True
+
+
 def test_execute_run_from_cache_only_fails_when_metrics_cache_invalid(
     tmp_path: Path,
 ) -> None:
@@ -488,6 +619,7 @@ enable = false
         [source_path],
         config.analysis,
         selection_domain=selection_domain,
+        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
     )
     cache_path = cache_dir / cache_io.metrics_cache_filename([source_path], fingerprint)
     cache_path.write_text("{not-json", encoding="utf-8")
@@ -545,6 +677,7 @@ enable = false
         [source_path],
         config.analysis,
         selection_domain=selection_domain,
+        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
     )
     cache_path = cache_dir / cache_io.metrics_cache_filename([source_path], fingerprint)
     cache_payload = {

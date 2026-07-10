@@ -12,12 +12,7 @@ from frame_compare.config.errors import ConfigValidationError
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.errors import JSONValue
 from frame_compare.orchestration.context import RunContext
-from frame_compare.orchestration.phase_selection import (
-    map_aligned_to_source_frame,
-    selection_detail_for_frame,
-    selection_label_for_frame,
-)
-from frame_compare.orchestration.types import (
+from frame_compare.orchestration.execution_types import (
     ConfirmSlowpicsUploadPhaseOutput,
     MetadataPhaseOutput,
     MetadataPrefetch,
@@ -25,6 +20,13 @@ from frame_compare.orchestration.types import (
     PublishPhaseOutput,
     RenderArtifacts,
     ReportPhaseOutput,
+)
+from frame_compare.orchestration.phase_selection import (
+    map_aligned_to_source_frame,
+    selection_detail_for_frame,
+    selection_label_for_frame,
+)
+from frame_compare.orchestration.types import (
     SlowpicsUploadConfirmationFn,
     SlowpicsUploadConfirmationRequest,
 )

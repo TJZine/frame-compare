@@ -5,7 +5,7 @@ from pathlib import Path
 
 from frame_compare.orchestration import RunResult as PublicRunResult
 from frame_compare.orchestration.coordinator import RunResult
-from frame_compare.orchestration.types import PostUploadActionResult
+from frame_compare.utils.post_upload_actions import PostUploadActionResult
 
 
 def test_run_result_defaults() -> None:

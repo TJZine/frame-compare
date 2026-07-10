@@ -14,6 +14,7 @@ from frame_compare.render.batch.expansion import (
     validate_batch_requests,
     validate_ffmpeg_batch_tonemap_gate,
 )
+from frame_compare.render.batch.results import RenderBatchResults
 from frame_compare.render.encoders import render_frame
 from frame_compare.render.prepare import is_hdr_via_runner
 from frame_compare.render.types import (
@@ -42,7 +43,10 @@ def _resolve_probe_is_hdr(
     target_renderer = resolve_target_renderer(config, renderer)
     if target_renderer != "ffmpeg" or not config.color.enable_tonemap:
         return None
-    resolved_ffmpeg_runner = resolve_batch_ffmpeg_runner(ffmpeg_runner)
+    resolved_ffmpeg_runner = resolve_batch_ffmpeg_runner(
+        ffmpeg_runner,
+        extraction_timeout_seconds=config.screenshots.ffmpeg_timeout_seconds,
+    )
     return is_hdr_via_runner(clip_path, resolved_ffmpeg_runner)
 
 
@@ -73,17 +77,17 @@ def _submit_render_request(
 
 def _render_batch_sequential(
     requests: list[RenderRequest],
-    results: list[Path | None],
+    results: RenderBatchResults,
     reporter: ProgressReporter | None,
 ) -> None:
     for index, request in enumerate(requests):
-        results[index] = render_frame(request)
+        results.record(index, render_frame(request))
         _record_render_progress(reporter, request)
 
 
 def _render_batch_parallel(
     requests: list[RenderRequest],
-    results: list[Path | None],
+    results: RenderBatchResults,
     parallelism: int,
     reporter: ProgressReporter | None,
 ) -> None:
@@ -108,7 +112,7 @@ def _render_batch_parallel(
                         first_exception = exc
 
             for index, rendered_path in completed:
-                results[index] = rendered_path
+                results.record(index, rendered_path)
                 _record_render_progress(reporter, requests[index])
 
             while (
@@ -121,15 +125,6 @@ def _render_batch_parallel(
 
     if first_exception is not None:
         raise first_exception
-
-
-def _completed_render_results(results: list[Path | None]) -> list[Path]:
-    completed: list[Path] = []
-    for result in results:
-        if result is None:
-            raise RuntimeError("render batch completed without a rendered path")
-        completed.append(result)
-    return completed
 
 
 def render_batch(
@@ -155,7 +150,7 @@ def render_batch(
     if not requests:
         return []
 
-    results: list[Path | None] = [None] * len(requests)
+    results = RenderBatchResults(len(requests))
 
     if reporter:
         reporter.start_phase("Rendering", len(requests))
@@ -173,7 +168,7 @@ def render_batch(
         if reporter:
             reporter.complete_phase(phase_status)
 
-    return _completed_render_results(results)
+    return results.ordered_paths()
 
 
 def render_screenshots(
@@ -203,6 +198,10 @@ def render_screenshots(
         RenderError: For other rendering failures
     """
     resolved_options = options or ScreenshotRenderOptions()
+    resolved_ffmpeg_runner = resolve_batch_ffmpeg_runner(
+        resolved_options.ffmpeg_runner,
+        extraction_timeout_seconds=config.screenshots.ffmpeg_timeout_seconds,
+    )
     label_map = resolved_options.label_map or {}
 
     if resolved_options.display_frames is not None and len(resolved_options.display_frames) != len(
@@ -242,7 +241,7 @@ def render_screenshots(
                 clip_path,
                 config=config,
                 renderer=resolved_options.renderer,
-                ffmpeg_runner=resolved_options.ffmpeg_runner,
+                ffmpeg_runner=resolved_ffmpeg_runner,
             ),
         )
         batch_requests.append(req)
@@ -255,7 +254,7 @@ def render_screenshots(
             renderer=resolved_options.renderer,
             overlay_mode=resolved_options.overlay_mode,
             reporter=resolved_options.reporter,
-            ffmpeg_runner=resolved_options.ffmpeg_runner,
+            ffmpeg_runner=resolved_ffmpeg_runner,
         ),
     )
 
@@ -278,7 +277,10 @@ def render_screenshots_from_batch(
         Dict mapping label -> list of rendered screenshot paths
     """
     resolved_options = options or BatchRenderOptions()
-    resolved_ffmpeg_runner = resolve_batch_ffmpeg_runner(resolved_options.ffmpeg_runner)
+    resolved_ffmpeg_runner = resolve_batch_ffmpeg_runner(
+        resolved_options.ffmpeg_runner,
+        extraction_timeout_seconds=config.screenshots.ffmpeg_timeout_seconds,
+    )
     target_renderer = resolve_target_renderer(config, resolved_options.renderer)
 
     validate_ffmpeg_batch_tonemap_gate(batch_requests, config, target_renderer)

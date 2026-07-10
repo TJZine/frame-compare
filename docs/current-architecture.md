@@ -20,7 +20,8 @@ The CLI keeps VS-heavy imports lazy through proxy functions so help text and sim
 The main run path is:
 
 1. Resolve root and config.
-2. Prepare preflight and workspace paths.
+2. Prepare preflight and workspace paths, containing config and writable state
+   beneath the resolved workspace root while permitting external media reads.
 3. Discover input clips.
 4. Validate shared analysis cache mode flags when needed.
 5. Create a fresh run folder when configured.
@@ -38,8 +39,14 @@ only the post-render ordering:
 The non-confirmed flow keeps the normal ordering above.
 
 `frame_compare.orchestration.context.RunContext` carries the shared run state across phases.
-Phase task functions return explicit phase-output DTOs, and `execution.py` applies those
-outputs back to `ExecutionState`, `RunContext`, or collected artifacts at phase boundaries.
+Phase task functions return explicit phase-output DTOs. `execution.py` owns phase
+plan construction and timed phase execution, while
+`frame_compare.orchestration.phase_output_application` applies phase outputs
+back to `ExecutionState`, `RunContext`, or collected artifacts at phase
+boundaries. `frame_compare.orchestration.types` owns the public run request,
+dependency, result, and callback DTO contract; internal phase outputs and
+mutable preparation/execution carriers live in
+`frame_compare.orchestration.execution_types`.
 Current phase-family owners are intentionally explicit:
 
 - `frame_compare.orchestration.phase_selection`: frame-plan and analyze phase bodies plus shared selection/frame-translation helpers
@@ -48,12 +55,22 @@ Current phase-family owners are intentionally explicit:
 
 Analysis metric algorithm identity is analysis-owned. `frame_compare.analysis.metric_identity`
 builds the stable cache identity for `analysis.performance_mode`; cache I/O stores that
-identity in schema v5 payload metadata, and orchestration only passes the effective
-analysis config plus selection-domain token into the analysis/cache owner.
+identity in schema v6 payload metadata, and orchestration only passes the effective
+analysis config, active-rect-aware selection-domain token, analysis-owned metric
+active rectangle, and active-rect provenance into the analysis/cache owner.
 `frame_compare.analysis.metric_strategies` owns the metric implementations:
-`quality` is the default/current full-frame Python/NumPy behavior, while
-`performance` is an approximate VapourSynth PlaneStats mode that can choose
-different dark, bright, or motion frames. Both modes still return dense
+`quality` is the default Python/NumPy behavior and computes luminance and motion
+in one frame pass, while `performance` is an approximate VapourSynth PlaneStats
+mode that can choose different dark, bright, or motion frames. Both modes apply
+the prepared active picture rectangle for the analysis source before metric
+calculation. Preparation resolves that rectangle through
+`frame_compare.orchestration.active_rect` for static evidence, using explicit
+source overrides, trusted static metadata, configured dimension/aspect-ratio
+detection, or a full-frame fallback. When
+`screenshots.active_rect_detection = "auto"`, preparation then runs optional
+post-selection-window content refinement through
+`frame_compare.orchestration.active_rect_content` before analysis-source
+resolution and analysis-cache validation. Both modes still return dense
 source-frame-indexed luminance and motion arrays for the selected analysis clip.
 
 ## Module Boundaries
@@ -115,14 +132,23 @@ Primary owned paths:
   fingerprint includes the selected reference identity plus an all-source
   selection-domain token. The token stores `analysis_source_path`,
   `reference_path`, source identities, source trims, effective FPS values,
-  configured analysis ignore windows, and the final shared selectable window.
-  Cache schema v5 stores `analysis_source_path`, `performance_mode`,
-  `algorithm_id`, `metric_backend`, and stable `algorithm_identity_json` in
-  `MetricsMetadata`, and the metric arrays are for that selected analysis clip.
-  Metric-array cache identity includes the selected analysis performance mode
-  and algorithm identity. It excludes frame-selection counts, `user_frames`,
-  random seed, and dark/bright quantile thresholds because those affect frame
-  choice rather than metric computation.
+  configured analysis ignore windows, active-rect resolver policy, each clip's
+  resolved active rectangle, and the final shared selectable window.
+  Cache schema v6 stores `analysis_source_path`, `performance_mode`,
+  `algorithm_id`, `metric_backend`, stable `algorithm_identity_json`, and
+  `metric_active_rect`, active-rect source, detection mode, and active-rect
+  resolver algorithm ID in `MetricsMetadata`, and the metric arrays are for that
+  selected analysis clip. Metric-array cache identity includes the selected
+  analysis performance mode, algorithm identity, active-rect resolver policy,
+  every prepared clip's resolved active rectangle, and a typed metric request
+  containing the analysis source, effective-FPS semantics, concrete metric active
+  rectangle, and active-rect provenance. Request-aware cache loading validates the
+  same typed identity before reporting or accepting a hit, with a full-frame
+  rectangle representing no crop.
+  Content-derived active rectangles from opt-in `auto` detection are final
+  prepared rectangles and are included in the same token/provenance fields. It excludes
+  frame-selection counts, `user_frames`, random seed, and dark/bright quantile
+  thresholds because those affect frame choice rather than metric computation.
 - `<resolved paths.generated_dir>/cache/alignment/alignment_reuse.toml`:
   shared previous alignment offset reuse cache owned by
   `frame_compare.services.alignment_reuse_cache`. It stores accepted computed or
@@ -155,8 +181,18 @@ Primary owned paths:
 - screenshot output directories and generated HTML reports
 - Windows portable bundle outputs under `dist/frame-compare-portable-win-x64`
 
+`frame_compare.orchestration.preflight` owns hybrid path enforcement. The selected
+config file, configured config/screenshots/generated directories, and explicit report
+output resolve under the workspace root after environment expansion and symlink
+resolution; escaping paths raise `FC-3009` before config or output side effects.
+Configured and CLI-overridden media inputs remain unrestricted read-only paths. The
+only selected-config exception is the installed Windows portable shim's exact resolved
+LocalAppData state `config.toml`; it does not extend to configured output paths or a
+symlinked config leaf that resolves elsewhere.
+
 `WorkspacePaths` resolves the runtime path set and can switch into run-folder mode so
-screenshots and generated files live inside an input-specific run directory. The
+screenshots and generated files live inside a fresh directory beneath the contained
+resolved `paths.generated_dir`, never beneath an external media input. The
 analysis and shared alignment reuse caches are the exceptions:
 `WorkspacePaths.cache_dir` and `WorkspacePaths.shared_analysis_cache_dir` remain
 the shared workspace-level `<resolved paths.generated_dir>/cache/analysis` path,
@@ -166,7 +202,8 @@ workspace-level `<resolved paths.generated_dir>/cache/alignment` path, even afte
 folder.
 
 When `paths.use_run_folders = true`, normal runs and cache-only runs that proceed
-reserve a fresh run folder. Existing run folders are not reused for analysis cache
+reserve a fresh run folder beneath the resolved `paths.generated_dir`. Existing run
+folders are not reused for analysis cache
 hits. Screenshots, slow.pics upload inputs, manual overrides, and VSPreview
 artifacts remain scoped to the current run folder. Probe snapshots
 are written to both the current run folder and the shared generated probe cache
@@ -197,10 +234,14 @@ dependency-light shared utility types; `services` must not import
 orchestration-owned or analysis-owned identity types such as `ClipState`,
 `ClipIdentity`, or `ClipFingerprint`.
 
-`frame_compare.services.alignment` owns previous-offset reuse policy and
-alignment precedence. Exact-match computed audio alignment cache hits are treated
-as deterministic and can be reused independently of the human confirmed-offset
-policy; `previous_offsets` governs only VSPreview-confirmed offset reuse.
+`frame_compare.services.alignment` owns alignment entrypoint sequencing and
+precedence, while `frame_compare.services.alignment_previous_offsets` owns
+previous-offset reuse policy. Exact-match computed audio alignment cache hits are
+treated as deterministic and can be reused independently of the human
+confirmed-offset policy; `previous_offsets` governs only VSPreview-confirmed
+offset reuse.
+`frame_compare.services.alignment_keys` owns the stable reference/comparison
+alignment key shared by alignment sequencing and previous-offset policy.
 `frame_compare.services.alignment_reuse_prompt` owns the Rich stderr
 prompt/table helper, including TTY fallback behavior and no-color rendering.
 `frame_compare.services.types.AlignmentProvenance` carries service-owned
@@ -369,15 +410,24 @@ collapsed/size, inspector open/tab, and blink speed. Blink paused state is not
 persisted. It does not own slow.pics upload policy, prompting, or browser side
 effects.
 
-Screenshot rendering owns its geometry and writer policy inside `frame_compare.render`:
-`frame_compare.render.geometry` plans optional aligned crop/scale/pad geometry,
-including active-rect fallback detection and fit-to-target scale/canvas policy.
-Render batch expansion converts explicit source overrides and trusted diagnostic
-metadata into provided active rectangles before geometry planning, attaches the
-resulting plans to render requests, and keeps metadata rejection warnings at the
-batch owner. The FFmpeg backend applies geometry filters after exact frame selection,
-and the VapourSynth path chooses between the Pillow writer and eligible
-`core.fpng.Write` output without changing CLI import-time behavior.
+Active-picture resolution is owned by `frame_compare.orchestration.active_rect`
+and optional `frame_compare.orchestration.active_rect_content` during
+preparation. Static resolution produces explicit, metadata, dimension-derived,
+aspect-ratio-derived, or full-frame rectangles from probe/config evidence.
+Opt-in `auto` content refinement runs only after the shared `SelectionWindow`
+exists, samples a bounded deterministic set of luma frames for unresolved
+full-frame clips, and can produce `content-derived` provenance. Analysis consumes
+the final prepared rectangle through analysis-owned `MetricActiveRect`; render
+consumes it through render-local request fields. Screenshot rendering still owns
+geometry and writer policy inside `frame_compare.render`: `frame_compare.render.geometry` plans
+optional aligned crop/scale/pad geometry, mod-safe crop rectangles, fit-to-target
+scale/canvas policy, padding, and overlay origins. Render batch expansion treats
+prepared active rectangles as already resolved for normal orchestration requests,
+while direct render batch calls without provenance can still use render-local
+static geometry inference; render does not sample content. Native screenshot
+render remains full-frame. The FFmpeg backend applies geometry filters after
+exact frame selection, and the VapourSynth path chooses between the Pillow writer
+and eligible `core.fpng.Write` output without changing CLI import-time behavior.
 
 Runtime ownership matrix:
 
@@ -385,7 +435,9 @@ Runtime ownership matrix:
 | --- | --- |
 | Source selector resolution, explicit reference ordering, duplicate-stem fail-fast, and per-source override application during preparation | `frame_compare.orchestration.source_selection` plus `frame_compare.orchestration.preparation` |
 | Analysis-source resolution and fastest-source benchmark policy | `frame_compare.orchestration.analysis_source` |
-| Audio alignment workflow, offset cache coordination, previous-offset reuse policy, and precedence policy | `frame_compare.services.alignment` |
+| Audio alignment workflow, offset cache write coordination, and precedence policy | `frame_compare.services.alignment` |
+| Previous-offset reuse policy and shared-reuse eligibility | `frame_compare.services.alignment_previous_offsets` |
+| Stable reference/comparison alignment key construction | `frame_compare.services.alignment_keys` |
 | Shared previous alignment offset reuse cache persistence | `frame_compare.services.alignment_reuse_cache` |
 | Previous-offset reuse prompt/table display | `frame_compare.services.alignment_reuse_prompt` |
 | Audio stream probing, deterministic stream selection, stream overrides, and FFmpeg/channel-aware extraction policy | `frame_compare.services.alignment_audio` |
@@ -394,7 +446,9 @@ Runtime ownership matrix:
 | Alignment-specific VSPreview verification display and override policy | `frame_compare.services.alignment_vspreview` |
 | VSPreview availability and launch adapter | `frame_compare.vspreview.adapter` |
 | VapourSynth import, Windows DLL registration, plugin detection/loading helpers | `frame_compare.vs.env` |
-| Doctor check ordering, categories, and diagnostic result mapping | `frame_compare.orchestration.doctor` |
+| Doctor execution and diagnostic result mapping | `frame_compare.orchestration.doctor` |
+| Doctor check ordering, categories, and check implementations | `frame_compare.orchestration.doctor_checks` |
+| Doctor diagnostic DTOs | `frame_compare.orchestration.doctor_types` |
 
 ## Public Boundaries
 
@@ -417,7 +471,8 @@ These files currently carry disproportionate change risk:
   (`alignment_audio.py`, `alignment_correlation.py`, `alignment_consensus.py`,
   `alignment_vspreview.py`)
 - `src/frame_compare/render/batch/orchestrator.py`
-- `src/frame_compare/orchestration/doctor.py`
+- `src/frame_compare/orchestration/doctor.py` and its focused diagnostic owners
+  (`doctor_checks.py`, `doctor_types.py`)
 - `src/frame_compare/vspreview/adapter.py`
 
 Working rule: changes to these files should usually trigger full verification and, when they reshape behavior or ownership, a same-pass update to this document.

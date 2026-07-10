@@ -7,7 +7,10 @@ description: Use when an approved Frame Compare plan contains concrete, disjoint
 
 ## Overview
 
-Use this skill when a plan-approved implementation slice is concrete enough for a `worker` agent to execute without inventing seams, adapters, ownership, public contracts, or verification depth.
+Use this skill when a plan-approved implementation slice is concrete enough for
+the default `worker` or an explicitly eligible `worker_terra` agent to execute
+without inventing seams, adapters, ownership, public contracts, or verification
+depth.
 
 The controller still owns decomposition, integration, verification, and final judgment.
 
@@ -20,6 +23,7 @@ All of these must already be true:
 3. The slice has a clear verification target.
 4. The write scope is disjoint from other active workers.
 5. The worker does not need to invent owner seams, CLI/config contracts, or runtime verification policy.
+6. A `worker_terra` slice is exact, cheap to verify, and has explicit stop/escalation conditions.
 
 If any precondition is false, keep the work local or re-plan first.
 
@@ -36,11 +40,20 @@ Every delegated slice should specify:
 
 Do not make the worker infer the slice from a broad plan alone.
 
+## Delegation Record
+
+Before dispatch, record the selected role and its `.codex/agents/<role>.toml`
+path in the worker packet. At closeout, report that role, config path, `model`,
+and `model_reasoning_effort` read from the TOML. Treat the worker's
+`CONFIGURED ROLE` opening line as a visibility aid, not independent proof of
+the model selection.
+
 ## Execution Pattern
 
 1. Decide whether delegation is justified.
 2. Cut one slice with one write owner.
-3. Dispatch one `worker` per disjoint slice.
+3. Dispatch `worker` by default. Use `worker_terra` only when the approved brief
+   explicitly selects it for an exact, bounded, cheap-to-verify slice.
 4. Continue useful non-overlapping local work.
 5. Review worker output before integration.
 6. Re-run required verification locally on the integrated result.
@@ -52,3 +65,4 @@ Do not make the worker infer the slice from a broad plan alone.
 - Running parallel workers against the same files or shared symbols
 - Letting a worker decide public CLI/config behavior
 - Treating worker output as done before local verification
+- Selecting `worker_terra` for ambiguous work or verification diagnosis

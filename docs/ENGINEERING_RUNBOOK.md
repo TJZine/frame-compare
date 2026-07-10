@@ -32,6 +32,8 @@ If a task needs a broader compatibility promise, the maintainer must confirm it 
 - `docs/current-cli-contract.md`: present-day CLI command, flag, and persistence contract
 - `docs/DECISIONS.md`: decision log and historical exceptions
 - `docs/api.md`: generated reference, not a stability promise by itself
+- `.codex/review-context.md`: repo review profile for `suggestion-review`
+  and `pr-commit-review`
 - `README.md`: product overview, install, quickstart
 - `CONTRIBUTING.md`: contributor onboarding and PR mechanics
 - `docs/plans/**`: reference-only unless the file starts with `Status: Active`
@@ -326,7 +328,7 @@ Use this as the default routing shortcut before exploring deeper:
 | Hotspot or runtime pipeline change | `docs/current-architecture.md` | `orchestration/`, `render/`, `vs/`, hotspot files, adjacent tests | High | Full verification, plus Docker when listed under Docker/runtime verification |
 | Docker/runtime environment change | this runbook + `docs/current-architecture.md` | `Dockerfile`, `docker-compose*.yml`, `tools/verify_docker_*.sh`, `.github/workflows/docker-integration.yml`, Docker workflow/contract tests, runtime integration tests | High | Full verification plus Docker/runtime verification |
 | Windows portable or release-path change | this runbook | `tools/windows_portable/**`, `.github/workflows/windows-portable.yml`, release-path docs | High | Full verification plus Windows portable/release-path verification |
-| Workflow/authority doc change | this runbook or the affected authority doc | `AGENTS.md`, `.agents/rules/general-guidelines.md`, `.coderabbit.yaml`, `docs/ENGINEERING_RUNBOOK.md`, `docs/current-architecture.md`, `docs/current-cli-contract.md` | High | Full verification |
+| Workflow/authority doc change | this runbook or the affected authority doc | `AGENTS.md`, `.agents/rules/general-guidelines.md`, `.codex/review-context.md`, `.coderabbit.yaml`, `docs/ENGINEERING_RUNBOOK.md`, `docs/current-architecture.md`, `docs/current-cli-contract.md` | High | Full verification |
 
 ### Stop And Ask
 
@@ -386,6 +388,15 @@ Review should prioritize:
 - undocumented authority drift
 
 Changes in `orchestration/coordinator.py`, `errors.py`, `services/report.py`, or packaging workflows should receive extra scrutiny because they are current hotspots or blast-radius multipliers.
+
+## Subagent Transparency
+
+When dispatching a subagent, record the selected role and its
+`.codex/agents/<role>.toml` path. At task closeout, list each role used with
+the `model` and `model_reasoning_effort` read from that TOML. The child role's
+`CONFIGURED ROLE` opening line is a visible confirmation of the selected role;
+the TOML remains the authoritative configuration and avoids duplicating model
+names in prompts or workflow docs.
 
 ## Documentation Freshness Triggers
 

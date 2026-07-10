@@ -15,6 +15,8 @@ import structlog
 import tomli_w
 
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot
+from frame_compare.utils.atomic_write import write_bytes_atomic
+from frame_compare.utils.file_lock import exclusive_file_lock
 from frame_compare.vs.types import HDRMetadata
 
 log = structlog.get_logger()
@@ -31,6 +33,10 @@ class _CacheEntryLoadOutcome:
 @dataclass(frozen=True)
 class _CacheWriteOutcome:
     error: str | None = None
+
+
+class _ProbeCacheReadError(Exception):
+    """Signal that a shared update must abort after a cache read failure."""
 
 
 def _mapping_has_only_str_keys(mapping: Mapping[object, object]) -> bool:
@@ -191,19 +197,18 @@ def compute_probe_cache_key(fingerprint: ClipFingerprint) -> str:
     return hashlib.blake2s(serialized.encode("utf-8")).hexdigest()
 
 
-def load_clip_probe_cache(cache_path: Path) -> dict[str, ClipProbeSnapshot]:
-    """Load probe cache from TOML file.
-
-    Returns empty dict on missing file, parse error, or version mismatch (warn-only).
-    Skips invalid entries (warn-only).
-    """
+def _load_clip_probe_cache(
+    cache_path: Path, *, abort_on_read_error: bool
+) -> dict[str, ClipProbeSnapshot]:
     try:
-        if not cache_path.exists():
-            return {}
         with cache_path.open("rb") as f:
             data: dict[str, object] = tomllib.load(f)
+    except FileNotFoundError:
+        return {}
     except OSError as e:
         log.warning("probe_cache_read_error", path=str(cache_path), error=str(e))
+        if abort_on_read_error:
+            raise _ProbeCacheReadError from e
         return {}
     except tomllib.TOMLDecodeError as e:
         log.warning("probe_cache_parse_error", path=str(cache_path), error=str(e))
@@ -234,12 +239,26 @@ def load_clip_probe_cache(cache_path: Path) -> dict[str, ClipProbeSnapshot]:
     return snapshots
 
 
+def load_clip_probe_cache(cache_path: Path) -> dict[str, ClipProbeSnapshot]:
+    """Load probe cache from TOML file.
+
+    Returns empty dict on missing file, parse error, or version mismatch (warn-only).
+    Skips invalid entries (warn-only).
+    """
+    return _load_clip_probe_cache(cache_path, abort_on_read_error=False)
+
+
+def _load_shared_clip_probe_cache_for_update(
+    cache_path: Path,
+) -> dict[str, ClipProbeSnapshot]:
+    """Load shared entries, aborting the transaction on filesystem read errors."""
+    return _load_clip_probe_cache(cache_path, abort_on_read_error=True)
+
+
 def _write_cache_file(cache_path: Path, output: Mapping[str, Any]) -> _CacheWriteOutcome:
     try:
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-
-        with cache_path.open("wb") as f:
-            tomli_w.dump(output, f)
+        content = tomli_w.dumps(output).encode("utf-8")
+        write_bytes_atomic(cache_path, content)
     except OSError as e:
         return _CacheWriteOutcome(error=str(e))
 
@@ -322,3 +341,19 @@ def save_clip_probe_cache(
     outcome = _write_cache_file(cache_path, output)
     if outcome.error is not None:
         log.warning("probe_cache_write_error", path=str(cache_path), error=outcome.error)
+
+
+def merge_shared_clip_probe_cache(
+    cache_path: Path, current_entries: Mapping[str, ClipProbeSnapshot]
+) -> None:
+    """Merge current entries into a shared cache under one locked transaction."""
+    lock_path = cache_path.with_name(f"{cache_path.name}.lock")
+    try:
+        with exclusive_file_lock(lock_path):
+            entries_by_key = _load_shared_clip_probe_cache_for_update(cache_path)
+            entries_by_key.update(current_entries)
+            save_clip_probe_cache(cache_path, entries_by_key)
+    except _ProbeCacheReadError:
+        return
+    except OSError as e:
+        log.warning("probe_cache_write_error", path=str(cache_path), error=str(e))

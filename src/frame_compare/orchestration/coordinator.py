@@ -12,6 +12,10 @@ from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.execution import (
     build_execution_phase_plan,
 )
+from frame_compare.orchestration.execution_types import (
+    ExecutionState,
+    RunArtifacts,
+)
 from frame_compare.orchestration.fps_report import (
     build_consolidated_fps_report,
     emit_consolidated_fps_report,
@@ -20,8 +24,6 @@ from frame_compare.orchestration.phases import execute_phases
 from frame_compare.orchestration.preparation import execute_prep
 from frame_compare.orchestration.progress import select_reporter
 from frame_compare.orchestration.types import (
-    ExecutionState,
-    RunArtifacts,
     RunDependencies,
     RunRequest,
     RunResult,
@@ -80,9 +82,6 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
     if local_deps.vs_loader is None:
         local_deps.vs_loader = DefaultVSLoader()
 
-    if local_deps.ffmpeg_runner is None:
-        local_deps.ffmpeg_runner = DefaultFFmpegRunner()
-
     if local_deps.progress is None:
         local_deps.progress = select_reporter(
             quiet=request.quiet,
@@ -97,6 +96,10 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             raise RuntimeError("Progress reporter must be initialized before execution.")
 
         prep = await execute_prep(request, local_deps)
+        if local_deps.ffmpeg_runner is None:
+            local_deps.ffmpeg_runner = DefaultFFmpegRunner(
+                extraction_timeout_seconds=prep.config.screenshots.ffmpeg_timeout_seconds
+            )
         state = ExecutionState(artifacts=prep.artifacts)
 
         state.phase_timings["preflight"] = prep.preflight_duration

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from fractions import Fraction
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
@@ -11,6 +12,16 @@ if TYPE_CHECKING:
 
 
 CacheLoadReason = Literal["not_found", "corrupted", "version_mismatch", "mismatched_inputs"]
+ActiveRectSource = Literal[
+    "explicit",
+    "metadata",
+    "dimension-derived",
+    "aspect-ratio-derived",
+    "content-derived",
+    "full-frame",
+]
+ActiveRectDetectionMode = Literal["provided", "dimension", "aspect_ratio", "auto"]
+ActiveRectAlgorithmId = Literal["active_rect_resolution_v2"]
 type SelectionDetailsByFrame = dict[int, SelectionDetail]
 
 
@@ -40,6 +51,28 @@ class ClipIdentity:
 
 
 @dataclass(frozen=True, slots=True)
+class MetricActiveRect:
+    """Analysis-owned active image rectangle in source-frame coordinates."""
+
+    x: int
+    y: int
+    width: int
+    height: int
+
+
+@dataclass(frozen=True, slots=True)
+class MetricCacheRequest:
+    """Complete requested identity for metric-array cache lookup and validation."""
+
+    analysis_source_path: Path | None
+    effective_fps: Fraction | None = None
+    metric_active_rect: MetricActiveRect | None = None
+    active_rect_source: ActiveRectSource = "full-frame"
+    active_rect_detection_mode: ActiveRectDetectionMode = "aspect_ratio"
+    active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v2"
+
+
+@dataclass(frozen=True, slots=True)
 class MetricsMetadata:
     """Metadata about the analysis run stored with cache.
 
@@ -53,6 +86,10 @@ class MetricsMetadata:
         algorithm_id: Stable ID for the metric algorithm identity
         metric_backend: Metric backend family that produced the arrays
         algorithm_identity_json: Stable JSON identity payload for cache/debugging
+        metric_active_rect: Active rectangle used for metric arrays; None means full frame
+        active_rect_source: Provenance for the metric active rectangle
+        active_rect_detection_mode: Active-rect detection mode used by preparation
+        active_rect_algorithm_id: Resolver algorithm ID used by preparation
         version: Cache schema version
     """
 
@@ -65,7 +102,11 @@ class MetricsMetadata:
     algorithm_id: str = ""
     metric_backend: str = ""
     algorithm_identity_json: str = "{}"
-    version: int = 5
+    metric_active_rect: MetricActiveRect | None = None
+    active_rect_source: ActiveRectSource = "full-frame"
+    active_rect_detection_mode: ActiveRectDetectionMode = "aspect_ratio"
+    active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v2"
+    version: int = 6
 
 
 @dataclass(frozen=True, slots=True)

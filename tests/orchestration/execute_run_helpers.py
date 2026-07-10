@@ -15,7 +15,13 @@ from frame_compare.analysis.metric_identity import (
     metric_backend,
     stable_metric_algorithm_identity_json,
 )
-from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
+from frame_compare.analysis.types import (
+    ClipIdentity,
+    FrameMetrics,
+    MetricActiveRect,
+    MetricCacheRequest,
+    MetricsMetadata,
+)
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_models import SourceOverrideConfig
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot, ClipState
@@ -108,6 +114,11 @@ def write_metrics_cache(
             config,
             analysis_source_path=resolved_analysis_source_path,
         )
+    metric_request = metric_cache_request_for_cache_inputs(
+        ordered_cache_inputs,
+        config,
+        analysis_source_path=resolved_analysis_source_path,
+    )
     write_probe_cache_for_inputs(
         cache_dir.parent.parent / "clip_probe.toml",
         ordered_cache_inputs,
@@ -117,6 +128,7 @@ def write_metrics_cache(
         ordered_cache_inputs,
         config.analysis,
         selection_domain=selection_domain,
+        metric_request=metric_request,
     )
     stats_by_path = {path: path.stat() for path in ordered_cache_inputs}
     metrics = FrameMetrics(
@@ -139,6 +151,10 @@ def write_metrics_cache(
             algorithm_id=metric_algorithm_id(config.analysis),
             metric_backend=metric_backend(config.analysis),
             algorithm_identity_json=stable_metric_algorithm_identity_json(config.analysis),
+            metric_active_rect=metric_request.metric_active_rect,
+            active_rect_source=metric_request.active_rect_source,
+            active_rect_detection_mode=metric_request.active_rect_detection_mode,
+            active_rect_algorithm_id=metric_request.active_rect_algorithm_id,
             version=cache_io.CACHE_VERSION,
         ),
     )
@@ -158,6 +174,7 @@ def analysis_selection_domain_for_cache_inputs(
         snapshots_by_path=snapshots_by_path,
         overrides_by_path=_resolved_cache_overrides(video_paths, config),
         match_fps=config.sources.match_fps,
+        active_rect_detection=config.screenshots.active_rect_detection,
     )
     window = compute_selection_window_for_clips(clips=clips, config=config)
     analysis_clip = clips[0]
@@ -168,6 +185,59 @@ def analysis_selection_domain_for_cache_inputs(
         analysis_clip=analysis_clip,
         config=config,
         selection_window=window,
+    )
+
+
+def metric_active_rect_for_cache_inputs(
+    video_paths: list[Path],
+    config: ConfigSchema,
+    *,
+    analysis_source_path: Path | None = None,
+) -> MetricActiveRect | None:
+    return metric_cache_request_for_cache_inputs(
+        video_paths,
+        config,
+        analysis_source_path=analysis_source_path,
+    ).metric_active_rect
+
+
+def metric_cache_request_for_cache_inputs(
+    video_paths: list[Path],
+    config: ConfigSchema,
+    *,
+    analysis_source_path: Path | None = None,
+) -> MetricCacheRequest:
+    ordered_paths = _resolved_cache_inputs(video_paths, config)
+    snapshots_by_path = {path: _clip_probe_snapshot_for_cache_input(path) for path in ordered_paths}
+    clips = build_selection_domain_clips(
+        ordered_paths=ordered_paths,
+        snapshots_by_path=snapshots_by_path,
+        overrides_by_path=_resolved_cache_overrides(video_paths, config),
+        match_fps=config.sources.match_fps,
+        active_rect_detection=config.screenshots.active_rect_detection,
+    )
+    analysis_clip = clips[0]
+    if analysis_source_path is not None:
+        analysis_clip = next(clip for clip in clips if clip.path == analysis_source_path)
+    rect = analysis_clip.active_rect
+    metric_rect = (
+        None
+        if rect is None
+        else MetricActiveRect(x=rect.x, y=rect.y, width=rect.width, height=rect.height)
+    )
+    return MetricCacheRequest(
+        analysis_source_path=analysis_clip.path,
+        effective_fps=analysis_clip.effective_fps,
+        metric_active_rect=metric_rect,
+        active_rect_source=rect.source if rect is not None else "full-frame",
+        active_rect_detection_mode=(
+            rect.detection_mode
+            if rect is not None
+            else config.screenshots.active_rect_detection.value
+        ),
+        active_rect_algorithm_id=(
+            rect.algorithm_id if rect is not None else "active_rect_resolution_v2"
+        ),
     )
 
 

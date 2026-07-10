@@ -10,7 +10,7 @@ import structlog
 from frame_compare.analysis.cache_io import (
     CACHE_VERSION,
     compute_cache_key,
-    load_cached_metrics,
+    load_cached_metrics_for_request,
     save_metrics_cache,
 )
 from frame_compare.analysis.errors import MetricsCalculationError
@@ -18,7 +18,16 @@ from frame_compare.analysis.metric_strategies import (
     MetricComputationResult,
     calculate_metric_strategy,
 )
-from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
+from frame_compare.analysis.types import (
+    ActiveRectAlgorithmId,
+    ActiveRectDetectionMode,
+    ActiveRectSource,
+    ClipIdentity,
+    FrameMetrics,
+    MetricActiveRect,
+    MetricCacheRequest,
+    MetricsMetadata,
+)
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError
 from frame_compare.vs.loader import DefaultVSLoader
@@ -57,8 +66,9 @@ def _cached_metrics(
     fingerprint: str,
     clips: list[ClipIdentity],
     reporter: ProgressReporter | None,
+    request: MetricCacheRequest,
 ) -> FrameMetrics | None:
-    cache_result = load_cached_metrics(cache_dir, fingerprint, clips)
+    cache_result = load_cached_metrics_for_request(cache_dir, fingerprint, clips, request)
     if not (cache_result.success and cache_result.metrics):
         return None
 
@@ -86,6 +96,10 @@ def _build_metrics(
     clips: list[ClipIdentity],
     analysis_source_path: Path,
     effective_fps: Fraction | None,
+    metric_active_rect: MetricActiveRect | None,
+    active_rect_source: ActiveRectSource,
+    active_rect_detection_mode: ActiveRectDetectionMode,
+    active_rect_algorithm_id: ActiveRectAlgorithmId,
 ) -> FrameMetrics:
     return FrameMetrics(
         luminance=result.luminance,
@@ -100,6 +114,10 @@ def _build_metrics(
             algorithm_id=result.algorithm_id,
             metric_backend=result.metric_backend,
             algorithm_identity_json=result.algorithm_identity_json,
+            metric_active_rect=metric_active_rect,
+            active_rect_source=active_rect_source,
+            active_rect_detection_mode=active_rect_detection_mode,
+            active_rect_algorithm_id=active_rect_algorithm_id,
             version=CACHE_VERSION,
         ),
     )
@@ -127,6 +145,10 @@ def calculate_metrics(
     selection_domain: str | None = None,
     analysis_source_path: Path | None = None,
     effective_fps: Fraction | None = None,
+    metric_active_rect: MetricActiveRect | None = None,
+    active_rect_source: ActiveRectSource = "full-frame",
+    active_rect_detection_mode: ActiveRectDetectionMode = "aspect_ratio",
+    active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v2",
 ) -> FrameMetrics:
     """
     Calculate frame metrics for the given clips.
@@ -160,18 +182,31 @@ def calculate_metrics(
     if not video_paths:
         raise MetricsCalculationError("No input video paths provided")
     source_path = video_paths[0] if analysis_source_path is None else analysis_source_path
+    cache_request = MetricCacheRequest(
+        analysis_source_path=source_path,
+        effective_fps=effective_fps,
+        metric_active_rect=metric_active_rect,
+        active_rect_source=active_rect_source,
+        active_rect_detection_mode=active_rect_detection_mode,
+        active_rect_algorithm_id=active_rect_algorithm_id,
+    )
 
-    fingerprint = compute_cache_key(video_paths, config, selection_domain=selection_domain)
+    fingerprint = compute_cache_key(
+        video_paths,
+        config,
+        selection_domain=selection_domain,
+        metric_request=cache_request,
+    )
     clips = _clip_identities(video_paths)
 
-    cached = _cached_metrics(cache_dir, fingerprint, clips, reporter)
+    cached = _cached_metrics(cache_dir, fingerprint, clips, reporter, cache_request)
     if cached:
         return cached
 
     # Cache miss or invalid - compute metrics for the selected analysis source only.
     source = _load_analysis_source(source_path, vs_loader)
     try:
-        strategy_result = calculate_metric_strategy(source, config, reporter)
+        strategy_result = calculate_metric_strategy(source, config, reporter, metric_active_rect)
         metrics = _build_metrics(
             result=strategy_result,
             source=source,
@@ -179,6 +214,10 @@ def calculate_metrics(
             clips=clips,
             analysis_source_path=source_path,
             effective_fps=effective_fps,
+            metric_active_rect=metric_active_rect,
+            active_rect_source=active_rect_source,
+            active_rect_detection_mode=active_rect_detection_mode,
+            active_rect_algorithm_id=active_rect_algorithm_id,
         )
     finally:
         del source

@@ -6,13 +6,14 @@ from pathlib import Path
 
 import pytest
 import tomli_w
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from frame_compare.config.defaults import DEFAULT_CONFIG_TOML
 from frame_compare.config.loader import get_default_config
 from frame_compare.config.schema import (
     AnalysisConfig,
     ColorConfig,
+    ConfigSchema,
     ReportConfig,
 )
 from frame_compare.config.schema_enums import (
@@ -266,7 +267,63 @@ def test_schema_model_section_defaults_are_representative() -> None:
     }
     assert logging.level == LogLevel.INFO
     assert logging.format == LogFormat.CONSOLE
-    assert logging.file is None
+
+
+@pytest.mark.parametrize(
+    ("model_type", "payload"),
+    [
+        (PathsConfig, {}),
+        (SourcesConfig, {}),
+        (SourceOverrideConfig, {}),
+        (SourceActiveRectConfig, {"x": 0, "y": 0, "width": 1, "height": 1}),
+        (AnalysisConfig, {}),
+        (AudioAlignmentConfig, {}),
+        (ScreenshotsConfig, {}),
+        (ColorConfig, {}),
+        (SlowpicsConfig, {}),
+        (TmdbConfig, {}),
+        (ReportConfig, {}),
+        (DiagnosticsConfig, {}),
+        (LoggingConfig, {}),
+    ],
+    ids=lambda value: value.__name__ if isinstance(value, type) else None,
+)
+def test_owned_nested_config_models_reject_unknown_keys(
+    model_type: type[BaseModel],
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        model_type.model_validate({**payload, "unknown_future_key": True})
+
+
+def test_root_config_ignores_unknown_keys() -> None:
+    config = ConfigSchema.model_validate({"unknown_future_section": {"enabled": True}})
+
+    assert "unknown_future_section" not in config.model_fields_set
+
+
+@pytest.mark.parametrize(
+    ("model_type", "removed_key", "value"),
+    [
+        (AnalysisConfig, "save_frames_data", True),
+        (ScreenshotsConfig, "directory_name", "screenshots"),
+        (LoggingConfig, "file", "frame-compare.log"),
+    ],
+)
+def test_removed_inert_config_keys_fail_validation(
+    model_type: type[BaseModel],
+    removed_key: str,
+    value: object,
+) -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        model_type.model_validate({removed_key: value})
+
+
+def test_screenshot_ffmpeg_timeout_keeps_five_second_minimum() -> None:
+    assert ScreenshotsConfig(ffmpeg_timeout_seconds=5.0).ffmpeg_timeout_seconds == 5.0
+
+    with pytest.raises(ValidationError, match="greater than or equal to 5"):
+        ScreenshotsConfig(ffmpeg_timeout_seconds=4.9)
 
 
 def test_sources_match_fps_accepts_majority() -> None:
@@ -435,6 +492,7 @@ def test_default_config_toml_documents_sources_defaults() -> None:
 def test_default_config_toml_documents_screenshot_geometry_defaults() -> None:
     data = tomllib.loads(DEFAULT_CONFIG_TOML)
 
+    assert "directory_name" not in data["screenshots"]
     assert data["screenshots"]["geometry_mode"] == "native"
     assert data["screenshots"]["active_rect_detection"] == "aspect_ratio"
     assert data["screenshots"]["aligned_scale_policy"] == "largest_active"
@@ -454,7 +512,6 @@ def test_default_config_toml_documents_analysis_ignore_window_defaults() -> None
         "bright_frame_count",
         "motion_frame_count",
         "random_seed",
-        "save_frames_data",
         "performance_mode",
         "ignore_lead_seconds",
         "ignore_trail_seconds",
@@ -466,6 +523,12 @@ def test_default_config_toml_documents_analysis_ignore_window_defaults() -> None
     assert data["analysis"]["ignore_lead_seconds"] == 0.0
     assert data["analysis"]["ignore_trail_seconds"] == 0.0
     assert data["analysis"]["min_window_seconds"] == 5.0
+
+
+def test_default_config_toml_omits_removed_logging_file_key() -> None:
+    data = tomllib.loads(DEFAULT_CONFIG_TOML)
+
+    assert "file" not in data["logging"]
 
 
 def test_default_config_toml_documents_approved_slowpics_defaults() -> None:
@@ -507,6 +570,9 @@ def test_schema_model_enums_accept_config_strings_and_reject_unknown_values() ->
     assert slowpics.visibility == Visibility.PUBLIC
     assert logging.level == LogLevel.DEBUG
     assert logging.format == LogFormat.JSON
+
+    auto_screenshots = ScreenshotsConfig.model_validate({"active_rect_detection": "auto"})
+    assert auto_screenshots.active_rect_detection == ScreenshotActiveRectDetection.AUTO
 
     with pytest.raises(ValidationError):
         ScreenshotsConfig.model_validate({"overlay_mode": "verbose"})

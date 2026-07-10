@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 import structlog
 
 from frame_compare.config.schema_enums import ScreenshotAlignedScalePolicy, ScreenshotGeometryMode
 from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner, FFmpegRunner
 from frame_compare.render.geometry import (
+    ActiveRectDetectionMode,
+    ActiveRectSource,
     GeometryRect,
     RenderGeometryOptions,
     RenderGeometryPlan,
@@ -51,7 +53,7 @@ class _PreparedBatchRequest:
 @dataclass(frozen=True, slots=True)
 class _ResolvedRequestActiveRect:
     rect: GeometryRect | None
-    source: Literal["explicit", "metadata"]
+    source: ActiveRectSource
 
 
 def _validate_batch_request_lengths(request: ScreenshotBatchRequest) -> None:
@@ -97,11 +99,15 @@ def validate_ffmpeg_batch_tonemap_gate(
         raise TonemapRequiresVapourSynthError()
 
 
-def resolve_batch_ffmpeg_runner(ffmpeg_runner: FFmpegRunner | None) -> FFmpegRunner:
+def resolve_batch_ffmpeg_runner(
+    ffmpeg_runner: FFmpegRunner | None,
+    *,
+    extraction_timeout_seconds: float = 30.0,
+) -> FFmpegRunner:
     if ffmpeg_runner is not None:
         return ffmpeg_runner
 
-    return DefaultFFmpegRunner()
+    return DefaultFFmpegRunner(extraction_timeout_seconds=extraction_timeout_seconds)
 
 
 def validate_batch_requests(batch_requests: list[ScreenshotBatchRequest]) -> None:
@@ -348,6 +354,11 @@ def _resolve_request_active_rect(
     warnings: list[str] | None,
 ) -> _ResolvedRequestActiveRect:
     if request.active_rect is not None:
+        if request.active_rect_source is not None:
+            return _ResolvedRequestActiveRect(
+                request.active_rect,
+                _validated_active_rect_source(request.active_rect_source),
+            )
         if request.diagnostic_metadata_trusted_for_geometry:
             _warn_if_metadata_geometry_rejected(
                 request,
@@ -371,6 +382,19 @@ def _resolve_request_active_rect(
         )
 
     return _ResolvedRequestActiveRect(None, "explicit")
+
+
+def _validated_active_rect_source(value: ActiveRectSource) -> ActiveRectSource:
+    if value not in (
+        "explicit",
+        "metadata",
+        "dimension-derived",
+        "aspect-ratio-derived",
+        "content-derived",
+        "full-frame",
+    ):
+        raise ValueError(f"Unsupported active rect source {value!r}")
+    return value
 
 
 def _warn_if_metadata_geometry_rejected(
@@ -479,11 +503,14 @@ def _geometry_plans_for_batch(
     return plan_render_geometry(
         sources,
         mode="aligned",
-        options=_geometry_options_from_config(config),
+        options=_geometry_options_from_config(config, prepared_requests),
     )
 
 
-def _geometry_options_from_config(config: ConfigSchema) -> RenderGeometryOptions:
+def _geometry_options_from_config(
+    config: ConfigSchema,
+    prepared_requests: list[_PreparedBatchRequest] | None = None,
+) -> RenderGeometryOptions:
     target_size: tuple[int, int] | None = None
     if config.screenshots.aligned_scale_policy == ScreenshotAlignedScalePolicy.EXPLICIT_SIZE:
         target_width = config.screenshots.aligned_target_width
@@ -493,10 +520,24 @@ def _geometry_options_from_config(config: ConfigSchema) -> RenderGeometryOptions
         target_size = (target_width, target_height)
 
     return RenderGeometryOptions(
-        active_rect_detection=config.screenshots.active_rect_detection.value,
+        active_rect_detection=_active_rect_detection_for_geometry(config, prepared_requests),
         aligned_scale_policy=config.screenshots.aligned_scale_policy.value,
         aligned_target_size=target_size,
     )
+
+
+def _active_rect_detection_for_geometry(
+    config: ConfigSchema,
+    prepared_requests: list[_PreparedBatchRequest] | None,
+) -> ActiveRectDetectionMode:
+    if prepared_requests and all(
+        prepared.request.active_rect is not None
+        and prepared.request.active_rect_source is not None
+        and prepared.request.active_rect_detection_mode is not None
+        for prepared in prepared_requests
+    ):
+        return "provided"
+    return config.screenshots.active_rect_detection.value
 
 
 def _source_geometry_for_request(

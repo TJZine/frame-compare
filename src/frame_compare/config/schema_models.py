@@ -41,6 +41,8 @@ def _empty_user_frames() -> list[int]:
 class PathsConfig(BaseModel):
     """Filesystem paths relative to the workspace root."""
 
+    model_config = ConfigDict(extra="forbid")
+
     input_dir: str = "comparison_videos"
     screenshots_dir: str = "screenshots"
     generated_dir: str = "generated"
@@ -59,7 +61,6 @@ class AnalysisConfig(BaseModel):
     bright_frame_count: int = Field(default=0, ge=0)
     motion_frame_count: int = Field(default=0, ge=0)
     random_seed: int = 42
-    save_frames_data: bool = True
     performance_mode: AnalysisPerformanceMode = AnalysisPerformanceMode.QUALITY
     ignore_lead_seconds: float = Field(default=0.0, ge=0.0)
     ignore_trail_seconds: float = Field(default=0.0, ge=0.0)
@@ -92,6 +93,8 @@ class AnalysisConfig(BaseModel):
 
 class AudioAlignmentConfig(BaseModel):
     """Audio alignment and interactive alignment configuration."""
+
+    model_config = ConfigDict(extra="forbid")
 
     enable: bool = True
     sample_rate: int = Field(default=8000, ge=4000, le=48000)
@@ -176,8 +179,9 @@ class SourcesConfig(BaseModel):
 class ScreenshotsConfig(BaseModel):
     """Screenshot rendering settings (encoder choice, overlays, compression)."""
 
+    model_config = ConfigDict(extra="forbid")
+
     use_ffmpeg: bool = False
-    directory_name: str = "screenshots"
     overlay_mode: OverlayMode = OverlayMode.STANDARD
     include_frame_number: bool = True
     png_compression: int = Field(default=6, ge=0, le=9)
@@ -228,6 +232,8 @@ class ScreenshotsConfig(BaseModel):
 class ColorConfig(BaseModel):
     """Tonemapping configuration for HDR sources."""
 
+    model_config = ConfigDict(extra="forbid")
+
     enable_tonemap: bool = True
     preset: TonemapPreset = TonemapPreset.REFERENCE
     target_nits: int = Field(default=100, ge=100, le=1000)
@@ -238,6 +244,8 @@ class ColorConfig(BaseModel):
 
 class SlowpicsConfig(BaseModel):
     """slow.pics upload configuration and retry policy."""
+
+    model_config = ConfigDict(extra="forbid")
 
     auto_upload: bool = False
     confirm_upload_after_report: bool = False
@@ -254,6 +262,8 @@ class SlowpicsConfig(BaseModel):
 class TmdbConfig(BaseModel):
     """TMDB metadata lookup configuration."""
 
+    model_config = ConfigDict(extra="forbid")
+
     api_key: str | None = None
     enabled: bool = True
     unattended: bool = False
@@ -264,6 +274,8 @@ class TmdbConfig(BaseModel):
 
 class ReportConfig(BaseModel):
     """HTML report generation configuration."""
+
+    model_config = ConfigDict(extra="forbid")
 
     enable: bool = True
     output_dir: str | None = None
@@ -284,15 +296,18 @@ class ReportConfig(BaseModel):
 class DiagnosticsConfig(BaseModel):
     """Optional diagnostic outputs for development and debugging."""
 
+    model_config = ConfigDict(extra="forbid")
+
     per_frame_nits: bool = False
 
 
 class LoggingConfig(BaseModel):
-    """Logging configuration (level, format, optional file path)."""
+    """Logging configuration (level and format)."""
+
+    model_config = ConfigDict(extra="forbid")
 
     level: LogLevel = LogLevel.INFO
     format: LogFormat = LogFormat.CONSOLE
-    file: str | None = None
 
 
 __all__ = [

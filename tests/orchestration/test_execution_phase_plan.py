@@ -11,23 +11,23 @@ from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
 from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest
 from frame_compare.orchestration.execution import (
-    _apply_phase_output,
     build_execution_phase_plan,
     build_phases_before_align,
 )
-from frame_compare.orchestration.types import (
+from frame_compare.orchestration.execution_types import (
     AlignPhaseOutput,
     ConfirmSlowpicsUploadPhaseOutput,
     ExecutionState,
     FramePlanPhaseOutput,
     MetadataPrefetch,
-    PostUploadActionResult,
     PrepState,
     PublishPhaseOutput,
     RenderArtifacts,
     RenderPhaseOutput,
     RunArtifacts,
 )
+from frame_compare.orchestration.phase_output_application import apply_phase_output
+from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.types import WorkspacePaths
 
 from .execute_run_helpers import FakeFFmpegRunner, FakeVSLoader, clip_state
@@ -232,7 +232,7 @@ def test_apply_phase_output_records_frame_plan_selection_labels(tmp_path: Path) 
         66: SelectionDetail(frame_index=66, label="Random", source="frame_plan"),
     }
 
-    _apply_phase_output(
+    apply_phase_output(
         ctx=ctx,
         state=state,
         output=FramePlanPhaseOutput(
@@ -248,7 +248,7 @@ def test_apply_phase_output_records_frame_plan_selection_labels(tmp_path: Path) 
 
 
 def test_apply_phase_output_handles_report_output_explicitly(tmp_path: Path) -> None:
-    from frame_compare.orchestration.types import ReportPhaseOutput
+    from frame_compare.orchestration.execution_types import ReportPhaseOutput
 
     workspace = WorkspacePaths(
         root=tmp_path,
@@ -271,7 +271,7 @@ def test_apply_phase_output_handles_report_output_explicitly(tmp_path: Path) -> 
     state = ExecutionState(artifacts=RunArtifacts())
     report_path = tmp_path / "report.html"
 
-    _apply_phase_output(
+    apply_phase_output(
         ctx=ctx,
         state=state,
         output=ReportPhaseOutput(report_path=report_path, report_succeeded=True),
@@ -314,7 +314,7 @@ def test_apply_phase_output_retains_publish_post_upload_actions(tmp_path: Path) 
         warning="webhook: delivery failed",
     )
 
-    _apply_phase_output(
+    apply_phase_output(
         ctx=ctx,
         state=state,
         output=PublishPhaseOutput(
@@ -352,7 +352,7 @@ def test_apply_phase_output_records_slowpics_confirmation_status_and_warnings(
     )
     state = ExecutionState(artifacts=RunArtifacts())
 
-    _apply_phase_output(
+    apply_phase_output(
         ctx=ctx,
         state=state,
         output=ConfirmSlowpicsUploadPhaseOutput(
@@ -393,7 +393,7 @@ def test_apply_phase_output_extends_warnings_from_render_output(tmp_path: Path) 
         warnings=["Screenshot geometry alignment skipped: using native geometry."],
     )
 
-    _apply_phase_output(ctx=ctx, state=state, output=RenderPhaseOutput(render=render))
+    apply_phase_output(ctx=ctx, state=state, output=RenderPhaseOutput(render=render))
 
     assert state.artifacts.render is render
     assert state.warnings == [
@@ -424,7 +424,7 @@ def test_apply_phase_output_extends_warnings_from_align_output(tmp_path: Path) -
     )
     state = ExecutionState(artifacts=RunArtifacts(warnings=["pre-existing warning"]))
 
-    _apply_phase_output(
+    apply_phase_output(
         ctx=ctx,
         state=state,
         output=AlignPhaseOutput(
@@ -471,4 +471,4 @@ def test_apply_phase_output_rejects_unknown_output_type(tmp_path: Path) -> None:
     state = ExecutionState(artifacts=RunArtifacts())
 
     with pytest.raises(TypeError, match="UnknownPhaseOutput"):
-        _apply_phase_output(ctx=ctx, state=state, output=UnknownPhaseOutput())  # type: ignore[arg-type]
+        apply_phase_output(ctx=ctx, state=state, output=UnknownPhaseOutput())  # type: ignore[arg-type]

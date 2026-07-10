@@ -203,6 +203,7 @@ def print_at_a_glance(
         f"seed={_styled_value(str(config.analysis.random_seed))}"
     )
     _add_kv(table, "selection", selection_text)
+    _add_kv(table, "analysis mode", _styled_value(str(config.analysis.performance_mode.value)))
     renderer = "ffmpeg" if config.screenshots.use_ffmpeg else "vapoursynth"
     _add_kv(table, "renderer", _styled_value(renderer))
     _add_kv(table, "overlay", _styled_value(str(config.screenshots.overlay_mode.value)))

@@ -81,10 +81,7 @@ def test_build_extract_frame_argv_places_geometry_filters_after_exact_frame_sele
     )
 
     assert argv[argv.index("-vf") + 1] == (
-        "select=eq(n\\,100),"
-        "crop=1440:1080:240:0,"
-        "scale=1280:960,"
-        "pad=1280:1080:0:60:color=black"
+        "select=eq(n\\,100),crop=1440:1080:240:0,scale=1280:960,pad=1280:1080:0:60:color=black"
     )
 
 
@@ -130,21 +127,54 @@ def test_default_ffmpeg_runner_extract_frame_uses_shared_command_policy(
 
     run_subprocess.assert_called_once_with(
         [
-        "ffmpeg",
-        "-y",
-        "-i",
-        "clip.mkv",
-        "-vf",
-        "select=eq(n\\,100)",
-        "-frames:v",
-        "1",
-        "-q:v",
-        "1",
-        str(output),
+            "ffmpeg",
+            "-y",
+            "-i",
+            "clip.mkv",
+            "-vf",
+            "select=eq(n\\,100)",
+            "-frames:v",
+            "1",
+            "-q:v",
+            "1",
+            str(output),
         ],
         timeout_seconds=30.0,
     )
     assert output.parent.is_dir()
+
+
+def test_default_ffmpeg_runner_extract_frame_uses_configured_timeout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    run_subprocess = MagicMock(
+        return_value=subprocess.CompletedProcess(args=[], returncode=0, stdout=b"", stderr=b"")
+    )
+    monkeypatch.setattr("frame_compare.render.backend.ffmpeg.run_subprocess", run_subprocess)
+
+    runner = DefaultFFmpegRunner(extraction_timeout_seconds=47.0)
+    runner.extract_frame(Path("clip.mkv"), 1, tmp_path / "frame.png")
+
+    assert run_subprocess.call_args.kwargs["timeout_seconds"] == 47.0
+
+
+def test_default_ffmpeg_runner_probe_hdr_keeps_fixed_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_subprocess = MagicMock(
+        return_value=subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=b'{"streams": []}',
+            stderr=b"",
+        )
+    )
+    monkeypatch.setattr("frame_compare.render.backend.ffmpeg.run_subprocess", run_subprocess)
+
+    runner = DefaultFFmpegRunner(extraction_timeout_seconds=47.0)
+    assert runner.probe_hdr(Path("clip.mkv")) is None
+
+    assert run_subprocess.call_args.kwargs["timeout_seconds"] == 15.0
 
 
 def test_default_ffmpeg_runner_extract_frame_wraps_missing_binary(

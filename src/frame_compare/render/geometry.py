@@ -7,21 +7,22 @@ from dataclasses import dataclass
 from typing import Literal
 
 GeometryMode = Literal["native", "aligned"]
-ActiveRectDetectionMode = Literal["provided", "dimension", "aspect_ratio"]
+ActiveRectDetectionMode = Literal["provided", "dimension", "aspect_ratio", "auto"]
 AlignedScalePolicy = Literal[
     "largest_active",
     "smallest_active",
     "reference_active",
     "explicit_size",
 ]
-ProvidedActiveRectSource = Literal["explicit", "metadata"]
 ActiveRectSource = Literal[
     "explicit",
     "metadata",
     "dimension-derived",
     "aspect-ratio-derived",
+    "content-derived",
     "full-frame",
 ]
+ProvidedActiveRectSource = ActiveRectSource
 
 ASPECT_RATIO_MATCH_REL_TOLERANCE = 0.005
 ASPECT_RATIO_MIN_CROP_REL_DELTA = 0.005
@@ -251,8 +252,10 @@ def _validate_sources(sources: Sequence[SourceGeometry]) -> None:
 
 
 def _validate_options(options: RenderGeometryOptions) -> None:
-    if options.active_rect_detection not in ("provided", "dimension", "aspect_ratio"):
-        raise ValueError("active rect detection must be 'provided', 'dimension', or 'aspect_ratio'")
+    if options.active_rect_detection not in ("provided", "dimension", "aspect_ratio", "auto"):
+        raise ValueError(
+            "active rect detection must be 'provided', 'dimension', 'aspect_ratio', or 'auto'"
+        )
     if options.aligned_scale_policy not in (
         "largest_active",
         "smallest_active",
@@ -298,7 +301,7 @@ def _resolve_active_rects(
 ) -> tuple[tuple[GeometryRect, ActiveRectSource], ...]:
     dimension_rects = (
         _dimension_derived_active_rects(sources)
-        if active_rect_detection in ("dimension", "aspect_ratio")
+        if active_rect_detection in ("dimension", "aspect_ratio", "auto")
         else tuple(None for _source in sources)
     )
     resolved: list[tuple[GeometryRect, ActiveRectSource]] = []
@@ -311,7 +314,7 @@ def _resolve_active_rects(
         else:
             resolved.append((GeometryRect(0, 0, source.width, source.height), "full-frame"))
     resolved_tuple = tuple(resolved)
-    if active_rect_detection != "aspect_ratio":
+    if active_rect_detection not in ("aspect_ratio", "auto"):
         return resolved_tuple
     return _aspect_ratio_derived_active_rects(sources, resolved_tuple)
 
@@ -351,11 +354,15 @@ def _is_safe_active_rect(rect: GeometryRect, source: SourceGeometry) -> bool:
 
 
 def _mod_safe_rect(rect: GeometryRect) -> GeometryRect:
-    width = _mod_safe_size(rect.width)
-    height = _mod_safe_size(rect.height)
+    x_offset = rect.x % 2 if rect.width > 1 else 0
+    y_offset = rect.y % 2 if rect.height > 1 else 0
+    width = _mod_safe_size(rect.width - x_offset)
+    height = _mod_safe_size(rect.height - y_offset)
+    if width <= 1 or height <= 1:
+        return rect
     return GeometryRect(
-        rect.x + ((rect.width - width) // 2),
-        rect.y + ((rect.height - height) // 2),
+        rect.x + x_offset + ((rect.width - x_offset - width) // 2),
+        rect.y + y_offset + ((rect.height - y_offset - height) // 2),
         width,
         height,
     )
@@ -441,7 +448,7 @@ def _aspect_ratio_candidates(
                 raw_candidates.append(_AspectCandidate(_rect_ratio(rect), index, evidence_rank))
 
     for index, (rect, rect_source) in enumerate(resolved):
-        if rect_source not in ("dimension-derived", "full-frame"):
+        if rect_source not in ("dimension-derived", "full-frame", "content-derived"):
             continue
         ratio = _rect_ratio(rect)
         if _aspect_candidate_support_count(ratio, resolved) >= 2:

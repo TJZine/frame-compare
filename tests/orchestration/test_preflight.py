@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 
 from frame_compare.config.errors import ConfigNotFoundError
+from frame_compare.config.schema import ConfigSchema, PathsConfig, ReportConfig
+from frame_compare.errors import PathEscapesRootError
 from frame_compare.orchestration.errors import (
     DirectoryNotFoundError,
     NoVideosFoundError,
@@ -15,8 +17,11 @@ from frame_compare.orchestration.preflight import (
     PreflightResult,
     discover_inputs,
     prepare_preflight,
+    resolve_contained_path,
     resolve_paths,
+    resolve_selected_config_path,
     resolve_workspace,
+    validate_and_normalize_config_paths,
 )
 
 # Minimal valid TOML config content
@@ -138,6 +143,158 @@ class TestResolvePaths:
 
         # The env var should be expanded
         assert result.input_dir == (Path(test_root) / "in").resolve()
+
+    @pytest.mark.parametrize(
+        "field_name",
+        ["config_dir", "screenshots_dir", "generated_dir", "report.output_dir"],
+    )
+    @pytest.mark.parametrize("escape_kind", ["relative", "absolute", "symlink"])
+    def test_contained_config_paths_reject_resolved_escapes(
+        self,
+        tmp_path: Path,
+        field_name: str,
+        escape_kind: str,
+    ) -> None:
+        root = tmp_path / "workspace"
+        root.mkdir()
+        external = tmp_path / "external"
+        external.mkdir()
+        if escape_kind == "relative":
+            escaped_value = "../external/output"
+        elif escape_kind == "absolute":
+            escaped_value = str(external / "output")
+        else:
+            (root / "linked-outside").symlink_to(external, target_is_directory=True)
+            escaped_value = "linked-outside/output"
+
+        paths = PathsConfig()
+        report = ReportConfig()
+        if field_name == "report.output_dir":
+            report = report.model_copy(update={"output_dir": escaped_value})
+        else:
+            paths = paths.model_copy(update={field_name: escaped_value})
+        config = ConfigSchema(paths=paths, report=report)
+
+        with pytest.raises(PathEscapesRootError) as exc_info:
+            resolve_paths(config, root)
+
+        error = exc_info.value
+        assert error.code == "FC-3009"
+        assert error.context.details == {
+            "path": str((external / "output").resolve()),
+            "root": str(root.resolve()),
+        }
+
+    def test_resolve_paths_allows_absolute_external_input(self, tmp_path: Path) -> None:
+        root = tmp_path / "workspace"
+        external_input = tmp_path / "media"
+        root.mkdir()
+        external_input.mkdir()
+        config = ConfigSchema(
+            paths=PathsConfig(input_dir=str(external_input)),
+        )
+
+        result = resolve_paths(config, root)
+
+        assert result.input_dir == external_input.resolve()
+        assert result.generated_dir.is_relative_to(root.resolve())
+
+    def test_resolve_paths_allows_symlinked_external_input(self, tmp_path: Path) -> None:
+        root = tmp_path / "workspace"
+        external_input = tmp_path / "media"
+        root.mkdir()
+        external_input.mkdir()
+        (root / "linked-media").symlink_to(external_input, target_is_directory=True)
+        config = ConfigSchema(paths=PathsConfig(input_dir="linked-media"))
+
+        result = resolve_paths(config, root)
+
+        assert result.input_dir == external_input.resolve()
+
+    def test_relative_report_output_is_normalized_without_mutating_config(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        config = ConfigSchema(report=ReportConfig(output_dir="reports/custom"))
+
+        normalized = validate_and_normalize_config_paths(config, tmp_path)
+
+        assert normalized is not config
+        assert normalized.report is not config.report
+        assert normalized.report.output_dir == str((tmp_path / "reports" / "custom").resolve())
+        assert config.report.output_dir == "reports/custom"
+
+    def test_resolve_contained_path_expands_environment_variables(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("CONTAINED_OUTPUT", "generated/custom")
+
+        assert (
+            resolve_contained_path("$CONTAINED_OUTPUT", tmp_path)
+            == (tmp_path / "generated" / "custom").resolve()
+        )
+
+    def test_selected_config_allows_exact_windows_portable_state_path(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Patch the owner seam so this Windows-only policy remains unit-testable
+        # on every supported development platform.
+        root = tmp_path / "workspace"
+        root.mkdir()
+        portable_config = tmp_path / "portable-state" / "config.toml"
+        monkeypatch.setattr(
+            "frame_compare.orchestration.preflight._windows_portable_state_config_path",
+            lambda: portable_config,
+        )
+
+        assert resolve_selected_config_path(portable_config, root) == portable_config.resolve()
+
+    def test_selected_config_windows_exception_rejects_external_sibling(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        root = tmp_path / "workspace"
+        root.mkdir()
+        state_dir = tmp_path / "portable-state"
+        portable_config = state_dir / "config.toml"
+        monkeypatch.setattr(
+            "frame_compare.orchestration.preflight._windows_portable_state_config_path",
+            lambda: portable_config,
+        )
+
+        with pytest.raises(PathEscapesRootError):
+            resolve_selected_config_path(state_dir / "other.toml", root)
+
+    def test_selected_config_windows_exception_rejects_symlinked_leaf_escape(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        root = tmp_path / "workspace"
+        root.mkdir()
+        state_dir = tmp_path / "portable-state"
+        state_dir.mkdir()
+        portable_config = state_dir / "config.toml"
+        external_config = tmp_path / "external.toml"
+        external_config.write_text("", encoding="utf-8")
+        portable_config.symlink_to(external_config)
+        monkeypatch.setattr(
+            "frame_compare.orchestration.preflight._windows_portable_state_config_path",
+            lambda: portable_config,
+        )
+
+        with pytest.raises(PathEscapesRootError) as exc_info:
+            resolve_selected_config_path(portable_config, root)
+
+        assert exc_info.value.context.details == {
+            "path": str(external_config.resolve()),
+            "root": str(root.resolve()),
+        }
 
 
 class TestDiscoverInputs:
@@ -268,3 +425,49 @@ class TestPreparePreflight:
         )
 
         assert result.workspace.input_dir == override_dir.resolve()
+
+    def test_prepare_preflight_allows_external_input_override(self, tmp_path: Path) -> None:
+        root = tmp_path / "workspace"
+        _create_config(root)
+        external_input = tmp_path / "media"
+        _create_video_files(external_input, "external.mkv")
+
+        result = prepare_preflight(
+            root=root,
+            overrides={"paths": {"input_dir": str(external_input)}},
+        )
+
+        assert result.workspace.input_dir == external_input.resolve()
+        assert result.workspace.generated_dir.is_relative_to(root.resolve())
+
+    def test_prepare_preflight_allows_symlinked_external_input(self, tmp_path: Path) -> None:
+        root = tmp_path / "workspace"
+        _create_config(root, MINIMAL_CONFIG.replace('"comparison_videos"', '"linked-media"'))
+        external_input = tmp_path / "media"
+        _create_video_files(external_input, "external.mkv")
+        (root / "linked-media").symlink_to(external_input, target_is_directory=True)
+
+        result = prepare_preflight(root=root)
+
+        assert result.workspace.input_dir == external_input.resolve()
+
+    def test_prepare_preflight_rejects_external_config_before_exists_or_load(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        root = tmp_path / "workspace"
+        root.mkdir()
+        external_config = tmp_path / "missing" / "config.toml"
+
+        def _unexpected_load(*_args: object, **_kwargs: object) -> ConfigSchema:
+            raise AssertionError("load_config must not run for an external config path")
+
+        monkeypatch.setattr("frame_compare.orchestration.preflight.load_config", _unexpected_load)
+
+        with pytest.raises(PathEscapesRootError) as exc_info:
+            prepare_preflight(root=root, config_path=external_config)
+
+        assert exc_info.value.code == "FC-3009"
+        assert exc_info.value.context.details is not None
+        assert exc_info.value.context.details["path"] == str(external_config.resolve())

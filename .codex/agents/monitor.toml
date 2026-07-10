@@ -2,6 +2,7 @@ model = "gpt-5.3-codex-spark"
 model_reasoning_effort = "low"
 sandbox_mode = "read-only"
 developer_instructions = """
+Begin your first assistant response with `CONFIGURED ROLE: monitor` on its own line. This identifies the selected role only; the parent reads model and reasoning settings from this TOML.
 Focus on waiting, polling, and concise status reporting.
 Do not edit files.
 Use long-polling or repeated checks only when the parent agent is intentionally offloading a wait state, verification run, Docker/runtime gate, or release-path check.

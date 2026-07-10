@@ -24,19 +24,37 @@ By default, the script renders tier-level Rich progress to stderr while keeping
 stdout reserved for the final output JSON path. Pass `--no-progress` when a
 scripted run needs no terminal progress display.
 
-When source trims, effective FPS overrides, or shared selection windows matter,
-pass the exact source-frame window used for review with `--window-start` and
-`--window-end-exclusive`. If an orchestration selection-domain token is available
-from a prepared run, pass it with `--selection-domain` so cache identity matches
-that run. Without those arguments, the script records warnings and compares the
+Pass the exact source-frame window used for review with `--window-start` and
+`--window-end-exclusive`. Pass the orchestration selection-domain token from a
+prepared run with `--selection-domain` whenever the benchmark uses a non-default
+reference or analysis source, active-rect detection policy, source trim, effective
+FPS override, or explicit active rectangle. The tool rejects those non-default
+domains without the token so its cache cannot alias production analysis state.
+Without explicit window arguments, the script records warnings and compares the
 full analysis metric domain.
 
 The benchmark script uses the configured `paths.generated_dir` for analysis
 cache by default and resolves explicit `sources.analysis_source` selectors before
-running metrics. It supports per-source `effective_fps` overrides. It does not
-support `sources.analysis_source = "fastest"` or automatic `sources.match_fps`
-policies; use an explicit analysis source and explicit effective-FPS overrides
-for benchmark evidence.
+running metrics. It supports per-source `effective_fps` overrides and explicit
+`sources.overrides.<selector>.active_rect` overrides for the selected analysis
+source. Active rectangles affect both `quality` and `performance` metric arrays
+and cache identity, so benchmark evidence for letterboxed or pillarboxed sources
+should use the same configured analysis source and explicit active rectangle as
+a normal run. When no explicit active rectangle is configured, the benchmark
+loads `generated/clip_probe.toml` and applies the same static active-picture
+resolver used by preparation so metric metadata preserves the prepared rectangle,
+source, detection mode, and resolver algorithm ID. If the probe snapshot is not
+available, the tool fails instead of fabricating full-frame provenance; run a
+normal preparation path first or configure an explicit active rectangle for the
+selected analysis source. For `screenshots.active_rect_detection = "auto"`, the
+benchmark cannot run content refinement by itself and fails when the prepared
+static rectangle remains full-frame. Normal runtime analysis uses the resolved
+active picture prepared from explicit `sources.overrides.<selector>.active_rect`,
+trusted static metadata, configured dimension/aspect-ratio inference, opt-in
+content detection, or full-frame fallback. The benchmark tool does not support
+`sources.analysis_source = "fastest"` or automatic `sources.match_fps` policies;
+use an explicit analysis source and explicit effective-FPS overrides for
+benchmark evidence.
 
 ## Local Evidence
 
@@ -67,7 +85,7 @@ Configuration:
 - Counts: 20 random, 10 dark, 10 bright, 10 motion
 - Warm source indexes were present before this run.
 - No orchestration selection-domain token was provided, so cache identity may
-  differ from a full run with trims or source overrides.
+  differ from a full run with trims, active rectangles, or source overrides.
 
 Timing:
 

@@ -27,6 +27,10 @@ from frame_compare.errors import FrameCompareError, JSONValue
 from frame_compare.orchestration.analysis_policy import (
     validate_skip_analysis_frame_selection_contract as validate_skip_analysis_policy,
 )
+from frame_compare.orchestration.preflight import (
+    resolve_selected_config_path,
+    validate_and_normalize_config_paths,
+)
 
 from .cli_helpers import format_enum_expected
 
@@ -238,11 +242,9 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
         stderr=False,
         no_color=effective_no_color,
     )
-    log_level = "WARNING" if args.quiet else ("DEBUG" if args.verbose else "INFO")
-    log_format = "json" if args.json_output else "console"
-    deps.configure_logging(level=log_level, format=log_format)
 
     try:
+        resolve_selected_config_path(args.config_path, args.resolved_root)
         run_options = parse_run_options(args, no_color=effective_no_color)
         request = build_run_request_from_cli(run_options)
         resolve_effective_config, load_effective_config = build_effective_config_loaders(
@@ -252,9 +254,20 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
         )
 
         effective_config = load_effective_config()
+        normalized_config = validate_and_normalize_config_paths(
+            effective_config,
+            args.resolved_root,
+        )
+        log_level = (
+            "WARNING"
+            if args.quiet
+            else ("DEBUG" if args.verbose else normalized_config.logging.level.value)
+        )
+        log_format = "json" if args.json_output else normalized_config.logging.format.value
+        deps.configure_logging(level=log_level, format=log_format)
 
         if args.diagnose_paths:
-            handle_diagnose_paths(args.resolved_root, args.config_path, effective_config)
+            handle_diagnose_paths(args.resolved_root, args.config_path, normalized_config)
             return
 
         if args.write_config:
@@ -262,7 +275,7 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
             deps.write_config_to(args.config_path, effective_config)
             return
 
-        validate_run_contracts(args, deps, effective_config)
+        validate_run_contracts(args, deps, normalized_config)
 
         if not args.json_output and not args.quiet:
             print_run_preview(console, args, request, load_effective_config)
@@ -270,7 +283,7 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
         run_dependencies = build_runner_dependencies(
             args=args,
             deps=deps,
-            config=load_effective_config(),
+            config=normalized_config,
             console=console,
             resolve_effective_config=resolve_effective_config,
         )

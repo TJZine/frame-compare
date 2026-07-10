@@ -70,12 +70,32 @@ For those commands:
 - `--config` selects the config file path. Relative paths resolve from `--root`.
 - If `--config` is omitted, the CLI resolves `config/config.toml` under `--root`.
 
+The selected config file and configured `paths.config_dir`,
+`paths.screenshots_dir`, `paths.generated_dir`, and non-null
+`report.output_dir` must resolve beneath the fully resolved workspace root.
+Containment follows symlinks and expands environment variables in config path
+values, so absolute paths, `..` traversal, or symlinks that escape the root fail
+with `PathEscapesRootError` / `FC-3009`. `run`, `wizard`, `preset apply`, and
+`preset save` validate their selected config destination before config reads or
+writes; `run` also validates configured contained paths before diagnostics,
+config writes, or runtime entry. `preset list` remains root-only and ignores its
+accepted `--config` value.
+
+Media input is a read boundary, not a write boundary. Configured
+`paths.input_dir` and the `run --input` override may be relative, absolute,
+environment-expanded, or symlinked to a directory outside the workspace. This
+does not permit generated state to follow media outside the root.
+
 For the installed Windows portable shim, the shim runs the bundle launcher from the
 bundle root and injects a default `--config` for `run`, `wizard`, and supported
 `preset` subcommands when the user did not pass `--config`. The injected default
 prefers `<bundle>/config/config.toml` when it exists, otherwise it falls back to
 `%LOCALAPPDATA%/Programs/FrameCompare/state/config.toml` when that state config
-exists.
+exists. That exact installed-shim state file is the sole selected-config
+containment exception. It is allowed only on Windows when `LOCALAPPDATA` is
+available; sibling LocalAppData files and a symlinked `config.toml` leaf that
+resolves outside the state directory are rejected. This exception does not
+apply to any configured output path.
 
 ## Config-Only Sources Surface
 
@@ -122,7 +142,11 @@ source IDs.
 Configured source trims define each clip's base renderable domain. Alignment
 trims compose on top of those base trims rather than replacing them. Explicit
 config `active_rect` values are validated against the probed source dimensions
-and invalid explicit rectangles fail instead of falling back silently.
+and invalid explicit rectangles fail instead of falling back silently. Explicit
+active rectangles are the highest-precedence active-picture evidence during
+preparation; when omitted, preparation may use trusted static metadata,
+dimension/aspect-ratio inference, or a full-frame fallback according to
+`screenshots.active_rect_detection`.
 `effective_fps` is an explicit AssumeFPS-style timing override: it changes
 timing/FPS interpretation without resampling, dropping, interpolating, or
 duplicating source frames. Mixed-FPS validation compares effective FPS values
@@ -200,6 +224,8 @@ unchanged.
   `force interactive`, and `VSPreview` while preserving the same effective
   configuration facts. The `previous offsets` row reports only the effective
   config mode: `disabled`, `prompt`, or `always`.
+- The `analysis mode` row reports the effective `analysis.performance_mode`:
+  `quality` or `performance`.
 - The at-a-glance workspace paths are resolved base paths. When
   `paths.use_run_folders = true`, the `screenshots` and `generated` rows describe the
   configured base paths rather than the fresh per-run subdirectories reserved later in
@@ -229,23 +255,41 @@ unchanged.
 - The analysis cache fingerprint includes the selected reference identity and a
   stable all-source selection-domain token. That token stores
   `analysis_source_path`, `reference_path`, source identities, source trims,
-  effective FPS values, the configured analysis ignore-window settings, and the
-  final shared selectable window. Cache schema v5 stores
+  effective FPS values, the configured analysis ignore-window settings,
+  active-rect resolver policy, each clip's resolved active rectangle, and the final
+  shared selectable window. Cache schema v6 stores
   `analysis_source_path`, `performance_mode`, `algorithm_id`, `metric_backend`,
-  and stable `algorithm_identity_json` in `MetricsMetadata`, and different
+  stable `algorithm_identity_json`, `metric_active_rect`, active-rect source,
+  detection mode, and active-rect resolver algorithm ID in
+  `MetricsMetadata`, and different
   selected references, selected analysis sources, selection domains,
-  performance modes, or metric algorithm identities from the same input set do
-  not satisfy each other. When `sources.analysis_source = "reference"`,
-  `analysis_source_path` is the selected reference path. Metric-array cache
+  performance modes, metric algorithm identities, or active-rect metric domains
+  from the same input set do not satisfy each other. When
+  `sources.analysis_source = "reference"`, `analysis_source_path` is the selected
+  reference path. Prepared full-frame active rectangles represent no crop;
+  explicit, metadata, dimension-derived, aspect-ratio-derived, or
+  content-derived rectangles produce coordinate-specific metric/cache
+  identities. A typed metric request also keys the analysis source, explicit
+  effective FPS versus source-FPS semantics, metric rectangle, and active-rect
+  provenance, and cache loading validates that request before accepting a hit.
+  Metric-array cache
   identity excludes `user_frames`, random seed, frame-selection counts,
   `dark_quantile`, and `bright_quantile` because those values affect frame
   choice rather than metric computation.
+- When `screenshots.active_rect_detection = "auto"` and analysis metrics are
+  required, `run --from-cache-only` must validate the exact content-derived
+  active-rect domain before runtime side effects. If content probing cannot run,
+  the command fails through the standard typed metrics/preparation error path
+  rather than silently validating a full-frame cache identity.
 - The full fingerprint remains inside the cache payload and is validated on load.
   Legacy run-folder `cache.compframes` files are not used as analysis cache hits.
 - Analysis is skipped automatically when `dark_frame_count`, `bright_frame_count`,
   and `motion_frame_count` are all `0`; `frame_plan` still selects configured
-  user/random frames. With `paths.use_run_folders = true`, runs that proceed reserve a fresh run folder;
-  existing run folders are not reused to satisfy analysis cache hits.
+  user/random frames. With `paths.use_run_folders = true`, runs that proceed reserve
+  a fresh run folder beneath the contained resolved `paths.generated_dir`, never
+  beneath `paths.input_dir`; existing run folders are not reused to satisfy analysis
+  cache hits. Screenshots, run-local generated state, and fallback reports remain
+  beneath that reserved folder even when media input is external.
 - In run-folder mode, folder names are capped at 64 characters and do not
   include exact timestamps. The first successful reservation uses the title-first base
   name, and collisions use compact numeric suffixes such as `_2` and `_3`.
@@ -471,7 +515,6 @@ The default `[analysis]` frame-selection and metric surface is:
 - `bright_frame_count = 0`
 - `motion_frame_count = 0`
 - `random_seed = 42`
-- `save_frames_data = true`
 - `performance_mode = "quality"`
 
 `user_frames` are original selected-reference source-frame numbers. They are not
@@ -495,10 +538,16 @@ dedicated `run` flags for them:
 - `bright_quantile = 0.95`
 
 `performance_mode` selects the analysis metric algorithm identity used for
-luminance and motion arrays. `quality` is the default and preserves the current
-full-frame Python/NumPy metric behavior. `performance` is an approximate
-VapourSynth PlaneStats metric mode; it can select different dark, bright, or
-motion frames than `quality` and is cache-isolated from `quality`.
+luminance and motion arrays. `quality` is the default Python/NumPy metric mode.
+`performance` is an approximate VapourSynth PlaneStats metric mode; it can select
+different dark, bright, or motion frames than `quality` and is cache-isolated
+from `quality`. Both modes apply the prepared active picture rectangle for the
+selected analysis source before metric calculation and use active-rect-specific
+cache identity. The prepared rectangle can come from an explicit
+`sources.overrides.<selector>.active_rect`, trusted static metadata, configured
+dimension/aspect-ratio detection, opt-in sampled content detection, or full-frame
+fallback. There are no new analysis performance modes or aliases for active-rect
+detection; `quality` and `performance` consume the same prepared rectangle.
 There is no dedicated `run` flag for analysis performance mode in v1.
 
 The lead/trail fields define a global selectable analysis window inside each
@@ -596,14 +645,31 @@ dedicated `run` flags for them:
   `aligned` is the opt-in mode for deterministic mixed-geometry screenshot
   alignment. Native mode ignores aligned-only geometry fields for behavior, but
   the config schema still validates their enum values and target field types.
-- `active_rect_detection = "provided" | "dimension" | "aspect_ratio"` selects
-  the active-image rectangle evidence used by aligned screenshots. `provided`
-  uses only explicit per-source `active_rect` overrides and trusted metadata
-  active rectangles. `dimension` also allows same-height or same-width centered
-  crop inference. `aspect_ratio` is the aligned default and additionally allows
-  conservative centered vertical letterbox inference when a target content
-  aspect ratio has at least two matching sources or one explicit/trusted
-  metadata source.
+- `active_rect_detection = "provided" | "dimension" | "aspect_ratio" | "auto"`
+  selects the shared active-picture evidence used during preparation.
+  `provided` uses only explicit per-source `active_rect` overrides and trusted
+  static metadata active rectangles. `dimension` also allows same-height or
+  same-width centered crop inference. `aspect_ratio` is the default and
+  additionally allows conservative centered vertical letterbox inference when a
+  target content aspect ratio has at least two matching sources or one
+  explicit/trusted metadata source. `auto` is opt-in; it first applies the same
+  static evidence as `aspect_ratio`, then conservatively samples luma frames
+  after the shared selectable window is known and only refines clips that still
+  have unresolved full-frame static rectangles. It returns full frame when
+  uncertain and is not ML, OCR, perceptual HDR analysis, or exhaustive scanning.
+  Metric analysis uses the resolved active picture. Aligned screenshot render
+  uses the same resolved active picture for crop/scale/pad planning. Native
+  screenshot render remains native/full-frame output. Analysis cache identity
+  includes the resolved active rectangle and provenance, including
+  `content-derived` rectangles from `auto`.
+
+  Example opt-in configuration:
+
+  ```toml
+  [screenshots]
+  active_rect_detection = "auto"
+  ```
+
 - `aligned_scale_policy = "largest_active" | "smallest_active" |
   "reference_active" | "explicit_size"` selects the aligned output canvas policy.
   `largest_active` is the aligned default and uses the active-source envelope
@@ -632,6 +698,39 @@ dedicated `run` flags for them:
   compression input for Pillow and VapourSynth fpng. Pillow receives the value
   directly. Fpng maps `0..3` to `0`, `4..6` to `1`, and `7..9` to `2`;
   unsupported values fail config validation rather than being silently clamped.
+- `ffmpeg_timeout_seconds` defaults to `30.0` and must be at least `5.0`. It
+  controls only FFmpeg frame extraction. The separate ffprobe HDR metadata
+  probe keeps its fixed `15.0` second timeout.
+
+## Config Validation, Logging, And Migration
+
+Unknown keys at the root of the config remain ignored so a config can carry
+top-level sections owned by other tools. Every Frame Compare-owned nested
+config table rejects unknown keys, including nested source override and active
+rectangle tables. A misspelled or stale key inside an owned table therefore
+fails config validation instead of silently using a default.
+
+The implemented `[logging]` surface contains only:
+
+- `level = "INFO"`, accepting `DEBUG`, `INFO`, `WARNING`, or `ERROR`
+- `format = "console"`, accepting `console` or `json`
+
+For `run`, logging is configured only after the effective config loads and
+validates. `--quiet` forces level `WARNING`; otherwise `--verbose` forces
+`DEBUG`; otherwise `[logging].level` applies. `--json` forces JSON-formatted
+logs on stderr; otherwise `[logging].format` applies. This does not change the
+successful `run --json` stdout schema or permit human diagnostics on JSON
+stdout.
+
+Configs created before this contract must remove these inert keys because they
+now fail nested validation:
+
+- Remove `analysis.save_frames_data`; it never controlled persisted frame data
+  and has no replacement.
+- Replace `screenshots.directory_name` with `paths.screenshots_dir`, which owns
+  the screenshot destination.
+- Remove `logging.file`; Frame Compare does not support config-driven file
+  logging.
 
 ## Config-Only Audio Alignment Surface
 
@@ -711,6 +810,11 @@ enabled.
 above. That means the flags in the previous section are persistent when combined with
 `--write-config`.
 
+Contained path values are validated before persistence. A non-null relative
+`report.output_dir` is normalized to an absolute workspace-root-based path for
+runtime use, while `run --write-config`, `preset apply`, and `preset save`
+persist the original relative value so saved configurations remain portable.
+
 Before writing, `run --write-config` rejects effective configs that combine
 `audio_alignment.previous_offsets = "prompt"` or `"always"` with
 `audio_alignment.force_interactive = true`, and rejects those reuse modes when
@@ -759,6 +863,9 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   - slow.pics delete-after-upload
   - optional TMDB API key
 - It validates the generated payload against `ConfigSchema` before writing.
+- It rejects a selected config destination outside the workspace before prompting,
+  except for the exact installed Windows portable state-config fallback described
+  under Shared Path Resolution Rules. The prompted media input may be external.
 - It does not advertise or accept unsupported slow.pics visibility values.
 - On success, it writes a concise confirmation to stderr including the resolved
   config path.
@@ -800,6 +907,8 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 
 ### `preset apply`
 
+- Validates the selected config path before loading, then validates contained path
+  values in both the loaded config and the preset-updated config.
 - Loads the resolved config file.
 - Applies the named preset from `<root>/config/presets`.
 - Writes the updated config back to the resolved config path.
@@ -808,6 +917,8 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 
 ### `preset save`
 
+- Validates the selected config path before loading and validates contained path
+  values in the loaded config.
 - Loads the resolved config file.
 - Saves the current config as a named preset under `<root>/config/presets`.
 - On success, writes a concise confirmation to stderr including the preset name and

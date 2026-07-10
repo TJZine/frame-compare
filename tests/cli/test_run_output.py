@@ -3,11 +3,12 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from pytest import MonkeyPatch
 
 from frame_compare.cli.entry import app
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
-from frame_compare.orchestration.types import PostUploadActionResult
+from frame_compare.utils.post_upload_actions import PostUploadActionResult
 
 from .cli_helpers import (
     MINIMAL_CONFIG,
@@ -592,7 +593,24 @@ def test_run_env_no_color_sets_request_no_color(monkeypatch: MonkeyPatch) -> Non
     assert captured["request"].no_color is True
 
 
-def test_run_verbose_calls_configure_logging_debug(monkeypatch: MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("configured_level", "configured_format", "args", "expected_level", "expected_format"),
+    [
+        ("ERROR", "json", [], "ERROR", "json"),
+        ("ERROR", "json", ["--quiet"], "WARNING", "json"),
+        ("ERROR", "json", ["--verbose"], "DEBUG", "json"),
+        ("ERROR", "json", ["--quiet", "--verbose"], "WARNING", "json"),
+        ("ERROR", "console", ["--json"], "ERROR", "json"),
+    ],
+)
+def test_run_logging_config_and_cli_precedence(
+    monkeypatch: MonkeyPatch,
+    configured_level: str,
+    configured_format: str,
+    args: list[str],
+    expected_level: str,
+    expected_format: str,
+) -> None:
     captured: dict[str, str] = {}
 
     def _configure_logging(*, level: str, format: str) -> None:
@@ -605,10 +623,28 @@ def test_run_verbose_calls_configure_logging_debug(monkeypatch: MonkeyPatch) -> 
     monkeypatch.setattr("frame_compare.cli.entry.configure_logging", _configure_logging)
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
-    result = _invoke_run_with_minimal_workspace(["--verbose"])
-    assert result.exit_code == 0
-    assert captured["level"] == "DEBUG"
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = _write_minimal_config(root)
+        with config_path.open("a", encoding="utf-8") as config_file:
+            config_file.write(
+                f'\n[logging]\nlevel = "{configured_level}"\nformat = "{configured_format}"\n'
+            )
 
-    result = _invoke_run_with_minimal_workspace(["--quiet"])
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--root",
+                str(root),
+                "--config",
+                str(config_path.relative_to(root)),
+                *args,
+            ],
+            color=False,
+            terminal_width=200,
+            env={"NO_COLOR": "1", "TERM": "dumb"},
+        )
+
     assert result.exit_code == 0
-    assert captured["level"] == "WARNING"
+    assert captured == {"level": expected_level, "format": expected_format}

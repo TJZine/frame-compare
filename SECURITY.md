@@ -30,7 +30,14 @@ We take security seriously. If you discover a security vulnerability in Frame Co
 
 Frame Compare handles local video files and optional network operations. Key security areas include:
 
-- **Path Traversal**: All file operations are contained within the workspace root
+- **Path Boundaries**: Media inputs may be read from outside the workspace. Selected
+  config files and writable config, screenshot, generated, cache, run-folder, and
+  report paths are checked after symlink resolution and must remain under the
+  resolved workspace root. The sole selected-config exception is the installed
+  Windows portable shim's exact
+  `%LOCALAPPDATA%/Programs/FrameCompare/state/config.toml` fallback; other paths in
+  LocalAppData receive no exception, and a symlinked fallback config that resolves
+  elsewhere is rejected.
 - **Subprocess Hardening**: External tool invocations (FFmpeg, VapourSynth) use validated arguments
 - **Network Operations**: Optional slow.pics/TMDB integrations follow SSRF prevention policies
 
