@@ -3,7 +3,7 @@
   "build": {
     "dockerfile": "../Dockerfile",
     "context": "..",
-    "target": "runtime"
+    "target": "devcontainer"
   },
   "customizations": {
     "vscode": {
@@ -14,7 +14,7 @@
         "tamasfe.even-better-toml"
       ],
       "settings": {
-        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.defaultInterpreterPath": "/workspace/frame-compare/.venv/bin/python",
         "python.analysis.typeCheckingMode": "strict",
         "editor.formatOnSave": true,
         "[python]": {
@@ -24,9 +24,10 @@
     }
   },
   "containerEnv": {
-    "VAPOURSYNTH_PLUGIN_PATH": "/usr/local/lib/vapoursynth"
+    "VAPOURSYNTH_EXTRA_PLUGIN_PATH": "/opt/vapoursynth-extra-plugins"
   },
   "mounts": [
+    "source=${localWorkspaceFolderBasename}-${devcontainerId}-venv,target=${containerWorkspaceFolder}/.venv,type=volume",
     "source=${localWorkspaceFolder}/comparison_videos,target=/workspace/comparison_videos,type=bind,readonly",
     "source=${localWorkspaceFolder}/config,target=/workspace/config,type=bind,readonly",
     "source=${localWorkspaceFolder}/screenshots,target=/workspace/screenshots,type=bind",
@@ -34,6 +35,6 @@
   ],
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace/frame-compare,type=bind",
   "workspaceFolder": "/workspace/frame-compare",
-  "postCreateCommand": "pip install -e '.[dev]'",
+  "postCreateCommand": "uv venv --clear --system-site-packages .venv && uv sync --group dev --frozen",
   "remoteUser": "framecompare"
 }

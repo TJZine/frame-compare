@@ -211,7 +211,16 @@ ENTRYPOINT ["frame-compare"]
 CMD ["--help"]
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 3: Optional Linux X11/VSPreview GUI runtime
+# Stage 3: Development container
+FROM runtime AS devcontainer
+
+USER root
+RUN install -d -m 0777 -o framecompare -g framecompare /workspace/frame-compare/.venv
+USER framecompare
+WORKDIR /workspace/frame-compare
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stage 4: Optional Linux X11/VSPreview GUI runtime
 # ─────────────────────────────────────────────────────────────────────────────
 FROM runtime AS gui-linux
 
