@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-type AnalysisCacheState = Literal["hit", "miss", "write_failed"]
+type AnalysisCacheState = Literal["hit", "miss"]
+type AnalysisCacheWriteState = Literal["not_attempted", "written", "failed"]
 
 
 def _empty_timing_spans() -> dict[str, float]:
@@ -18,6 +19,7 @@ class AnalysisTimingRecorder:
 
     spans_seconds: dict[str, float] = field(default_factory=_empty_timing_spans)
     cache_state: AnalysisCacheState = "miss"
+    cache_write_state: AnalysisCacheWriteState = "not_attempted"
 
     def add_seconds(self, name: str, elapsed_seconds: float) -> None:
         """Add an observed duration to a named span."""
@@ -28,4 +30,4 @@ class AnalysisTimingRecorder:
         return {name: self.spans_seconds[name] for name in sorted(self.spans_seconds)}
 
 
-__all__ = ["AnalysisCacheState", "AnalysisTimingRecorder"]
+__all__ = ["AnalysisCacheState", "AnalysisCacheWriteState", "AnalysisTimingRecorder"]

@@ -15,12 +15,43 @@ Example:
   reference.mkv comparison.mkv
 ```
 
-The script writes deterministic JSON with the quality baseline, candidate mode
-comparisons, selected-frame overlap, nearest-frame distances, miss rates,
-Spearman rank correlations, top-K overlap, total analysis wall-clock time,
-algorithm identity, and warnings for unavailable runtime details.
+The benchmark defaults to three cold-metric-cache repetitions per mode. It
+deletes only the exact mode/domain metric cache entry before each timed trial,
+rotates mode order deterministically between repetitions, and runs the optional
+decode-throughput baseline only after all timed mode trials. Use
+`--metric-cache-policy reuse` to measure cache reuse instead, or
+`--repetitions N` to change the sample count.
 
-By default, the script renders tier-level Rich progress to stderr while keeping
+Use `--require-warm-source-index` when a comparison is intended to measure warm
+L-SMASH source indexes. The check recognizes adjacent `.lwi` files and fails
+before timed trials when the selected analysis source has no detected index. It
+never deletes source indexes. Use `--skip-decode-baseline` to omit the post-trial
+concurrent PlaneStats throughput baseline.
+
+Pass `--inspect-frame-types` to run an additional, untimed ffprobe scan after the
+mode trials. That scan records I/P/B counts, keyframe count, and keyframe-gap
+statistics for GOP-sensitive experiments. It can be expensive on long sources
+and is intentionally opt-in. `--ffprobe-timeout` bounds each inspection command.
+
+The script writes a stable structured JSON artifact with the quality baseline,
+candidate mode comparisons, selected-frame overlap, nearest-frame distances,
+miss rates, Spearman rank correlations, top-K overlap, algorithm identity, and
+warnings for unavailable runtime details. Each mode includes individual trials
+and aggregate count/min/max/mean/median/population-standard-deviation summaries
+for total analysis, selection, total trial, process CPU, CPU-to-wall ratio, and
+every observed analysis subphase. Trials also record proven cache hit/miss state,
+cache-write outcome, and the process-wide peak RSS observed by that point.
+
+Detailed subphases distinguish cache lookup, source load, graph construction,
+frame rendering, metric computation/property reads, and cache writing. The
+runtime section records Python, platform, CPU count, FFmpeg/ffprobe,
+VapourSynth/API versions, core thread count, and core cache limit. Source facts
+record stream/container metadata and detected adjacent source indexes. Peak RSS
+is process-wide and cumulative; compare it as a high-water mark rather than a
+per-trial allocation delta. It is reported as `null` on Windows, where the
+standard-library high-water-mark API used by this benchmark is unavailable.
+
+By default, the script renders trial-level Rich progress to stderr while keeping
 stdout reserved for the final output JSON path. Pass `--no-progress` when a
 scripted run needs no terminal progress display.
 

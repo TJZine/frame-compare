@@ -14,6 +14,7 @@ def test_analysis_timing_recorder_accumulates_and_sorts_spans() -> None:
     recorder.cache_state = "hit"
 
     assert recorder.cache_state == "hit"
+    assert recorder.cache_write_state == "not_attempted"
     assert recorder.as_dict() == {
         "cache_lookup": 0.1,
         "source_load": 0.75,

@@ -179,6 +179,43 @@ def test_calculate_metrics_computes_on_cache_miss(
     mock_save.assert_called_once()
 
 
+@patch("frame_compare.analysis.metrics.save_metrics_cache")
+@patch("frame_compare.analysis.metrics.calculate_metric_strategy")
+@patch("frame_compare.analysis.metrics.DefaultVSLoader")
+@patch("frame_compare.analysis.metrics.load_cached_metrics_for_request")
+@patch("frame_compare.analysis.metrics.compute_cache_key")
+def test_calculate_metrics_records_cache_miss_compute_and_write(
+    mock_key,
+    mock_load,
+    mock_loader_cls,
+    mock_strategy,
+    mock_save,
+    tmp_path: Path,
+) -> None:
+    mock_key.return_value = "fp"
+    mock_load.return_value = MagicMock(success=False)
+    source = mock_loader_cls.return_value.load.return_value
+    source.clip.num_frames = 1
+    source.fps = Fraction(24, 1)
+    mock_strategy.return_value = _quality_strategy_result(frame_count=1)
+    video_path = tmp_path / "v1.mkv"
+    video_path.write_bytes(b"")
+    recorder = AnalysisTimingRecorder()
+
+    calculate_metrics(
+        [video_path],
+        AnalysisConfig(),
+        tmp_path,
+        timing_recorder=recorder,
+    )
+
+    assert recorder.cache_state == "miss"
+    assert recorder.cache_write_state == "written"
+    assert set(recorder.as_dict()) >= {"cache_lookup", "source_load", "cache_write"}
+    assert mock_strategy.call_args.kwargs["timing_recorder"] is recorder
+    mock_save.assert_called_once()
+
+
 def _quality_strategy_result(frame_count: int = 10) -> MetricComputationResult:
     return MetricComputationResult(
         luminance=[0.1] * frame_count,

@@ -142,9 +142,11 @@ def _save_metrics_cache_best_effort(
     started = perf_counter() if timing_recorder is not None else 0.0
     try:
         save_metrics_cache(metrics, cache_dir)
+        if timing_recorder is not None:
+            timing_recorder.cache_write_state = "written"
     except Exception as e:
         if timing_recorder is not None:
-            timing_recorder.cache_state = "write_failed"
+            timing_recorder.cache_write_state = "failed"
         if reporter:
             reporter.set_description(f"Cache save failed: {e}")
         log.warning("analysis_cache_save_failed", error=str(e), exc_info=True)

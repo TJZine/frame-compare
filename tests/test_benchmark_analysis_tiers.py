@@ -83,7 +83,7 @@ def test_benchmark_script_progress_wraps_quality_and_candidate_tiers(
         assert active_rect.source == "explicit"
         assert active_rect.detection_mode == "provided"
         calls.append(mode)
-        return {"mode": mode, "analyze_seconds": 0.1}
+        return _tier_payload(mode, [0.0, 1.0], [0.0, 0.5], [0, 1])
 
     def fake_compare_tier(
         *,
@@ -161,6 +161,7 @@ def test_benchmark_script_run_tier_preserves_typed_performance_mode(
         active_rect_detection_mode: str,
         active_rect_algorithm_id: str,
         selection_domain: str | None,
+        timing_recorder: object,
     ) -> FrameMetrics:
         assert video_paths == [tmp_path / "reference.mkv"]
         assert cache_dir == tmp_path / "cache"
@@ -171,6 +172,7 @@ def test_benchmark_script_run_tier_preserves_typed_performance_mode(
         assert active_rect_detection_mode == "provided"
         assert active_rect_algorithm_id == "active_rect_resolution_v2"
         assert selection_domain is None
+        assert timing_recorder is not None
         observed_modes.append(analysis_config.performance_mode)
         return _metrics_payload(
             "performance",
@@ -211,6 +213,144 @@ def test_benchmark_script_run_tier_preserves_typed_performance_mode(
 
     assert observed_modes == [AnalysisPerformanceMode.PERFORMANCE]
     assert result["metadata"]["performance_mode"] == "performance"
+    assert result["cache_state"] == "miss"
+    assert result["cache_write_state"] == "not_attempted"
+
+
+def test_benchmark_script_rotates_trial_order_and_aggregates_distributions(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    script = _load_benchmark_script()
+    calls: list[tuple[int, int, str]] = []
+    timings = iter((3.0, 6.0, 5.0, 4.0, 7.0, 2.0))
+
+    def fake_run_tier(**kwargs: object) -> dict[str, object]:
+        mode = cast(str, kwargs["mode"])
+        result = _tier_payload(mode, [0.0, 1.0], [0.0, 0.5], [0, 1])
+        elapsed = next(timings)
+        result.update(
+            {
+                "analyze_seconds": elapsed,
+                "selection_seconds": 0.1,
+                "trial_seconds": elapsed + 0.1,
+                "process_cpu_seconds": elapsed / 2,
+                "cpu_to_wall_ratio": 0.5,
+                "peak_rss_bytes": 123,
+                "phase_timings_seconds": {"frame_render": elapsed - 0.1},
+                "cache_state": "miss",
+                "cache_write_state": "written",
+                "repetition": kwargs["repetition"],
+                "order_index": kwargs["order_index"],
+            }
+        )
+        calls.append(
+            (
+                cast(int, kwargs["repetition"]),
+                cast(int, kwargs["order_index"]),
+                mode,
+            )
+        )
+        return result
+
+    monkeypatch.setattr(script, "_run_tier", fake_run_tier)
+
+    quality, comparisons = script._run_benchmark_tiers(
+        candidate_modes=["performance"],
+        video_paths=[tmp_path / "reference.mkv"],
+        analysis_config=ConfigSchema().analysis,
+        cache_dir=tmp_path / "cache",
+        analysis_source_path=tmp_path / "reference.mkv",
+        effective_fps=None,
+        active_rect=script.BenchmarkActiveRect(
+            rect=None,
+            source="full-frame",
+            detection_mode="aspect_ratio",
+        ),
+        selection_domain=None,
+        window_start=0,
+        window_end_exclusive=None,
+        progress_enabled=False,
+        repetitions=3,
+        metric_cache_policy="cold",
+    )
+
+    assert calls == [
+        (0, 0, "quality"),
+        (0, 1, "performance"),
+        (1, 0, "performance"),
+        (1, 1, "quality"),
+        (2, 0, "quality"),
+        (2, 1, "performance"),
+    ]
+    assert quality["timing_summary"]["analyze_seconds"]["median"] == 4.0
+    assert quality["cache_state"] == {"miss": 3}
+    assert quality["cache_write_state"] == {"written": 3}
+    assert len(quality["trials"]) == 3
+    assert comparisons["performance"]["timing_summary"]["analyze_seconds"]["median"] == 5.0
+
+
+def test_benchmark_script_frame_type_summary_records_gop_distribution() -> None:
+    script = _load_benchmark_script()
+
+    summary = script._frame_type_summary(
+        {
+            "success": True,
+            "payload": {
+                "frames": [
+                    {"key_frame": 1, "pict_type": "I"},
+                    {"key_frame": 0, "pict_type": "B"},
+                    {"key_frame": 0, "pict_type": "P"},
+                    {"key_frame": 1, "pict_type": "I"},
+                ]
+            },
+        }
+    )
+
+    assert summary["type_counts"] == {"I": 2, "B": 1, "P": 1}
+    assert summary["keyframe_count"] == 2
+    assert summary["keyframe_gap_frames"]["median"] == 3.0
+
+
+def test_benchmark_script_detects_adjacent_source_index(tmp_path: Path) -> None:
+    script = _load_benchmark_script()
+    source = tmp_path / "source.mkv"
+    source.write_bytes(b"source")
+    index = Path(f"{source}.lwi")
+    index.write_bytes(b"index")
+
+    facts = script._source_index_facts([source])
+
+    assert facts[source.as_posix()] == {
+        "detected": True,
+        "paths": [index.as_posix()],
+        "sizes_bytes": [5],
+    }
+
+
+def test_benchmark_script_ffprobe_timeout_is_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    script = _load_benchmark_script()
+
+    def timeout(*_args: object, **_kwargs: object) -> object:
+        raise script.subprocess.TimeoutExpired(cmd="ffprobe", timeout=2.5)
+
+    monkeypatch.setattr(script.subprocess, "run", timeout)
+
+    result = script._run_ffprobe_json([], path=tmp_path / "source.mkv", timeout_seconds=2.5)
+
+    assert result == {"success": False, "error": "ffprobe timed out after 2.5s"}
+
+
+def test_benchmark_script_reports_unavailable_peak_rss_on_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    script = _load_benchmark_script()
+    monkeypatch.setattr(script.sys, "platform", "win32")
+
+    assert script._peak_rss_bytes() is None
 
 
 def test_benchmark_script_recomputes_stale_active_rect_provenance_cache(
@@ -662,6 +802,15 @@ def _tier_payload(
         "mode": mode,
         "analyze_seconds": 0.1,
         "cache_state": "unknown",
+        "cache_write_state": "not_attempted",
+        "phase_timings_seconds": {},
+        "selection_seconds": 0.0,
+        "trial_seconds": 0.1,
+        "process_cpu_seconds": 0.05,
+        "cpu_to_wall_ratio": 0.5,
+        "peak_rss_bytes": 1,
+        "repetition": 0,
+        "order_index": 0,
         "metadata": {
             "frame_count": len(luminance),
             "performance_mode": mode,
