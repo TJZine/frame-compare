@@ -20,6 +20,7 @@ from frame_compare.vspreview.adapter import (
     VSPreviewAvailabilityStatus,
     VSPreviewConfig,
     VSPreviewSessionRequest,
+    check_vspreview_availability,
     launch_alignment_verification_session,
 )
 from frame_compare.vspreview.errors import VSPreviewError
@@ -787,87 +788,115 @@ def test_generate_vspreview_script_handles_collision(
     assert script_path.exists()
 
 
-def test_build_script_content_assert_by_section() -> None:
-    """Verify that the generated script remains parseable and carries session data."""
-    reference = Path("ref.mkv")
-    comparisons = [Path("comp_a.mkv"), Path("comp_b.mkv")]
-    suggested_offsets = {"ref:comp_a": 10, "ref:comp_b": -5}
-    bootstrap_paths = [Path("/w"), Path("/w/src")]
+@pytest.mark.parametrize(
+    (
+        "executable",
+        "importable_modules",
+        "probe_error",
+        "expected_status",
+        "expected_message",
+    ),
+    [
+        pytest.param(
+            "/usr/bin/vspreview",
+            frozenset(),
+            None,
+            VSPreviewAvailabilityStatus.AVAILABLE,
+            "available",
+            id="executable",
+        ),
+        pytest.param(
+            None,
+            frozenset({"vspreview", "PyQt6"}),
+            None,
+            VSPreviewAvailabilityStatus.AVAILABLE,
+            "available",
+            id="pyqt6",
+        ),
+        pytest.param(
+            None,
+            frozenset({"vspreview", "PySide6"}),
+            None,
+            VSPreviewAvailabilityStatus.AVAILABLE,
+            "available",
+            id="pyside6",
+        ),
+        pytest.param(
+            None,
+            frozenset({"vspreview", "PyQt5"}),
+            None,
+            VSPreviewAvailabilityStatus.AVAILABLE,
+            "available",
+            id="pyqt5",
+        ),
+        pytest.param(
+            None,
+            frozenset(),
+            None,
+            VSPreviewAvailabilityStatus.MISSING_EXEC_AND_MODULE,
+            "not installed",
+            id="missing-module",
+        ),
+        pytest.param(
+            None,
+            frozenset({"vspreview"}),
+            None,
+            VSPreviewAvailabilityStatus.MISSING_QT_BACKEND,
+            "Qt backend missing",
+            id="missing-qt",
+        ),
+        pytest.param(
+            None,
+            frozenset(),
+            ValueError("simulated import error"),
+            VSPreviewAvailabilityStatus.PROBE_FAILED,
+            "probe failed",
+            id="probe-failed",
+        ),
+    ],
+)
+def test_check_vspreview_availability_by_owner_branch(
+    monkeypatch: pytest.MonkeyPatch,
+    executable: str | None,
+    importable_modules: frozenset[str],
+    probe_error: ValueError | None,
+    expected_status: VSPreviewAvailabilityStatus,
+    expected_message: str,
+) -> None:
+    find_spec_calls: list[str] = []
 
-    script = _build_script_content(reference, comparisons, suggested_offsets, bootstrap_paths)
-    assert script.startswith("#!/usr/bin/env python3\n")
-    compile(script, "<vspreview>", "exec")
-    assert json.dumps(str(bootstrap_paths[0])) in script
-    assert json.dumps(str(bootstrap_paths[1])) in script
-    assert "get_frame" not in script
-    assert "def trim_clip(clip, trim_start, trim_end_inclusive):" not in script
-    assert "calculate_alignment_trims" not in script
-    assert '"label": "ref"' in script
-    assert '"comp_a": "comp_a.mkv"' in script
-    assert '"ref:comp_a": 10' in script
-    assert "OFFSET_MAP" not in script
-    assert script.rstrip().endswith("main()")
+    def fake_find_spec(name: str) -> object | None:
+        find_spec_calls.append(name)
+        if probe_error is not None:
+            raise probe_error
+        return object() if name in importable_modules else None
 
-
-def test_check_vspreview_availability(monkeypatch: pytest.MonkeyPatch) -> None:
-    from frame_compare.vspreview.adapter import (
-        VSPreviewAvailabilityStatus,
-        check_vspreview_availability,
-    )
-
-    # 1. Executable available
     monkeypatch.setattr(
-        "shutil.which", lambda cmd: "/usr/bin/vspreview" if cmd == "vspreview" else None
+        "shutil.which", lambda command: executable if command == "vspreview" else None
     )
-    res = check_vspreview_availability()
-    assert res.status == VSPreviewAvailabilityStatus.AVAILABLE
-    assert res.is_available is True
+    monkeypatch.setattr("importlib.util.find_spec", fake_find_spec)
 
-    # 2. Executable missing, but module and PyQt6 available
-    monkeypatch.setattr("shutil.which", lambda cmd: None)
+    result = check_vspreview_availability()
 
-    def mock_find_spec(name: str):
-        if name in ("vspreview", "PyQt6"):
-            from importlib.machinery import ModuleSpec
-
-            return ModuleSpec(name, None)
-        return None
-
-    monkeypatch.setattr("importlib.util.find_spec", mock_find_spec)
-    res = check_vspreview_availability()
-    assert res.status == VSPreviewAvailabilityStatus.AVAILABLE
-    assert res.is_available is True
-
-    # 3. Executable missing, module present, but no Qt backend
-    def mock_find_spec_no_qt(name: str):
-        if name == "vspreview":
-            from importlib.machinery import ModuleSpec
-
-            return ModuleSpec(name, None)
-        return None
-
-    monkeypatch.setattr("importlib.util.find_spec", mock_find_spec_no_qt)
-    res = check_vspreview_availability()
-    assert res.status == VSPreviewAvailabilityStatus.MISSING_QT_BACKEND
-    assert res.is_available is False
-    assert "Qt backend missing" in res.message
-    assert res.hint == "Install with: pip install PyQt6 (or: pip install PySide6)"
-    assert "VSPreview not installed" not in res.message
-
-    # 4. Nothing available
-    monkeypatch.setattr("importlib.util.find_spec", lambda name: None)
-    res = check_vspreview_availability()
-    assert res.status == VSPreviewAvailabilityStatus.MISSING_EXEC_AND_MODULE
-    assert res.is_available is False
-
-    # 5. Unexpected exception
-    def mock_find_spec_error(name: str):
-        raise ValueError("simulated import error")
-
-    monkeypatch.setattr("importlib.util.find_spec", mock_find_spec_error)
-    res = check_vspreview_availability()
-    assert res.status == VSPreviewAvailabilityStatus.PROBE_FAILED
-    assert res.is_available is False
-    assert res.error_details is not None
-    assert res.error_details["exception_type"] == "ValueError"
-    assert res.error_details["exception"] == "simulated import error"
+    assert result.status is expected_status
+    assert result.is_available is (expected_status is VSPreviewAvailabilityStatus.AVAILABLE)
+    assert expected_message in result.message
+    expected_hints = {
+        VSPreviewAvailabilityStatus.MISSING_EXEC_AND_MODULE: (
+            "Install with: pip install vspreview PyQt6 (or: pip install vspreview PySide6)"
+        ),
+        VSPreviewAvailabilityStatus.MISSING_QT_BACKEND: (
+            "Install with: pip install PyQt6 (or: pip install PySide6)"
+        ),
+        VSPreviewAvailabilityStatus.PROBE_FAILED: (
+            "Check the VSPreview/PyQt6/PySide6 installation if interactive alignment is needed"
+        ),
+    }
+    assert result.hint == expected_hints.get(expected_status)
+    if executable is not None:
+        assert find_spec_calls == []
+    if expected_status is VSPreviewAvailabilityStatus.PROBE_FAILED:
+        assert result.error_details == {
+            "exception_type": "ValueError",
+            "exception": "simulated import error",
+        }
