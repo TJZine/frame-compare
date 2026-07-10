@@ -70,12 +70,32 @@ For those commands:
 - `--config` selects the config file path. Relative paths resolve from `--root`.
 - If `--config` is omitted, the CLI resolves `config/config.toml` under `--root`.
 
+The selected config file and configured `paths.config_dir`,
+`paths.screenshots_dir`, `paths.generated_dir`, and non-null
+`report.output_dir` must resolve beneath the fully resolved workspace root.
+Containment follows symlinks and expands environment variables in config path
+values, so absolute paths, `..` traversal, or symlinks that escape the root fail
+with `PathEscapesRootError` / `FC-3009`. `run`, `wizard`, `preset apply`, and
+`preset save` validate their selected config destination before config reads or
+writes; `run` also validates configured contained paths before diagnostics,
+config writes, or runtime entry. `preset list` remains root-only and ignores its
+accepted `--config` value.
+
+Media input is a read boundary, not a write boundary. Configured
+`paths.input_dir` and the `run --input` override may be relative, absolute,
+environment-expanded, or symlinked to a directory outside the workspace. This
+does not permit generated state to follow media outside the root.
+
 For the installed Windows portable shim, the shim runs the bundle launcher from the
 bundle root and injects a default `--config` for `run`, `wizard`, and supported
 `preset` subcommands when the user did not pass `--config`. The injected default
 prefers `<bundle>/config/config.toml` when it exists, otherwise it falls back to
 `%LOCALAPPDATA%/Programs/FrameCompare/state/config.toml` when that state config
-exists.
+exists. That exact installed-shim state file is the sole selected-config
+containment exception. It is allowed only on Windows when `LOCALAPPDATA` is
+available; sibling LocalAppData files and a symlinked `config.toml` leaf that
+resolves outside the state directory are rejected. This exception does not
+apply to any configured output path.
 
 ## Config-Only Sources Surface
 
@@ -265,8 +285,11 @@ unchanged.
   Legacy run-folder `cache.compframes` files are not used as analysis cache hits.
 - Analysis is skipped automatically when `dark_frame_count`, `bright_frame_count`,
   and `motion_frame_count` are all `0`; `frame_plan` still selects configured
-  user/random frames. With `paths.use_run_folders = true`, runs that proceed reserve a fresh run folder;
-  existing run folders are not reused to satisfy analysis cache hits.
+  user/random frames. With `paths.use_run_folders = true`, runs that proceed reserve
+  a fresh run folder beneath the contained resolved `paths.generated_dir`, never
+  beneath `paths.input_dir`; existing run folders are not reused to satisfy analysis
+  cache hits. Screenshots, run-local generated state, and fallback reports remain
+  beneath that reserved folder even when media input is external.
 - In run-folder mode, folder names are capped at 64 characters and do not
   include exact timestamps. The first successful reservation uses the title-first base
   name, and collisions use compact numeric suffixes such as `_2` and `_3`.
@@ -787,6 +810,11 @@ enabled.
 above. That means the flags in the previous section are persistent when combined with
 `--write-config`.
 
+Contained path values are validated before persistence. A non-null relative
+`report.output_dir` is normalized to an absolute workspace-root-based path for
+runtime use, while `run --write-config`, `preset apply`, and `preset save`
+persist the original relative value so saved configurations remain portable.
+
 Before writing, `run --write-config` rejects effective configs that combine
 `audio_alignment.previous_offsets = "prompt"` or `"always"` with
 `audio_alignment.force_interactive = true`, and rejects those reuse modes when
@@ -835,6 +863,9 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   - slow.pics delete-after-upload
   - optional TMDB API key
 - It validates the generated payload against `ConfigSchema` before writing.
+- It rejects a selected config destination outside the workspace before prompting,
+  except for the exact installed Windows portable state-config fallback described
+  under Shared Path Resolution Rules. The prompted media input may be external.
 - It does not advertise or accept unsupported slow.pics visibility values.
 - On success, it writes a concise confirmation to stderr including the resolved
   config path.
@@ -876,6 +907,8 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 
 ### `preset apply`
 
+- Validates the selected config path before loading, then validates contained path
+  values in both the loaded config and the preset-updated config.
 - Loads the resolved config file.
 - Applies the named preset from `<root>/config/presets`.
 - Writes the updated config back to the resolved config path.
@@ -884,6 +917,8 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 
 ### `preset save`
 
+- Validates the selected config path before loading and validates contained path
+  values in the loaded config.
 - Loads the resolved config file.
 - Saves the current config as a named preset under `<root>/config/presets`.
 - On success, writes a concise confirmation to stderr including the preset name and

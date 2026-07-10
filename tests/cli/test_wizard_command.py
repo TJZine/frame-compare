@@ -65,6 +65,60 @@ def test_wizard_writes_explicit_config_path_via_public_cli() -> None:
         assert data["tmdb"]["api_key"] == "abc123"
 
 
+def test_wizard_rejects_external_config_before_prompts_or_write(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _unexpected(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("external config must be rejected before prompting or writing")
+
+    monkeypatch.setattr("frame_compare.cli.entry._prompt_input_dir", _unexpected)
+    monkeypatch.setattr("frame_compare.cli.entry.write_text_atomic", _unexpected)
+
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        root.mkdir()
+        external_config = (Path("outside") / "config.toml").resolve()
+
+        result = runner.invoke(
+            app,
+            ["wizard", "--root", str(root), "--config", str(external_config)],
+        )
+
+    assert result.exit_code == int(ExitCode.INPUT_ERROR)
+    assert result.stdout == ""
+    assert "FC-3009" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_handle_wizard_allows_exact_windows_portable_state_config(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    portable_config = tmp_path / "portable-state" / "config.toml"
+    monkeypatch.setattr(
+        "frame_compare.orchestration.preflight._windows_portable_state_config_path",
+        lambda: portable_config,
+    )
+    writes: list[Path] = []
+
+    handle_wizard(
+        root,
+        portable_config,
+        prompt_input_dir=lambda _default, *, base_dir: str(tmp_path / "external-media"),
+        prompt_visibility=lambda _default: "unlisted",
+        confirm=lambda _text, *, default: default,
+        prompt_secret=lambda _text, *, default, hide_input: "",
+        write_payload=lambda path, _data: writes.append(path),
+        handle_error=lambda *_args, **_kwargs: int(ExitCode.GENERAL_ERROR),
+        stdin_is_tty=False,
+        no_color=True,
+    )
+
+    assert writes == [portable_config]
+
+
 def test_wizard_defaults_slowpics_upload_to_disabled() -> None:
     with runner.isolated_filesystem():
         Path("inputs").mkdir()

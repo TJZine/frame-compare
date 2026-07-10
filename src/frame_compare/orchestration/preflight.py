@@ -14,6 +14,7 @@ from pathlib import Path
 from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema import ConfigSchema
+from frame_compare.errors import PathEscapesRootError
 from frame_compare.orchestration.errors import (
     DirectoryNotFoundError,
     InputDiscoveryError,
@@ -67,18 +68,79 @@ def _resolve_path(path_str: str, root: Path) -> Path:
     return (root / path).resolve()
 
 
+def resolve_contained_path(path_value: str | Path, root: Path) -> Path:
+    """Resolve a path and require its final target to remain under ``root``."""
+    resolved_root = root.resolve()
+    expanded = os.path.expandvars(str(path_value))
+    candidate = Path(expanded)
+    resolved_path = (
+        candidate.resolve() if candidate.is_absolute() else (resolved_root / candidate).resolve()
+    )
+    if not resolved_path.is_relative_to(resolved_root):
+        raise PathEscapesRootError(resolved_path, resolved_root)
+    return resolved_path
+
+
+def _windows_portable_state_config_path() -> Path | None:
+    """Return the installed Windows shim's sole external config destination."""
+    if os.name != "nt":
+        return None
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if not local_app_data:
+        return None
+    state_dir = (Path(local_app_data) / "Programs" / "FrameCompare" / "state").resolve()
+    return state_dir / "config.toml"
+
+
+def resolve_selected_config_path(path_value: str | Path, root: Path) -> Path:
+    """Resolve a selected config, including the one Windows portable exception."""
+    resolved_root = root.resolve()
+    expanded = os.path.expandvars(str(path_value))
+    candidate = Path(expanded)
+    resolved_path = (
+        candidate.resolve() if candidate.is_absolute() else (resolved_root / candidate).resolve()
+    )
+    if resolved_path.is_relative_to(resolved_root):
+        return resolved_path
+
+    portable_state_config = _windows_portable_state_config_path()
+    if portable_state_config is not None and resolved_path == portable_state_config:
+        return resolved_path
+    raise PathEscapesRootError(resolved_path, resolved_root)
+
+
+def validate_and_normalize_config_paths(
+    config: ConfigSchema,
+    root: Path,
+) -> ConfigSchema:
+    """Validate contained config paths without mutating the supplied config."""
+    resolved_root = root.resolve()
+    resolve_contained_path(config.paths.config_dir, resolved_root)
+    resolve_contained_path(config.paths.screenshots_dir, resolved_root)
+    resolve_contained_path(config.paths.generated_dir, resolved_root)
+
+    if config.report.output_dir is None:
+        return config
+
+    output_dir = resolve_contained_path(config.report.output_dir, resolved_root)
+    return config.model_copy(
+        update={"report": config.report.model_copy(update={"output_dir": str(output_dir)})}
+    )
+
+
 def resolve_paths(config: ConfigSchema, root: Path) -> WorkspacePaths:
     """Resolve all workspace paths from config."""
-    paths = config.paths
     resolved_root = root.resolve()
-    config_dir = _resolve_path(paths.config_dir, resolved_root)
-    generated_dir = _resolve_path(paths.generated_dir, resolved_root)
+    validated_config = validate_and_normalize_config_paths(config, resolved_root)
+    paths = validated_config.paths
+    config_dir = resolve_contained_path(paths.config_dir, resolved_root)
+    generated_dir = resolve_contained_path(paths.generated_dir, resolved_root)
 
     return WorkspacePaths(
         root=resolved_root,
         input_dir=_resolve_path(paths.input_dir, resolved_root),
         run_dir=None,  # Legacy mode: run folder disabled
-        screenshots_dir=_resolve_path(paths.screenshots_dir, resolved_root),
+        screenshots_dir=resolve_contained_path(paths.screenshots_dir, resolved_root),
         generated_dir=generated_dir,
         config_dir=config_dir,
         config_file=config_dir / "config.toml",
@@ -91,17 +153,18 @@ def _resolve_paths_with_config_file(
     config: ConfigSchema, root: Path, config_file: Path
 ) -> WorkspacePaths:
     """Internal: Resolve paths with explicit config_file (for prepare_preflight)."""
-    paths = config.paths
     resolved_root = root.resolve()
-    generated_dir = _resolve_path(paths.generated_dir, resolved_root)
+    validated_config = validate_and_normalize_config_paths(config, resolved_root)
+    paths = validated_config.paths
+    generated_dir = resolve_contained_path(paths.generated_dir, resolved_root)
 
     return WorkspacePaths(
         root=resolved_root,
         input_dir=_resolve_path(paths.input_dir, resolved_root),
         run_dir=None,  # Legacy mode: run folder disabled
-        screenshots_dir=_resolve_path(paths.screenshots_dir, resolved_root),
+        screenshots_dir=resolve_contained_path(paths.screenshots_dir, resolved_root),
         generated_dir=generated_dir,
-        config_dir=_resolve_path(paths.config_dir, resolved_root),
+        config_dir=resolve_contained_path(paths.config_dir, resolved_root),
         config_file=config_file,
         analysis_cache_dir=generated_dir / "cache" / "analysis",
         alignment_cache_dir=generated_dir / "cache" / "alignment",
@@ -148,17 +211,27 @@ def prepare_preflight(
     warnings: list[str] = []
 
     if config_path is not None:
-        if not config_path.exists():
-            raise ConfigNotFoundError(config_path)
-        resolved_config_path = config_path.resolve()
-        resolved_root = root.resolve() if root else resolved_config_path.parent.parent
+        expanded_config_path = Path(os.path.expandvars(str(config_path)))
+        if root is not None and not expanded_config_path.is_absolute():
+            config_candidate = root.resolve() / expanded_config_path
+        else:
+            config_candidate = expanded_config_path
+        resolved_candidate = config_candidate.resolve()
+        resolved_root = root.resolve() if root else resolved_candidate.parent.parent
+        resolved_config_path = resolve_selected_config_path(resolved_candidate, resolved_root)
+        if not resolved_config_path.exists():
+            raise ConfigNotFoundError(resolved_config_path)
     else:
         resolved_root = resolve_workspace(root)
-        resolved_config_path = resolved_root / "config" / "config.toml"
+        resolved_config_path = resolve_selected_config_path(
+            resolved_root / "config" / "config.toml",
+            resolved_root,
+        )
         if not resolved_config_path.exists():
             raise ConfigNotFoundError(resolved_config_path)
 
-    config = load_config(resolved_config_path, overrides=overrides)
+    loaded_config = load_config(resolved_config_path, overrides=overrides)
+    config = validate_and_normalize_config_paths(loaded_config, resolved_root)
 
     workspace = _resolve_paths_with_config_file(config, resolved_root, resolved_config_path)
 

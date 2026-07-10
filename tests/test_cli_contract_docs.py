@@ -1031,3 +1031,25 @@ def test_current_cli_contract_matches_wizard_visibility_choices() -> None:
         "visibility: private",
     ):
         assert unsupported_token not in wizard_section
+
+
+def test_current_contract_docs_define_hybrid_workspace_path_policy() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
+    architecture = (repo_root / "docs" / "current-architecture.md").read_text(encoding="utf-8")
+    security = (repo_root / "SECURITY.md").read_text(encoding="utf-8")
+    normalized_cli_contract = " ".join(cli_contract.split())
+
+    for phrase in (
+        "Media input is a read boundary, not a write boundary",
+        "`PathEscapesRootError` / `FC-3009`",
+        "beneath the contained resolved `paths.generated_dir`, never beneath `paths.input_dir`",
+        "sole selected-config containment exception",
+        "`run`, `wizard`, `preset apply`, and `preset save`",
+    ):
+        assert phrase in normalized_cli_contract
+
+    assert "permitting external media reads" in architecture
+    assert "never beneath an external media input" in architecture
+    assert "Media inputs may be read from outside the workspace" in security
+    assert "%LOCALAPPDATA%/Programs/FrameCompare/state/config.toml" in security

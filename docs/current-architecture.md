@@ -20,7 +20,8 @@ The CLI keeps VS-heavy imports lazy through proxy functions so help text and sim
 The main run path is:
 
 1. Resolve root and config.
-2. Prepare preflight and workspace paths.
+2. Prepare preflight and workspace paths, containing config and writable state
+   beneath the resolved workspace root while permitting external media reads.
 3. Discover input clips.
 4. Validate shared analysis cache mode flags when needed.
 5. Create a fresh run folder when configured.
@@ -180,8 +181,18 @@ Primary owned paths:
 - screenshot output directories and generated HTML reports
 - Windows portable bundle outputs under `dist/frame-compare-portable-win-x64`
 
+`frame_compare.orchestration.preflight` owns hybrid path enforcement. The selected
+config file, configured config/screenshots/generated directories, and explicit report
+output resolve under the workspace root after environment expansion and symlink
+resolution; escaping paths raise `FC-3009` before config or output side effects.
+Configured and CLI-overridden media inputs remain unrestricted read-only paths. The
+only selected-config exception is the installed Windows portable shim's exact resolved
+LocalAppData state `config.toml`; it does not extend to configured output paths or a
+symlinked config leaf that resolves elsewhere.
+
 `WorkspacePaths` resolves the runtime path set and can switch into run-folder mode so
-screenshots and generated files live inside an input-specific run directory. The
+screenshots and generated files live inside a fresh directory beneath the contained
+resolved `paths.generated_dir`, never beneath an external media input. The
 analysis and shared alignment reuse caches are the exceptions:
 `WorkspacePaths.cache_dir` and `WorkspacePaths.shared_analysis_cache_dir` remain
 the shared workspace-level `<resolved paths.generated_dir>/cache/analysis` path,
@@ -191,7 +202,8 @@ workspace-level `<resolved paths.generated_dir>/cache/alignment` path, even afte
 folder.
 
 When `paths.use_run_folders = true`, normal runs and cache-only runs that proceed
-reserve a fresh run folder. Existing run folders are not reused for analysis cache
+reserve a fresh run folder beneath the resolved `paths.generated_dir`. Existing run
+folders are not reused for analysis cache
 hits. Screenshots, slow.pics upload inputs, manual overrides, and VSPreview
 artifacts remain scoped to the current run folder. Probe snapshots
 are written to both the current run folder and the shared generated probe cache

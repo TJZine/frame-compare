@@ -147,7 +147,7 @@ async def _resolve_run_directory(
 
         filenames = [video.name for video in input_videos]
         run_dir = reserve_run_folder(
-            input_dir=workspace.input_dir,
+            input_dir=workspace.generated_dir,
             filenames=filenames,
             tmdb_metadata=metadata,
         )

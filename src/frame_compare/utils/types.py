@@ -27,8 +27,9 @@ class WorkspacePaths:
     Run folder mode (when run_dir is set):
     - screenshots_dir and generated_dir are resolved relative to run_dir
     - analysis_cache_dir remains at the workspace-level generated cache path
-    - This enables fresh per-comparison outputs inside input_dir while preserving
-      reusable analysis results across runs
+    - This enables fresh per-comparison outputs beneath the contained workspace
+      generated base without writing into input_dir, while preserving reusable
+      analysis results across runs
 
     Legacy mode (when run_dir is None):
     - screenshots_dir and generated_dir are resolved at workspace root level
@@ -86,7 +87,7 @@ class WorkspacePaths:
         preserving the workspace-level shared analysis cache path.
 
         Args:
-            run_dir: The run folder path (e.g., input_dir / "Movie (2024)")
+            run_dir: The run folder path (e.g., workspace_generated_dir / "Movie (2024)")
 
         Returns:
             New WorkspacePaths instance with run folder mode enabled
