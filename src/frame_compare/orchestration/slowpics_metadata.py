@@ -6,7 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from frame_compare.config.schema_models import SlowpicsConfig
-from frame_compare.config.slowpics import render_slowpics_title_template
+from frame_compare.config.slowpics import (
+    SlowpicsTitleTemplateContext,
+    render_slowpics_title_template,
+)
 from frame_compare.orchestration.source_labels import normalize_derived_display_text
 from frame_compare.services.types import (
     ParsedMetadata,
@@ -88,7 +91,7 @@ def _template_context(
     parsed_reference: ParsedMetadata,
     matching_tmdb: TmdbMetadata | None,
     association: tuple[int, str] | None,
-) -> dict[str, str]:
+) -> SlowpicsTitleTemplateContext:
     title = matching_tmdb.title if matching_tmdb is not None else parsed_reference.title
     original_title = matching_tmdb.original_title if matching_tmdb is not None else ""
     year = matching_tmdb.year if matching_tmdb is not None else parsed_reference.year
@@ -109,7 +112,7 @@ def _template_context(
 def _base_title(
     *,
     config: SlowpicsConfig,
-    context: dict[str, str],
+    context: SlowpicsTitleTemplateContext,
     reference_path: Path,
     parsed_reference: ParsedMetadata,
     matching_tmdb: TmdbMetadata | None,

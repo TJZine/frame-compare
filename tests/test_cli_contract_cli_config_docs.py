@@ -25,11 +25,15 @@ def _declared_run_options() -> set[str]:
 def test_current_cli_contract_matches_live_override_map() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
+    mapping_section = cli_contract.split("## CLI Flag To Config Mapping", maxsplit=1)[1].split(
+        "## Config-Only Analysis Surface",
+        maxsplit=1,
+    )[0]
 
     for cli_name, config_path in CLI_OVERRIDE_MAP.items():
         flag = f"--{cli_name.replace('_', '-')}"
-        assert flag in cli_contract
-        assert config_path in cli_contract
+        expected_row = f"| `{flag}` | `{config_path}` |"
+        assert expected_row in mapping_section
 
 
 def test_current_cli_contract_documents_analysis_performance_mode_config_and_summary() -> None:

@@ -30,6 +30,7 @@ import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.config.errors import ConfigValidationError
 from frame_compare.orchestration.active_rect import metric_cache_request_for_clip
+from frame_compare.orchestration.execution_types import PrepState
 from frame_compare.vspreview.overrides import MANUAL_OVERRIDES_FILE
 from tests.orchestration.execute_run_helpers import (
     analysis_selection_domain_for_cache_inputs,
@@ -66,6 +67,19 @@ class FakeVSLoader:
         raise AssertionError("Preparation probing should not request the VS core directly")
 
 
+def _prepared_metric_cache_fingerprint(source_paths: list[Path], *, prep: PrepState) -> str:
+    """Build the exact metric-cache identity for a prepared analysis source."""
+    return cache_io.compute_cache_key(
+        source_paths,
+        prep.config.analysis,
+        selection_domain=prep.analysis_selection_domain,
+        metric_request=metric_cache_request_for_clip(
+            prep.analysis_clip,
+            fallback_detection_mode=prep.config.screenshots.active_rect_detection.value,
+        ),
+    )
+
+
 def test_execute_prep_rejects_mutually_exclusive_cache_flags(tmp_path: Path) -> None:
     request = RunRequest(root=tmp_path, no_cache=True, from_cache_only=True)
 
@@ -79,7 +93,6 @@ def test_execute_prep_no_cache_removes_only_matching_shared_metrics_cache(tmp_pa
     _create_video_files(input_dir, "source.mkv")
 
     preflight = preparation.prepare_preflight(root=tmp_path)
-    config = preflight.config
     source_path = input_dir / "source.mkv"
     prep_for_domain = asyncio.run(
         preparation.execute_prep(
@@ -87,14 +100,9 @@ def test_execute_prep_no_cache_removes_only_matching_shared_metrics_cache(tmp_pa
             RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
         )
     )
-    fingerprint = cache_io.compute_cache_key(
+    fingerprint = _prepared_metric_cache_fingerprint(
         [source_path],
-        config.analysis,
-        selection_domain=prep_for_domain.analysis_selection_domain,
-        metric_request=metric_cache_request_for_clip(
-            prep_for_domain.analysis_clip,
-            fallback_detection_mode=config.screenshots.active_rect_detection.value,
-        ),
+        prep=prep_for_domain,
     )
     metrics_dir = tmp_path / "generated" / "cache" / "analysis"
     metrics_dir.mkdir(parents=True, exist_ok=True)
@@ -134,26 +142,19 @@ active_rect = { x = 10, y = 20, width = 300, height = 200 }
     _create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"
     source_path = _create_video_files(input_dir, "source.mkv")[0]
-    preflight = preparation.prepare_preflight(root=tmp_path)
-    config = preflight.config
     prep_for_domain = asyncio.run(
         preparation.execute_prep(
             RunRequest(root=tmp_path),
             RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
         )
     )
-    rect_fingerprint = cache_io.compute_cache_key(
+    rect_fingerprint = _prepared_metric_cache_fingerprint(
         [source_path],
-        config.analysis,
-        selection_domain=prep_for_domain.analysis_selection_domain,
-        metric_request=metric_cache_request_for_clip(
-            prep_for_domain.analysis_clip,
-            fallback_detection_mode=config.screenshots.active_rect_detection.value,
-        ),
+        prep=prep_for_domain,
     )
     full_frame_fingerprint = cache_io.compute_cache_key(
         [source_path],
-        config.analysis,
+        prep_for_domain.config.analysis,
         selection_domain=prep_for_domain.analysis_selection_domain,
     )
     metrics_dir = tmp_path / "generated" / "cache" / "analysis"
@@ -197,14 +198,9 @@ def test_execute_prep_no_cache_removes_only_selected_reference_metrics_cache(
     metrics_dir = tmp_path / "generated" / "cache" / "analysis"
     metrics_dir.mkdir(parents=True, exist_ok=True)
     default_fingerprint = cache_io.compute_cache_key(default_order, config.analysis)
-    selected_fingerprint = cache_io.compute_cache_key(
+    selected_fingerprint = _prepared_metric_cache_fingerprint(
         selected_order,
-        config.analysis,
-        selection_domain=prep_for_domain.analysis_selection_domain,
-        metric_request=metric_cache_request_for_clip(
-            prep_for_domain.analysis_clip,
-            fallback_detection_mode=config.screenshots.active_rect_detection.value,
-        ),
+        prep=prep_for_domain,
     )
     default_cache_path = metrics_dir / cache_io.metrics_cache_filename(
         default_order, default_fingerprint

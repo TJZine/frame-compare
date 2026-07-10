@@ -7,6 +7,7 @@ from frame_compare.config.schema_models import SlowpicsConfig, SourceOverrideCon
 from frame_compare.config.slowpics import (
     SLOWPICS_TITLE_TEMPLATE_FIELDS,
     render_slowpics_title_template,
+    validate_slowpics_title_template,
 )
 
 
@@ -23,6 +24,24 @@ def test_renderer_supports_every_allowed_placeholder_and_missing_values() -> Non
 def test_renderer_supports_literal_text_and_escaped_dollar() -> None:
     assert render_slowpics_title_template("Cost $$5: ${Title}", {"Title": "Example"}) == (
         "Cost $5: Example"
+    )
+
+
+@pytest.mark.parametrize("control", ["\x00", "\n", "\u0085"])
+def test_template_helpers_reject_unicode_control_characters(control: str) -> None:
+    with pytest.raises(ValueError, match="title_template must not contain control characters"):
+        validate_slowpics_title_template(f"bad{control}template")
+
+    with pytest.raises(
+        ValueError,
+        match="title_template context value Title must not contain control characters",
+    ):
+        render_slowpics_title_template("${Title}", {"Title": f"bad{control}context"})
+
+
+def test_renderer_ignores_control_characters_in_unused_context_values() -> None:
+    assert render_slowpics_title_template("${Title}", {"Title": "Good", "Unused": "bad\n"}) == (
+        "Good"
     )
 
 

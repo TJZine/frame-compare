@@ -35,6 +35,7 @@ def test_execute_run_run_info_write_failure_happens_before_probing_and_cleans_em
     create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
+    generated_dir = preparation.prepare_preflight(root=tmp_path).workspace.generated_dir
 
     def _fail_write_run_info(*_args: object, **_kwargs: object) -> None:
         raise OSError("disk full")
@@ -52,4 +53,5 @@ def test_execute_run_run_info_write_failure_happens_before_probing_and_cleans_em
     with pytest.raises(OSError, match="disk full"):
         asyncio.run(execute_run(request, deps=deps))
 
-    assert [path.name for path in input_dir.iterdir() if path.is_dir()] == []
+    assert generated_dir.is_dir()
+    assert not any(path.is_dir() for path in generated_dir.iterdir())

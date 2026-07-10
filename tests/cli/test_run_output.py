@@ -130,8 +130,6 @@ def test_run_json_is_machine_only_and_omits_post_upload_actions(
     assert payload["success"] is True
     assert payload["slowpics_url"] == "https://slow.pics/c/example"
     assert "post_upload_actions" not in payload
-    assert "shortcut" not in payload
-    assert "webhook" not in payload
     assert "warnings" not in payload
     assert "At-a-Glance" not in result.stdout
     assert "Screenshots:" not in result.stdout

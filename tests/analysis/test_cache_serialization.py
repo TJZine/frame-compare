@@ -133,6 +133,8 @@ def test_save_and_load_round_trip_serializes_metric_active_rect(tmp_path: Path) 
         clips=clips,
         config=config,
         metric_active_rect=rect,
+        active_rect_source="explicit",
+        active_rect_detection_mode="provided",
     )
     metrics = FrameMetrics(
         luminance=[0.1, 0.2],
@@ -146,6 +148,9 @@ def test_save_and_load_round_trip_serializes_metric_active_rect(tmp_path: Path) 
     assert result.success is True
     assert result.metrics is not None
     assert result.metrics.metadata.metric_active_rect == rect
+    assert result.metrics.metadata.active_rect_source == "explicit"
+    assert result.metrics.metadata.active_rect_detection_mode == "provided"
+    assert result.metrics.metadata.active_rect_algorithm_id == "active_rect_resolution_v2"
 
 
 def test_load_cache_accepts_content_derived_auto_active_rect_metadata(tmp_path: Path) -> None:

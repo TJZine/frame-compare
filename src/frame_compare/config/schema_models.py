@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import unicodedata
 from fractions import Fraction
 from typing import Annotated, Literal
 
@@ -33,6 +32,7 @@ from frame_compare.config.schema_enums import (
     VsScreenshotWriter,
 )
 from frame_compare.config.slowpics import validate_slowpics_title_template
+from frame_compare.config.text_validation import reject_control_characters
 
 _EFFECTIVE_FPS_PATTERN = re.compile(r"^[0-9]+/[0-9]+$")
 
@@ -148,7 +148,7 @@ class SourceOverrideConfig(BaseModel):
     def validate_label(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        _reject_control_characters(value, field_name="label")
+        reject_control_characters(value, field_name="label")
         normalized = value.strip()
         if not normalized:
             raise ValueError("label must not be empty")
@@ -287,7 +287,7 @@ class SlowpicsConfig(BaseModel):
     @classmethod
     def validate_title_text(cls, value: str, info: ValidationInfo) -> str:
         field_name = info.field_name or "slowpics title"
-        _reject_control_characters(value, field_name=field_name)
+        reject_control_characters(value, field_name=field_name)
         normalized = value.strip()
         if field_name == "title_template" and normalized:
             validate_slowpics_title_template(normalized)
@@ -351,11 +351,6 @@ class LoggingConfig(BaseModel):
 
     level: LogLevel = LogLevel.INFO
     format: LogFormat = LogFormat.CONSOLE
-
-
-def _reject_control_characters(value: str, *, field_name: str) -> None:
-    if any(unicodedata.category(character) == "Cc" for character in value):
-        raise ValueError(f"{field_name} must not contain control characters")
 
 
 __all__ = [

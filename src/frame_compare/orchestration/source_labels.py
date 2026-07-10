@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import re
-import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from frame_compare.config.schema_models import SourceOverrideConfig
+from frame_compare.config.text_validation import is_control_character
 from frame_compare.orchestration.errors import SourceSelectionError
 from frame_compare.services.metadata_parsing import parse_filename
 from frame_compare.services.types import ParsedMetadata
@@ -77,7 +77,7 @@ def resolve_source_labels(
 def normalize_derived_display_text(value: str, *, fallback: str = "comparison") -> str:
     """Replace unsafe runtime control text and collapse whitespace."""
     without_controls = "".join(
-        " " if unicodedata.category(character) == "Cc" else character for character in value
+        " " if is_control_character(character) else character for character in value
     )
     normalized = _WHITESPACE_RE.sub(" ", without_controls).strip()
     return normalized or fallback

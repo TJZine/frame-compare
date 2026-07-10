@@ -10,7 +10,14 @@ from frame_compare.analysis.metric_identity import (
     metric_backend,
     stable_metric_algorithm_identity_json,
 )
-from frame_compare.analysis.types import ClipIdentity, MetricActiveRect, MetricsMetadata
+from frame_compare.analysis.types import (
+    ActiveRectAlgorithmId,
+    ActiveRectDetectionMode,
+    ActiveRectSource,
+    ClipIdentity,
+    MetricActiveRect,
+    MetricsMetadata,
+)
 from frame_compare.config.schema import AnalysisConfig
 
 FIXED_MTIME = 1704067200.0  # 2024-01-01 00:00:00 UTC
@@ -21,8 +28,9 @@ def valid_cache_metadata_payload(
     *,
     frame_count: int = 0,
     metric_active_rect: dict[str, int] | None = None,
-    active_rect_source: str = "full-frame",
-    active_rect_detection_mode: str = "aspect_ratio",
+    active_rect_source: ActiveRectSource = "full-frame",
+    active_rect_detection_mode: ActiveRectDetectionMode = "aspect_ratio",
+    active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v2",
 ) -> dict[str, object]:
     return {
         "frame_count": frame_count,
@@ -37,7 +45,7 @@ def valid_cache_metadata_payload(
         "metric_active_rect": metric_active_rect,
         "active_rect_source": active_rect_source,
         "active_rect_detection_mode": active_rect_detection_mode,
-        "active_rect_algorithm_id": "active_rect_resolution_v2",
+        "active_rect_algorithm_id": active_rect_algorithm_id,
         "version": CACHE_VERSION,
     }
 
@@ -63,6 +71,9 @@ def metrics_metadata(
     config: AnalysisConfig,
     analysis_source_path: str = "",
     metric_active_rect: MetricActiveRect | None = None,
+    active_rect_source: ActiveRectSource = "full-frame",
+    active_rect_detection_mode: ActiveRectDetectionMode = "aspect_ratio",
+    active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v2",
 ) -> MetricsMetadata:
     return MetricsMetadata(
         frame_count=frame_count,
@@ -75,5 +86,8 @@ def metrics_metadata(
         metric_backend=metric_backend(config),
         algorithm_identity_json=stable_metric_algorithm_identity_json(config),
         metric_active_rect=metric_active_rect,
+        active_rect_source=active_rect_source,
+        active_rect_detection_mode=active_rect_detection_mode,
+        active_rect_algorithm_id=active_rect_algorithm_id,
         version=CACHE_VERSION,
     )
