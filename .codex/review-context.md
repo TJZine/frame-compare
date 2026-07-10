@@ -132,6 +132,7 @@ Logic verification:
 ```bash
 .venv/bin/pyright --warnings
 .venv/bin/ruff check .
+.venv/bin/bandit -c pyproject.toml -r src --severity-level medium
 .venv/bin/pytest -q
 UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
 ```
@@ -140,6 +141,7 @@ Full verification:
 ```bash
 .venv/bin/pyright --warnings
 .venv/bin/ruff check .
+.venv/bin/bandit -c pyproject.toml -r src --severity-level medium
 .venv/bin/pytest -q
 UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
 ```

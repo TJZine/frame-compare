@@ -41,6 +41,11 @@ This plan outlines the implementation to restore naming precision and configure 
 - `src/frame_compare/orchestration/phase_post_render.py` (Orchestrate slow.pics gallery title resolution with `(year)` fallback logic and image labeling)
 - `src/frame_compare/services/publishers.py` (Build and map slow.pics API payload fields)
 - `docs/current-cli-contract.md` (Authority CLI/Config contract doc)
+- `tests/config/test_schema.py` (Validate new slow.pics/source fields, defaults, invalid strings, numeric bounds, and `tmdb_id`/`tmdb_category` coupling)
+- `tests/orchestration/test_preparation.py` (Prove override-label selection, deterministic fallback labels, and duplicate-label rejection before render)
+- `tests/orchestration/test_phase_tasks_outputs.py` (Prove title/year/suffix resolution and `clip.label` propagation into slow.pics image labeling)
+- `tests/services/test_publishers.py` (Prove multipart title, `tmdbId`, `hentai`, `removeAfter`, and planned image-name payload mapping)
+- `tests/test_cli_contract_docs.py` (Keep the exact public config field set, defaults, documentation, and absence of unintended run flags aligned)
 
 ### Files Out of Scope
 - `src/frame_compare/analysis/**`
@@ -74,26 +79,14 @@ The following field will be added to per-source overrides:
 This changes the validated public configuration surface and public HTTP request payloads. Full test coverage is required to verify config loading, schema serialization, label propagation, and correct multipart boundary formatting.
 
 ### Verification Commands
-```bash
-# Static type checking
-.venv/bin/pyright --warnings
-
-# Check syntax and style
-.venv/bin/ruff check .
-
-# Execute full test suite
-.venv/bin/pytest -q
-
-# Verify import layers
-UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
-```
+Run the **Full Verification** command canon from `docs/ENGINEERING_RUNBOOK.md`.
 
 ---
 
 ## 6. Rollback & Stop Conditions
 
 - **Rollback Surface**:
-  - Run `git checkout -- <file>` on any touched files to revert.
+  - Revert the workstream's dedicated commit(s), or apply targeted inverse patches after inspecting `git status` and `git diff`; preserve unrelated workspace changes.
 - **Stop and Replan Triggers**:
   - If adding `label` to `SourceOverrideConfig` breaks Pydantic parsing of existing workspace override configurations.
   - If slow.pics upload endpoints reject the resolved `tmdbId` format (e.g. `MOVIE_123` / `TV_456`).
