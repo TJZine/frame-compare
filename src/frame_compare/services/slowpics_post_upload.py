@@ -22,8 +22,7 @@ class SlowpicsPostUploadRequest:
     workspace: WorkspacePaths
     config: SlowpicsConfig
     slowpics_url: str
-    metadata_title: str | None
-    upload_title: str | None
+    collection_title: str
 
 
 async def run_slowpics_post_upload_actions(
@@ -45,8 +44,7 @@ def _create_shortcut_actions(
     result = create_slowpics_url_shortcut(
         workspace=request.workspace,
         slowpics_url=request.slowpics_url,
-        metadata_title=request.metadata_title,
-        upload_title=request.upload_title,
+        collection_title=request.collection_title,
     )
     if result.success:
         return (

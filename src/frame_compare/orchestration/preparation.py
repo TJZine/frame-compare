@@ -63,6 +63,7 @@ from frame_compare.orchestration.selection_domain import (
     build_selection_domain_clips_with_diagnostics,
     compute_selection_window_for_clips,
 )
+from frame_compare.orchestration.source_labels import resolve_source_labels
 from frame_compare.orchestration.source_selection import resolve_source_selection
 from frame_compare.orchestration.types import (
     RunDependencies,
@@ -358,6 +359,7 @@ def _probe_input_videos(
     deps: RunDependencies,
     config: ConfigSchema,
     overrides_by_path: dict[Path, SourceOverrideConfig],
+    labels_by_path: dict[Path, str],
 ) -> tuple[list[ClipState], list[str], list[str]]:
     cache_paths = _probe_cache_paths_for_run(workspace)
     entries_by_key = _load_probe_cache_entries(cache_paths)
@@ -402,6 +404,7 @@ def _probe_input_videos(
         ordered_paths=input_videos,
         snapshots_by_path=snapshots_by_path,
         overrides_by_path=overrides_by_path,
+        labels_by_path=labels_by_path,
         match_fps=config.sources.match_fps,
         active_rect_detection=config.screenshots.active_rect_detection,
     )
@@ -465,12 +468,14 @@ def _probe_input_videos_from_snapshots(
     input_videos: list[Path],
     config: ConfigSchema,
     overrides_by_path: dict[Path, SourceOverrideConfig],
+    labels_by_path: dict[Path, str],
     snapshots_by_path: dict[Path, ClipProbeSnapshot],
 ) -> tuple[list[ClipState], list[str], list[str]]:
     result = build_selection_domain_clips_with_diagnostics(
         ordered_paths=input_videos,
         snapshots_by_path=snapshots_by_path,
         overrides_by_path=overrides_by_path,
+        labels_by_path=labels_by_path,
         match_fps=config.sources.match_fps,
         active_rect_detection=config.screenshots.active_rect_detection,
     )
@@ -510,6 +515,12 @@ async def execute_prep(
     )
     input_videos = source_selection.ordered_paths
     overrides_by_path = dict(source_selection.overrides_by_path)
+    labels_by_path = resolve_source_labels(
+        ordered_paths=input_videos,
+        overrides_by_path=overrides_by_path,
+        label_mode=config.sources.label_mode,
+        label_parser=config.sources.label_parser,
+    )
     analysis_required = not request.skip_analysis and needs_analysis(config.analysis)
     if (
         request.from_cache_only
@@ -540,6 +551,7 @@ async def execute_prep(
             input_videos=input_videos,
             config=config,
             overrides_by_path=overrides_by_path,
+            labels_by_path=labels_by_path,
             snapshots_by_path=prevalidated_snapshots_by_path,
         )
         _validate_source_fps_compatibility(prevalidated_clips)
@@ -612,6 +624,7 @@ async def execute_prep(
             deps=deps,
             config=config,
             overrides_by_path=overrides_by_path,
+            labels_by_path=labels_by_path,
         )
         _validate_source_fps_compatibility(clips)
         selection_window = compute_selection_window_for_clips(clips=clips, config=config)

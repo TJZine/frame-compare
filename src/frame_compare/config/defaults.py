@@ -15,6 +15,8 @@ use_run_folders = true
 # reference = "auto"
 # analysis_source = "reference"  # reference, fastest, or a source selector
 # match_fps = "majority"  # opt-in; timing metadata only, no frame resampling
+label_mode = "stem"
+label_parser = "auto"
 # Add per-source overrides with tables such as:
 # [sources.overrides."encode-a.mkv"]
 # trim_start_frames = 0
@@ -81,10 +83,18 @@ contrast_recovery = 0.3
 [slowpics]
 auto_upload = false
 confirm_upload_after_report = false
-visibility = "unlisted"
+visibility = "public"
 delete_after_upload = false
 timeout_seconds = 60.0
 max_retries = 3
+# title = "Example Film"
+# title_template = "${Title} (${Year})"
+# title_suffix = "[Source Comparison]"
+is_hentai = false
+# tmdb_id = 1234
+# tmdb_media_type = "movie"
+remove_after_days = 0
+image_upload_timeout_seconds = 180.0
 copy_url_to_clipboard = true
 open_in_browser = true
 create_url_shortcut = true

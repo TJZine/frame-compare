@@ -26,12 +26,16 @@ from frame_compare.orchestration.phase_selection import (
     selection_detail_for_frame,
     selection_label_for_frame,
 )
+from frame_compare.orchestration.slowpics_metadata import (
+    resolve_slowpics_collection_metadata,
+)
 from frame_compare.orchestration.types import (
     SlowpicsUploadConfirmationFn,
     SlowpicsUploadConfirmationRequest,
 )
 from frame_compare.services.errors import SlowpicsError
 from frame_compare.services.metadata import resolve_metadata
+from frame_compare.services.metadata_parsing import parse_filename
 from frame_compare.services.publishers import publish_to_slowpics
 from frame_compare.services.report.display import (
     SourceFrameSelectionDetail,
@@ -130,16 +134,22 @@ async def run_publish_phase(
         clips=_slowpics_upload_clips(ctx),
         screenshots_by_label=render.screenshots_by_label,
     )
-    screenshot_dir = (
-        render.screenshot_dir
-        if render.screenshot_dir is not None
-        else ctx.workspace.screenshots_dir
+    collection_resolution = resolve_slowpics_collection_metadata(
+        config=ctx.config.slowpics,
+        reference_path=ctx.reference.path,
+        reference_label=ctx.reference.label,
+        parsed_reference=parse_filename(
+            ctx.reference.path.name,
+            parser_priority=ctx.config.sources.label_parser,
+        ),
+        resolved_tmdb=metadata,
     )
+    for warning in collection_resolution.warnings:
+        log.warning("slowpics_tmdb_association_mismatch", warning=warning)
     result = await publish_to_slowpics(
-        screenshot_dir=screenshot_dir,
+        collection_metadata=collection_resolution.metadata,
         config=ctx.config.slowpics,
         client=client,
-        metadata=metadata,
         progress=ctx.reporter,
         upload_plan=upload_plan,
     )
@@ -148,8 +158,7 @@ async def run_publish_phase(
             workspace=ctx.workspace,
             config=ctx.config.slowpics,
             slowpics_url=result.url,
-            metadata_title=metadata.title if metadata is not None else None,
-            upload_title=screenshot_dir.name,
+            collection_title=collection_resolution.metadata.title,
         )
     )
     return PublishPhaseOutput(
@@ -201,7 +210,7 @@ def _slowpics_upload_clips(ctx: RunContext) -> list[SlowpicsUploadClip]:
         if clip.label in seen_labels:
             raise SlowpicsError(f"Duplicate clip label in slow.pics upload input: {clip.label!r}")
         seen_labels.add(clip.label)
-        upload_clips.append(SlowpicsUploadClip(label=clip.label, image_name=clip.path.stem))
+        upload_clips.append(SlowpicsUploadClip(label=clip.label, image_name=clip.label))
     return upload_clips
 
 

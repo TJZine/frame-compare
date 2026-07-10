@@ -127,6 +127,14 @@ def test_current_cli_contract_documents_slowpics_config_surface_and_defaults() -
         "delete_after_upload",
         "timeout_seconds",
         "max_retries",
+        "title",
+        "title_template",
+        "title_suffix",
+        "is_hentai",
+        "tmdb_id",
+        "tmdb_media_type",
+        "remove_after_days",
+        "image_upload_timeout_seconds",
         "copy_url_to_clipboard",
         "open_in_browser",
         "create_url_shortcut",
@@ -135,10 +143,18 @@ def test_current_cli_contract_documents_slowpics_config_surface_and_defaults() -
     for expected in (
         "`auto_upload = false`",
         "`confirm_upload_after_report = false`",
-        '`visibility = "unlisted"`',
+        '`visibility = "public"`',
         "`delete_after_upload = false`",
         "`timeout_seconds = 60.0`",
         "`max_retries = 3`",
+        '`title = ""`',
+        '`title_template = ""`',
+        '`title_suffix = ""`',
+        "`is_hentai = false`",
+        "`tmdb_id = null`",
+        "`tmdb_media_type = null`",
+        "`remove_after_days = 0`",
+        "`image_upload_timeout_seconds = 180.0`",
         "`copy_url_to_clipboard = true`",
         "`open_in_browser = true`",
         "`create_url_shortcut = true`",
@@ -163,7 +179,7 @@ def test_current_cli_contract_documents_slowpics_config_surface_and_defaults() -
     ):
         assert expected in normalized_slowpics_section
     assert (
-        "These ten fields are the full current public `[slowpics]` config surface"
+        "These eighteen fields are the full current public `[slowpics]` config surface"
         in normalized_slowpics_section
     )
     assert "parsed and defaulted only" not in normalized_slowpics_section

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from fractions import Fraction
 from typing import Annotated, Literal
 
@@ -10,6 +11,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    ValidationInfo,
     field_serializer,
     field_validator,
     model_validator,
@@ -30,6 +32,7 @@ from frame_compare.config.schema_enums import (
     Visibility,
     VsScreenshotWriter,
 )
+from frame_compare.config.slowpics import validate_slowpics_title_template
 
 _EFFECTIVE_FPS_PATTERN = re.compile(r"^[0-9]+/[0-9]+$")
 
@@ -138,6 +141,18 @@ class SourceOverrideConfig(BaseModel):
     trim_end_frames: int = Field(default=0, ge=0)
     active_rect: SourceActiveRectConfig | None = None
     effective_fps: Fraction | None = None
+    label: str | None = None
+
+    @field_validator("label")
+    @classmethod
+    def validate_label(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("label must not be empty")
+        _reject_control_characters(normalized, field_name="label")
+        return normalized
 
     @field_validator("effective_fps", mode="before")
     @classmethod
@@ -173,6 +188,8 @@ class SourcesConfig(BaseModel):
     reference: str | None = None
     analysis_source: str = "reference"
     match_fps: SourceMatchFpsMode = SourceMatchFpsMode.DISABLED
+    label_mode: Literal["stem", "filename", "parsed"] = "stem"
+    label_parser: Literal["auto", "guessit", "anitopy"] = "auto"
     overrides: dict[str, SourceOverrideConfig] = Field(default_factory=dict)
 
 
@@ -249,14 +266,40 @@ class SlowpicsConfig(BaseModel):
 
     auto_upload: bool = False
     confirm_upload_after_report: bool = False
-    visibility: Visibility = Visibility.UNLISTED
+    visibility: Visibility = Visibility.PUBLIC
     delete_after_upload: bool = False
     timeout_seconds: float = Field(default=60.0, ge=10.0)
     max_retries: int = Field(default=3, ge=1, le=10)
+    title: str = ""
+    title_template: str = ""
+    title_suffix: str = ""
+    is_hentai: bool = False
+    tmdb_id: Annotated[int, Field(strict=True, gt=0)] | None = None
+    tmdb_media_type: Literal["movie", "tv"] | None = None
+    remove_after_days: Annotated[int, Field(strict=True, ge=0, le=999999)] = 0
+    image_upload_timeout_seconds: float = Field(default=180.0, ge=10.0)
     copy_url_to_clipboard: bool = True
     open_in_browser: bool = True
     create_url_shortcut: bool = True
     webhook_url: str | None = None
+
+    @field_validator("title", "title_template", "title_suffix")
+    @classmethod
+    def validate_title_text(cls, value: str, info: ValidationInfo) -> str:
+        normalized = value.strip()
+        field_name = info.field_name or "slowpics title"
+        _reject_control_characters(normalized, field_name=field_name)
+        if field_name == "title_template" and normalized:
+            validate_slowpics_title_template(normalized)
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_title_and_tmdb_pairs(self) -> SlowpicsConfig:
+        if self.title and self.title_template:
+            raise ValueError("title and title_template are mutually exclusive")
+        if (self.tmdb_id is None) != (self.tmdb_media_type is None):
+            raise ValueError("tmdb_id and tmdb_media_type must be configured together")
+        return self
 
 
 class TmdbConfig(BaseModel):
@@ -308,6 +351,11 @@ class LoggingConfig(BaseModel):
 
     level: LogLevel = LogLevel.INFO
     format: LogFormat = LogFormat.CONSOLE
+
+
+def _reject_control_characters(value: str, *, field_name: str) -> None:
+    if any(unicodedata.category(character) == "Cc" for character in value):
+        raise ValueError(f"{field_name} must not contain control characters")
 
 
 __all__ = [

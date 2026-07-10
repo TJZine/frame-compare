@@ -40,8 +40,7 @@ def create_slowpics_url_shortcut(
     *,
     workspace: WorkspacePaths,
     slowpics_url: str,
-    metadata_title: str | None,
-    upload_title: str | None,
+    collection_title: str,
     text_writer: ShortcutTextWriter = write_text_atomic,
 ) -> SlowpicsShortcutResult:
     """Create a deterministic Windows InternetShortcut-style file."""
@@ -62,8 +61,7 @@ def create_slowpics_url_shortcut(
         )
 
     shortcut_path = output_dir / _shortcut_filename(
-        metadata_title=metadata_title,
-        upload_title=upload_title,
+        collection_title=collection_title,
         slowpics_url=slowpics_url,
     )
     content = f"[InternetShortcut]\nURL={slowpics_url}\n"
@@ -118,16 +116,12 @@ def _is_safe_shortcut_parent(parent: Path, root: Path) -> bool:
 
 def _shortcut_filename(
     *,
-    metadata_title: str | None,
-    upload_title: str | None,
+    collection_title: str,
     slowpics_url: str,
 ) -> str:
-    for candidate in (metadata_title, upload_title):
-        if candidate is None:
-            continue
-        stem = _safe_filename_stem(candidate)
-        if stem is not None:
-            return f"{stem}.url"
+    stem = _safe_filename_stem(collection_title)
+    if stem is not None:
+        return f"{stem}.url"
     return f"{_fallback_stem_from_url(slowpics_url)}.url"
 
 

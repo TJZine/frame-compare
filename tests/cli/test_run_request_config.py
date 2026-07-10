@@ -138,6 +138,11 @@ effective_fps = "24/1"
         assert data["analysis"]["user_frames"] == [3, 5]
         assert data["analysis"]["random_frame_count"] == 17
         assert data["sources"]["overrides"]["reference.mkv"]["effective_fps"] == "24/1"
+        assert data["sources"]["label_mode"] == "stem"
+        assert data["sources"]["label_parser"] == "auto"
+        assert data["slowpics"]["visibility"] == "public"
+        assert data["slowpics"]["remove_after_days"] == 0
+        assert data["slowpics"]["image_upload_timeout_seconds"] == 180.0
 
 
 def test_run_write_config_json_preserves_previous_offsets_and_writes_config(

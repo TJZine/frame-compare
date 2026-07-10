@@ -103,7 +103,7 @@ def test_run_default_prints_at_a_glance_and_result_summary(monkeypatch: MonkeyPa
         assert "slow.pics" in output
         assert "auto_upload" in output
         assert "visibility" in output
-        assert "unlisted" in output
+        assert "public" in output
         assert "report" in output
         assert "enabled" in output
         assert "auto_open" in output

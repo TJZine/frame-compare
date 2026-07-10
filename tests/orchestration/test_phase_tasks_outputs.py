@@ -274,9 +274,13 @@ def test_run_render_phase_maps_aligned_frames_to_source_frames(
 
     requests = captured["batch_requests"]
     assert requests[0].source_frames == [4]
+    assert requests[0].label == "Reference"
+    assert requests[0].filename_label == "reference"
     assert requests[0].display_frames == [1]
     assert requests[0].selection_labels == ["Dark"]
     assert requests[1].source_frames == [2]
+    assert requests[1].label == "Encode 1"
+    assert requests[1].filename_label == "encode"
     assert captured["output_dir"] == ctx.workspace.screenshots_dir
     options = captured["options"]
     assert options.overlay_mode == ctx.config.screenshots.overlay_mode
@@ -1007,19 +1011,20 @@ async def test_run_publish_phase_sets_url_from_publish_result_and_delegates_post
         )
         assert captured["client"] is client
 
-    assert captured["screenshot_dir"] == screenshot_dir
     assert captured["config"] == ctx.config.slowpics
-    assert captured["metadata"] == metadata
+    assert captured["collection_metadata"].title == "Collateral (2004)"
+    assert captured["collection_metadata"].tmdb_id == 3
+    assert captured["collection_metadata"].tmdb_media_type == "movie"
     upload_plan = captured["upload_plan"]
     assert upload_plan.file_paths == [ref_10, enc_10, ref_20, enc_20]
     assert [row.row_name for row in upload_plan.rows] == ["10", "20"]
     assert [image.image_name for image in upload_plan.rows[0].images] == [
-        "reference",
-        "encode-final-source",
+        "Reference",
+        "Encode 1",
     ]
     assert captured_clip_names == [
-        ("Reference", "reference"),
-        ("Encode 1", "encode-final-source"),
+        ("Reference", "Reference"),
+        ("Encode 1", "Encode 1"),
     ]
     assert output.slowpics_url == "https://slow.pics/c/collateral"
     assert output.uploaded_file_paths == (ref_10, enc_10, ref_20, enc_20)
@@ -1027,8 +1032,7 @@ async def test_run_publish_phase_sets_url_from_publish_result_and_delegates_post
     assert captured_post_upload_request.workspace == ctx.workspace
     assert captured_post_upload_request.config is ctx.config.slowpics
     assert captured_post_upload_request.slowpics_url == "https://slow.pics/c/collateral"
-    assert captured_post_upload_request.metadata_title == "Collateral"
-    assert captured_post_upload_request.upload_title == screenshot_dir.name
+    assert captured_post_upload_request.collection_title == "Collateral (2004)"
     assert output.post_upload_actions == (
         PostUploadActionResult(
             kind="shortcut",

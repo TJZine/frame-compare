@@ -24,7 +24,7 @@ from frame_compare.services.errors import (
     SlowpicsUnavailableError,
 )
 from frame_compare.services.slowpics_upload_plan import SlowpicsUploadPlan
-from frame_compare.services.types import TmdbMetadata
+from frame_compare.services.types import SlowpicsCollectionMetadata
 from frame_compare.utils.progress_protocol import ProgressReporter
 
 log = structlog.get_logger()
@@ -75,12 +75,16 @@ class SlowpicsPublisher:
         self.config = config
         self._client = client
 
-    async def upload(self, upload_plan: SlowpicsUploadPlan, title: str | None = None) -> str:
+    async def upload(
+        self,
+        upload_plan: SlowpicsUploadPlan,
+        collection_metadata: SlowpicsCollectionMetadata,
+    ) -> str:
         """Upload screenshots to slow.pics.
 
         Args:
             upload_plan: Planned rows/images to upload.
-            title: Optional title for the comparison.
+            collection_metadata: Resolved collection title and optional TMDB association.
 
         Returns:
             The URL of the uploaded comparison.
@@ -99,7 +103,7 @@ class SlowpicsPublisher:
         log.info(
             "slowpics_upload_start",
             file_count=len(files),
-            title=title,
+            title=collection_metadata.title,
             visibility=visibility.value,
         )
 
@@ -109,8 +113,7 @@ class SlowpicsPublisher:
             browser_id = _browser_id_from_cookies(self._client)
             metadata_response = await self._create_metadata_with_retry(
                 upload_plan=upload_plan,
-                title=title,
-                visibility=visibility,
+                collection_metadata=collection_metadata,
                 xsrf_token=xsrf_token,
                 browser_id=browser_id,
             )
@@ -256,8 +259,7 @@ class SlowpicsPublisher:
         self,
         *,
         upload_plan: SlowpicsUploadPlan,
-        title: str | None,
-        visibility: Visibility,
+        collection_metadata: SlowpicsCollectionMetadata,
         xsrf_token: str,
         browser_id: str,
     ) -> _SlowpicsMetadataResponse:
@@ -269,8 +271,8 @@ class SlowpicsPublisher:
                 headers=_slowpics_upload_headers(xsrf_token),
                 files=_metadata_multipart_fields(
                     upload_plan=upload_plan,
-                    title=title,
-                    visibility=visibility,
+                    collection_metadata=collection_metadata,
+                    config=self.config,
                     browser_id=browser_id,
                 ),
             ),
@@ -344,7 +346,11 @@ class SlowpicsPublisher:
             file_handle = stack.enter_context(image_path.open("rb"))
             return await self._client.post(
                 SLOWPICS_IMAGE_UPLOAD_URL_TEMPLATE.format(image_uuid=image_uuid),
-                timeout=self.config.timeout_seconds,
+                timeout=_image_upload_timeout(
+                    general_timeout_seconds=self.config.timeout_seconds,
+                    image_upload_timeout_seconds=self.config.image_upload_timeout_seconds,
+                    file_size_bytes=image_path.stat().st_size,
+                ),
                 headers=_slowpics_upload_headers(xsrf_token),
                 data={
                     "collectionUuid": collection_uuid,
@@ -392,20 +398,18 @@ class SlowpicsPublisher:
 
 
 async def publish_to_slowpics(
-    screenshot_dir: Path,
+    collection_metadata: SlowpicsCollectionMetadata,
     config: SlowpicsConfig,
     client: httpx.AsyncClient,
-    metadata: TmdbMetadata | None = None,
     progress: ProgressReporter | None = None,
     upload_plan: SlowpicsUploadPlan | None = None,
 ) -> PublishResult:
     """Publish screenshots through the browser-compatible slow.pics upload flow.
 
     Args:
-        screenshot_dir: Screenshot directory, used for title fallback.
+        collection_metadata: Resolved collection title and optional TMDB association.
         config: Slowpics configuration.
         client: HTTP client to use.
-        metadata: Optional metadata for title.
         progress: Optional progress reporter.
         upload_plan: Explicit row-major upload plan.
 
@@ -421,13 +425,11 @@ async def publish_to_slowpics(
         raise SlowpicsError("No PNG files found to upload")
     _validate_upload_files(files)
 
-    title = metadata.title if metadata else screenshot_dir.name
-
     if progress:
-        progress.set_description("Uploading screenshots to slow.pics")
+        progress.set_description(f"Uploading {collection_metadata.title} to slow.pics")
 
     publisher = SlowpicsPublisher(config, client)
-    url = await publisher.upload(upload_plan, title)
+    url = await publisher.upload(upload_plan, collection_metadata)
 
     duration = monotonic() - start_time
 
@@ -467,26 +469,33 @@ def _slowpics_upload_headers(xsrf_token: str) -> dict[str, str]:
 def _metadata_multipart_fields(
     *,
     upload_plan: SlowpicsUploadPlan,
-    title: str | None,
-    visibility: Visibility,
+    collection_metadata: SlowpicsCollectionMetadata,
+    config: SlowpicsConfig,
     browser_id: str,
 ) -> _MultipartTextFields:
     fields: list[tuple[str, str]] = [
-        ("collectionName", title or "Comparison"),
+        ("collectionName", collection_metadata.title),
         ("browserId", browser_id),
         ("optimizeImages", "true"),
         ("desiredFileType", "image/png"),
-        ("hentai", "false"),
-        ("public", "true" if visibility is Visibility.PUBLIC else "false"),
-        ("visibility", "PUBLIC" if visibility is Visibility.PUBLIC else "UNLISTED"),
-        ("removeAfter", ""),
+        ("hentai", _lowercase_bool(config.is_hentai)),
+        ("public", _lowercase_bool(config.visibility is Visibility.PUBLIC)),
+        ("visibility", "PUBLIC" if config.visibility is Visibility.PUBLIC else "LINK_ONLY"),
+        ("removeAfter", str(config.remove_after_days) if config.remove_after_days else ""),
     ]
+    if collection_metadata.tmdb_id is not None and collection_metadata.tmdb_media_type is not None:
+        fields.append(
+            (
+                "tmdbId",
+                f"{collection_metadata.tmdb_media_type.upper()}_{collection_metadata.tmdb_id}",
+            )
+        )
     for row in upload_plan.rows:
         row_prefix = f"comparisons[{row.row_index}]"
         fields.extend(
             [
                 (f"{row_prefix}.name", row.row_name),
-                (f"{row_prefix}.hentai", "false"),
+                (f"{row_prefix}.hentai", _lowercase_bool(config.is_hentai)),
                 (f"{row_prefix}.sortOrder", str(row.sort_order)),
             ]
         )
@@ -499,6 +508,21 @@ def _metadata_multipart_fields(
                 ]
             )
     return [(name, (None, value)) for name, value in fields]
+
+
+def _lowercase_bool(value: bool) -> str:
+    return "true" if value else "false"
+
+
+def _image_upload_timeout(
+    *,
+    general_timeout_seconds: float,
+    image_upload_timeout_seconds: float,
+    file_size_bytes: int,
+) -> httpx.Timeout:
+    estimated_write_seconds = file_size_bytes / (256 * 1024) + 15.0
+    write_timeout = max(image_upload_timeout_seconds, estimated_write_seconds)
+    return httpx.Timeout(general_timeout_seconds, write=write_timeout)
 
 
 def _parse_metadata_response(

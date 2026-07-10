@@ -471,8 +471,8 @@ def test_execute_run_emits_reports_after_load_sources_and_after_align(
     asyncio.run(execute_run(request, deps=deps))
 
     assert fps_calls == [
-        ("after_load_sources", True, ("Reference", "Encode 1")),
-        ("after_align", True, ("Reference", "Encode 1")),
+        ("after_load_sources", True, ("comp", "source")),
+        ("after_align", True, ("comp", "source")),
     ]
     assert len(alignment_calls) == 1
     assert alignment_calls[0][:4] == ("after_align", True, False, False)

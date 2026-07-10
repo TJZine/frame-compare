@@ -24,7 +24,7 @@ def _workspace(
     )
 
 
-def test_create_slowpics_url_shortcut_prefers_run_dir_and_metadata_title(
+def test_create_slowpics_url_shortcut_prefers_run_dir_and_collection_title(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "workspace"
@@ -37,8 +37,7 @@ def test_create_slowpics_url_shortcut_prefers_run_dir_and_metadata_title(
             generated_dir=root / "elsewhere" / "generated",
         ),
         slowpics_url="https://slow.pics/c/collateral-key",
-        metadata_title="Collateral",
-        upload_title="screenshots",
+        collection_title="Collateral",
     )
 
     shortcut_path = run_dir / "Collateral.url"
@@ -62,8 +61,7 @@ def test_create_slowpics_url_shortcut_uses_safe_common_parent_without_run_dir(
             generated_dir=output_parent / "generated",
         ),
         slowpics_url="https://slow.pics/c/example-key",
-        metadata_title=None,
-        upload_title="Encode Screenshots",
+        collection_title="Encode Screenshots",
     )
 
     shortcut_path = output_parent / "Encode Screenshots.url"
@@ -87,8 +85,7 @@ def test_create_slowpics_url_shortcut_returns_warning_for_parent_outside_root(
             generated_dir=output_parent / "generated",
         ),
         slowpics_url="https://slow.pics/c/example-key",
-        metadata_title="Collateral",
-        upload_title="screenshots",
+        collection_title="Collateral",
     )
 
     assert result.success is False
@@ -108,8 +105,7 @@ def test_create_slowpics_url_shortcut_treats_home_common_parent_as_unsafe() -> N
             generated_dir=home / "frame-compare-shortcut-test-generated",
         ),
         slowpics_url="https://slow.pics/c/example-key",
-        metadata_title="Collateral",
-        upload_title="screenshots",
+        collection_title="Collateral",
     )
 
     assert result.success is False
@@ -130,8 +126,7 @@ def test_create_slowpics_url_shortcut_sanitizes_title_and_falls_back_to_url_key(
             generated_dir=output_parent / "generated",
         ),
         slowpics_url="https://slow.pics/c/title-key",
-        metadata_title='The: Movie / Finale * "Special"',
-        upload_title="screenshots",
+        collection_title='The: Movie / Finale * "Special"',
     )
     fallback_result = create_slowpics_url_shortcut(
         workspace=_workspace(
@@ -140,8 +135,7 @@ def test_create_slowpics_url_shortcut_sanitizes_title_and_falls_back_to_url_key(
             generated_dir=output_parent / "generated",
         ),
         slowpics_url="https://slow.pics/c/url-key",
-        metadata_title="<>:?*",
-        upload_title=None,
+        collection_title="<>:?*",
     )
 
     assert title_result.path == output_parent / "The Movie Finale Special.url"
@@ -160,14 +154,12 @@ def test_create_slowpics_url_shortcut_overwrites_same_deterministic_path(
     first = create_slowpics_url_shortcut(
         workspace=_workspace(root, run_dir=run_dir),
         slowpics_url="https://slow.pics/c/one",
-        metadata_title="Example",
-        upload_title=None,
+        collection_title="Example",
     )
     second = create_slowpics_url_shortcut(
         workspace=_workspace(root, run_dir=run_dir),
         slowpics_url="https://slow.pics/c/two",
-        metadata_title="Example",
-        upload_title=None,
+        collection_title="Example",
     )
 
     assert first.path == shortcut_path
@@ -188,8 +180,7 @@ def test_create_slowpics_url_shortcut_returns_warning_for_write_failure(
     result = create_slowpics_url_shortcut(
         workspace=_workspace(root, run_dir=root / "runs" / "Example"),
         slowpics_url="https://slow.pics/c/example-key",
-        metadata_title="Example",
-        upload_title=None,
+        collection_title="Example",
         text_writer=_raise_write_error,
     )
 

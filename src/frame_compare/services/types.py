@@ -92,6 +92,7 @@ class ParsedMetadata:
     year: int | None = None
     season: int | None = None
     episode: int | None = None
+    episode_title: str | None = None
     release_group: str | None = None
     source: str | None = None  # BluRay, WEB-DL, etc.
     resolution: str | None = None
@@ -106,8 +107,18 @@ class TmdbMetadata:
     original_title: str
     year: int
     media_type: Literal["movie", "tv"]
+    original_language: str | None = None
     poster_url: str | None = None
     backdrop_url: str | None = None
+
+
+@dataclass(frozen=True)
+class SlowpicsCollectionMetadata:
+    """Resolved slow.pics collection identity, independent of HTTP field names."""
+
+    title: str
+    tmdb_id: int | None = None
+    tmdb_media_type: Literal["movie", "tv"] | None = None
 
 
 @dataclass(frozen=True)

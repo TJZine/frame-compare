@@ -245,7 +245,7 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert color.contrast_recovery == 0.3
     assert color.preset == "reference"
     assert slowpics.confirm_upload_after_report is False
-    assert slowpics.visibility == Visibility.UNLISTED
+    assert slowpics.visibility == Visibility.PUBLIC
     assert slowpics.max_retries == 3
     assert slowpics.copy_url_to_clipboard is True
     assert slowpics.open_in_browser is True
@@ -350,10 +350,18 @@ def test_slowpics_config_public_surface_is_frozen_to_approved_fields_and_default
     expected_defaults = {
         "auto_upload": False,
         "confirm_upload_after_report": False,
-        "visibility": "unlisted",
+        "visibility": "public",
         "delete_after_upload": False,
         "timeout_seconds": 60.0,
         "max_retries": 3,
+        "title": "",
+        "title_template": "",
+        "title_suffix": "",
+        "is_hentai": False,
+        "tmdb_id": None,
+        "tmdb_media_type": None,
+        "remove_after_days": 0,
+        "image_upload_timeout_seconds": 180.0,
         "copy_url_to_clipboard": True,
         "open_in_browser": True,
         "create_url_shortcut": True,
@@ -481,7 +489,7 @@ def test_sources_config_effective_fps_serializes_num_den_for_toml_round_trip() -
 def test_default_config_toml_documents_sources_defaults() -> None:
     data = tomllib.loads(DEFAULT_CONFIG_TOML)
 
-    assert data["sources"] == {}
+    assert data["sources"] == {"label_mode": "stem", "label_parser": "auto"}
     assert '# reference = "auto"' in DEFAULT_CONFIG_TOML
     assert '# analysis_source = "reference"' in DEFAULT_CONFIG_TOML
     assert '# match_fps = "majority"' in DEFAULT_CONFIG_TOML
@@ -538,10 +546,13 @@ def test_default_config_toml_documents_approved_slowpics_defaults() -> None:
     assert data["slowpics"] == {
         "auto_upload": False,
         "confirm_upload_after_report": False,
-        "visibility": "unlisted",
+        "visibility": "public",
         "delete_after_upload": False,
         "timeout_seconds": 60.0,
         "max_retries": 3,
+        "is_hentai": False,
+        "remove_after_days": 0,
+        "image_upload_timeout_seconds": 180.0,
         "copy_url_to_clipboard": True,
         "open_in_browser": True,
         "create_url_shortcut": True,

@@ -40,6 +40,42 @@ def test_load_from_toml_file(tmp_path: Path) -> None:
     assert config.paths.input_dir == "comparison_videos"
 
 
+def test_load_slowpics_naming_and_source_label_fields_from_toml(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        """
+        [sources]
+        label_mode = "parsed"
+        label_parser = "anitopy"
+
+        [sources.overrides."reference.mkv"]
+        label = "Reference Source"
+
+        [slowpics]
+        title_template = "${Title} (${Year})"
+        title_suffix = "[Compare]"
+        is_hentai = true
+        tmdb_id = 7
+        tmdb_media_type = "tv"
+        remove_after_days = 30
+        image_upload_timeout_seconds = 240.0
+        """,
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path=config_file)
+    assert config.sources.label_mode == "parsed"
+    assert config.sources.label_parser == "anitopy"
+    assert config.sources.overrides["reference.mkv"].label == "Reference Source"
+    assert config.slowpics.title_template == "${Title} (${Year})"
+    assert config.slowpics.title_suffix == "[Compare]"
+    assert config.slowpics.is_hentai is True
+    assert config.slowpics.tmdb_id == 7
+    assert config.slowpics.tmdb_media_type == "tv"
+    assert config.slowpics.remove_after_days == 30
+    assert config.slowpics.image_upload_timeout_seconds == 240.0
+
+
 def test_toml_file_not_found_raises() -> None:
     """Test that missing config file raises ConfigNotFoundError."""
     with pytest.raises(ConfigNotFoundError) as exc:

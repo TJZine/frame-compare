@@ -66,3 +66,30 @@ def test_metadata_parsing_direct_module_uses_anitopy_first_for_bracketed_names(
     assert result.release_group == "Group"
     assert result.source == "Blu-ray"
     assert result.resolution == "1080p"
+
+
+def test_metadata_parsing_explicit_priority_and_episode_title(mocker) -> None:
+    calls: list[str] = []
+
+    def fake_anitopy(_filename: str) -> dict[str, object]:
+        calls.append("anitopy")
+        return {
+            "anime_title": "Anime",
+            "anime_episode": 4,
+            "episode_title": "The Arrival",
+        }
+
+    def fake_guessit(_filename: str) -> dict[str, object]:
+        calls.append("guessit")
+        return {"title": "Fallback", "season": 1}
+
+    mocker.patch("frame_compare.services.metadata_parsing.anitopy.parse", fake_anitopy)
+    mocker.patch("frame_compare.services.metadata_parsing.guessit", fake_guessit)
+
+    result = metadata_parsing.parse_filename("show.mkv", parser_priority="anitopy")
+
+    assert calls == ["anitopy", "guessit"]
+    assert result.title == "Anime"
+    assert result.season == 1
+    assert result.episode == 4
+    assert result.episode_title == "The Arrival"

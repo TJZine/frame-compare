@@ -38,6 +38,7 @@ async def test_search_tmdb_movie_maps_movie_endpoint_without_media_type() -> Non
                         "id": 329865,
                         "title": "Arrival",
                         "original_title": "Arrival",
+                        "original_language": "en",
                         "release_date": "2016-11-10",
                         "poster_path": "/poster.jpg",
                         "backdrop_path": None,
@@ -61,6 +62,7 @@ async def test_search_tmdb_movie_maps_movie_endpoint_without_media_type() -> Non
             original_title="Arrival",
             year=2016,
             media_type="movie",
+            original_language="en",
             poster_url="https://image.tmdb.org/t/p/original/poster.jpg",
             backdrop_url=None,
         )

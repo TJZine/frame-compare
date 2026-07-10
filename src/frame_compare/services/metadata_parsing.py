@@ -4,7 +4,7 @@ import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 import anitopy
 import structlog
@@ -24,6 +24,7 @@ class _ParsedFilenameFields:
     year: int | None = None
     season: int | None = None
     episode: int | None = None
+    episode_title: str | None = None
     release_group: str | None = None
     source: str | None = None
     resolution: str | None = None
@@ -71,6 +72,10 @@ def _merge_parser_metadata(
             current.episode,
             _first_int(parser_result, "anime_episode", "episode"),
         ),
+        episode_title=_keep_existing(
+            current.episode_title,
+            _first_text(parser_result, "episode_title", "anime_episode_title"),
+        ),
         release_group=_keep_existing(
             current.release_group,
             _first_text(parser_result, "release_group"),
@@ -83,7 +88,10 @@ def _merge_parser_metadata(
     )
 
 
-def parse_filename(filename: str) -> ParsedMetadata:
+def parse_filename(
+    filename: str,
+    parser_priority: Literal["auto", "guessit", "anitopy"] = "auto",
+) -> ParsedMetadata:
     """
     Extract metadata from filename using GuessIt + Anitopy.
 
@@ -111,7 +119,9 @@ def parse_filename(filename: str) -> ParsedMetadata:
         return ParsedMetadata(title="")
 
     # Determine primary parser
-    use_anitopy_first = filename.startswith("[")
+    use_anitopy_first = parser_priority == "anitopy" or (
+        parser_priority == "auto" and filename.startswith("[")
+    )
 
     def _log_parser_exception(parser_name: str, name: str, exc: Exception) -> None:
         log.debug(
@@ -162,6 +172,7 @@ def parse_filename(filename: str) -> ParsedMetadata:
         year=fields.year,
         season=fields.season,
         episode=fields.episode,
+        episode_title=fields.episode_title,
         release_group=fields.release_group,
         source=fields.source,
         resolution=fields.resolution,

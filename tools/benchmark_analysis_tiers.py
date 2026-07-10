@@ -317,6 +317,7 @@ def _prepared_benchmark_clip(
         ordered_paths=list(input_paths),
         snapshots_by_path=snapshots_by_path,
         overrides_by_path=overrides_by_path,
+        labels_by_path={path: path.stem for path in input_paths},
         match_fps=config.sources.match_fps,
         active_rect_detection=config.screenshots.active_rect_detection,
     )

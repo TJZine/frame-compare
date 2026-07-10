@@ -111,6 +111,37 @@ def _create_video_files(input_dir: Path, *filenames: str) -> list[Path]:
     return paths
 
 
+def test_execute_prep_rejects_duplicate_explicit_labels_before_probe_or_generated_state(
+    tmp_path: Path,
+) -> None:
+    _create_config(
+        tmp_path,
+        content=MINIMAL_CONFIG
+        + """
+[sources.overrides."a.mkv"]
+label = "Same"
+
+[sources.overrides."b.mkv"]
+label = "Same"
+""",
+    )
+    _create_video_files(tmp_path / "comparison_videos", "a.mkv", "b.mkv")
+
+    class FailIfLoaded:
+        def load(self, _path: Path) -> None:
+            raise AssertionError("source probing must not start")
+
+    with pytest.raises(SourceSelectionError, match="duplicate explicit source label"):
+        asyncio.run(
+            preparation.execute_prep(
+                RunRequest(root=tmp_path),
+                RunDependencies(vs_loader=cast(Any, FailIfLoaded())),
+            )
+        )
+
+    assert not (tmp_path / "generated").exists()
+
+
 def _letterbox_luma_frame(
     *,
     width: int = 100,
@@ -261,7 +292,7 @@ def test_execute_prep_no_cache_removes_only_matching_shared_metrics_cache(tmp_pa
         )
     )
 
-    assert prep.clips[0].label == "Reference"
+    assert prep.clips[0].label == "source"
     assert not metrics_path.exists()
     assert other_metrics_path.exists()
     assert manual_overrides_path.exists()
@@ -384,7 +415,7 @@ def test_execute_prep_from_cache_only_does_not_require_cached_alignment_offsets(
         preparation.execute_prep(request, RunDependencies(vs_loader=cast(Any, FakeVSLoader())))
     )
 
-    assert [clip.label for clip in prep.clips] == ["Reference", "Encode 1"]
+    assert [clip.label for clip in prep.clips] == ["a_source", "b_comp"]
 
 
 def test_execute_prep_from_cache_only_validates_metrics_cache_when_analysis_runs(
@@ -571,7 +602,7 @@ def test_execute_prep_probes_uncached_clips_and_persists_probe_snapshot(tmp_path
     )
 
     assert set(loader.loaded) == {source, encode}
-    assert [clip.label for clip in prep.clips] == ["Reference", "Encode 1"]
+    assert [clip.label for clip in prep.clips] == ["encode", "source"]
     assert [clip.probe.width for clip in prep.clips] == [1920, 1920]
     assert prep.clips[0].probe.tonemap_prop_keys == ("DolbyVisionRPU", "_Transfer")
     assert prep.clips[0].probe.preserved_frame_props == {
@@ -609,10 +640,10 @@ def test_execute_prep_preserves_deterministic_four_clip_order_and_labels(tmp_pat
         input_dir / "04-charlie.ts",
     ]
     assert [clip.label for clip in prep.clips] == [
-        "Reference",
-        "Encode 1",
-        "Encode 2",
-        "Encode 3",
+        "00-alpha",
+        "01-bravo",
+        "03-delta",
+        "04-charlie",
     ]
 
 
@@ -937,7 +968,7 @@ def test_execute_prep_explicit_reference_moves_selected_source_to_front(
         input_dir / "00-alpha.mp4",
         input_dir / "01-bravo.mkv",
     ]
-    assert [clip.label for clip in prep.clips] == ["Reference", "Encode 1", "Encode 2"]
+    assert [clip.label for clip in prep.clips] == ["03-delta", "00-alpha", "01-bravo"]
 
 
 def test_execute_prep_reference_auto_behaves_like_omitted_reference(tmp_path: Path) -> None:
@@ -1664,7 +1695,7 @@ def test_execute_prep_reuses_probe_cache_without_vs_loader(tmp_path: Path) -> No
     )
     second = asyncio.run(preparation.execute_prep(RunRequest(root=tmp_path), RunDependencies()))
 
-    assert second.clips[0].label == "Reference"
+    assert second.clips[0].label == "source"
     assert second.clips[0].probe == first.clips[0].probe
 
 
@@ -1693,7 +1724,7 @@ def test_execute_prep_rejects_mixed_source_fps_before_downstream_work(tmp_path: 
     assert error.context.details == {
         "reference_path": str(input_dir / "a_reference.mkv"),
         "reference_fps": "24000/1001",
-        "comparison_label": "Encode 1",
+        "comparison_label": "b_comparison",
         "comparison_path": str(input_dir / "b_comparison.mkv"),
         "comparison_fps": "30000/1001",
     }
