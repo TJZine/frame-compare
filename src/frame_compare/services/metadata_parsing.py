@@ -2,7 +2,7 @@
 
 import re
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal, cast
 
@@ -174,6 +174,8 @@ def parse_filename(
 
     fields = _merge_parser_metadata(_ParsedFilenameFields(), parsers[0](filename))
     if alternate_policy == "merge" or not _has_usable_title(fields.title):
+        if alternate_policy == "fallback":
+            fields = replace(fields, title=None)
         fields = _merge_parser_metadata(fields, parsers[1](filename))
 
     title = fields.title or Path(filename).stem

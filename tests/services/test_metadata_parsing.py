@@ -136,6 +136,26 @@ def test_metadata_parsing_fallback_policy_uses_alternate_for_missing_primary_tit
     assert result.episode == 4
 
 
+def test_metadata_parsing_fallback_policy_replaces_unusable_primary_title(mocker) -> None:
+    mocker.patch(
+        "frame_compare.services.metadata_parsing.anitopy.parse",
+        return_value={"anime_title": "---", "anime_episode": 4},
+    )
+    mocker.patch(
+        "frame_compare.services.metadata_parsing.guessit",
+        return_value={"title": "Fallback"},
+    )
+
+    result = metadata_parsing.parse_filename(
+        "show.mkv",
+        parser_priority="anitopy",
+        alternate_policy="fallback",
+    )
+
+    assert result.title == "Fallback"
+    assert result.episode == 4
+
+
 def test_metadata_parsing_fallback_policy_rejects_malformed_primary_fields(mocker) -> None:
     calls: list[str] = []
 
