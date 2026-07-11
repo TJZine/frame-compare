@@ -2,7 +2,7 @@
 
 import asyncio
 import random
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -555,9 +555,12 @@ def _slowpics_application_error_code(response: httpx.Response) -> str | None:
     candidates: tuple[object, ...]
     if isinstance(payload, str):
         candidates = (payload,)
-    elif isinstance(payload, dict):
-        payload_fields = cast(dict[object, object], payload)
-        candidates = (payload_fields.get("error"), payload_fields.get("message"))
+    elif isinstance(payload, Mapping):
+        payload_fields = cast(Mapping[object, object], payload)
+        candidates = (
+            _mapping_string_field(payload_fields, "error"),
+            _mapping_string_field(payload_fields, "message"),
+        )
     else:
         return None
 
@@ -569,6 +572,12 @@ def _slowpics_application_error_code(response: httpx.Response) -> str | None:
         ),
         None,
     )
+
+
+def _mapping_string_field(payload: Mapping[object, object], field: str) -> str | None:
+    """Read one known string field from an otherwise untrusted JSON mapping."""
+    value = payload.get(field)
+    return value if isinstance(value, str) else None
 
 
 def _metadata_multipart_fields(

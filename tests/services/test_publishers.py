@@ -885,6 +885,10 @@ async def test_publish_to_slowpics_malformed_metadata_response_fails_before_imag
             "uploads are temporarily limited; wait 1 minute before retrying (LIMIT_UPLOAD)",
         ),
         (
+            {"error": 429, "message": "LIMIT_UPLOAD"},
+            "uploads are temporarily limited; wait 1 minute before retrying (LIMIT_UPLOAD)",
+        ),
+        (
             "DAILY_LIMIT_UPLOAD",
             "the daily upload limit has been reached (DAILY_LIMIT_UPLOAD)",
         ),
