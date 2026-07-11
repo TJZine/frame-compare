@@ -119,8 +119,8 @@ class BenchmarkAnalysisSource:
         return self.ordered_paths[0]
 
 
-def main() -> int:
-    args = _parse_args()
+def main(argv: Sequence[str] | None = None) -> int:
+    args = _parse_args(argv)
     root = args.root.resolve()
     config_path = args.config if args.config.is_absolute() else root / args.config
     output_path = args.output if args.output.is_absolute() else root / args.output
@@ -683,7 +683,7 @@ def _source_override_affects_selection_domain(override: SourceOverrideConfig) ->
     )
 
 
-def _parse_args() -> argparse.Namespace:
+def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Compare performance analysis mode against quality and write JSON.",
     )
@@ -762,7 +762,7 @@ def _parse_args() -> argparse.Namespace:
         default=FFPROBE_TIMEOUT_SECONDS,
         help="Timeout in seconds for each source-inspection ffprobe command.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.modes is None:
         args.modes = ["performance"]
     if args.window_start < 0:

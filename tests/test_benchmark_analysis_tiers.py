@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import subprocess
 import sys
 from fractions import Fraction
 from pathlib import Path
@@ -26,6 +28,97 @@ from frame_compare.config.schema_enums import (
 )
 from frame_compare.config.schema_models import SourceOverrideConfig
 from tests.orchestration.execute_run_helpers import write_probe_cache_for_inputs
+
+
+def test_benchmark_script_help_is_available_through_documented_process_entrypoint() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "tools" / "benchmark_analysis_tiers.py"
+
+    result = subprocess.run(
+        [sys.executable, str(script_path), "--help"],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=10,
+    )
+
+    assert result.returncode == 0
+    for option in (
+        "--repetitions",
+        "--metric-cache-policy",
+        "--require-warm-source-index",
+        "--skip-decode-baseline",
+        "--inspect-frame-types",
+        "--ffprobe-timeout",
+    ):
+        assert option in result.stdout
+    assert result.stderr == ""
+
+
+def test_benchmark_script_main_writes_json_and_honors_public_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    script = _load_benchmark_script()
+    reference = tmp_path / "reference.mkv"
+    reference.write_bytes(b"source")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("", encoding="utf-8")
+    output_path = tmp_path / "benchmark.json"
+    config = ConfigSchema()
+    source = _benchmark_analysis_source(script, path=reference, reference=reference)
+    observed_run_options: dict[str, object] = {}
+
+    def fake_run_benchmark_tiers(**kwargs: object) -> tuple[dict[str, Any], dict[str, Any]]:
+        observed_run_options.update(kwargs)
+        trial = _tier_payload("quality", [0.1, 0.9], [0.0, 0.5], [0, 1])
+        return script._aggregate_tier_trials([trial]), {}
+
+    monkeypatch.setattr(script, "load_config", lambda _path: config)
+    monkeypatch.setattr(script, "_resolve_benchmark_analysis_source", lambda **_kwargs: source)
+    monkeypatch.setattr(
+        script,
+        "_require_selection_domain_for_analysis_cache_identity",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        script,
+        "_source_index_facts",
+        lambda _paths: {reference.as_posix(): {"detected": False}},
+    )
+    monkeypatch.setattr(script, "_run_benchmark_tiers", fake_run_benchmark_tiers)
+    monkeypatch.setattr(script, "_probe_source_facts", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(script, "_runtime_facts", lambda: {})
+
+    exit_code = script.main(
+        [
+            "--root",
+            str(tmp_path),
+            "--config",
+            config_path.name,
+            "--output",
+            output_path.name,
+            "--no-progress",
+            "--skip-decode-baseline",
+            reference.name,
+        ]
+    )
+
+    captured = capsys.readouterr()
+    report = json.loads(output_path.read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert captured.out == f"{output_path.as_posix()}\n"
+    assert captured.err == ""
+    assert report["inputs"] == [reference.as_posix()]
+    assert report["config"]["repetitions"] == 3
+    assert report["config"]["metric_cache_policy"] == "cold"
+    assert report["decode_baseline"] is None
+    assert observed_run_options["candidate_modes"] == ["performance"]
+    assert observed_run_options["repetitions"] == 3
+    assert observed_run_options["metric_cache_policy"] == "cold"
+    assert observed_run_options["progress_enabled"] is False
 
 
 def test_benchmark_script_comparison_schema_contains_required_sections() -> None:

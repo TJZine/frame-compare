@@ -119,10 +119,17 @@ def test_save_and_load_round_trip_serializes_metric_active_rect(tmp_path: Path) 
     v1 = create_video_file(tmp_path, "v1.mkv")
     config = AnalysisConfig(random_frame_count=10)
     rect = MetricActiveRect(x=4, y=8, width=320, height=180)
+    request = MetricCacheRequest(
+        analysis_source_path=v1,
+        metric_active_rect=rect,
+        active_rect_source="explicit",
+        active_rect_detection_mode="provided",
+        active_rect_algorithm_id="active_rect_resolution_v2",
+    )
     fingerprint = compute_cache_key(
         [v1],
         config,
-        metric_request=MetricCacheRequest(analysis_source_path=v1, metric_active_rect=rect),
+        metric_request=request,
     )
 
     clips = [ClipIdentity(path=str(v1), size=v1.stat().st_size, mtime=v1.stat().st_mtime)]
@@ -132,6 +139,7 @@ def test_save_and_load_round_trip_serializes_metric_active_rect(tmp_path: Path) 
         config_fingerprint=fingerprint,
         clips=clips,
         config=config,
+        analysis_source_path=str(v1),
         metric_active_rect=rect,
         active_rect_source="explicit",
         active_rect_detection_mode="provided",
@@ -143,7 +151,7 @@ def test_save_and_load_round_trip_serializes_metric_active_rect(tmp_path: Path) 
     )
 
     save_metrics_cache(metrics, tmp_path)
-    result = load_cached_metrics(tmp_path, fingerprint, clips)
+    result = load_cached_metrics_for_request(tmp_path, fingerprint, clips, request)
 
     assert result.success is True
     assert result.metrics is not None
