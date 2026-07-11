@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
+from time import perf_counter
 from typing import Literal
 
 type AnalysisCacheState = Literal["hit", "miss"]
@@ -30,4 +33,30 @@ class AnalysisTimingRecorder:
         return {name: self.spans_seconds[name] for name in sorted(self.spans_seconds)}
 
 
-__all__ = ["AnalysisCacheState", "AnalysisCacheWriteState", "AnalysisTimingRecorder"]
+@contextmanager
+def record_span(
+    recorder: AnalysisTimingRecorder | None,
+    name: str,
+) -> Generator[None]:
+    """Record a coarse additive span, including time elapsed before failures.
+
+    Per-frame metric loops intentionally use direct ``perf_counter`` calls so
+    context-manager overhead does not contaminate their smallest measurements.
+    """
+    if recorder is None:
+        yield
+        return
+
+    started = perf_counter()
+    try:
+        yield
+    finally:
+        recorder.add_seconds(name, perf_counter() - started)
+
+
+__all__ = [
+    "AnalysisCacheState",
+    "AnalysisCacheWriteState",
+    "AnalysisTimingRecorder",
+    "record_span",
+]

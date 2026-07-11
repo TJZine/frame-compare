@@ -16,7 +16,7 @@ from frame_compare.analysis.metric_identity import (
     metric_backend,
     stable_metric_algorithm_identity_json,
 )
-from frame_compare.analysis.timing import AnalysisTimingRecorder
+from frame_compare.analysis.timing import AnalysisTimingRecorder, record_span
 from frame_compare.analysis.types import MetricActiveRect
 from frame_compare.config.schema_enums import AnalysisPerformanceMode
 from frame_compare.utils.perf import perf_span
@@ -252,11 +252,9 @@ def _calculate_quality_metrics(
     with perf_span("analysis.calculate_metrics", frames=total_frames):
         import vapoursynth as vs
 
-        graph_started = perf_counter() if timing_recorder is not None else 0.0
-        if clip.format.color_family != vs.YUV:
-            clip = clip.resize.Bicubic(format=vs.YUV420P8)
-        if timing_recorder is not None:
-            timing_recorder.add_seconds("metric_graph_build", perf_counter() - graph_started)
+        with record_span(timing_recorder, "metric_graph_build"):
+            if clip.format.color_family != vs.YUV:
+                clip = clip.resize.Bicubic(format=vs.YUV420P8)
 
         max_value: float = (
             1.0
@@ -315,10 +313,8 @@ def _calculate_performance_metrics(
 
     total_frames = clip.num_frames
     with perf_span("analysis.calculate_metrics", frames=total_frames):
-        graph_started = perf_counter() if timing_recorder is not None else 0.0
-        luma = _performance_luma_clip(clip, active_rect)
-        if timing_recorder is not None:
-            timing_recorder.add_seconds("metric_graph_build", perf_counter() - graph_started)
+        with record_span(timing_recorder, "metric_graph_build"):
+            luma = _performance_luma_clip(clip, active_rect)
         luminance = _calculate_performance_luminance(luma, reporter, timing_recorder)
         if reporter:
             reporter.advance(1)
@@ -393,11 +389,9 @@ def _calculate_performance_luminance(
         if reporter:
             reporter.start_phase("Calculating luminance", luma.num_frames)
 
-        graph_started = perf_counter() if timing_recorder is not None else 0.0
-        plane_stats = cast(_PlaneStatsFn, _dynamic_attr(luma.std, "PlaneStats"))
-        stats = cast(_FrameReadable, plane_stats())
-        if timing_recorder is not None:
-            timing_recorder.add_seconds("luminance_graph_build", perf_counter() - graph_started)
+        with record_span(timing_recorder, "luminance_graph_build"):
+            plane_stats = cast(_PlaneStatsFn, _dynamic_attr(luma.std, "PlaneStats"))
+            stats = cast(_FrameReadable, plane_stats())
         luminance: list[float] = []
         phase_status = ProgressPhaseStatus.COMPLETED
         try:
@@ -461,13 +455,11 @@ def _calculate_dense_planestats_motion(
         motion = [0.0] * luma.num_frames
         phase_status = ProgressPhaseStatus.COMPLETED
         try:
-            graph_started = perf_counter() if timing_recorder is not None else 0.0
-            previous = luma[0:total_pairs]
-            current = luma[1 : luma.num_frames]
-            plane_stats = cast(_PlaneStatsFn, _dynamic_attr(current.std, "PlaneStats"))
-            stats = cast(_FrameReadable, plane_stats(previous))
-            if timing_recorder is not None:
-                timing_recorder.add_seconds("motion_graph_build", perf_counter() - graph_started)
+            with record_span(timing_recorder, "motion_graph_build"):
+                previous = luma[0:total_pairs]
+                current = luma[1 : luma.num_frames]
+                plane_stats = cast(_PlaneStatsFn, _dynamic_attr(current.std, "PlaneStats"))
+                stats = cast(_FrameReadable, plane_stats(previous))
             for result_index in range(total_pairs):
                 frame_started = perf_counter() if timing_recorder is not None else 0.0
                 frame = stats.get_frame(result_index)

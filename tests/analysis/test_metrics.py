@@ -116,7 +116,13 @@ def test_calculate_metrics_recomputes_cache_with_mismatched_active_rect_provenan
         active_rect_detection_mode="provided",
     )
 
-    mock_strategy.assert_called_once_with(mock_source, config, None, rect)
+    mock_strategy.assert_called_once_with(
+        mock_source,
+        config,
+        None,
+        rect,
+        timing_recorder=None,
+    )
     assert mock_load.call_args.args[3] == MetricCacheRequest(
         analysis_source_path=video_path,
         effective_fps=None,
@@ -175,7 +181,13 @@ def test_calculate_metrics_computes_on_cache_miss(
 
     assert len(result.luminance) == 10
     assert len(result.motion) == 10
-    mock_strategy.assert_called_once_with(mock_source, config, None, None)
+    mock_strategy.assert_called_once_with(
+        mock_source,
+        config,
+        None,
+        None,
+        timing_recorder=None,
+    )
     mock_save.assert_called_once()
 
 
