@@ -50,7 +50,9 @@ The default move is extraction into the existing owner, not accretion in hotspot
 
 ## Discovery Pattern
 
-1. Prefer Codanna for indexed discovery. If Codanna is unavailable or indexed to another repo, fall back to `rg` and direct file reads, then record the fallback.
+1. Find exact owners and callers with search/direct reads. Use Codanna semantic or
+   impact tools when available and materially useful for an unknown or shared seam;
+   do not delay work merely to record a preferred-tool fallback.
 2. Identify the current owner from docs and source before editing.
 3. Define the target owner, public API, invariants, and verification surface.
 4. Add or tighten behavior tests when the seam is under-protected.
@@ -58,25 +60,11 @@ The default move is extraction into the existing owner, not accretion in hotspot
 
 ## Verification
 
-- Use the runbook's verification tier.
-- Run full verification for hotspots, architecture docs, public CLI/config contracts, Docker/runtime, Windows portable/release, or import-layer changes:
-
-```bash
-.venv/bin/pyright --warnings
-.venv/bin/ruff check .
-.venv/bin/pytest -q
-UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
-```
-
-On Windows or when direct venv script paths are unavailable, use equivalent `uv`
-invocations while preserving the same proof surface:
-
-```powershell
-uv run --no-sync pyright --warnings
-uv run --no-sync ruff check .
-uv run --no-sync pytest -q
-$env:UV_CACHE_DIR = ".uv_cache"; uv run --no-sync lint-imports --config importlinter.ini
-```
+- Use the exact runbook verification gate for the classified risk; do not copy or
+  omit individual commands from that canonical recipe.
+- Run full verification for hotspots, architecture authority, public CLI/config
+  contracts, Docker/runtime, Windows portable/release, or import-layer changes.
+- Add the targeted proof for the owner seam; the full suite does not replace it.
 
 ## Common Mistakes
 
