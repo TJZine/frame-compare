@@ -1,68 +1,15 @@
 ---
 name: bounded-worker-execution
-description: Use when an approved Frame Compare plan contains concrete, disjoint implementation slices that can be delegated to worker agents without making the main session wait on the immediate critical path.
+description: Use when a Sol planner has produced a decision-complete Frame Compare implementation unit suitable for the lower-cost worker_luna role.
 ---
 
 # Bounded Worker Execution
 
-## Overview
+Use `worker_luna` only after the configured Sol planner freezes exact files,
+invariants, verification, and stop conditions. The unit must be bounded,
+low-ambiguity, disjoint from other writers, and cheap to verify.
 
-Use this skill when a plan-approved implementation slice is concrete enough for
-the default `worker` or an explicitly eligible `worker_terra` agent to execute
-without inventing seams, adapters, ownership, public contracts, or verification
-depth.
-
-The controller still owns decomposition, integration, verification, and final judgment.
-
-## Preconditions
-
-All of these must already be true:
-
-1. The task has an approved execution brief, tracked plan, or run bundle.
-2. The slice names exact files in scope.
-3. The slice has a clear verification target.
-4. The write scope is disjoint from other active workers.
-5. The worker does not need to invent owner seams, CLI/config contracts, or runtime verification policy.
-6. A `worker_terra` slice is exact, cheap to verify, and has explicit stop/escalation conditions.
-
-If any precondition is false, keep the work local or re-plan first.
-
-## Worker Slice Contract
-
-Every delegated slice should specify:
-
-- exact task
-- exact files in scope
-- files out of scope when ambiguity is likely
-- constraints and invariants
-- required verification
-- expected return format
-
-Do not make the worker infer the slice from a broad plan alone.
-
-## Delegation Record
-
-Before dispatch, record the selected role and its `.codex/agents/<role>.toml`
-path in the worker packet. At closeout, report that role, config path, `model`,
-and `model_reasoning_effort` read from the TOML. Treat the worker's
-`CONFIGURED ROLE` opening line as a visibility aid, not independent proof of
-the model selection.
-
-## Execution Pattern
-
-1. Decide whether delegation is justified.
-2. Cut one slice with one write owner.
-3. Dispatch `worker` by default. Use `worker_terra` only when the approved brief
-   explicitly selects it for an exact, bounded, cheap-to-verify slice.
-4. Continue useful non-overlapping local work.
-5. Review worker output before integration.
-6. Re-run required verification locally on the integrated result.
-7. If the worker surfaces a blocker or seam question, stop and re-plan.
-
-## Common Mistakes
-
-- Delegating before the plan is execution-grade
-- Running parallel workers against the same files or shared symbols
-- Letting a worker decide public CLI/config behavior
-- Treating worker output as done before local verification
-- Selecting `worker_terra` for ambiguous work or verification diagnosis
+Do not use Luna to discover ownership, design public CLI/config behavior, diagnose
+failures, change architecture, or repair an incomplete plan. The controller reviews
+the diff, integrates it, and reruns the required proof. Route other delegation
+through `parallel-sidecars`.

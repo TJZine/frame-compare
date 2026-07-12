@@ -69,6 +69,7 @@ def build_selection_domain_clips(
     ordered_paths: list[Path],
     snapshots_by_path: dict[Path, ClipProbeSnapshot],
     overrides_by_path: dict[Path, SourceOverrideConfig],
+    labels_by_path: dict[Path, str],
     match_fps: SourceMatchFpsMode = SourceMatchFpsMode.DISABLED,
     active_rect_detection: ScreenshotActiveRectDetection = (
         ScreenshotActiveRectDetection.ASPECT_RATIO
@@ -79,6 +80,7 @@ def build_selection_domain_clips(
         ordered_paths=ordered_paths,
         snapshots_by_path=snapshots_by_path,
         overrides_by_path=overrides_by_path,
+        labels_by_path=labels_by_path,
         match_fps=match_fps,
         active_rect_detection=active_rect_detection,
     ).clips
@@ -89,6 +91,7 @@ def build_selection_domain_clips_with_diagnostics(
     ordered_paths: list[Path],
     snapshots_by_path: dict[Path, ClipProbeSnapshot],
     overrides_by_path: dict[Path, SourceOverrideConfig],
+    labels_by_path: dict[Path, str],
     match_fps: SourceMatchFpsMode = SourceMatchFpsMode.DISABLED,
     active_rect_detection: ScreenshotActiveRectDetection = (
         ScreenshotActiveRectDetection.ASPECT_RATIO
@@ -97,12 +100,12 @@ def build_selection_domain_clips_with_diagnostics(
     """Build prepared clip states and return automatic FPS matching diagnostics."""
     clips = [
         _build_selection_domain_clip(
-            index=index,
             path=path,
             snapshot=snapshots_by_path[path],
             override=overrides_by_path.get(path),
+            label=labels_by_path[path],
         )
-        for index, path in enumerate(ordered_paths)
+        for path in ordered_paths
     ]
     clips = resolve_active_rects_for_clips(
         clips=clips,
@@ -188,10 +191,10 @@ def _apply_majority_fps_match(
 
 def _build_selection_domain_clip(
     *,
-    index: int,
     path: Path,
     snapshot: ClipProbeSnapshot,
     override: SourceOverrideConfig | None,
+    label: str,
 ) -> ClipState:
     trim_start_frames = override.trim_start_frames if override is not None else 0
     trim_end_frames = override.trim_end_frames if override is not None else 0
@@ -210,7 +213,6 @@ def _build_selection_domain_clip(
         if override is not None and override.effective_fps is not None
         else snapshot.fps
     )
-    label = "Reference" if index == 0 else f"Encode {index}"
     return ClipState(
         path=path,
         label=label,
@@ -255,9 +257,7 @@ def build_analysis_selection_domain_token(
             "ignore_trail_seconds": analysis.ignore_trail_seconds,
             "min_window_seconds": analysis.min_window_seconds,
         },
-        "active_rect_policy": active_rect_policy_identity(
-            config.screenshots.active_rect_detection
-        ),
+        "active_rect_policy": active_rect_policy_identity(config.screenshots.active_rect_detection),
         "clips": [
             {
                 "active_rect": (

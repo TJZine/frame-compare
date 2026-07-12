@@ -73,6 +73,14 @@ post-selection-window content refinement through
 resolution and analysis-cache validation. Both modes still return dense
 source-frame-indexed luminance and motion arrays for the selected analysis clip.
 
+`frame_compare.orchestration.source_labels` resolves presentation labels after
+selector/override resolution and before probing or run-folder reservation.
+`selection_domain` receives the resolved per-path map when constructing
+`ClipState`; it does not own parsing or collision policy. Labels propagate
+through presentation surfaces while source paths, fingerprints,
+cache/alignment identity, and stem-based physical PNG filenames remain
+unchanged.
+
 ## Module Boundaries
 
 Import boundaries are enforced by `importlinter.ini`.
@@ -340,18 +348,29 @@ and allows remote opening only for explicit `https://slow.pics/...` URLs.
 slow.pics publishing is service-owned. `frame_compare.services.publishers` owns
 the browser-compatible slow.pics client flow: `GET /comparison`,
 `POST /upload/comparison`, and planned `POST /upload/image/{imageUuid}` image
-requests. `frame_compare.services.slowpics_upload_plan` owns the explicit
-upload-plan seam for current render artifacts, row/image names, and upload
-ordering; the final upload path uses that plan and does not scan the screenshot
-directory for membership. After a successful upload, orchestration carries the
-exact uploaded planned local file paths into `post_report_cleanup` and carries
-typed post-upload action results plus warnings returned by
+requests. Image requests use a bounded concurrency of three, retain per-image
+retry/idempotency handling, and advance a nested image-count progress task after
+each completed upload. `frame_compare.services.slowpics_upload_plan` owns the
+explicit upload-plan seam for current render artifacts, row/image names, and
+upload ordering; the final upload path uses that plan and does not scan the
+screenshot directory for membership. After a successful upload, orchestration
+carries the exact uploaded planned local file paths into `post_report_cleanup`
+and carries typed post-upload action results plus warnings returned by
 `frame_compare.services.slowpics_post_upload` into the final `RunResult`.
 Orchestration does not own clipboard, browser, shortcut, or webhook side-effect
 policy. That cleanup phase owns report-safe local deletion policy for
 `slowpics.delete_after_upload` and never reconstructs deletion membership from
 directories, labels, render artifacts, or shortcut outputs after upload. The
 `.url` shortcut is not cleanup membership.
+
+`frame_compare.orchestration.slowpics_metadata` owns pure template context,
+literal/template/automatic title precedence, suffix application, and explicit
+versus resolved TMDB association. It produces one service-owned immutable
+`SlowpicsCollectionMetadata` value. The publish phase passes that value to the
+publisher and its exact title to post-upload actions. The publisher alone maps
+the DTO and config into browser-compatible field names, canonical
+`MOVIE_<id>`/`TV_<id>` association, `PUBLIC`/`LINK_ONLY` visibility, collection
+and row hentai values, remote retention, and size-aware image write timeouts.
 
 Report-confirmed slow.pics upload uses a CLI-owned confirmation callback seam
 carried on `RunDependencies.confirm_slowpics_upload`. Orchestration owns the
@@ -378,7 +397,8 @@ the safe common parent of the resolved screenshots/generated directories when
 run folders are disabled. The service rejects unsafe parent choices outside the
 workspace root, filesystem anchors, drive/share roots, and the user home
 directory; filename selection is deterministic and repeated writes overwrite the
-same path.
+same path. Filename selection consumes the single final resolved upload title;
+it does not independently fall back through metadata or screenshot directories.
 
 `frame_compare.services.slowpics_webhook` owns isolated outbound webhook
 delivery for successful slow.pics uploads. It validates strict external HTTPS
@@ -434,6 +454,8 @@ Runtime ownership matrix:
 | Runtime concern | Owner |
 | --- | --- |
 | Source selector resolution, explicit reference ordering, duplicate-stem fail-fast, and per-source override application during preparation | `frame_compare.orchestration.source_selection` plus `frame_compare.orchestration.preparation` |
+| Source display-label parsing, normalization, override precedence, and collision handling | `frame_compare.orchestration.source_labels` |
+| slow.pics title/template/TMDB precedence and immutable collection metadata resolution | `frame_compare.orchestration.slowpics_metadata` |
 | Analysis-source resolution and fastest-source benchmark policy | `frame_compare.orchestration.analysis_source` |
 | Audio alignment workflow, offset cache write coordination, and precedence policy | `frame_compare.services.alignment` |
 | Previous-offset reuse policy and shared-reuse eligibility | `frame_compare.services.alignment_previous_offsets` |

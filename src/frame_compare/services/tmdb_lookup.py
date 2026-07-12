@@ -18,6 +18,7 @@ class TmdbSearchHit:
     metadata: TmdbMetadata
     popularity: float
 
+
 TMDB_API_BASE_URL = "https://api.themoviedb.org/3"
 TMDB_MULTI_SEARCH_URL = f"{TMDB_API_BASE_URL}/search/multi"
 TMDB_MOVIE_SEARCH_URL = f"{TMDB_API_BASE_URL}/search/movie"
@@ -146,6 +147,7 @@ def _map_tmdb_result(
         original_title=original_title,
         year=_tmdb_result_year(item, media_type),
         media_type=media_type,
+        original_language=_optional_str(item.get("original_language")),
         poster_url=_tmdb_image_url(_optional_str(item.get("poster_path"))),
         backdrop_url=_tmdb_image_url(_optional_str(item.get("backdrop_path"))),
     )

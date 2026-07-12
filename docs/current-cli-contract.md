@@ -124,9 +124,16 @@ Current fields:
   warning diagnostic.
   This is an AssumeFPS-style timing override; it does not resample, drop,
   interpolate, or duplicate frames.
+- `label_mode`: display-label policy. `stem` is the default; `filename` includes
+  the extension; `parsed` composes available release group, title,
+  season/episode marker, and episode title.
+- `label_parser`: parsed-label parser priority. `auto` keeps bracket-aware
+  Anitopy/GuessIt ordering; `guessit` and `anitopy` select the primary parser
+  while retaining the alternate fallback.
 - `overrides`: mapping from source selector to per-source override table.
-  Current override fields are `trim_start_frames`, `trim_end_frames`, and
-  `active_rect = { x, y, width, height }`, and `effective_fps = "num/den"`.
+  Current override fields are `trim_start_frames`, `trim_end_frames`,
+  `active_rect = { x, y, width, height }`, `effective_fps = "num/den"`, and an
+  optional highest-precedence display `label`.
 
 Source selectors match discovered input clips in this order: input-dir-relative
 path, filename, then stem. Selectors are case-sensitive. Backslashes are
@@ -153,6 +160,15 @@ duplicating source frames. Mixed-FPS validation compares effective FPS values
 after explicit overrides and after `match_fps = "assume_reference"` or
 `match_fps = "majority"` matching. Explicit per-source `effective_fps` values
 take precedence over `match_fps`.
+
+Explicit labels are trimmed and control-free. Derived labels replace control
+characters with spaces and collapse whitespace. Duplicate explicit labels fail
+before probing, metadata prefetch, run-folder reservation, rendering, or HTTP
+work. Derived collisions are qualified deterministically with source stems and
+then stable source order. Resolved labels drive overlays, progress, reports,
+alignment display, render artifact keys, and slow.pics column names, but do not
+change source/cache/alignment identity or physical PNG filenames. Orchestrated
+rendering continues to use the source stem as `filename_label`.
 
 When analysis is skipped because effective `[analysis]` requests only
 `user_frames` and/or `random_frame_count`, `sources.analysis_source` is not
@@ -367,8 +383,9 @@ opened. If it is not opened, the CLI prints the report path before prompting.
 - When enabled and not suppressed by `--no-upload`, the current upload path uses
   the browser-compatible slow.pics flow owned by
   `frame_compare.services.publishers`: fetch `/comparison`, create metadata at
-  `/upload/comparison`, then upload each planned image to
-  `/upload/image/{imageUuid}`.
+  `/upload/comparison`, then upload planned images to
+  `/upload/image/{imageUuid}` with at most three image requests in flight. Human
+  progress reports completed images against the exact planned image total.
 - Upload membership comes from the explicit current-render upload plan, not from
   scanning the screenshot directory. The plan is built from selected frames,
   current render artifacts, and clip order.
@@ -396,8 +413,9 @@ opened. If it is not opened, the CLI prints the report path before prompting.
   `slow.pics upload skipped by confirmation` rather than a successful artifact
   row, and `slowpics_url` remains `None`.
 - `delete_after_upload` is local-only and report-safe. It is not mapped to
-  slow.pics `removeAfter`; the current remote metadata request sends an empty
-  `removeAfter` value.
+  slow.pics `removeAfter`. Remote retention is controlled independently by
+  `remove_after_days`, which sends an empty `removeAfter` for zero and decimal
+  days for a positive value.
 - When `delete_after_upload = true`, Frame Compare deletes only the exact
   planned local screenshot files that were successfully uploaded. Deletion runs
   after the report phase, not inside the slow.pics publisher, and never scans the
@@ -435,9 +453,10 @@ opened. If it is not opened, the CLI prints the report path before prompting.
   Disabled or skipped post-upload actions are not listed by default.
 - Confirmed report-first upload still runs the existing post-upload actions
   after a successful upload according to their normal owners and gating.
-- The current public upload surface does not include collection suffix/name,
-  image format or optimization toggles, tags, hentai flag, or remote
-  remove-after behavior.
+- Title, template, suffix, typed TMDB association, hentai, remote retention, and
+  image-timeout settings are config-only. They add no `run` flags, wizard
+  prompts, successful JSON keys, or report fields. Image format/optimization
+  controls and tags remain outside the public config surface.
 
 ### slow.pics Shortcut Policy
 
@@ -452,8 +471,8 @@ opened. If it is not opened, the CLI prints the report path before prompting.
   root and must not be a drive root, filesystem anchor, UNC/share root, or the
   user home directory. Paths on different drives or anchors have no safe common
   parent.
-- The filename is derived from current run metadata or upload title, with a
-  stable fallback from the slow.pics URL key.
+- The filename is derived from the same final collection title sent to
+  slow.pics, with a stable fallback from the slow.pics URL key.
 - Repeated writes overwrite the same deterministic shortcut path.
 - Shortcut files are not members of `slowpics.delete_after_upload` cleanup.
 - Shortcut write or path-selection failures are warning-only.
@@ -559,20 +578,57 @@ cannot be formed, the run fails with the standard typed selection error.
 
 ## Config-Only slow.pics Surface
 
-These ten fields are the full current public `[slowpics]` config surface:
+These eighteen fields are the full current public `[slowpics]` config surface:
 
 - `auto_upload = false`
 - `confirm_upload_after_report = false`
-- `visibility = "unlisted"`
+- `visibility = "public"`
 - `delete_after_upload = false`
 - `timeout_seconds = 60.0`
 - `max_retries = 3`
+- `title = ""`
+- `title_template = ""`
+- `title_suffix = ""`
+- `is_hentai = false`
+- `tmdb_id = null`
+- `tmdb_media_type = null`
+- `remove_after_days = 0`
+- `image_upload_timeout_seconds = 180.0`
 - `copy_url_to_clipboard = true`
 - `open_in_browser = true`
 - `create_url_shortcut = true`
 - `webhook_url = null`
 
 `visibility` accepts only `public` and `unlisted`.
+
+`title` is a trimmed literal title. The mutually exclusive `title_template`
+supports only `${Title}`, `${OriginalTitle}`, `${Year}`, `${TMDBId}`,
+`${TMDBCategory}`, `${OriginalLanguage}`, `${Filename}`, `${FileName}`, and
+`${Label}`; `$$` emits a literal dollar. Unknown or malformed substitutions and
+control characters fail validation. Missing values substitute as empty strings,
+and a blank rendered template continues through automatic fallback.
+
+The base title resolves as literal title, nonblank rendered template, matching
+TMDB title with optional positive year, parsed reference title with optional
+positive year, normalized reference stem, then `Frame Comparison`.
+`title_suffix` appends exactly once with one ASCII space to every path. One
+immutable resolved title is used for upload metadata, upload descriptions, and
+deterministic `.url` shortcut naming.
+
+`tmdb_id` is a strict positive integer paired with `tmdb_media_type = "movie" |
+"tv"`. Explicit association wins over automatic metadata and serializes as
+`MOVIE_<id>` or `TV_<id>`. A mismatch isolates resolved TMDB title context,
+retains parsed reference fallback values, and emits a sanitized warning. Absent
+association omits multipart `tmdbId`.
+
+`is_hentai` is a strict boolean and maps to lowercase collection and
+per-comparison fields. Public maps to `public=true`/`PUBLIC`; explicit unlisted
+maps to `public=false`/`LINK_ONLY`. `remove_after_days` is a strict `0..999999`
+remote retention value: zero sends empty `removeAfter`, positive values send
+decimal days. `image_upload_timeout_seconds` is at least 10 seconds and is the
+image write-timeout floor; the floor also cannot be lower than
+`file_size / 256 KiB/s + 15 seconds`. Navigation and metadata continue using
+`timeout_seconds`.
 
 `confirm_upload_after_report` is a config-only, interactive-only opt-in. It only
 has effect when effective `auto_upload = true`; it adds no `run` flag, no wizard
@@ -603,9 +659,8 @@ off JSON stdout and do not fail the run.
 The JSON output schema remains unchanged by report-confirmed upload:
 `slowpics_url` is still the only machine-readable slow.pics result field.
 
-There are no current slow.pics config fields for collection suffix/name, image
-format or optimization toggles, tags, hentai flag, or remote remove-after
-behavior.
+There are no current slow.pics config fields for image format or optimization
+toggles or tags.
 
 ## VSPreview Interactive Diagnostics
 

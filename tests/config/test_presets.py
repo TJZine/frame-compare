@@ -114,6 +114,12 @@ def test_save_preset_roundtrip(tmp_path: Path) -> None:
     from frame_compare.config.loader import get_default_config
 
     original_config = get_default_config()
+    original_config.sources.label_mode = "filename"
+    original_config.slowpics.title = "Preset Title"
+    original_config.slowpics.title_suffix = "[Preset]"
+    original_config.slowpics.tmdb_id = 42
+    original_config.slowpics.tmdb_media_type = "movie"
+    original_config.slowpics.remove_after_days = 90
     # This is what save_preset serializes (excludes None values)
     expected_data = original_config.model_dump(mode="json", exclude_none=True)
 

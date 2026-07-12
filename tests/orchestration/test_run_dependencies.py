@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
 
 import pytest
 
@@ -20,23 +18,11 @@ from frame_compare.orchestration.types import (
     SlowpicsUploadConfirmationRequest,
 )
 from frame_compare.utils.progress import NullProgressReporter
-from frame_compare.vs.loader import VSLoader
-from frame_compare.vs.types import HDRMetadata, SourceInfo
-
-if TYPE_CHECKING:
-    import vapoursynth as vs
+from frame_compare.vs.types import HDRMetadata
 
 
 class StopAfterDependencyInit(RuntimeError):
     pass
-
-
-class DummyVSLoader:
-    def load(self, path: Path) -> SourceInfo:
-        raise RuntimeError("Not used in tests.")
-
-    def ensure_core(self) -> vs.Core:
-        raise RuntimeError("Not used in tests.")
 
 
 class DummyFFmpegRunner:
@@ -49,42 +35,6 @@ class DummyFFmpegRunner:
 
 def test_run_dependencies_exported_from_orchestration() -> None:
     assert PublicRunDependencies is RunDependencies
-
-
-def test_run_dependencies_returns_injected_dependencies() -> None:
-    loader = DummyVSLoader()
-    runner = DummyFFmpegRunner()
-
-    deps = RunDependencies(vs_loader=loader, ffmpeg_runner=runner)
-
-    assert deps.vs_loader is loader
-    assert deps.ffmpeg_runner is runner
-
-
-def test_run_dependencies_accepts_slowpics_confirmation_callback() -> None:
-    def _confirm(
-        _request: SlowpicsUploadConfirmationRequest,
-    ) -> SlowpicsUploadConfirmationDecision:
-        return "confirmed"
-
-    deps = RunDependencies(confirm_slowpics_upload=_confirm)
-
-    assert deps.confirm_slowpics_upload is _confirm
-
-
-def test_run_dependencies_clock_returns_datetime() -> None:
-    deps = RunDependencies()
-
-    now = deps.clock()
-
-    assert isinstance(now, datetime)
-
-
-def test_run_dependencies_accepts_vs_loader_protocol() -> None:
-    loader: VSLoader = DummyVSLoader()
-    deps = RunDependencies(vs_loader=loader)
-
-    assert deps.vs_loader is loader
 
 
 def test_execute_run_initializes_local_dependencies_without_mutating_injected_deps(

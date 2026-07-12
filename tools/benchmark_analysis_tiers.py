@@ -5,12 +5,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import platform
+import statistics
+import subprocess
+import sys
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, Protocol, cast
 
 from rich.console import Console
 from rich.progress import (
@@ -31,6 +36,7 @@ from frame_compare.analysis.tier_validation import (
     compare_selection_category,
     tier_category_tolerance,
 )
+from frame_compare.analysis.timing import AnalysisTimingRecorder
 from frame_compare.analysis.types import (
     ActiveRectAlgorithmId,
     ActiveRectDetectionMode,
@@ -65,8 +71,27 @@ from frame_compare.orchestration.source_selection import (
     resolve_source_selection,
     resolve_source_selector,
 )
+from frame_compare.vs.loader import DefaultVSLoader
 
 type JsonObject = dict[str, Any]
+type MetricCachePolicy = Literal["cold", "reuse"]
+
+FFPROBE_TIMEOUT_SECONDS = 120.0
+
+
+class _FramesReadable(Protocol):
+    num_frames: int
+
+    def frames(self, *, close: bool = False) -> Iterator[object]: ...
+
+
+class _PlaneStatsNamespace(Protocol):
+    def PlaneStats(self) -> _FramesReadable: ...
+
+
+class _PlaneStatsSource(Protocol):
+    num_frames: int
+    std: _PlaneStatsNamespace
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,8 +119,8 @@ class BenchmarkAnalysisSource:
         return self.ordered_paths[0]
 
 
-def main() -> int:
-    args = _parse_args()
+def main(argv: Sequence[str] | None = None) -> int:
+    args = _parse_args(argv)
     root = args.root.resolve()
     config_path = args.config if args.config.is_absolute() else root / args.config
     output_path = args.output if args.output.is_absolute() else root / args.output
@@ -123,10 +148,14 @@ def main() -> int:
         analysis_source=analysis_source,
         active_rect_detection=config.screenshots.active_rect_detection,
     )
-    warnings = [
-        "Per-subphase luminance and motion timings are unavailable; only total analysis wall-clock is recorded.",
-        "Cache hit/miss state is not exposed by calculate_metrics; benchmark output records cache_state as unknown.",
-    ]
+    source_indexes = _source_index_facts(analysis_source.ordered_paths)
+    selected_index = source_indexes[analysis_source.path.as_posix()]
+    if args.require_warm_source_index and not selected_index["detected"]:
+        raise SystemExit(
+            "A warm source index was required but no adjacent L-SMASH index was detected "
+            f"for the selected analysis source: {analysis_source.path.as_posix()}"
+        )
+    warnings: list[str] = []
 
     quality, comparisons = _run_benchmark_tiers(
         candidate_modes=cast(Sequence[str], args.modes),
@@ -140,6 +169,18 @@ def main() -> int:
         window_start=args.window_start,
         window_end_exclusive=args.window_end_exclusive,
         progress_enabled=not args.no_progress,
+        repetitions=args.repetitions,
+        metric_cache_policy=cast(MetricCachePolicy, args.metric_cache_policy),
+    )
+    decode_baseline = (
+        None
+        if args.skip_decode_baseline
+        else _run_decode_baseline(analysis_source_path=analysis_source.path)
+    )
+    source_probe = _probe_source_facts(
+        analysis_source.path,
+        inspect_frame_types=args.inspect_frame_types,
+        timeout_seconds=args.ffprobe_timeout,
     )
 
     if args.window_end_exclusive is None:
@@ -149,6 +190,11 @@ def main() -> int:
     if args.selection_domain is None:
         warnings.append(
             "No orchestration selection-domain token was provided; cache identity may differ from a full run with trims or source overrides."
+        )
+    if not args.inspect_frame_types:
+        warnings.append(
+            "Frame-type/GOP inspection was not requested; pass --inspect-frame-types to "
+            "record keyframe and I/P/B-frame distribution outside timed trials."
         )
 
     report: JsonObject = {
@@ -182,7 +228,17 @@ def main() -> int:
                 "bright": config.analysis.bright_quantile,
             },
             "selection_domain": args.selection_domain,
+            "metric_cache_policy": args.metric_cache_policy,
+            "repetitions": args.repetitions,
+            "trial_order_policy": "deterministic_rotation",
+            "require_warm_source_index": args.require_warm_source_index,
         },
+        "runtime": _runtime_facts(),
+        "source": {
+            "analysis_source": source_probe,
+            "indexes": source_indexes,
+        },
+        "decode_baseline": decode_baseline,
         "quality": _tier_summary(quality),
         "comparisons": comparisons,
         "warnings": warnings,
@@ -200,6 +256,207 @@ def main() -> int:
 def _resolve_config_path(root: Path, configured_path: str) -> Path:
     path = Path(configured_path)
     return path if path.is_absolute() else root / path
+
+
+def _runtime_facts() -> JsonObject:
+    facts: JsonObject = {
+        "python": sys.version.split()[0],
+        "platform": platform.platform(),
+        "machine": platform.machine(),
+        "logical_cpu_count": os.cpu_count(),
+        "ffmpeg": _command_version("ffmpeg"),
+        "ffprobe": _command_version("ffprobe"),
+    }
+    try:
+        import vapoursynth as vs
+
+        facts["vapoursynth"] = str(getattr(vs, "__version__", "unknown"))
+        facts["vapoursynth_api"] = str(getattr(vs, "__api_version__", "unknown"))
+        facts["vapoursynth_core_threads"] = int(vs.core.num_threads)
+        facts["vapoursynth_core_max_cache_mb"] = int(vs.core.max_cache_size)
+    except Exception as exc:
+        facts["vapoursynth_error"] = f"{type(exc).__name__}: {exc}"
+    return facts
+
+
+def _command_version(command: str) -> str | None:
+    try:
+        result = subprocess.run(
+            [command, "-version"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10.0,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    first_line = result.stdout.splitlines()[0] if result.stdout else ""
+    return first_line or None
+
+
+def _source_index_facts(paths: Sequence[Path]) -> dict[str, JsonObject]:
+    facts: dict[str, JsonObject] = {}
+    for path in paths:
+        candidates = list(
+            dict.fromkeys(
+                (
+                    Path(f"{path}.lwi"),
+                    path.with_suffix(".lwi"),
+                    path.with_suffix(f"{path.suffix}.lwi"),
+                )
+            )
+        )
+        existing = [candidate for candidate in candidates if candidate.is_file()]
+        facts[path.as_posix()] = {
+            "detected": bool(existing),
+            "paths": [candidate.as_posix() for candidate in existing],
+            "sizes_bytes": [candidate.stat().st_size for candidate in existing],
+        }
+    return facts
+
+
+def _probe_source_facts(
+    path: Path,
+    *,
+    inspect_frame_types: bool,
+    timeout_seconds: float,
+) -> JsonObject:
+    stream_payload = _run_ffprobe_json(
+        [
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            (
+                "stream=codec_name,codec_long_name,profile,pix_fmt,width,height,"
+                "bits_per_raw_sample,avg_frame_rate,r_frame_rate,nb_frames,duration:"
+                "format=format_name,duration,size,bit_rate"
+            ),
+        ],
+        path=path,
+        timeout_seconds=timeout_seconds,
+    )
+    result: JsonObject = {
+        "path": path.as_posix(),
+        "size_bytes": path.stat().st_size,
+        "stream_and_format": stream_payload,
+    }
+    if inspect_frame_types:
+        started = time.perf_counter()
+        frame_payload = _run_ffprobe_json(
+            [
+                "-select_streams",
+                "v:0",
+                "-show_frames",
+                "-show_entries",
+                "frame=key_frame,pict_type",
+            ],
+            path=path,
+            timeout_seconds=timeout_seconds,
+        )
+        result["frame_type_inspection_seconds"] = time.perf_counter() - started
+        result["frame_types"] = _frame_type_summary(frame_payload)
+    return result
+
+
+def _run_ffprobe_json(
+    options: Sequence[str],
+    *,
+    path: Path,
+    timeout_seconds: float,
+) -> JsonObject:
+    try:
+        completed = subprocess.run(
+            ["ffprobe", "-v", "error", *options, "-of", "json", str(path)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout_seconds,
+        )
+    except OSError as exc:
+        return {"success": False, "error": f"{type(exc).__name__}: {exc}"}
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error": f"ffprobe timed out after {timeout_seconds}s"}
+    if completed.returncode != 0:
+        return {
+            "success": False,
+            "returncode": completed.returncode,
+            "error": completed.stderr.strip(),
+        }
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        return {"success": False, "error": f"invalid ffprobe JSON: {exc}"}
+    if not isinstance(payload, dict):
+        return {"success": False, "error": "ffprobe JSON root was not an object"}
+    return {"success": True, "payload": payload}
+
+
+def _frame_type_summary(ffprobe_result: JsonObject) -> JsonObject:
+    payload = ffprobe_result.get("payload")
+    if not isinstance(payload, Mapping):
+        return {"available": False}
+    typed_payload = cast(Mapping[str, object], payload)
+    frames_value = typed_payload.get("frames")
+    if not isinstance(frames_value, list):
+        return {"available": False}
+    frames = cast(list[object], frames_value)
+
+    type_counts: dict[str, int] = {}
+    keyframe_indices: list[int] = []
+    for index, raw_frame in enumerate(frames):
+        if not isinstance(raw_frame, Mapping):
+            continue
+        pict_type = raw_frame.get("pict_type")
+        if isinstance(pict_type, str):
+            type_counts[pict_type] = type_counts.get(pict_type, 0) + 1
+        if raw_frame.get("key_frame") == 1:
+            keyframe_indices.append(index)
+    keyframe_gaps = [
+        right - left for left, right in zip(keyframe_indices, keyframe_indices[1:], strict=False)
+    ]
+    return {
+        "available": True,
+        "frame_count": len(frames),
+        "type_counts": type_counts,
+        "keyframe_count": len(keyframe_indices),
+        "keyframe_gap_frames": _distribution([float(gap) for gap in keyframe_gaps]),
+    }
+
+
+def _run_decode_baseline(*, analysis_source_path: Path) -> JsonObject:
+    loader = DefaultVSLoader()
+    cpu_started = time.process_time()
+    overall_started = time.perf_counter()
+    load_started = time.perf_counter()
+    source = loader.load(analysis_source_path)
+    source_load_seconds = time.perf_counter() - load_started
+    try:
+        graph_started = time.perf_counter()
+        node = cast(_PlaneStatsSource, source.clip)
+        stats = node.std.PlaneStats()
+        graph_build_seconds = time.perf_counter() - graph_started
+        render_started = time.perf_counter()
+        rendered_frames = sum(1 for _frame in stats.frames(close=True))
+        frame_render_seconds = time.perf_counter() - render_started
+    finally:
+        del source
+    wall_seconds = time.perf_counter() - overall_started
+    cpu_seconds = time.process_time() - cpu_started
+    return {
+        "operation": "full_source_plane0_planestats_concurrent",
+        "frame_count": rendered_frames,
+        "wall_seconds": wall_seconds,
+        "source_load_seconds": source_load_seconds,
+        "graph_build_seconds": graph_build_seconds,
+        "frame_render_seconds": frame_render_seconds,
+        "frames_per_second": (
+            0.0 if frame_render_seconds <= 0.0 else rendered_frames / frame_render_seconds
+        ),
+        "process_cpu_seconds": cpu_seconds,
+        "cpu_to_wall_ratio": 0.0 if wall_seconds <= 0.0 else cpu_seconds / wall_seconds,
+        "peak_rss_bytes": _peak_rss_bytes(),
+        "note": "Executed after timed mode trials so it cannot warm their source/frame caches.",
+    }
 
 
 def _resolve_benchmark_analysis_source_path(
@@ -317,6 +574,7 @@ def _prepared_benchmark_clip(
         ordered_paths=list(input_paths),
         snapshots_by_path=snapshots_by_path,
         overrides_by_path=overrides_by_path,
+        labels_by_path={path: path.stem for path in input_paths},
         match_fps=config.sources.match_fps,
         active_rect_detection=config.screenshots.active_rect_detection,
     )
@@ -340,10 +598,7 @@ def _benchmark_active_rect_from_prepared_clip(
                 height=rect.height,
             ),
             source="explicit",
-            detection_mode=cast(
-                ActiveRectDetectionMode,
-                config.screenshots.active_rect_detection.value,
-            ),
+            detection_mode=config.screenshots.active_rect_detection.value,
         )
     if prepared_clip is None or prepared_clip.active_rect is None:
         raise SystemExit(
@@ -370,9 +625,9 @@ def _benchmark_active_rect_from_prepared_clip(
             width=prepared.width,
             height=prepared.height,
         ),
-        source=cast(ActiveRectSource, prepared.source),
-        detection_mode=cast(ActiveRectDetectionMode, prepared.detection_mode),
-        algorithm_id=cast(ActiveRectAlgorithmId, prepared.algorithm_id),
+        source=prepared.source,
+        detection_mode=prepared.detection_mode,
+        algorithm_id=prepared.algorithm_id,
     )
 
 
@@ -428,7 +683,7 @@ def _source_override_affects_selection_domain(override: SourceOverrideConfig) ->
     )
 
 
-def _parse_args() -> argparse.Namespace:
+def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Compare performance analysis mode against quality and write JSON.",
     )
@@ -471,13 +726,53 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable stderr progress display for scripted runs.",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--repetitions",
+        type=int,
+        default=3,
+        help="Timed repetitions per mode; trial order rotates each repetition (default: 3).",
+    )
+    parser.add_argument(
+        "--metric-cache-policy",
+        choices=["cold", "reuse"],
+        default="cold",
+        help="Delete each mode's metric cache before every trial, or allow reuse.",
+    )
+    parser.add_argument(
+        "--require-warm-source-index",
+        action="store_true",
+        help=(
+            "Fail unless an adjacent L-SMASH .lwi index is detected for the selected "
+            "analysis source."
+        ),
+    )
+    parser.add_argument(
+        "--skip-decode-baseline",
+        action="store_true",
+        help="Skip the post-trial decode/PlaneStats throughput baseline.",
+    )
+    parser.add_argument(
+        "--inspect-frame-types",
+        action="store_true",
+        help="Use ffprobe outside timed trials to record I/P/B and keyframe distribution.",
+    )
+    parser.add_argument(
+        "--ffprobe-timeout",
+        type=float,
+        default=FFPROBE_TIMEOUT_SECONDS,
+        help="Timeout in seconds for each source-inspection ffprobe command.",
+    )
+    args = parser.parse_args(argv)
     if args.modes is None:
         args.modes = ["performance"]
     if args.window_start < 0:
         parser.error("--window-start must be non-negative")
     if args.window_end_exclusive is not None and args.window_end_exclusive <= args.window_start:
         parser.error("--window-end-exclusive must be greater than --window-start")
+    if args.repetitions <= 0:
+        parser.error("--repetitions must be positive")
+    if args.ffprobe_timeout <= 0:
+        parser.error("--ffprobe-timeout must be positive")
     return args
 
 
@@ -494,6 +789,8 @@ def _run_benchmark_tiers(
     window_start: int,
     window_end_exclusive: int | None,
     progress_enabled: bool,
+    repetitions: int = 1,
+    metric_cache_policy: MetricCachePolicy = "reuse",
 ) -> tuple[JsonObject, dict[str, JsonObject]]:
     console = Console(stderr=True)
     progress = Progress(
@@ -505,46 +802,58 @@ def _run_benchmark_tiers(
         console=console,
         disable=not progress_enabled,
     )
-    total = 1 + len(candidate_modes)
-    comparisons: dict[str, JsonObject] = {}
+    modes = list(dict.fromkeys(("quality", *candidate_modes)))
+    total = len(modes) * repetitions
+    trials_by_mode: dict[str, list[JsonObject]] = {mode: [] for mode in modes}
 
     with progress:
         task_id = progress.add_task("Starting analysis benchmark", total=total)
-        progress.update(task_id, description="Running quality analysis")
-        quality = _run_tier(
-            mode="quality",
-            video_paths=video_paths,
-            analysis_config=analysis_config,
-            cache_dir=cache_dir,
-            analysis_source_path=analysis_source_path,
-            effective_fps=effective_fps,
-            active_rect=active_rect,
-            selection_domain=selection_domain,
-            window_start=window_start,
-            window_end_exclusive=window_end_exclusive,
-        )
-        progress.advance(task_id)
-
-        for mode in candidate_modes:
-            progress.update(task_id, description=f"Running {mode} analysis")
-            tier = _run_tier(
-                mode=mode,
-                video_paths=video_paths,
-                analysis_config=analysis_config,
-                cache_dir=cache_dir,
-                analysis_source_path=analysis_source_path,
-                effective_fps=effective_fps,
-                active_rect=active_rect,
-                selection_domain=selection_domain,
-                window_start=window_start,
-                window_end_exclusive=window_end_exclusive,
-            )
-            comparisons[mode] = _compare_tier(quality=quality, candidate=tier)
-            progress.advance(task_id)
+        for repetition in range(repetitions):
+            order = _rotated_trial_order(modes, repetition)
+            for order_index, mode in enumerate(order):
+                progress.update(
+                    task_id,
+                    description=f"Running {mode} analysis ({repetition + 1}/{repetitions})",
+                )
+                trials_by_mode[mode].append(
+                    _run_tier(
+                        mode=mode,
+                        video_paths=video_paths,
+                        analysis_config=analysis_config,
+                        cache_dir=cache_dir,
+                        analysis_source_path=analysis_source_path,
+                        effective_fps=effective_fps,
+                        active_rect=active_rect,
+                        selection_domain=selection_domain,
+                        window_start=window_start,
+                        window_end_exclusive=window_end_exclusive,
+                        metric_cache_policy=metric_cache_policy,
+                        repetition=repetition,
+                        order_index=order_index,
+                    )
+                )
+                progress.advance(task_id)
 
         progress.update(task_id, description="Analysis benchmark complete")
 
+    quality = _aggregate_tier_trials(trials_by_mode["quality"])
+    comparisons = {
+        mode: _compare_tier(
+            quality=quality,
+            candidate=_aggregate_tier_trials(trials_by_mode[mode]),
+        )
+        for mode in modes
+        if mode != "quality"
+    }
     return quality, comparisons
+
+
+def _rotated_trial_order(modes: Sequence[str], repetition: int) -> list[str]:
+    """Rotate mode order deterministically to spread warm-cache/order bias."""
+    if not modes:
+        return []
+    offset = repetition % len(modes)
+    return [*modes[offset:], *modes[:offset]]
 
 
 def _run_tier(
@@ -559,10 +868,26 @@ def _run_tier(
     selection_domain: str | None,
     window_start: int,
     window_end_exclusive: int | None,
+    metric_cache_policy: MetricCachePolicy = "reuse",
+    repetition: int = 0,
+    order_index: int = 0,
 ) -> JsonObject:
     tier_config = analysis_config.model_copy(
         update={"performance_mode": AnalysisPerformanceMode(mode)}
     )
+    if metric_cache_policy == "cold":
+        _delete_tier_metrics_cache(
+            video_paths=video_paths,
+            config=tier_config,
+            cache_dir=cache_dir,
+            analysis_source_path=analysis_source_path,
+            effective_fps=effective_fps,
+            active_rect=active_rect,
+            selection_domain=selection_domain,
+        )
+    timing_recorder = AnalysisTimingRecorder()
+    cpu_started = time.process_time()
+    trial_started = time.perf_counter()
     started = time.perf_counter()
     metrics = _calculate_metrics_with_expected_active_rect(
         video_paths=video_paths,
@@ -572,6 +897,7 @@ def _run_tier(
         effective_fps=effective_fps,
         active_rect=active_rect,
         selection_domain=selection_domain,
+        timing_recorder=timing_recorder,
     )
     analyze_seconds = time.perf_counter() - started
     windowed_metrics, source_offset = _windowed_metrics(
@@ -579,6 +905,7 @@ def _run_tier(
         window_start=window_start,
         window_end_exclusive=window_end_exclusive,
     )
+    selection_started = time.perf_counter()
     selection = select_frames(
         windowed_metrics,
         _config_for_window(
@@ -587,10 +914,22 @@ def _run_tier(
             window_end=source_offset + windowed_metrics.metadata.frame_count,
         ),
     )
+    selection_seconds = time.perf_counter() - selection_started
+    trial_seconds = time.perf_counter() - trial_started
+    process_cpu_seconds = time.process_time() - cpu_started
     return {
         "mode": mode,
         "analyze_seconds": analyze_seconds,
-        "cache_state": "unknown",
+        "cache_state": timing_recorder.cache_state,
+        "cache_write_state": timing_recorder.cache_write_state,
+        "phase_timings_seconds": timing_recorder.as_dict(),
+        "selection_seconds": selection_seconds,
+        "trial_seconds": trial_seconds,
+        "process_cpu_seconds": process_cpu_seconds,
+        "cpu_to_wall_ratio": (0.0 if trial_seconds <= 0.0 else process_cpu_seconds / trial_seconds),
+        "peak_rss_bytes": _peak_rss_bytes(),
+        "repetition": repetition,
+        "order_index": order_index,
         "metrics": metrics,
         "windowed_metrics": windowed_metrics,
         "selection": _selection_with_offset(selection, source_offset),
@@ -608,6 +947,124 @@ def _run_tier(
     }
 
 
+def _delete_tier_metrics_cache(
+    *,
+    video_paths: Sequence[Path],
+    config: AnalysisConfig,
+    cache_dir: Path,
+    analysis_source_path: Path,
+    effective_fps: Fraction | None,
+    active_rect: BenchmarkActiveRect,
+    selection_domain: str | None,
+) -> None:
+    cache_key = compute_cache_key(
+        list(video_paths),
+        config,
+        selection_domain=selection_domain,
+        metric_request=MetricCacheRequest(
+            analysis_source_path=analysis_source_path,
+            effective_fps=effective_fps,
+            metric_active_rect=active_rect.rect,
+            active_rect_source=active_rect.source,
+            active_rect_detection_mode=active_rect.detection_mode,
+            active_rect_algorithm_id=active_rect.algorithm_id,
+        ),
+    )
+    delete_metrics_cache_entry(cache_dir, cache_key)
+
+
+def _aggregate_tier_trials(trials: Sequence[JsonObject]) -> JsonObject:
+    if not trials:
+        raise ValueError("Cannot aggregate an empty benchmark trial set")
+    aggregate = dict(trials[0])
+    trial_summaries = [_trial_result_summary(trial) for trial in trials]
+    aggregate["trials"] = trial_summaries
+    aggregate["timing_summary"] = _timing_summary(trial_summaries)
+    analyze_distribution = aggregate["timing_summary"]["analyze_seconds"]
+    aggregate["analyze_seconds"] = cast(JsonObject, analyze_distribution)["median"]
+    cache_states: dict[str, int] = {}
+    cache_write_states: dict[str, int] = {}
+    for trial in trials:
+        state = cast(str, trial["cache_state"])
+        cache_states[state] = cache_states.get(state, 0) + 1
+        write_state = cast(str, trial["cache_write_state"])
+        cache_write_states[write_state] = cache_write_states.get(write_state, 0) + 1
+    aggregate["cache_state"] = cache_states
+    aggregate["cache_write_state"] = cache_write_states
+    return aggregate
+
+
+def _trial_result_summary(trial: JsonObject) -> JsonObject:
+    return {
+        "repetition": trial["repetition"],
+        "order_index": trial["order_index"],
+        "cache_state": trial["cache_state"],
+        "cache_write_state": trial["cache_write_state"],
+        "analyze_seconds": trial["analyze_seconds"],
+        "selection_seconds": trial["selection_seconds"],
+        "trial_seconds": trial["trial_seconds"],
+        "process_cpu_seconds": trial["process_cpu_seconds"],
+        "cpu_to_wall_ratio": trial["cpu_to_wall_ratio"],
+        "peak_rss_bytes": trial["peak_rss_bytes"],
+        "phase_timings_seconds": trial["phase_timings_seconds"],
+    }
+
+
+def _timing_summary(trials: Sequence[JsonObject]) -> JsonObject:
+    summary: JsonObject = {}
+    for field_name in (
+        "analyze_seconds",
+        "selection_seconds",
+        "trial_seconds",
+        "process_cpu_seconds",
+        "cpu_to_wall_ratio",
+    ):
+        summary[field_name] = _distribution(
+            [float(cast(float, trial[field_name])) for trial in trials]
+        )
+
+    phase_names = sorted(
+        {
+            phase
+            for trial in trials
+            for phase in cast(Mapping[str, float], trial["phase_timings_seconds"])
+        }
+    )
+    summary["phase_timings_seconds"] = {
+        phase: _distribution(
+            [
+                float(cast(Mapping[str, float], trial["phase_timings_seconds"]).get(phase, 0.0))
+                for trial in trials
+            ]
+        )
+        for phase in phase_names
+    }
+    return summary
+
+
+def _distribution(values: Sequence[float]) -> JsonObject:
+    if not values:
+        return {"count": 0}
+    return {
+        "count": len(values),
+        "min": min(values),
+        "max": max(values),
+        "mean": statistics.fmean(values),
+        "median": statistics.median(values),
+        "pstdev": statistics.pstdev(values),
+    }
+
+
+def _peak_rss_bytes() -> int | None:
+    if sys.platform == "win32":
+        return None
+
+    import resource
+
+    peak = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    return peak if sys.platform == "darwin" else peak * 1024
+
+
 def _calculate_metrics_with_expected_active_rect(
     *,
     video_paths: Sequence[Path],
@@ -617,6 +1074,7 @@ def _calculate_metrics_with_expected_active_rect(
     effective_fps: Fraction | None,
     active_rect: BenchmarkActiveRect,
     selection_domain: str | None,
+    timing_recorder: AnalysisTimingRecorder | None = None,
 ) -> FrameMetrics:
     metrics = _calculate_metrics_once(
         video_paths=video_paths,
@@ -626,6 +1084,7 @@ def _calculate_metrics_with_expected_active_rect(
         effective_fps=effective_fps,
         active_rect=active_rect,
         selection_domain=selection_domain,
+        timing_recorder=timing_recorder,
     )
     if _metrics_active_rect_metadata_matches(metrics, active_rect):
         return metrics
@@ -652,6 +1111,7 @@ def _calculate_metrics_with_expected_active_rect(
         effective_fps=effective_fps,
         active_rect=active_rect,
         selection_domain=selection_domain,
+        timing_recorder=timing_recorder,
     )
     if _metrics_active_rect_metadata_matches(metrics, active_rect):
         return metrics
@@ -672,6 +1132,7 @@ def _calculate_metrics_once(
     effective_fps: Fraction | None,
     active_rect: BenchmarkActiveRect,
     selection_domain: str | None,
+    timing_recorder: AnalysisTimingRecorder | None = None,
 ) -> FrameMetrics:
     return calculate_metrics(
         list(video_paths),
@@ -684,6 +1145,7 @@ def _calculate_metrics_once(
         active_rect_detection_mode=active_rect.detection_mode,
         active_rect_algorithm_id=active_rect.algorithm_id,
         selection_domain=selection_domain,
+        timing_recorder=timing_recorder,
     )
 
 
@@ -744,6 +1206,9 @@ def _compare_tier(*, quality: JsonObject, candidate: JsonObject) -> JsonObject:
         "mode": mode,
         "analyze_seconds": candidate["analyze_seconds"],
         "cache_state": candidate["cache_state"],
+        "cache_write_state": candidate.get("cache_write_state"),
+        "timing_summary": candidate.get("timing_summary"),
+        "trials": candidate.get("trials", []),
         "metadata": candidate["metadata"],
         "selected": _selected_summary(candidate_selection),
         "comparisons": category_comparisons,
@@ -756,6 +1221,9 @@ def _tier_summary(tier: JsonObject) -> JsonObject:
     return {
         "analyze_seconds": tier["analyze_seconds"],
         "cache_state": tier["cache_state"],
+        "cache_write_state": tier.get("cache_write_state"),
+        "timing_summary": tier.get("timing_summary"),
+        "trials": tier.get("trials", []),
         "metadata": tier["metadata"],
         "selected": _selected_summary(selection),
     }

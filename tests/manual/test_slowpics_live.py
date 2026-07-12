@@ -208,6 +208,11 @@ def test_slowpics_comparison_page_exposes_passive_upload_protocol() -> None:
     )
     _assert_script_regex(
         script_text,
+        r"['\"]Access-Control-Allow-Origin['\"]\s*:\s*['\"]\*['\"]",
+        "Access-Control-Allow-Origin upload header",
+    )
+    _assert_script_regex(
+        script_text,
         r"localStorage\s*\.\s*getItem\(\s*['\"]browserId['\"]\s*\)",
         "browserId localStorage read",
     )

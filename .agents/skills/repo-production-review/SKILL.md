@@ -9,15 +9,17 @@ Thin Frame Compare wrapper for the global `repo-production-review` skill suite.
 
 ## Local Required Reads
 
-Before running the universal review, read and honor:
+Start with:
 
 - `AGENTS.md`
-- `docs/ENGINEERING_RUNBOOK.md`
+- relevant sections of `docs/ENGINEERING_RUNBOOK.md`
 - `docs/current-architecture.md`
-- `docs/current-cli-contract.md`
-- `importlinter.ini`
-- `pyproject.toml`
-- `.agents/skills/*/SKILL.md`
+
+Inventory skill names and descriptions, then load only boundary skills matching each
+review dimension. Read `docs/current-cli-contract.md` for CLI/config/output review,
+`importlinter.ini` for dependency-direction review, and `pyproject.toml` for typing,
+dependency, packaging, or build review. Do not preload launcher and process skill
+bodies merely to inventory them.
 
 Also open and follow the global orchestrator at:
 
@@ -47,7 +49,9 @@ Calibrate findings against Frame Compare's real surfaces:
 
 ## Invocation Behavior
 
-Run the global `repo-production-review` orchestrator. Use installed global specialist skills when available.
+Run the global `repo-production-review` orchestrator. Use installed global specialist
+skills when available. Keep the review pass read-only; neither `worker` nor
+`worker_luna` participates.
 
 The final report must separate confirmed defects, inferred risks, subjective maintainability concerns, and insufficient-data items. Every material finding must include evidence, risk mechanism, severity, confidence, suggested verification, and remediation direction.
 

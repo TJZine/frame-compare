@@ -87,7 +87,7 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     assert "ffmpeg" in output
     assert "slow.pics" in output
     assert "visibility" in output
-    assert "unlisted" in output
+    assert "public" in output
     assert "report" in output
     assert "auto_open" in output
     assert "upload" in output

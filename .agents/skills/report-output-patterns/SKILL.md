@@ -18,7 +18,10 @@ Frame Compare is CLI-first, so CLI text, JSON payloads, generated reports, scree
 3. [`docs/current-architecture.md`](../../../docs/current-architecture.md) for output owners
 4. Tests near the touched owner, especially CLI, render, orchestration, and report tests
 
-## Current Owners
+## Output Owner Categories
+
+Confirm file-level ownership in `docs/current-architecture.md`; the entries below
+identify stable responsibility categories rather than a second owner map.
 
 - CLI command routing, human summaries, JSON modes, and browser auto-open: [`src/frame_compare/cli/entry.py`](../../../src/frame_compare/cli/entry.py)
 - CLI formatting helpers: [`src/frame_compare/cli/output.py`](../../../src/frame_compare/cli/output.py)

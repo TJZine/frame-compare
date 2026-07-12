@@ -1,11 +1,12 @@
 """Tests for slow.pics publisher service."""
 
+import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
 from http.cookies import SimpleCookie
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import UUID
 
 import httpx
@@ -27,7 +28,18 @@ from frame_compare.services.slowpics_upload_plan import (
     SlowpicsUploadPlan,
     SlowpicsUploadRow,
 )
-from frame_compare.services.types import TmdbMetadata
+from frame_compare.services.types import SlowpicsCollectionMetadata
+from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
+
+
+def _collection_metadata(
+    title: str = "screenshots",
+    *,
+    tmdb_id: int | None = None,
+    tmdb_media_type: str | None = None,
+) -> SlowpicsCollectionMetadata:
+    media_type = tmdb_media_type if tmdb_media_type in {"movie", "tv"} else None
+    return SlowpicsCollectionMetadata(title=title, tmdb_id=tmdb_id, tmdb_media_type=media_type)
 
 
 def _png(path: Path) -> Path:
@@ -165,12 +177,88 @@ async def test_publish_to_slowpics_success_returns_url(
     _mock_successful_browser_flow(respx_mock)
 
     result = await publish_to_slowpics(
-        tmp_path / "screenshots", SlowpicsConfig(), async_client, upload_plan=upload_plan
+        _collection_metadata(), SlowpicsConfig(), async_client, upload_plan=upload_plan
     )
 
     assert result.url == "https://slow.pics/c/first-key"
     assert result.screenshot_count == 4
     assert result.upload_duration_seconds >= 0.0
+
+
+@pytest.mark.anyio
+async def test_publish_to_slowpics_reports_progress_for_each_completed_image(
+    tmp_path: Path,
+    async_client: httpx.AsyncClient,
+    respx_mock,
+) -> None:
+    upload_plan = _plan(tmp_path, rows=2, cols=2)
+    _mock_successful_browser_flow(respx_mock)
+    progress = Mock(spec=ProgressReporter)
+
+    await publish_to_slowpics(
+        _collection_metadata("My Comparison"),
+        SlowpicsConfig(),
+        async_client,
+        progress=progress,
+        upload_plan=upload_plan,
+    )
+
+    progress.start_phase.assert_called_once_with(
+        "Uploading My Comparison to slow.pics",
+        total=4,
+    )
+    assert progress.advance.call_count == 4
+    progress.complete_phase.assert_called_once_with(ProgressPhaseStatus.COMPLETED)
+
+
+@pytest.mark.anyio
+async def test_publish_to_slowpics_uploads_at_most_three_images_concurrently(
+    tmp_path: Path,
+    async_client: httpx.AsyncClient,
+    respx_mock,
+) -> None:
+    upload_plan = _plan(tmp_path, rows=2, cols=2)
+    active_uploads = 0
+    maximum_active_uploads = 0
+    three_uploads_started = asyncio.Event()
+
+    respx_mock.get("https://slow.pics/comparison").mock(
+        return_value=httpx.Response(
+            200,
+            headers={"Set-Cookie": "XSRF-TOKEN=token; Domain=.slow.pics; Path=/"},
+        )
+    )
+    respx_mock.post("https://slow.pics/upload/comparison").mock(
+        return_value=httpx.Response(200, json=_metadata_payload())
+    )
+
+    async def _upload_image(_request: httpx.Request) -> httpx.Response:
+        nonlocal active_uploads, maximum_active_uploads
+        active_uploads += 1
+        maximum_active_uploads = max(maximum_active_uploads, active_uploads)
+        if active_uploads == 3:
+            three_uploads_started.set()
+        try:
+            await asyncio.wait_for(three_uploads_started.wait(), timeout=1.0)
+            await asyncio.sleep(0)
+            return httpx.Response(200)
+        finally:
+            active_uploads -= 1
+
+    for row in range(2):
+        for col in range(2):
+            respx_mock.post(f"https://slow.pics/upload/image/image-{row}-{col}-secret").mock(
+                side_effect=_upload_image
+            )
+
+    await publish_to_slowpics(
+        _collection_metadata(),
+        SlowpicsConfig(),
+        async_client,
+        upload_plan=upload_plan,
+    )
+
+    assert maximum_active_uploads == 3
 
 
 @pytest.mark.anyio
@@ -200,7 +288,7 @@ async def test_publish_to_slowpics_get_comparison_precedes_metadata_upload(
     )
 
     await publish_to_slowpics(
-        tmp_path / "screenshots", SlowpicsConfig(), async_client, upload_plan=upload_plan
+        _collection_metadata(), SlowpicsConfig(), async_client, upload_plan=upload_plan
     )
 
     assert events == ["get", "metadata"]
@@ -231,7 +319,7 @@ async def test_publish_to_slowpics_sends_decoded_xsrf_browser_id_headers_and_use
     respx_mock.post("https://slow.pics/upload/image/image-0-0-secret").mock(side_effect=capture)
 
     await publish_to_slowpics(
-        tmp_path / "screenshots", SlowpicsConfig(), async_client, upload_plan=upload_plan
+        _collection_metadata(), SlowpicsConfig(), async_client, upload_plan=upload_plan
     )
 
     metadata_request = requests[1]
@@ -242,8 +330,14 @@ async def test_publish_to_slowpics_sends_decoded_xsrf_browser_id_headers_and_use
     assert image_request.headers["User-Agent"] == SLOWPICS_USER_AGENT
     assert metadata_request.headers["X-XSRF-TOKEN"] == "token+decoded"
     assert image_request.headers["X-XSRF-TOKEN"] == "token+decoded"
+    assert metadata_request.headers["Accept"] == "*/*"
+    assert metadata_request.headers["Accept-Language"] == "en-US,en;q=0.9"
+    assert metadata_request.headers["Access-Control-Allow-Origin"] == "*"
     assert metadata_request.headers["Origin"] == "https://slow.pics"
     assert metadata_request.headers["Referer"] == "https://slow.pics/comparison"
+    assert image_request.headers["Accept"] == "*/*"
+    assert image_request.headers["Accept-Language"] == "en-US,en;q=0.9"
+    assert image_request.headers["Access-Control-Allow-Origin"] == "*"
     assert image_request.headers["Origin"] == "https://slow.pics"
     assert image_request.headers["Referer"] == "https://slow.pics/comparison"
     assert browser_id
@@ -280,7 +374,7 @@ async def test_publish_to_slowpics_reuses_existing_browser_id_cookie(
     respx_mock.post("https://slow.pics/upload/image/image-0-0-secret").mock(side_effect=capture)
 
     await publish_to_slowpics(
-        tmp_path / "screenshots", SlowpicsConfig(), async_client, upload_plan=upload_plan
+        _collection_metadata(), SlowpicsConfig(), async_client, upload_plan=upload_plan
     )
 
     assert _multipart_field_value(requests[1], "browserId") == "existing-browser-id"
@@ -318,7 +412,7 @@ async def test_publish_to_slowpics_replaces_sentinel_browser_id_cookie(
     respx_mock.post("https://slow.pics/upload/image/image-0-0-secret").mock(side_effect=capture)
 
     await publish_to_slowpics(
-        tmp_path / "screenshots", SlowpicsConfig(), async_client, upload_plan=upload_plan
+        _collection_metadata(), SlowpicsConfig(), async_client, upload_plan=upload_plan
     )
 
     browser_id = _multipart_field_value(requests[1], "browserId")
@@ -364,18 +458,11 @@ async def test_publish_to_slowpics_metadata_uses_plan_names_sort_order_and_visib
                 return_value=httpx.Response(200)
             )
 
-    metadata = TmdbMetadata(
-        tmdb_id=1,
-        title="My Movie",
-        original_title="My Movie",
-        year=2021,
-        media_type="movie",
-    )
+    metadata = _collection_metadata("My Movie", tmdb_id=1, tmdb_media_type="movie")
     await publish_to_slowpics(
-        tmp_path / "screenshots",
+        metadata,
         SlowpicsConfig(visibility=Visibility.PUBLIC),
         async_client,
-        metadata=metadata,
         upload_plan=upload_plan,
     )
 
@@ -387,6 +474,7 @@ async def test_publish_to_slowpics_metadata_uses_plan_names_sort_order_and_visib
     assert _multipart_field_value(request, "public") == "true"
     assert _multipart_field_value(request, "visibility") == "PUBLIC"
     assert _multipart_field_value(request, "removeAfter") == ""
+    assert _multipart_field_value(request, "tmdbId") == "MOVIE_1"
     assert _multipart_field_value(request, "comparisons[0].name") == "10"
     assert _multipart_field_value(request, "comparisons[0].hentai") == "false"
     assert _multipart_field_value(request, "comparisons[0].sortOrder") == "0"
@@ -396,6 +484,73 @@ async def test_publish_to_slowpics_metadata_uses_plan_names_sort_order_and_visib
     assert _multipart_field_value(request, "comparisons[1].sortOrder") == "1"
     assert _multipart_field_value(request, "comparisons[1].images[1].name") == "encode-source-1"
     assert _multipart_field_value(request, "comparisons[1].images[1].sortOrder") == "1"
+
+
+@pytest.mark.anyio
+async def test_publish_to_slowpics_maps_unlisted_hentai_retention_and_tv_association(
+    tmp_path: Path,
+    async_client: httpx.AsyncClient,
+    respx_mock,
+) -> None:
+    upload_plan = _plan(tmp_path, rows=1, cols=1)
+    requests: list[httpx.Request] = []
+
+    def capture(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/comparison":
+            return httpx.Response(
+                200,
+                headers={"Set-Cookie": "XSRF-TOKEN=token; Domain=.slow.pics; Path=/"},
+            )
+        if request.url.path == "/upload/comparison":
+            return httpx.Response(200, json=_metadata_payload(rows=1, cols=1))
+        return httpx.Response(200)
+
+    respx_mock.get("https://slow.pics/comparison").mock(side_effect=capture)
+    respx_mock.post("https://slow.pics/upload/comparison").mock(side_effect=capture)
+    respx_mock.post("https://slow.pics/upload/image/image-0-0-secret").mock(side_effect=capture)
+
+    await publish_to_slowpics(
+        _collection_metadata("Show", tmdb_id=22, tmdb_media_type="tv"),
+        SlowpicsConfig(
+            visibility=Visibility.UNLISTED,
+            is_hentai=True,
+            remove_after_days=30,
+        ),
+        async_client,
+        upload_plan=upload_plan,
+    )
+
+    metadata_request = requests[1]
+    assert _multipart_field_value(metadata_request, "public") == "false"
+    assert _multipart_field_value(metadata_request, "visibility") == "LINK_ONLY"
+    assert _multipart_field_value(metadata_request, "hentai") == "true"
+    assert _multipart_field_value(metadata_request, "comparisons[0].hentai") == "true"
+    assert _multipart_field_value(metadata_request, "removeAfter") == "30"
+    assert _multipart_field_value(metadata_request, "tmdbId") == "TV_22"
+
+
+@pytest.mark.anyio
+async def test_publish_to_slowpics_omits_tmdb_field_when_association_is_absent(
+    tmp_path: Path,
+    async_client: httpx.AsyncClient,
+    respx_mock,
+) -> None:
+    upload_plan = _plan(tmp_path, rows=1, cols=1)
+    metadata_requests: list[httpx.Request] = []
+    _mock_successful_browser_flow(respx_mock, rows=1, cols=1)
+    respx_mock.post("https://slow.pics/upload/comparison").mock(
+        side_effect=lambda request: (
+            metadata_requests.append(request)
+            or httpx.Response(200, json=_metadata_payload(rows=1, cols=1))
+        )
+    )
+
+    await publish_to_slowpics(
+        _collection_metadata(), SlowpicsConfig(), async_client, upload_plan=upload_plan
+    )
+
+    assert 'name="tmdbId"' not in metadata_requests[0].content.decode()
 
 
 @pytest.mark.anyio
@@ -414,7 +569,7 @@ async def test_publish_to_slowpics_response_matrix_maps_to_matching_image_upload
             )
 
     await publish_to_slowpics(
-        tmp_path / "screenshots", SlowpicsConfig(), async_client, upload_plan=upload_plan
+        _collection_metadata(), SlowpicsConfig(), async_client, upload_plan=upload_plan
     )
 
     assert [request.url.path for request in image_requests] == [
@@ -434,6 +589,55 @@ async def test_publish_to_slowpics_response_matrix_maps_to_matching_image_upload
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("file_size_bytes", "image_timeout_floor", "expected_write_timeout"),
+    [
+        (1024 * 1024, 10.0, 19.0),
+        (8, 180.0, 180.0),
+    ],
+)
+async def test_publish_to_slowpics_uses_general_metadata_timeout_and_size_aware_image_write_timeout(
+    tmp_path: Path,
+    async_client: httpx.AsyncClient,
+    respx_mock,
+    file_size_bytes: int,
+    image_timeout_floor: float,
+    expected_write_timeout: float,
+) -> None:
+    upload_plan = _plan(tmp_path, rows=1, cols=1)
+    upload_plan.file_paths[0].write_bytes(b"x" * file_size_bytes)
+    requests: list[httpx.Request] = []
+
+    def capture(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/comparison":
+            return httpx.Response(
+                200,
+                headers={"Set-Cookie": "XSRF-TOKEN=token; Domain=.slow.pics; Path=/"},
+            )
+        if request.url.path == "/upload/comparison":
+            return httpx.Response(200, json=_metadata_payload(rows=1, cols=1))
+        return httpx.Response(200)
+
+    respx_mock.get("https://slow.pics/comparison").mock(side_effect=capture)
+    respx_mock.post("https://slow.pics/upload/comparison").mock(side_effect=capture)
+    respx_mock.post("https://slow.pics/upload/image/image-0-0-secret").mock(side_effect=capture)
+
+    await publish_to_slowpics(
+        _collection_metadata(),
+        SlowpicsConfig(
+            timeout_seconds=60.0,
+            image_upload_timeout_seconds=image_timeout_floor,
+        ),
+        async_client,
+        upload_plan=upload_plan,
+    )
+
+    assert requests[1].extensions["timeout"]["write"] == 60.0
+    assert requests[2].extensions["timeout"]["write"] == expected_write_timeout
+
+
+@pytest.mark.anyio
 async def test_publish_to_slowpics_maps_ten_column_upload_plan(
     tmp_path: Path,
     async_client: httpx.AsyncClient,
@@ -449,8 +653,10 @@ async def test_publish_to_slowpics_maps_ten_column_upload_plan(
         )
     )
     respx_mock.post("https://slow.pics/upload/comparison").mock(
-        side_effect=lambda request: metadata_requests.append(request)
-        or httpx.Response(200, json=_metadata_payload(rows=2, cols=10))
+        side_effect=lambda request: (
+            metadata_requests.append(request)
+            or httpx.Response(200, json=_metadata_payload(rows=2, cols=10))
+        )
     )
     for row in range(2):
         for col in range(10):
@@ -459,7 +665,7 @@ async def test_publish_to_slowpics_maps_ten_column_upload_plan(
             )
 
     result = await publish_to_slowpics(
-        tmp_path / "screenshots", SlowpicsConfig(), async_client, upload_plan=upload_plan
+        _collection_metadata(), SlowpicsConfig(), async_client, upload_plan=upload_plan
     )
 
     assert result.screenshot_count == 20
@@ -508,7 +714,7 @@ async def test_publish_to_slowpics_metadata_response_count_mismatch_fails_before
 
     with pytest.raises(SlowpicsError, match="Invalid metadata response"):
         await publish_to_slowpics(
-            tmp_path / "screenshots", SlowpicsConfig(), async_client, upload_plan=upload_plan
+            _collection_metadata(), SlowpicsConfig(), async_client, upload_plan=upload_plan
         )
 
     assert image_route.call_count == 0
@@ -563,7 +769,7 @@ async def test_publish_to_slowpics_metadata_response_column_mismatch_fails_befor
 
     with pytest.raises(SlowpicsError, match="Invalid metadata response"):
         await publish_to_slowpics(
-            tmp_path / "screenshots", SlowpicsConfig(), async_client, upload_plan=upload_plan
+            _collection_metadata(), SlowpicsConfig(), async_client, upload_plan=upload_plan
         )
 
     assert all(route.call_count == 0 for route in image_routes)
@@ -592,7 +798,7 @@ async def test_publish_to_slowpics_returned_url_falls_back_to_key(
     )
 
     result = await publish_to_slowpics(
-        tmp_path / "screenshots", SlowpicsConfig(), async_client, upload_plan=upload_plan
+        _collection_metadata(), SlowpicsConfig(), async_client, upload_plan=upload_plan
     )
 
     assert result.url == "https://slow.pics/c/collection-key"
@@ -611,7 +817,7 @@ async def test_publish_to_slowpics_does_not_request_legacy_api_endpoint(
     )
 
     await publish_to_slowpics(
-        tmp_path / "screenshots", SlowpicsConfig(), async_client, upload_plan=upload_plan
+        _collection_metadata(), SlowpicsConfig(), async_client, upload_plan=upload_plan
     )
 
     assert legacy_route.call_count == 0
@@ -631,7 +837,7 @@ async def test_publish_to_slowpics_missing_xsrf_token_fails_before_metadata_post
 
     with pytest.raises(SlowpicsError, match="Missing slow.pics XSRF token"):
         await publish_to_slowpics(
-            tmp_path / "screenshots", SlowpicsConfig(), async_client, upload_plan=upload_plan
+            _collection_metadata(), SlowpicsConfig(), async_client, upload_plan=upload_plan
         )
 
     assert metadata_route.call_count == 0
@@ -659,10 +865,98 @@ async def test_publish_to_slowpics_malformed_metadata_response_fails_before_imag
 
     with pytest.raises(SlowpicsError, match="Invalid metadata response"):
         await publish_to_slowpics(
-            tmp_path / "screenshots", SlowpicsConfig(), async_client, upload_plan=upload_plan
+            _collection_metadata(), SlowpicsConfig(), async_client, upload_plan=upload_plan
         )
 
     assert image_route.call_count == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("payload", "expected_detail"),
+    [
+        (
+            {"error": "LIMIT_INCOMPLETE_UPLOAD", "message": "sensitive server detail"},
+            "an incomplete collection already exists; complete or remove it, or wait 5 minutes "
+            "(LIMIT_INCOMPLETE_UPLOAD)",
+        ),
+        (
+            {"message": "LIMIT_UPLOAD"},
+            "uploads are temporarily limited; wait 1 minute before retrying (LIMIT_UPLOAD)",
+        ),
+        (
+            {"error": 429, "message": "LIMIT_UPLOAD"},
+            "uploads are temporarily limited; wait 1 minute before retrying (LIMIT_UPLOAD)",
+        ),
+        (
+            "DAILY_LIMIT_UPLOAD",
+            "the daily upload limit has been reached (DAILY_LIMIT_UPLOAD)",
+        ),
+        (
+            {"error": "LIMIT_COMPARISON_UPLOAD"},
+            "the request contains more than 512 comparisons (LIMIT_COMPARISON_UPLOAD)",
+        ),
+    ],
+)
+async def test_publish_to_slowpics_reports_known_metadata_rejection_safely(
+    tmp_path: Path,
+    async_client: httpx.AsyncClient,
+    respx_mock,
+    payload: object,
+    expected_detail: str,
+) -> None:
+    upload_plan = _plan(tmp_path, rows=1, cols=1)
+    respx_mock.get("https://slow.pics/comparison").mock(
+        return_value=httpx.Response(
+            200,
+            headers={"Set-Cookie": "XSRF-TOKEN=token; Domain=.slow.pics; Path=/"},
+        )
+    )
+    respx_mock.post("https://slow.pics/upload/comparison").mock(
+        return_value=httpx.Response(403, json=payload)
+    )
+
+    with pytest.raises(SlowpicsError) as exc:
+        await publish_to_slowpics(
+            _collection_metadata(), SlowpicsConfig(), async_client, upload_plan=upload_plan
+        )
+
+    message = str(exc.value)
+    assert "Metadata upload rejected with status 403" in message
+    assert expected_detail in message
+    assert "sensitive server detail" not in message
+
+
+@pytest.mark.anyio
+async def test_publish_to_slowpics_does_not_expose_unknown_metadata_rejection_body(
+    tmp_path: Path,
+    async_client: httpx.AsyncClient,
+    respx_mock,
+) -> None:
+    upload_plan = _plan(tmp_path, rows=1, cols=1)
+    respx_mock.get("https://slow.pics/comparison").mock(
+        return_value=httpx.Response(
+            200,
+            headers={"Set-Cookie": "XSRF-TOKEN=token; Domain=.slow.pics; Path=/"},
+        )
+    )
+    respx_mock.post("https://slow.pics/upload/comparison").mock(
+        return_value=httpx.Response(
+            403,
+            json={"error": "UNKNOWN_ERROR", "message": "token-secret private server detail"},
+        )
+    )
+
+    with pytest.raises(SlowpicsError) as exc:
+        await publish_to_slowpics(
+            _collection_metadata(), SlowpicsConfig(), async_client, upload_plan=upload_plan
+        )
+
+    message = str(exc.value)
+    assert "Metadata upload failed with status 403" in message
+    assert "UNKNOWN_ERROR" not in message
+    assert "token-secret" not in message
+    assert "private server detail" not in message
 
 
 @pytest.mark.anyio
@@ -675,6 +969,7 @@ async def test_publish_to_slowpics_partial_image_failure_does_not_delete_files(
 ) -> None:
     upload_plan = _plan(tmp_path, rows=1, cols=2)
     files = upload_plan.file_paths
+    progress = Mock(spec=ProgressReporter)
     _mock_successful_browser_flow(respx_mock, rows=1, cols=2)
     respx_mock.post("https://slow.pics/upload/image/image-0-0-secret").mock(
         return_value=httpx.Response(200)
@@ -685,14 +980,16 @@ async def test_publish_to_slowpics_partial_image_failure_does_not_delete_files(
 
     with pytest.raises(SlowpicsUnavailableError):
         await publish_to_slowpics(
-            tmp_path / "screenshots",
+            _collection_metadata(),
             SlowpicsConfig(delete_after_upload=True, max_retries=1),
             async_client,
+            progress=progress,
             upload_plan=upload_plan,
         )
 
     assert all(path.exists() for path in files)
     assert mock_sleep.await_count == 1
+    progress.complete_phase.assert_called_once_with(ProgressPhaseStatus.FAILED)
 
 
 @pytest.mark.anyio
@@ -708,7 +1005,7 @@ async def test_publish_to_slowpics_image_is_complete_response_is_success(
     )
 
     result = await publish_to_slowpics(
-        tmp_path / "screenshots", SlowpicsConfig(), async_client, upload_plan=upload_plan
+        _collection_metadata(), SlowpicsConfig(), async_client, upload_plan=upload_plan
     )
 
     assert result.url == "https://slow.pics/c/first-key"
@@ -738,7 +1035,7 @@ async def test_publish_to_slowpics_retry_policy_is_step_specific(
     image_route.side_effect = [httpx.TimeoutException("timeout"), httpx.Response(200)]
 
     await publish_to_slowpics(
-        tmp_path / "screenshots",
+        _collection_metadata(),
         SlowpicsConfig(max_retries=1),
         async_client,
         upload_plan=upload_plan,
@@ -777,7 +1074,7 @@ async def test_publish_to_slowpics_metadata_timeout_and_request_error_do_not_ret
 
     with pytest.raises(SlowpicsError) as exc:
         await publish_to_slowpics(
-            tmp_path / "screenshots",
+            _collection_metadata(),
             SlowpicsConfig(max_retries=3),
             async_client,
             upload_plan=upload_plan,
@@ -815,7 +1112,7 @@ async def test_publish_to_slowpics_metadata_retries_response_rate_limit(
     )
 
     result = await publish_to_slowpics(
-        tmp_path / "screenshots",
+        _collection_metadata(),
         SlowpicsConfig(max_retries=1),
         async_client,
         upload_plan=upload_plan,
@@ -850,7 +1147,7 @@ async def test_publish_to_slowpics_metadata_retries_response_server_error(
     )
 
     result = await publish_to_slowpics(
-        tmp_path / "screenshots",
+        _collection_metadata(),
         SlowpicsConfig(max_retries=1),
         async_client,
         upload_plan=upload_plan,
@@ -890,7 +1187,7 @@ async def test_publish_to_slowpics_does_not_delete_local_files_after_upload(
     respx_mock.post("https://slow.pics/upload/image/image-0-1-secret").mock(side_effect=capture)
 
     await publish_to_slowpics(
-        tmp_path / "screenshots",
+        _collection_metadata(),
         SlowpicsConfig(delete_after_upload=True),
         async_client,
         upload_plan=upload_plan,
@@ -937,7 +1234,7 @@ async def test_publish_to_slowpics_sensitive_values_redacted_from_exceptions(
 
     with pytest.raises(SlowpicsError) as exc:
         await publish_to_slowpics(
-            tmp_path / "screenshots", SlowpicsConfig(), async_client, upload_plan=upload_plan
+            _collection_metadata(), SlowpicsConfig(), async_client, upload_plan=upload_plan
         )
 
     message = str(exc.value)
@@ -957,7 +1254,7 @@ async def test_publish_to_slowpics_empty_plan_raises_error(
 ) -> None:
     with pytest.raises(SlowpicsError, match="No PNG files found"):
         await publish_to_slowpics(
-            tmp_path / "screenshots",
+            _collection_metadata(),
             SlowpicsConfig(),
             async_client,
             upload_plan=SlowpicsUploadPlan(rows=()),
@@ -976,7 +1273,7 @@ async def test_publish_to_slowpics_rejects_missing_planned_file_before_request(
 
     with pytest.raises(SlowpicsError, match="planned for slow.pics upload is missing"):
         await publish_to_slowpics(
-            tmp_path / "screenshots", SlowpicsConfig(), async_client, upload_plan=upload_plan
+            _collection_metadata(), SlowpicsConfig(), async_client, upload_plan=upload_plan
         )
 
     assert route.call_count == 0
@@ -992,7 +1289,7 @@ async def test_slowpics_publisher_upload_returns_url(
     _mock_successful_browser_flow(respx_mock, rows=1, cols=1)
     publisher = SlowpicsPublisher(SlowpicsConfig(), async_client)
 
-    url = await publisher.upload(upload_plan)
+    url = await publisher.upload(upload_plan, _collection_metadata())
 
     assert url == "https://slow.pics/c/first-key"
 
@@ -1007,5 +1304,5 @@ async def test_slowpics_publisher_does_not_own_client(
 
     async with httpx.AsyncClient() as client:
         publisher = SlowpicsPublisher(SlowpicsConfig(), client)
-        await publisher.upload(upload_plan)
+        await publisher.upload(upload_plan, _collection_metadata())
         assert not client.is_closed

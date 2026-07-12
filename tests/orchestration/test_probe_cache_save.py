@@ -193,6 +193,32 @@ def test_merge_shared_clip_probe_cache_read_failure_aborts_without_replacing(
     atomic_write.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "existing_content",
+    [
+        pytest.param("invalid [ toml", id="malformed-toml"),
+        pytest.param('version = "2"\n', id="version-mismatch"),
+    ],
+)
+def test_merge_shared_clip_probe_cache_invalid_state_aborts_without_replacing(
+    tmp_path: Path,
+    sample_snapshot: ClipProbeSnapshot,
+    existing_content: str,
+) -> None:
+    cache_path = tmp_path / "cache.toml"
+    cache_path.write_text(existing_content, encoding="utf-8")
+    existing_bytes = cache_path.read_bytes()
+    current_key = compute_probe_cache_key(sample_snapshot.fingerprint)
+
+    with patch(
+        "frame_compare.orchestration.probing.probe_cache.write_bytes_atomic"
+    ) as atomic_write:
+        merge_shared_clip_probe_cache(cache_path, {current_key: sample_snapshot})
+
+    assert cache_path.read_bytes() == existing_bytes
+    atomic_write.assert_not_called()
+
+
 def test_save_clip_probe_cache_creates_parent_directories(
     tmp_path: Path, sample_snapshot: ClipProbeSnapshot
 ):

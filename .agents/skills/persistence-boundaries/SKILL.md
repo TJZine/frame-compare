@@ -18,7 +18,10 @@ Frame Compare has no database; persistence is mostly config files, generated run
 3. [`docs/current-cli-contract.md`](../../../docs/current-cli-contract.md) when config or CLI persistence is involved
 4. Relevant owner modules such as config loaders, cache IO, run-folder services, report generation, or Windows packaging scripts
 
-## Current Persistence Owners
+## Persistence Owner Categories
+
+Confirm the current file-level owner map in `docs/current-architecture.md`; the
+categories below are routing aids, not a second authoritative inventory.
 
 - Config and presets: `src/frame_compare/config/**`
 - CLI flag to config mapping: [`src/frame_compare/config/overrides.py`](../../../src/frame_compare/config/overrides.py)

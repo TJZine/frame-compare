@@ -2,22 +2,28 @@
 
 Short entrypoint map for local coding agents.
 
-Read in this order:
+Use the relevant section of [docs/ENGINEERING_RUNBOOK.md](docs/ENGINEERING_RUNBOOK.md)
+for risk, verification, planning, or handoff decisions. Load deeper context only when
+the task needs it:
 
-1. [docs/ENGINEERING_RUNBOOK.md](docs/ENGINEERING_RUNBOOK.md)
-2. [docs/current-architecture.md](docs/current-architecture.md)
-3. [docs/current-cli-contract.md](docs/current-cli-contract.md)
-4. [importlinter.ini](importlinter.ini)
-5. [pyproject.toml](pyproject.toml)
+- ownership, hotspots, runtime flow, or layering: [docs/current-architecture.md](docs/current-architecture.md)
+- CLI, config, JSON, reports, or other public behavior: [docs/current-cli-contract.md](docs/current-cli-contract.md)
+- import direction: [importlinter.ini](importlinter.ini)
+- dependencies, packaging, or tool configuration: [pyproject.toml](pyproject.toml)
 
 Always-on defaults:
 
 - Bootstrap with `uv sync --group dev --frozen` if `.venv/bin/*` is missing.
-- Use repo-local skills under `.agents/skills/` when their trigger descriptions match the task.
+- Use the smallest matching repo-local skill set. Prefer one process skill plus only
+  the boundary skills required by the changed surface.
 - Keep code-health scanner state and optional local code-health skills untracked; do not add a repo-local `desloppify` skill unless the task explicitly targets desloppify workflow and the maintainer approves tracking it.
 - Keep Antigravity rules in `.agents/rules/general-guidelines.md` as a thin shim over this entrypoint and the runbook, not a second workflow.
 - Use the repo command canon from the runbook.
 - Let the runbook own public-surface and `docs/plans/` activation policy.
+- Default to one agent. Delegate only independent read-heavy work or an approved,
+  disjoint implementation unit; do not add planner/reviewer passes by habit.
+- Before claiming completion, run risk-matched verification, inspect the diff, and
+  preserve unrelated user changes.
 
 Where to look next:
 

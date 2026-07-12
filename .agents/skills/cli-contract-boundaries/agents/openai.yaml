@@ -1,4 +1,4 @@
 interface:
   display_name: "CLI Contract Boundaries"
   short_description: "Protect Typer CLI, JSON, streams, and exit-code contracts"
-  default_prompt: "Use the cli-contract-boundaries skill for this task."
+  default_prompt: "Use $cli-contract-boundaries for this task."

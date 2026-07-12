@@ -19,7 +19,6 @@ _PLANNED_TOKEN = "PLANNED:"
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REPO_TESTS_DIR = REPO_ROOT / "tests"
-SCAFFOLD_TESTS_DIR = REPO_ROOT / "scaffold"
 
 
 TraceKind = Literal["test", "module_spec"]

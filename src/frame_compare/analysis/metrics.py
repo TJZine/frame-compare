@@ -18,6 +18,7 @@ from frame_compare.analysis.metric_strategies import (
     MetricComputationResult,
     calculate_metric_strategy,
 )
+from frame_compare.analysis.timing import AnalysisTimingRecorder, record_span
 from frame_compare.analysis.types import (
     ActiveRectAlgorithmId,
     ActiveRectDetectionMode,
@@ -67,14 +68,20 @@ def _cached_metrics(
     clips: list[ClipIdentity],
     reporter: ProgressReporter | None,
     request: MetricCacheRequest,
+    timing_recorder: AnalysisTimingRecorder | None,
 ) -> FrameMetrics | None:
-    cache_result = load_cached_metrics_for_request(cache_dir, fingerprint, clips, request)
+    with record_span(timing_recorder, "cache_lookup"):
+        cache_result = load_cached_metrics_for_request(cache_dir, fingerprint, clips, request)
     if not (cache_result.success and cache_result.metrics):
+        if timing_recorder is not None:
+            timing_recorder.cache_state = "miss"
         return None
 
     if reporter:
         reporter.set_description("Cache hit")
         reporter.advance(ANALYZE_PROGRESS_TOTAL - 1)
+    if timing_recorder is not None:
+        timing_recorder.cache_state = "hit"
     return cache_result.metrics
 
 
@@ -127,13 +134,19 @@ def _save_metrics_cache_best_effort(
     metrics: FrameMetrics,
     cache_dir: Path,
     reporter: ProgressReporter | None,
+    timing_recorder: AnalysisTimingRecorder | None,
 ) -> None:
-    try:
-        save_metrics_cache(metrics, cache_dir)
-    except Exception as e:
-        if reporter:
-            reporter.set_description(f"Cache save failed: {e}")
-        log.warning("analysis_cache_save_failed", error=str(e), exc_info=True)
+    with record_span(timing_recorder, "cache_write"):
+        try:
+            save_metrics_cache(metrics, cache_dir)
+            if timing_recorder is not None:
+                timing_recorder.cache_write_state = "written"
+        except Exception as e:
+            if timing_recorder is not None:
+                timing_recorder.cache_write_state = "failed"
+            if reporter:
+                reporter.set_description(f"Cache save failed: {e}")
+            log.warning("analysis_cache_save_failed", error=str(e), exc_info=True)
 
 
 def calculate_metrics(
@@ -149,6 +162,7 @@ def calculate_metrics(
     active_rect_source: ActiveRectSource = "full-frame",
     active_rect_detection_mode: ActiveRectDetectionMode = "aspect_ratio",
     active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v2",
+    timing_recorder: AnalysisTimingRecorder | None = None,
 ) -> FrameMetrics:
     """
     Calculate frame metrics for the given clips.
@@ -169,6 +183,16 @@ def calculate_metrics(
             selection.
         effective_fps: Optional FPS value stored in metrics metadata for
             timing and selection-detail normalization.
+        metric_active_rect: Optional active-picture rectangle applied during
+            metric calculation and included in cache identity. ``None`` uses
+            the full source frame.
+        active_rect_source: Provenance for ``metric_active_rect`` stored in
+            cache metadata. Defaults to ``"full-frame"``.
+        active_rect_detection_mode: Detection policy that produced the active
+            rectangle. Defaults to ``"aspect_ratio"``.
+        active_rect_algorithm_id: Stable active-rectangle resolver algorithm
+            identity used for cache isolation. Defaults to
+            ``"active_rect_resolution_v2"``.
 
     Returns:
         FrameMetrics with luminance and motion arrays
@@ -199,14 +223,28 @@ def calculate_metrics(
     )
     clips = _clip_identities(video_paths)
 
-    cached = _cached_metrics(cache_dir, fingerprint, clips, reporter, cache_request)
+    cached = _cached_metrics(
+        cache_dir,
+        fingerprint,
+        clips,
+        reporter,
+        cache_request,
+        timing_recorder,
+    )
     if cached:
         return cached
 
     # Cache miss or invalid - compute metrics for the selected analysis source only.
-    source = _load_analysis_source(source_path, vs_loader)
+    with record_span(timing_recorder, "source_load"):
+        source = _load_analysis_source(source_path, vs_loader)
     try:
-        strategy_result = calculate_metric_strategy(source, config, reporter, metric_active_rect)
+        strategy_result = calculate_metric_strategy(
+            source,
+            config,
+            reporter,
+            metric_active_rect,
+            timing_recorder=timing_recorder,
+        )
         metrics = _build_metrics(
             result=strategy_result,
             source=source,
@@ -222,7 +260,7 @@ def calculate_metrics(
     finally:
         del source
 
-    _save_metrics_cache_best_effort(metrics, cache_dir, reporter)
+    _save_metrics_cache_best_effort(metrics, cache_dir, reporter, timing_recorder)
 
     if reporter:
         reporter.advance(1)

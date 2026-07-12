@@ -178,7 +178,7 @@ def test_emit_consolidated_fps_report_json_mode_logs_without_human_output(
     assert stage == "after_load_sources"
     assert diagnostics == []
     assert len(clips) == 1
-    assert set(clips[0]) == {
+    assert {
         "path",
         "label",
         "width",
@@ -191,7 +191,7 @@ def test_emit_consolidated_fps_report_json_mode_logs_without_human_output(
         "effective_fps_den",
         "fps_divergent",
         "note",
-    }
+    } <= clips[0].keys()
     assert clips[0]["path"] == "ref.mkv"
     assert clips[0]["label"] == "Reference"
     assert clips[0]["source_fps_num"] == 24

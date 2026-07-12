@@ -41,8 +41,7 @@ def _request(
     create_url_shortcut: bool = True,
     webhook_url: str | None = None,
     slowpics_url: str = "https://slow.pics/c/example",
-    metadata_title: str | None = None,
-    upload_title: str | None = None,
+    collection_title: str = "Frame Comparison",
 ) -> SlowpicsPostUploadRequest:
     root = tmp_path / "workspace"
     config = ConfigSchema().slowpics
@@ -52,8 +51,7 @@ def _request(
         workspace=_workspace(root, run_dir=run_dir),
         config=config,
         slowpics_url=slowpics_url,
-        metadata_title=metadata_title,
-        upload_title=upload_title,
+        collection_title=collection_title,
     )
 
 
@@ -65,8 +63,7 @@ async def test_run_slowpics_post_upload_actions_writes_shortcut_when_enabled(
         tmp_path,
         run_dir=run_dir,
         slowpics_url="https://slow.pics/c/collateral-key",
-        metadata_title="Collateral",
-        upload_title="screenshots",
+        collection_title="Collateral",
     )
 
     output = await run_slowpics_post_upload_actions(request)
@@ -104,8 +101,7 @@ async def test_run_slowpics_post_upload_actions_returns_shortcut_then_webhook(
         run_dir=run_dir,
         webhook_url="https://hooks.example.test/webhook/token?secret=value",
         slowpics_url="https://slow.pics/c/example",
-        metadata_title="Collateral",
-        upload_title="screenshots",
+        collection_title="Collateral",
     )
     captured: dict[str, str] = {}
 
@@ -163,7 +159,7 @@ async def test_run_slowpics_post_upload_actions_logs_shortcut_warning(
     monkeypatch.setattr("frame_compare.services.slowpics_post_upload.log.warning", _capture_warning)
 
     output = await run_slowpics_post_upload_actions(
-        _request(tmp_path, create_url_shortcut=True, metadata_title="Example")
+        _request(tmp_path, create_url_shortcut=True, collection_title="Example")
     )
 
     assert output == (

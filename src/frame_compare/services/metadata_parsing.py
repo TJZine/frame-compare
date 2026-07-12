@@ -2,9 +2,9 @@
 
 import re
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 import anitopy
 import structlog
@@ -16,6 +16,8 @@ log = structlog.get_logger()
 
 type FilenameMetadataParser = Callable[[str], dict[str, object]]
 type _ParsedField = str | int
+type ParserPriority = Literal["auto", "guessit", "anitopy"]
+type AlternateParserPolicy = Literal["merge", "fallback"]
 
 
 @dataclass(frozen=True)
@@ -24,6 +26,7 @@ class _ParsedFilenameFields:
     year: int | None = None
     season: int | None = None
     episode: int | None = None
+    episode_title: str | None = None
     release_group: str | None = None
     source: str | None = None
     resolution: str | None = None
@@ -32,19 +35,25 @@ class _ParsedFilenameFields:
 def _first_text(parser_result: dict[str, object], *keys: str) -> str | None:
     for key in keys:
         value = parser_result.get(key)
-        if value:
-            return str(value)
+        if isinstance(value, str) and value.strip():
+            return value
     return None
 
 
 def _first_int(parser_result: dict[str, object], *keys: str) -> int | None:
     for key in keys:
         value = parser_result.get(key)
-        if isinstance(value, int):
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
             return value
         if isinstance(value, str) and value.isdigit():
             return int(value)
-        if isinstance(value, list) and value and isinstance(value[0], int):
+        if (
+            isinstance(value, list)
+            and value
+            and isinstance(value[0], int)
+            and not isinstance(value[0], bool)
+            and value[0] >= 0
+        ):
             return value[0]
     return None
 
@@ -71,6 +80,10 @@ def _merge_parser_metadata(
             current.episode,
             _first_int(parser_result, "anime_episode", "episode"),
         ),
+        episode_title=_keep_existing(
+            current.episode_title,
+            _first_text(parser_result, "episode_title", "anime_episode_title"),
+        ),
         release_group=_keep_existing(
             current.release_group,
             _first_text(parser_result, "release_group"),
@@ -83,14 +96,21 @@ def _merge_parser_metadata(
     )
 
 
-def parse_filename(filename: str) -> ParsedMetadata:
+def parse_filename(
+    filename: str,
+    parser_priority: ParserPriority = "auto",
+    *,
+    alternate_policy: AlternateParserPolicy = "merge",
+) -> ParsedMetadata:
     """
     Extract metadata from filename using GuessIt + Anitopy.
 
     Parser selection:
     1. If filename starts with '[' (bracketed group), use Anitopy first
     2. Otherwise, try GuessIt for western media
-    3. If primary parser returns no title, try the alternate parser
+    3. In fallback mode, try the alternate parser only when the primary parser
+       returns no usable title. Merge mode preserves the historical behavior of
+       filling missing primary fields from the alternate parser.
 
     Fallback behavior:
     - If both parsers fail to extract a title, use the filename stem
@@ -103,6 +123,9 @@ def parse_filename(filename: str) -> ParsedMetadata:
 
     Args:
         filename: Video filename (not full path)
+        parser_priority: Primary parser selection policy.
+        alternate_policy: Whether the alternate parser always fills missing
+            fields or runs only when the primary has no usable title.
 
     Returns:
         ParsedMetadata with extracted fields (always returns, never raises)
@@ -111,7 +134,9 @@ def parse_filename(filename: str) -> ParsedMetadata:
         return ParsedMetadata(title="")
 
     # Determine primary parser
-    use_anitopy_first = filename.startswith("[")
+    use_anitopy_first = parser_priority == "anitopy" or (
+        parser_priority == "auto" and filename.startswith("[")
+    )
 
     def _log_parser_exception(parser_name: str, name: str, exc: Exception) -> None:
         log.debug(
@@ -147,10 +172,11 @@ def parse_filename(filename: str) -> ParsedMetadata:
         (_apply_guessit if use_anitopy_first else _apply_anitopy),
     ]
 
-    fields = _ParsedFilenameFields()
-
-    for parser in parsers:
-        fields = _merge_parser_metadata(fields, parser(filename))
+    fields = _merge_parser_metadata(_ParsedFilenameFields(), parsers[0](filename))
+    if alternate_policy == "merge" or not _has_usable_title(fields.title):
+        if alternate_policy == "fallback":
+            fields = replace(fields, title=None)
+        fields = _merge_parser_metadata(fields, parsers[1](filename))
 
     title = fields.title or Path(filename).stem
 
@@ -162,7 +188,14 @@ def parse_filename(filename: str) -> ParsedMetadata:
         year=fields.year,
         season=fields.season,
         episode=fields.episode,
+        episode_title=fields.episode_title,
         release_group=fields.release_group,
         source=fields.source,
         resolution=fields.resolution,
     )
+
+
+def _has_usable_title(title: str | None) -> bool:
+    if title is None:
+        return False
+    return bool(re.sub(r"[._\-]", " ", title).strip())

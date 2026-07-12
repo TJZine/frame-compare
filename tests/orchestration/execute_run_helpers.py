@@ -173,6 +173,10 @@ def analysis_selection_domain_for_cache_inputs(
         ordered_paths=ordered_paths,
         snapshots_by_path=snapshots_by_path,
         overrides_by_path=_resolved_cache_overrides(video_paths, config),
+        labels_by_path={
+            path: "Reference" if index == 0 else f"Encode {index}"
+            for index, path in enumerate(ordered_paths)
+        },
         match_fps=config.sources.match_fps,
         active_rect_detection=config.screenshots.active_rect_detection,
     )
@@ -213,6 +217,10 @@ def metric_cache_request_for_cache_inputs(
         ordered_paths=ordered_paths,
         snapshots_by_path=snapshots_by_path,
         overrides_by_path=_resolved_cache_overrides(video_paths, config),
+        labels_by_path={
+            path: "Reference" if index == 0 else f"Encode {index}"
+            for index, path in enumerate(ordered_paths)
+        },
         match_fps=config.sources.match_fps,
         active_rect_detection=config.screenshots.active_rect_detection,
     )
