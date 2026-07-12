@@ -297,11 +297,20 @@ def test_calculate_metrics_cache_save_is_best_effort(
     video_paths = [tmp_path / "v1.mkv"]
     video_paths[0].write_bytes(b"")
     config = AnalysisConfig()
-    result = calculate_metrics(video_paths, config, tmp_path)
+    recorder = AnalysisTimingRecorder()
+    result = calculate_metrics(
+        video_paths,
+        config,
+        tmp_path,
+        timing_recorder=recorder,
+    )
 
     assert isinstance(result, FrameMetrics)
     assert len(result.luminance) == 10
     assert len(result.motion) == 10
+    assert recorder.cache_write_state == "failed"
+    assert recorder.as_dict()["cache_write"] >= 0.0
+    mock_save.assert_called_once()
 
 
 @patch("frame_compare.analysis.metrics.calculate_metric_strategy")

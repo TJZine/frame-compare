@@ -23,8 +23,9 @@ Read these files in order:
 2. Keep planning in the main agent unless ambiguity, cross-session scope, or a
    multi-boundary seam justifies a separate planner.
 3. Execute one approved unit at a time.
-4. Use one independent final review for high-risk work. Add another pass only
-   after a material finding or material review-surface change.
+4. Use one independent final review for high-risk work or when novelty, blast
+   radius, or weak verification evidence creates substantial hidden risk. Add
+   another pass only after a material finding or material review-surface change.
 5. Adjudicate findings through the `review-request` lifecycle.
 6. Stop and re-plan when the owner, public contract, or proof surface changes.
 7. Use `closeout-verification` for final status.

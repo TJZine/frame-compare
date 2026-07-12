@@ -13,7 +13,11 @@ Keep production states and owner seams explicit:
   schemas rather than casts, sentinel strings, or boolean flag clusters;
 - preserve exception causes while mapping expected failures to typed, sanitized,
   user-actionable errors; do not catch `Exception` without an owner-specific reason;
-- use Pydantic for external/config validation and typed Python objects internally;
+- use Pydantic v2 validators, `ConfigDict`/`SettingsConfigDict`, and
+  `model_validate` for external/config validation; do not add v1 compatibility
+  shims, and pass typed Python objects inward;
+- inject `httpx.AsyncClient` from the composition owner, close it only where it is
+  created, and explicitly classify expected statuses before decoding payloads;
 - give clients, files, subprocesses, temporary artifacts, and runtime handles one
   explicit lifetime and cleanup path;
 - keep Typer/Rich wiring thin, JSON stdout machine-clean, and simple CLI paths free
@@ -24,5 +28,6 @@ Keep production states and owner seams explicit:
   or speculative protocol.
 
 Stop when correct typing requires a new ownership or public-contract decision. Run
-focused behavior proof, Pyright, Ruff, Bandit, and import-linter when dependency
-direction changes, plus the runbook-required gate.
+the focused pytest proof first, then Pyright, Ruff, Bandit, and the runbook-required
+gate. Run import-linter whenever imports or top-level module boundaries change, and
+load `python-test-design` when tests or fixtures change.

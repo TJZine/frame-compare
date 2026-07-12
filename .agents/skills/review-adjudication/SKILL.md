@@ -5,5 +5,6 @@ description: Compatibility entrypoint for adjudicating Frame Compare review feed
 
 # Review Adjudication
 
-Load `review-request` and follow its finding-adjudication rules. This compatibility
-entrypoint exists for older plans; it owns no separate workflow policy.
+Load `review-request` and follow its finding-adjudication rules. This is a one-way
+compatibility entrypoint for older plans; `review-request` is the sole authority and
+must not route back here.
