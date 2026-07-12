@@ -2,3 +2,5 @@ interface:
   display_name: "Frame Compare Cleanup Plan"
   short_description: "Launch the cleanup/refactor planner workflow"
   default_prompt: "Use the frame-compare-cleanup-plan skill for this task."
+policy:
+  allow_implicit_invocation: false

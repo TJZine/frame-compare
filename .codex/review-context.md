@@ -178,25 +178,22 @@ If Windows or Docker paths cannot run locally, record them as documented-only an
 
 ## Subagent Roles
 
-Preferred roles when available:
-- reviewer: normal correctness/regression/security/test review
-- maintainability_reviewer: code-health, strict typing, brittle tests, file shape, unnecessary indirection, harmful duplication
-- architecture_reviewer: CLI/config contracts, runtime/render/VS boundaries, release/Docker/Windows paths, import boundaries, persistence/subprocess/network risk
-- worker_luna: explicitly approved, exact, bounded, cheap-to-verify fixes with no unresolved owner/product/architecture decision
-- worker: normal, ambiguous, or high-risk implementation/fix work
-- docs_researcher: official docs/API/tooling/runtime behavior checks
+Preferred roles:
+- `explorer`: read-only source discovery
+- `reviewer`: packet-focused correctness, architecture, maintainability, security, or workflow review
+- `worker`: bounded implementation
+- `worker_luna`: lower-cost execution of a decision-complete Sol-planned unit
+- `planner`: separate planning only when justified
+- `docs_researcher`: official-source checks
+- `monitor`: long waits and status checks
 
-Fallback rule:
-- If a named role is unavailable, use the closest available default subagent and pass the intended role instructions explicitly.
-- Preserve read-only reviewer vs write-capable worker boundaries.
-- Frame Compare stage1 currently has `.codex` roles for explorer, reviewer, docs_researcher, planner, worker, monitor, but may not yet have specialized reviewer/worker variants; use explicit fallback packets when missing.
+Preserve read-only reviewer/research roles versus write-capable planner/worker boundaries.
 
 ## Model Policy
 
-- Use cost-effective bounded roles for exact local fixes.
-- Use maintainability review for strict typing/test/code-health concerns.
-- Use deep architecture review for CLI/config contract, runtime/render/VS, Docker, Windows portable/release, subprocess/network/persistence, and authority-doc changes.
-- Do not default every review subagent to GPT-5.6 Sol high; use the tracked role that matches the risk surface.
+- Use configured role defaults. Use `worker_luna` only for an explicitly eligible,
+  low-ambiguity, directly verifiable unit planned by the Sol planner. Change model
+  or reasoning effort only from representative eval evidence.
 
 ## Pure Docs / Assets Exclusion Rule
 

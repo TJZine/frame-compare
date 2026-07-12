@@ -6,10 +6,6 @@ max_depth = 1
 description = "Read-only Frame Compare codebase explorer for gathering evidence before changes are proposed."
 config_file = "agents/explorer.toml"
 
-[agents.explorer_fallback]
-description = "Fallback read-only explorer when spark usage is constrained or unavailable."
-config_file = "agents/explorer-fallback.toml"
-
 [agents.reviewer]
 description = "Read-only reviewer focused on correctness, regressions, security, architecture fit, maintainability, and missing tests."
 config_file = "agents/reviewer.toml"
@@ -27,13 +23,9 @@ description = "Implementation-focused role for narrow, disjoint write scopes onc
 config_file = "agents/worker.toml"
 
 [agents.worker_luna]
-description = "Lower-cost implementation role for explicitly approved, bounded, exact, cheap-to-verify write scopes."
+description = "Lower-cost implementation role for a Sol-planned, bounded, exact, cheap-to-verify write unit."
 config_file = "agents/worker-luna.toml"
 
 [agents.monitor]
 description = "Long-running command and polling role for status checks, verification waits, and runtime/release gate monitoring."
 config_file = "agents/monitor.toml"
-
-[agents.monitor_fallback]
-description = "Fallback monitoring role for waits and polling when spark usage is constrained or unavailable."
-config_file = "agents/monitor-fallback.toml"

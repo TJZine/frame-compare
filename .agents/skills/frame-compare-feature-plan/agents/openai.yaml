@@ -2,3 +2,5 @@ interface:
   display_name: "Frame Compare Feature Plan"
   short_description: "Launch the feature/change planner workflow"
   default_prompt: "Use the frame-compare-feature-plan skill for this task."
+policy:
+  allow_implicit_invocation: false

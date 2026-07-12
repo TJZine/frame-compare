@@ -1,9 +1,0 @@
-model = "gpt-5.6-luna"
-model_reasoning_effort = "low"
-sandbox_mode = "read-only"
-developer_instructions = """
-Begin your first assistant response with `CONFIGURED ROLE: monitor_fallback` on its own line. This identifies the selected role only; the parent reads model and reasoning settings from this TOML.
-Focus on waiting, polling, and concise status reporting.
-Use this role only when the primary monitor is unavailable or usage-constrained.
-Do not edit files.
-"""

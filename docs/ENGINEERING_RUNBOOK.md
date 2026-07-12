@@ -130,7 +130,7 @@ Required for:
 - config loading or env-var behavior changes
 - changes in `orchestration/`, `render/`, `vs/`, `services/`
 - changes to hot spots listed in the architecture doc
-- changes to docs that redefine workflow, architecture, or CLI/config contract authority
+- architecture or CLI/config authority changes that can affect product behavior
 
 Run:
 
@@ -246,6 +246,22 @@ documented-only in the task handoff and require explicit maintainer or
 Windows-runner confirmation before treating the signed update release path as
 fully verified.
 
+### Workflow And Documentation Verification
+
+For `AGENTS.md`, repo-local skills, role config, or workflow-only runbook changes,
+use the smallest structural proof that covers the edited surface:
+
+Always run `git diff --check`. Parse edited TOML or YAML with the repo's existing
+tooling, and inspect changed skill, role, and launcher paths or references
+directly. Run `.venv/bin/pytest -q tests/test_cli_contract_docs.py` when
+`AGENTS.md`, the current CLI authority links, or CLI contract documentation
+changes.
+
+Do not create a generalized workflow verifier unless repeated, measured failures
+justify its maintenance cost. Do not run the full product suite solely because
+workflow prose changed. Use full verification when the same change also modifies
+product code, executable tooling, architecture, or a public CLI/config contract.
+
 ## Risk Tiers
 
 ### Low Risk
@@ -271,7 +287,7 @@ Use a lightweight task plan in the current task or PR. Use logic verification.
 - Windows portable/release-path changes
 - changes to hotspots
 - changes to external integrations
-- changes to architecture, workflow, or CLI/config contract authority docs
+- architecture or CLI/config contract authority changes tied to product behavior
 
 Require:
 
@@ -283,6 +299,27 @@ For single-session work, including single-session high-risk work, the default pl
 live inline in the current task, review, or PR. Activate `docs/plans/` only when the
 work needs a durable cross-session handoff or the maintainer explicitly asks for a
 tracked plan file.
+
+## Orchestration Policy
+
+Use the lightest workflow that still protects the outcome:
+
+- Low risk: one agent, focused proof, and a local diff audit.
+- Medium risk: one agent plans and implements. Add one independent final review
+  only when the change is novel, broad, weakly covered, or hard to validate.
+- High risk: explicit plan, implementation, risk-matched verification, and one
+  independent final review.
+- Separate planner: only for ambiguous seams, cross-session work, or genuinely
+  large multi-boundary changes.
+- Repeated evaluator/reviewer loops: only after a material finding or measured
+  evidence that another pass improves the result.
+
+Delegate independent read-heavy exploration, documentation research, log analysis,
+or long waits when useful. Parallel writes require disjoint files and an approved
+integration plan. A Sol planner may hand an explicitly eligible, low-ambiguity,
+cheap-to-verify unit to `worker_luna`; the packet must name exact files, invariants,
+verification, and stop conditions, and the controller must review and reverify the
+result. Keep delegation depth shallow.
 
 ## Production Quality Guardrails
 
@@ -328,7 +365,8 @@ Use this as the default routing shortcut before exploring deeper:
 | Hotspot or runtime pipeline change | `docs/current-architecture.md` | `orchestration/`, `render/`, `vs/`, hotspot files, adjacent tests | High | Full verification, plus Docker when listed under Docker/runtime verification |
 | Docker/runtime environment change | this runbook + `docs/current-architecture.md` | `Dockerfile`, `docker-compose*.yml`, `tools/verify_docker_*.sh`, `.github/workflows/docker-integration.yml`, Docker workflow/contract tests, runtime integration tests | High | Full verification plus Docker/runtime verification |
 | Windows portable or release-path change | this runbook | `tools/windows_portable/**`, `.github/workflows/windows-portable.yml`, release-path docs | High | Full verification plus Windows portable/release-path verification |
-| Workflow/authority doc change | this runbook or the affected authority doc | `AGENTS.md`, `.agents/rules/general-guidelines.md`, `.codex/review-context.md`, `.coderabbit.yaml`, `docs/ENGINEERING_RUNBOOK.md`, `docs/current-architecture.md`, `docs/current-cli-contract.md` | High | Full verification |
+| Workflow-only authority change | this runbook | `AGENTS.md`, repo-local skills, `.codex/config.toml`, `.codex/agents/**`, workflow-only runbook sections | Medium | Workflow/documentation verification |
+| Architecture or public contract authority change | affected authority doc | `docs/current-architecture.md`, `docs/current-cli-contract.md`, related product/tests | High | Full verification |
 
 ### Stop And Ask
 
@@ -388,6 +426,11 @@ Review should prioritize:
 - undocumented authority drift
 
 Changes in `orchestration/coordinator.py`, `errors.py`, `services/report.py`, or packaging workflows should receive extra scrutiny because they are current hotspots or blast-radius multipliers.
+
+Review is risk-triggered, not universal ceremony. One independent final review is
+the default high-risk gate. Review a plan only when its seam or public contract is
+still expensive to get wrong. Do not require both same-reviewer closure and a fresh
+clean review for an unchanged artifact.
 
 ## Subagent Transparency
 
