@@ -15,6 +15,183 @@ Example:
   reference.mkv comparison.mkv
 ```
 
+## Windows Baseline Collection Before Implementation
+
+Run this workflow from a source checkout on the Windows machine that will be
+used for performance decisions. The benchmark is a developer tool under
+`tools/`; it is not currently exposed as a command in the packaged portable
+application. The checkout must include commits `9ed39cce` and `719ad206`.
+
+### 1. Stabilize the machine and checkout
+
+- Connect AC power and use the same Windows power mode for every run.
+- Close unrelated CPU-, GPU-, disk-, and memory-intensive applications.
+- Keep the same Frame Compare commit, Python environment, config, source files,
+  source-frame window, and source indexes throughout baseline collection.
+- Do not compare results collected while Windows Update, antivirus scanning, or
+  media indexing is actively consuming resources.
+
+From PowerShell at the repository root:
+
+```powershell
+git log -2 --oneline
+uv sync --group dev --frozen
+uv run --no-sync frame-compare doctor --json
+```
+
+Record the current commit with each evidence set:
+
+```powershell
+git rev-parse HEAD
+```
+
+### 2. Select a fixed corpus and config
+
+Start with the clip pair that motivated the performance work, then add locally
+available representatives from the [clip-class list](#clip-classes). Use the
+same ordered inputs for every baseline and later candidate run. Do not infer a
+general speedup from one codec, resolution, or content class.
+
+Create a local, uncommitted benchmark config if one is not already available:
+
+```powershell
+uv run --no-sync frame-compare wizard --root . --config config/benchmark.config.toml
+```
+
+For the simplest reproducible baseline, use the first input as both reference
+and analysis source, disable automatic FPS matching, and keep the default
+aspect-ratio active-rect policy:
+
+```toml
+[sources]
+analysis_source = "reference"
+match_fps = "disabled"
+
+[screenshots]
+active_rect_detection = "aspect_ratio"
+
+[analysis]
+random_frame_count = 20
+dark_frame_count = 10
+bright_frame_count = 10
+motion_frame_count = 10
+```
+
+The benchmark config is local evidence and may contain machine-specific paths or
+secrets. Store or share a redacted copy with the result JSON rather than
+committing it by default.
+
+### 3. Prepare probe data and warm the source index
+
+Run the same inputs once through the normal application path before timing. This
+creates or refreshes `generated/clip_probe.toml` and lets L-SMASH create its
+adjacent `.lwi` source index. For an input directory containing only the fixed
+case under test:
+
+```powershell
+uv run --no-sync frame-compare run `
+  --root . `
+  --config config/benchmark.config.toml `
+  --input 'C:\Benchmarks\case-01' `
+  --no-upload
+```
+
+The benchmark's cold policy deletes only the exact analysis metric cache entry;
+it intentionally preserves the `.lwi` source index. Use
+`--require-warm-source-index` in timed runs so a missing selected-source index
+fails instead of silently turning one result into an index-generation test.
+
+Non-default references or analysis sources, trims, effective-FPS overrides,
+explicit active rectangles, and non-default active-rect detection require the
+exact `--selection-domain` token from the prepared production run. Establish the
+default-domain baseline first unless the experiment specifically targets one of
+those features.
+
+### 4. Run the cold baseline
+
+Set paths once in PowerShell, then run three repetitions per mode. A 2,400-frame
+window is a useful initial sample when it contains representative content; use a
+different fixed window when the target event lies elsewhere.
+
+```powershell
+$Reference = 'C:\Benchmarks\case-01\reference.mkv'
+$Comparison = 'C:\Benchmarks\case-01\comparison.mkv'
+
+uv run --no-sync python tools/benchmark_analysis_tiers.py `
+  --root . `
+  --config config/benchmark.config.toml `
+  --output generated/case-01-windows-cold.json `
+  --window-start 0 `
+  --window-end-exclusive 2400 `
+  --repetitions 3 `
+  --metric-cache-policy cold `
+  --require-warm-source-index `
+  --inspect-frame-types `
+  $Reference $Comparison
+```
+
+This is the primary algorithm-performance artifact. It includes the post-trial
+decode/PlaneStats baseline. If a run is noisy or will decide between close
+candidates, repeat it with five repetitions rather than combining results from
+different machine conditions.
+
+### 5. Run the cache-reuse control
+
+Run this after the cold baseline so matching metric caches exist. GOP inspection
+and the decode baseline need not be repeated:
+
+```powershell
+uv run --no-sync python tools/benchmark_analysis_tiers.py `
+  --root . `
+  --config config/benchmark.config.toml `
+  --output generated/case-01-windows-reuse.json `
+  --window-start 0 `
+  --window-end-exclusive 2400 `
+  --repetitions 3 `
+  --metric-cache-policy reuse `
+  --require-warm-source-index `
+  --skip-decode-baseline `
+  $Reference $Comparison
+```
+
+The reuse control measures cache loading and frame selection, not uncached
+brightness or motion calculation. Confirm that its trials report cache hits;
+do not substitute it for the cold result.
+
+### 6. Preserve and interpret the evidence
+
+Keep the following together for each case:
+
+- cold and reuse JSON artifacts;
+- redacted benchmark config;
+- `git rev-parse HEAD` output;
+- input ordering and exact source-frame window;
+- Windows power mode and notes about unusual background activity;
+- unavailable clip classes and visual labels for selection misses.
+
+Use the evidence in this order before choosing an implementation:
+
+1. Confirm cold trials are cache misses with successful cache writes and reuse
+   trials are cache hits.
+2. Use median time as the primary result and population standard deviation as
+   the noise warning. Re-run unstable cases before drawing conclusions.
+3. Compare `frame_render` against the decode/PlaneStats baseline. A small gap
+   points toward decode, VapourSynth scheduling, or graph costs; a large gap
+   leaves more room in the brightness/motion strategy itself.
+4. Compare graph construction, metric/property work, source loading, and cache
+   phases. Optimize the measured dominant phase rather than lowering unrelated
+   knobs.
+5. Compare brightness and motion rank correlation, top-K overlap, category miss
+   rates, and nearest-frame distances against `quality`.
+6. Visually review misses outside tolerance using the [review labels](#review-labels).
+7. Choose a candidate only after its likely speed ceiling and acceptable quality
+   loss are supported across the available clip classes.
+
+Do not change the existing modes before these baseline artifacts are saved. For
+each later implementation experiment, rerun the same cold command on the same
+machine, inputs, config, and windows, writing a new output file rather than
+overwriting the baseline.
+
 The benchmark defaults to three cold-metric-cache repetitions per mode. It
 deletes only the exact mode/domain metric cache entry before each timed trial,
 rotates mode order deterministically between repetitions, and runs the optional
