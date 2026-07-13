@@ -19,6 +19,7 @@ from frame_compare.analysis.metric_strategies import (
     calculate_quality_luminance,
     calculate_quality_motion,
 )
+from frame_compare.analysis.timing import AnalysisTimingRecorder
 from frame_compare.analysis.types import MetricActiveRect
 from frame_compare.config.schema import AnalysisConfig
 from frame_compare.utils.progress_protocol import ProgressReporter
@@ -90,7 +91,10 @@ class FakeStd:
             return FakePlaneStatsClip([{"PlaneStatsAverage": value} for value in self._clip.values])
         return FakePlaneStatsClip(
             [
-                {"PlaneStatsDiff": abs(current - previous)}
+                {
+                    "PlaneStatsAverage": current,
+                    "PlaneStatsDiff": abs(current - previous),
+                }
                 for current, previous in zip(self._clip.values, clipb.values, strict=True)
             ]
         )
@@ -226,6 +230,20 @@ class FakeCoreStd:
             resize_calls=clips.resize_calls,
             crop_calls=clips.crop_calls,
             ops=clips.ops,
+        )
+
+    def Splice(self, *, clips: list[object]) -> FakeBalancedClip:
+        typed_clips = [clip for clip in clips if isinstance(clip, FakeBalancedClip)]
+        assert len(typed_clips) == len(clips)
+        first = typed_clips[0]
+        return FakeBalancedClip(
+            [value for clip in typed_clips for value in clip.values],
+            width=first.width,
+            height=first.height,
+            color_family=first.format.color_family,
+            resize_calls=first.resize_calls,
+            crop_calls=first.crop_calls,
+            ops=first.ops,
         )
 
 
@@ -475,6 +493,31 @@ def test_performance_strategy_returns_full_length_dense_arrays(
     assert result.motion[0] == 0.0
     assert result.performance_mode == "performance"
     assert result.metric_backend == "vapoursynth_planestats"
+
+
+def test_performance_strategy_records_one_combined_render_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
+    source = MagicMock()
+    source.clip = FakeBalancedClip([0.0, 0.25, 0.75, 1.0])
+    recorder = AnalysisTimingRecorder()
+
+    result = calculate_metric_strategy(
+        source,
+        AnalysisConfig(performance_mode="performance"),
+        reporter=None,
+        timing_recorder=recorder,
+    )
+
+    assert result.luminance == [0.0, 0.25, 0.75, 1.0]
+    assert result.motion == [0.0, 0.25, 0.5, 0.25]
+    assert set(recorder.as_dict()) == {
+        "metric_graph_build",
+        "performance_frame_render",
+        "performance_graph_build",
+        "performance_metric_read",
+    }
 
 
 def test_performance_strategy_crops_before_resize_and_remains_dense(

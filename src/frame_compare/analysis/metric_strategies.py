@@ -33,6 +33,10 @@ class _ShufflePlanesFn(Protocol):
     def __call__(self, *, clips: object, planes: int, colorfamily: int) -> object: ...
 
 
+class _SpliceFn(Protocol):
+    def __call__(self, *, clips: list[object]) -> object: ...
+
+
 class _PlaneStatsFn(Protocol):
     def __call__(self, clipb: object | None = None) -> object: ...
 
@@ -315,12 +319,7 @@ def _calculate_performance_metrics(
     with perf_span("analysis.calculate_metrics", frames=total_frames):
         with record_span(timing_recorder, "metric_graph_build"):
             luma = _performance_luma_clip(clip, active_rect)
-        luminance = _calculate_performance_luminance(luma, reporter, timing_recorder)
-        if reporter:
-            reporter.advance(1)
-        motion = _calculate_performance_motion(luma, reporter, timing_recorder)
-
-    return luminance, motion
+        return _calculate_dense_planestats_metrics(luma, reporter, timing_recorder)
 
 
 def _performance_luma_clip(
@@ -377,22 +376,29 @@ def _planestats_luma_clip(
         raise MetricsCalculationError(f"{mode_name} luma preparation failed: {exc}") from exc
 
 
-def _calculate_performance_luminance(
+def _calculate_dense_planestats_metrics(
     luma: vs.VideoNode,
     reporter: ProgressReporter | None = None,
     timing_recorder: AnalysisTimingRecorder | None = None,
-) -> list[float]:
+) -> tuple[list[float], list[float]]:
     if luma.num_frames == 0:
         raise MetricsCalculationError("Empty clip")
 
-    with perf_span("analysis.performance_luminance", frames=luma.num_frames):
+    with perf_span("analysis.performance_metrics", frames=luma.num_frames):
         if reporter:
-            reporter.start_phase("Calculating luminance", luma.num_frames)
+            reporter.start_phase("Calculating metrics", luma.num_frames)
 
-        with record_span(timing_recorder, "luminance_graph_build"):
+        with record_span(timing_recorder, "performance_graph_build"):
+            import vapoursynth as vs
+
+            core = _dynamic_attr(vs, "core")
+            std = _dynamic_attr(core, "std")
+            splice = cast(_SpliceFn, _dynamic_attr(std, "Splice"))
+            previous = splice(clips=[luma[0:1], luma[0:-1]])
             plane_stats = cast(_PlaneStatsFn, _dynamic_attr(luma.std, "PlaneStats"))
-            stats = cast(_FrameReadable, plane_stats())
+            stats = cast(_FrameReadable, plane_stats(previous))
         luminance: list[float] = []
+        motion = [0.0] * luma.num_frames
         phase_status = ProgressPhaseStatus.COMPLETED
         try:
             for n in range(luma.num_frames):
@@ -400,91 +406,29 @@ def _calculate_performance_luminance(
                 frame = stats.get_frame(n)
                 if timing_recorder is not None:
                     timing_recorder.add_seconds(
-                        "luminance_frame_render", perf_counter() - frame_started
+                        "performance_frame_render", perf_counter() - frame_started
                     )
                 metric_started = perf_counter() if timing_recorder is not None else 0.0
                 luminance.append(_frame_prop_float(frame, "PlaneStatsAverage"))
+                if n > 0:
+                    motion[n] = _frame_prop_float(frame, "PlaneStatsDiff")
                 if timing_recorder is not None:
                     timing_recorder.add_seconds(
-                        "luminance_metric_read", perf_counter() - metric_started
+                        "performance_metric_read", perf_counter() - metric_started
                     )
                 if reporter:
                     reporter.advance(1)
         except Exception as exc:
             phase_status = ProgressPhaseStatus.FAILED
             raise MetricsCalculationError(
-                f"Frame access failed at frame {len(luminance)}: {exc}"
+                f"Frame access failed during performance metric analysis "
+                f"at frame {len(luminance)}: {exc}"
             ) from exc
         finally:
             if reporter:
                 reporter.complete_phase(phase_status)
 
-    return luminance
-
-
-def _calculate_performance_motion(
-    luma: vs.VideoNode,
-    reporter: ProgressReporter | None = None,
-    timing_recorder: AnalysisTimingRecorder | None = None,
-) -> list[float]:
-    return _calculate_dense_planestats_motion(
-        luma,
-        reporter,
-        span_name="analysis.performance_motion",
-        timing_recorder=timing_recorder,
-    )
-
-
-def _calculate_dense_planestats_motion(
-    luma: vs.VideoNode,
-    reporter: ProgressReporter | None,
-    *,
-    span_name: str,
-    timing_recorder: AnalysisTimingRecorder | None = None,
-) -> list[float]:
-    if luma.num_frames == 0:
-        raise MetricsCalculationError("Empty clip")
-    if luma.num_frames == 1:
-        return [0.0]
-
-    total_pairs = luma.num_frames - 1
-    with perf_span(span_name, frames=luma.num_frames):
-        if reporter:
-            reporter.start_phase("Calculating motion", total_pairs)
-
-        motion = [0.0] * luma.num_frames
-        phase_status = ProgressPhaseStatus.COMPLETED
-        try:
-            with record_span(timing_recorder, "motion_graph_build"):
-                previous = luma[0:total_pairs]
-                current = luma[1 : luma.num_frames]
-                plane_stats = cast(_PlaneStatsFn, _dynamic_attr(current.std, "PlaneStats"))
-                stats = cast(_FrameReadable, plane_stats(previous))
-            for result_index in range(total_pairs):
-                frame_started = perf_counter() if timing_recorder is not None else 0.0
-                frame = stats.get_frame(result_index)
-                if timing_recorder is not None:
-                    timing_recorder.add_seconds(
-                        "motion_frame_render", perf_counter() - frame_started
-                    )
-                metric_started = perf_counter() if timing_recorder is not None else 0.0
-                motion[result_index + 1] = _frame_prop_float(frame, "PlaneStatsDiff")
-                if timing_recorder is not None:
-                    timing_recorder.add_seconds(
-                        "motion_metric_read", perf_counter() - metric_started
-                    )
-                if reporter:
-                    reporter.advance(1)
-        except Exception as exc:
-            phase_status = ProgressPhaseStatus.FAILED
-            raise MetricsCalculationError(
-                f"Frame access failed during motion analysis: {exc}"
-            ) from exc
-        finally:
-            if reporter:
-                reporter.complete_phase(phase_status)
-
-    return motion
+    return luminance, motion
 
 
 def _y_plane_array(frame: vs.VideoFrame) -> npt.NDArray[np.generic]:
