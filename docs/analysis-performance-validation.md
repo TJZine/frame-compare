@@ -631,7 +631,9 @@ the compact metric range and array length; they do not pad excluded frames.
 An explicit window requires the selected source's frame count from
 `generated/clip_probe.toml`; the tool fails closed instead of timing a full-source
 calculation when that prepared probe is unavailable, including when an explicit
-active rectangle otherwise supplies metric provenance.
+active rectangle otherwise supplies metric provenance. A nonzero `--window-start`
+also requires `--window-end-exclusive`; start-only post-calculation slicing is
+rejected.
 
 ### Benchmark exact production window bounding
 

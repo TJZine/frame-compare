@@ -935,6 +935,8 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error(f"--mode {cold_only_modes[0]} requires --metric-cache-policy cold")
     if args.window_start < 0:
         parser.error("--window-start must be non-negative")
+    if args.window_start > 0 and args.window_end_exclusive is None:
+        parser.error("--window-start requires --window-end-exclusive when nonzero")
     if args.window_end_exclusive is not None and args.window_end_exclusive <= args.window_start:
         parser.error("--window-end-exclusive must be greater than --window-start")
     sparse_modes = [mode for mode in args.modes if mode in SPARSE_CANDIDATE_MODES]
@@ -975,6 +977,8 @@ def _run_benchmark_tiers(
     cold_only_modes = [mode for mode in candidate_modes if mode in BENCHMARK_ONLY_CANDIDATE_MODES]
     if cold_only_modes and metric_cache_policy != "cold":
         raise ValueError(f"{cold_only_modes[0]} requires metric_cache_policy='cold'")
+    if window_start > 0 and window_end_exclusive is None:
+        raise ValueError("A nonzero benchmark window start requires an explicit window end")
     sparse_modes = [mode for mode in candidate_modes if mode in SPARSE_CANDIDATE_MODES]
     if window_end_exclusive is not None and source_frame_count is None:
         raise ValueError("An explicit benchmark window requires a source frame count")

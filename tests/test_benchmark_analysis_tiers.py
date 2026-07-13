@@ -976,6 +976,42 @@ def test_benchmark_script_explicit_window_requires_source_frame_count(tmp_path: 
         )
 
 
+def test_benchmark_script_rejects_nonzero_start_without_explicit_end(tmp_path: Path) -> None:
+    script = _load_benchmark_script()
+
+    with pytest.raises(ValueError, match="nonzero benchmark window start"):
+        script._run_benchmark_tiers(
+            candidate_modes=["performance"],
+            video_paths=[tmp_path / "reference.mkv"],
+            analysis_config=ConfigSchema().analysis,
+            cache_dir=tmp_path / "cache",
+            analysis_source_path=tmp_path / "reference.mkv",
+            effective_fps=None,
+            active_rect=script.BenchmarkActiveRect(
+                rect=None,
+                source="full-frame",
+                detection_mode="aspect_ratio",
+            ),
+            selection_domain=None,
+            window_start=10,
+            window_end_exclusive=None,
+            source_frame_count=100,
+            progress_enabled=False,
+            metric_cache_policy="cold",
+        )
+
+    with pytest.raises(SystemExit):
+        script._parse_args(
+            [
+                "--output",
+                "benchmark.json",
+                "--window-start",
+                "10",
+                "reference.mkv",
+            ]
+        )
+
+
 def test_benchmark_script_sparse_comparison_reports_decision_metrics() -> None:
     script = _load_benchmark_script()
     quality = _tier_payload(
