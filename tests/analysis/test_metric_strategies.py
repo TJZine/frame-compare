@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Iterator
 from fractions import Fraction
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call
@@ -79,7 +80,12 @@ class FakePlaneStatsClip:
         self.num_frames = len(props_by_frame)
 
     def get_frame(self, n: int) -> FakePlaneStatsFrame:
-        return FakePlaneStatsFrame(self._props_by_frame[n])
+        raise AssertionError(f"Concurrent performance metrics must not call get_frame({n})")
+
+    def frames(self, *, close: bool = False) -> Iterator[FakePlaneStatsFrame]:
+        assert close is True
+        for props in self._props_by_frame:
+            yield FakePlaneStatsFrame(props)
 
 
 class FakeStd:

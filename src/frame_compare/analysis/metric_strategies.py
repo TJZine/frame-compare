@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from time import perf_counter
 from typing import TYPE_CHECKING, Protocol, cast
@@ -45,8 +45,16 @@ class _CropAbsFn(Protocol):
     def __call__(self, *, width: int, height: int, left: int, top: int) -> object: ...
 
 
+class _FrameIterator(Protocol):
+    def __iter__(self) -> Iterator[object]: ...
+
+    def __next__(self) -> object: ...
+
+    def close(self) -> None: ...
+
+
 class _FrameReadable(Protocol):
-    def get_frame(self, n: int) -> object: ...
+    def frames(self, *, close: bool = False) -> _FrameIterator: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -400,10 +408,11 @@ def _calculate_dense_planestats_metrics(
         luminance: list[float] = []
         motion = [0.0] * luma.num_frames
         phase_status = ProgressPhaseStatus.COMPLETED
+        frames = stats.frames(close=True)
         try:
             for n in range(luma.num_frames):
                 frame_started = perf_counter() if timing_recorder is not None else 0.0
-                frame = stats.get_frame(n)
+                frame = next(frames)
                 if timing_recorder is not None:
                     timing_recorder.add_seconds(
                         "performance_frame_render", perf_counter() - frame_started
@@ -425,6 +434,7 @@ def _calculate_dense_planestats_metrics(
                 f"at frame {len(luminance)}: {exc}"
             ) from exc
         finally:
+            frames.close()
             if reporter:
                 reporter.complete_phase(phase_status)
 
