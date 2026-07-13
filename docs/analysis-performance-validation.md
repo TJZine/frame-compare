@@ -1066,7 +1066,9 @@ Treat it as support for tuning decisions, not a release-wide guarantee.
 ### 2026-07-13: Full-resolution quality PlaneStats candidate reopened under practical equivalence
 
 Benchmark artifact:
-`generated/quality-planestats-candidate-witch-4k-hdr.json`
+the historical report summarized in
+[Analysis Benchmark History](analysis-benchmark-history.md). The generated raw
+JSON was removed after its decision metrics were recorded.
 
 The three-repetition cold-cache Windows run compared production NumPy `quality`
 with the benchmark-only full-resolution PlaneStats candidate on the established
