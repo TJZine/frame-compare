@@ -255,14 +255,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     sparse_modes = [
         mode for mode in cast(Sequence[str], args.modes) if mode in SPARSE_CANDIDATE_MODES
     ]
+    if args.window_end_exclusive is not None and analysis_source.source_frame_count is None:
+        raise SystemExit(
+            "An explicit benchmark window requires the selected source frame count from "
+            "generated/clip_probe.toml. Run the normal preparation path, then rerun the benchmark."
+        )
     if sparse_modes and analysis_source.source_frame_count is None:
         raise SystemExit(
             "Sparse analysis candidates require the selected source frame count from "
             "generated/clip_probe.toml. Run the normal preparation path, then rerun the benchmark."
         )
     if (
-        sparse_modes
-        and args.window_end_exclusive is not None
+        args.window_end_exclusive is not None
         and analysis_source.source_frame_count is not None
         and args.window_end_exclusive > analysis_source.source_frame_count
     ):
@@ -270,6 +274,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "--window-end-exclusive exceeds the selected analysis source frame count "
             f"({analysis_source.source_frame_count})."
         )
+    _require_selection_coordinate_compatibility(analysis_source)
     _require_selection_domain_for_analysis_cache_identity(
         selection_domain=args.selection_domain,
         video_paths=input_paths,
@@ -809,6 +814,24 @@ def _source_override_affects_selection_domain(override: SourceOverrideConfig) ->
     )
 
 
+def _require_selection_coordinate_compatibility(
+    analysis_source: BenchmarkAnalysisSource,
+) -> None:
+    """Reject a benchmark domain whose selected-frame coordinates need translation."""
+    analysis_override = analysis_source.overrides_by_path.get(analysis_source.path)
+    reference_override = analysis_source.overrides_by_path.get(analysis_source.reference_path)
+    analysis_trim_start = 0 if analysis_override is None else analysis_override.trim_start_frames
+    reference_trim_start = 0 if reference_override is None else reference_override.trim_start_frames
+    if analysis_trim_start == reference_trim_start:
+        return
+    raise SystemExit(
+        "This benchmark cannot report production-equivalent selected source-frame numbers "
+        "when the reference and analysis source have different trim_start_frames. Use the "
+        "reference as the analysis source, align the trim starts for benchmarking, or extend "
+        "the benchmark with explicit reference/analysis coordinate translation first."
+    )
+
+
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Compare performance analysis mode against quality and write JSON.",
@@ -953,6 +976,8 @@ def _run_benchmark_tiers(
     if cold_only_modes and metric_cache_policy != "cold":
         raise ValueError(f"{cold_only_modes[0]} requires metric_cache_policy='cold'")
     sparse_modes = [mode for mode in candidate_modes if mode in SPARSE_CANDIDATE_MODES]
+    if window_end_exclusive is not None and source_frame_count is None:
+        raise ValueError("An explicit benchmark window requires a source frame count")
     if sparse_modes and (window_end_exclusive is None or source_frame_count is None):
         raise ValueError(
             f"{sparse_modes[0]} requires an explicit window end and source frame count"
@@ -1077,6 +1102,7 @@ def _run_tier(
             metric_frame_range=metric_frame_range,
         )
     timing_recorder = AnalysisTimingRecorder()
+    nvidia_utilization_before = _nvidia_decoder_utilization() if is_nvidia_candidate else None
     cpu_started = time.process_time()
     trial_started = time.perf_counter()
     started = time.perf_counter()
@@ -1098,7 +1124,7 @@ def _run_tier(
         cache_state = "bypassed"
         cache_write_state = "not-written"
     elif is_nvidia_candidate:
-        metrics, decoder_evidence = _calculate_nvidia_candidate_trial_metrics(
+        metrics = _calculate_nvidia_candidate_trial_metrics(
             video_paths=video_paths,
             analysis_source_path=analysis_source_path,
             effective_fps=effective_fps,
@@ -1177,6 +1203,11 @@ def _run_tier(
     selection_seconds = time.perf_counter() - selection_started
     trial_seconds = time.perf_counter() - trial_started
     process_cpu_seconds = time.process_time() - cpu_started
+    if is_nvidia_candidate:
+        decoder_evidence = _nvidia_decoder_evidence(
+            utilization_before=nvidia_utilization_before,
+            utilization_after=_nvidia_decoder_utilization(),
+        )
     return {
         "mode": mode,
         "analyze_seconds": analyze_seconds,
@@ -1381,9 +1412,8 @@ def _calculate_nvidia_candidate_trial_metrics(
     active_rect: BenchmarkActiveRect,
     metric_frame_range: MetricFrameRange | None,
     timing_recorder: AnalysisTimingRecorder,
-) -> tuple[FrameMetrics, JsonObject]:
+) -> FrameMetrics:
     """Request CUVID while reporting that L-SMASH may silently fall back to software."""
-    utilization_before = _nvidia_decoder_utilization()
     with record_span(timing_recorder, "source_load"):
         source = load_source(
             analysis_source_path,
@@ -1401,21 +1431,6 @@ def _calculate_nvidia_candidate_trial_metrics(
     if has_lookbehind:
         luminance = luminance[1:]
         motion = motion[1:]
-    utilization_after = _nvidia_decoder_utilization()
-    observed = any(
-        value is not None and value > 0.0 for value in (utilization_before, utilization_after)
-    )
-    evidence: JsonObject = {
-        "requested_policy": "L-SMASH Works prefer_hw=1 (NVIDIA CUVID with software fallback)",
-        "effective_decoder_proven": False,
-        "verification_status": (
-            "decoder_engine_activity_observed_unattributed" if observed else "requested_unverified"
-        ),
-        "decoder_utilization_percent_before": utilization_before,
-        "decoder_utilization_percent_after": utilization_after,
-        "telemetry_scope": "system-wide; not attributable to this process",
-        "software_fallback_possible": True,
-    }
     identity = {
         "algorithm_id": NVIDIA_CUVID_CANDIDATE_ALGORITHM_ID,
         "backend": NVIDIA_CUVID_CANDIDATE_BACKEND,
@@ -1425,7 +1440,7 @@ def _calculate_nvidia_candidate_trial_metrics(
         "luminance": "full_resolution_luma_planestats_average",
         "motion": "full_resolution_luma_planestats_diff_with_window_lookbehind",
     }
-    metrics = FrameMetrics(
+    return FrameMetrics(
         luminance=luminance,
         motion=motion,
         metadata=MetricsMetadata(
@@ -1447,7 +1462,27 @@ def _calculate_nvidia_candidate_trial_metrics(
             active_rect_algorithm_id=active_rect.algorithm_id,
         ),
     )
-    return metrics, evidence
+
+
+def _nvidia_decoder_evidence(
+    *,
+    utilization_before: float | None,
+    utilization_after: float | None,
+) -> JsonObject:
+    observed = any(
+        value is not None and value > 0.0 for value in (utilization_before, utilization_after)
+    )
+    return {
+        "requested_policy": "L-SMASH Works prefer_hw=1 (NVIDIA CUVID with software fallback)",
+        "effective_decoder_proven": False,
+        "verification_status": (
+            "decoder_engine_activity_observed_unattributed" if observed else "requested_unverified"
+        ),
+        "decoder_utilization_percent_before": utilization_before,
+        "decoder_utilization_percent_after": utilization_after,
+        "telemetry_scope": "system-wide; not attributable to this process",
+        "software_fallback_possible": True,
+    }
 
 
 def _require_nvidia_preflight() -> JsonObject:
@@ -2375,15 +2410,21 @@ def _compare_sparse_tier(*, quality: JsonObject, candidate: JsonObject) -> JsonO
             ),
         },
         "sampled_ranking": {
-            "luminance": _sampled_ranking_diagnostic(
+            "dark_luminance": _sampled_ranking_diagnostic(
                 quality_values=quality_metrics.luminance,
                 candidate_values=sparse_metrics.luminance,
                 sampled_source_frames=sparse_metrics.source_frames,
                 quality_source_offset=quality_offset,
-                top_k=max(
-                    len(quality_selection.breakdown.quantile_dark),
-                    len(quality_selection.breakdown.quantile_bright),
-                ),
+                top_k=len(quality_selection.breakdown.quantile_dark),
+                largest=False,
+            ),
+            "bright_luminance": _sampled_ranking_diagnostic(
+                quality_values=quality_metrics.luminance,
+                candidate_values=sparse_metrics.luminance,
+                sampled_source_frames=sparse_metrics.source_frames,
+                quality_source_offset=quality_offset,
+                top_k=len(quality_selection.breakdown.quantile_bright),
+                largest=True,
             ),
             "motion": _sampled_ranking_diagnostic(
                 quality_values=quality_metrics.motion,
@@ -2391,6 +2432,7 @@ def _compare_sparse_tier(*, quality: JsonObject, candidate: JsonObject) -> JsonO
                 sampled_source_frames=sparse_metrics.source_frames,
                 quality_source_offset=quality_offset,
                 top_k=len(quality_selection.breakdown.motion),
+                largest=True,
             ),
         },
         "quality_extreme_coverage": {
@@ -2461,6 +2503,7 @@ def _sampled_ranking_diagnostic(
     sampled_source_frames: Sequence[int],
     quality_source_offset: int,
     top_k: int,
+    largest: bool,
 ) -> JsonObject:
     quality_sampled = [
         float(quality_values[source_frame - quality_source_offset])
@@ -2470,18 +2513,19 @@ def _sampled_ranking_diagnostic(
     quality_order = sorted(
         range(len(sampled_source_frames)),
         key=lambda index: quality_sampled[index],
-        reverse=True,
+        reverse=largest,
     )
     candidate_order = sorted(
         range(len(sampled_source_frames)),
         key=lambda index: candidate_sampled[index],
-        reverse=True,
+        reverse=largest,
     )
     effective_k = min(max(0, top_k), len(sampled_source_frames))
     quality_top = [sampled_source_frames[index] for index in quality_order[:effective_k]]
     candidate_top = [sampled_source_frames[index] for index in candidate_order[:effective_k]]
     overlap = len(set(quality_top) & set(candidate_top))
     return {
+        "direction": "highest" if largest else "lowest",
         "spearman": _spearman_correlation(quality_sampled, candidate_sampled),
         "top_k": effective_k,
         "quality_top_source_frames": quality_top,

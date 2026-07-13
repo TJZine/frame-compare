@@ -628,6 +628,10 @@ dense metric calculation as well as selection and comparison. A nonzero start
 includes one unreturned source-frame lookbehind so the first retained motion
 value preserves full-source adjacent-pair semantics. Benchmark artifacts record
 the compact metric range and array length; they do not pad excluded frames.
+An explicit window requires the selected source's frame count from
+`generated/clip_probe.toml`; the tool fails closed instead of timing a full-source
+calculation when that prepared probe is unavailable, including when an explicit
+active rectangle otherwise supplies metric provenance.
 
 ### Benchmark exact production window bounding
 
@@ -667,6 +671,10 @@ non-default analysis source, also pass the prepared run's exact
 `--selection-domain` token. Compare each mode's
 `timing_summary.compute_pipeline_seconds.median`, confirm the compact metadata
 range, and verify selected source-frame lists against the full-window baseline.
+The benchmark currently rejects a non-default analysis source when its
+`trim_start_frames` differs from the reference because that case requires
+reference/analysis coordinate translation to report production-equivalent frame
+numbers. Use the reference analysis source or equal trim starts for this benchmark.
 
 ### Benchmark sparse contiguous-burst candidates
 
@@ -727,6 +735,10 @@ class. Judge quality with category retention, exact/nearest selection results,
 sampled metric fidelity/ranking, extreme-pool coverage, and nearest-sample
 distance. Sparse modes remain invalid application configuration values until the
 maintainer accepts a distinct quality/performance tradeoff from this evidence.
+`sampled_ranking.dark_luminance` reports lowest-luminance top-K overlap,
+`sampled_ranking.bright_luminance` reports highest-luminance top-K overlap, and
+`sampled_ranking.motion` reports highest-motion top-K overlap; each includes its
+direction explicitly.
 
 ### Benchmark the isolated NVIDIA request
 
@@ -735,7 +747,8 @@ PlaneStats and the same exact metric window as production quality. L-SMASH Works
 may silently fall back to software, so a successful run is not proof of CUVID.
 The tool fails before timing when `nvidia-smi` cannot identify an NVIDIA GPU and
 records system-wide decoder utilization only as corroborating, unattributed
-evidence.
+evidence. Both utilization probes run outside analysis, selection, and total-trial
+timers, so their subprocess overhead cannot bias the candidate speedup.
 
 ```powershell
 uv run --no-sync python tools/benchmark_analysis_tiers.py `
@@ -815,6 +828,10 @@ FPS override, or explicit active rectangle. The tool rejects those non-default
 domains without the token so its cache cannot alias production analysis state.
 Without explicit window arguments, the script records warnings and compares the
 full analysis metric domain.
+An explicit end also requires the selected source's prepared frame count; there
+is no full-source fallback. A non-default analysis source with a different
+`trim_start_frames` from the reference is rejected until coordinate translation
+is implemented in this developer tool.
 
 The benchmark script uses the configured `paths.generated_dir` for analysis
 cache by default and resolves explicit `sources.analysis_source` selectors before

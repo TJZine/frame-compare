@@ -128,6 +128,38 @@ def test_benchmark_script_main_writes_json_and_honors_public_defaults(
     assert observed_run_options["progress_enabled"] is False
 
 
+def test_benchmark_script_main_rejects_explicit_window_without_prepared_frame_count(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    script = _load_benchmark_script()
+    reference = tmp_path / "reference.mkv"
+    reference.write_bytes(b"source")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("", encoding="utf-8")
+    source = _benchmark_analysis_source(script, path=reference, reference=reference)
+
+    monkeypatch.setattr(script, "load_config", lambda _path: ConfigSchema())
+    monkeypatch.setattr(script, "_resolve_benchmark_analysis_source", lambda **_kwargs: source)
+
+    with pytest.raises(SystemExit, match="explicit benchmark window requires"):
+        script.main(
+            [
+                "--root",
+                str(tmp_path),
+                "--config",
+                config_path.name,
+                "--output",
+                "benchmark.json",
+                "--window-start",
+                "10",
+                "--window-end-exclusive",
+                "20",
+                reference.name,
+            ]
+        )
+
+
 def test_benchmark_script_comparison_schema_contains_required_sections() -> None:
     script = _load_benchmark_script()
     quality = _tier_payload("quality", [0.0, 0.2, 1.0], [0.0, 0.1, 0.7], [0, 1, 2])
@@ -919,6 +951,31 @@ def test_benchmark_script_sparse_run_bounds_quality_reference_to_same_window(
         )
 
 
+def test_benchmark_script_explicit_window_requires_source_frame_count(tmp_path: Path) -> None:
+    script = _load_benchmark_script()
+
+    with pytest.raises(ValueError, match="requires a source frame count"):
+        script._run_benchmark_tiers(
+            candidate_modes=["performance"],
+            video_paths=[tmp_path / "reference.mkv"],
+            analysis_config=ConfigSchema().analysis,
+            cache_dir=tmp_path / "cache",
+            analysis_source_path=tmp_path / "reference.mkv",
+            effective_fps=None,
+            active_rect=script.BenchmarkActiveRect(
+                rect=None,
+                source="full-frame",
+                detection_mode="aspect_ratio",
+            ),
+            selection_domain=None,
+            window_start=10,
+            window_end_exclusive=60,
+            source_frame_count=None,
+            progress_enabled=False,
+            metric_cache_policy="cold",
+        )
+
+
 def test_benchmark_script_sparse_comparison_reports_decision_metrics() -> None:
     script = _load_benchmark_script()
     quality = _tier_payload(
@@ -967,7 +1024,9 @@ def test_benchmark_script_sparse_comparison_reports_decision_metrics() -> None:
     assert result["sampling"]["source_frames"] == [101, 102, 105, 106]
     assert result["sampled_metric_fidelity"]["luminance"]["allclose"] is True
     assert result["sampled_metric_fidelity"]["motion"]["allclose"] is True
-    assert result["sampled_ranking"]["luminance"]["spearman"] == pytest.approx(1.0)
+    assert result["sampled_ranking"]["dark_luminance"]["spearman"] == pytest.approx(1.0)
+    assert result["sampled_ranking"]["dark_luminance"]["direction"] == "lowest"
+    assert result["sampled_ranking"]["bright_luminance"]["direction"] == "highest"
     assert set(result["quality_extreme_coverage"]) == {"dark", "bright", "motion"}
     assert set(result["comparisons"]) == {"dark", "bright", "motion"}
 
@@ -1522,7 +1581,6 @@ def test_benchmark_script_requires_selection_domain_for_non_first_analysis_sourc
             analysis_source=_benchmark_analysis_source(script, path=analysis, reference=reference),
             active_rect_detection=ScreenshotActiveRectDetection.ASPECT_RATIO,
         )
-
     script._require_selection_domain_for_analysis_cache_identity(
         selection_domain="benchmark-domain",
         video_paths=[reference, analysis],
@@ -1535,6 +1593,26 @@ def test_benchmark_script_requires_selection_domain_for_non_first_analysis_sourc
         analysis_source=_benchmark_analysis_source(script, path=reference, reference=reference),
         active_rect_detection=ScreenshotActiveRectDetection.ASPECT_RATIO,
     )
+
+
+def test_benchmark_script_rejects_different_reference_and_analysis_trim_starts(
+    tmp_path: Path,
+) -> None:
+    script = _load_benchmark_script()
+    reference = tmp_path / "reference.mkv"
+    analysis = tmp_path / "analysis.mkv"
+    source = _benchmark_analysis_source(
+        script,
+        path=analysis,
+        reference=reference,
+        overrides={
+            reference: SourceOverrideConfig(trim_start_frames=12),
+            analysis: SourceOverrideConfig(trim_start_frames=20),
+        },
+    )
+
+    with pytest.raises(SystemExit, match="different trim_start_frames"):
+        script._require_selection_coordinate_compatibility(source)
 
 
 def test_benchmark_script_requires_selection_domain_for_effective_fps_override(
@@ -1798,7 +1876,7 @@ def test_benchmark_script_nvidia_candidate_bounds_metrics_and_reports_unverified
     monkeypatch.setattr(script, "calculate_quality_planestats_metrics", fake_metrics)
     monkeypatch.setattr(script, "_nvidia_decoder_utilization", lambda: next(utilization))
 
-    metrics, evidence = script._calculate_nvidia_candidate_trial_metrics(
+    metrics = script._calculate_nvidia_candidate_trial_metrics(
         video_paths=[reference],
         analysis_source_path=reference,
         effective_fps=None,
@@ -1815,9 +1893,62 @@ def test_benchmark_script_nvidia_candidate_bounds_metrics_and_reports_unverified
     assert metrics.luminance == [0.1, 0.2]
     assert metrics.metadata.metric_source_start == 1
     assert metrics.metadata.metric_source_end_exclusive == 3
+    evidence = script._nvidia_decoder_evidence(
+        utilization_before=next(utilization),
+        utilization_after=next(utilization),
+    )
     assert evidence["effective_decoder_proven"] is False
     assert evidence["verification_status"] == "decoder_engine_activity_observed_unattributed"
     assert script._category_tolerance("quality-nvidia-cuvid-candidate", "motion") == 0
+
+
+def test_benchmark_script_nvidia_telemetry_is_outside_all_timed_work(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    script = _load_benchmark_script()
+    clock = 0.0
+
+    def fake_utilization() -> float:
+        nonlocal clock
+        clock += 100.0
+        return 5.0
+
+    monkeypatch.setattr(script.time, "perf_counter", lambda: clock)
+    monkeypatch.setattr(script, "_nvidia_decoder_utilization", fake_utilization)
+    monkeypatch.setattr(
+        script,
+        "_calculate_nvidia_candidate_trial_metrics",
+        lambda **_kwargs: _metrics_payload(
+            "quality-nvidia-cuvid-candidate",
+            [float(index) for index in range(20)],
+            [0.0, *[float(index) for index in range(1, 20)]],
+        ),
+    )
+
+    result = script._run_tier(
+        mode="quality-nvidia-cuvid-candidate",
+        video_paths=[tmp_path / "reference.mkv"],
+        analysis_config=ConfigSchema.model_validate(
+            {"analysis": {"random_frame_count": 1}}
+        ).analysis,
+        cache_dir=tmp_path / "cache",
+        analysis_source_path=tmp_path / "reference.mkv",
+        effective_fps=None,
+        active_rect=script.BenchmarkActiveRect(
+            rect=None,
+            source="full-frame",
+            detection_mode="aspect_ratio",
+        ),
+        selection_domain=None,
+        window_start=0,
+        window_end_exclusive=20,
+    )
+
+    assert result["analyze_seconds"] == 0.0
+    assert result["trial_seconds"] == 0.0
+    assert result["decoder_evidence"]["decoder_utilization_percent_before"] == 5.0
+    assert result["decoder_evidence"]["decoder_utilization_percent_after"] == 5.0
 
 
 def _load_benchmark_script() -> ModuleType:

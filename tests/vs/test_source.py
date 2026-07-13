@@ -1,5 +1,6 @@
 from collections.abc import Mapping
 from fractions import Fraction
+from importlib import import_module
 from types import SimpleNamespace
 from typing import Literal, cast
 
@@ -163,8 +164,10 @@ def test_load_source_rejects_invalid_hardware_preference_before_plugin_work(
     prefer_hw: object,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    source_module = import_module("frame_compare.vs.source")
     monkeypatch.setattr(
-        "frame_compare.vs.source.require_plugin",
+        source_module,
+        "require_plugin",
         lambda *_args, **_kwargs: pytest.fail("plugin lookup must not be called"),
     )
 
