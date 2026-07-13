@@ -59,9 +59,10 @@ identity in schema v6 payload metadata, and orchestration only passes the effect
 analysis config, active-rect-aware selection-domain token, analysis-owned metric
 active rectangle, and active-rect provenance into the analysis/cache owner.
 `frame_compare.analysis.metric_strategies` owns the metric implementations:
-`quality` is the default Python/NumPy behavior and computes luminance and motion
-in one frame pass, while `performance` is an approximate VapourSynth PlaneStats
-mode that can choose different dark, bright, or motion frames. Both modes apply
+`quality` is the default full-resolution VapourSynth PlaneStats behavior, while
+`performance` is an approximate 320px VapourSynth PlaneStats mode that can choose
+different dark, bright, or motion frames. Both modes compute luminance and motion
+in one synchronous graph traversal and apply
 the prepared active picture rectangle for the analysis source before metric
 calculation. Preparation resolves that rectangle through
 `frame_compare.orchestration.active_rect` for static evidence, using explicit

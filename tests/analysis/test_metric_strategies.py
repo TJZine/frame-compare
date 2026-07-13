@@ -6,7 +6,7 @@ import json
 import sys
 from fractions import Fraction
 from types import SimpleNamespace
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -19,7 +19,7 @@ from frame_compare.analysis.metric_strategies import (
     calculate_performance_planestats_metrics,
     calculate_quality_luminance,
     calculate_quality_motion,
-    calculate_quality_planestats_candidate_metrics,
+    calculate_quality_planestats_metrics,
 )
 from frame_compare.analysis.timing import AnalysisTimingRecorder
 from frame_compare.analysis.types import MetricActiveRect
@@ -383,18 +383,15 @@ def test_calculate_metrics_frame_access_failure_raises_fc4002():
     assert exc.value.code == "FC-4002"
 
 
-def test_quality_strategy_dispatch_matches_direct_quality_helpers() -> None:
-    frames = [
-        np.zeros((4, 4), dtype=np.uint8),
-        np.full((4, 4), 64, dtype=np.uint8),
-        np.full((4, 4), 255, dtype=np.uint8),
-    ]
-    clip = MockClip(frames)
+def test_quality_strategy_dispatch_matches_full_resolution_planestats(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
+    clip = FakeBalancedClip([0.0, 0.25, 1.0], width=3840, height=2160)
     source = MagicMock()
     source.clip = clip
 
-    direct_luminance = calculate_quality_luminance(clip)
-    direct_motion = calculate_quality_motion(clip)
+    direct_luminance, direct_motion = calculate_quality_planestats_metrics(clip)
     result = calculate_metric_strategy(source, AnalysisConfig(), reporter=None)
 
     assert result.luminance == direct_luminance
@@ -403,13 +400,15 @@ def test_quality_strategy_dispatch_matches_direct_quality_helpers() -> None:
     assert len(result.motion) == clip.num_frames
     assert result.motion[0] == 0.0
     assert result.performance_mode == "quality"
-    assert result.metric_backend == "python_numpy"
+    assert result.metric_backend == "vapoursynth_planestats"
+    assert clip.resize_calls == []
 
 
-def test_quality_active_rect_ignores_border_pixels_for_luminance() -> None:
-    frame = np.full((4, 4), 255, dtype=np.uint8)
-    frame[1:3, 1:3] = 0
-    clip = MockClip([frame])
+def test_quality_strategy_applies_active_rect_without_resize(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
+    clip = FakeBalancedClip([0.0], width=640, height=360)
     source = MagicMock()
     source.clip = clip
 
@@ -417,47 +416,27 @@ def test_quality_active_rect_ignores_border_pixels_for_luminance() -> None:
         source,
         AnalysisConfig(),
         reporter=None,
-        metric_active_rect=MetricActiveRect(x=1, y=1, width=2, height=2),
+        metric_active_rect=MetricActiveRect(x=10, y=20, width=400, height=200),
     )
 
     assert result.luminance == [0.0]
     assert result.motion == [0.0]
+    assert clip.crop_calls == [("CropAbs", 10, 20, 400, 200)]
+    assert clip.resize_calls == []
 
 
-def test_quality_active_rect_ignores_cropped_out_changes_for_motion() -> None:
-    first = np.zeros((4, 4), dtype=np.uint8)
-    second = np.zeros((4, 4), dtype=np.uint8)
-    second[:, 0] = 255
-    second[:, 3] = 255
-    clip = MockClip([first, second])
-    source = MagicMock()
-    source.clip = clip
-
-    result = calculate_metric_strategy(
-        source,
-        AnalysisConfig(),
-        reporter=None,
-        metric_active_rect=MetricActiveRect(x=1, y=0, width=2, height=4),
-    )
-
-    assert result.motion == [0.0, 0.0]
-
-
-def test_quality_default_strategy_reads_each_frame_once() -> None:
-    frames = [
-        np.zeros((4, 4), dtype=np.uint8),
-        np.full((4, 4), 64, dtype=np.uint8),
-        np.full((4, 4), 255, dtype=np.uint8),
-    ]
-    clip = MockClip(frames)
-    clip.get_frame = MagicMock(side_effect=clip.get_frame)
+def test_quality_default_strategy_uses_one_combined_planestats_graph(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
+    clip = FakeBalancedClip([0.0, 0.25, 1.0])
     source = MagicMock()
     source.clip = clip
 
     result = calculate_metric_strategy(source, AnalysisConfig(), reporter=None)
 
     assert result.motion[0] == 0.0
-    assert clip.get_frame.call_args_list == [call(0), call(1), call(2)]
+    assert clip.planestats_clipb_flags == [True]
 
 
 def test_invalid_active_rect_raises_metrics_calculation_error() -> None:
@@ -474,14 +453,14 @@ def test_invalid_active_rect_raises_metrics_calculation_error() -> None:
         )
 
 
-def test_quality_planestats_candidate_is_full_resolution_combined_and_dense(
+def test_quality_planestats_is_full_resolution_combined_and_dense(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
     clip = FakeBalancedClip([0.0, 0.25, 0.75, 1.0], width=3840, height=2160)
     recorder = AnalysisTimingRecorder()
 
-    luminance, motion = calculate_quality_planestats_candidate_metrics(
+    luminance, motion = calculate_quality_planestats_metrics(
         clip,
         timing_recorder=recorder,
     )
@@ -494,19 +473,19 @@ def test_quality_planestats_candidate_is_full_resolution_combined_and_dense(
     assert clip.planestats_clipb_flags == [True]
     assert set(recorder.as_dict()) == {
         "metric_graph_build",
-        "quality_planestats_candidate_frame_render",
-        "quality_planestats_candidate_graph_build",
-        "quality_planestats_candidate_metric_read",
+        "quality_frame_render",
+        "quality_graph_build",
+        "quality_metric_read",
     }
 
 
-def test_quality_planestats_candidate_converts_non_yuv_like_quality_without_downscaling(
+def test_quality_planestats_converts_non_yuv_like_quality_without_downscaling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
     clip = FakeBalancedClip([0.2, 0.4], width=1920, height=1080, color_family=99)
 
-    luminance, motion = calculate_quality_planestats_candidate_metrics(clip)
+    luminance, motion = calculate_quality_planestats_metrics(clip)
 
     assert luminance == [0.2, 0.4]
     assert motion == [0.0, 0.2]
@@ -514,13 +493,13 @@ def test_quality_planestats_candidate_converts_non_yuv_like_quality_without_down
     assert clip.ops == [("Bicubic", None, None)]
 
 
-def test_quality_planestats_candidate_applies_active_rect_without_resize(
+def test_quality_planestats_applies_active_rect_without_resize(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
     clip = FakeBalancedClip([0.1, 0.6], width=640, height=360)
 
-    luminance, motion = calculate_quality_planestats_candidate_metrics(
+    luminance, motion = calculate_quality_planestats_metrics(
         clip,
         metric_active_rect=MetricActiveRect(x=10, y=20, width=400, height=200),
     )
@@ -532,16 +511,16 @@ def test_quality_planestats_candidate_applies_active_rect_without_resize(
     assert clip.ops == [("CropAbs", 10, 20, 400, 200)]
 
 
-def test_quality_planestats_candidate_rejects_empty_clip(
+def test_quality_planestats_rejects_empty_clip(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
 
     with pytest.raises(MetricsCalculationError, match="Analysis clip has 0 frames"):
-        calculate_quality_planestats_candidate_metrics(FakeBalancedClip([]))
+        calculate_quality_planestats_metrics(FakeBalancedClip([]))
 
 
-def test_quality_planestats_candidate_reports_missing_frame_properties(
+def test_quality_planestats_reports_missing_frame_properties(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
@@ -553,18 +532,18 @@ def test_quality_planestats_candidate_reports_missing_frame_properties(
 
     with pytest.raises(
         MetricsCalculationError,
-        match="quality PlaneStats candidate metric analysis",
+        match="quality metric analysis",
     ):
-        calculate_quality_planestats_candidate_metrics(FakeBalancedClip([0.0, 1.0]))
+        calculate_quality_planestats_metrics(FakeBalancedClip([0.0, 1.0]))
 
 
-def test_quality_planestats_candidate_is_unreachable_from_normal_dispatch(
+def test_quality_planestats_is_used_by_normal_quality_dispatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    candidate = MagicMock(side_effect=AssertionError("candidate dispatch must remain unreachable"))
+    quality = MagicMock(return_value=([0.5], [0.0]))
     monkeypatch.setattr(
-        "frame_compare.analysis.metric_strategies.calculate_quality_planestats_candidate_metrics",
-        candidate,
+        "frame_compare.analysis.metric_strategies.calculate_quality_planestats_metrics",
+        quality,
     )
     frames = [np.zeros((4, 4), dtype=np.uint8)]
     source = MagicMock()
@@ -573,7 +552,7 @@ def test_quality_planestats_candidate_is_unreachable_from_normal_dispatch(
     result = calculate_metric_strategy(source, AnalysisConfig(), reporter=None)
 
     assert result.performance_mode == "quality"
-    candidate.assert_not_called()
+    quality.assert_called_once()
     with pytest.raises(ValueError):
         AnalysisConfig(performance_mode="quality-planestats-candidate")
 

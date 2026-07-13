@@ -31,7 +31,7 @@ from rich.progress import (
 from frame_compare.analysis.cache_io import compute_cache_key, delete_metrics_cache_entry
 from frame_compare.analysis.metric_strategies import (
     calculate_performance_planestats_metrics,
-    calculate_quality_planestats_candidate_metrics,
+    calculate_quality_planestats_metrics,
 )
 from frame_compare.analysis.metrics import calculate_metrics
 from frame_compare.analysis.selection import select_frames
@@ -1057,7 +1057,7 @@ def _calculate_quality_planestats_candidate_trial_metrics(
 ) -> FrameMetrics:
     with record_span(timing_recorder, "source_load"):
         source = DefaultVSLoader().load(analysis_source_path)
-    luminance, motion = calculate_quality_planestats_candidate_metrics(
+    luminance, motion = calculate_quality_planestats_metrics(
         source.clip,
         metric_active_rect=active_rect.rect,
         timing_recorder=timing_recorder,

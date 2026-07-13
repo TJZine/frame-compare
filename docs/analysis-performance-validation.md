@@ -744,10 +744,12 @@ contract, the Witch result passes the provisional quality gate: selected frames
 and top-50 orderings are exact, and the maximum motion error is well below the
 new `1e-7` bound.
 
-Decision: reopen production quality migration and complete the required 8-bit
-SDR and animation/grain-heavy runs before changing production dispatch. The
-candidate remains benchmark-only until all three cases pass. This is a recorded
-contract change, not a silent post-result relaxation.
+Decision update: the maintainer subsequently accepted production implementation
+under this practical-equivalence contract so the combined PlaneStats, exact-window,
+sparse, and NVIDIA candidates can be validated through one Windows benchmark
+cycle. The required 8-bit SDR and animation/grain-heavy runs remain release
+evidence, but no longer block implementing the production quality dispatch. This
+is a recorded contract change, not a silent post-result relaxation.
 
 ### 2026-06-10: The Witch UHD Clip Pair, Mode Simplification Decision
 

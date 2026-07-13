@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 type MetricAlgorithmIdentity = Mapping[str, object]
 
-_ALGORITHM_VERSION = "analysis_metrics_v3"
+_ALGORITHM_VERSION = "analysis_metrics_v4"
 
 
 def build_metric_algorithm_identity(config: AnalysisConfig) -> MetricAlgorithmIdentity:
@@ -52,17 +52,17 @@ def _stable_json(payload: MetricAlgorithmIdentity) -> str:
 def _quality_identity() -> dict[str, object]:
     return {
         "algorithm_version": _ALGORITHM_VERSION,
-        "backend": "python_numpy",
+        "backend": "vapoursynth_planestats",
         "performance_mode": "quality",
         "luminance": {
             "temporal": "all_frames",
-            "spatial": "active_rect_aware_y_plane",
-            "operation": "y_plane_mean",
+            "spatial": "active_rect_aware_full_resolution_luma",
+            "operation": "planestats_average",
         },
         "motion": {
             "temporal": "all_adjacent_pairs",
-            "spatial": "active_rect_aware_y_plane",
-            "operation": "adjacent_y_mad",
+            "spatial": "active_rect_aware_full_resolution_luma",
+            "operation": "planestats_diff",
         },
     }
 

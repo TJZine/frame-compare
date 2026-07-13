@@ -557,8 +557,9 @@ dedicated `run` flags for them:
 - `bright_quantile = 0.95`
 
 `performance_mode` selects the analysis metric algorithm identity used for
-luminance and motion arrays. `quality` is the default Python/NumPy metric mode.
-`performance` is an approximate VapourSynth PlaneStats metric mode; it can select
+luminance and motion arrays. `quality` is the default full-resolution VapourSynth
+PlaneStats metric mode. `performance` is an approximate 320px VapourSynth PlaneStats
+metric mode; it can select
 different dark, bright, or motion frames than `quality` and is cache-isolated
 from `quality`. Both modes apply the prepared active picture rectangle for the
 selected analysis source before metric calculation and use active-rect-specific

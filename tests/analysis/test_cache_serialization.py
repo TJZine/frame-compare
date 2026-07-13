@@ -65,7 +65,7 @@ def test_save_and_load_round_trip(tmp_path: Path) -> None:
     assert result.metrics.metadata.config_fingerprint == fingerprint
     assert result.metrics.metadata.analysis_source_path == ""
     assert result.metrics.metadata.performance_mode == "quality"
-    assert result.metrics.metadata.metric_backend == "python_numpy"
+    assert result.metrics.metadata.metric_backend == "vapoursynth_planestats"
     assert result.metrics.metadata.algorithm_id == metric_algorithm_id(config)
     assert result.metrics.metadata.algorithm_identity_json == (
         stable_metric_algorithm_identity_json(config)
@@ -223,7 +223,7 @@ def test_save_writes_required_keys(tmp_path: Path) -> None:
     assert data["metadata"]["analysis_source_path"] == ""
     assert data["metadata"]["performance_mode"] == "quality"
     assert data["metadata"]["algorithm_id"] == metric_algorithm_id(config)
-    assert data["metadata"]["metric_backend"] == "python_numpy"
+    assert data["metadata"]["metric_backend"] == "vapoursynth_planestats"
     assert data["metadata"]["algorithm_identity_json"] == stable_metric_algorithm_identity_json(
         config
     )
