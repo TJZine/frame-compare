@@ -1,6 +1,7 @@
 from collections.abc import Mapping
 from fractions import Fraction
 from types import SimpleNamespace
+from typing import Literal, cast
 
 import pytest
 
@@ -130,13 +131,14 @@ def test_load_source_forwards_explicit_decoder_options():
         decoder_options=LWLibavSourceOptions(
             threads=12,
             ff_options="skip_loop_filter=all",
+            prefer_hw=1,
         ),
     )
 
     assert calls == [
         (
             "video.mkv",
-            {"threads": 12, "ff_options": "skip_loop_filter=all"},
+            {"threads": 12, "ff_options": "skip_loop_filter=all", "prefer_hw": 1},
         )
     ]
 
@@ -153,6 +155,29 @@ def test_load_source_rejects_negative_decoder_thread_count():
             "video.mkv",
             core,
             decoder_options=LWLibavSourceOptions(threads=-1),
+        )
+
+
+@pytest.mark.parametrize("prefer_hw", [0, 2, -1, True, "1", [1]])
+def test_load_source_rejects_invalid_hardware_preference_before_plugin_work(
+    prefer_hw: object,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        "frame_compare.vs.source.require_plugin",
+        lambda *_args, **_kwargs: pytest.fail("plugin lookup must not be called"),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"prefer_hw must be the integer 1 \(NVIDIA CUVID\) or None",
+    ):
+        load_source(
+            "video.mkv",  # type: ignore[arg-type]
+            SimpleNamespace(),  # type: ignore[arg-type]
+            decoder_options=LWLibavSourceOptions(
+                prefer_hw=cast("Literal[1]", prefer_hw),
+            ),
         )
 
 

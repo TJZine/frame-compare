@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from fractions import Fraction
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from frame_compare.vs.env import ensure_vs_environment, require_plugin
 from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError
@@ -23,6 +23,7 @@ class LWLibavSourceOptions:
 
     threads: int | None = None
     ff_options: str | None = None
+    prefer_hw: Literal[1] | None = None
 
 
 def load_source(
@@ -41,6 +42,10 @@ def load_source(
         decoder_options.threads is not None and decoder_options.threads < 0
     ):
         raise ValueError("LWLibavSource thread count must be non-negative")
+    if decoder_options is not None and decoder_options.prefer_hw is not None:
+        prefer_hw = decoder_options.prefer_hw
+        if type(prefer_hw) is not int or prefer_hw != 1:
+            raise ValueError("LWLibavSource prefer_hw must be the integer 1 (NVIDIA CUVID) or None")
 
     if core is None:
         core = ensure_vs_environment()
@@ -63,6 +68,8 @@ def load_source(
                 loader_kwargs["threads"] = decoder_options.threads
             if decoder_options.ff_options is not None:
                 loader_kwargs["ff_options"] = decoder_options.ff_options
+            if decoder_options.prefer_hw is not None:
+                loader_kwargs["prefer_hw"] = decoder_options.prefer_hw
         clip = loader.LWLibavSource(str(path), **loader_kwargs)
         frame = clip.get_frame(0)
         fps = Fraction(clip.fps.numerator, clip.fps.denominator)
