@@ -8,7 +8,7 @@ import subprocess
 import sys
 from fractions import Fraction
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -138,6 +138,65 @@ def test_benchmark_script_comparison_schema_contains_required_sections() -> None
         "motion_spearman",
     }
     assert result["selected"]["frames"] == [0, 2]
+
+
+def test_benchmark_script_accepts_quality_planestats_candidate_mode_only_in_tool(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    script = _load_benchmark_script()
+
+    args = script._parse_args(
+        [
+            "--output",
+            "candidate.json",
+            "--mode",
+            "quality-planestats-candidate",
+            "reference.mkv",
+        ]
+    )
+
+    assert args.modes == ["quality-planestats-candidate"]
+    with pytest.raises(ValueError):
+        AnalysisPerformanceMode("quality-planestats-candidate")
+    with pytest.raises(SystemExit):
+        script._parse_args(
+            [
+                "--output",
+                "candidate.json",
+                "--mode",
+                "quality-planestats-candidate",
+                "--metric-cache-policy",
+                "reuse",
+                "reference.mkv",
+            ]
+        )
+    assert "requires --metric-cache-policy cold" in capsys.readouterr().err
+
+
+def test_benchmark_script_programmatic_candidate_requires_cold_quality(
+    tmp_path: Path,
+) -> None:
+    script = _load_benchmark_script()
+
+    with pytest.raises(ValueError, match="requires metric_cache_policy='cold'"):
+        script._run_benchmark_tiers(
+            candidate_modes=["quality-planestats-candidate"],
+            video_paths=[tmp_path / "reference.mkv"],
+            analysis_config=ConfigSchema().analysis,
+            cache_dir=tmp_path / "cache",
+            analysis_source_path=tmp_path / "reference.mkv",
+            effective_fps=None,
+            active_rect=script.BenchmarkActiveRect(
+                rect=None,
+                source="full-frame",
+                detection_mode="aspect_ratio",
+            ),
+            selection_domain=None,
+            window_start=0,
+            window_end_exclusive=None,
+            progress_enabled=False,
+            metric_cache_policy="reuse",
+        )
 
 
 def test_benchmark_script_progress_wraps_quality_and_candidate_tiers(
@@ -310,6 +369,94 @@ def test_benchmark_script_run_tier_preserves_typed_performance_mode(
     assert result["cache_write_state"] == "not_attempted"
 
 
+def test_benchmark_script_candidate_trial_bypasses_cache_and_uses_explicit_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    script = _load_benchmark_script()
+    reference = tmp_path / "reference.mkv"
+    reference.write_bytes(b"source")
+    clip = SimpleNamespace(num_frames=3)
+    source = SimpleNamespace(clip=clip, fps=Fraction(24, 1))
+    loader = SimpleNamespace(load=lambda path: source)
+    observed: dict[str, object] = {}
+
+    def fake_candidate(
+        loaded_clip: object,
+        reporter: object = None,
+        metric_active_rect: MetricActiveRect | None = None,
+        *,
+        timing_recorder: object = None,
+    ) -> tuple[list[float], list[float]]:
+        observed.update(
+            {
+                "clip": loaded_clip,
+                "reporter": reporter,
+                "active_rect": metric_active_rect,
+                "timing_recorder": timing_recorder,
+            }
+        )
+        return [0.1, 0.5, 0.9], [0.0, 0.4, 0.4]
+
+    monkeypatch.setattr(script, "DefaultVSLoader", lambda: loader)
+    monkeypatch.setattr(script, "calculate_quality_planestats_candidate_metrics", fake_candidate)
+    monkeypatch.setattr(
+        script,
+        "_delete_tier_metrics_cache",
+        lambda **_kwargs: pytest.fail("candidate cache must not be deleted or written"),
+    )
+
+    result = script._run_tier(
+        mode="quality-planestats-candidate",
+        video_paths=[reference],
+        analysis_config=ConfigSchema.model_validate(
+            {
+                "analysis": {
+                    "random_frame_count": 0,
+                    "dark_frame_count": 1,
+                    "bright_frame_count": 0,
+                    "motion_frame_count": 0,
+                }
+            }
+        ).analysis,
+        cache_dir=tmp_path / "cache",
+        analysis_source_path=reference,
+        effective_fps=Fraction(24000, 1001),
+        active_rect=script.BenchmarkActiveRect(
+            rect=MetricActiveRect(x=10, y=20, width=300, height=200),
+            source="explicit",
+            detection_mode="provided",
+        ),
+        selection_domain="prepared-domain",
+        window_start=0,
+        window_end_exclusive=None,
+        metric_cache_policy="cold",
+    )
+
+    assert observed["clip"] is clip
+    assert observed["active_rect"] == MetricActiveRect(x=10, y=20, width=300, height=200)
+    assert observed["timing_recorder"] is not None
+    assert result["cache_state"] == "bypassed"
+    assert result["cache_write_state"] == "not-written"
+    assert result["metadata"] == {
+        "frame_count": 3,
+        "performance_mode": "quality-planestats-candidate",
+        "algorithm_id": "quality_fullres_planestats_candidate_v1",
+        "metric_backend": "vapoursynth-planestats-fullres",
+        "algorithm_identity": {
+            "algorithm_id": "quality_fullres_planestats_candidate_v1",
+            "backend": "vapoursynth-planestats-fullres",
+            "benchmark_only": True,
+            "luminance": "full_resolution_luma_planestats_average",
+            "motion": "full_resolution_luma_planestats_diff_all_adjacent_pairs",
+        },
+    }
+    metrics = cast(FrameMetrics, result["metrics"])
+    assert metrics.metadata.fps == Fraction(24000, 1001)
+    assert metrics.metadata.config_fingerprint == "benchmark-only-non-cacheable"
+    assert result["compute_pipeline_seconds"] == result["analyze_seconds"]
+
+
 def test_benchmark_script_rotates_trial_order_and_aggregates_distributions(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -325,6 +472,7 @@ def test_benchmark_script_rotates_trial_order_and_aggregates_distributions(
         result.update(
             {
                 "analyze_seconds": elapsed,
+                "compute_pipeline_seconds": elapsed - 0.25,
                 "selection_seconds": 0.1,
                 "trial_seconds": elapsed + 0.1,
                 "process_cpu_seconds": elapsed / 2,
@@ -381,6 +529,80 @@ def test_benchmark_script_rotates_trial_order_and_aggregates_distributions(
     assert quality["cache_write_state"] == {"written": 3}
     assert len(quality["trials"]) == 3
     assert comparisons["performance"]["timing_summary"]["analyze_seconds"]["median"] == 5.0
+
+
+def test_benchmark_script_compute_pipeline_excludes_only_cache_persistence() -> None:
+    script = _load_benchmark_script()
+
+    result = script._compute_pipeline_seconds(
+        analyze_seconds=10.0,
+        phase_timings_seconds={
+            "cache_lookup": 1.25,
+            "source_load": 2.0,
+            "frame_render": 5.0,
+            "cache_write": 0.75,
+        },
+    )
+
+    assert result == 8.0
+
+
+def test_benchmark_script_reports_dense_equivalence_and_exact_top_k_ordering() -> None:
+    script = _load_benchmark_script()
+    quality = _tier_payload(
+        "quality",
+        [0.1, 0.2, 0.3, 0.4],
+        [0.0, 0.7, 0.2, 0.5],
+        [0, 1, 3],
+    )
+    candidate = _tier_payload(
+        "quality-planestats-candidate",
+        [0.1, 0.2 + 5e-13, 0.3, 0.4],
+        [0.0, 0.7, 0.2, 0.5 + 2e-12],
+        [0, 1, 3],
+    )
+    quality["window"] = {"start_frame": 100, "end_frame_exclusive": 104}
+    candidate["window"] = {"start_frame": 100, "end_frame_exclusive": 104}
+
+    result = cast(dict[str, Any], script._compare_tier(quality=quality, candidate=candidate))
+
+    assert result["window"] == {"start_frame": 100, "end_frame_exclusive": 104}
+    dense = result["dense_metric_differences"]
+    assert dense["tolerance"] == {"rtol": 0.0, "atol": 1e-12}
+    assert dense["luminance"]["allclose"] is True
+    assert dense["luminance"]["first_differing_index"] == 1
+    assert dense["luminance"]["first_differing_source_frame"] == 101
+    assert dense["luminance"]["first_outside_tolerance_index"] is None
+    assert dense["luminance"]["first_outside_tolerance_source_frame"] is None
+    assert dense["luminance"]["max_absolute_error"] == pytest.approx(5e-13)
+    assert dense["luminance"]["mean_absolute_error"] == pytest.approx(1.25e-13)
+    assert dense["motion"]["allclose"] is False
+    assert dense["motion"]["first_differing_index"] == 3
+    assert dense["motion"]["first_differing_source_frame"] == 103
+    assert dense["motion"]["first_outside_tolerance_index"] == 3
+    assert dense["motion"]["first_outside_tolerance_source_frame"] == 103
+    assert result["exact_selected_equality"] == {
+        "dark": True,
+        "bright": True,
+        "motion": True,
+    }
+    assert result["exact_top_k_ordering"] == {
+        "dark": {
+            "quality_indices": [100, 101, 102, 103],
+            "candidate_indices": [100, 101, 102, 103],
+            "equal": True,
+        },
+        "bright": {
+            "quality_indices": [103, 102, 101, 100],
+            "candidate_indices": [103, 102, 101, 100],
+            "equal": True,
+        },
+        "motion": {
+            "quality_indices": [101, 103, 102, 100],
+            "candidate_indices": [101, 103, 102, 100],
+            "equal": True,
+        },
+    }
 
 
 def test_benchmark_script_frame_type_summary_records_gop_distribution() -> None:
@@ -894,6 +1116,7 @@ def _tier_payload(
     return {
         "mode": mode,
         "analyze_seconds": 0.1,
+        "compute_pipeline_seconds": 0.1,
         "cache_state": "unknown",
         "cache_write_state": "not_attempted",
         "phase_timings_seconds": {},

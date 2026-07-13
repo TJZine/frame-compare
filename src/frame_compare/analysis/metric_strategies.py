@@ -322,6 +322,40 @@ def _calculate_performance_metrics(
         return _calculate_dense_planestats_metrics(luma, reporter, timing_recorder)
 
 
+def calculate_quality_planestats_candidate_metrics(
+    clip: vs.VideoNode,
+    reporter: ProgressReporter | None = None,
+    metric_active_rect: MetricActiveRect | None = None,
+    *,
+    timing_recorder: AnalysisTimingRecorder | None = None,
+) -> tuple[list[float], list[float]]:
+    """Calculate benchmark-only full-resolution quality metric candidates."""
+    if clip.num_frames == 0:
+        raise MetricsCalculationError("Analysis clip has 0 frames")
+
+    active_rect = _validated_active_rect(
+        metric_active_rect,
+        frame_width=clip.width,
+        frame_height=clip.height,
+    )
+    with perf_span("analysis.quality_planestats_candidate", frames=clip.num_frames):
+        with record_span(timing_recorder, "metric_graph_build"):
+            luma = _planestats_luma_clip(
+                clip,
+                active_rect=active_rect,
+                target_max_width=None,
+                mode_name="Quality PlaneStats candidate",
+            )
+        return _calculate_dense_planestats_metrics(
+            luma,
+            reporter,
+            timing_recorder,
+            timing_prefix="quality_planestats_candidate",
+            error_label="quality PlaneStats candidate",
+            perf_label="analysis.quality_planestats_candidate_metrics",
+        )
+
+
 def _performance_luma_clip(
     clip: vs.VideoNode,
     active_rect: MetricActiveRect | None,
@@ -338,7 +372,7 @@ def _planestats_luma_clip(
     clip: vs.VideoNode,
     *,
     active_rect: MetricActiveRect | None,
-    target_max_width: int,
+    target_max_width: int | None,
     mode_name: str,
 ) -> vs.VideoNode:
     import vapoursynth as vs
@@ -366,7 +400,7 @@ def _planestats_luma_clip(
                     top=active_rect.y,
                 ),
             )
-        if luma.width <= target_max_width:
+        if target_max_width is None or luma.width <= target_max_width:
             return luma
 
         target_width = target_max_width
@@ -380,15 +414,19 @@ def _calculate_dense_planestats_metrics(
     luma: vs.VideoNode,
     reporter: ProgressReporter | None = None,
     timing_recorder: AnalysisTimingRecorder | None = None,
+    *,
+    timing_prefix: str = "performance",
+    error_label: str = "performance",
+    perf_label: str = "analysis.performance_metrics",
 ) -> tuple[list[float], list[float]]:
     if luma.num_frames == 0:
         raise MetricsCalculationError("Empty clip")
 
-    with perf_span("analysis.performance_metrics", frames=luma.num_frames):
+    with perf_span(perf_label, frames=luma.num_frames):
         if reporter:
             reporter.start_phase("Calculating metrics", luma.num_frames)
 
-        with record_span(timing_recorder, "performance_graph_build"):
+        with record_span(timing_recorder, f"{timing_prefix}_graph_build"):
             import vapoursynth as vs
 
             core = _dynamic_attr(vs, "core")
@@ -406,7 +444,7 @@ def _calculate_dense_planestats_metrics(
                 frame = stats.get_frame(n)
                 if timing_recorder is not None:
                     timing_recorder.add_seconds(
-                        "performance_frame_render", perf_counter() - frame_started
+                        f"{timing_prefix}_frame_render", perf_counter() - frame_started
                     )
                 metric_started = perf_counter() if timing_recorder is not None else 0.0
                 luminance.append(_frame_prop_float(frame, "PlaneStatsAverage"))
@@ -414,14 +452,14 @@ def _calculate_dense_planestats_metrics(
                     motion[n] = _frame_prop_float(frame, "PlaneStatsDiff")
                 if timing_recorder is not None:
                     timing_recorder.add_seconds(
-                        "performance_metric_read", perf_counter() - metric_started
+                        f"{timing_prefix}_metric_read", perf_counter() - metric_started
                     )
                 if reporter:
                     reporter.advance(1)
         except Exception as exc:
             phase_status = ProgressPhaseStatus.FAILED
             raise MetricsCalculationError(
-                f"Frame access failed during performance metric analysis "
+                f"Frame access failed during {error_label} metric analysis "
                 f"at frame {len(luminance)}: {exc}"
             ) from exc
         finally:
@@ -490,6 +528,7 @@ def _dynamic_attr(owner: object, name: str) -> object:
 __all__ = [
     "MetricComputationResult",
     "calculate_metric_strategy",
+    "calculate_quality_planestats_candidate_metrics",
     "calculate_quality_luminance",
     "calculate_quality_motion",
 ]

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import platform
 import statistics
@@ -28,23 +29,29 @@ from rich.progress import (
 )
 
 from frame_compare.analysis.cache_io import compute_cache_key, delete_metrics_cache_entry
+from frame_compare.analysis.metric_strategies import (
+    calculate_quality_planestats_candidate_metrics,
+)
 from frame_compare.analysis.metrics import calculate_metrics
 from frame_compare.analysis.selection import select_frames
 from frame_compare.analysis.tier_validation import (
     SelectionCategory,
+    TopKOverlap,
     compare_rankings,
     compare_selection_category,
     tier_category_tolerance,
 )
-from frame_compare.analysis.timing import AnalysisTimingRecorder
+from frame_compare.analysis.timing import AnalysisTimingRecorder, record_span
 from frame_compare.analysis.types import (
     ActiveRectAlgorithmId,
     ActiveRectDetectionMode,
     ActiveRectSource,
+    ClipIdentity,
     FrameMetrics,
     FrameSelection,
     MetricActiveRect,
     MetricCacheRequest,
+    MetricsMetadata,
 )
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema import AnalysisConfig, ConfigSchema
@@ -77,6 +84,11 @@ type JsonObject = dict[str, Any]
 type MetricCachePolicy = Literal["cold", "reuse"]
 
 FFPROBE_TIMEOUT_SECONDS = 120.0
+QUALITY_PLANESTATS_CANDIDATE_MODE = "quality-planestats-candidate"
+QUALITY_PLANESTATS_CANDIDATE_ALGORITHM_ID = "quality_fullres_planestats_candidate_v1"
+QUALITY_PLANESTATS_CANDIDATE_BACKEND = "vapoursynth-planestats-fullres"
+DENSE_EQUIVALENCE_RTOL = 0.0
+DENSE_EQUIVALENCE_ATOL = 1e-12
 
 
 class _FramesReadable(Protocol):
@@ -700,7 +712,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--mode",
         dest="modes",
         action="append",
-        choices=["performance"],
+        choices=["performance", QUALITY_PLANESTATS_CANDIDATE_MODE],
         help="Candidate mode to compare. Repeatable; defaults to performance.",
     )
     parser.add_argument(
@@ -765,6 +777,11 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if args.modes is None:
         args.modes = ["performance"]
+    if QUALITY_PLANESTATS_CANDIDATE_MODE in args.modes and args.metric_cache_policy != "cold":
+        parser.error(
+            f"--mode {QUALITY_PLANESTATS_CANDIDATE_MODE} requires "
+            "--metric-cache-policy cold so production quality is recomputed"
+        )
     if args.window_start < 0:
         parser.error("--window-start must be non-negative")
     if args.window_end_exclusive is not None and args.window_end_exclusive <= args.window_start:
@@ -792,6 +809,8 @@ def _run_benchmark_tiers(
     repetitions: int = 1,
     metric_cache_policy: MetricCachePolicy = "reuse",
 ) -> tuple[JsonObject, dict[str, JsonObject]]:
+    if QUALITY_PLANESTATS_CANDIDATE_MODE in candidate_modes and metric_cache_policy != "cold":
+        raise ValueError(f"{QUALITY_PLANESTATS_CANDIDATE_MODE} requires metric_cache_policy='cold'")
     console = Console(stderr=True)
     progress = Progress(
         SpinnerColumn(),
@@ -872,10 +891,12 @@ def _run_tier(
     repetition: int = 0,
     order_index: int = 0,
 ) -> JsonObject:
+    is_quality_planestats_candidate = mode == QUALITY_PLANESTATS_CANDIDATE_MODE
+    runtime_mode = "quality" if is_quality_planestats_candidate else mode
     tier_config = analysis_config.model_copy(
-        update={"performance_mode": AnalysisPerformanceMode(mode)}
+        update={"performance_mode": AnalysisPerformanceMode(runtime_mode)}
     )
-    if metric_cache_policy == "cold":
+    if metric_cache_policy == "cold" and not is_quality_planestats_candidate:
         _delete_tier_metrics_cache(
             video_paths=video_paths,
             config=tier_config,
@@ -889,17 +910,35 @@ def _run_tier(
     cpu_started = time.process_time()
     trial_started = time.perf_counter()
     started = time.perf_counter()
-    metrics = _calculate_metrics_with_expected_active_rect(
-        video_paths=video_paths,
-        config=tier_config,
-        cache_dir=cache_dir,
-        analysis_source_path=analysis_source_path,
-        effective_fps=effective_fps,
-        active_rect=active_rect,
-        selection_domain=selection_domain,
-        timing_recorder=timing_recorder,
-    )
+    if is_quality_planestats_candidate:
+        metrics = _calculate_quality_planestats_candidate_trial_metrics(
+            video_paths=video_paths,
+            analysis_source_path=analysis_source_path,
+            effective_fps=effective_fps,
+            active_rect=active_rect,
+            timing_recorder=timing_recorder,
+        )
+        cache_state = "bypassed"
+        cache_write_state = "not-written"
+    else:
+        metrics = _calculate_metrics_with_expected_active_rect(
+            video_paths=video_paths,
+            config=tier_config,
+            cache_dir=cache_dir,
+            analysis_source_path=analysis_source_path,
+            effective_fps=effective_fps,
+            active_rect=active_rect,
+            selection_domain=selection_domain,
+            timing_recorder=timing_recorder,
+        )
+        cache_state = timing_recorder.cache_state
+        cache_write_state = timing_recorder.cache_write_state
     analyze_seconds = time.perf_counter() - started
+    phase_timings_seconds = timing_recorder.as_dict()
+    compute_pipeline_seconds = _compute_pipeline_seconds(
+        analyze_seconds=analyze_seconds,
+        phase_timings_seconds=phase_timings_seconds,
+    )
     windowed_metrics, source_offset = _windowed_metrics(
         metrics,
         window_start=window_start,
@@ -920,9 +959,10 @@ def _run_tier(
     return {
         "mode": mode,
         "analyze_seconds": analyze_seconds,
-        "cache_state": timing_recorder.cache_state,
-        "cache_write_state": timing_recorder.cache_write_state,
-        "phase_timings_seconds": timing_recorder.as_dict(),
+        "compute_pipeline_seconds": compute_pipeline_seconds,
+        "cache_state": cache_state,
+        "cache_write_state": cache_write_state,
+        "phase_timings_seconds": phase_timings_seconds,
         "selection_seconds": selection_seconds,
         "trial_seconds": trial_seconds,
         "process_cpu_seconds": process_cpu_seconds,
@@ -945,6 +985,64 @@ def _run_tier(
             "algorithm_identity": json.loads(metrics.metadata.algorithm_identity_json),
         },
     }
+
+
+def _calculate_quality_planestats_candidate_trial_metrics(
+    *,
+    video_paths: Sequence[Path],
+    analysis_source_path: Path,
+    effective_fps: Fraction | None,
+    active_rect: BenchmarkActiveRect,
+    timing_recorder: AnalysisTimingRecorder,
+) -> FrameMetrics:
+    with record_span(timing_recorder, "source_load"):
+        source = DefaultVSLoader().load(analysis_source_path)
+    luminance, motion = calculate_quality_planestats_candidate_metrics(
+        source.clip,
+        metric_active_rect=active_rect.rect,
+        timing_recorder=timing_recorder,
+    )
+    algorithm_identity_json = json.dumps(
+        {
+            "algorithm_id": QUALITY_PLANESTATS_CANDIDATE_ALGORITHM_ID,
+            "backend": QUALITY_PLANESTATS_CANDIDATE_BACKEND,
+            "benchmark_only": True,
+            "luminance": "full_resolution_luma_planestats_average",
+            "motion": "full_resolution_luma_planestats_diff_all_adjacent_pairs",
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return FrameMetrics(
+        luminance=luminance,
+        motion=motion,
+        metadata=MetricsMetadata(
+            frame_count=source.clip.num_frames,
+            fps=effective_fps if effective_fps is not None else source.fps,
+            config_fingerprint="benchmark-only-non-cacheable",
+            clips=_benchmark_clip_identities(video_paths),
+            analysis_source_path=str(analysis_source_path),
+            performance_mode=QUALITY_PLANESTATS_CANDIDATE_MODE,
+            algorithm_id=QUALITY_PLANESTATS_CANDIDATE_ALGORITHM_ID,
+            metric_backend=QUALITY_PLANESTATS_CANDIDATE_BACKEND,
+            algorithm_identity_json=algorithm_identity_json,
+            metric_active_rect=active_rect.rect,
+            active_rect_source=active_rect.source,
+            active_rect_detection_mode=active_rect.detection_mode,
+            active_rect_algorithm_id=active_rect.algorithm_id,
+        ),
+    )
+
+
+def _benchmark_clip_identities(video_paths: Sequence[Path]) -> list[ClipIdentity]:
+    return [
+        ClipIdentity(
+            path=str(path),
+            size=path.stat().st_size,
+            mtime=path.stat().st_mtime,
+        )
+        for path in video_paths
+    ]
 
 
 def _delete_tier_metrics_cache(
@@ -982,6 +1080,8 @@ def _aggregate_tier_trials(trials: Sequence[JsonObject]) -> JsonObject:
     aggregate["timing_summary"] = _timing_summary(trial_summaries)
     analyze_distribution = aggregate["timing_summary"]["analyze_seconds"]
     aggregate["analyze_seconds"] = cast(JsonObject, analyze_distribution)["median"]
+    compute_distribution = aggregate["timing_summary"]["compute_pipeline_seconds"]
+    aggregate["compute_pipeline_seconds"] = cast(JsonObject, compute_distribution)["median"]
     cache_states: dict[str, int] = {}
     cache_write_states: dict[str, int] = {}
     for trial in trials:
@@ -1001,6 +1101,7 @@ def _trial_result_summary(trial: JsonObject) -> JsonObject:
         "cache_state": trial["cache_state"],
         "cache_write_state": trial["cache_write_state"],
         "analyze_seconds": trial["analyze_seconds"],
+        "compute_pipeline_seconds": trial["compute_pipeline_seconds"],
         "selection_seconds": trial["selection_seconds"],
         "trial_seconds": trial["trial_seconds"],
         "process_cpu_seconds": trial["process_cpu_seconds"],
@@ -1014,6 +1115,7 @@ def _timing_summary(trials: Sequence[JsonObject]) -> JsonObject:
     summary: JsonObject = {}
     for field_name in (
         "analyze_seconds",
+        "compute_pipeline_seconds",
         "selection_seconds",
         "trial_seconds",
         "process_cpu_seconds",
@@ -1040,6 +1142,17 @@ def _timing_summary(trials: Sequence[JsonObject]) -> JsonObject:
         for phase in phase_names
     }
     return summary
+
+
+def _compute_pipeline_seconds(
+    *,
+    analyze_seconds: float,
+    phase_timings_seconds: Mapping[str, float],
+) -> float:
+    persistence_seconds = phase_timings_seconds.get(
+        "cache_lookup", 0.0
+    ) + phase_timings_seconds.get("cache_write", 0.0)
+    return max(0.0, analyze_seconds - persistence_seconds)
 
 
 def _distribution(values: Sequence[float]) -> JsonObject:
@@ -1187,7 +1300,11 @@ def _compare_tier(*, quality: JsonObject, candidate: JsonObject) -> JsonObject:
             compare_selection_category(
                 quality_frames=quality_frames,
                 candidate_frames=candidate_frames,
-                tolerance_frames=tier_category_tolerance(cast(Any, mode), category),
+                tolerance_frames=(
+                    0
+                    if mode == QUALITY_PLANESTATS_CANDIDATE_MODE
+                    else tier_category_tolerance(cast(Any, mode), category)
+                ),
             )
         )
         for category, (quality_frames, candidate_frames) in categories.items()
@@ -1205,14 +1322,41 @@ def _compare_tier(*, quality: JsonObject, candidate: JsonObject) -> JsonObject:
     return {
         "mode": mode,
         "analyze_seconds": candidate["analyze_seconds"],
+        "compute_pipeline_seconds": candidate["compute_pipeline_seconds"],
         "cache_state": candidate["cache_state"],
         "cache_write_state": candidate.get("cache_write_state"),
         "timing_summary": candidate.get("timing_summary"),
         "trials": candidate.get("trials", []),
         "metadata": candidate["metadata"],
+        "window": candidate["window"],
         "selected": _selected_summary(candidate_selection),
         "comparisons": category_comparisons,
         "ranking": asdict(ranking),
+        "dense_metric_differences": {
+            "tolerance": {
+                "rtol": DENSE_EQUIVALENCE_RTOL,
+                "atol": DENSE_EQUIVALENCE_ATOL,
+            },
+            "luminance": _dense_metric_difference(
+                quality_metrics.luminance,
+                candidate_metrics.luminance,
+                source_offset=cast(dict[str, int], candidate["window"])["start_frame"],
+            ),
+            "motion": _dense_metric_difference(
+                quality_metrics.motion,
+                candidate_metrics.motion,
+                source_offset=cast(dict[str, int], candidate["window"])["start_frame"],
+            ),
+        },
+        "exact_selected_equality": {
+            category: list(quality_frames) == list(candidate_frames)
+            for category, (quality_frames, candidate_frames) in categories.items()
+        },
+        "exact_top_k_ordering": {
+            "dark": _exact_top_k_ordering(ranking.lowest_luminance_top_k),
+            "bright": _exact_top_k_ordering(ranking.highest_luminance_top_k),
+            "motion": _exact_top_k_ordering(ranking.highest_motion_top_k),
+        },
     }
 
 
@@ -1220,12 +1364,81 @@ def _tier_summary(tier: JsonObject) -> JsonObject:
     selection = cast(FrameSelection, tier["selection"])
     return {
         "analyze_seconds": tier["analyze_seconds"],
+        "compute_pipeline_seconds": tier["compute_pipeline_seconds"],
         "cache_state": tier["cache_state"],
         "cache_write_state": tier.get("cache_write_state"),
         "timing_summary": tier.get("timing_summary"),
         "trials": tier.get("trials", []),
         "metadata": tier["metadata"],
+        "window": tier["window"],
         "selected": _selected_summary(selection),
+    }
+
+
+def _dense_metric_difference(
+    quality_values: Sequence[float],
+    candidate_values: Sequence[float],
+    *,
+    source_offset: int,
+) -> JsonObject:
+    if len(quality_values) != len(candidate_values):
+        raise ValueError(
+            "dense metric comparison requires matching lengths: "
+            f"quality={len(quality_values)}, candidate={len(candidate_values)}"
+        )
+    absolute_errors = [
+        abs(float(candidate) - float(quality))
+        for quality, candidate in zip(quality_values, candidate_values, strict=True)
+    ]
+    first_differing_index = next(
+        (
+            index
+            for index, (quality, candidate) in enumerate(
+                zip(quality_values, candidate_values, strict=True)
+            )
+            if float(quality) != float(candidate)
+        ),
+        None,
+    )
+    first_outside_tolerance_index = next(
+        (
+            index
+            for index, (quality, candidate) in enumerate(
+                zip(quality_values, candidate_values, strict=True)
+            )
+            if not math.isclose(
+                float(quality),
+                float(candidate),
+                rel_tol=DENSE_EQUIVALENCE_RTOL,
+                abs_tol=DENSE_EQUIVALENCE_ATOL,
+            )
+        ),
+        None,
+    )
+    return {
+        "max_absolute_error": max(absolute_errors, default=0.0),
+        "mean_absolute_error": statistics.fmean(absolute_errors) if absolute_errors else 0.0,
+        "first_differing_index": first_differing_index,
+        "first_differing_source_frame": (
+            None if first_differing_index is None else source_offset + first_differing_index
+        ),
+        "first_outside_tolerance_index": first_outside_tolerance_index,
+        "first_outside_tolerance_source_frame": (
+            None
+            if first_outside_tolerance_index is None
+            else source_offset + first_outside_tolerance_index
+        ),
+        "allclose": first_outside_tolerance_index is None,
+    }
+
+
+def _exact_top_k_ordering(top_k: TopKOverlap) -> JsonObject:
+    quality_indices = list(top_k.quality_indices)
+    candidate_indices = list(top_k.candidate_indices)
+    return {
+        "quality_indices": quality_indices,
+        "candidate_indices": candidate_indices,
+        "equal": quality_indices == candidate_indices,
     }
 
 

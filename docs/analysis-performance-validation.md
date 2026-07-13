@@ -309,6 +309,182 @@ investigate before accepting the timing improvement. Compare the synchronous
 artifact against the baseline to isolate the combined traversal, then compare
 the concurrent artifact against the synchronous artifact to isolate scheduling.
 
+### Benchmark the full-resolution quality PlaneStats candidate
+
+`quality-planestats-candidate` is a benchmark-tool-only experiment. It is not the
+production `quality` mode, is not accepted by application config, and never reads
+or writes the analysis metric cache. Each candidate artifact still runs the
+production `quality` backend as its paired baseline. Candidate runs require
+`--metric-cache-policy cold`; the tool rejects `reuse` so a quality cache hit
+cannot be compared with fresh candidate computation.
+
+Run the candidate on the same Windows machine with three cold repetitions for
+each required source class. Replace the SDR and animation paths with fixed local
+cases; keep those exact files for every rerun. The selected analysis source must
+have an adjacent warm `.lwi` index.
+
+```powershell
+$WitchReference = (Resolve-Path -LiteralPath 'comparison_videos\The Witch [2015] 2160p UHD BDRip DV HDR10 x265 DTS-HD MA 5.1-Kira.Clip.mkv').Path
+$WitchComparison = (Resolve-Path -LiteralPath 'comparison_videos\The.VVitch.A.New-England.Folktale.2015.2160p.UHD.BluRay.DTS-HD.MA.5.1.DoVi.x265-CtrlHD.Clip.mkv').Path
+$SdrReference = (Resolve-Path -LiteralPath 'C:\Benchmarks\sdr-8bit\reference.mkv').Path
+$SdrComparison = (Resolve-Path -LiteralPath 'C:\Benchmarks\sdr-8bit\comparison.mkv').Path
+$AnimationReference = (Resolve-Path -LiteralPath 'C:\Benchmarks\animation-grain\reference.mkv').Path
+$AnimationComparison = (Resolve-Path -LiteralPath 'C:\Benchmarks\animation-grain\comparison.mkv').Path
+
+uv run --no-sync python tools/benchmark_analysis_tiers.py `
+  --root . `
+  --config config/benchmark.config.toml `
+  --output generated/quality-planestats-candidate-witch-4k-hdr.json `
+  --mode quality-planestats-candidate `
+  --window-start 0 `
+  --window-end-exclusive 2400 `
+  --repetitions 3 `
+  --metric-cache-policy cold `
+  --require-warm-source-index `
+  $WitchReference $WitchComparison
+
+uv run --no-sync python tools/benchmark_analysis_tiers.py `
+  --root . `
+  --config config/benchmark.config.toml `
+  --output generated/quality-planestats-candidate-sdr-8bit.json `
+  --mode quality-planestats-candidate `
+  --window-start 0 `
+  --window-end-exclusive 2400 `
+  --repetitions 3 `
+  --metric-cache-policy cold `
+  --require-warm-source-index `
+  $SdrReference $SdrComparison
+
+uv run --no-sync python tools/benchmark_analysis_tiers.py `
+  --root . `
+  --config config/benchmark.config.toml `
+  --output generated/quality-planestats-candidate-animation-grain.json `
+  --mode quality-planestats-candidate `
+  --window-start 0 `
+  --window-end-exclusive 2400 `
+  --repetitions 3 `
+  --metric-cache-policy cold `
+  --require-warm-source-index `
+  $AnimationReference $AnimationComparison
+```
+
+If a case uses a non-default reference, analysis source, effective FPS, trim, or
+active rectangle, also pass the exact `--selection-domain` token from its
+prepared production run. Use a representative fixed window for each clip; do
+not force `0..2400` when that range misses the content class being tested.
+
+Inspect all three artifacts with this compact PowerShell summary:
+
+```powershell
+$CandidateFiles = @(
+  'generated/quality-planestats-candidate-witch-4k-hdr.json',
+  'generated/quality-planestats-candidate-sdr-8bit.json',
+  'generated/quality-planestats-candidate-animation-grain.json'
+)
+
+$CandidateFiles | ForEach-Object {
+  $Report = Get-Content $_ -Raw | ConvertFrom-Json
+  $Candidate = $Report.comparisons.'quality-planestats-candidate'
+  $Dense = $Candidate.dense_metric_differences
+  $TopK = $Candidate.exact_top_k_ordering
+  $QualityCompute = $Report.quality.timing_summary.compute_pipeline_seconds
+  $CandidateCompute = $Candidate.timing_summary.compute_pipeline_seconds
+  $QualityTrials = @($Report.quality.trials)
+  $CandidateTrials = @($Candidate.trials)
+  $MedianDelta = $QualityCompute.median - $CandidateCompute.median
+  $ImprovementPercent = if ($QualityCompute.median -gt 0) {
+    100 * $MedianDelta / $QualityCompute.median
+  } else { 0 }
+  $NoiseBand = [math]::Max($QualityCompute.pstdev, $CandidateCompute.pstdev)
+  $OutsideNoise = $MedianDelta -gt $NoiseBand
+  $FasterPairedTrials = @(0..($CandidateTrials.Count - 1) | Where-Object {
+    $CandidateTrials[$_].compute_pipeline_seconds -lt $QualityTrials[$_].compute_pipeline_seconds
+  }).Count
+  $RequiredPairedWins = [math]::Floor($QualityTrials.Count / 2) + 1
+  $QualityColdMisses = @($QualityTrials | Where-Object { $_.cache_state -eq 'miss' }).Count
+  $CandidateBypasses = @($CandidateTrials | Where-Object { $_.cache_state -eq 'bypassed' }).Count
+  $FrameCountsEqual = $Report.quality.metadata.frame_count -eq $Candidate.metadata.frame_count
+  $WindowDomainsEqual =
+    ($Report.quality.window.start_frame -eq $Candidate.window.start_frame) -and
+    ($Report.quality.window.end_frame_exclusive -eq $Candidate.window.end_frame_exclusive)
+  $TrialCountGate = ($QualityTrials.Count -ge 3) -and
+    ($CandidateTrials.Count -eq $QualityTrials.Count)
+  $DenseGate = $Dense.luminance.allclose -and $Dense.motion.allclose
+  $SelectionGate = $Candidate.exact_selected_equality.dark -and
+    $Candidate.exact_selected_equality.bright -and
+    $Candidate.exact_selected_equality.motion
+  $TopKGate = $TopK.dark.equal -and $TopK.bright.equal -and $TopK.motion.equal
+  $GateAPass = $FrameCountsEqual -and $WindowDomainsEqual -and $TrialCountGate -and
+    $DenseGate -and $SelectionGate -and
+    $TopKGate -and ($QualityColdMisses -eq $QualityTrials.Count) -and
+    ($CandidateBypasses -eq $CandidateTrials.Count) -and
+    ($FasterPairedTrials -ge $RequiredPairedWins) -and
+    ($ImprovementPercent -ge 5) -and $OutsideNoise
+
+  [PSCustomObject]@{
+    File = Split-Path $_ -Leaf
+    QualityComputeMedian = [math]::Round($QualityCompute.median, 3)
+    QualityComputePstdev = [math]::Round($QualityCompute.pstdev, 3)
+    CandidateComputeMedian = [math]::Round($CandidateCompute.median, 3)
+    CandidateComputePstdev = [math]::Round($CandidateCompute.pstdev, 3)
+    MedianDelta = [math]::Round($MedianDelta, 3)
+    ImprovementPercent = [math]::Round($ImprovementPercent, 2)
+    NoiseBand = [math]::Round($NoiseBand, 3)
+    OutsideNoise = $OutsideNoise
+    FasterPairedTrials = $FasterPairedTrials
+    RequiredPairedWins = $RequiredPairedWins
+    QualityColdMisses = $QualityColdMisses
+    CandidateBypasses = $CandidateBypasses
+    FrameCountsEqual = $FrameCountsEqual
+    WindowDomainsEqual = $WindowDomainsEqual
+    TrialCountGate = $TrialCountGate
+    LumaAllclose = $Dense.luminance.allclose
+    LumaMaxError = $Dense.luminance.max_absolute_error
+    LumaMeanError = $Dense.luminance.mean_absolute_error
+    LumaFirstDifference = $Dense.luminance.first_differing_index
+    LumaFirstDifferenceSourceFrame = $Dense.luminance.first_differing_source_frame
+    LumaFirstOutsideTolerance = $Dense.luminance.first_outside_tolerance_index
+    MotionAllclose = $Dense.motion.allclose
+    MotionMaxError = $Dense.motion.max_absolute_error
+    MotionMeanError = $Dense.motion.mean_absolute_error
+    MotionFirstDifference = $Dense.motion.first_differing_index
+    MotionFirstDifferenceSourceFrame = $Dense.motion.first_differing_source_frame
+    MotionFirstOutsideTolerance = $Dense.motion.first_outside_tolerance_index
+    DarkSelectedExact = $Candidate.exact_selected_equality.dark
+    BrightSelectedExact = $Candidate.exact_selected_equality.bright
+    MotionSelectedExact = $Candidate.exact_selected_equality.motion
+    DarkTopKExact = $TopK.dark.equal
+    BrightTopKExact = $TopK.bright.equal
+    MotionTopKExact = $TopK.motion.equal
+    QualityCpuToWallMedian = $Report.quality.timing_summary.cpu_to_wall_ratio.median
+    CandidateCpuToWallMedian = $Candidate.timing_summary.cpu_to_wall_ratio.median
+    QualityPeakRssBytes = $QualityTrials[-1].peak_rss_bytes
+    CandidatePeakRssBytes = $CandidateTrials[-1].peak_rss_bytes
+    GateAPass = $GateAPass
+  }
+} | Format-Table -AutoSize
+```
+
+Use `compute_pipeline_seconds`, not raw `analyze_seconds`, for the candidate
+performance decision. It subtracts only cache lookup and cache write, retaining
+source loading and metric work so the cache-bypassing candidate cannot gain a
+false timing advantage. Accept quality only when both dense arrays are allclose
+at `rtol=0, atol=1e-12`, all selected-category booleans are true, and all exact
+top-K booleans are true for every case. Then apply the timing and noise gate from
+the active performance plan. `first_differing_index` and
+`first_differing_source_frame` report the first raw float inequality even when it
+is within tolerance; the separate `first_outside_tolerance_*` fields explain an
+`allclose = false` result. The displayed `GateAPass` combines every frozen
+objective criterion available in the artifact. CPU-to-wall medians remain
+visible for separate regression review. Standard-library peak RSS is unavailable
+on Windows and remains `$null`; do not convert it to zero or treat it as proof of
+unchanged memory use.
+
+The current `--window-start` and `--window-end-exclusive` options slice the dense
+arrays for selection and comparison only after full-source metric calculation.
+They do not yet benchmark window-bounded metric computation; that is a separate
+later experiment.
+
 The benchmark defaults to three cold-metric-cache repetitions per mode. It
 deletes only the exact mode/domain metric cache entry before each timed trial,
 rotates mode order deterministically between repetitions, and runs the optional
