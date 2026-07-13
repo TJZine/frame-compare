@@ -303,6 +303,14 @@ performance criterion before allowing Package 2. Failed or incomplete evidence
 stops migration but does not block proceeding later with independently safe
 window bounding on the existing NumPy quality backend.
 
+Gate result (2026-07-13): rejected. The required 4K HDR Witch case improved
+median compute time from 235.086 seconds to 64.009 seconds and preserved exact
+selected frames and top-50 orderings, but motion exceeded the frozen
+`allclose(rtol=0, atol=1e-12)` limit (`8.80e-9` maximum absolute error). Because
+every required case had to pass, this single failure is decisive and additional
+candidate clips cannot rescue the migration. Package 2 is skipped; the candidate
+remains benchmark-only and NumPy remains production `quality`.
+
 ### Package 2: accepted quality migration, conditional
 
 This package exists only if Gate A passes. Before delegation, the controller

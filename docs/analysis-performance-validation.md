@@ -562,6 +562,46 @@ benchmark evidence.
 This evidence is local, hardware-dependent, and not a full validation matrix.
 Treat it as support for tuning decisions, not a release-wide guarantee.
 
+### 2026-07-13: Full-resolution quality PlaneStats candidate rejected
+
+Benchmark artifact:
+`generated/quality-planestats-candidate-witch-4k-hdr.json`
+
+The three-repetition cold-cache Windows run compared production NumPy `quality`
+with the benchmark-only full-resolution PlaneStats candidate on the established
+4K HDR Witch source, using the prepared dimension-derived active rectangle and
+frames `0..2400`.
+
+| Measure | Production quality | Candidate |
+| --- | ---: | ---: |
+| Median compute pipeline | 235.086s | 64.009s |
+| Population standard deviation | 0.853s | 0.556s |
+| Median process CPU | 585.516s | 563.266s |
+| Median CPU-to-wall ratio | 2.488 | 8.799 |
+
+The candidate was 3.67x faster, a 72.77% reduction in median compute time. The
+171.08-second median improvement was far outside the 0.853-second noise band,
+and every paired candidate trial was faster. All three quality trials were
+proven cache misses and every candidate trial bypassed the metric cache.
+
+Quality evidence:
+
+- luminance passed `allclose(rtol=0, atol=1e-12)`, with maximum absolute error
+  `5.55e-17`;
+- motion failed that frozen lossless threshold beginning at source frame 1,
+  with maximum absolute error `8.80e-9` and mean absolute error `4.21e-10`;
+- dark, bright, and motion selected-frame lists were exactly identical; and
+- dark, bright, and motion top-50 ordering was exactly identical.
+
+Decision: reject production quality migration. The speedup and practical
+selection agreement do not override the predeclared lossless gate, and the
+tolerance is not loosened after observing the result. Additional source classes
+cannot make a mandatory per-case failure pass, so the 8-bit SDR and
+animation/grain-heavy candidate runs are unnecessary for this migration
+decision. Keep NumPy as production `quality`; keep the candidate benchmark-only
+as reproducible evidence. Proceed independently with exact window-bounded metric
+calculation for NumPy `quality` and synchronous PlaneStats `performance`.
+
 ### 2026-06-10: The Witch UHD Clip Pair, Mode Simplification Decision
 
 Benchmark artifact:
