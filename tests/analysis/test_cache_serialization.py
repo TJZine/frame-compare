@@ -1,8 +1,11 @@
 """Cache serialization and round-trip contract tests."""
 
 import json
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
+
+import pytest
 
 from frame_compare.analysis.cache_io import (
     CACHE_VERSION,
@@ -75,6 +78,24 @@ def test_save_and_load_round_trip(tmp_path: Path) -> None:
     assert result.metrics.metadata.active_rect_source == "full-frame"
     assert result.metrics.metadata.active_rect_detection_mode == "aspect_ratio"
     assert result.metrics.metadata.active_rect_algorithm_id == "active_rect_resolution_v2"
+
+
+def test_save_rejects_stale_nested_metadata_version(tmp_path: Path) -> None:
+    metadata = metrics_metadata(
+        frame_count=1,
+        fps=Fraction(24, 1),
+        config_fingerprint="fingerprint",
+        clips=[],
+        config=AnalysisConfig(),
+    )
+    metrics = FrameMetrics(
+        luminance=[0.1],
+        motion=[0.0],
+        metadata=replace(metadata, version=CACHE_VERSION - 1),
+    )
+
+    with pytest.raises(ValueError, match="does not match the current cache schema"):
+        save_metrics_cache(metrics, tmp_path)
 
 
 def test_request_aware_cache_load_rejects_mismatched_provenance(tmp_path: Path) -> None:

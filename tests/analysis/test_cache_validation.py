@@ -477,6 +477,7 @@ def test_load_missing_key_returns_corrupted(tmp_path: Path) -> None:
         ("metadata.fps", "not-a-fraction"),
         ("metadata.fps", "24000/0"),
         ("metadata.version", "3"),
+        ("metadata.version", CACHE_VERSION - 1),
         ("metadata.clips.0.path", 123),
         ("metadata.clips.0.size", True),
         ("metadata.clips.0.mtime", False),

@@ -427,6 +427,9 @@ def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
         data["active_rect_detection_mode"]
     )
     active_rect_algorithm_id = _parse_active_rect_algorithm_id(data["active_rect_algorithm_id"])
+    metadata_version = _parse_cache_version(data.get("version", CACHE_VERSION))
+    if metadata_version != CACHE_VERSION:
+        raise _CacheParseError
 
     try:
         return MetricsMetadata(
@@ -446,7 +449,7 @@ def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
             active_rect_source=active_rect_source,
             active_rect_detection_mode=active_rect_detection_mode,
             active_rect_algorithm_id=active_rect_algorithm_id,
-            version=_parse_cache_version(data.get("version", CACHE_VERSION)),
+            version=metadata_version,
         )
     except (ValueError, TypeError, ZeroDivisionError) as exc:
         raise _CacheParseError from exc
@@ -575,6 +578,8 @@ def _parse_nonnegative_int(value: object) -> int:
 
 def save_metrics_cache(metrics: FrameMetrics, cache_dir: Path) -> None:
     """Persist analysis metrics to cache file."""
+    if metrics.metadata.version != CACHE_VERSION:
+        raise ValueError("Metrics metadata cache version does not match the current cache schema")
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path = cache_dir / metrics_cache_filename(
         [Path(clip.path) for clip in metrics.metadata.clips],
