@@ -732,6 +732,103 @@ $Report.comparisons.PSObject.Properties | ForEach-Object {
 } | Format-Table -AutoSize
 ```
 
+#### Current sparse follow-up after the 2026-07-13 Witch matrix
+
+The first Witch matrix eliminated the 6.25 percent candidates because motion
+category retention fell to 60 percent. Skip-loop-filter added only about eight
+percent beyond sparse sampling while introducing another approximation. The
+current decision run therefore compares only the normal-decoder 25 and 12.5
+percent candidates.
+
+The original result artifact used the older generic
+`sampled_ranking.luminance` schema and its 120-second frame-type inspection
+timed out. Before rerunning, verify that the checkout contains the final split
+dark/bright ranking schema:
+
+```powershell
+git status --short
+git rev-parse --short HEAD
+if (-not (Select-String -Path 'tools/benchmark_analysis_tiers.py' -Pattern '"dark_luminance"' -Quiet)) {
+  throw 'The benchmark checkout predates the final sparse-ranking schema. Pull the latest stage1 commit.'
+}
+```
+
+Use a nonzero 2,400-frame window to exercise the production motion-lookbehind
+path while keeping the workload comparable to the first Witch run. Run the
+second command on an animation/grain-heavy pair because it is the strongest
+second-source challenge for temporal sampling. If that class is unavailable,
+use the fixed 8-bit SDR pair instead. Both selected analysis sources must contain
+at least 2,640 frames; otherwise reduce both window values while preserving a
+nonzero start and equal window length.
+
+```powershell
+uv run --no-sync python tools/benchmark_analysis_tiers.py `
+  --root . `
+  --config config/benchmark.config.toml `
+  --output generated/analysis-sparse-final-witch-4k-hdr.json `
+  --mode performance-sparse-25pct-candidate `
+  --mode performance-sparse-12_5pct-candidate `
+  --window-start 240 `
+  --window-end-exclusive 2640 `
+  --sparse-burst-count 8 `
+  --repetitions 3 `
+  --metric-cache-policy cold `
+  --require-warm-source-index `
+  --inspect-frame-types `
+  --ffprobe-timeout 300 `
+  $WitchReference $WitchComparison
+
+uv run --no-sync python tools/benchmark_analysis_tiers.py `
+  --root . `
+  --config config/benchmark.config.toml `
+  --output generated/analysis-sparse-final-animation-grain.json `
+  --mode performance-sparse-25pct-candidate `
+  --mode performance-sparse-12_5pct-candidate `
+  --window-start 240 `
+  --window-end-exclusive 2640 `
+  --sparse-burst-count 8 `
+  --repetitions 3 `
+  --metric-cache-policy cold `
+  --require-warm-source-index `
+  --inspect-frame-types `
+  --ffprobe-timeout 300 `
+  $AnimationReference $AnimationComparison
+```
+
+Summarize both final artifacts with the final ranking schema:
+
+```powershell
+$SparseFiles = @(
+  'generated/analysis-sparse-final-witch-4k-hdr.json',
+  'generated/analysis-sparse-final-animation-grain.json'
+)
+$SparseModes = @(
+  'performance-sparse-25pct-candidate',
+  'performance-sparse-12_5pct-candidate'
+)
+
+$SparseFiles | ForEach-Object {
+  $Report = Get-Content $_ -Raw | ConvertFrom-Json
+  foreach ($Mode in $SparseModes) {
+    $Result = $Report.comparisons.PSObject.Properties[$Mode].Value
+    [PSCustomObject]@{
+      File = Split-Path $_ -Leaf
+      Mode = $Mode
+      Speedup = [math]::Round($Result.timing_comparison.speedup, 3)
+      OutsideNoise = $Result.timing_comparison.outside_noise_band
+      PairedWins = "$($Result.timing_comparison.paired_faster_count)/$($Result.timing_comparison.paired_count)"
+      DarkRetention = $Result.quality_category_retention.dark.passing_fraction
+      BrightRetention = $Result.quality_category_retention.bright.passing_fraction
+      MotionRetention = $Result.quality_category_retention.motion.passing_fraction
+      DarkTopK = $Result.sampled_ranking.dark_luminance.top_k_overlap_fraction
+      BrightTopK = $Result.sampled_ranking.bright_luminance.top_k_overlap_fraction
+      MotionTopK = $Result.sampled_ranking.motion.top_k_overlap_fraction
+      FrameTypesAvailable = $Report.source.analysis_source.frame_types.available
+    }
+  }
+} | Format-Table -AutoSize
+```
+
 Use the existing `1.5x` minimum/desired `2x` timing gate on every required clip
 class. Judge quality with category retention, exact/nearest selection results,
 sampled metric fidelity/ranking, extreme-pool coverage, and nearest-sample
@@ -781,6 +878,100 @@ $Result = $Report.comparisons.'quality-nvidia-cuvid-candidate'
 Never promote this experiment based only on GPU presence or nonzero utilization:
 the current integration cannot attribute
 decoder-engine activity to the process or prove that L-SMASH did not fall back.
+
+#### Establishing whether CUVID actually decoded the candidate
+
+`prefer_hw=1` is a preference, not a requirement. L-SMASH Works tries the
+codec-specific `_cuvid` decoder when a CUDA device and matching decoder are
+available, but otherwise retains the default software decoder, as shown by its
+[decoder-selection source](https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/blob/10614318db0b231a8d5bff855946442c7b976799/common/decode.c)
+and [VapourSynth documentation](https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/blob/10614318db0b231a8d5bff855946442c7b976799/VapourSynth/README.md).
+Its VapourSynth surface does not expose the selected `AVCodec` name or wrapper,
+so the current benchmark JSON cannot prove backend identity by itself.
+
+Use these evidence levels:
+
+1. **Backend-identity proof:** a diagnostic L-SMASH Works build must expose the
+   opened codec name and wrapper from `AVCodecContext`. Accept only a codec such
+   as `hevc_cuvid`, wrapper `cuvid`, with a CUDA hardware context. This is the
+   definitive internal proof, but it requires a custom/upstream plugin change.
+2. **Process-attributed operational proof:** monitor video-decoder utilization
+   for the exact benchmark Python PID. During a one-repetition run, the software
+   `quality` trial must remain at zero and the following NVIDIA candidate trial
+   must show nonzero `VideoDecode` utilization. The
+   [NVIDIA NVML API](https://docs.nvidia.com/deploy/nvml-api/group__nvmlDeviceQueries.html)
+   exposes PID plus decoder utilization through
+   `nvmlDeviceGetProcessUtilization`; use that API when supported by the
+   installed driver.
+3. **Windows fallback proof:** if per-process NVML returns `NOT_SUPPORTED`, use
+   the built-in `GPU Engine` performance counters or a
+   [GPUView ETW capture](https://learn.microsoft.com/en-us/windows/win32/direct2d/profiling-directx-applications)
+   for the exact Python PID. Device-wide `nvidia-smi utilization.decoder`
+   remains corroboration only. Do not use `nvidia-smi pmon` as the Windows proof
+   path; the [NVIDIA command documentation](https://docs.nvidia.com/deploy/nvidia-smi/index.html)
+   limits that process-monitoring command to supported bare-metal 64-bit Linux
+   systems.
+
+For the Windows counter check, copy this one-repetition control/candidate pair
+into the first PowerShell window, but do not start it yet. Repetition zero always
+runs software `quality` first and the NVIDIA candidate second:
+
+```powershell
+uv run --no-sync python tools/benchmark_analysis_tiers.py `
+  --root . `
+  --config config/benchmark.config.toml `
+  --output generated/analysis-nvidia-cuvid-pid-proof.json `
+  --mode quality-nvidia-cuvid-candidate `
+  --window-start 240 `
+  --window-end-exclusive 2640 `
+  --repetitions 1 `
+  --metric-cache-policy cold `
+  --require-warm-source-index `
+  --skip-decode-baseline `
+  $WitchReference $WitchComparison
+```
+
+In a second PowerShell window, start the following monitor. It waits for the
+benchmark's `python.exe`, captures its PID automatically, then samples only that
+PID's Video Decode engine. Immediately after starting the monitor, start the
+benchmark in the first window. Increase `-MaxSamples` if that benchmark runs
+longer than 60 seconds on the test machine.
+
+```powershell
+do {
+  $BenchmarkProcess = Get-CimInstance Win32_Process |
+    Where-Object {
+      $_.Name -eq 'python.exe' -and
+      $_.CommandLine -like '*benchmark_analysis_tiers.py*'
+    } |
+    Sort-Object CreationDate -Descending |
+    Select-Object -First 1
+  if ($null -eq $BenchmarkProcess) {
+    Start-Sleep -Milliseconds 100
+  }
+} until ($null -ne $BenchmarkProcess)
+
+$BenchmarkPid = [int]$BenchmarkProcess.ProcessId
+Write-Host "Monitoring benchmark PID $BenchmarkPid"
+$VideoDecodeSamples = Get-Counter '\GPU Engine(*)\Utilization Percentage' -SampleInterval 1 -MaxSamples 60 |
+  ForEach-Object { $_.CounterSamples } |
+  Where-Object {
+    $_.InstanceName -like "*pid_$($BenchmarkPid)_*" -and
+    $_.InstanceName -match 'engtype_VideoDecode'
+  } |
+  Select-Object Timestamp, InstanceName, CookedValue
+
+$VideoDecodeSamples |
+  Export-Csv 'generated/nvidia-cuvid-pid-video-decode.csv' -NoTypeInformation
+$VideoDecodeSamples | Format-Table -AutoSize
+```
+
+Record the transition shown by benchmark progress: the first `quality` interval
+must have no positive samples; the subsequent NVIDIA-candidate interval must
+have repeatable positive samples for that same PID. This establishes that the
+candidate process used NVIDIA's video-decoder engine. It is sufficient
+operational evidence for performance evaluation, but only the plugin-internal
+codec/wrapper report establishes the exact CUVID decoder identity.
 
 The benchmark defaults to three cold-metric-cache repetitions per mode. It
 deletes only the exact mode/domain metric cache entry before each timed trial,
