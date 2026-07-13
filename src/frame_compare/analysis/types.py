@@ -99,10 +99,13 @@ class MetricsMetadata:
     """Metadata about the analysis run stored with cache.
 
     Fields:
-        frame_count: Number of frames in source video
+        frame_count: Number of stored metric entries
         fps: Source video framerate
         config_fingerprint: Hash of analysis configuration
         clips: List of clip identities involved (usually just one)
+        source_frame_count: Original analysis source frame count
+        metric_source_start: Inclusive source-frame offset represented by index zero
+        metric_source_end_exclusive: Exclusive represented source-frame boundary
         analysis_source_path: Path to the source used for analysis, if any
         performance_mode: Analysis performance mode that produced the arrays
         algorithm_id: Stable ID for the metric algorithm identity

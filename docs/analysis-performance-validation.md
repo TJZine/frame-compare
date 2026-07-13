@@ -623,10 +623,149 @@ for a sparse reference/key-frame or fixed-budget backend with explicit source
 frame mapping; do not assume `SelectEvery` avoids decoding inter-frame
 dependencies.
 
-The current `--window-start` and `--window-end-exclusive` options slice the dense
-arrays for selection and comparison only after full-source metric calculation.
-They do not yet benchmark window-bounded metric computation; that is a separate
-later experiment.
+The `--window-start` and `--window-end-exclusive` options now bound production
+dense metric calculation as well as selection and comparison. A nonzero start
+includes one unreturned source-frame lookbehind so the first retained motion
+value preserves full-source adjacent-pair semantics. Benchmark artifacts record
+the compact metric range and array length; they do not pad excluded frames.
+
+### Benchmark exact production window bounding
+
+Run a materially excluded window and a full-window control on the same clip. The
+first command models a 10-second lead/trail exclusion for a 24 fps, 2400-frame
+case; adjust the frame boundaries to the prepared window for other frame rates.
+Both `quality` and `performance` use the exact bounded production calculation.
+
+```powershell
+uv run --no-sync python tools/benchmark_analysis_tiers.py `
+  --root . `
+  --config config/benchmark.config.toml `
+  --output generated/analysis-window-bounded-witch-4k-hdr.json `
+  --mode performance `
+  --window-start 240 `
+  --window-end-exclusive 2160 `
+  --repetitions 3 `
+  --metric-cache-policy cold `
+  --require-warm-source-index `
+  $WitchReference $WitchComparison
+
+uv run --no-sync python tools/benchmark_analysis_tiers.py `
+  --root . `
+  --config config/benchmark.config.toml `
+  --output generated/analysis-window-full-control-witch-4k-hdr.json `
+  --mode performance `
+  --window-start 0 `
+  --window-end-exclusive 2400 `
+  --repetitions 3 `
+  --metric-cache-policy cold `
+  --require-warm-source-index `
+  $WitchReference $WitchComparison
+```
+
+For a run with configured source trims, active-rectangle overrides, or a
+non-default analysis source, also pass the prepared run's exact
+`--selection-domain` token. Compare each mode's
+`timing_summary.compute_pipeline_seconds.median`, confirm the compact metadata
+range, and verify selected source-frame lists against the full-window baseline.
+
+### Benchmark sparse contiguous-burst candidates
+
+Sparse candidates are developer-only modes. They analyze full-resolution luma
+in eight deterministic centered bursts with exact 25%, 12.5%, or 6.25% frame
+budgets. Each nonzero burst includes one unreturned motion lookbehind. Normal
+and skip-loop-filter variants are separate so temporal sampling and decoder
+quality loss remain attributable.
+
+```powershell
+uv run --no-sync python tools/benchmark_analysis_tiers.py `
+  --root . `
+  --config config/benchmark.config.toml `
+  --output generated/analysis-sparse-candidates-witch-4k-hdr.json `
+  --mode performance-sparse-25pct-candidate `
+  --mode performance-sparse-25pct-skip-loop-filter-candidate `
+  --mode performance-sparse-12_5pct-candidate `
+  --mode performance-sparse-12_5pct-skip-loop-filter-candidate `
+  --mode performance-sparse-6_25pct-candidate `
+  --mode performance-sparse-6_25pct-skip-loop-filter-candidate `
+  --window-start 0 `
+  --window-end-exclusive 2400 `
+  --sparse-burst-count 8 `
+  --repetitions 3 `
+  --metric-cache-policy cold `
+  --require-warm-source-index `
+  --inspect-frame-types `
+  $WitchReference $WitchComparison
+```
+
+Repeat that command for the SDR and animation/grain-heavy pairs with distinct
+output filenames. Summarize one artifact with:
+
+```powershell
+$Report = Get-Content 'generated/analysis-sparse-candidates-witch-4k-hdr.json' -Raw | ConvertFrom-Json
+$Report.comparisons.PSObject.Properties | ForEach-Object {
+  $Mode = $_.Name
+  $Result = $_.Value
+  [PSCustomObject]@{
+    Mode = $Mode
+    Speedup = [math]::Round($Result.timing_comparison.speedup, 3)
+    OutsideNoise = $Result.timing_comparison.outside_noise_band
+    PairedWins = "$($Result.timing_comparison.paired_faster_count)/$($Result.timing_comparison.paired_count)"
+    AnalyzedFrames = $Result.sampling.analyzed_frame_count
+    ActualFraction = [math]::Round($Result.sampling.sampling_fraction_actual, 4)
+    DarkRetention = $Result.quality_category_retention.dark.passing_fraction
+    BrightRetention = $Result.quality_category_retention.bright.passing_fraction
+    MotionRetention = $Result.quality_category_retention.motion.passing_fraction
+    DarkExtremeCoverage = $Result.quality_extreme_coverage.dark.sampled_extreme_fraction
+    BrightExtremeCoverage = $Result.quality_extreme_coverage.bright.sampled_extreme_fraction
+    MotionExtremeCoverage = $Result.quality_extreme_coverage.motion.sampled_extreme_fraction
+  }
+} | Format-Table -AutoSize
+```
+
+Use the existing `1.5x` minimum/desired `2x` timing gate on every required clip
+class. Judge quality with category retention, exact/nearest selection results,
+sampled metric fidelity/ranking, extreme-pool coverage, and nearest-sample
+distance. Sparse modes remain invalid application configuration values until the
+maintainer accepts a distinct quality/performance tradeoff from this evidence.
+
+### Benchmark the isolated NVIDIA request
+
+This experiment requests `LWLibavSource(prefer_hw=1)` with full-resolution
+PlaneStats and the same exact metric window as production quality. L-SMASH Works
+may silently fall back to software, so a successful run is not proof of CUVID.
+The tool fails before timing when `nvidia-smi` cannot identify an NVIDIA GPU and
+records system-wide decoder utilization only as corroborating, unattributed
+evidence.
+
+```powershell
+uv run --no-sync python tools/benchmark_analysis_tiers.py `
+  --root . `
+  --config config/benchmark.config.toml `
+  --output generated/analysis-nvidia-cuvid-request-witch-4k-hdr.json `
+  --mode quality-nvidia-cuvid-candidate `
+  --window-start 0 `
+  --window-end-exclusive 2400 `
+  --repetitions 3 `
+  --metric-cache-policy cold `
+  --require-warm-source-index `
+  $WitchReference $WitchComparison
+
+$Report = Get-Content 'generated/analysis-nvidia-cuvid-request-witch-4k-hdr.json' -Raw | ConvertFrom-Json
+$Result = $Report.comparisons.'quality-nvidia-cuvid-candidate'
+[PSCustomObject]@{
+  GPU = $Report.nvidia_preflight.gpus[0].name
+  Driver = $Report.nvidia_preflight.gpus[0].driver_version
+  Speedup = [math]::Round($Result.timing_comparison.speedup, 3)
+  EffectiveDecoderProven = $Result.decoder_evidence.effective_decoder_proven
+  VerificationStatus = $Result.decoder_evidence.verification_status
+  BeforeDecoderUtilization = $Result.decoder_evidence.decoder_utilization_percent_before
+  AfterDecoderUtilization = $Result.decoder_evidence.decoder_utilization_percent_after
+} | Format-List
+```
+
+Never promote this experiment based only on GPU presence or nonzero utilization:
+the current integration cannot attribute
+decoder-engine activity to the process or prove that L-SMASH did not fall back.
 
 The benchmark defaults to three cold-metric-cache repetitions per mode. It
 deletes only the exact mode/domain metric cache entry before each timed trial,

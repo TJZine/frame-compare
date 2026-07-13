@@ -1,5 +1,5 @@
 Status: Active
-Scope: Practical-equivalence quality migration, benchmark-only dense fast-decoder experiments, and exact window-bounded brightness/motion analysis, each isolated behind its own Windows benchmark gate
+Scope: Practical-equivalence quality migration, exact window-bounded brightness/motion analysis, benchmark-only sparse performance candidates, and an isolated NVIDIA decoder experiment, each independently measurable on Windows
 Owner: Codex (primary controller)
 Updated: 2026-07-13
 
@@ -7,7 +7,7 @@ Updated: 2026-07-13
 
 ## 1. Executive decision
 
-Proceed in three separately measured workstreams:
+Proceed in five separately measured workstreams:
 
 1. evaluate a full-resolution, no-resize VapourSynth PlaneStats implementation as
    an internal candidate for the existing `quality` backend; and
@@ -16,14 +16,21 @@ Proceed in three separately measured workstreams:
    backend without changing frame coverage or motion semantics; and
 3. after the backend decisions are frozen, calculate metrics only for the
    prepared selectable window, with the one-frame motion lookbehind needed to
-   preserve existing results.
+   preserve existing results;
+4. benchmark full-resolution PlaneStats on deterministic contiguous bursts at
+   25%, 12.5%, and 6.25% window coverage, with skip-loop filtering retained only
+   as a separately attributable variant; and
+5. benchmark the bundled L-SMASH Works NVIDIA preference in isolation, recording
+   fallback/verification state rather than assuming that a successful load used
+   hardware decoding.
 
 None of these workstreams adds a public analysis mode. `quality` and `performance` remain
 the only public modes. A candidate may replace the internal `quality`
-implementation only after dense metric, ranking, selected-frame, and multi-clip
-Windows evidence proves practical selection/ranking equivalence, tightly bounded
-float drift, and a material speedup. Window bounding applies to both accepted
-backends and must preserve the exact source
+implementation after explicit maintainer acceptance of practical selection/ranking
+equivalence, tightly bounded float drift, and a material speedup. The maintainer
+accepted implementation after the 4K HDR evidence; the next Windows matrix validates
+the combined production path rather than acting as a pre-implementation block.
+Window bounding applies to both accepted backends and must preserve the exact source
 frames selected by today's full-source calculation followed by slicing.
 
 This is a high-risk analysis, cache-persistence, orchestration, and runtime
@@ -48,18 +55,23 @@ authority-document updates, Windows benchmark artifacts, and independent review.
    committed with conventional commit messages.
 7. Determine whether a dense every-frame decoder-fast backend can make
    `performance` at least 1.5x faster than full-resolution PlaneStats quality.
+8. Determine whether deterministic contiguous-burst sampling can make
+   `performance` at least 1.5x faster while retaining useful automatic selection.
+9. Measure NVIDIA decoding independently and fail closed when actual hardware use
+   cannot be corroborated.
 
 ### Non-goals
 
-- No third public mode in this workstream.
-- No additional spatial downscaling, bit-depth reduction, frame subsampling, or
-  approximate motion algorithm in the first performance experiment. Skipping
-  decoder loop filtering is the one approved benchmark-only quality reduction.
+- No third public mode is added before sparse benchmark evidence justifies one.
+- No additional spatial downscaling or bit-depth reduction. The measured resize
+  path did not reduce the dominant decode/render cost.
 - No concurrent VapourSynth frame scheduling; the measured concurrent experiment
   increased CPU without a normalized throughput gain and has been reverted.
 - No demand-aware omission of luminance or motion. The common workload requests
   both, and partial cache payloads would add disproportionate state complexity.
-- No NVIDIA/GPU-specific decoding path or hardware-dependent branching.
+- No automatic production NVIDIA enablement or silent hardware-success claim;
+  NVIDIA remains benchmark-only until the runtime can prove a maintainable
+  effective-decoder contract.
 - No change to `sources.analysis_source = "fastest"`. It already exists and can
   be evaluated later as a configuration-only experiment.
 - No changes to application CLI flags, config schema, public mode names, default
@@ -152,8 +164,10 @@ Do not create full-source arrays padded with zero, NaN, or sentinel values.
 Add the same exact window boundaries and expected source frame count to
 `MetricCacheRequest`. Include them in the cache fingerprint, serialized payload,
 request-aware load validation, cache-only prevalidation, and diagnostics. Bump
-the analysis metric cache schema from v6 to v7. Old cache files must miss through
-the existing version-mismatch path; do not migrate or partially accept them.
+the analysis metric cache schema from v6 to v7. Because the version is part of
+the filename fingerprint, realistic v6 entries fail closed as cache misses; a v6
+payload placed under a current fingerprint is rejected through the explicit
+version-mismatch path. Do not migrate or partially accept either form.
 
 The selection-domain token continues to include the prepared shared window, but
 it is not a substitute for typed metric-request validation.
@@ -343,13 +357,14 @@ performance criterion before allowing Package 2. Failed or incomplete evidence
 stops migration but does not block proceeding later with independently safe
 window bounding on the existing NumPy quality backend.
 
-Gate status (2026-07-13): provisional pass on the 4K HDR Witch case, with the
-8-bit SDR and animation/grain-heavy cases still required. The Witch run improved
+Gate status (2026-07-13): accepted for implementation by explicit maintainer
+decision under the practical-equivalence contract. The Witch run improved
 median compute time from 235.086 seconds to 64.009 seconds, preserved exact
 selected frames and top-50 orderings, and had `8.80e-9` maximum motion error.
 The original strict `1e-12` rejection was superseded by the maintainer's explicit
-practical-equivalence contract and its frozen `1e-7` dense-error ceiling. Package
-2 remains blocked until the two missing clip classes pass.
+practical-equivalence contract and its frozen `1e-7` dense-error ceiling. The
+8-bit SDR and animation/grain-heavy cases remain required release evidence, but
+now validate the implemented combined path instead of blocking Package 2.
 
 ### Package 1b: dense fast-decoder benchmark experiments
 
@@ -465,6 +480,55 @@ modes. Add JSON artifacts without overwriting Gate A or historical artifacts.
 Any frame/ranking mismatch, incorrect first-window motion, changed source-frame
 number, cache alias, or unexplained full-window regression stops acceptance.
 
+### Package 3b: sparse and NVIDIA benchmark candidates
+
+This package is benchmark-only. It adds no config enum, public mode, or reusable
+production cache payload.
+
+Implementation files:
+
+- `tools/benchmark_analysis_tiers.py`;
+- `tests/test_benchmark_analysis_tiers.py`;
+- the typed optional `prefer_hw=1` loader seam in `src/frame_compare/vs/source.py`
+  and its focused tests; and
+- `docs/analysis-performance-validation.md`.
+
+Required sparse outcome:
+
+- exact deterministic 25%, 12.5%, and 6.25% contiguous-burst budgets;
+- separate normal-decoder and skip-loop-filter variants;
+- one non-selectable lookbehind for every nonzero burst;
+- an explicit sampled-index to source-frame map with source-space exclusions and
+  minimum gaps;
+- full-window user/random behavior;
+- bounded production quality as the timing/reference domain; and
+- timing, selected-frame drift, category retention, sampled fidelity/ranking,
+  quality-extreme coverage, and nearest-sample diagnostics in JSON.
+
+Required NVIDIA outcome:
+
+- full-resolution bounded PlaneStats with `LWLibavSource(prefer_hw=1)`;
+- preflight failure when `nvidia-smi` cannot establish an NVIDIA runtime;
+- GPU/driver and system-wide decoder-utilization evidence; and
+- an explicit unverified/fallback-possible status. GPU presence, successful load,
+  or decoder utilization must never be reported as proof that CUVID was the
+  effective decoder.
+
+Commit boundaries:
+
+1. `feat(benchmark): expose NVIDIA decoder preference`
+2. `feat(benchmark): add sparse analysis candidates`
+3. `feat(benchmark): add NVIDIA analysis candidate`
+4. `docs(analysis): document performance candidate validation`
+
+### Gate C: Windows sparse/NVIDIA decision
+
+Run the documented three-class sparse matrix and isolated NVIDIA command. No
+sparse candidate becomes a public third mode unless it passes the frozen timing
+gate on every required clip and the maintainer accepts its measured selection
+quality. NVIDIA remains experimental unless a maintainable effective-decoder
+contract can be proven; speed alone cannot satisfy that contract.
+
 ### Package 4: independent review and closeout
 
 After both accepted packages are present, assign a read-only production reviewer
@@ -496,9 +560,10 @@ result, reviewer finding disposition, and commit hash.
 ## 7. Rollback
 
 - Package 1 is experimental and can be reverted without changing runtime modes.
-- Package 2 has its own algorithm identity and commit, so reverting restores the
-  NumPy quality backend; v7 or later cache isolation prevents accepting arrays
-  produced by another identity.
+- Package 2 has its own algorithm identity and commit; reverting its migration
+  together with the legacy-helper cleanup restores the former NumPy quality
+  backend. v7 or later cache isolation prevents accepting arrays produced by
+  another identity.
 - Package 3 is a single cache-schema boundary. Revert its code and authority-doc
   commit together; v7 entries then fail the restored v6 loader rather than alias.
 - Never preserve a failed optimization by weakening equivalence thresholds,
@@ -509,9 +574,9 @@ result, reviewer finding disposition, and commit hash.
 After this plan is complete, reassess only with new evidence:
 
 - `sources.analysis_source = "fastest"` as a configuration experiment;
-- a sparse reference/key-frame or fixed-budget performance backend with explicit
-  product semantics, only if the dense decoder-fast gate fails;
+- promotion or rejection of a sparse fixed-budget performance backend after the
+  new three-class artifacts are adjudicated;
 - demand-aware metric payloads if real workloads frequently request only one
   metric family; or
-- hardware-specific decoding if a portable, maintainable runtime contract can be
-  proved across supported environments.
+- hardware-specific decoding only if evidence beyond the current unverified
+  NVIDIA request can prove a portable, maintainable effective-decoder contract.

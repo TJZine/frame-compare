@@ -273,11 +273,11 @@ unchanged.
   `analysis_source_path`, `reference_path`, source identities, source trims,
   effective FPS values, the configured analysis ignore-window settings,
   active-rect resolver policy, each clip's resolved active rectangle, and the final
-  shared selectable window. Cache schema v6 stores
+  shared selectable window. Cache schema v7 stores
   `analysis_source_path`, `performance_mode`, `algorithm_id`, `metric_backend`,
   stable `algorithm_identity_json`, `metric_active_rect`, active-rect source,
-  detection mode, and active-rect resolver algorithm ID in
-  `MetricsMetadata`, and different
+  detection mode, active-rect resolver algorithm ID, original source frame count,
+  and the exact compact metric-array source range in `MetricsMetadata`, and different
   selected references, selected analysis sources, selection domains,
   performance modes, metric algorithm identities, or active-rect metric domains
   from the same input set do not satisfy each other. When
@@ -287,7 +287,8 @@ unchanged.
   content-derived rectangles produce coordinate-specific metric/cache
   identities. A typed metric request also keys the analysis source, explicit
   effective FPS versus source-FPS semantics, metric rectangle, and active-rect
-  provenance, and cache loading validates that request before accepting a hit.
+  provenance, exact source frame count, and metric range, and cache loading validates
+  that request before accepting a hit.
   Metric-array cache
   identity excludes `user_frames`, random seed, frame-selection counts,
   `dark_quantile`, and `bright_quantile` because those values affect frame
@@ -563,7 +564,11 @@ metric mode; it can select
 different dark, bright, or motion frames than `quality` and is cache-isolated
 from `quality`. Both modes apply the prepared active picture rectangle for the
 selected analysis source before metric calculation and use active-rect-specific
-cache identity. The prepared rectangle can come from an explicit
+cache identity. Both modes calculate metric arrays only for the prepared shared
+selectable window; cache schema v7 records that exact source-frame range. When
+the window starts after source frame zero, analysis decodes one unreturned
+lookbehind frame to preserve the first frame's adjacent-pair motion value. The
+prepared rectangle can come from an explicit
 `sources.overrides.<selector>.active_rect`, trusted static metadata, configured
 dimension/aspect-ratio detection, opt-in sampled content detection, or full-frame
 fallback. There are no new analysis performance modes or aliases for active-rect
@@ -571,8 +576,9 @@ detection; `quality` and `performance` consume the same prepared rectangle.
 There is no dedicated `run` flag for analysis performance mode in v1.
 
 The lead/trail fields define a global selectable analysis window inside each
-clip's source-specific base trim domain. They do not physically trim sources or
-change reported source-frame numbers. `min_window_seconds` expands a too-small
+clip's source-specific base trim domain. They bound brightness and motion
+calculation as well as selection without physically changing the sources or
+reported source-frame numbers. `min_window_seconds` expands a too-small
 per-clip selectable window within clip bounds, preferring to extend the end
 first and then shift the start earlier. If a shared selectable intersection
 cannot be formed, the run fails with the standard typed selection error.

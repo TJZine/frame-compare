@@ -55,14 +55,16 @@ Current phase-family owners are intentionally explicit:
 
 Analysis metric algorithm identity is analysis-owned. `frame_compare.analysis.metric_identity`
 builds the stable cache identity for `analysis.performance_mode`; cache I/O stores that
-identity in schema v6 payload metadata, and orchestration only passes the effective
+identity in schema v7 payload metadata, and orchestration only passes the effective
 analysis config, active-rect-aware selection-domain token, analysis-owned metric
-active rectangle, and active-rect provenance into the analysis/cache owner.
+active rectangle, active-rect provenance, and exact source-frame metric range into
+the analysis/cache owner.
 `frame_compare.analysis.metric_strategies` owns the metric implementations:
 `quality` is the default full-resolution VapourSynth PlaneStats behavior, while
 `performance` is an approximate 320px VapourSynth PlaneStats mode that can choose
 different dark, bright, or motion frames. Both modes compute luminance and motion
-in one synchronous graph traversal and apply
+only for the prepared selectable source-frame window in one synchronous graph
+traversal and apply
 the prepared active picture rectangle for the analysis source before metric
 calculation. Preparation resolves that rectangle through
 `frame_compare.orchestration.active_rect` for static evidence, using explicit
@@ -71,8 +73,10 @@ detection, or a full-frame fallback. When
 `screenshots.active_rect_detection = "auto"`, preparation then runs optional
 post-selection-window content refinement through
 `frame_compare.orchestration.active_rect_content` before analysis-source
-resolution and analysis-cache validation. Both modes still return dense
-source-frame-indexed luminance and motion arrays for the selected analysis clip.
+resolution and analysis-cache validation. Both modes return compact dense arrays
+whose metadata records the exact contiguous source-frame range. A nonzero window
+start decodes one unreturned lookbehind frame so the first retained motion value
+still compares the same adjacent source frames as full-source analysis.
 
 `frame_compare.orchestration.source_labels` resolves presentation labels after
 selector/override resolution and before probing or run-folder reservation.
@@ -143,15 +147,18 @@ Primary owned paths:
   `reference_path`, source identities, source trims, effective FPS values,
   configured analysis ignore windows, active-rect resolver policy, each clip's
   resolved active rectangle, and the final shared selectable window.
-  Cache schema v6 stores `analysis_source_path`, `performance_mode`,
+  Cache schema v7 stores `analysis_source_path`, `performance_mode`,
   `algorithm_id`, `metric_backend`, stable `algorithm_identity_json`, and
   `metric_active_rect`, active-rect source, detection mode, and active-rect
-  resolver algorithm ID in `MetricsMetadata`, and the metric arrays are for that
-  selected analysis clip. Metric-array cache identity includes the selected
+  resolver algorithm ID in `MetricsMetadata`. It also stores the original source
+  frame count and exact inclusive/exclusive source-frame metric range; the compact
+  arrays cover only that range for the selected analysis clip. Metric-array cache
+  identity includes the selected
   analysis performance mode, algorithm identity, active-rect resolver policy,
   every prepared clip's resolved active rectangle, and a typed metric request
   containing the analysis source, effective-FPS semantics, concrete metric active
-  rectangle, and active-rect provenance. Request-aware cache loading validates the
+  rectangle, active-rect provenance, and exact metric range. Request-aware cache
+  loading validates the
   same typed identity before reporting or accepting a hit, with a full-frame
   rectangle representing no crop.
   Content-derived active rectangles from opt-in `auto` detection are final
