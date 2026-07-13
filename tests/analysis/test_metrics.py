@@ -181,8 +181,8 @@ def test_calculate_metrics_computes_on_cache_miss(
         motion=[0.0] + [0.1] * 9,
         performance_mode="quality",
         algorithm_id="algorithm-id",
-        metric_backend="python_numpy",
-        algorithm_identity_json='{"backend":"python_numpy"}',
+        metric_backend="vapoursynth_planestats",
+        algorithm_identity_json='{"backend":"vapoursynth_planestats"}',
     )
 
     video_paths = [tmp_path / "v1.mkv"]
@@ -246,8 +246,8 @@ def _quality_strategy_result(frame_count: int = 10) -> MetricComputationResult:
         motion=[0.0] + [0.1] * max(0, frame_count - 1),
         performance_mode="quality",
         algorithm_id="algorithm-id",
-        metric_backend="python_numpy",
-        algorithm_identity_json='{"backend":"python_numpy"}',
+        metric_backend="vapoursynth_planestats",
+        algorithm_identity_json='{"backend":"vapoursynth_planestats"}',
     )
 
 

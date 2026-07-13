@@ -31,8 +31,8 @@ def test_calculate_metrics_uses_custom_vs_loader(mock_key, mock_load, tmp_path):
         motion=[0.0] * 5,
         performance_mode="quality",
         algorithm_id="algorithm-id",
-        metric_backend="python_numpy",
-        algorithm_identity_json='{"backend":"python_numpy"}',
+        metric_backend="vapoursynth_planestats",
+        algorithm_identity_json='{"backend":"vapoursynth_planestats"}',
     )
     with (
         patch(

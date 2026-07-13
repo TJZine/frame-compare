@@ -8,6 +8,7 @@ import pytest
 from frame_compare.analysis.cache_io import CACHE_VERSION, load_cached_metrics
 from frame_compare.analysis.metric_identity import (
     metric_algorithm_id,
+    metric_backend,
     stable_metric_algorithm_identity_json,
 )
 from frame_compare.config.schema import AnalysisConfig
@@ -98,6 +99,9 @@ def test_load_mismatched_inputs(tmp_path: Path) -> None:
                 "motion": [],
                 "metadata": {
                     "frame_count": 0,
+                    "source_frame_count": 0,
+                    "metric_source_start": 0,
+                    "metric_source_end_exclusive": 0,
                     "fps": "24/1",
                     "config_fingerprint": "fp1",
                     "analysis_source_path": "",
@@ -188,13 +192,16 @@ def test_load_same_version_cache_without_metric_active_rect_metadata_is_corrupte
                 "motion": [],
                 "metadata": {
                     "frame_count": 0,
+                    "source_frame_count": 0,
+                    "metric_source_start": 0,
+                    "metric_source_end_exclusive": 0,
                     "fps": "24/1",
                     "config_fingerprint": "fp",
                     "analysis_source_path": "",
                     "clips": [],
                     "performance_mode": "quality",
                     "algorithm_id": metric_algorithm_id(config),
-                    "metric_backend": "python_numpy",
+                    "metric_backend": metric_backend(config),
                     "algorithm_identity_json": stable_metric_algorithm_identity_json(config),
                     "version": CACHE_VERSION,
                 },
@@ -224,13 +231,16 @@ def test_load_same_version_cache_without_active_rect_provenance_is_corrupted(
     config = AnalysisConfig()
     metadata = {
         "frame_count": 0,
+        "source_frame_count": 0,
+        "metric_source_start": 0,
+        "metric_source_end_exclusive": 0,
         "fps": "24/1",
         "config_fingerprint": "fp",
         "analysis_source_path": "",
         "clips": [],
         "performance_mode": "quality",
         "algorithm_id": metric_algorithm_id(config),
-        "metric_backend": "python_numpy",
+        "metric_backend": metric_backend(config),
         "algorithm_identity_json": stable_metric_algorithm_identity_json(config),
         "metric_active_rect": None,
         "active_rect_source": "full-frame",
@@ -483,13 +493,16 @@ def test_load_malformed_nested_payload_returns_corrupted(
         "motion": [0.0],
         "metadata": {
             "frame_count": 1,
+            "source_frame_count": 1,
+            "metric_source_start": 0,
+            "metric_source_end_exclusive": 1,
             "fps": "24/1",
             "config_fingerprint": "fp",
             "analysis_source_path": "",
             "clips": [{"path": "video.mkv", "size": 10, "mtime": 1.0, "sha1": None}],
             "performance_mode": "quality",
             "algorithm_id": metric_algorithm_id(AnalysisConfig()),
-            "metric_backend": "python_numpy",
+            "metric_backend": metric_backend(AnalysisConfig()),
             "algorithm_identity_json": stable_metric_algorithm_identity_json(AnalysisConfig()),
             "metric_active_rect": None,
             "active_rect_source": "full-frame",
