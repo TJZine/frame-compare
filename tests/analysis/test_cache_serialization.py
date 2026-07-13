@@ -21,6 +21,7 @@ from frame_compare.analysis.types import (
     FrameMetrics,
     MetricActiveRect,
     MetricCacheRequest,
+    MetricFrameRange,
     MetricsMetadata,
 )
 from frame_compare.config.schema import AnalysisConfig
@@ -159,6 +160,88 @@ def test_save_and_load_round_trip_serializes_metric_active_rect(tmp_path: Path) 
     assert result.metrics.metadata.active_rect_source == "explicit"
     assert result.metrics.metadata.active_rect_detection_mode == "provided"
     assert result.metrics.metadata.active_rect_algorithm_id == "active_rect_resolution_v2"
+
+
+def test_windowed_cache_round_trip_preserves_range_and_first_motion(tmp_path: Path) -> None:
+    video = create_video_file(tmp_path, "v1.mkv")
+    config = AnalysisConfig()
+    metric_range = MetricFrameRange(source_frame_count=100, start=20, end_exclusive=23)
+    request = MetricCacheRequest(
+        analysis_source_path=video,
+        metric_frame_range=metric_range,
+    )
+    fingerprint = compute_cache_key([video], config, metric_request=request)
+    metrics = FrameMetrics(
+        luminance=[0.1, 0.2, 0.3],
+        motion=[0.4, 0.5, 0.6],
+        metadata=MetricsMetadata(
+            frame_count=3,
+            fps=Fraction(24, 1),
+            config_fingerprint=fingerprint,
+            clips=[
+                ClipIdentity(
+                    path=str(video),
+                    size=video.stat().st_size,
+                    mtime=video.stat().st_mtime,
+                )
+            ],
+            source_frame_count=100,
+            metric_source_start=20,
+            metric_source_end_exclusive=23,
+            analysis_source_path=str(video),
+            performance_mode=config.performance_mode.value,
+            algorithm_id=metric_algorithm_id(config),
+            metric_backend=metric_backend(config),
+            algorithm_identity_json=stable_metric_algorithm_identity_json(config),
+        ),
+    )
+
+    save_metrics_cache(metrics, tmp_path)
+    result = load_cached_metrics_for_request(tmp_path, fingerprint, [], request)
+
+    assert result.success is True
+    assert result.metrics is not None
+    assert result.metrics.motion[0] == 0.4
+    assert result.metrics.metadata.metric_source_start == 20
+    assert result.metrics.metadata.metric_source_end_exclusive == 23
+
+
+def test_windowed_cache_request_rejects_different_range(tmp_path: Path) -> None:
+    video = create_video_file(tmp_path, "v1.mkv")
+    config = AnalysisConfig()
+    stored_range = MetricFrameRange(source_frame_count=100, start=20, end_exclusive=23)
+    stored_request = MetricCacheRequest(
+        analysis_source_path=video,
+        metric_frame_range=stored_range,
+    )
+    fingerprint = compute_cache_key([video], config, metric_request=stored_request)
+    metadata = MetricsMetadata(
+        frame_count=3,
+        fps=Fraction(24, 1),
+        config_fingerprint=fingerprint,
+        clips=[],
+        source_frame_count=100,
+        metric_source_start=20,
+        metric_source_end_exclusive=23,
+        analysis_source_path=str(video),
+        performance_mode=config.performance_mode.value,
+        algorithm_id=metric_algorithm_id(config),
+        metric_backend=metric_backend(config),
+        algorithm_identity_json=stable_metric_algorithm_identity_json(config),
+    )
+    save_metrics_cache(
+        FrameMetrics(luminance=[0.1, 0.2, 0.3], motion=[0.4, 0.5, 0.6], metadata=metadata),
+        tmp_path,
+    )
+    mismatched_request = MetricCacheRequest(
+        analysis_source_path=video,
+        metric_frame_range=MetricFrameRange(100, 21, 24),
+    )
+
+    result = load_cached_metrics_for_request(tmp_path, fingerprint, [], mismatched_request)
+
+    assert result.success is False
+    assert result.reason == "mismatched_inputs"
 
 
 def test_load_cache_accepts_content_derived_auto_active_rect_metadata(tmp_path: Path) -> None:

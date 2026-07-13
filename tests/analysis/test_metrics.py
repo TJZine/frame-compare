@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fractions import Fraction
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -16,10 +17,21 @@ from frame_compare.analysis.types import (
     FrameMetrics,
     MetricActiveRect,
     MetricCacheRequest,
+    MetricFrameRange,
     MetricsMetadata,
 )
 from frame_compare.config.schema import AnalysisConfig
 from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError
+from frame_compare.vs.types import SourceInfo
+
+
+class _SliceClip:
+    def __init__(self, frames: list[int]) -> None:
+        self.frames = frames
+        self.num_frames = len(frames)
+
+    def __getitem__(self, frame_slice: slice) -> _SliceClip:
+        return _SliceClip(self.frames[frame_slice])
 
 
 @patch("frame_compare.analysis.metrics.load_cached_metrics_for_request")
@@ -237,6 +249,61 @@ def _quality_strategy_result(frame_count: int = 10) -> MetricComputationResult:
         metric_backend="python_numpy",
         algorithm_identity_json='{"backend":"python_numpy"}',
     )
+
+
+@patch("frame_compare.analysis.metrics.save_metrics_cache")
+@patch("frame_compare.analysis.metrics.calculate_metric_strategy")
+@patch("frame_compare.analysis.metrics.DefaultVSLoader")
+@patch("frame_compare.analysis.metrics.load_cached_metrics_for_request")
+def test_calculate_metrics_bounds_decode_and_preserves_motion_lookbehind(
+    mock_load,
+    mock_loader_cls,
+    mock_strategy,
+    mock_save,
+    tmp_path: Path,
+) -> None:
+    mock_load.return_value = MagicMock(success=False)
+    clip = _SliceClip([0, 1, 2, 3, 4, 5])
+    source = SourceInfo(
+        clip=cast(Any, clip),
+        width=1920,
+        height=1080,
+        num_frames=clip.num_frames,
+        fps=Fraction(24, 1),
+        format=cast(Any, object()),
+        frame_props={},
+        is_hdr=False,
+        hdr_metadata=None,
+    )
+    mock_loader_cls.return_value.load.return_value = source
+    mock_strategy.return_value = MetricComputationResult(
+        luminance=[0.1, 0.2, 0.3, 0.4],
+        motion=[0.0, 0.12, 0.23, 0.34],
+        performance_mode="quality",
+        algorithm_id="algorithm-id",
+        metric_backend="vapoursynth_planestats",
+        algorithm_identity_json='{"backend":"vapoursynth_planestats"}',
+    )
+    video_path = tmp_path / "v1.mkv"
+    video_path.write_bytes(b"")
+    requested_range = MetricFrameRange(source_frame_count=6, start=2, end_exclusive=5)
+
+    result = calculate_metrics(
+        [video_path],
+        AnalysisConfig(),
+        tmp_path,
+        metric_frame_range=requested_range,
+    )
+
+    strategy_source = mock_strategy.call_args.args[0]
+    assert strategy_source.clip.frames == [1, 2, 3, 4]
+    assert result.luminance == [0.2, 0.3, 0.4]
+    assert result.motion == [0.12, 0.23, 0.34]
+    assert result.metadata.frame_count == 3
+    assert result.metadata.source_frame_count == 6
+    assert result.metadata.metric_source_start == 2
+    assert result.metadata.metric_source_end_exclusive == 5
+    mock_save.assert_called_once()
 
 
 @patch("frame_compare.analysis.metrics.save_metrics_cache")

@@ -22,6 +22,7 @@ from frame_compare.analysis.types import (
     FrameMetrics,
     MetricActiveRect,
     MetricCacheRequest,
+    MetricFrameRange,
     MetricsMetadata,
 )
 from frame_compare.utils.atomic_write import write_text_atomic
@@ -31,7 +32,7 @@ if TYPE_CHECKING:
 
 CACHE_FILE_EXTENSION: str = ".compframes"
 CACHE_LABEL_MAX_LENGTH: int = 80
-CACHE_VERSION: int = 6
+CACHE_VERSION: int = 7
 _SAFE_LABEL_CHARS = re.compile(r"[^a-z0-9._-]+")
 _MULTI_SEPARATOR = re.compile(r"[-_.]{2,}")
 
@@ -99,9 +100,16 @@ def _metric_cache_request_token(request: MetricCacheRequest) -> str:
         else f"{request.effective_fps.numerator}/{request.effective_fps.denominator}"
     )
     source_path = "" if request.analysis_source_path is None else str(request.analysis_source_path)
+    frame_range = request.metric_frame_range
+    frame_range_token = (
+        "full_source"
+        if frame_range is None
+        else (f"{frame_range.source_frame_count}:{frame_range.start}:{frame_range.end_exclusive}")
+    )
     return "|".join(
         (
             f"source:{source_path}",
+            f"frame_range:{frame_range_token}",
             f"effective_fps:{effective_fps}",
             f"rect:{_metric_active_rect_token(request.metric_active_rect)}",
             f"rect_source:{request.active_rect_source}",
@@ -243,8 +251,19 @@ def _metrics_metadata_matches_request(
     expected_source = (
         "" if request.analysis_source_path is None else str(request.analysis_source_path)
     )
+    frame_range_matches = (
+        metadata.metric_source_start == 0
+        and metadata.metric_source_end_exclusive == metadata.source_frame_count
+        if request.metric_frame_range is None
+        else (
+            metadata.source_frame_count == request.metric_frame_range.source_frame_count
+            and metadata.metric_source_start == request.metric_frame_range.start
+            and metadata.metric_source_end_exclusive == request.metric_frame_range.end_exclusive
+        )
+    )
     return (
         metadata.analysis_source_path == expected_source
+        and frame_range_matches
         and metadata.metric_active_rect == request.metric_active_rect
         and metadata.active_rect_source == request.active_rect_source
         and metadata.active_rect_detection_mode == request.active_rect_detection_mode
@@ -285,7 +304,12 @@ def _parse_cache_payload(data: Mapping[str, object]) -> _ValidatedCachePayload:
     metadata = _parse_metrics_metadata(_as_mapping(data["metadata"]))
     luminance = _parse_numeric_series(data["luminance"])
     motion = _parse_numeric_series(data["motion"])
-    _validate_metric_arrays(luminance=luminance, motion=motion, frame_count=metadata.frame_count)
+    _validate_metric_arrays(
+        luminance=luminance,
+        motion=motion,
+        frame_count=metadata.frame_count,
+        metric_source_start=metadata.metric_source_start,
+    )
     return _ValidatedCachePayload(
         luminance=luminance,
         motion=motion,
@@ -313,10 +337,11 @@ def _validate_metric_arrays(
     luminance: list[float],
     motion: list[float],
     frame_count: int,
+    metric_source_start: int,
 ) -> None:
     if len(luminance) != frame_count or len(motion) != frame_count:
         raise _CacheParseError
-    if motion and motion[0] != 0.0:
+    if motion and metric_source_start == 0 and motion[0] != 0.0:
         raise _CacheParseError
 
 
@@ -328,6 +353,9 @@ def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
             "fps",
             "config_fingerprint",
             "clips",
+            "source_frame_count",
+            "metric_source_start",
+            "metric_source_end_exclusive",
             "analysis_source_path",
             "performance_mode",
             "algorithm_id",
@@ -342,6 +370,20 @@ def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
 
     frame_count = data["frame_count"]
     if not isinstance(frame_count, int) or isinstance(frame_count, bool) or frame_count < 0:
+        raise _CacheParseError
+
+    source_frame_count = _parse_nonnegative_int(data["source_frame_count"])
+    metric_source_start = _parse_nonnegative_int(data["metric_source_start"])
+    metric_source_end_exclusive = _parse_nonnegative_int(data["metric_source_end_exclusive"])
+    try:
+        MetricFrameRange(
+            source_frame_count=source_frame_count,
+            start=metric_source_start,
+            end_exclusive=metric_source_end_exclusive,
+        )
+    except ValueError as exc:
+        raise _CacheParseError from exc
+    if metric_source_end_exclusive - metric_source_start != frame_count:
         raise _CacheParseError
 
     fps = data["fps"]
@@ -392,6 +434,9 @@ def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
             fps=Fraction(fps),
             config_fingerprint=config_fingerprint,
             clips=_parse_clip_identities(data["clips"]),
+            source_frame_count=source_frame_count,
+            metric_source_start=metric_source_start,
+            metric_source_end_exclusive=metric_source_end_exclusive,
             analysis_source_path=analysis_source_path,
             performance_mode=performance_mode,
             algorithm_id=algorithm_id,
@@ -522,6 +567,12 @@ def _parse_cache_version(value: object) -> int:
     return value
 
 
+def _parse_nonnegative_int(value: object) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise _CacheParseError
+    return value
+
+
 def save_metrics_cache(metrics: FrameMetrics, cache_dir: Path) -> None:
     """Persist analysis metrics to cache file."""
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -537,6 +588,9 @@ def save_metrics_cache(metrics: FrameMetrics, cache_dir: Path) -> None:
         "motion": list(metrics.motion),
         "metadata": {
             "frame_count": metrics.metadata.frame_count,
+            "source_frame_count": metrics.metadata.source_frame_count,
+            "metric_source_start": metrics.metadata.metric_source_start,
+            "metric_source_end_exclusive": metrics.metadata.metric_source_end_exclusive,
             "fps": str(metrics.metadata.fps),
             "config_fingerprint": metrics.metadata.config_fingerprint,
             "analysis_source_path": metrics.metadata.analysis_source_path,

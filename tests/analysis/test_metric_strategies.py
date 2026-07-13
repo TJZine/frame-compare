@@ -559,7 +559,7 @@ def test_performance_metric_identity_is_distinct_and_stable() -> None:
     assert '"performance_mode":"performance"' in first_performance
     assert '"target_max_width":320' in first_performance
     assert '"resize":"bicubic"' in first_performance
-    assert '"temporal":"all_adjacent_pairs"' in first_performance
+    assert '"temporal":"requested_window_pairs_with_source_lookbehind"' in first_performance
     parsed_performance = json.loads(first_performance)
     assert parsed_performance["luminance"]["spatial"] == "active_rect_aware_luma_resize"
     assert parsed_performance["motion"]["spatial"] == "active_rect_aware_luma_resize"

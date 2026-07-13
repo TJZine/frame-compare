@@ -24,6 +24,7 @@ from frame_compare.analysis.types import (
 )
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_models import SourceOverrideConfig
+from frame_compare.orchestration.active_rect import metric_cache_request_for_clip
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot, ClipState
 from frame_compare.orchestration.probing.probe_cache import (
     compute_probe_cache_key,
@@ -119,6 +120,9 @@ def write_metrics_cache(
         config,
         analysis_source_path=resolved_analysis_source_path,
     )
+    metric_range = metric_request.metric_frame_range
+    if metric_range is None:
+        raise AssertionError("Prepared cache request must include an exact metric range")
     write_probe_cache_for_inputs(
         cache_dir.parent.parent / "clip_probe.toml",
         ordered_cache_inputs,
@@ -132,10 +136,14 @@ def write_metrics_cache(
     )
     stats_by_path = {path: path.stat() for path in ordered_cache_inputs}
     metrics = FrameMetrics(
-        luminance=[0.1] * 100,
-        motion=[0.0] + [0.2] * 99,
+        luminance=[0.1] * metric_range.frame_count,
+        motion=(
+            [0.0] + [0.2] * (metric_range.frame_count - 1)
+            if metric_range.start == 0
+            else [0.2] * metric_range.frame_count
+        ),
         metadata=MetricsMetadata(
-            frame_count=100,
+            frame_count=metric_range.frame_count,
             fps=Fraction(24, 1),
             config_fingerprint=fingerprint,
             clips=[
@@ -146,6 +154,9 @@ def write_metrics_cache(
                 )
                 for path in ordered_cache_inputs
             ],
+            source_frame_count=metric_range.source_frame_count,
+            metric_source_start=metric_range.start,
+            metric_source_end_exclusive=metric_range.end_exclusive,
             analysis_source_path=str(resolved_analysis_source_path),
             performance_mode=config.analysis.performance_mode.value,
             algorithm_id=metric_algorithm_id(config.analysis),
@@ -227,25 +238,11 @@ def metric_cache_request_for_cache_inputs(
     analysis_clip = clips[0]
     if analysis_source_path is not None:
         analysis_clip = next(clip for clip in clips if clip.path == analysis_source_path)
-    rect = analysis_clip.active_rect
-    metric_rect = (
-        None
-        if rect is None
-        else MetricActiveRect(x=rect.x, y=rect.y, width=rect.width, height=rect.height)
-    )
-    return MetricCacheRequest(
-        analysis_source_path=analysis_clip.path,
-        effective_fps=analysis_clip.effective_fps,
-        metric_active_rect=metric_rect,
-        active_rect_source=rect.source if rect is not None else "full-frame",
-        active_rect_detection_mode=(
-            rect.detection_mode
-            if rect is not None
-            else config.screenshots.active_rect_detection.value
-        ),
-        active_rect_algorithm_id=(
-            rect.algorithm_id if rect is not None else "active_rect_resolution_v2"
-        ),
+    selection_window = compute_selection_window_for_clips(clips=clips, config=config)
+    return metric_cache_request_for_clip(
+        analysis_clip,
+        selection_window=selection_window,
+        fallback_detection_mode=config.screenshots.active_rect_detection.value,
     )
 
 

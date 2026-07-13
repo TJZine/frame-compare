@@ -67,6 +67,26 @@ def test_load_v4_payload_returns_version_mismatch(tmp_path: Path) -> None:
     assert result.reason == "version_mismatch"
 
 
+def test_load_v6_payload_returns_version_mismatch(tmp_path: Path) -> None:
+    cache_file(tmp_path, "fp").write_text(
+        json.dumps(
+            {
+                "version": 6,
+                "fingerprint": "fp",
+                "luminance": [],
+                "motion": [],
+                "metadata": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = load_cached_metrics(tmp_path, "fp", [])
+
+    assert result.success is False
+    assert result.reason == "version_mismatch"
+
+
 def test_load_mismatched_inputs(tmp_path: Path) -> None:
     """Wrong fingerprint → reason="mismatched_inputs"."""
     cache_file(tmp_path, "fp2").write_text(

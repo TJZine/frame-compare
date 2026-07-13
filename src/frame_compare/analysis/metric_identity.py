@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 type MetricAlgorithmIdentity = Mapping[str, object]
 
-_ALGORITHM_VERSION = "analysis_metrics_v4"
+_ALGORITHM_VERSION = "analysis_metrics_v5"
 
 
 def build_metric_algorithm_identity(config: AnalysisConfig) -> MetricAlgorithmIdentity:
@@ -55,12 +55,12 @@ def _quality_identity() -> dict[str, object]:
         "backend": "vapoursynth_planestats",
         "performance_mode": "quality",
         "luminance": {
-            "temporal": "all_frames",
+            "temporal": "requested_contiguous_window_frames",
             "spatial": "active_rect_aware_full_resolution_luma",
             "operation": "planestats_average",
         },
         "motion": {
-            "temporal": "all_adjacent_pairs",
+            "temporal": "requested_window_pairs_with_source_lookbehind",
             "spatial": "active_rect_aware_full_resolution_luma",
             "operation": "planestats_diff",
         },
@@ -73,7 +73,7 @@ def _performance_identity() -> dict[str, object]:
         "backend": "vapoursynth_planestats",
         "performance_mode": "performance",
         "luminance": {
-            "temporal": "all_frames",
+            "temporal": "requested_contiguous_window_frames",
             "spatial": "active_rect_aware_luma_resize",
             "target_max_width": 320,
             "resize": "bicubic",
@@ -81,7 +81,7 @@ def _performance_identity() -> dict[str, object]:
             "operation": "planestats_average",
         },
         "motion": {
-            "temporal": "all_adjacent_pairs",
+            "temporal": "requested_window_pairs_with_source_lookbehind",
             "spatial": "active_rect_aware_luma_resize",
             "target_max_width": 320,
             "resize": "bicubic",

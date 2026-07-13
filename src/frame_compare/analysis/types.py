@@ -61,10 +61,32 @@ class MetricActiveRect:
 
 
 @dataclass(frozen=True, slots=True)
+class MetricFrameRange:
+    """Contiguous source-frame domain represented by cached metric arrays."""
+
+    source_frame_count: int
+    start: int
+    end_exclusive: int
+
+    def __post_init__(self) -> None:
+        if self.source_frame_count < 0:
+            raise ValueError("Metric source frame count must be non-negative")
+        if self.start < 0 or self.end_exclusive < self.start:
+            raise ValueError("Metric frame range boundaries are invalid")
+        if self.end_exclusive > self.source_frame_count:
+            raise ValueError("Metric frame range exceeds the source frame count")
+
+    @property
+    def frame_count(self) -> int:
+        return self.end_exclusive - self.start
+
+
+@dataclass(frozen=True, slots=True)
 class MetricCacheRequest:
     """Complete requested identity for metric-array cache lookup and validation."""
 
     analysis_source_path: Path | None
+    metric_frame_range: MetricFrameRange | None = None
     effective_fps: Fraction | None = None
     metric_active_rect: MetricActiveRect | None = None
     active_rect_source: ActiveRectSource = "full-frame"
@@ -97,6 +119,9 @@ class MetricsMetadata:
     fps: Fraction
     config_fingerprint: str
     clips: Sequence[ClipIdentity]
+    source_frame_count: int = -1
+    metric_source_start: int = 0
+    metric_source_end_exclusive: int = -1
     analysis_source_path: str = ""
     performance_mode: str = "quality"
     algorithm_id: str = ""
@@ -106,7 +131,23 @@ class MetricsMetadata:
     active_rect_source: ActiveRectSource = "full-frame"
     active_rect_detection_mode: ActiveRectDetectionMode = "aspect_ratio"
     active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v2"
-    version: int = 6
+    version: int = 7
+
+    def __post_init__(self) -> None:
+        """Normalize legacy in-memory constructors to a full-source metric domain."""
+        if self.source_frame_count == -1:
+            object.__setattr__(self, "source_frame_count", self.frame_count)
+        if self.metric_source_end_exclusive == -1:
+            object.__setattr__(self, "metric_source_end_exclusive", self.frame_count)
+        if self.frame_count < 0 or self.source_frame_count < 0:
+            raise ValueError("Metric frame counts must be non-negative")
+        if (
+            self.metric_source_start < 0
+            or self.metric_source_end_exclusive < self.metric_source_start
+            or self.metric_source_end_exclusive > self.source_frame_count
+            or self.metric_source_end_exclusive - self.metric_source_start != self.frame_count
+        ):
+            raise ValueError("Metric metadata frame range is inconsistent")
 
 
 @dataclass(frozen=True, slots=True)

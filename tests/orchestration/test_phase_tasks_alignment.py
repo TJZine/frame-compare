@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from frame_compare.analysis.errors import SelectionError
+from frame_compare.analysis.metrics import slice_frame_metrics
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.orchestration import phase_selection, phase_tasks
@@ -305,12 +306,10 @@ def test_run_align_phase_reselects_trimmed_overlap_when_fallback_plan_would_drop
     overlap_length = output.reference.effective_num_frames()
 
     expected_selection = phase_tasks.select_frames(
-        metrics=FrameMetrics(
-            luminance=ctx.analysis_metrics.luminance[
-                overlap_start : overlap_start + overlap_length
-            ],
-            motion=ctx.analysis_metrics.motion[overlap_start : overlap_start + overlap_length],
-            metadata=replace(ctx.analysis_metrics.metadata, frame_count=overlap_length),
+        metrics=slice_frame_metrics(
+            ctx.analysis_metrics,
+            start_index=overlap_start,
+            frame_count=overlap_length,
         ),
         config=ctx.config.analysis,
     )

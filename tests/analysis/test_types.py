@@ -29,7 +29,7 @@ def test_clip_identity_is_frozen() -> None:
 
 def test_metrics_metadata_default_schema_version() -> None:
     mm = MetricsMetadata(frame_count=100, fps=Fraction(24), config_fingerprint="fp", clips=[])
-    assert mm.version == 6
+    assert mm.version == 7
 
 
 def test_selection_default_factories_are_isolated() -> None:

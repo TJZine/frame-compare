@@ -47,6 +47,7 @@ def test_run_analyze_phase_records_cache_hit_and_selection_breakdown(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ctx = _context(tmp_path)
+    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=2)
     input_videos = [ctx.reference.path]
     metrics = FrameMetrics(
         luminance=[0.1, 0.9],
@@ -120,6 +121,7 @@ def test_run_analyze_phase_uses_prepared_analysis_selection_domain(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ctx = _context(tmp_path)
+    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=2)
     ctx.analysis_selection_domain = "trim_start=0|trim_end=0|effective_fps=24/1"
     input_videos = [ctx.reference.path]
     metrics = FrameMetrics(
@@ -183,6 +185,7 @@ def test_run_analyze_phase_forwards_analysis_clip_active_rect(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ctx = _context(tmp_path)
+    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=2)
     assert ctx.analysis_clip is not None
     ctx.analysis_clip = replace(
         ctx.analysis_clip,
@@ -256,6 +259,7 @@ def test_run_analyze_phase_cache_only_missing_cache_does_not_recompute(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ctx = _context(tmp_path)
+    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=2)
     input_videos = [ctx.reference.path]
 
     def _fake_load_cached_metrics(*_args: object, **_kwargs: object) -> CacheLoadResult:
@@ -283,6 +287,7 @@ def test_run_analyze_phase_metadata_mismatch_recomputes_and_reports_cache_miss(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ctx = _context(tmp_path)
+    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=2)
     input_videos = [ctx.reference.path]
     metrics = FrameMetrics(
         luminance=[0.1, 0.9],
@@ -367,13 +372,16 @@ def test_run_analyze_phase_selects_from_reference_base_trim_domain(
     ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=5)
     input_videos = [ctx.reference.path]
     metrics = FrameMetrics(
-        luminance=[float(frame) for frame in range(20)],
-        motion=[float(frame) / 10.0 for frame in range(20)],
+        luminance=[float(frame) for frame in range(10, 15)],
+        motion=[float(frame) / 10.0 for frame in range(10, 15)],
         metadata=MetricsMetadata(
-            frame_count=20,
+            frame_count=5,
             fps=Fraction(24, 1),
             config_fingerprint="fingerprint",
             clips=[],
+            source_frame_count=100,
+            metric_source_start=10,
+            metric_source_end_exclusive=15,
         ),
     )
     calls: dict[str, Any] = {}
@@ -439,13 +447,16 @@ def test_run_analyze_phase_uses_analysis_clip_metrics_but_reference_frame_domain
     ctx.selection_window = SelectionWindow(start_frame=5, end_frame_exclusive=15)
     input_videos = [ctx.reference.path, analysis_clip.path]
     metrics = FrameMetrics(
-        luminance=[float(frame) for frame in range(100)],
-        motion=[float(frame) / 10.0 for frame in range(100)],
+        luminance=[float(frame) for frame in range(25, 35)],
+        motion=[float(frame) / 10.0 for frame in range(25, 35)],
         metadata=MetricsMetadata(
-            frame_count=100,
+            frame_count=10,
             fps=Fraction(24, 1),
             config_fingerprint="fingerprint",
             clips=[],
+            source_frame_count=100,
+            metric_source_start=25,
+            metric_source_end_exclusive=35,
         ),
     )
 
@@ -569,13 +580,16 @@ def test_run_analyze_phase_selects_from_global_selection_window(
     ctx.selection_window = SelectionWindow(start_frame=24, end_frame_exclusive=72)
     input_videos = [ctx.reference.path]
     metrics = FrameMetrics(
-        luminance=[float(frame) for frame in range(100)],
-        motion=[float(frame) / 10.0 for frame in range(100)],
+        luminance=[float(frame) for frame in range(24, 72)],
+        motion=[float(frame) / 10.0 for frame in range(24, 72)],
         metadata=MetricsMetadata(
-            frame_count=100,
+            frame_count=48,
             fps=Fraction(24, 1),
             config_fingerprint="fingerprint",
             clips=[],
+            source_frame_count=100,
+            metric_source_start=24,
+            metric_source_end_exclusive=72,
         ),
     )
 

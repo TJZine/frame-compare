@@ -7,7 +7,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
-from frame_compare.analysis.types import MetricActiveRect, MetricCacheRequest
+from frame_compare.analysis.types import MetricActiveRect, MetricCacheRequest, MetricFrameRange
+from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 from frame_compare.config.schema_models import SourceOverrideConfig
 from frame_compare.orchestration.context import (
@@ -124,12 +125,14 @@ def metric_active_rect_for_clip(clip: ClipState | None) -> MetricActiveRect | No
 def metric_cache_request_for_clip(
     clip: ClipState | None,
     *,
+    selection_window: SelectionWindow,
     fallback_detection_mode: ClipActiveRectDetectionMode,
 ) -> MetricCacheRequest:
     """Build the complete analysis cache request for a prepared clip."""
     rect = clip.active_rect if clip is not None else None
     return MetricCacheRequest(
         analysis_source_path=clip.path if clip is not None else None,
+        metric_frame_range=_metric_frame_range_for_clip(clip, selection_window),
         effective_fps=clip.effective_fps if clip is not None else None,
         metric_active_rect=metric_active_rect_for_clip(clip),
         active_rect_source=rect.source if rect is not None else "full-frame",
@@ -139,6 +142,26 @@ def metric_cache_request_for_clip(
         active_rect_algorithm_id=(
             rect.algorithm_id if rect is not None else ACTIVE_RECT_RESOLUTION_ALGORITHM
         ),
+    )
+
+
+def _metric_frame_range_for_clip(
+    clip: ClipState | None,
+    selection_window: SelectionWindow,
+) -> MetricFrameRange | None:
+    if clip is None:
+        return None
+    window_start = selection_window.start_frame if selection_window.frame_count > 0 else 0
+    frame_count = (
+        selection_window.frame_count
+        if selection_window.frame_count > 0
+        else clip.effective_num_frames()
+    )
+    source_start = clip.trim.trim_start_frames + window_start
+    return MetricFrameRange(
+        source_frame_count=clip.probe.num_frames,
+        start=source_start,
+        end_exclusive=source_start + frame_count,
     )
 
 
