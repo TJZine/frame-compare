@@ -1,6 +1,7 @@
 from collections.abc import Mapping
 from fractions import Fraction
 from importlib import import_module
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Literal, cast
 
@@ -191,11 +192,79 @@ def test_load_source_missing_lsmas_raises_plugin_not_found():
     assert exc.value.code == "FC-2003"
 
 
-def test_load_source_file_error_raises_source_load_error():
-    core = make_mock_core(with_lsmas=True, fail_load=True)
+def test_load_source_file_error_raises_source_load_error(tmp_path: Path) -> None:
+    calls: list[dict[str, object]] = []
+
+    def loader(_path: str, **kwargs: object) -> MockClip:
+        calls.append(kwargs)
+        raise RuntimeError("File corrupt")
+
+    core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
+
     with pytest.raises(SourceLoadError) as exc:
-        load_source("video.mkv", core)  # type: ignore
+        load_source(tmp_path / "video.mkv", core)  # type: ignore[arg-type]
+
     assert exc.value.code == "FC-4015"
+    assert calls == [{}]
+
+
+def test_load_source_retries_without_cache_after_adjacent_index_failure(tmp_path: Path) -> None:
+    video_path = tmp_path / "video.mkv"
+    index_path = Path(f"{video_path}.lwi")
+    index_path.write_bytes(b"unusable index")
+    calls: list[dict[str, object]] = []
+
+    def loader(_path: str, **kwargs: object) -> MockClip:
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise RuntimeError("failed to construct index")
+        return MockClip()
+
+    core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
+
+    source = load_source(  # type: ignore[arg-type]
+        video_path,
+        core,
+        decoder_options=LWLibavSourceOptions(
+            threads=12,
+            ff_options="skip_loop_filter=all",
+            prefer_hw=1,
+        ),
+    )
+
+    assert source.num_frames == 1000
+    assert calls == [
+        {"threads": 12, "ff_options": "skip_loop_filter=all", "prefer_hw": 1},
+        {
+            "cache": 0,
+            "threads": 12,
+            "ff_options": "skip_loop_filter=all",
+            "prefer_hw": 1,
+        },
+    ]
+    assert index_path.read_bytes() == b"unusable index"
+
+
+def test_load_source_does_not_retry_frame_read_failure(tmp_path: Path) -> None:
+    video_path = tmp_path / "video.mkv"
+    Path(f"{video_path}.lwi").write_bytes(b"existing index")
+    calls: list[dict[str, object]] = []
+
+    class FrameReadFailureClip(MockClip):
+        def get_frame(self, n: int) -> SimpleNamespace:
+            raise RuntimeError(f"failed to read frame {n}")
+
+    def loader(_path: str, **kwargs: object) -> MockClip:
+        calls.append(kwargs)
+        return FrameReadFailureClip()
+
+    core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
+
+    with pytest.raises(SourceLoadError) as exc:
+        load_source(video_path, core)  # type: ignore[arg-type]
+
+    assert exc.value.code == "FC-4015"
+    assert calls == [{}]
 
 
 # HDR Detection Tests

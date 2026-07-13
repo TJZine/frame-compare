@@ -312,7 +312,8 @@ Keep these integrations at their current owners:
 - isolated slow.pics post-upload webhook delivery:
   `frame_compare.services.slowpics_webhook`
 - HTML report generation: `frame_compare.services.report`
-- VS loading and HDR/tonemap logic: `frame_compare.vs.*`
+- VS loading, non-destructive adjacent L-SMASH index recovery, and HDR/tonemap
+  logic: `frame_compare.vs.*`
 - packaging/install/update flow: `tools/windows_portable/**`
 
 The default Docker behavior is intentionally narrower than the native Windows

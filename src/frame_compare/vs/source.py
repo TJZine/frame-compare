@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from fractions import Fraction
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from frame_compare.vs.env import ensure_vs_environment, require_plugin
@@ -12,8 +13,6 @@ from frame_compare.vs.props import detect_hdr
 from frame_compare.vs.types import SourceInfo
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     import vapoursynth as vs
 
 
@@ -70,7 +69,15 @@ def load_source(
                 loader_kwargs["ff_options"] = decoder_options.ff_options
             if decoder_options.prefer_hw is not None:
                 loader_kwargs["prefer_hw"] = decoder_options.prefer_hw
-        clip = loader.LWLibavSource(str(path), **loader_kwargs)
+        try:
+            clip = loader.LWLibavSource(str(path), **loader_kwargs)
+        except Exception:
+            # L-SMASH may leave or encounter an unusable adjacent index and then
+            # fail while trying to rebuild it in place. Retry without writing a
+            # cache so callers do not have to delete generated index files.
+            if not Path(f"{path}.lwi").is_file():
+                raise
+            clip = loader.LWLibavSource(str(path), cache=0, **loader_kwargs)
         frame = clip.get_frame(0)
         fps = Fraction(clip.fps.numerator, clip.fps.denominator)
         is_hdr, hdr_metadata = detect_hdr(dict(frame.props))
