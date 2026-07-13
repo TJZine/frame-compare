@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -29,11 +30,12 @@ from rich.progress import (
 )
 
 from frame_compare.analysis.cache_io import compute_cache_key, delete_metrics_cache_entry
+from frame_compare.analysis.errors import SelectionError
 from frame_compare.analysis.metric_strategies import (
     calculate_performance_planestats_metrics,
     calculate_quality_planestats_metrics,
 )
-from frame_compare.analysis.metrics import calculate_metrics
+from frame_compare.analysis.metrics import calculate_metrics, slice_frame_metrics
 from frame_compare.analysis.selection import select_frames
 from frame_compare.analysis.tier_validation import (
     SelectionCategory,
@@ -52,7 +54,9 @@ from frame_compare.analysis.types import (
     FrameSelection,
     MetricActiveRect,
     MetricCacheRequest,
+    MetricFrameRange,
     MetricsMetadata,
+    SelectionBreakdown,
 )
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema import AnalysisConfig, ConfigSchema
@@ -102,11 +106,28 @@ PERFORMANCE_SKIP_LOOP_FILTER_MAX_THREADS_CANDIDATE_ALGORITHM_ID = (
 PERFORMANCE_SKIP_LOOP_FILTER_CANDIDATE_BACKEND = (
     "vapoursynth-planestats-320-lwlibavsource-skip-loop-filter"
 )
+NVIDIA_CUVID_CANDIDATE_MODE = "quality-nvidia-cuvid-candidate"
+NVIDIA_CUVID_CANDIDATE_ALGORITHM_ID = "quality_fullres_planestats_nvidia_cuvid_requested_v1"
+NVIDIA_CUVID_CANDIDATE_BACKEND = "vapoursynth-planestats-fullres-lwlibavsource-prefer-hw"
+SPARSE_CANDIDATE_SPECS: dict[str, tuple[Fraction, bool]] = {
+    "performance-sparse-25pct-candidate": (Fraction(1, 4), False),
+    "performance-sparse-25pct-skip-loop-filter-candidate": (Fraction(1, 4), True),
+    "performance-sparse-12_5pct-candidate": (Fraction(1, 8), False),
+    "performance-sparse-12_5pct-skip-loop-filter-candidate": (Fraction(1, 8), True),
+    "performance-sparse-6_25pct-candidate": (Fraction(1, 16), False),
+    "performance-sparse-6_25pct-skip-loop-filter-candidate": (Fraction(1, 16), True),
+}
+SPARSE_CANDIDATE_MODES = frozenset(SPARSE_CANDIDATE_SPECS)
+SPARSE_CANDIDATE_BACKEND = "vapoursynth-planestats-fullres-contiguous-bursts"
+SPARSE_CANDIDATE_ALGORITHM_VERSION = "v1"
+SPARSE_DEFAULT_BURST_COUNT = 8
 BENCHMARK_ONLY_CANDIDATE_MODES = frozenset(
     {
         QUALITY_PLANESTATS_CANDIDATE_MODE,
         PERFORMANCE_SKIP_LOOP_FILTER_CANDIDATE_MODE,
         PERFORMANCE_SKIP_LOOP_FILTER_MAX_THREADS_CANDIDATE_MODE,
+        NVIDIA_CUVID_CANDIDATE_MODE,
+        *SPARSE_CANDIDATE_MODES,
     }
 )
 PERFORMANCE_DECODER_CANDIDATE_MODES = frozenset(
@@ -135,6 +156,8 @@ class _PlaneStatsSource(Protocol):
     num_frames: int
     std: _PlaneStatsNamespace
 
+    def __getitem__(self, key: slice) -> _PlaneStatsSource: ...
+
 
 @dataclass(frozen=True, slots=True)
 class BenchmarkActiveRect:
@@ -155,10 +178,50 @@ class BenchmarkAnalysisSource:
     effective_fps: Fraction | None
     active_rect: BenchmarkActiveRect
     overrides_by_path: Mapping[Path, SourceOverrideConfig]
+    source_frame_count: int | None = None
 
     @property
     def reference_path(self) -> Path:
         return self.ordered_paths[0]
+
+
+@dataclass(frozen=True, slots=True)
+class SparseBurst:
+    """One analyzed contiguous run and its optional motion-lookbehind frame."""
+
+    start: int
+    end_exclusive: int
+    decode_start: int
+
+    @property
+    def frame_count(self) -> int:
+        return self.end_exclusive - self.start
+
+
+@dataclass(frozen=True, slots=True)
+class SparseMetricSet:
+    """Benchmark-only sparse metrics mapped to their source-frame coordinates."""
+
+    luminance: tuple[float, ...]
+    motion: tuple[float, ...]
+    source_frames: tuple[int, ...]
+    source_frame_count: int
+    fps: Fraction
+    window_start: int
+    window_end_exclusive: int
+    sampling_fraction: Fraction
+    requested_burst_count: int
+    bursts: tuple[SparseBurst, ...]
+    mode: str
+    algorithm_id: str
+    metric_backend: str
+    algorithm_identity_json: str
+
+    def __post_init__(self) -> None:
+        if not (len(self.luminance) == len(self.motion) == len(self.source_frames)):
+            raise ValueError("Sparse metric arrays and source-frame map must have equal lengths")
+        if tuple(sorted(set(self.source_frames))) != self.source_frames:
+            raise ValueError("Sparse source-frame map must be sorted and unique")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -184,6 +247,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         input_paths=input_paths,
         config=config,
     )
+    nvidia_preflight = (
+        _require_nvidia_preflight()
+        if NVIDIA_CUVID_CANDIDATE_MODE in cast(Sequence[str], args.modes)
+        else None
+    )
+    sparse_modes = [
+        mode for mode in cast(Sequence[str], args.modes) if mode in SPARSE_CANDIDATE_MODES
+    ]
+    if sparse_modes and analysis_source.source_frame_count is None:
+        raise SystemExit(
+            "Sparse analysis candidates require the selected source frame count from "
+            "generated/clip_probe.toml. Run the normal preparation path, then rerun the benchmark."
+        )
+    if (
+        sparse_modes
+        and args.window_end_exclusive is not None
+        and analysis_source.source_frame_count is not None
+        and args.window_end_exclusive > analysis_source.source_frame_count
+    ):
+        raise SystemExit(
+            "--window-end-exclusive exceeds the selected analysis source frame count "
+            f"({analysis_source.source_frame_count})."
+        )
     _require_selection_domain_for_analysis_cache_identity(
         selection_domain=args.selection_domain,
         video_paths=input_paths,
@@ -210,6 +296,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         selection_domain=args.selection_domain,
         window_start=args.window_start,
         window_end_exclusive=args.window_end_exclusive,
+        source_frame_count=analysis_source.source_frame_count,
+        sparse_burst_count=args.sparse_burst_count,
         progress_enabled=not args.no_progress,
         repetitions=args.repetitions,
         metric_cache_policy=cast(MetricCachePolicy, args.metric_cache_policy),
@@ -275,8 +363,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             "repetitions": args.repetitions,
             "trial_order_policy": "deterministic_rotation",
             "require_warm_source_index": args.require_warm_source_index,
+            "sparse_burst_count": args.sparse_burst_count,
         },
         "runtime": _runtime_facts(),
+        "nvidia_preflight": nvidia_preflight,
         "source": {
             "analysis_source": source_probe,
             "indexes": source_indexes,
@@ -455,10 +545,11 @@ def _frame_type_summary(ffprobe_result: JsonObject) -> JsonObject:
     for index, raw_frame in enumerate(frames):
         if not isinstance(raw_frame, Mapping):
             continue
-        pict_type = raw_frame.get("pict_type")
+        typed_frame = cast(Mapping[str, object], raw_frame)
+        pict_type = typed_frame.get("pict_type")
         if isinstance(pict_type, str):
             type_counts[pict_type] = type_counts.get(pict_type, 0) + 1
-        if raw_frame.get("key_frame") == 1:
+        if typed_frame.get("key_frame") == 1:
             keyframe_indices.append(index)
     keyframe_gaps = [
         right - left for left, right in zip(keyframe_indices, keyframe_indices[1:], strict=False)
@@ -559,16 +650,17 @@ def _resolve_benchmark_analysis_source(
     )
     override = selection.overrides_by_path.get(source_path)
     effective_fps = None if override is None else override.effective_fps
+    prepared_clip = _prepared_benchmark_clip(
+        root=root,
+        input_paths=selection.ordered_paths,
+        config=config,
+        source_path=source_path,
+        overrides_by_path=selection.overrides_by_path,
+    )
     active_rect = _benchmark_active_rect_from_prepared_clip(
         source_path=source_path,
         override=override,
-        prepared_clip=_prepared_benchmark_clip(
-            root=root,
-            input_paths=selection.ordered_paths,
-            config=config,
-            source_path=source_path,
-            overrides_by_path=selection.overrides_by_path,
-        ),
+        prepared_clip=prepared_clip,
         config=config,
     )
     return BenchmarkAnalysisSource(
@@ -577,23 +669,8 @@ def _resolve_benchmark_analysis_source(
         effective_fps=effective_fps,
         active_rect=active_rect,
         overrides_by_path=selection.overrides_by_path,
+        source_frame_count=None if prepared_clip is None else prepared_clip.probe.num_frames,
     )
-
-
-def _effective_fps_override_for_path(
-    *,
-    input_dir: Path,
-    input_paths: Sequence[Path],
-    config: ConfigSchema,
-    source_path: Path,
-) -> Fraction | None:
-    selection = resolve_source_selection(
-        input_dir=input_dir,
-        discovered_paths=list(input_paths),
-        config=config.sources,
-    )
-    override = selection.overrides_by_path.get(source_path)
-    return None if override is None else override.effective_fps
 
 
 def _prepared_benchmark_clip(
@@ -754,6 +831,8 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             QUALITY_PLANESTATS_CANDIDATE_MODE,
             PERFORMANCE_SKIP_LOOP_FILTER_CANDIDATE_MODE,
             PERFORMANCE_SKIP_LOOP_FILTER_MAX_THREADS_CANDIDATE_MODE,
+            NVIDIA_CUVID_CANDIDATE_MODE,
+            *sorted(SPARSE_CANDIDATE_MODES),
         ],
         help="Candidate mode to compare. Repeatable; defaults to performance.",
     )
@@ -774,6 +853,15 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=int,
         default=None,
         help="Source-frame window end. Defaults to metric frame count.",
+    )
+    parser.add_argument(
+        "--sparse-burst-count",
+        type=int,
+        default=SPARSE_DEFAULT_BURST_COUNT,
+        help=(
+            "Number of deterministic contiguous analysis bursts for sparse candidates "
+            f"(default: {SPARSE_DEFAULT_BURST_COUNT})."
+        ),
     )
     parser.add_argument(
         "--no-progress",
@@ -826,6 +914,16 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--window-start must be non-negative")
     if args.window_end_exclusive is not None and args.window_end_exclusive <= args.window_start:
         parser.error("--window-end-exclusive must be greater than --window-start")
+    sparse_modes = [mode for mode in args.modes if mode in SPARSE_CANDIDATE_MODES]
+    if sparse_modes and args.window_end_exclusive is None:
+        parser.error(f"--mode {sparse_modes[0]} requires --window-end-exclusive")
+    if sparse_modes and not args.inspect_frame_types:
+        parser.error(
+            f"--mode {sparse_modes[0]} requires --inspect-frame-types so the benchmark "
+            "artifact records GOP/keyframe evidence"
+        )
+    if args.sparse_burst_count <= 0:
+        parser.error("--sparse-burst-count must be positive")
     if args.repetitions <= 0:
         parser.error("--repetitions must be positive")
     if args.ffprobe_timeout <= 0:
@@ -845,6 +943,8 @@ def _run_benchmark_tiers(
     selection_domain: str | None,
     window_start: int,
     window_end_exclusive: int | None,
+    source_frame_count: int | None = None,
+    sparse_burst_count: int = SPARSE_DEFAULT_BURST_COUNT,
     progress_enabled: bool,
     repetitions: int = 1,
     metric_cache_policy: MetricCachePolicy = "reuse",
@@ -852,6 +952,20 @@ def _run_benchmark_tiers(
     cold_only_modes = [mode for mode in candidate_modes if mode in BENCHMARK_ONLY_CANDIDATE_MODES]
     if cold_only_modes and metric_cache_policy != "cold":
         raise ValueError(f"{cold_only_modes[0]} requires metric_cache_policy='cold'")
+    sparse_modes = [mode for mode in candidate_modes if mode in SPARSE_CANDIDATE_MODES]
+    if sparse_modes and (window_end_exclusive is None or source_frame_count is None):
+        raise ValueError(
+            f"{sparse_modes[0]} requires an explicit window end and source frame count"
+        )
+    metric_frame_range = (
+        MetricFrameRange(
+            source_frame_count=source_frame_count,
+            start=window_start,
+            end_exclusive=window_end_exclusive,
+        )
+        if source_frame_count is not None and window_end_exclusive is not None
+        else None
+    )
     console = Console(stderr=True)
     progress = Progress(
         SpinnerColumn(),
@@ -887,6 +1001,8 @@ def _run_benchmark_tiers(
                         selection_domain=selection_domain,
                         window_start=window_start,
                         window_end_exclusive=window_end_exclusive,
+                        metric_frame_range=metric_frame_range,
+                        sparse_burst_count=sparse_burst_count,
                         metric_cache_policy=metric_cache_policy,
                         repetition=repetition,
                         order_index=order_index,
@@ -928,18 +1044,22 @@ def _run_tier(
     selection_domain: str | None,
     window_start: int,
     window_end_exclusive: int | None,
+    metric_frame_range: MetricFrameRange | None = None,
+    sparse_burst_count: int = SPARSE_DEFAULT_BURST_COUNT,
     metric_cache_policy: MetricCachePolicy = "reuse",
     repetition: int = 0,
     order_index: int = 0,
 ) -> JsonObject:
     is_quality_planestats_candidate = mode == QUALITY_PLANESTATS_CANDIDATE_MODE
     is_performance_decoder_candidate = mode in PERFORMANCE_DECODER_CANDIDATE_MODES
+    is_nvidia_candidate = mode == NVIDIA_CUVID_CANDIDATE_MODE
+    is_sparse_candidate = mode in SPARSE_CANDIDATE_MODES
     is_benchmark_only_candidate = mode in BENCHMARK_ONLY_CANDIDATE_MODES
     runtime_mode = (
         "quality"
-        if is_quality_planestats_candidate
+        if is_quality_planestats_candidate or is_nvidia_candidate
         else "performance"
-        if is_performance_decoder_candidate
+        if is_performance_decoder_candidate or is_sparse_candidate
         else mode
     )
     tier_config = analysis_config.model_copy(
@@ -954,17 +1074,47 @@ def _run_tier(
             effective_fps=effective_fps,
             active_rect=active_rect,
             selection_domain=selection_domain,
+            metric_frame_range=metric_frame_range,
         )
     timing_recorder = AnalysisTimingRecorder()
     cpu_started = time.process_time()
     trial_started = time.perf_counter()
     started = time.perf_counter()
-    if is_quality_planestats_candidate:
+    sparse_metrics: SparseMetricSet | None = None
+    decoder_evidence: JsonObject | None = None
+    if is_sparse_candidate:
+        if metric_frame_range is None:
+            raise ValueError(f"{mode} requires an exact benchmark metric frame range")
+        sparse_metrics = _calculate_sparse_candidate_trial_metrics(
+            mode=mode,
+            analysis_source_path=analysis_source_path,
+            effective_fps=effective_fps,
+            active_rect=active_rect,
+            metric_frame_range=metric_frame_range,
+            burst_count=sparse_burst_count,
+            timing_recorder=timing_recorder,
+        )
+        metrics = None
+        cache_state = "bypassed"
+        cache_write_state = "not-written"
+    elif is_nvidia_candidate:
+        metrics, decoder_evidence = _calculate_nvidia_candidate_trial_metrics(
+            video_paths=video_paths,
+            analysis_source_path=analysis_source_path,
+            effective_fps=effective_fps,
+            active_rect=active_rect,
+            metric_frame_range=metric_frame_range,
+            timing_recorder=timing_recorder,
+        )
+        cache_state = "bypassed"
+        cache_write_state = "not-written"
+    elif is_quality_planestats_candidate:
         metrics = _calculate_quality_planestats_candidate_trial_metrics(
             video_paths=video_paths,
             analysis_source_path=analysis_source_path,
             effective_fps=effective_fps,
             active_rect=active_rect,
+            metric_frame_range=metric_frame_range,
             timing_recorder=timing_recorder,
         )
         cache_state = "bypassed"
@@ -976,6 +1126,7 @@ def _run_tier(
             analysis_source_path=analysis_source_path,
             effective_fps=effective_fps,
             active_rect=active_rect,
+            metric_frame_range=metric_frame_range,
             timing_recorder=timing_recorder,
         )
         cache_state = "bypassed"
@@ -989,6 +1140,7 @@ def _run_tier(
             effective_fps=effective_fps,
             active_rect=active_rect,
             selection_domain=selection_domain,
+            metric_frame_range=metric_frame_range,
             timing_recorder=timing_recorder,
         )
         cache_state = timing_recorder.cache_state
@@ -999,20 +1151,29 @@ def _run_tier(
         analyze_seconds=analyze_seconds,
         phase_timings_seconds=phase_timings_seconds,
     )
-    windowed_metrics, source_offset = _windowed_metrics(
-        metrics,
-        window_start=window_start,
-        window_end_exclusive=window_end_exclusive,
-    )
     selection_started = time.perf_counter()
-    selection = select_frames(
-        windowed_metrics,
-        _config_for_window(
-            tier_config,
-            window_start=source_offset,
-            window_end=source_offset + windowed_metrics.metadata.frame_count,
-        ),
-    )
+    if sparse_metrics is not None:
+        selection = _select_sparse_frames(sparse_metrics, tier_config)
+        source_offset = sparse_metrics.window_start
+        windowed_metrics = None
+        window_end = sparse_metrics.window_end_exclusive
+    else:
+        assert metrics is not None
+        windowed_metrics, source_offset = _windowed_metrics(
+            metrics,
+            window_start=window_start,
+            window_end_exclusive=window_end_exclusive,
+        )
+        selection = select_frames(
+            windowed_metrics,
+            _config_for_window(
+                tier_config,
+                window_start=source_offset,
+                window_end=source_offset + windowed_metrics.metadata.frame_count,
+            ),
+        )
+        selection = _selection_with_offset(selection, source_offset)
+        window_end = source_offset + windowed_metrics.metadata.frame_count
     selection_seconds = time.perf_counter() - selection_started
     trial_seconds = time.perf_counter() - trial_started
     process_cpu_seconds = time.process_time() - cpu_started
@@ -1032,18 +1193,15 @@ def _run_tier(
         "order_index": order_index,
         "metrics": metrics,
         "windowed_metrics": windowed_metrics,
-        "selection": _selection_with_offset(selection, source_offset),
+        "sparse_metrics": sparse_metrics,
+        "selection": selection,
         "window": {
             "start_frame": source_offset,
-            "end_frame_exclusive": source_offset + windowed_metrics.metadata.frame_count,
+            "end_frame_exclusive": window_end,
         },
-        "metadata": {
-            "frame_count": metrics.metadata.frame_count,
-            "performance_mode": metrics.metadata.performance_mode,
-            "algorithm_id": metrics.metadata.algorithm_id,
-            "metric_backend": metrics.metadata.metric_backend,
-            "algorithm_identity": json.loads(metrics.metadata.algorithm_identity_json),
-        },
+        "metadata": _tier_metadata(metrics=metrics, sparse_metrics=sparse_metrics),
+        "sampling": (None if sparse_metrics is None else _sparse_sampling_json(sparse_metrics)),
+        "decoder_evidence": decoder_evidence,
     }
 
 
@@ -1053,15 +1211,23 @@ def _calculate_quality_planestats_candidate_trial_metrics(
     analysis_source_path: Path,
     effective_fps: Fraction | None,
     active_rect: BenchmarkActiveRect,
+    metric_frame_range: MetricFrameRange | None = None,
     timing_recorder: AnalysisTimingRecorder,
 ) -> FrameMetrics:
     with record_span(timing_recorder, "source_load"):
         source = DefaultVSLoader().load(analysis_source_path)
-    luminance, motion = calculate_quality_planestats_metrics(
+    metric_clip, has_lookbehind, resolved_range = _bounded_metric_clip(
         source.clip,
+        metric_frame_range,
+    )
+    luminance, motion = calculate_quality_planestats_metrics(
+        metric_clip,
         metric_active_rect=active_rect.rect,
         timing_recorder=timing_recorder,
     )
+    if has_lookbehind:
+        luminance = luminance[1:]
+        motion = motion[1:]
     algorithm_identity_json = json.dumps(
         {
             "algorithm_id": QUALITY_PLANESTATS_CANDIDATE_ALGORITHM_ID,
@@ -1077,10 +1243,13 @@ def _calculate_quality_planestats_candidate_trial_metrics(
         luminance=luminance,
         motion=motion,
         metadata=MetricsMetadata(
-            frame_count=source.clip.num_frames,
+            frame_count=resolved_range.frame_count,
             fps=effective_fps if effective_fps is not None else source.fps,
             config_fingerprint="benchmark-only-non-cacheable",
             clips=_benchmark_clip_identities(video_paths),
+            source_frame_count=resolved_range.source_frame_count,
+            metric_source_start=resolved_range.start,
+            metric_source_end_exclusive=resolved_range.end_exclusive,
             analysis_source_path=str(analysis_source_path),
             performance_mode=QUALITY_PLANESTATS_CANDIDATE_MODE,
             algorithm_id=QUALITY_PLANESTATS_CANDIDATE_ALGORITHM_ID,
@@ -1101,6 +1270,7 @@ def _calculate_performance_decoder_candidate_trial_metrics(
     analysis_source_path: Path,
     effective_fps: Fraction | None,
     active_rect: BenchmarkActiveRect,
+    metric_frame_range: MetricFrameRange | None = None,
     timing_recorder: AnalysisTimingRecorder,
 ) -> FrameMetrics:
     if mode not in PERFORMANCE_DECODER_CANDIDATE_MODES:
@@ -1123,11 +1293,18 @@ def _calculate_performance_decoder_candidate_trial_metrics(
     )
     with record_span(timing_recorder, "source_load"):
         source = load_source(analysis_source_path, decoder_options=decoder_options)
-    luminance, motion = calculate_performance_planestats_metrics(
+    metric_clip, has_lookbehind, resolved_range = _bounded_metric_clip(
         source.clip,
+        metric_frame_range,
+    )
+    luminance, motion = calculate_performance_planestats_metrics(
+        metric_clip,
         metric_active_rect=active_rect.rect,
         timing_recorder=timing_recorder,
     )
+    if has_lookbehind:
+        luminance = luminance[1:]
+        motion = motion[1:]
     algorithm_id = (
         PERFORMANCE_SKIP_LOOP_FILTER_MAX_THREADS_CANDIDATE_ALGORITHM_ID
         if logical_threads is not None
@@ -1154,10 +1331,13 @@ def _calculate_performance_decoder_candidate_trial_metrics(
         luminance=luminance,
         motion=motion,
         metadata=MetricsMetadata(
-            frame_count=source.clip.num_frames,
+            frame_count=resolved_range.frame_count,
             fps=effective_fps if effective_fps is not None else source.fps,
             config_fingerprint="benchmark-only-non-cacheable",
             clips=_benchmark_clip_identities(video_paths),
+            source_frame_count=resolved_range.source_frame_count,
+            metric_source_start=resolved_range.start,
+            metric_source_end_exclusive=resolved_range.end_exclusive,
             analysis_source_path=str(analysis_source_path),
             performance_mode=mode,
             algorithm_id=algorithm_id,
@@ -1169,6 +1349,512 @@ def _calculate_performance_decoder_candidate_trial_metrics(
             active_rect_algorithm_id=active_rect.algorithm_id,
         ),
     )
+
+
+def _bounded_metric_clip(
+    clip: Any,
+    metric_frame_range: MetricFrameRange | None,
+) -> tuple[Any, bool, MetricFrameRange]:
+    source_frame_count = clip.num_frames
+    resolved_range = metric_frame_range or MetricFrameRange(
+        source_frame_count=source_frame_count,
+        start=0,
+        end_exclusive=source_frame_count,
+    )
+    if resolved_range.source_frame_count != source_frame_count:
+        raise ValueError("Benchmark metric range differs from the loaded source frame count")
+    if resolved_range.start == 0 and resolved_range.end_exclusive == source_frame_count:
+        return clip, False, resolved_range
+    decode_start = max(0, resolved_range.start - 1)
+    return (
+        clip[decode_start : resolved_range.end_exclusive],
+        resolved_range.start > 0,
+        resolved_range,
+    )
+
+
+def _calculate_nvidia_candidate_trial_metrics(
+    *,
+    video_paths: Sequence[Path],
+    analysis_source_path: Path,
+    effective_fps: Fraction | None,
+    active_rect: BenchmarkActiveRect,
+    metric_frame_range: MetricFrameRange | None,
+    timing_recorder: AnalysisTimingRecorder,
+) -> tuple[FrameMetrics, JsonObject]:
+    """Request CUVID while reporting that L-SMASH may silently fall back to software."""
+    utilization_before = _nvidia_decoder_utilization()
+    with record_span(timing_recorder, "source_load"):
+        source = load_source(
+            analysis_source_path,
+            decoder_options=LWLibavSourceOptions(prefer_hw=1),
+        )
+    metric_clip, has_lookbehind, resolved_range = _bounded_metric_clip(
+        source.clip,
+        metric_frame_range,
+    )
+    luminance, motion = calculate_quality_planestats_metrics(
+        metric_clip,
+        metric_active_rect=active_rect.rect,
+        timing_recorder=timing_recorder,
+    )
+    if has_lookbehind:
+        luminance = luminance[1:]
+        motion = motion[1:]
+    utilization_after = _nvidia_decoder_utilization()
+    observed = any(
+        value is not None and value > 0.0 for value in (utilization_before, utilization_after)
+    )
+    evidence: JsonObject = {
+        "requested_policy": "L-SMASH Works prefer_hw=1 (NVIDIA CUVID with software fallback)",
+        "effective_decoder_proven": False,
+        "verification_status": (
+            "decoder_engine_activity_observed_unattributed" if observed else "requested_unverified"
+        ),
+        "decoder_utilization_percent_before": utilization_before,
+        "decoder_utilization_percent_after": utilization_after,
+        "telemetry_scope": "system-wide; not attributable to this process",
+        "software_fallback_possible": True,
+    }
+    identity = {
+        "algorithm_id": NVIDIA_CUVID_CANDIDATE_ALGORITHM_ID,
+        "backend": NVIDIA_CUVID_CANDIDATE_BACKEND,
+        "benchmark_only": True,
+        "decoder_request": {"prefer_hw": 1, "requested_decoder": "nvidia_cuvid"},
+        "effective_decoder_contract": "unverified_fallback_possible",
+        "luminance": "full_resolution_luma_planestats_average",
+        "motion": "full_resolution_luma_planestats_diff_with_window_lookbehind",
+    }
+    metrics = FrameMetrics(
+        luminance=luminance,
+        motion=motion,
+        metadata=MetricsMetadata(
+            frame_count=resolved_range.frame_count,
+            fps=effective_fps if effective_fps is not None else source.fps,
+            config_fingerprint="benchmark-only-non-cacheable",
+            clips=_benchmark_clip_identities(video_paths),
+            source_frame_count=resolved_range.source_frame_count,
+            metric_source_start=resolved_range.start,
+            metric_source_end_exclusive=resolved_range.end_exclusive,
+            analysis_source_path=str(analysis_source_path),
+            performance_mode=NVIDIA_CUVID_CANDIDATE_MODE,
+            algorithm_id=NVIDIA_CUVID_CANDIDATE_ALGORITHM_ID,
+            metric_backend=NVIDIA_CUVID_CANDIDATE_BACKEND,
+            algorithm_identity_json=json.dumps(identity, sort_keys=True, separators=(",", ":")),
+            metric_active_rect=active_rect.rect,
+            active_rect_source=active_rect.source,
+            active_rect_detection_mode=active_rect.detection_mode,
+            active_rect_algorithm_id=active_rect.algorithm_id,
+        ),
+    )
+    return metrics, evidence
+
+
+def _require_nvidia_preflight() -> JsonObject:
+    """Fail before timing when the host cannot establish an NVIDIA runtime."""
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=name,driver_version",
+                "--format=csv,noheader",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15.0,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        raise SystemExit(
+            "The NVIDIA candidate requires a working nvidia-smi command before timed trials."
+        ) from exc
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if result.returncode != 0 or not lines:
+        detail = result.stderr.strip() or "no GPU rows returned"
+        raise SystemExit(f"NVIDIA preflight failed before timed trials: {detail}")
+    gpus: list[JsonObject] = []
+    for line in lines:
+        name, separator, driver = line.rpartition(",")
+        gpus.append(
+            {
+                "name": name.strip() if separator else line,
+                "driver_version": driver.strip() if separator else None,
+            }
+        )
+    return {
+        "nvidia_smi_available": True,
+        "gpus": gpus,
+        "effective_decoder_proven": False,
+        "note": (
+            "GPU presence does not prove L-SMASH selected CUVID; prefer_hw=1 may fall "
+            "back to software."
+        ),
+    }
+
+
+def _nvidia_decoder_utilization() -> float | None:
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=utilization.decoder",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5.0,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    values: list[float] = []
+    for line in result.stdout.splitlines():
+        try:
+            values.append(float(line.strip()))
+        except ValueError:
+            continue
+    return max(values) if values else None
+
+
+def _plan_sparse_bursts(
+    *,
+    window_start: int,
+    window_end_exclusive: int,
+    sampling_fraction: Fraction,
+    requested_burst_count: int,
+) -> tuple[SparseBurst, ...]:
+    """Plan deterministic centered runs with an exact ceil-fraction frame budget."""
+    window_length = window_end_exclusive - window_start
+    if window_length <= 0:
+        raise ValueError("Sparse analysis window must contain at least one frame")
+    if not 0 < sampling_fraction <= 1:
+        raise ValueError("Sparse sampling fraction must be within (0, 1]")
+    if requested_burst_count <= 0:
+        raise ValueError("Sparse burst count must be positive")
+
+    budget = min(
+        window_length,
+        math.ceil(window_length * sampling_fraction.numerator / sampling_fraction.denominator),
+    )
+    burst_count = min(requested_burst_count, budget)
+    base_size, larger_bursts = divmod(budget, burst_count)
+    bursts: list[SparseBurst] = []
+    for index in range(burst_count):
+        stratum_start = window_start + window_length * index // burst_count
+        stratum_end = window_start + window_length * (index + 1) // burst_count
+        run_size = base_size + (1 if index < larger_bursts else 0)
+        if run_size > stratum_end - stratum_start:
+            raise ValueError("Sparse burst budget does not fit its deterministic stratum")
+        start = stratum_start + (stratum_end - stratum_start - run_size) // 2
+        bursts.append(
+            SparseBurst(
+                start=start,
+                end_exclusive=start + run_size,
+                decode_start=max(0, start - 1),
+            )
+        )
+    return tuple(bursts)
+
+
+def _calculate_sparse_candidate_trial_metrics(
+    *,
+    mode: str,
+    analysis_source_path: Path,
+    effective_fps: Fraction | None,
+    active_rect: BenchmarkActiveRect,
+    metric_frame_range: MetricFrameRange,
+    burst_count: int,
+    timing_recorder: AnalysisTimingRecorder,
+) -> SparseMetricSet:
+    """Calculate full-resolution PlaneStats only for benchmark-planned bursts."""
+    try:
+        sampling_fraction, skip_loop_filter = SPARSE_CANDIDATE_SPECS[mode]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported sparse benchmark candidate: {mode}") from exc
+
+    decoder_options = (
+        LWLibavSourceOptions(ff_options=SKIP_LOOP_FILTER_FF_OPTIONS) if skip_loop_filter else None
+    )
+    with record_span(timing_recorder, "source_load"):
+        source = (
+            load_source(analysis_source_path, decoder_options=decoder_options)
+            if decoder_options is not None
+            else DefaultVSLoader().load(analysis_source_path)
+        )
+    if source.clip.num_frames != metric_frame_range.source_frame_count:
+        raise ValueError("Sparse benchmark source frame count differs from prepared probe metadata")
+
+    bursts = _plan_sparse_bursts(
+        window_start=metric_frame_range.start,
+        window_end_exclusive=metric_frame_range.end_exclusive,
+        sampling_fraction=sampling_fraction,
+        requested_burst_count=burst_count,
+    )
+    luminance: list[float] = []
+    motion: list[float] = []
+    source_frames: list[int] = []
+    for burst in bursts:
+        burst_clip = source.clip[burst.decode_start : burst.end_exclusive]
+        burst_luminance, burst_motion = calculate_quality_planestats_metrics(
+            burst_clip,
+            metric_active_rect=active_rect.rect,
+            timing_recorder=timing_recorder,
+        )
+        if burst.decode_start < burst.start:
+            burst_luminance = burst_luminance[1:]
+            burst_motion = burst_motion[1:]
+        if len(burst_luminance) != burst.frame_count or len(burst_motion) != burst.frame_count:
+            raise ValueError("Sparse PlaneStats burst returned an unexpected metric count")
+        luminance.extend(float(value) for value in burst_luminance)
+        motion.extend(float(value) for value in burst_motion)
+        source_frames.extend(range(burst.start, burst.end_exclusive))
+
+    fraction_token = f"{sampling_fraction.numerator}_{sampling_fraction.denominator}"
+    decoder_identity = (
+        {"ff_options": SKIP_LOOP_FILTER_FF_OPTIONS, "source": "LWLibavSource"}
+        if skip_loop_filter
+        else {"ff_options": None, "source": "LWLibavSource"}
+    )
+    decoder_token = "skip_loop_filter" if skip_loop_filter else "default_decoder"
+    algorithm_id = (
+        f"performance_sparse_fullres_planestats_{fraction_token}_{burst_count}_bursts_"
+        f"{decoder_token}_{SPARSE_CANDIDATE_ALGORITHM_VERSION}"
+    )
+    identity = {
+        "algorithm_id": algorithm_id,
+        "backend": SPARSE_CANDIDATE_BACKEND,
+        "benchmark_only": True,
+        "burst_count_requested": burst_count,
+        "decoder": decoder_identity,
+        "luminance": "full_resolution_luma_planestats_average_sampled_bursts",
+        "motion": "full_resolution_luma_planestats_diff_with_per_burst_lookbehind",
+        "sampling_fraction": str(sampling_fraction),
+    }
+    return SparseMetricSet(
+        luminance=tuple(luminance),
+        motion=tuple(motion),
+        source_frames=tuple(source_frames),
+        source_frame_count=metric_frame_range.source_frame_count,
+        fps=effective_fps if effective_fps is not None else source.fps,
+        window_start=metric_frame_range.start,
+        window_end_exclusive=metric_frame_range.end_exclusive,
+        sampling_fraction=sampling_fraction,
+        requested_burst_count=burst_count,
+        bursts=bursts,
+        mode=mode,
+        algorithm_id=algorithm_id,
+        metric_backend=SPARSE_CANDIDATE_BACKEND,
+        algorithm_identity_json=json.dumps(identity, sort_keys=True, separators=(",", ":")),
+    )
+
+
+def _select_sparse_frames(metrics: SparseMetricSet, config: AnalysisConfig) -> FrameSelection:
+    """Apply analysis selection while keeping every exclusion/gap in source coordinates."""
+    selected: set[int] = set()
+    user = sorted(
+        {
+            frame
+            for frame in config.user_frames
+            if metrics.window_start <= frame < metrics.window_end_exclusive
+        }
+    )
+    selected.update(user)
+    sampled_luminance = list(zip(metrics.source_frames, metrics.luminance, strict=True))
+    sampled_motion = list(zip(metrics.source_frames, metrics.motion, strict=True))
+
+    dark = _select_sparse_quantile(
+        sampled_luminance,
+        count=config.dark_frame_count,
+        exclude=selected,
+        quantile=config.dark_quantile,
+        largest=False,
+    )
+    selected.update(dark)
+    bright = _select_sparse_quantile(
+        sampled_luminance,
+        count=config.bright_frame_count,
+        exclude=selected,
+        quantile=config.bright_quantile,
+        largest=True,
+    )
+    selected.update(bright)
+    motion = _select_sparse_motion(sampled_motion, config.motion_frame_count, selected)
+    selected.update(motion)
+    random_frames = _select_sparse_random(
+        start=metrics.window_start,
+        end_exclusive=metrics.window_end_exclusive,
+        count=config.random_frame_count,
+        seed=config.random_seed,
+        exclude=selected,
+    )
+    selected.update(random_frames)
+
+    requested = (
+        len(user)
+        + config.dark_frame_count
+        + config.bright_frame_count
+        + config.motion_frame_count
+        + config.random_frame_count
+    )
+    if len(selected) < requested:
+        raise SelectionError(
+            reason="insufficient_candidates",
+            requested=requested,
+            found=len(selected),
+        )
+    return FrameSelection(
+        frames=sorted(selected),
+        seed=config.random_seed,
+        breakdown=SelectionBreakdown(
+            user=user,
+            quantile_dark=dark,
+            quantile_bright=bright,
+            motion=motion,
+            random=random_frames,
+        ),
+        selection_details={},
+    )
+
+
+def _select_sparse_quantile(
+    values: Sequence[tuple[int, float]],
+    *,
+    count: int,
+    exclude: set[int],
+    quantile: float,
+    largest: bool,
+) -> list[int]:
+    if count <= 0 or not values:
+        return []
+    ordered = sorted(values, key=lambda item: item[1])
+    if largest:
+        cutoff = min(len(ordered) - 1, int(len(ordered) * quantile))
+        pool = [frame for frame, _value in ordered[cutoff:] if frame not in exclude]
+        if len(pool) < count:
+            pool = [frame for frame, _value in ordered if frame not in exclude][-count:]
+    else:
+        cutoff = max(1, int(len(ordered) * quantile))
+        pool = [frame for frame, _value in ordered[:cutoff] if frame not in exclude]
+        if len(pool) < count:
+            pool = [frame for frame, _value in ordered if frame not in exclude][:count]
+    return sorted(_sample_sparse_evenly(pool, count))
+
+
+def _sample_sparse_evenly(items: Sequence[int], count: int) -> list[int]:
+    if count <= 0:
+        return []
+    if len(items) <= count:
+        return list(items)
+    if count == 1:
+        return [items[0]]
+    last = len(items) - 1
+    positions: list[int] = []
+    for index in range(count):
+        position = math.floor(index * last / (count - 1) + 0.5)
+        if positions:
+            position = max(position, positions[-1] + 1)
+        position = min(position, last - (count - index - 1))
+        positions.append(position)
+    return [items[position] for position in positions]
+
+
+def _select_sparse_motion(
+    values: Sequence[tuple[int, float]],
+    count: int,
+    exclude: set[int],
+) -> list[int]:
+    selected: list[int] = []
+    for frame, _value in sorted(values, key=lambda item: item[1], reverse=True):
+        if len(selected) >= count:
+            break
+        if frame in exclude:
+            continue
+        if all(abs(frame - other) >= 5 for other in selected) and all(
+            abs(frame - other) >= 5 for other in exclude
+        ):
+            selected.append(frame)
+    return sorted(selected)
+
+
+def _select_sparse_random(
+    *,
+    start: int,
+    end_exclusive: int,
+    count: int,
+    seed: int,
+    exclude: set[int],
+) -> list[int]:
+    candidates = sorted(
+        range(start, end_exclusive),
+        key=lambda frame: hashlib.blake2b(
+            f"{seed}:{frame - start}".encode("ascii"), digest_size=16
+        ).digest(),
+    )
+    selected: list[int] = []
+    for frame in candidates:
+        if len(selected) >= count:
+            break
+        if frame in exclude:
+            continue
+        if all(abs(frame - other) >= 5 for other in selected) and all(
+            abs(frame - other) >= 5 for other in exclude
+        ):
+            selected.append(frame)
+    return sorted(selected)
+
+
+def _tier_metadata(
+    *,
+    metrics: FrameMetrics | None,
+    sparse_metrics: SparseMetricSet | None,
+) -> JsonObject:
+    if sparse_metrics is not None:
+        return {
+            "frame_count": len(sparse_metrics.source_frames),
+            "source_frame_count": sparse_metrics.source_frame_count,
+            "performance_mode": sparse_metrics.mode,
+            "algorithm_id": sparse_metrics.algorithm_id,
+            "metric_backend": sparse_metrics.metric_backend,
+            "algorithm_identity": json.loads(sparse_metrics.algorithm_identity_json),
+        }
+    if metrics is None:
+        raise ValueError("Tier result is missing metric data")
+    return {
+        "frame_count": metrics.metadata.frame_count,
+        "source_frame_count": metrics.metadata.source_frame_count,
+        "performance_mode": metrics.metadata.performance_mode,
+        "algorithm_id": metrics.metadata.algorithm_id,
+        "metric_backend": metrics.metadata.metric_backend,
+        "algorithm_identity": json.loads(metrics.metadata.algorithm_identity_json),
+    }
+
+
+def _sparse_sampling_json(metrics: SparseMetricSet) -> JsonObject:
+    analyzed_count = len(metrics.source_frames)
+    window_count = metrics.window_end_exclusive - metrics.window_start
+    return {
+        "sampling_fraction_requested": str(metrics.sampling_fraction),
+        "sampling_fraction_actual": analyzed_count / window_count,
+        "analyzed_frame_count": analyzed_count,
+        "window_frame_count": window_count,
+        "requested_burst_count": metrics.requested_burst_count,
+        "actual_burst_count": len(metrics.bursts),
+        "source_frames": list(metrics.source_frames),
+        "bursts": [
+            {
+                "start_frame": burst.start,
+                "end_frame_exclusive": burst.end_exclusive,
+                "frame_count": burst.frame_count,
+                "decode_start_frame": burst.decode_start,
+                "lookbehind_frame": (
+                    burst.decode_start if burst.decode_start < burst.start else None
+                ),
+            }
+            for burst in metrics.bursts
+        ],
+    }
 
 
 def _benchmark_clip_identities(video_paths: Sequence[Path]) -> list[ClipIdentity]:
@@ -1191,6 +1877,7 @@ def _delete_tier_metrics_cache(
     effective_fps: Fraction | None,
     active_rect: BenchmarkActiveRect,
     selection_domain: str | None,
+    metric_frame_range: MetricFrameRange | None = None,
 ) -> None:
     cache_key = compute_cache_key(
         list(video_paths),
@@ -1198,6 +1885,7 @@ def _delete_tier_metrics_cache(
         selection_domain=selection_domain,
         metric_request=MetricCacheRequest(
             analysis_source_path=analysis_source_path,
+            metric_frame_range=metric_frame_range,
             effective_fps=effective_fps,
             metric_active_rect=active_rect.rect,
             active_rect_source=active_rect.source,
@@ -1232,7 +1920,7 @@ def _aggregate_tier_trials(trials: Sequence[JsonObject]) -> JsonObject:
 
 
 def _trial_result_summary(trial: JsonObject) -> JsonObject:
-    return {
+    summary = {
         "repetition": trial["repetition"],
         "order_index": trial["order_index"],
         "cache_state": trial["cache_state"],
@@ -1246,6 +1934,9 @@ def _trial_result_summary(trial: JsonObject) -> JsonObject:
         "peak_rss_bytes": trial["peak_rss_bytes"],
         "phase_timings_seconds": trial["phase_timings_seconds"],
     }
+    if trial.get("decoder_evidence") is not None:
+        summary["decoder_evidence"] = trial["decoder_evidence"]
+    return summary
 
 
 def _timing_summary(trials: Sequence[JsonObject]) -> JsonObject:
@@ -1413,6 +2104,7 @@ def _calculate_metrics_with_expected_active_rect(
     effective_fps: Fraction | None,
     active_rect: BenchmarkActiveRect,
     selection_domain: str | None,
+    metric_frame_range: MetricFrameRange | None = None,
     timing_recorder: AnalysisTimingRecorder | None = None,
 ) -> FrameMetrics:
     metrics = _calculate_metrics_once(
@@ -1423,6 +2115,7 @@ def _calculate_metrics_with_expected_active_rect(
         effective_fps=effective_fps,
         active_rect=active_rect,
         selection_domain=selection_domain,
+        metric_frame_range=metric_frame_range,
         timing_recorder=timing_recorder,
     )
     if _metrics_active_rect_metadata_matches(metrics, active_rect):
@@ -1434,6 +2127,7 @@ def _calculate_metrics_with_expected_active_rect(
         selection_domain=selection_domain,
         metric_request=MetricCacheRequest(
             analysis_source_path=analysis_source_path,
+            metric_frame_range=metric_frame_range,
             effective_fps=effective_fps,
             metric_active_rect=active_rect.rect,
             active_rect_source=active_rect.source,
@@ -1450,6 +2144,7 @@ def _calculate_metrics_with_expected_active_rect(
         effective_fps=effective_fps,
         active_rect=active_rect,
         selection_domain=selection_domain,
+        metric_frame_range=metric_frame_range,
         timing_recorder=timing_recorder,
     )
     if _metrics_active_rect_metadata_matches(metrics, active_rect):
@@ -1471,6 +2166,7 @@ def _calculate_metrics_once(
     effective_fps: Fraction | None,
     active_rect: BenchmarkActiveRect,
     selection_domain: str | None,
+    metric_frame_range: MetricFrameRange | None = None,
     timing_recorder: AnalysisTimingRecorder | None = None,
 ) -> FrameMetrics:
     return calculate_metrics(
@@ -1480,6 +2176,7 @@ def _calculate_metrics_once(
         analysis_source_path=analysis_source_path,
         effective_fps=effective_fps,
         metric_active_rect=active_rect.rect,
+        metric_frame_range=metric_frame_range,
         active_rect_source=active_rect.source,
         active_rect_detection_mode=active_rect.detection_mode,
         active_rect_algorithm_id=active_rect.algorithm_id,
@@ -1502,6 +2199,8 @@ def _metrics_active_rect_metadata_matches(
 
 
 def _compare_tier(*, quality: JsonObject, candidate: JsonObject) -> JsonObject:
+    if cast(str, candidate["mode"]) in SPARSE_CANDIDATE_MODES:
+        return _compare_sparse_tier(quality=quality, candidate=candidate)
     quality_selection = cast(FrameSelection, quality["selection"])
     candidate_selection = cast(FrameSelection, candidate["selection"])
     quality_metrics = cast(FrameMetrics, quality["windowed_metrics"])
@@ -1547,10 +2246,17 @@ def _compare_tier(*, quality: JsonObject, candidate: JsonObject) -> JsonObject:
         "compute_pipeline_seconds": candidate["compute_pipeline_seconds"],
         "cache_state": candidate["cache_state"],
         "cache_write_state": candidate.get("cache_write_state"),
+        "decoder_evidence": candidate.get("decoder_evidence"),
         "timing_summary": candidate.get("timing_summary"),
         "trials": candidate.get("trials", []),
         "metadata": candidate["metadata"],
         "window": candidate["window"],
+        "timing_comparison": _timing_comparison(
+            reference_mode="quality",
+            reference=quality,
+            candidate_mode=mode,
+            candidate=candidate,
+        ),
         "selected": _selected_summary(candidate_selection),
         "comparisons": category_comparisons,
         "quality_category_retention": _quality_category_retention(
@@ -1588,11 +2294,264 @@ def _compare_tier(*, quality: JsonObject, candidate: JsonObject) -> JsonObject:
 
 
 def _category_tolerance(mode: str, category: SelectionCategory) -> int:
-    if mode == QUALITY_PLANESTATS_CANDIDATE_MODE:
+    if mode in {QUALITY_PLANESTATS_CANDIDATE_MODE, NVIDIA_CUVID_CANDIDATE_MODE}:
         return 0
-    if mode == "performance" or mode in PERFORMANCE_DECODER_CANDIDATE_MODES:
+    if (
+        mode == "performance"
+        or mode in PERFORMANCE_DECODER_CANDIDATE_MODES
+        or mode in SPARSE_CANDIDATE_MODES
+    ):
         return tier_category_tolerance("performance", category)
     raise ValueError(f"Unsupported benchmark comparison mode: {mode}")
+
+
+def _compare_sparse_tier(*, quality: JsonObject, candidate: JsonObject) -> JsonObject:
+    quality_selection = cast(FrameSelection, quality["selection"])
+    candidate_selection = cast(FrameSelection, candidate["selection"])
+    quality_metrics = cast(FrameMetrics, quality["windowed_metrics"])
+    sparse_metrics = cast(SparseMetricSet, candidate["sparse_metrics"])
+    mode = cast(str, candidate["mode"])
+    quality_offset = cast(dict[str, int], quality["window"])["start_frame"]
+    categories: dict[SelectionCategory, tuple[Sequence[int], Sequence[int]]] = {
+        "dark": (
+            quality_selection.breakdown.quantile_dark,
+            candidate_selection.breakdown.quantile_dark,
+        ),
+        "bright": (
+            quality_selection.breakdown.quantile_bright,
+            candidate_selection.breakdown.quantile_bright,
+        ),
+        "motion": (
+            quality_selection.breakdown.motion,
+            candidate_selection.breakdown.motion,
+        ),
+    }
+    category_comparisons = {
+        category: asdict(
+            compare_selection_category(
+                quality_frames=quality_frames,
+                candidate_frames=candidate_frames,
+                tolerance_frames=_category_tolerance(mode, category),
+            )
+        )
+        for category, (quality_frames, candidate_frames) in categories.items()
+    }
+    return {
+        "mode": mode,
+        "analyze_seconds": candidate["analyze_seconds"],
+        "compute_pipeline_seconds": candidate["compute_pipeline_seconds"],
+        "cache_state": candidate["cache_state"],
+        "cache_write_state": candidate.get("cache_write_state"),
+        "timing_summary": candidate.get("timing_summary"),
+        "trials": candidate.get("trials", []),
+        "metadata": candidate["metadata"],
+        "window": candidate["window"],
+        "sampling": candidate["sampling"],
+        "timing_comparison": _timing_comparison(
+            reference_mode="quality",
+            reference=quality,
+            candidate_mode=mode,
+            candidate=candidate,
+        ),
+        "selected": _selected_summary(candidate_selection),
+        "comparisons": category_comparisons,
+        "quality_category_retention": _quality_category_retention(
+            quality_metrics=quality_metrics,
+            candidate_selection=candidate_selection,
+            source_offset=quality_offset,
+        ),
+        "sampled_metric_fidelity": {
+            "luminance": _sampled_metric_fidelity(
+                quality_values=quality_metrics.luminance,
+                candidate_values=sparse_metrics.luminance,
+                sampled_source_frames=sparse_metrics.source_frames,
+                quality_source_offset=quality_offset,
+            ),
+            "motion": _sampled_metric_fidelity(
+                quality_values=quality_metrics.motion,
+                candidate_values=sparse_metrics.motion,
+                sampled_source_frames=sparse_metrics.source_frames,
+                quality_source_offset=quality_offset,
+            ),
+        },
+        "sampled_ranking": {
+            "luminance": _sampled_ranking_diagnostic(
+                quality_values=quality_metrics.luminance,
+                candidate_values=sparse_metrics.luminance,
+                sampled_source_frames=sparse_metrics.source_frames,
+                quality_source_offset=quality_offset,
+                top_k=max(
+                    len(quality_selection.breakdown.quantile_dark),
+                    len(quality_selection.breakdown.quantile_bright),
+                ),
+            ),
+            "motion": _sampled_ranking_diagnostic(
+                quality_values=quality_metrics.motion,
+                candidate_values=sparse_metrics.motion,
+                sampled_source_frames=sparse_metrics.source_frames,
+                quality_source_offset=quality_offset,
+                top_k=len(quality_selection.breakdown.motion),
+            ),
+        },
+        "quality_extreme_coverage": {
+            "dark": _quality_extreme_coverage(
+                quality_values=quality_metrics.luminance,
+                sampled_source_frames=sparse_metrics.source_frames,
+                source_offset=quality_offset,
+                fraction=0.25,
+                largest=False,
+            ),
+            "bright": _quality_extreme_coverage(
+                quality_values=quality_metrics.luminance,
+                sampled_source_frames=sparse_metrics.source_frames,
+                source_offset=quality_offset,
+                fraction=0.25,
+                largest=True,
+            ),
+            "motion": _quality_extreme_coverage(
+                quality_values=quality_metrics.motion,
+                sampled_source_frames=sparse_metrics.source_frames,
+                source_offset=quality_offset,
+                fraction=0.20,
+                largest=True,
+            ),
+        },
+    }
+
+
+def _sampled_metric_fidelity(
+    *,
+    quality_values: Sequence[float],
+    candidate_values: Sequence[float],
+    sampled_source_frames: Sequence[int],
+    quality_source_offset: int,
+) -> JsonObject:
+    if len(candidate_values) != len(sampled_source_frames):
+        raise ValueError("Sparse candidate values do not match the source-frame map")
+    errors: list[float] = []
+    first_outside_tolerance: int | None = None
+    for source_frame, candidate in zip(sampled_source_frames, candidate_values, strict=True):
+        quality_index = source_frame - quality_source_offset
+        if not 0 <= quality_index < len(quality_values):
+            raise ValueError("Sparse sample lies outside the quality metric window")
+        quality = float(quality_values[quality_index])
+        error = abs(float(candidate) - quality)
+        errors.append(error)
+        if first_outside_tolerance is None and not math.isclose(
+            float(candidate),
+            quality,
+            rel_tol=DENSE_EQUIVALENCE_RTOL,
+            abs_tol=DENSE_EQUIVALENCE_ATOL,
+        ):
+            first_outside_tolerance = source_frame
+    return {
+        "sample_count": len(errors),
+        "max_absolute_error": max(errors, default=0.0),
+        "mean_absolute_error": statistics.fmean(errors) if errors else 0.0,
+        "first_outside_tolerance_source_frame": first_outside_tolerance,
+        "allclose": first_outside_tolerance is None,
+        "tolerance": {"rtol": DENSE_EQUIVALENCE_RTOL, "atol": DENSE_EQUIVALENCE_ATOL},
+    }
+
+
+def _sampled_ranking_diagnostic(
+    *,
+    quality_values: Sequence[float],
+    candidate_values: Sequence[float],
+    sampled_source_frames: Sequence[int],
+    quality_source_offset: int,
+    top_k: int,
+) -> JsonObject:
+    quality_sampled = [
+        float(quality_values[source_frame - quality_source_offset])
+        for source_frame in sampled_source_frames
+    ]
+    candidate_sampled = [float(value) for value in candidate_values]
+    quality_order = sorted(
+        range(len(sampled_source_frames)),
+        key=lambda index: quality_sampled[index],
+        reverse=True,
+    )
+    candidate_order = sorted(
+        range(len(sampled_source_frames)),
+        key=lambda index: candidate_sampled[index],
+        reverse=True,
+    )
+    effective_k = min(max(0, top_k), len(sampled_source_frames))
+    quality_top = [sampled_source_frames[index] for index in quality_order[:effective_k]]
+    candidate_top = [sampled_source_frames[index] for index in candidate_order[:effective_k]]
+    overlap = len(set(quality_top) & set(candidate_top))
+    return {
+        "spearman": _spearman_correlation(quality_sampled, candidate_sampled),
+        "top_k": effective_k,
+        "quality_top_source_frames": quality_top,
+        "candidate_top_source_frames": candidate_top,
+        "top_k_overlap_count": overlap,
+        "top_k_overlap_fraction": 1.0 if effective_k == 0 else overlap / effective_k,
+    }
+
+
+def _spearman_correlation(left: Sequence[float], right: Sequence[float]) -> float | None:
+    if len(left) != len(right) or len(left) < 2:
+        return None
+    left_ranks = _average_ranks(left)
+    right_ranks = _average_ranks(right)
+    left_mean = statistics.fmean(left_ranks)
+    right_mean = statistics.fmean(right_ranks)
+    numerator = sum(
+        (left_rank - left_mean) * (right_rank - right_mean)
+        for left_rank, right_rank in zip(left_ranks, right_ranks, strict=True)
+    )
+    left_sum = sum((rank - left_mean) ** 2 for rank in left_ranks)
+    right_sum = sum((rank - right_mean) ** 2 for rank in right_ranks)
+    denominator = math.sqrt(left_sum * right_sum)
+    return None if denominator == 0.0 else numerator / denominator
+
+
+def _average_ranks(values: Sequence[float]) -> list[float]:
+    ordered = sorted(range(len(values)), key=lambda index: values[index])
+    ranks = [0.0] * len(values)
+    position = 0
+    while position < len(ordered):
+        end = position + 1
+        while end < len(ordered) and values[ordered[end]] == values[ordered[position]]:
+            end += 1
+        average_rank = (position + end - 1) / 2.0
+        for ordered_index in ordered[position:end]:
+            ranks[ordered_index] = average_rank
+        position = end
+    return ranks
+
+
+def _quality_extreme_coverage(
+    *,
+    quality_values: Sequence[float],
+    sampled_source_frames: Sequence[int],
+    source_offset: int,
+    fraction: float,
+    largest: bool,
+) -> JsonObject:
+    extreme_count = max(1, math.ceil(len(quality_values) * fraction)) if quality_values else 0
+    ordered = sorted(range(len(quality_values)), key=lambda index: quality_values[index])
+    extreme_indices = ordered[-extreme_count:] if largest else ordered[:extreme_count]
+    extreme_frames = [source_offset + index for index in extreme_indices]
+    sampled = set(sampled_source_frames)
+    covered = sorted(frame for frame in extreme_frames if frame in sampled)
+    nearest_distances = [
+        min((abs(frame - sampled_frame) for sampled_frame in sampled_source_frames), default=0)
+        for frame in extreme_frames
+    ]
+    return {
+        "quality_extreme_frame_count": len(extreme_frames),
+        "sampled_extreme_frame_count": len(covered),
+        "sampled_extreme_fraction": (
+            1.0 if not extreme_frames else len(covered) / len(extreme_frames)
+        ),
+        "sampled_extreme_source_frames": covered,
+        "nearest_sample_distance_frames": _distribution(
+            [float(distance) for distance in nearest_distances]
+        ),
+    }
 
 
 def _quality_category_retention(
@@ -1688,6 +2647,7 @@ def _tier_summary(tier: JsonObject) -> JsonObject:
         "metadata": tier["metadata"],
         "window": tier["window"],
         "selected": _selected_summary(selection),
+        "sampling": tier.get("sampling"),
     }
 
 
@@ -1775,16 +2735,29 @@ def _windowed_metrics(
     window_start: int,
     window_end_exclusive: int | None,
 ) -> tuple[FrameMetrics, int]:
-    frame_count = metrics.metadata.frame_count
-    end = frame_count if window_end_exclusive is None else min(window_end_exclusive, frame_count)
-    start = min(window_start, end)
+    metadata = metrics.metadata
+    requested_end = (
+        metadata.metric_source_end_exclusive
+        if window_end_exclusive is None
+        else window_end_exclusive
+    )
+    if (
+        metadata.metric_source_start == window_start
+        and metadata.metric_source_end_exclusive == requested_end
+    ):
+        return metrics, metadata.metric_source_start
+    if window_start < metadata.metric_source_start or requested_end > (
+        metadata.metric_source_end_exclusive
+    ):
+        raise ValueError("Requested benchmark window lies outside the metric source range")
+    local_start = window_start - metadata.metric_source_start
     return (
-        FrameMetrics(
-            luminance=metrics.luminance[start:end],
-            motion=metrics.motion[start:end],
-            metadata=replace(metrics.metadata, frame_count=end - start),
+        slice_frame_metrics(
+            metrics,
+            start_index=local_start,
+            frame_count=requested_end - window_start,
         ),
-        start,
+        window_start,
     )
 
 

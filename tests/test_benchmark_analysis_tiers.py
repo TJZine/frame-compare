@@ -51,10 +51,13 @@ def test_benchmark_script_help_is_available_through_documented_process_entrypoin
         "--skip-decode-baseline",
         "--inspect-frame-types",
         "--ffprobe-timeout",
+        "--sparse-burst-count",
     ):
         assert option in result.stdout
     assert "performance-skip-loop-filter-candidate" in result.stdout
     assert "performance-skip-loop-filter-max-threads-candidate" in result.stdout
+    assert "performance-sparse-25pct-candidate" in result.stdout
+    assert "performance-sparse-6_25pct-skip-loop-filter-candidate" in result.stdout
     assert result.stderr == ""
 
 
@@ -351,6 +354,7 @@ def test_benchmark_script_run_tier_preserves_typed_performance_mode(
         active_rect_detection_mode: str,
         active_rect_algorithm_id: str,
         selection_domain: str | None,
+        metric_frame_range: object,
         timing_recorder: object,
     ) -> FrameMetrics:
         assert video_paths == [tmp_path / "reference.mkv"]
@@ -362,6 +366,7 @@ def test_benchmark_script_run_tier_preserves_typed_performance_mode(
         assert active_rect_detection_mode == "provided"
         assert active_rect_algorithm_id == "active_rect_resolution_v2"
         assert selection_domain is None
+        assert metric_frame_range is None
         assert timing_recorder is not None
         observed_modes.append(analysis_config.performance_mode)
         return _metrics_payload(
@@ -437,7 +442,7 @@ def test_benchmark_script_candidate_trial_bypasses_cache_and_uses_explicit_ident
         return [0.1, 0.5, 0.9], [0.0, 0.4, 0.4]
 
     monkeypatch.setattr(script, "DefaultVSLoader", lambda: loader)
-    monkeypatch.setattr(script, "calculate_quality_planestats_candidate_metrics", fake_candidate)
+    monkeypatch.setattr(script, "calculate_quality_planestats_metrics", fake_candidate)
     monkeypatch.setattr(
         script,
         "_delete_tier_metrics_cache",
@@ -478,6 +483,7 @@ def test_benchmark_script_candidate_trial_bypasses_cache_and_uses_explicit_ident
     assert result["cache_write_state"] == "not-written"
     assert result["metadata"] == {
         "frame_count": 3,
+        "source_frame_count": 3,
         "performance_mode": "quality-planestats-candidate",
         "algorithm_id": "quality_fullres_planestats_candidate_v1",
         "metric_backend": "vapoursynth-planestats-fullres",
@@ -626,6 +632,344 @@ def test_benchmark_script_max_threads_candidate_fails_without_cpu_count(
             ),
             timing_recorder=script.AnalysisTimingRecorder(),
         )
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "performance-sparse-25pct-candidate",
+        "performance-sparse-25pct-skip-loop-filter-candidate",
+        "performance-sparse-12_5pct-candidate",
+        "performance-sparse-12_5pct-skip-loop-filter-candidate",
+        "performance-sparse-6_25pct-candidate",
+        "performance-sparse-6_25pct-skip-loop-filter-candidate",
+    ],
+)
+def test_benchmark_script_sparse_candidates_require_decision_evidence_inputs(
+    mode: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    script = _load_benchmark_script()
+
+    args = script._parse_args(
+        [
+            "--output",
+            "candidate.json",
+            "--mode",
+            mode,
+            "--window-start",
+            "100",
+            "--window-end-exclusive",
+            "2500",
+            "--inspect-frame-types",
+            "reference.mkv",
+        ]
+    )
+
+    assert args.modes == [mode]
+    assert args.sparse_burst_count == 8
+    with pytest.raises(ValueError):
+        AnalysisPerformanceMode(mode)
+    with pytest.raises(SystemExit):
+        script._parse_args(["--output", "candidate.json", "--mode", mode, "reference.mkv"])
+    assert "requires --window-end-exclusive" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        script._parse_args(
+            [
+                "--output",
+                "candidate.json",
+                "--mode",
+                mode,
+                "--window-end-exclusive",
+                "2500",
+                "reference.mkv",
+            ]
+        )
+    assert "requires --inspect-frame-types" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("fraction", "expected_budget", "expected_sizes"),
+    [
+        (Fraction(1, 4), 600, [75] * 8),
+        (Fraction(1, 8), 300, [38, 38, 38, 38, 37, 37, 37, 37]),
+        (Fraction(1, 16), 150, [19, 19, 19, 19, 19, 19, 18, 18]),
+    ],
+)
+def test_benchmark_script_sparse_burst_plan_has_exact_budget_and_lookbehind(
+    fraction: Fraction,
+    expected_budget: int,
+    expected_sizes: list[int],
+) -> None:
+    script = _load_benchmark_script()
+
+    bursts = script._plan_sparse_bursts(
+        window_start=100,
+        window_end_exclusive=2500,
+        sampling_fraction=fraction,
+        requested_burst_count=8,
+    )
+
+    assert sum(burst.frame_count for burst in bursts) == expected_budget
+    assert [burst.frame_count for burst in bursts] == expected_sizes
+    assert all(burst.decode_start == burst.start - 1 for burst in bursts)
+    assert all(
+        earlier.end_exclusive <= later.start
+        for earlier, later in zip(bursts, bursts[1:], strict=False)
+    )
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected_ff_options"),
+    [
+        ("performance-sparse-25pct-candidate", None),
+        (
+            "performance-sparse-25pct-skip-loop-filter-candidate",
+            "skip_loop_filter=all",
+        ),
+    ],
+)
+def test_benchmark_script_sparse_metrics_preserve_source_map_and_motion_lookbehind(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    mode: str,
+    expected_ff_options: str | None,
+) -> None:
+    script = _load_benchmark_script()
+    reference = tmp_path / "reference.mkv"
+    reference.write_bytes(b"source")
+    observed_slices: list[tuple[int, int]] = []
+
+    class FakeClip:
+        def __init__(self, start: int, end: int, source_count: int = 40) -> None:
+            self.start = start
+            self.end = end
+            self.num_frames = end - start
+            self.source_count = source_count
+
+        def __getitem__(self, key: slice) -> FakeClip:
+            start = cast(int, key.start)
+            end = cast(int, key.stop)
+            observed_slices.append((start, end))
+            return FakeClip(start, end, self.source_count)
+
+    source = SimpleNamespace(clip=FakeClip(0, 40), fps=Fraction(24, 1))
+    observed_decoder_options: list[object] = []
+
+    def fake_metrics(
+        clip: FakeClip,
+        reporter: object = None,
+        metric_active_rect: object = None,
+        *,
+        timing_recorder: object = None,
+    ) -> tuple[list[float], list[float]]:
+        del reporter, metric_active_rect, timing_recorder
+        frames = list(range(clip.start, clip.end))
+        return [frame / 100 for frame in frames], [frame / 1000 for frame in frames]
+
+    monkeypatch.setattr(
+        script,
+        "DefaultVSLoader",
+        lambda: SimpleNamespace(load=lambda _path: source),
+    )
+    monkeypatch.setattr(
+        script,
+        "load_source",
+        lambda _path, *, decoder_options: (
+            observed_decoder_options.append(decoder_options) or source
+        ),
+    )
+    monkeypatch.setattr(script, "calculate_quality_planestats_metrics", fake_metrics)
+
+    result = script._calculate_sparse_candidate_trial_metrics(
+        mode=mode,
+        analysis_source_path=reference,
+        effective_fps=None,
+        active_rect=script.BenchmarkActiveRect(
+            rect=None,
+            source="full-frame",
+            detection_mode="aspect_ratio",
+        ),
+        metric_frame_range=script.MetricFrameRange(
+            source_frame_count=40,
+            start=8,
+            end_exclusive=32,
+        ),
+        burst_count=3,
+        timing_recorder=script.AnalysisTimingRecorder(),
+    )
+
+    assert len(result.source_frames) == 6
+    assert tuple(value / 100 for value in result.source_frames) == result.luminance
+    assert tuple(value / 1000 for value in result.source_frames) == result.motion
+    assert observed_slices == [(burst.decode_start, burst.end_exclusive) for burst in result.bursts]
+    assert all(
+        start == burst.start - 1
+        for (start, _end), burst in zip(observed_slices, result.bursts, strict=True)
+    )
+    if expected_ff_options is None:
+        assert observed_decoder_options == []
+    else:
+        assert len(observed_decoder_options) == 1
+        assert cast(Any, observed_decoder_options[0]).ff_options == expected_ff_options
+
+
+def test_benchmark_script_sparse_selector_uses_source_space_for_random_and_gap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    script = _load_benchmark_script()
+
+    class FakeDigest:
+        def __init__(self, payload: bytes) -> None:
+            self.payload = payload
+
+        def digest(self) -> bytes:
+            local_frame = int(self.payload.decode("ascii").split(":")[1])
+            return bytes([0 if local_frame == 50 else 1])
+
+    monkeypatch.setattr(
+        script.hashlib,
+        "blake2b",
+        lambda payload, digest_size: FakeDigest(payload),
+    )
+    metrics = script.SparseMetricSet(
+        luminance=(0.1, 0.2, 0.8, 0.9),
+        motion=(0.0, 0.9, 0.8, 0.7),
+        source_frames=(110, 111, 160, 161),
+        source_frame_count=300,
+        fps=Fraction(24, 1),
+        window_start=100,
+        window_end_exclusive=200,
+        sampling_fraction=Fraction(1, 16),
+        requested_burst_count=2,
+        bursts=(
+            script.SparseBurst(start=110, end_exclusive=112, decode_start=109),
+            script.SparseBurst(start=160, end_exclusive=162, decode_start=159),
+        ),
+        mode="performance-sparse-6_25pct-candidate",
+        algorithm_id="sparse-test",
+        metric_backend="test",
+        algorithm_identity_json="{}",
+    )
+    config = ConfigSchema.model_validate(
+        {
+            "analysis": {
+                "dark_frame_count": 1,
+                "bright_frame_count": 1,
+                "motion_frame_count": 0,
+                "random_frame_count": 1,
+                "random_seed": 42,
+            }
+        }
+    ).analysis
+
+    selection = script._select_sparse_frames(metrics, config)
+
+    assert selection.breakdown.quantile_dark == [110]
+    assert selection.breakdown.quantile_bright == [161]
+    assert selection.breakdown.random == [150]
+    assert 150 not in metrics.source_frames
+    assert all(abs(150 - frame) >= 5 for frame in [110, 161])
+
+
+def test_benchmark_script_sparse_run_bounds_quality_reference_to_same_window(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    script = _load_benchmark_script()
+    observed_ranges: dict[str, object] = {}
+
+    def fake_run_tier(**kwargs: object) -> dict[str, Any]:
+        mode = cast(str, kwargs["mode"])
+        observed_ranges[mode] = kwargs["metric_frame_range"]
+        return _tier_payload(mode, [0.1, 0.9], [0.0, 0.5], [10, 59])
+
+    monkeypatch.setattr(script, "_run_tier", fake_run_tier)
+    monkeypatch.setattr(
+        script,
+        "_compare_tier",
+        lambda **_kwargs: {"bounded": True},
+    )
+
+    script._run_benchmark_tiers(
+        candidate_modes=["performance-sparse-25pct-candidate"],
+        video_paths=[tmp_path / "reference.mkv"],
+        analysis_config=ConfigSchema().analysis,
+        cache_dir=tmp_path / "cache",
+        analysis_source_path=tmp_path / "reference.mkv",
+        effective_fps=None,
+        active_rect=script.BenchmarkActiveRect(
+            rect=None,
+            source="full-frame",
+            detection_mode="aspect_ratio",
+        ),
+        selection_domain=None,
+        window_start=10,
+        window_end_exclusive=60,
+        source_frame_count=100,
+        progress_enabled=False,
+        metric_cache_policy="cold",
+    )
+
+    for metric_range in observed_ranges.values():
+        assert metric_range == script.MetricFrameRange(
+            source_frame_count=100,
+            start=10,
+            end_exclusive=60,
+        )
+
+
+def test_benchmark_script_sparse_comparison_reports_decision_metrics() -> None:
+    script = _load_benchmark_script()
+    quality = _tier_payload(
+        "quality",
+        [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
+        [0.0, 0.8, 0.1, 0.7, 0.2, 0.6, 0.3, 0.5],
+        [100, 101, 107],
+    )
+    quality["window"] = {"start_frame": 100, "end_frame_exclusive": 108}
+    quality["timing_summary"] = {"compute_pipeline_seconds": {"median": 8.0, "pstdev": 0.2}}
+    quality["trials"] = [{"repetition": 0, "compute_pipeline_seconds": 8.0}]
+    sparse = script.SparseMetricSet(
+        luminance=(0.2, 0.3, 0.6, 0.7),
+        motion=(0.8, 0.1, 0.6, 0.3),
+        source_frames=(101, 102, 105, 106),
+        source_frame_count=200,
+        fps=Fraction(24, 1),
+        window_start=100,
+        window_end_exclusive=108,
+        sampling_fraction=Fraction(1, 2),
+        requested_burst_count=2,
+        bursts=(
+            script.SparseBurst(start=101, end_exclusive=103, decode_start=100),
+            script.SparseBurst(start=105, end_exclusive=107, decode_start=104),
+        ),
+        mode="performance-sparse-25pct-candidate",
+        algorithm_id="sparse-test",
+        metric_backend="test",
+        algorithm_identity_json="{}",
+    )
+    candidate = _tier_payload(
+        "performance-sparse-25pct-candidate",
+        [],
+        [],
+        [101, 105, 106],
+    )
+    candidate["window"] = {"start_frame": 100, "end_frame_exclusive": 108}
+    candidate["sparse_metrics"] = sparse
+    candidate["sampling"] = script._sparse_sampling_json(sparse)
+    candidate["timing_summary"] = {"compute_pipeline_seconds": {"median": 2.0, "pstdev": 0.1}}
+    candidate["trials"] = [{"repetition": 0, "compute_pipeline_seconds": 2.0}]
+
+    result = script._compare_tier(quality=quality, candidate=candidate)
+
+    assert result["timing_comparison"]["speedup"] == 4.0
+    assert result["sampling"]["source_frames"] == [101, 102, 105, 106]
+    assert result["sampled_metric_fidelity"]["luminance"]["allclose"] is True
+    assert result["sampled_metric_fidelity"]["motion"]["allclose"] is True
+    assert result["sampled_ranking"]["luminance"]["spearman"] == pytest.approx(1.0)
+    assert set(result["quality_extreme_coverage"]) == {"dark", "bright", "motion"}
+    assert set(result["comparisons"]) == {"dark", "bright", "motion"}
 
 
 def test_benchmark_script_rotates_trial_order_and_aggregates_distributions(
@@ -1058,17 +1402,9 @@ def test_benchmark_script_resolves_configured_analysis_source_effective_fps_and_
         input_paths=[reference, analysis],
         config=config,
     )
-    legacy_effective_fps = script._effective_fps_override_for_path(
-        input_dir=input_dir,
-        input_paths=[reference, analysis],
-        config=config,
-        source_path=source.path,
-    )
-
     assert source.path == analysis
     assert source.reference_path == reference
     assert source.effective_fps == Fraction(24000, 1001)
-    assert legacy_effective_fps == Fraction(24000, 1001)
     assert source.active_rect.rect == MetricActiveRect(x=10, y=20, width=300, height=200)
     assert source.active_rect.source == "explicit"
     assert source.active_rect.detection_mode == "aspect_ratio"
@@ -1378,6 +1714,112 @@ def _benchmark_analysis_source(
     )
 
 
+def test_benchmark_script_nvidia_candidate_is_benchmark_only_and_cold() -> None:
+    script = _load_benchmark_script()
+
+    args = script._parse_args(
+        [
+            "--output",
+            "candidate.json",
+            "--mode",
+            "quality-nvidia-cuvid-candidate",
+            "reference.mkv",
+        ]
+    )
+
+    assert args.modes == ["quality-nvidia-cuvid-candidate"]
+    with pytest.raises(ValueError):
+        AnalysisPerformanceMode("quality-nvidia-cuvid-candidate")
+    with pytest.raises(SystemExit):
+        script._parse_args(
+            [
+                "--output",
+                "candidate.json",
+                "--mode",
+                "quality-nvidia-cuvid-candidate",
+                "--metric-cache-policy",
+                "reuse",
+                "reference.mkv",
+            ]
+        )
+
+
+def test_benchmark_script_nvidia_preflight_reports_gpu_without_claiming_decoder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    script = _load_benchmark_script()
+    monkeypatch.setattr(
+        script.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=0,
+            stdout="GeForce RTX 4080, 591.44\n",
+            stderr="",
+        ),
+    )
+
+    result = script._require_nvidia_preflight()
+
+    assert result["gpus"] == [{"name": "GeForce RTX 4080", "driver_version": "591.44"}]
+    assert result["effective_decoder_proven"] is False
+
+
+def test_benchmark_script_nvidia_candidate_bounds_metrics_and_reports_unverified_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    script = _load_benchmark_script()
+    reference = tmp_path / "reference.mkv"
+    reference.write_bytes(b"source")
+    observed_options: list[object] = []
+
+    class FakeClip:
+        def __init__(self, frames: list[int]) -> None:
+            self.frames = frames
+            self.num_frames = len(frames)
+
+        def __getitem__(self, key: slice) -> FakeClip:
+            return FakeClip(self.frames[key])
+
+    source = SimpleNamespace(clip=FakeClip([0, 1, 2, 3]), fps=Fraction(24, 1))
+
+    def fake_load_source(_path: Path, *, decoder_options: object) -> object:
+        observed_options.append(decoder_options)
+        return source
+
+    def fake_metrics(
+        clip: FakeClip, *_args: object, **_kwargs: object
+    ) -> tuple[list[float], list[float]]:
+        values = [frame / 10 for frame in clip.frames]
+        return values, [0.0, *values[1:]]
+
+    utilization = iter([0.0, 14.0])
+    monkeypatch.setattr(script, "load_source", fake_load_source)
+    monkeypatch.setattr(script, "calculate_quality_planestats_metrics", fake_metrics)
+    monkeypatch.setattr(script, "_nvidia_decoder_utilization", lambda: next(utilization))
+
+    metrics, evidence = script._calculate_nvidia_candidate_trial_metrics(
+        video_paths=[reference],
+        analysis_source_path=reference,
+        effective_fps=None,
+        active_rect=script.BenchmarkActiveRect(
+            rect=None,
+            source="full-frame",
+            detection_mode="aspect_ratio",
+        ),
+        metric_frame_range=script.MetricFrameRange(4, 1, 3),
+        timing_recorder=script.AnalysisTimingRecorder(),
+    )
+
+    assert cast(Any, observed_options[0]).prefer_hw == 1
+    assert metrics.luminance == [0.1, 0.2]
+    assert metrics.metadata.metric_source_start == 1
+    assert metrics.metadata.metric_source_end_exclusive == 3
+    assert evidence["effective_decoder_proven"] is False
+    assert evidence["verification_status"] == "decoder_engine_activity_observed_unattributed"
+    assert script._category_tolerance("quality-nvidia-cuvid-candidate", "motion") == 0
+
+
 def _load_benchmark_script() -> ModuleType:
     script_path = Path(__file__).resolve().parents[1] / "tools" / "benchmark_analysis_tiers.py"
     spec = importlib.util.spec_from_file_location("benchmark_analysis_tiers_for_test", script_path)
@@ -1417,6 +1859,17 @@ def _tier_payload(
         "process_cpu_seconds": 0.05,
         "cpu_to_wall_ratio": 0.5,
         "peak_rss_bytes": 1,
+        "timing_summary": {
+            "compute_pipeline_seconds": {
+                "count": 1,
+                "min": 0.1,
+                "max": 0.1,
+                "mean": 0.1,
+                "median": 0.1,
+                "pstdev": 0.0,
+            }
+        },
+        "trials": [{"repetition": 0, "compute_pipeline_seconds": 0.1}],
         "repetition": 0,
         "order_index": 0,
         "metadata": {
