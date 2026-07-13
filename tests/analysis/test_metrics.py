@@ -306,6 +306,114 @@ def test_calculate_metrics_bounds_decode_and_preserves_motion_lookbehind(
     mock_save.assert_called_once()
 
 
+@pytest.mark.parametrize(
+    ("requested_range", "strategy_frames", "strategy_values", "expected_values"),
+    [
+        (MetricFrameRange(6, 0, 3), [0, 1, 2], [0.1, 0.2, 0.3], [0.1, 0.2, 0.3]),
+        (MetricFrameRange(6, 3, 6), [2, 3, 4, 5], [0.2, 0.3, 0.4, 0.5], [0.3, 0.4, 0.5]),
+        (MetricFrameRange(6, 3, 4), [2, 3], [0.2, 0.3], [0.3]),
+    ],
+)
+@patch("frame_compare.analysis.metrics.save_metrics_cache")
+@patch("frame_compare.analysis.metrics.calculate_metric_strategy")
+@patch("frame_compare.analysis.metrics.DefaultVSLoader")
+@patch("frame_compare.analysis.metrics.load_cached_metrics_for_request")
+def test_calculate_metrics_range_boundaries(
+    mock_load,
+    mock_loader_cls,
+    mock_strategy,
+    _mock_save,
+    requested_range: MetricFrameRange,
+    strategy_frames: list[int],
+    strategy_values: list[float],
+    expected_values: list[float],
+    tmp_path: Path,
+) -> None:
+    mock_load.return_value = MagicMock(success=False)
+    clip = _SliceClip([0, 1, 2, 3, 4, 5])
+    mock_loader_cls.return_value.load.return_value = SourceInfo(
+        clip=cast(Any, clip),
+        width=1920,
+        height=1080,
+        num_frames=clip.num_frames,
+        fps=Fraction(24, 1),
+        format=cast(Any, object()),
+        frame_props={},
+        is_hdr=False,
+        hdr_metadata=None,
+    )
+    mock_strategy.return_value = MetricComputationResult(
+        luminance=strategy_values,
+        motion=[0.0, *strategy_values[1:]],
+        performance_mode="quality",
+        algorithm_id="algorithm-id",
+        metric_backend="vapoursynth_planestats",
+        algorithm_identity_json='{"backend":"vapoursynth_planestats"}',
+    )
+    video_path = tmp_path / "v1.mkv"
+    video_path.write_bytes(b"")
+
+    result = calculate_metrics(
+        [video_path],
+        AnalysisConfig(),
+        tmp_path,
+        metric_frame_range=requested_range,
+    )
+
+    assert mock_strategy.call_args.args[0].clip.frames == strategy_frames
+    assert result.luminance == expected_values
+    assert len(result.motion) == requested_range.frame_count
+    assert result.metadata.frame_count == requested_range.frame_count
+
+
+@patch("frame_compare.analysis.metrics.save_metrics_cache")
+@patch("frame_compare.analysis.metrics.calculate_metric_strategy")
+@patch("frame_compare.analysis.metrics.DefaultVSLoader")
+@patch("frame_compare.analysis.metrics.load_cached_metrics_for_request")
+def test_calculate_metrics_forwards_active_rect_with_windowed_source(
+    mock_load,
+    mock_loader_cls,
+    mock_strategy,
+    _mock_save,
+    tmp_path: Path,
+) -> None:
+    mock_load.return_value = MagicMock(success=False)
+    clip = _SliceClip([0, 1, 2, 3])
+    mock_loader_cls.return_value.load.return_value = SourceInfo(
+        clip=cast(Any, clip),
+        width=1920,
+        height=1080,
+        num_frames=clip.num_frames,
+        fps=Fraction(24, 1),
+        format=cast(Any, object()),
+        frame_props={},
+        is_hdr=False,
+        hdr_metadata=None,
+    )
+    mock_strategy.return_value = MetricComputationResult(
+        luminance=[0.1, 0.2, 0.3],
+        motion=[0.0, 0.2, 0.3],
+        performance_mode="quality",
+        algorithm_id="algorithm-id",
+        metric_backend="vapoursynth_planestats",
+        algorithm_identity_json='{"backend":"vapoursynth_planestats"}',
+    )
+    video_path = tmp_path / "v1.mkv"
+    video_path.write_bytes(b"")
+    rect = MetricActiveRect(x=10, y=20, width=300, height=200)
+
+    calculate_metrics(
+        [video_path],
+        AnalysisConfig(),
+        tmp_path,
+        metric_frame_range=MetricFrameRange(4, 1, 3),
+        metric_active_rect=rect,
+    )
+
+    assert mock_strategy.call_args.args[0].clip.frames == [0, 1, 2]
+    assert mock_strategy.call_args.args[3] == rect
+
+
 @patch("frame_compare.analysis.metrics.save_metrics_cache")
 @patch("frame_compare.analysis.metrics.calculate_metric_strategy")
 @patch("frame_compare.analysis.metrics.DefaultVSLoader")

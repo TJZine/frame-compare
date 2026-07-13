@@ -488,17 +488,25 @@ def test_run_align_phase_fallback_reselects_only_inside_global_selection_window(
     )
     ctx = _context(tmp_path, comparisons=[comparison])
     ctx.selection_window = SelectionWindow(start_frame=80, end_frame_exclusive=140)
+    ctx.analysis_clip = _clip(
+        tmp_path / "comparison_videos" / "analysis.mkv",
+        label="Analysis",
+        num_frames=220,
+    ).with_trim(trim_start_frames=20, trim_end_frame_inclusive=219)
     ctx.config.analysis = ctx.config.analysis.model_copy(
         update={"random_frame_count": 0, "dark_frame_count": 2, "bright_frame_count": 2}
     )
     ctx.analysis_metrics = FrameMetrics(
-        luminance=[float(frame) / 219.0 for frame in range(220)],
-        motion=[0.0 for _ in range(220)],
+        luminance=[float(frame) / 219.0 for frame in range(100, 160)],
+        motion=[0.0 for _ in range(60)],
         metadata=MetricsMetadata(
-            frame_count=220,
+            frame_count=60,
             fps=Fraction(24, 1),
             config_fingerprint="test",
             clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
+            source_frame_count=220,
+            metric_source_start=100,
+            metric_source_end_exclusive=160,
         ),
     )
 
