@@ -192,6 +192,123 @@ each later implementation experiment, rerun the same cold command on the same
 machine, inputs, config, and windows, writing a new output file rather than
 overwriting the baseline.
 
+### 7. Benchmark the combined and concurrent PlaneStats experiments
+
+The checked-in Witch baseline at commit `5202aa65` measured a 232.49-second
+`quality` median and a 115.03-second `performance` median. Two later commits
+isolate the proposed rendering improvements:
+
+| Commit | Experiment |
+| --- | --- |
+| `d058d354` | Calculate luminance and motion in one synchronous PlaneStats traversal. |
+| `b2f6c5ee` | Evaluate that combined graph with concurrent VapourSynth frame iteration. |
+
+Run both commits on the same Windows machine and source indexes used for the
+baseline. The following PowerShell block uses the checked-in Witch filenames,
+keeps the original three-repetition cold-cache policy, writes distinct result
+files, and returns to the branch that was active when the block started. It
+omits the optional frame-type scan because the baseline already attempted that
+untimed inspection; the decode baseline still runs as a machine-condition
+control.
+
+Before running it, confirm `git status --short` shows no tracked modifications.
+Untracked benchmark JSON outputs do not prevent the temporary detached checkouts.
+
+```powershell
+$ReturnBranch = git branch --show-current
+if (-not $ReturnBranch) {
+  $ReturnBranch = 'stage1'
+}
+
+$Reference = (Resolve-Path -LiteralPath 'comparison_videos\The Witch [2015] 2160p UHD BDRip DV HDR10 x265 DTS-HD MA 5.1-Kira.Clip.mkv').Path
+$Comparison = (Resolve-Path -LiteralPath 'comparison_videos\The.VVitch.A.New-England.Folktale.2015.2160p.UHD.BluRay.DTS-HD.MA.5.1.DoVi.x265-CtrlHD.Clip.mkv').Path
+
+try {
+  git switch --detach d058d354
+  if ($LASTEXITCODE -ne 0) { throw 'Could not check out d058d354' }
+
+  uv run --no-sync python tools/benchmark_analysis_tiers.py `
+    --root . `
+    --config config/benchmark.config.toml `
+    --output generated/analysis-tier-benchmark-witch-combined-sync.json `
+    --window-start 0 `
+    --window-end-exclusive 2400 `
+    --repetitions 3 `
+    --metric-cache-policy cold `
+    --require-warm-source-index `
+    $Reference $Comparison
+  if ($LASTEXITCODE -ne 0) { throw 'Combined synchronous benchmark failed' }
+
+  git switch --detach b2f6c5ee
+  if ($LASTEXITCODE -ne 0) { throw 'Could not check out b2f6c5ee' }
+
+  uv run --no-sync python tools/benchmark_analysis_tiers.py `
+    --root . `
+    --config config/benchmark.config.toml `
+    --output generated/analysis-tier-benchmark-witch-combined-concurrent.json `
+    --window-start 0 `
+    --window-end-exclusive 2400 `
+    --repetitions 3 `
+    --metric-cache-policy cold `
+    --require-warm-source-index `
+    $Reference $Comparison
+  if ($LASTEXITCODE -ne 0) { throw 'Combined concurrent benchmark failed' }
+}
+finally {
+  git switch $ReturnBranch
+}
+```
+
+After both runs, produce a compact comparison table in PowerShell:
+
+```powershell
+$ResultFiles = @(
+  'generated/analysis-tier-benchmark-witch-baseline.json',
+  'generated/analysis-tier-benchmark-witch-combined-sync.json',
+  'generated/analysis-tier-benchmark-witch-combined-concurrent.json'
+)
+
+$ResultFiles | ForEach-Object {
+  $Report = Get-Content $_ -Raw | ConvertFrom-Json
+  $Performance = $Report.comparisons.performance
+  $Phases = $Performance.timing_summary.phase_timings_seconds
+  $RenderSeconds = if ($null -ne $Phases.performance_frame_render) {
+    $Phases.performance_frame_render.median
+  } else {
+    $Phases.luminance_frame_render.median + $Phases.motion_frame_render.median
+  }
+
+  [PSCustomObject]@{
+    File = Split-Path $_ -Leaf
+    QualitySeconds = [math]::Round($Report.quality.analyze_seconds, 2)
+    PerformanceSeconds = [math]::Round($Performance.analyze_seconds, 2)
+    Speedup = [math]::Round(
+      $Report.quality.analyze_seconds / $Performance.analyze_seconds,
+      2
+    )
+    RenderSeconds = [math]::Round($RenderSeconds, 2)
+    TrialStdDev = [math]::Round(
+      $Performance.timing_summary.analyze_seconds.pstdev,
+      2
+    )
+    BrightMissRate = $Performance.comparisons.bright.miss_rate_at_tolerance
+    DarkMissRate = $Performance.comparisons.dark.miss_rate_at_tolerance
+    MotionMissRate = $Performance.comparisons.motion.miss_rate_at_tolerance
+    LuminanceSpearman = [math]::Round($Performance.ranking.luminance_spearman, 6)
+    MotionSpearman = [math]::Round($Performance.ranking.motion_spearman, 6)
+  }
+} | Format-Table -AutoSize
+```
+
+Acceptance for these implementation-only optimizations requires equivalent
+performance metric arrays in automated strategy tests and equivalent selected
+frames in the Windows artifacts, not merely results within the looser tier
+tolerances. The benchmark JSON does not serialize the full dense metric arrays.
+Treat any changed dark, bright, or motion selection as a regression to
+investigate before accepting the timing improvement. Compare the synchronous
+artifact against the baseline to isolate the combined traversal, then compare
+the concurrent artifact against the synchronous artifact to isolate scheduling.
+
 The benchmark defaults to three cold-metric-cache repetitions per mode. It
 deletes only the exact mode/domain metric cache entry before each timed trial,
 rotates mode order deterministically between repetitions, and runs the optional
