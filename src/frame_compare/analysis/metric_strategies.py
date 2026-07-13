@@ -91,11 +91,11 @@ def calculate_metric_strategy(
             algorithm_identity_json=stable_metric_algorithm_identity_json(config),
         )
     if config.performance_mode == AnalysisPerformanceMode.PERFORMANCE:
-        luminance, motion = _calculate_performance_metrics(
+        luminance, motion = calculate_performance_planestats_metrics(
             source.clip,
             reporter,
             active_rect,
-            timing_recorder,
+            timing_recorder=timing_recorder,
         )
         return MetricComputationResult(
             luminance=luminance,
@@ -306,15 +306,22 @@ def _calculate_quality_metrics(
     return luminance, motion
 
 
-def _calculate_performance_metrics(
+def calculate_performance_planestats_metrics(
     clip: vs.VideoNode,
-    reporter: ProgressReporter | None,
-    active_rect: MetricActiveRect | None,
-    timing_recorder: AnalysisTimingRecorder | None,
+    reporter: ProgressReporter | None = None,
+    metric_active_rect: MetricActiveRect | None = None,
+    *,
+    timing_recorder: AnalysisTimingRecorder | None = None,
 ) -> tuple[list[float], list[float]]:
+    """Calculate the dense 320px PlaneStats metrics used by performance mode."""
     if clip.num_frames == 0:
         raise MetricsCalculationError("Analysis clip has 0 frames")
 
+    active_rect = _validated_active_rect(
+        metric_active_rect,
+        frame_width=clip.width,
+        frame_height=clip.height,
+    )
     total_frames = clip.num_frames
     with perf_span("analysis.calculate_metrics", frames=total_frames):
         with record_span(timing_recorder, "metric_graph_build"):
@@ -528,6 +535,7 @@ def _dynamic_attr(owner: object, name: str) -> object:
 __all__ = [
     "MetricComputationResult",
     "calculate_metric_strategy",
+    "calculate_performance_planestats_metrics",
     "calculate_quality_planestats_candidate_metrics",
     "calculate_quality_luminance",
     "calculate_quality_motion",

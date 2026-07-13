@@ -30,6 +30,7 @@ from rich.progress import (
 
 from frame_compare.analysis.cache_io import compute_cache_key, delete_metrics_cache_entry
 from frame_compare.analysis.metric_strategies import (
+    calculate_performance_planestats_metrics,
     calculate_quality_planestats_candidate_metrics,
 )
 from frame_compare.analysis.metrics import calculate_metrics
@@ -79,6 +80,7 @@ from frame_compare.orchestration.source_selection import (
     resolve_source_selector,
 )
 from frame_compare.vs.loader import DefaultVSLoader
+from frame_compare.vs.source import LWLibavSourceOptions, load_source
 
 type JsonObject = dict[str, Any]
 type MetricCachePolicy = Literal["cold", "reuse"]
@@ -87,6 +89,34 @@ FFPROBE_TIMEOUT_SECONDS = 120.0
 QUALITY_PLANESTATS_CANDIDATE_MODE = "quality-planestats-candidate"
 QUALITY_PLANESTATS_CANDIDATE_ALGORITHM_ID = "quality_fullres_planestats_candidate_v1"
 QUALITY_PLANESTATS_CANDIDATE_BACKEND = "vapoursynth-planestats-fullres"
+PERFORMANCE_SKIP_LOOP_FILTER_CANDIDATE_MODE = "performance-skip-loop-filter-candidate"
+PERFORMANCE_SKIP_LOOP_FILTER_MAX_THREADS_CANDIDATE_MODE = (
+    "performance-skip-loop-filter-max-threads-candidate"
+)
+PERFORMANCE_SKIP_LOOP_FILTER_CANDIDATE_ALGORITHM_ID = (
+    "performance_320_planestats_skip_loop_filter_candidate_v1"
+)
+PERFORMANCE_SKIP_LOOP_FILTER_MAX_THREADS_CANDIDATE_ALGORITHM_ID = (
+    "performance_320_planestats_skip_loop_filter_max_threads_candidate_v1"
+)
+PERFORMANCE_SKIP_LOOP_FILTER_CANDIDATE_BACKEND = (
+    "vapoursynth-planestats-320-lwlibavsource-skip-loop-filter"
+)
+BENCHMARK_ONLY_CANDIDATE_MODES = frozenset(
+    {
+        QUALITY_PLANESTATS_CANDIDATE_MODE,
+        PERFORMANCE_SKIP_LOOP_FILTER_CANDIDATE_MODE,
+        PERFORMANCE_SKIP_LOOP_FILTER_MAX_THREADS_CANDIDATE_MODE,
+    }
+)
+PERFORMANCE_DECODER_CANDIDATE_MODES = frozenset(
+    {
+        PERFORMANCE_SKIP_LOOP_FILTER_CANDIDATE_MODE,
+        PERFORMANCE_SKIP_LOOP_FILTER_MAX_THREADS_CANDIDATE_MODE,
+    }
+)
+PERFORMANCE_COMPARISON_MODES = frozenset({"performance", *PERFORMANCE_DECODER_CANDIDATE_MODES})
+SKIP_LOOP_FILTER_FF_OPTIONS = "skip_loop_filter=all"
 DENSE_EQUIVALENCE_RTOL = 0.0
 DENSE_EQUIVALENCE_ATOL = 1e-12
 
@@ -241,6 +271,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             },
             "selection_domain": args.selection_domain,
             "metric_cache_policy": args.metric_cache_policy,
+            "requested_modes": list(args.modes),
             "repetitions": args.repetitions,
             "trial_order_policy": "deterministic_rotation",
             "require_warm_source_index": args.require_warm_source_index,
@@ -253,6 +284,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         "decode_baseline": decode_baseline,
         "quality": _tier_summary(quality),
         "comparisons": comparisons,
+        "quality_planestats_candidate_timing_comparisons": (
+            _quality_planestats_candidate_timing_comparisons(
+                comparisons,
+                requested_modes=cast(Sequence[str], args.modes),
+            )
+        ),
         "warnings": warnings,
     }
 
@@ -712,7 +749,12 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--mode",
         dest="modes",
         action="append",
-        choices=["performance", QUALITY_PLANESTATS_CANDIDATE_MODE],
+        choices=[
+            "performance",
+            QUALITY_PLANESTATS_CANDIDATE_MODE,
+            PERFORMANCE_SKIP_LOOP_FILTER_CANDIDATE_MODE,
+            PERFORMANCE_SKIP_LOOP_FILTER_MAX_THREADS_CANDIDATE_MODE,
+        ],
         help="Candidate mode to compare. Repeatable; defaults to performance.",
     )
     parser.add_argument(
@@ -777,11 +819,9 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if args.modes is None:
         args.modes = ["performance"]
-    if QUALITY_PLANESTATS_CANDIDATE_MODE in args.modes and args.metric_cache_policy != "cold":
-        parser.error(
-            f"--mode {QUALITY_PLANESTATS_CANDIDATE_MODE} requires "
-            "--metric-cache-policy cold so production quality is recomputed"
-        )
+    cold_only_modes = [mode for mode in args.modes if mode in BENCHMARK_ONLY_CANDIDATE_MODES]
+    if cold_only_modes and args.metric_cache_policy != "cold":
+        parser.error(f"--mode {cold_only_modes[0]} requires --metric-cache-policy cold")
     if args.window_start < 0:
         parser.error("--window-start must be non-negative")
     if args.window_end_exclusive is not None and args.window_end_exclusive <= args.window_start:
@@ -809,8 +849,9 @@ def _run_benchmark_tiers(
     repetitions: int = 1,
     metric_cache_policy: MetricCachePolicy = "reuse",
 ) -> tuple[JsonObject, dict[str, JsonObject]]:
-    if QUALITY_PLANESTATS_CANDIDATE_MODE in candidate_modes and metric_cache_policy != "cold":
-        raise ValueError(f"{QUALITY_PLANESTATS_CANDIDATE_MODE} requires metric_cache_policy='cold'")
+    cold_only_modes = [mode for mode in candidate_modes if mode in BENCHMARK_ONLY_CANDIDATE_MODES]
+    if cold_only_modes and metric_cache_policy != "cold":
+        raise ValueError(f"{cold_only_modes[0]} requires metric_cache_policy='cold'")
     console = Console(stderr=True)
     progress = Progress(
         SpinnerColumn(),
@@ -892,11 +933,19 @@ def _run_tier(
     order_index: int = 0,
 ) -> JsonObject:
     is_quality_planestats_candidate = mode == QUALITY_PLANESTATS_CANDIDATE_MODE
-    runtime_mode = "quality" if is_quality_planestats_candidate else mode
+    is_performance_decoder_candidate = mode in PERFORMANCE_DECODER_CANDIDATE_MODES
+    is_benchmark_only_candidate = mode in BENCHMARK_ONLY_CANDIDATE_MODES
+    runtime_mode = (
+        "quality"
+        if is_quality_planestats_candidate
+        else "performance"
+        if is_performance_decoder_candidate
+        else mode
+    )
     tier_config = analysis_config.model_copy(
         update={"performance_mode": AnalysisPerformanceMode(runtime_mode)}
     )
-    if metric_cache_policy == "cold" and not is_quality_planestats_candidate:
+    if metric_cache_policy == "cold" and not is_benchmark_only_candidate:
         _delete_tier_metrics_cache(
             video_paths=video_paths,
             config=tier_config,
@@ -912,6 +961,17 @@ def _run_tier(
     started = time.perf_counter()
     if is_quality_planestats_candidate:
         metrics = _calculate_quality_planestats_candidate_trial_metrics(
+            video_paths=video_paths,
+            analysis_source_path=analysis_source_path,
+            effective_fps=effective_fps,
+            active_rect=active_rect,
+            timing_recorder=timing_recorder,
+        )
+        cache_state = "bypassed"
+        cache_write_state = "not-written"
+    elif is_performance_decoder_candidate:
+        metrics = _calculate_performance_decoder_candidate_trial_metrics(
+            mode=mode,
             video_paths=video_paths,
             analysis_source_path=analysis_source_path,
             effective_fps=effective_fps,
@@ -1025,6 +1085,83 @@ def _calculate_quality_planestats_candidate_trial_metrics(
             performance_mode=QUALITY_PLANESTATS_CANDIDATE_MODE,
             algorithm_id=QUALITY_PLANESTATS_CANDIDATE_ALGORITHM_ID,
             metric_backend=QUALITY_PLANESTATS_CANDIDATE_BACKEND,
+            algorithm_identity_json=algorithm_identity_json,
+            metric_active_rect=active_rect.rect,
+            active_rect_source=active_rect.source,
+            active_rect_detection_mode=active_rect.detection_mode,
+            active_rect_algorithm_id=active_rect.algorithm_id,
+        ),
+    )
+
+
+def _calculate_performance_decoder_candidate_trial_metrics(
+    *,
+    mode: str,
+    video_paths: Sequence[Path],
+    analysis_source_path: Path,
+    effective_fps: Fraction | None,
+    active_rect: BenchmarkActiveRect,
+    timing_recorder: AnalysisTimingRecorder,
+) -> FrameMetrics:
+    if mode not in PERFORMANCE_DECODER_CANDIDATE_MODES:
+        raise ValueError(f"Unsupported decoder benchmark candidate: {mode}")
+
+    logical_threads: int | None = None
+    thread_policy = "automatic"
+    if mode == PERFORMANCE_SKIP_LOOP_FILTER_MAX_THREADS_CANDIDATE_MODE:
+        logical_threads = os.cpu_count()
+        if logical_threads is None or logical_threads <= 0:
+            raise SystemExit(
+                "The max-threads decoder candidate requires a positive logical CPU count, "
+                "but os.cpu_count() did not provide one."
+            )
+        thread_policy = "explicit_logical_cpu_count"
+
+    decoder_options = LWLibavSourceOptions(
+        threads=logical_threads,
+        ff_options=SKIP_LOOP_FILTER_FF_OPTIONS,
+    )
+    with record_span(timing_recorder, "source_load"):
+        source = load_source(analysis_source_path, decoder_options=decoder_options)
+    luminance, motion = calculate_performance_planestats_metrics(
+        source.clip,
+        metric_active_rect=active_rect.rect,
+        timing_recorder=timing_recorder,
+    )
+    algorithm_id = (
+        PERFORMANCE_SKIP_LOOP_FILTER_MAX_THREADS_CANDIDATE_ALGORITHM_ID
+        if logical_threads is not None
+        else PERFORMANCE_SKIP_LOOP_FILTER_CANDIDATE_ALGORITHM_ID
+    )
+    algorithm_identity_json = json.dumps(
+        {
+            "algorithm_id": algorithm_id,
+            "backend": PERFORMANCE_SKIP_LOOP_FILTER_CANDIDATE_BACKEND,
+            "benchmark_only": True,
+            "decoder": {
+                "ff_options": SKIP_LOOP_FILTER_FF_OPTIONS,
+                "source": "LWLibavSource",
+                "thread_policy": thread_policy,
+                "threads": logical_threads,
+            },
+            "luminance": "max_width_320_luma_planestats_average_all_frames",
+            "motion": "max_width_320_luma_planestats_diff_all_adjacent_pairs",
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return FrameMetrics(
+        luminance=luminance,
+        motion=motion,
+        metadata=MetricsMetadata(
+            frame_count=source.clip.num_frames,
+            fps=effective_fps if effective_fps is not None else source.fps,
+            config_fingerprint="benchmark-only-non-cacheable",
+            clips=_benchmark_clip_identities(video_paths),
+            analysis_source_path=str(analysis_source_path),
+            performance_mode=mode,
+            algorithm_id=algorithm_id,
+            metric_backend=PERFORMANCE_SKIP_LOOP_FILTER_CANDIDATE_BACKEND,
             algorithm_identity_json=algorithm_identity_json,
             metric_active_rect=active_rect.rect,
             active_rect_source=active_rect.source,
@@ -1168,6 +1305,95 @@ def _distribution(values: Sequence[float]) -> JsonObject:
     }
 
 
+def _quality_planestats_candidate_timing_comparisons(
+    comparisons: Mapping[str, JsonObject],
+    *,
+    requested_modes: Sequence[str],
+) -> dict[str, JsonObject]:
+    """Compare decoder candidates with the requested PlaneStats quality candidate."""
+    if QUALITY_PLANESTATS_CANDIDATE_MODE not in requested_modes:
+        return {}
+    reference = comparisons.get(QUALITY_PLANESTATS_CANDIDATE_MODE)
+    if reference is None:
+        return {}
+
+    result: dict[str, JsonObject] = {}
+    for mode in requested_modes:
+        if mode not in PERFORMANCE_COMPARISON_MODES:
+            continue
+        candidate = comparisons.get(mode)
+        if candidate is None:
+            continue
+        result[mode] = _timing_comparison(
+            reference_mode=QUALITY_PLANESTATS_CANDIDATE_MODE,
+            reference=reference,
+            candidate_mode=mode,
+            candidate=candidate,
+        )
+    return result
+
+
+def _timing_comparison(
+    *,
+    reference_mode: str,
+    reference: JsonObject,
+    candidate_mode: str,
+    candidate: JsonObject,
+) -> JsonObject:
+    reference_distribution = cast(
+        Mapping[str, float],
+        cast(Mapping[str, object], reference["timing_summary"])["compute_pipeline_seconds"],
+    )
+    candidate_distribution = cast(
+        Mapping[str, float],
+        cast(Mapping[str, object], candidate["timing_summary"])["compute_pipeline_seconds"],
+    )
+    reference_median = float(reference_distribution["median"])
+    candidate_median = float(candidate_distribution["median"])
+    reference_pstdev = float(reference_distribution["pstdev"])
+    candidate_pstdev = float(candidate_distribution["pstdev"])
+    speedup = None if candidate_median <= 0.0 else reference_median / candidate_median
+    percent_time_reduction = (
+        None
+        if reference_median <= 0.0
+        else (reference_median - candidate_median) / reference_median * 100.0
+    )
+    median_delta = reference_median - candidate_median
+    noise_band = max(reference_pstdev, candidate_pstdev)
+
+    reference_by_repetition = {
+        int(cast(int, trial["repetition"])): float(cast(float, trial["compute_pipeline_seconds"]))
+        for trial in cast(Sequence[JsonObject], reference.get("trials", []))
+    }
+    candidate_by_repetition = {
+        int(cast(int, trial["repetition"])): float(cast(float, trial["compute_pipeline_seconds"]))
+        for trial in cast(Sequence[JsonObject], candidate.get("trials", []))
+    }
+    paired_repetitions = sorted(reference_by_repetition.keys() & candidate_by_repetition.keys())
+    paired_faster_count = sum(
+        candidate_by_repetition[repetition] < reference_by_repetition[repetition]
+        for repetition in paired_repetitions
+    )
+    return {
+        "reference_mode": reference_mode,
+        "candidate_mode": candidate_mode,
+        "timing_field": "compute_pipeline_seconds",
+        "speedup": speedup,
+        "percent_time_reduction": percent_time_reduction,
+        "reference_median_seconds": reference_median,
+        "candidate_median_seconds": candidate_median,
+        "reference_minus_candidate_median_seconds": median_delta,
+        "reference_pstdev_seconds": reference_pstdev,
+        "candidate_pstdev_seconds": candidate_pstdev,
+        "max_pstdev_noise_band_seconds": noise_band,
+        "outside_noise_band": median_delta > noise_band,
+        "paired_faster_count": paired_faster_count,
+        "paired_count": len(paired_repetitions),
+        "meets_1_5x_speedup": speedup is not None and speedup >= 1.5,
+        "meets_2x_speedup": speedup is not None and speedup >= 2.0,
+    }
+
+
 def _peak_rss_bytes() -> int | None:
     if sys.platform == "win32":
         return None
@@ -1300,11 +1526,7 @@ def _compare_tier(*, quality: JsonObject, candidate: JsonObject) -> JsonObject:
             compare_selection_category(
                 quality_frames=quality_frames,
                 candidate_frames=candidate_frames,
-                tolerance_frames=(
-                    0
-                    if mode == QUALITY_PLANESTATS_CANDIDATE_MODE
-                    else tier_category_tolerance(cast(Any, mode), category)
-                ),
+                tolerance_frames=_category_tolerance(mode, category),
             )
         )
         for category, (quality_frames, candidate_frames) in categories.items()
@@ -1331,6 +1553,11 @@ def _compare_tier(*, quality: JsonObject, candidate: JsonObject) -> JsonObject:
         "window": candidate["window"],
         "selected": _selected_summary(candidate_selection),
         "comparisons": category_comparisons,
+        "quality_category_retention": _quality_category_retention(
+            quality_metrics=quality_metrics,
+            candidate_selection=candidate_selection,
+            source_offset=cast(dict[str, int], quality["window"])["start_frame"],
+        ),
         "ranking": asdict(ranking),
         "dense_metric_differences": {
             "tolerance": {
@@ -1358,6 +1585,95 @@ def _compare_tier(*, quality: JsonObject, candidate: JsonObject) -> JsonObject:
             "motion": _exact_top_k_ordering(ranking.highest_motion_top_k),
         },
     }
+
+
+def _category_tolerance(mode: str, category: SelectionCategory) -> int:
+    if mode == QUALITY_PLANESTATS_CANDIDATE_MODE:
+        return 0
+    if mode == "performance" or mode in PERFORMANCE_DECODER_CANDIDATE_MODES:
+        return tier_category_tolerance("performance", category)
+    raise ValueError(f"Unsupported benchmark comparison mode: {mode}")
+
+
+def _quality_category_retention(
+    *,
+    quality_metrics: FrameMetrics,
+    candidate_selection: FrameSelection,
+    source_offset: int,
+) -> dict[SelectionCategory, JsonObject]:
+    return {
+        "dark": _category_retention_diagnostic(
+            quality_values=quality_metrics.luminance,
+            selected_source_frames=candidate_selection.breakdown.quantile_dark,
+            source_offset=source_offset,
+            fraction=0.25,
+            largest=False,
+        ),
+        "bright": _category_retention_diagnostic(
+            quality_values=quality_metrics.luminance,
+            selected_source_frames=candidate_selection.breakdown.quantile_bright,
+            source_offset=source_offset,
+            fraction=0.25,
+            largest=True,
+        ),
+        "motion": _category_retention_diagnostic(
+            quality_values=quality_metrics.motion,
+            selected_source_frames=candidate_selection.breakdown.motion,
+            source_offset=source_offset,
+            fraction=0.20,
+            largest=True,
+        ),
+    }
+
+
+def _category_retention_diagnostic(
+    *,
+    quality_values: Sequence[float],
+    selected_source_frames: Sequence[int],
+    source_offset: int,
+    fraction: float,
+    largest: bool,
+) -> JsonObject:
+    selected = list(selected_source_frames)
+    threshold = _inclusive_extreme_threshold(
+        quality_values,
+        fraction=fraction,
+        largest=largest,
+    )
+    passing: list[int] = []
+    if threshold is not None:
+        for source_frame in selected:
+            metric_index = source_frame - source_offset
+            if not 0 <= metric_index < len(quality_values):
+                continue
+            value = float(quality_values[metric_index])
+            passes_threshold = value >= threshold if largest else value <= threshold
+            if passes_threshold:
+                passing.append(source_frame)
+    total_count = len(selected)
+    passing_count = len(passing)
+    return {
+        "threshold": threshold,
+        "selected_source_frames": selected,
+        "passing_source_frames": passing,
+        "passing_count": passing_count,
+        "passing_fraction": 1.0 if total_count == 0 else passing_count / total_count,
+        "total_count": total_count,
+        "required_fraction": 1.0,
+    }
+
+
+def _inclusive_extreme_threshold(
+    values: Sequence[float],
+    *,
+    fraction: float,
+    largest: bool,
+) -> float | None:
+    if not values:
+        return None
+    count = max(1, math.ceil(len(values) * fraction))
+    ordered = sorted(float(value) for value in values)
+    return ordered[-count] if largest else ordered[count - 1]
 
 
 def _tier_summary(tier: JsonObject) -> JsonObject:

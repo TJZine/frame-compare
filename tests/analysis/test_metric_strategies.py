@@ -16,6 +16,7 @@ from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.metric_identity import stable_metric_algorithm_identity_json
 from frame_compare.analysis.metric_strategies import (
     calculate_metric_strategy,
+    calculate_performance_planestats_metrics,
     calculate_quality_luminance,
     calculate_quality_motion,
     calculate_quality_planestats_candidate_metrics,
@@ -610,6 +611,20 @@ def test_performance_strategy_returns_full_length_dense_arrays(
     assert result.motion[0] == 0.0
     assert result.performance_mode == "performance"
     assert result.metric_backend == "vapoursynth_planestats"
+
+
+def test_public_performance_planestats_callable_matches_production_semantics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
+    clip = FakeBalancedClip([0.0, 0.25, 0.75, 1.0], width=640, height=360)
+
+    luminance, motion = calculate_performance_planestats_metrics(clip)
+
+    assert luminance == [0.0, 0.25, 0.75, 1.0]
+    assert motion == [0.0, 0.25, 0.5, 0.25]
+    assert clip.resize_calls == [("Bicubic", 320, 180)]
+    assert clip.planestats_clipb_flags == [True]
 
 
 def test_performance_strategy_records_one_combined_render_phase(

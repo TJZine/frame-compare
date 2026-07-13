@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError
-from frame_compare.vs.source import apply_trim, load_source
+from frame_compare.vs.source import LWLibavSourceOptions, apply_trim, load_source
 from frame_compare.vs.types import SourceInfo
 
 
@@ -99,6 +99,61 @@ def test_load_source_uses_lw_namespace_fallback():
     core = make_mock_core(with_lsmas=True, use_lw_namespace=True)
     source = load_source("video.mkv", core)  # type: ignore
     assert source.num_frames == 1000
+
+
+def test_load_source_default_does_not_forward_decoder_kwargs():
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def loader(path: str, **kwargs: object) -> MockClip:
+        calls.append((path, kwargs))
+        return MockClip()
+
+    core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
+
+    load_source("video.mkv", core)  # type: ignore[arg-type]
+
+    assert calls == [("video.mkv", {})]
+
+
+def test_load_source_forwards_explicit_decoder_options():
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def loader(path: str, **kwargs: object) -> MockClip:
+        calls.append((path, kwargs))
+        return MockClip()
+
+    core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
+
+    load_source(  # type: ignore[arg-type]
+        "video.mkv",
+        core,
+        decoder_options=LWLibavSourceOptions(
+            threads=12,
+            ff_options="skip_loop_filter=all",
+        ),
+    )
+
+    assert calls == [
+        (
+            "video.mkv",
+            {"threads": 12, "ff_options": "skip_loop_filter=all"},
+        )
+    ]
+
+
+def test_load_source_rejects_negative_decoder_thread_count():
+    core = SimpleNamespace(
+        lsmas=SimpleNamespace(
+            LWLibavSource=lambda *_args, **_kwargs: pytest.fail("loader must not be called")
+        )
+    )
+
+    with pytest.raises(ValueError, match="thread count must be non-negative"):
+        load_source(  # type: ignore[arg-type]
+            "video.mkv",
+            core,
+            decoder_options=LWLibavSourceOptions(threads=-1),
+        )
 
 
 def test_load_source_missing_lsmas_raises_plugin_not_found():

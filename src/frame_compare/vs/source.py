@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from fractions import Fraction
 from typing import TYPE_CHECKING
 
@@ -16,13 +17,31 @@ if TYPE_CHECKING:
     import vapoursynth as vs
 
 
-def load_source(path: Path, core: vs.Core | None = None) -> SourceInfo:
+@dataclass(frozen=True, slots=True)
+class LWLibavSourceOptions:
+    """Explicit optional decoder settings forwarded to LWLibavSource."""
+
+    threads: int | None = None
+    ff_options: str | None = None
+
+
+def load_source(
+    path: Path,
+    core: vs.Core | None = None,
+    *,
+    decoder_options: LWLibavSourceOptions | None = None,
+) -> SourceInfo:
     """Load video source with automatic format detection.
 
     Raises:
         PluginNotFoundError: If lsmas plugin is not available (FC-2003, propagates)
         SourceLoadError: If file cannot be opened or is corrupt (FC-4015)
     """
+    if decoder_options is not None and (
+        decoder_options.threads is not None and decoder_options.threads < 0
+    ):
+        raise ValueError("LWLibavSource thread count must be non-negative")
+
     if core is None:
         core = ensure_vs_environment()
 
@@ -38,7 +57,13 @@ def load_source(path: Path, core: vs.Core | None = None) -> SourceInfo:
             # require_plugin passed, so core.lw.LWLibavSource must exist
             loader = core.lw
 
-        clip = loader.LWLibavSource(str(path))
+        loader_kwargs: dict[str, int | str] = {}
+        if decoder_options is not None:
+            if decoder_options.threads is not None:
+                loader_kwargs["threads"] = decoder_options.threads
+            if decoder_options.ff_options is not None:
+                loader_kwargs["ff_options"] = decoder_options.ff_options
+        clip = loader.LWLibavSource(str(path), **loader_kwargs)
         frame = clip.get_frame(0)
         fps = Fraction(clip.fps.numerator, clip.fps.denominator)
         is_hdr, hdr_metadata = detect_hdr(dict(frame.props))

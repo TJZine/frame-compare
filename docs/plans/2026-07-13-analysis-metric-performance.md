@@ -1,5 +1,5 @@
 Status: Active
-Scope: Lossless quality-backend experiment and exact window-bounded brightness/motion analysis, each isolated behind its own Windows benchmark gate
+Scope: Practical-equivalence quality migration, benchmark-only dense fast-decoder experiments, and exact window-bounded brightness/motion analysis, each isolated behind its own Windows benchmark gate
 Owner: Codex (primary controller)
 Updated: 2026-07-13
 
@@ -7,19 +7,23 @@ Updated: 2026-07-13
 
 ## 1. Executive decision
 
-Proceed in two separately measured work packages:
+Proceed in three separately measured workstreams:
 
 1. evaluate a full-resolution, no-resize VapourSynth PlaneStats implementation as
    an internal candidate for the existing `quality` backend; and
-2. after that candidate is accepted or rejected, calculate metrics only for the
+2. benchmark dense software-decoder quality reductions that could make
+   `performance` meaningfully faster than the accepted PlaneStats quality
+   backend without changing frame coverage or motion semantics; and
+3. after the backend decisions are frozen, calculate metrics only for the
    prepared selectable window, with the one-frame motion lookbehind needed to
    preserve existing results.
 
-Neither package adds a public analysis mode. `quality` and `performance` remain
+None of these workstreams adds a public analysis mode. `quality` and `performance` remain
 the only public modes. A candidate may replace the internal `quality`
 implementation only after dense metric, ranking, selected-frame, and multi-clip
-Windows evidence proves that it is lossless and materially faster. Window
-bounding applies to both accepted backends and must preserve the exact source
+Windows evidence proves practical selection/ranking equivalence, tightly bounded
+float drift, and a material speedup. Window bounding applies to both accepted
+backends and must preserve the exact source
 frames selected by today's full-source calculation followed by slicing.
 
 This is a high-risk analysis, cache-persistence, orchestration, and runtime
@@ -42,12 +46,15 @@ authority-document updates, Windows benchmark artifacts, and independent review.
    fail-closed, with no fabricated full-source arrays.
 6. Keep every experiment and production migration independently revertible and
    committed with conventional commit messages.
+7. Determine whether a dense every-frame decoder-fast backend can make
+   `performance` at least 1.5x faster than full-resolution PlaneStats quality.
 
 ### Non-goals
 
 - No third public mode in this workstream.
-- No additional downscaling, bit-depth reduction, frame subsampling, approximate
-  motion algorithm, or other quality reduction.
+- No additional spatial downscaling, bit-depth reduction, frame subsampling, or
+  approximate motion algorithm in the first performance experiment. Skipping
+  decoder loop filtering is the one approved benchmark-only quality reduction.
 - No concurrent VapourSynth frame scheduling; the measured concurrent experiment
   increased CPU without a normalized throughput gain and has been reverted.
 - No demand-aware omission of luminance or motion. The common workload requests
@@ -55,8 +62,8 @@ authority-document updates, Windows benchmark artifacts, and independent review.
 - No NVIDIA/GPU-specific decoding path or hardware-dependent branching.
 - No change to `sources.analysis_source = "fastest"`. It already exists and can
   be evaluated later as a configuration-only experiment.
-- No changes to CLI flags, config schema, mode names, default mode, selection
-  counts, quantiles, or public JSON output.
+- No changes to application CLI flags, config schema, public mode names, default
+  mode, selection counts, quantiles, or public JSON output.
 - No benchmarking claim based only on a single clip, a single timing sample, or
   a benchmark window that still computes metrics for the full source.
 
@@ -192,15 +199,18 @@ window, config, and machine state for legacy quality and the candidate.
 The candidate passes quality only when all of the following hold for every case:
 
 - exact array lengths and domains;
-- dense luminance and motion values satisfy
-  `allclose(rtol=0, atol=1e-12)`;
+- maximum absolute luminance and motion error is no greater than `1e-7`;
 - maximum and mean absolute errors are reported even when the tolerance passes;
 - identical dark, bright, and motion selected frame lists;
 - identical production top-K rankings for every requested category; and
 - no changed cache, source-frame, or active-rectangle identity.
 
-Do not loosen the tolerance silently. Any failure is a stop condition for
-production migration and must be explained from the first differing frame.
+The artifact continues to report `allclose(rtol=0, atol=1e-12)` as a strict
+numerical diagnostic. It is not the product gate after the maintainer's explicit
+decision that selection/ranking equivalence with tightly bounded float drift is
+the quality contract. Any failure of the frozen `1e-7`, selection, ranking, or
+domain gates is a stop condition and must be explained from the first differing
+frame.
 
 The candidate passes performance only when each case is faster in at least two
 of three paired repetitions and its median metric wall time improves by at least
@@ -209,7 +219,37 @@ trial population standard deviations; results inside that noise band are
 inconclusive, not a win. CPU-to-wall and memory regressions must be reported and
 may reject the candidate even when wall time improves.
 
-### 4.3 Window-bounding acceptance gate
+### 4.3 Dense fast-decoder performance gate
+
+Compare current `performance` and both benchmark-only decoder candidates against
+the full-resolution PlaneStats candidate in the same rotating three-repetition
+run. Both candidates use the current dense 320px synchronous PlaneStats graph;
+one loads LWLibavSource with `ff_options = "skip_loop_filter=all"`, and the
+other also passes the host logical CPU count as the explicit decoder thread
+count. No candidate enters config, cache identity, or normal dispatch.
+
+For every required clip class, record median speedup, percent time reduction,
+median delta, both population standard deviations, the larger standard
+deviation as a noise band, and paired-trial wins. A candidate passes only if it:
+
+- is at least `1.5x` faster than full-resolution PlaneStats quality;
+- wins a majority of repetition-paired trials;
+- improves outside the larger observed timing standard deviation; and
+- produces exact dense frame counts, windows, and source-frame mapping.
+
+Treat `2x` as the desired performance result. For approximate quality, report
+exact overlap, nearest-frame distances, top-K overlap, and rank correlations.
+Additionally require every candidate dark selection to fall within legacy
+quality's darkest 25 percent, every bright selection within its brightest 25
+percent, and every motion selection within its highest-motion 20 percent. Exact
+selected-frame equality is not required for `performance`.
+
+If neither candidate reaches `1.5x`, do not lower spatial resolution again. A
+later sparse reference/key-frame or fixed-budget experiment requires a separate
+product and data-model decision because only analyzed source frames may be
+selected and inter-frame source decoding cannot be assumed to disappear.
+
+### 4.4 Window-bounding acceptance gate
 
 For both accepted public backends, compare the new window-local result with a
 legacy full-source calculation sliced to the same domain. Prove these cases:
@@ -224,9 +264,9 @@ legacy full-source calculation sliced to the same domain. Prove these cases:
 - cold-cache miss, exact cache hit, changed-window miss, and v6-version miss.
 
 Require exact selected-frame, ranking, source-frame-number, and metadata-domain
-equivalence. Dense values use the quality tolerance appropriate to the accepted
-backend: exact equality for an unchanged algorithm, or the frozen `1e-12`
-quality migration tolerance if PlaneStats quality was accepted.
+equivalence. Dense values use exact equality for an unchanged backend; the
+PlaneStats migration's `1e-7` bound applies only when comparing that backend
+with the legacy NumPy oracle.
 
 Windows timing must include at least one materially trimmed 4K HDR case. Report
 excluded-frame percentage and metric-time reduction; the optimization is
@@ -303,13 +343,56 @@ performance criterion before allowing Package 2. Failed or incomplete evidence
 stops migration but does not block proceeding later with independently safe
 window bounding on the existing NumPy quality backend.
 
-Gate result (2026-07-13): rejected. The required 4K HDR Witch case improved
-median compute time from 235.086 seconds to 64.009 seconds and preserved exact
-selected frames and top-50 orderings, but motion exceeded the frozen
-`allclose(rtol=0, atol=1e-12)` limit (`8.80e-9` maximum absolute error). Because
-every required case had to pass, this single failure is decisive and additional
-candidate clips cannot rescue the migration. Package 2 is skipped; the candidate
-remains benchmark-only and NumPy remains production `quality`.
+Gate status (2026-07-13): provisional pass on the 4K HDR Witch case, with the
+8-bit SDR and animation/grain-heavy cases still required. The Witch run improved
+median compute time from 235.086 seconds to 64.009 seconds, preserved exact
+selected frames and top-50 orderings, and had `8.80e-9` maximum motion error.
+The original strict `1e-12` rejection was superseded by the maintainer's explicit
+practical-equivalence contract and its frozen `1e-7` dense-error ceiling. Package
+2 remains blocked until the two missing clip classes pass.
+
+### Package 1b: dense fast-decoder benchmark experiments
+
+This package is benchmark-only and may proceed while the remaining Gate A clips
+are collected. Permitted implementation files:
+
+- `src/frame_compare/vs/source.py`;
+- `src/frame_compare/analysis/metric_strategies.py`;
+- `tools/benchmark_analysis_tiers.py`; and
+- directly corresponding focused tests.
+
+Permitted documentation files:
+
+- `docs/analysis-performance-validation.md`; and
+- this plan.
+
+Required outcome:
+
+- add typed optional LWLibavSource decoder options without changing default
+  source loading;
+- expose the existing dense 320px PlaneStats calculation for exact reuse by the
+  benchmark candidates;
+- add `performance-skip-loop-filter-candidate` and
+  `performance-skip-loop-filter-max-threads-candidate` only to the developer
+  benchmark tool;
+- keep both strings invalid as application performance modes and bypass
+  production metric caches;
+- record exact decoder identity, quality-category retention, and timing relative
+  to the full-resolution PlaneStats candidate; and
+- document the three-class Windows commands and `1.5x`/desired-`2x` gate.
+
+Focused proof:
+
+```bash
+.venv/bin/pytest -q tests/vs/test_source.py tests/analysis/test_metric_strategies.py tests/test_benchmark_analysis_tiers.py
+.venv/bin/pyright --warnings
+.venv/bin/ruff check src/frame_compare/vs/source.py src/frame_compare/analysis/metric_strategies.py tools/benchmark_analysis_tiers.py tests/vs/test_source.py tests/analysis/test_metric_strategies.py tests/test_benchmark_analysis_tiers.py
+git diff --check
+```
+
+The worker does not commit. The controller audits, re-verifies, and commits:
+
+`perf(analysis): add decoder-fast benchmark candidates`
 
 ### Package 2: accepted quality migration, conditional
 
@@ -327,7 +410,7 @@ Required outcome: public `quality` uses the accepted backend, its stable
 algorithm/backend identity changes, legacy quality caches miss, and no
 candidate-only public surface remains.
 
-Commit: `perf(analysis): use lossless PlaneStats quality metrics`
+Commit: `perf(analysis): use PlaneStats quality metrics`
 
 If Gate A fails, replace this package with removal or benchmark-only containment
 of the rejected candidate and record the decision in the validation document.
@@ -426,7 +509,8 @@ result, reviewer finding disposition, and commit hash.
 After this plan is complete, reassess only with new evidence:
 
 - `sources.analysis_source = "fastest"` as a configuration experiment;
-- a deliberately lower-quality third mode with explicit product semantics;
+- a sparse reference/key-frame or fixed-budget performance backend with explicit
+  product semantics, only if the dense decoder-fast gate fails;
 - demand-aware metric payloads if real workloads frequently request only one
   metric family; or
 - hardware-specific decoding if a portable, maintainable runtime contract can be

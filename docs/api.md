@@ -166,7 +166,7 @@ Check if VapourSynth is usable (import + core creation).
 
 ### load_source
 
-`load_source(path: Path, core: vs.Core | None = None) -> SourceInfo`
+`load_source(path: Path, core: vs.Core | None = None, *, decoder_options: LWLibavSourceOptions | None = None) -> SourceInfo`
 
 Load video source with automatic format detection.
 

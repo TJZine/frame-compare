@@ -1,7 +1,7 @@
 # Analysis Performance Validation
 
-Use `tools/benchmark_analysis_tiers.py` to compare `performance` against
-`quality` on local clips that are not committed to the repository.
+Use `tools/benchmark_analysis_tiers.py` to compare production and benchmark-only
+analysis backends on local clips that are not committed to the repository.
 
 Example:
 
@@ -409,13 +409,15 @@ $CandidateFiles | ForEach-Object {
     ($Report.quality.window.end_frame_exclusive -eq $Candidate.window.end_frame_exclusive)
   $TrialCountGate = ($QualityTrials.Count -ge 3) -and
     ($CandidateTrials.Count -eq $QualityTrials.Count)
-  $DenseGate = $Dense.luminance.allclose -and $Dense.motion.allclose
+  $PracticalDenseGate =
+    ($Dense.luminance.max_absolute_error -le 1e-7) -and
+    ($Dense.motion.max_absolute_error -le 1e-7)
   $SelectionGate = $Candidate.exact_selected_equality.dark -and
     $Candidate.exact_selected_equality.bright -and
     $Candidate.exact_selected_equality.motion
   $TopKGate = $TopK.dark.equal -and $TopK.bright.equal -and $TopK.motion.equal
   $GateAPass = $FrameCountsEqual -and $WindowDomainsEqual -and $TrialCountGate -and
-    $DenseGate -and $SelectionGate -and
+    $PracticalDenseGate -and $SelectionGate -and
     $TopKGate -and ($QualityColdMisses -eq $QualityTrials.Count) -and
     ($CandidateBypasses -eq $CandidateTrials.Count) -and
     ($FasterPairedTrials -ge $RequiredPairedWins) -and
@@ -450,6 +452,7 @@ $CandidateFiles | ForEach-Object {
     MotionFirstDifference = $Dense.motion.first_differing_index
     MotionFirstDifferenceSourceFrame = $Dense.motion.first_differing_source_frame
     MotionFirstOutsideTolerance = $Dense.motion.first_outside_tolerance_index
+    PracticalDenseGate = $PracticalDenseGate
     DarkSelectedExact = $Candidate.exact_selected_equality.dark
     BrightSelectedExact = $Candidate.exact_selected_equality.bright
     MotionSelectedExact = $Candidate.exact_selected_equality.motion
@@ -468,10 +471,12 @@ $CandidateFiles | ForEach-Object {
 Use `compute_pipeline_seconds`, not raw `analyze_seconds`, for the candidate
 performance decision. It subtracts only cache lookup and cache write, retaining
 source loading and metric work so the cache-bypassing candidate cannot gain a
-false timing advantage. Accept quality only when both dense arrays are allclose
-at `rtol=0, atol=1e-12`, all selected-category booleans are true, and all exact
-top-K booleans are true for every case. Then apply the timing and noise gate from
-the active performance plan. `first_differing_index` and
+false timing advantage. Accept the practical quality migration only when
+luminance and motion each have maximum absolute error no greater than `1e-7`,
+all selected-category booleans are true, and all exact top-K booleans are true
+for every case. The stricter `allclose(rtol=0, atol=1e-12)` result remains
+visible as a diagnostic, but it is no longer the migration gate. Then apply the
+timing and noise gate from the active performance plan. `first_differing_index` and
 `first_differing_source_frame` report the first raw float inequality even when it
 is within tolerance; the separate `first_outside_tolerance_*` fields explain an
 `allclose = false` result. The displayed `GateAPass` combines every frozen
@@ -479,6 +484,144 @@ objective criterion available in the artifact. CPU-to-wall medians remain
 visible for separate regression review. Standard-library peak RSS is unavailable
 on Windows and remains `$null`; do not convert it to zero or treat it as proof of
 unchanged memory use.
+
+### Benchmark the dense fast-decoder performance candidates
+
+These benchmark-only modes test whether a deliberately cheaper software decode
+can make `performance` meaningfully distinct after full-resolution PlaneStats
+becomes `quality`:
+
+| Mode | Decoder | Metric graph |
+| --- | --- | --- |
+| `performance` | Normal production decoder settings | Current dense 320px PlaneStats |
+| `performance-skip-loop-filter-candidate` | FFmpeg `skip_loop_filter=all`, automatic decoder threads | Current dense 320px PlaneStats |
+| `performance-skip-loop-filter-max-threads-candidate` | The same decoder option with the host logical CPU count passed explicitly | Current dense 320px PlaneStats |
+
+All three modes analyze every source frame. The candidates preserve dense source
+frame numbering and adjacent-frame motion semantics; their intended quality loss
+comes from skipping decoder loop filtering, not temporal sampling. They remain
+invalid application config values and bypass the production metric cache. The
+decoder option is supported by the bundled L-SMASH Works `ff_options` seam and
+the FFmpeg `skip_loop_filter` codec option:
+[L-SMASH Works options](https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/blob/0079a06ee384061ecdadd0de03df4e0493dd56ab/VapourSynth/README.md),
+[FFmpeg codec options](https://ffmpeg.org/ffmpeg-codecs.html).
+
+Run the full matrix in one process so mode order rotates under the same machine
+conditions. Use the exact same three clip classes and windows as the quality
+candidate gate:
+
+```powershell
+uv run --no-sync python tools/benchmark_analysis_tiers.py `
+  --root . `
+  --config config/benchmark.config.toml `
+  --output generated/analysis-decoder-candidates-witch-4k-hdr.json `
+  --mode quality-planestats-candidate `
+  --mode performance `
+  --mode performance-skip-loop-filter-candidate `
+  --mode performance-skip-loop-filter-max-threads-candidate `
+  --window-start 0 `
+  --window-end-exclusive 2400 `
+  --repetitions 3 `
+  --metric-cache-policy cold `
+  --require-warm-source-index `
+  --inspect-frame-types `
+  $WitchReference $WitchComparison
+
+uv run --no-sync python tools/benchmark_analysis_tiers.py `
+  --root . `
+  --config config/benchmark.config.toml `
+  --output generated/analysis-decoder-candidates-sdr-8bit.json `
+  --mode quality-planestats-candidate `
+  --mode performance `
+  --mode performance-skip-loop-filter-candidate `
+  --mode performance-skip-loop-filter-max-threads-candidate `
+  --window-start 0 `
+  --window-end-exclusive 2400 `
+  --repetitions 3 `
+  --metric-cache-policy cold `
+  --require-warm-source-index `
+  --inspect-frame-types `
+  $SdrReference $SdrComparison
+
+uv run --no-sync python tools/benchmark_analysis_tiers.py `
+  --root . `
+  --config config/benchmark.config.toml `
+  --output generated/analysis-decoder-candidates-animation-grain.json `
+  --mode quality-planestats-candidate `
+  --mode performance `
+  --mode performance-skip-loop-filter-candidate `
+  --mode performance-skip-loop-filter-max-threads-candidate `
+  --window-start 0 `
+  --window-end-exclusive 2400 `
+  --repetitions 3 `
+  --metric-cache-policy cold `
+  --require-warm-source-index `
+  --inspect-frame-types `
+  $AnimationReference $AnimationComparison
+```
+
+Summarize all three outputs without manually calculating speed or retention:
+
+```powershell
+$DecoderFiles = @(
+  'generated/analysis-decoder-candidates-witch-4k-hdr.json',
+  'generated/analysis-decoder-candidates-sdr-8bit.json',
+  'generated/analysis-decoder-candidates-animation-grain.json'
+)
+$PerformanceModes = @(
+  'performance',
+  'performance-skip-loop-filter-candidate',
+  'performance-skip-loop-filter-max-threads-candidate'
+)
+
+$DecoderFiles | ForEach-Object {
+  $Report = Get-Content $_ -Raw | ConvertFrom-Json
+  foreach ($Mode in $PerformanceModes) {
+    $Timing = $Report.quality_planestats_candidate_timing_comparisons.PSObject.Properties[$Mode].Value
+    $ComparisonResult = $Report.comparisons.PSObject.Properties[$Mode].Value
+    $Retention = $ComparisonResult.quality_category_retention
+    [PSCustomObject]@{
+      File = Split-Path $_ -Leaf
+      Mode = $Mode
+      Speedup = [math]::Round($Timing.speedup, 3)
+      TimeReductionPercent = [math]::Round($Timing.percent_time_reduction, 2)
+      OutsideNoise = $Timing.outside_noise_band
+      PairedWins = "$($Timing.paired_faster_count)/$($Timing.paired_count)"
+      Meets1_5x = $Timing.meets_1_5x_speedup
+      Meets2x = $Timing.meets_2x_speedup
+      DarkRetention = $Retention.dark.passing_fraction
+      BrightRetention = $Retention.bright.passing_fraction
+      MotionRetention = $Retention.motion.passing_fraction
+      DarkExactOverlap = $ComparisonResult.comparisons.dark.overlap_count
+      BrightExactOverlap = $ComparisonResult.comparisons.bright.overlap_count
+      MotionExactOverlap = $ComparisonResult.comparisons.motion.overlap_count
+      LumaSpearman = $ComparisonResult.ranking.luminance_spearman
+      MotionSpearman = $ComparisonResult.ranking.motion_spearman
+    }
+  }
+} | Format-Table -AutoSize
+```
+
+Promote neither candidate from a single clip. A candidate passes the performance
+gate only when it is at least `1.5x` faster than the full-resolution PlaneStats
+candidate on every required class, is faster in a majority of paired
+repetitions, and its median improvement exceeds the larger timing population
+standard deviation. Treat `2x` as the desired result rather than a mandatory
+minimum.
+
+For approximate-quality review, use the report's exact overlap, nearest-frame
+distances, top-K overlap, and rank correlations, plus its quality-baseline
+category-retention diagnostics. Every candidate-selected dark frame must remain
+inside quality's darkest 25 percent, every bright frame inside its brightest 25
+percent, and every motion frame inside its highest-motion 20 percent. Exact
+frame equality is informative but is not required for `performance`.
+
+If neither dense decoder candidate reaches `1.5x`, reject additional spatial
+downscaling as the next lever. The measured 320px/full-resolution gap shows that
+it cannot remove the dominant decode cost. Only then open a separate benchmark
+for a sparse reference/key-frame or fixed-budget backend with explicit source
+frame mapping; do not assume `SelectEvery` avoids decoding inter-frame
+dependencies.
 
 The current `--window-start` and `--window-end-exclusive` options slice the dense
 arrays for selection and comparison only after full-source metric calculation.
@@ -562,7 +705,7 @@ benchmark evidence.
 This evidence is local, hardware-dependent, and not a full validation matrix.
 Treat it as support for tuning decisions, not a release-wide guarantee.
 
-### 2026-07-13: Full-resolution quality PlaneStats candidate rejected
+### 2026-07-13: Full-resolution quality PlaneStats candidate reopened under practical equivalence
 
 Benchmark artifact:
 `generated/quality-planestats-candidate-witch-4k-hdr.json`
@@ -593,14 +736,18 @@ Quality evidence:
 - dark, bright, and motion selected-frame lists were exactly identical; and
 - dark, bright, and motion top-50 ordering was exactly identical.
 
-Decision: reject production quality migration. The speedup and practical
-selection agreement do not override the predeclared lossless gate, and the
-tolerance is not loosened after observing the result. Additional source classes
-cannot make a mandatory per-case failure pass, so the 8-bit SDR and
-animation/grain-heavy candidate runs are unnecessary for this migration
-decision. Keep NumPy as production `quality`; keep the candidate benchmark-only
-as reproducible evidence. Proceed independently with exact window-bounded metric
-calculation for NumPy `quality` and synchronous PlaneStats `performance`.
+The original strict lossless gate rejected this result because motion exceeded
+`allclose(rtol=0, atol=1e-12)`. After reviewing the numerical meaning and product
+goal, the maintainer explicitly changed the quality contract to practical
+selection/ranking equivalence with tightly bounded float drift. Under that
+contract, the Witch result passes the provisional quality gate: selected frames
+and top-50 orderings are exact, and the maximum motion error is well below the
+new `1e-7` bound.
+
+Decision: reopen production quality migration and complete the required 8-bit
+SDR and animation/grain-heavy runs before changing production dispatch. The
+candidate remains benchmark-only until all three cases pass. This is a recorded
+contract change, not a silent post-result relaxation.
 
 ### 2026-06-10: The Witch UHD Clip Pair, Mode Simplification Decision
 
