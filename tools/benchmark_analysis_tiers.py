@@ -179,6 +179,7 @@ class BenchmarkAnalysisSource:
     active_rect: BenchmarkActiveRect
     overrides_by_path: Mapping[Path, SourceOverrideConfig]
     source_frame_count: int | None = None
+    source_fps: Fraction | None = None
 
     @property
     def reference_path(self) -> Path:
@@ -316,6 +317,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         analysis_source.path,
         inspect_frame_types=args.inspect_frame_types,
         timeout_seconds=args.ffprobe_timeout,
+        window_start=args.window_start,
+        window_end_exclusive=args.window_end_exclusive,
+        source_fps=analysis_source.source_fps,
     )
 
     if args.window_end_exclusive is None:
@@ -464,6 +468,9 @@ def _probe_source_facts(
     *,
     inspect_frame_types: bool,
     timeout_seconds: float,
+    window_start: int = 0,
+    window_end_exclusive: int | None = None,
+    source_fps: Fraction | None = None,
 ) -> JsonObject:
     stream_payload = _run_ffprobe_json(
         [
@@ -486,20 +493,56 @@ def _probe_source_facts(
     }
     if inspect_frame_types:
         started = time.perf_counter()
+        frame_probe_options, inspection_scope = _frame_type_probe_options(
+            window_start=window_start,
+            window_end_exclusive=window_end_exclusive,
+            source_fps=source_fps,
+        )
         frame_payload = _run_ffprobe_json(
-            [
-                "-select_streams",
-                "v:0",
-                "-show_frames",
-                "-show_entries",
-                "frame=key_frame,pict_type",
-            ],
+            frame_probe_options,
             path=path,
             timeout_seconds=timeout_seconds,
         )
         result["frame_type_inspection_seconds"] = time.perf_counter() - started
+        result["frame_type_inspection_scope"] = inspection_scope
         result["frame_types"] = _frame_type_summary(frame_payload)
     return result
+
+
+def _frame_type_probe_options(
+    *,
+    window_start: int,
+    window_end_exclusive: int | None,
+    source_fps: Fraction | None,
+) -> tuple[list[str], JsonObject]:
+    """Bound expensive frame decoding to the benchmark window when possible."""
+    options = ["-select_streams", "v:0"]
+    if window_end_exclusive is not None and source_fps is not None:
+        start_seconds = Fraction(window_start, 1) / source_fps
+        duration_seconds = Fraction(window_end_exclusive - window_start, 1) / source_fps
+        read_interval = f"{float(start_seconds):.6f}%+{float(duration_seconds):.6f}"
+        options.extend(["-read_intervals", read_interval])
+        scope: JsonObject = {
+            "kind": "benchmark-window",
+            "start_frame": window_start,
+            "end_frame_exclusive": window_end_exclusive,
+            "source_fps": str(source_fps),
+            "read_interval": read_interval,
+        }
+    else:
+        scope = {"kind": "full-source"}
+        if window_end_exclusive is not None:
+            scope["fallback_reason"] = "source_fps_unavailable"
+            scope["requested_start_frame"] = window_start
+            scope["requested_end_frame_exclusive"] = window_end_exclusive
+    options.extend(
+        [
+            "-show_frames",
+            "-show_entries",
+            "frame=key_frame,pict_type",
+        ]
+    )
+    return options, scope
 
 
 def _run_ffprobe_json(
@@ -536,13 +579,22 @@ def _run_ffprobe_json(
 
 
 def _frame_type_summary(ffprobe_result: JsonObject) -> JsonObject:
+    if ffprobe_result.get("success") is not True:
+        summary: JsonObject = {"available": False}
+        error = ffprobe_result.get("error")
+        if isinstance(error, str) and error:
+            summary["error"] = error
+        returncode = ffprobe_result.get("returncode")
+        if isinstance(returncode, int):
+            summary["returncode"] = returncode
+        return summary
     payload = ffprobe_result.get("payload")
     if not isinstance(payload, Mapping):
-        return {"available": False}
+        return {"available": False, "error": "ffprobe JSON root was not an object"}
     typed_payload = cast(Mapping[str, object], payload)
     frames_value = typed_payload.get("frames")
     if not isinstance(frames_value, list):
-        return {"available": False}
+        return {"available": False, "error": "ffprobe JSON payload did not contain frames"}
     frames = cast(list[object], frames_value)
 
     type_counts: dict[str, int] = {}
@@ -675,6 +727,7 @@ def _resolve_benchmark_analysis_source(
         active_rect=active_rect,
         overrides_by_path=selection.overrides_by_path,
         source_frame_count=None if prepared_clip is None else prepared_clip.probe.num_frames,
+        source_fps=None if prepared_clip is None else prepared_clip.probe.fps,
     )
 
 

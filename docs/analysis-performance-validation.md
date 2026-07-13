@@ -3,6 +3,10 @@
 Use `tools/benchmark_analysis_tiers.py` to compare production and benchmark-only
 analysis backends on local clips that are not committed to the repository.
 
+For the curated cross-run results, retained evidence, and cleanup policy, see
+[Analysis Benchmark History](analysis-benchmark-history.md). This file remains
+the procedural validation runbook.
+
 Example:
 
 ```bash
@@ -988,8 +992,13 @@ concurrent PlaneStats throughput baseline.
 
 Pass `--inspect-frame-types` to run an additional, untimed ffprobe scan after the
 mode trials. That scan records I/P/B counts, keyframe count, and keyframe-gap
-statistics for GOP-sensitive experiments. It can be expensive on long sources
-and is intentionally opt-in. `--ffprobe-timeout` bounds each inspection command.
+statistics for GOP-sensitive experiments. When an explicit benchmark window and
+prepared source FPS are available, frame decoding is bounded to that window with
+`-read_intervals`; otherwise the scan covers the full source and may be expensive
+on long clips. `--ffprobe-timeout` bounds each inspection command. The report's
+`frame_type_inspection_scope` records the inspected range, while
+`frame_types.error` preserves a timeout or other ffprobe failure instead of
+reducing it to an unexplained `available = false` result.
 
 The script writes a stable structured JSON artifact with the quality baseline,
 candidate mode comparisons, selected-frame overlap, nearest-frame distances,
@@ -1103,7 +1112,9 @@ is a recorded contract change, not a silent post-result relaxation.
 ### 2026-06-10: The Witch UHD Clip Pair, Mode Simplification Decision
 
 Benchmark artifact:
-`generated/analysis-tier-benchmark-warm-index.json`
+the historical June report summarized in
+[Analysis Benchmark History](analysis-benchmark-history.md). Its generated
+scratch JSON was removed after the decision metrics were recorded.
 
 This run compared the old three-mode experiment before the public surface was
 reduced to `quality` and `performance`. The result favored keeping the

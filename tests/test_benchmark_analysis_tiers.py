@@ -1358,6 +1358,71 @@ def test_benchmark_script_frame_type_summary_records_gop_distribution() -> None:
     assert summary["keyframe_gap_frames"]["median"] == 3.0
 
 
+def test_benchmark_script_frame_type_probe_is_bounded_to_selection_window(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    script = _load_benchmark_script()
+    source = tmp_path / "source.mkv"
+    source.write_bytes(b"source")
+    calls: list[list[str]] = []
+
+    def fake_ffprobe(
+        options: list[str],
+        *,
+        path: Path,
+        timeout_seconds: float,
+    ) -> dict[str, object]:
+        del path, timeout_seconds
+        calls.append(options)
+        if "-show_frames" in options:
+            return {
+                "success": True,
+                "payload": {
+                    "frames": [
+                        {"key_frame": 1, "pict_type": "I"},
+                        {"key_frame": 0, "pict_type": "P"},
+                    ]
+                },
+            }
+        return {"success": True, "payload": {"streams": []}}
+
+    monkeypatch.setattr(script, "_run_ffprobe_json", fake_ffprobe)
+
+    facts = script._probe_source_facts(
+        source,
+        inspect_frame_types=True,
+        timeout_seconds=30.0,
+        window_start=240,
+        window_end_exclusive=2640,
+        source_fps=Fraction(24000, 1001),
+    )
+
+    assert calls[1] == [
+        "-select_streams",
+        "v:0",
+        "-read_intervals",
+        "10.010000%+100.100000",
+        "-show_frames",
+        "-show_entries",
+        "frame=key_frame,pict_type",
+    ]
+    assert facts["frame_type_inspection_scope"] == {
+        "kind": "benchmark-window",
+        "start_frame": 240,
+        "end_frame_exclusive": 2640,
+        "source_fps": "24000/1001",
+        "read_interval": "10.010000%+100.100000",
+    }
+    assert facts["frame_types"] == {
+        "available": True,
+        "frame_count": 2,
+        "type_counts": {"I": 1, "P": 1},
+        "keyframe_count": 1,
+        "keyframe_gap_frames": {"count": 0},
+    }
+
+
 def test_benchmark_script_detects_adjacent_source_index(tmp_path: Path) -> None:
     script = _load_benchmark_script()
     source = tmp_path / "source.mkv"
@@ -1388,6 +1453,10 @@ def test_benchmark_script_ffprobe_timeout_is_bounded(
     result = script._run_ffprobe_json([], path=tmp_path / "source.mkv", timeout_seconds=2.5)
 
     assert result == {"success": False, "error": "ffprobe timed out after 2.5s"}
+    assert script._frame_type_summary(result) == {
+        "available": False,
+        "error": "ffprobe timed out after 2.5s",
+    }
 
 
 def test_benchmark_script_reports_unavailable_peak_rss_on_windows(
