@@ -7,9 +7,6 @@ from dataclasses import dataclass
 from time import perf_counter
 from typing import TYPE_CHECKING, Protocol, cast
 
-import numpy as np
-import numpy.typing as npt
-
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.metric_identity import (
     metric_algorithm_id,
@@ -108,139 +105,6 @@ def calculate_metric_strategy(
     raise MetricsCalculationError(
         f"Unsupported analysis performance mode '{config.performance_mode.value}'."
     )
-
-
-def calculate_quality_luminance(
-    clip: vs.VideoNode,
-    reporter: ProgressReporter | None = None,
-    metric_active_rect: MetricActiveRect | None = None,
-) -> list[float]:
-    """
-    Calculate Y channel mean for each frame.
-
-    Args:
-        clip: VapourSynth clip to analyze
-        reporter: Optional progress reporter
-
-    Returns:
-        List of per-frame luminance values (0.0-1.0)
-    """
-    import vapoursynth as vs
-
-    if clip.num_frames == 0:
-        raise MetricsCalculationError("Empty clip")
-
-    total_frames = clip.num_frames
-    with perf_span("analysis.luminance", frames=total_frames):
-        # Format handling: convert to YUV if needed
-        if clip.format.color_family != vs.YUV:
-            clip = clip.resize.Bicubic(format=vs.YUV420P8)
-
-        max_value: float = (
-            1.0
-            if clip.format.sample_type == vs.FLOAT
-            else float((1 << clip.format.bits_per_sample) - 1)
-        )
-        active_rect = _validated_active_rect(
-            metric_active_rect,
-            frame_width=clip.width,
-            frame_height=clip.height,
-        )
-
-        if reporter:
-            reporter.start_phase("Calculating luminance", clip.num_frames)
-
-        luminance: list[float] = []
-        phase_status = ProgressPhaseStatus.COMPLETED
-        try:
-            for n in range(clip.num_frames):
-                frame = clip.get_frame(n)
-                arr = _cropped_y_plane_array(_y_plane_array(frame), active_rect)
-                mean_val = float(arr.mean())
-                luminance.append(mean_val / max_value)
-                if reporter:
-                    reporter.advance(1)
-        except Exception as e:
-            phase_status = ProgressPhaseStatus.FAILED
-            raise MetricsCalculationError(
-                f"Frame access failed at frame {len(luminance)}: {e}"
-            ) from e
-        finally:
-            if reporter:
-                reporter.complete_phase(phase_status)
-
-        return luminance
-
-
-def calculate_quality_motion(
-    clip: vs.VideoNode,
-    reporter: ProgressReporter | None = None,
-    metric_active_rect: MetricActiveRect | None = None,
-) -> list[float]:
-    """
-    Calculate frame-to-frame difference scores.
-
-    Args:
-        clip: VapourSynth clip to analyze
-        reporter: Optional progress reporter to receive progress updates during motion calculation.
-
-    Returns:
-        List of per-frame motion scores (0.0-1.0)
-    """
-    import vapoursynth as vs
-
-    if clip.num_frames == 0:
-        raise MetricsCalculationError("Empty clip")
-
-    total_frames = clip.num_frames
-    with perf_span("analysis.motion", frames=total_frames):
-        # Format handling: convert to YUV if needed
-        if clip.format.color_family != vs.YUV:
-            clip = clip.resize.Bicubic(format=vs.YUV420P8)
-
-        active_rect = _validated_active_rect(
-            metric_active_rect,
-            frame_width=clip.width,
-            frame_height=clip.height,
-        )
-        width = clip.width if active_rect is None else active_rect.width
-        height = clip.height if active_rect is None else active_rect.height
-        max_value: float = (
-            1.0
-            if clip.format.sample_type == vs.FLOAT
-            else float((1 << clip.format.bits_per_sample) - 1)
-        )
-        norm_factor = float(width * height) * max_value
-
-        if reporter:
-            reporter.start_phase("Calculating motion", max(1, total_frames - 1))
-
-        motion = [0.0] * clip.num_frames
-        phase_status = ProgressPhaseStatus.COMPLETED
-        try:
-            for n in range(1, clip.num_frames):
-                prev_frame = clip.get_frame(n - 1)
-                curr_frame = clip.get_frame(n)
-                prev_arr = _cropped_y_plane_array(
-                    _y_plane_array(prev_frame),
-                    active_rect,
-                ).astype(np.float32)
-                curr_arr = _cropped_y_plane_array(
-                    _y_plane_array(curr_frame),
-                    active_rect,
-                ).astype(np.float32)
-                diff = np.abs(curr_arr - prev_arr)
-                motion[n] = float(np.sum(diff)) / norm_factor
-                if reporter:
-                    reporter.advance(1)
-        except Exception as e:
-            phase_status = ProgressPhaseStatus.FAILED
-            raise MetricsCalculationError(f"Frame access failed during motion analysis: {e}") from e
-        finally:
-            if reporter:
-                reporter.complete_phase(phase_status)
-
-        return motion
 
 
 def calculate_performance_planestats_metrics(
@@ -413,22 +277,6 @@ def _calculate_dense_planestats_metrics(
     return luminance, motion
 
 
-def _y_plane_array(frame: vs.VideoFrame) -> npt.NDArray[np.generic]:
-    return np.asarray(frame[0])
-
-
-def _cropped_y_plane_array(
-    arr: npt.NDArray[np.generic],
-    active_rect: MetricActiveRect | None,
-) -> npt.NDArray[np.generic]:
-    if active_rect is None:
-        return arr
-    return arr[
-        active_rect.y : active_rect.y + active_rect.height,
-        active_rect.x : active_rect.x + active_rect.width,
-    ]
-
-
 def _validated_active_rect(
     active_rect: MetricActiveRect | None,
     *,
@@ -474,6 +322,4 @@ __all__ = [
     "calculate_metric_strategy",
     "calculate_performance_planestats_metrics",
     "calculate_quality_planestats_metrics",
-    "calculate_quality_luminance",
-    "calculate_quality_motion",
 ]

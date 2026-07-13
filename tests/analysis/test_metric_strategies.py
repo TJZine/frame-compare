@@ -4,70 +4,23 @@ from __future__ import annotations
 
 import json
 import sys
-from fractions import Fraction
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import numpy as np
 import pytest
-import vapoursynth as vs_module
 
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.metric_identity import stable_metric_algorithm_identity_json
 from frame_compare.analysis.metric_strategies import (
     calculate_metric_strategy,
     calculate_performance_planestats_metrics,
-    calculate_quality_luminance,
-    calculate_quality_motion,
     calculate_quality_planestats_metrics,
 )
 from frame_compare.analysis.timing import AnalysisTimingRecorder
 from frame_compare.analysis.types import MetricActiveRect
 from frame_compare.config.schema import AnalysisConfig
-from frame_compare.utils.progress_protocol import ProgressReporter
-
-vs_mock = vs_module
 
 type FakeClipOp = tuple[str, int | None, int | None] | tuple[str, int, int, int, int]
-
-
-class MockFrame:
-    """Mock VapourSynth frame."""
-
-    def __init__(self, data: np.ndarray):
-        self._data = data
-
-    def __getitem__(self, index: int) -> np.ndarray:
-        if index == 0:
-            return self._data
-        raise IndexError("Mock only supports Y plane (index 0)")
-
-    @property
-    def props(self) -> dict:
-        return {}
-
-
-class MockClip:
-    """Mock VapourSynth clip."""
-
-    def __init__(self, frames: list[np.ndarray], fps: Fraction = Fraction(24, 1)):
-        self._frames = [MockFrame(f) for f in frames]
-        self.num_frames = len(frames)
-        self.fps = MagicMock()
-        self.fps.numerator = fps.numerator
-        self.fps.denominator = fps.denominator
-        self.width = frames[0].shape[1] if frames else 0
-        self.height = frames[0].shape[0] if frames else 0
-        self.format = MagicMock()
-        self.format.color_family = vs_mock.YUV
-        self.format.sample_type = vs_mock.INTEGER
-        self.format.bits_per_sample = 8
-        self.resize = MagicMock()
-
-    def get_frame(self, n: int) -> MockFrame:
-        if 0 <= n < self.num_frames:
-            return self._frames[n]
-        raise Exception(f"Frame {n} out of range")
 
 
 class FakePlaneStatsFrame:
@@ -270,119 +223,6 @@ FAKE_VS = SimpleNamespace(
 )
 
 
-@pytest.fixture
-def mock_reporter():
-    return MagicMock(spec=ProgressReporter)
-
-
-def test_calculate_luminance_black_frames_returns_zeros():
-    frames = [np.zeros((10, 10), dtype=np.uint8) for _ in range(3)]
-    clip = MockClip(frames)
-    luminance = calculate_quality_luminance(clip)  # type: ignore
-    assert luminance == [0.0, 0.0, 0.0]
-
-
-def test_calculate_luminance_white_frames_returns_ones():
-    frames = [np.full((10, 10), 255, dtype=np.uint8) for _ in range(3)]
-    clip = MockClip(frames)
-    luminance = calculate_quality_luminance(clip)  # type: ignore
-    assert luminance == [1.0, 1.0, 1.0]
-
-
-def test_calculate_luminance_single_frame():
-    frames = [np.full((10, 10), 127, dtype=np.uint8)]
-    clip = MockClip(frames)
-    luminance = calculate_quality_luminance(clip)  # type: ignore
-    assert len(luminance) == 1
-    assert pytest.approx(luminance[0], abs=1e-2) == 127 / 255
-
-
-def test_calculate_luminance_calls_progress_reporter(mock_reporter):
-    frames = [np.zeros((10, 10), dtype=np.uint8) for _ in range(5)]
-    clip = MockClip(frames)
-    calculate_quality_luminance(clip, reporter=mock_reporter)  # type: ignore
-    mock_reporter.start_phase.assert_called_once_with("Calculating luminance", 5)
-    assert mock_reporter.advance.call_count == 5
-    mock_reporter.complete_phase.assert_called_once()
-
-
-def test_calculate_motion_static_clip_returns_zeros():
-    frames = [np.full((10, 10), 100, dtype=np.uint8) for _ in range(3)]
-    clip = MockClip(frames)
-    motion = calculate_quality_motion(clip)  # type: ignore
-    assert motion == [0.0, 0.0, 0.0]
-
-
-def test_calculate_motion_first_frame_is_zero():
-    frames = [
-        np.zeros((10, 10), dtype=np.uint8),
-        np.full((10, 10), 255, dtype=np.uint8),
-    ]
-    clip = MockClip(frames)
-    motion = calculate_quality_motion(clip)  # type: ignore
-    assert motion[0] == 0.0
-    assert motion[1] == 1.0
-
-
-def test_calculate_motion_changing_frames_returns_positive():
-    frames = [
-        np.zeros((10, 10), dtype=np.uint8),
-        np.full((10, 10), 127, dtype=np.uint8),
-    ]
-    clip = MockClip(frames)
-    motion = calculate_quality_motion(clip)  # type: ignore
-    assert motion[0] == 0.0
-    assert 0.0 < motion[1] < 1.0
-
-
-def test_calculate_motion_single_frame_returns_single_zero():
-    frames = [np.zeros((10, 10), dtype=np.uint8)]
-    clip = MockClip(frames)
-    motion = calculate_quality_motion(clip)  # type: ignore
-    assert motion == [0.0]
-
-
-def test_calculate_motion_output_length_equals_num_frames():
-    frames = [np.zeros((10, 10), dtype=np.uint8) for _ in range(10)]
-    clip = MockClip(frames)
-    motion = calculate_quality_motion(clip)  # type: ignore
-    assert len(motion) == 10
-
-
-def test_calculate_motion_calls_progress_reporter(mock_reporter):
-    frames = [np.zeros((10, 10), dtype=np.uint8) for _ in range(5)]
-    clip = MockClip(frames)
-    calculate_quality_motion(clip, reporter=mock_reporter)  # type: ignore
-    mock_reporter.start_phase.assert_called_once_with("Calculating motion", 4)
-    assert mock_reporter.advance.call_count == 4
-    mock_reporter.complete_phase.assert_called_once()
-
-
-def test_calculate_luminance_empty_clip_raises_error():
-    clip = MockClip([])
-    with pytest.raises(MetricsCalculationError, match="Empty clip"):
-        calculate_quality_luminance(clip)  # type: ignore
-
-
-def test_calculate_motion_empty_clip_raises_error():
-    clip = MockClip([])
-    with pytest.raises(MetricsCalculationError, match="Empty clip"):
-        calculate_quality_motion(clip)  # type: ignore
-
-
-def test_calculate_metrics_frame_access_failure_raises_fc4002():
-    clip = MagicMock()
-    clip.num_frames = 1
-    clip.format.color_family = vs_mock.YUV
-    clip.format.sample_type = vs_mock.INTEGER
-    clip.format.bits_per_sample = 8
-    clip.get_frame.side_effect = Exception("VS Error")
-
-    with pytest.raises(MetricsCalculationError) as exc:
-        calculate_quality_luminance(clip)  # type: ignore
-    assert exc.value.code == "FC-4002"
-
-
 def test_quality_strategy_dispatch_matches_full_resolution_planestats(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -440,7 +280,7 @@ def test_quality_default_strategy_uses_one_combined_planestats_graph(
 
 
 def test_invalid_active_rect_raises_metrics_calculation_error() -> None:
-    clip = MockClip([np.zeros((4, 4), dtype=np.uint8)])
+    clip = FakeBalancedClip([0.0], width=4, height=4)
     source = MagicMock()
     source.clip = clip
 
@@ -545,9 +385,8 @@ def test_quality_planestats_is_used_by_normal_quality_dispatch(
         "frame_compare.analysis.metric_strategies.calculate_quality_planestats_metrics",
         quality,
     )
-    frames = [np.zeros((4, 4), dtype=np.uint8)]
     source = MagicMock()
-    source.clip = MockClip(frames)
+    source.clip = FakeBalancedClip([0.0], width=4, height=4)
 
     result = calculate_metric_strategy(source, AnalysisConfig(), reporter=None)
 
