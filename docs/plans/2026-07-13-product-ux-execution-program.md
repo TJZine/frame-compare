@@ -251,7 +251,7 @@ step advances the ledger.
 | 5. Guarded safe rerun | Deferred / accepted | Deferral evidence and acceptance record in `fbbf173` under [Reviewed feasibility outcome (accepted 2026-07-14)](#reviewed-feasibility-outcome-accepted-2026-07-14) | Full feasibility gate and independent review accepted U5F-001 through U5F-005; clean rollback verified | Reevaluate only with an approved internal config-injection contract and revised proof |
 | 6A. Wizard product-contract gate | Approved | Approved specification in `be32476` under [Unit 6A wizard interaction specification](#unit-6a-wizard-interaction-specification) | Plan-only structural proof passed; independent review U6A-001 through U6A-007 accepted, revised, closed, and returned APPROVABLE; maintainer approved 2026-07-14 | Continue to Unit 6B |
 | 6B. Wizard implementation | Completed | `484ae6f` | Expanded focused wizard/config/source/atomic/CLI/Windows proof and full gate passed; independent review U6B-001 through U6B-003 plus controller finding U6B-C001 accepted, fixed, closure-confirmed, and returned APPROVABLE | Continue to Unit 7 design gate |
-| 7. Report interaction design gate | Ready | — | Dependency promoted by completed Unit 6B `484ae6f` | Claim Unit 7 design gate |
+| 7. Report interaction design gate | Awaiting approval | `43c8341` | Reviewed contract at [`2026-07-14-report-interaction-design-contract.md`](2026-07-14-report-interaction-design-contract.md); U7-002 through U7-007 closed; maintainer accepted deferring U7-001 manual browser proof to final-program validation on 2026-07-14 | Obtain explicit Unit 7 approval before promoting Unit 8 |
 | 8. Magnifier and pixel inspector | Pending approved Unit 7 | — | — | Wait |
 | 9. Multi-clip grid | Pending Unit 8 | — | — | Wait |
 | 10. Local review state/export | Pending Unit 9 | — | — | Wait |
@@ -1056,6 +1056,32 @@ cross-session contract consumed by Units 8 through 11.
 
 Approval of this design gate permits the following implementation packages; it does
 not authorize a broad report rewrite.
+
+### Unit 7 reviewed design outcome (manual proof deferred 2026-07-14)
+
+The reviewed contract is
+[`2026-07-14-report-interaction-design-contract.md`](2026-07-14-report-interaction-design-contract.md).
+Its independent adversarial review accepted U7-002 through U7-007, covering the closed
+export/import domain, deterministic per-mode coordinate anchors and gesture arbitration,
+the presentation-blind threat boundary, memory-only import transactions, standard
+inspector-tab keyboard behavior, and faithful prototype closed/open plus ROI interaction
+states. Controller fixes were closure-reviewed; the reviewer returned `APPROVABLE EXCEPT
+FOR U7-001` before the maintainer decision below.
+
+U7-001 identified missing in-app-browser visual and interaction proof. On 2026-07-14 the
+maintainer explicitly chose to run that manual proof after Units 8–11 are implemented so
+the complete report experience can be tested and any issues fixed in the same pass. This
+changes proof timing only. It does not count as a pass or waive the required desktop,
+constrained/touch-width, 200% zoom, reduced-motion, keyboard traversal, inspector
+open/closed, 2/3/4/6-clip, failure-state, and current-viewer continuity matrix. Program
+closeout remains blocked until that evidence is recorded and accepted.
+
+Fresh design-unit proof passed `node --check` for the disposable prototype, required
+contract/scenario marker checks, `git diff --check`, and the untracked-file diff check.
+No production Python changed, so production test/type/lint/security/import gates are not
+claimed for this design-only unit. The reviewed contract is integrated as `43c8341`.
+Unit 7 remains `Awaiting approval`; Unit 8 is not promoted until the maintainer explicitly
+approves the design gate.
 
 ## 14. Package 8: magnifier, locked ROI, and pixel inspector
 
