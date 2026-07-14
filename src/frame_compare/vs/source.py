@@ -15,6 +15,8 @@ from frame_compare.vs.types import SourceInfo
 if TYPE_CHECKING:
     import vapoursynth as vs
 
+_INDEX_CONSTRUCTION_FAILURE_MARKER = "failed to construct index"
+
 
 @dataclass(frozen=True, slots=True)
 class LWLibavSourceOptions:
@@ -69,15 +71,22 @@ def load_source(
                 loader_kwargs["ff_options"] = decoder_options.ff_options
             if decoder_options.prefer_hw is not None:
                 loader_kwargs["prefer_hw"] = decoder_options.prefer_hw
+        adjacent_index_path = Path(f"{path}.lwi")
         try:
             clip = loader.LWLibavSource(str(path), **loader_kwargs)
-        except Exception:
+        except Exception as original_error:
             # L-SMASH may leave or encounter an unusable adjacent index and then
             # fail while trying to rebuild it in place. Retry without writing a
             # cache so callers do not have to delete generated index files.
-            if not Path(f"{path}.lwi").is_file():
+            if not _is_adjacent_index_construction_failure(
+                original_error,
+                index_path=adjacent_index_path,
+            ):
                 raise
-            clip = loader.LWLibavSource(str(path), cache=0, **loader_kwargs)
+            try:
+                clip = loader.LWLibavSource(str(path), cache=0, **loader_kwargs)
+            except Exception as retry_error:
+                raise original_error from retry_error
         frame = clip.get_frame(0)
         fps = Fraction(clip.fps.numerator, clip.fps.denominator)
         is_hdr, hdr_metadata = detect_hdr(dict(frame.props))
@@ -97,6 +106,15 @@ def load_source(
         is_hdr=is_hdr,
         hdr_metadata=hdr_metadata,
     )
+
+
+def _is_adjacent_index_construction_failure(
+    error: Exception,
+    *,
+    index_path: Path,
+) -> bool:
+    """Return whether an L-SMASH construction failure can use cache-free recovery."""
+    return index_path.is_file() and _INDEX_CONSTRUCTION_FAILURE_MARKER in str(error).casefold()
 
 
 def apply_trim(source: SourceInfo, start: int, end: int | None = None) -> vs.VideoNode:

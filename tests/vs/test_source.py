@@ -217,7 +217,7 @@ def test_load_source_retries_without_cache_after_adjacent_index_failure(tmp_path
     def loader(_path: str, **kwargs: object) -> MockClip:
         calls.append(kwargs)
         if len(calls) == 1:
-            raise RuntimeError("failed to construct index")
+            raise RuntimeError("lsmas: failed to construct index for video.mkv")
         return MockClip()
 
     core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
@@ -243,6 +243,49 @@ def test_load_source_retries_without_cache_after_adjacent_index_failure(tmp_path
         },
     ]
     assert index_path.read_bytes() == b"unusable index"
+
+
+def test_load_source_does_not_retry_unrelated_loader_failure_with_adjacent_index(
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "video.mkv"
+    Path(f"{video_path}.lwi").write_bytes(b"existing index")
+    calls: list[dict[str, object]] = []
+
+    def loader(_path: str, **kwargs: object) -> MockClip:
+        calls.append(kwargs)
+        raise RuntimeError("decoder initialization failed")
+
+    core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
+
+    with pytest.raises(SourceLoadError, match="decoder initialization failed"):
+        load_source(video_path, core)  # type: ignore[arg-type]
+
+    assert calls == [{}]
+
+
+def test_load_source_preserves_original_error_when_index_retry_fails(tmp_path: Path) -> None:
+    video_path = tmp_path / "video.mkv"
+    Path(f"{video_path}.lwi").write_bytes(b"unusable index")
+    calls: list[dict[str, object]] = []
+
+    def loader(_path: str, **kwargs: object) -> MockClip:
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise RuntimeError("lsmas: failed to construct index for video.mkv")
+        raise RuntimeError("cache-free retry also failed")
+
+    core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
+
+    with pytest.raises(SourceLoadError, match="failed to construct index") as exc_info:
+        load_source(video_path, core)  # type: ignore[arg-type]
+
+    original_error = exc_info.value.__cause__
+    assert isinstance(original_error, RuntimeError)
+    assert "failed to construct index" in str(original_error)
+    assert isinstance(original_error.__cause__, RuntimeError)
+    assert str(original_error.__cause__) == "cache-free retry also failed"
+    assert calls == [{}, {"cache": 0}]
 
 
 def test_load_source_does_not_retry_frame_read_failure(tmp_path: Path) -> None:
