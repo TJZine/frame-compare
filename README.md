@@ -193,7 +193,7 @@ window.
 | Mode | Metric coverage | Best for |
 | --- | --- | --- |
 | `quality` (default) | Every eligible frame | Highest-confidence automatic dark, bright, and motion selection |
-| `performance` | Exactly 25% of eligible frames across up to eight deterministic contiguous bursts | Faster analysis when different automatic frame choices and missed brief events are acceptable |
+| `performance` | 25% of eligible frames, rounded up to a whole frame, across up to eight deterministic contiguous bursts | Faster analysis when different automatic frame choices and missed brief events are acceptable |
 
 Choose the mode in configuration:
 

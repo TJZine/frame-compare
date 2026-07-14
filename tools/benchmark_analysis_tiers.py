@@ -36,7 +36,11 @@ from frame_compare.analysis.tier_validation import (
     compare_selection_category,
     tier_category_tolerance,
 )
-from frame_compare.analysis.timing import AnalysisTimingRecorder
+from frame_compare.analysis.timing import (
+    AnalysisCacheState,
+    AnalysisCacheWriteState,
+    AnalysisTimingRecorder,
+)
 from frame_compare.analysis.types import (
     ActiveRectAlgorithmId,
     ActiveRectDetectionMode,
@@ -480,8 +484,8 @@ def _require_cache_policy(
     *,
     policy: MetricCachePolicy,
     mode: str,
-    cache_state: str,
-    cache_write_state: str,
+    cache_state: AnalysisCacheState,
+    cache_write_state: AnalysisCacheWriteState,
 ) -> None:
     if policy == "cold":
         if cache_state != "miss" or cache_write_state != "written":
@@ -490,8 +494,11 @@ def _require_cache_policy(
                 f"{cache_state}/{cache_write_state}"
             )
         return
-    if cache_state != "hit":
-        raise RuntimeError(f"Reuse {mode} trial expected cache hit, got {cache_state}")
+    if cache_state != "hit" or cache_write_state != "not_attempted":
+        raise RuntimeError(
+            f"Reuse {mode} trial expected cache hit/no write attempt, got "
+            f"{cache_state}/{cache_write_state}"
+        )
 
 
 def _aggregate_tier_trials(trials: Sequence[JsonObject]) -> JsonObject:

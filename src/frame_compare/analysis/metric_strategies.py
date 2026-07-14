@@ -298,19 +298,21 @@ def _calculate_dense_planestats_metrics(
         if reporter:
             reporter.start_phase("Calculating metrics", luma.num_frames)
 
-        with record_span(timing_recorder, f"{timing_prefix}_graph_build"):
-            import vapoursynth as vs
-
-            core = _dynamic_attr(vs, "core")
-            std = _dynamic_attr(core, "std")
-            splice = cast(_SpliceFn, _dynamic_attr(std, "Splice"))
-            previous = splice(clips=[luma[0:1], luma[0:-1]])
-            plane_stats = cast(_PlaneStatsFn, _dynamic_attr(luma.std, "PlaneStats"))
-            stats = cast(_FrameReadable, plane_stats(previous))
         luminance: list[float] = []
         motion = [0.0] * luma.num_frames
         phase_status = ProgressPhaseStatus.COMPLETED
+        failure_stage = "graph construction"
         try:
+            with record_span(timing_recorder, f"{timing_prefix}_graph_build"):
+                import vapoursynth as vs
+
+                core = _dynamic_attr(vs, "core")
+                std = _dynamic_attr(core, "std")
+                splice = cast(_SpliceFn, _dynamic_attr(std, "Splice"))
+                previous = splice(clips=[luma[0:1], luma[0:-1]])
+                plane_stats = cast(_PlaneStatsFn, _dynamic_attr(luma.std, "PlaneStats"))
+                stats = cast(_FrameReadable, plane_stats(previous))
+            failure_stage = "frame access"
             for n in range(luma.num_frames):
                 frame_started = perf_counter() if timing_recorder is not None else 0.0
                 frame = stats.get_frame(n)
@@ -331,7 +333,7 @@ def _calculate_dense_planestats_metrics(
         except Exception as exc:
             phase_status = ProgressPhaseStatus.FAILED
             raise MetricsCalculationError(
-                f"Frame access failed during {error_label} metric analysis "
+                f"Failure during {error_label} metric analysis ({failure_stage}) "
                 f"at frame {len(luminance)}: {exc}"
             ) from exc
         finally:

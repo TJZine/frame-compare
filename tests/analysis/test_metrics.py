@@ -283,7 +283,7 @@ def _quality_strategy_result(frame_count: int = 10) -> MetricComputationResult:
 @patch("frame_compare.analysis.metrics.calculate_metric_strategy")
 @patch("frame_compare.analysis.metrics.DefaultVSLoader")
 @patch("frame_compare.analysis.metrics.load_cached_metrics_for_request")
-def test_calculate_metrics_bounds_decode_and_preserves_motion_lookbehind(
+def test_calculate_metrics_forwards_metric_range_and_persists_range_metadata(
     mock_load,
     mock_loader_cls,
     mock_strategy,

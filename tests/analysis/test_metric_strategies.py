@@ -17,8 +17,9 @@ from frame_compare.analysis.metric_strategies import (
     calculate_quality_planestats_metrics,
 )
 from frame_compare.analysis.timing import AnalysisTimingRecorder
-from frame_compare.analysis.types import MetricActiveRect
+from frame_compare.analysis.types import MetricActiveRect, MetricFrameRange
 from frame_compare.config.schema import AnalysisConfig
+from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 
 type FakeClipOp = tuple[str, int | None, int | None] | tuple[str, int, int, int, int]
 
@@ -74,6 +75,7 @@ class FakeStd:
             crop_calls=self._clip.crop_calls,
             ops=self._clip.ops,
             planestats_clipb_flags=self._clip.planestats_clipb_flags,
+            slice_calls=self._clip.slice_calls,
         )
 
 
@@ -102,6 +104,7 @@ class FakeResize:
             crop_calls=self._clip.crop_calls,
             ops=self._clip.ops,
             planestats_clipb_flags=self._clip.planestats_clipb_flags,
+            slice_calls=self._clip.slice_calls,
         )
 
     def Bilinear(
@@ -121,6 +124,7 @@ class FakeResize:
             crop_calls=self._clip.crop_calls,
             ops=self._clip.ops,
             planestats_clipb_flags=self._clip.planestats_clipb_flags,
+            slice_calls=self._clip.slice_calls,
         )
 
 
@@ -136,6 +140,7 @@ class FakeBalancedClip:
         crop_calls: list[tuple[str, int, int, int, int]] | None = None,
         ops: list[FakeClipOp] | None = None,
         planestats_clipb_flags: list[bool] | None = None,
+        slice_calls: list[tuple[int | None, int | None, int | None]] | None = None,
     ):
         self.values = values
         self.num_frames = len(values)
@@ -148,10 +153,12 @@ class FakeBalancedClip:
         self.planestats_clipb_flags = (
             [] if planestats_clipb_flags is None else planestats_clipb_flags
         )
+        self.slice_calls = [] if slice_calls is None else slice_calls
         self.resize = FakeResize(self)
         self.std = FakeStd(self)
 
     def __getitem__(self, item: slice) -> FakeBalancedClip:
+        self.slice_calls.append((item.start, item.stop, item.step))
         return FakeBalancedClip(
             self.values[item],
             width=self.width,
@@ -161,6 +168,7 @@ class FakeBalancedClip:
             crop_calls=self.crop_calls,
             ops=self.ops,
             planestats_clipb_flags=self.planestats_clipb_flags,
+            slice_calls=self.slice_calls,
         )
 
     def __add__(self, other: object) -> FakeBalancedClip:
@@ -175,6 +183,7 @@ class FakeBalancedClip:
             crop_calls=self.crop_calls,
             ops=self.ops,
             planestats_clipb_flags=self.planestats_clipb_flags,
+            slice_calls=self.slice_calls,
         )
 
 
@@ -196,6 +205,7 @@ class FakeCoreStd:
             crop_calls=clips.crop_calls,
             ops=clips.ops,
             planestats_clipb_flags=clips.planestats_clipb_flags,
+            slice_calls=clips.slice_calls,
         )
 
     def Splice(self, *, clips: list[object]) -> FakeBalancedClip:
@@ -211,6 +221,7 @@ class FakeCoreStd:
             crop_calls=first.crop_calls,
             ops=first.ops,
             planestats_clipb_flags=first.planestats_clipb_flags,
+            slice_calls=first.slice_calls,
         )
 
 
@@ -377,6 +388,29 @@ def test_quality_planestats_reports_missing_frame_properties(
         calculate_quality_planestats_metrics(FakeBalancedClip([0.0, 1.0]))
 
 
+def test_quality_planestats_wraps_graph_failure_and_completes_progress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failing_vs = SimpleNamespace(
+        YUV=FAKE_VS.YUV,
+        YUV420P8=FAKE_VS.YUV420P8,
+        GRAY=FAKE_VS.GRAY,
+        core=SimpleNamespace(
+            std=SimpleNamespace(ShufflePlanes=FakeCoreStd().ShufflePlanes),
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "vapoursynth", failing_vs)
+    reporter = MagicMock(spec=ProgressReporter)
+
+    with pytest.raises(MetricsCalculationError, match="graph construction"):
+        calculate_quality_planestats_metrics(
+            FakeBalancedClip([0.0, 1.0]),
+            reporter=reporter,
+        )
+
+    reporter.complete_phase.assert_called_once_with(ProgressPhaseStatus.FAILED)
+
+
 def test_quality_planestats_is_used_by_normal_quality_dispatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -394,6 +428,30 @@ def test_quality_planestats_is_used_by_normal_quality_dispatch(
     quality.assert_called_once()
     with pytest.raises(ValueError):
         AnalysisConfig(performance_mode="quality-planestats-candidate")
+
+
+def test_quality_strategy_bounds_range_and_preserves_motion_lookbehind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
+    clip = FakeBalancedClip([0.0, 0.1, 0.4, 0.9, 0.9, 1.0])
+    source = MagicMock()
+    source.clip = clip
+
+    result = calculate_metric_strategy(
+        source,
+        AnalysisConfig(),
+        reporter=None,
+        metric_frame_range=MetricFrameRange(
+            source_frame_count=6,
+            start=2,
+            end_exclusive=5,
+        ),
+    )
+
+    assert result.luminance == [0.4, 0.9, 0.9]
+    assert result.motion == pytest.approx([0.3, 0.5, 0.0])
+    assert clip.slice_calls == [(1, 5, None), (0, 1, None), (0, -1, None)]
 
 
 def test_performance_strategy_rejects_empty_clip(monkeypatch: pytest.MonkeyPatch) -> None:

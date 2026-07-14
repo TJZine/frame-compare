@@ -63,12 +63,12 @@ the analysis/cache owner.
 `quality` is the default full-resolution VapourSynth PlaneStats behavior, while
 `performance` is an approximate temporal-sampling strategy over the same
 full-resolution luma PlaneStats metrics. Quality analyzes every eligible frame.
-Performance analyzes exactly `ceil(window_frame_count * 0.25)` frames, distributed
-across up to eight deterministic centered contiguous bursts. Each nonzero burst
-includes one unreturned source-frame lookbehind so its first motion value preserves
-adjacent-frame semantics. Both modes stay inside the prepared selectable
-source-frame window and apply the prepared active picture rectangle for the
-analysis source before metric
+Performance returns metrics for exactly `ceil(window_frame_count * 0.25)` sampled
+frames, distributed across up to eight deterministic centered contiguous bursts. It
+may evaluate one additional unreturned source-frame lookbehind per nonzero burst so
+the burst's first motion value preserves adjacent-frame semantics. Returned metric
+frames in both modes stay inside the prepared selectable source-frame window and
+apply the prepared active picture rectangle for the analysis source before metric
 calculation. Preparation resolves that rectangle through
 `frame_compare.orchestration.active_rect` for static evidence, using explicit
 source overrides, trusted static metadata, configured dimension/aspect-ratio

@@ -15,8 +15,8 @@ not in this runbook.
 Both modes:
 
 - use the selected analysis source and prepared active picture rectangle;
-- stay inside the shared selectable window after source trims and configured
-  leading/trailing exclusions;
+- return metrics only for frames inside the shared selectable window after source
+  trims and configured leading/trailing exclusions;
 - preserve adjacent-frame motion at the start of every analyzed range with an
   unreturned lookbehind frame; and
 - isolate metric caches by mode and algorithm identity.
@@ -67,7 +67,7 @@ $DefaultConfig = 'config\benchmark-default-quantiles.config.toml'
 $Text = Get-Content $DefaultConfig -Raw
 $Text = $Text.Replace('dark_quantile = 0.20', 'dark_quantile = 0.05')
 $Text = $Text.Replace('bright_quantile = 0.80', 'bright_quantile = 0.95')
-Set-Content -Path $DefaultConfig -Value $Text
+Set-Content -LiteralPath $DefaultConfig -Value $Text -Encoding UTF8
 ```
 
 Run this control before describing performance-mode quality as validated under

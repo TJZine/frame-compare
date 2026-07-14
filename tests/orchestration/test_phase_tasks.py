@@ -500,14 +500,26 @@ def test_run_analyze_phase_uses_analysis_clip_metrics_but_reference_frame_domain
 @pytest.mark.unit
 def test_sparse_analysis_source_frames_normalize_into_reference_window(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ctx = _context(tmp_path)
-    reference = ctx.reference.with_trim(trim_start_frames=10, trim_end_frame_inclusive=70)
-    analysis_clip = ctx.reference.with_trim(
+    ctx.reference = ctx.reference.with_trim(
+        trim_start_frames=10,
+        trim_end_frame_inclusive=70,
+    )
+    ctx.analysis_clip = ctx.reference.with_trim(
         trim_start_frames=20,
         trim_end_frame_inclusive=80,
     )
-    window = SelectionWindow(start_frame=5, end_frame_exclusive=15)
+    ctx.selection_window = SelectionWindow(start_frame=5, end_frame_exclusive=15)
+    ctx.config.analysis = ctx.config.analysis.model_copy(
+        update={
+            "random_frame_count": 0,
+            "dark_frame_count": 1,
+            "bright_frame_count": 0,
+            "motion_frame_count": 0,
+        }
+    )
     metrics = FrameMetrics(
         luminance=[0.1, 0.9],
         motion=[0.2, 0.8],
@@ -524,24 +536,22 @@ def test_sparse_analysis_source_frames_normalize_into_reference_window(
         sampled_source_frames=(25, 34),
     )
 
-    selection = phase_selection._select_frames_for_selection_domain(
-        metrics=metrics,
-        reference=reference,
-        analysis_clip=analysis_clip,
-        selection_window=window,
-        config=ctx.config.analysis.model_copy(
-            update={
-                "random_frame_count": 0,
-                "dark_frame_count": 1,
-                "bright_frame_count": 0,
-                "motion_frame_count": 0,
-            }
-        ),
+    monkeypatch.setattr(
+        phase_selection.cache_io,
+        "load_cached_metrics_for_request",
+        lambda *_args, **_kwargs: CacheLoadResult(success=True, metrics=metrics),
     )
 
-    assert selection.frames == [5]
-    assert selection.breakdown.quantile_dark == [15]
-    assert set(selection.selection_details) == {15}
+    output = phase_selection.run_analyze_phase(
+        ctx,
+        input_videos=[ctx.reference.path],
+        workspace=ctx.workspace,
+        require_cache_only=True,
+    )
+
+    assert output.selected_frames == [5]
+    assert output.selection_breakdown.quantile_dark == [15]
+    assert set(output.selection_details_by_source_frame) == {15}
 
 
 @pytest.mark.unit

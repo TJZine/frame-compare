@@ -45,18 +45,56 @@ def test_help_exposes_only_production_benchmark_options() -> None:
 
 
 @pytest.mark.parametrize(
-    "args",
+    ("args", "message"),
     [
-        ["--output", "out.json", "--window-end-exclusive", "0", "a.mkv"],
-        ["--output", "out.json", "--window-start", "3", "--window-end-exclusive", "3", "a.mkv"],
-        ["--output", "out.json", "--window-end-exclusive", "10", "--repetitions", "0", "a.mkv"],
+        pytest.param(
+            ["--output", "out.json", "--window-end-exclusive", "0", "a.mkv"],
+            "--window-end-exclusive must be greater than --window-start",
+            id="empty-default-window",
+        ),
+        pytest.param(
+            [
+                "--output",
+                "out.json",
+                "--window-start",
+                "3",
+                "--window-end-exclusive",
+                "3",
+                "a.mkv",
+            ],
+            "--window-end-exclusive must be greater than --window-start",
+            id="empty-offset-window",
+        ),
+        pytest.param(
+            [
+                "--output",
+                "out.json",
+                "--window-end-exclusive",
+                "10",
+                "--repetitions",
+                "0",
+                "a.mkv",
+            ],
+            "--repetitions must be positive",
+            id="zero-repetitions",
+        ),
     ],
 )
-def test_invalid_benchmark_arguments_fail_closed(args: list[str]) -> None:
-    script = _load_script()
+def test_invalid_benchmark_arguments_fail_closed(args: list[str], message: str) -> None:
+    root = Path(__file__).resolve().parents[1]
 
-    with pytest.raises(SystemExit):
-        script._parse_args(args)
+    result = subprocess.run(
+        [sys.executable, str(root / "tools" / "benchmark_analysis_tiers.py"), *args],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=10,
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert message in result.stderr
 
 
 def test_trial_order_rotates_without_candidate_modes() -> None:
@@ -102,9 +140,10 @@ def test_performance_contract_requires_exact_production_source_map() -> None:
 @pytest.mark.parametrize(
     ("policy", "cache_state", "cache_write_state", "message"),
     [
-        pytest.param("cold", "hit", "not-written", "Cold", id="cold-hit"),
+        pytest.param("cold", "hit", "not_attempted", "Cold", id="cold-hit"),
         pytest.param("cold", "miss", "failed", "Cold", id="cold-write-failed"),
         pytest.param("reuse", "miss", "written", "Reuse", id="reuse-miss"),
+        pytest.param("reuse", "hit", "written", "Reuse", id="reuse-hit-and-write"),
     ],
 )
 def test_cache_policy_rejects_mislabeled_trials(
@@ -128,7 +167,7 @@ def test_cache_policy_rejects_mislabeled_trials(
     ("policy", "cache_state", "cache_write_state"),
     [
         pytest.param("cold", "miss", "written", id="cold-miss-and-write"),
-        pytest.param("reuse", "hit", "not-written", id="reuse-hit"),
+        pytest.param("reuse", "hit", "not_attempted", id="reuse-hit"),
     ],
 )
 def test_cache_policy_accepts_observed_trial_state(
@@ -192,42 +231,6 @@ def test_sampled_fidelity_compares_only_mapped_frames() -> None:
     assert result["sample_count"] == 2
     assert result["luminance"]["max_absolute_error"] == pytest.approx(0.0)
     assert result["motion"]["max_absolute_error"] == pytest.approx(0.0)
-
-
-def test_mode_comparison_distinguishes_exact_overlap_and_pool_retention() -> None:
-    script = _load_script()
-    quality_metrics = _metrics(mode="quality", start=0, end=20, source_frame_count=20)
-    performance_metrics = _metrics(
-        mode="performance",
-        start=0,
-        end=20,
-        source_frame_count=20,
-        sampled=(1, 3, 6, 8, 11),
-        luminance=[0.1, 0.3, 0.6, 0.8, 1.1],
-        motion=[0.01, 0.03, 0.06, 0.08, 0.11],
-    )
-    quality_selection = _selection(dark=[0], bright=[19], motion=[18])
-    performance_selection = _selection(dark=[1], bright=[11], motion=[11])
-    quality = _aggregate(script, quality_metrics, quality_selection, "quality", 2.0)
-    performance = _aggregate(script, performance_metrics, performance_selection, "performance", 1.0)
-
-    result = script._compare_modes(
-        quality=quality,
-        performance=performance,
-        config=AnalysisConfig(
-            random_frame_count=0,
-            dark_frame_count=1,
-            bright_frame_count=1,
-            motion_frame_count=1,
-            dark_quantile=0.2,
-            bright_quantile=0.8,
-        ),
-    )
-
-    assert result["comparisons"]["dark"]["overlap_count"] == 0
-    assert result["exact_selected_equality"]["dark"] is False
-    assert "quality_category_pool_retention" in result
-    assert result["timing_comparison"]["speedup"] == pytest.approx(2.0)
 
 
 def test_compute_pipeline_excludes_cache_persistence_only() -> None:
@@ -365,7 +368,21 @@ def test_main_writes_atomic_production_report(
         source_frame_count=20,
         sampled=sampled,
     )
-    monkeypatch.setattr(script, "load_config", lambda _path: ConfigSchema())
+    config = ConfigSchema().model_copy(
+        update={
+            "analysis": AnalysisConfig(
+                random_frame_count=0,
+                dark_frame_count=1,
+                bright_frame_count=1,
+                motion_frame_count=1,
+                dark_quantile=0.2,
+                bright_quantile=0.8,
+            )
+        }
+    )
+    quality_selection = _selection(dark=[0], bright=[19], motion=[18])
+    performance_selection = _selection(dark=[1], bright=[11], motion=[11])
+    monkeypatch.setattr(script, "load_config", lambda _path: config)
     monkeypatch.setattr(script, "_resolve_benchmark_analysis_source", lambda **_kwargs: source)
     monkeypatch.setattr(
         script, "_source_index_facts", lambda _paths: {reference.as_posix(): {"detected": True}}
@@ -374,8 +391,8 @@ def test_main_writes_atomic_production_report(
         script,
         "_run_benchmark",
         lambda **_kwargs: (
-            _aggregate(script, quality_metrics, _selection(), "quality", 2.0),
-            _aggregate(script, performance_metrics, _selection(), "performance", 1.0),
+            _aggregate(script, quality_metrics, quality_selection, "quality", 2.0),
+            _aggregate(script, performance_metrics, performance_selection, "performance", 1.0),
         ),
     )
     monkeypatch.setattr(script, "_probe_source_facts", lambda *_args, **_kwargs: {})
@@ -400,7 +417,12 @@ def test_main_writes_atomic_production_report(
     report = json.loads(output.read_text(encoding="utf-8"))
     assert report["schema_version"] == 2
     assert set(report["comparisons"]) == {"performance"}
-    assert report["comparisons"]["performance"]["sampling"]["sample_count"] == 5
+    comparison = report["comparisons"]["performance"]
+    assert comparison["sampling"]["sample_count"] == 5
+    assert comparison["comparisons"]["dark"]["overlap_count"] == 0
+    assert comparison["exact_selected_equality"]["dark"] is False
+    assert "quality_category_pool_retention" in comparison
+    assert comparison["timing_comparison"]["speedup"] == pytest.approx(2.0)
     assert capsys.readouterr().out.strip() == output.as_posix()
 
 

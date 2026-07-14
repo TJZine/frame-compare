@@ -1,6 +1,6 @@
 import pytest
 
-from frame_compare.analysis.sampling import plan_performance_bursts
+from frame_compare.analysis.sampling import SamplingBurst, plan_performance_bursts
 
 
 @pytest.mark.parametrize(
@@ -27,10 +27,20 @@ def test_performance_plan_has_exact_ceil_quarter_budget(
     assert list(bursts) == sorted(bursts, key=lambda burst: burst.start)
 
 
-def test_centered_plan_is_deterministic() -> None:
-    kwargs = {"window_start": 37, "window_end_exclusive": 154}
-
-    assert plan_performance_bursts(**kwargs) == plan_performance_bursts(**kwargs)
+def test_centered_plan_has_expected_offset_burst_boundaries() -> None:
+    assert plan_performance_bursts(
+        window_start=37,
+        window_end_exclusive=154,
+    ) == (
+        SamplingBurst(start=42, end_exclusive=46, decode_start=41),
+        SamplingBurst(start=56, end_exclusive=60, decode_start=55),
+        SamplingBurst(start=71, end_exclusive=75, decode_start=70),
+        SamplingBurst(start=85, end_exclusive=89, decode_start=84),
+        SamplingBurst(start=100, end_exclusive=104, decode_start=99),
+        SamplingBurst(start=115, end_exclusive=119, decode_start=114),
+        SamplingBurst(start=130, end_exclusive=133, decode_start=129),
+        SamplingBurst(start=145, end_exclusive=148, decode_start=144),
+    )
 
 
 @pytest.mark.parametrize("length", [1, 2, 7, 8, 9, 31, 32, 33, 100])

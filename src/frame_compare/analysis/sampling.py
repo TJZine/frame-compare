@@ -27,7 +27,10 @@ def plan_performance_bursts(
     window_start: int,
     window_end_exclusive: int,
 ) -> tuple[SamplingBurst, ...]:
-    """Plan exact 25% coverage in at most eight centered deterministic bursts."""
+    """Plan 25% coverage rounded up to a whole frame.
+
+    Uses at most eight centered deterministic bursts.
+    """
     window_length = window_end_exclusive - window_start
     if window_length <= 0:
         raise ValueError("Sampling window must contain at least one frame")
