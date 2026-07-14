@@ -316,10 +316,10 @@ a product decision:
 - add its commit, corpus, window, repetitions, cache policy, profile, environment,
   timing, selection evidence, and caveats to
   [Analysis Benchmark History](analysis-benchmark-history.md);
-- retain raw JSON only when it is the minimum evidence needed for the current
-  decision; and
-- move accepted raw evidence to `docs/benchmark-evidence/` rather than force-
-  tracking runtime scratch output.
+- keep raw JSON only in ignored `generated/` while reviewing and transcribing
+  the decision-grade results; and
+- delete the raw JSON after the history entry is complete rather than tracking
+  benchmark reports in the repository.
 
 Do not retain superseded matrices, transient probes, lock files, cache payloads,
-or reports whose material result is already captured in the ledger.
+per-frame arrays, or reports whose material result is captured in the ledger.

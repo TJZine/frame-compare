@@ -1,8 +1,8 @@
 # Analysis Benchmark History
 
 This is the curated record of analysis-mode performance decisions. It preserves
-the material timing and selection evidence while keeping superseded benchmark
-JSON and experimental commands out of the active documentation.
+the material timing and selection evidence without retaining raw benchmark JSON
+or experimental commands in the repository.
 
 For current Windows commands, see
 [Analysis Performance Validation](analysis-performance-validation.md).
@@ -31,8 +31,8 @@ The following alternatives are not part of the locked system:
 
 ## Reading the quality evidence
 
-The sparse reports contain several different measurements that must not be
-treated as interchangeable:
+The final sparse decision data contains several different measurements that
+must not be treated as interchangeable:
 
 - **Category-pool retention** asks whether each performance-selected frame falls
   inside quality's configured dark, bright, or motion extreme pool. A 100% result
@@ -45,29 +45,41 @@ treated as interchangeable:
   full-resolution PlaneStats calculation is intact on those frames; it says
   nothing about events between bursts.
 
-The retained runs used the deliberate decision profile in
+The final runs used the deliberate decision profile in
 `config/benchmark.config.toml`: 20 random frames, 10 frames in each metric
 category, `dark_quantile = 0.20`, and `bright_quantile = 0.80`. Shipped defaults
 use `0.05` and `0.95`, and ship with metric-category counts set to zero. These
-reports therefore validate the benchmark decision profile, not the shipped
+measurements therefore validate the benchmark decision profile, not the shipped
 default quantile pools.
 
 ## Corpus and protocol
 
 Decision runs used three cold metric-cache repetitions with warm L-SMASH source
 indexes and a fixed 2,400-frame window. The final sparse runs used source frames
-`240..2640` so nonzero-start motion lookbehind behavior was exercised.
+`240..2640` so nonzero-start motion lookbehind behavior was exercised. Trial
+order rotated deterministically, all three quality trials reported cache misses
+and successful writes, and benchmark-only sparse candidates bypassed persistence.
 
-The primary corpus was the 4K HDR Witch pair, analyzed from the reference inside
-a dimension-derived `3600x2160` rectangle at `(120, 0)`. The secondary corpus was
-the 1920x1080 H.264 Dan Da Dan S02E01 pair, using the full frame. Measurements
-were collected on Windows with 24 logical CPUs, Python 3.13.7, VapourSynth R76,
-and API R4.2. The NVIDIA diagnostic also recorded a GeForce RTX 5080 with driver
-610.62.
+| Runtime fact | Final sparse runs |
+| --- | --- |
+| Host | Windows 10 build 19045, AMD64, 24 logical CPUs |
+| Python | 3.13.7 |
+| VapourSynth | R76, API R4.2, 24 core threads, 4,096 MB core cache |
+| FFmpeg/ffprobe | `git-2025-11-02-a677b38-ffmpeg-windows-build-helpers` |
+| Metric cache | Cold; 3 misses and 3 successful writes for quality |
+| Selection profile | 20 random; 10 each dark, bright, and motion; 20%/80% quantiles |
+
+| Corpus | Analysis source facts | Active rectangle | Diagnostic frame types in the benchmark interval |
+| --- | --- | --- | --- |
+| Witch 4K HDR | HEVC Main 10, `yuv420p10le`, 3840x2160, 24000/1001 fps, 7,116 source frames | Dimension-derived 3600x2160 at `(120, 0)` | 2,006 B, 22 I, 369 P across 2,397 reported frames |
+| Dan Da Dan S02E01 | H.264 High, `yuv420p`, 1920x1080, 24000/1001 fps, 34,502 source frames | Full frame | 1,406 B, 119 I, 875 P across 2,400 frames |
+
+The NVIDIA diagnostic additionally recorded a GeForce RTX 5080 with driver
+610.62, but it did not prove that CUVID was the effective decoder.
 
 Results are machine-, decoder-build-, source-, and window-dependent. Speedups
-below are paired within a single report; wall-clock medians from different
-reports are not combined.
+below are paired within a single run; wall-clock medians from different runs are
+not combined.
 
 ## Decision ledger
 
@@ -80,35 +92,81 @@ reports are not combined.
 | `00cd9dfd` | `analysis-decoder-candidates-witch-4k-hdr.json` (raw report removed) | Skip-loop-filter was 1.056x and forced max threads 1.029x relative to the dense comparison reference. | Rejected: neither reached the 1.5x minimum and each added complexity or approximation. |
 | `6df04266` | `analysis-all-candidates-witch-4k-hdr.json` (raw report removed) | Normal 25%, 12.5%, and 6.25% sparse candidates measured 2.075x, 3.207x, and 3.735x relative to that report's quality reference. The 6.25% modes retained only 60% of motion selections. | Rejected 6.25% and skip-loop variants; narrowed the final run to normal-decoder 25% and 12.5%. |
 | `6df04266` | `analysis-nvidia-cuvid-request-witch-4k-hdr.json` (raw report removed) | NVIDIA request was 1.204x with 100% category-pool retention, but GPU presence/utilization could not prove the effective decoder. | Diagnostic only; never promoted. |
-| `4f6b4108` | [`analysis-sparse-final-witch-4k-hdr.json`](benchmark-evidence/analysis-sparse-final-witch-4k-hdr.json) | Quality was 27.793s. The 25% candidate was 13.507s (2.058x; 51.40% reduction) with 100% category-pool retention. Exact bright/dark/motion overlap was 1/10, 0/10, and 3/10. The 12.5% candidate was 2.468x but retained only 90% of bright selections. | Accepted 25% as the balanced performance contract; rejected 12.5% as a public mode. |
+| `4f6b4108` | final Witch sparse decision run (raw report removed) | Quality was 27.793s. The 25% candidate was 13.507s (2.058x; 51.40% reduction) with 100% category-pool retention. Exact bright/dark/motion overlap was 1/10, 0/10, and 3/10. The 12.5% candidate was 2.468x but retained only 90% of bright selections. | Accepted 25% as the balanced performance contract; rejected 12.5% as a public mode. |
 | `4f6b4108` | `analysis-nvidia-cuvid-final-witch-4k-hdr.json` (raw report removed) | NVIDIA request was 1.239x with exact selections, but `effective_decoder_proven` remained false. | Rejected from production; the ledger is sufficient evidence. |
-| `7dec388e` | [`analysis-sparse-final-dandadan-s02e01-1080p.json`](benchmark-evidence/analysis-sparse-final-dandadan-s02e01-1080p.json) | Quality was 4.317s. The 25% candidate was 1.717s (2.514x; 60.22% reduction) with 100% category-pool retention but only 1/10 exact overlap in each metric category. The 12.5% candidate was 3.817x with 100% pool retention. | Confirmed that 25% creates a meaningful speed tier on a second corpus. The faster 12.5% result did not outweigh its Witch miss or the cost of another public tradeoff. |
+| `7dec388e` | final Dan Da Dan sparse decision run (raw report removed) | Quality was 4.317s. The 25% candidate was 1.717s (2.514x; 60.22% reduction) with 100% category-pool retention but only 1/10 exact overlap in each metric category. The 12.5% candidate was 3.817x with 100% pool retention. | Confirmed that 25% creates a meaningful speed tier on a second corpus. The faster 12.5% result did not outweigh its Witch miss or the cost of another public tradeoff. |
 
-The evidence commits above identify when each report entered version control.
-The historical JSON schema did not embed the benchmark checkout commit or dirty
-state, so the exact executed checkout cannot be reconstructed from those files
-alone. Future reports should record both automatically.
+The evidence commits above identify when each report first entered version
+control. The historical JSON schema did not embed the benchmark checkout commit
+or dirty state, so the exact executed checkout cannot be reconstructed from
+those files alone. The current benchmark harness records both automatically.
 
-## Retained evidence and cleanup policy
+## Final sparse timing measurements
 
-The repository retains only the two final sparse decision reports:
+Times are compute-pipeline seconds from three paired cold repetitions. The
+minimum, median, maximum, and population standard deviation are recorded so the
+decision does not rely on a single central value.
 
-- 4K HDR Witch, which contains the accepted 25% result and the decisive 12.5%
-  bright-category miss; and
-- Dan Da Dan animation, which provides the second-corpus timing and selection
-  result.
+| Corpus | Coverage | Samples | Min / median / max | Population SD | Speedup | Time reduction | Faster pairs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Witch | Quality, 100% | 2,400 | 27.209 / 27.793 / 28.204 | 0.408 | Reference | Reference | — |
+| Witch | Sparse 25% | 600 | 13.481 / 13.507 / 14.579 | 0.511 | 2.058x | 51.40% | 3/3 |
+| Witch | Sparse 12.5% | 300 | 11.162 / 11.260 / 12.176 | 0.457 | 2.468x | 59.49% | 3/3 |
+| Dan Da Dan | Quality, 100% | 2,400 | 4.142 / 4.317 / 4.353 | 0.092 | Reference | Reference | — |
+| Dan Da Dan | Sparse 25% | 600 | 1.645 / 1.717 / 1.735 | 0.039 | 2.514x | 60.22% | 3/3 |
+| Dan Da Dan | Sparse 12.5% | 300 | 1.127 / 1.131 / 1.169 | 0.019 | 3.817x | 73.80% | 3/3 |
 
-Superseded baseline, implementation, decoder, full-matrix, and NVIDIA JSON is
-removed after its material result is captured in this ledger. New benchmark
-outputs belong in ignored `generated/` while under review. Promote only the
-smallest decision-grade evidence into `docs/benchmark-evidence/`.
+## Final sparse selection measurements
+
+`Miss rate` is the fraction of sparse selections that were not within the stated
+frame tolerance of any quality selection. `Nearest distance` records the median
+and maximum absolute source-frame distance to the closest quality selection.
+
+| Corpus | Coverage | Category | Quality-pool retention | Exact overlap | Miss rate | Tolerance | Nearest distance median / max |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| Witch | 25% | Dark | 100% | 0/10 | 90% | 2 frames | 35.5 / 64 |
+| Witch | 25% | Bright | 100% | 1/10 | 90% | 2 frames | 9.5 / 25 |
+| Witch | 25% | Motion | 100% | 3/10 | 70% | 3 frames | 17.0 / 1,202 |
+| Witch | 12.5% | Dark | 100% | 2/10 | 70% | 2 frames | 17.0 / 70 |
+| Witch | 12.5% | Bright | 90% | 0/10 | 100% | 2 frames | 10.5 / 30 |
+| Witch | 12.5% | Motion | 100% | 0/10 | 100% | 3 frames | 25.5 / 1,209 |
+| Dan Da Dan | 25% | Dark | 100% | 1/10 | 80% | 2 frames | 11.0 / 80 |
+| Dan Da Dan | 25% | Bright | 100% | 1/10 | 90% | 2 frames | 35.5 / 87 |
+| Dan Da Dan | 25% | Motion | 100% | 1/10 | 90% | 3 frames | 80.5 / 261 |
+| Dan Da Dan | 12.5% | Dark | 100% | 0/10 | 90% | 2 frames | 56.0 / 80 |
+| Dan Da Dan | 12.5% | Bright | 100% | 0/10 | 80% | 2 frames | 43.5 / 75 |
+| Dan Da Dan | 12.5% | Motion | 100% | 0/10 | 100% | 3 frames | 124.0 / 261 |
+
+For both corpora and both sparse candidates, luminance and motion values on
+sampled frames had zero maximum absolute error against quality at `1e-12`
+tolerance. Within the sampled frames, dark, bright, and motion rankings all had
+Spearman correlation `1.0` and 10/10 top-ten overlap. This proves metric fidelity
+only on sampled frames; it does not reduce the temporal miss risk shown above.
+
+The sampled share of quality's wider extreme pools also favored 25% coverage:
+
+| Corpus | Coverage | Dark / bright / motion extreme frames sampled | Maximum distance to a sample, dark / bright / motion |
+| --- | ---: | ---: | ---: |
+| Witch | 25% | 30.17% / 20.83% / 28.33% | 113 / 113 / 113 frames |
+| Witch | 12.5% | 14.33% / 9.00% / 18.13% | 132 / 131 / 131 frames |
+| Dan Da Dan | 25% | 29.33% / 35.50% / 26.88% | 113 / 112 / 113 frames |
+| Dan Da Dan | 12.5% | 15.67% / 20.00% / 13.75% | 132 / 131 / 132 frames |
+
+## Evidence retention policy
+
+Raw benchmark JSON is not retained in the repository. New outputs stay in the
+ignored `generated/` directory only while they are being reviewed. When a run
+changes a product decision, transcribe its decision-grade protocol, environment,
+timing distribution, selection evidence, and caveats into this history, then
+delete the raw output. Exact frame lists, per-frame metrics, probe payloads, and
+other reproducible diagnostic arrays are intentionally omitted.
 
 ## Remaining validation
 
 - Run the locked production modes with 10 metric selections per category at the
   shipped `0.05`/`0.95` quantiles before making release-wide default-profile
   quality claims.
-- The retained final reports have `selection_domain = null`; they are fixed-window
+- The final sparse runs used `selection_domain = null`; they are fixed-window
   algorithm evidence, not complete proof of production cache identity with trims
   or source overrides. Verify those through the normal application path.
 - Add an SDR live-action or especially grain-heavy corpus when available.
