@@ -250,8 +250,8 @@ step advances the ledger.
 | 4. Run outcomes and history | Completed | `78d1adb` | Focused persistence/lifecycle/CLI/Windows proof and full gate passed; independent review U4-001 through U4-007 accepted, fixed, closed, and reverified | Continue to Unit 5 feasibility |
 | 5. Guarded safe rerun | Deferred / accepted | Deferral evidence and acceptance record in `fbbf173` under [Reviewed feasibility outcome (accepted 2026-07-14)](#reviewed-feasibility-outcome-accepted-2026-07-14) | Full feasibility gate and independent review accepted U5F-001 through U5F-005; clean rollback verified | Reevaluate only with an approved internal config-injection contract and revised proof |
 | 6A. Wizard product-contract gate | Approved | Approved specification in `be32476` under [Unit 6A wizard interaction specification](#unit-6a-wizard-interaction-specification) | Plan-only structural proof passed; independent review U6A-001 through U6A-007 accepted, revised, closed, and returned APPROVABLE; maintainer approved 2026-07-14 | Continue to Unit 6B |
-| 6B. Wizard implementation | Ready | — | Dependency promoted by approved Unit 6A contract `be32476` | Claim Unit 6B implementation |
-| 7. Report interaction design gate | Pending Unit 6B | — | — | Wait |
+| 6B. Wizard implementation | Completed | `484ae6f` | Expanded focused wizard/config/source/atomic/CLI/Windows proof and full gate passed; independent review U6B-001 through U6B-003 plus controller finding U6B-C001 accepted, fixed, closure-confirmed, and returned APPROVABLE | Continue to Unit 7 design gate |
+| 7. Report interaction design gate | Ready | — | Dependency promoted by completed Unit 6B `484ae6f` | Claim Unit 7 design gate |
 | 8. Magnifier and pixel inspector | Pending approved Unit 7 | — | — | Wait |
 | 9. Multi-clip grid | Pending Unit 8 | — | — | Wait |
 | 10. Local review state/export | Pending Unit 9 | — | — | Wait |
