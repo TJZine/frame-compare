@@ -22,7 +22,11 @@ bright_frame_count = 10
 motion_frame_count = 10
 random_seed = 20202020
 
-# Keep the historical benchmark selection policy explicit.
+# Keep the historical decision profile explicit. The 0.20/0.80 quantiles are
+# deliberately wider than Frame Compare's shipped 0.05/0.95 defaults so the
+# research runs have larger category pools. Use a local copied config with
+# 0.05/0.95 for the shipped-default control described in
+# docs/analysis-performance-validation.md.
 ignore_lead_seconds = 240.0
 ignore_trail_seconds = 240.0
 min_window_seconds = 5.0
@@ -30,7 +34,6 @@ dark_quantile = 0.20
 bright_quantile = 0.80
 
 [screenshots]
-# The benchmark harness does not perform the normal pipeline's content scan.
-# The current benchmark pair resolves to the same full-frame metric geometry
-# under this deterministic policy.
+# The benchmark harness uses prepared static active-rectangle provenance but
+# does not run the normal pipeline's optional content-refinement scan.
 active_rect_detection = "aspect_ratio"
