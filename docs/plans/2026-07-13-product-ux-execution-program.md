@@ -243,7 +243,7 @@ step advances the ledger.
 
 | Unit | Status | Integrated reference | Verification/review | Next action |
 | --- | --- | --- | --- | --- |
-| 1. CLI discoverability and input open | Ready | — | — | Implement Unit 1 |
+| 1. CLI discoverability and input open | Verified / awaiting integration | — | Full gate passed on the candidate; independent review accepted U1-001 and U1-002; all partial product/test changes removed | Commit durable deferral evidence |
 | 2. Side-effect-free dry run | Pending Unit 1 | — | — | Wait |
 | 3A. Doctor-hint audit | Pending Unit 2 | — | — | Wait |
 | 3B. Final-selection summary | Pending Unit 3A | — | — | Wait |
@@ -305,6 +305,36 @@ step advances the ledger.
 - Run the repository full-verification gate.
 - Rollback is removal of the subgroup and its focused owner; no persisted state is
   involved.
+
+### Deferred outcome (accepted 2026-07-14)
+
+Unit 1 is deferred in full. No `inputs` subgroup, opener implementation, help
+change, public-contract change, or test from the candidate is shipped. The
+controller explicitly removed every partial production, test, README, and CLI
+authority change before recording this outcome.
+
+The candidate passed 31 focused CLI/contract tests and the complete repository gate
+(`pyright --warnings`, Ruff, Bandit at medium severity, full pytest, and both
+import-linter contracts) before independent review. A fresh read-only unconfigured
+reviewer fallback then identified two P1 findings:
+
+- **U1-001 — accepted:** the installed Windows
+  [`frame-compare.ps1`](../../tools/windows_portable/shim/frame-compare.ps1) shim
+  injects its persisted state config for `run`, `wizard`, and `preset`, but not for
+  `inputs open`. Fixing the discrepancy requires expanding the package into the
+  Windows portable/release surface and its verification contract.
+- **U1-002 — accepted:** documented
+  [`xdg-open`](https://man.archlinux.org/man/xdg-open.1) semantics permit a successfully
+  launched desktop application to remain attached for a long time. The candidate's
+  ten-second synchronous timeout could therefore open a folder and still report a
+  false failure. A correct replacement needs an approved launch-acceptance,
+  detachment, process-lifetime, and failure-reporting contract.
+
+The maintainer accepted deferral in the persistent controller task on 2026-07-14.
+Reevaluate Unit 1 only when a new approved package explicitly includes both Windows
+portable config injection and Linux opener lifetime semantics, with the matching
+Windows/Linux host-proof plan. Do not revive only the cosmetic help or label portion
+without reopening the complete user contract.
 
 ## 7. Package 2: side-effect-free `run --dry-run`
 
