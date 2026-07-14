@@ -20,11 +20,24 @@ _INDEX_CONSTRUCTION_FAILURE_MARKER = "failed to construct index"
 
 @dataclass(frozen=True, slots=True)
 class LWLibavSourceOptions:
-    """Explicit optional decoder settings forwarded to LWLibavSource."""
+    """Explicit optional decoder settings forwarded to LWLibavSource.
+
+    Raises:
+        ValueError: If ``threads`` is not a non-negative integer, or if
+            ``prefer_hw`` is not the integer 1 or ``None``.
+    """
 
     threads: int | None = None
     ff_options: str | None = None
     prefer_hw: Literal[1] | None = None
+
+    def __post_init__(self) -> None:
+        """Reject invalid decoder settings before they reach the runtime boundary."""
+        if self.threads is not None and (type(self.threads) is not int or self.threads < 0):
+            raise ValueError("LWLibavSource thread count must be a non-negative integer or None")
+
+        if self.prefer_hw is not None and (type(self.prefer_hw) is not int or self.prefer_hw != 1):
+            raise ValueError("LWLibavSource prefer_hw must be the integer 1 (NVIDIA CUVID) or None")
 
 
 def load_source(
@@ -36,18 +49,9 @@ def load_source(
     """Load video source with automatic format detection.
 
     Raises:
-        PluginNotFoundError: If lsmas plugin is not available (FC-2003, propagates)
-        SourceLoadError: If file cannot be opened or is corrupt (FC-4015)
+        PluginNotFoundError: If the L-SMASH Works plugin is unavailable (FC-2003).
+        SourceLoadError: If the source cannot be loaded or inspected (FC-4015).
     """
-    if decoder_options is not None and (
-        decoder_options.threads is not None and decoder_options.threads < 0
-    ):
-        raise ValueError("LWLibavSource thread count must be non-negative")
-    if decoder_options is not None and decoder_options.prefer_hw is not None:
-        prefer_hw = decoder_options.prefer_hw
-        if type(prefer_hw) is not int or prefer_hw != 1:
-            raise ValueError("LWLibavSource prefer_hw must be the integer 1 (NVIDIA CUVID) or None")
-
     if core is None:
         core = ensure_vs_environment()
 

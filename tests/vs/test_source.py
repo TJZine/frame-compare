@@ -1,6 +1,5 @@
 from collections.abc import Mapping
 from fractions import Fraction
-from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Literal, cast
@@ -145,43 +144,33 @@ def test_load_source_forwards_explicit_decoder_options():
     ]
 
 
-def test_load_source_rejects_negative_decoder_thread_count():
-    core = SimpleNamespace(
-        lsmas=SimpleNamespace(
-            LWLibavSource=lambda *_args, **_kwargs: pytest.fail("loader must not be called")
-        )
-    )
-
-    with pytest.raises(ValueError, match="thread count must be non-negative"):
-        load_source(  # type: ignore[arg-type]
-            "video.mkv",
-            core,
-            decoder_options=LWLibavSourceOptions(threads=-1),
-        )
+@pytest.mark.parametrize("threads", [-1, True, "4", 1.5])
+def test_lwlibav_source_options_reject_invalid_thread_count(threads: object) -> None:
+    with pytest.raises(
+        ValueError,
+        match="thread count must be a non-negative integer or None",
+    ):
+        LWLibavSourceOptions(threads=cast("int", threads))
 
 
-@pytest.mark.parametrize("prefer_hw", [0, 2, -1, True, "1", [1]])
-def test_load_source_rejects_invalid_hardware_preference_before_plugin_work(
+def test_lwlibav_source_options_accept_boundary_values() -> None:
+    defaults = LWLibavSourceOptions()
+    explicit = LWLibavSourceOptions(threads=0, prefer_hw=1)
+
+    assert (defaults.threads, defaults.ff_options, defaults.prefer_hw) == (None, None, None)
+    assert (explicit.threads, explicit.prefer_hw) == (0, 1)
+
+
+@pytest.mark.parametrize("prefer_hw", [0, 2, -1, True, 1.0, "1", [1]])
+def test_lwlibav_source_options_reject_invalid_hardware_preference(
     prefer_hw: object,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    source_module = import_module("frame_compare.vs.source")
-    monkeypatch.setattr(
-        source_module,
-        "require_plugin",
-        lambda *_args, **_kwargs: pytest.fail("plugin lookup must not be called"),
-    )
-
+) -> None:
     with pytest.raises(
         ValueError,
         match=r"prefer_hw must be the integer 1 \(NVIDIA CUVID\) or None",
     ):
-        load_source(
-            "video.mkv",  # type: ignore[arg-type]
-            SimpleNamespace(),  # type: ignore[arg-type]
-            decoder_options=LWLibavSourceOptions(
-                prefer_hw=cast("Literal[1]", prefer_hw),
-            ),
+        LWLibavSourceOptions(
+            prefer_hw=cast("Literal[1]", prefer_hw),
         )
 
 

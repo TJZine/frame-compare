@@ -170,6 +170,12 @@ Check if VapourSynth is usable (import + core creation).
 
 Load video source with automatic format detection.
 
+### LWLibavSourceOptions
+
+`LWLibavSourceOptions`
+
+Explicit optional decoder settings forwarded to LWLibavSource.
+
 ### require_plugin
 
 `require_plugin(core: vs.Core, plugin: str) -> None`

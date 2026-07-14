@@ -52,3 +52,18 @@ def test_lazy_attribute_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
     settings_cls = vs_mod.TonemapSettings
     assert settings_cls is not None
     assert "frame_compare.vs.types" in sys.modules
+
+
+def test_lazy_decoder_options_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Decoder options remain available without eagerly importing VS source logic."""
+    vs_modules = [m for m in sys.modules if m.startswith("frame_compare.vs")]
+    for module_name in vs_modules:
+        monkeypatch.delitem(sys.modules, module_name, raising=False)
+
+    vs_mod = importlib.import_module("frame_compare.vs")
+
+    assert "frame_compare.vs.source" not in sys.modules
+    options = vs_mod.LWLibavSourceOptions(threads=0)
+
+    assert options.threads == 0
+    assert "frame_compare.vs.source" in sys.modules
