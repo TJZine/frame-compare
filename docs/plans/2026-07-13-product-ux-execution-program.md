@@ -1,0 +1,874 @@
+Status: Active
+Scope: Approved CLI ergonomics, diagnostics, run history and safe rerun, guided setup, and generated-report review UX
+Owner: Frame Compare maintainer and executing Codex sessions
+Updated: 2026-07-13
+
+# Product and UX execution program
+
+## 1. Executive decision
+
+Deliver the approved product improvements as a sequence of independently releasable
+packages, not as one long-lived feature branch or a broad UI rewrite. Each package
+must have one clear owner seam, its own public-contract update, targeted tests, the
+repository full-verification gate, diff inspection, and an independent final review
+when it changes a high-risk surface.
+
+The sequence is intentionally ordered from low-coupling CLI improvements through
+new persisted state and only then into interactive report work:
+
+1. CLI discoverability and `inputs open`.
+2. Side-effect-free `run --dry-run`.
+3. Focused diagnostics and final-selection output improvements.
+4. Run outcome persistence and read-only history commands.
+5. Safe rerun, only after its feasibility gate passes.
+6. Goal-oriented wizard redesign, after its prompt/profile contract is approved.
+7. Report interaction design gate.
+8. Magnifier and pixel inspection.
+9. Grid comparison.
+10. Local review state with versioned export/import.
+11. Blind A/B, only after an identity-leak audit proves it can be honest.
+
+This program preserves `comparison_videos` as the default folder-first input
+workflow. It does not add positional source-file arguments or require users to type
+long media paths.
+
+## 2. Goals and non-goals
+
+### Goals
+
+1. Make the existing CLI workflow easier to discover and safer to operate without
+   changing the folder-first mental model.
+2. Let users understand what a run would do before media probing, rendering,
+   persistence, network activity, or browser launch.
+3. Make failures and successful selections easier to understand using existing
+   typed diagnostic and orchestration facts.
+4. Add a small, durable, versioned run-history foundation with deterministic,
+   atomic filesystem behavior.
+5. Support a guarded "repeat these saved settings against these verified inputs"
+   workflow without claiming bit-for-bit reproducibility.
+6. Improve guided setup without inventing a second configuration or preset system.
+7. Turn the generated report into a stronger inspection workspace while preserving
+   its static, offline, report-first architecture.
+8. Keep implementation slices small enough to review, revert, and release
+   independently.
+
+### Non-goals
+
+- No positional media-file mode; `comparison_videos` remains the default input seam.
+- No visual frame-plan or timeline-selection visualization.
+- No motion-sample generation, objective quality metrics, or generic resume of an
+  interrupted run.
+- No server, database, account system, report backend, or background daemon.
+- No full-screen application shell or wholesale report visual redesign.
+- No framework migration for the static HTML report.
+- No `doctor --fix`, automatic package installation, or silent environment mutation.
+- No feature-flag framework solely for these changes.
+- No abstract repository layer, generic command bus, plugin system, or generalized
+  persistence framework.
+- No promise that reruns are bit-identical across Frame Compare, FFmpeg,
+  VapourSynth, model, or operating-system versions.
+- No blind mode that merely hides labels while filenames, baked overlays, metadata,
+  or ordering still reveal source identity.
+
+## 3. Program-wide invariants
+
+Every package must preserve these invariants:
+
+- `frame_compare.cli.entry` remains a thin, lazy composition root. Command behavior
+  belongs in focused `cli/*_command.py` owners.
+- Orchestration phases coordinate existing owners; they do not absorb CLI rendering,
+  persistence parsing, browser policy, or report interaction logic.
+- Services remain side-effect owners with typed inputs and outputs. Cross-layer
+  imports continue to satisfy `importlinter.ini`.
+- Human output uses stderr where required by the current CLI contract. JSON stdout
+  remains exactly one JSON document with no progress, Rich markup, browser noise,
+  or diagnostic text.
+- New public CLI, config, JSON, persistence, and report behavior is documented in
+  `docs/current-cli-contract.md` in the same package that changes it.
+- Persisted files are versioned, deterministic, atomically replaced, and contained
+  beneath the configured workspace root. Readers fail closed on malformed or
+  unsupported data.
+- Secrets, API keys, webhook headers, tokens, environment values, tracebacks, and
+  absolute paths outside the workspace are never written to history or replay
+  records.
+- A convenience command never invokes a shell string. External processes receive
+  argument arrays through the existing subprocess boundary.
+- Existing user configuration and legacy run folders are never rewritten as an
+  implicit migration.
+- Report state stays offline and local to the browser unless the user explicitly
+  exports a JSON file.
+- Accessibility is part of the report interaction contract: keyboard access,
+  visible focus, semantic controls, reduced-motion behavior, readable contrast,
+  and touch/pointer parity are not follow-up work.
+- New behavior reuses current owners and data when they are already sufficient.
+  Duplicate summaries, parallel configuration models, and compatibility shims are
+  out of scope.
+
+## 4. Ownership map
+
+| Concern | Primary owner | Composition seam | Explicitly kept out |
+| --- | --- | --- | --- |
+| CLI registration and lazy imports | `src/frame_compare/cli/entry.py` | Typer registration only | Business logic, persistence, platform subprocess policy |
+| Input-folder open command | New focused `src/frame_compare/cli/inputs_command.py` | Registered by `entry.py`; reuses configured path resolution | Orchestration and report code |
+| Dry-run planning and rendering | New focused `src/frame_compare/cli/dry_run.py` plus `run_command.py` dispatch | Runs before `Runner.run` | `RunRequest`, orchestration phases, media probing, persistence |
+| Doctor remediation facts | `src/frame_compare/orchestration/doctor_checks.py` | Existing `DoctorReport` and CLI renderers | New repair engine or platform mutation |
+| Selection summary | New focused `src/frame_compare/orchestration/selection_report.py` | Called after final aligned selection is known | `RunResult` growth solely for live human output |
+| Run creation identity | Existing `src/frame_compare/services/run_info.py` | Existing preparation flow | Outcome mutation or replay settings |
+| Run outcomes | New `src/frame_compare/services/run_result_record.py` | Minimal lifecycle calls from orchestration | CLI history rendering and config reconstruction |
+| Replay settings and input manifest | New `src/frame_compare/services/run_replay.py` | Written after run reservation; read by history CLI | Secrets, publishing authorization, source discovery policy |
+| History CLI | New `src/frame_compare/cli/history_command.py` | Uses run-record service APIs | Direct TOML parsing and arbitrary path opening |
+| Guided wizard | Existing `src/frame_compare/cli/wizard_command.py`, split only if measured size/cohesion requires it | Existing config load/write and preset owners | New profile engine or runtime imports |
+| Report payload and markup | Existing `src/frame_compare/services/report/*` owners | Renderer and payload contracts | Browser persistence policy and orchestration logic |
+| Viewer interactions and state | `src/frame_compare/services/report/assets/viewer.js` and `viewer.css` | Existing embedded payload | New web framework, server, or Python callback layer |
+
+Adding a new module in this map is justified only where it gives a new public or
+persistence behavior one owner. Do not pre-create empty abstractions for later
+packages.
+
+## 5. Release and branch workflow
+
+Each numbered package below is its own branch/PR or equivalent reviewable commit
+series. Integrate packages in dependency order and start each package from the
+latest integrated base. Do not keep the entire program open in one implementation
+branch.
+
+For every package:
+
+1. Restate the package scope and stop conditions in the task before editing.
+2. Load one process skill and only the boundary skills required by that package.
+3. Inspect the named owner seams and current tests; do not begin with a broad repo
+   refactor.
+4. Add or update contract tests before or with production behavior.
+5. Update the relevant authority docs in the same change.
+6. Run targeted verification while iterating, then the full gate before handoff.
+7. Inspect `git diff`, `git status`, generated/untracked files, and unrelated user
+   changes.
+8. Obtain one independent final review for high-risk CLI, config, persistence,
+   orchestration, services, browser-open, or report packages; adjudicate findings
+   against evidence before changing code.
+9. Merge/release only when the package is independently useful and revertable.
+
+Use conventional commits. Avoid drive-by cleanup; record discovered unrelated debt
+separately rather than expanding a package.
+
+Use the copy/paste session packets in
+[`docs/product-ux-package-handoffs.md`](../product-ux-package-handoffs.md). That
+companion contains workflow instructions only; this active plan remains the sole
+authority for product behavior, package scope, and stop conditions.
+
+### Authorized persistent-controller mode
+
+The maintainer authorized a single persistent main controller to execute this
+program through depth-one subagents instead of requiring a fresh manually prompted
+main session for every unit. This changes execution topology only; it does not relax
+any package contract, dependency, proof, review, approval, or stop condition.
+
+In this mode:
+
+- the main task is the sole authoritative controller and owns scope, integration,
+  user communication, conflict resolution, verification, review adjudication,
+  remediation, staging, commits, and ledger state;
+- one fresh bounded implementation worker may write the current unit; it receives a
+  decision-complete packet and may not delegate, broaden scope, or use git;
+- the controller inspects the worker's actual diff and reruns required proof;
+- one separate fresh read-only reviewer receives no implementation transcript and
+  may not edit, delegate, or use git;
+- the controller adjudicates every review finding, fixes accepted/modified issues
+  itself, reruns affected proof, and requests closure review only after a material
+  fix;
+- only one writer is active at a time, dependent units are never parallelized, and
+  the controller continues automatically after a successful checkpoint;
+- the controller pauses for Unit 6A approval; Unit 7 approval; a maintainer decision
+  required by Unit 5 or Unit 11; any named package stop condition; an unplanned
+  public, architecture, or authority contract; overlapping unrelated user changes;
+  missing environment bootstrap that requires installation authority; a failed
+  required proof after bounded remediation; branch/push/PR or external coordination;
+  dependency installation; or any other material scope/permission expansion.
+
+The maintainer authorizes the persistent controller to stage exact task-owned files
+and create local conventional commits for the workflow bootstrap, each reviewed
+unit, and each mechanical ledger checkpoint. This authorization does not include
+creating/switching branches, pushing, opening pull requests, installing dependencies,
+or changing unrelated/external state.
+
+Because a commit cannot contain its own hash, checkpointed closeout uses two local
+commits:
+
+1. the reviewed implementation/design commit, including same-pass authority docs,
+   or a reviewed durable-evidence commit for a blocked feasibility outcome;
+2. a docs-only ledger checkpoint that records the first commit's immutable hash and
+   promotes the row to `Completed`, `Awaiting approval`, or `Blocked` as appropriate.
+
+A `Blocked` feasibility outcome must not commit partial production code, disposable
+experiments, or an incomplete feature. After reviewing the evidence, the controller
+first restores the task-owned production/test surface to the integrated base through
+safe explicit edits without touching unrelated changes, then may commit only the
+durable evidence/design record. The ledger checkpoint records that evidence commit
+and keeps dependent work stopped.
+If the controller cannot separate task-owned partial work from unrelated changes, it
+pauses instead of committing.
+
+The ledger-only checkpoint may run `git diff --check`, exact row inspection, and
+repository-status inspection instead of repeating the product full gate or
+independent review. Approval or accepted-deferral transitions use another docs-only
+checkpoint after the maintainer decision. Stage exact files only; never use
+`git add .`.
+
+### Execution ledger
+
+Update one row at package closeout using these exact state meanings:
+
+- `Ready`: dependency gates are satisfied and work may start.
+- `Pending <dependency>`: the named dependency has not reached a promoting state;
+  work may not start.
+- `In progress`: one main session owns the unit.
+- `Verified / awaiting integration`: implementation, proof, and review are complete,
+  but the change is not yet represented by an immutable integrated reference.
+- `Awaiting approval`: a reviewed decision/design artifact exists but the maintainer
+  has not approved it.
+- `Completed`: the accepted implementation or decision artifact is present on the
+  current base and the row names its immutable commit/merge reference.
+- `Approved`: a decision gate is maintainer-approved, integrated, and the row names
+  both its durable contract location and immutable reference.
+- `Deferred / accepted`: the maintainer accepted a reviewed deferral; the row names
+  the evidence, acceptance record, and reevaluation trigger.
+- `Blocked`: the unit cannot proceed and dependent work must not start.
+
+A dependent package may begin only after the preceding row is `Completed`,
+`Approved`, or `Deferred / accepted`. `Verified / awaiting integration`,
+`Awaiting approval`, and `Blocked` do not promote the next row. Package sessions do
+not invent an integrated reference: without explicit git authorization they stop at
+`Verified / awaiting integration`, and a later authorized integration/acceptance
+step advances the ledger.
+
+| Unit | Status | Integrated reference | Verification/review | Next action |
+| --- | --- | --- | --- | --- |
+| 1. CLI discoverability and input open | Ready | — | — | Implement Unit 1 |
+| 2. Side-effect-free dry run | Pending Unit 1 | — | — | Wait |
+| 3A. Doctor-hint audit | Pending Unit 2 | — | — | Wait |
+| 3B. Final-selection summary | Pending Unit 3A | — | — | Wait |
+| 4. Run outcomes and history | Pending Unit 3B | — | — | Wait |
+| 5. Guarded safe rerun | Pending Unit 4 | — | — | Wait |
+| 6A. Wizard product-contract gate | Pending Unit 5 | — | — | Wait |
+| 6B. Wizard implementation | Pending approved Unit 6A | — | — | Wait |
+| 7. Report interaction design gate | Pending Unit 6B | — | — | Wait |
+| 8. Magnifier and pixel inspector | Pending approved Unit 7 | — | — | Wait |
+| 9. Multi-clip grid | Pending Unit 8 | — | — | Wait |
+| 10. Local review state/export | Pending Unit 9 | — | — | Wait |
+| 11. Blind A/B feasibility/implementation | Pending Unit 10 | — | — | Wait |
+
+## 6. Package 1: CLI discoverability and input-folder opening
+
+### User contract
+
+- Add `frame-compare inputs open`.
+- Resolve the input directory through the same root/config rules as `run`.
+- Open that directory using the supported host mechanism: `open` on macOS,
+  `xdg-open` on Linux, and the native non-shell Windows path.
+- If the directory is absent, fail with the existing typed path/config error style;
+  do not silently create it.
+- If graphical opening is unavailable or the environment is headless/containerized,
+  return a typed dependency/platform error that includes the resolved path and a
+  concrete manual-open hint. Do not claim that the host folder opened.
+- Keep `comparison_videos` as the documented default workflow.
+- Improve command and option help with accepted choices, defaults, and a small
+  number of copyable examples. Help must remain skimmable and must not become a
+  second manual.
+
+### Expected files in scope
+
+- `src/frame_compare/cli/entry.py`
+- new `src/frame_compare/cli/inputs_command.py`
+- `src/frame_compare/cli/run_command.py` only for option help text
+- `src/frame_compare/cli/wizard_command.py` only for help text if needed
+- `tests/cli/test_help_and_import.py`
+- new `tests/cli/test_inputs_command.py`
+- `docs/current-cli-contract.md`
+- `README.md` or the current user-facing quick-start owner, if it exposes command
+  examples
+
+### Guardrails
+
+- Pass paths as process arguments; no `shell=True`, interpolated command, or
+  shell-dependent quoting.
+- Mock the platform process boundary in unit tests. Record real native verification
+  only on the host platforms actually exercised.
+- If the command cannot reuse the existing safe open/process seams and Typer entry
+  point without packaging or runtime-architecture changes, stop and defer it. The
+  approved feature is intentionally a small convenience, not a new platform layer.
+
+### Verification and rollback
+
+- Contract tests cover root/config resolution, paths containing spaces, missing
+  directories, unsupported openers, opener failure, JSON/output cleanliness where
+  applicable, and lazy `--help` imports.
+- Run the repository full-verification gate.
+- Rollback is removal of the subgroup and its focused owner; no persisted state is
+  involved.
+
+## 7. Package 2: side-effect-free `run --dry-run`
+
+### Frozen behavior
+
+`frame-compare run --dry-run` performs only:
+
+1. root/config/preset loading and validation;
+2. CLI option compatibility validation;
+3. configured input-directory validation and supported-file discovery;
+4. pure resolution of the planned selection strategy and declared outputs;
+5. rendering a typed dry-run plan.
+
+It does not:
+
+- construct or call the orchestration runner;
+- import or initialize VapourSynth;
+- run FFmpeg, ffprobe, doctor checks, media probing, analysis, or alignment;
+- read or write analysis/probe/alignment caches;
+- reserve a run folder or write run metadata;
+- perform TMDB, slow.pics, webhook, or other network activity;
+- open a browser, copy to the clipboard, or launch VSPreview.
+
+Human output and `--json` render the same typed DTO. JSON contains a stable,
+allowlisted summary of the input directory, discovered source filenames, reference
+selector, selection strategy, declared output/publishing intentions, and an
+explicit `checks_not_performed` list. It never dumps the complete effective config.
+
+The output must distinguish facts that are known without probing from facts that
+cannot be known yet. For example, it may say that report generation is enabled but
+must not invent the final run-folder name, selected frame numbers, clip metadata,
+or output dimensions.
+
+### Expected files in scope
+
+- `src/frame_compare/cli/entry.py`
+- `src/frame_compare/cli/run_command.py`
+- new `src/frame_compare/cli/dry_run.py`
+- `src/frame_compare/cli/output.py` only if the shared JSON writer is reused
+- `tests/cli/test_run_command.py`
+- new `tests/cli/test_run_dry_run.py`
+- `tests/cli/test_run_json_errors.py`
+- `docs/current-cli-contract.md`
+
+### Architectural decision
+
+Dry run is CLI-owned and exits before `RunRequest` construction. Do not add a
+`dry_run` flag to `RunRequest`, the phase plan, or the runner; doing so would force
+every runtime owner to defend against accidental side effects.
+
+### Stop conditions
+
+- If current input discovery cannot be called without runtime initialization or
+  writes, extract only its pure filename-discovery policy into a focused owner.
+- Stop rather than simulate media-derived values or build a parallel orchestration
+  graph.
+
+### Verification and rollback
+
+- Tests use sentinels that fail if runner construction, subprocesses, network,
+  cache access, run-folder writes, browser open, or clipboard access occurs.
+- Test invalid config, no inputs, incompatible options, human output, and exact JSON
+  shape/stream discipline.
+- Run the repository full-verification gate.
+- Rollback removes the option and DTO; no migrations are required.
+
+## 8. Package 3A: doctor-hint quality audit
+
+The current doctor model already owns `CheckResult.hint`, exposes it as
+`install_hint` in JSON, and renders it in human output. Improve the facts, not the
+framework.
+
+### Scope
+
+- Audit each failing/warning check for a deterministic, platform-appropriate next
+  action.
+- Distinguish missing executable, unusable version, unavailable optional feature,
+  bundle corruption, network failure, and configuration failure where the check
+  can prove that distinction.
+- Keep hints short and directly actionable. Include an exact command only when it
+  is safe and correct for the detected platform/install mode.
+- Preserve existing status, exit-code, and JSON field names.
+
+### Non-goals and stop conditions
+
+- No automated repair, package-manager detection matrix, shell execution, or broad
+  environment recommendation engine.
+- Do not guess an install command when the application cannot identify the install
+  mode. Prefer a precise diagnostic and documentation pointer.
+
+### Expected files and proof
+
+- `src/frame_compare/orchestration/doctor_checks.py`
+- `src/frame_compare/orchestration/doctor_types.py` only if a proven missing typed
+  fact is required
+- `tests/orchestration/test_doctor*.py`
+- `tests/cli/test_doctor_command.py`
+- `docs/current-cli-contract.md`
+- Run targeted doctor tests, then the full-verification gate.
+
+## 9. Package 3B: final-selection summary
+
+The existing `Clip Overview` already reports per-clip resolution, frame rate, frame
+count, HDR state, and path after sources load. Preserve it and remove or correct any
+stale TODO that says clip metadata is missing.
+
+Add one verbose human summary after alignment has produced the final selection. It
+reports the final frame count and the counts/ranges attributable to available
+selection categories such as user, dark, bright, motion, and random. It must use the
+existing `SelectionBreakdown`; it does not recalculate selection or add data solely
+for presentation.
+
+### Owner and contract
+
+- Put formatting/emission in a focused
+  `src/frame_compare/orchestration/selection_report.py`, parallel to
+  `fps_report.py`.
+- Invoke it at the phase boundary where the final aligned selection and breakdown
+  are both known.
+- Emit only for verbose human runs. Keep quiet mode quiet and JSON stdout unchanged.
+- Do not enlarge `RunResult` solely to route live console output.
+
+### Expected proof
+
+- New focused selection-report tests.
+- Phase integration tests prove it uses the post-alignment selection, stays absent
+  in normal/quiet/JSON modes, and handles user-only or unavailable breakdowns.
+- Update CLI authority prose and run the full-verification gate.
+
+## 10. Package 4: run outcomes and read-only history (Stage 1)
+
+### Persistence contract
+
+Keep `run_info.toml` as immutable creation identity. Add a separate, versioned,
+atomically written `run_result.toml` under each reserved run folder.
+
+The initial schema contains only durable facts needed for history:
+
+- schema version;
+- `completed`, `completed_with_warnings`, or `failed` status;
+- start/completion timestamps and elapsed duration;
+- paths to the report and screenshot directory relative to the workspace root;
+- clip count and final selected-frame count;
+- existing phase-timing/cache summary facts where available;
+- sanitized warning summaries;
+- slow.pics outcome and URL when one exists;
+- for failure, a stable error code/category and sanitized message, never traceback or
+  exception representation.
+
+Do not duplicate configuration or replay settings in this file. That belongs to
+the separate Stage 2 replay record.
+
+### Lifecycle behavior
+
+- Write the final result after post-run outputs have settled.
+- On a run failure after folder reservation, make one best-effort failure-record
+  write and then preserve the original error and exit code.
+- A result-record write failure must not turn completed media work into a failed
+  comparison. Surface a structured warning; the folder appears as `unknown` in
+  history if no valid record exists.
+- Failures before run-folder reservation create no history entry.
+- Legacy folders with no `run_result.toml` remain readable as `unknown`; never
+  migrate them implicitly.
+
+### CLI contract
+
+- `frame-compare history list` lists run folders newest first with deterministic
+  tie-breaking and concise status/time/report availability.
+- `frame-compare history open RUN_NAME` accepts an exact run-folder name, validates
+  that the stored relative report path resolves beneath the configured generated
+  root, and reuses existing browser-open policy.
+- Malformed/unsupported records are displayed as unavailable with an actionable
+  warning; one bad folder does not hide valid history.
+- No delete, rename, search, pagination, database, or fuzzy matching in Stage 1.
+- Provide a stable allowlisted `history list --json` shape and keep stdout clean.
+
+### Expected files in scope
+
+- new `src/frame_compare/services/run_result_record.py`
+- minimal lifecycle calls in `src/frame_compare/orchestration/coordinator.py` or a
+  focused lifecycle helper selected after inspection
+- new `src/frame_compare/cli/history_command.py`
+- `src/frame_compare/cli/entry.py`
+- service, orchestration lifecycle, and CLI contract tests
+- `docs/current-cli-contract.md`
+- `docs/current-architecture.md` if the new persistence owner changes the durable
+  architecture map
+
+### Verification and rollback
+
+- Round-trip, schema-version, malformed-file, atomic-write, containment, legacy
+  folder, partial-failure, and deterministic-order tests are required.
+- Verify report opening cannot escape the generated root through `..`, absolute
+  paths, or symlinks according to the repository's current containment policy.
+- Run the full-verification gate.
+- Rollback can leave `run_result.toml` files in old runs; older versions ignore
+  them. Never require destructive cleanup.
+
+## 11. Package 5: guarded safe rerun (Stage 2)
+
+### Feasibility gate
+
+Do not implement this package until a focused spike proves all of the following
+without changing the runner-wide configuration contract:
+
+1. a redacted effective configuration can round-trip with all semantically relevant
+   Pydantic explicit-field state preserved;
+2. current input names and existing stat-based fingerprints can be compared before
+   a new run starts;
+3. replay construction can reuse existing config override and source-discovery
+   owners rather than introduce a second config loader or source-selection path;
+4. publishing can be disabled by default independently of saved settings.
+
+The spike is test code or a disposable local experiment, not a shipped abstraction.
+If any point requires a broad `ConfigSchema`, `RunRequest`, or orchestration refactor,
+defer rerun and keep Stage 1 history. That is the main downside boundary.
+
+### Replay persistence contract
+
+On normal runs, atomically write a separate versioned `run_replay.toml` after source
+identity is available but before analysis, rendering, or external publishing. It
+contains:
+
+- redacted effective config values required by runtime behavior;
+- recursively captured explicit-field state needed to reproduce Pydantic semantics;
+- semantic CLI overrides that affect comparison behavior;
+- input-directory identity plus ordered input-relative source names and the same
+  size/mtime source fingerprints already owned by current probe/cache identity;
+- Frame Compare version and relevant runtime identity facts.
+
+It never contains secrets, tokens, webhook headers, presentation-only flags, or an
+authorization to republish.
+
+### Rerun contract
+
+- Add `frame-compare history rerun RUN_NAME`.
+- Revalidate the stored schema, path containment, and complete source manifest.
+- The current discovered source set must match recorded names and fingerprints
+  exactly. Added, removed, renamed, or changed inputs fail closed with a diff-style
+  explanation. Do not add an alternate explicit-file runtime path just for rerun.
+- Document that stat-based fingerprints detect ordinary source changes but are not
+  cryptographic proof of identical media bytes. Do not impose full-file hashing on
+  multi-gigabyte videos without a separate measured performance decision.
+- Always create a new run folder; never mutate or resume the old one.
+- Restore comparison-semantic settings. Do not restore `--json`, `--quiet`,
+  `--no-color`, browser-open state, clipboard behavior, or cache-only policy.
+- Disable slow.pics, webhook, and other publishing by default. A separate explicit
+  `--with-publishing` opt-in uses current secrets and current safety validation.
+- Treat this as "repeat saved settings with verified current inputs," not as
+  bit-for-bit reproducibility. Warn on version drift and fail on unsupported replay
+  schema versions.
+
+### Required tests
+
+- Secret-redaction tests with sentinel values.
+- Recursive config/explicit-field round trips, including color/tonemap behavior.
+- Changed/added/removed/renamed input rejection.
+- Path traversal and symlink containment.
+- New-folder guarantee and old-folder immutability.
+- Publishing disabled by default and explicitly enabled only through the new flag.
+- Version drift, malformed record, legacy history, JSON/output, and original error
+  preservation.
+- Full-verification gate and independent final review.
+
+### Rollback
+
+Remove the rerun command and replay writer. Existing `run_replay.toml` files are
+ignored by older code and remain harmless. Do not delete user run folders.
+
+## 12. Package 6: goal-oriented wizard redesign
+
+### Product-contract gate
+
+Before editing production prompts, write a short wizard interaction spec and obtain
+maintainer approval for:
+
+- the exact goal choices and names;
+- the exact config fields each choice changes;
+- whether choices are code-owned guided defaults or saved user presets;
+- behavior when a config already exists;
+- source/reference confirmation behavior when files are already present;
+- final review/confirmation copy.
+
+Record the complete reviewed specification in this active plan (or in a tracked
+supporting document linked from this section) before requesting approval. The Unit
+6A ledger row must name that durable location. Record maintainer approval and its
+immutable integrated reference in the row before Unit 6B begins; chat-only approval
+or an untracked artifact is not a sufficient cross-session contract.
+
+Do not ship vague labels such as "best" or "high quality" without showing their
+concrete consequences. Do not invent built-in presets that silently diverge from
+the existing preset merge contract.
+
+### Recommended implementation contract
+
+- Keep the wizard a guided editor of `ConfigSchema`, not a second runtime path.
+- Load and preserve an existing valid config, including unrelated supported fields
+  and secrets, unless the user explicitly changes them.
+- For first use, begin from repository defaults.
+- Detect filenames in the configured input folder without probing media or importing
+  runtime-heavy modules. Let the user confirm the reference selector when useful.
+- Present a final concise review of changes and write once, atomically, only after
+  confirmation. Cancellation and validation failure leave the old config intact.
+- Continue using the existing preset owner for actual user presets. If guided goals
+  are approved, represent them as small typed config patches with one owner and
+  contract tests; do not duplicate full TOML defaults.
+
+### UX and verification
+
+- Use `cli-contract-boundaries`, `python-test-design`, and `verification-strategy`.
+  The web interface-design skill is not the design owner for terminal prompts.
+- Test first-run, existing-config edit, cancellation at each destructive boundary,
+  secret preservation, invalid input recovery, non-interactive failure, no-TTY
+  behavior, and atomic write failure.
+- Record representative prompt transcripts in tests or authority docs; avoid broad
+  snapshots that fail on harmless Rich formatting.
+- Run the full-verification gate.
+
+## 13. Package 7: report interaction design gate
+
+No report feature code begins until this gate is approved. At the start of the
+package, explicitly load and apply `interface-design`, `report-output-patterns`,
+`python-test-design`, and `verification-strategy`.
+
+### Required design foundation
+
+Document before prototyping:
+
+- **Intent:** a precise inspection workstation for finding and recording visible
+  differences, not a generic dashboard.
+- **Palette:** preserve the existing cinema-black/charcoal technical surface with a
+  restrained reference cyan and warning/annotation amber; verify contrast rather
+  than broadening the palette.
+- **Depth:** preserve the report's current restrained depth model; use layering only
+  where the magnifier or docked inspector requires it.
+- **Surfaces:** define toolbar, image stage, comparison grid, docked inspector,
+  floating lens, and review panel hierarchy.
+- **Typography:** retain the current readable UI stack and numeric treatment unless
+  evidence demonstrates a problem.
+- **Spacing:** define a compact base unit and responsive density rules appropriate
+  to image inspection.
+
+The signature interaction is the coordinate-linked magnifier/pixel inspector, not
+decorative dashboard chrome.
+
+### Prototype matrix
+
+Build a disposable, non-production prototype using representative generated report
+data for:
+
+- two, three, four, and more-than-four clips;
+- 16:9, ultrawide, portrait, and very large source images;
+- long labels and paths;
+- reports with and without analysis categories or slow.pics;
+- desktop mouse, keyboard-only, touch-sized viewport, reduced motion, and browser
+  zoom;
+- loading/error/missing-image/import-conflict states.
+
+Prototype artifacts stay ignored or outside `src/`. Inspect them in the in-app
+browser at multiple viewport sizes. Capture screenshots for the task review, not as
+permanent generated repo assets unless the maintainer approves them.
+
+### Decisions that must be frozen
+
+- magnifier default presentation and lens/dock relationship;
+- zoom levels, sampling behavior, coordinate display, and ROI lock semantics;
+- linked pan/zoom behavior and responsive grid layout;
+- keyboard model and touch fallback;
+- bookmark/tag/note information model and local-storage scope;
+- versioned export/import schema and report-identity mismatch policy;
+- identity-leak definition for blind A/B.
+
+Record the complete reviewed interaction contract in this active plan (or in a
+tracked supporting document linked from this section). The Unit 7 ledger row must
+name that durable location plus the maintainer approval and immutable integrated
+reference. Disposable prototypes and screenshots are supporting evidence, not the
+cross-session contract consumed by Units 8 through 11.
+
+Approval of this design gate permits the following implementation packages; it does
+not authorize a broad report rewrite.
+
+## 14. Package 8: magnifier, locked ROI, and pixel inspector
+
+### Interaction contract
+
+- Provide a small docked inspector that remains useful while the main images are
+  zoomed out.
+- Allow an optional floating lens over the active image.
+- Support an explicitly locked region of interest so the same source coordinates
+  are inspected across clips and comparison modes.
+- Provide a small, approved zoom set such as 2x/4x/8x, source coordinates, active
+  clip/mode, and pixel values only when they can be sampled accurately.
+- Reuse existing image layers and transform math. Do not introduce canvas rendering
+  unless the approved design or accurate sampling proves it necessary.
+- If browser color management or cross-origin restrictions make a value approximate,
+  label it honestly; do not present false measurement precision.
+
+### Architecture and proof
+
+- Keep behavior in viewer assets and small existing report renderer/payload seams.
+- Do not add orchestration data unless source-coordinate mapping truly requires it.
+- Add semantic markup assertions, focused JavaScript state-harness tests, CSS
+  contract tests, and manual browser visual QA at the approved matrix.
+- Verify keyboard focus, escape/unlock behavior, pointer capture, high-DPI scaling,
+  resize, reduced motion, and no regression to slider/overlay/diff modes.
+- Run the full-verification gate and independent final review.
+
+### Stop condition
+
+If accurate coordinate linking cannot be derived from current payload dimensions and
+viewer transforms, stop and define the smallest payload addition before coding. Do
+not scatter coordinate conversions across event handlers.
+
+## 15. Package 9: multi-clip grid comparison
+
+### Initial contract
+
+- Add a viewer-only grid mode; do not expand the public report `default_mode` config
+  enum in the first slice.
+- Use a deterministic responsive layout: two clips side by side, three with one
+  larger/selected cell only if approved by the prototype, four in 2x2, and a clearly
+  specified overflow policy for more than four.
+- Link pan/zoom/ROI coordinates across visible cells by default.
+- Keep labels and the active/reference state visible without covering comparison
+  content.
+- Preserve all current modes and local viewer-state behavior.
+
+### Scope controls
+
+- No virtualized gallery framework, detachable windows, arbitrary drag-layout
+  system, or saved dashboard layouts.
+- Do not add grid to persisted config until real use demonstrates a need to make it
+  the generated-report default.
+
+### Proof
+
+- Test 2/3/4/N layouts, image load failures, long labels, synchronized transforms,
+  mode switching, state persistence, responsive breakpoints, and keyboard order.
+- Perform browser visual QA at the design matrix and run the full-verification gate.
+
+## 16. Package 10: local review state and export/import
+
+### Review model
+
+Add only the approved local review facts:
+
+- frame bookmark;
+- optional tag from a small controlled set or explicitly approved freeform model;
+- note;
+- optional preferred/winning clip for that frame.
+
+Persist them in browser `localStorage`, scoped by stable report identity and schema
+version. Do not write back into the generated HTML or run directory from browser
+JavaScript.
+
+### Export/import contract
+
+- Export a versioned JSON document through an explicit user action.
+- Include report identity, clip identities, frame references, annotations, and
+  export timestamp; exclude image data, secrets, absolute paths, and unrelated
+  viewer preferences.
+- Import validates structure, size bounds, types, tag/note length, report identity,
+  clip identities, and frame bounds before changing current state.
+- Reject report-identity mismatches by default. A future explicit remapping workflow
+  is outside this slice.
+- Apply a valid import atomically in memory/local storage; malformed or partial data
+  leaves current review state unchanged.
+- Treat all imported strings as text, never HTML.
+
+### Proof and rollback
+
+- Test storage unavailable/quota failure, corrupt stored state, schema mismatch,
+  malicious strings, oversized import, duplicate bookmarks, atomic replacement,
+  and export round trip.
+- Add accessible empty, dirty, saved/exported, import-error, and conflict states.
+- Full-verification gate, browser visual QA, and independent final review.
+- Rollback removes UI and readers; local browser data remains harmless and can be
+  ignored by earlier report versions.
+
+## 17. Package 11: blind A/B feasibility and implementation
+
+Start with an identity-leak audit across:
+
+- clip labels and ordering;
+- filenames, paths, alt text, titles, tooltips, and accessible names;
+- baked image overlays and frame labels;
+- report metadata and downloadable/exported review data;
+- slow.pics labels/links and browser state;
+- keyboard order or styling that distinguishes the reference.
+
+Implement blind A/B only if the report can conceal those facts for the comparison
+session without creating a misleading claim. Randomize labels through a stored
+per-session mapping, keep reveal explicit, and record the reveal state separately
+from the vote.
+
+If baked screenshots or payload data expose identity and fixing that requires clean
+alternate renders, config changes, or a new report format, stop and create a
+separate decision-complete plan. Do not ship cosmetic label hiding as "blind."
+
+## 18. Verification matrix
+
+Every implementation package that changes Python or product behavior runs the
+repository full gate:
+
+```bash
+.venv/bin/pyright --warnings
+.venv/bin/ruff check .
+.venv/bin/bandit -c pyproject.toml -r src --severity-level medium
+.venv/bin/pytest -q
+UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
+```
+
+Use focused tests during development. Also apply these package-specific proofs:
+
+| Surface | Additional proof |
+| --- | --- |
+| CLI help/open/dry-run/history/wizard | Typer runner tests, subprocess sentinels, stdout/stderr/exit-code assertions, lazy import tests |
+| Persistence | deterministic round trip, atomic replacement, malformed/old/new schema, containment, permission/partial-write failure |
+| Rerun | config semantic round trip, manifest mismatch, redaction, side-effect opt-in, new-run immutability |
+| Report viewer | JavaScript state harness, semantic markup/CSS contracts, in-app browser interaction and multi-viewport screenshots |
+| Platform folder open | mocked macOS/Linux/Windows boundaries; real checks only on available hosts, others recorded as documented-only |
+| Windows portable/release files, if actually touched | the runbook Windows portable/release-path gate |
+| Render/VS/Docker files, if unexpectedly required | `bash tools/verify_docker_integration.sh` plus the relevant runtime proof |
+
+For plan-only edits, run `git diff --check` and inspect the plan and repository
+status. Do not run the full product suite solely for this planning document.
+
+## 19. Architecture and debt control checklist
+
+Before accepting each package, answer yes to all applicable questions:
+
+- Does one existing or newly justified focused module own the behavior?
+- Did `entry.py`, `coordinator.py`, `phase_tasks.py`, `viewer.js`, or another hotspot
+  receive only composition-level changes, or is any growth explicitly justified?
+- Is there exactly one config/persistence/report representation of each new fact?
+- Can invalid external or persisted input fail before expensive or irreversible work?
+- Are secrets and absolute external paths excluded by construction, not by cleanup?
+- Does rollback leave existing user runs/config/reports readable or safely ignored?
+- Are platform limitations honest and tested at the boundary?
+- Did the change avoid speculative interfaces, compatibility aliases, and generic
+  helpers with only one caller?
+- Did the tests assert behavior at the owner boundary rather than mirror internal
+  implementation?
+- Are authority docs and generated docs consistent with the code in the same diff?
+- Is the package independently useful, releasable, and reviewable?
+
+If a package cannot meet these checks without widening scope, stop and amend this
+plan or create a separate active plan for the newly discovered workstream.
+
+## 20. Completion and handoff
+
+This program is complete only when every implemented package has passed its proof
+surface, all explicitly deferred packages are recorded as deferred rather than
+silently omitted, authority documentation reflects the shipped state, and no
+active work remains under this scope.
+
+At completion:
+
+1. update this file from `Status: Active` to `Status: Historical`;
+2. record the final shipped/deferred package matrix and any documented-only platform
+   verification;
+3. inspect the final repository status without altering unrelated user files;
+4. hand off exact verification commands and results.
+
+Only one active plan should own this workstream. Smaller package tasks may use
+inline plans that link back here; they must not create competing active roadmap
+documents.
