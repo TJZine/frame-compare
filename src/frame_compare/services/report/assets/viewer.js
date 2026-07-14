@@ -59,6 +59,10 @@ const ReportViewer = {
             this.restorePersistedState();
             this.pixelInspector = PixelInspector.create(this);
             this.gridView = GridView.create(this);
+            this.reviewController = null;
+            if (this.state.inspectorOpen && this.state.inspectorTab === 'review') {
+                this.ensureReviewController();
+            }
             this.bindHelpEvents();
             this.updateOverlayVisibility();
             this.updateInspectorTabs();
@@ -163,6 +167,20 @@ const ReportViewer = {
             inspectorExportGenerated: document.querySelector('[data-inspector-export-generated]'),
             inspectorExportSlowpics: document.querySelector('[data-inspector-export-slowpics]'),
             inspectorExportSummary: document.querySelector('[data-inspector-export-summary]'),
+            reviewFrame: document.querySelector('[data-review-frame]'),
+            reviewBookmark: document.querySelector('[data-review-bookmark]'),
+            reviewTag: document.querySelector('[data-review-tag]'),
+            reviewNote: document.querySelector('[data-review-note]'),
+            reviewNoteCount: document.querySelector('[data-review-note-count]'),
+            reviewPreferred: document.querySelector('[data-review-preferred]'),
+            reviewStatus: document.querySelector('[data-review-status]'),
+            reviewExport: document.querySelector('[data-review-export]'),
+            reviewImportTrigger: document.querySelector('[data-review-import-trigger]'),
+            reviewImport: document.querySelector('[data-review-import]'),
+            reviewPreview: document.querySelector('[data-review-preview]'),
+            reviewPreviewCounts: document.querySelector('[data-review-preview-counts]'),
+            reviewImportApply: document.querySelector('[data-review-import-apply]'),
+            reviewImportCancel: document.querySelector('[data-review-import-cancel]'),
             btnAlignToggle: document.getElementById('btn-align-toggle'),
             alignPopover: document.getElementById('align-popover'),
             btnOverlays: document.getElementById('btn-overlays'),
@@ -227,6 +245,20 @@ const ReportViewer = {
             this.dom.inspectorClips,
             this.dom.btnInspectorResetCurrentAlign,
             this.dom.btnInspectorResetAllAlign,
+            this.dom.reviewFrame,
+            this.dom.reviewBookmark,
+            this.dom.reviewTag,
+            this.dom.reviewNote,
+            this.dom.reviewNoteCount,
+            this.dom.reviewPreferred,
+            this.dom.reviewStatus,
+            this.dom.reviewExport,
+            this.dom.reviewImportTrigger,
+            this.dom.reviewImport,
+            this.dom.reviewPreview,
+            this.dom.reviewPreviewCounts,
+            this.dom.reviewImportApply,
+            this.dom.reviewImportCancel,
             this.dom.btnAlignToggle,
             this.dom.alignPopover,
             this.dom.btnOverlays
@@ -1248,7 +1280,7 @@ const ReportViewer = {
     },
 
     validInspectorTab(tab) {
-        return ['pixel', 'frame', 'clips', 'align', 'export'].includes(tab);
+        return ['pixel', 'frame', 'clips', 'align', 'review', 'export'].includes(tab);
     },
 
     validBlinkIntervalMs(intervalMs) {
@@ -1333,9 +1365,18 @@ const ReportViewer = {
         }
     },
 
+    ensureReviewController() {
+        if (this.reviewController) return this.reviewController;
+        this.reviewController = ReviewState.createController(this);
+        this.reviewController.bind();
+        this.reviewController.render();
+        return this.reviewController;
+    },
+
     setInspectorOpen(open, options = {}) {
         const nextOpen = Boolean(open);
         const wasOpen = this.state.inspectorOpen;
+        if (nextOpen && this.state.inspectorTab === 'review') this.ensureReviewController();
         if (nextOpen && !wasOpen && options.focus !== false) {
             const activeElement = document.activeElement;
             this.state.inspectorRestoreFocus = activeElement && typeof activeElement.focus === 'function'
@@ -1448,6 +1489,7 @@ const ReportViewer = {
     setInspectorTab(tab, options = {}) {
         if (!this.validInspectorTab(tab)) tab = 'frame';
         this.state.inspectorTab = tab;
+        if (tab === 'review') this.ensureReviewController();
         this.updateInspectorTabs();
         if (options.save !== false) this.persistViewportState();
         this.pixelInspector?.syncVisibility();
@@ -1590,6 +1632,7 @@ const ReportViewer = {
             this.dom.inspectorExportSummary,
             `${this.state.data.title || 'Report'} • ${this.state.data.stats.frame_count} frames • ${this.state.data.stats.clip_count} clips • ${this.modeLabel()}`
         );
+        this.reviewController?.render();
 
         this.updateInspectorTabs();
         this.updateInspectorVisibility();

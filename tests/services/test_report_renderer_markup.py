@@ -506,8 +506,8 @@ def test_build_html_renders_inspector_drawer(report_payload: ReportPayload) -> N
     tab_names = [
         child.attrs.get("data-inspector-tab") for child in tablist.children if child.tag == "button"
     ]
-    assert tab_names == ["pixel", "frame", "clips", "align", "export"]
-    for tab in ("pixel", "frame", "clips", "align", "export"):
+    assert tab_names == ["pixel", "frame", "clips", "align", "review", "export"]
+    for tab in ("pixel", "frame", "clips", "align", "review", "export"):
         tab_button = require_first(
             tablist, tag="button", attr_name="data-inspector-tab", attr_value=tab
         )
@@ -552,6 +552,16 @@ def test_build_html_renders_inspector_drawer(report_payload: ReportPayload) -> N
         button = require_first(inspector, tag="button", element_id=button_id)
         assert button.attrs["tabindex"] == "-1"
     assert "data-inspector-export-summary" in html
+    review_panel = require_first(inspector, element_id="inspector-panel-review")
+    assert require_first(review_panel, tag="textarea", attr_name="data-review-note")
+    assert require_first(review_panel, tag="input", attr_name="data-review-bookmark")
+    assert require_first(review_panel, tag="select", attr_name="data-review-tag")
+    assert require_first(review_panel, tag="select", attr_name="data-review-preferred")
+    assert require_first(review_panel, tag="input", attr_name="data-review-import")
+    review_status = require_first(review_panel, attr_name="data-review-status")
+    assert "role" not in review_status.attrs
+    assert "aria-live" not in review_status.attrs
+    assert html.count('id="pixel-inspector-live"') == 1
     assert "data-focus-frame" not in html
     assert "data-focus-mode" not in html
     assert "data-focus-pair" not in html

@@ -1684,6 +1684,101 @@ select optgroup {
     font-size: var(--text-xs);
 }
 
+.rv-review-panel {
+    display: grid;
+    align-content: start;
+    gap: 0.75rem;
+}
+
+.rv-review-frame {
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--annotation);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+}
+
+.rv-review-field,
+.rv-review-check {
+    display: grid;
+    gap: 0.25rem;
+    color: var(--text-secondary);
+    font-size: var(--text-xs);
+}
+
+.rv-review-check {
+    grid-template-columns: auto 1fr;
+    align-items: center;
+}
+
+.rv-review-field > span {
+    justify-self: end;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.rv-review-field textarea,
+.rv-review-field select {
+    width: 100%;
+    padding: 0.5rem;
+    color: var(--text-primary);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-hover);
+    border-radius: 4px;
+    font: inherit;
+}
+
+.rv-review-field textarea {
+    min-height: 7rem;
+    resize: vertical;
+}
+
+.rv-review-status {
+    min-height: 2.25rem;
+    padding: 0.5rem;
+    border-left: 2px solid var(--accent);
+    color: var(--text-secondary);
+    background: var(--accent-muted);
+    font-size: var(--text-xs);
+}
+
+.rv-review-status[data-tone="warning"] {
+    border-left-color: var(--annotation);
+    color: var(--annotation);
+    background: rgba(243, 173, 69, 0.08);
+}
+
+.rv-review-transfer {
+    grid-template-columns: 1fr 1fr;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+}
+
+.rv-review-preview {
+    display: grid;
+    gap: 0.5rem;
+    padding: 0.75rem;
+    border: 1px solid var(--annotation);
+    border-radius: 4px;
+    background: var(--bg-primary);
+    font-size: var(--text-xs);
+}
+
+.rv-review-preview fieldset {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 0.75rem;
+    padding: 0.5rem;
+    border: 1px solid var(--border);
+}
+
+.rv-review-preview legend {
+    padding-inline: 0.25rem;
+    color: var(--text-muted);
+}
+
 .rv-pixel-panel {
     display: grid;
     align-content: start;
@@ -2043,6 +2138,15 @@ body.rv-inspector-open .rv-viewer-stage {
     #btn-grid-next,
     [data-grid-retry],
     .rv-grid-cell {
+        min-width: 44px;
+        min-height: 44px;
+    }
+
+    .rv-review-field select,
+    .rv-review-transfer button,
+    .rv-review-preview button,
+    .rv-review-check,
+    .rv-review-preview label {
         min-width: 44px;
         min-height: 44px;
     }

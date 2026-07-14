@@ -145,6 +145,7 @@ function fakeBody() {
 
 function loadViewer({ clipCount, savedState = null }) {
     const storage = new Map();
+    const reviewMetrics = { creates: 0, binds: 0, renders: 0 };
     const storageApi = {
         getItem(key) {
             return storage.has(key) ? storage.get(key) : null;
@@ -160,6 +161,15 @@ function loadViewer({ clipCount, savedState = null }) {
         },
         clearInterval() {},
         URL,
+        ReviewState: {
+            createController() {
+                reviewMetrics.creates += 1;
+                return {
+                    bind() { reviewMetrics.binds += 1; },
+                    render() { reviewMetrics.renders += 1; },
+                };
+            },
+        },
         document: {
             activeElement: null,
             body: fakeBody(),
@@ -247,11 +257,11 @@ function loadViewer({ clipCount, savedState = null }) {
         btnInfo: fakeElement(),
         inspector: fakeElement(),
         btnInspectorClose: fakeElement(),
-        inspectorTabs: ['pixel', 'frame', 'clips', 'align', 'export'].map((tab) => ({
+        inspectorTabs: ['pixel', 'frame', 'clips', 'align', 'review', 'export'].map((tab) => ({
             ...fakeElement(),
             dataset: { inspectorTab: tab },
         })),
-        inspectorPanels: ['pixel', 'frame', 'clips', 'align', 'export'].map((tab) => ({
+        inspectorPanels: ['pixel', 'frame', 'clips', 'align', 'review', 'export'].map((tab) => ({
             ...fakeElement(),
             id: `inspector-panel-${tab}`,
         })),
@@ -323,6 +333,7 @@ function loadViewer({ clipCount, savedState = null }) {
         syncVisibility() {},
         unlock() { return false; },
     };
+    viewer.reviewController = null;
     viewer.render = function renderStateOnly() {
         this.applyAlignment();
         this.persistViewportState();
@@ -335,7 +346,13 @@ function loadViewer({ clipCount, savedState = null }) {
     viewer.applyDefaultSelection();
     viewer.restorePersistedState();
     viewer.applyAlignment();
-    return { viewer, storage, storageKey: viewer.state.storageKey, document: context.document };
+    return {
+        viewer,
+        storage,
+        storageKey: viewer.state.storageKey,
+        document: context.document,
+        reviewMetrics,
+    };
 }
 
 function persisted(storage, storageKey) {
@@ -478,7 +495,7 @@ const summary = {};
 }
 
 {
-    const { viewer, storage, storageKey, document } = loadViewer({
+    const { viewer, storage, storageKey, document, reviewMetrics } = loadViewer({
         clipCount: 4,
         savedState: {
             currentFrameIdx: 1,
@@ -497,14 +514,21 @@ const summary = {};
     assert.equal(viewer.state.blinkIntervalMs, 1200);
     assert.equal(viewer.state.blinkPaused, false);
 
+    assert.equal(reviewMetrics.creates, 0);
+    viewer.setInspectorTab('review');
+    assert.equal(viewer.state.inspectorTab, 'review');
+    assert.deepEqual(reviewMetrics, { creates: 1, binds: 1, renders: 1 });
+    viewer.setInspectorTab('export');
+    viewer.setInspectorTab('review');
+    assert.equal(reviewMetrics.creates, 1);
     viewer.setInspectorTab('export');
     const focusables = viewer.dom.inspectorFocusables;
     viewer.dom.btnInspectorClose.setAttribute('tabindex', '0');
     document.activeElement = viewer.dom.btnInfo;
     viewer.setInspectorOpen(true);
-    assert.equal(document.activeElement, viewer.dom.inspectorTabs[4]);
+    assert.equal(document.activeElement, viewer.dom.inspectorTabs[5]);
     const wrapEvent = keyboardEvent('ArrowRight');
-    wrapEvent.currentTarget = viewer.dom.inspectorTabs[4];
+    wrapEvent.currentTarget = viewer.dom.inspectorTabs[5];
     viewer.handleInspectorTabKey(wrapEvent);
     assert.equal(viewer.state.inspectorTab, 'pixel');
     assert.equal(document.activeElement, viewer.dom.inspectorTabs[0]);
@@ -522,7 +546,7 @@ const summary = {};
     assert.equal(viewer.dom.inspector.inert, false);
     assert.equal(viewer.dom.btnInspectorClose.getAttribute('tabindex'), '0');
     viewer.dom.inspectorTabs.forEach((element, index) => {
-        assert.equal(element.tabIndex, index === 4 ? 0 : -1);
+        assert.equal(element.tabIndex, index === 5 ? 0 : -1);
     });
     viewer.setInspectorOpen(false);
     viewer.setBlinkIntervalMs(300);
@@ -1060,6 +1084,17 @@ const summary = {};
         publicPayloadRejected: true,
         internalStoredModeRestored: true,
     };
+}
+
+{
+    const { viewer, reviewMetrics } = loadViewer({
+        clipCount: 4,
+        savedState: { inspectorOpen: false, inspectorTab: 'review' },
+    });
+    assert.equal(reviewMetrics.creates, 0);
+    viewer.setInspectorOpen(true, { focus: false, save: false });
+    assert.deepEqual(reviewMetrics, { creates: 1, binds: 1, renders: 1 });
+    summary.lazyReviewController = { opensOnFirstVisibleUse: true, createsOnce: true };
 }
 
 console.log(JSON.stringify(summary));

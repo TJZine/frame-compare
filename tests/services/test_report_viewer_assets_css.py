@@ -164,6 +164,25 @@ def test_viewer_css_covers_pixel_inspector_roi_lens_and_tabs() -> None:
     assert ".rv-inspection-point" in reduced_motion
 
 
+def test_viewer_css_covers_dense_review_slate_and_accessible_states() -> None:
+    css = get_css()
+    assert ".rv-review-panel" in css
+    assert ".rv-review-field textarea" in css
+    assert '.rv-review-status[data-tone="warning"]' in css
+    assert ".rv-review-preview fieldset" in css
+    assert "var(--annotation)" in css_block(css, ".rv-review-frame")
+    coarse = css[css.index("@media (pointer: coarse)") :]
+    for selector in (
+        ".rv-review-field select",
+        ".rv-review-transfer button",
+        ".rv-review-preview button",
+        ".rv-review-check",
+        ".rv-review-preview label",
+    ):
+        assert selector in coarse
+    assert coarse.count("min-height: 44px;") >= 3
+
+
 def test_viewer_css_covers_deterministic_grid_and_mobile_cells() -> None:
     css = get_css()
     two = css_block(css, '.rv-grid[data-layout="two"] .rv-grid-cells')

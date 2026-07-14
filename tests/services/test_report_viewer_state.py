@@ -112,3 +112,7 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment(
         "publicPayloadRejected": True,
         "internalStoredModeRestored": True,
     }
+    assert summary["lazyReviewController"] == {
+        "opensOnFirstVisibleUse": True,
+        "createsOnce": True,
+    }

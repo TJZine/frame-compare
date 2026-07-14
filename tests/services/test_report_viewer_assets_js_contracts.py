@@ -176,7 +176,7 @@ def test_viewer_js_uses_pixel_roving_tabs_shortcut_and_escape_priority() -> None
     handle_key = js_method_block(js, "handleKey(e)")
     viewport = js_method_block(js, "bindViewportEvents()")
 
-    assert "['pixel', 'frame', 'clips', 'align', 'export']" in js
+    assert "['pixel', 'frame', 'clips', 'align', 'review', 'export']" in js
     assert "if (e.key === 'ArrowLeft')" in tabs
     assert "if (e.key === 'ArrowRight')" in tabs
     assert "if (e.key === 'Home')" in tabs
@@ -198,6 +198,30 @@ def test_viewer_js_uses_pixel_roving_tabs_shortcut_and_escape_priority() -> None
     assert "this.pixelInspector.moveStagePress(e);" in viewport
     assert "this.pixelInspector.scheduleHover(e);" in viewport
     assert "this.pixelInspector.endStagePress(e)" in js
+
+
+def test_viewer_js_composes_focused_review_owner_before_viewer() -> None:
+    js = get_js()
+    assert js.index("const ReviewState =") < js.index("const ReportViewer =")
+    assert "frame-compare:report-review:v1:${context.reportId}" in js
+    assert "this.reviewController = null;" in js
+    assert "ensureReviewController()" in js
+    assert "this.reviewController = ReviewState.createController(this);" in js
+    assert "this.reviewController.bind();" in js
+    assert "this.reviewController?.render();" in js
+    assert "const model = create({" in js
+    assert "model.parseImport(bytes)" in js
+    assert "model.apply(importPreview)" in js
+    assert "token !== importToken" in js
+    assert "importToken += 1;" in js
+    assert "resetImportChoices();" in js
+    assert "viewer.pixelInspector?.announce?.(message);" in js
+    assert "messageWithPersistence(message)" in js
+    assert "renderedFrameOrdinal === viewer.state.currentFrameIdx" in js
+    assert "updateImportPreview();" in js
+    assert "window.setTimeout(() => URL.revokeObjectURL(url), 0);" in js
+    assert "bindReviewEvents" not in js
+    assert "reviewImportToken" not in js
 
 
 def test_viewer_js_keeps_pointer_zoom_and_alignment_hooks_behavioral() -> None:

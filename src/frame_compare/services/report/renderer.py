@@ -512,6 +512,7 @@ def _render_inspector() -> str:
             <button id="inspector-tab-frame" type="button" role="tab" data-inspector-tab="frame" aria-selected="true" aria-controls="inspector-panel-frame" tabindex="-1">Frame</button>
             <button id="inspector-tab-clips" type="button" role="tab" data-inspector-tab="clips" aria-selected="false" aria-controls="inspector-panel-clips" tabindex="-1">Clips</button>
             <button id="inspector-tab-align" type="button" role="tab" data-inspector-tab="align" aria-selected="false" aria-controls="inspector-panel-align" tabindex="-1">Align</button>
+            <button id="inspector-tab-review" type="button" role="tab" data-inspector-tab="review" aria-selected="false" aria-controls="inspector-panel-review" tabindex="-1">Review</button>
             <button id="inspector-tab-export" type="button" role="tab" data-inspector-tab="export" aria-selected="false" aria-controls="inspector-panel-export" tabindex="-1">Export</button>
         </div>
         <section id="inspector-panel-pixel" class="rv-inspector-panel rv-pixel-panel" role="tabpanel" aria-labelledby="inspector-tab-pixel" tabindex="-1" hidden>
@@ -553,6 +554,42 @@ def _render_inspector() -> str:
                 <button id="btn-inspector-reset-all-align" type="button" tabindex="-1">Reset all pairs</button>
             </div>
             <p class="rv-inspector-note">Offsets are scoped to the selected pair.</p>
+        </section>
+        <section id="inspector-panel-review" class="rv-inspector-panel rv-review-panel" role="tabpanel" aria-labelledby="inspector-tab-review" tabindex="-1" hidden>
+            <p class="rv-review-frame" data-review-frame>Frame 1</p>
+            <label class="rv-review-check"><input type="checkbox" data-review-bookmark tabindex="-1"> Bookmark this frame</label>
+            <label class="rv-review-field">Tag
+                <select data-review-tag tabindex="-1">
+                    <option value="">No tag</option><option value="artifact">Artifact</option><option value="detail">Detail</option><option value="motion">Motion</option><option value="color">Color</option><option value="other">Other</option>
+                </select>
+            </label>
+            <label class="rv-review-field">Note <span data-review-note-count>0 / 1000</span>
+                <textarea data-review-note rows="5" maxlength="2000" tabindex="-1"></textarea>
+            </label>
+            <label class="rv-review-field">Preferred clip
+                <select data-review-preferred tabindex="-1"></select>
+            </label>
+            <p class="rv-review-status" data-review-status></p>
+            <div class="rv-inspector-actions rv-review-transfer">
+                <button type="button" data-review-export tabindex="-1">Export review JSON</button>
+                <button type="button" data-review-import-trigger tabindex="-1">Import review JSON</button>
+                <input type="file" data-review-import accept=".json,application/json" hidden tabindex="-1">
+            </div>
+            <div class="rv-review-preview" data-review-preview hidden>
+                <p data-review-preview-counts></p>
+                <fieldset><legend>Apply mode</legend>
+                    <label><input type="radio" name="review-import-mode" value="merge" checked> Merge</label>
+                    <label><input type="radio" name="review-import-mode" value="replace"> Replace</label>
+                </fieldset>
+                <fieldset><legend>Conflicts</legend>
+                    <label><input type="radio" name="review-import-conflict" value="keep-local" checked> Keep local</label>
+                    <label><input type="radio" name="review-import-conflict" value="use-imported"> Use imported</label>
+                </fieldset>
+                <div class="rv-inspector-actions">
+                    <button type="button" data-review-import-apply>Apply import</button>
+                    <button type="button" data-review-import-cancel>Cancel</button>
+                </div>
+            </div>
         </section>
         <section id="inspector-panel-export" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-export" tabindex="-1" hidden>
             <dl class="rv-inspector-list">
