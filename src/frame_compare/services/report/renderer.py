@@ -364,6 +364,10 @@ def _render_controls(
             <button data-mode="blink" role="radio" aria-checked="false" aria-label="Blink mode" title="Blink (B)">Blink</button>
         </div>
 
+        <div class="rv-control-group rv-inspect-control">
+            <button id="btn-inspect" type="button" aria-label="Open pixel inspector" title="Inspect pixels (M)">Inspect</button>
+        </div>
+
         <div class="rv-control-group" data-control-scope="pair" aria-label="Comparison pair">
             <span class="rv-clip-prefix left">L:</span>
             <select id="left-select" aria-label="Left clip">
@@ -471,6 +475,12 @@ def _render_stage() -> str:
                 <div id="label-right" class="rv-overlay-label right"></div>
             </div>
         </div>
+        <button id="rv-inspection-point" class="rv-inspection-point" type="button" aria-label="Inspection point unavailable" aria-pressed="false" tabindex="-1" hidden>
+            <span aria-hidden="true"></span>
+        </button>
+        <aside id="rv-pixel-lens" class="rv-pixel-lens" aria-label="Pixel lens" data-magnification="4" hidden>
+            <img src="" alt="">
+        </aside>
         <div class="rv-stage-overlay-info">
             <span class="rv-info-label" data-current-frame-label></span>
             <span class="rv-info-divider" data-current-frame-category-divider>•</span>
@@ -487,12 +497,29 @@ def _render_inspector() -> str:
             <button id="btn-inspector-close" type="button" aria-label="Close inspector" title="Close inspector (I)" tabindex="-1">Close</button>
         </div>
         <div class="rv-inspector-tabs" role="tablist" aria-label="Inspector tabs">
+            <button id="inspector-tab-pixel" type="button" role="tab" data-inspector-tab="pixel" aria-selected="false" aria-controls="inspector-panel-pixel" tabindex="-1">Pixel</button>
             <button id="inspector-tab-frame" type="button" role="tab" data-inspector-tab="frame" aria-selected="true" aria-controls="inspector-panel-frame" tabindex="-1">Frame</button>
             <button id="inspector-tab-clips" type="button" role="tab" data-inspector-tab="clips" aria-selected="false" aria-controls="inspector-panel-clips" tabindex="-1">Clips</button>
             <button id="inspector-tab-align" type="button" role="tab" data-inspector-tab="align" aria-selected="false" aria-controls="inspector-panel-align" tabindex="-1">Align</button>
             <button id="inspector-tab-export" type="button" role="tab" data-inspector-tab="export" aria-selected="false" aria-controls="inspector-panel-export" tabindex="-1">Export</button>
         </div>
-        <section id="inspector-panel-frame" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-frame">
+        <section id="inspector-panel-pixel" class="rv-inspector-panel rv-pixel-panel" role="tabpanel" aria-labelledby="inspector-tab-pixel" tabindex="-1" hidden>
+            <div class="rv-pixel-toolbar">
+                <button id="pixel-lens-toggle" type="button" aria-pressed="false" tabindex="-1">Lens off</button>
+                <div class="rv-pixel-magnification" role="radiogroup" aria-label="Lens magnification">
+                    <button type="button" role="radio" data-pixel-magnification="2" aria-checked="false" aria-label="Magnification 2×" tabindex="-1">2×</button>
+                    <button type="button" role="radio" data-pixel-magnification="4" aria-checked="true" aria-label="Magnification 4×" tabindex="-1">4×</button>
+                    <button type="button" role="radio" data-pixel-magnification="8" aria-checked="false" aria-label="Magnification 8×" tabindex="-1">8×</button>
+                </div>
+            </div>
+            <p class="rv-pixel-anchor" data-pixel-anchor>Anchor: not selected</p>
+            <ol class="rv-pixel-rows" data-pixel-rows></ol>
+            <p class="rv-pixel-legend">Decoded display sample · 8-bit sRGB</p>
+            <p class="rv-inspector-note">Coordinates are zero-based with origin at top-left.</p>
+            <p class="rv-inspector-note">Normalized cross-size mapping; not scene registration.</p>
+            <div id="pixel-inspector-live" class="rv-visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
+        </section>
+        <section id="inspector-panel-frame" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-frame" tabindex="-1">
             <dl class="rv-inspector-list">
                 <div><dt>Label</dt><dd data-inspector-frame-label></dd></div>
                 <div><dt>Number</dt><dd data-inspector-frame-number></dd></div>
@@ -501,10 +528,10 @@ def _render_inspector() -> str:
                 <div><dt>Shown</dt><dd data-inspector-frame-position></dd></div>
             </dl>
         </section>
-        <section id="inspector-panel-clips" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-clips" hidden>
+        <section id="inspector-panel-clips" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-clips" tabindex="-1" hidden>
             <ol class="rv-inspector-clip-list" data-inspector-clips></ol>
         </section>
-        <section id="inspector-panel-align" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-align" hidden>
+        <section id="inspector-panel-align" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-align" tabindex="-1" hidden>
             <dl class="rv-inspector-list">
                 <div><dt>Pair</dt><dd data-inspector-align-pair></dd></div>
                 <div><dt>Preset</dt><dd data-inspector-align-preset></dd></div>
@@ -517,7 +544,7 @@ def _render_inspector() -> str:
             </div>
             <p class="rv-inspector-note">Offsets are scoped to the selected pair.</p>
         </section>
-        <section id="inspector-panel-export" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-export" hidden>
+        <section id="inspector-panel-export" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-export" tabindex="-1" hidden>
             <dl class="rv-inspector-list">
                 <div><dt>Title</dt><dd data-inspector-export-title></dd></div>
                 <div><dt>Report ID</dt><dd data-inspector-export-id></dd></div>
@@ -544,6 +571,7 @@ def _render_help_modal() -> str:
                 <div class="rv-shortcut-row"><span>Toggle HUD</span><span class="rv-key">H</span></div>
                 <div class="rv-shortcut-row"><span>Toggle Filmstrip</span><span class="rv-key">F</span></div>
                 <div class="rv-shortcut-row"><span>Toggle Inspector</span><span class="rv-key">I</span></div>
+                <div class="rv-shortcut-row"><span>Inspect Pixels</span><span class="rv-key">M</span></div>
                 <div class="rv-shortcut-row"><span>Blink Pause / Speed</span><span class="rv-key">Space / [ / ]</span></div>
                 <div class="rv-shortcut-row"><span>Zoom In / Out</span><span class="rv-key">+ / -</span></div>
                 <div class="rv-shortcut-row"><span>Reset Viewport</span><span class="rv-key">R / Double-click</span></div>

@@ -62,6 +62,8 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment(
     inspector_state = summary["inspectorBlinkKeyboardState"]
     assert inspector_state["inspectorOpen"] is False
     assert inspector_state["inspectorTab"] == "export"
+    assert inspector_state["pixelLensEnabled"] is True
+    assert inspector_state["rovingTabWrapped"] is True
     assert inspector_state["blinkPausedPersisted"] is False
     assert inspector_state["closedInspectorInert"] is True
     assert inspector_state["closedInspectorTabIndex"] == "-1"
@@ -69,9 +71,9 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment(
     assert inspector_state["clearedKeyboardFocusRestoreTarget"] is True
 
     assert summary["escapeOrder"] == {
-        "inspectorClosedBeforeAlignment": True,
+        "alignmentClosedBeforeInspector": True,
         "legacyInfoModalWins": True,
-        "alignmentStillOpenAfterInspectorEscape": True,
+        "inspectorStillOpenAfterAlignmentEscape": True,
     }
     assert summary["inspectorSlowpics"]["safeLinkTag"] == "A"
     assert summary["inspectorSlowpics"]["unsafeAsText"] is True
@@ -100,3 +102,9 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment(
     }
     assert summary["activeFilterBadge"]["badgeHiddenByDefault"] is True
     assert summary["activeFilterBadge"]["badgeClearedToHidden"] is True
+    assert summary["pixelPanArbitration"] == {
+        "subthresholdPanDeferred": True,
+        "overThresholdPanAppliedFromOrigin": True,
+        "pointerupOnlyMoveApplied": True,
+        "pointerCancelDidNotCycle": True,
+    }

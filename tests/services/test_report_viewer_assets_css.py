@@ -130,3 +130,35 @@ def test_viewer_css_stays_offline_and_preserves_tokenized_regressions() -> None:
     )
     assert "margin" not in webkit_vertical_track
     assert "margin" not in moz_vertical_track
+
+
+def test_viewer_css_covers_pixel_inspector_roi_lens_and_tabs() -> None:
+    css = get_css()
+    roi = css_block(css, ".rv-inspection-point")
+    tabs = css_block(css, ".rv-inspector-tabs")
+    lens_image = css_block(css, ".rv-pixel-lens img")
+    grid = css_block(css, '.rv-pixel-lens[data-magnification="8"]::after')
+    coarse = css_block(css, "@media (pointer: coarse)")
+    reduced_motion = css_block(css, "@media (prefers-reduced-motion: reduce)")
+
+    assert "width: 44px;" in roi
+    assert "height: 44px;" in roi
+    assert "touch-action: none;" in roi
+    assert "overflow-x: auto;" in tabs
+    assert "display: flex;" in tabs
+    assert '.rv-pixel-lens[data-magnification="2"]' in css
+    assert '.rv-pixel-lens[data-magnification="4"]' in css
+    assert '.rv-pixel-lens[data-magnification="8"]' in css
+    assert "image-rendering: pixelated;" in lens_image
+    assert "repeating-linear-gradient" in grid
+    assert "background-position: 4px 4px;" in grid
+    assert ".rv-pixel-lens" in coarse
+    assert "display: none !important;" in coarse
+    assert "#btn-inspect" in coarse
+    assert "#pixel-lens-toggle" in coarse
+    assert "[data-pixel-magnification]" in coarse
+    assert ".rv-inspector-tabs button" in coarse
+    assert "min-width: 44px;" in coarse
+    assert "min-height: 44px;" in coarse
+    assert ".rv-pixel-lens" in reduced_motion
+    assert ".rv-inspection-point" in reduced_motion

@@ -104,6 +104,7 @@ def test_viewer_js_persists_report_scoped_viewport_state() -> None:
         "filmstripSize: this.state.filmstripSize",
         "inspectorOpen: this.state.inspectorOpen",
         "inspectorTab: this.state.inspectorTab",
+        "pixelLensEnabled: this.state.pixelLensEnabled",
         "blinkIntervalMs: this.state.blinkIntervalMs",
         "paletteOrientation: this.state.paletteOrientation",
         "pairAlignments: this.state.pairAlignments",
@@ -115,6 +116,58 @@ def test_viewer_js_persists_report_scoped_viewport_state() -> None:
     assert "alignY: this.state.alignY" not in persist_block
 
 
+def test_viewer_js_composes_focused_pixel_owner_before_viewer() -> None:
+    js = get_js()
+
+    assert js.index("const PixelInspector =") < js.index("const ReportViewer =")
+    assert "this.pixelInspector = PixelInspector.create(this);" in js
+    assert "this.pixelInspector.bind();" in js
+    assert "pointFromImageRect(image, clientX, clientY)" in js
+    assert "mapNormalizedPoint(point, targetWidth, targetHeight)" in js
+    assert "anchorIndexForMode(mode, options)" in js
+    assert "gestureExceeded(startX, startY, clientX, clientY)" in js
+    assert "Math.hypot(clientX - startX, clientY - startY) > MAX_GESTURE_DISTANCE" in js
+    assert "const MAX_GESTURE_DISTANCE = 6;" in js
+    assert "canvas.width = 1;" in js
+    assert "canvas.height = 1;" in js
+    assert js.count("documentObject.createElement('canvas')") == 1
+    assert "sampler ||= createSampler(document);" in js
+    assert "context.getImageData(0, 0, 1, 1).data" in js
+    assert "Pixel value unavailable" in js
+    assert "querySelectorAll('img')" not in js
+
+
+def test_viewer_js_uses_pixel_roving_tabs_shortcut_and_escape_priority() -> None:
+    js = get_js()
+    tabs = js_method_block(js, "handleInspectorTabKey(e)")
+    update_tabs = js_method_block(js, "updateInspectorTabs()")
+    handle_key = js_method_block(js, "handleKey(e)")
+    viewport = js_method_block(js, "bindViewportEvents()")
+
+    assert "['pixel', 'frame', 'clips', 'align', 'export']" in js
+    assert "if (e.key === 'ArrowLeft')" in tabs
+    assert "if (e.key === 'ArrowRight')" in tabs
+    assert "if (e.key === 'Home')" in tabs
+    assert "if (e.key === 'End')" in tabs
+    assert "e.stopPropagation();" in tabs
+    assert "tab.tabIndex = this.state.inspectorOpen && isActive ? 0 : -1;" in update_tabs
+    assert "panel.tabIndex = this.state.inspectorOpen && isActive ? 0 : -1;" in update_tabs
+    assert "if (e.key === 'm' || e.key === 'M')" in handle_key
+    assert_in_order(
+        handle_key,
+        [
+            "if (this.isAlignmentPopoverOpen()) {",
+            "if (this.pixelInspector?.unlock()) {",
+            "if (this.isInspectorVisible()) {",
+            "if (document.fullscreenElement) {",
+        ],
+    )
+    assert "this.pixelInspector.beginStagePress(e);" in viewport
+    assert "this.pixelInspector.moveStagePress(e);" in viewport
+    assert "this.pixelInspector.scheduleHover(e);" in viewport
+    assert "this.pixelInspector.endStagePress(e)" in js
+
+
 def test_viewer_js_keeps_pointer_zoom_and_alignment_hooks_behavioral() -> None:
     js = get_js()
     viewport_block = js_method_block(js, "bindViewportEvents()")
@@ -123,6 +176,7 @@ def test_viewer_js_keeps_pointer_zoom_and_alignment_hooks_behavioral() -> None:
     pinch_update_block = js_method_block(js, "updatePinchFromTrackedPointers()")
     start_pinch_block = js_method_block(js, "startPinchFromTrackedPointers()")
     finish_pinch_block = js_method_block(js, "finishPinchInteraction()")
+    pan_pointer_block = js_method_block(js, "updatePanFromPointer(e)")
 
     assert "panX: 0" in js
     assert "panY: 0" in js
@@ -146,8 +200,9 @@ def test_viewer_js_keeps_pointer_zoom_and_alignment_hooks_behavioral() -> None:
     assert "this.zoomAtPoint(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1);" in viewport_block
     assert (
         "this.setPan(this.state.panX + dx, this.state.panY + dy, { save: false });"
-        in viewport_block
+        in pan_pointer_block
     )
+    assert "this.pixelInspector.isStagePressPending(e.pointerId)" in pan_pointer_block
     assert "trackedTouchPointers()" in js
     assert "Math.hypot(dx, dy)" in js
     assert "this.state.fitMode = 'custom';" in start_pinch_block

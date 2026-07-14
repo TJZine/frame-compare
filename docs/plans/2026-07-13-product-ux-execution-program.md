@@ -252,7 +252,7 @@ step advances the ledger.
 | 6A. Wizard product-contract gate | Approved | Approved specification in `be32476` under [Unit 6A wizard interaction specification](#unit-6a-wizard-interaction-specification) | Plan-only structural proof passed; independent review U6A-001 through U6A-007 accepted, revised, closed, and returned APPROVABLE; maintainer approved 2026-07-14 | Continue to Unit 6B |
 | 6B. Wizard implementation | Completed | `484ae6f` | Expanded focused wizard/config/source/atomic/CLI/Windows proof and full gate passed; independent review U6B-001 through U6B-003 plus controller finding U6B-C001 accepted, fixed, closure-confirmed, and returned APPROVABLE | Continue to Unit 7 design gate |
 | 7. Report interaction design gate | Approved | `43c8341` | Reviewed contract at [`2026-07-14-report-interaction-design-contract.md`](2026-07-14-report-interaction-design-contract.md); U7-002 through U7-007 closed; maintainer approved 2026-07-14 with U7-001 manual browser proof deferred to final-program validation | Continue to Unit 8 |
-| 8. Magnifier and pixel inspector | Ready | — | Dependency promoted by approved Unit 7 contract `43c8341` | Claim Unit 8 implementation |
+| 8. Magnifier and pixel inspector | Verified / awaiting integration | — | 100 focused report tests and the canonical full gate passed; U8-R001 through U8-R007 plus controller async findings accepted/modified, fixed, closure-reviewed, and returned APPROVABLE; manual browser matrix remains deferred final-program validation debt | Create the authorized reviewed implementation commit |
 | 9. Multi-clip grid | Pending Unit 8 | — | — | Wait |
 | 10. Local review state/export | Pending Unit 9 | — | — | Wait |
 | 11. Blind A/B feasibility/implementation | Pending Unit 10 | — | — | Wait |

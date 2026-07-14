@@ -29,6 +29,7 @@ const ReportViewer = {
         filmstripSize: 'normal',
         inspectorOpen: false,
         inspectorTab: 'frame',
+        pixelLensEnabled: false,
         categoryFilterKeys: new Map(),
         imageLoadPromises: new Map(),
         imageRequestToken: 0,
@@ -56,6 +57,7 @@ const ReportViewer = {
             this.state.categoryFilterKeys = this.buildCategoryFilterKeys();
             this.applyDefaultSelection();
             this.restorePersistedState();
+            this.pixelInspector = PixelInspector.create(this);
             this.bindHelpEvents();
             this.updateOverlayVisibility();
             this.updateInspectorTabs();
@@ -132,6 +134,7 @@ const ReportViewer = {
             btnCloseHelp: document.getElementById('btn-close-help'),
             infoModal: document.getElementById('info-modal'),
             btnInfo: document.getElementById('btn-info'),
+            btnInspect: document.getElementById('btn-inspect'),
             btnCloseInfo: document.getElementById('btn-close-info'),
             inspector: document.getElementById('rv-inspector'),
             btnInspectorClose: document.getElementById('btn-inspector-close'),
@@ -206,6 +209,7 @@ const ReportViewer = {
             this.dom.btnCloseHelp,
             this.dom.infoModal,
             this.dom.btnInfo,
+            this.dom.btnInspect,
             this.dom.btnCloseInfo,
             this.dom.inspector,
             this.dom.btnInspectorClose,
@@ -494,6 +498,7 @@ const ReportViewer = {
         this.bindBlinkEvents();
         this.bindFilmstripEvents();
         this.bindKeyboardEvents();
+        this.pixelInspector.bind();
     },
 
     bindModeEvents() {
@@ -520,7 +525,11 @@ const ReportViewer = {
             this.setRightClip(parseInt(e.target.value));
         });
         this.dom.activeSelect.addEventListener('change', (e) => {
-            this.state.activeClipIdx = this.clipIndexOrDefault(e.target.value, this.state.activeClipIdx);
+            const nextIndex = this.clipIndexOrDefault(e.target.value, this.state.activeClipIdx);
+            if (nextIndex !== this.state.activeClipIdx) {
+                this.pixelInspector.clearForContext('Clip changed; inspection unlocked.');
+            }
+            this.state.activeClipIdx = nextIndex;
             this.render();
         });
     },
@@ -568,6 +577,7 @@ const ReportViewer = {
 
         this.dom.stage.addEventListener('pointerdown', (e) => {
             if (this.isViewportPaletteEvent(e)) return;
+            this.pixelInspector.beginStagePress(e);
             this.trackPointerPosition(e);
             this.capturePointer(e.pointerId);
             if (this.shouldStartPinch(e)) {
@@ -589,6 +599,9 @@ const ReportViewer = {
         });
 
         this.dom.stage.addEventListener('pointermove', (e) => {
+            if (this.isViewportPaletteEvent(e)) return;
+            this.pixelInspector.moveStagePress(e);
+            this.pixelInspector.scheduleHover(e);
             this.trackPointerPosition(e);
             const pointer = this.pointerInteraction;
             if (pointer.pinchActive) {
@@ -597,13 +610,7 @@ const ReportViewer = {
                 return;
             }
             if (pointer.activePointerId !== null && e.pointerId !== pointer.activePointerId) return;
-            if (pointer.isPanning) {
-                const dx = e.clientX - pointer.lastPanX;
-                const dy = e.clientY - pointer.lastPanY;
-                if (Math.abs(dx) > 1 || Math.abs(dy) > 1) pointer.panMoved = true;
-                pointer.lastPanX = e.clientX;
-                pointer.lastPanY = e.clientY;
-                this.setPan(this.state.panX + dx, this.state.panY + dy, { save: false });
+            if (this.updatePanFromPointer(e)) {
                 e.preventDefault();
                 return;
             }
@@ -613,7 +620,9 @@ const ReportViewer = {
             }
         });
         this.dom.stage.addEventListener('pointerup', (e) => this.stopPointerInteraction(e));
-        this.dom.stage.addEventListener('pointercancel', (e) => this.stopPointerInteraction(e));
+        this.dom.stage.addEventListener('pointercancel', (e) => {
+            this.stopPointerInteraction(e, { cancelled: true });
+        });
         this.dom.stage.addEventListener('dblclick', (e) => {
             if (this.isViewportPaletteEvent(e)) return;
             if (this.state.mode === 'overlay' || this.state.mode === 'diff') return;
@@ -692,10 +701,6 @@ const ReportViewer = {
                     this.closeInfoModal();
                     return;
                 }
-                if (this.isInspectorVisible()) {
-                    this.setInspectorOpen(false);
-                    return;
-                }
                 this.closeAlignmentPopover();
             }
         });
@@ -728,6 +733,7 @@ const ReportViewer = {
         this.dom.btnInspectorClose.addEventListener('click', () => this.setInspectorOpen(false));
         this.dom.inspectorTabs.forEach(tab => {
             tab.addEventListener('click', () => this.setInspectorTab(tab.dataset.inspectorTab));
+            tab.addEventListener('keydown', (e) => this.handleInspectorTabKey(e));
         });
         this.dom.btnInspectorResetCurrentAlign.addEventListener('click', () => this.resetCurrentPairAlignment());
         this.dom.btnInspectorResetAllAlign.addEventListener('click', () => this.resetAllPairAlignments());
@@ -735,6 +741,7 @@ const ReportViewer = {
             if (e.key !== 'Escape') return;
             e.preventDefault();
             e.stopPropagation();
+            if (this.pixelInspector.unlock()) return;
             this.setInspectorOpen(false);
         });
     },
@@ -821,6 +828,7 @@ const ReportViewer = {
         if (!metrics) return;
 
         const pointer = this.pointerInteraction;
+        this.pixelInspector.cancelStagePress();
         const stageRect = this.dom.stage.getBoundingClientRect();
         const stageCenterX = stageRect.left + stageRect.width / 2;
         const stageCenterY = stageRect.top + stageRect.height / 2;
@@ -899,7 +907,21 @@ const ReportViewer = {
         this.dom.stage.classList.add('is-panning');
     },
 
-    stopPointerInteraction(e) {
+    updatePanFromPointer(e) {
+        const pointer = this.pointerInteraction;
+        if (!pointer.isPanning) return false;
+        if (this.pixelInspector.isStagePressPending(e.pointerId)) return true;
+
+        const dx = e.clientX - pointer.lastPanX;
+        const dy = e.clientY - pointer.lastPanY;
+        if (Math.abs(dx) > 1 || Math.abs(dy) > 1) pointer.panMoved = true;
+        pointer.lastPanX = e.clientX;
+        pointer.lastPanY = e.clientY;
+        this.setPan(this.state.panX + dx, this.state.panY + dy, { save: false });
+        return true;
+    },
+
+    stopPointerInteraction(e, options = {}) {
         const pointer = this.pointerInteraction;
         this.untrackPointer(e.pointerId);
         this.releasePointer(e.pointerId);
@@ -916,6 +938,10 @@ const ReportViewer = {
         if (pointer.activePointerId !== null && e.pointerId !== pointer.activePointerId) return;
         const completedDrag = pointer.isDragging;
         const completedPan = pointer.isPanning;
+        if (!options.cancelled) {
+            this.pixelInspector.moveStagePress(e);
+            this.updatePanFromPointer(e);
+        }
         const completedPanMoved = pointer.panMoved;
         pointer.isDragging = false;
         pointer.isPanning = false;
@@ -925,9 +951,19 @@ const ReportViewer = {
         pointer.panMoved = false;
         this.dom.stage.classList.remove('is-panning');
         if (this.state.mode === 'blink') this.state.blinkPaused = false;
+        if (completedDrag) this.updateSliderFromPointer(e);
+        const acquiredInspection = options.cancelled
+            ? false
+            : this.pixelInspector.endStagePress(e);
+        if (options.cancelled) this.pixelInspector.cancelStagePress();
         if (completedPan) {
             this.persistViewportState();
-            if (!completedPanMoved && (this.state.mode === 'overlay' || this.state.mode === 'diff')) {
+            if (
+                !acquiredInspection
+                && !options.cancelled
+                && !completedPanMoved
+                && (this.state.mode === 'overlay' || this.state.mode === 'diff')
+            ) {
                 this.cycleClip();
             }
         }
@@ -988,8 +1024,12 @@ const ReportViewer = {
     },
 
     setLeftClip(idx) {
+        const nextIndex = this.clipIndexOrDefault(idx, this.state.leftClipIdx);
+        if (nextIndex !== this.state.leftClipIdx) {
+            this.pixelInspector.clearForContext('Clip changed; inspection unlocked.');
+        }
         this.storeCurrentPairAlignment();
-        this.state.leftClipIdx = this.clipIndexOrDefault(idx, this.state.leftClipIdx);
+        this.state.leftClipIdx = nextIndex;
         this.ensureDistinctPairSelection();
         this.loadCurrentPairAlignment();
         if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
@@ -997,8 +1037,12 @@ const ReportViewer = {
     },
 
     setRightClip(idx) {
+        const nextIndex = this.clipIndexOrDefault(idx, this.state.rightClipIdx);
+        if (nextIndex !== this.state.rightClipIdx) {
+            this.pixelInspector.clearForContext('Clip changed; inspection unlocked.');
+        }
         this.storeCurrentPairAlignment();
-        this.state.rightClipIdx = this.clipIndexOrDefault(idx, this.state.rightClipIdx);
+        this.state.rightClipIdx = nextIndex;
         this.ensureDistinctPairSelection();
         this.loadCurrentPairAlignment();
         if (this.state.mode === 'blink') {
@@ -1011,6 +1055,7 @@ const ReportViewer = {
     swapPairClips() {
         if (this.state.mode === 'overlay' || this.clipCount() <= 1) return;
 
+        this.pixelInspector.clearForContext('Clip changed; inspection unlocked.');
         this.storeCurrentPairAlignment();
         const previousLeft = this.state.leftClipIdx;
         this.state.leftClipIdx = this.state.rightClipIdx;
@@ -1075,6 +1120,9 @@ const ReportViewer = {
         if (this.validInspectorTab(saved.inspectorTab)) {
             this.state.inspectorTab = saved.inspectorTab;
         }
+        if (typeof saved.pixelLensEnabled === 'boolean') {
+            this.state.pixelLensEnabled = saved.pixelLensEnabled;
+        }
         if (this.validBlinkIntervalMs(saved.blinkIntervalMs)) {
             this.state.blinkIntervalMs = saved.blinkIntervalMs;
         }
@@ -1103,7 +1151,7 @@ const ReportViewer = {
 
     persistViewportState() {
         const storage = this.localStorage();
-        if (!this.state.storageKey || !storage) return;
+        if (!this.state.storageKey || !storage) return false;
         this.storeCurrentPairAlignment();
 
         const payload = {
@@ -1122,14 +1170,17 @@ const ReportViewer = {
             filmstripSize: this.state.filmstripSize,
             inspectorOpen: this.state.inspectorOpen,
             inspectorTab: this.state.inspectorTab,
+            pixelLensEnabled: this.state.pixelLensEnabled,
             blinkIntervalMs: this.state.blinkIntervalMs,
             paletteOrientation: this.state.paletteOrientation,
             pairAlignments: this.state.pairAlignments
         };
         try {
             storage.setItem(this.state.storageKey, JSON.stringify(payload));
+            return true;
         } catch {
             // localStorage can be unavailable for file:// reports in hardened browser modes.
+            return false;
         }
     },
 
@@ -1155,7 +1206,7 @@ const ReportViewer = {
     },
 
     validInspectorTab(tab) {
-        return ['frame', 'clips', 'align', 'export'].includes(tab);
+        return ['pixel', 'frame', 'clips', 'align', 'export'].includes(tab);
     },
 
     validBlinkIntervalMs(intervalMs) {
@@ -1254,7 +1305,9 @@ const ReportViewer = {
         this.updateInspectorVisibility();
         if (options.save !== false) this.persistViewportState();
         if (this.state.inspectorOpen && options.focus !== false) {
-            this.focusElement(this.dom.inspectorTabs[0]);
+            const activeTab = Array.from(this.dom.inspectorTabs)
+                .find(tab => tab.dataset.inspectorTab === this.state.inspectorTab);
+            this.focusElement(activeTab);
         } else if (!this.state.inspectorOpen && wasOpen) {
             const shouldRestoreFocus = options.focus !== false;
             const restoreTarget = this.state.inspectorRestoreFocus?.isConnected
@@ -1285,6 +1338,8 @@ const ReportViewer = {
             'title',
             visible ? 'Close inspector (I)' : 'Open inspector (I)'
         );
+        this.updateInspectorTabs();
+        this.pixelInspector?.syncVisibility();
     },
 
     inspectorFocusableElements() {
@@ -1353,6 +1408,24 @@ const ReportViewer = {
         this.state.inspectorTab = tab;
         this.updateInspectorTabs();
         if (options.save !== false) this.persistViewportState();
+        this.pixelInspector?.syncVisibility();
+    },
+
+    handleInspectorTabKey(e) {
+        const tabs = Array.from(this.dom.inspectorTabs);
+        const currentIndex = tabs.indexOf(e.currentTarget);
+        if (currentIndex === -1) return;
+        let nextIndex = null;
+        if (e.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+        if (e.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length;
+        if (e.key === 'Home') nextIndex = 0;
+        if (e.key === 'End') nextIndex = tabs.length - 1;
+        if (nextIndex === null) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const nextTab = tabs[nextIndex];
+        this.setInspectorTab(nextTab.dataset.inspectorTab);
+        this.focusElement(nextTab);
     },
 
     updateInspectorTabs() {
@@ -1360,9 +1433,12 @@ const ReportViewer = {
             const isActive = tab.dataset.inspectorTab === this.state.inspectorTab;
             tab.classList.toggle('active', isActive);
             tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+            tab.tabIndex = this.state.inspectorOpen && isActive ? 0 : -1;
         });
         this.dom.inspectorPanels.forEach(panel => {
-            panel.hidden = panel.id !== `inspector-panel-${this.state.inspectorTab}`;
+            const isActive = panel.id === `inspector-panel-${this.state.inspectorTab}`;
+            panel.hidden = !isActive;
+            panel.tabIndex = this.state.inspectorOpen && isActive ? 0 : -1;
         });
     },
 
@@ -1628,7 +1704,11 @@ const ReportViewer = {
         if (this.state.activeCategoryKey === nextKey) return;
 
         this.state.activeCategoryKey = nextKey;
+        const previousFrameIdx = this.state.currentFrameIdx;
         this.normalizeCurrentFrameForFilter();
+        if (this.state.currentFrameIdx !== previousFrameIdx) {
+            this.pixelInspector.clearForContext('Frame changed; inspection unlocked.');
+        }
         this.render();
         this.scrollActiveFilmstripItem({ behavior: 'smooth', inline: 'center' });
     },
@@ -1702,14 +1782,18 @@ const ReportViewer = {
                 this.closeInfoModal();
                 return;
             }
-            if (this.isInspectorVisible()) {
-                e.preventDefault();
-                this.setInspectorOpen(false);
-                return;
-            }
             if (this.isAlignmentPopoverOpen()) {
                 e.preventDefault();
                 this.closeAlignmentPopover();
+                return;
+            }
+            if (this.pixelInspector?.unlock()) {
+                e.preventDefault();
+                return;
+            }
+            if (this.isInspectorVisible()) {
+                e.preventDefault();
+                this.setInspectorOpen(false);
                 return;
             }
             if (document.fullscreenElement) {
@@ -1722,6 +1806,12 @@ const ReportViewer = {
         if (this.dom.modal.classList.contains('open') || this.dom.infoModal.classList.contains('open')) return;
         if (this.isAlignmentPopoverOpen()) return;
         if (this.isShortcutEditableTarget(e.target)) return;
+
+        if (e.key === 'm' || e.key === 'M') {
+            e.preventDefault();
+            this.pixelInspector.open();
+            return;
+        }
 
         if (e.key === 'i' || e.key === 'I') {
             e.preventDefault();
@@ -1787,6 +1877,9 @@ const ReportViewer = {
                          if (this.state.mode === 'slider') this.setLeftClip(idx);
                          else if (this.state.mode === 'diff' || this.state.mode === 'blink') this.setRightClip(idx);
                          else {
+                             if (idx !== this.state.activeClipIdx) {
+                                 this.pixelInspector.clearForContext('Clip changed; inspection unlocked.');
+                             }
                              this.state.activeClipIdx = idx;
                              this.render();
                          }
@@ -1797,6 +1890,9 @@ const ReportViewer = {
 
     setMode(mode) {
         if (!this.validMode(mode)) return;
+        if (mode !== this.state.mode) {
+            this.pixelInspector.clearForContext('Mode changed; inspection unlocked.');
+        }
         this.state.mode = mode;
         this.ensureDistinctPairSelection(mode);
         if (mode === 'blink') this.keepBlinkActiveInPair();
@@ -1883,6 +1979,9 @@ const ReportViewer = {
             : this.nearestVisibleFrameIndex(idx, visibleIndexes);
         if (nextIdx === null) return;
 
+        if (nextIdx !== this.state.currentFrameIdx) {
+            this.pixelInspector.clearForContext('Frame changed; inspection unlocked.');
+        }
         this.state.currentFrameIdx = nextIdx;
         this.render();
 
@@ -1927,7 +2026,11 @@ const ReportViewer = {
                 this.nextDistinctClipIndex(this.state.rightClipIdx, this.state.leftClipIdx, direction)
             );
         } else {
-            this.state.activeClipIdx = (this.state.activeClipIdx + direction + count) % count;
+            const nextIndex = (this.state.activeClipIdx + direction + count) % count;
+            if (nextIndex !== this.state.activeClipIdx) {
+                this.pixelInspector.clearForContext('Clip changed; inspection unlocked.');
+            }
+            this.state.activeClipIdx = nextIndex;
             this.dom.activeSelect.value = this.state.activeClipIdx;
             this.render();
         }
@@ -1953,6 +2056,7 @@ const ReportViewer = {
         this.dom.canvas.style.setProperty('--zoom-level', this.state.zoom);
         if (options.clampPan !== false) this.clampPan();
         this.updateSmartStageLabels();
+        this.pixelInspector?.schedulePlacement();
     },
 
     resetViewport() {
@@ -2015,6 +2119,7 @@ const ReportViewer = {
         this.dom.canvas.style.setProperty('--pan-x', `${this.state.panX}px`);
         this.dom.canvas.style.setProperty('--pan-y', `${this.state.panY}px`);
         this.updateSmartStageLabels();
+        this.pixelInspector?.schedulePlacement();
     },
 
     setFitMode(mode, options = {}) {
@@ -2264,6 +2369,7 @@ const ReportViewer = {
         this.dom.btnAlignToggle.classList.toggle('has-offset', isOffset);
         this.updateAlignmentStatus();
         this.updateInspectorData();
+        this.pixelInspector?.schedulePlacement();
     },
 
     formatSignedPixels(value, axis) {
@@ -2518,6 +2624,7 @@ const ReportViewer = {
             'active',
             isBlink && this.state.activeClipIdx === this.state.rightClipIdx
         );
+        this.pixelInspector?.render();
     },
 
     updateImages() {
