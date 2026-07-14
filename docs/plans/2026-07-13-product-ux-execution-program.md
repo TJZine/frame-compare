@@ -248,7 +248,7 @@ step advances the ledger.
 | 3A. Doctor-hint audit | Completed | `c20c0e5` | 84 focused doctor/VSPreview/CLI tests and full gate passed; independent review U3A-001/U3A-002/U3A-003 accepted, fixed, and reverified | Continue to Unit 3B |
 | 3B. Final-selection summary | Completed | `1402634` | 29 focused selection-report/lifecycle/contract tests and full gate passed; independent review found no actionable issues | Continue to Unit 4 |
 | 4. Run outcomes and history | Completed | `78d1adb` | Focused persistence/lifecycle/CLI/Windows proof and full gate passed; independent review U4-001 through U4-007 accepted, fixed, closed, and reverified | Continue to Unit 5 feasibility |
-| 5. Guarded safe rerun | Ready | — | Dependency promoted by Unit 4 integration `78d1adb` | Claim Unit 5 feasibility spike |
+| 5. Guarded safe rerun | Verified / awaiting integration | — | Full gate passed on the disposable spike; independent review U5F-001 through U5F-005 accepted; all partial test changes removed | Commit durable blocked-feasibility evidence |
 | 6A. Wizard product-contract gate | Pending Unit 5 | — | — | Wait |
 | 6B. Wizard implementation | Pending approved Unit 6A | — | — | Wait |
 | 7. Report interaction design gate | Pending Unit 6B | — | — | Wait |
@@ -551,6 +551,52 @@ without changing the runner-wide configuration contract:
 The spike is test code or a disposable local experiment, not a shipped abstraction.
 If any point requires a broad `ConfigSchema`, `RunRequest`, or orchestration refactor,
 defer rerun and keep Stage 1 history. That is the main downside boundary.
+
+### Reviewed feasibility outcome (awaiting maintainer decision 2026-07-14)
+
+Unit 5 cannot clear its frozen feasibility gate on the current runtime seams. No
+`history rerun` command, replay writer, production change, or feasibility test is
+shipped. The controller explicitly removed the disposable test-owned spike before
+recording this evidence.
+
+The candidate spike passed 10 focused tests, 275 adjacent config/source/history
+tests, Ruff, strict Pyright, Bandit at medium severity, the full pytest suite, and
+both import-linter contracts. A fresh read-only adversarial reviewer then rejected
+the feasibility claim. The controller accepted every finding from source evidence:
+
+- **U5F-001 — accepted, blocking:** the spike reconstructed configuration only in
+  test helpers. The real preparation path still reloads configuration from
+  `RunRequest.config_path` in `orchestration/preparation.py`; there is no existing
+  owner-compatible seam that can deliver reconstructed values plus recursive
+  Pydantic explicit-field state to the runner. Proceeding requires an approved,
+  narrowly owned internal configuration-injection contract across the request,
+  preflight, and preparation boundary. A temporary parallel loader or config path
+  would violate the package constraints.
+- **U5F-002 — accepted:** the isolated proofs did not exercise reconstruct, force
+  `no_upload=True`, then run as one sequence. The canonical override rebuild loses
+  `model_fields_set` inside mappings of `SourceOverrideConfig`, changing explicit
+  `None` versus omitted state. Any approved implementation must restore the complete
+  saved recursive state after applying the forced publishing override or narrowly
+  repair that owner.
+- **U5F-003 — accepted:** `ConfigSchema.model_validate()` can rehydrate omitted
+  slow.pics/TMDB settings and secrets from current settings sources. Default-off
+  publishing must be proved after reconstruction under hostile current publishing
+  configuration, not only against an ambient secretless environment.
+- **U5F-004 — accepted:** the spike used JSON even though the required artifact is
+  TOML. Explicit `None` is not directly TOML-serializable, so a versioned tagged or
+  omission-plus-explicit-state encoding must be proved for `None`, `Fraction`, enum,
+  and color-preset semantics before the target persistence format is feasible.
+- **U5F-005 — accepted:** the section-wide audio-alignment projection retained
+  `use_vspreview`, `force_interactive`, `cache_results`, and `previous_offsets`,
+  contrary to the rule against replaying presentation/runtime and cache-only policy.
+  A reviewed field-level semantic classification is required.
+
+The accepted names plus size/`mtime_ns` manifest remains intentionally
+non-cryptographic and has a validation-to-run race; those are documented residual
+limitations, not the blocker. The smallest maintainer decision is either to accept
+Unit 5 deferral and promote Unit 6A, or authorize the narrow internal
+configuration-injection contract and a revised feasibility proof covering all five
+findings. Production implementation must not begin before that decision.
 
 ### Replay persistence contract
 
