@@ -112,8 +112,15 @@ def _build_metrics(
     metric_frame_range: MetricFrameRange,
 ) -> FrameMetrics:
     if (
-        len(result.luminance) != metric_frame_range.frame_count
-        or len(result.motion) != metric_frame_range.frame_count
+        len(result.luminance) != len(result.motion)
+        or (
+            result.sampled_source_frames is None
+            and len(result.luminance) != metric_frame_range.frame_count
+        )
+        or (
+            result.sampled_source_frames is not None
+            and len(result.luminance) != len(result.sampled_source_frames)
+        )
     ):
         raise MetricsCalculationError(
             "Metric strategy returned arrays outside the requested frame range"
@@ -122,7 +129,7 @@ def _build_metrics(
         luminance=result.luminance,
         motion=result.motion,
         metadata=MetricsMetadata(
-            frame_count=metric_frame_range.frame_count,
+            frame_count=len(result.luminance),
             fps=effective_fps if effective_fps is not None else source.fps,
             config_fingerprint=fingerprint,
             clips=clips,
@@ -140,6 +147,7 @@ def _build_metrics(
             active_rect_algorithm_id=active_rect_algorithm_id,
             version=CACHE_VERSION,
         ),
+        sampled_source_frames=result.sampled_source_frames,
     )
 
 
@@ -256,20 +264,14 @@ def calculate_metrics(
         source = _load_analysis_source(source_path, vs_loader)
     try:
         resolved_range = _resolved_metric_frame_range(source, metric_frame_range)
-        strategy_source, has_lookbehind = _strategy_source_for_range(source, resolved_range)
         strategy_result = calculate_metric_strategy(
-            strategy_source,
+            source,
             config,
             reporter,
             metric_active_rect,
+            metric_frame_range=resolved_range,
             timing_recorder=timing_recorder,
         )
-        if has_lookbehind:
-            strategy_result = replace(
-                strategy_result,
-                luminance=strategy_result.luminance[1:],
-                motion=strategy_result.motion[1:],
-            )
         metrics = _build_metrics(
             result=strategy_result,
             source=source,
@@ -315,17 +317,6 @@ def _resolved_metric_frame_range(
     return requested
 
 
-def _strategy_source_for_range(
-    source: SourceInfo,
-    metric_frame_range: MetricFrameRange,
-) -> tuple[SourceInfo, bool]:
-    if metric_frame_range.start == 0 and metric_frame_range.end_exclusive == source.clip.num_frames:
-        return source, False
-    decode_start = max(0, metric_frame_range.start - 1)
-    clip = source.clip[decode_start : metric_frame_range.end_exclusive]
-    return replace(source, clip=clip, num_frames=clip.num_frames), metric_frame_range.start > 0
-
-
 def slice_frame_metrics(
     metrics: FrameMetrics,
     *,
@@ -336,19 +327,39 @@ def slice_frame_metrics(
     if (
         start_index < 0
         or frame_count < 0
-        or start_index + frame_count > len(metrics.luminance)
-        or start_index + frame_count > len(metrics.motion)
+        or start_index + frame_count > metrics.eligible_frame_count
     ):
-        raise MetricsCalculationError("Requested metric slice is outside cached metric arrays")
-    end_index = start_index + frame_count
+        raise MetricsCalculationError("Requested metric slice is outside cached metric range")
     source_start = metrics.metadata.metric_source_start + start_index
+    source_end = source_start + frame_count
+    if metrics.sampled_source_frames is None:
+        end_index = start_index + frame_count
+        return FrameMetrics(
+            luminance=metrics.luminance[start_index:end_index],
+            motion=metrics.motion[start_index:end_index],
+            metadata=replace(
+                metrics.metadata,
+                frame_count=frame_count,
+                metric_source_start=source_start,
+                metric_source_end_exclusive=source_end,
+            ),
+        )
+
+    source_frames = tuple(metrics.source_frames())
+    retained_indices = [
+        index
+        for index, source_frame in enumerate(source_frames)
+        if source_start <= source_frame < source_end
+    ]
+    sampled_source_frames = tuple(source_frames[index] for index in retained_indices)
     return FrameMetrics(
-        luminance=metrics.luminance[start_index:end_index],
-        motion=metrics.motion[start_index:end_index],
+        luminance=[metrics.luminance[index] for index in retained_indices],
+        motion=[metrics.motion[index] for index in retained_indices],
         metadata=replace(
             metrics.metadata,
-            frame_count=frame_count,
+            frame_count=len(retained_indices),
             metric_source_start=source_start,
-            metric_source_end_exclusive=source_start + frame_count,
+            metric_source_end_exclusive=source_end,
         ),
+        sampled_source_frames=sampled_source_frames,
     )

@@ -185,16 +185,31 @@ frame-compare run --root . --input ./comparison_videos
 
 ### Analysis Performance
 
-The `[analysis]` config supports `performance_mode`:
+Frame Compare exposes two analysis modes. Both use full-resolution luma
+PlaneStats, honor source trims and the shared leading/trailing exclusion window,
+and keep configured user/random frames eligible across the entire selectable
+window.
+
+| Mode | Metric coverage | Best for |
+| --- | --- | --- |
+| `quality` (default) | Every eligible frame | Highest-confidence automatic dark, bright, and motion selection |
+| `performance` | Exactly 25% of eligible frames across up to eight deterministic contiguous bursts | Faster analysis when different automatic frame choices and missed brief events are acceptable |
+
+Choose the mode in configuration:
 
 ```toml
 [analysis]
 performance_mode = "quality"  # quality or performance
 ```
 
-`quality` is the default and preserves the current full-resolution analysis
-behavior. `performance` is an approximate VapourSynth PlaneStats mode that can
-reduce analysis work, but it may select different dark, bright, or motion frames.
+`performance` is intentionally approximate: metric-based dark, bright, and
+motion choices come only from sampled frames. Sampling is deterministic for the
+same inputs and window, but it is not expected to reproduce `quality`
+frame-for-frame.
+See the [CLI contract](docs/current-cli-contract.md#config-only-analysis-surface)
+for the full behavior and the
+[benchmark history](docs/analysis-benchmark-history.md) for hardware-dependent
+evidence.
 
 ### Reports
 
@@ -230,6 +245,8 @@ For GPU acceleration, X11 GUI profiles, and platform-specific details, see
 | [API Reference](docs/api.md) | Generated API documentation |
 | [Docker Environments](docs/docker-environments.md) | Docker capability matrix, GPU/GUI profiles |
 | [Windows Portable](docs/windows-portable.md) | Portable bundle install, layout, updater |
+| [Analysis Performance Validation](docs/analysis-performance-validation.md) | Reproducible Windows benchmarking workflow |
+| [Analysis Benchmark History](docs/analysis-benchmark-history.md) | Curated analysis-mode decisions and retained evidence |
 
 ---
 

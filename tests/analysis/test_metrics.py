@@ -11,7 +11,7 @@ import pytest
 
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.metric_strategies import MetricComputationResult
-from frame_compare.analysis.metrics import calculate_metrics
+from frame_compare.analysis.metrics import calculate_metrics, slice_frame_metrics
 from frame_compare.analysis.timing import AnalysisTimingRecorder
 from frame_compare.analysis.types import (
     FrameMetrics,
@@ -32,6 +32,32 @@ class _SliceClip:
 
     def __getitem__(self, frame_slice: slice) -> _SliceClip:
         return _SliceClip(self.frames[frame_slice])
+
+
+def test_slice_sparse_metrics_filters_map_by_source_overlap() -> None:
+    metrics = FrameMetrics(
+        luminance=[0.1, 0.2, 0.3, 0.4],
+        motion=[0.1, 0.2, 0.3, 0.4],
+        metadata=MetricsMetadata(
+            frame_count=4,
+            fps=Fraction(24),
+            config_fingerprint="fp",
+            clips=[],
+            source_frame_count=200,
+            metric_source_start=100,
+            metric_source_end_exclusive=140,
+            performance_mode="performance",
+        ),
+        sampled_source_frames=(101, 110, 125, 138),
+    )
+
+    sliced = slice_frame_metrics(metrics, start_index=8, frame_count=20)
+
+    assert sliced.metadata.metric_source_start == 108
+    assert sliced.metadata.metric_source_end_exclusive == 128
+    assert sliced.metadata.frame_count == 2
+    assert sliced.sampled_source_frames == (110, 125)
+    assert sliced.luminance == [0.2, 0.3]
 
 
 @patch("frame_compare.analysis.metrics.load_cached_metrics_for_request")
@@ -133,6 +159,7 @@ def test_calculate_metrics_recomputes_cache_with_mismatched_active_rect_provenan
         config,
         None,
         rect,
+        metric_frame_range=MetricFrameRange(1, 0, 1),
         timing_recorder=None,
     )
     assert mock_load.call_args.args[3] == MetricCacheRequest(
@@ -198,6 +225,7 @@ def test_calculate_metrics_computes_on_cache_miss(
         config,
         None,
         None,
+        metric_frame_range=MetricFrameRange(10, 0, 10),
         timing_recorder=None,
     )
     mock_save.assert_called_once()
@@ -277,8 +305,8 @@ def test_calculate_metrics_bounds_decode_and_preserves_motion_lookbehind(
     )
     mock_loader_cls.return_value.load.return_value = source
     mock_strategy.return_value = MetricComputationResult(
-        luminance=[0.1, 0.2, 0.3, 0.4],
-        motion=[0.0, 0.12, 0.23, 0.34],
+        luminance=[0.2, 0.3, 0.4],
+        motion=[0.12, 0.23, 0.34],
         performance_mode="quality",
         algorithm_id="algorithm-id",
         metric_backend="vapoursynth_planestats",
@@ -296,7 +324,8 @@ def test_calculate_metrics_bounds_decode_and_preserves_motion_lookbehind(
     )
 
     strategy_source = mock_strategy.call_args.args[0]
-    assert strategy_source.clip.frames == [1, 2, 3, 4]
+    assert strategy_source.clip.frames == [0, 1, 2, 3, 4, 5]
+    assert mock_strategy.call_args.kwargs["metric_frame_range"] == requested_range
     assert result.luminance == [0.2, 0.3, 0.4]
     assert result.motion == [0.12, 0.23, 0.34]
     assert result.metadata.frame_count == 3
@@ -307,11 +336,11 @@ def test_calculate_metrics_bounds_decode_and_preserves_motion_lookbehind(
 
 
 @pytest.mark.parametrize(
-    ("requested_range", "strategy_frames", "strategy_values", "expected_values"),
+    ("requested_range", "strategy_values"),
     [
-        (MetricFrameRange(6, 0, 3), [0, 1, 2], [0.1, 0.2, 0.3], [0.1, 0.2, 0.3]),
-        (MetricFrameRange(6, 3, 6), [2, 3, 4, 5], [0.2, 0.3, 0.4, 0.5], [0.3, 0.4, 0.5]),
-        (MetricFrameRange(6, 3, 4), [2, 3], [0.2, 0.3], [0.3]),
+        (MetricFrameRange(6, 0, 3), [0.1, 0.2, 0.3]),
+        (MetricFrameRange(6, 3, 6), [0.3, 0.4, 0.5]),
+        (MetricFrameRange(6, 3, 4), [0.3]),
     ],
 )
 @patch("frame_compare.analysis.metrics.save_metrics_cache")
@@ -324,9 +353,7 @@ def test_calculate_metrics_range_boundaries(
     mock_strategy,
     _mock_save,
     requested_range: MetricFrameRange,
-    strategy_frames: list[int],
     strategy_values: list[float],
-    expected_values: list[float],
     tmp_path: Path,
 ) -> None:
     mock_load.return_value = MagicMock(success=False)
@@ -360,8 +387,9 @@ def test_calculate_metrics_range_boundaries(
         metric_frame_range=requested_range,
     )
 
-    assert mock_strategy.call_args.args[0].clip.frames == strategy_frames
-    assert result.luminance == expected_values
+    assert mock_strategy.call_args.args[0].clip.frames == [0, 1, 2, 3, 4, 5]
+    assert mock_strategy.call_args.kwargs["metric_frame_range"] == requested_range
+    assert result.luminance == strategy_values
     assert len(result.motion) == requested_range.frame_count
     assert result.metadata.frame_count == requested_range.frame_count
 
@@ -391,8 +419,8 @@ def test_calculate_metrics_forwards_active_rect_with_windowed_source(
         hdr_metadata=None,
     )
     mock_strategy.return_value = MetricComputationResult(
-        luminance=[0.1, 0.2, 0.3],
-        motion=[0.0, 0.2, 0.3],
+        luminance=[0.1, 0.2],
+        motion=[0.0, 0.2],
         performance_mode="quality",
         algorithm_id="algorithm-id",
         metric_backend="vapoursynth_planestats",
@@ -410,7 +438,8 @@ def test_calculate_metrics_forwards_active_rect_with_windowed_source(
         metric_active_rect=rect,
     )
 
-    assert mock_strategy.call_args.args[0].clip.frames == [0, 1, 2]
+    assert mock_strategy.call_args.args[0].clip.frames == [0, 1, 2, 3]
+    assert mock_strategy.call_args.kwargs["metric_frame_range"] == MetricFrameRange(4, 1, 3)
     assert mock_strategy.call_args.args[3] == rect
 
 

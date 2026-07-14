@@ -19,6 +19,7 @@ from frame_compare.analysis.metric_identity import (
     metric_backend,
     stable_metric_algorithm_identity_json,
 )
+from frame_compare.analysis.sampling import plan_performance_bursts
 from frame_compare.analysis.types import (
     ClipIdentity,
     FrameMetrics,
@@ -95,6 +96,32 @@ def test_save_rejects_stale_nested_metadata_version(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ValueError, match="does not match the current cache schema"):
+        save_metrics_cache(metrics, tmp_path)
+
+
+def test_save_rejects_performance_source_map_that_differs_from_plan(tmp_path: Path) -> None:
+    config = AnalysisConfig(performance_mode="performance")
+    metadata = MetricsMetadata(
+        frame_count=2,
+        fps=Fraction(24),
+        config_fingerprint="fingerprint",
+        clips=[],
+        source_frame_count=8,
+        metric_source_start=0,
+        metric_source_end_exclusive=8,
+        performance_mode="performance",
+        algorithm_id=metric_algorithm_id(config),
+        metric_backend=metric_backend(config),
+        algorithm_identity_json=stable_metric_algorithm_identity_json(config),
+    )
+    metrics = FrameMetrics(
+        luminance=[0.1, 0.2],
+        motion=[0.0, 0.1],
+        metadata=metadata,
+        sampled_source_frames=(0, 7),
+    )
+
+    with pytest.raises(ValueError, match="do not satisfy the current cache schema"):
         save_metrics_cache(metrics, tmp_path)
 
 
@@ -227,6 +254,162 @@ def test_windowed_cache_round_trip_preserves_range_and_first_motion(tmp_path: Pa
     assert result.metrics.metadata.metric_source_end_exclusive == 23
 
 
+def test_sparse_performance_cache_round_trip_preserves_source_map(tmp_path: Path) -> None:
+    video = create_video_file(tmp_path, "v1.mkv")
+    config = AnalysisConfig(performance_mode="performance")
+    metric_range = MetricFrameRange(source_frame_count=100, start=20, end_exclusive=40)
+    request = MetricCacheRequest(analysis_source_path=video, metric_frame_range=metric_range)
+    fingerprint = compute_cache_key([video], config, metric_request=request)
+    sampled_frames = _performance_source_frames(metric_range)
+    metrics = FrameMetrics(
+        luminance=[0.1, 0.2, 0.3, 0.4, 0.5],
+        motion=[0.1, 0.2, 0.3, 0.4, 0.5],
+        metadata=MetricsMetadata(
+            frame_count=5,
+            fps=Fraction(24),
+            config_fingerprint=fingerprint,
+            clips=[ClipIdentity(str(video), video.stat().st_size, video.stat().st_mtime)],
+            source_frame_count=100,
+            metric_source_start=20,
+            metric_source_end_exclusive=40,
+            analysis_source_path=str(video),
+            performance_mode="performance",
+            algorithm_id=metric_algorithm_id(config),
+            metric_backend=metric_backend(config),
+            algorithm_identity_json=stable_metric_algorithm_identity_json(config),
+        ),
+        sampled_source_frames=sampled_frames,
+    )
+
+    save_metrics_cache(metrics, tmp_path)
+    result = load_cached_metrics_for_request(tmp_path, fingerprint, [], request)
+
+    assert result.success is True
+    assert result.metrics is not None
+    assert result.metrics.sampled_source_frames == sampled_frames
+    assert result.metrics.eligible_frame_count == 20
+
+
+def test_cache_rejects_performance_payload_without_source_map(tmp_path: Path) -> None:
+    video = create_video_file(tmp_path, "v1.mkv")
+    config = AnalysisConfig(performance_mode="performance")
+    fingerprint = compute_cache_key([video], config)
+    metadata = MetricsMetadata(
+        frame_count=1,
+        fps=Fraction(24),
+        config_fingerprint=fingerprint,
+        clips=[ClipIdentity(str(video), video.stat().st_size, video.stat().st_mtime)],
+        source_frame_count=4,
+        metric_source_start=0,
+        metric_source_end_exclusive=4,
+        performance_mode="performance",
+        algorithm_id=metric_algorithm_id(config),
+        metric_backend=metric_backend(config),
+        algorithm_identity_json=stable_metric_algorithm_identity_json(config),
+    )
+    save_metrics_cache(
+        FrameMetrics(
+            luminance=[0.1],
+            motion=[0.0],
+            metadata=metadata,
+            sampled_source_frames=(1,),
+        ),
+        tmp_path,
+    )
+    cache_path = next(tmp_path.glob("*.compframes"))
+    payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    payload["sampled_source_frames"] = None
+    cache_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = load_cached_metrics(tmp_path, fingerprint, [])
+
+    assert result.success is False
+    assert result.reason == "corrupted"
+
+
+def test_cache_rejects_quality_payload_with_source_map(tmp_path: Path) -> None:
+    video = create_video_file(tmp_path, "v1.mkv")
+    config = AnalysisConfig()
+    fingerprint = compute_cache_key([video], config)
+    metadata = metrics_metadata(
+        frame_count=1,
+        fps=Fraction(24),
+        config_fingerprint=fingerprint,
+        clips=[ClipIdentity(str(video), video.stat().st_size, video.stat().st_mtime)],
+        config=config,
+    )
+    save_metrics_cache(FrameMetrics([0.1], [0.0], metadata), tmp_path)
+    cache_path = next(tmp_path.glob("*.compframes"))
+    payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    payload["sampled_source_frames"] = [0]
+    cache_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = load_cached_metrics(tmp_path, fingerprint, [])
+
+    assert result.success is False
+    assert result.reason == "corrupted"
+
+
+@pytest.mark.parametrize(
+    "sample_map",
+    [
+        pytest.param([1], id="wrong-length"),
+        pytest.param([5, 1], id="unsorted"),
+        pytest.param([1, 1], id="duplicate"),
+        pytest.param([1, 8], id="out-of-range"),
+        pytest.param([False, 5], id="boolean"),
+        pytest.param("1,5", id="not-a-list"),
+        pytest.param([0, 7], id="production-plan-mismatch"),
+    ],
+)
+def test_cache_rejects_malformed_performance_source_maps(
+    tmp_path: Path,
+    sample_map: object,
+) -> None:
+    video = create_video_file(tmp_path, "v1.mkv")
+    config = AnalysisConfig(performance_mode="performance")
+    fingerprint = compute_cache_key([video], config)
+    metrics = FrameMetrics(
+        luminance=[0.1, 0.2],
+        motion=[0.0, 0.1],
+        metadata=MetricsMetadata(
+            frame_count=2,
+            fps=Fraction(24),
+            config_fingerprint=fingerprint,
+            clips=[ClipIdentity(str(video), video.stat().st_size, video.stat().st_mtime)],
+            source_frame_count=8,
+            metric_source_start=0,
+            metric_source_end_exclusive=8,
+            performance_mode="performance",
+            algorithm_id=metric_algorithm_id(config),
+            metric_backend=metric_backend(config),
+            algorithm_identity_json=stable_metric_algorithm_identity_json(config),
+        ),
+        sampled_source_frames=(1, 5),
+    )
+    save_metrics_cache(metrics, tmp_path)
+    cache_path = next(tmp_path.glob("*.compframes"))
+    payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    payload["sampled_source_frames"] = sample_map
+    cache_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = load_cached_metrics(tmp_path, fingerprint, [])
+
+    assert result.success is False
+    assert result.reason == "corrupted"
+
+
+def _performance_source_frames(metric_range: MetricFrameRange) -> tuple[int, ...]:
+    return tuple(
+        frame
+        for burst in plan_performance_bursts(
+            window_start=metric_range.start,
+            window_end_exclusive=metric_range.end_exclusive,
+        )
+        for frame in range(burst.start, burst.end_exclusive)
+    )
+
+
 def test_windowed_cache_request_rejects_different_range(tmp_path: Path) -> None:
     video = create_video_file(tmp_path, "v1.mkv")
     config = AnalysisConfig()
@@ -281,6 +464,7 @@ def test_load_cache_accepts_content_derived_auto_active_rect_metadata(tmp_path: 
                 "fingerprint": "fp",
                 "luminance": [0.1],
                 "motion": [0.0],
+                "sampled_source_frames": None,
                 "metadata": metadata,
             }
         ),
@@ -311,7 +495,7 @@ def test_save_writes_required_keys(tmp_path: Path) -> None:
         clips=[],
         config=config,
     )
-    metrics = FrameMetrics(luminance=[0.5], motion=[0.1], metadata=metadata)
+    metrics = FrameMetrics(luminance=[0.5] * 10, motion=[0.0] * 10, metadata=metadata)
     save_metrics_cache(metrics, tmp_path)
 
     with (tmp_path / "analysis__fp.compframes").open("r") as f:
@@ -323,6 +507,7 @@ def test_save_writes_required_keys(tmp_path: Path) -> None:
     assert "motion" in data
     assert "metadata" in data
     assert data["metadata"]["frame_count"] == 10
+    assert data["sampled_source_frames"] is None
     assert data["metadata"]["fps"] == "24000/1001"
     assert data["metadata"]["analysis_source_path"] == ""
     assert data["metadata"]["performance_mode"] == "quality"

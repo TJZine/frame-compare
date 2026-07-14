@@ -325,6 +325,108 @@ def test_run_align_phase_reselects_trimmed_overlap_when_fallback_plan_would_drop
     )
 
 
+def test_run_align_phase_filters_and_rebases_sparse_metrics_for_overlap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comparison = _clip(
+        tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1", num_frames=220
+    )
+    ctx = _context(tmp_path, comparisons=[comparison])
+    ctx.config.analysis = ctx.config.analysis.model_copy(
+        update={"random_frame_count": 0, "dark_frame_count": 2}
+    )
+    ctx.analysis_metrics = FrameMetrics(
+        luminance=[0.9, 0.8, 0.4, 0.1, 0.2],
+        motion=[0.1, 0.1, 0.2, 0.3, 0.4],
+        metadata=MetricsMetadata(
+            frame_count=5,
+            fps=Fraction(24),
+            config_fingerprint="test",
+            clips=[],
+            source_frame_count=220,
+            metric_source_start=0,
+            metric_source_end_exclusive=220,
+            performance_mode="performance",
+        ),
+        sampled_source_frames=(10, 20, 65, 75, 90),
+    )
+
+    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
+        return [
+            AlignmentResult(
+                reference_clip="reference.mkv",
+                comparison_clip="encode.mkv",
+                frame_offset=60,
+                time_offset_seconds=2.5,
+                correlation_score=0.9,
+                algorithm="cross_correlation",
+                source="computed",
+            )
+        ]
+
+    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
+
+    output = phase_tasks.run_align_phase(ctx, selected_frames=[0, 1])
+
+    assert output.reference.trim.trim_start_frames == 60
+    assert output.selected_frames == [15, 30]
+    assert output.selection_breakdown is not None
+    assert output.selection_breakdown.quantile_dark == [75, 90]
+    assert output.selection_details_by_source_frame is not None
+    assert set(output.selection_details_by_source_frame) == {75, 90}
+
+
+def test_run_align_phase_sparse_overlap_reports_metric_candidate_underfill(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comparison = _clip(
+        tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1", num_frames=220
+    )
+    ctx = _context(tmp_path, comparisons=[comparison])
+    ctx.config.analysis = ctx.config.analysis.model_copy(
+        update={"random_frame_count": 0, "dark_frame_count": 2}
+    )
+    ctx.analysis_metrics = FrameMetrics(
+        luminance=[0.1, 0.2],
+        motion=[0.1, 0.2],
+        metadata=MetricsMetadata(
+            frame_count=2,
+            fps=Fraction(24),
+            config_fingerprint="test",
+            clips=[],
+            source_frame_count=220,
+            metric_source_start=0,
+            metric_source_end_exclusive=220,
+            performance_mode="performance",
+        ),
+        sampled_source_frames=(10, 100),
+    )
+
+    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
+        return [
+            AlignmentResult(
+                reference_clip="reference.mkv",
+                comparison_clip="encode.mkv",
+                frame_offset=60,
+                time_offset_seconds=2.5,
+                correlation_score=0.9,
+                algorithm="cross_correlation",
+                source="computed",
+            )
+        ]
+
+    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
+
+    with pytest.raises(SelectionError) as exc_info:
+        phase_tasks.run_align_phase(ctx, selected_frames=[0, 1])
+
+    assert exc_info.value.context.details == {
+        "reason": "insufficient_candidates",
+        "requested": 2,
+        "found": 0,
+    }
+
+
 def test_run_align_phase_raises_when_overlap_is_smaller_than_generated_counts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -409,7 +409,7 @@ def test_performance_strategy_rejects_empty_clip(monkeypatch: pytest.MonkeyPatch
         )
 
 
-def test_performance_strategy_returns_full_length_dense_arrays(
+def test_performance_strategy_returns_exact_quarter_sparse_arrays(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
@@ -422,11 +422,9 @@ def test_performance_strategy_returns_full_length_dense_arrays(
         reporter=None,
     )
 
-    assert result.luminance == [0.0, 0.25, 0.75, 1.0]
-    assert result.motion == [0.0, 0.25, 0.5, 0.25]
-    assert len(result.luminance) == source.clip.num_frames
-    assert len(result.motion) == source.clip.num_frames
-    assert result.motion[0] == 0.0
+    assert result.luminance == [0.25]
+    assert result.motion == [0.25]
+    assert result.sampled_source_frames == (1,)
     assert result.performance_mode == "performance"
     assert result.metric_backend == "vapoursynth_planestats"
 
@@ -437,11 +435,12 @@ def test_public_performance_planestats_callable_matches_production_semantics(
     monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
     clip = FakeBalancedClip([0.0, 0.25, 0.75, 1.0], width=640, height=360)
 
-    luminance, motion = calculate_performance_planestats_metrics(clip)
+    luminance, motion, source_frames = calculate_performance_planestats_metrics(clip)
 
-    assert luminance == [0.0, 0.25, 0.75, 1.0]
-    assert motion == [0.0, 0.25, 0.5, 0.25]
-    assert clip.resize_calls == [("Bicubic", 320, 180)]
+    assert luminance == [0.25]
+    assert motion == [0.25]
+    assert source_frames == (1,)
+    assert clip.resize_calls == []
     assert clip.planestats_clipb_flags == [True]
 
 
@@ -460,8 +459,8 @@ def test_performance_strategy_records_one_combined_render_phase(
         timing_recorder=recorder,
     )
 
-    assert result.luminance == [0.0, 0.25, 0.75, 1.0]
-    assert result.motion == [0.0, 0.25, 0.5, 0.25]
+    assert result.luminance == [0.25]
+    assert result.motion == [0.25]
     assert set(recorder.as_dict()) == {
         "metric_graph_build",
         "performance_frame_render",
@@ -470,7 +469,7 @@ def test_performance_strategy_records_one_combined_render_phase(
     }
 
 
-def test_performance_strategy_crops_before_resize_and_remains_dense(
+def test_performance_strategy_crops_without_spatial_resize(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
@@ -485,13 +484,11 @@ def test_performance_strategy_crops_before_resize_and_remains_dense(
     )
 
     assert source.clip.crop_calls == [("CropAbs", 10, 20, 400, 200)]
-    assert source.clip.resize_calls == [("Bicubic", 320, 160)]
-    assert source.clip.ops == [("CropAbs", 10, 20, 400, 200), ("Bicubic", 320, 160)]
-    assert result.luminance == [0.0, 0.25, 0.75]
-    assert result.motion == [0.0, 0.25, 0.5]
-    assert len(result.luminance) == 3
-    assert len(result.motion) == 3
-    assert result.motion[0] == 0.0
+    assert source.clip.resize_calls == []
+    assert source.clip.ops == [("CropAbs", 10, 20, 400, 200)]
+    assert result.luminance == [0.25]
+    assert result.motion == [0.25]
+    assert result.sampled_source_frames == (1,)
 
 
 def test_performance_strategy_one_frame_motion_is_zero(
@@ -522,18 +519,18 @@ def test_performance_strategy_constant_clip_is_deterministic_with_zero_motion(
     first = calculate_metric_strategy(source, config, reporter=None)
     second = calculate_metric_strategy(source, config, reporter=None)
 
-    assert first.luminance == [0.25, 0.25, 0.25]
-    assert first.motion == [0.0, 0.0, 0.0]
+    assert first.luminance == [0.25]
+    assert first.motion == [0.0]
     assert second.luminance == first.luminance
     assert second.motion == first.motion
 
 
-def test_performance_strategy_simple_transition_has_motion_at_current_frame(
+def test_performance_strategy_preserves_motion_lookbehind_at_sampled_frame(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
     source = MagicMock()
-    source.clip = FakeBalancedClip([0.0, 1.0], width=640, height=360)
+    source.clip = FakeBalancedClip([0.0, 1.0, 1.0, 1.0], width=640, height=360)
 
     result = calculate_metric_strategy(
         source,
@@ -541,8 +538,8 @@ def test_performance_strategy_simple_transition_has_motion_at_current_frame(
         reporter=None,
     )
 
-    assert result.motion[0] == 0.0
-    assert result.motion[1] > result.motion[0]
+    assert result.sampled_source_frames == (1,)
+    assert result.motion == [1.0]
 
 
 def test_performance_metric_identity_is_distinct_and_stable() -> None:
@@ -557,12 +554,12 @@ def test_performance_metric_identity_is_distinct_and_stable() -> None:
     assert first_performance == second_performance
     assert len({quality, first_performance}) == 2
     assert '"performance_mode":"performance"' in first_performance
-    assert '"target_max_width":320' in first_performance
-    assert '"resize":"bicubic"' in first_performance
-    assert '"temporal":"requested_window_pairs_with_source_lookbehind"' in first_performance
+    assert '"target_max_width"' not in first_performance
+    assert '"resize"' not in first_performance
+    assert '"sampled_burst_pairs_with_per_burst_source_lookbehind"' in first_performance
     parsed_performance = json.loads(first_performance)
-    assert parsed_performance["luminance"]["spatial"] == "active_rect_aware_luma_resize"
-    assert parsed_performance["motion"]["spatial"] == "active_rect_aware_luma_resize"
+    assert parsed_performance["luminance"]["spatial"] == "active_rect_aware_full_resolution_luma"
+    assert parsed_performance["motion"]["spatial"] == "active_rect_aware_full_resolution_luma"
     assert '"x"' not in first_performance
     assert "coarse_to_refined" not in first_performance
 
@@ -580,5 +577,5 @@ def test_performance_strategy_static_clip_has_zero_motion(
         reporter=None,
     )
 
-    assert result.luminance == [0.25, 0.25, 0.25]
-    assert result.motion == [0.0, 0.0, 0.0]
+    assert result.luminance == [0.25]
+    assert result.motion == [0.0]

@@ -15,6 +15,7 @@ from frame_compare.analysis.metric_identity import (
     metric_backend,
     stable_metric_algorithm_identity_json,
 )
+from frame_compare.analysis.sampling import plan_performance_bursts
 from frame_compare.analysis.types import (
     ClipIdentity,
     FrameMetrics,
@@ -135,15 +136,23 @@ def write_metrics_cache(
         metric_request=metric_request,
     )
     stats_by_path = {path: path.stat() for path in ordered_cache_inputs}
+    sampled_source_frames = None
+    metric_frames: tuple[int, ...] = tuple(range(metric_range.start, metric_range.end_exclusive))
+    if config.analysis.performance_mode.value == "performance":
+        sampled_source_frames = tuple(
+            frame
+            for burst in plan_performance_bursts(
+                window_start=metric_range.start,
+                window_end_exclusive=metric_range.end_exclusive,
+            )
+            for frame in range(burst.start, burst.end_exclusive)
+        )
+        metric_frames = sampled_source_frames
     metrics = FrameMetrics(
-        luminance=[0.1] * metric_range.frame_count,
-        motion=(
-            [0.0] + [0.2] * (metric_range.frame_count - 1)
-            if metric_range.start == 0
-            else [0.2] * metric_range.frame_count
-        ),
+        luminance=[0.1] * len(metric_frames),
+        motion=[0.0 if frame == 0 else 0.2 for frame in metric_frames],
         metadata=MetricsMetadata(
-            frame_count=metric_range.frame_count,
+            frame_count=len(metric_frames),
             fps=Fraction(24, 1),
             config_fingerprint=fingerprint,
             clips=[
@@ -168,6 +177,7 @@ def write_metrics_cache(
             active_rect_algorithm_id=metric_request.active_rect_algorithm_id,
             version=cache_io.CACHE_VERSION,
         ),
+        sampled_source_frames=sampled_source_frames,
     )
     cache_io.save_metrics_cache(metrics, cache_dir)
 

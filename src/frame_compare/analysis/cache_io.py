@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from frame_compare.analysis.metric_identity import stable_metric_algorithm_identity_json
+from frame_compare.analysis.sampling import plan_performance_bursts
 from frame_compare.analysis.types import (
     ActiveRectAlgorithmId,
     ActiveRectDetectionMode,
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
 
 CACHE_FILE_EXTENSION: str = ".compframes"
 CACHE_LABEL_MAX_LENGTH: int = 80
-CACHE_VERSION: int = 7
+CACHE_VERSION: int = 8
 _SAFE_LABEL_CHARS = re.compile(r"[^a-z0-9._-]+")
 _MULTI_SEPARATOR = re.compile(r"[-_.]{2,}")
 
@@ -46,6 +47,7 @@ class _ValidatedCachePayload:
     luminance: list[float]
     motion: list[float]
     metadata: MetricsMetadata
+    sampled_source_frames: tuple[int, ...] | None
 
 
 def _cache_path_sort_key(path: Path) -> str:
@@ -225,6 +227,7 @@ def load_cached_metrics(
         luminance=payload.luminance,
         motion=payload.motion,
         metadata=payload.metadata,
+        sampled_source_frames=payload.sampled_source_frames,
     )
     return CacheLoadResult(success=True, metrics=metrics)
 
@@ -292,29 +295,46 @@ def _require_keys(data: Mapping[str, object], keys: set[str]) -> None:
 
 
 def _validate_cache_identity(data: Mapping[str, object], fingerprint: str) -> None:
-    _require_keys(data, {"version", "fingerprint", "luminance", "motion", "metadata"})
+    _require_keys(data, {"version", "fingerprint"})
 
     if data["version"] != CACHE_VERSION:
         raise _CacheVersionMismatch
     if data["fingerprint"] != fingerprint:
         raise _CacheFingerprintMismatch
+    _require_keys(data, {"luminance", "motion", "sampled_source_frames", "metadata"})
 
 
 def _parse_cache_payload(data: Mapping[str, object]) -> _ValidatedCachePayload:
     metadata = _parse_metrics_metadata(_as_mapping(data["metadata"]))
     luminance = _parse_numeric_series(data["luminance"])
     motion = _parse_numeric_series(data["motion"])
+    sampled_source_frames = _parse_sampled_source_frames(data["sampled_source_frames"])
     _validate_metric_arrays(
         luminance=luminance,
         motion=motion,
         frame_count=metadata.frame_count,
         metric_source_start=metadata.metric_source_start,
+        metric_source_end_exclusive=metadata.metric_source_end_exclusive,
+        performance_mode=metadata.performance_mode,
+        sampled_source_frames=sampled_source_frames,
     )
     return _ValidatedCachePayload(
         luminance=luminance,
         motion=motion,
         metadata=metadata,
+        sampled_source_frames=sampled_source_frames,
     )
+
+
+def _parse_sampled_source_frames(value: object) -> tuple[int, ...] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise _CacheParseError
+    frames = tuple(_parse_nonnegative_int(item) for item in cast(list[object], value))
+    if tuple(sorted(set(frames))) != frames:
+        raise _CacheParseError
+    return frames
 
 
 def _parse_numeric_series(value: object) -> list[float]:
@@ -338,10 +358,41 @@ def _validate_metric_arrays(
     motion: list[float],
     frame_count: int,
     metric_source_start: int,
+    metric_source_end_exclusive: int,
+    performance_mode: str,
+    sampled_source_frames: tuple[int, ...] | None,
 ) -> None:
     if len(luminance) != frame_count or len(motion) != frame_count:
         raise _CacheParseError
-    if motion and metric_source_start == 0 and motion[0] != 0.0:
+    if performance_mode == "quality" and sampled_source_frames is not None:
+        raise _CacheParseError
+    if performance_mode == "performance" and sampled_source_frames is None:
+        raise _CacheParseError
+    if performance_mode not in {"quality", "performance"}:
+        raise _CacheParseError
+    source_frames: range | tuple[int, ...]
+    if sampled_source_frames is None:
+        if metric_source_end_exclusive - metric_source_start != frame_count:
+            raise _CacheParseError
+        source_frames = range(metric_source_start, metric_source_end_exclusive)
+    else:
+        if len(sampled_source_frames) != frame_count or any(
+            frame < metric_source_start or frame >= metric_source_end_exclusive
+            for frame in sampled_source_frames
+        ):
+            raise _CacheParseError
+        expected_source_frames = tuple(
+            frame
+            for burst in plan_performance_bursts(
+                window_start=metric_source_start,
+                window_end_exclusive=metric_source_end_exclusive,
+            )
+            for frame in range(burst.start, burst.end_exclusive)
+        )
+        if sampled_source_frames != expected_source_frames:
+            raise _CacheParseError
+        source_frames = sampled_source_frames
+    if motion and 0 in source_frames and motion[source_frames.index(0)] != 0.0:
         raise _CacheParseError
 
 
@@ -383,9 +434,6 @@ def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
         )
     except ValueError as exc:
         raise _CacheParseError from exc
-    if metric_source_end_exclusive - metric_source_start != frame_count:
-        raise _CacheParseError
-
     fps = data["fps"]
     if not isinstance(fps, str):
         raise _CacheParseError
@@ -580,6 +628,22 @@ def save_metrics_cache(metrics: FrameMetrics, cache_dir: Path) -> None:
     """Persist analysis metrics to cache file."""
     if metrics.metadata.version != CACHE_VERSION:
         raise ValueError("Metrics metadata cache version does not match the current cache schema")
+    try:
+        _validate_metric_arrays(
+            luminance=list(metrics.luminance),
+            motion=list(metrics.motion),
+            frame_count=metrics.metadata.frame_count,
+            metric_source_start=metrics.metadata.metric_source_start,
+            metric_source_end_exclusive=metrics.metadata.metric_source_end_exclusive,
+            performance_mode=metrics.metadata.performance_mode,
+            sampled_source_frames=(
+                None
+                if metrics.sampled_source_frames is None
+                else tuple(metrics.sampled_source_frames)
+            ),
+        )
+    except _CacheParseError as exc:
+        raise ValueError("Metrics do not satisfy the current cache schema") from exc
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path = cache_dir / metrics_cache_filename(
         [Path(clip.path) for clip in metrics.metadata.clips],
@@ -591,6 +655,9 @@ def save_metrics_cache(metrics: FrameMetrics, cache_dir: Path) -> None:
         "fingerprint": metrics.metadata.config_fingerprint,
         "luminance": list(metrics.luminance),
         "motion": list(metrics.motion),
+        "sampled_source_frames": (
+            None if metrics.sampled_source_frames is None else list(metrics.sampled_source_frames)
+        ),
         "metadata": {
             "frame_count": metrics.metadata.frame_count,
             "source_frame_count": metrics.metadata.source_frame_count,

@@ -13,8 +13,9 @@ from frame_compare.analysis.metric_identity import (
     metric_backend,
     stable_metric_algorithm_identity_json,
 )
+from frame_compare.analysis.sampling import plan_performance_bursts
 from frame_compare.analysis.timing import AnalysisTimingRecorder, record_span
-from frame_compare.analysis.types import MetricActiveRect
+from frame_compare.analysis.types import MetricActiveRect, MetricFrameRange
 from frame_compare.config.schema_enums import AnalysisPerformanceMode
 from frame_compare.utils.perf import perf_span
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
@@ -56,6 +57,7 @@ class MetricComputationResult:
     algorithm_id: str
     metric_backend: str
     algorithm_identity_json: str
+    sampled_source_frames: tuple[int, ...] | None = None
 
 
 def calculate_metric_strategy(
@@ -64,6 +66,7 @@ def calculate_metric_strategy(
     reporter: ProgressReporter | None,
     metric_active_rect: MetricActiveRect | None = None,
     *,
+    metric_frame_range: MetricFrameRange | None = None,
     timing_recorder: AnalysisTimingRecorder | None = None,
 ) -> MetricComputationResult:
     """Dispatch metric computation for the configured analysis performance mode."""
@@ -72,13 +75,27 @@ def calculate_metric_strategy(
         frame_width=source.clip.width,
         frame_height=source.clip.height,
     )
+    if source.clip.num_frames == 0:
+        raise MetricsCalculationError("Analysis clip has 0 frames")
+    frame_range = metric_frame_range or MetricFrameRange(
+        source_frame_count=source.clip.num_frames,
+        start=0,
+        end_exclusive=source.clip.num_frames,
+    )
+    if frame_range.source_frame_count != source.clip.num_frames or frame_range.frame_count <= 0:
+        raise MetricsCalculationError("Metric range does not match the loaded clip")
     if config.performance_mode == AnalysisPerformanceMode.QUALITY:
+        decode_start = max(0, frame_range.start - 1)
+        strategy_clip = source.clip[decode_start : frame_range.end_exclusive]
         luminance, motion = calculate_quality_planestats_metrics(
-            source.clip,
+            strategy_clip,
             reporter,
             active_rect,
             timing_recorder=timing_recorder,
         )
+        if decode_start < frame_range.start:
+            luminance = luminance[1:]
+            motion = motion[1:]
         return MetricComputationResult(
             luminance=luminance,
             motion=motion,
@@ -88,10 +105,11 @@ def calculate_metric_strategy(
             algorithm_identity_json=stable_metric_algorithm_identity_json(config),
         )
     if config.performance_mode == AnalysisPerformanceMode.PERFORMANCE:
-        luminance, motion = calculate_performance_planestats_metrics(
+        luminance, motion, sampled_source_frames = calculate_performance_planestats_metrics(
             source.clip,
             reporter,
             active_rect,
+            metric_frame_range=frame_range,
             timing_recorder=timing_recorder,
         )
         return MetricComputationResult(
@@ -101,6 +119,7 @@ def calculate_metric_strategy(
             algorithm_id=metric_algorithm_id(config),
             metric_backend=metric_backend(config),
             algorithm_identity_json=stable_metric_algorithm_identity_json(config),
+            sampled_source_frames=sampled_source_frames,
         )
     raise MetricsCalculationError(
         f"Unsupported analysis performance mode '{config.performance_mode.value}'."
@@ -112,9 +131,10 @@ def calculate_performance_planestats_metrics(
     reporter: ProgressReporter | None = None,
     metric_active_rect: MetricActiveRect | None = None,
     *,
+    metric_frame_range: MetricFrameRange | None = None,
     timing_recorder: AnalysisTimingRecorder | None = None,
-) -> tuple[list[float], list[float]]:
-    """Calculate the dense 320px PlaneStats metrics used by performance mode."""
+) -> tuple[list[float], list[float], tuple[int, ...]]:
+    """Calculate sparse full-resolution PlaneStats metrics for performance mode."""
     if clip.num_frames == 0:
         raise MetricsCalculationError("Analysis clip has 0 frames")
 
@@ -123,11 +143,56 @@ def calculate_performance_planestats_metrics(
         frame_width=clip.width,
         frame_height=clip.height,
     )
-    total_frames = clip.num_frames
-    with perf_span("analysis.calculate_metrics", frames=total_frames):
-        with record_span(timing_recorder, "metric_graph_build"):
-            luma = _performance_luma_clip(clip, active_rect)
-        return _calculate_dense_planestats_metrics(luma, reporter, timing_recorder)
+    frame_range = metric_frame_range or MetricFrameRange(
+        source_frame_count=clip.num_frames,
+        start=0,
+        end_exclusive=clip.num_frames,
+    )
+    if frame_range.source_frame_count != clip.num_frames or frame_range.frame_count <= 0:
+        raise MetricsCalculationError("Performance metric range does not match the loaded clip")
+    bursts = plan_performance_bursts(
+        window_start=frame_range.start,
+        window_end_exclusive=frame_range.end_exclusive,
+    )
+    total_samples = sum(burst.frame_count for burst in bursts)
+    luminance: list[float] = []
+    motion: list[float] = []
+    sampled_source_frames: list[int] = []
+    phase_status = ProgressPhaseStatus.COMPLETED
+    if reporter:
+        reporter.start_phase("Calculating metrics", total_samples)
+    try:
+        with perf_span("analysis.performance_metrics", frames=total_samples):
+            for burst in bursts:
+                burst_clip = clip[burst.decode_start : burst.end_exclusive]
+                burst_luminance, burst_motion = _calculate_full_resolution_planestats_metrics(
+                    burst_clip,
+                    metric_active_rect=active_rect,
+                    timing_recorder=timing_recorder,
+                    timing_prefix="performance",
+                )
+                if burst.decode_start < burst.start:
+                    burst_luminance = burst_luminance[1:]
+                    burst_motion = burst_motion[1:]
+                if (
+                    len(burst_luminance) != burst.frame_count
+                    or len(burst_motion) != burst.frame_count
+                ):
+                    raise MetricsCalculationError(
+                        "Performance PlaneStats burst returned an unexpected metric count"
+                    )
+                luminance.extend(burst_luminance)
+                motion.extend(burst_motion)
+                sampled_source_frames.extend(range(burst.start, burst.end_exclusive))
+                if reporter:
+                    reporter.advance(burst.frame_count)
+    except Exception:
+        phase_status = ProgressPhaseStatus.FAILED
+        raise
+    finally:
+        if reporter:
+            reporter.complete_phase(phase_status)
+    return luminance, motion, tuple(sampled_source_frames)
 
 
 def calculate_quality_planestats_metrics(
@@ -138,6 +203,24 @@ def calculate_quality_planestats_metrics(
     timing_recorder: AnalysisTimingRecorder | None = None,
 ) -> tuple[list[float], list[float]]:
     """Calculate full-resolution PlaneStats metrics used by quality mode."""
+    return _calculate_full_resolution_planestats_metrics(
+        clip,
+        reporter,
+        metric_active_rect,
+        timing_recorder=timing_recorder,
+        timing_prefix="quality",
+    )
+
+
+def _calculate_full_resolution_planestats_metrics(
+    clip: vs.VideoNode,
+    reporter: ProgressReporter | None = None,
+    metric_active_rect: MetricActiveRect | None = None,
+    *,
+    timing_recorder: AnalysisTimingRecorder | None = None,
+    timing_prefix: str,
+) -> tuple[list[float], list[float]]:
+    """Calculate full-resolution PlaneStats with caller-owned telemetry labels."""
     if clip.num_frames == 0:
         raise MetricsCalculationError("Analysis clip has 0 frames")
 
@@ -146,41 +229,27 @@ def calculate_quality_planestats_metrics(
         frame_width=clip.width,
         frame_height=clip.height,
     )
-    with perf_span("analysis.quality_planestats", frames=clip.num_frames):
+    with perf_span(f"analysis.{timing_prefix}_planestats", frames=clip.num_frames):
         with record_span(timing_recorder, "metric_graph_build"):
             luma = _planestats_luma_clip(
                 clip,
                 active_rect=active_rect,
-                target_max_width=None,
-                mode_name="Quality",
+                mode_name=timing_prefix.capitalize(),
             )
         return _calculate_dense_planestats_metrics(
             luma,
             reporter,
             timing_recorder,
-            timing_prefix="quality",
-            error_label="quality",
-            perf_label="analysis.quality_planestats_metrics",
+            timing_prefix=timing_prefix,
+            error_label=timing_prefix,
+            perf_label=f"analysis.{timing_prefix}_planestats_metrics",
         )
-
-
-def _performance_luma_clip(
-    clip: vs.VideoNode,
-    active_rect: MetricActiveRect | None,
-) -> vs.VideoNode:
-    return _planestats_luma_clip(
-        clip,
-        active_rect=active_rect,
-        target_max_width=320,
-        mode_name="Performance",
-    )
 
 
 def _planestats_luma_clip(
     clip: vs.VideoNode,
     *,
     active_rect: MetricActiveRect | None,
-    target_max_width: int | None,
     mode_name: str,
 ) -> vs.VideoNode:
     import vapoursynth as vs
@@ -208,12 +277,7 @@ def _planestats_luma_clip(
                     top=active_rect.y,
                 ),
             )
-        if target_max_width is None or luma.width <= target_max_width:
-            return luma
-
-        target_width = target_max_width
-        target_height = max(1, round(luma.height * target_width / luma.width))
-        return luma.resize.Bicubic(width=target_width, height=target_height)
+        return luma
     except Exception as exc:
         raise MetricsCalculationError(f"{mode_name} luma preparation failed: {exc}") from exc
 

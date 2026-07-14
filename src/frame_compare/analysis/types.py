@@ -62,7 +62,7 @@ class MetricActiveRect:
 
 @dataclass(frozen=True, slots=True)
 class MetricFrameRange:
-    """Contiguous source-frame domain represented by cached metric arrays."""
+    """Contiguous eligible source-frame domain represented by a metric set."""
 
     source_frame_count: int
     start: int
@@ -99,13 +99,13 @@ class MetricsMetadata:
     """Metadata about the analysis run stored with cache.
 
     Fields:
-        frame_count: Number of stored metric entries
+        frame_count: Number of stored metric samples
         fps: Source video framerate
         config_fingerprint: Hash of analysis configuration
         clips: List of clip identities involved (usually just one)
         source_frame_count: Original analysis source frame count
-        metric_source_start: Inclusive source-frame offset represented by index zero
-        metric_source_end_exclusive: Exclusive represented source-frame boundary
+        metric_source_start: Inclusive eligible source-frame boundary
+        metric_source_end_exclusive: Exclusive eligible source-frame boundary
         analysis_source_path: Path to the source used for analysis, if any
         performance_mode: Analysis performance mode that produced the arrays
         algorithm_id: Stable ID for the metric algorithm identity
@@ -134,7 +134,7 @@ class MetricsMetadata:
     active_rect_source: ActiveRectSource = "full-frame"
     active_rect_detection_mode: ActiveRectDetectionMode = "aspect_ratio"
     active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v2"
-    version: int = 7
+    version: int = 8
 
     def __post_init__(self) -> None:
         """Normalize legacy in-memory constructors to a full-source metric domain."""
@@ -148,24 +148,72 @@ class MetricsMetadata:
             self.metric_source_start < 0
             or self.metric_source_end_exclusive < self.metric_source_start
             or self.metric_source_end_exclusive > self.source_frame_count
-            or self.metric_source_end_exclusive - self.metric_source_start != self.frame_count
         ):
             raise ValueError("Metric metadata frame range is inconsistent")
 
 
 @dataclass(frozen=True, slots=True)
 class FrameMetrics:
-    """Calculated metrics for all frames in a video.
+    """Calculated dense or explicitly mapped sparse frame metrics.
 
     Fields:
-        luminance: Array of luminance values (0.0-1.0) per frame
-        motion: Array of scene change probabilities (0.0-1.0) per frame
+        luminance: Luminance values (0.0-1.0) for stored samples
+        motion: Plane-difference values (0.0-1.0) for stored samples
         metadata: Source metadata
+        sampled_source_frames: Absolute source frame for each sparse sample;
+            ``None`` means the arrays densely cover the entire eligible range
     """
 
     luminance: Sequence[float]
     motion: Sequence[float]
     metadata: MetricsMetadata
+    sampled_source_frames: Sequence[int] | None = None
+
+    def __post_init__(self) -> None:
+        """Validate dense and sparse metric domains at their shared boundary."""
+        if (
+            len(self.luminance) != self.metadata.frame_count
+            or len(self.motion) != self.metadata.frame_count
+        ):
+            raise ValueError("Metric arrays must match the stored metric frame count")
+        if self.metadata.performance_mode not in {"quality", "performance"}:
+            raise ValueError("Metric performance mode must be quality or performance")
+        if self.sampled_source_frames is None:
+            if self.metadata.performance_mode == "performance":
+                raise ValueError("Performance metrics require an explicit source-frame map")
+            if (
+                self.metadata.metric_source_end_exclusive - self.metadata.metric_source_start
+                != self.metadata.frame_count
+            ):
+                raise ValueError("Dense metrics must cover every frame in their metric range")
+            return
+        if self.metadata.performance_mode != "performance":
+            raise ValueError("Only performance metrics may store a sparse source-frame map")
+        sampled = tuple(self.sampled_source_frames)
+        if len(sampled) != self.metadata.frame_count:
+            raise ValueError("Sparse source-frame map must match the metric arrays")
+        if tuple(sorted(set(sampled))) != sampled:
+            raise ValueError("Sparse source-frame map must be sorted and unique")
+        if any(
+            frame < self.metadata.metric_source_start
+            or frame >= self.metadata.metric_source_end_exclusive
+            for frame in sampled
+        ):
+            raise ValueError("Sparse source-frame map must stay within the metric range")
+
+    @property
+    def eligible_frame_count(self) -> int:
+        """Return the complete contiguous selection domain represented by the metrics."""
+        return self.metadata.metric_source_end_exclusive - self.metadata.metric_source_start
+
+    def source_frames(self) -> range | Sequence[int]:
+        """Map each metric entry to its absolute analysis-source frame."""
+        if self.sampled_source_frames is not None:
+            return self.sampled_source_frames
+        return range(
+            self.metadata.metric_source_start,
+            self.metadata.metric_source_end_exclusive,
+        )
 
 
 @dataclass(frozen=True, slots=True)

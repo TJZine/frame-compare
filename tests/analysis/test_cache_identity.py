@@ -203,9 +203,10 @@ def test_metric_algorithm_identity_serialization_is_deterministic() -> None:
 
     assert first == second
     assert '"performance_mode":"performance"' in first
-    assert '"target_max_width":320' in first
-    assert '"resize":"bicubic"' in first
-    assert '"temporal":"requested_window_pairs_with_source_lookbehind"' in first
+    assert '"exact_ceil_one_quarter_in_up_to_eight_centered_bursts"' in first
+    assert '"active_rect_aware_full_resolution_luma"' in first
+    assert '"resize"' not in first
+    assert '"sampled_burst_pairs_with_per_burst_source_lookbehind"' in first
 
 
 def test_compute_cache_key_ignores_random_seed(tmp_path: Path) -> None:

@@ -287,8 +287,8 @@ def _select_frames_for_selection_domain(
     if (
         metrics.metadata.metric_source_start != expected_metric_start
         or metrics.metadata.metric_source_end_exclusive != expected_metric_start + frame_count
-        or len(metrics.luminance) != frame_count
-        or len(metrics.motion) != frame_count
+        or len(metrics.luminance) != metrics.metadata.frame_count
+        or len(metrics.motion) != metrics.metadata.frame_count
     ):
         raise MetricsCalculationError(
             "Analysis metrics do not match the requested selection window"

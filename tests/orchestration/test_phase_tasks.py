@@ -498,6 +498,53 @@ def test_run_analyze_phase_uses_analysis_clip_metrics_but_reference_frame_domain
 
 
 @pytest.mark.unit
+def test_sparse_analysis_source_frames_normalize_into_reference_window(
+    tmp_path: Path,
+) -> None:
+    ctx = _context(tmp_path)
+    reference = ctx.reference.with_trim(trim_start_frames=10, trim_end_frame_inclusive=70)
+    analysis_clip = ctx.reference.with_trim(
+        trim_start_frames=20,
+        trim_end_frame_inclusive=80,
+    )
+    window = SelectionWindow(start_frame=5, end_frame_exclusive=15)
+    metrics = FrameMetrics(
+        luminance=[0.1, 0.9],
+        motion=[0.2, 0.8],
+        metadata=MetricsMetadata(
+            frame_count=2,
+            fps=Fraction(24),
+            config_fingerprint="fingerprint",
+            clips=[],
+            source_frame_count=100,
+            metric_source_start=25,
+            metric_source_end_exclusive=35,
+            performance_mode="performance",
+        ),
+        sampled_source_frames=(25, 34),
+    )
+
+    selection = phase_selection._select_frames_for_selection_domain(
+        metrics=metrics,
+        reference=reference,
+        analysis_clip=analysis_clip,
+        selection_window=window,
+        config=ctx.config.analysis.model_copy(
+            update={
+                "random_frame_count": 0,
+                "dark_frame_count": 1,
+                "bright_frame_count": 0,
+                "motion_frame_count": 0,
+            }
+        ),
+    )
+
+    assert selection.frames == [5]
+    assert selection.breakdown.quantile_dark == [15]
+    assert set(selection.selection_details) == {15}
+
+
+@pytest.mark.unit
 def test_run_analyze_phase_offsets_labels_when_reference_trim_matches_untrimmed_analysis_clip(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
