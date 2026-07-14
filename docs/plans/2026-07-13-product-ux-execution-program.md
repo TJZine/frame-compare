@@ -248,7 +248,7 @@ step advances the ledger.
 | 3A. Doctor-hint audit | Completed | `c20c0e5` | 84 focused doctor/VSPreview/CLI tests and full gate passed; independent review U3A-001/U3A-002/U3A-003 accepted, fixed, and reverified | Continue to Unit 3B |
 | 3B. Final-selection summary | Completed | `1402634` | 29 focused selection-report/lifecycle/contract tests and full gate passed; independent review found no actionable issues | Continue to Unit 4 |
 | 4. Run outcomes and history | Completed | `78d1adb` | Focused persistence/lifecycle/CLI/Windows proof and full gate passed; independent review U4-001 through U4-007 accepted, fixed, closed, and reverified | Continue to Unit 5 feasibility |
-| 5. Guarded safe rerun | Verified / awaiting integration | — | Full gate passed on the disposable spike; independent review U5F-001 through U5F-005 accepted; all partial test changes removed | Commit durable blocked-feasibility evidence |
+| 5. Guarded safe rerun | Blocked | `fbbf173` | Disposable spike and full gate passed, but independent review U5F-001 through U5F-005 was accepted; no partial product/test changes remain | Maintainer: accept deferral or authorize the narrow internal config-injection contract and revised proof |
 | 6A. Wizard product-contract gate | Pending Unit 5 | — | — | Wait |
 | 6B. Wizard implementation | Pending approved Unit 6A | — | — | Wait |
 | 7. Report interaction design gate | Pending Unit 6B | — | — | Wait |
