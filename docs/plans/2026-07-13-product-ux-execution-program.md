@@ -243,8 +243,8 @@ step advances the ledger.
 
 | Unit | Status | Integrated reference | Verification/review | Next action |
 | --- | --- | --- | --- | --- |
-| 1. CLI discoverability and input open | Verified / awaiting integration | — | Full gate passed on the candidate; independent review accepted U1-001 and U1-002; all partial product/test changes removed | Commit durable deferral evidence |
-| 2. Side-effect-free dry run | Pending Unit 1 | — | — | Wait |
+| 1. CLI discoverability and input open | Deferred / accepted | Deferral evidence and acceptance record in `972a34d` under [Deferred outcome (accepted 2026-07-14)](#deferred-outcome-accepted-2026-07-14) | Candidate full gate passed; independent review accepted U1-001/U1-002; clean rollback verified | Reevaluate only with approved Windows/Linux opener contract and host-proof plan |
+| 2. Side-effect-free dry run | Ready | — | Unit 1 accepted as deferred in `972a34d` | Implement Unit 2 |
 | 3A. Doctor-hint audit | Pending Unit 2 | — | — | Wait |
 | 3B. Final-selection summary | Pending Unit 3A | — | — | Wait |
 | 4. Run outcomes and history | Pending Unit 3B | — | — | Wait |
