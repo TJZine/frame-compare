@@ -447,6 +447,14 @@ human, non-quiet, TTY stdout runs; JSON stdout stays a single object.
 The same CLI owner presents the local report and asks for confirmation in the
 report-confirmed workflow before post-upload URL actions are considered.
 
+`frame_compare.cli.wizard_command` owns the interactive goal-oriented config editor,
+while `frame_compare.cli.wizard_policy` owns its typed code-defined frame-selection
+patches and pure summaries. The wizard reuses orchestration's lightweight filename
+discovery and source-selection policy without importing media runtime code.
+`frame_compare.config.loader` owns environment-independent raw TOML narrowing and
+redacted schema validation for preserving an existing wizard-edited document; atomic
+replacement remains owned by `frame_compare.utils.atomic_write`.
+
 `frame_compare.services.report` owns the static offline report payload and viewer
 assets. The generated viewer exposes slider, internal overlay mode presented to
 users as Single where appropriate, diff, and pair-based blink modes; frame/category

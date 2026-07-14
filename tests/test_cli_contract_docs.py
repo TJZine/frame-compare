@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from frame_compare.config.schema import Visibility
-
 
 def test_current_cli_contract_is_wired_into_repo_authority_surfaces() -> None:
     repo_root = Path(__file__).resolve().parents[1]
@@ -102,7 +100,7 @@ def test_current_cli_contract_names_primary_executable_contract_checks() -> None
         assert expected in authority_section
 
 
-def test_current_cli_contract_matches_wizard_visibility_choices() -> None:
+def test_current_cli_contract_matches_goal_oriented_wizard_scope() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
     wizard_heading = "## `wizard` Command Contract"
@@ -115,14 +113,20 @@ def test_current_cli_contract_matches_wizard_visibility_choices() -> None:
         maxsplit=1,
     )[0]
 
-    for visibility in Visibility:
-        assert visibility.value in wizard_section
-    for unsupported_token in (
-        "--visibility private",
-        "--visibility=private",
-        "visibility: private",
+    for expected in (
+        "Random spot check",
+        "Dark, bright, and motion coverage",
+        "Specific frame numbers",
+        "Keep current frame selection",
+        "Publishing visibility/deletion and TMDB-key setup",
     ):
-        assert unsupported_token not in wizard_section
+        assert expected in wizard_section
+    for removed_prompt in (
+        "slow.pics visibility (`public` or `unlisted`)",
+        "slow.pics delete-after-upload",
+        "optional TMDB API key",
+    ):
+        assert removed_prompt not in wizard_section
 
 
 def test_current_contract_docs_define_hybrid_workspace_path_policy() -> None:

@@ -75,7 +75,7 @@ def _substitute_slowpics_title_template(
             raise ValueError("title_template contains an unterminated placeholder")
         identifier = template[index + 2 : closing_index]
         if identifier not in SLOWPICS_TITLE_TEMPLATE_FIELDS:
-            raise ValueError(f"title_template contains unsupported placeholder {identifier!r}")
+            raise ValueError("title_template contains an unsupported placeholder")
         replacement = context.get(identifier, "")
         if not isinstance(replacement, str):
             raise ValueError(f"title_template context value {identifier} must be a string")

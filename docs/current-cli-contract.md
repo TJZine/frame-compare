@@ -1037,24 +1037,49 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 
 ## `wizard` Command Contract
 
-- `wizard` is interactive and writes a minimal config payload to the resolved config path.
-- It prompts for:
-  - input directory
-  - slow.pics auto-upload, defaulting to disabled
-  - slow.pics visibility (`public` or `unlisted`)
-  - slow.pics delete-after-upload
-  - optional TMDB API key
-- It validates the generated payload against `ConfigSchema` before writing.
+- `wizard` is an interactive, goal-oriented editor for input, reference, and frame
+  selection configuration. It does not run comparisons or probe media. It requires
+  both stdin and stdout to be TTYs; otherwise it fails through `FC-3017` with input
+  exit code 4 before reading config, prompting, or writing.
+- Its goals are `Random spot check` (10 seeded random frames, no metrics scan),
+  `Dark, bright, and motion coverage` (4 random plus 2 each dark, bright, and motion
+  frames in full-resolution `quality` mode), and `Specific frame numbers` (1–100
+  sorted unique non-negative frame numbers, no metrics scan). Existing configs also
+  offer a default `Keep current frame selection` no-op.
+- It discovers supported filenames through the canonical deterministic discovery and
+  source-selection owners without reading, hashing, opening, or probing media. The
+  input directory may be external. Zero files preserve reference selection; duplicate
+  stems fail before the reference prompt; automatic reference removes an explicit
+  reference key; explicit filename selection is canonically revalidated.
+- First use starts from schema defaults and writes only the confirmed partial payload,
+  including `slowpics.auto_upload = false`. Environment values still have higher
+  precedence during a later run, so the review states that the environment may
+  override this file baseline.
+- Existing TOML is parsed and validated without environment precedence, then used as
+  the persistence base. Confirmed partial patches preserve unrelated supported and
+  unknown root values, explicit empty values, dates/times, nested tables,
+  arrays-of-tables, and file-resident secrets. Environment-only values are neither
+  displayed nor persisted. Wizard validation errors redact every raw Pydantic input.
+- Before writing, the wizard validates the complete candidate and shows a semantic
+  review containing changed/new input, reference, and frame-selection facts, the
+  metrics-scan consequence, and privacy/preservation statements. It never displays
+  secret values or environment presence.
+- A no-op exits 0 without confirmation or writing. Final confirmation defaults to No;
+  No exits 0 with `Canceled; configuration unchanged.` Ctrl-C, abort, or EOF at any
+  prompt emits the same line and exits 130. All cancellation and validation paths
+  preserve an existing file byte-for-byte.
+- Only a final Yes serializes the raw candidate and calls the existing atomic text
+  writer once, with a confirmation to stderr including the resolved config path.
+  Serialization and atomic-write failures
+  use `ConfigWriteError` / exit 2; pre-replacement failures preserve old bytes and
+  temporary cleanup remains best effort.
 - It rejects a selected config destination outside the workspace before prompting,
   except for the exact installed Windows portable state-config fallback described
   under Shared Path Resolution Rules. The prompted media input may be external.
-- It does not advertise or accept unsupported slow.pics visibility values.
-- On success, it writes a concise confirmation to stderr including the resolved
-  config path.
-- Interruptions during prompting exit with the interrupted exit code.
-- Typed validation/write failures use the standard CLI error contract on stderr,
-  honor the `NO_COLOR` environment variable, and do not suggest unsupported
-  `--verbose` usage.
+- Publishing visibility/deletion and TMDB-key setup are config/environment/preset
+  concerns and are no longer wizard prompts. Typed failures continue to use the
+  standard stderr adapter, honor the `NO_COLOR` environment variable, and do not
+  suggest unsupported `--verbose` usage.
 
 ## `doctor` Command Contract
 

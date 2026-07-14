@@ -45,14 +45,11 @@ from frame_compare.cli.run_command import (
     handle_run,
 )
 from frame_compare.cli.wizard_command import (
-    build_minimal_config,
     handle_wizard,
     prompt_input_dir,
-    prompt_visibility,
-    validate_config,
     write_wizard_config_payload,
 )
-from frame_compare.config.loader import load_config
+from frame_compare.config.loader import TomlPayload, load_config
 from frame_compare.config.presets import apply_preset, list_presets, save_preset
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.logging import configure_logging
@@ -102,14 +99,11 @@ _open_url_in_browser = open_url_in_browser
 _doctor_report_json = doctor_report_json
 _print_doctor_report = print_doctor_report
 _prompt_input_dir = prompt_input_dir
-_prompt_visibility = prompt_visibility
 _RunCliOptions = RunCliOptions
 _build_run_request_from_cli = build_run_request_from_cli
 _coerce_cli_choice = coerce_cli_choice
 _handle_diagnose_paths = handle_diagnose_paths
 _handle_json_output = handle_json_output
-_build_minimal_config = build_minimal_config
-_validate_config = validate_config
 
 
 def _sys_stream_isatty(name: str) -> bool:
@@ -133,8 +127,12 @@ def _write_config_to(path: Path, config: ConfigSchema) -> None:
     write_config_to(path, config, text_writer=write_text_atomic)
 
 
-def _write_wizard_config_payload(config_path: Path, data: dict[str, object]) -> None:
+def _write_wizard_config_payload(config_path: Path, data: TomlPayload) -> None:
     write_wizard_config_payload(config_path, data, text_writer=write_text_atomic)
+
+
+def _prompt_text(text: str, *, default: str) -> str:
+    return str(typer.prompt(text, default=default))
 
 
 @app.callback(invoke_without_command=True)
@@ -242,12 +240,12 @@ def wizard(
         resolved_root,
         config_path,
         prompt_input_dir=_prompt_input_dir,
-        prompt_visibility=_prompt_visibility,
+        prompt=_prompt_text,
         confirm=typer.confirm,
-        prompt_secret=typer.prompt,
         write_payload=_write_wizard_config_payload,
         handle_error=handle_error,
         stdin_is_tty=_sys_stream_isatty("stdin"),
+        stdout_is_tty=_sys_stream_isatty("stdout"),
         no_color=effective_no_color,
     )
 
