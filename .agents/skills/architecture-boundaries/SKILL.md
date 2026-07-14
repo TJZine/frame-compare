@@ -47,7 +47,7 @@ verdict. Exclude generated assets.
 
 - Above 500 lines: inspect the full owner and record the compact disposition below.
 - Above 800 lines, or for a named hotspot or composition root: require one fresh
-  Sol-high architecture review before closeout.
+  `reviewer` architecture review before closeout.
 - Below either threshold: still extract when the change introduces a distinct owner.
 
 ```text

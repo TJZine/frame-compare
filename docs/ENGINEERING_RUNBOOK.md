@@ -446,7 +446,7 @@ Production LOC is an architecture-attention signal, not a decomposition rule.
 Exclude generated assets. For a touched owner above 500 lines, inspect the full file
 and record `Owner | Existing responsibility | New behavior | Decision | Evidence`.
 For a touched owner above 800 lines, a named hotspot, or a composition root, require
-one fresh Sol-high architecture review. A cohesive owner may grow; a smaller file
+one fresh `reviewer` architecture review. A cohesive owner may grow; a smaller file
 must still split when it gains a distinct responsibility.
 
 Review is risk-triggered, not universal ceremony. One independent final review is
