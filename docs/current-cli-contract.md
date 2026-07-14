@@ -268,6 +268,13 @@ unchanged.
   ranges, offsets, selected aligned frames, and rejected alignment warning context
   for comparisons with material alignment information. It is suppressed by
   `--quiet` and is never emitted to `run --json` stdout.
+- Verbose human runs emit a concise `Final Selection` summary to stderr immediately
+  after alignment. It reports the final aligned frame count and each non-empty
+  `SelectionBreakdown` category in `User`, `Dark`, `Bright`, `Motion`, `Random`
+  order, with category counts and compact ranges kept in their existing source-frame
+  domain. If the breakdown is unavailable, the aligned count is still reported with
+  an unavailable indication. Normal, quiet, and JSON runs do not emit this summary,
+  and it does not add a JSON field or log event.
 - Human-readable non-quiet successful runs group final warnings by source in a
   `Warnings` panel. Existing runtime warning strings and slow.pics post-upload
   action warnings are bridged into presentation rows with source, severity,

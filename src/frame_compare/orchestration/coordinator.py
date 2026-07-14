@@ -23,6 +23,7 @@ from frame_compare.orchestration.fps_report import (
 from frame_compare.orchestration.phases import execute_phases
 from frame_compare.orchestration.preparation import execute_prep
 from frame_compare.orchestration.progress import select_reporter
+from frame_compare.orchestration.selection_report import emit_final_selection_report
 from frame_compare.orchestration.types import (
     RunDependencies,
     RunRequest,
@@ -154,6 +155,14 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         )
 
         await execute_phases(phase_plan.before_align, context, reporter)
+        emit_final_selection_report(
+            selected_frames=state.selected_frames,
+            breakdown=context.selection_breakdown,
+            verbose=request.verbose,
+            json_output=request.json_output,
+            quiet=request.quiet,
+            no_color=request.no_color,
+        )
         emit_consolidated_fps_report(
             stage="after_align",
             clips=build_consolidated_fps_report(context.reference, context.comparisons),
