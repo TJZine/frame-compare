@@ -137,7 +137,7 @@ def test_current_contract_docs_define_hybrid_workspace_path_policy() -> None:
         "`PathEscapesRootError` / `FC-3009`",
         "beneath the contained resolved `paths.generated_dir`, never beneath `paths.input_dir`",
         "sole selected-config containment exception",
-        "`run`, `wizard`, `preset apply`, and `preset save`",
+        "`run`, `wizard`, `preset apply`, `preset save`, and both `history` subcommands",
     ):
         assert phrase in normalized_cli_contract
 

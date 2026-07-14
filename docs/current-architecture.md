@@ -192,6 +192,16 @@ Primary owned paths:
   stores creation time, final folder name, naming source, source filenames,
   Frame Compare version, and optional TMDB prefetch facts. It is user-facing
   creation-time identity, not an end-of-run outcome manifest.
+- `<run-folder>/run_result.toml`: versioned V1 run outcome owned by
+  `frame_compare.services.run_result_record` and written atomically only after a
+  reserved run completes or fails. It stores sanitized workspace-relative output
+  facts, UTC lifecycle timing, bounded warning summaries, cache/phase facts,
+  slow.pics outcome, and a sanitized typed failure when applicable. The service
+  also owns strict TOML validation, immediate-child history discovery, legacy
+  `unknown` entries, malformed-record isolation, deterministic ordering, exact
+  run-name validation, record-file/run-directory containment, and report-path
+  containment. Symlinked run-directory aliases are not history entries. It never mutates
+  `run_info.toml` or migrates legacy folders.
 - `<run-folder>/generated/clip_probe.toml`: current-run clip probe cache when
   run folders are enabled
 - `generated/manual_overrides.toml` or `<run-folder>/generated/manual_overrides.toml`:
@@ -242,6 +252,14 @@ directory. The exact creation time lives in `<run-folder>/run_info.toml`, which 
 written before probing, rendering, or other runtime-heavy work. If that write
 fails, the run fails immediately and cleanup attempts to remove the empty
 reserved directory as best effort.
+
+Preparation reports the reserved `WorkspacePaths` through an internal dependency
+capture immediately after `run_info.toml` succeeds, without changing the
+`execute_prep(request, deps)` call shape. The coordinator owns whole-run outcome
+timing and asks the run-result service to write success only after post-run phases
+settle, or to make one best-effort failure write while re-raising the original
+exception unchanged. Completed-run record failures add a stable warning and do
+not change successful media work into failure.
 
 The align phase uses a typed orchestration-to-services request seam:
 `frame_compare.orchestration.phase_tasks.run_align_phase()` builds a

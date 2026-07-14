@@ -24,6 +24,8 @@ documents that promise elsewhere.
     surface.
   - `tests/cli/test_run_output.py` for human output, JSON stdout cleanliness,
     and slow.pics post-upload presentation behavior.
+  - `tests/cli/test_history_command.py` for history config resolution, exact JSON
+    and stream contracts, exact-name opening, browser failures, and lazy help.
   - `tests/config/test_schema.py` for config schema/defaults, including the
     exact slow.pics field set.
   - `tests/config/test_overrides.py` for CLI override mapping semantics.
@@ -50,6 +52,9 @@ Current user-facing command surface:
 - `frame-compare run`
 - `frame-compare wizard`
 - `frame-compare doctor`
+- `frame-compare history`
+  - `frame-compare history list`
+  - `frame-compare history open RUN_NAME`
 - `frame-compare preset`
   - `frame-compare preset list`
   - `frame-compare preset apply`
@@ -63,6 +68,8 @@ These commands share the same root/config path resolution rules:
 - `wizard`
 - `preset apply`
 - `preset save`
+- `history list`
+- `history open`
 
 For those commands:
 
@@ -75,20 +82,27 @@ The selected config file and configured `paths.config_dir`,
 `report.output_dir` must resolve beneath the fully resolved workspace root.
 Containment follows symlinks and expands environment variables in config path
 values, so absolute paths, `..` traversal, or symlinks that escape the root fail
-with `PathEscapesRootError` / `FC-3009`. `run`, `wizard`, `preset apply`, and
-`preset save` validate their selected config destination before config reads or
-writes; `run` also validates configured contained paths before diagnostics,
-config writes, or runtime entry. `preset list` remains root-only and ignores its
-accepted `--config` value.
+with `PathEscapesRootError` / `FC-3009`. `run`, `wizard`, `preset apply`,
+`preset save`, and both `history` subcommands validate their selected config
+destination before config reads or writes; `run` also validates configured
+contained paths before diagnostics, config writes, or runtime entry. `preset list`
+remains root-only and ignores its accepted `--config` value.
 
 Media input is a read boundary, not a write boundary. Configured
 `paths.input_dir` and the `run --input` override may be relative, absolute,
 environment-expanded, or symlinked to a directory outside the workspace. This
 does not permit generated state to follow media outside the root.
 
+History commands resolve, load, and validate the selected config and contained
+configured `paths.generated_dir` using these same `--root/-r` and `--config/-c`
+rules, but they do not require the configured input directory or current video
+files to exist. This keeps recorded outcomes readable after media moves.
+
 For the installed Windows portable shim, the shim runs the bundle launcher from the
-bundle root and injects a default `--config` for `run`, `wizard`, and supported
-`preset` subcommands when the user did not pass `--config`. The injected default
+bundle root and injects a default `--config` for `run`, `wizard`, supported
+`preset` subcommands, and `history list`/`history open` when the user did not pass
+`--config`. For subgroup commands the injection occurs after the subcommand and
+before any positional history run name or preset name. The injected default
 prefers `<bundle>/config/config.toml` when it exists, otherwise it falls back to
 `%LOCALAPPDATA%/Programs/FrameCompare/state/config.toml` when that state config
 exists. That exact installed-shim state file is the sole selected-config
@@ -182,6 +196,41 @@ error path before probe loading, metadata prefetch, run-folder reservation,
 analysis cache validation, or fastest benchmarking. JSON error mode keeps the
 existing error payload shape, and the successful `run --json` schema is
 unchanged.
+
+## `history` Command Contract
+
+- History is read-only. Stage 1 provides only `list`, `list --json`, and exact-name
+  `open`; it does not migrate, replay, delete, rename, search, paginate, or fuzzy
+  match runs.
+- Discovery inspects contained immediate child directories of the configured
+  workspace-level generated root. Symlinked run directories are ignored, and a
+  result or legacy identity file is trusted only when its final regular-file target
+  remains inside that run directory. The shared `cache` directory is not a run
+  entry.
+- Valid V1 `run_result.toml` entries report `completed`,
+  `completed_with_warnings`, or `failed`. Legacy folders without a result record
+  report `unknown` and are never modified. Malformed or unsupported records report
+  `unavailable`; each warning goes to stderr and does not hide other entries.
+- Entries sort newest first using persisted UTC completion/start time, with an
+  exact folder-name tie-break. Legacy entries use valid persisted
+  `run_info.toml` creation time when available.
+- Human `history list` output goes to stdout and exposes the exact run name,
+  status, persisted time, and report availability. Diagnostics and warnings use
+  stderr.
+- `history list --json` writes exactly one compact object to stdout with top-level
+  key `runs`. Every entry has exactly `name`, `status`, `started_at`,
+  `completed_at`, `duration_seconds`, and `report_available`; unavailable facts
+  are JSON null and no warnings, paths, exception details, or logs are added.
+- `history open RUN_NAME` accepts one exact child folder name only. Empty names,
+  dot segments, separators, absolute/drive/UNC forms, traversal, missing or
+  non-directory entries, and symlinked run directories fail through the typed CLI error
+  path. The command reads the report path only from a valid V1 record, resolves
+  its workspace-relative path, and requires the final existing file to remain
+  beneath the configured generated root after symlink resolution.
+- A configured report elsewhere beneath the workspace root may be recorded, but
+  history intentionally refuses to open it because it is outside the generated
+  history boundary. Browser refusal or browser integration failure is a typed
+  actionable failure and never produces a success claim.
 
 ## `version` Command Contract
 
@@ -372,6 +421,16 @@ unchanged.
   outcome manifest and does not include report URL, timings, or success/failure
   state. If `run_info.toml` cannot be written, the run fails immediately and
   best-effort cleanup removes the empty reserved run folder when possible.
+- A separate atomically written `<run-folder>/run_result.toml` V1 record captures
+  the final outcome without modifying `run_info.toml`. Successful records are
+  written after all post-run phases settle and use `completed` or
+  `completed_with_warnings`; failures after reservation get one best-effort
+  `failed` record. Failures before reservation write no record. A completed-run
+  result-write failure is warning-only and leaves the run successful; a
+  failed-run result-write failure preserves the identical original exception and
+  exit mapping. Records omit absent optional values and never persist raw warning
+  or exception text, tracebacks, secrets, absolute paths, URL credentials, query,
+  or fragment data.
 - `--no-cache` deletes only the matching shared analysis cache entry for the current
   inputs, selected reference, all-source selection domain, performance mode,
   metric algorithm identity, and analysis settings before continuing. It does

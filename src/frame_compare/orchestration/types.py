@@ -15,6 +15,7 @@ from frame_compare.config.schema import OverlayMode, ToneCurve, TonemapPreset
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
 from frame_compare.utils.post_upload_actions import PostUploadActionResults
 from frame_compare.utils.progress_protocol import ProgressReporter
+from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.loader import VSLoader
 
 
@@ -100,6 +101,16 @@ class SlowpicsUploadConfirmationFn(Protocol):
     ) -> SlowpicsUploadConfirmationDecision: ...
 
 
+@dataclass(frozen=True, slots=True)
+class ReservedRunCapture:
+    """Facts known immediately after a run folder's identity is durable."""
+
+    workspace: WorkspacePaths
+    clip_count: int
+    preflight_duration: float
+    preflight_warnings: tuple[str, ...]
+
+
 @dataclass(frozen=True)
 class RunResult:
     """Complete result from a comparison run."""
@@ -135,3 +146,8 @@ class RunDependencies:
     progress: ProgressReporter | None = None
     confirm_slowpics_upload: SlowpicsUploadConfirmationFn | None = None
     clock: Callable[[], datetime] = field(default=datetime.now)
+    capture_reserved_run: Callable[[ReservedRunCapture], None] | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )

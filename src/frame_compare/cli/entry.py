@@ -28,6 +28,7 @@ from frame_compare.cli.doctor_command import (
     handle_doctor,
     print_doctor_report,
 )
+from frame_compare.cli.history_command import handle_history_list, handle_history_open
 from frame_compare.cli.preset_command import (
     handle_preset_apply,
     handle_preset_list,
@@ -263,6 +264,44 @@ def doctor(json_output: bool = _option(False, "--json")) -> None:
 
 preset_app = typer.Typer(name="preset", help="Manage configuration presets.", no_args_is_help=True)
 app.add_typer(preset_app, name="preset")
+
+history_app = typer.Typer(name="history", help="Inspect recorded runs.", no_args_is_help=True)
+app.add_typer(history_app, name="history")
+
+
+@history_app.command("list")
+def history_list(
+    root: Path = _path_option(".", "--root", "-r"),
+    config: Path | None = _option(None, "--config", "-c"),
+    json_output: bool = _option(False, "--json"),
+) -> None:
+    """List recorded runs newest first."""
+    resolved_root, config_path = _resolve_root_and_config(root, config)
+    handle_history_list(
+        resolved_root,
+        config_path,
+        json_output=json_output,
+        handle_error=handle_error,
+        no_color=no_color_requested(),
+    )
+
+
+@history_app.command("open")
+def history_open(
+    run_name: str,
+    root: Path = _path_option(".", "--root", "-r"),
+    config: Path | None = _option(None, "--config", "-c"),
+) -> None:
+    """Open one exact-name recorded report."""
+    resolved_root, config_path = _resolve_root_and_config(root, config)
+    handle_history_open(
+        run_name,
+        resolved_root,
+        config_path,
+        open_report=_maybe_open_report,
+        handle_error=handle_error,
+        no_color=no_color_requested(),
+    )
 
 
 @preset_app.command("list")

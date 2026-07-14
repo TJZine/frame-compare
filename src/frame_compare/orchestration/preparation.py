@@ -66,6 +66,7 @@ from frame_compare.orchestration.selection_domain import (
 from frame_compare.orchestration.source_labels import resolve_source_labels
 from frame_compare.orchestration.source_selection import resolve_source_selection
 from frame_compare.orchestration.types import (
+    ReservedRunCapture,
     RunDependencies,
     RunRequest,
 )
@@ -112,6 +113,8 @@ async def _resolve_run_directory(
     config: ConfigSchema,
     input_videos: list[Path],
     deps: RunDependencies,
+    preflight_duration: float,
+    preflight_warnings: tuple[str, ...],
 ) -> tuple[WorkspacePaths, MetadataPrefetch]:
     metadata = None
     was_attempted = False
@@ -167,6 +170,15 @@ async def _resolve_run_directory(
             _cleanup_empty_reserved_run_dir(run_dir.path, original_error=exc)
             raise
         new_workspace = workspace.with_run_dir(run_dir.path)
+        if deps.capture_reserved_run is not None:
+            deps.capture_reserved_run(
+                ReservedRunCapture(
+                    workspace=new_workspace,
+                    clip_count=len(input_videos),
+                    preflight_duration=preflight_duration,
+                    preflight_warnings=preflight_warnings,
+                )
+            )
         return new_workspace, MetadataPrefetch(metadata=metadata, was_attempted=was_attempted)
     return workspace, MetadataPrefetch(metadata=None, was_attempted=False)
 
@@ -601,6 +613,8 @@ async def execute_prep(
         config=config,
         input_videos=input_videos,
         deps=deps,
+        preflight_duration=preflight_duration,
+        preflight_warnings=tuple(preflight.warnings),
     )
 
     if prevalidated_clips is not None:
