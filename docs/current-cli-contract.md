@@ -1003,6 +1003,13 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 - Human output uses a neutral status marker for optional unavailable checks such as
   VSPreview, so optional availability gaps are visually distinct from critical
   dependency failures. This does not change `doctor --json` status values.
+- Failed checks and optional-unavailable warnings include a short deterministic next
+  action when the check can prove one. `doctor --json` exposes the same text as
+  `install_hint`. Hints distinguish missing executables, unavailable runtimes/plugins,
+  optional GUI dependency classes, network failure classes, and TMDB
+  configuration/credential classes without guessing a package-manager command or
+  install mode; when setup mode is unknown, they point to the repository's current
+  setup documentation.
 - If any critical failures are present, `doctor` exits with the dependency error exit code.
 - Optional VSPreview probe diagnostics may include exception type metadata, but do not
   expose raw probe exception messages.

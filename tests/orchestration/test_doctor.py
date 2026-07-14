@@ -78,6 +78,11 @@ class TestCheckLsmas:
             },
             {"source": "bundle_vs_plugins", "path": "/bundle/vs/plugins/libvslsmashsource.so"},
         ]
+        assert result.hint == (
+            "Make L-SMASH-Works available to VapourSynth; see "
+            "https://github.com/TJZine/frame-compare#quick-start"
+        )
+        assert "install" not in result.hint.lower()
 
     def test_check_lsmas_plugin_fallback_loads_from_nested_extra_plugin_root(
         self,
@@ -140,7 +145,30 @@ class TestCheckLsmas:
 
         assert result.passed is False
         assert result.message == "lsmas check failed"
+        assert result.hint == (
+            "Check the VapourSynth/plugin setup, then rerun doctor; see "
+            "https://github.com/TJZine/frame-compare#quick-start"
+        )
         assert result.details == {"exception_type": "RuntimeError"}
+
+    def test_check_lsmas_when_vapoursynth_is_unavailable_points_to_runtime_setup(
+        self,
+    ) -> None:
+        checks = collect_checks()
+        lsmas_check = next(c for c in checks if c.name == "lsmas")
+
+        with patch(
+            "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
+            side_effect=ImportError("missing runtime"),
+        ):
+            result = lsmas_check.check_fn()
+
+        assert result.passed is False
+        assert result.message == "Cannot check lsmas (VapourSynth not available)"
+        assert result.hint == (
+            "Make VapourSynth importable before checking L-SMASH-Works; see "
+            "https://github.com/TJZine/frame-compare#quick-start"
+        )
 
     def test_check_lsmas_failure_included_in_critical_failures(self) -> None:
         """Mock lsmas core failure → DoctorReport.critical_failures includes 'lsmas'."""
@@ -180,8 +208,10 @@ class TestCheckPythonVersion:
 
         assert result.passed is False
         assert "3.12" in result.message
-        assert result.hint is not None
-        assert "3.13" in result.hint
+        assert result.hint == (
+            "Run Frame Compare with Python 3.13+; see "
+            "https://github.com/TJZine/frame-compare#requirements"
+        )
 
 
 class TestCheckVapoursynth:
@@ -209,6 +239,10 @@ class TestCheckVapoursynth:
 
         assert result.passed is False
         assert "not found" in result.message
+        assert result.hint == (
+            "Make VapourSynth importable; see https://github.com/TJZine/frame-compare#quick-start"
+        )
+        assert "pip install" not in result.hint
 
     def test_check_vapoursynth_registers_runtime_dirs_before_import(self) -> None:
         """Ensure runtime DLL path registration runs as an import fallback."""
@@ -262,3 +296,11 @@ class TestCheckFFmpeg:
 
         assert result.passed is False
         assert "not found" in result.message
+        assert result.hint == (
+            "Provide an FFmpeg executable on PATH; see "
+            "https://github.com/TJZine/frame-compare#requirements"
+        )
+        assert all(
+            command not in result.hint.lower()
+            for command in ("apt ", "brew ", "choco ", "pip ", "winget ")
+        )

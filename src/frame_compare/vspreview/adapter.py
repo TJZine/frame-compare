@@ -98,7 +98,9 @@ def check_vspreview_availability() -> VSPreviewAvailability:
             return VSPreviewAvailability(
                 status=VSPreviewAvailabilityStatus.MISSING_EXEC_AND_MODULE,
                 message="VSPreview not installed (optional for manual alignment)",
-                hint="Install with: pip install vspreview PyQt6 (or: pip install vspreview PySide6)",
+                hint=(
+                    "Provide VSPreview; see https://github.com/TJZine/frame-compare#installation"
+                ),
             )
 
         # Need at least one Qt backend
@@ -115,13 +117,19 @@ def check_vspreview_availability() -> VSPreviewAvailability:
         return VSPreviewAvailability(
             status=VSPreviewAvailabilityStatus.MISSING_QT_BACKEND,
             message="Qt backend missing for VSPreview (optional for manual alignment)",
-            hint="Install with: pip install PyQt6 (or: pip install PySide6)",
+            hint=(
+                "Provide a supported Qt backend for VSPreview; see "
+                "https://github.com/TJZine/frame-compare#installation"
+            ),
         )
     except Exception as exc:
         return VSPreviewAvailability(
             status=VSPreviewAvailabilityStatus.PROBE_FAILED,
             message="VSPreview availability probe failed (optional for manual alignment)",
-            hint="Check the VSPreview/PyQt6/PySide6 installation if interactive alignment is needed",
+            hint=(
+                "Check the optional VSPreview setup, then rerun doctor; see "
+                "https://github.com/TJZine/frame-compare#installation"
+            ),
             error_details={
                 "exception_type": type(exc).__name__,
                 "exception": str(exc),
