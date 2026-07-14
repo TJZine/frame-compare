@@ -248,8 +248,8 @@ step advances the ledger.
 | 3A. Doctor-hint audit | Completed | `c20c0e5` | 84 focused doctor/VSPreview/CLI tests and full gate passed; independent review U3A-001/U3A-002/U3A-003 accepted, fixed, and reverified | Continue to Unit 3B |
 | 3B. Final-selection summary | Completed | `1402634` | 29 focused selection-report/lifecycle/contract tests and full gate passed; independent review found no actionable issues | Continue to Unit 4 |
 | 4. Run outcomes and history | Completed | `78d1adb` | Focused persistence/lifecycle/CLI/Windows proof and full gate passed; independent review U4-001 through U4-007 accepted, fixed, closed, and reverified | Continue to Unit 5 feasibility |
-| 5. Guarded safe rerun | Blocked | `fbbf173` | Disposable spike and full gate passed, but independent review U5F-001 through U5F-005 was accepted; no partial product/test changes remain | Maintainer: accept deferral or authorize the narrow internal config-injection contract and revised proof |
-| 6A. Wizard product-contract gate | Pending Unit 5 | — | — | Wait |
+| 5. Guarded safe rerun | Deferred / accepted | Deferral evidence and acceptance record in `fbbf173` under [Reviewed feasibility outcome (accepted 2026-07-14)](#reviewed-feasibility-outcome-accepted-2026-07-14) | Full feasibility gate and independent review accepted U5F-001 through U5F-005; clean rollback verified | Reevaluate only with an approved internal config-injection contract and revised proof |
+| 6A. Wizard product-contract gate | Ready | — | Dependency promoted by accepted Unit 5 deferral | Claim Unit 6A design gate |
 | 6B. Wizard implementation | Pending approved Unit 6A | — | — | Wait |
 | 7. Report interaction design gate | Pending Unit 6B | — | — | Wait |
 | 8. Magnifier and pixel inspector | Pending approved Unit 7 | — | — | Wait |
@@ -552,7 +552,7 @@ The spike is test code or a disposable local experiment, not a shipped abstracti
 If any point requires a broad `ConfigSchema`, `RunRequest`, or orchestration refactor,
 defer rerun and keep Stage 1 history. That is the main downside boundary.
 
-### Reviewed feasibility outcome (awaiting maintainer decision 2026-07-14)
+### Reviewed feasibility outcome (accepted 2026-07-14)
 
 Unit 5 cannot clear its frozen feasibility gate on the current runtime seams. No
 `history rerun` command, replay writer, production change, or feasibility test is
@@ -593,10 +593,10 @@ the feasibility claim. The controller accepted every finding from source evidenc
 
 The accepted names plus size/`mtime_ns` manifest remains intentionally
 non-cryptographic and has a validation-to-run race; those are documented residual
-limitations, not the blocker. The smallest maintainer decision is either to accept
-Unit 5 deferral and promote Unit 6A, or authorize the narrow internal
-configuration-injection contract and a revised feasibility proof covering all five
-findings. Production implementation must not begin before that decision.
+limitations, not the blocker. The maintainer accepted Unit 5 deferral in the
+persistent controller task on 2026-07-14. Reevaluate rerun only when a new approved
+package includes the internal configuration-injection contract and a revised
+feasibility proof covering all five findings.
 
 ### Replay persistence contract
 
