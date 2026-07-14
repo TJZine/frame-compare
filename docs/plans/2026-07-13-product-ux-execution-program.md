@@ -245,8 +245,8 @@ step advances the ledger.
 | --- | --- | --- | --- | --- |
 | 1. CLI discoverability and input open | Deferred / accepted | Deferral evidence and acceptance record in `972a34d` under [Deferred outcome (accepted 2026-07-14)](#deferred-outcome-accepted-2026-07-14) | Candidate full gate passed; independent review accepted U1-001/U1-002; clean rollback verified | Reevaluate only with approved Windows/Linux opener contract and host-proof plan |
 | 2. Side-effect-free dry run | Completed | `9af60bd` | Focused CLI/contract proof and full gate passed; independent review U2-001/U2-002/U2-003 accepted, fixed, and reverified; deterministic case-fold tie gap fixed | Continue to Unit 3A |
-| 3A. Doctor-hint audit | Verified / awaiting integration | — | 84 focused doctor/VSPreview/CLI tests and full gate passed; independent review U3A-001/U3A-002/U3A-003 accepted, fixed, and reverified | Create reviewed implementation commit |
-| 3B. Final-selection summary | Pending Unit 3A | — | — | Wait |
+| 3A. Doctor-hint audit | Completed | `c20c0e5` | 84 focused doctor/VSPreview/CLI tests and full gate passed; independent review U3A-001/U3A-002/U3A-003 accepted, fixed, and reverified | Continue to Unit 3B |
+| 3B. Final-selection summary | Ready | — | Unit 3A completed in `c20c0e5` | Implement Unit 3B |
 | 4. Run outcomes and history | Pending Unit 3B | — | — | Wait |
 | 5. Guarded safe rerun | Pending Unit 4 | — | — | Wait |
 | 6A. Wizard product-contract gate | Pending Unit 5 | — | — | Wait |
