@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from fractions import Fraction
 from typing import TYPE_CHECKING
 
@@ -27,6 +28,7 @@ from frame_compare.analysis.types import (
     FrameMetrics,
     MetricActiveRect,
     MetricCacheRequest,
+    MetricFrameRange,
     MetricsMetadata,
 )
 from frame_compare.utils.progress_protocol import ProgressReporter
@@ -107,15 +109,33 @@ def _build_metrics(
     active_rect_source: ActiveRectSource,
     active_rect_detection_mode: ActiveRectDetectionMode,
     active_rect_algorithm_id: ActiveRectAlgorithmId,
+    metric_frame_range: MetricFrameRange,
 ) -> FrameMetrics:
+    if (
+        len(result.luminance) != len(result.motion)
+        or (
+            result.sampled_source_frames is None
+            and len(result.luminance) != metric_frame_range.frame_count
+        )
+        or (
+            result.sampled_source_frames is not None
+            and len(result.luminance) != len(result.sampled_source_frames)
+        )
+    ):
+        raise MetricsCalculationError(
+            "Metric strategy returned arrays outside the requested frame range"
+        )
     return FrameMetrics(
         luminance=result.luminance,
         motion=result.motion,
         metadata=MetricsMetadata(
-            frame_count=source.clip.num_frames,
+            frame_count=len(result.luminance),
             fps=effective_fps if effective_fps is not None else source.fps,
             config_fingerprint=fingerprint,
             clips=clips,
+            source_frame_count=metric_frame_range.source_frame_count,
+            metric_source_start=metric_frame_range.start,
+            metric_source_end_exclusive=metric_frame_range.end_exclusive,
             analysis_source_path=str(analysis_source_path),
             performance_mode=result.performance_mode,
             algorithm_id=result.algorithm_id,
@@ -127,6 +147,7 @@ def _build_metrics(
             active_rect_algorithm_id=active_rect_algorithm_id,
             version=CACHE_VERSION,
         ),
+        sampled_source_frames=result.sampled_source_frames,
     )
 
 
@@ -159,6 +180,7 @@ def calculate_metrics(
     analysis_source_path: Path | None = None,
     effective_fps: Fraction | None = None,
     metric_active_rect: MetricActiveRect | None = None,
+    metric_frame_range: MetricFrameRange | None = None,
     active_rect_source: ActiveRectSource = "full-frame",
     active_rect_detection_mode: ActiveRectDetectionMode = "aspect_ratio",
     active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v2",
@@ -186,6 +208,8 @@ def calculate_metrics(
         metric_active_rect: Optional active-picture rectangle applied during
             metric calculation and included in cache identity. ``None`` uses
             the full source frame.
+        metric_frame_range: Exact contiguous source-frame domain to analyze.
+            ``None`` analyzes the full source for compatibility with direct callers.
         active_rect_source: Provenance for ``metric_active_rect`` stored in
             cache metadata. Defaults to ``"full-frame"``.
         active_rect_detection_mode: Detection policy that produced the active
@@ -208,6 +232,7 @@ def calculate_metrics(
     source_path = video_paths[0] if analysis_source_path is None else analysis_source_path
     cache_request = MetricCacheRequest(
         analysis_source_path=source_path,
+        metric_frame_range=metric_frame_range,
         effective_fps=effective_fps,
         metric_active_rect=metric_active_rect,
         active_rect_source=active_rect_source,
@@ -238,11 +263,13 @@ def calculate_metrics(
     with record_span(timing_recorder, "source_load"):
         source = _load_analysis_source(source_path, vs_loader)
     try:
+        resolved_range = _resolved_metric_frame_range(source, metric_frame_range)
         strategy_result = calculate_metric_strategy(
             source,
             config,
             reporter,
             metric_active_rect,
+            metric_frame_range=resolved_range,
             timing_recorder=timing_recorder,
         )
         metrics = _build_metrics(
@@ -256,6 +283,7 @@ def calculate_metrics(
             active_rect_source=active_rect_source,
             active_rect_detection_mode=active_rect_detection_mode,
             active_rect_algorithm_id=active_rect_algorithm_id,
+            metric_frame_range=resolved_range,
         )
     finally:
         del source
@@ -265,3 +293,73 @@ def calculate_metrics(
     if reporter:
         reporter.advance(1)
     return metrics
+
+
+def _resolved_metric_frame_range(
+    source: SourceInfo,
+    requested: MetricFrameRange | None,
+) -> MetricFrameRange:
+    source_frame_count = source.clip.num_frames
+    if source_frame_count <= 0:
+        raise MetricsCalculationError("Analysis clip has 0 frames")
+    if requested is None:
+        return MetricFrameRange(
+            source_frame_count=source_frame_count,
+            start=0,
+            end_exclusive=source_frame_count,
+        )
+    if requested.source_frame_count != source_frame_count:
+        raise MetricsCalculationError(
+            "Requested metric frame range does not match the loaded analysis source"
+        )
+    if requested.frame_count <= 0:
+        raise MetricsCalculationError("Requested metric frame range is empty")
+    return requested
+
+
+def slice_frame_metrics(
+    metrics: FrameMetrics,
+    *,
+    start_index: int,
+    frame_count: int,
+) -> FrameMetrics:
+    """Slice a contiguous metric domain while preserving source-frame metadata."""
+    if (
+        start_index < 0
+        or frame_count < 0
+        or start_index + frame_count > metrics.eligible_frame_count
+    ):
+        raise MetricsCalculationError("Requested metric slice is outside cached metric range")
+    source_start = metrics.metadata.metric_source_start + start_index
+    source_end = source_start + frame_count
+    if metrics.sampled_source_frames is None:
+        end_index = start_index + frame_count
+        return FrameMetrics(
+            luminance=metrics.luminance[start_index:end_index],
+            motion=metrics.motion[start_index:end_index],
+            metadata=replace(
+                metrics.metadata,
+                frame_count=frame_count,
+                metric_source_start=source_start,
+                metric_source_end_exclusive=source_end,
+            ),
+        )
+
+    source_frames = tuple(metrics.source_frames())
+    retained_indices = [
+        index
+        for index, source_frame in enumerate(source_frames)
+        if source_start <= source_frame < source_end
+    ]
+    sampled_source_frames = tuple(source_frames[index] for index in retained_indices)
+    return FrameMetrics(
+        luminance=[metrics.luminance[index] for index in retained_indices],
+        motion=[metrics.motion[index] for index in retained_indices],
+        metadata=replace(
+            metrics.metadata,
+            frame_count=len(retained_indices),
+            metric_source_start=source_start,
+            metric_source_end_exclusive=source_end,
+        ),
+        sampled_source_frames=sampled_source_frames,
+    )

@@ -590,6 +590,7 @@ async def execute_prep(
             selection_domain=prevalidated_selection_domain,
             metric_request=metric_cache_request_for_clip(
                 prevalidated_analysis_clip,
+                selection_window=prevalidated_selection_window,
                 fallback_detection_mode=config.screenshots.active_rect_detection.value,
             ),
         )
@@ -664,6 +665,7 @@ async def execute_prep(
                 selection_domain=selection_domain,
                 metric_request=metric_cache_request_for_clip(
                     analysis_clip,
+                    selection_window=selection_window,
                     fallback_detection_mode=config.screenshots.active_rect_detection.value,
                 ),
             )

@@ -73,7 +73,7 @@ def test_save_metrics_cache_uses_atomic_text_write(
         config_fingerprint="fp",
         clips=[],
     )
-    metrics = FrameMetrics(luminance=[0.5], motion=[0.1], metadata=metadata)
+    metrics = FrameMetrics(luminance=[0.5] * 10, motion=[0.0] * 10, metadata=metadata)
     calls: list[tuple[Path, str, str]] = []
 
     def _fake_write(path: Path, content: str, *, encoding: str = "utf-8") -> None:

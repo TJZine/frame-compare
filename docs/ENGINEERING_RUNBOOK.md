@@ -321,6 +321,15 @@ cheap-to-verify unit to `worker_luna`; the packet must name exact files, invaria
 verification, and stop conditions, and the controller must review and reverify the
 result. Keep delegation depth shallow.
 
+For genuinely large multi-unit work, explicitly use the
+`large-task-orchestration` skill. The main task remains the authoritative
+controller and integrates checkpointed, decision-complete units. Reuse a completed
+worker only for adjacent work with the same owner and contracts; use a fresh worker
+when the seam or assumptions change, and a fresh read-only reviewer for required
+independent final review. Give that reviewer a bounded task/diff/proof/risk packet
+without the implementation transcript. Treat six threads as a cap rather than a
+target and keep delegation depth at one.
+
 ## Production Quality Guardrails
 
 Every non-trivial code change should be checked against these criteria before

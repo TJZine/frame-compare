@@ -22,6 +22,31 @@ def make_metrics(luminance: list[float], motion: list[float]) -> FrameMetrics:
     )
 
 
+def make_sparse_metrics(
+    luminance: list[float],
+    motion: list[float],
+    source_frames: tuple[int, ...],
+    *,
+    start: int = 100,
+    end_exclusive: int = 140,
+) -> FrameMetrics:
+    return FrameMetrics(
+        luminance=luminance,
+        motion=motion,
+        metadata=MetricsMetadata(
+            frame_count=len(luminance),
+            fps=Fraction(24),
+            config_fingerprint="fp",
+            clips=[],
+            source_frame_count=200,
+            metric_source_start=start,
+            metric_source_end_exclusive=end_exclusive,
+            performance_mode="performance",
+        ),
+        sampled_source_frames=source_frames,
+    )
+
+
 LUMINANCE_100 = [i / 100.0 for i in range(100)]
 MOTION_100 = [1.0 if i in {50, 60, 70, 80, 90} else 0.1 for i in range(100)]
 
@@ -208,3 +233,45 @@ def test_random_selection_respects_min_gap() -> None:
     for i in range(len(frames)):
         for j in range(i + 1, len(frames)):
             assert abs(frames[i] - frames[j]) >= MIN_GAP
+
+
+def test_sparse_selection_uses_source_coordinates_and_full_window_for_user_frames() -> None:
+    metrics = make_sparse_metrics(
+        [0.1, 0.9, 0.5],
+        [0.2, 0.3, 1.0],
+        (101, 120, 138),
+    )
+    config = AnalysisConfig(
+        user_frames=[0],
+        random_frame_count=0,
+        dark_frame_count=1,
+        bright_frame_count=1,
+        motion_frame_count=1,
+    )
+
+    result = select_frames(metrics, config)
+
+    assert result.frames == [0, 1, 20, 38]
+    assert result.breakdown.quantile_dark == [1]
+    assert result.breakdown.quantile_bright == [20]
+    assert result.breakdown.motion == [38]
+    assert result.selection_details[1].score == pytest.approx(0.1)
+    assert result.selection_details[20].score == pytest.approx(0.9)
+    assert result.selection_details[38].score == pytest.approx(1.0)
+    assert result.selection_details[38].timecode == "00:00:01.583"
+
+
+def test_sparse_selection_reports_insufficient_metric_candidates() -> None:
+    metrics = make_sparse_metrics([0.1, 0.2], [0.0, 0.1], (101, 120))
+
+    with pytest.raises(SelectionError) as exc:
+        select_frames(
+            metrics,
+            AnalysisConfig(random_frame_count=0, dark_frame_count=3),
+        )
+
+    assert exc.value.context.details == {
+        "reason": "insufficient_candidates",
+        "requested": 3,
+        "found": 2,
+    }

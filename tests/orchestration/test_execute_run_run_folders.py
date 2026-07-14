@@ -21,6 +21,7 @@ from frame_compare.analysis.types import (
     FrameMetrics,
     MetricActiveRect,
     MetricCacheRequest,
+    MetricFrameRange,
     MetricsMetadata,
 )
 from frame_compare.config.loader import load_config
@@ -295,6 +296,7 @@ enable = false
         cache_dir: Path,
         analysis_source_path: Path | None = None,
         metric_active_rect: MetricActiveRect | None = None,
+        metric_frame_range: MetricFrameRange | None = None,
         selection_domain: str | None = None,
         **_kwargs: object,
     ) -> FrameMetrics:
@@ -307,16 +309,17 @@ enable = false
             selection_domain=selection_domain,
             metric_request=MetricCacheRequest(
                 analysis_source_path=resolved_analysis_source_path,
+                metric_frame_range=metric_frame_range,
                 effective_fps=Fraction(24, 1),
                 metric_active_rect=metric_active_rect,
             ),
         )
         stats_by_path = {path: path.stat() for path in video_paths}
         metrics = FrameMetrics(
-            luminance=[0.1] * 100,
-            motion=[0.0] * 100,
+            luminance=[0.1] * (metric_frame_range.frame_count if metric_frame_range else 100),
+            motion=[0.0] * (metric_frame_range.frame_count if metric_frame_range else 100),
             metadata=MetricsMetadata(
-                frame_count=100,
+                frame_count=metric_frame_range.frame_count if metric_frame_range else 100,
                 fps=Fraction(24, 1),
                 config_fingerprint=cache_fingerprint,
                 clips=[
@@ -327,6 +330,13 @@ enable = false
                     )
                     for path in video_paths
                 ],
+                source_frame_count=(
+                    metric_frame_range.source_frame_count if metric_frame_range else 100
+                ),
+                metric_source_start=metric_frame_range.start if metric_frame_range else 0,
+                metric_source_end_exclusive=(
+                    metric_frame_range.end_exclusive if metric_frame_range else 100
+                ),
                 analysis_source_path=str(resolved_analysis_source_path),
                 performance_mode=config.performance_mode.value,
                 algorithm_id=metric_algorithm_id(config),

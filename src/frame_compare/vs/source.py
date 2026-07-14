@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from fractions import Fraction
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Literal
 
 from frame_compare.vs.env import ensure_vs_environment, require_plugin
 from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError
@@ -11,17 +13,44 @@ from frame_compare.vs.props import detect_hdr
 from frame_compare.vs.types import SourceInfo
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     import vapoursynth as vs
 
+_INDEX_CONSTRUCTION_FAILURE_MARKER = "failed to construct index"
 
-def load_source(path: Path, core: vs.Core | None = None) -> SourceInfo:
+
+@dataclass(frozen=True, slots=True)
+class LWLibavSourceOptions:
+    """Explicit optional decoder settings forwarded to LWLibavSource.
+
+    Raises:
+        ValueError: If ``threads`` is not a non-negative integer, or if
+            ``prefer_hw`` is not the integer 1 or ``None``.
+    """
+
+    threads: int | None = None
+    ff_options: str | None = None
+    prefer_hw: Literal[1] | None = None
+
+    def __post_init__(self) -> None:
+        """Reject invalid decoder settings before they reach the runtime boundary."""
+        if self.threads is not None and (type(self.threads) is not int or self.threads < 0):
+            raise ValueError("LWLibavSource thread count must be a non-negative integer or None")
+
+        if self.prefer_hw is not None and (type(self.prefer_hw) is not int or self.prefer_hw != 1):
+            raise ValueError("LWLibavSource prefer_hw must be the integer 1 (NVIDIA CUVID) or None")
+
+
+def load_source(
+    path: Path,
+    core: vs.Core | None = None,
+    *,
+    decoder_options: LWLibavSourceOptions | None = None,
+) -> SourceInfo:
     """Load video source with automatic format detection.
 
     Raises:
-        PluginNotFoundError: If lsmas plugin is not available (FC-2003, propagates)
-        SourceLoadError: If file cannot be opened or is corrupt (FC-4015)
+        PluginNotFoundError: If the L-SMASH Works plugin is unavailable (FC-2003).
+        SourceLoadError: If the source cannot be loaded or inspected (FC-4015).
     """
     if core is None:
         core = ensure_vs_environment()
@@ -38,7 +67,30 @@ def load_source(path: Path, core: vs.Core | None = None) -> SourceInfo:
             # require_plugin passed, so core.lw.LWLibavSource must exist
             loader = core.lw
 
-        clip = loader.LWLibavSource(str(path))
+        loader_kwargs: dict[str, int | str] = {}
+        if decoder_options is not None:
+            if decoder_options.threads is not None:
+                loader_kwargs["threads"] = decoder_options.threads
+            if decoder_options.ff_options is not None:
+                loader_kwargs["ff_options"] = decoder_options.ff_options
+            if decoder_options.prefer_hw is not None:
+                loader_kwargs["prefer_hw"] = decoder_options.prefer_hw
+        adjacent_index_path = Path(f"{path}.lwi")
+        try:
+            clip = loader.LWLibavSource(str(path), **loader_kwargs)
+        except Exception as original_error:
+            # L-SMASH may leave or encounter an unusable adjacent index and then
+            # fail while trying to rebuild it in place. Retry without writing a
+            # cache so callers do not have to delete generated index files.
+            if not _is_adjacent_index_construction_failure(
+                original_error,
+                index_path=adjacent_index_path,
+            ):
+                raise
+            try:
+                clip = loader.LWLibavSource(str(path), cache=0, **loader_kwargs)
+            except Exception as retry_error:
+                raise original_error from retry_error
         frame = clip.get_frame(0)
         fps = Fraction(clip.fps.numerator, clip.fps.denominator)
         is_hdr, hdr_metadata = detect_hdr(dict(frame.props))
@@ -58,6 +110,15 @@ def load_source(path: Path, core: vs.Core | None = None) -> SourceInfo:
         is_hdr=is_hdr,
         hdr_metadata=hdr_metadata,
     )
+
+
+def _is_adjacent_index_construction_failure(
+    error: Exception,
+    *,
+    index_path: Path,
+) -> bool:
+    """Return whether an L-SMASH construction failure can use cache-free recovery."""
+    return index_path.is_file() and _INDEX_CONSTRUCTION_FAILURE_MARKER in str(error).casefold()
 
 
 def apply_trim(source: SourceInfo, start: int, end: int | None = None) -> vs.VideoNode:

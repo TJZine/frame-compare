@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -192,6 +191,7 @@ def run_analyze_phase(
     selection_domain = ctx.analysis_selection_domain
     metric_request = metric_cache_request_for_clip(
         ctx.analysis_clip,
+        selection_window=ctx.selection_window,
         fallback_detection_mode=ctx.config.screenshots.active_rect_detection.value,
     )
     fingerprint = cache_io.compute_cache_key(
@@ -224,6 +224,7 @@ def run_analyze_phase(
             vs_loader=vs_loader,
             selection_domain=selection_domain,
             effective_fps=ctx.analysis_clip.effective_fps,
+            metric_frame_range=metric_request.metric_frame_range,
             metric_active_rect=metric_request.metric_active_rect,
             active_rect_source=metric_request.active_rect_source,
             active_rect_detection_mode=metric_request.active_rect_detection_mode,
@@ -280,35 +281,21 @@ def _select_frames_for_selection_domain(
         if selection_window.frame_count > 0
         else (0, reference.effective_num_frames())
     )
-    source_offset = _source_offset_for_reference_window(reference, window_start)
-    if (
-        source_offset == 0
-        and analysis_clip.trim.trim_start_frames == 0
-        and analysis_clip.trim.trim_end_frame_inclusive is None
-        and frame_count == reference.effective_num_frames()
-        and frame_count == analysis_clip.effective_num_frames()
-        and window_start == 0
-    ):
-        return select_frames(
-            metrics=metrics,
-            config=_config_for_selection_window(
-                config=config,
-                reference=reference,
-                window_start=window_start,
-                frame_count=frame_count,
-            ),
-        )
-
     if frame_count <= 0:
         raise SelectionError("reference source trims leave no selectable frames", 0, 0)
-
-    trimmed_metrics = _trimmed_metrics_for_overlap(
-        metrics=metrics,
-        trim_start_frame=analysis_clip.trim.trim_start_frames + window_start,
-        frame_count=frame_count,
-    )
+    expected_metric_start = analysis_clip.trim.trim_start_frames + window_start
+    if (
+        metrics.metadata.metric_source_start != expected_metric_start
+        or metrics.metadata.metric_source_end_exclusive != expected_metric_start + frame_count
+        or len(metrics.luminance) != metrics.metadata.frame_count
+        or len(metrics.motion) != metrics.metadata.frame_count
+    ):
+        raise MetricsCalculationError(
+            "Analysis metrics do not match the requested selection window"
+        )
+    source_offset = _source_offset_for_reference_window(reference, window_start)
     selection = select_frames(
-        metrics=trimmed_metrics,
+        metrics=metrics,
         config=_config_for_selection_window(
             config=config,
             reference=reference,
@@ -457,17 +444,3 @@ def map_aligned_to_source_frame(*, clip: ClipState, aligned_frame: int) -> int:
             f"Aligned frame {aligned_frame} exceeds trimmed domain for {clip.path.name}."
         )
     return source_frame
-
-
-def _trimmed_metrics_for_overlap(
-    *,
-    metrics: FrameMetrics,
-    trim_start_frame: int,
-    frame_count: int,
-) -> FrameMetrics:
-    trim_end = trim_start_frame + frame_count
-    return FrameMetrics(
-        luminance=metrics.luminance[trim_start_frame:trim_end],
-        motion=metrics.motion[trim_start_frame:trim_end],
-        metadata=replace(metrics.metadata, frame_count=frame_count),
-    )

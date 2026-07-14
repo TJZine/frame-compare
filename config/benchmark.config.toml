@@ -1,0 +1,39 @@
+# Deterministic configuration for tools/benchmark_analysis_tiers.py.
+# This file is benchmark-only; use config/config.toml for normal Frame Compare runs.
+
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screens"
+generated_dir = "generated"
+config_dir = "config"
+use_run_folders = true
+
+[sources]
+# The benchmark command supplies inputs in reference/comparison order.
+analysis_source = "reference"
+match_fps = "disabled"
+
+[analysis]
+# 20 random + 10 dark + 10 bright + 10 motion = 50 selected frames.
+user_frames = []
+random_frame_count = 20
+dark_frame_count = 10
+bright_frame_count = 10
+motion_frame_count = 10
+random_seed = 20202020
+
+# Keep the historical decision profile explicit. The 0.20/0.80 quantiles are
+# deliberately wider than Frame Compare's shipped 0.05/0.95 defaults so the
+# research runs have larger category pools. Use a local copied config with
+# 0.05/0.95 for the shipped-default control described in
+# docs/analysis-performance-validation.md.
+ignore_lead_seconds = 240.0
+ignore_trail_seconds = 240.0
+min_window_seconds = 5.0
+dark_quantile = 0.20
+bright_quantile = 0.80
+
+[screenshots]
+# The benchmark harness uses prepared static active-rectangle provenance but
+# does not run the normal pipeline's optional content-refinement scan.
+active_rect_detection = "aspect_ratio"

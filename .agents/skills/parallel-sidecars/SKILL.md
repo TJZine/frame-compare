@@ -18,3 +18,7 @@ benefit exceeds coordination cost.
 
 Keep delegation shallow. Do not delegate an immediate critical-path task merely to
 use a role.
+
+For a genuinely large program with multiple work units, dependency ordering, and
+repeated integration checkpoints, explicitly use `large-task-orchestration`. This
+skill routes individual sidecars and bounded units; it does not own a program.

@@ -75,6 +75,7 @@ def _prepared_metric_cache_fingerprint(source_paths: list[Path], *, prep: PrepSt
         selection_domain=prep.analysis_selection_domain,
         metric_request=metric_cache_request_for_clip(
             prep.analysis_clip,
+            selection_window=prep.selection_window,
             fallback_detection_mode=prep.config.screenshots.active_rect_detection.value,
         ),
     )

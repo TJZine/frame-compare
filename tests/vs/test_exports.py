@@ -31,6 +31,7 @@ EXPECTED_EXPORTS = {
     "HDRMetadata",
     "TonemapSettings",
     "ColorProps",
+    "LWLibavSourceOptions",
     "is_vapoursynth_available",
     "ensure_vs_environment",
     "detect_plugins",

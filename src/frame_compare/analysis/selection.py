@@ -23,7 +23,7 @@ MIN_GAP: int = 5
 def select_frames(metrics: FrameMetrics, config: AnalysisConfig) -> FrameSelection:
     """Select frames from explicit user/random/dark/bright/motion requests."""
 
-    total_frames = metrics.metadata.frame_count
+    total_frames = metrics.eligible_frame_count
     if total_frames == 0:
         raise SelectionError(reason="empty_metrics", requested=_requested_count(config), found=0)
 
@@ -33,8 +33,15 @@ def select_frames(metrics: FrameMetrics, config: AnalysisConfig) -> FrameSelecti
     user_frames = sorted({frame for frame in config.user_frames if 0 <= frame < total_frames})
     selected_set.update(user_frames)
 
+    metric_source_frames = [
+        source_frame - metrics.metadata.metric_source_start
+        for source_frame in metrics.source_frames()
+    ]
+    luminance_by_frame = list(zip(metric_source_frames, metrics.luminance, strict=True))
+    motion_by_frame = list(zip(metric_source_frames, metrics.motion, strict=True))
+
     dark = _select_dark_frames(
-        metrics.luminance,
+        luminance_by_frame,
         config.dark_frame_count,
         selected_set,
         dark_quantile=config.dark_quantile,
@@ -42,7 +49,7 @@ def select_frames(metrics: FrameMetrics, config: AnalysisConfig) -> FrameSelecti
     selected_set.update(dark)
 
     bright = _select_bright_frames(
-        metrics.luminance,
+        luminance_by_frame,
         config.bright_frame_count,
         selected_set,
         bright_quantile=config.bright_quantile,
@@ -50,7 +57,7 @@ def select_frames(metrics: FrameMetrics, config: AnalysisConfig) -> FrameSelecti
     selected_set.update(bright)
 
     motion_frames = _select_by_motion(
-        metrics.motion,
+        motion_by_frame,
         config.motion_frame_count,
         selected_set,
         MIN_GAP,
@@ -119,20 +126,28 @@ def _build_selection_details_by_frame(
     breakdown: SelectionBreakdown,
 ) -> SelectionDetailsByFrame:
     details_by_frame: SelectionDetailsByFrame = {}
+    luminance_scores = {
+        source_frame - metrics.metadata.metric_source_start: value
+        for source_frame, value in zip(metrics.source_frames(), metrics.luminance, strict=True)
+    }
+    motion_scores = {
+        source_frame - metrics.metadata.metric_source_start: value
+        for source_frame, value in zip(metrics.source_frames(), metrics.motion, strict=True)
+    }
 
     def _store_details(
         frames: Sequence[int],
         *,
         label: str,
         category_note: str,
-        score_values: Sequence[float] | None,
+        score_values: dict[int, float] | None,
     ) -> None:
         for frame_index in frames:
             if frame_index in details_by_frame:
                 continue
             score = None
-            if score_values is not None and 0 <= frame_index < len(score_values):
-                score = score_values[frame_index]
+            if score_values is not None:
+                score = score_values.get(frame_index)
             details_by_frame[frame_index] = SelectionDetail(
                 frame_index=frame_index,
                 label=label,
@@ -148,19 +163,19 @@ def _build_selection_details_by_frame(
         breakdown.quantile_dark,
         label="Dark",
         category_note="quantile_dark",
-        score_values=metrics.luminance,
+        score_values=luminance_scores,
     )
     _store_details(
         breakdown.quantile_bright,
         label="Bright",
         category_note="quantile_bright",
-        score_values=metrics.luminance,
+        score_values=luminance_scores,
     )
     _store_details(
         breakdown.motion,
         label="Motion",
         category_note="motion",
-        score_values=metrics.motion,
+        score_values=motion_scores,
     )
     _store_details(
         breakdown.random,
@@ -183,7 +198,7 @@ def _format_selection_timecode(frame_index: int, fps: Fraction) -> str | None:
 
 
 def _select_dark_frames(
-    luminance: Sequence[float],
+    luminance: Sequence[tuple[int, float]],
     count: int,
     exclude: set[int],
     *,
@@ -191,7 +206,7 @@ def _select_dark_frames(
 ) -> list[int]:
     if count <= 0:
         return []
-    indexed = sorted(enumerate(luminance), key=lambda x: x[1])
+    indexed = sorted(luminance, key=lambda x: x[1])
     n = len(indexed)
     if n == 0:
         return []
@@ -203,7 +218,7 @@ def _select_dark_frames(
 
 
 def _select_bright_frames(
-    luminance: Sequence[float],
+    luminance: Sequence[tuple[int, float]],
     count: int,
     exclude: set[int],
     *,
@@ -211,7 +226,7 @@ def _select_bright_frames(
 ) -> list[int]:
     if count <= 0:
         return []
-    indexed = sorted(enumerate(luminance), key=lambda x: x[1])
+    indexed = sorted(luminance, key=lambda x: x[1])
     n = len(indexed)
     if n == 0:
         return []
@@ -248,11 +263,11 @@ def _sample_evenly(items: Sequence[int], count: int) -> list[int]:
 
 
 def _select_by_motion(
-    motion: Sequence[float], count: int, exclude: set[int], min_gap: int
+    motion: Sequence[tuple[int, float]], count: int, exclude: set[int], min_gap: int
 ) -> list[int]:
     """Select frames based on motion peaks, respecting min_gap."""
     # Enumerate and sort by motion descending
-    indexed = sorted(enumerate(motion), key=lambda x: x[1], reverse=True)
+    indexed = sorted(motion, key=lambda x: x[1], reverse=True)
 
     selected: list[int] = []
     for idx, _ in indexed:

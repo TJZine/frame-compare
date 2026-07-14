@@ -10,6 +10,7 @@ import structlog
 
 from frame_compare.analysis.errors import SelectionError
 from frame_compare.analysis.frame_plan import create_frame_plan
+from frame_compare.analysis.metrics import slice_frame_metrics
 from frame_compare.analysis.selection import select_frames
 from frame_compare.analysis.types import (
     FrameMetrics,
@@ -689,20 +690,6 @@ class _NormalizedFrameSelection:
     generated_source_frames: list[int]
 
 
-def _trimmed_metrics_for_overlap(
-    *,
-    metrics: FrameMetrics,
-    trim_start_frame: int,
-    frame_count: int,
-) -> FrameMetrics:
-    trim_end_frame = trim_start_frame + frame_count
-    return FrameMetrics(
-        luminance=metrics.luminance[trim_start_frame:trim_end_frame],
-        motion=metrics.motion[trim_start_frame:trim_end_frame],
-        metadata=replace(metrics.metadata, frame_count=frame_count),
-    )
-
-
 def _reselect_frames_for_trimmed_overlap(
     *,
     metrics: FrameMetrics,
@@ -726,9 +713,14 @@ def _reselect_frames_for_trimmed_overlap(
             requested=target_count,
             found=selectable_length,
         )
-    trimmed_metrics = _trimmed_metrics_for_overlap(
+    metric_reference_start = (
+        selection_source_window[0]
+        if selection_source_window is not None
+        else metrics.metadata.metric_source_start
+    )
+    trimmed_metrics = slice_frame_metrics(
         metrics=metrics,
-        trim_start_frame=selectable_start,
+        start_index=selectable_start - metric_reference_start,
         frame_count=selectable_length,
     )
     local_user_frames = sorted(

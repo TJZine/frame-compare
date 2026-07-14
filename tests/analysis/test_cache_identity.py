@@ -6,7 +6,7 @@ from pathlib import Path
 
 from frame_compare.analysis.cache_io import compute_cache_key, metrics_cache_filename
 from frame_compare.analysis.metric_identity import stable_metric_algorithm_identity_json
-from frame_compare.analysis.types import MetricActiveRect, MetricCacheRequest
+from frame_compare.analysis.types import MetricActiveRect, MetricCacheRequest, MetricFrameRange
 from frame_compare.config.schema import AnalysisConfig
 from tests.analysis._cache_io_test_helpers import FIXED_MTIME, create_video_file
 
@@ -116,6 +116,29 @@ def test_compute_cache_key_changes_by_complete_metric_request_identity(tmp_path:
     assert len(keys) == len(requests)
 
 
+def test_compute_cache_key_changes_by_exact_metric_frame_range(tmp_path: Path) -> None:
+    video = create_video_file(tmp_path, "v1.mkv")
+    config = AnalysisConfig()
+    requests = (
+        MetricCacheRequest(
+            analysis_source_path=video,
+            metric_frame_range=MetricFrameRange(100, 0, 100),
+        ),
+        MetricCacheRequest(
+            analysis_source_path=video,
+            metric_frame_range=MetricFrameRange(100, 10, 90),
+        ),
+        MetricCacheRequest(
+            analysis_source_path=video,
+            metric_frame_range=MetricFrameRange(120, 10, 90),
+        ),
+    )
+
+    keys = {compute_cache_key([video], config, metric_request=request) for request in requests}
+
+    assert len(keys) == len(requests)
+
+
 def test_metrics_cache_filename_order_independent(tmp_path: Path) -> None:
     fingerprint = "f" * 64
     v1 = create_video_file(tmp_path, "b-source.mkv")
@@ -180,9 +203,10 @@ def test_metric_algorithm_identity_serialization_is_deterministic() -> None:
 
     assert first == second
     assert '"performance_mode":"performance"' in first
-    assert '"target_max_width":320' in first
-    assert '"resize":"bicubic"' in first
-    assert '"temporal":"all_adjacent_pairs"' in first
+    assert '"exact_ceil_one_quarter_in_up_to_eight_centered_bursts"' in first
+    assert '"active_rect_aware_full_resolution_luma"' in first
+    assert '"resize"' not in first
+    assert '"sampled_burst_pairs_with_per_burst_source_lookbehind"' in first
 
 
 def test_compute_cache_key_ignores_random_seed(tmp_path: Path) -> None:

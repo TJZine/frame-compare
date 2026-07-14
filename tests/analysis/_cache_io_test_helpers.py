@@ -34,6 +34,9 @@ def valid_cache_metadata_payload(
 ) -> dict[str, object]:
     return {
         "frame_count": frame_count,
+        "source_frame_count": frame_count,
+        "metric_source_start": 0,
+        "metric_source_end_exclusive": frame_count,
         "fps": "24/1",
         "config_fingerprint": "fp",
         "analysis_source_path": "",
@@ -80,6 +83,9 @@ def metrics_metadata(
         fps=fps,
         config_fingerprint=config_fingerprint,
         clips=clips,
+        source_frame_count=frame_count,
+        metric_source_start=0,
+        metric_source_end_exclusive=frame_count,
         analysis_source_path=analysis_source_path,
         performance_mode=config.performance_mode.value,
         algorithm_id=metric_algorithm_id(config),

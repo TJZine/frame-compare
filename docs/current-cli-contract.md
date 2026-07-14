@@ -273,12 +273,15 @@ unchanged.
   `analysis_source_path`, `reference_path`, source identities, source trims,
   effective FPS values, the configured analysis ignore-window settings,
   active-rect resolver policy, each clip's resolved active rectangle, and the final
-  shared selectable window. Cache schema v6 stores
+  shared selectable window. Cache schema v8 stores
   `analysis_source_path`, `performance_mode`, `algorithm_id`, `metric_backend`,
   stable `algorithm_identity_json`, `metric_active_rect`, active-rect source,
-  detection mode, and active-rect resolver algorithm ID in
-  `MetricsMetadata`, and different
-  selected references, selected analysis sources, selection domains,
+  detection mode, and active-rect resolver algorithm ID, original source frame count,
+  and the exact selectable metric source range in `MetricsMetadata`. Performance
+  payloads also store an explicit `sampled_source_frames` map aligned one-to-one
+  with the compact luminance and motion arrays. Quality uses the implicit
+  contiguous range; performance records its deterministic sparse samples.
+  Different selected references, selected analysis sources, selection domains,
   performance modes, metric algorithm identities, or active-rect metric domains
   from the same input set do not satisfy each other. When
   `sources.analysis_source = "reference"`, `analysis_source_path` is the selected
@@ -287,9 +290,9 @@ unchanged.
   content-derived rectangles produce coordinate-specific metric/cache
   identities. A typed metric request also keys the analysis source, explicit
   effective FPS versus source-FPS semantics, metric rectangle, and active-rect
-  provenance, and cache loading validates that request before accepting a hit.
-  Metric-array cache
-  identity excludes `user_frames`, random seed, frame-selection counts,
+  provenance, exact source frame count, and metric range, and cache loading validates
+  that request before accepting a hit. Metric-array cache identity excludes
+  `user_frames`, random seed, frame-selection counts,
   `dark_quantile`, and `bright_quantile` because those values affect frame
   choice rather than metric computation.
 - When `screenshots.active_rect_detection = "auto"` and analysis metrics are
@@ -557,21 +560,34 @@ dedicated `run` flags for them:
 - `bright_quantile = 0.95`
 
 `performance_mode` selects the analysis metric algorithm identity used for
-luminance and motion arrays. `quality` is the default Python/NumPy metric mode.
-`performance` is an approximate VapourSynth PlaneStats metric mode; it can select
-different dark, bright, or motion frames than `quality` and is cache-isolated
-from `quality`. Both modes apply the prepared active picture rectangle for the
-selected analysis source before metric calculation and use active-rect-specific
-cache identity. The prepared rectangle can come from an explicit
+luminance and motion arrays. `quality` is the default full-resolution VapourSynth
+PlaneStats metric mode and analyzes every eligible frame. `performance` uses the
+same full-resolution luma PlaneStats metrics on exactly
+`ceil(eligible_frame_count * 0.25)` frames distributed across up to eight
+deterministic centered contiguous bursts. Each nonzero burst decodes one
+unreturned lookbehind frame so its first sampled motion value compares the same
+adjacent source frames as quality. Metric-based dark, bright, and motion choices
+are limited to sampled frames, so performance can select materially different
+frames or miss brief events between bursts. Configured user and random frames
+still span the whole eligible window.
+
+Both modes apply the prepared active picture rectangle for the selected analysis
+source before metric calculation and use active-rect-specific cache identity.
+Both stay inside the prepared shared selectable window, and `performance` is
+cache-isolated from `quality` through its mode and algorithm identity. Cache schema v8 records
+that window and, for performance, the explicit source-frame map for every stored
+metric value. The prepared rectangle can come from an explicit
 `sources.overrides.<selector>.active_rect`, trusted static metadata, configured
 dimension/aspect-ratio detection, opt-in sampled content detection, or full-frame
 fallback. There are no new analysis performance modes or aliases for active-rect
 detection; `quality` and `performance` consume the same prepared rectangle.
-There is no dedicated `run` flag for analysis performance mode in v1.
+The 25% fraction and burst count are internal mode contracts, not user-facing
+knobs. There is no dedicated `run` flag for analysis performance mode in v1.
 
 The lead/trail fields define a global selectable analysis window inside each
-clip's source-specific base trim domain. They do not physically trim sources or
-change reported source-frame numbers. `min_window_seconds` expands a too-small
+clip's source-specific base trim domain. They bound brightness and motion
+calculation as well as selection, but do not physically trim sources or change
+reported source-frame numbers. `min_window_seconds` expands a too-small
 per-clip selectable window within clip bounds, preferring to extend the end
 first and then shift the start earlier. If a shared selectable intersection
 cannot be formed, the run fails with the standard typed selection error.

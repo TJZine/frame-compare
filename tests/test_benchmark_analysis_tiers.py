@@ -1,4 +1,4 @@
-"""Tests for the analysis-tier benchmark tool."""
+"""Contract tests for the production analysis benchmark tool."""
 
 from __future__ import annotations
 
@@ -13,30 +13,23 @@ from typing import Any, cast
 
 import pytest
 
+from frame_compare.analysis.sampling import plan_performance_bursts
 from frame_compare.analysis.types import (
-    ClipIdentity,
     FrameMetrics,
     FrameSelection,
-    MetricActiveRect,
+    MetricFrameRange,
     MetricsMetadata,
     SelectionBreakdown,
 )
-from frame_compare.config.schema import ConfigSchema
-from frame_compare.config.schema_enums import (
-    AnalysisPerformanceMode,
-    ScreenshotActiveRectDetection,
-)
-from frame_compare.config.schema_models import SourceOverrideConfig
-from tests.orchestration.execute_run_helpers import write_probe_cache_for_inputs
+from frame_compare.config.schema import AnalysisConfig, ConfigSchema
+from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 
 
-def test_benchmark_script_help_is_available_through_documented_process_entrypoint() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
-    script_path = repo_root / "tools" / "benchmark_analysis_tiers.py"
-
+def test_help_exposes_only_production_benchmark_options() -> None:
+    root = Path(__file__).resolve().parents[1]
     result = subprocess.run(
-        [sys.executable, str(script_path), "--help"],
-        cwd=repo_root,
+        [sys.executable, str(root / "tools" / "benchmark_analysis_tiers.py"), "--help"],
+        cwd=root,
         text=True,
         capture_output=True,
         check=False,
@@ -44,902 +37,481 @@ def test_benchmark_script_help_is_available_through_documented_process_entrypoin
     )
 
     assert result.returncode == 0
-    for option in (
-        "--repetitions",
-        "--metric-cache-policy",
-        "--require-warm-source-index",
-        "--skip-decode-baseline",
-        "--inspect-frame-types",
-        "--ffprobe-timeout",
-    ):
-        assert option in result.stdout
-    assert result.stderr == ""
+    assert "--window-end-exclusive" in result.stdout
+    assert "--metric-cache-policy" in result.stdout
+    assert "--inspect-frame-types" in result.stdout
+    assert "--mode" not in result.stdout
+    assert "candidate" not in result.stdout.lower()
 
 
-def test_benchmark_script_main_writes_json_and_honors_public_defaults(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    script = _load_benchmark_script()
-    reference = tmp_path / "reference.mkv"
-    reference.write_bytes(b"source")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text("", encoding="utf-8")
-    output_path = tmp_path / "benchmark.json"
-    config = ConfigSchema()
-    source = _benchmark_analysis_source(script, path=reference, reference=reference)
-    observed_run_options: dict[str, object] = {}
-
-    def fake_run_benchmark_tiers(**kwargs: object) -> tuple[dict[str, Any], dict[str, Any]]:
-        observed_run_options.update(kwargs)
-        trial = _tier_payload("quality", [0.1, 0.9], [0.0, 0.5], [0, 1])
-        return script._aggregate_tier_trials([trial]), {}
-
-    monkeypatch.setattr(script, "load_config", lambda _path: config)
-    monkeypatch.setattr(script, "_resolve_benchmark_analysis_source", lambda **_kwargs: source)
-    monkeypatch.setattr(
-        script,
-        "_require_selection_domain_for_analysis_cache_identity",
-        lambda **_kwargs: None,
-    )
-    monkeypatch.setattr(
-        script,
-        "_source_index_facts",
-        lambda _paths: {reference.as_posix(): {"detected": False}},
-    )
-    monkeypatch.setattr(script, "_run_benchmark_tiers", fake_run_benchmark_tiers)
-    monkeypatch.setattr(script, "_probe_source_facts", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(script, "_runtime_facts", lambda: {})
-
-    exit_code = script.main(
-        [
-            "--root",
-            str(tmp_path),
-            "--config",
-            config_path.name,
-            "--output",
-            output_path.name,
-            "--no-progress",
-            "--skip-decode-baseline",
-            reference.name,
-        ]
-    )
-
-    captured = capsys.readouterr()
-    report = json.loads(output_path.read_text(encoding="utf-8"))
-    assert exit_code == 0
-    assert captured.out == f"{output_path.as_posix()}\n"
-    assert captured.err == ""
-    assert report["inputs"] == [reference.as_posix()]
-    assert report["config"]["repetitions"] == 3
-    assert report["config"]["metric_cache_policy"] == "cold"
-    assert report["decode_baseline"] is None
-    assert observed_run_options["candidate_modes"] == ["performance"]
-    assert observed_run_options["repetitions"] == 3
-    assert observed_run_options["metric_cache_policy"] == "cold"
-    assert observed_run_options["progress_enabled"] is False
-
-
-def test_benchmark_script_comparison_schema_contains_required_sections() -> None:
-    script = _load_benchmark_script()
-    quality = _tier_payload("quality", [0.0, 0.2, 1.0], [0.0, 0.1, 0.7], [0, 1, 2])
-    candidate = _tier_payload("performance", [0.0, 0.1, 1.0], [0.0, 0.0, 0.8], [0, 2])
-
-    result = cast(dict[str, Any], script._compare_tier(quality=quality, candidate=candidate))
-
-    assert result["mode"] == "performance"
-    assert set(result["comparisons"]) == {"dark", "bright", "motion"}
-    assert set(result["ranking"]) == {
-        "highest_luminance_top_k",
-        "highest_motion_top_k",
-        "lowest_luminance_top_k",
-        "luminance_spearman",
-        "motion_spearman",
-    }
-    assert result["selected"]["frames"] == [0, 2]
-
-
-def test_benchmark_script_progress_wraps_quality_and_candidate_tiers(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    script = _load_benchmark_script()
-    calls: list[str] = []
-    progress_events: list[tuple[str, object]] = []
-
-    class FakeProgress:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            progress_events.append(("disable", kwargs["disable"]))
-
-        def __enter__(self) -> FakeProgress:
-            progress_events.append(("enter", None))
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            progress_events.append(("exit", None))
-
-        def add_task(self, description: str, *, total: int) -> int:
-            progress_events.append(("add_task", (description, total)))
-            return 7
-
-        def update(self, task_id: int, *, description: str) -> None:
-            progress_events.append(("update", (task_id, description)))
-
-        def advance(self, task_id: int) -> None:
-            progress_events.append(("advance", task_id))
-
-    def fake_run_tier(**kwargs: object) -> dict[str, object]:
-        mode = cast(str, kwargs["mode"])
-        active_rect = cast(Any, kwargs["active_rect"])
-        assert active_rect.rect == MetricActiveRect(x=10, y=20, width=300, height=200)
-        assert active_rect.source == "explicit"
-        assert active_rect.detection_mode == "provided"
-        calls.append(mode)
-        return _tier_payload(mode, [0.0, 1.0], [0.0, 0.5], [0, 1])
-
-    def fake_compare_tier(
-        *,
-        quality: dict[str, object],
-        candidate: dict[str, object],
-    ) -> dict[str, object]:
-        return {
-            "quality_mode": quality["mode"],
-            "candidate_mode": candidate["mode"],
-        }
-
-    monkeypatch.setattr(script, "Progress", FakeProgress)
-    monkeypatch.setattr(script, "_run_tier", fake_run_tier)
-    monkeypatch.setattr(script, "_compare_tier", fake_compare_tier)
-
-    quality, comparisons = script._run_benchmark_tiers(
-        candidate_modes=["performance"],
-        video_paths=[tmp_path / "reference.mkv"],
-        analysis_config=ConfigSchema().analysis,
-        cache_dir=tmp_path / "cache",
-        analysis_source_path=tmp_path / "reference.mkv",
-        effective_fps=None,
-        active_rect=script.BenchmarkActiveRect(
-            rect=MetricActiveRect(x=10, y=20, width=300, height=200),
-            source="explicit",
-            detection_mode="provided",
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        pytest.param(
+            ["--output", "out.json", "--window-end-exclusive", "0", "a.mkv"],
+            "--window-end-exclusive must be greater than --window-start",
+            id="empty-default-window",
         ),
-        selection_domain=None,
-        window_start=0,
-        window_end_exclusive=None,
-        progress_enabled=True,
+        pytest.param(
+            [
+                "--output",
+                "out.json",
+                "--window-start",
+                "3",
+                "--window-end-exclusive",
+                "3",
+                "a.mkv",
+            ],
+            "--window-end-exclusive must be greater than --window-start",
+            id="empty-offset-window",
+        ),
+        pytest.param(
+            [
+                "--output",
+                "out.json",
+                "--window-end-exclusive",
+                "10",
+                "--repetitions",
+                "0",
+                "a.mkv",
+            ],
+            "--repetitions must be positive",
+            id="zero-repetitions",
+        ),
+    ],
+)
+def test_invalid_benchmark_arguments_fail_closed(args: list[str], message: str) -> None:
+    root = Path(__file__).resolve().parents[1]
+
+    result = subprocess.run(
+        [sys.executable, str(root / "tools" / "benchmark_analysis_tiers.py"), *args],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=10,
     )
 
-    assert quality["mode"] == "quality"
-    assert calls == ["quality", "performance"]
-    assert comparisons == {
-        "performance": {"quality_mode": "quality", "candidate_mode": "performance"},
-    }
-    assert ("disable", False) in progress_events
-    add_task_events = [payload for event, payload in progress_events if event == "add_task"]
-    assert len(add_task_events) == 1
-    start_description, total = cast(tuple[str, int], add_task_events[0])
-    assert start_description
-    assert total == 2
-    update_events = [
-        cast(tuple[int, str], payload) for event, payload in progress_events if event == "update"
-    ]
-    assert len(update_events) == 3
-    assert all(task_id == 7 and description for task_id, description in update_events)
-    assert progress_events.count(("advance", 7)) == 2
-    assert progress_events.index(("add_task", add_task_events[0])) < progress_events.index(
-        ("advance", 7)
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert message in result.stderr
+
+
+def test_trial_order_rotates_without_candidate_modes() -> None:
+    script = _load_script()
+
+    assert script._rotated_trial_order(0) == ("quality", "performance")
+    assert script._rotated_trial_order(1) == ("performance", "quality")
+    assert script._rotated_trial_order(2) == ("quality", "performance")
+
+
+def test_performance_contract_requires_exact_production_source_map() -> None:
+    script = _load_script()
+    frame_range = MetricFrameRange(100, 10, 50)
+    source_frames = tuple(
+        frame
+        for burst in plan_performance_bursts(window_start=10, window_end_exclusive=50)
+        for frame in range(burst.start, burst.end_exclusive)
     )
-    assert max(
-        index for index, event in enumerate(progress_events) if event == ("advance", 7)
-    ) < max(index for index, (event, _payload) in enumerate(progress_events) if event == "update")
-
-
-def test_benchmark_script_run_tier_preserves_typed_performance_mode(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    script = _load_benchmark_script()
-    observed_modes: list[AnalysisPerformanceMode] = []
-
-    def fake_calculate_metrics(
-        video_paths: list[Path],
-        analysis_config: object,
-        cache_dir: Path,
-        *,
-        analysis_source_path: Path,
-        effective_fps: object,
-        metric_active_rect: MetricActiveRect | None,
-        active_rect_source: str,
-        active_rect_detection_mode: str,
-        active_rect_algorithm_id: str,
-        selection_domain: str | None,
-        timing_recorder: object,
-    ) -> FrameMetrics:
-        assert video_paths == [tmp_path / "reference.mkv"]
-        assert cache_dir == tmp_path / "cache"
-        assert analysis_source_path == tmp_path / "reference.mkv"
-        assert effective_fps is None
-        assert metric_active_rect == MetricActiveRect(x=10, y=20, width=300, height=200)
-        assert active_rect_source == "explicit"
-        assert active_rect_detection_mode == "provided"
-        assert active_rect_algorithm_id == "active_rect_resolution_v2"
-        assert selection_domain is None
-        assert timing_recorder is not None
-        observed_modes.append(analysis_config.performance_mode)
-        return _metrics_payload(
-            "performance",
-            [0.0, 0.2, 1.0],
-            [0.0, 0.1, 0.7],
-            metric_active_rect=MetricActiveRect(x=10, y=20, width=300, height=200),
-            active_rect_source="explicit",
-            active_rect_detection_mode="provided",
-        )
-
-    monkeypatch.setattr(script, "calculate_metrics", fake_calculate_metrics)
-
-    result = script._run_tier(
+    metrics = _metrics(
         mode="performance",
-        video_paths=[tmp_path / "reference.mkv"],
-        analysis_config=ConfigSchema.model_validate(
-            {
-                "analysis": {
-                    "random_frame_count": 0,
-                    "dark_frame_count": 1,
-                    "bright_frame_count": 0,
-                    "motion_frame_count": 0,
-                }
-            }
-        ).analysis,
-        cache_dir=tmp_path / "cache",
-        analysis_source_path=tmp_path / "reference.mkv",
-        effective_fps=None,
-        active_rect=script.BenchmarkActiveRect(
-            rect=MetricActiveRect(x=10, y=20, width=300, height=200),
-            source="explicit",
-            detection_mode="provided",
-        ),
-        selection_domain=None,
-        window_start=0,
-        window_end_exclusive=None,
+        start=10,
+        end=50,
+        source_frame_count=100,
+        sampled=source_frames,
     )
 
-    assert observed_modes == [AnalysisPerformanceMode.PERFORMANCE]
-    assert result["metadata"]["performance_mode"] == "performance"
-    assert result["cache_state"] == "miss"
-    assert result["cache_write_state"] == "not_attempted"
+    script._require_metric_contract(metrics, mode="performance", expected_range=frame_range)
+
+    with pytest.raises(RuntimeError, match="source-frame map"):
+        script._require_metric_contract(
+            _metrics(
+                mode="performance",
+                start=10,
+                end=50,
+                source_frame_count=100,
+                sampled=tuple(frame + 1 for frame in source_frames),
+            ),
+            mode="performance",
+            expected_range=frame_range,
+        )
 
 
-def test_benchmark_script_rotates_trial_order_and_aggregates_distributions(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    ("policy", "cache_state", "cache_write_state", "message"),
+    [
+        pytest.param("cold", "hit", "not_attempted", "Cold", id="cold-hit"),
+        pytest.param("cold", "miss", "failed", "Cold", id="cold-write-failed"),
+        pytest.param("reuse", "miss", "written", "Reuse", id="reuse-miss"),
+        pytest.param("reuse", "hit", "written", "Reuse", id="reuse-hit-and-write"),
+    ],
+)
+def test_cache_policy_rejects_mislabeled_trials(
+    policy: str,
+    cache_state: str,
+    cache_write_state: str,
+    message: str,
 ) -> None:
-    script = _load_benchmark_script()
-    calls: list[tuple[int, int, str]] = []
-    timings = iter((3.0, 6.0, 5.0, 4.0, 7.0, 2.0))
+    script = _load_script()
 
-    def fake_run_tier(**kwargs: object) -> dict[str, object]:
-        mode = cast(str, kwargs["mode"])
-        result = _tier_payload(mode, [0.0, 1.0], [0.0, 0.5], [0, 1])
-        elapsed = next(timings)
-        result.update(
-            {
-                "analyze_seconds": elapsed,
-                "selection_seconds": 0.1,
-                "trial_seconds": elapsed + 0.1,
-                "process_cpu_seconds": elapsed / 2,
-                "cpu_to_wall_ratio": 0.5,
-                "peak_rss_bytes": 123,
-                "phase_timings_seconds": {"frame_render": elapsed - 0.1},
-                "cache_state": "miss",
-                "cache_write_state": "written",
-                "repetition": kwargs["repetition"],
-                "order_index": kwargs["order_index"],
-            }
+    with pytest.raises(RuntimeError, match=message):
+        script._require_cache_policy(
+            policy=policy,
+            mode="quality",
+            cache_state=cache_state,
+            cache_write_state=cache_write_state,
         )
-        calls.append(
-            (
-                cast(int, kwargs["repetition"]),
-                cast(int, kwargs["order_index"]),
-                mode,
-            )
-        )
-        return result
 
-    monkeypatch.setattr(script, "_run_tier", fake_run_tier)
 
-    quality, comparisons = script._run_benchmark_tiers(
-        candidate_modes=["performance"],
-        video_paths=[tmp_path / "reference.mkv"],
-        analysis_config=ConfigSchema().analysis,
-        cache_dir=tmp_path / "cache",
-        analysis_source_path=tmp_path / "reference.mkv",
-        effective_fps=None,
-        active_rect=script.BenchmarkActiveRect(
-            rect=None,
-            source="full-frame",
-            detection_mode="aspect_ratio",
-        ),
-        selection_domain=None,
-        window_start=0,
-        window_end_exclusive=None,
-        progress_enabled=False,
-        repetitions=3,
-        metric_cache_policy="cold",
+@pytest.mark.parametrize(
+    ("policy", "cache_state", "cache_write_state"),
+    [
+        pytest.param("cold", "miss", "written", id="cold-miss-and-write"),
+        pytest.param("reuse", "hit", "not_attempted", id="reuse-hit"),
+    ],
+)
+def test_cache_policy_accepts_observed_trial_state(
+    policy: str,
+    cache_state: str,
+    cache_write_state: str,
+) -> None:
+    script = _load_script()
+
+    script._require_cache_policy(
+        policy=policy,
+        mode="quality",
+        cache_state=cache_state,
+        cache_write_state=cache_write_state,
     )
 
-    assert calls == [
-        (0, 0, "quality"),
-        (0, 1, "performance"),
-        (1, 0, "performance"),
-        (1, 1, "quality"),
-        (2, 0, "quality"),
-        (2, 1, "performance"),
-    ]
-    assert quality["timing_summary"]["analyze_seconds"]["median"] == 4.0
-    assert quality["cache_state"] == {"miss": 3}
-    assert quality["cache_write_state"] == {"written": 3}
-    assert len(quality["trials"]) == 3
-    assert comparisons["performance"]["timing_summary"]["analyze_seconds"]["median"] == 5.0
+
+def test_sampling_json_records_exact_budget_and_bursts() -> None:
+    script = _load_script()
+    source_frames = tuple(
+        frame
+        for burst in plan_performance_bursts(window_start=20, window_end_exclusive=120)
+        for frame in range(burst.start, burst.end_exclusive)
+    )
+    result = script._sampling_json(
+        _metrics(
+            mode="performance",
+            start=20,
+            end=120,
+            source_frame_count=200,
+            sampled=source_frames,
+        )
+    )
+
+    assert result is not None
+    assert result["sample_count"] == 25
+    assert result["actual_fraction"] == 0.25
+    assert len(result["bursts"]) == 8
+    assert result["source_frames"] == list(source_frames)
 
 
-def test_benchmark_script_frame_type_summary_records_gop_distribution() -> None:
-    script = _load_benchmark_script()
+def test_sampled_fidelity_compares_only_mapped_frames() -> None:
+    script = _load_script()
+    quality = _metrics(mode="quality", start=100, end=108, source_frame_count=200)
+    performance = _metrics(
+        mode="performance",
+        start=100,
+        end=108,
+        source_frame_count=200,
+        sampled=(101, 106),
+        luminance=[10.1, 10.6],
+        motion=[1.01, 1.06],
+    )
 
-    summary = script._frame_type_summary(
+    result = script._sampled_metric_fidelity(
+        quality_metrics=quality,
+        performance_metrics=performance,
+    )
+
+    assert result["scope"] == "performance-sampled-source-frames-only"
+    assert result["sample_count"] == 2
+    assert result["luminance"]["max_absolute_error"] == pytest.approx(0.0)
+    assert result["motion"]["max_absolute_error"] == pytest.approx(0.0)
+
+
+def test_compute_pipeline_excludes_cache_persistence_only() -> None:
+    script = _load_script()
+
+    assert script._compute_pipeline_seconds(
+        10.0,
+        {"cache_lookup": 1.0, "cache_write": 2.0, "source_load": 3.0},
+    ) == pytest.approx(7.0)
+
+
+def test_git_provenance_records_commit_and_dirty_state(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    script = _load_script()
+    outputs = iter(["abc123", " M file.py"])
+    monkeypatch.setattr(script, "_git_output", lambda *_args: next(outputs))
+
+    result = script._git_provenance(tmp_path)
+
+    assert result == {
+        "available": True,
+        "commit": "abc123",
+        "dirty": True,
+        "status_porcelain": [" M file.py"],
+    }
+
+
+def test_frame_type_summary_records_distribution() -> None:
+    script = _load_script()
+
+    result = script._frame_type_summary(
         {
             "success": True,
             "payload": {
                 "frames": [
                     {"key_frame": 1, "pict_type": "I"},
                     {"key_frame": 0, "pict_type": "B"},
-                    {"key_frame": 0, "pict_type": "P"},
-                    {"key_frame": 1, "pict_type": "I"},
+                    {"key_frame": 1, "pict_type": "P"},
                 ]
             },
         }
     )
 
-    assert summary["type_counts"] == {"I": 2, "B": 1, "P": 1}
-    assert summary["keyframe_count"] == 2
-    assert summary["keyframe_gap_frames"]["median"] == 3.0
+    assert result["available"] is True
+    assert result["type_counts"] == {"I": 1, "B": 1, "P": 1}
+    assert result["keyframe_count"] == 2
 
 
-def test_benchmark_script_detects_adjacent_source_index(tmp_path: Path) -> None:
-    script = _load_benchmark_script()
-    source = tmp_path / "source.mkv"
-    source.write_bytes(b"source")
-    index = Path(f"{source}.lwi")
-    index.write_bytes(b"index")
+def test_frame_type_probe_bounds_window_when_fps_is_known() -> None:
+    script = _load_script()
 
-    facts = script._source_index_facts([source])
-
-    assert facts[source.as_posix()] == {
-        "detected": True,
-        "paths": [index.as_posix()],
-        "sizes_bytes": [5],
-    }
-
-
-def test_benchmark_script_ffprobe_timeout_is_bounded(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    script = _load_benchmark_script()
-
-    def timeout(*_args: object, **_kwargs: object) -> object:
-        raise script.subprocess.TimeoutExpired(cmd="ffprobe", timeout=2.5)
-
-    monkeypatch.setattr(script.subprocess, "run", timeout)
-
-    result = script._run_ffprobe_json([], path=tmp_path / "source.mkv", timeout_seconds=2.5)
-
-    assert result == {"success": False, "error": "ffprobe timed out after 2.5s"}
-
-
-def test_benchmark_script_reports_unavailable_peak_rss_on_windows(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    script = _load_benchmark_script()
-    monkeypatch.setattr(script.sys, "platform", "win32")
-
-    assert script._peak_rss_bytes() is None
-
-
-def test_benchmark_script_recomputes_stale_active_rect_provenance_cache(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    script = _load_benchmark_script()
-    reference = tmp_path / "reference.mkv"
-    reference.write_bytes(b"ref")
-    active_rect = script.BenchmarkActiveRect(
-        rect=MetricActiveRect(x=10, y=20, width=300, height=200),
-        source="explicit",
-        detection_mode="provided",
-    )
-    calls = 0
-    deleted: list[tuple[Path, str]] = []
-
-    def fake_calculate_metrics(*args: object, **kwargs: object) -> FrameMetrics:
-        nonlocal calls
-        calls += 1
-        assert kwargs["metric_active_rect"] == active_rect.rect
-        if calls == 1:
-            return _metrics_payload(
-                "performance",
-                [0.0, 0.2, 1.0],
-                [0.0, 0.1, 0.7],
-                metric_active_rect=active_rect.rect,
-                active_rect_source="full-frame",
-                active_rect_detection_mode="aspect_ratio",
-            )
-        return _metrics_payload(
-            "performance",
-            [0.0, 0.2, 1.0],
-            [0.0, 0.1, 0.7],
-            metric_active_rect=active_rect.rect,
-            active_rect_source="explicit",
-            active_rect_detection_mode="provided",
-        )
-
-    def fake_compute_cache_key(*args: object, **kwargs: object) -> str:
-        assert args[0] == [reference]
-        assert kwargs["metric_request"].metric_active_rect == active_rect.rect
-        return "stale-fingerprint"
-
-    def fake_delete_metrics_cache_entry(cache_dir: Path, fingerprint: str) -> None:
-        deleted.append((cache_dir, fingerprint))
-
-    monkeypatch.setattr(script, "calculate_metrics", fake_calculate_metrics)
-    monkeypatch.setattr(script, "compute_cache_key", fake_compute_cache_key)
-    monkeypatch.setattr(script, "delete_metrics_cache_entry", fake_delete_metrics_cache_entry)
-
-    result = script._calculate_metrics_with_expected_active_rect(
-        video_paths=[reference],
-        config=ConfigSchema.model_validate(
-            {"analysis": {"performance_mode": "performance"}}
-        ).analysis,
-        cache_dir=tmp_path / "cache",
-        analysis_source_path=reference,
-        effective_fps=None,
-        active_rect=active_rect,
-        selection_domain=None,
+    options, scope = script._frame_type_probe_options(
+        window_start=240,
+        window_end_exclusive=2640,
+        source_fps=Fraction(24),
     )
 
-    assert calls == 2
-    assert deleted == [(tmp_path / "cache", "stale-fingerprint")]
-    assert result.metadata.active_rect_source == "explicit"
-    assert result.metadata.active_rect_detection_mode == "provided"
+    assert "-read_intervals" in options
+    assert scope["kind"] == "benchmark-window"
+    assert scope["start_frame"] == 240
+    assert scope["end_frame_exclusive"] == 2640
 
 
-def test_benchmark_script_resolves_configured_analysis_source_effective_fps_and_active_rect(
-    tmp_path: Path,
-) -> None:
-    script = _load_benchmark_script()
-    input_dir = tmp_path / "comparison_videos"
-    input_dir.mkdir()
-    reference = input_dir / "reference.mkv"
-    analysis = input_dir / "analysis.mkv"
-    reference.write_bytes(b"ref")
-    analysis.write_bytes(b"analysis")
-    config = ConfigSchema.model_validate(
-        {
-            "sources": {
-                "analysis_source": "analysis.mkv",
-                "match_fps": "disabled",
-                "overrides": {
-                    "analysis.mkv": {
-                        "effective_fps": "24000/1001",
-                        "active_rect": {"x": 10, "y": 20, "width": 300, "height": 200},
-                    }
-                },
-            }
-        }
-    )
+def test_source_index_detection_finds_adjacent_lwi(tmp_path: Path) -> None:
+    script = _load_script()
+    video = tmp_path / "clip.mkv"
+    video.write_bytes(b"video")
+    Path(f"{video}.lwi").write_bytes(b"index")
 
-    source = script._resolve_benchmark_analysis_source(
-        root=tmp_path,
-        input_dir=input_dir,
-        input_paths=[reference, analysis],
-        config=config,
-    )
-    legacy_effective_fps = script._effective_fps_override_for_path(
-        input_dir=input_dir,
-        input_paths=[reference, analysis],
-        config=config,
-        source_path=source.path,
-    )
+    result = script._source_index_facts([video])[video.as_posix()]
 
-    assert source.path == analysis
-    assert source.reference_path == reference
-    assert source.effective_fps == Fraction(24000, 1001)
-    assert legacy_effective_fps == Fraction(24000, 1001)
-    assert source.active_rect.rect == MetricActiveRect(x=10, y=20, width=300, height=200)
-    assert source.active_rect.source == "explicit"
-    assert source.active_rect.detection_mode == "aspect_ratio"
+    assert result["detected"] is True
+    assert result["sizes_bytes"] == [5]
 
 
-def test_benchmark_script_uses_full_frame_active_rect_provenance_by_default(
-    tmp_path: Path,
-) -> None:
-    script = _load_benchmark_script()
-    input_dir = tmp_path / "comparison_videos"
-    input_dir.mkdir()
-    reference = input_dir / "reference.mkv"
-    reference.write_bytes(b"ref")
-    config = ConfigSchema()
-    write_probe_cache_for_inputs(tmp_path / "generated" / "clip_probe.toml", [reference], config)
-
-    source = script._resolve_benchmark_analysis_source(
-        root=tmp_path,
-        input_dir=input_dir,
-        input_paths=[reference],
-        config=config,
-    )
-
-    assert source.path == reference
-    assert source.reference_path == reference
-    assert source.effective_fps is None
-    assert source.active_rect.rect == MetricActiveRect(x=0, y=0, width=1920, height=1080)
-    assert source.active_rect.source == "full-frame"
-    assert source.active_rect.detection_mode == "aspect_ratio"
-    assert source.active_rect.algorithm_id == "active_rect_resolution_v2"
-
-
-def test_benchmark_script_uses_resolved_reference_order_for_metrics(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    script = _load_benchmark_script()
-    input_dir = tmp_path / "comparison_videos"
-    input_dir.mkdir()
-    first = input_dir / "first.mkv"
-    reference = input_dir / "reference.mkv"
-    first.write_bytes(b"first")
-    reference.write_bytes(b"reference")
-    config = ConfigSchema.model_validate(
-        {
-            "sources": {
-                "reference": reference.name,
-                "overrides": {
-                    reference.name: {"active_rect": {"x": 0, "y": 0, "width": 100, "height": 100}}
-                },
-            }
-        }
-    )
-    source = script._resolve_benchmark_analysis_source(
-        root=tmp_path,
-        input_dir=input_dir,
-        input_paths=[first, reference],
-        config=config,
-    )
-    captured_paths: list[Path] = []
-    sentinel = object()
-
-    def fake_calculate_metrics(
-        video_paths: list[Path], *_args: object, **_kwargs: object
-    ) -> object:
-        captured_paths.extend(video_paths)
-        return sentinel
-
-    monkeypatch.setattr(script, "calculate_metrics", fake_calculate_metrics)
-
-    result = script._calculate_metrics_once(
-        video_paths=source.ordered_paths,
-        config=config.analysis,
-        cache_dir=tmp_path / "cache",
-        analysis_source_path=source.path,
-        effective_fps=source.effective_fps,
-        active_rect=source.active_rect,
-        selection_domain="prepared-domain",
-    )
-
-    assert source.ordered_paths == (reference, first)
-    assert captured_paths == [reference, first]
-    assert result is sentinel
-
-
-def test_benchmark_script_requires_prepared_probe_for_implicit_active_rect(
-    tmp_path: Path,
-) -> None:
-    script = _load_benchmark_script()
-    input_dir = tmp_path / "comparison_videos"
-    input_dir.mkdir()
-    reference = input_dir / "reference.mkv"
-    reference.write_bytes(b"ref")
-
-    with pytest.raises(SystemExit, match="prepared clip probe data"):
-        script._resolve_benchmark_analysis_source(
-            root=tmp_path,
-            input_dir=input_dir,
-            input_paths=[reference],
-            config=ConfigSchema(),
-        )
-
-
-def test_benchmark_script_requires_selection_domain_for_non_first_analysis_source(
-    tmp_path: Path,
-) -> None:
-    script = _load_benchmark_script()
-    reference = tmp_path / "reference.mkv"
-    analysis = tmp_path / "analysis.mkv"
-
-    with pytest.raises(SystemExit, match="selection-domain token is required"):
-        script._require_selection_domain_for_analysis_cache_identity(
-            selection_domain=None,
-            video_paths=[reference, analysis],
-            analysis_source=_benchmark_analysis_source(script, path=analysis, reference=reference),
-            active_rect_detection=ScreenshotActiveRectDetection.ASPECT_RATIO,
-        )
-
-    script._require_selection_domain_for_analysis_cache_identity(
-        selection_domain="benchmark-domain",
-        video_paths=[reference, analysis],
-        analysis_source=_benchmark_analysis_source(script, path=analysis, reference=reference),
-        active_rect_detection=ScreenshotActiveRectDetection.ASPECT_RATIO,
-    )
-    script._require_selection_domain_for_analysis_cache_identity(
-        selection_domain=None,
-        video_paths=[reference, analysis],
-        analysis_source=_benchmark_analysis_source(script, path=reference, reference=reference),
-        active_rect_detection=ScreenshotActiveRectDetection.ASPECT_RATIO,
-    )
-
-
-def test_benchmark_script_requires_selection_domain_for_effective_fps_override(
-    tmp_path: Path,
-) -> None:
-    script = _load_benchmark_script()
-    reference = tmp_path / "reference.mkv"
-
-    with pytest.raises(SystemExit, match="selection-domain token is required"):
-        script._require_selection_domain_for_analysis_cache_identity(
-            selection_domain=None,
-            video_paths=[reference],
-            analysis_source=_benchmark_analysis_source(
-                script,
-                path=reference,
-                reference=reference,
-                effective_fps=Fraction(24, 1),
-            ),
-            active_rect_detection=ScreenshotActiveRectDetection.ASPECT_RATIO,
-        )
-
-    script._require_selection_domain_for_analysis_cache_identity(
-        selection_domain="fps-domain",
-        video_paths=[reference],
-        analysis_source=_benchmark_analysis_source(
-            script,
-            path=reference,
-            reference=reference,
-            effective_fps=Fraction(24, 1),
-        ),
-        active_rect_detection=ScreenshotActiveRectDetection.ASPECT_RATIO,
-    )
-
-
-def test_benchmark_script_requires_selection_domain_for_trim_overrides(
-    tmp_path: Path,
-) -> None:
-    script = _load_benchmark_script()
-    reference = tmp_path / "reference.mkv"
-
-    overrides = {reference: SourceOverrideConfig(trim_start_frames=10)}
-    with pytest.raises(SystemExit, match="selection-domain token is required"):
-        script._require_selection_domain_for_analysis_cache_identity(
-            selection_domain=None,
-            video_paths=[reference],
-            analysis_source=_benchmark_analysis_source(
-                script,
-                path=reference,
-                reference=reference,
-                overrides=overrides,
-            ),
-            active_rect_detection=ScreenshotActiveRectDetection.ASPECT_RATIO,
-        )
-
-    script._require_selection_domain_for_analysis_cache_identity(
-        selection_domain="trim-domain",
-        video_paths=[reference],
-        analysis_source=_benchmark_analysis_source(
-            script,
-            path=reference,
-            reference=reference,
-            overrides=overrides,
-        ),
-        active_rect_detection=ScreenshotActiveRectDetection.ASPECT_RATIO,
-    )
-
-    script._require_selection_domain_for_analysis_cache_identity(
-        selection_domain=None,
-        video_paths=[reference],
-        analysis_source=_benchmark_analysis_source(
-            script,
-            path=reference,
-            reference=reference,
-            overrides={reference: SourceOverrideConfig()},
-        ),
-        active_rect_detection=ScreenshotActiveRectDetection.ASPECT_RATIO,
-    )
-
-
-def test_benchmark_script_requires_selection_domain_for_other_domain_facts(
-    tmp_path: Path,
-) -> None:
-    script = _load_benchmark_script()
-    reference = tmp_path / "reference.mkv"
-    configured_reference = tmp_path / "configured-reference.mkv"
-
-    cases = (
-        (
-            _benchmark_analysis_source(
-                script,
-                path=reference,
-                reference=configured_reference,
-            ),
-            ScreenshotActiveRectDetection.ASPECT_RATIO,
-        ),
-        (
-            _benchmark_analysis_source(
-                script,
-                path=reference,
-                reference=reference,
-                overrides={
-                    reference: SourceOverrideConfig.model_validate(
-                        {"active_rect": {"x": 0, "y": 0, "width": 100, "height": 100}}
-                    )
-                },
-            ),
-            ScreenshotActiveRectDetection.ASPECT_RATIO,
-        ),
-        (
-            _benchmark_analysis_source(script, path=reference, reference=reference),
-            ScreenshotActiveRectDetection.AUTO,
-        ),
-    )
-
-    for source, detection in cases:
-        with pytest.raises(SystemExit, match="selection-domain token is required"):
-            script._require_selection_domain_for_analysis_cache_identity(
-                selection_domain=None,
-                video_paths=[reference, configured_reference],
-                analysis_source=source,
-                active_rect_detection=detection,
-            )
-
-
-def test_benchmark_script_uses_configured_generated_dir_for_default_cache(tmp_path: Path) -> None:
-    script = _load_benchmark_script()
-
-    assert (
-        script._resolve_config_path(tmp_path, "custom-generated") == tmp_path / "custom-generated"
-    )
-
-
-@pytest.mark.parametrize(
-    "sources",
-    [
-        {"analysis_source": "fastest"},
-        {"match_fps": "assume_reference"},
-    ],
-)
-def test_benchmark_script_rejects_unsupported_production_contexts(
-    tmp_path: Path,
-    sources: dict[str, str],
-) -> None:
-    script = _load_benchmark_script()
-    input_dir = tmp_path / "comparison_videos"
-    input_dir.mkdir()
-    source = input_dir / "source.mkv"
-    source.write_bytes(b"source")
-    config = ConfigSchema.model_validate({"sources": sources})
-
-    with pytest.raises(SystemExit):
-        script._resolve_benchmark_analysis_source_path(
-            input_dir=input_dir,
-            input_paths=[source],
-            config=config,
-        )
-
-
-def _benchmark_analysis_source(
-    script: ModuleType,
-    *,
-    path: Path,
-    reference: Path,
-    effective_fps: Fraction | None = None,
-    overrides: dict[Path, SourceOverrideConfig] | None = None,
-) -> Any:
-    return script.BenchmarkAnalysisSource(
-        path=path,
-        ordered_paths=(reference,) if path == reference else (reference, path),
-        effective_fps=effective_fps,
+def test_nondefault_domain_requires_explicit_selection_token(tmp_path: Path) -> None:
+    script = _load_script()
+    video = tmp_path / "clip.mkv"
+    source = script.BenchmarkAnalysisSource(
+        path=video,
+        ordered_paths=(video,),
+        effective_fps=Fraction(24),
         active_rect=script.BenchmarkActiveRect(
             rect=None,
             source="full-frame",
             detection_mode="aspect_ratio",
         ),
-        overrides_by_path={} if overrides is None else overrides,
+        overrides_by_path={},
     )
 
+    with pytest.raises(SystemExit, match="selection-domain"):
+        script._require_selection_domain_for_analysis_cache_identity(
+            selection_domain=None,
+            video_paths=(video,),
+            analysis_source=source,
+            active_rect_detection=ScreenshotActiveRectDetection.ASPECT_RATIO,
+        )
 
-def _load_benchmark_script() -> ModuleType:
-    script_path = Path(__file__).resolve().parents[1] / "tools" / "benchmark_analysis_tiers.py"
-    spec = importlib.util.spec_from_file_location("benchmark_analysis_tiers_for_test", script_path)
-    assert spec is not None
+
+def test_main_writes_atomic_production_report(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    script = _load_script()
+    reference = tmp_path / "reference.mkv"
+    reference.write_bytes(b"source")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("", encoding="utf-8")
+    output = tmp_path / "report.json"
+    source = script.BenchmarkAnalysisSource(
+        path=reference,
+        ordered_paths=(reference,),
+        effective_fps=None,
+        active_rect=script.BenchmarkActiveRect(
+            rect=None,
+            source="full-frame",
+            detection_mode="aspect_ratio",
+        ),
+        overrides_by_path={},
+        source_frame_count=20,
+        source_fps=Fraction(24),
+    )
+    quality_metrics = _metrics(mode="quality", start=0, end=20, source_frame_count=20)
+    sampled = tuple(
+        frame
+        for burst in plan_performance_bursts(window_start=0, window_end_exclusive=20)
+        for frame in range(burst.start, burst.end_exclusive)
+    )
+    performance_metrics = _metrics(
+        mode="performance",
+        start=0,
+        end=20,
+        source_frame_count=20,
+        sampled=sampled,
+    )
+    config = ConfigSchema().model_copy(
+        update={
+            "analysis": AnalysisConfig(
+                random_frame_count=0,
+                dark_frame_count=1,
+                bright_frame_count=1,
+                motion_frame_count=1,
+                dark_quantile=0.2,
+                bright_quantile=0.8,
+            )
+        }
+    )
+    quality_selection = _selection(dark=[0], bright=[19], motion=[18])
+    performance_selection = _selection(dark=[1], bright=[11], motion=[11])
+    monkeypatch.setattr(script, "load_config", lambda _path: config)
+    monkeypatch.setattr(script, "_resolve_benchmark_analysis_source", lambda **_kwargs: source)
+    monkeypatch.setattr(
+        script, "_source_index_facts", lambda _paths: {reference.as_posix(): {"detected": True}}
+    )
+    monkeypatch.setattr(
+        script,
+        "_run_benchmark",
+        lambda **_kwargs: (
+            _aggregate(script, quality_metrics, quality_selection, "quality", 2.0),
+            _aggregate(script, performance_metrics, performance_selection, "performance", 1.0),
+        ),
+    )
+    monkeypatch.setattr(script, "_probe_source_facts", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(script, "_git_provenance", lambda _root: {"available": True})
+
+    result = script.main(
+        [
+            "--root",
+            str(tmp_path),
+            "--config",
+            str(config_path),
+            "--output",
+            str(output),
+            "--window-end-exclusive",
+            "20",
+            "--skip-decode-baseline",
+            str(reference),
+        ]
+    )
+
+    assert result == 0
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["schema_version"] == 2
+    assert set(report["comparisons"]) == {"performance"}
+    comparison = report["comparisons"]["performance"]
+    assert comparison["sampling"]["sample_count"] == 5
+    assert comparison["comparisons"]["dark"]["overlap_count"] == 0
+    assert comparison["exact_selected_equality"]["dark"] is False
+    assert "quality_category_pool_retention" in comparison
+    assert comparison["timing_comparison"]["speedup"] == pytest.approx(2.0)
+    assert capsys.readouterr().out.strip() == output.as_posix()
+
+
+def _load_script() -> ModuleType:
+    root = Path(__file__).resolve().parents[1]
+    path = root / "tools" / "benchmark_analysis_tiers.py"
+    name = f"benchmark_analysis_tiers_test_{id(path)}_{len(sys.modules)}"
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    sys.modules[spec.name] = module
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
 
-def _tier_payload(
+def _metrics(
+    *,
     mode: str,
-    luminance: list[float],
-    motion: list[float],
-    selected_frames: list[int],
-) -> dict[str, Any]:
-    metrics = _metrics_payload(mode, luminance, motion)
-    selection = FrameSelection(
-        frames=selected_frames,
-        seed=0,
-        breakdown=SelectionBreakdown(
-            quantile_dark=selected_frames[:1],
-            quantile_bright=selected_frames[-1:],
-            motion=selected_frames,
+    start: int,
+    end: int,
+    source_frame_count: int,
+    sampled: tuple[int, ...] | None = None,
+    luminance: list[float] | None = None,
+    motion: list[float] | None = None,
+) -> FrameMetrics:
+    frames = tuple(range(start, end)) if sampled is None else sampled
+    values = [frame / 10 for frame in frames] if luminance is None else luminance
+    motion_values = [frame / 100 for frame in frames] if motion is None else motion
+    return FrameMetrics(
+        luminance=values,
+        motion=motion_values,
+        metadata=MetricsMetadata(
+            frame_count=len(frames),
+            fps=Fraction(24),
+            config_fingerprint="fp",
+            clips=[],
+            source_frame_count=source_frame_count,
+            metric_source_start=start,
+            metric_source_end_exclusive=end,
+            performance_mode=mode,
+            algorithm_id="algorithm",
+            metric_backend="vapoursynth_planestats",
         ),
+        sampled_source_frames=sampled,
     )
-    return {
+
+
+def _selection(
+    *,
+    dark: list[int] | None = None,
+    bright: list[int] | None = None,
+    motion: list[int] | None = None,
+) -> FrameSelection:
+    breakdown = SelectionBreakdown(
+        quantile_dark=[] if dark is None else dark,
+        quantile_bright=[] if bright is None else bright,
+        motion=[] if motion is None else motion,
+    )
+    return FrameSelection(
+        frames=sorted({*breakdown.quantile_dark, *breakdown.quantile_bright, *breakdown.motion}),
+        seed=42,
+        breakdown=breakdown,
+    )
+
+
+def _aggregate(
+    script: ModuleType,
+    metrics: FrameMetrics,
+    selection: FrameSelection,
+    mode: str,
+    seconds: float,
+) -> dict[str, Any]:
+    trial: dict[str, Any] = {
         "mode": mode,
-        "analyze_seconds": 0.1,
-        "cache_state": "unknown",
-        "cache_write_state": "not_attempted",
+        "analyze_seconds": seconds,
+        "compute_pipeline_seconds": seconds,
+        "selection_seconds": 0.01,
+        "trial_seconds": seconds,
+        "process_cpu_seconds": seconds,
+        "cpu_to_wall_ratio": 1.0,
+        "peak_rss_bytes": None,
+        "cache_state": "miss",
+        "cache_write_state": "written",
         "phase_timings_seconds": {},
-        "selection_seconds": 0.0,
-        "trial_seconds": 0.1,
-        "process_cpu_seconds": 0.05,
-        "cpu_to_wall_ratio": 0.5,
-        "peak_rss_bytes": 1,
         "repetition": 0,
         "order_index": 0,
-        "metadata": {
-            "frame_count": len(luminance),
-            "performance_mode": mode,
-            "algorithm_id": f"{mode}-algorithm",
-            "metric_backend": "test",
-            "algorithm_identity": {},
-        },
-        "window": {"start_frame": 0, "end_frame_exclusive": len(luminance)},
-        "windowed_metrics": metrics,
+        "metrics": metrics,
         "selection": selection,
+        "metadata": script._metrics_metadata_json(metrics),
+        "sampling": script._sampling_json(metrics),
     }
-
-
-def _metrics_payload(
-    mode: str,
-    luminance: list[float],
-    motion: list[float],
-    *,
-    metric_active_rect: MetricActiveRect | None = None,
-    active_rect_source: str = "full-frame",
-    active_rect_detection_mode: str = "aspect_ratio",
-) -> FrameMetrics:
-    return FrameMetrics(
-        luminance=luminance,
-        motion=motion,
-        metadata=MetricsMetadata(
-            frame_count=len(luminance),
-            fps=Fraction(24, 1),
-            config_fingerprint="fingerprint",
-            clips=[ClipIdentity(path="clip.mkv", size=1, mtime=1.0)],
-            performance_mode=mode,
-            algorithm_id=f"{mode}-algorithm",
-            metric_backend="test",
-            algorithm_identity_json="{}",
-            metric_active_rect=metric_active_rect,
-            active_rect_source=active_rect_source,
-            active_rect_detection_mode=active_rect_detection_mode,
-        ),
-    )
+    return cast(dict[str, Any], script._aggregate_tier_trials([trial]))
