@@ -249,7 +249,7 @@ step advances the ledger.
 | 3B. Final-selection summary | Completed | `1402634` | 29 focused selection-report/lifecycle/contract tests and full gate passed; independent review found no actionable issues | Continue to Unit 4 |
 | 4. Run outcomes and history | Completed | `78d1adb` | Focused persistence/lifecycle/CLI/Windows proof and full gate passed; independent review U4-001 through U4-007 accepted, fixed, closed, and reverified | Continue to Unit 5 feasibility |
 | 5. Guarded safe rerun | Deferred / accepted | Deferral evidence and acceptance record in `fbbf173` under [Reviewed feasibility outcome (accepted 2026-07-14)](#reviewed-feasibility-outcome-accepted-2026-07-14) | Full feasibility gate and independent review accepted U5F-001 through U5F-005; clean rollback verified | Reevaluate only with an approved internal config-injection contract and revised proof |
-| 6A. Wizard product-contract gate | Ready | — | Dependency promoted by accepted Unit 5 deferral | Claim Unit 6A design gate |
+| 6A. Wizard product-contract gate | Verified / awaiting integration | — | Plan-only structural proof passed; independent review U6A-001 through U6A-007 accepted, revised, closed, and returned APPROVABLE with no new findings | Commit the reviewed durable specification |
 | 6B. Wizard implementation | Pending approved Unit 6A | — | — | Wait |
 | 7. Report interaction design gate | Pending Unit 6B | — | — | Wait |
 | 8. Magnifier and pixel inspector | Pending approved Unit 7 | — | — | Wait |
@@ -673,6 +673,300 @@ or an untracked artifact is not a sufficient cross-session contract.
 Do not ship vague labels such as "best" or "high quality" without showing their
 concrete consequences. Do not invent built-in presets that silently diverge from
 the existing preset merge contract.
+
+### Unit 6A wizard interaction specification
+
+Status: independently reviewed and approvable; maintainer approval is required
+before Unit 6B.
+
+Review record (2026-07-14): U6A-001 through U6A-007 were accepted, resolved in the
+durable contract, and confirmed closed by the same read-only reviewer after material
+revision. Closure review found no directly introduced issue and returned
+`APPROVABLE`. Residual TTY, hostile-environment, Windows portable, raw-TOML,
+redaction, and atomic-failure proof belongs to Unit 6B.
+
+#### Intent and ownership
+
+`wizard` becomes a goal-oriented editor for frame-selection configuration. It does
+not run comparisons, probe media, create a second preset system, or ask users to
+choose an unexplained quality tier. Guided goals are code-owned, typed, partial
+patches with one wizard owner. They are not saved presets and never appear in
+`preset list`; user-created presets remain exclusively owned by the existing
+`config.presets` merge/save contract.
+
+Unit 6B adds no command, option, or `ConfigSchema` field. The selected config path,
+path-containment rules, exact Windows portable state-config exception, human output
+streams, and standard typed-error adapter remain authoritative. The wizard uses the
+existing defaults, config validation/deep-merge, atomic text writer, deterministic
+input discovery, and source-selection owners. A lightweight owner may be extracted
+only if needed to reuse filename discovery without importing a runtime-heavy module;
+it must not duplicate extension, ordering, or selector policy.
+
+The redesign intentionally removes the current slow.pics visibility/deletion and
+TMDB-key prompts. First use explicitly writes `slowpics.auto_upload = false` as a
+file-level safety baseline. Environment settings have higher precedence and can
+still enable publishing when a later run starts, so the wizard states that caveat
+rather than promising effective publishing is disabled. Existing publishing values
+and secrets are preserved but never displayed. Publishing setup remains available
+through the documented config/environment and preset surfaces; Unit 6B updates the
+current CLI authority and README in the same pass so this removal is not silent.
+
+The wizard command owns a typed `InputError` with code `FC-3017` for its interactive-
+terminal precondition, either beside the wizard or in the existing cohesive CLI
+error owner. It uses the standard error adapter; Unit 6B does not create a parallel
+plain-text error path. The existing config-loader owner is extended with the
+smallest raw-payload validation seam needed by this workflow. That seam redacts all
+Pydantic `input` values before constructing an `FC-1003` error so invalid secret-
+bearing config cannot be echoed by the wizard.
+
+#### Guided goal contract
+
+The prompt is `What do you want to compare?` and shows consequences before input.
+The numbered choices and exact partial patches are:
+
+| Choice | Exact `analysis` patch | Consequence shown before selection |
+| --- | --- | --- |
+| `1. Random spot check` | `user_frames = []`, `random_frame_count = 10`, `dark_frame_count = 0`, `bright_frame_count = 0`, `motion_frame_count = 0` | Select 10 deterministic random frames using the configured seed. This does not run the luminance/motion metrics scan. |
+| `2. Dark, bright, and motion coverage` | `user_frames = []`, `random_frame_count = 4`, `dark_frame_count = 2`, `bright_frame_count = 2`, `motion_frame_count = 2`, `performance_mode = "quality"` | Request 10 frames: 4 random, 2 dark, 2 bright, and 2 high-motion. This overrides `performance` mode, scans full-resolution luma for every eligible frame, can choose different frames than the 25%-sampled performance mode, and can take substantially longer. |
+| `3. Specific frame numbers` | `user_frames = <validated list>`, all four automatic counts `= 0` | Use only the listed zero-based frame numbers. This does not run the luminance/motion metrics scan. |
+
+When an existing config is loaded, prepend `0. Keep current frame selection`. It is
+a true no-op: every `analysis` field remains unchanged. It is the default existing-
+config choice. First use defaults to `Random spot check`; it does not show the no-op
+choice because there is no prior user selection to preserve.
+
+`Specific frame numbers` accepts one comma-separated list of 1–100 base-10,
+non-negative integers, for example `0, 24, 120`. Empty entries, signs other than an
+optional leading `+`, non-integers, negative values, and duplicates are rejected with
+a concise inline explanation and the same prompt is repeated. Persist the accepted
+values in ascending order. Validation does not probe clip length; out-of-range frame
+handling remains the existing run-time selection contract and is stated in the
+prompt as `Frame availability is checked when the comparison runs.`
+
+Every goal patch leaves `random_seed`, ignore windows, quantiles, and all config
+sections outside the listed fields unchanged. The coverage goal deliberately sets
+`performance_mode = "quality"`; the other two goals preserve the current performance
+mode because they do not request metric selectors.
+
+#### Startup, config preservation, and candidate construction
+
+The operation order is fixed:
+
+1. Resolve and contain the selected config destination before reading config or
+   prompting. Preserve the exact installed Windows portable exception.
+2. Require interactive stdin and stdout. If either is not a TTY, fail before config
+   load, prompts, or writes with input exit code 4 and stdout empty. Standard-adapter
+   stderr must contain the stable semantic fragments
+   `[FC-3017]`, `Wizard requires an interactive terminal.`, and
+   `Run frame-compare wizard from a terminal; edit the selected TOML file directly`
+   ` for automation.` Styling, the standard `✗` marker, indentation, and color follow
+   the shared adapter and are not separate literal-copy contracts.
+3. If the selected file exists, parse and validate it before prompting. TOML,
+   schema, or contained-path failure uses the current typed config/input error and
+   leaves the file byte-for-byte unchanged. Wizard validation retains error code,
+   locations, types, messages, hint, stream, and exit behavior but replaces every
+   raw Pydantic `input` detail with `<redacted>`. If the file does not exist, start
+   from repository `ConfigSchema` defaults without reading the repository template
+   as a second defaults source, and add the explicit file patch
+   `slowpics.auto_upload = false`.
+4. Keep the parsed existing TOML payload as the persistence base. Apply only the
+   confirmed partial patches to that payload, then validate the effective candidate
+   against defaults plus the complete payload. This prevents environment-only
+   values or secrets from being materialized on disk, preserves unrelated supported
+   and unknown TOML keys, and avoids serializing a duplicate full defaults document.
+   Existing comments, whitespace, quoting style, and key order need not be preserved.
+   Every unedited parsed TOML value, type, explicit key presence, table/array
+   membership, date/time value, and unknown-root entry must be preserved. The current
+   `prepare_toml_payload` sanitizer must not process an existing raw payload because
+   it drops explicit empty strings and unsupported-but-valid raw structures.
+
+No prompt mutates the file. Candidate state remains in memory until the final
+confirmation. Environment-provided secrets may influence a later `run`, but the
+wizard neither displays nor persists values absent from the selected file.
+
+#### Input directory and reference flow
+
+Prompt `Input directory` with the current configured value, or the repository
+default on first use. Resolve relative values against `--root`; external media
+directories remain allowed. A missing or non-directory value prints
+`Input directory does not exist or is not a directory.` and repeats the prompt.
+
+After a valid directory is chosen, perform filename-only discovery with the current
+supported extensions and deterministic case-fold/exact-name ordering. Do not probe,
+open, hash, or read media contents.
+
+- Canonical `NoVideosFoundError`/`FC-3001` is caught only at this wizard boundary and
+  converted to the zero-file branch; discovery semantics are not reimplemented.
+- Zero supported files: print `No supported video files found; reference selection`
+  ` is unchanged.` Preserve an existing `sources.reference`; omit it on first use.
+- One supported file: list its relative filename. First use offers `Automatic`
+  (default, no explicit reference) and that filename. Existing config offers `Keep`
+  (default), `Automatic`, and the filename.
+- Two or more supported files: list every relative filename in discovery order.
+  First use offers `Automatic (first discovered: <name>)` as the default plus every
+  filename. Existing config first offers `Keep current: <selector>` as the default,
+  then `Automatic (first discovered: <name>)` and every filename.
+
+For a non-empty set, invoke canonical `resolve_source_selection` once with automatic
+reference before presenting the reference menu. A `DuplicateSourceStemError` fails
+through its existing typed input contract before the reference prompt or write;
+the wizard does not invent a second duplicate policy. `Keep` is a no-op even when
+the current selector does not match a presently discovered file, but the menu and
+final review warn `Current reference does not match the discovered files; a run may`
+` fail until the files or selector change.` `Automatic` removes the explicit
+`sources.reference` key. A filename choice stores its input-relative POSIX name and
+is revalidated through canonical source selection before review. Invalid menu input
+repeats without changing candidate state. Other discovery/selection failures use
+their existing typed input errors and leave the config unchanged.
+
+#### Review, confirmation, cancellation, and writes
+
+Before confirmation, validate the full candidate and print this stable semantic
+review to stdout:
+
+```text
+Review configuration changes
+  Config: <resolved selected config path>
+  Input directory: <old or default> -> <new>          # only when changed/new
+  Reference: <old or automatic> -> <new>              # only when changed/new
+  Frame selection: <old summary> -> <goal summary>     # only when changed/new
+  Metric scan: disabled|quality|performance
+  Publishing settings: file default disabled|preserved; environment may override at run time
+  Other settings: preserved
+  Sensitive values: preserved and hidden              # existing secret keys only
+Write these changes? [y/N]:
+```
+
+The goal summary names the exact counts or explicit frame list; it never says only
+`fast`, `best`, or `high quality`. The review includes only changed/new fields plus
+the two preservation statements. Secret values, lengths, prefixes, URLs, and
+environment presence are never printed. If nothing changed, print
+`No configuration changes. Configuration was not written.` to stderr and exit 0
+without asking for write confirmation.
+
+Final confirmation defaults to `No`. A `No` response prints
+`Canceled; configuration unchanged.` to stderr and exits 0. Ctrl-C, Typer abort, or
+EOF at every prompt boundary prints exactly `Canceled; configuration unchanged.` to
+stderr and exits 130. Validation errors caused by a single prompt value repeat that
+prompt. A candidate-wide invariant failure uses the typed config error, exits 2,
+redacts every raw input detail, and does not write.
+
+Only `Yes` calls the existing atomic text writer once. Success prints
+`Configuration written: <resolved path>` to stderr and exits 0. Serialization,
+directory creation, permission, replacement, or fsync failure uses the existing
+`ConfigWriteError`/exit-2 contract. Write, flush, file-fsync, mode-preservation, and
+replacement failures before a successful `os.replace` leave an existing target
+byte-for-byte unchanged. Temporary-file cleanup is best effort: cleanup failure may
+leave the hidden sibling temp file and is attached as a note to the original error.
+The contract does not claim parent-directory fsync or rollback after a successful
+replace.
+
+#### Representative terminal transcripts
+
+First use with multiple clips:
+
+```text
+$ frame-compare wizard
+Input directory [comparison_videos]:
+Found 3 video files: Encode-A.mkv, Encode-B.mkv, Reference.mkv
+Reference:
+  1. Automatic (first discovered: Encode-A.mkv)
+  2. Encode-A.mkv
+  3. Encode-B.mkv
+  4. Reference.mkv
+Select [1]: 4
+What do you want to compare?
+  1. Random spot check — 10 deterministic random frames; no metrics scan
+  2. Dark, bright, and motion coverage — 4 random + 2 dark + 2 bright + 2 motion; full-resolution quality scan of every eligible frame (overrides 25%-sampled performance mode and can take substantially longer)
+  3. Specific frame numbers — only the zero-based frames you enter; no metrics scan
+Select [1]: 2
+Review configuration changes
+  Config: <root>/config/config.toml
+  Input directory: <not configured> -> comparison_videos
+  Reference: automatic -> Reference.mkv
+  Frame selection: <default> -> 4 random + 2 dark + 2 bright + 2 motion
+  Metric scan: quality
+  Publishing settings: file default disabled; environment may override at run time
+  Other settings: preserved
+Write these changes? [y/N]: y
+Configuration written: <root>/config/config.toml
+```
+
+Existing config with a secret and specific frames:
+
+```text
+$ frame-compare wizard
+Input directory [comparison_videos]:
+Found 2 video files: Encode.mkv, Reference.mkv
+Reference [Keep current: Reference.mkv]:
+What do you want to compare?
+  0. Keep current frame selection
+  1. Random spot check — 10 deterministic random frames; no metrics scan
+  2. Dark, bright, and motion coverage — 4 random + 2 dark + 2 bright + 2 motion; full-resolution quality scan of every eligible frame (overrides 25%-sampled performance mode and can take substantially longer)
+  3. Specific frame numbers — only the zero-based frames you enter; no metrics scan
+Select [0]: 3
+Frame numbers (comma-separated): 0, 24, 120
+Frame availability is checked when the comparison runs.
+Review configuration changes
+  Config: <root>/config/config.toml
+  Frame selection: 10 random -> frames 0, 24, 120
+  Metric scan: disabled
+  Publishing settings: preserved; environment may override at run time
+  Other settings: preserved
+  Sensitive values: preserved and hidden
+Write these changes? [y/N]: n
+Canceled; configuration unchanged.
+```
+
+Non-interactive use:
+
+```text
+$ printf '\n' | frame-compare wizard
+✗ Error [FC-3017]: Wizard requires an interactive terminal.
+  Hint: Run frame-compare wizard from a terminal; edit the selected TOML file directly for automation.
+# exit 4; stdout empty; no file read or written
+```
+
+#### Unit 6B behavior-first test matrix
+
+| Area | Required public/integration proof |
+| --- | --- |
+| Goal patches | Each numbered choice yields exactly its listed partial patch and consequence summary; existing no-op preserves every analysis field; specific frames cover retry, sorting, duplicates, negatives, empty entries, and 100/101 bounds. |
+| First use | Missing selected config starts from schema defaults, supports zero/one/many discovered files, writes only the confirmed minimal payload including explicit `slowpics.auto_upload = false`, never claims to override the environment, and proves effective environment precedence with a hostile sentinel. |
+| Existing config | Every unrelated parsed value/type/key, unknown TOML section, empty string, date/time, array-of-tables, dotted/nested table, relative path, explicit value, and sentinel secret survives; environment-only sentinels are neither shown nor persisted; invalid existing TOML/schema/path redacts all raw validation inputs and fails before prompts. |
+| Source flow | Canonical extension/order/selector owners are reused; FC-3001-only empty adaptation, zero/one/many, case-fold ties, duplicate-stem rejection before reference prompting, nested relative names if supported by the owner, stale-current warning, automatic removal, explicit reference, discovery error, and external input directory are covered without probe calls. |
+| Review/privacy | Semantic diff contains only changes and preservation summaries; no secret value/length/prefix/URL/environment fact appears in stdout, stderr, exception text, or snapshots. |
+| Cancellation | Final `No`, Ctrl-C/abort, and EOF at each prompt boundary emit the exact cancellation line, never call the writer, and preserve existing bytes; no-op exits 0 without confirmation/write. |
+| Terminal/errors | stdin and stdout TTY combinations, `NO_COLOR`, wizard-owned FC-3017/exit 4 through standard-adapter semantic fragments, redacted typed parse/validation/path errors, separate stdout/stderr, and absence of unsupported `--verbose` advice are asserted. |
+| Persistence | Exactly one atomic write occurs after `Yes`; success, parent creation, serialization, permission, pre-replace file-fsync/replace failure, old-target preservation, successful-replace boundary, best-effort temp cleanup, and cleanup-failure note are covered without claiming parent-directory durability. |
+| Platform/architecture | Explicit contained config, rejected escaping config, exact Windows portable state path, command help/lazy-import sentinels, no media probe/runtime-heavy import, preset isolation, CLI authority/README transcript drift, full gate, and import contracts pass. |
+
+Tests assert semantic prompt fragments and parsed TOML, not complete Rich/terminal
+snapshots. CliRunner remains sequential; subprocess/entrypoint tests use explicit
+timeouts and controlled TTYs.
+
+#### Files, non-goals, rollback, and stops
+
+Expected Unit 6B owners are the existing wizard command/entry wiring and wizard-
+owned FC-3017 type, the smallest extension of the existing config loader/merge/write
+owner needed to preserve raw values and redact invalid inputs without persisting
+environment values, focused wizard/config/atomic-boundary tests, and the current
+CLI/README authority. Split `wizard_command.py` only if measured cohesion requires
+it. Do not change the global error formatter, preset semantics, schema fields, run
+flags, runtime orchestration, media probing, report UX, or comparison algorithms.
+
+Rollback restores the prior wizard implementation and its authority text; because
+the new flow writes ordinary valid config through the existing atomic owner, no
+migration or user-file deletion is required.
+
+Stop Unit 6B before coding or integration if preserving an existing file requires
+persisting environment-only values, secrets cannot be redacted from every review or
+error path, canonical filename/reference reuse requires a runtime-heavy import or a
+second selector policy, atomic replacement cannot preserve old bytes, the Windows
+portable exception would diverge, or implementation requires a new command, flag,
+schema field, preset engine, dependency, or media probe. Any changed goal name,
+field patch, consequence, prompt ordering, or stream/exit behavior requires renewed
+maintainer approval in the durable Unit 6A contract.
 
 ### Recommended implementation contract
 
