@@ -316,10 +316,12 @@ Use the lightest workflow that still protects the outcome:
 
 Delegate independent read-heavy exploration, documentation research, log analysis,
 or long waits when useful. Parallel writes require disjoint files and an approved
-integration plan. A Sol planner may hand an explicitly eligible, low-ambiguity,
-cheap-to-verify unit to `worker_luna`; the packet must name exact files, invariants,
-verification, and stop conditions, and the controller must review and reverify the
-result. Keep delegation depth shallow.
+integration plan. A bounded unit with frozen ownership and contracts may use
+`worker_sol_low` when it still needs repository comprehension or local coding
+judgment. A Sol planner may hand an explicitly eligible, low-ambiguity,
+cheap-to-verify unit to `worker_luna`. Both packets must name exact files,
+invariants, verification, and stop conditions; the controller reviews and
+reverifies the result. Keep delegation depth shallow.
 
 For genuinely large multi-unit work, explicitly use the
 `large-task-orchestration` skill. The main task remains the authoritative
@@ -338,9 +340,10 @@ closeout. Passing tests are required evidence, not the full definition of done.
 - Correctness first: preserve documented CLI/config behavior, exit codes, generated
   output contracts, filesystem effects, and release/runtime behavior unless the task
   explicitly changes them.
-- Architecture fit: keep behavior in the current owner module when possible, respect
-  `importlinter.ini`, and avoid growing hotspots when a smaller adjacent owner can
-  carry the responsibility.
+- Architecture fit: keep behavior in the current owner when it shares the same
+  invariants, state, lifecycle, and reason to change. Extract only a distinct
+  present-day responsibility; respect `importlinter.ini`, and reject both hotspot
+  accretion and line-count-driven pass-through abstractions.
 - Boundary hygiene: keep config/env interpretation, filesystem persistence, HTTP
   integrations, subprocess/runtime details, report generation, and packaging policy
   behind their documented owners.
@@ -351,6 +354,9 @@ closeout. Passing tests are required evidence, not the full definition of done.
   apply DRY where duplication is harmful, avoid premature abstractions, speculative
   options, dead code, debug leftovers, commented-out code, misleading names, and
   unnecessary indirection.
+- YAGNI: every new abstraction, option, fallback, retry, cache, or edge-case branch
+  must serve a current requirement, reachable input, observed failure, or real
+  trust/runtime boundary. Do not encode hypothetical futures.
 - Compatibility restraint: do not add legacy bridges, compatibility shims, fallback API
   variants, or broad migration paths unless the maintainer explicitly approves them.
 - Test quality: prove behavior through public seams where practical, avoid brittle
@@ -436,6 +442,13 @@ Review should prioritize:
 
 Changes in `orchestration/coordinator.py`, `errors.py`, `services/report.py`, or packaging workflows should receive extra scrutiny because they are current hotspots or blast-radius multipliers.
 
+Production LOC is an architecture-attention signal, not a decomposition rule.
+Exclude generated assets. For a touched owner above 500 lines, inspect the full file
+and record `Owner | Existing responsibility | New behavior | Decision | Evidence`.
+For a touched owner above 800 lines, a named hotspot, or a composition root, require
+one fresh Sol-high architecture review. A cohesive owner may grow; a smaller file
+must still split when it gains a distinct responsibility.
+
 Review is risk-triggered, not universal ceremony. One independent final review is
 the default high-risk gate. Review a plan only when its seam or public contract is
 still expensive to get wrong. Do not require both same-reviewer closure and a fresh
@@ -477,5 +490,8 @@ Update or remove stale references immediately. Do not leave half-live commands i
 - Keep HTTP integrations inside `services.metadata`, `services.publishers`, or explicit diagnostics code.
 - Use existing atomic-write owners for config and cache persistence paths.
 - Preserve lazy CLI import boundaries that avoid importing VS-heavy modules at CLI import time.
-- Avoid adding new behavior directly into the hotspot files when a smaller adjacent module can own it cleanly.
+- Keep cohesive behavior with its current owner. When a hotspot gains a distinct
+  present-day responsibility, move that responsibility to one focused adjacent owner.
+- Do not create thin wrappers, speculative extension points, or extra modules solely
+  to satisfy a file-length threshold.
 - Do not add compatibility shims or legacy bridges unless explicitly requested.

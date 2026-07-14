@@ -50,8 +50,8 @@ Calibrate findings against Frame Compare's real surfaces:
 ## Invocation Behavior
 
 Run the global `repo-production-review` orchestrator. Use installed global specialist
-skills when available. Keep the review pass read-only; neither `worker` nor
-`worker_luna` participates.
+skills when available. Keep the review pass read-only; `worker`, `worker_sol_low`,
+and `worker_luna` do not participate.
 
 The final report must separate confirmed defects, inferred risks, subjective maintainability concerns, and insufficient-data items. Every material finding must include evidence, risk mechanism, severity, confidence, suggested verification, and remediation direction.
 
