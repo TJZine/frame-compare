@@ -249,8 +249,8 @@ step advances the ledger.
 | 3B. Final-selection summary | Completed | `1402634` | 29 focused selection-report/lifecycle/contract tests and full gate passed; independent review found no actionable issues | Continue to Unit 4 |
 | 4. Run outcomes and history | Completed | `78d1adb` | Focused persistence/lifecycle/CLI/Windows proof and full gate passed; independent review U4-001 through U4-007 accepted, fixed, closed, and reverified | Continue to Unit 5 feasibility |
 | 5. Guarded safe rerun | Deferred / accepted | Deferral evidence and acceptance record in `fbbf173` under [Reviewed feasibility outcome (accepted 2026-07-14)](#reviewed-feasibility-outcome-accepted-2026-07-14) | Full feasibility gate and independent review accepted U5F-001 through U5F-005; clean rollback verified | Reevaluate only with an approved internal config-injection contract and revised proof |
-| 6A. Wizard product-contract gate | Awaiting approval | Reviewed specification in `be32476` under [Unit 6A wizard interaction specification](#unit-6a-wizard-interaction-specification) | Plan-only structural proof passed; independent review U6A-001 through U6A-007 accepted, revised, closed, and returned APPROVABLE with no new findings | Maintainer: approve or reject the exact durable contract; Unit 6B waits |
-| 6B. Wizard implementation | Pending approved Unit 6A | — | — | Wait |
+| 6A. Wizard product-contract gate | Approved | Approved specification in `be32476` under [Unit 6A wizard interaction specification](#unit-6a-wizard-interaction-specification) | Plan-only structural proof passed; independent review U6A-001 through U6A-007 accepted, revised, closed, and returned APPROVABLE; maintainer approved 2026-07-14 | Continue to Unit 6B |
+| 6B. Wizard implementation | Ready | — | Dependency promoted by approved Unit 6A contract `be32476` | Claim Unit 6B implementation |
 | 7. Report interaction design gate | Pending Unit 6B | — | — | Wait |
 | 8. Magnifier and pixel inspector | Pending approved Unit 7 | — | — | Wait |
 | 9. Multi-clip grid | Pending Unit 8 | — | — | Wait |
@@ -676,8 +676,9 @@ the existing preset merge contract.
 
 ### Unit 6A wizard interaction specification
 
-Status: independently reviewed and approvable; maintainer approval is required
-before Unit 6B.
+Status: approved by the maintainer on 2026-07-14. Immutable design reference:
+`be32476`. Any change to a frozen goal, patch, consequence, prompt order, stream, or
+exit contract requires renewed durable approval before implementation continues.
 
 Review record (2026-07-14): U6A-001 through U6A-007 were accepted, resolved in the
 durable contract, and confirmed closed by the same read-only reviewer after material
