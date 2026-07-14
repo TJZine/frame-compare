@@ -254,8 +254,8 @@ step advances the ledger.
 | 7. Report interaction design gate | Approved | `43c8341` | Reviewed contract at [`2026-07-14-report-interaction-design-contract.md`](2026-07-14-report-interaction-design-contract.md); U7-002 through U7-007 closed; maintainer approved 2026-07-14 with U7-001 manual browser proof deferred to final-program validation | Continue to Unit 8 |
 | 8. Magnifier and pixel inspector | Completed | `d24f094` | 100 focused report tests and the canonical full gate passed; U8-R001 through U8-R007 plus controller async findings accepted/modified, fixed, closure-reviewed, and returned APPROVABLE; manual browser matrix remains deferred final-program validation debt | Continue to Unit 9 |
 | 9. Multi-clip grid | Completed | `d6c5fb0` | Focused Grid/Pixel/viewer harnesses and 104 focused report tests passed; canonical pyright/Ruff/Bandit/full-pytest/import-linter gate passed after fixes; U9-R001 through U9-R004 accepted, fixed, closure-reviewed, and returned APPROVABLE; manual browser matrix remains deferred final-program validation debt | Continue to Unit 10 |
-| 10. Local review state/export | Ready | — | Dependency promoted by completed Unit 9 implementation `d6c5fb0`; approved interaction contract `43c8341` | Claim Unit 10 implementation |
-| 11. Blind A/B feasibility/implementation | Pending Unit 10 | — | — | Wait |
+| 10. Local review state/export | Completed | `d3059e6` | 43 focused report tests and the canonical full gate passed; U10-R001 through U10-R007 plus controller merge-ceiling/CRLF findings accepted, fixed, closure-reviewed, and returned APPROVABLE; manual browser matrix remains deferred final-program validation debt | Continue to Unit 11 |
+| 11. Blind A/B feasibility/implementation | Ready | — | Dependency promoted by completed Unit 10 implementation `d3059e6`; approved interaction contract `43c8341` | Claim Unit 11 feasibility audit |
 
 ## 6. Package 1: CLI discoverability and input-folder opening
 
