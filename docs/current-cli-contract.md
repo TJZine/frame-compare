@@ -192,6 +192,50 @@ unchanged.
 
 ### Output Modes
 
+- `--dry-run` is a runtime-only planning mode. It loads and validates the effective
+  config and CLI options, validates the resolved configured input directory,
+  discovers supported source filenames, validates filename-based source selectors,
+  and exits before `RunRequest` construction or runner invocation.
+- `--dry-run` performs no doctor checks, FFmpeg/ffprobe or media probing, analysis,
+  alignment, cache reads or writes, run-folder reservation or metadata writes,
+  rendering or report generation, network metadata/publishing, browser or clipboard
+  action, or VSPreview launch. `--no-cache` and `--from-cache-only` are still
+  validated as mutually exclusive, but neither performs cache access.
+- `--dry-run` is incompatible with `--write-config` and `--diagnose-paths`. It
+  preserves the effective future run's existing `--json`, `--quiet`, interactive,
+  frame-selection, source-selector, and cache-option compatibility validation.
+- Human dry-run output renders the same typed plan as JSON. Normal human mode shows
+  the detailed plan; `--quiet` emits only a minimal source-count/no-side-effects
+  summary. `--dry-run --json` writes exactly one JSON document to stdout, and typed
+  errors retain the standard JSON error schema and stream placement.
+- Successful dry-run JSON has exactly these top-level keys:
+  `checks_not_performed`, `dry_run`, `input`, `outputs`, `publishing`, `reference`,
+  `runtime_facts`, and `selection`. Their exact nested fields are:
+  - `input`: `resolved_directory`, `source_filenames`
+  - `reference`: `configured_selector`, `resolved_filename`
+  - `selection`: `strategy`, `requested_user_frames`, `random_frame_count`,
+    `dark_frame_count`, `bright_frame_count`, `motion_frame_count`, `random_seed`,
+    `analysis_performance_mode`, `analysis_metrics_required`
+  - `outputs`: `screenshots`, `run_folders`, `report`,
+    `report_auto_open_configured`
+  - `publishing`: `slowpics_upload`, `slowpics_visibility`,
+    `copy_url_to_clipboard_configured`, `open_in_browser_configured`,
+    `create_url_shortcut_configured`, `webhook_configured`
+  - `runtime_facts`: `run_folder_name`, `final_selected_frames`, `clip_metadata`,
+    `output_dimensions`; each contains exactly `status`, `value`, and `reason`
+- `checks_not_performed` is the fixed ordered list `doctor`, `ffprobe_or_ffmpeg`,
+  `media_probe`, `analysis`, `alignment`, `cache_reads_or_writes`,
+  `run_folder_reservation_or_metadata_writes`, `render_or_report_generation`,
+  `network_publishing_or_metadata`, and `browser_clipboard_or_vspreview`.
+- The plan never dumps effective config. The resolved input directory is its only
+  deliberately reported absolute path. Source entries are filenames only. API keys,
+  webhook URLs, tokens, and other secret values are excluded; only
+  `webhook_configured` may reveal that a webhook-backed action is configured. The
+  five `*_configured` action fields report effective configuration only; they do
+  not claim that JSON, quiet, non-TTY, upload-result, or other runtime eligibility
+  gates will permit the action. Runtime-only facts remain `unknown` with null
+  values until their existing runtime owners could determine them. When run folders
+  are disabled, `run_folder_name` is the one known null fact.
 - `--json` writes a single JSON object to stdout and suppresses human-readable summaries.
 - In that JSON object, `slowpics_url` is the only machine-readable slow.pics
   result field. No copy/open/shortcut/webhook result fields are emitted.
@@ -904,6 +948,7 @@ The following `run` flags are runtime-only and do not persist through `--write-c
 - `--no-color`
 - `--write-config`
 - `--diagnose-paths`
+- `--dry-run`
 - `--quiet`
 - `--verbose`
 

@@ -6,6 +6,8 @@ from _pytest.monkeypatch import MonkeyPatch
 
 from frame_compare.cli.entry import app
 from frame_compare.cli.errors import ExitCode
+from frame_compare.cli.run_command import RunCliOptions, build_run_request_from_cli
+from frame_compare.config.overrides import CLIConfigOverrides, cli_config_overrides_from
 from frame_compare.config.schema import OverlayMode, ToneCurve, TonemapPreset
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
 
@@ -81,6 +83,52 @@ def test_run_builds_run_request_with_typed_choice_overrides(
     assert request.tm_preset == TonemapPreset.FILMIC
     assert request.tm_curve == ToneCurve.SPLINE
     assert request.overlay_mode == OverlayMode.DIAGNOSTIC
+
+
+def test_cli_and_runtime_share_the_complete_config_override_projection() -> None:
+    options = RunCliOptions(
+        root=Path("/workspace"),
+        config_path=Path("/workspace/config/config.toml"),
+        input_dir=Path("external-input"),
+        no_cache=True,
+        from_cache_only=False,
+        no_upload=True,
+        tm_preset=TonemapPreset.FILMIC,
+        tm_target_nits=203,
+        tm_curve=ToneCurve.SPLINE,
+        user_frames=[3, 5],
+        random_frame_count=7,
+        dark_frame_count=2,
+        bright_frame_count=1,
+        motion_frame_count=4,
+        seed=19,
+        overlay_mode=OverlayMode.DIAGNOSTIC,
+        skip_analysis=False,
+        skip_metadata=True,
+        force_interactive_alignment=True,
+        json_output=True,
+        no_color=True,
+        quiet=True,
+        verbose=False,
+    )
+    expected = CLIConfigOverrides(
+        input_dir=Path("external-input"),
+        tm_preset=TonemapPreset.FILMIC,
+        tm_target_nits=203,
+        tm_curve=ToneCurve.SPLINE,
+        user_frames=[3, 5],
+        random_frame_count=7,
+        dark_frame_count=2,
+        bright_frame_count=1,
+        motion_frame_count=4,
+        seed=19,
+        overlay_mode=OverlayMode.DIAGNOSTIC,
+        no_upload=True,
+        force_interactive_alignment=True,
+    )
+
+    assert cli_config_overrides_from(options) == expected
+    assert build_run_request_from_cli(options).cli_config_overrides() == expected
 
 
 def test_run_builds_run_request_with_input_dir(monkeypatch: MonkeyPatch) -> None:

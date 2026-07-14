@@ -311,6 +311,19 @@ class TestDiscoverInputs:
         assert result[0].name == "A.mkv"
         assert result[1].name == "b.mkv"
 
+    def test_discover_inputs_uses_exact_name_to_break_casefold_ties(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        candidates = [tmp_path / "a.mkv", tmp_path / "A.mkv"]
+        monkeypatch.setattr(Path, "iterdir", lambda _path: iter(candidates))
+        monkeypatch.setattr(Path, "is_file", lambda path: path in candidates)
+
+        result = discover_inputs(tmp_path, ["*.mkv"])
+
+        assert [path.name for path in result] == ["A.mkv", "a.mkv"]
+
     def test_discover_inputs_matches_extensions_case_insensitive(self, tmp_path: Path) -> None:
         _create_video_files(tmp_path, "VIDEO.MKV")
         result = discover_inputs(tmp_path, ["*.mkv"])

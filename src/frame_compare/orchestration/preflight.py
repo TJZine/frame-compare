@@ -195,8 +195,8 @@ def discover_inputs(input_dir: Path, patterns: list[str] | None = None) -> list[
     except OSError as exc:
         raise InputDiscoveryError(input_dir, exc) from exc
 
-    # Stable ordering: case-insensitive lexicographic sort by filename
-    ordered = sorted(videos, key=lambda p: p.name.lower())
+    # Stable ordering: case-insensitive filename with an exact-name tie-breaker.
+    ordered = sorted(videos, key=lambda p: (p.name.casefold(), p.name))
     if not ordered:
         raise NoVideosFoundError(input_dir.resolve(), patterns=effective_patterns)
     return ordered
