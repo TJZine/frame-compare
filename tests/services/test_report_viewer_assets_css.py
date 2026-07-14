@@ -162,3 +162,34 @@ def test_viewer_css_covers_pixel_inspector_roi_lens_and_tabs() -> None:
     assert "min-height: 44px;" in coarse
     assert ".rv-pixel-lens" in reduced_motion
     assert ".rv-inspection-point" in reduced_motion
+
+
+def test_viewer_css_covers_deterministic_grid_and_mobile_cells() -> None:
+    css = get_css()
+    two = css_block(css, '.rv-grid[data-layout="two"] .rv-grid-cells')
+    three_wide = css_block(css, '.rv-grid[data-layout="three-wide"] .rv-grid-cells')
+    three_wrap = css_block(
+        css,
+        '.rv-grid[data-layout="three-wrap"] .rv-grid-cells,\n.rv-grid[data-layout="four"] .rv-grid-cells',
+    )
+    mobile = css_block(
+        css,
+        '.rv-grid[data-layout="single"] .rv-grid-cells,\n.rv-grid[data-layout="mobile"] .rv-grid-cells',
+    )
+    image = css_block(css, ".rv-grid-image")
+    coarse = css_block(css, "@media (pointer: coarse)")
+
+    assert "repeat(2, minmax(0, 1fr))" in two
+    assert "repeat(3, minmax(0, 1fr))" in three_wide
+    assert "repeat(2, minmax(0, 1fr))" in three_wrap
+    assert "grid-template-columns: minmax(0, 1fr);" in mobile
+    assert "object-fit: contain;" in image
+    assert "var(--grid-pan-x, 0px)" in image
+    assert "scale(var(--grid-zoom-level, 1))" in image
+    assert "text-overflow: ellipsis;" in css_block(css, ".rv-grid-label-text")
+    assert "border-color: var(--accent);" in css_block(css, '.rv-grid-cell[data-reference="true"]')
+    assert "var(--annotation)" in css_block(css, '.rv-grid-cell[data-active="true"]')
+    assert "overflow: hidden;" in css_block(css, ".rv-grid")
+    assert "#btn-grid-prev" in coarse
+    assert "[data-grid-retry]" in coarse
+    assert "min-width: 44px;" in coarse

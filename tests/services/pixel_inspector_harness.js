@@ -75,6 +75,7 @@ assert.equal(model.anchorIndexForMode('slider', { ...anchorOptions, clientX: 251
 assert.equal(model.anchorIndexForMode('overlay', anchorOptions), 3);
 assert.equal(model.anchorIndexForMode('diff', anchorOptions), 1);
 assert.equal(model.anchorIndexForMode('blink', anchorOptions), 2);
+assert.equal(model.anchorIndexForMode('grid', { ...anchorOptions, gridClipIdx: 3 }), 3);
 
 assert.equal(model.gestureExceeded(0, 0, 6, 0), false);
 assert.equal(model.gestureExceeded(0, 0, 6.01, 0), true);
@@ -339,7 +340,12 @@ const integrationViewer = {
         rightClipIdx: 1,
         revealPercent: 50,
         pixelLensEnabled: false,
-        data: { clips: [{ label: 'Left' }, { label: 'Right' }] },
+        data: {
+            clips: [
+                { label: 'Left', resolution: [100, 50] },
+                { label: 'Right', resolution: [200, 100] },
+            ],
+        },
     },
     dom: {
         stage,
@@ -429,6 +435,29 @@ integrationViewer.state.pixelLensEnabled = true;
 controller.render();
 assert.equal(lens.hidden, false);
 assert.equal(lensImage.dataset.source, 'right.png');
+
+integrationViewer.state.mode = 'grid';
+integrationViewer.gridView = {
+    entries() {
+        return [{
+            clipIdx: 1,
+            image: rightImage,
+            unavailable: false,
+            width: 200,
+            height: 100,
+        }];
+    },
+    clipIndexFromTarget() { return 1; },
+};
+controller.state.point = point(50, 25, 100, 50);
+controller.state.anchorClipIdx = 0;
+controller.state.locked = true;
+controller.render();
+roi.dispatch('pointerdown', rightPointer(301.5, 111.5));
+roi.dispatch('pointermove', rightPointer(310, 110));
+assert.equal(controller.state.anchorClipIdx, 0);
+assert.equal(controller.state.point.x, 55);
+roi.dispatch('pointercancel', rightPointer(310, 110));
 integrationViewer.state.inspectorOpen = false;
 controller.render();
 assert.equal(roi.hidden, true);
@@ -438,13 +467,14 @@ console.log(JSON.stringify({
     equalDimensions: true,
     mismatchedDimensions: true,
     renderedBoxBounds: true,
-    anchors: ['slider-left', 'slider-right', 'single', 'diff', 'blink'],
+    anchors: ['slider-left', 'slider-right', 'single', 'diff', 'blink', 'grid-cell'],
     gestureThreshold: model.MAX_GESTURE_DISTANCE,
     decodedPixelLensGeometry: true,
     blinkForwardPlacement: true,
     composedGestureThreshold: true,
     contextTimerCancelled: true,
     directRoiCancelPreservedPoint: true,
+    pagedGridDragRetainedAnchor: true,
     nudgeBounds: true,
     inactiveUiCleared: true,
     samplerRecoveredAfterTaint: true,

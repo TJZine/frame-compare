@@ -465,9 +465,19 @@ Export tabs; fullscreen support; viewport pan, zoom, actual/width/height fit, re
 and adjacent-frame preloading. `assets/pixel_inspector.js` is the focused owner for
 inspection-point acquisition, normalized cross-size coordinate mapping, bounded
 decoded-display sampling through one offscreen 1x1 canvas, ROI lock/nudge state, and
-the optional 2x/4x/8x floating lens. `assets/viewer.js` composes that owner with the
-existing mode, pointer, viewport, alignment, and inspector state rather than owning
-duplicate coordinate conversions. Blink mode supports 0.3s/0.7s/1.2s speeds,
+the optional 2x/4x/8x floating lens. `assets/grid_view.js` owns the viewer-only Grid
+cell lifecycle: deterministic responsive 2/3/4 layouts, payload-order pages of at
+most four images (one below the mobile reflow boundary), loading/missing/retry
+presentation, and visible-range controls. It consumes the viewer's single viewport
+state and the pixel inspector's normalized point rather than duplicating either. In
+Grid mode the shared pan fields represent normalized image-box translation and each
+cell derives its CSS-pixel transform from its own contained image dimensions; the
+viewer converts those fields at the Grid/pair-mode boundary so mixed-aspect cells keep
+one normalized viewport center without changing pair-mode persistence semantics.
+`assets/viewer.js` composes those owners with the existing mode, pointer, viewport,
+alignment, and inspector state rather than owning duplicate coordinate conversions
+or grid mount policy. Grid remains outside the public report default-mode payload
+enum and does not preload adjacent grid pages. Blink mode supports 0.3s/0.7s/1.2s speeds,
 pause/resume, keyboard speed controls, and reduced-motion handling that enters Blink
 paused. Browser-local
 viewer state is scoped by report identity and persists current frame, view mode,

@@ -1048,4 +1048,18 @@ const summary = {};
     };
 }
 
+{
+    const { viewer } = loadViewer({
+        clipCount: 4,
+        savedState: { mode: 'grid' },
+    });
+    assert.equal(viewer.validPayloadMode('grid'), false);
+    assert.equal(viewer.validMode('grid'), true);
+    assert.equal(viewer.state.mode, 'grid');
+    summary.gridModeBoundary = {
+        publicPayloadRejected: true,
+        internalStoredModeRestored: true,
+    };
+}
+
 console.log(JSON.stringify(summary));

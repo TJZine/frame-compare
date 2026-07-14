@@ -53,6 +53,7 @@ const PixelInspector = (() => {
     }
 
     function anchorIndexForMode(mode, options) {
+        if (mode === 'grid' && Number.isInteger(options.gridClipIdx)) return options.gridClipIdx;
         if (mode === 'overlay') return options.activeClipIdx;
         if (mode === 'diff') return options.leftClipIdx;
         if (mode === 'blink') return options.blinkVisibleClipIdx;
@@ -192,6 +193,9 @@ const PixelInspector = (() => {
         }
 
         function currentEntries() {
+            if (viewer.state.mode === 'grid') {
+                return viewer.gridView?.entries?.() || [];
+            }
             if (viewer.state.mode === 'overlay') {
                 return [{ clipIdx: viewer.state.activeClipIdx, image: viewer.dom.leftImg }];
             }
@@ -208,23 +212,49 @@ const PixelInspector = (() => {
             return currentEntries().find(entry => entry.clipIdx === index) || null;
         }
 
+        function entryWidth(entry) {
+            return Number(entry?.image?.naturalWidth) || Number(entry?.width);
+        }
+
+        function entryHeight(entry) {
+            return Number(entry?.image?.naturalHeight) || Number(entry?.height);
+        }
+
+        function clipDimensions(index) {
+            const resolution = viewer.state.data?.clips?.[index]?.resolution;
+            return {
+                width: Number(resolution?.[0]),
+                height: Number(resolution?.[1]),
+            };
+        }
+
         function placementEntry() {
             if (!state.point || state.anchorClipIdx === null) return null;
             const clipIdx = viewer.state.mode === 'blink'
                 ? viewer.state.activeClipIdx
                 : state.anchorClipIdx;
-            const entry = entryForClip(clipIdx);
-            const point = clipIdx === state.anchorClipIdx
+            const visibleEntries = viewer.state.mode === 'grid' ? currentEntries() : [];
+            const entry = entryForClip(clipIdx) || (
+                viewer.state.mode === 'grid'
+                    ? visibleEntries.find(candidate => !candidate.unavailable) || visibleEntries[0]
+                    : null
+            );
+            const placementClipIdx = entry?.clipIdx ?? clipIdx;
+            const point = placementClipIdx === state.anchorClipIdx
                 ? state.point
                 : mapNormalizedPoint(
                     state.point,
-                    Number(entry?.image?.naturalWidth),
-                    Number(entry?.image?.naturalHeight),
+                    entryWidth(entry),
+                    entryHeight(entry),
                 );
             return entry && point ? { ...entry, point } : null;
         }
 
-        function currentAnchorIndex(clientX, blinkVisibleClipIdx = viewer.state.activeClipIdx) {
+        function currentAnchorIndex(
+            clientX,
+            blinkVisibleClipIdx = viewer.state.activeClipIdx,
+            gridClipIdx = null,
+        ) {
             return anchorIndexForMode(viewer.state.mode, {
                 activeClipIdx: viewer.state.activeClipIdx,
                 leftClipIdx: viewer.state.leftClipIdx,
@@ -233,6 +263,7 @@ const PixelInspector = (() => {
                 sliderRect: viewer.sliderCanvasRect(),
                 revealPercent: viewer.state.revealPercent,
                 clientX,
+                gridClipIdx,
             });
         }
 
@@ -274,8 +305,8 @@ const PixelInspector = (() => {
         function mappedRows() {
             if (!state.point) return [];
             return currentEntries().map(entry => {
-                const width = Number(entry.image?.naturalWidth);
-                const height = Number(entry.image?.naturalHeight);
+                const width = entryWidth(entry);
+                const height = entryHeight(entry);
                 const mapped = mapNormalizedPoint(state.point, width, height);
                 return { ...entry, mapped };
             });
@@ -309,7 +340,9 @@ const PixelInspector = (() => {
                 }
 
                 sampler ||= createSampler(document);
-                const rgba = sampler.sample(row.image, row.mapped.x, row.mapped.y);
+                const rgba = row.unavailable
+                    ? null
+                    : sampler.sample(row.image, row.mapped.x, row.mapped.y);
                 const valueText = rgba
                     ? `R ${rgba[0]} G ${rgba[1]} B ${rgba[2]} A ${rgba[3]}`
                     : 'Pixel value unavailable';
@@ -471,10 +504,11 @@ const PixelInspector = (() => {
             let point = pointFromImageRect(source?.image, clientX, clientY);
             if (point && sourceClipIdx !== anchorClipIdx) {
                 const anchor = entryForClip(anchorClipIdx);
+                const fallback = clipDimensions(anchorClipIdx);
                 point = mapNormalizedPoint(
                     point,
-                    Number(anchor?.image?.naturalWidth),
-                    Number(anchor?.image?.naturalHeight),
+                    entryWidth(anchor) || fallback.width,
+                    entryHeight(anchor) || fallback.height,
                 );
             }
             if (!point) {
@@ -527,13 +561,24 @@ const PixelInspector = (() => {
 
         function scheduleHover(event) {
             if (!isActive() || state.locked || state.stagePress || event.pointerType !== 'mouse') return;
-            state.pendingHover = { clientX: event.clientX, clientY: event.clientY };
+            state.pendingHover = {
+                clientX: event.clientX,
+                clientY: event.clientY,
+                gridClipIdx: viewer.gridView?.clipIndexFromTarget?.(event.target) ?? null,
+            };
             if (state.hoverFrame !== null) return;
             state.hoverFrame = window.requestAnimationFrame(() => {
                 state.hoverFrame = null;
                 const hover = state.pendingHover;
                 state.pendingHover = null;
-                if (hover && !state.locked) acquire(hover.clientX, hover.clientY, { lock: false });
+                if (hover && !state.locked) acquire(hover.clientX, hover.clientY, {
+                    anchorClipIdx: currentAnchorIndex(
+                        hover.clientX,
+                        viewer.state.activeClipIdx,
+                        hover.gridClipIdx,
+                    ),
+                    lock: false,
+                });
             });
         }
 
@@ -545,6 +590,7 @@ const PixelInspector = (() => {
                 startY: event.clientY,
                 moved: false,
                 blinkVisibleClipIdx: viewer.state.activeClipIdx,
+                gridClipIdx: viewer.gridView?.clipIndexFromTarget?.(event.target) ?? null,
             };
             return true;
         }
@@ -572,7 +618,11 @@ const PixelInspector = (() => {
             if (press.moved || gestureExceeded(press.startX, press.startY, event.clientX, event.clientY)) {
                 return false;
             }
-            const anchorClipIdx = currentAnchorIndex(event.clientX, press.blinkVisibleClipIdx);
+            const anchorClipIdx = currentAnchorIndex(
+                event.clientX,
+                press.blinkVisibleClipIdx,
+                press.gridClipIdx,
+            );
             return acquire(event.clientX, event.clientY, {
                 anchorClipIdx,
                 lock: true,
@@ -615,6 +665,25 @@ const PixelInspector = (() => {
             if (options.save !== false && !viewer.persistViewportState()) {
                 announce('Lens preference could not be saved in this browser.');
             }
+        }
+
+        function focusGridCell(clipIdx, image) {
+            if (!isActive() || viewer.state.mode !== 'grid' || !Number.isInteger(clipIdx)) return;
+            const entry = entryForClip(clipIdx);
+            const width = entryWidth(entry);
+            const height = entryHeight(entry);
+            if (state.point && validDimensions(width, height)) {
+                state.point = mapNormalizedPoint(state.point, width, height);
+                state.anchorClipIdx = clipIdx;
+                render();
+                return;
+            }
+            const rect = image?.getBoundingClientRect?.();
+            if (!rect || rect.width <= 0 || rect.height <= 0) return;
+            acquire(rect.left + rect.width / 2, rect.top + rect.height / 2, {
+                anchorClipIdx: clipIdx,
+                lock: false,
+            });
         }
 
         function ensurePointAtCenter() {
@@ -684,7 +753,9 @@ const PixelInspector = (() => {
                 event.stopPropagation();
                 acquire(event.clientX, event.clientY, {
                     anchorClipIdx: state.anchorClipIdx,
-                    sourceClipIdx: viewer.state.mode === 'blink'
+                    sourceClipIdx: viewer.state.mode === 'grid'
+                        ? placementEntry()?.clipIdx
+                        : viewer.state.mode === 'blink'
                         ? viewer.state.activeClipIdx
                         : state.anchorClipIdx,
                     lock: true,
@@ -701,7 +772,9 @@ const PixelInspector = (() => {
                 if (state.roiDragPointerId !== event.pointerId) return;
                 acquire(event.clientX, event.clientY, {
                     anchorClipIdx: state.anchorClipIdx,
-                    sourceClipIdx: viewer.state.mode === 'blink'
+                    sourceClipIdx: viewer.state.mode === 'grid'
+                        ? placementEntry()?.clipIdx
+                        : viewer.state.mode === 'blink'
                         ? viewer.state.activeClipIdx
                         : state.anchorClipIdx,
                     lock: true,
@@ -753,6 +826,7 @@ const PixelInspector = (() => {
             isActive,
             syncVisibility,
             beginStagePress,
+            focusGridCell,
             moveStagePress,
             isStagePressPending,
             endStagePress,
@@ -762,6 +836,7 @@ const PixelInspector = (() => {
             clearForContext,
             unlock,
             render,
+            announce,
             state,
         };
     }

@@ -108,3 +108,7 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment(
         "pointerupOnlyMoveApplied": True,
         "pointerCancelDidNotCycle": True,
     }
+    assert summary["gridModeBoundary"] == {
+        "publicPayloadRejected": True,
+        "internalStoredModeRestored": True,
+    }

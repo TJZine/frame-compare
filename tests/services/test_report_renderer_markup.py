@@ -103,6 +103,32 @@ def test_build_html_renders_mode_aware_clip_controls(report_payload: ReportPaylo
     assert 'data-mode="overlay" role="radio"' in html
 
 
+def test_build_html_exposes_viewer_only_grid_controls_and_empty_mount(
+    report_payload: ReportPayload,
+) -> None:
+    html = build_html(report_payload)
+    document = parse_elements(html)
+    tags = parse_start_tags(html)
+
+    grid_button = require_first(document, tag="button", attr_name="data-mode", attr_value="grid")
+    grid_controls = require_first(
+        document, tag="div", attr_name="data-control-scope", attr_value="grid"
+    )
+    grid = require_first(document, tag="section", element_id="rv-grid")
+    cells = require_first(grid, tag="div", attr_name="data-grid-cells")
+
+    assert grid_button.attrs["aria-label"] == "Grid mode"
+    assert grid_controls.attrs["aria-label"] == "Grid clips"
+    assert "hidden" in grid_controls.attrs
+    assert tags.by_id["btn-grid-prev"][1]["aria-label"] == "Previous grid clips"
+    assert tags.by_id["btn-grid-next"][1]["aria-label"] == "Next grid clips"
+    assert grid.attrs["aria-label"] == "Grid comparison"
+    assert "hidden" in grid.attrs
+    assert cells.children == []
+    assert script_payload(html)["default_mode"] == "slider"
+    assert html.count('id="pixel-inspector-live"') == 1
+
+
 def test_build_html_keeps_ten_plus_long_label_clips_reachable_and_mobile_safe(
     report_payload: ReportPayload,
 ) -> None:
@@ -514,9 +540,10 @@ def test_build_html_renders_inspector_drawer(report_payload: ReportPayload) -> N
         "Magnification 4×",
         "Magnification 8×",
     ]
-    live = require_first(pixel_panel, tag="div", element_id="pixel-inspector-live")
+    live = require_first(document, tag="div", element_id="pixel-inspector-live")
     assert live.attrs["role"] == "status"
     assert live.attrs["aria-live"] == "polite"
+    assert find_all(pixel_panel, tag="div", element_id="pixel-inspector-live") == []
     for button_id in (
         "btn-inspector-close",
         "btn-inspector-reset-current-align",

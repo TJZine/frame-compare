@@ -362,10 +362,17 @@ def _render_controls(
             <button data-mode="overlay" role="radio" aria-checked="false" aria-label="Single clip view" title="Single clip view (O)">Single</button>
             <button data-mode="diff" role="radio" aria-checked="false" aria-label="Difference mode" title="Difference (D)">Diff</button>
             <button data-mode="blink" role="radio" aria-checked="false" aria-label="Blink mode" title="Blink (B)">Blink</button>
+            <button data-mode="grid" role="radio" aria-checked="false" aria-label="Grid mode" title="Grid comparison">Grid</button>
         </div>
 
         <div class="rv-control-group rv-inspect-control">
             <button id="btn-inspect" type="button" aria-label="Open pixel inspector" title="Inspect pixels (M)">Inspect</button>
+        </div>
+
+        <div class="rv-control-group rv-grid-controls" data-control-scope="grid" aria-label="Grid clips" hidden>
+            <button id="btn-grid-prev" type="button" aria-label="Previous grid clips">←</button>
+            <span class="rv-grid-position" data-grid-position aria-live="off"></span>
+            <button id="btn-grid-next" type="button" aria-label="Next grid clips">→</button>
         </div>
 
         <div class="rv-control-group" data-control-scope="pair" aria-label="Comparison pair">
@@ -478,6 +485,10 @@ def _render_stage() -> str:
         <button id="rv-inspection-point" class="rv-inspection-point" type="button" aria-label="Inspection point unavailable" aria-pressed="false" tabindex="-1" hidden>
             <span aria-hidden="true"></span>
         </button>
+        <section id="rv-grid" class="rv-grid" aria-label="Grid comparison" hidden>
+            <div class="rv-grid-frame-error" data-grid-frame-error hidden></div>
+            <div class="rv-grid-cells" data-grid-cells></div>
+        </section>
         <aside id="rv-pixel-lens" class="rv-pixel-lens" aria-label="Pixel lens" data-magnification="4" hidden>
             <img src="" alt="">
         </aside>
@@ -517,7 +528,6 @@ def _render_inspector() -> str:
             <p class="rv-pixel-legend">Decoded display sample · 8-bit sRGB</p>
             <p class="rv-inspector-note">Coordinates are zero-based with origin at top-left.</p>
             <p class="rv-inspector-note">Normalized cross-size mapping; not scene registration.</p>
-            <div id="pixel-inspector-live" class="rv-visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
         </section>
         <section id="inspector-panel-frame" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-frame" tabindex="-1">
             <dl class="rv-inspector-list">
@@ -677,6 +687,7 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
 <body>
 {header_html}
 <div id="viewer-status" class="rv-status" role="status" aria-live="polite" hidden></div>
+<div id="pixel-inspector-live" class="rv-visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
 {controls_html}
 {stage_html}
 {inspector_html}
