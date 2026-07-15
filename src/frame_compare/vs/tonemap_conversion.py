@@ -29,10 +29,7 @@ class HdrTonemapInputs:
 
 
 def deduce_src_csp_hint(transfer: int | None, primaries: int | None) -> int | None:
-    """Return vs-placebo `src_csp` hint based on HDR signaling.
-
-    This mirrors the legacy behavior documented in `docs/archive/legacy_tonemap_info.md`.
-    """
+    """Return the vs-placebo `src_csp` hint for supported HDR signaling pairs."""
     if transfer == 16 and primaries == 9:
         return 1  # PQ + BT.2020 -> HDR10
     if transfer == 18 and primaries == 9:
