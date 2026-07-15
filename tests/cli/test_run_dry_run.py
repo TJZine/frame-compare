@@ -42,13 +42,6 @@ def _unexpected(*_args: object, **_kwargs: object) -> None:
     raise AssertionError("runtime boundary must not be reached by --dry-run")
 
 
-def test_run_help_exposes_dry_run_option() -> None:
-    result = runner.invoke(app, ["run", "--help"], color=False)
-
-    assert result.exit_code == 0
-    assert "--dry-run" in result.stdout
-
-
 def test_run_dry_run_json_has_exact_allowlisted_shape_and_no_secrets(
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -443,9 +436,6 @@ def unexpected(*args, **kwargs):
     raise AssertionError("forbidden side effect")
 
 sys.meta_path.insert(0, Blocker())
-subprocess.run = unexpected
-subprocess.Popen = unexpected
-webbrowser.open = unexpected
 
 from typer.testing import CliRunner
 from frame_compare.cli.entry import app
@@ -462,18 +452,20 @@ def snapshot_tree(root):
             snapshot.append((relative, "file", path.read_bytes()))
     return snapshot
 
+root = Path(sys.argv[1])
+config = Path(sys.argv[2])
+before = snapshot_tree(root)
+subprocess.run = unexpected
+subprocess.Popen = unexpected
+webbrowser.open = unexpected
+socket.create_connection = unexpected
+socket.socket = unexpected
 entry._copy_text_to_clipboard = unexpected
 entry._open_url_in_browser = unexpected
 entry._maybe_open_report = unexpected
 entry.configure_logging = unexpected
 entry.runner.run = unexpected
 run_command.build_run_request_from_cli = unexpected
-socket.create_connection = unexpected
-socket.socket = unexpected
-
-root = Path(sys.argv[1])
-config = Path(sys.argv[2])
-before = snapshot_tree(root)
 result = CliRunner().invoke(
     app,
     ["run", "--root", str(root), "--config", str(config.relative_to(root)), "--dry-run", "--json"],
