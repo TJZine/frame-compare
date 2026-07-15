@@ -170,6 +170,28 @@ class TestCheckLsmas:
             "https://github.com/TJZine/frame-compare#quick-start"
         )
 
+    def test_check_lsmas_import_error_after_runtime_import_is_setup_failure(self) -> None:
+        checks = collect_checks()
+        lsmas_check = next(c for c in checks if c.name == "lsmas")
+        mock_vs = SimpleNamespace(core=object())
+
+        with (
+            patch(
+                "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
+                return_value=mock_vs,
+            ),
+            patch(
+                "frame_compare.orchestration.doctor_checks.try_load_lsmas_plugin",
+                side_effect=ImportError("plugin setup import failed"),
+            ),
+        ):
+            result = lsmas_check.check_fn()
+
+        assert result.passed is False
+        assert result.message == "lsmas check failed"
+        assert result.details == {"exception_type": "ImportError"}
+        assert "plugin setup import failed" not in str(result.details)
+
     def test_check_lsmas_failure_included_in_critical_failures(self) -> None:
         """Mock lsmas core failure → DoctorReport.critical_failures includes 'lsmas'."""
         lsmas_check = DoctorCheck(

@@ -425,10 +425,12 @@ unchanged.
   the final outcome without modifying `run_info.toml`. Successful records are
   written after all post-run phases settle and use `completed` or
   `completed_with_warnings`; failures after reservation get one best-effort
-  `failed` record. Failures before reservation write no record. A completed-run
-  result-write failure is warning-only and leaves the run successful; a
-  failed-run result-write failure preserves the identical original exception and
-  exit mapping. Records omit absent optional values and never persist raw warning
+  `failed` record. Failures before reservation write no record. An ordinary
+  completed-run result-write failure is warning-only and leaves the run successful;
+  an ordinary failed-run result-write failure preserves the identical original
+  exception and exit mapping. `KeyboardInterrupt` and `SystemExit` raised while
+  recording either outcome propagate. Records omit absent optional values and never
+  persist raw warning
   or exception text, tracebacks, secrets, absolute paths, URL credentials, query,
   or fragment data.
 - `--no-cache` deletes only the matching shared analysis cache entry for the current

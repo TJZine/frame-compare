@@ -83,10 +83,35 @@ def _lsmas_plugin_path_details() -> dict[str, JSONValue]:
     return {"checked_plugin_paths": cast(JSONValue, candidates)}
 
 
+def _lsmas_setup_failure(error: Exception) -> CheckResult:
+    return CheckResult(
+        passed=False,
+        message="lsmas check failed",
+        hint=(
+            "Check the VapourSynth/plugin setup, then rerun doctor; see "
+            "https://github.com/TJZine/frame-compare#quick-start"
+        ),
+        details={"exception_type": type(error).__name__},
+    )
+
+
 def _check_lsmas() -> CheckResult:
     """Check L-SMASH-Works plugin is available."""
     try:
         vs = import_vapoursynth_module()
+    except ImportError:
+        return CheckResult(
+            passed=False,
+            message="Cannot check lsmas (VapourSynth not available)",
+            hint=(
+                "Make VapourSynth importable before checking L-SMASH-Works; "
+                "see https://github.com/TJZine/frame-compare#quick-start"
+            ),
+        )
+    except Exception as e:
+        return _lsmas_setup_failure(e)
+
+    try:
         core = vs.core
         # Check for lsmas namespace (preferred) or lw (legacy)
         if hasattr(core, "lsmas") or hasattr(core, "lw"):
@@ -114,25 +139,8 @@ def _check_lsmas() -> CheckResult:
             ),
             details=_lsmas_plugin_path_details(),
         )
-    except ImportError:
-        return CheckResult(
-            passed=False,
-            message="Cannot check lsmas (VapourSynth not available)",
-            hint=(
-                "Make VapourSynth importable before checking L-SMASH-Works; "
-                "see https://github.com/TJZine/frame-compare#quick-start"
-            ),
-        )
     except Exception as e:
-        return CheckResult(
-            passed=False,
-            message="lsmas check failed",
-            hint=(
-                "Check the VapourSynth/plugin setup, then rerun doctor; see "
-                "https://github.com/TJZine/frame-compare#quick-start"
-            ),
-            details={"exception_type": type(e).__name__},
-        )
+        return _lsmas_setup_failure(e)
 
 
 def _check_ffmpeg() -> CheckResult:

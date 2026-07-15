@@ -55,8 +55,8 @@ def record_completed_run_result(
                 completed_at=completed_at,
             ),
         )
-    except BaseException:
-        with contextlib.suppress(BaseException):
+    except Exception:
+        with contextlib.suppress(Exception):
             log.warning("run_result_write_degraded", status="completed")
         return replace(result, warnings=[*result.warnings, RUN_RESULT_WRITE_WARNING])
     return result
@@ -74,7 +74,7 @@ def record_failed_run_best_effort(
     phase_timings: dict[str, float],
     warnings: tuple[str, ...],
 ) -> None:
-    """Attempt one failed-outcome write and never mask the original failure."""
+    """Avoid masking the original with ordinary failed-outcome recording failures."""
     if started_at is None or workspace is None or workspace.run_dir is None:
         return
     try:
@@ -105,6 +105,6 @@ def record_failed_run_best_effort(
                 workspace=workspace,
             ),
         )
-    except BaseException:
-        with contextlib.suppress(BaseException):
+    except Exception:
+        with contextlib.suppress(Exception):
             log.warning("run_result_write_degraded", status="failed")
