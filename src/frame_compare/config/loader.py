@@ -147,6 +147,8 @@ def load_raw_config(config_path: Path) -> RawConfigDocument:
     try:
         text = config_path.read_text(encoding="utf-8-sig")
         untrusted: object = tomllib.loads(text)
+    except FileNotFoundError as exc:
+        raise ConfigNotFoundError(config_path) from exc
     except tomllib.TOMLDecodeError as exc:
         raise ConfigParseError(config_path, str(exc)) from exc
     except UnicodeDecodeError as exc:

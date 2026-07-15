@@ -154,8 +154,34 @@ def test_raw_config_load_ignores_environment_and_redacts_invalid_input(
     )
     with pytest.raises(ConfigValidationError) as exc_info:
         load_raw_config(config_file)
-    assert all(error.get("input") == "<redacted>" for error in exc_info.value.validation_errors)
+    validation_errors = exc_info.value.validation_errors
+    assert validation_errors
+    assert all(error.get("input") == "<redacted>" for error in validation_errors)
     assert "raw-secret" not in str(exc_info.value.context.to_dict())
+
+
+def test_raw_config_load_empty_document_uses_defaults_without_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_file = tmp_path / "empty.toml"
+    config_file.write_text("", encoding="utf-8")
+    monkeypatch.setenv("FRAME_COMPARE_ANALYSIS__RANDOM_FRAME_COUNT", "77")
+
+    document = load_raw_config(config_file)
+
+    assert document.payload == {}
+    assert document.config.model_dump() == get_default_config().model_dump()
+    assert document.config.analysis.random_frame_count == 10
+
+
+def test_raw_config_load_missing_file_uses_config_not_found_error(tmp_path: Path) -> None:
+    config_file = tmp_path / "missing.toml"
+
+    with pytest.raises(ConfigNotFoundError) as exc_info:
+        load_raw_config(config_file)
+
+    assert exc_info.value.path == config_file
 
 
 def test_config_validation_error_context_is_json_serializable(tmp_path: Path) -> None:
