@@ -255,7 +255,7 @@ step advances the ledger.
 | 8. Magnifier and pixel inspector | Completed | `d24f094` | 100 focused report tests and the canonical full gate passed; U8-R001 through U8-R007 plus controller async findings accepted/modified, fixed, closure-reviewed, and returned APPROVABLE; manual browser matrix remains deferred final-program validation debt | Continue to Unit 9 |
 | 9. Multi-clip grid | Completed | `d6c5fb0` | Focused Grid/Pixel/viewer harnesses and 104 focused report tests passed; canonical pyright/Ruff/Bandit/full-pytest/import-linter gate passed after fixes; U9-R001 through U9-R004 accepted, fixed, closure-reviewed, and returned APPROVABLE; manual browser matrix remains deferred final-program validation debt | Continue to Unit 10 |
 | 10. Local review state/export | Completed | `d3059e6` | 43 focused report tests and the canonical full gate passed; U10-R001 through U10-R007 plus controller merge-ceiling/CRLF findings accepted, fixed, closure-reviewed, and returned APPROVABLE; manual browser matrix remains deferred final-program validation debt | Continue to Unit 11 |
-| 11. Blind A/B feasibility/implementation | Ready | — | Dependency promoted by completed Unit 10 implementation `d3059e6`; approved interaction contract `43c8341` | Claim Unit 11 feasibility audit |
+| 11. Blind A/B feasibility/implementation | Deferred / accepted | Historical [presentation-blind decision package](2026-07-14-presentation-blind-report-decision-package.md) in `ab72197` | Feasibility worker, controller audit, and fresh adversarial review returned `STOP_REQUIRED`; U11-R001 through U11-R003 accepted; maintainer accepted deferral 2026-07-14 | Reevaluate only after approval of the complete clean-artifact, neutral-delivery, eligibility/versioning, invocation, publishing, first-paint, Review-transfer, ownership, and compatibility contract |
 
 ## 6. Package 1: CLI discoverability and input-folder opening
 
@@ -1200,6 +1200,37 @@ from the vote.
 If baked screenshots or payload data expose identity and fixing that requires clean
 alternate renders, config changes, or a new report format, stop and create a
 separate decision-complete plan. Do not ship cosmetic label hiding as "blind."
+
+### Reviewed feasibility outcome (accepted 2026-07-14)
+
+Unit 11 is deferred. No Blind control, label randomization, vote/reveal state,
+config/CLI option, alternate render, payload change, or report-format change is
+shipped. The maintainer accepted this reviewed deferral on 2026-07-14.
+
+The controller, one bounded feasibility worker, and a separate fresh read-only
+adversarial reviewer confirmed three blocking facts:
+
+- **U11-R001 — accepted, blocking:** default Standard screenshots burn the physical
+  source filename stem into image pixels. Minimal also burns a label; only overlay
+  mode `none` is clean. Viewer JavaScript cannot remove those pixels.
+- **U11-R002 — accepted, blocking:** default non-embedded reports expose physical
+  screenshot names such as `{frame} - {source stem}.png` through ordinary browser
+  open/save/copy-image behavior. Neutral DOM text does not conceal that channel.
+- **U11-R003 — accepted, blocking:** report payload V1 has no trustworthy clean-artifact
+  eligibility fact, so a viewer cannot distinguish clean and identity-bearing reports
+  or fail closed honestly.
+
+The reviewed supporting decision package is
+[`2026-07-14-presentation-blind-report-decision-package.md`](2026-07-14-presentation-blind-report-decision-package.md).
+It preserves the recommended separate-blind-report direction, nine decisions that
+require explicit approval, owner boundaries, proof, privacy/failure behavior,
+rollback, and the reevaluation trigger without activating a competing roadmap.
+
+Reevaluate Unit 11 only after the maintainer approves the complete clean-artifact,
+neutral-delivery, eligibility/versioning, invocation, publishing, first-paint,
+review-transfer, ownership, and compatibility contract. Any render/VS implementation
+must include the required Docker/runtime proof. Cosmetic viewer-only hiding remains
+prohibited.
 
 ## 18. Verification matrix
 
