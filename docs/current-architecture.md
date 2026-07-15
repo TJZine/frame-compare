@@ -463,14 +463,20 @@ toolbar plus floating viewport palette; a collapsible, compact/normal/large
 filmstrip bottom panel; an inspector drawer with Frame, Clips, Align, Review, and
 Export tabs; fullscreen support; viewport pan, zoom, actual/width/height fit, reveal,
 and adjacent-frame preloading. `assets/lens.js` is the focused owner for the optional
-floating image lens: normalized per-source mapping, follow/park placement, pending
-touch tap-versus-viewport-gesture ownership,
-160/240/320px sizing, 2x/3x/4x/6x/8x/12x magnification, target marking, and an
-optional Single-mode active/comparison split. Diff uses separate aligned base and
-difference DOM images with CSS difference blending, while the viewer exposes one
-palette/lens chrome event boundary so bubbled pointer, wheel, and double-click input
-cannot mutate the viewport. Activation seeds a transient center point, responsive
-chrome uses the rendered titlebar height, and settings are clamped to stage bounds.
+floating image lens: normalized per-source mapping, fixed-window placement, dedicated
+edge-grip dragging, pending touch tap-versus-viewport-gesture ownership,
+160/240/320px sizing, 2x/3x/4x/6x/8x/12x magnification, Off/Ring/Brackets sample
+marking, and an optional Single-mode active/comparison split. The sample follows
+pointer movement across the displayed source while the lens window stays fixed;
+only its grip can move the window. Diff uses separate aligned base and difference DOM
+images with CSS difference blending, while the viewer exposes one palette/lens chrome
+event boundary so bubbled pointer, wheel, and double-click input cannot mutate the
+viewport. Activation seeds a transient center point and retains the stable palette
+Lens group, which owns zoom, fixed status, and stage-clamped settings. The display-only
+lens body has no titlebar or controls. Grip pointer dragging uses capture, while its
+arrow-key operation supports a larger Shift step, clamps to the stage, persists the
+position, and prevents viewer shortcuts. Touch sampling remains a deliberate tap;
+touch movement beyond its threshold returns ownership to viewport gestures.
 Context sync remaps or reseeds the target when frames, modes, sources, or Grid entries
 change; layout refresh preserves the normalized sample through pan, zoom, fit, and
 alignment changes. Each Lens clone slot uses a detached, source-matched image loader;
@@ -507,9 +513,11 @@ paused. Browser-local
 viewer state is scoped by report identity and persists current frame, view mode,
 clip selection, viewport/zoom/reveal, pair alignments, HUD visibility, filmstrip
 collapsed/size, inspector open/tab, and blink speed. Lens preferences use a separate
-best-effort browser-global key for magnification, size, behavior, and target-marker
-visibility; report-scoped lens state stores enabled state, parked normalized position,
-and Single comparison selection. Pointer/sample position and Blink paused state are
+best-effort browser-global v2 key for magnification, size, and sample-marker style,
+whose default is Off. Report-scoped lens state stores enabled state, fixed normalized
+window position, and Single comparison selection. Grip drag end and keyboard movement
+persist that normalized position so size and responsive layout changes preserve its
+relative placement. Pointer/sample position and Blink paused state are
 transient. Storage failure leaves the lens usable for the current session and is
 reported quietly inside its settings popover. It
 does not own slow.pics upload policy, prompting, or browser side effects.

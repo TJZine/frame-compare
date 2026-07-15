@@ -1089,11 +1089,22 @@ const summary = {};
     assert.equal(viewer.isViewerChromeEvent({
         target: { closest(selector) { return selector.includes('.rv-lens') ? this : null; } },
     }), true);
+    assert.equal(viewer.isViewerChromeEvent({
+        target: {
+            closest(selector) {
+                return selector.split(', ').includes('.rv-lens-settings') ? this : null;
+            },
+        },
+    }), true);
     assert.equal(viewer.isViewerChromeEvent({ target: { closest() { return null; } } }), false);
     let resets = 0;
     let zooms = 0;
     let pans = 0;
-    const chromeTarget = { closest(selector) { return selector.includes('.rv-lens') ? this : null; } };
+    const chromeTarget = {
+        closest(selector) {
+            return selector.split(', ').includes('.rv-lens-settings') ? this : null;
+        },
+    };
     viewer.resetViewport = () => { resets += 1; };
     viewer.zoomAtPoint = () => { zooms += 1; };
     viewer.panByPixels = () => { pans += 1; };

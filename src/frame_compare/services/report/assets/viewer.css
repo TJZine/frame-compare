@@ -475,6 +475,11 @@ select optgroup {
     cursor: grabbing;
 }
 
+.rv-viewer-stage.rv-lens-active,
+.rv-viewer-stage.rv-lens-active.is-panning {
+    cursor: default;
+}
+
 .rv-empty-state {
     position: absolute;
     inset: 0;
@@ -811,34 +816,56 @@ select optgroup {
 .rv-lens-target {
     position: absolute;
     z-index: 16;
-    width: 18px;
-    height: 18px;
-    border: 1px solid var(--annotation);
-    border-radius: 50%;
-    box-shadow: 0 0 0 2px rgba(5, 6, 8, 0.7);
+    width: 20px;
+    height: 20px;
     transform: translate(-50%, -50%);
     pointer-events: none;
 }
 
-.rv-lens-target::before,
-.rv-lens-target::after {
+.rv-lens-target[data-marker-style="ring"] {
+    border: 1px solid var(--annotation);
+    border-radius: 50%;
+    box-shadow: 0 0 0 2px rgba(5, 6, 8, 0.64);
+}
+
+.rv-lens-target > i {
+    display: none;
+}
+
+.rv-lens-target[data-marker-style="brackets"] > i {
     position: absolute;
-    content: "";
-    background: var(--annotation);
+    display: block;
+    width: 7px;
+    height: 7px;
+    font-style: normal;
 }
 
-.rv-lens-target::before {
-    top: 8px;
-    left: -4px;
-    width: 24px;
-    height: 1px;
+.rv-lens-target[data-marker-style="brackets"] > i:nth-child(1) {
+    top: 0;
+    left: 0;
+    border-top: 1px solid var(--annotation);
+    border-left: 1px solid var(--annotation);
 }
 
-.rv-lens-target::after {
-    top: -4px;
-    left: 8px;
-    width: 1px;
-    height: 24px;
+.rv-lens-target[data-marker-style="brackets"] > i:nth-child(2) {
+    top: 0;
+    right: 0;
+    border-top: 1px solid var(--annotation);
+    border-right: 1px solid var(--annotation);
+}
+
+.rv-lens-target[data-marker-style="brackets"] > i:nth-child(3) {
+    bottom: 0;
+    left: 0;
+    border-bottom: 1px solid var(--annotation);
+    border-left: 1px solid var(--annotation);
+}
+
+.rv-lens-target[data-marker-style="brackets"] > i:nth-child(4) {
+    right: 0;
+    bottom: 0;
+    border-right: 1px solid var(--annotation);
+    border-bottom: 1px solid var(--annotation);
 }
 
 .rv-lens {
@@ -847,55 +874,13 @@ select optgroup {
     z-index: 17;
     width: var(--lens-size);
     overflow: visible;
-    border: 1px solid var(--annotation);
+    border: 1px solid var(--border-hover);
     border-radius: 4px;
     background: #050608;
     box-shadow: 0 12px 30px rgba(0, 0, 0, 0.52);
     color: var(--text-primary);
     font-family: var(--font-mono);
-    touch-action: none;
-}
-
-.rv-lens-titlebar {
-    display: flex;
-    min-height: 32px;
-    align-items: center;
-    justify-content: space-between;
-    gap: 4px;
-    padding: 4px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-surface);
-    cursor: move;
-}
-
-.rv-lens-titlebar strong {
-    padding-inline: 4px;
-    color: var(--annotation);
-    font-size: var(--text-xs);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-}
-
-.rv-lens-controls {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-}
-
-.rv-lens-controls button {
-    min-width: 28px;
-    min-height: 24px;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-}
-
-.rv-lens-controls output {
-    min-width: 3ch;
-    color: var(--text-primary);
-    font-size: var(--text-xs);
-    text-align: center;
+    pointer-events: none;
 }
 
 .rv-lens-view {
@@ -904,6 +889,44 @@ select optgroup {
     height: var(--lens-size);
     overflow: hidden;
     background: #050608;
+    cursor: default;
+    pointer-events: none;
+}
+
+.rv-lens-grip {
+    position: absolute;
+    z-index: 4;
+    top: 8px;
+    right: 8px;
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 1px solid var(--border-hover);
+    border-radius: 4px;
+    background: rgba(11, 13, 16, 0.88);
+    color: var(--annotation);
+    cursor: grab;
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    line-height: 1;
+    pointer-events: auto;
+    touch-action: none;
+}
+
+.rv-lens-grip:hover {
+    border-color: var(--annotation);
+    background: var(--bg-elevated);
+}
+
+.rv-lens-grip:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.rv-lens-grip.is-dragging {
+    cursor: grabbing;
 }
 
 .rv-lens-pane {
@@ -961,9 +984,9 @@ select optgroup {
 
 .rv-lens-settings {
     position: absolute;
-    z-index: 3;
-    top: 36px;
-    right: 4px;
+    z-index: 36;
+    top: 8px;
+    left: 8px;
     width: min(260px, calc(100vw - 24px));
     max-height: calc(100vh - 16px);
     display: grid;
@@ -1032,25 +1055,6 @@ select optgroup {
 
 .rv-lens-persistence[data-tone="quiet-warning"] {
     color: var(--annotation);
-}
-
-.rv-lens[data-size="small"] .rv-lens-titlebar strong,
-.rv-lens[data-size="small"] #btn-lens-behavior {
-    display: none;
-}
-
-.rv-lens[data-size="small"] .rv-lens-titlebar {
-    padding: 4px;
-}
-
-.rv-lens[data-size="small"] .rv-lens-controls {
-    width: 100%;
-    justify-content: space-between;
-}
-
-.rv-lens[data-size="small"] .rv-lens-controls button {
-    min-width: 24px;
-    padding-inline: 4px;
 }
 
 /* Labels overlay on image */
@@ -1195,6 +1199,45 @@ select optgroup {
     border-left: 1px solid var(--border);
 }
 
+.rv-lens-palette-controls {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+}
+
+.rv-lens-palette-controls button {
+    min-width: 28px;
+    height: 28px;
+    padding: 4px 6px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+}
+
+.rv-lens-palette-controls button:hover {
+    background: var(--bg-elevated);
+}
+
+.rv-lens-palette-controls output {
+    min-width: 3ch;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    text-align: center;
+}
+
+.rv-lens-fixed-status {
+    padding-inline: 4px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
 /* Target only direct controls, avoiding nested popover inputs */
 .rv-viewport-palette > .rv-palette-group > button,
 .rv-viewport-palette > .rv-palette-group > select {
@@ -1251,6 +1294,10 @@ select optgroup {
 .rv-viewport-palette[data-orientation="vertical"] .rv-palette-group {
     flex-direction: column;
     align-items: center;
+}
+
+.rv-viewport-palette[data-orientation="vertical"] .rv-lens-palette-controls {
+    flex-direction: column;
 }
 
 .rv-viewport-palette[data-orientation="vertical"] .rv-palette-group + .rv-palette-group {
@@ -2162,6 +2209,10 @@ body.rv-inspector-open .rv-viewer-stage {
         align-items: center !important;
     }
 
+    .rv-viewport-palette .rv-lens-palette-controls {
+        flex-flow: row wrap !important;
+    }
+
     #btn-palette-orientation {
         display: none !important;
     }
@@ -2221,33 +2272,17 @@ body.rv-inspector-open .rv-viewer-stage {
 
 @media (pointer: coarse) {
     #btn-lens,
-    .rv-lens-controls button,
+    .rv-lens-palette-controls button,
+    .rv-lens-grip,
     [data-lens-size],
-    [data-lens-behavior],
+    [data-lens-marker],
     .rv-inspector-tabs button {
         min-width: 44px;
         min-height: 44px;
     }
 
-    .rv-lens-titlebar strong,
-    #btn-lens-behavior {
+    .rv-lens-fixed-status {
         display: none;
-    }
-
-    .rv-lens-titlebar {
-        padding: 4px;
-    }
-
-    .rv-lens-controls {
-        width: 100%;
-        display: grid;
-        grid-template-columns: repeat(3, minmax(44px, 1fr));
-        gap: 4px;
-    }
-
-    .rv-lens-controls output {
-        align-self: center;
-        justify-self: center;
     }
 
     #btn-grid-prev,

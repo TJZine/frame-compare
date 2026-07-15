@@ -1,5 +1,5 @@
 const Lens = (() => {
-    const PREFERENCES_KEY = 'frame-compare:lens-preferences:v1';
+    const PREFERENCES_KEY = 'frame-compare:lens-preferences:v2';
     const REPORT_KEY_PREFIX = 'frame-compare:report-lens:v1:';
     const TOUCH_GESTURE_THRESHOLD = 6;
     const MAGNIFICATIONS = [2, 3, 4, 6, 8, 12];
@@ -7,12 +7,11 @@ const Lens = (() => {
     const DEFAULT_PREFERENCES = Object.freeze({
         magnification: 4,
         size: 'medium',
-        behavior: 'follow',
-        targetMarker: true,
+        markerStyle: 'off',
     });
     const DEFAULT_REPORT_STATE = Object.freeze({
         enabled: false,
-        parkedPosition: { u: 0.72, v: 0.18 },
+        parkedPosition: { u: 0.82, v: 0.12 },
         comparisonEnabled: false,
         comparisonTarget: null,
     });
@@ -67,12 +66,9 @@ const Lens = (() => {
                 ? source.magnification
                 : DEFAULT_PREFERENCES.magnification,
             size: Object.hasOwn(SIZES, source.size) ? source.size : DEFAULT_PREFERENCES.size,
-            behavior: ['follow', 'park'].includes(source.behavior)
-                ? source.behavior
-                : DEFAULT_PREFERENCES.behavior,
-            targetMarker: typeof source.targetMarker === 'boolean'
-                ? source.targetMarker
-                : DEFAULT_PREFERENCES.targetMarker,
+            markerStyle: ['off', 'ring', 'brackets'].includes(source.markerStyle)
+                ? source.markerStyle
+                : DEFAULT_PREFERENCES.markerStyle,
         };
     }
 
@@ -120,7 +116,7 @@ const Lens = (() => {
 
     function boundedPopoverPosition(
         stageRect,
-        lensRect,
+        anchorRect,
         popoverRect,
         margin = 8,
         anchorOffset = 36,
@@ -131,10 +127,10 @@ const Lens = (() => {
         const height = Math.min(popoverRect.height || 320, availableHeight);
         const minimumLeft = stageRect.left + margin;
         const maximumLeft = stageRect.left + stageRect.width - margin - width;
-        const preferredLeft = lensRect.left + lensRect.width - width;
+        const preferredLeft = anchorRect.left + anchorRect.width - width;
         const globalLeft = clamp(preferredLeft, minimumLeft, Math.max(minimumLeft, maximumLeft));
-        const below = lensRect.top + anchorOffset;
-        const above = lensRect.top - height - 4;
+        const below = anchorRect.top + anchorOffset;
+        const above = anchorRect.top - height - 4;
         const preferredTop = below + height <= stageRect.top + stageRect.height - margin
             ? below
             : above;
@@ -142,8 +138,8 @@ const Lens = (() => {
         const maximumTop = stageRect.top + stageRect.height - margin - height;
         const globalTop = clamp(preferredTop, minimumTop, Math.max(minimumTop, maximumTop));
         return {
-            left: globalLeft - lensRect.left,
-            top: globalTop - lensRect.top,
+            left: globalLeft - anchorRect.left,
+            top: globalTop - anchorRect.top,
             maxWidth: availableWidth,
             maxHeight: availableHeight,
         };
@@ -152,19 +148,19 @@ const Lens = (() => {
     function create(viewer) {
         const dom = {
             toggle: document.getElementById('btn-lens'),
+            group: document.querySelector('[data-lens-palette-group]'),
+            activeControls: document.querySelector('[data-lens-active-controls]'),
             lens: document.getElementById('rv-lens'),
             marker: document.getElementById('rv-lens-target'),
-            titlebar: document.querySelector('[data-lens-drag-handle]'),
+            grip: document.querySelector('[data-lens-drag-handle]'),
             zoomOut: document.getElementById('btn-lens-zoom-out'),
             zoomIn: document.getElementById('btn-lens-zoom-in'),
             zoomValue: document.querySelector('[data-lens-zoom]'),
-            behavior: document.getElementById('btn-lens-behavior'),
             settings: document.getElementById('btn-lens-settings'),
-            close: document.getElementById('btn-lens-close'),
+            orientation: document.getElementById('btn-palette-orientation'),
             popover: document.getElementById('lens-settings-popover'),
             sizeButtons: document.querySelectorAll('[data-lens-size]'),
-            behaviorButtons: document.querySelectorAll('[data-lens-behavior]'),
-            markerToggle: document.getElementById('lens-target-marker'),
+            markerButtons: document.querySelectorAll('[data-lens-marker]'),
             comparisonToggle: document.getElementById('lens-comparison-enabled'),
             comparisonTarget: document.getElementById('lens-comparison-target'),
             comparisonSettings: document.querySelector('[data-lens-comparison-settings]'),
@@ -368,19 +364,10 @@ const Lens = (() => {
             return Boolean(window.matchMedia?.('(pointer: coarse)')?.matches);
         }
 
-        function effectiveBehavior(pointerType = '') {
-            return coarsePointerActive() || pointerType === 'touch'
-                ? 'park'
-                : state.preferences.behavior;
-        }
-
         function lensSize() {
-            return SIZES[state.preferences.size];
-        }
-
-        function lensChromeHeight() {
-            const height = Number(dom.titlebar?.getBoundingClientRect?.().height);
-            return Number.isFinite(height) && height > 0 ? height : 32;
+            const stageRect = viewer.dom.stage.getBoundingClientRect();
+            const available = Math.max(1, Math.floor(Math.min(stageRect.width, stageRect.height) - 16));
+            return Math.min(SIZES[state.preferences.size], available);
         }
 
         function setImageGeometry(image, point, size, viewportWidth = size) {
@@ -517,26 +504,20 @@ const Lens = (() => {
         function lensPosition(size) {
             const stageRect = viewer.dom.stage.getBoundingClientRect();
             const maxLeft = Math.max(8, stageRect.width - size - 8);
-            const maxTop = Math.max(8, stageRect.height - size - lensChromeHeight() - 8);
-            if (effectiveBehavior(state.pointer?.pointerType) === 'park' || !state.pointer) {
-                return {
-                    left: 8 + clamp(state.report.parkedPosition.u) * Math.max(0, maxLeft - 8),
-                    top: 8 + clamp(state.report.parkedPosition.v) * Math.max(0, maxTop - 8),
-                };
-            }
-            const x = state.pointer.clientX - stageRect.left;
-            const y = state.pointer.clientY - stageRect.top;
-            const gap = 28;
-            const left = x < stageRect.width / 2 ? x + gap : x - size - gap;
-            const top = y < stageRect.height / 2 ? y + gap : y - size - gap;
+            const maxTop = Math.max(8, stageRect.height - size - 8);
             return {
-                left: clamp(left, 8, maxLeft),
-                top: clamp(top, 8, maxTop),
+                left: 8 + clamp(state.report.parkedPosition.u) * Math.max(0, maxLeft - 8),
+                top: 8 + clamp(state.report.parkedPosition.v) * Math.max(0, maxTop - 8),
             };
         }
 
         function placeTargetMarker() {
-            if (!dom.marker || !state.point || !state.activeImage || !state.preferences.targetMarker) {
+            if (
+                !dom.marker
+                || !state.point
+                || !state.activeImage
+                || state.preferences.markerStyle === 'off'
+            ) {
                 if (dom.marker) dom.marker.hidden = true;
                 return;
             }
@@ -548,6 +529,7 @@ const Lens = (() => {
             }
             dom.marker.style.left = `${imageRect.left - stageRect.left + state.point.u * imageRect.width}px`;
             dom.marker.style.top = `${imageRect.top - stageRect.top + state.point.v * imageRect.height}px`;
+            dom.marker.dataset.markerStyle = state.preferences.markerStyle;
             dom.marker.hidden = false;
         }
 
@@ -611,21 +593,22 @@ const Lens = (() => {
         }
 
         function positionSettingsPopover() {
-            if (!dom.popover || dom.popover.hidden || !dom.lens) return;
+            if (!dom.popover || dom.popover.hidden || !dom.group) return;
             const stageRect = viewer.dom.stage.getBoundingClientRect();
-            const lensRect = dom.lens.getBoundingClientRect();
+            const groupRect = dom.group.getBoundingClientRect();
             const popoverRect = dom.popover.getBoundingClientRect();
             if (!validDimensions(stageRect.width, stageRect.height)) return;
             const position = boundedPopoverPosition(
                 stageRect,
-                lensRect,
+                groupRect,
                 popoverRect,
                 8,
-                lensChromeHeight() + 4,
+                groupRect.height + 4,
             );
-            dom.popover.style.left = `${position.left}px`;
+            dom.popover.style.left = `${groupRect.left + position.left - stageRect.left}px`;
             dom.popover.style.right = 'auto';
-            dom.popover.style.top = `${position.top}px`;
+            dom.popover.style.top = `${groupRect.top + position.top - stageRect.top}px`;
+            dom.popover.style.bottom = 'auto';
             dom.popover.style.maxWidth = `${position.maxWidth}px`;
             dom.popover.style.maxHeight = `${position.maxHeight}px`;
         }
@@ -635,7 +618,8 @@ const Lens = (() => {
             dom.toggle?.classList?.toggle('active', state.report.enabled);
             dom.toggle?.setAttribute?.('aria-pressed', state.report.enabled ? 'true' : 'false');
             dom.toggle?.setAttribute?.('aria-label', state.report.enabled ? 'Turn lens off' : 'Turn lens on');
-            if (dom.toggle) dom.toggle.hidden = Boolean(state.report.enabled && visible);
+            if (dom.activeControls) dom.activeControls.hidden = !state.report.enabled;
+            viewer.dom.stage.classList?.toggle?.('rv-lens-active', state.report.enabled);
             if (!visible) {
                 if (dom.lens) dom.lens.hidden = true;
                 if (dom.marker) dom.marker.hidden = true;
@@ -656,7 +640,6 @@ const Lens = (() => {
             dom.lens.style.top = `${position.top}px`;
             dom.lens.style.setProperty('--lens-size', `${size}px`);
             dom.lens.dataset.size = state.preferences.size;
-            dom.lens.dataset.behavior = effectiveBehavior(state.pointer?.pointerType);
             const activeState = requestStatus('active') === 'loading' ? 'loading' : 'unavailable';
             const differenceState = requestStatus('difference') === 'loading' ? 'loading' : 'unavailable';
             dom.activeLabel.textContent = viewer.state.mode === 'diff'
@@ -688,11 +671,20 @@ const Lens = (() => {
         }
 
         function setEnabled(enabled, options = {}) {
-            const restoreToggleFocus = !enabled && Boolean(dom.lens?.contains?.(document.activeElement));
+            const restoreToggleFocus = !enabled && Boolean(
+                dom.lens?.contains?.(document.activeElement)
+                || dom.group?.contains?.(document.activeElement)
+                || dom.popover?.contains?.(document.activeElement)
+            );
             state.report.enabled = Boolean(enabled);
             if (state.report.enabled) {
                 if (!state.point || !state.activeImage) seedCenterPoint();
             } else {
+                if (state.drag && dom.grip?.hasPointerCapture?.(state.drag.pointerId)) {
+                    dom.grip.releasePointerCapture?.(state.drag.pointerId);
+                }
+                state.drag = null;
+                dom.grip?.classList?.toggle?.('is-dragging', false);
                 state.point = null;
                 state.activeImage = null;
                 state.pointer = null;
@@ -725,15 +717,9 @@ const Lens = (() => {
             render();
         }
 
-        function setBehavior(value) {
-            if (!['follow', 'park'].includes(value)) return;
-            state.preferences.behavior = value;
-            savePreferences();
-            render();
-        }
-
-        function setTargetMarker(enabled) {
-            state.preferences.targetMarker = Boolean(enabled);
+        function setMarkerStyle(value) {
+            if (!['off', 'ring', 'brackets'].includes(value)) return;
+            state.preferences.markerStyle = value;
             savePreferences();
             render();
         }
@@ -774,23 +760,16 @@ const Lens = (() => {
             if (dom.zoomValue) dom.zoomValue.textContent = `${state.preferences.magnification}×`;
             if (dom.zoomOut) dom.zoomOut.disabled = state.preferences.magnification === MAGNIFICATIONS[0];
             if (dom.zoomIn) dom.zoomIn.disabled = state.preferences.magnification === MAGNIFICATIONS.at(-1);
-            if (dom.behavior) {
-                const behavior = effectiveBehavior(state.pointer?.pointerType);
-                dom.behavior.textContent = behavior === 'follow' ? 'Follow' : 'Park';
-                dom.behavior.setAttribute('aria-pressed', behavior === 'park' ? 'true' : 'false');
-                dom.behavior.disabled = coarsePointerActive();
-            }
             dom.sizeButtons.forEach(button => {
                 const active = button.dataset.lensSize === state.preferences.size;
                 button.classList.toggle('active', active);
                 button.setAttribute('aria-checked', active ? 'true' : 'false');
             });
-            dom.behaviorButtons.forEach(button => {
-                const active = button.dataset.lensBehavior === state.preferences.behavior;
+            dom.markerButtons.forEach(button => {
+                const active = button.dataset.lensMarker === state.preferences.markerStyle;
                 button.classList.toggle('active', active);
                 button.setAttribute('aria-checked', active ? 'true' : 'false');
             });
-            if (dom.markerToggle) dom.markerToggle.checked = state.preferences.targetMarker;
             if (dom.comparisonToggle) dom.comparisonToggle.checked = state.report.comparisonEnabled;
             if (dom.comparisonSettings) {
                 const available = viewer.state.mode === 'overlay' && clipCount() > 1;
@@ -807,7 +786,7 @@ const Lens = (() => {
             dom.settings.setAttribute('aria-expanded', 'true');
             renderControls();
             positionSettingsPopover();
-            dom.popover.querySelector('button, input, select')?.focus?.();
+            dom.popover.querySelector('[aria-checked="true"], input, select, button')?.focus?.();
         }
 
         function closeSettings(options = {}) {
@@ -830,17 +809,35 @@ const Lens = (() => {
             viewer.announce?.('Lens settings reset.');
         }
 
+        function setPositionFromPixels(left, top, size = lensSize()) {
+            const stageRect = viewer.dom.stage.getBoundingClientRect();
+            const maxLeft = Math.max(8, stageRect.width - size - 8);
+            const maxTop = Math.max(8, stageRect.height - size - 8);
+            const boundedLeft = clamp(left, 8, maxLeft);
+            const boundedTop = clamp(top, 8, maxTop);
+            state.report.parkedPosition = {
+                u: maxLeft > 8 ? clamp((boundedLeft - 8) / (maxLeft - 8)) : 0,
+                v: maxTop > 8 ? clamp((boundedTop - 8) / (maxTop - 8)) : 0,
+            };
+        }
+
+        function announcePosition() {
+            const horizontal = Math.round(state.report.parkedPosition.u * 100);
+            const vertical = Math.round(state.report.parkedPosition.v * 100);
+            viewer.announce?.(`Lens position ${horizontal}% across, ${vertical}% down.`);
+        }
+
         function startDrag(event) {
+            if (!state.report.enabled) return;
             if (event.button !== undefined && event.button !== 0) return;
-            if (event.target?.closest?.('button')) return;
             const rect = dom.lens.getBoundingClientRect();
             state.drag = {
                 pointerId: event.pointerId,
                 offsetX: event.clientX - rect.left,
                 offsetY: event.clientY - rect.top,
             };
-            state.preferences.behavior = 'park';
-            dom.titlebar.setPointerCapture?.(event.pointerId);
+            dom.grip?.classList?.toggle?.('is-dragging', true);
+            dom.grip?.setPointerCapture?.(event.pointerId);
             event.preventDefault();
             event.stopPropagation();
         }
@@ -848,25 +845,46 @@ const Lens = (() => {
         function moveDrag(event) {
             if (!state.drag || event.pointerId !== state.drag.pointerId) return;
             const stageRect = viewer.dom.stage.getBoundingClientRect();
-            const size = lensSize();
-            const maxLeft = Math.max(8, stageRect.width - size - 8);
-            const maxTop = Math.max(8, stageRect.height - size - lensChromeHeight() - 8);
-            const left = clamp(event.clientX - stageRect.left - state.drag.offsetX, 8, maxLeft);
-            const top = clamp(event.clientY - stageRect.top - state.drag.offsetY, 8, maxTop);
-            state.report.parkedPosition = {
-                u: maxLeft > 8 ? clamp((left - 8) / (maxLeft - 8)) : 0,
-                v: maxTop > 8 ? clamp((top - 8) / (maxTop - 8)) : 0,
-            };
+            setPositionFromPixels(
+                event.clientX - stageRect.left - state.drag.offsetX,
+                event.clientY - stageRect.top - state.drag.offsetY,
+            );
             render();
             event.preventDefault();
             event.stopPropagation();
         }
 
-        function endDrag(event) {
+        function finishDrag(event, options = {}) {
             if (!state.drag || event.pointerId !== state.drag.pointerId) return;
             state.drag = null;
-            savePreferences();
+            dom.grip?.classList?.toggle?.('is-dragging', false);
+            if (options.releaseCapture !== false && dom.grip?.hasPointerCapture?.(event.pointerId)) {
+                dom.grip.releasePointerCapture?.(event.pointerId);
+            }
             saveReportState();
+            announcePosition();
+            event.stopPropagation?.();
+        }
+
+        function moveFromKeyboard(event) {
+            const directions = {
+                ArrowLeft: [-1, 0],
+                ArrowRight: [1, 0],
+                ArrowUp: [0, -1],
+                ArrowDown: [0, 1],
+            };
+            const direction = directions[event.key];
+            if (!direction || !state.report.enabled) return;
+            const step = event.shiftKey ? 24 : 4;
+            const position = lensPosition(lensSize());
+            setPositionFromPixels(
+                position.left + direction[0] * step,
+                position.top + direction[1] * step,
+            );
+            render();
+            saveReportState();
+            announcePosition();
+            event.preventDefault();
             event.stopPropagation();
         }
 
@@ -874,29 +892,30 @@ const Lens = (() => {
             dom.toggle?.addEventListener('click', () => setEnabled(!state.report.enabled));
             dom.zoomOut?.addEventListener('click', () => stepMagnification(-1));
             dom.zoomIn?.addEventListener('click', () => stepMagnification(1));
-            dom.behavior?.addEventListener('click', () => setBehavior(
-                state.preferences.behavior === 'follow' ? 'park' : 'follow'
-            ));
             dom.settings?.addEventListener('click', () => {
                 if (dom.popover.hidden) openSettings();
                 else closeSettings();
             });
-            dom.close?.addEventListener('click', () => setEnabled(false));
             dom.sizeButtons.forEach(button => button.addEventListener('click', () => {
                 setSize(button.dataset.lensSize);
             }));
-            dom.behaviorButtons.forEach(button => button.addEventListener('click', () => {
-                setBehavior(button.dataset.lensBehavior);
+            dom.markerButtons.forEach(button => button.addEventListener('click', () => {
+                setMarkerStyle(button.dataset.lensMarker);
             }));
-            dom.markerToggle?.addEventListener('change', event => setTargetMarker(event.target.checked));
             dom.comparisonToggle?.addEventListener('change', event => setComparisonEnabled(event.target.checked));
             dom.comparisonTarget?.addEventListener('change', event => setComparisonTarget(event.target.value));
             dom.reset?.addEventListener('click', reset);
-            dom.titlebar?.addEventListener('pointerdown', startDrag);
-            dom.titlebar?.addEventListener('pointermove', moveDrag);
-            dom.titlebar?.addEventListener('pointerup', endDrag);
-            dom.titlebar?.addEventListener('pointercancel', endDrag);
-            dom.lens?.addEventListener('pointerdown', event => event.stopPropagation());
+            dom.orientation?.addEventListener('click', () => {
+                window.setTimeout?.(positionSettingsPopover, 0);
+            });
+            dom.grip?.addEventListener('pointerdown', startDrag);
+            dom.grip?.addEventListener('pointermove', moveDrag);
+            dom.grip?.addEventListener('pointerup', finishDrag);
+            dom.grip?.addEventListener('pointercancel', finishDrag);
+            dom.grip?.addEventListener('lostpointercapture', event => {
+                finishDrag(event, { releaseCapture: false });
+            });
+            dom.grip?.addEventListener('keydown', moveFromKeyboard);
             dom.popover?.addEventListener('keydown', event => {
                 if (event.key !== 'Escape') return;
                 event.preventDefault();

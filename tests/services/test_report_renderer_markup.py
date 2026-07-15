@@ -570,11 +570,21 @@ def test_build_html_renders_lens_stage_controls(
     assert lens.attrs["data-comparison"] == "false"
     assert len(find_all(lens, tag="img")) == 3
     assert require_first(lens, tag="img", attr_name="data-lens-image", attr_value="difference")
-    settings = require_first(lens, tag="div", element_id="lens-settings-popover")
+    grip = require_first(lens, tag="button", attr_name="data-lens-drag-handle")
+    assert grip.attrs["aria-label"] == "Move lens window"
+    assert not find_all(lens, tag="div", class_name="rv-lens-titlebar")
+    assert not find_all(lens, tag="button", element_id="btn-lens-settings")
+
+    settings = require_first(stage, tag="div", element_id="lens-settings-popover")
     assert settings.attrs["role"] == "dialog"
     assert "hidden" in settings.attrs
-    assert require_first(lens, tag="button", element_id="btn-lens-close")
-    assert require_first(lens, tag="input", element_id="lens-comparison-enabled")
+    settings_trigger = require_first(palette, tag="button", element_id="btn-lens-settings")
+    assert settings_trigger.attrs["aria-controls"] == "lens-settings-popover"
+    assert not find_all(palette, tag="div", element_id="lens-settings-popover")
+    assert not find_all(lens, tag="div", element_id="lens-settings-popover")
+    assert require_first(settings, tag="input", element_id="lens-comparison-enabled")
+    assert require_first(settings, tag="button", attr_name="data-lens-marker", attr_value="off")
+    assert not find_all(stage, attr_name="data-lens-behavior")
     assert not find_all(stage, tag="canvas")
     assert 'id="btn-inspect"' not in html
 

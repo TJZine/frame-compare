@@ -121,7 +121,7 @@ def test_viewer_js_composes_focused_lens_owner_before_viewer() -> None:
     assert_in_order(js, ["const Lens =", "const ReportViewer ="])
     assert "this.lens = Lens.create(this);" in js
     assert "this.lens.bind();" in js
-    assert "frame-compare:lens-preferences:v1" in js
+    assert "frame-compare:lens-preferences:v2" in js
     assert "frame-compare:report-lens:v1:" in js
     assert "const MAGNIFICATIONS = [2, 3, 4, 6, 8, 12];" in js
     assert "const SIZES = { small: 160, medium: 240, large: 320 };" in js
@@ -132,7 +132,8 @@ def test_viewer_js_composes_focused_lens_owner_before_viewer() -> None:
     assert "dom.differenceImage" in js
     assert "viewer.dom.rightImg" in js
     assert "dom.lens.dataset.renderMode = showing ? 'diff' : 'source';" in js
-    assert "effectiveBehavior(pointerType = '')" in js
+    assert "markerStyle: 'off'" in js
+    assert "['off', 'ring', 'brackets'].includes(source.markerStyle)" in js
     assert "seedCenterPoint()" in js
     assert "const TOUCH_GESTURE_THRESHOLD = 6;" in js
     assert "function boundedPopoverPosition(" in js
@@ -147,6 +148,25 @@ def test_viewer_js_composes_focused_lens_owner_before_viewer() -> None:
     assert "function refresh()" in js
     assert "activeRect.left + point.u * activeRect.width" in js
     assert "restoreToggleFocus" in js
+    assert "dom.group?.contains?.(document.activeElement)" in js
+    assert "dom.popover?.contains?.(document.activeElement)" in js
+    assert "if (dom.activeControls) dom.activeControls.hidden = !state.report.enabled;" in js
+    assert "viewer.dom.stage.classList?.toggle?.('rv-lens-active', state.report.enabled);" in js
+    assert "function setPositionFromPixels(left, top, size = lensSize())" in js
+    assert "groupRect.left + position.left - stageRect.left" in js
+    assert "groupRect.top + position.top - stageRect.top" in js
+    assert "dom.grip?.setPointerCapture?.(event.pointerId);" in js
+    assert "function finishDrag(event, options = {})" in js
+    assert "options.releaseCapture !== false" in js
+    assert "dom.grip?.addEventListener('lostpointercapture'" in js
+    assert "dom.grip?.addEventListener('keydown', moveFromKeyboard);" in js
+    assert "const step = event.shiftKey ? 24 : 4;" in js
+    assert "Lens position ${horizontal}% across, ${vertical}% down." in js
+    assert "dom.toggle.hidden" not in js
+    assert "data-lens-behavior" not in js
+    assert "targetMarker" not in js
+    assert "effectiveBehavior" not in js
+    assert "rv-lens-settings-open" not in js
     assert "viewer.state.mode === 'overlay'" in js
     assert "createElement('canvas')" not in js
     assert "getImageData" not in js
@@ -225,7 +245,7 @@ def test_viewer_js_isolates_lens_chrome_and_arbitrates_touch_gestures() -> None:
     deferred = js_method_block(js, "startDeferredViewportGesture(e, start)")
     stop = js_method_block(js, "stopPointerInteraction(e, options = {})")
 
-    assert ".rv-viewport-palette, .rv-lens" in guard
+    assert ".rv-viewport-palette, .rv-lens, .rv-lens-settings" in guard
     assert viewport.count("if (this.isViewerChromeEvent(e)) return;") == 2
     assert "if (this.isViewerChromeEvent(e)) return;" in wheel
     assert "if (this.isViewerChromeEvent(e)) return;" in double_click

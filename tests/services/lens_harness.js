@@ -21,6 +21,7 @@ function fakeElement(rect = { left: 0, top: 0, width: 0, height: 0 }) {
     const listeners = new Map();
     const attributes = new Map();
     const classes = new Set();
+    const capturedPointers = new Set();
     let currentRect = { ...rect };
     let srcValue = '';
     const element = {
@@ -96,7 +97,12 @@ function fakeElement(rect = { left: 0, top: 0, width: 0, height: 0 }) {
         closest() { return null; },
         focus() { if (focusDocument) focusDocument.activeElement = this; },
         querySelector() { return this.children[0] || null; },
-        setPointerCapture() {},
+        setPointerCapture(pointerId) { capturedPointers.add(pointerId); },
+        releasePointerCapture(pointerId) {
+            if (!capturedPointers.delete(pointerId)) return;
+            this.dispatch('lostpointercapture', { pointerId });
+        },
+        hasPointerCapture(pointerId) { return capturedPointers.has(pointerId); },
     };
     Object.defineProperty(element, 'src', {
         configurable: true,
@@ -117,19 +123,24 @@ function makeEnvironment({ failingWrites = false, coarse = false, autoLoadClones
     const rightImage = fakeElement({ left: 120, top: 110, width: 800, height: 450 });
     rightImage.src = 'clip-1/frame.png';
     rightImage.currentSrc = rightImage.src;
-    const lens = fakeElement({ left: 600, top: 80, width: 240, height: 272 });
-    const popover = fakeElement({ left: 580, top: 112, width: 260, height: 320 });
+    const lens = fakeElement({ left: 600, top: 80, width: 240, height: 240 });
+    const palette = fakeElement({ left: 600, top: 632, width: 380, height: 40 });
+    const paletteGroup = fakeElement({ left: 700, top: 640, width: 280, height: 32 });
+    const activeControls = fakeElement();
+    activeControls.hidden = true;
+    const popover = fakeElement({ left: 700, top: 312, width: 260, height: 320 });
     popover.hidden = true;
     const firstSetting = fakeElement();
     popover.querySelector = () => firstSetting;
+    popover.contains = target => [popover, firstSetting].includes(target);
     const sizeButtons = ['small', 'medium', 'large'].map(size => {
         const button = fakeElement();
         button.dataset.lensSize = size;
         return button;
     });
-    const behaviorButtons = ['follow', 'park'].map(behavior => {
+    const markerButtons = ['off', 'ring', 'brackets'].map(markerStyle => {
         const button = fakeElement();
-        button.dataset.lensBehavior = behavior;
+        button.dataset.lensMarker = markerStyle;
         return button;
     });
     const elements = {
@@ -138,17 +149,17 @@ function makeEnvironment({ failingWrites = false, coarse = false, autoLoadClones
         'rv-lens-target': fakeElement(),
         'btn-lens-zoom-out': fakeElement(),
         'btn-lens-zoom-in': fakeElement(),
-        'btn-lens-behavior': fakeElement(),
         'btn-lens-settings': fakeElement(),
-        'btn-lens-close': fakeElement(),
         'lens-settings-popover': popover,
-        'lens-target-marker': fakeElement(),
         'lens-comparison-enabled': fakeElement(),
         'lens-comparison-target': fakeElement(),
         'btn-lens-reset': fakeElement(),
     };
     const selectors = {
-        '[data-lens-drag-handle]': fakeElement({ left: 600, top: 80, width: 240, height: 32 }),
+        '.rv-viewport-palette': palette,
+        '[data-lens-palette-group]': paletteGroup,
+        '[data-lens-active-controls]': activeControls,
+        '[data-lens-drag-handle]': fakeElement({ left: 804, top: 88, width: 28, height: 28 }),
         '[data-lens-zoom]': fakeElement(),
         '[data-lens-comparison-settings]': fakeElement(),
         '[data-lens-persistence]': fakeElement(),
@@ -173,7 +184,7 @@ function makeEnvironment({ failingWrites = false, coarse = false, autoLoadClones
         querySelector(selector) { return selectors[selector] || null; },
         querySelectorAll(selector) {
             if (selector === '[data-lens-size]') return sizeButtons;
-            if (selector === '[data-lens-behavior]') return behaviorButtons;
+            if (selector === '[data-lens-marker]') return markerButtons;
             return [];
         },
         createElement(tagName) {
@@ -190,13 +201,15 @@ function makeEnvironment({ failingWrites = false, coarse = false, autoLoadClones
     focusDocument = document;
     lens.contains = target => [
         lens,
+        selectors['[data-lens-drag-handle]'],
+    ].includes(target);
+    paletteGroup.contains = target => [
+        paletteGroup,
+        elements['btn-lens'],
+        activeControls,
         elements['btn-lens-zoom-out'],
         elements['btn-lens-zoom-in'],
-        elements['btn-lens-behavior'],
         elements['btn-lens-settings'],
-        elements['btn-lens-close'],
-        popover,
-        firstSetting,
     ].includes(target);
     const context = {
         console,
@@ -218,6 +231,7 @@ function makeEnvironment({ failingWrites = false, coarse = false, autoLoadClones
             { src: 'clip-3/frame.png' },
         ],
     };
+    const announcements = [];
     const viewer = {
         state: {
             data: {
@@ -239,7 +253,7 @@ function makeEnvironment({ failingWrites = false, coarse = false, autoLoadClones
         currentFrame() { return frame; },
         referenceClipIndex() { return 0; },
         sliderCanvasRect() { return activeImage.getBoundingClientRect(); },
-        announce() {},
+        announce(message) { announcements.push(message); },
         gridView: { entries() { return []; } },
     };
     return {
@@ -248,11 +262,13 @@ function makeEnvironment({ failingWrites = false, coarse = false, autoLoadClones
         elements,
         selectors,
         sizeButtons,
-        behaviorButtons,
+        markerButtons,
         storageValues,
         frame,
         document,
         detachedLoaders,
+        announcements,
+        palette,
     };
 }
 
@@ -261,25 +277,23 @@ const Lens = pure.Lens;
 
 assert.deepEqual(
     JSON.parse(JSON.stringify(Lens.normalizePreferences({}))),
-    { magnification: 4, size: 'medium', behavior: 'follow', targetMarker: true },
+    { magnification: 4, size: 'medium', markerStyle: 'off' },
 );
 assert.deepEqual(
     JSON.parse(JSON.stringify(Lens.normalizePreferences({
         magnification: 12,
         size: 'large',
-        behavior: 'park',
-        targetMarker: false,
+        markerStyle: 'brackets',
     }))),
-    { magnification: 12, size: 'large', behavior: 'park', targetMarker: false },
+    { magnification: 12, size: 'large', markerStyle: 'brackets' },
 );
 assert.deepEqual(
     JSON.parse(JSON.stringify(Lens.normalizePreferences({
         magnification: 5,
         size: 'huge',
-        behavior: 'float',
-        targetMarker: 'yes',
+        markerStyle: 'crosshair',
     }))),
-    { magnification: 4, size: 'medium', behavior: 'follow', targetMarker: true },
+    { magnification: 4, size: 'medium', markerStyle: 'off' },
 );
 
 const bounded = Lens.normalizedPosition({ u: -4, v: 2 });
@@ -327,14 +341,25 @@ controller.setEnabled(true);
 assert.equal(controller.state.report.enabled, true);
 assert.equal(environment.elements['btn-lens'].getAttribute('aria-pressed'), 'true');
 assert.equal(environment.elements['rv-lens'].hidden, false);
+assert.equal(environment.elements['btn-lens'].hidden, false);
+assert.equal(environment.selectors['[data-lens-active-controls]'].hidden, false);
+assert.equal(environment.viewer.dom.stage.classList.contains('rv-lens-active'), true);
+environment.elements['btn-lens-settings'].dispatch('click');
+assert.equal(environment.elements['lens-settings-popover'].hidden, false);
+assert.equal(environment.elements['lens-settings-popover'].style.left, '720px');
+assert.equal(environment.elements['lens-settings-popover'].style.top, '316px');
+environment.elements['lens-settings-popover'].dispatch('keydown', { key: 'Escape' });
+assert.equal(environment.elements['lens-settings-popover'].hidden, true);
 assert.equal(controller.state.point.u, 0.5);
 assert.equal(controller.state.point.v, 0.5);
-controller.handleStagePointerMove({ clientX: 500, clientY: 325, pointerType: 'mouse' });
+const fixedLeft = environment.elements['rv-lens'].style.left;
+const fixedTop = environment.elements['rv-lens'].style.top;
+controller.handleStagePointerMove({ clientX: 300, clientY: 200, pointerType: 'mouse' });
 assert.equal(environment.elements['rv-lens'].hidden, false);
-assert.equal(environment.elements['btn-lens'].hidden, true);
-assert.equal(controller.state.point.u, 0.5);
-assert.equal(controller.state.point.v, 0.5);
-assert.equal(environment.elements['rv-lens'].dataset.behavior, 'follow');
+assert.equal(controller.state.point.u, 0.25);
+assert.equal(controller.state.point.v, 2 / 9);
+assert.equal(environment.elements['rv-lens'].style.left, fixedLeft);
+assert.equal(environment.elements['rv-lens'].style.top, fixedTop);
 
 environment.viewer.state.mode = 'diff';
 controller.sync();
@@ -405,15 +430,25 @@ assert.equal(
     'clip-2/frame.png',
 );
 
-environment.behaviorButtons[1].dispatch('click');
-assert.equal(controller.state.preferences.behavior, 'park');
-assert.equal(environment.elements['rv-lens'].dataset.behavior, 'park');
 environment.sizeButtons[2].dispatch('click');
 assert.equal(controller.state.preferences.size, 'large');
 assert.equal(environment.elements['rv-lens'].style.values['--lens-size'], '320px');
+const normalizedPositionBeforeResize = { ...controller.state.report.parkedPosition };
+environment.viewer.dom.stage.setRect({ left: 0, top: 0, width: 300, height: 220 });
+controller.refresh();
+assert.deepEqual(
+    JSON.parse(JSON.stringify(controller.state.report.parkedPosition)),
+    normalizedPositionBeforeResize,
+);
+assert.equal(environment.elements['rv-lens'].style.values['--lens-size'], '204px');
+environment.viewer.dom.stage.setRect({ left: 0, top: 0, width: 1000, height: 700 });
+controller.refresh();
 
-environment.behaviorButtons[0].dispatch('click');
-assert.equal(controller.state.preferences.behavior, 'follow');
+assert.equal(environment.elements['rv-lens-target'].hidden, true);
+environment.markerButtons[1].dispatch('click');
+assert.equal(controller.state.preferences.markerStyle, 'ring');
+assert.equal(environment.elements['rv-lens-target'].dataset.markerStyle, 'ring');
+assert.equal(environment.elements['rv-lens-target'].hidden, false);
 const beforeTap = { ...controller.state.point };
 assert.equal(
     controller.handleStagePointerDown({ pointerId: 7, clientX: 300, clientY: 200, pointerType: 'touch' }),
@@ -428,8 +463,6 @@ assert.equal(
     controller.endStagePointer({ pointerId: 7, clientX: 300, clientY: 200, pointerType: 'touch' }),
     true,
 );
-assert.equal(controller.state.preferences.behavior, 'follow');
-assert.equal(environment.elements['rv-lens'].dataset.behavior, 'park');
 assert.equal(controller.state.point.u, 0.25);
 assert.equal(controller.state.point.v, 2 / 9);
 const tapPoint = { ...controller.state.point };
@@ -460,11 +493,57 @@ environment.viewer.state.mode = 'overlay';
 controller.sync();
 
 const dragHandle = environment.selectors['[data-lens-drag-handle]'];
+dragHandle.dispatch('pointerdown', { pointerId: 10, button: 0, clientX: 620, clientY: 100 });
+dragHandle.dispatch('pointermove', { pointerId: 10, clientX: 760, clientY: 360 });
+const captureLossPosition = { ...controller.state.report.parkedPosition };
+assert.equal(dragHandle.classList.contains('is-dragging'), true);
+dragHandle.releasePointerCapture(10);
+assert.equal(dragHandle.hasPointerCapture(10), false);
+assert.equal(dragHandle.classList.contains('is-dragging'), false);
+assert.equal(controller.state.drag, null);
+assert.deepEqual(
+    JSON.parse(environment.storageValues.get('frame-compare:report-lens:v1:lens-report')).parkedPosition,
+    captureLossPosition,
+);
+const sampleBeforeCaptureLossRecovery = { ...controller.state.point };
+assert.equal(
+    controller.handleStagePointerMove({ clientX: 700, clientY: 300, pointerType: 'mouse' }),
+    true,
+);
+assert.notDeepEqual(JSON.parse(JSON.stringify(controller.state.point)), sampleBeforeCaptureLossRecovery);
+const positionBeforeSecondDrag = { ...controller.state.report.parkedPosition };
+dragHandle.dispatch('pointerdown', { pointerId: 11, button: 0, clientX: 620, clientY: 100 });
+assert.equal(dragHandle.hasPointerCapture(11), true);
+dragHandle.dispatch('pointermove', { pointerId: 11, clientX: 500, clientY: 240 });
+dragHandle.dispatch('pointerup', { pointerId: 11, clientX: 500, clientY: 240 });
+assert.notDeepEqual(
+    JSON.parse(JSON.stringify(controller.state.report.parkedPosition)),
+    positionBeforeSecondDrag,
+);
+assert.equal(dragHandle.hasPointerCapture(11), false);
+assert.equal(controller.state.drag, null);
+
 dragHandle.dispatch('pointerdown', { pointerId: 9, button: 0, clientX: 620, clientY: 100 });
+assert.equal(dragHandle.hasPointerCapture(9), true);
 dragHandle.dispatch('pointermove', { pointerId: 9, clientX: 990, clientY: 690 });
 dragHandle.dispatch('pointerup', { pointerId: 9, clientX: 990, clientY: 690 });
+assert.equal(dragHandle.hasPointerCapture(9), false);
 assert.ok(controller.state.report.parkedPosition.u >= 0 && controller.state.report.parkedPosition.u <= 1);
 assert.ok(controller.state.report.parkedPosition.v >= 0 && controller.state.report.parkedPosition.v <= 1);
+assert.equal(dragHandle.classList.contains('is-dragging'), false);
+const afterDrag = { ...controller.state.report.parkedPosition };
+let keyboardPrevented = false;
+let keyboardStopped = false;
+dragHandle.dispatch('keydown', {
+    key: 'ArrowLeft',
+    shiftKey: true,
+    preventDefault() { keyboardPrevented = true; },
+    stopPropagation() { keyboardStopped = true; },
+});
+assert.ok(controller.state.report.parkedPosition.u < afterDrag.u);
+assert.equal(keyboardPrevented, true);
+assert.equal(keyboardStopped, true);
+assert.match(environment.announcements.at(-1), /Lens position/);
 
 environment.viewer.state.mode = 'slider';
 controller.sync();
@@ -479,6 +558,11 @@ assert.equal(reportPayload.enabled, true);
 assert.equal(reportPayload.comparisonEnabled, true);
 assert.equal(Object.hasOwn(reportPayload, 'point'), false);
 assert.equal(Object.hasOwn(reportPayload, 'pointer'), false);
+const preferencePayload = JSON.parse(
+    environment.storageValues.get('frame-compare:lens-preferences:v2'),
+);
+assert.equal(preferencePayload.markerStyle, 'ring');
+assert.equal(Object.hasOwn(preferencePayload, 'behavior'), false);
 
 const failing = makeEnvironment({ failingWrites: true, coarse: true });
 const memoryController = failing.Lens.create(failing.viewer);
@@ -494,10 +578,12 @@ const focusEnvironment = makeEnvironment();
 const focusController = focusEnvironment.Lens.create(focusEnvironment.viewer);
 focusController.bind();
 focusController.setEnabled(true);
-focusEnvironment.document.activeElement = focusEnvironment.elements['btn-lens-close'];
-focusEnvironment.elements['btn-lens-close'].dispatch('click');
+focusEnvironment.elements['btn-lens-settings'].dispatch('click');
+focusEnvironment.document.activeElement = focusEnvironment.elements['lens-settings-popover'].querySelector();
+focusController.setEnabled(false);
 assert.equal(focusController.state.report.enabled, false);
 assert.equal(focusEnvironment.elements['btn-lens'].hidden, false);
+assert.equal(focusEnvironment.viewer.dom.stage.classList.contains('rv-lens-active'), false);
 assert.equal(focusEnvironment.document.activeElement, focusEnvironment.elements['btn-lens']);
 focusController.setEnabled(true);
 const externalFocus = fakeElement();
@@ -621,8 +707,9 @@ console.log(JSON.stringify({
     diffCompositionAndAlignment: true,
     staleContextReseeds: true,
     immediateActivation: true,
-    toggleAndFollow: true,
-    parkAndTouch: true,
+    stablePaletteAndFixedWindow: true,
+    fixedTouchSampling: true,
+    lostPointerCaptureRecovers: true,
     touchDragReleasesWithoutSampling: true,
     touchLayoutRefreshStable: true,
     focusedDisableRestoresToggle: true,

@@ -706,7 +706,7 @@ const ReportViewer = {
     },
 
     isViewerChromeEvent(e) {
-        return Boolean(e.target?.closest?.('.rv-viewport-palette, .rv-lens'));
+        return Boolean(e.target?.closest?.('.rv-viewport-palette, .rv-lens, .rv-lens-settings'));
     },
 
     handleViewportDoubleClick(e) {

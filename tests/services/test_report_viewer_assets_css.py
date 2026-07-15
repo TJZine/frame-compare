@@ -138,36 +138,58 @@ def test_viewer_css_stays_offline_and_preserves_tokenized_regressions() -> None:
 def test_viewer_css_covers_production_lens_and_touch_controls() -> None:
     css = get_css()
     target = css_block(css, ".rv-lens-target")
+    ring = css_block(css, '.rv-lens-target[data-marker-style="ring"]')
+    brackets = css_block(css, '.rv-lens-target[data-marker-style="brackets"] > i')
     tabs = css_block(css, ".rv-inspector-tabs")
     lens = css_block(css, ".rv-lens {")
+    grip = css_block(css, ".rv-lens-grip")
     lens_image = css_block(css, ".rv-lens-pane img")
     settings = css_block(css, ".rv-lens-settings")
+    vertical_palette = css_block(css, '.rv-viewport-palette[data-orientation="vertical"]')
     coarse = css_block(css, "@media (pointer: coarse)")
     reduced_motion = css_block(css, "@media (prefers-reduced-motion: reduce)")
 
-    assert "width: 18px;" in target
-    assert "var(--annotation)" in target
+    assert "width: 20px;" in target
+    assert "pointer-events: none;" in target
+    assert "border: 1px solid var(--annotation);" in ring
+    assert "border-radius: 50%;" in ring
+    assert "display: block;" in brackets
     assert "overflow-x: auto;" in tabs
     assert "display: flex;" in tabs
     assert "--lens-size: 240px;" in lens
-    assert "touch-action: none;" in lens
+    assert "pointer-events: none;" in lens
+    assert "cursor: grab;" in grip
+    assert "pointer-events: auto;" in grip
+    assert "touch-action: none;" in grip
+    assert "cursor: grabbing;" in css_block(css, ".rv-lens-grip.is-dragging")
+    assert "cursor: default;" in css_block(
+        css,
+        ".rv-viewer-stage.rv-lens-active,\n.rv-viewer-stage.rv-lens-active.is-panning",
+    )
     assert "image-rendering: pixelated;" in lens_image
     assert "mix-blend-mode: difference;" in css_block(
         css, '.rv-lens[data-render-mode="diff"] .rv-lens-image--difference'
     )
     assert "width: min(260px, calc(100vw - 24px));" in settings
+    assert "z-index: 36;" in settings
+    assert "top: 8px;" in settings
+    assert "left: 8px;" in settings
     assert "overflow: auto;" in settings
     assert "overscroll-behavior: contain;" in settings
+    assert "max-height: calc(100% - 2rem);" in vertical_palette
+    assert "overflow-y: auto;" in vertical_palette
+    assert ".rv-lens-settings-open" not in css
     assert '.rv-lens[data-comparison="true"] .rv-lens-pane--comparison' in css
-    assert '.rv-lens[data-size="small"] #btn-lens-behavior' in css
-    assert '.rv-lens[data-size="small"] .rv-lens-controls' in css
+    assert ".rv-lens-palette-controls" in css
+    assert ".rv-lens-fixed-status" in css
+    assert ".rv-lens-titlebar" not in css
+    assert ".rv-lens-controls" not in css
     assert "#btn-lens" in coarse
-    assert ".rv-lens-controls button" in coarse
+    assert ".rv-lens-palette-controls button" in coarse
+    assert ".rv-lens-grip" in coarse
     assert "[data-lens-size]" in coarse
-    assert "[data-lens-behavior]" in coarse
-    assert "grid-template-columns: repeat(3, minmax(44px, 1fr));" in coarse
-    assert "grid-template-columns: repeat(5, minmax(44px, 1fr));" not in coarse
-    assert "#btn-lens-behavior" in coarse
+    assert "[data-lens-marker]" in coarse
+    assert "[data-lens-behavior]" not in coarse
     assert ".rv-inspector-tabs button" in coarse
     assert "min-width: 44px;" in coarse
     assert "min-height: 44px;" in coarse
