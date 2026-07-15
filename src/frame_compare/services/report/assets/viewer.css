@@ -808,86 +808,249 @@ select optgroup {
     display: none;
 }
 
-.rv-inspection-point {
+.rv-lens-target {
     position: absolute;
     z-index: 16;
-    width: 44px;
-    height: 44px;
-    min-width: 44px;
-    padding: 0;
-    border: 1px solid transparent;
+    width: 18px;
+    height: 18px;
+    border: 1px solid var(--annotation);
     border-radius: 50%;
-    background: transparent;
+    box-shadow: 0 0 0 2px rgba(5, 6, 8, 0.7);
     transform: translate(-50%, -50%);
-    cursor: crosshair;
+    pointer-events: none;
+}
+
+.rv-lens-target::before,
+.rv-lens-target::after {
+    position: absolute;
+    content: "";
+    background: var(--annotation);
+}
+
+.rv-lens-target::before {
+    top: 8px;
+    left: -4px;
+    width: 24px;
+    height: 1px;
+}
+
+.rv-lens-target::after {
+    top: -4px;
+    left: 8px;
+    width: 1px;
+    height: 24px;
+}
+
+.rv-lens {
+    --lens-size: 240px;
+    position: absolute;
+    z-index: 17;
+    width: var(--lens-size);
+    overflow: visible;
+    border: 1px solid var(--annotation);
+    border-radius: 4px;
+    background: #050608;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.52);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
     touch-action: none;
 }
 
-.rv-inspection-point > span,
-.rv-inspection-point > span::before,
-.rv-inspection-point > span::after {
-    position: absolute;
-    content: "";
-    pointer-events: none;
+.rv-lens-titlebar {
+    display: flex;
+    min-height: 32px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+    padding: 4px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-surface);
+    cursor: move;
 }
 
-.rv-inspection-point > span {
-    inset: 10px;
-    border: 2px solid var(--annotation);
-    border-radius: 50%;
-    background: rgba(5, 6, 8, 0.38);
+.rv-lens-titlebar strong {
+    padding-inline: 4px;
+    color: var(--annotation);
+    font-size: var(--text-xs);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
 }
 
-.rv-inspection-point > span::before {
-    top: 50%;
-    left: -7px;
-    right: -7px;
-    border-top: 1px solid var(--annotation);
+.rv-lens-controls {
+    display: flex;
+    align-items: center;
+    gap: 4px;
 }
 
-.rv-inspection-point > span::after {
-    top: -7px;
-    bottom: -7px;
-    left: 50%;
-    border-left: 1px solid var(--annotation);
-}
-
-.rv-inspection-point[data-locked="true"] > span {
-    background: rgba(243, 173, 69, 0.22);
-    box-shadow: 0 0 0 2px rgba(5, 6, 8, 0.76);
-}
-
-.rv-pixel-lens {
-    position: absolute;
-    z-index: 15;
-    width: 112px;
-    height: 112px;
-    overflow: hidden;
-    border: 2px solid var(--annotation);
+.rv-lens-controls button {
+    min-width: 28px;
+    min-height: 24px;
+    padding: 2px 6px;
     border-radius: 4px;
-    background: #050608;
-    pointer-events: none;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
 }
 
-.rv-pixel-lens img {
+.rv-lens-controls output {
+    min-width: 3ch;
+    color: var(--text-primary);
+    font-size: var(--text-xs);
+    text-align: center;
+}
+
+.rv-lens-view {
+    position: relative;
+    width: var(--lens-size);
+    height: var(--lens-size);
+    overflow: hidden;
+    background: #050608;
+}
+
+.rv-lens-pane {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+}
+
+.rv-lens-pane img {
     position: absolute;
     max-width: none;
     image-rendering: crisp-edges;
     image-rendering: pixelated;
 }
 
-.rv-pixel-lens[data-magnification="2"] { --pixel-magnification: 2; }
-.rv-pixel-lens[data-magnification="4"] { --pixel-magnification: 4; }
-.rv-pixel-lens[data-magnification="8"] { --pixel-magnification: 8; }
+.rv-lens-image--difference {
+    display: none;
+}
 
-.rv-pixel-lens[data-magnification="8"]::after {
+.rv-lens[data-render-mode="diff"] .rv-lens-image--difference {
+    display: block;
+    mix-blend-mode: difference;
+}
+
+.rv-lens-pane span {
     position: absolute;
-    inset: 0;
-    content: "";
-    background-image:
-        repeating-linear-gradient(to right, transparent 0 7px, rgba(240, 242, 245, 0.3) 7px 8px),
-        repeating-linear-gradient(to bottom, transparent 0 7px, rgba(240, 242, 245, 0.3) 7px 8px);
-    background-position: 4px 4px;
+    z-index: 2;
+    right: 4px;
+    bottom: 4px;
+    left: 4px;
+    overflow: hidden;
+    padding: 3px 5px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: rgba(5, 6, 8, 0.84);
+    color: var(--text-primary);
+    font-size: var(--text-xs);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rv-lens-pane--comparison {
+    display: none;
+}
+
+.rv-lens[data-comparison="true"] .rv-lens-pane--active {
+    right: 50%;
+}
+
+.rv-lens[data-comparison="true"] .rv-lens-pane--comparison {
+    display: block;
+    left: 50%;
+    border-left: 1px solid var(--accent);
+}
+
+.rv-lens-settings {
+    position: absolute;
+    z-index: 3;
+    top: 36px;
+    right: 4px;
+    width: min(260px, calc(100vw - 24px));
+    max-height: calc(100vh - 16px);
+    display: grid;
+    gap: 8px;
+    padding: 8px;
+    border: 1px solid var(--border-hover);
+    border-radius: 4px;
+    background: var(--bg-surface);
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.52);
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+    overflow: auto;
+    overscroll-behavior: contain;
+}
+
+.rv-lens-settings[hidden] {
+    display: none;
+}
+
+.rv-lens-settings fieldset {
+    display: grid;
+    gap: 4px;
+    padding: 0;
+    border: 0;
+}
+
+.rv-lens-settings legend {
+    margin-bottom: 4px;
+    color: var(--text-secondary);
+}
+
+.rv-lens-setting-options {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+}
+
+.rv-lens-setting-options button {
+    padding: 5px 6px;
+    border-radius: 4px;
+    font-size: var(--text-xs);
+}
+
+.rv-lens-setting-options button.active {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.rv-lens-check,
+.rv-lens-select {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    gap: 8px;
+}
+
+.rv-lens-select select {
+    min-width: 0;
+}
+
+.rv-lens-persistence {
+    margin: 0;
+    color: var(--text-muted);
+    line-height: 1.35;
+}
+
+.rv-lens-persistence[data-tone="quiet-warning"] {
+    color: var(--annotation);
+}
+
+.rv-lens[data-size="small"] .rv-lens-titlebar strong,
+.rv-lens[data-size="small"] #btn-lens-behavior {
+    display: none;
+}
+
+.rv-lens[data-size="small"] .rv-lens-titlebar {
+    padding: 4px;
+}
+
+.rv-lens[data-size="small"] .rv-lens-controls {
+    width: 100%;
+    justify-content: space-between;
+}
+
+.rv-lens[data-size="small"] .rv-lens-controls button {
+    min-width: 24px;
+    padding-inline: 4px;
 }
 
 /* Labels overlay on image */
@@ -1779,69 +1942,6 @@ select optgroup {
     color: var(--text-muted);
 }
 
-.rv-pixel-panel {
-    display: grid;
-    align-content: start;
-    gap: 0.75rem;
-}
-
-.rv-pixel-toolbar,
-.rv-pixel-magnification {
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-}
-
-.rv-pixel-toolbar {
-    justify-content: space-between;
-    flex-wrap: wrap;
-}
-
-.rv-pixel-anchor,
-.rv-pixel-legend,
-.rv-pixel-coordinates,
-.rv-pixel-sample {
-    font-family: var(--font-mono);
-    font-variant-numeric: tabular-nums;
-}
-
-.rv-pixel-anchor {
-    color: var(--annotation);
-    font-size: var(--text-xs);
-}
-
-.rv-pixel-rows {
-    display: grid;
-    gap: 0.5rem;
-    list-style: none;
-}
-
-.rv-pixel-row {
-    display: grid;
-    gap: 0.25rem;
-    padding: 0.5rem;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: rgba(255, 255, 255, 0.02);
-    font-size: var(--text-xs);
-}
-
-.rv-pixel-row strong {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.rv-pixel-coordinates,
-.rv-pixel-legend,
-.rv-pixel-empty {
-    color: var(--text-secondary);
-    font-size: var(--text-xs);
-}
-
-.rv-pixel-sample {
-    color: var(--text-primary);
-}
 
 .rv-visually-hidden {
     position: absolute !important;
@@ -2112,27 +2212,42 @@ body.rv-inspector-open .rv-viewer-stage {
     .rv-overlay-label,
     .rv-stage-overlay-info,
     .rv-inspector,
-    .rv-pixel-lens,
-    .rv-inspection-point {
+    .rv-lens,
+    .rv-lens-target {
         transition: none !important;
         animation: none !important;
     }
 }
 
 @media (pointer: coarse) {
-    #btn-inspect,
-    #pixel-lens-toggle,
-    [data-pixel-magnification],
+    #btn-lens,
+    .rv-lens-controls button,
+    [data-lens-size],
+    [data-lens-behavior],
     .rv-inspector-tabs button {
         min-width: 44px;
         min-height: 44px;
     }
 
-    .rv-inspection-point {
-        width: 44px;
-        height: 44px;
-        min-width: 44px;
-        min-height: 44px;
+    .rv-lens-titlebar strong,
+    #btn-lens-behavior {
+        display: none;
+    }
+
+    .rv-lens-titlebar {
+        padding: 4px;
+    }
+
+    .rv-lens-controls {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(44px, 1fr));
+        gap: 4px;
+    }
+
+    .rv-lens-controls output {
+        align-self: center;
+        justify-self: center;
     }
 
     #btn-grid-prev,
@@ -2152,9 +2267,6 @@ body.rv-inspector-open .rv-viewer-stage {
         min-height: 44px;
     }
 
-    .rv-pixel-lens {
-        display: none !important;
-    }
 }
 
 /* 13. Info Modal Content Styling */

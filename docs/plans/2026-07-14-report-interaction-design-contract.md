@@ -1,8 +1,55 @@
-Status: Approved Unit 7 design contract / Unit 8 implemented and integrated
+Status: Approved Unit 7 design contract / Unit 8 integrated / Lens v2 amendment approved 2026-07-15
 Scope: Generated-report interaction decisions consumed by Product/UX Units 8–11
 Owner: Frame Compare maintainer and the active Product/UX execution program
 
 # Report interaction design contract
+
+## Controlling maintainer-approved Lens v2 amendment — 2026-07-15
+
+This amendment is the current authority for the local report lens. The maintainer
+explicitly approved it through the 2026-07-15 report-viewer task. It supersedes every
+contradictory **Frozen** or implementation instruction elsewhere in this document,
+the active execution program, and the Unit 8 handoff. Earlier text remains only as a
+historical record of the implementation integrated at `d24f094`.
+
+The following behavior is removed and must not be reintroduced without a new explicit
+maintainer decision: the Pixel inspector tab; `Inspect` button; `M` shortcut; public
+pixel coordinates; RGB/RGBA values or availability messages; any offscreen or visible
+sampling canvas/readback; decoded-value/colorimetry claims; locked ROI; ROI drag/nudge;
+and suppression of the lens on touch or coarse pointers.
+
+The controlling Lens v2 contract is:
+
+- Lens is an independent, default-off viewport tool toggled by `Lens` or `L`; it does
+  not open or depend on the inspector drawer. Enabled state survives frame, clip, and
+  mode changes.
+- The lens uses DOM images only. Sizes are 160/240/320px (240 default) and zoom values
+  are 2x/3x/4x/6x/8x/12x (4x default). Mouse defaults to Follow. Park fixes the lens
+  window while the sample follows; the titlebar is draggable and stores a normalized,
+  clamped position. Touch/coarse input uses pending tap-to-position ownership: a tap
+  moves only the sample, while a drag/pinch belongs exclusively to the existing
+  viewport gesture and does not continue sampling.
+- Lens chrome exposes zoom, Follow/Park, settings, and close with keyboard-accessible
+  names. The 160px and coarse-pointer layouts must fit without horizontal overflow;
+  coarse targets remain at least 44x44. The settings popover clamps/flips within the
+  stage, constrains width/height, and scrolls internally under tiny-stage/zoomed UI.
+- Single mode may optionally show a labelled vertical Active/Comparison split,
+  default off. The target never equals active; reference is preferred when active is
+  non-reference, otherwise the first non-reference is used. Other modes hide but retain
+  this setting. Diff instead reproduces the visible aligned base/difference DOM
+  composition using `mix-blend-mode: difference` and per-source normalized mapping.
+- Global best-effort preferences use `frame-compare:lens-preferences:v1`; report state
+  uses `frame-compare:report-lens:v1:<report_id>`. Pointer/sample position is never
+  persisted. Storage failure leaves a session-only lens and is reported quietly in
+  settings.
+- Palette and lens are one viewer-chrome event boundary. Pointer, wheel, and double-click
+  events originating in either must never leak into pan, reveal, zoom, reset, cycling,
+  or sample movement.
+
+All later sections mentioning Pixel/Inspect/M/canvas/ROI are superseded in full, even
+where they use the word **Frozen**. Frame/Clips/Align/Review/Export inspector behavior,
+existing viewer modes, static offline operation, and the deferred manual browser matrix
+remain current.
 
 This supporting contract is governed by the sole active plan,
 [`2026-07-13-product-ux-execution-program.md`](2026-07-13-product-ux-execution-program.md),

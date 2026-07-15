@@ -1,0 +1,1024 @@
+const Lens = (() => {
+    const PREFERENCES_KEY = 'frame-compare:lens-preferences:v1';
+    const REPORT_KEY_PREFIX = 'frame-compare:report-lens:v1:';
+    const TOUCH_GESTURE_THRESHOLD = 6;
+    const MAGNIFICATIONS = [2, 3, 4, 6, 8, 12];
+    const SIZES = { small: 160, medium: 240, large: 320 };
+    const DEFAULT_PREFERENCES = Object.freeze({
+        magnification: 4,
+        size: 'medium',
+        behavior: 'follow',
+        targetMarker: true,
+    });
+    const DEFAULT_REPORT_STATE = Object.freeze({
+        enabled: false,
+        parkedPosition: { u: 0.72, v: 0.18 },
+        comparisonEnabled: false,
+        comparisonTarget: null,
+    });
+
+    function clamp(value, minimum = 0, maximum = 1) {
+        return Math.max(minimum, Math.min(maximum, value));
+    }
+
+    function validDimensions(width, height) {
+        return Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0;
+    }
+
+    function normalizedPoint(image, clientX, clientY) {
+        const rect = image?.getBoundingClientRect?.();
+        if (!rect || !validDimensions(rect.width, rect.height)) return null;
+        const right = Number.isFinite(rect.right) ? rect.right : rect.left + rect.width;
+        const bottom = Number.isFinite(rect.bottom) ? rect.bottom : rect.top + rect.height;
+        if (
+            clientX < rect.left
+            || clientX > right
+            || clientY < rect.top
+            || clientY > bottom
+        ) return null;
+        return {
+            u: clamp((clientX - rect.left) / rect.width),
+            v: clamp((clientY - rect.top) / rect.height),
+        };
+    }
+
+    function compositionPoint(image, clientX, clientY) {
+        const rect = image?.getBoundingClientRect?.();
+        if (!rect || !validDimensions(rect.width, rect.height)) return null;
+        return {
+            u: (clientX - rect.left) / rect.width,
+            v: (clientY - rect.top) / rect.height,
+        };
+    }
+
+    function normalizedPosition(value, fallback = DEFAULT_REPORT_STATE.parkedPosition) {
+        const u = value?.u;
+        const v = value?.v;
+        if (typeof u !== 'number' || typeof v !== 'number' || !Number.isFinite(u) || !Number.isFinite(v)) {
+            return { ...fallback };
+        }
+        return { u: clamp(u), v: clamp(v) };
+    }
+
+    function normalizePreferences(value) {
+        const source = value && typeof value === 'object' ? value : {};
+        return {
+            magnification: MAGNIFICATIONS.includes(source.magnification)
+                ? source.magnification
+                : DEFAULT_PREFERENCES.magnification,
+            size: Object.hasOwn(SIZES, source.size) ? source.size : DEFAULT_PREFERENCES.size,
+            behavior: ['follow', 'park'].includes(source.behavior)
+                ? source.behavior
+                : DEFAULT_PREFERENCES.behavior,
+            targetMarker: typeof source.targetMarker === 'boolean'
+                ? source.targetMarker
+                : DEFAULT_PREFERENCES.targetMarker,
+        };
+    }
+
+    function normalizeReportState(value, clipCount = 0) {
+        const source = value && typeof value === 'object' ? value : {};
+        const target = source.comparisonTarget;
+        return {
+            enabled: typeof source.enabled === 'boolean'
+                ? source.enabled
+                : DEFAULT_REPORT_STATE.enabled,
+            parkedPosition: normalizedPosition(source.parkedPosition),
+            comparisonEnabled: typeof source.comparisonEnabled === 'boolean'
+                ? source.comparisonEnabled
+                : DEFAULT_REPORT_STATE.comparisonEnabled,
+            comparisonTarget: Number.isInteger(target) && target >= 0 && target < clipCount
+                ? target
+                : null,
+        };
+    }
+
+    function lensImageGeometry(
+        point,
+        width,
+        height,
+        magnification,
+        lensSize,
+        viewportWidth = lensSize,
+    ) {
+        if (
+            !point
+            || !Number.isFinite(point.u)
+            || !Number.isFinite(point.v)
+            || !validDimensions(width, height)
+            || !MAGNIFICATIONS.includes(magnification)
+            || !Number.isFinite(lensSize)
+            || lensSize <= 0
+        ) return null;
+        return {
+            width: width * magnification,
+            height: height * magnification,
+            left: viewportWidth / 2 - point.u * width * magnification,
+            top: lensSize / 2 - point.v * height * magnification,
+        };
+    }
+
+    function boundedPopoverPosition(
+        stageRect,
+        lensRect,
+        popoverRect,
+        margin = 8,
+        anchorOffset = 36,
+    ) {
+        const availableWidth = Math.max(1, stageRect.width - margin * 2);
+        const availableHeight = Math.max(1, stageRect.height - margin * 2);
+        const width = Math.min(popoverRect.width || 260, availableWidth);
+        const height = Math.min(popoverRect.height || 320, availableHeight);
+        const minimumLeft = stageRect.left + margin;
+        const maximumLeft = stageRect.left + stageRect.width - margin - width;
+        const preferredLeft = lensRect.left + lensRect.width - width;
+        const globalLeft = clamp(preferredLeft, minimumLeft, Math.max(minimumLeft, maximumLeft));
+        const below = lensRect.top + anchorOffset;
+        const above = lensRect.top - height - 4;
+        const preferredTop = below + height <= stageRect.top + stageRect.height - margin
+            ? below
+            : above;
+        const minimumTop = stageRect.top + margin;
+        const maximumTop = stageRect.top + stageRect.height - margin - height;
+        const globalTop = clamp(preferredTop, minimumTop, Math.max(minimumTop, maximumTop));
+        return {
+            left: globalLeft - lensRect.left,
+            top: globalTop - lensRect.top,
+            maxWidth: availableWidth,
+            maxHeight: availableHeight,
+        };
+    }
+
+    function create(viewer) {
+        const dom = {
+            toggle: document.getElementById('btn-lens'),
+            lens: document.getElementById('rv-lens'),
+            marker: document.getElementById('rv-lens-target'),
+            titlebar: document.querySelector('[data-lens-drag-handle]'),
+            zoomOut: document.getElementById('btn-lens-zoom-out'),
+            zoomIn: document.getElementById('btn-lens-zoom-in'),
+            zoomValue: document.querySelector('[data-lens-zoom]'),
+            behavior: document.getElementById('btn-lens-behavior'),
+            settings: document.getElementById('btn-lens-settings'),
+            close: document.getElementById('btn-lens-close'),
+            popover: document.getElementById('lens-settings-popover'),
+            sizeButtons: document.querySelectorAll('[data-lens-size]'),
+            behaviorButtons: document.querySelectorAll('[data-lens-behavior]'),
+            markerToggle: document.getElementById('lens-target-marker'),
+            comparisonToggle: document.getElementById('lens-comparison-enabled'),
+            comparisonTarget: document.getElementById('lens-comparison-target'),
+            comparisonSettings: document.querySelector('[data-lens-comparison-settings]'),
+            reset: document.getElementById('btn-lens-reset'),
+            persistence: document.querySelector('[data-lens-persistence]'),
+            activeImage: document.querySelector('[data-lens-image="active"]'),
+            differenceImage: document.querySelector('[data-lens-image="difference"]'),
+            comparisonImage: document.querySelector('[data-lens-image="comparison"]'),
+            activeLabel: document.querySelector('[data-lens-label="active"]'),
+            comparisonLabel: document.querySelector('[data-lens-label="comparison"]'),
+        };
+        const storage = viewer.localStorage();
+        const reportKey = `${REPORT_KEY_PREFIX}${viewer.state.data?.report_id || 'unknown-report'}`;
+        let storageReadFailed = false;
+        function readStored(key) {
+            if (!storage) return null;
+            try {
+                return JSON.parse(storage.getItem(key) || 'null');
+            } catch {
+                storageReadFailed = true;
+                return null;
+            }
+        }
+        const storedPreferences = readStored(PREFERENCES_KEY);
+        const storedReportState = readStored(reportKey);
+        const state = {
+            preferences: normalizePreferences(storedPreferences),
+            report: normalizeReportState(
+                storedReportState,
+                viewer.state.data?.clips?.length || 0,
+            ),
+            point: null,
+            activeClipIdx: null,
+            activeImage: null,
+            pointer: null,
+            touchPending: null,
+            drag: null,
+            memoryOnly: !storage || storageReadFailed,
+            settingsRestoreFocus: null,
+        };
+        const imageRequests = {
+            active: { token: 0, source: null, status: 'empty', loader: null, onLoad: null, onError: null },
+            difference: { token: 0, source: null, status: 'empty', loader: null, onLoad: null, onError: null },
+            comparison: { token: 0, source: null, status: 'empty', loader: null, onLoad: null, onError: null },
+        };
+
+        function cloneImage(slot) {
+            return {
+                active: dom.activeImage,
+                difference: dom.differenceImage,
+                comparison: dom.comparisonImage,
+            }[slot] || null;
+        }
+
+        function clipCount() {
+            return viewer.state.data?.clips?.length || 0;
+        }
+
+        function clipLabel(index) {
+            return viewer.state.data?.clips?.[index]?.label || `Clip ${index + 1}`;
+        }
+
+        function sourceFor(index) {
+            return viewer.currentFrame()?.images?.[index]?.src || '';
+        }
+
+        function save(key, payload) {
+            if (!storage) {
+                state.memoryOnly = true;
+                renderPersistenceStatus();
+                return false;
+            }
+            try {
+                storage.setItem(key, JSON.stringify(payload));
+                return true;
+            } catch {
+                state.memoryOnly = true;
+                renderPersistenceStatus();
+                return false;
+            }
+        }
+
+        function savePreferences() {
+            return save(PREFERENCES_KEY, state.preferences);
+        }
+
+        function saveReportState() {
+            return save(reportKey, state.report);
+        }
+
+        function renderPersistenceStatus() {
+            if (!dom.persistence) return;
+            dom.persistence.textContent = state.memoryOnly
+                ? 'Settings are available for this session only.'
+                : 'Settings are saved locally in this browser.';
+            dom.persistence.dataset.tone = state.memoryOnly ? 'quiet-warning' : 'quiet';
+        }
+
+        function referenceIndex() {
+            return viewer.referenceClipIndex?.() ?? 0;
+        }
+
+        function comparisonFallback(activeIndex) {
+            const reference = referenceIndex();
+            if (activeIndex !== reference && reference >= 0 && reference < clipCount()) {
+                return reference;
+            }
+            for (let index = 0; index < clipCount(); index += 1) {
+                if (index !== activeIndex && index !== reference) return index;
+            }
+            for (let index = 0; index < clipCount(); index += 1) {
+                if (index !== activeIndex) return index;
+            }
+            return null;
+        }
+
+        function validComparisonTarget(activeIndex, candidate = state.report.comparisonTarget) {
+            return Number.isInteger(candidate)
+                && candidate >= 0
+                && candidate < clipCount()
+                && candidate !== activeIndex;
+        }
+
+        function ensureComparisonTarget(activeIndex) {
+            if (!validComparisonTarget(activeIndex)) {
+                state.report.comparisonTarget = comparisonFallback(activeIndex);
+            }
+            return state.report.comparisonTarget;
+        }
+
+        function entryForPointer(clientX, clientY) {
+            if (viewer.state.mode === 'grid') {
+                const entries = viewer.gridView?.entries?.() || [];
+                return entries.find(entry => normalizedPoint(entry.image, clientX, clientY)) || null;
+            }
+            if (viewer.state.mode === 'overlay') {
+                return { clipIdx: viewer.state.activeClipIdx, image: viewer.dom.leftImg };
+            }
+            if (viewer.state.mode === 'blink') {
+                const image = viewer.state.activeClipIdx === viewer.state.rightClipIdx
+                    ? viewer.dom.rightImg
+                    : viewer.dom.leftImg;
+                return { clipIdx: viewer.state.activeClipIdx, image };
+            }
+            if (viewer.state.mode === 'slider') {
+                const rect = viewer.sliderCanvasRect?.();
+                const divider = rect?.left + rect?.width * (1 - viewer.state.revealPercent / 100);
+                return clientX <= divider
+                    ? { clipIdx: viewer.state.leftClipIdx, image: viewer.dom.leftImg }
+                    : { clipIdx: viewer.state.rightClipIdx, image: viewer.dom.rightImg };
+            }
+            return { clipIdx: viewer.state.leftClipIdx, image: viewer.dom.leftImg };
+        }
+
+        function centerEntry() {
+            if (viewer.state.mode === 'grid') {
+                const entries = viewer.gridView?.entries?.() || [];
+                return entries.find(entry => entry.clipIdx === viewer.state.activeClipIdx)
+                    || entries.find(entry => !entry.unavailable)
+                    || entries[0]
+                    || null;
+            }
+            if (viewer.state.mode === 'overlay') {
+                return { clipIdx: viewer.state.activeClipIdx, image: viewer.dom.leftImg };
+            }
+            if (viewer.state.mode === 'blink') {
+                const image = viewer.state.activeClipIdx === viewer.state.rightClipIdx
+                    ? viewer.dom.rightImg
+                    : viewer.dom.leftImg;
+                return { clipIdx: viewer.state.activeClipIdx, image };
+            }
+            if (viewer.state.mode === 'slider') {
+                const rect = viewer.sliderCanvasRect?.();
+                if (rect && validDimensions(rect.width, rect.height)) {
+                    return entryForPointer(
+                        rect.left + rect.width / 2,
+                        rect.top + rect.height / 2,
+                    );
+                }
+            }
+            return { clipIdx: viewer.state.leftClipIdx, image: viewer.dom.leftImg };
+        }
+
+        function seedCenterPoint() {
+            const entry = centerEntry();
+            const rect = entry?.image?.getBoundingClientRect?.();
+            if (!entry || !rect || !validDimensions(rect.width, rect.height)) return false;
+            state.pointer = {
+                clientX: rect.left + rect.width / 2,
+                clientY: rect.top + rect.height / 2,
+                pointerType: 'keyboard',
+            };
+            state.point = { u: 0.5, v: 0.5 };
+            state.activeClipIdx = entry.clipIdx;
+            state.activeImage = entry.image;
+            ensureComparisonTarget(entry.clipIdx);
+            return true;
+        }
+
+        function coarsePointerActive() {
+            return Boolean(window.matchMedia?.('(pointer: coarse)')?.matches);
+        }
+
+        function effectiveBehavior(pointerType = '') {
+            return coarsePointerActive() || pointerType === 'touch'
+                ? 'park'
+                : state.preferences.behavior;
+        }
+
+        function lensSize() {
+            return SIZES[state.preferences.size];
+        }
+
+        function lensChromeHeight() {
+            const height = Number(dom.titlebar?.getBoundingClientRect?.().height);
+            return Number.isFinite(height) && height > 0 ? height : 32;
+        }
+
+        function setImageGeometry(image, point, size, viewportWidth = size) {
+            if (image?.complete === false) return null;
+            const width = Number(image?.naturalWidth);
+            const height = Number(image?.naturalHeight);
+            const geometry = lensImageGeometry(
+                point,
+                width,
+                height,
+                state.preferences.magnification,
+                size,
+                viewportWidth,
+            );
+            return geometry;
+        }
+
+        function clearCloneDom(element) {
+            if (!element) return;
+            element.removeAttribute?.('src');
+            delete element.dataset.source;
+            delete element.dataset.requestSource;
+            element.hidden = true;
+            element.style.width = '';
+            element.style.height = '';
+            element.style.left = '';
+            element.style.top = '';
+        }
+
+        function discardRequestLoader(request) {
+            if (!request?.loader) return;
+            if (request.onLoad) request.loader.removeEventListener?.('load', request.onLoad);
+            if (request.onError) request.loader.removeEventListener?.('error', request.onError);
+            request.loader.removeAttribute?.('src');
+            request.loader = null;
+            request.onLoad = null;
+            request.onError = null;
+        }
+
+        function clearLensImage(slot) {
+            const request = imageRequests[slot];
+            if (request) {
+                discardRequestLoader(request);
+                request.token += 1;
+                request.source = null;
+                request.status = 'empty';
+            }
+            clearCloneDom(cloneImage(slot));
+        }
+
+        function finishLensImageRequest(slot, loader, token, source, succeeded, rerender = true) {
+            const request = imageRequests[slot];
+            const element = cloneImage(slot);
+            if (
+                !request
+                || !element
+                || request.token !== token
+                || request.source !== source
+                || request.status !== 'loading'
+                || request.loader !== loader
+            ) return false;
+            discardRequestLoader(request);
+            request.status = succeeded ? 'loaded' : 'failed';
+            delete element.dataset.requestSource;
+            if (succeeded) {
+                element.src = source;
+                element.dataset.source = source;
+                element.hidden = false;
+            } else {
+                clearCloneDom(element);
+            }
+            if (rerender) render();
+            return true;
+        }
+
+        function applyLensImage(slot, source, geometry) {
+            const element = cloneImage(slot);
+            const request = imageRequests[slot];
+            if (!element || !request) return false;
+            if (!source || !geometry) {
+                clearLensImage(slot);
+                return false;
+            }
+            element.style.width = `${geometry.width}px`;
+            element.style.height = `${geometry.height}px`;
+            element.style.left = `${geometry.left}px`;
+            element.style.top = `${geometry.top}px`;
+            if (request.source === source) {
+                if (request.status === 'loaded') element.hidden = false;
+                return request.status === 'loaded';
+            }
+            const token = request.token + 1;
+            discardRequestLoader(request);
+            request.token = token;
+            request.source = source;
+            request.status = 'loading';
+            clearCloneDom(element);
+            element.style.width = `${geometry.width}px`;
+            element.style.height = `${geometry.height}px`;
+            element.style.left = `${geometry.left}px`;
+            element.style.top = `${geometry.top}px`;
+            element.dataset.requestSource = source;
+            element.hidden = true;
+            const loader = document.createElement('img');
+            const onLoad = () => {
+                finishLensImageRequest(slot, loader, token, source, true);
+            };
+            const onError = () => {
+                finishLensImageRequest(slot, loader, token, source, false);
+            };
+            request.loader = loader;
+            request.onLoad = onLoad;
+            request.onError = onError;
+            loader.addEventListener?.('load', onLoad);
+            loader.addEventListener?.('error', onError);
+            loader.src = source;
+            if (loader.complete === true) {
+                finishLensImageRequest(
+                    slot,
+                    loader,
+                    token,
+                    source,
+                    Number(loader.naturalWidth) > 0,
+                    false,
+                );
+            }
+            return request.status === 'loaded';
+        }
+
+        function requestStatus(slot) {
+            return imageRequests[slot]?.status || 'empty';
+        }
+
+        function lensPosition(size) {
+            const stageRect = viewer.dom.stage.getBoundingClientRect();
+            const maxLeft = Math.max(8, stageRect.width - size - 8);
+            const maxTop = Math.max(8, stageRect.height - size - lensChromeHeight() - 8);
+            if (effectiveBehavior(state.pointer?.pointerType) === 'park' || !state.pointer) {
+                return {
+                    left: 8 + clamp(state.report.parkedPosition.u) * Math.max(0, maxLeft - 8),
+                    top: 8 + clamp(state.report.parkedPosition.v) * Math.max(0, maxTop - 8),
+                };
+            }
+            const x = state.pointer.clientX - stageRect.left;
+            const y = state.pointer.clientY - stageRect.top;
+            const gap = 28;
+            const left = x < stageRect.width / 2 ? x + gap : x - size - gap;
+            const top = y < stageRect.height / 2 ? y + gap : y - size - gap;
+            return {
+                left: clamp(left, 8, maxLeft),
+                top: clamp(top, 8, maxTop),
+            };
+        }
+
+        function placeTargetMarker() {
+            if (!dom.marker || !state.point || !state.activeImage || !state.preferences.targetMarker) {
+                if (dom.marker) dom.marker.hidden = true;
+                return;
+            }
+            const imageRect = state.activeImage.getBoundingClientRect?.();
+            const stageRect = viewer.dom.stage.getBoundingClientRect();
+            if (!imageRect || !validDimensions(imageRect.width, imageRect.height)) {
+                dom.marker.hidden = true;
+                return;
+            }
+            dom.marker.style.left = `${imageRect.left - stageRect.left + state.point.u * imageRect.width}px`;
+            dom.marker.style.top = `${imageRect.top - stageRect.top + state.point.v * imageRect.height}px`;
+            dom.marker.hidden = false;
+        }
+
+        function comparisonShowing() {
+            return viewer.state.mode === 'overlay'
+                && state.report.comparisonEnabled
+                && clipCount() > 1;
+        }
+
+        function renderComparison(activeIndex, point, size) {
+            const showing = comparisonShowing();
+            dom.lens.dataset.comparison = showing ? 'true' : 'false';
+            if (!showing) {
+                clearLensImage('comparison');
+                dom.comparisonLabel.textContent = '';
+                return;
+            }
+            const target = ensureComparisonTarget(activeIndex);
+            const source = sourceFor(target);
+            const comparisonClip = viewer.state.data?.clips?.[target];
+            const width = Number(comparisonClip?.resolution?.[0]);
+            const height = Number(comparisonClip?.resolution?.[1]);
+            const geometry = lensImageGeometry(
+                point,
+                width,
+                height,
+                state.preferences.magnification,
+                size,
+                size / 2,
+            );
+            const available = applyLensImage('comparison', source, geometry);
+            dom.comparisonLabel.textContent = available
+                ? `Comparison · ${clipLabel(target)}`
+                : `Comparison ${requestStatus('comparison') === 'loading' ? 'loading' : 'unavailable'} · ${clipLabel(target)}`;
+        }
+
+        function renderDiff(point, size) {
+            const showing = viewer.state.mode === 'diff';
+            dom.lens.dataset.renderMode = showing ? 'diff' : 'source';
+            if (!showing) {
+                clearLensImage('difference');
+                return true;
+            }
+            const activeRect = state.activeImage?.getBoundingClientRect?.();
+            const sample = activeRect && validDimensions(activeRect.width, activeRect.height)
+                ? {
+                    clientX: activeRect.left + point.u * activeRect.width,
+                    clientY: activeRect.top + point.v * activeRect.height,
+                }
+                : null;
+            const differencePoint = compositionPoint(
+                viewer.dom.rightImg,
+                sample?.clientX,
+                sample?.clientY,
+            );
+            const geometry = setImageGeometry(viewer.dom.rightImg, differencePoint, size);
+            const source = viewer.dom.rightImg.currentSrc
+                || viewer.dom.rightImg.src
+                || sourceFor(viewer.state.rightClipIdx);
+            return applyLensImage('difference', source, geometry);
+        }
+
+        function positionSettingsPopover() {
+            if (!dom.popover || dom.popover.hidden || !dom.lens) return;
+            const stageRect = viewer.dom.stage.getBoundingClientRect();
+            const lensRect = dom.lens.getBoundingClientRect();
+            const popoverRect = dom.popover.getBoundingClientRect();
+            if (!validDimensions(stageRect.width, stageRect.height)) return;
+            const position = boundedPopoverPosition(
+                stageRect,
+                lensRect,
+                popoverRect,
+                8,
+                lensChromeHeight() + 4,
+            );
+            dom.popover.style.left = `${position.left}px`;
+            dom.popover.style.right = 'auto';
+            dom.popover.style.top = `${position.top}px`;
+            dom.popover.style.maxWidth = `${position.maxWidth}px`;
+            dom.popover.style.maxHeight = `${position.maxHeight}px`;
+        }
+
+        function render() {
+            const visible = Boolean(state.report.enabled && state.point && state.activeImage);
+            dom.toggle?.classList?.toggle('active', state.report.enabled);
+            dom.toggle?.setAttribute?.('aria-pressed', state.report.enabled ? 'true' : 'false');
+            dom.toggle?.setAttribute?.('aria-label', state.report.enabled ? 'Turn lens off' : 'Turn lens on');
+            if (dom.toggle) dom.toggle.hidden = Boolean(state.report.enabled && visible);
+            if (!visible) {
+                if (dom.lens) dom.lens.hidden = true;
+                if (dom.marker) dom.marker.hidden = true;
+                return;
+            }
+            const size = lensSize();
+            const source = state.activeImage.currentSrc || state.activeImage.src || sourceFor(state.activeClipIdx);
+            const geometry = setImageGeometry(
+                state.activeImage,
+                state.point,
+                size,
+                comparisonShowing() ? size / 2 : size,
+            );
+            const activeAvailable = applyLensImage('active', source, geometry);
+            const differenceAvailable = renderDiff(state.point, size);
+            const position = lensPosition(size);
+            dom.lens.style.left = `${position.left}px`;
+            dom.lens.style.top = `${position.top}px`;
+            dom.lens.style.setProperty('--lens-size', `${size}px`);
+            dom.lens.dataset.size = state.preferences.size;
+            dom.lens.dataset.behavior = effectiveBehavior(state.pointer?.pointerType);
+            const activeState = requestStatus('active') === 'loading' ? 'loading' : 'unavailable';
+            const differenceState = requestStatus('difference') === 'loading' ? 'loading' : 'unavailable';
+            dom.activeLabel.textContent = viewer.state.mode === 'diff'
+                ? `${activeAvailable && differenceAvailable ? 'Difference' : `Difference ${!activeAvailable ? activeState : differenceState}`} · ${clipLabel(viewer.state.leftClipIdx)} vs ${clipLabel(viewer.state.rightClipIdx)}`
+                : `${activeAvailable ? 'Active' : `Active ${activeState}`} · ${clipLabel(state.activeClipIdx)}`;
+            renderComparison(state.activeClipIdx, state.point, size);
+            dom.lens.hidden = false;
+            placeTargetMarker();
+            renderControls();
+            positionSettingsPopover();
+        }
+
+        function updatePoint(event) {
+            if (!state.report.enabled || !event) return false;
+            const entry = entryForPointer(event.clientX, event.clientY);
+            const point = normalizedPoint(entry?.image, event.clientX, event.clientY);
+            if (!entry || !point) return false;
+            state.pointer = {
+                clientX: event.clientX,
+                clientY: event.clientY,
+                pointerType: event.pointerType || 'mouse',
+            };
+            state.point = point;
+            state.activeClipIdx = entry.clipIdx;
+            state.activeImage = entry.image;
+            ensureComparisonTarget(entry.clipIdx);
+            render();
+            return true;
+        }
+
+        function setEnabled(enabled, options = {}) {
+            const restoreToggleFocus = !enabled && Boolean(dom.lens?.contains?.(document.activeElement));
+            state.report.enabled = Boolean(enabled);
+            if (state.report.enabled) {
+                if (!state.point || !state.activeImage) seedCenterPoint();
+            } else {
+                state.point = null;
+                state.activeImage = null;
+                state.pointer = null;
+                state.touchPending = null;
+                closeSettings({ restoreFocus: false });
+            }
+            render();
+            if (restoreToggleFocus) dom.toggle?.focus?.();
+            if (options.save !== false) saveReportState();
+            viewer.announce?.(`Lens ${state.report.enabled ? 'on' : 'off'}.`);
+            if (state.report.enabled && dom.lens && !dom.lens.hidden) dom.settings?.focus?.();
+        }
+
+        function setMagnification(value) {
+            if (!MAGNIFICATIONS.includes(value)) return;
+            state.preferences.magnification = value;
+            savePreferences();
+            render();
+        }
+
+        function stepMagnification(direction) {
+            const index = MAGNIFICATIONS.indexOf(state.preferences.magnification);
+            setMagnification(MAGNIFICATIONS[clamp(index + direction, 0, MAGNIFICATIONS.length - 1)]);
+        }
+
+        function setSize(value) {
+            if (!Object.hasOwn(SIZES, value)) return;
+            state.preferences.size = value;
+            savePreferences();
+            render();
+        }
+
+        function setBehavior(value) {
+            if (!['follow', 'park'].includes(value)) return;
+            state.preferences.behavior = value;
+            savePreferences();
+            render();
+        }
+
+        function setTargetMarker(enabled) {
+            state.preferences.targetMarker = Boolean(enabled);
+            savePreferences();
+            render();
+        }
+
+        function setComparisonEnabled(enabled) {
+            state.report.comparisonEnabled = Boolean(enabled);
+            ensureComparisonTarget(state.activeClipIdx ?? viewer.state.activeClipIdx);
+            saveReportState();
+            render();
+        }
+
+        function setComparisonTarget(value) {
+            const target = Number(value);
+            const active = state.activeClipIdx ?? viewer.state.activeClipIdx;
+            if (!validComparisonTarget(active, target)) return;
+            state.report.comparisonTarget = target;
+            saveReportState();
+            render();
+        }
+
+        function populateComparisonTargets() {
+            if (!dom.comparisonTarget) return;
+            const active = state.activeClipIdx ?? viewer.state.activeClipIdx;
+            const target = ensureComparisonTarget(active);
+            const options = viewer.state.data.clips
+                .map((clip, index) => {
+                    const option = document.createElement('option');
+                    option.value = String(index);
+                    option.textContent = clip.label || `Clip ${index + 1}`;
+                    option.disabled = index === active;
+                    option.selected = index === target;
+                    return option;
+                });
+            dom.comparisonTarget.replaceChildren(...options);
+        }
+
+        function renderControls() {
+            if (dom.zoomValue) dom.zoomValue.textContent = `${state.preferences.magnification}×`;
+            if (dom.zoomOut) dom.zoomOut.disabled = state.preferences.magnification === MAGNIFICATIONS[0];
+            if (dom.zoomIn) dom.zoomIn.disabled = state.preferences.magnification === MAGNIFICATIONS.at(-1);
+            if (dom.behavior) {
+                const behavior = effectiveBehavior(state.pointer?.pointerType);
+                dom.behavior.textContent = behavior === 'follow' ? 'Follow' : 'Park';
+                dom.behavior.setAttribute('aria-pressed', behavior === 'park' ? 'true' : 'false');
+                dom.behavior.disabled = coarsePointerActive();
+            }
+            dom.sizeButtons.forEach(button => {
+                const active = button.dataset.lensSize === state.preferences.size;
+                button.classList.toggle('active', active);
+                button.setAttribute('aria-checked', active ? 'true' : 'false');
+            });
+            dom.behaviorButtons.forEach(button => {
+                const active = button.dataset.lensBehavior === state.preferences.behavior;
+                button.classList.toggle('active', active);
+                button.setAttribute('aria-checked', active ? 'true' : 'false');
+            });
+            if (dom.markerToggle) dom.markerToggle.checked = state.preferences.targetMarker;
+            if (dom.comparisonToggle) dom.comparisonToggle.checked = state.report.comparisonEnabled;
+            if (dom.comparisonSettings) {
+                const available = viewer.state.mode === 'overlay' && clipCount() > 1;
+                dom.comparisonSettings.hidden = !available;
+            }
+            populateComparisonTargets();
+            renderPersistenceStatus();
+        }
+
+        function openSettings() {
+            if (!dom.popover || !dom.settings) return;
+            state.settingsRestoreFocus = document.activeElement;
+            dom.popover.hidden = false;
+            dom.settings.setAttribute('aria-expanded', 'true');
+            renderControls();
+            positionSettingsPopover();
+            dom.popover.querySelector('button, input, select')?.focus?.();
+        }
+
+        function closeSettings(options = {}) {
+            if (!dom.popover || dom.popover.hidden) return;
+            dom.popover.hidden = true;
+            dom.settings?.setAttribute('aria-expanded', 'false');
+            const restore = state.settingsRestoreFocus || dom.settings;
+            state.settingsRestoreFocus = null;
+            if (options.restoreFocus !== false) restore?.focus?.();
+        }
+
+        function reset() {
+            state.preferences = { ...DEFAULT_PREFERENCES };
+            state.report.parkedPosition = { ...DEFAULT_REPORT_STATE.parkedPosition };
+            state.report.comparisonEnabled = false;
+            state.report.comparisonTarget = null;
+            savePreferences();
+            saveReportState();
+            render();
+            viewer.announce?.('Lens settings reset.');
+        }
+
+        function startDrag(event) {
+            if (event.button !== undefined && event.button !== 0) return;
+            if (event.target?.closest?.('button')) return;
+            const rect = dom.lens.getBoundingClientRect();
+            state.drag = {
+                pointerId: event.pointerId,
+                offsetX: event.clientX - rect.left,
+                offsetY: event.clientY - rect.top,
+            };
+            state.preferences.behavior = 'park';
+            dom.titlebar.setPointerCapture?.(event.pointerId);
+            event.preventDefault();
+            event.stopPropagation();
+        }
+
+        function moveDrag(event) {
+            if (!state.drag || event.pointerId !== state.drag.pointerId) return;
+            const stageRect = viewer.dom.stage.getBoundingClientRect();
+            const size = lensSize();
+            const maxLeft = Math.max(8, stageRect.width - size - 8);
+            const maxTop = Math.max(8, stageRect.height - size - lensChromeHeight() - 8);
+            const left = clamp(event.clientX - stageRect.left - state.drag.offsetX, 8, maxLeft);
+            const top = clamp(event.clientY - stageRect.top - state.drag.offsetY, 8, maxTop);
+            state.report.parkedPosition = {
+                u: maxLeft > 8 ? clamp((left - 8) / (maxLeft - 8)) : 0,
+                v: maxTop > 8 ? clamp((top - 8) / (maxTop - 8)) : 0,
+            };
+            render();
+            event.preventDefault();
+            event.stopPropagation();
+        }
+
+        function endDrag(event) {
+            if (!state.drag || event.pointerId !== state.drag.pointerId) return;
+            state.drag = null;
+            savePreferences();
+            saveReportState();
+            event.stopPropagation();
+        }
+
+        function bind() {
+            dom.toggle?.addEventListener('click', () => setEnabled(!state.report.enabled));
+            dom.zoomOut?.addEventListener('click', () => stepMagnification(-1));
+            dom.zoomIn?.addEventListener('click', () => stepMagnification(1));
+            dom.behavior?.addEventListener('click', () => setBehavior(
+                state.preferences.behavior === 'follow' ? 'park' : 'follow'
+            ));
+            dom.settings?.addEventListener('click', () => {
+                if (dom.popover.hidden) openSettings();
+                else closeSettings();
+            });
+            dom.close?.addEventListener('click', () => setEnabled(false));
+            dom.sizeButtons.forEach(button => button.addEventListener('click', () => {
+                setSize(button.dataset.lensSize);
+            }));
+            dom.behaviorButtons.forEach(button => button.addEventListener('click', () => {
+                setBehavior(button.dataset.lensBehavior);
+            }));
+            dom.markerToggle?.addEventListener('change', event => setTargetMarker(event.target.checked));
+            dom.comparisonToggle?.addEventListener('change', event => setComparisonEnabled(event.target.checked));
+            dom.comparisonTarget?.addEventListener('change', event => setComparisonTarget(event.target.value));
+            dom.reset?.addEventListener('click', reset);
+            dom.titlebar?.addEventListener('pointerdown', startDrag);
+            dom.titlebar?.addEventListener('pointermove', moveDrag);
+            dom.titlebar?.addEventListener('pointerup', endDrag);
+            dom.titlebar?.addEventListener('pointercancel', endDrag);
+            dom.lens?.addEventListener('pointerdown', event => event.stopPropagation());
+            dom.popover?.addEventListener('keydown', event => {
+                if (event.key !== 'Escape') return;
+                event.preventDefault();
+                event.stopPropagation();
+                closeSettings();
+            });
+            viewer.dom.leftImg?.addEventListener?.('load', sync);
+            viewer.dom.rightImg?.addEventListener?.('load', sync);
+            document.addEventListener('pointerdown', event => {
+                if (dom.popover?.hidden || dom.popover?.contains(event.target) || event.target === dom.settings) return;
+                closeSettings({ restoreFocus: false });
+            });
+            renderControls();
+            if (state.report.enabled) seedCenterPoint();
+            render();
+        }
+
+        function handleStagePointerDown(event) {
+            if (!state.report.enabled) return false;
+            if (event.pointerType === 'touch' || coarsePointerActive()) {
+                const entry = entryForPointer(event.clientX, event.clientY);
+                const point = normalizedPoint(entry?.image, event.clientX, event.clientY);
+                if (!entry || !point) return false;
+                state.touchPending = {
+                    pointerId: event.pointerId,
+                    startX: event.clientX,
+                    startY: event.clientY,
+                };
+                return true;
+            }
+            return false;
+        }
+
+        function handleStagePointerMove(event) {
+            if (!state.report.enabled || state.drag) return false;
+            if (state.touchPending && event.pointerId === state.touchPending.pointerId) {
+                const distance = Math.hypot(
+                    event.clientX - state.touchPending.startX,
+                    event.clientY - state.touchPending.startY,
+                );
+                if (distance <= TOUCH_GESTURE_THRESHOLD) return 'pending';
+                state.touchPending = null;
+                return 'released';
+            }
+            if (event.pointerType === 'touch' || coarsePointerActive()) return false;
+            return updatePoint(event);
+        }
+
+        function endStagePointer(event, options = {}) {
+            if (!state.touchPending || event.pointerId !== state.touchPending.pointerId) return false;
+            const pending = state.touchPending;
+            state.touchPending = null;
+            if (options.cancelled) return false;
+            return updatePoint({
+                clientX: event.clientX ?? pending.startX,
+                clientY: event.clientY ?? pending.startY,
+                pointerType: event.pointerType || 'touch',
+            });
+        }
+
+        function cancelTouchPending() {
+            state.touchPending = null;
+        }
+
+        function clearTransient() {
+            state.point = null;
+            state.activeClipIdx = null;
+            state.activeImage = null;
+            state.pointer = null;
+            state.touchPending = null;
+            clearLensImage('active');
+            clearLensImage('difference');
+            clearLensImage('comparison');
+            dom.activeLabel.textContent = '';
+            dom.comparisonLabel.textContent = '';
+            dom.lens.dataset.comparison = 'false';
+            dom.lens.dataset.renderMode = 'source';
+            render();
+        }
+
+        function sync() {
+            if (!state.report.enabled) return;
+            if (state.pointer && updatePoint(state.pointer)) return;
+            state.point = null;
+            state.activeClipIdx = null;
+            state.activeImage = null;
+            state.pointer = null;
+            if (seedCenterPoint()) render();
+            else clearTransient();
+        }
+
+        function refresh() {
+            render();
+        }
+
+        return {
+            bind,
+            setEnabled,
+            handleStagePointerDown,
+            handleStagePointerMove,
+            endStagePointer,
+            cancelTouchPending,
+            clearTransient,
+            refresh,
+            sync,
+            render,
+            state,
+        };
+    }
+
+    return {
+        PREFERENCES_KEY,
+        REPORT_KEY_PREFIX,
+        MAGNIFICATIONS,
+        SIZES,
+        normalizePreferences,
+        normalizeReportState,
+        normalizedPoint,
+        compositionPoint,
+        normalizedPosition,
+        lensImageGeometry,
+        boundedPopoverPosition,
+        create,
+    };
+})();

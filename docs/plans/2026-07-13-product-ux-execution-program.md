@@ -1,7 +1,7 @@
 Status: Active
 Scope: Approved CLI ergonomics, diagnostics, run history and safe rerun, guided setup, and generated-report review UX
 Owner: Frame Compare maintainer and executing Codex sessions
-Updated: 2026-07-13
+Updated: 2026-07-15
 
 # Product and UX execution program
 
@@ -252,8 +252,8 @@ step advances the ledger.
 | 6A. Wizard product-contract gate | Approved | Approved specification in `be32476` under [Unit 6A wizard interaction specification](#unit-6a-wizard-interaction-specification) | Plan-only structural proof passed; independent review U6A-001 through U6A-007 accepted, revised, closed, and returned APPROVABLE; maintainer approved 2026-07-14 | Continue to Unit 6B |
 | 6B. Wizard implementation | Completed | `484ae6f` | Expanded focused wizard/config/source/atomic/CLI/Windows proof and full gate passed; independent review U6B-001 through U6B-003 plus controller finding U6B-C001 accepted, fixed, closure-confirmed, and returned APPROVABLE | Continue to Unit 7 design gate |
 | 7. Report interaction design gate | Approved | `43c8341` | Reviewed contract at [`2026-07-14-report-interaction-design-contract.md`](2026-07-14-report-interaction-design-contract.md); U7-002 through U7-007 closed; maintainer approved 2026-07-14 with U7-001 manual browser proof deferred to final-program validation | Continue to Unit 8 |
-| 8. Magnifier and pixel inspector | Completed | `d24f094` | 100 focused report tests and the canonical full gate passed; U8-R001 through U8-R007 plus controller async findings accepted/modified, fixed, closure-reviewed, and returned APPROVABLE; manual browser matrix remains deferred final-program validation debt | Continue to Unit 9 |
-| 9. Multi-clip grid | Completed | `d6c5fb0` | Focused Grid/Pixel/viewer harnesses and 104 focused report tests passed; canonical pyright/Ruff/Bandit/full-pytest/import-linter gate passed after fixes; U9-R001 through U9-R004 accepted, fixed, closure-reviewed, and returned APPROVABLE; manual browser matrix remains deferred final-program validation debt | Continue to Unit 10 |
+| 8. Lens v2 magnifier (Pixel inspector superseded) | Completed | Historical Unit 8 implementation `d24f094`; controlling maintainer-approved Lens v2 amendment is recorded in [`2026-07-14-report-interaction-design-contract.md`](2026-07-14-report-interaction-design-contract.md) on 2026-07-15 | Original Unit 8 proof remains historical. Lens v2 removes Pixel/Inspect/M/canvas/ROI behavior, adds production lens controls and DOM-only Diff fidelity, and carries focused harness plus canonical-gate proof in the integrating change; manual browser matrix remains deferred final-program validation debt | Continue to Unit 9; do not restore superseded Pixel behavior |
+| 9. Multi-clip grid | Completed | `d6c5fb0` | Focused Grid/viewer harnesses and 104 focused report tests passed; canonical pyright/Ruff/Bandit/full-pytest/import-linter gate passed after fixes; U9-R001 through U9-R004 accepted, fixed, closure-reviewed, and returned APPROVABLE; manual browser matrix remains deferred final-program validation debt | Continue to Unit 10 |
 | 10. Local review state/export | Completed | `d3059e6` | 43 focused report tests and the canonical full gate passed; U10-R001 through U10-R007 plus controller merge-ceiling/CRLF findings accepted, fixed, closure-reviewed, and returned APPROVABLE; manual browser matrix remains deferred final-program validation debt | Continue to Unit 11 |
 | 11. Blind A/B feasibility/implementation | Deferred / accepted | Historical [presentation-blind decision package](2026-07-14-presentation-blind-report-decision-package.md) in `ab72197` | Feasibility worker, controller audit, and fresh adversarial review returned `STOP_REQUIRED`; U11-R001 through U11-R003 accepted; maintainer accepted deferral 2026-07-14 | Reevaluate only after approval of the complete clean-artifact, neutral-delivery, eligibility/versioning, invocation, publishing, first-paint, Review-transfer, ownership, and compatibility contract |
 
@@ -1083,37 +1083,48 @@ claimed for this design-only unit. The reviewed contract is integrated as `43c83
 The maintainer explicitly approved Unit 7 on 2026-07-14. This approval promotes Unit 8
 without changing the deferred final-program manual-validation obligation above.
 
-## 14. Package 8: magnifier, locked ROI, and pixel inspector
+## 14. Package 8: Lens v2 magnifier
+
+The original Unit 8 Pixel-inspector contract is a historical implementation fact only.
+On 2026-07-15 the maintainer explicitly approved the Lens v2 amendment in
+[`2026-07-14-report-interaction-design-contract.md`](2026-07-14-report-interaction-design-contract.md).
+That amendment controls all current and future maintenance and supersedes every prior
+Pixel tab, Inspect control, `M` shortcut, RGBA/canvas sampling, coordinate readout,
+locked ROI, nudge, and coarse-pointer lens-suppression instruction in this program.
 
 ### Interaction contract
 
-- Provide a small docked inspector that remains useful while the main images are
-  zoomed out.
-- Allow an optional floating lens over the active image.
-- Support an explicitly locked region of interest so the same source coordinates
-  are inspected across clips and comparison modes.
-- Provide a small, approved zoom set such as 2x/4x/8x, source coordinates, active
-  clip/mode, and pixel values only when they can be sampled accurately.
-- Reuse existing image layers and transform math. Do not introduce canvas rendering
-  unless the approved design or accurate sampling proves it necessary.
-- If browser color management or cross-origin restrictions make a value approximate,
-  label it honestly; do not present false measurement precision.
+- Provide one optional floating lens, default off, directly toggleable from the
+  viewport palette and `L` shortcut without opening the inspector drawer.
+- Support 160/240/320px sizes and 2x/3x/4x/6x/8x/12x magnification, Follow/Park,
+  draggable normalized placement, target marker, and touch/coarse tap-to-position.
+- Keep frequent controls in responsive lens chrome and secondary controls in a bounded,
+  internally scrollable settings popover. Lens chrome is keyboard reachable.
+- In Single mode only, optionally split the lens into active/comparison sources with a
+  no-self target fallback. In Diff, reproduce the visible aligned DOM-image difference
+  composition; do not conflate this with Single comparison.
+- Reuse DOM image layers and transform math. Canvas creation, pixel readback, RGBA
+  claims, public coordinates, locked ROI, and nudge controls are prohibited.
+- Persist global lens preferences and report-scoped enabled/park/comparison state
+  best-effort in browser storage. Pointer/sample position is always transient.
 
 ### Architecture and proof
 
-- Keep behavior in viewer assets and small existing report renderer/payload seams.
+- Keep behavior in the focused `assets/lens.js` owner and small existing report
+  viewer/renderer/style seams.
 - Do not add orchestration data unless source-coordinate mapping truly requires it.
 - Add semantic markup assertions, focused JavaScript state-harness tests, CSS
   contract tests, and manual browser visual QA at the approved matrix.
-- Verify keyboard focus, escape/unlock behavior, pointer capture, high-DPI scaling,
-  resize, reduced motion, and no regression to slider/overlay/diff modes.
+- Verify immediate activation, keyboard focus, event isolation, tap-versus-drag/pinch
+  ownership, responsive/coarse chrome, bounded popover placement, DOM-only Diff
+  fidelity/alignment, storage failure, and no regression to any viewer mode.
 - Run the full-verification gate and independent final review.
 
 ### Stop condition
 
-If accurate coordinate linking cannot be derived from current payload dimensions and
-viewer transforms, stop and define the smallest payload addition before coding. Do
-not scatter coordinate conversions across event handlers.
+If accurate magnified composition cannot be derived from current DOM image geometry and
+viewer transforms, stop before adding payload or rendering dependencies. Do not restore
+sampling or scatter coordinate conversions across event handlers.
 
 ## 15. Package 9: multi-clip grid comparison
 
@@ -1124,7 +1135,10 @@ not scatter coordinate conversions across event handlers.
 - Use a deterministic responsive layout: two clips side by side, three with one
   larger/selected cell only if approved by the prototype, four in 2x2, and a clearly
   specified overflow policy for more than four.
-- Link pan/zoom/ROI coordinates across visible cells by default.
+- Link pan/zoom across visible cells by default, and keep the Lens target in normalized
+  source coordinates so layout-only pan/zoom refreshes preserve the selected sample.
+  Follow the controlling Lens v2 mapping contract in
+  [`2026-07-14-report-interaction-design-contract.md`](2026-07-14-report-interaction-design-contract.md).
 - Keep labels and the active/reference state visible without covering comparison
   content.
 - Preserve all current modes and local viewer-state behavior.
@@ -1138,8 +1152,9 @@ not scatter coordinate conversions across event handlers.
 
 ### Proof
 
-- Test 2/3/4/N layouts, image load failures, long labels, synchronized transforms,
-  mode switching, state persistence, responsive breakpoints, and keyboard order.
+- Test 2/3/4/N layouts, image load failures, long labels, synchronized transforms and
+  normalized Lens mapping through pan/zoom, mode switching, state persistence,
+  responsive breakpoints, and keyboard order.
 - Perform browser visual QA at the design matrix and run the full-verification gate.
 
 ## 16. Package 10: local review state and export/import

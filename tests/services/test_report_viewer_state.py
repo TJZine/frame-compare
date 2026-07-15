@@ -62,7 +62,7 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment(
     inspector_state = summary["inspectorBlinkKeyboardState"]
     assert inspector_state["inspectorOpen"] is False
     assert inspector_state["inspectorTab"] == "export"
-    assert inspector_state["pixelLensEnabled"] is True
+    assert inspector_state["lensExcludedFromViewport"] is True
     assert inspector_state["rovingTabWrapped"] is True
     assert inspector_state["blinkPausedPersisted"] is False
     assert inspector_state["closedInspectorInert"] is True
@@ -84,6 +84,7 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment(
     assert single_mode["alignedComparisonActive"] is True
     assert single_mode["baseClipUnshifted"] is True
     assert single_mode["emptyStateClearsAlignment"] is True
+    assert single_mode["emptyStateClearsLensTransient"] is True
 
     assert summary["blinkControls"]["reducedMotionPaused"] is True
     assert summary["blinkControls"]["intervalAfterSteps"] == 700
@@ -102,11 +103,22 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment(
     }
     assert summary["activeFilterBadge"]["badgeHiddenByDefault"] is True
     assert summary["activeFilterBadge"]["badgeClearedToHidden"] is True
-    assert summary["pixelPanArbitration"] == {
-        "subthresholdPanDeferred": True,
-        "overThresholdPanAppliedFromOrigin": True,
-        "pointerupOnlyMoveApplied": True,
-        "pointerCancelDidNotCycle": True,
+    assert summary["lensPanIndependence"] == {
+        "panAppliedWithoutInspectorGestureGate": True,
+        "panMovedRecorded": True,
+        "touchLensTapDidNotCycle": True,
+    }
+    assert summary["lensLayoutRefresh"] == {
+        "touchPanPreservedSample": True,
+        "pinchZoomPreservedSample": True,
+        "alignmentPreservedSample": True,
+        "contextSyncNotUsed": True,
+    }
+    assert summary["deferredTouchOwnership"] == {
+        "sliderRetainsRevealDrag": True,
+        "allPanModesRetainPanDrag": True,
+        "viewerChromeRecognized": True,
+        "chromeWheelAndDoubleClickIsolated": True,
     }
     assert summary["gridModeBoundary"] == {
         "publicPayloadRejected": True,

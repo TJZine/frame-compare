@@ -460,16 +460,30 @@ assets. The generated viewer exposes slider, internal overlay mode presented to
 users as Single where appropriate, diff, and pair-based blink modes; frame/category
 navigation; a HUD toggle for stage labels and current-frame metadata; a primary
 toolbar plus floating viewport palette; a collapsible, compact/normal/large
-filmstrip bottom panel; an inspector drawer with Pixel, Frame, Clips, Align, Review,
-and Export tabs; fullscreen support; viewport pan, zoom, actual/width/height fit, reveal,
-and adjacent-frame preloading. `assets/pixel_inspector.js` is the focused owner for
-inspection-point acquisition, normalized cross-size coordinate mapping, bounded
-decoded-display sampling through one offscreen 1x1 canvas, ROI lock/nudge state, and
-the optional 2x/4x/8x floating lens. `assets/grid_view.js` owns the viewer-only Grid
+filmstrip bottom panel; an inspector drawer with Frame, Clips, Align, Review, and
+Export tabs; fullscreen support; viewport pan, zoom, actual/width/height fit, reveal,
+and adjacent-frame preloading. `assets/lens.js` is the focused owner for the optional
+floating image lens: normalized per-source mapping, follow/park placement, pending
+touch tap-versus-viewport-gesture ownership,
+160/240/320px sizing, 2x/3x/4x/6x/8x/12x magnification, target marking, and an
+optional Single-mode active/comparison split. Diff uses separate aligned base and
+difference DOM images with CSS difference blending, while the viewer exposes one
+palette/lens chrome event boundary so bubbled pointer, wheel, and double-click input
+cannot mutate the viewport. Activation seeds a transient center point, responsive
+chrome uses the rendered titlebar height, and settings are clamped to stage bounds.
+Context sync remaps or reseeds the target when frames, modes, sources, or Grid entries
+change; layout refresh preserves the normalized sample through pan, zoom, fit, and
+alignment changes. Each Lens clone slot uses a detached, source-matched image loader;
+supersede, completion, and clearing remove both loader handlers and discard the loader,
+with request tokens retained as defense in depth. Stale load/error callbacks cannot
+revive superseded content, same-source failures do not retry continuously, and
+unavailable content remains visibly honest. It magnifies existing image elements
+without canvas decoding or pixel-value claims.
+`assets/grid_view.js` owns the viewer-only Grid
 cell lifecycle: deterministic responsive 2/3/4 layouts, payload-order pages of at
 most four images (one below the mobile reflow boundary), loading/missing/retry
 presentation, and visible-range controls. It consumes the viewer's single viewport
-state and the pixel inspector's normalized point rather than duplicating either. In
+state while exposing visible image entries to the lens rather than duplicating either. In
 Grid mode the shared pan fields represent normalized image-box translation and each
 cell derives its CSS-pixel transform from its own contained image dimensions; the
 viewer converts those fields at the Grid/pair-mode boundary so mixed-aspect cells keep
@@ -492,8 +506,12 @@ pause/resume, keyboard speed controls, and reduced-motion handling that enters B
 paused. Browser-local
 viewer state is scoped by report identity and persists current frame, view mode,
 clip selection, viewport/zoom/reveal, pair alignments, HUD visibility, filmstrip
-collapsed/size, inspector open/tab, optional-lens preference, and blink speed. Pixel
-lock and magnification are not persisted; Blink paused state is also transient. It
+collapsed/size, inspector open/tab, and blink speed. Lens preferences use a separate
+best-effort browser-global key for magnification, size, behavior, and target-marker
+visibility; report-scoped lens state stores enabled state, parked normalized position,
+and Single comparison selection. Pointer/sample position and Blink paused state are
+transient. Storage failure leaves the lens usable for the current session and is
+reported quietly inside its settings popover. It
 does not own slow.pics upload policy, prompting, or browser side effects.
 
 Active-picture resolution is owned by `frame_compare.orchestration.active_rect`

@@ -29,7 +29,6 @@ const ReportViewer = {
         filmstripSize: 'normal',
         inspectorOpen: false,
         inspectorTab: 'frame',
-        pixelLensEnabled: false,
         categoryFilterKeys: new Map(),
         imageLoadPromises: new Map(),
         imageRequestToken: 0,
@@ -57,7 +56,7 @@ const ReportViewer = {
             this.state.categoryFilterKeys = this.buildCategoryFilterKeys();
             this.applyDefaultSelection();
             this.restorePersistedState();
-            this.pixelInspector = PixelInspector.create(this);
+            this.lens = Lens.create(this);
             this.gridView = GridView.create(this);
             this.reviewController = null;
             if (this.state.inspectorOpen && this.state.inspectorTab === 'review') {
@@ -139,7 +138,7 @@ const ReportViewer = {
             btnCloseHelp: document.getElementById('btn-close-help'),
             infoModal: document.getElementById('info-modal'),
             btnInfo: document.getElementById('btn-info'),
-            btnInspect: document.getElementById('btn-inspect'),
+            live: document.getElementById('viewer-live'),
             grid: document.getElementById('rv-grid'),
             gridCells: document.querySelector('[data-grid-cells]'),
             gridControls: document.querySelector('[data-control-scope="grid"]'),
@@ -233,7 +232,7 @@ const ReportViewer = {
             this.dom.btnCloseHelp,
             this.dom.infoModal,
             this.dom.btnInfo,
-            this.dom.btnInspect,
+            this.dom.live,
             this.dom.grid,
             this.dom.gridCells,
             this.dom.gridControls,
@@ -348,6 +347,14 @@ const ReportViewer = {
         status.dataset.tone = tone;
         status.setAttribute('role', tone === 'error' ? 'alert' : 'status');
         status.hidden = false;
+    },
+
+    announce(message) {
+        if (!this.dom?.live || !message) return;
+        this.dom.live.textContent = '';
+        window.setTimeout(() => {
+            this.dom.live.textContent = message;
+        }, 0);
     },
 
     clearStatus() {
@@ -546,7 +553,7 @@ const ReportViewer = {
         this.bindFilmstripEvents();
         this.bindKeyboardEvents();
         this.gridView.bind();
-        this.pixelInspector.bind();
+        this.lens.bind();
     },
 
     bindModeEvents() {
@@ -574,9 +581,6 @@ const ReportViewer = {
         });
         this.dom.activeSelect.addEventListener('change', (e) => {
             const nextIndex = this.clipIndexOrDefault(e.target.value, this.state.activeClipIdx);
-            if (nextIndex !== this.state.activeClipIdx) {
-                this.pixelInspector.clearForContext('Clip changed; inspection unlocked.');
-            }
             this.state.activeClipIdx = nextIndex;
             this.render();
         });
@@ -599,6 +603,8 @@ const ReportViewer = {
             pinchContentY: 0,
             pinchGridAnchor: null,
             panBasis: null,
+            lensPointHandled: false,
+            lensTouchStart: null,
         };
 
         this.dom.zoomRange.addEventListener('input', (e) => this.setZoom(parseFloat(e.target.value)));
@@ -626,13 +632,25 @@ const ReportViewer = {
         }
 
         this.dom.stage.addEventListener('pointerdown', (e) => {
-            if (this.isViewportPaletteEvent(e)) return;
-            this.pixelInspector.beginStagePress(e);
+            if (this.isViewerChromeEvent(e)) return;
+            this.pointerInteraction.lensPointHandled = this.lens.handleStagePointerDown(e);
             this.trackPointerPosition(e);
             this.capturePointer(e.pointerId);
             if (this.shouldStartPinch(e)) {
+                this.lens.cancelTouchPending();
+                this.pointerInteraction.lensPointHandled = false;
+                this.pointerInteraction.lensTouchStart = null;
                 this.startPinchFromTrackedPointers();
                 if (this.state.mode === 'blink') this.state.blinkPaused = true;
+                e.preventDefault();
+                return;
+            }
+            if (this.pointerInteraction.lensPointHandled) {
+                this.pointerInteraction.lensTouchStart = {
+                    pointerId: e.pointerId,
+                    clientX: e.clientX,
+                    clientY: e.clientY,
+                };
                 e.preventDefault();
                 return;
             }
@@ -649,11 +667,21 @@ const ReportViewer = {
         });
 
         this.dom.stage.addEventListener('pointermove', (e) => {
-            if (this.isViewportPaletteEvent(e)) return;
-            this.pixelInspector.moveStagePress(e);
-            this.pixelInspector.scheduleHover(e);
+            if (this.isViewerChromeEvent(e)) return;
+            const lensMove = this.lens.handleStagePointerMove(e);
             this.trackPointerPosition(e);
             const pointer = this.pointerInteraction;
+            if (pointer.lensPointHandled && pointer.lensTouchStart?.pointerId === e.pointerId) {
+                if (lensMove === 'pending') {
+                    e.preventDefault();
+                    return;
+                }
+                if (lensMove === 'released') {
+                    pointer.lensPointHandled = false;
+                    this.startDeferredViewportGesture(e, pointer.lensTouchStart);
+                    pointer.lensTouchStart = null;
+                }
+            }
             if (pointer.pinchActive) {
                 this.updatePinchFromTrackedPointers();
                 e.preventDefault();
@@ -673,25 +701,52 @@ const ReportViewer = {
         this.dom.stage.addEventListener('pointercancel', (e) => {
             this.stopPointerInteraction(e, { cancelled: true });
         });
-        this.dom.stage.addEventListener('dblclick', (e) => {
-            if (this.isViewportPaletteEvent(e)) return;
-            if (this.state.mode === 'overlay' || this.state.mode === 'diff') return;
-            e.preventDefault();
-            this.resetViewport();
-        });
-        this.dom.stage.addEventListener('wheel', (e) => {
-            if (this.isViewportPaletteEvent(e)) return;
-            e.preventDefault();
-            if (e.shiftKey) {
-                this.panByPixels(-e.deltaX, -e.deltaY, e.clientX, e.clientY);
-                return;
-            }
-            this.zoomAtPoint(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1);
-        }, { passive: false });
+        this.dom.stage.addEventListener('dblclick', (e) => this.handleViewportDoubleClick(e));
+        this.dom.stage.addEventListener('wheel', (e) => this.handleViewportWheel(e), { passive: false });
     },
 
-    isViewportPaletteEvent(e) {
-        return Boolean(e.target?.closest?.('.rv-viewport-palette'));
+    isViewerChromeEvent(e) {
+        return Boolean(e.target?.closest?.('.rv-viewport-palette, .rv-lens'));
+    },
+
+    handleViewportDoubleClick(e) {
+        if (this.isViewerChromeEvent(e)) return;
+        if (this.state.mode === 'overlay' || this.state.mode === 'diff') return;
+        e.preventDefault();
+        this.resetViewport();
+    },
+
+    handleViewportWheel(e) {
+        if (this.isViewerChromeEvent(e)) return;
+        e.preventDefault();
+        if (e.shiftKey) {
+            this.panByPixels(-e.deltaX, -e.deltaY, e.clientX, e.clientY);
+            return;
+        }
+        this.zoomAtPoint(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1);
+    },
+
+    startDeferredViewportGesture(e, start) {
+        const origin = {
+            pointerId: e.pointerId,
+            pointerType: e.pointerType,
+            button: e.button,
+            altKey: e.altKey,
+            shiftKey: e.shiftKey,
+            clientX: start.clientX,
+            clientY: start.clientY,
+        };
+        if (this.state.mode === 'blink') this.state.blinkPaused = true;
+        if (this.shouldPanFromPointer(e)) {
+            this.startPanFromPointer(origin);
+            this.updatePanFromPointer(e);
+            return;
+        }
+        if (this.state.mode === 'slider') {
+            this.pointerInteraction.isDragging = true;
+            this.captureStagePointer(e);
+            this.updateSliderFromPointer(e);
+        }
     },
 
     bindAlignmentEvents() {
@@ -788,7 +843,6 @@ const ReportViewer = {
             if (e.key !== 'Escape') return;
             e.preventDefault();
             e.stopPropagation();
-            if (this.pixelInspector.unlock()) return;
             this.setInspectorOpen(false);
         });
     },
@@ -875,7 +929,6 @@ const ReportViewer = {
         if (!metrics) return;
 
         const pointer = this.pointerInteraction;
-        this.pixelInspector.cancelStagePress();
         const stageRect = this.dom.stage.getBoundingClientRect();
         const stageCenterX = stageRect.left + stageRect.width / 2;
         const stageCenterY = stageRect.top + stageRect.height / 2;
@@ -973,7 +1026,6 @@ const ReportViewer = {
     updatePanFromPointer(e) {
         const pointer = this.pointerInteraction;
         if (!pointer.isPanning) return false;
-        if (this.pixelInspector.isStagePressPending(e.pointerId)) return true;
 
         const dx = e.clientX - pointer.lastPanX;
         const dy = e.clientY - pointer.lastPanY;
@@ -1001,11 +1053,29 @@ const ReportViewer = {
             return;
         }
 
+        const wasLensTapPending = Boolean(
+            pointer.lensPointHandled
+            && pointer.lensTouchStart?.pointerId === e.pointerId
+        );
+        if (wasLensTapPending) {
+            this.lens.endStagePointer(e, { cancelled: Boolean(options.cancelled) });
+            pointer.lensPointHandled = false;
+            pointer.lensTouchStart = null;
+            pointer.isDragging = false;
+            pointer.isPanning = false;
+            pointer.panBasis = null;
+            pointer.panMoved = false;
+            if (pointer.activePointerId === e.pointerId) pointer.activePointerId = null;
+            this.dom.stage.classList.remove('is-panning');
+            if (this.state.mode === 'blink') this.state.blinkPaused = false;
+            return;
+        }
+
         if (pointer.activePointerId !== null && e.pointerId !== pointer.activePointerId) return;
         const completedDrag = pointer.isDragging;
         const completedPan = pointer.isPanning;
         if (!options.cancelled) {
-            this.pixelInspector.moveStagePress(e);
+            this.lens.handleStagePointerMove(e);
             this.updatePanFromPointer(e);
         }
         const completedPanMoved = pointer.panMoved;
@@ -1019,14 +1089,13 @@ const ReportViewer = {
         this.dom.stage.classList.remove('is-panning');
         if (this.state.mode === 'blink') this.state.blinkPaused = false;
         if (completedDrag) this.updateSliderFromPointer(e);
-        const acquiredInspection = options.cancelled
-            ? false
-            : this.pixelInspector.endStagePress(e);
-        if (options.cancelled) this.pixelInspector.cancelStagePress();
+        const acquiredLensPoint = pointer.lensPointHandled;
+        pointer.lensPointHandled = false;
+        pointer.lensTouchStart = null;
         if (completedPan) {
             this.persistViewportState();
             if (
-                !acquiredInspection
+                !acquiredLensPoint
                 && !options.cancelled
                 && !completedPanMoved
                 && (this.state.mode === 'overlay' || this.state.mode === 'diff')
@@ -1099,9 +1168,6 @@ const ReportViewer = {
 
     setLeftClip(idx) {
         const nextIndex = this.clipIndexOrDefault(idx, this.state.leftClipIdx);
-        if (nextIndex !== this.state.leftClipIdx) {
-            this.pixelInspector.clearForContext('Clip changed; inspection unlocked.');
-        }
         this.storeCurrentPairAlignment();
         this.state.leftClipIdx = nextIndex;
         this.ensureDistinctPairSelection();
@@ -1112,9 +1178,6 @@ const ReportViewer = {
 
     setRightClip(idx) {
         const nextIndex = this.clipIndexOrDefault(idx, this.state.rightClipIdx);
-        if (nextIndex !== this.state.rightClipIdx) {
-            this.pixelInspector.clearForContext('Clip changed; inspection unlocked.');
-        }
         this.storeCurrentPairAlignment();
         this.state.rightClipIdx = nextIndex;
         this.ensureDistinctPairSelection();
@@ -1129,7 +1192,6 @@ const ReportViewer = {
     swapPairClips() {
         if (this.state.mode === 'overlay' || this.state.mode === 'grid' || this.clipCount() <= 1) return;
 
-        this.pixelInspector.clearForContext('Clip changed; inspection unlocked.');
         this.storeCurrentPairAlignment();
         const previousLeft = this.state.leftClipIdx;
         this.state.leftClipIdx = this.state.rightClipIdx;
@@ -1194,9 +1256,6 @@ const ReportViewer = {
         if (this.validInspectorTab(saved.inspectorTab)) {
             this.state.inspectorTab = saved.inspectorTab;
         }
-        if (typeof saved.pixelLensEnabled === 'boolean') {
-            this.state.pixelLensEnabled = saved.pixelLensEnabled;
-        }
         if (this.validBlinkIntervalMs(saved.blinkIntervalMs)) {
             this.state.blinkIntervalMs = saved.blinkIntervalMs;
         }
@@ -1244,7 +1303,6 @@ const ReportViewer = {
             filmstripSize: this.state.filmstripSize,
             inspectorOpen: this.state.inspectorOpen,
             inspectorTab: this.state.inspectorTab,
-            pixelLensEnabled: this.state.pixelLensEnabled,
             blinkIntervalMs: this.state.blinkIntervalMs,
             paletteOrientation: this.state.paletteOrientation,
             pairAlignments: this.state.pairAlignments
@@ -1280,7 +1338,7 @@ const ReportViewer = {
     },
 
     validInspectorTab(tab) {
-        return ['pixel', 'frame', 'clips', 'align', 'review', 'export'].includes(tab);
+        return ['frame', 'clips', 'align', 'review', 'export'].includes(tab);
     },
 
     validBlinkIntervalMs(intervalMs) {
@@ -1422,7 +1480,6 @@ const ReportViewer = {
             visible ? 'Close inspector (I)' : 'Open inspector (I)'
         );
         this.updateInspectorTabs();
-        this.pixelInspector?.syncVisibility();
     },
 
     inspectorFocusableElements() {
@@ -1492,7 +1549,6 @@ const ReportViewer = {
         if (tab === 'review') this.ensureReviewController();
         this.updateInspectorTabs();
         if (options.save !== false) this.persistViewportState();
-        this.pixelInspector?.syncVisibility();
     },
 
     handleInspectorTabKey(e) {
@@ -1795,11 +1851,7 @@ const ReportViewer = {
         if (this.state.activeCategoryKey === nextKey) return;
 
         this.state.activeCategoryKey = nextKey;
-        const previousFrameIdx = this.state.currentFrameIdx;
         this.normalizeCurrentFrameForFilter();
-        if (this.state.currentFrameIdx !== previousFrameIdx) {
-            this.pixelInspector.clearForContext('Frame changed; inspection unlocked.');
-        }
         this.render();
         this.scrollActiveFilmstripItem({ behavior: 'smooth', inline: 'center' });
     },
@@ -1878,10 +1930,6 @@ const ReportViewer = {
                 this.closeAlignmentPopover();
                 return;
             }
-            if (this.pixelInspector?.unlock()) {
-                e.preventDefault();
-                return;
-            }
             if (this.isInspectorVisible()) {
                 e.preventDefault();
                 this.setInspectorOpen(false);
@@ -1898,9 +1946,9 @@ const ReportViewer = {
         if (this.isAlignmentPopoverOpen()) return;
         if (this.isShortcutEditableTarget(e.target)) return;
 
-        if (e.key === 'm' || e.key === 'M') {
+        if (e.key === 'l' || e.key === 'L') {
             e.preventDefault();
-            this.pixelInspector.open();
+            this.lens.setEnabled(!this.lens.state.report.enabled);
             return;
         }
 
@@ -1968,9 +2016,6 @@ const ReportViewer = {
                          if (this.state.mode === 'slider') this.setLeftClip(idx);
                          else if (this.state.mode === 'diff' || this.state.mode === 'blink') this.setRightClip(idx);
                          else if (this.state.mode === 'overlay') {
-                             if (idx !== this.state.activeClipIdx) {
-                                 this.pixelInspector.clearForContext('Clip changed; inspection unlocked.');
-                             }
                              this.state.activeClipIdx = idx;
                              this.render();
                          }
@@ -1986,9 +2031,6 @@ const ReportViewer = {
             const base = this.baseCanvasSize();
             this.state.panX = base.width > 0 ? this.state.panX / base.width : 0;
             this.state.panY = base.height > 0 ? this.state.panY / base.height : 0;
-        }
-        if (mode !== this.state.mode) {
-            this.pixelInspector.clearForContext('Mode changed; inspection unlocked.');
         }
         this.state.mode = mode;
         this.ensureDistinctPairSelection(mode);
@@ -2084,9 +2126,6 @@ const ReportViewer = {
             : this.nearestVisibleFrameIndex(idx, visibleIndexes);
         if (nextIdx === null) return;
 
-        if (nextIdx !== this.state.currentFrameIdx) {
-            this.pixelInspector.clearForContext('Frame changed; inspection unlocked.');
-        }
         this.state.currentFrameIdx = nextIdx;
         this.render();
 
@@ -2133,9 +2172,6 @@ const ReportViewer = {
             );
         } else {
             const nextIndex = (this.state.activeClipIdx + direction + count) % count;
-            if (nextIndex !== this.state.activeClipIdx) {
-                this.pixelInspector.clearForContext('Clip changed; inspection unlocked.');
-            }
             this.state.activeClipIdx = nextIndex;
             this.dom.activeSelect.value = this.state.activeClipIdx;
             this.render();
@@ -2163,7 +2199,7 @@ const ReportViewer = {
         this.gridView?.syncViewport();
         if (options.clampPan !== false) this.clampPan();
         this.updateSmartStageLabels();
-        this.pixelInspector?.schedulePlacement();
+        this.lens?.refresh();
     },
 
     resetViewport() {
@@ -2263,7 +2299,7 @@ const ReportViewer = {
         this.dom.canvas.style.setProperty('--pan-y', `${this.state.panY}px`);
         this.gridView?.syncViewport();
         this.updateSmartStageLabels();
-        this.pixelInspector?.schedulePlacement();
+        this.lens?.refresh();
     },
 
     setFitMode(mode, options = {}) {
@@ -2522,7 +2558,7 @@ const ReportViewer = {
         this.dom.btnAlignToggle.classList.toggle('has-offset', isOffset);
         this.updateAlignmentStatus();
         this.updateInspectorData();
-        this.pixelInspector?.schedulePlacement();
+        this.lens?.refresh();
     },
 
     formatSignedPixels(value, axis) {
@@ -2777,7 +2813,7 @@ const ReportViewer = {
             'active',
             isBlink && this.state.activeClipIdx === this.state.rightClipIdx
         );
-        this.pixelInspector?.render();
+        this.lens?.sync();
     },
 
     updateImages() {
@@ -2870,6 +2906,7 @@ const ReportViewer = {
     clearFrameImages() {
         this.state.imageRequestToken += 1;
         this.gridView?.clear();
+        this.lens?.clearTransient?.();
         if (this.dom.sizerImg) this.dom.sizerImg.src = EMPTY_IMAGE_SRC;
         if (this.dom.leftImg) {
             this.dom.leftImg.src = EMPTY_IMAGE_SRC;

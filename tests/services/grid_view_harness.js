@@ -205,12 +205,8 @@ const viewer = {
     clampPan() {},
     updateInspectorData() {},
     updateCurrentFrameMetadata() {},
-    pixelInspector: {
-        announce(message) { announcements.push(message); },
-        focusGridCell() {},
-        render() {},
-        schedulePlacement() {},
-    },
+    announce(message) { announcements.push(message); },
+    lens: { refresh() {}, sync() {} },
 };
 const owner = grid.create(viewer);
 owner.bind();

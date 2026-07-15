@@ -695,36 +695,36 @@ only after maintainer approval is recorded with an immutable integrated referenc
 Then stop. Unit 8 must not start from chat-only approval or disposable artifacts.
 ```
 
-## Unit 8 handoff: magnifier, locked ROI, and pixel inspector
+## Unit 8 handoff: Lens v2 magnifier (2026-07-15 amendment controls)
 
 ```text
-Implement Unit 8 only after Unit 7's design contract is recorded as approved. Read
-and obey the Shared controller contract, approved design artifacts, and Package 8 of
-the active program. Use frame-compare-feature-implement, interface-design,
+This handoff supersedes the historical Pixel-inspector Unit 8 prompt. Do not restore
+the Pixel tab, Inspect button, M shortcut, canvas/RGBA sampling, coordinate readouts,
+locked ROI, nudging, or coarse-pointer suppression. Read and obey the controlling
+2026-07-15 Lens v2 amendment in the report interaction design contract and Package 8
+of the active program. Use frame-compare-feature-implement, interface-design,
 report-output-patterns, browser:control-in-app-browser, architecture-boundaries,
 python-quality-boundaries, python-test-design, verification-strategy,
 review-request, and closeout-verification.
 
-Goal: implement exactly the approved docked inspector, optional floating lens,
-locked source-coordinate ROI, approved zoom levels, and honest coordinate/pixel
-presentation. Reuse existing image layers and centralize transform math. Keep report
-and viewer owners focused; add payload facts only if current dimensions/transforms
-cannot correctly supply them. Preserve slider/overlay/diff modes, static offline
-operation, keyboard/touch access, focus, reduced motion, high-DPI/resize behavior,
-and graceful image failures.
+Goal: maintain the independent production Lens v2 tool: responsive 160/240/320px
+chrome, 2x/3x/4x/6x/8x/12x zoom, Follow/Park, normalized drag placement, target marker,
+touch/coarse tap-versus-drag ownership, immediate keyboard-accessible activation,
+bounded settings, Single-only split comparison, and aligned DOM-only Diff composition.
+Keep report and viewer owners focused and preserve every viewer mode, static offline
+operation, keyboard/touch access, focus, reduced motion, resize behavior, and graceful
+image failures.
 
-Do not introduce a web framework, orchestration coupling, false pixel precision,
-scattered coordinate conversions, or unapproved visual redesign. Do not introduce
-canvas unless the approved design or accurate sampling proves it necessary; require
-a new maintainer decision only when canvas was not already approved. Add semantic markup,
-JS state-harness, CSS contract, and interaction tests plus browser visual QA across
-the approved matrix; then run the full gate.
+Do not introduce a web framework, orchestration coupling, canvas/readback, pixel-value
+claims, public coordinate/ROI UI, scattered geometry conversions, or unapproved visual
+redesign. Add semantic markup, JS state-harness, CSS contract, and interaction tests
+plus browser visual QA across the approved matrix; then run the full gate.
 
-Spawn a fresh read-only adversarial reviewer. Focus on coordinate/frame correctness,
-transform drift, color/sampling claims, event/pointer leaks, memory/performance,
-keyboard/touch/accessibility, mode regressions, payload growth, and viewer.js hotspot
-debt. Adjudicate, fix, reverify including browser QA where affected, update Unit 8's
-ledger row, and stop.
+Spawn a fresh read-only adversarial reviewer. Focus on per-mode/source/frame/alignment
+fidelity, event isolation, tap/drag/pinch ownership, immediate activation, responsive
+and zoomed accessibility, popover bounds, persistence, mode regressions, payload growth,
+and viewer.js hotspot debt. Adjudicate, fix, reverify including browser QA where
+affected, update Unit 8's ledger row, and stop.
 ```
 
 ## Unit 9 handoff: multi-clip grid comparison
@@ -737,16 +737,20 @@ browser:control-in-app-browser, architecture-boundaries, python-test-design,
 verification-strategy, review-request, and closeout-verification.
 
 Goal: add the approved viewer-only responsive grid with deterministic 2/3/4/N
-layout/overflow and linked pan/zoom/ROI across visible cells. Preserve current modes,
-report payload compatibility, local viewer state, visible reference/active labels,
-keyboard order, touch behavior, and useful image area at constrained viewports.
+layout/overflow and linked pan/zoom across visible cells. Preserve the Lens target in
+normalized source coordinates through layout-only pan/zoom refreshes, following the
+controlling Lens v2 amendment in
+[`2026-07-14-report-interaction-design-contract.md`](plans/2026-07-14-report-interaction-design-contract.md).
+Preserve current modes, report payload compatibility, local viewer state, visible
+reference/active labels, keyboard order, touch behavior, and useful image area at
+constrained viewports.
 
 Do not add grid to the public default_mode config in this slice, create virtualized
 gallery/layout frameworks, detachable windows, arbitrary drag layouts, saved
 dashboards, or duplicate transform state. Test every clip-count layout, long labels,
-load failures, mode transitions, synchronized transforms, persistence, breakpoints,
-keyboard/touch order, and magnifier interaction. Perform browser visual QA and run
-the full gate.
+load failures, mode transitions, synchronized transforms and normalized Lens mapping,
+persistence, breakpoints, keyboard/touch order, and magnifier interaction. Perform
+browser visual QA and run the full gate.
 
 Spawn a fresh read-only adversarial reviewer. Focus on N-source correctness,
 responsive overflow, transform synchronization, performance/memory, accessibility,

@@ -135,36 +135,45 @@ def test_viewer_css_stays_offline_and_preserves_tokenized_regressions() -> None:
     assert "margin" not in moz_vertical_track
 
 
-def test_viewer_css_covers_pixel_inspector_roi_lens_and_tabs() -> None:
+def test_viewer_css_covers_production_lens_and_touch_controls() -> None:
     css = get_css()
-    roi = css_block(css, ".rv-inspection-point")
+    target = css_block(css, ".rv-lens-target")
     tabs = css_block(css, ".rv-inspector-tabs")
-    lens_image = css_block(css, ".rv-pixel-lens img")
-    grid = css_block(css, '.rv-pixel-lens[data-magnification="8"]::after')
+    lens = css_block(css, ".rv-lens {")
+    lens_image = css_block(css, ".rv-lens-pane img")
+    settings = css_block(css, ".rv-lens-settings")
     coarse = css_block(css, "@media (pointer: coarse)")
     reduced_motion = css_block(css, "@media (prefers-reduced-motion: reduce)")
 
-    assert "width: 44px;" in roi
-    assert "height: 44px;" in roi
-    assert "touch-action: none;" in roi
+    assert "width: 18px;" in target
+    assert "var(--annotation)" in target
     assert "overflow-x: auto;" in tabs
     assert "display: flex;" in tabs
-    assert '.rv-pixel-lens[data-magnification="2"]' in css
-    assert '.rv-pixel-lens[data-magnification="4"]' in css
-    assert '.rv-pixel-lens[data-magnification="8"]' in css
+    assert "--lens-size: 240px;" in lens
+    assert "touch-action: none;" in lens
     assert "image-rendering: pixelated;" in lens_image
-    assert "repeating-linear-gradient" in grid
-    assert "background-position: 4px 4px;" in grid
-    assert ".rv-pixel-lens" in coarse
-    assert "display: none !important;" in coarse
-    assert "#btn-inspect" in coarse
-    assert "#pixel-lens-toggle" in coarse
-    assert "[data-pixel-magnification]" in coarse
+    assert "mix-blend-mode: difference;" in css_block(
+        css, '.rv-lens[data-render-mode="diff"] .rv-lens-image--difference'
+    )
+    assert "width: min(260px, calc(100vw - 24px));" in settings
+    assert "overflow: auto;" in settings
+    assert "overscroll-behavior: contain;" in settings
+    assert '.rv-lens[data-comparison="true"] .rv-lens-pane--comparison' in css
+    assert '.rv-lens[data-size="small"] #btn-lens-behavior' in css
+    assert '.rv-lens[data-size="small"] .rv-lens-controls' in css
+    assert "#btn-lens" in coarse
+    assert ".rv-lens-controls button" in coarse
+    assert "[data-lens-size]" in coarse
+    assert "[data-lens-behavior]" in coarse
+    assert "grid-template-columns: repeat(3, minmax(44px, 1fr));" in coarse
+    assert "grid-template-columns: repeat(5, minmax(44px, 1fr));" not in coarse
+    assert "#btn-lens-behavior" in coarse
     assert ".rv-inspector-tabs button" in coarse
     assert "min-width: 44px;" in coarse
     assert "min-height: 44px;" in coarse
-    assert ".rv-pixel-lens" in reduced_motion
-    assert ".rv-inspection-point" in reduced_motion
+    assert ".rv-lens" in reduced_motion
+    assert ".rv-lens-target" in reduced_motion
+    assert "display: none !important" not in coarse
 
 
 def test_viewer_css_covers_dense_review_slate_and_accessible_states() -> None:
