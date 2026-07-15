@@ -119,7 +119,7 @@ def test_viewer_js_persists_report_scoped_viewport_state() -> None:
 def test_viewer_js_composes_focused_pixel_owner_before_viewer() -> None:
     js = get_js()
 
-    assert js.index("const PixelInspector =") < js.index("const ReportViewer =")
+    assert_in_order(js, ["const PixelInspector =", "const ReportViewer ="])
     assert "this.pixelInspector = PixelInspector.create(this);" in js
     assert "this.pixelInspector.bind();" in js
     assert "pointFromImageRect(image, clientX, clientY)" in js
@@ -145,7 +145,7 @@ def test_viewer_js_composes_focused_grid_owner_without_public_default_drift() ->
     valid_payload_mode = js_method_block(js, "validPayloadMode(mode)")
     pinch_update = js_method_block(js, "updatePinchFromTrackedPointers()")
 
-    assert js.index("const GridView =") < js.index("const ReportViewer =")
+    assert_in_order(js, ["const GridView =", "const ReportViewer ="])
     assert "this.gridView = GridView.create(this);" in js
     assert "this.gridView.bind();" in js
     assert "this.gridView?.setActive(mode === 'grid');" in set_mode
@@ -202,7 +202,17 @@ def test_viewer_js_uses_pixel_roving_tabs_shortcut_and_escape_priority() -> None
 
 def test_viewer_js_composes_focused_review_owner_before_viewer() -> None:
     js = get_js()
-    assert js.index("const ReviewState =") < js.index("const ReportViewer =")
+    assert_in_order(js, ["const ReviewState =", "const ReportViewer ="])
+    assert "const MAX_BYTES_LABEL = MAX_BYTES.toLocaleString('en-US');" in js
+    assert "const MAX_RECORDS_LABEL = MAX_RECORDS.toLocaleString('en-US');" in js
+    for limit_message in (
+        "`Review JSON exceeds ${MAX_BYTES_LABEL} bytes.`",
+        "`Stored review JSON exceeds ${MAX_BYTES_LABEL} bytes.`",
+        "`Review record limit of ${MAX_RECORDS_LABEL} reached.`",
+        "`Import exceeds ${MAX_BYTES_LABEL} bytes.`",
+        "`Import exceeds ${MAX_BYTES_LABEL} bytes. No changes were made.`",
+    ):
+        assert limit_message in js
     assert "frame-compare:report-review:v1:${context.reportId}" in js
     assert "this.reviewController = null;" in js
     assert "ensureReviewController()" in js

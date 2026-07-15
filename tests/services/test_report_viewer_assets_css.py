@@ -38,6 +38,7 @@ def test_viewer_css_keeps_stage_pointer_and_label_contracts() -> None:
 
 def test_viewer_css_keeps_hidden_state_and_empty_stage_regressions() -> None:
     css = get_css()
+    visually_hidden = css_block(css, ".rv-visually-hidden")
 
     assert "display: none;" in css_block(css, ".rv-control-group[hidden]")
     assert "display: none;" in css_block(css, ".rv-filmstrip-item[hidden]")
@@ -50,6 +51,8 @@ def test_viewer_css_keeps_hidden_state_and_empty_stage_regressions() -> None:
     assert ".rv-modal-content--wide" in css
     assert ".rv-modal-actions" in css
     assert ".rv-zoom-value" in css
+    assert "clip: rect(0 0 0 0) !important;" in visually_hidden
+    assert "clip-path: inset(50%) !important;" in visually_hidden
 
 
 def test_viewer_css_covers_timeline_layout_contracts() -> None:
@@ -171,7 +174,7 @@ def test_viewer_css_covers_dense_review_slate_and_accessible_states() -> None:
     assert '.rv-review-status[data-tone="warning"]' in css
     assert ".rv-review-preview fieldset" in css
     assert "var(--annotation)" in css_block(css, ".rv-review-frame")
-    coarse = css[css.index("@media (pointer: coarse)") :]
+    coarse = css_block(css, "@media (pointer: coarse)")
     for selector in (
         ".rv-review-field select",
         ".rv-review-transfer button",

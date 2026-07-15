@@ -1,4 +1,4 @@
-Status: Unit 7 design contract / awaiting maintainer approval
+Status: Approved Unit 7 design contract / Unit 8 implemented and integrated
 Scope: Generated-report interaction decisions consumed by Product/UX Units 8–11
 Owner: Frame Compare maintainer and the active Product/UX execution program
 
@@ -7,16 +7,18 @@ Owner: Frame Compare maintainer and the active Product/UX execution program
 This supporting contract is governed by the sole active plan,
 [`2026-07-13-product-ux-execution-program.md`](2026-07-13-product-ux-execution-program.md),
 Package 7. It is not a second active execution plan. Maintainer approval of this
-document permits Units 8–11 to implement only the seams frozen below; it does not
-authorize production code, a framework, new CLI/config fields, a report rewrite, or
-claims of implementation proof.
+document on 2026-07-14 froze only the seams below. Unit 8 was subsequently completed
+and integrated at `d24f094`; this recorded state does not authorize unrelated
+production work, a framework, new CLI/config fields, a report rewrite, or unproved
+claims for later units.
 
 ## Approval boundary and evidence
 
-The decisions marked **Frozen** are the proposed design contract. Every item marked
+The decisions marked **Frozen** are the approved design contract. Every item marked
 **Implementation proof** remains a required test/browser/review obligation in its
-own unit. Unit 8 must not start until this document is reviewed, approved, integrated,
-and named by immutable reference in the active plan ledger.
+own unit. The active plan ledger records Unit 7 approval at `43c8341` and Unit 8
+completion at `d24f094`; later units remain governed by their own approval and proof
+boundaries.
 
 The current generated viewer was inspected from its renderer, payload, CSS, JavaScript,
 state harness, and an existing generated `.tmp/visual_audit_report.html`. The assigned

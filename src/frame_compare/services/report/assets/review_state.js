@@ -6,6 +6,8 @@ const ReviewState = (() => {
     const MAX_BYTES = 8388608;
     const MAX_RECORDS = 1000;
     const MAX_NOTE_SCALARS = 1000;
+    const MAX_BYTES_LABEL = MAX_BYTES.toLocaleString('en-US');
+    const MAX_RECORDS_LABEL = MAX_RECORDS.toLocaleString('en-US');
     const TAGS = new Set([null, 'artifact', 'detail', 'motion', 'color', 'other']);
     const DANGEROUS_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
     const PERSISTENCE_WARNING = 'Review changes will not persist in this browser; export to keep them.';
@@ -162,7 +164,7 @@ const ReviewState = (() => {
 
     function serialize(document) {
         const text = `${JSON.stringify(document, null, 2)}\n`;
-        if (encoder.encode(text).byteLength > MAX_BYTES) throw new ReviewStateError('Review JSON exceeds 8,388,608 bytes.');
+        if (encoder.encode(text).byteLength > MAX_BYTES) throw new ReviewStateError(`Review JSON exceeds ${MAX_BYTES_LABEL} bytes.`);
         return text;
     }
 
@@ -195,7 +197,7 @@ const ReviewState = (() => {
             try {
                 const bytes = storage.getItem(storageKey);
                 if (bytes !== null) {
-                    if (encoder.encode(bytes).byteLength > MAX_BYTES) throw new ReviewStateError('Stored review JSON exceeds 8,388,608 bytes.');
+                    if (encoder.encode(bytes).byteLength > MAX_BYTES) throw new ReviewStateError(`Stored review JSON exceeds ${MAX_BYTES_LABEL} bytes.`);
                     const parsed = JSON.parse(bytes);
                     records = mapFrom(validateDocument(parsed, context, false));
                 }
@@ -239,7 +241,7 @@ const ReviewState = (() => {
             const validated = validateRecord(next, context, true);
             if (isDefault(validated)) records.delete(frameOrdinal);
             else {
-                if (!records.has(frameOrdinal) && records.size >= MAX_RECORDS) throw new ReviewStateError('Review record limit of 1,000 reached.');
+                if (!records.has(frameOrdinal) && records.size >= MAX_RECORDS) throw new ReviewStateError(`Review record limit of ${MAX_RECORDS_LABEL} reached.`);
                 records.set(frameOrdinal, validated);
             }
             persistMutation();
@@ -256,7 +258,7 @@ const ReviewState = (() => {
 
         function parseImport(bytes) {
             const byteArray = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-            if (byteArray.byteLength > MAX_BYTES) throw new ReviewStateError('Import exceeds 8,388,608 bytes.');
+            if (byteArray.byteLength > MAX_BYTES) throw new ReviewStateError(`Import exceeds ${MAX_BYTES_LABEL} bytes.`);
             if (byteArray.length >= 3 && byteArray[0] === 0xef && byteArray[1] === 0xbb && byteArray[2] === 0xbf) {
                 throw new ReviewStateError('Import must not contain a UTF-8 BOM.');
             }
@@ -386,7 +388,7 @@ const ReviewState = (() => {
             viewer.dom.reviewBookmark.checked = record.bookmark;
             viewer.dom.reviewTag.value = record.tag || '';
             viewer.dom.reviewNote.value = record.note;
-            viewer.setText(viewer.dom.reviewNoteCount, `${scalarLength(record.note)} / 1000`);
+            viewer.setText(viewer.dom.reviewNoteCount, `${scalarLength(record.note)} / ${MAX_NOTE_SCALARS}`);
             viewer.dom.reviewPreferred.value = record.preferred_clip_id || '';
             updateStatus(initialWarningPending);
             initialWarningPending = false;
@@ -481,7 +483,7 @@ const ReviewState = (() => {
             }
             if (file.size > MAX_BYTES) {
                 cancelImport();
-                showMessage('Import exceeds 8,388,608 bytes. No changes were made.', true);
+                showMessage(`Import exceeds ${MAX_BYTES_LABEL} bytes. No changes were made.`, true);
                 return;
             }
             try {

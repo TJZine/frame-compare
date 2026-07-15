@@ -49,7 +49,10 @@ assert.throws(() => state.mutate(1, { note: '\ud800' }), /surrogate/);
 assert.throws(() => state.mutate(1, { bookmark: 'true' }), /boolean/);
 assert.throws(() => state.mutate(1, { bookmark: true, unexpected: true }), /unknown or missing/);
 assert.throws(() => R.create({ ...context, payloadVersion: '2.0', storage: null }), /identity/);
-assert.throws(() => state.parseImport(new Uint8Array(R.constants.MAX_BYTES + 1)), /exceeds/);
+assert.throws(
+    () => state.parseImport(new Uint8Array(R.constants.MAX_BYTES + 1)),
+    new RegExp(`exceeds ${R.constants.MAX_BYTES.toLocaleString('en-US')} bytes`),
+);
 assert.throws(() => state.parseImport(Uint8Array.from([0xff])), /strict UTF-8/);
 assert.throws(() => state.parseImport(bytes(`\ufeff${exported([])}`)), /BOM/);
 
@@ -135,7 +138,10 @@ assert.match(ignored.status().warning, /corrupt or unsupported/);
 
 const ceiling = R.create({ ...context, storage: null });
 for (let index = 0; index < 1000; index += 1) ceiling.mutate(index, { bookmark: true });
-assert.throws(() => ceiling.mutate(1000, { bookmark: true }), /limit/);
+assert.throws(
+    () => ceiling.mutate(1000, { bookmark: true }),
+    new RegExp(`limit of ${R.constants.MAX_RECORDS.toLocaleString('en-US')} reached`),
+);
 
 const mergeCeiling = R.create({ ...context, storage: null });
 for (let index = 0; index < 501; index += 1) mergeCeiling.mutate(index, { bookmark: true });
