@@ -570,6 +570,15 @@ def test_build_html_renders_lens_stage_controls(
     assert lens.attrs["data-comparison"] == "false"
     assert len(find_all(lens, tag="img")) == 3
     assert require_first(lens, tag="img", attr_name="data-lens-image", attr_value="difference")
+    active_role = require_first(lens, tag="span", attr_name="data-lens-role", attr_value="active")
+    assert active_role.text == "ACTIVE"
+    assert require_first(lens, tag="span", attr_name="data-lens-status", attr_value="active")
+    assert require_first(lens, tag="span", attr_name="data-lens-identity", attr_value="active")
+    comparison_role = require_first(
+        lens, tag="span", attr_name="data-lens-role", attr_value="comparison"
+    )
+    assert comparison_role.text == "COMPARE"
+    assert require_first(lens, tag="span", attr_name="data-lens-identity", attr_value="comparison")
     grip = require_first(lens, tag="button", attr_name="data-lens-drag-handle")
     assert grip.attrs["aria-label"] == "Move lens window"
     assert not find_all(lens, tag="div", class_name="rv-lens-titlebar")
@@ -584,6 +593,9 @@ def test_build_html_renders_lens_stage_controls(
     assert not find_all(lens, tag="div", element_id="lens-settings-popover")
     assert require_first(settings, tag="input", element_id="lens-comparison-enabled")
     assert require_first(settings, tag="button", attr_name="data-lens-marker", attr_value="off")
+    current_source = require_first(settings, tag="output", attr_name="data-lens-current-source")
+    assert current_source.text == "Lens is off."
+    assert current_source.attrs["aria-live"] == "off"
     assert not find_all(stage, attr_name="data-lens-behavior")
     assert not find_all(stage, tag="canvas")
     assert 'id="btn-inspect"' not in html

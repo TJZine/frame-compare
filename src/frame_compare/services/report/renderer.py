@@ -420,6 +420,9 @@ def _render_lens_settings() -> str:
                     <select id="lens-comparison-target"></select>
                 </label>
             </div>
+            <label class="rv-lens-current-source">Current source
+                <output data-lens-current-source aria-live="off">Lens is off.</output>
+            </label>
             <button id="btn-lens-reset" type="button">Reset lens settings and position</button>
             <p class="rv-lens-persistence" data-lens-persistence></p>
         </div>"""
@@ -529,11 +532,19 @@ def _render_stage() -> str:
                 <div class="rv-lens-pane rv-lens-pane--active">
                     <img class="rv-lens-image rv-lens-image--active" data-lens-image="active" src="" alt="">
                     <img class="rv-lens-image rv-lens-image--difference" data-lens-image="difference" src="" alt="">
-                    <span data-lens-label="active"></span>
+                    <div class="rv-lens-caption">
+                        <span class="rv-lens-role" data-lens-role="active">ACTIVE</span>
+                    </div>
+                    <span class="rv-lens-status" data-lens-status="active" hidden></span>
+                    <span class="rv-lens-identity" data-lens-identity="active"></span>
                 </div>
                 <div class="rv-lens-pane rv-lens-pane--comparison">
                     <img class="rv-lens-image rv-lens-image--comparison" data-lens-image="comparison" src="" alt="">
-                    <span data-lens-label="comparison"></span>
+                    <div class="rv-lens-caption">
+                        <span class="rv-lens-role" data-lens-role="comparison">COMPARE</span>
+                    </div>
+                    <span class="rv-lens-status" data-lens-status="comparison" hidden></span>
+                    <span class="rv-lens-identity" data-lens-identity="comparison"></span>
                 </div>
             </div>
             <button class="rv-lens-grip" type="button" data-lens-drag-handle aria-label="Move lens window" title="Drag to move lens; use arrow keys when focused"><span aria-hidden="true">⠿</span></button>

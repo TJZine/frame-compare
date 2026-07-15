@@ -39,6 +39,7 @@ def test_lens_harness_proves_mapping_behavior_comparison_and_storage(
         "mappingAndClamping": True,
         "splitGeometry": True,
         "boundedPopover": True,
+        "longIdentityCaptions": True,
         "diffCompositionAndAlignment": True,
         "staleContextReseeds": True,
         "immediateActivation": True,

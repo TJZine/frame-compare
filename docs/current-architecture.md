@@ -473,7 +473,12 @@ images with CSS difference blending, while the viewer exposes one palette/lens c
 event boundary so bubbled pointer, wheel, and double-click input cannot mutate the
 viewport. Activation seeds a transient center point and retains the stable palette
 Lens group, which owns zoom, fixed status, and stage-clamped settings. The display-only
-lens body has no titlebar or controls. Grip pointer dragging uses capture, while its
+lens body has no titlebar or controls. It uses compact mode-aware ACTIVE, COMPARE, and
+DIFF badges plus deterministic, stage-size-aware middle-ellipsized identity rails that
+preserve source name beginnings and suffixes; Lens Settings exposes the full wrapping
+current-source label. Report interaction highlights, including lens markers and its grip, share one
+Projection Brass signal token family while semantic status and frame-category colors
+remain separate. Grip pointer dragging uses capture, while its
 arrow-key operation supports a larger Shift step, clamps to the stage, persists the
 position, and prevents viewer shortcuts. Touch sampling remains a deliberate tap;
 touch movement beyond its threshold returns ownership to viewport gestures.

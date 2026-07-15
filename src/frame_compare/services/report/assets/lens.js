@@ -4,6 +4,14 @@ const Lens = (() => {
     const TOUCH_GESTURE_THRESHOLD = 6;
     const MAGNIFICATIONS = [2, 3, 4, 6, 8, 12];
     const SIZES = { small: 160, medium: 240, large: 320 };
+    // Mirrors the identity rail CSS: single/Diff subtract 8px insets + 10px padding
+    // + 2px borders; split subtracts 8px + 6px + 2px and its 1px pane divider.
+    // Character widths are conservative for the 12px and 10px mono rail fonts.
+    const CAPTION_METRICS = Object.freeze({
+        single: Object.freeze({ paneFraction: 1, horizontalChrome: 20, characterWidth: 8 }),
+        split: Object.freeze({ paneFraction: 0.5, horizontalChrome: 17, characterWidth: 7 }),
+        diff: Object.freeze({ paneFraction: 1, horizontalChrome: 20, characterWidth: 8 }),
+    });
     const DEFAULT_PREFERENCES = Object.freeze({
         magnification: 4,
         size: 'medium',
@@ -18,6 +26,66 @@ const Lens = (() => {
 
     function clamp(value, minimum = 0, maximum = 1) {
         return Math.max(minimum, Math.min(maximum, value));
+    }
+
+    function middleEllipsis(value, maxCharacters) {
+        const characters = Array.from(String(value ?? ''));
+        const limit = Math.max(0, Math.floor(Number(maxCharacters) || 0));
+        if (characters.length <= limit) return characters.join('');
+        if (limit === 0) return '';
+        if (limit === 1) return characters.at(-1);
+        if (limit === 2) return `…${characters.at(-1)}`;
+        const available = limit - 1;
+        const trailing = Math.min(
+            available - 1,
+            Math.max(1, Math.ceil(available * 0.4), Math.min(4, available - 1)),
+        );
+        const leading = available - trailing;
+        return `${characters.slice(0, leading).join('')}…${characters.slice(-trailing).join('')}`;
+    }
+
+    function captionCharacterCapacity(lensPixels, context = 'single') {
+        const metrics = CAPTION_METRICS[context] || CAPTION_METRICS.single;
+        const pixels = Number(lensPixels);
+        if (!Number.isFinite(pixels) || pixels <= 0) return 0;
+        const paneWidth = pixels * metrics.paneFraction;
+        const contentWidth = Math.max(0, paneWidth - metrics.horizontalChrome);
+        return Math.max(0, Math.floor(contentWidth / metrics.characterWidth));
+    }
+
+    function sourceNumber(index) {
+        return `#${Number.isInteger(index) && index >= 0 ? index + 1 : '?'}`;
+    }
+
+    function compactSourceCaption(label, index, totalCapacity, options = {}) {
+        const capacity = Math.max(0, Math.floor(Number(totalCapacity) || 0));
+        const prefix = options.compactStructure
+            ? `${sourceNumber(index)}·`
+            : `${sourceNumber(index)} · `;
+        const prefixCharacters = Array.from(prefix);
+        if (prefixCharacters.length >= capacity) {
+            return prefixCharacters.slice(0, capacity).join('');
+        }
+        return `${prefix}${middleEllipsis(label, capacity - prefixCharacters.length)}`;
+    }
+
+    function compactDiffCaption(leftLabel, leftIndex, rightLabel, rightIndex, totalCapacity) {
+        const capacity = Math.max(0, Math.floor(Number(totalCapacity) || 0));
+        const leftNumber = sourceNumber(leftIndex);
+        const rightNumber = sourceNumber(rightIndex);
+        const minimalStructure = `${leftNumber}↔${rightNumber}`;
+        if (Array.from(minimalStructure).length > capacity) {
+            return middleEllipsis(minimalStructure, capacity);
+        }
+        const dottedStructureLength = Array.from(`${leftNumber}·↔${rightNumber}·`).length;
+        const useDots = dottedStructureLength <= capacity;
+        const leftPrefix = `${leftNumber}${useDots ? '·' : ''}`;
+        const rightPrefix = `${rightNumber}${useDots ? '·' : ''}`;
+        const structureLength = Array.from(`${leftPrefix}↔${rightPrefix}`).length;
+        const filenameCapacity = capacity - structureLength;
+        const leftCapacity = Math.ceil(filenameCapacity / 2);
+        const rightCapacity = filenameCapacity - leftCapacity;
+        return `${leftPrefix}${middleEllipsis(leftLabel, leftCapacity)}↔${rightPrefix}${middleEllipsis(rightLabel, rightCapacity)}`;
     }
 
     function validDimensions(width, height) {
@@ -169,8 +237,13 @@ const Lens = (() => {
             activeImage: document.querySelector('[data-lens-image="active"]'),
             differenceImage: document.querySelector('[data-lens-image="difference"]'),
             comparisonImage: document.querySelector('[data-lens-image="comparison"]'),
-            activeLabel: document.querySelector('[data-lens-label="active"]'),
-            comparisonLabel: document.querySelector('[data-lens-label="comparison"]'),
+            activeRole: document.querySelector('[data-lens-role="active"]'),
+            activeStatus: document.querySelector('[data-lens-status="active"]'),
+            activeIdentity: document.querySelector('[data-lens-identity="active"]'),
+            comparisonRole: document.querySelector('[data-lens-role="comparison"]'),
+            comparisonStatus: document.querySelector('[data-lens-status="comparison"]'),
+            comparisonIdentity: document.querySelector('[data-lens-identity="comparison"]'),
+            currentSource: document.querySelector('[data-lens-current-source]'),
         };
         const storage = viewer.localStorage();
         const reportKey = `${REPORT_KEY_PREFIX}${viewer.state.data?.report_id || 'unknown-report'}`;
@@ -221,6 +294,64 @@ const Lens = (() => {
 
         function clipLabel(index) {
             return viewer.state.data?.clips?.[index]?.label || `Clip ${index + 1}`;
+        }
+
+        function fullSourceIdentity(index) {
+            if (!Number.isInteger(index) || index < 0 || index >= clipCount()) {
+                return 'Source unavailable.';
+            }
+            return `#${index + 1} · ${clipLabel(index)}`;
+        }
+
+        function compactSourceIdentity(index, size, context = 'single') {
+            return compactSourceCaption(
+                clipLabel(index),
+                index,
+                captionCharacterCapacity(size, context),
+                { compactStructure: context === 'split' },
+            );
+        }
+
+        function diffIdentity(leftIndex, rightIndex, size) {
+            return compactDiffCaption(
+                clipLabel(leftIndex),
+                leftIndex,
+                clipLabel(rightIndex),
+                rightIndex,
+                captionCharacterCapacity(size, 'diff'),
+            );
+        }
+
+        function setCaption(slot, role, identity, status = '', fullIdentity = identity) {
+            const roleElement = slot === 'comparison' ? dom.comparisonRole : dom.activeRole;
+            const statusElement = slot === 'comparison' ? dom.comparisonStatus : dom.activeStatus;
+            const identityElement = slot === 'comparison' ? dom.comparisonIdentity : dom.activeIdentity;
+            if (roleElement) roleElement.textContent = role;
+            if (identityElement) {
+                identityElement.textContent = identity;
+                identityElement.setAttribute?.('aria-label', fullIdentity);
+            }
+            if (statusElement) {
+                statusElement.textContent = status;
+                statusElement.hidden = !status;
+            }
+        }
+
+        function renderCurrentSource() {
+            const identity = state.report.enabled
+                ? fullSourceIdentity(state.activeClipIdx)
+                : 'Lens is off.';
+            if (dom.currentSource) {
+                dom.currentSource.textContent = identity;
+                dom.currentSource.setAttribute?.('aria-label', `Current source: ${identity}`);
+            }
+            let lensContext = `Current source: ${identity}`;
+            if (state.report.enabled && viewer.state.mode === 'diff') {
+                lensContext = `Difference: ${fullSourceIdentity(viewer.state.leftClipIdx)} versus ${fullSourceIdentity(viewer.state.rightClipIdx)}`;
+            } else if (state.report.enabled && comparisonShowing()) {
+                lensContext = `Active: ${identity}. Comparison: ${fullSourceIdentity(state.report.comparisonTarget)}`;
+            }
+            dom.lens?.setAttribute?.('aria-label', `Image magnification lens. ${lensContext}`);
         }
 
         function sourceFor(index) {
@@ -544,7 +675,7 @@ const Lens = (() => {
             dom.lens.dataset.comparison = showing ? 'true' : 'false';
             if (!showing) {
                 clearLensImage('comparison');
-                dom.comparisonLabel.textContent = '';
+                setCaption('comparison', 'COMPARE', '', '');
                 return;
             }
             const target = ensureComparisonTarget(activeIndex);
@@ -561,9 +692,16 @@ const Lens = (() => {
                 size / 2,
             );
             const available = applyLensImage('comparison', source, geometry);
-            dom.comparisonLabel.textContent = available
-                ? `Comparison · ${clipLabel(target)}`
-                : `Comparison ${requestStatus('comparison') === 'loading' ? 'loading' : 'unavailable'} · ${clipLabel(target)}`;
+            const status = available
+                ? ''
+                : requestStatus('comparison') === 'loading' ? 'LOADING' : 'UNAVAILABLE';
+            setCaption(
+                'comparison',
+                'COMPARE',
+                compactSourceIdentity(target, size, 'split'),
+                status,
+                fullSourceIdentity(target),
+            );
         }
 
         function renderDiff(point, size) {
@@ -620,6 +758,7 @@ const Lens = (() => {
             dom.toggle?.setAttribute?.('aria-label', state.report.enabled ? 'Turn lens off' : 'Turn lens on');
             if (dom.activeControls) dom.activeControls.hidden = !state.report.enabled;
             viewer.dom.stage.classList?.toggle?.('rv-lens-active', state.report.enabled);
+            renderCurrentSource();
             if (!visible) {
                 if (dom.lens) dom.lens.hidden = true;
                 if (dom.marker) dom.marker.hidden = true;
@@ -642,9 +781,31 @@ const Lens = (() => {
             dom.lens.dataset.size = state.preferences.size;
             const activeState = requestStatus('active') === 'loading' ? 'loading' : 'unavailable';
             const differenceState = requestStatus('difference') === 'loading' ? 'loading' : 'unavailable';
-            dom.activeLabel.textContent = viewer.state.mode === 'diff'
-                ? `${activeAvailable && differenceAvailable ? 'Difference' : `Difference ${!activeAvailable ? activeState : differenceState}`} · ${clipLabel(viewer.state.leftClipIdx)} vs ${clipLabel(viewer.state.rightClipIdx)}`
-                : `${activeAvailable ? 'Active' : `Active ${activeState}`} · ${clipLabel(state.activeClipIdx)}`;
+            if (viewer.state.mode === 'diff') {
+                const status = activeAvailable && differenceAvailable
+                    ? ''
+                    : `${!activeAvailable ? activeState : differenceState}`.toUpperCase();
+                setCaption(
+                    'active',
+                    'DIFF',
+                    diffIdentity(viewer.state.leftClipIdx, viewer.state.rightClipIdx, size),
+                    status,
+                    `${fullSourceIdentity(viewer.state.leftClipIdx)} ↔ ${fullSourceIdentity(viewer.state.rightClipIdx)}`,
+                );
+            } else {
+                const status = activeAvailable ? '' : activeState.toUpperCase();
+                setCaption(
+                    'active',
+                    'ACTIVE',
+                    compactSourceIdentity(
+                        state.activeClipIdx,
+                        size,
+                        comparisonShowing() ? 'split' : 'single',
+                    ),
+                    status,
+                    fullSourceIdentity(state.activeClipIdx),
+                );
+            }
             renderComparison(state.activeClipIdx, state.point, size);
             dom.lens.hidden = false;
             placeTargetMarker();
@@ -989,8 +1150,8 @@ const Lens = (() => {
             clearLensImage('active');
             clearLensImage('difference');
             clearLensImage('comparison');
-            dom.activeLabel.textContent = '';
-            dom.comparisonLabel.textContent = '';
+            setCaption('active', 'ACTIVE', '', '');
+            setCaption('comparison', 'COMPARE', '', '');
             dom.lens.dataset.comparison = 'false';
             dom.lens.dataset.renderMode = 'source';
             render();
@@ -1031,6 +1192,11 @@ const Lens = (() => {
         REPORT_KEY_PREFIX,
         MAGNIFICATIONS,
         SIZES,
+        CAPTION_METRICS,
+        middleEllipsis,
+        captionCharacterCapacity,
+        compactSourceCaption,
+        compactDiffCaption,
         normalizePreferences,
         normalizeReportState,
         normalizedPoint,

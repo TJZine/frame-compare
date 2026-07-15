@@ -125,6 +125,20 @@ def test_viewer_js_composes_focused_lens_owner_before_viewer() -> None:
     assert "frame-compare:report-lens:v1:" in js
     assert "const MAGNIFICATIONS = [2, 3, 4, 6, 8, 12];" in js
     assert "const SIZES = { small: 160, medium: 240, large: 320 };" in js
+    assert "const CAPTION_METRICS = Object.freeze({" in js
+    assert "horizontalChrome: 20, characterWidth: 8" in js
+    assert "horizontalChrome: 17, characterWidth: 7" in js
+    assert "function middleEllipsis(value, maxCharacters)" in js
+    assert "const characters = Array.from(String(value ?? ''));" in js
+    assert "function captionCharacterCapacity(lensPixels, context = 'single')" in js
+    assert "function compactSourceCaption(label, index, totalCapacity, options = {})" in js
+    assert "function compactDiffCaption(" in js
+    assert "function setCaption(slot, role, identity, status = '', fullIdentity = identity)" in js
+    assert "captionCharacterCapacity(size, context)" in js
+    assert "captionCharacterCapacity(size, 'diff')" in js
+    assert "IDENTITY_BUDGETS" not in js
+    assert "data-lens-current-source" in js
+    assert "Current source: ${identity}" in js
     assert "normalizedPoint(image, clientX, clientY)" in js
     assert "lensImageGeometry(" in js
     assert "compositionPoint(image, clientX, clientY)" in js
@@ -171,6 +185,7 @@ def test_viewer_js_composes_focused_lens_owner_before_viewer() -> None:
     assert "createElement('canvas')" not in js
     assert "getImageData" not in js
     assert "Pixel value unavailable" not in js
+    assert "data-lens-label" not in js
 
 
 def test_viewer_js_composes_focused_grid_owner_without_public_default_drift() -> None:

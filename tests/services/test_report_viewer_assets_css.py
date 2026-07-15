@@ -135,6 +135,39 @@ def test_viewer_css_stays_offline_and_preserves_tokenized_regressions() -> None:
     assert "margin" not in moz_vertical_track
 
 
+def test_viewer_css_uses_projection_brass_as_the_single_interaction_signal() -> None:
+    css = get_css()
+    root = css_block(css, ":root")
+
+    for declaration in (
+        "--signal: #d8a448;",
+        "--signal-hover: #e8bc68;",
+        "--signal-muted: rgba(216, 164, 72, 0.14);",
+        "--signal-glow: rgba(216, 164, 72, 0.25);",
+        "--signal-ink: #16120a;",
+        "--signal-border: rgba(216, 164, 72, 0.45);",
+    ):
+        assert declaration in root
+    for obsolete in (
+        "--accent",
+        "--divider",
+        "--annotation",
+        "#38bdf8",
+        "#7dd3fc",
+        "#3b82f6",
+        "rgba(56, 189, 248",
+        "rgba(59, 130, 246",
+    ):
+        assert obsolete not in css.lower()
+    assert "color: var(--signal-ink);" in css_block(css, ".rv-control-group button.active")
+    assert "color: var(--signal-ink);" in css_block(css, "button.active")
+    assert "color: var(--signal-ink);" in css_block(css, ".rv-lens-setting-options button.active")
+    assert "--category-accent: var(--signal);" in css_block(
+        css,
+        '.rv-filmstrip-accent[data-category="selected"],\n.rv-filmstrip-accent[data-category="Selected"],\n.rv-filter-chip[data-category="selected"],\n.rv-filter-chip[data-category="Selected"]',
+    )
+
+
 def test_viewer_css_covers_production_lens_and_touch_controls() -> None:
     css = get_css()
     target = css_block(css, ".rv-lens-target")
@@ -144,6 +177,8 @@ def test_viewer_css_covers_production_lens_and_touch_controls() -> None:
     lens = css_block(css, ".rv-lens {")
     grip = css_block(css, ".rv-lens-grip")
     lens_image = css_block(css, ".rv-lens-pane img")
+    identity = css_block(css, ".rv-lens-identity")
+    split_identity = css_block(css, '.rv-lens[data-comparison="true"] .rv-lens-identity')
     settings = css_block(css, ".rv-lens-settings")
     vertical_palette = css_block(css, '.rv-viewport-palette[data-orientation="vertical"]')
     coarse = css_block(css, "@media (pointer: coarse)")
@@ -151,7 +186,7 @@ def test_viewer_css_covers_production_lens_and_touch_controls() -> None:
 
     assert "width: 20px;" in target
     assert "pointer-events: none;" in target
-    assert "border: 1px solid var(--annotation);" in ring
+    assert "border: 1px solid var(--signal);" in ring
     assert "border-radius: 50%;" in ring
     assert "display: block;" in brackets
     assert "overflow-x: auto;" in tabs
@@ -167,6 +202,16 @@ def test_viewer_css_covers_production_lens_and_touch_controls() -> None:
         ".rv-viewer-stage.rv-lens-active,\n.rv-viewer-stage.rv-lens-active.is-panning",
     )
     assert "image-rendering: pixelated;" in lens_image
+    assert "background: var(--signal);" in css_block(css, ".rv-lens-role {")
+    assert "color: var(--signal-ink);" in css_block(css, ".rv-lens-role {")
+    assert "right: 4px;" in identity
+    assert "left: 4px;" in identity
+    assert "padding: 3px 5px;" in identity
+    assert "font-size: var(--text-xs);" in identity
+    assert "white-space: nowrap;" in identity
+    assert "padding-inline: 3px;" in split_identity
+    assert "font-size: 0.625rem;" in split_identity
+    assert "overflow-wrap: anywhere;" in css_block(css, ".rv-lens-current-source output")
     assert "mix-blend-mode: difference;" in css_block(
         css, '.rv-lens[data-render-mode="diff"] .rv-lens-image--difference'
     )
@@ -204,7 +249,7 @@ def test_viewer_css_covers_dense_review_slate_and_accessible_states() -> None:
     assert ".rv-review-field textarea" in css
     assert '.rv-review-status[data-tone="warning"]' in css
     assert ".rv-review-preview fieldset" in css
-    assert "var(--annotation)" in css_block(css, ".rv-review-frame")
+    assert "var(--signal)" in css_block(css, ".rv-review-frame")
     coarse = css_block(css, "@media (pointer: coarse)")
     for selector in (
         ".rv-review-field select",
@@ -240,8 +285,8 @@ def test_viewer_css_covers_deterministic_grid_and_mobile_cells() -> None:
     assert "var(--grid-pan-x, 0px)" in image
     assert "scale(var(--grid-zoom-level, 1))" in image
     assert "text-overflow: ellipsis;" in css_block(css, ".rv-grid-label-text")
-    assert "border-color: var(--accent);" in css_block(css, '.rv-grid-cell[data-reference="true"]')
-    assert "var(--annotation)" in css_block(css, '.rv-grid-cell[data-active="true"]')
+    assert "border-color: var(--signal);" in css_block(css, '.rv-grid-cell[data-reference="true"]')
+    assert "var(--signal)" in css_block(css, '.rv-grid-cell[data-active="true"]')
     assert "overflow: hidden;" in css_block(css, ".rv-grid")
     assert "#btn-grid-prev" in coarse
     assert "[data-grid-retry]" in coarse
