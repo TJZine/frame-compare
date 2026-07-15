@@ -71,6 +71,19 @@ def test_build_final_selection_report_marks_missing_breakdown_unavailable() -> N
     )
 
 
+def test_build_final_selection_report_marks_empty_breakdown_available() -> None:
+    report = build_final_selection_report(
+        selected_frames=[],
+        breakdown=SelectionBreakdown(),
+    )
+
+    assert report == FinalSelectionReport(
+        final_count=0,
+        categories=(),
+        breakdown_available=True,
+    )
+
+
 def test_emit_final_selection_report_renders_verbose_human_summary_to_stderr(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

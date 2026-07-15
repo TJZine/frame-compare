@@ -131,6 +131,38 @@ def test_cli_and_runtime_share_the_complete_config_override_projection() -> None
     assert build_run_request_from_cli(options).cli_config_overrides() == expected
 
 
+def test_cli_and_runtime_preserve_absent_and_explicit_empty_overrides() -> None:
+    options = RunCliOptions(
+        root=Path("/workspace"),
+        config_path=Path("/workspace/config/config.toml"),
+        input_dir=None,
+        no_cache=False,
+        from_cache_only=False,
+        no_upload=False,
+        tm_preset=None,
+        tm_target_nits=None,
+        tm_curve=None,
+        user_frames=[],
+        random_frame_count=None,
+        dark_frame_count=None,
+        bright_frame_count=None,
+        motion_frame_count=None,
+        seed=None,
+        overlay_mode=None,
+        skip_analysis=False,
+        skip_metadata=False,
+        force_interactive_alignment=False,
+        json_output=False,
+        no_color=False,
+        quiet=False,
+        verbose=False,
+    )
+    expected = CLIConfigOverrides(user_frames=[])
+
+    assert cli_config_overrides_from(options) == expected
+    assert build_run_request_from_cli(options).cli_config_overrides() == expected
+
+
 def test_run_builds_run_request_with_input_dir(monkeypatch: MonkeyPatch) -> None:
     captured: dict[str, RunRequest] = {}
 

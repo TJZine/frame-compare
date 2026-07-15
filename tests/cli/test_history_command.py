@@ -46,10 +46,14 @@ def _workspace(root: Path, run_dir: Path) -> WorkspacePaths:
     )
 
 
-def _setup(root: Path, name: str = "Exact Run") -> Path:
+def _setup_config(root: Path) -> None:
     config = root / "config" / "config.toml"
     config.parent.mkdir(parents=True)
     config.write_text(CONFIG, encoding="utf-8")
+
+
+def _setup(root: Path, name: str = "Exact Run") -> Path:
+    _setup_config(root)
     run_dir = root / "generated" / name
     run_dir.mkdir(parents=True)
     report = run_dir / "report.html"
@@ -140,6 +144,16 @@ def test_history_list_human_exposes_concise_fields(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert result.stdout == "Exact Run\tcompleted\t2026-07-14T12:00:05Z\treport=yes\n"
     assert result.stderr == ""
+
+
+def test_history_list_json_returns_empty_runs_without_history(tmp_path: Path) -> None:
+    _setup_config(tmp_path)
+
+    result = _invoke(tmp_path, ["list", "--json"])
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert json.loads(result.stdout) == {"runs": []}
 
 
 def test_history_open_uses_exact_recorded_report(
