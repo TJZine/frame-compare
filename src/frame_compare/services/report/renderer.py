@@ -15,9 +15,7 @@ from frame_compare.services.report.payload import REPORT_VERSION
 from frame_compare.services.report.viewer import get_css, get_js
 
 ALL_CATEGORY_FILTER_KEY = "__fc_all__"
-_REVIEW_NOTE_MAX_SCALARS = 1000
-# HTML maxlength counts UTF-16 code units; JavaScript enforces the scalar limit.
-_REVIEW_NOTE_MAX_UTF16_CODE_UNITS = _REVIEW_NOTE_MAX_SCALARS * 2
+_REVIEW_NOTE_MAX_LENGTH = 1000
 
 if TYPE_CHECKING:
     from frame_compare.services.report.payload import (
@@ -566,8 +564,8 @@ def _render_inspector() -> str:
                     <option value="">No tag</option><option value="artifact">Artifact</option><option value="detail">Detail</option><option value="motion">Motion</option><option value="color">Color</option><option value="other">Other</option>
                 </select>
             </label>
-            <label class="rv-review-field">Note <span data-review-note-count>0 / {_REVIEW_NOTE_MAX_SCALARS}</span>
-                <textarea data-review-note rows="5" maxlength="{_REVIEW_NOTE_MAX_UTF16_CODE_UNITS}" tabindex="-1"></textarea>
+            <label class="rv-review-field">Note <span data-review-note-count>0 / {_REVIEW_NOTE_MAX_LENGTH}</span>
+                <textarea data-review-note rows="5" maxlength="{_REVIEW_NOTE_MAX_LENGTH}" tabindex="-1"></textarea>
             </label>
             <label class="rv-review-field">Preferred clip
                 <select data-review-preferred tabindex="-1"></select>

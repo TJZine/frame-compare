@@ -555,7 +555,7 @@ def test_build_html_renders_inspector_drawer(report_payload: ReportPayload) -> N
     review_panel = require_first(inspector, element_id="inspector-panel-review")
     review_note = require_first(review_panel, tag="textarea", attr_name="data-review-note")
     review_note_count = require_first(review_panel, tag="span", attr_name="data-review-note-count")
-    assert review_note.attrs["maxlength"] == "2000"
+    assert review_note.attrs["maxlength"] == "1000"
     assert review_note_count.text == "0 / 1000"
     assert require_first(review_panel, tag="input", attr_name="data-review-bookmark")
     assert require_first(review_panel, tag="select", attr_name="data-review-tag")
