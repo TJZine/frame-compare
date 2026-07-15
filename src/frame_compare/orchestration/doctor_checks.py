@@ -51,7 +51,10 @@ def _check_python_version() -> CheckResult:
     return CheckResult(
         passed=False,
         message=f"Python {version_str} (requires 3.13+)",
-        hint="Upgrade to Python 3.13 or later",
+        hint=(
+            "Run Frame Compare with Python 3.13+; see "
+            "https://github.com/TJZine/frame-compare#requirements"
+        ),
         details={"current": version_str},
     )
 
@@ -65,7 +68,10 @@ def _check_vapoursynth() -> CheckResult:
         return CheckResult(
             passed=False,
             message="VapourSynth not found",
-            hint="Install VapourSynth (pip install VapourSynth)",
+            hint=(
+                "Make VapourSynth importable; see "
+                "https://github.com/TJZine/frame-compare#quick-start"
+            ),
         )
 
 
@@ -77,10 +83,35 @@ def _lsmas_plugin_path_details() -> dict[str, JSONValue]:
     return {"checked_plugin_paths": cast(JSONValue, candidates)}
 
 
+def _lsmas_setup_failure(error: Exception) -> CheckResult:
+    return CheckResult(
+        passed=False,
+        message="lsmas check failed",
+        hint=(
+            "Check the VapourSynth/plugin setup, then rerun doctor; see "
+            "https://github.com/TJZine/frame-compare#quick-start"
+        ),
+        details={"exception_type": type(error).__name__},
+    )
+
+
 def _check_lsmas() -> CheckResult:
     """Check L-SMASH-Works plugin is available."""
     try:
         vs = import_vapoursynth_module()
+    except ImportError:
+        return CheckResult(
+            passed=False,
+            message="Cannot check lsmas (VapourSynth not available)",
+            hint=(
+                "Make VapourSynth importable before checking L-SMASH-Works; "
+                "see https://github.com/TJZine/frame-compare#quick-start"
+            ),
+        )
+    except Exception as e:
+        return _lsmas_setup_failure(e)
+
+    try:
         core = vs.core
         # Check for lsmas namespace (preferred) or lw (legacy)
         if hasattr(core, "lsmas") or hasattr(core, "lw"):
@@ -102,22 +133,14 @@ def _check_lsmas() -> CheckResult:
         return CheckResult(
             passed=False,
             message="L-SMASH-Works plugin not found",
-            hint="Install L-SMASH-Works VapourSynth plugin",
+            hint=(
+                "Make L-SMASH-Works available to VapourSynth; see "
+                "https://github.com/TJZine/frame-compare#quick-start"
+            ),
             details=_lsmas_plugin_path_details(),
         )
-    except ImportError:
-        return CheckResult(
-            passed=False,
-            message="Cannot check lsmas (VapourSynth not available)",
-            hint="Install VapourSynth first",
-        )
     except Exception as e:
-        return CheckResult(
-            passed=False,
-            message="lsmas check failed",
-            hint="Check VapourSynth installation",
-            details={"exception_type": type(e).__name__},
-        )
+        return _lsmas_setup_failure(e)
 
 
 def _check_ffmpeg() -> CheckResult:
@@ -132,7 +155,10 @@ def _check_ffmpeg() -> CheckResult:
     return CheckResult(
         passed=False,
         message="FFmpeg not found in PATH",
-        hint="Install FFmpeg and add to PATH",
+        hint=(
+            "Provide an FFmpeg executable on PATH; see "
+            "https://github.com/TJZine/frame-compare#requirements"
+        ),
     )
 
 
@@ -196,21 +222,21 @@ def _check_slowpics() -> CheckResult:
             return CheckResult(
                 passed=False,
                 message=f"slow.pics returned status {response.status_code}",
-                hint="slow.pics may be experiencing issues",
+                hint="Review the returned HTTP status before retrying",
                 details={"status_code": response.status_code},
             )
     except httpx.TimeoutException:
         return CheckResult(
             passed=False,
             message="slow.pics connection timed out",
-            hint="Check internet connection",
+            hint="Check network access to slow.pics, then retry",
             details={"timeout": timeout},
         )
     except httpx.RequestError as e:
         return CheckResult(
             passed=False,
             message=f"slow.pics connection failed: {e}",
-            hint="Check internet connection",
+            hint="Review the request failure and network path to slow.pics before retrying",
         )
 
 
@@ -223,7 +249,7 @@ def _check_tmdb_api_key() -> CheckResult:
         return CheckResult(
             passed=False,
             message="TMDB configuration could not be loaded",
-            hint="Fix config/config.toml or set FRAME_COMPARE_TMDB__API_KEY",
+            hint=_tmdb_config_error_hint(config_error),
             details=config_error,
         )
 
@@ -239,7 +265,7 @@ def _check_tmdb_api_key() -> CheckResult:
             return CheckResult(
                 passed=False,
                 message="TMDB API key has invalid format",
-                hint="Set a 32-character hexadecimal TMDB API key",
+                hint="Replace the TMDB credential with a 32-character hexadecimal API key",
             )
         return CheckResult(
             passed=True,
@@ -250,9 +276,7 @@ def _check_tmdb_api_key() -> CheckResult:
         return CheckResult(
             passed=False,
             message="TMDB API key configured via legacy variable",
-            hint=(
-                "Set FRAME_COMPARE_TMDB__API_KEY; legacy TMDB API key alias is no longer supported"
-            ),
+            hint=("Move the credential to FRAME_COMPARE_TMDB__API_KEY and remove TMDB_API_KEY"),
         )
 
     return CheckResult(
@@ -260,6 +284,12 @@ def _check_tmdb_api_key() -> CheckResult:
         message="TMDB API key not configured",
         hint="Set FRAME_COMPARE_TMDB__API_KEY or tmdb.api_key in config/config.toml",
     )
+
+
+def _tmdb_config_error_hint(config_error: dict[str, JSONValue]) -> str:
+    if config_error.get("exception_type") == "ConfigParseError":
+        return "Fix config/config.toml syntax, then rerun doctor"
+    return "Fix the reported config/environment validation errors, then rerun doctor"
 
 
 def _resolve_tmdb_config() -> tuple[bool | None, str | None, dict[str, JSONValue] | None]:

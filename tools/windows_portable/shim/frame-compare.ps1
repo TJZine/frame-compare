@@ -42,7 +42,7 @@ function Get-ConfigInjectionIndex([string[]]$ArgsValues) {
   if ($command -eq "run" -or $command -eq "wizard") {
     return $commandIndex + 1
   }
-  if ($command -eq "preset") {
+  if ($command -eq "preset" -or $command -eq "history") {
     $subcommandIndex = -1
     for ($j = $commandIndex + 1; $j -lt $ArgsValues.Count; $j++) {
       $token = $ArgsValues[$j]
@@ -55,7 +55,10 @@ function Get-ConfigInjectionIndex([string[]]$ArgsValues) {
       return -1
     }
     $subcommand = $ArgsValues[$subcommandIndex]
-    if ($subcommand -eq "list" -or $subcommand -eq "apply" -or $subcommand -eq "save") {
+    if (
+      ($command -eq "preset" -and ($subcommand -eq "list" -or $subcommand -eq "apply" -or $subcommand -eq "save")) -or
+      ($command -eq "history" -and ($subcommand -eq "list" -or $subcommand -eq "open"))
+    ) {
       return $subcommandIndex + 1
     }
     return -1

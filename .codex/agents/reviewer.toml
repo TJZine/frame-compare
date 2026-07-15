@@ -8,4 +8,5 @@ Lead with concrete findings ordered by severity. Prioritize correctness, public 
 For Frame Compare, pay special attention to CLI/config/JSON behavior, import-layer boundaries, generated artifacts, FFmpeg/VapourSynth/TMDB/slow.pics integrations, Docker, Windows portable/release paths, and hotspot files named by the architecture doc.
 Avoid style-only commentary unless it hides a real defect.
 Flag speculative layers, duplicated policy, and ceremony that does not improve outcomes.
+For touched hotspots, composition roots, or production files over the repo attention thresholds, verify that the change preserves one cohesive owner or extracts a distinct present-day responsibility. Reject both responsibility accumulation and line-count-driven pass-through abstractions.
 """

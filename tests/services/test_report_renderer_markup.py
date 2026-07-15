@@ -103,6 +103,32 @@ def test_build_html_renders_mode_aware_clip_controls(report_payload: ReportPaylo
     assert 'data-mode="overlay" role="radio"' in html
 
 
+def test_build_html_exposes_viewer_only_grid_controls_and_empty_mount(
+    report_payload: ReportPayload,
+) -> None:
+    html = build_html(report_payload)
+    document = parse_elements(html)
+    tags = parse_start_tags(html)
+
+    grid_button = require_first(document, tag="button", attr_name="data-mode", attr_value="grid")
+    grid_controls = require_first(
+        document, tag="div", attr_name="data-control-scope", attr_value="grid"
+    )
+    grid = require_first(document, tag="section", element_id="rv-grid")
+    cells = require_first(grid, tag="div", attr_name="data-grid-cells")
+
+    assert grid_button.attrs["aria-label"] == "Grid mode"
+    assert grid_controls.attrs["aria-label"] == "Grid clips"
+    assert "hidden" in grid_controls.attrs
+    assert tags.by_id["btn-grid-prev"][1]["aria-label"] == "Previous grid clips"
+    assert tags.by_id["btn-grid-next"][1]["aria-label"] == "Next grid clips"
+    assert grid.attrs["aria-label"] == "Grid comparison"
+    assert "hidden" in grid.attrs
+    assert cells.children == []
+    assert script_payload(html)["default_mode"] == "slider"
+    assert html.count('id="pixel-inspector-live"') == 1
+
+
 def test_build_html_keeps_ten_plus_long_label_clips_reachable_and_mobile_safe(
     report_payload: ReportPayload,
 ) -> None:
@@ -477,17 +503,47 @@ def test_build_html_renders_inspector_drawer(report_payload: ReportPayload) -> N
     assert "inert" in inspector.attrs
     tablist = require_first(inspector, tag="div", attr_name="role", attr_value="tablist")
     assert tablist.attrs["aria-label"] == "Inspector tabs"
-    for tab in ("frame", "clips", "align", "export"):
+    tab_names = [
+        child.attrs.get("data-inspector-tab") for child in tablist.children if child.tag == "button"
+    ]
+    assert tab_names == ["pixel", "frame", "clips", "align", "review", "export"]
+    for tab in ("pixel", "frame", "clips", "align", "review", "export"):
         tab_button = require_first(
             tablist, tag="button", attr_name="data-inspector-tab", attr_value=tab
         )
         assert tab_button.attrs["tabindex"] == "-1"
-        assert require_first(inspector, element_id=f"inspector-panel-{tab}") is not None
+        panel = require_first(inspector, element_id=f"inspector-panel-{tab}")
+        assert panel.attrs["tabindex"] == "-1"
 
     assert "data-inspector-frame-label" in html
     assert "data-inspector-frame-position" in html
     assert "data-inspector-clips" in html
     assert "data-inspector-align-pair" in html
+    pixel_panel = require_first(inspector, element_id="inspector-panel-pixel")
+    assert "hidden" in pixel_panel.attrs
+    assert "Decoded display sample · 8-bit sRGB" in pixel_panel.text
+    assert "Normalized cross-size mapping; not scene registration." in pixel_panel.text
+    lens_toggle = require_first(pixel_panel, tag="button", element_id="pixel-lens-toggle")
+    assert lens_toggle.attrs["aria-pressed"] == "false"
+    magnification = find_all(
+        pixel_panel,
+        tag="button",
+        attr_name="data-pixel-magnification",
+    )
+    assert [button.attrs["data-pixel-magnification"] for button in magnification] == [
+        "2",
+        "4",
+        "8",
+    ]
+    assert [button.attrs["aria-label"] for button in magnification] == [
+        "Magnification 2×",
+        "Magnification 4×",
+        "Magnification 8×",
+    ]
+    live = require_first(document, tag="div", element_id="pixel-inspector-live")
+    assert live.attrs["role"] == "status"
+    assert live.attrs["aria-live"] == "polite"
+    assert find_all(pixel_panel, tag="div", element_id="pixel-inspector-live") == []
     for button_id in (
         "btn-inspector-close",
         "btn-inspector-reset-current-align",
@@ -496,9 +552,46 @@ def test_build_html_renders_inspector_drawer(report_payload: ReportPayload) -> N
         button = require_first(inspector, tag="button", element_id=button_id)
         assert button.attrs["tabindex"] == "-1"
     assert "data-inspector-export-summary" in html
+    review_panel = require_first(inspector, element_id="inspector-panel-review")
+    review_note = require_first(review_panel, tag="textarea", attr_name="data-review-note")
+    review_note_count = require_first(review_panel, tag="span", attr_name="data-review-note-count")
+    assert review_note.attrs["maxlength"] == "1000"
+    assert review_note_count.text == "0 / 1000"
+    assert require_first(review_panel, tag="input", attr_name="data-review-bookmark")
+    assert require_first(review_panel, tag="select", attr_name="data-review-tag")
+    assert require_first(review_panel, tag="select", attr_name="data-review-preferred")
+    assert require_first(review_panel, tag="input", attr_name="data-review-import")
+    review_status = require_first(review_panel, attr_name="data-review-status")
+    assert "role" not in review_status.attrs
+    assert "aria-live" not in review_status.attrs
+    assert html.count('id="pixel-inspector-live"') == 1
     assert "data-focus-frame" not in html
     assert "data-focus-mode" not in html
     assert "data-focus-pair" not in html
+
+
+def test_build_html_renders_pixel_inspection_stage_controls(
+    report_payload: ReportPayload,
+) -> None:
+    html = build_html(report_payload)
+    document = parse_elements(html)
+    controls = require_first(document, tag="div", class_name="rv-controls")
+    inspect_button = require_first(controls, tag="button", element_id="btn-inspect")
+    assert inspect_button.attrs["aria-label"] == "Open pixel inspector"
+    assert inspect_button.attrs["title"] == "Inspect pixels (M)"
+
+    stage = require_first(document, tag="div", class_name="rv-viewer-stage")
+    roi = require_first(stage, tag="button", element_id="rv-inspection-point")
+    assert roi.attrs["aria-label"] == "Inspection point unavailable"
+    assert roi.attrs["aria-pressed"] == "false"
+    assert roi.attrs["tabindex"] == "-1"
+    assert "hidden" in roi.attrs
+
+    lens = require_first(stage, tag="aside", element_id="rv-pixel-lens")
+    assert lens.attrs["aria-label"] == "Pixel lens"
+    assert lens.attrs["data-magnification"] == "4"
+    assert len(find_all(lens, tag="img")) == 1
+    assert not find_all(stage, tag="canvas")
 
 
 def test_build_html_renders_keyboard_help_accessibility_hooks(

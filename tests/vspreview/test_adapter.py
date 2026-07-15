@@ -883,13 +883,15 @@ def test_check_vspreview_availability_by_owner_branch(
     assert expected_message in result.message
     expected_hints = {
         VSPreviewAvailabilityStatus.MISSING_EXEC_AND_MODULE: (
-            "Install with: pip install vspreview PyQt6 (or: pip install vspreview PySide6)"
+            "Provide VSPreview; see https://github.com/TJZine/frame-compare#installation"
         ),
         VSPreviewAvailabilityStatus.MISSING_QT_BACKEND: (
-            "Install with: pip install PyQt6 (or: pip install PySide6)"
+            "Provide a supported Qt backend for VSPreview; see "
+            "https://github.com/TJZine/frame-compare#installation"
         ),
         VSPreviewAvailabilityStatus.PROBE_FAILED: (
-            "Check the VSPreview/PyQt6/PySide6 installation if interactive alignment is needed"
+            "Check the optional VSPreview setup, then rerun doctor; see "
+            "https://github.com/TJZine/frame-compare#installation"
         ),
     }
     assert result.hint == expected_hints.get(expected_status)
@@ -900,3 +902,6 @@ def test_check_vspreview_availability_by_owner_branch(
             "exception_type": "ValueError",
             "exception": "simulated import error",
         }
+    if result.hint is not None:
+        assert "pip install" not in result.hint
+        assert "README.md" not in result.hint

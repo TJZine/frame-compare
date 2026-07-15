@@ -2,7 +2,7 @@
 
 Schema-Version: 1
 Profile-Status: explicit
-Last-Updated: 2026-07-09
+Last-Updated: 2026-07-14
 Repo-Name: frame-compare
 Default-Branch: main
 Profile-Scope: suggestion-review and pr-commit-review
@@ -182,7 +182,8 @@ Preferred roles:
 - `explorer`: read-only source discovery
 - `reviewer`: packet-focused correctness, architecture, maintainability, security, or workflow review
 - `worker`: bounded implementation
-- `worker_luna`: lower-cost execution of a decision-complete Sol-planned unit
+- `worker_sol_low`: bounded implementation with frozen ownership and contracts that still needs local code judgment
+- `worker_luna`: lower-cost execution of a low-ambiguity, decision-complete Sol-planned unit
 - `planner`: separate planning only when justified
 - `docs_researcher`: official-source checks
 - `monitor`: long waits and status checks
@@ -191,9 +192,10 @@ Preserve read-only reviewer/research roles versus write-capable planner/worker b
 
 ## Model Policy
 
-- Use configured role defaults. Use `worker_luna` only for an explicitly eligible,
+- Use configured role defaults. Use `worker_sol_low` only for bounded work with
+  frozen ownership and contracts. Use `worker_luna` only for an explicitly eligible,
   low-ambiguity, directly verifiable unit planned by the Sol planner. Change model
-  or reasoning effort only from representative eval evidence.
+  or reasoning effort only from current representative evidence.
 
 ## Pure Docs / Assets Exclusion Rule
 

@@ -4,10 +4,39 @@ from __future__ import annotations
 
 from frame_compare.errors import (
     ErrorContext,
+    InputError,
     NetworkError,
     ProcessingError,
     redact_url_for_error,
 )
+
+
+class HistoryAccessError(InputError):
+    """History folder or run-name access failed (FC-3016)."""
+
+    def __init__(self, message: str, hint: str) -> None:
+        super().__init__(
+            ErrorContext(
+                code="FC-3016",
+                name="HISTORY_ACCESS_ERROR",
+                message=message,
+                hint=hint,
+            )
+        )
+
+
+class HistoryOpenError(ProcessingError):
+    """A recorded report cannot be opened safely (FC-4020)."""
+
+    def __init__(self, message: str, hint: str) -> None:
+        super().__init__(
+            ErrorContext(
+                code="FC-4020",
+                name="HISTORY_OPEN_ERROR",
+                message=message,
+                hint=hint,
+            )
+        )
 
 
 class MetadataError(ProcessingError):

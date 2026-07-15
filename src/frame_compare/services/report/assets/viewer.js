@@ -29,6 +29,7 @@ const ReportViewer = {
         filmstripSize: 'normal',
         inspectorOpen: false,
         inspectorTab: 'frame',
+        pixelLensEnabled: false,
         categoryFilterKeys: new Map(),
         imageLoadPromises: new Map(),
         imageRequestToken: 0,
@@ -49,13 +50,19 @@ const ReportViewer = {
 
         try {
             this.state.data = this.normalizePayload(this.readPayload());
-            this.state.mode = this.validMode(this.state.data.default_mode)
+            this.state.mode = this.validPayloadMode(this.state.data.default_mode)
                 ? this.state.data.default_mode
                 : 'slider';
             this.state.storageKey = this.viewportStorageKey();
             this.state.categoryFilterKeys = this.buildCategoryFilterKeys();
             this.applyDefaultSelection();
             this.restorePersistedState();
+            this.pixelInspector = PixelInspector.create(this);
+            this.gridView = GridView.create(this);
+            this.reviewController = null;
+            if (this.state.inspectorOpen && this.state.inspectorTab === 'review') {
+                this.ensureReviewController();
+            }
             this.bindHelpEvents();
             this.updateOverlayVisibility();
             this.updateInspectorTabs();
@@ -132,6 +139,12 @@ const ReportViewer = {
             btnCloseHelp: document.getElementById('btn-close-help'),
             infoModal: document.getElementById('info-modal'),
             btnInfo: document.getElementById('btn-info'),
+            btnInspect: document.getElementById('btn-inspect'),
+            grid: document.getElementById('rv-grid'),
+            gridCells: document.querySelector('[data-grid-cells]'),
+            gridControls: document.querySelector('[data-control-scope="grid"]'),
+            btnGridPrev: document.getElementById('btn-grid-prev'),
+            btnGridNext: document.getElementById('btn-grid-next'),
             btnCloseInfo: document.getElementById('btn-close-info'),
             inspector: document.getElementById('rv-inspector'),
             btnInspectorClose: document.getElementById('btn-inspector-close'),
@@ -154,6 +167,20 @@ const ReportViewer = {
             inspectorExportGenerated: document.querySelector('[data-inspector-export-generated]'),
             inspectorExportSlowpics: document.querySelector('[data-inspector-export-slowpics]'),
             inspectorExportSummary: document.querySelector('[data-inspector-export-summary]'),
+            reviewFrame: document.querySelector('[data-review-frame]'),
+            reviewBookmark: document.querySelector('[data-review-bookmark]'),
+            reviewTag: document.querySelector('[data-review-tag]'),
+            reviewNote: document.querySelector('[data-review-note]'),
+            reviewNoteCount: document.querySelector('[data-review-note-count]'),
+            reviewPreferred: document.querySelector('[data-review-preferred]'),
+            reviewStatus: document.querySelector('[data-review-status]'),
+            reviewExport: document.querySelector('[data-review-export]'),
+            reviewImportTrigger: document.querySelector('[data-review-import-trigger]'),
+            reviewImport: document.querySelector('[data-review-import]'),
+            reviewPreview: document.querySelector('[data-review-preview]'),
+            reviewPreviewCounts: document.querySelector('[data-review-preview-counts]'),
+            reviewImportApply: document.querySelector('[data-review-import-apply]'),
+            reviewImportCancel: document.querySelector('[data-review-import-cancel]'),
             btnAlignToggle: document.getElementById('btn-align-toggle'),
             alignPopover: document.getElementById('align-popover'),
             btnOverlays: document.getElementById('btn-overlays'),
@@ -206,12 +233,32 @@ const ReportViewer = {
             this.dom.btnCloseHelp,
             this.dom.infoModal,
             this.dom.btnInfo,
+            this.dom.btnInspect,
+            this.dom.grid,
+            this.dom.gridCells,
+            this.dom.gridControls,
+            this.dom.btnGridPrev,
+            this.dom.btnGridNext,
             this.dom.btnCloseInfo,
             this.dom.inspector,
             this.dom.btnInspectorClose,
             this.dom.inspectorClips,
             this.dom.btnInspectorResetCurrentAlign,
             this.dom.btnInspectorResetAllAlign,
+            this.dom.reviewFrame,
+            this.dom.reviewBookmark,
+            this.dom.reviewTag,
+            this.dom.reviewNote,
+            this.dom.reviewNoteCount,
+            this.dom.reviewPreferred,
+            this.dom.reviewStatus,
+            this.dom.reviewExport,
+            this.dom.reviewImportTrigger,
+            this.dom.reviewImport,
+            this.dom.reviewPreview,
+            this.dom.reviewPreviewCounts,
+            this.dom.reviewImportApply,
+            this.dom.reviewImportCancel,
             this.dom.btnAlignToggle,
             this.dom.alignPopover,
             this.dom.btnOverlays
@@ -256,6 +303,10 @@ const ReportViewer = {
     },
 
     validMode(mode) {
+        return ['slider', 'overlay', 'diff', 'blink', 'grid'].includes(mode);
+    },
+
+    validPayloadMode(mode) {
         return ['slider', 'overlay', 'diff', 'blink'].includes(mode);
     },
 
@@ -494,6 +545,8 @@ const ReportViewer = {
         this.bindBlinkEvents();
         this.bindFilmstripEvents();
         this.bindKeyboardEvents();
+        this.gridView.bind();
+        this.pixelInspector.bind();
     },
 
     bindModeEvents() {
@@ -520,7 +573,11 @@ const ReportViewer = {
             this.setRightClip(parseInt(e.target.value));
         });
         this.dom.activeSelect.addEventListener('change', (e) => {
-            this.state.activeClipIdx = this.clipIndexOrDefault(e.target.value, this.state.activeClipIdx);
+            const nextIndex = this.clipIndexOrDefault(e.target.value, this.state.activeClipIdx);
+            if (nextIndex !== this.state.activeClipIdx) {
+                this.pixelInspector.clearForContext('Clip changed; inspection unlocked.');
+            }
+            this.state.activeClipIdx = nextIndex;
             this.render();
         });
     },
@@ -539,7 +596,9 @@ const ReportViewer = {
             pinchStartDistance: 0,
             pinchStartZoom: 1.0,
             pinchContentX: 0,
-            pinchContentY: 0
+            pinchContentY: 0,
+            pinchGridAnchor: null,
+            panBasis: null,
         };
 
         this.dom.zoomRange.addEventListener('input', (e) => this.setZoom(parseFloat(e.target.value)));
@@ -568,6 +627,7 @@ const ReportViewer = {
 
         this.dom.stage.addEventListener('pointerdown', (e) => {
             if (this.isViewportPaletteEvent(e)) return;
+            this.pixelInspector.beginStagePress(e);
             this.trackPointerPosition(e);
             this.capturePointer(e.pointerId);
             if (this.shouldStartPinch(e)) {
@@ -589,6 +649,9 @@ const ReportViewer = {
         });
 
         this.dom.stage.addEventListener('pointermove', (e) => {
+            if (this.isViewportPaletteEvent(e)) return;
+            this.pixelInspector.moveStagePress(e);
+            this.pixelInspector.scheduleHover(e);
             this.trackPointerPosition(e);
             const pointer = this.pointerInteraction;
             if (pointer.pinchActive) {
@@ -597,13 +660,7 @@ const ReportViewer = {
                 return;
             }
             if (pointer.activePointerId !== null && e.pointerId !== pointer.activePointerId) return;
-            if (pointer.isPanning) {
-                const dx = e.clientX - pointer.lastPanX;
-                const dy = e.clientY - pointer.lastPanY;
-                if (Math.abs(dx) > 1 || Math.abs(dy) > 1) pointer.panMoved = true;
-                pointer.lastPanX = e.clientX;
-                pointer.lastPanY = e.clientY;
-                this.setPan(this.state.panX + dx, this.state.panY + dy, { save: false });
+            if (this.updatePanFromPointer(e)) {
                 e.preventDefault();
                 return;
             }
@@ -613,7 +670,9 @@ const ReportViewer = {
             }
         });
         this.dom.stage.addEventListener('pointerup', (e) => this.stopPointerInteraction(e));
-        this.dom.stage.addEventListener('pointercancel', (e) => this.stopPointerInteraction(e));
+        this.dom.stage.addEventListener('pointercancel', (e) => {
+            this.stopPointerInteraction(e, { cancelled: true });
+        });
         this.dom.stage.addEventListener('dblclick', (e) => {
             if (this.isViewportPaletteEvent(e)) return;
             if (this.state.mode === 'overlay' || this.state.mode === 'diff') return;
@@ -624,10 +683,7 @@ const ReportViewer = {
             if (this.isViewportPaletteEvent(e)) return;
             e.preventDefault();
             if (e.shiftKey) {
-                this.setPan(
-                    this.state.panX - e.deltaX,
-                    this.state.panY - e.deltaY,
-                );
+                this.panByPixels(-e.deltaX, -e.deltaY, e.clientX, e.clientY);
                 return;
             }
             this.zoomAtPoint(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1);
@@ -692,10 +748,6 @@ const ReportViewer = {
                     this.closeInfoModal();
                     return;
                 }
-                if (this.isInspectorVisible()) {
-                    this.setInspectorOpen(false);
-                    return;
-                }
                 this.closeAlignmentPopover();
             }
         });
@@ -728,6 +780,7 @@ const ReportViewer = {
         this.dom.btnInspectorClose.addEventListener('click', () => this.setInspectorOpen(false));
         this.dom.inspectorTabs.forEach(tab => {
             tab.addEventListener('click', () => this.setInspectorTab(tab.dataset.inspectorTab));
+            tab.addEventListener('keydown', (e) => this.handleInspectorTabKey(e));
         });
         this.dom.btnInspectorResetCurrentAlign.addEventListener('click', () => this.resetCurrentPairAlignment());
         this.dom.btnInspectorResetAllAlign.addEventListener('click', () => this.resetAllPairAlignments());
@@ -735,6 +788,7 @@ const ReportViewer = {
             if (e.key !== 'Escape') return;
             e.preventDefault();
             e.stopPropagation();
+            if (this.pixelInspector.unlock()) return;
             this.setInspectorOpen(false);
         });
     },
@@ -821,6 +875,7 @@ const ReportViewer = {
         if (!metrics) return;
 
         const pointer = this.pointerInteraction;
+        this.pixelInspector.cancelStagePress();
         const stageRect = this.dom.stage.getBoundingClientRect();
         const stageCenterX = stageRect.left + stageRect.width / 2;
         const stageCenterY = stageRect.top + stageRect.height / 2;
@@ -832,6 +887,9 @@ const ReportViewer = {
         pointer.panMoved = true;
         pointer.pinchStartDistance = Math.max(metrics.distance, 1);
         pointer.pinchStartZoom = this.state.zoom;
+        pointer.pinchGridAnchor = this.state.mode === 'grid'
+            ? this.gridView.zoomAnchorForPoint(metrics.centerX, metrics.centerY)
+            : null;
         pointer.pinchContentX = (metrics.centerX - stageCenterX - this.state.panX) / this.state.zoom;
         pointer.pinchContentY = (metrics.centerY - stageCenterY - this.state.panY) / this.state.zoom;
 
@@ -850,11 +908,20 @@ const ReportViewer = {
         const nextZoom = this.clampZoom(
             pointer.pinchStartZoom * (metrics.distance / pointer.pinchStartDistance)
         );
+        this.applyZoom(nextZoom, { clampPan: false });
+        if (this.state.mode === 'grid' && pointer.pinchGridAnchor) {
+            const pan = this.gridView.panForZoomAnchor(
+                pointer.pinchGridAnchor,
+                metrics.centerX,
+                metrics.centerY,
+                nextZoom,
+            );
+            if (pan) this.setPan(pan.x, pan.y, { save: false });
+            return;
+        }
         const stageRect = this.dom.stage.getBoundingClientRect();
         const stageCenterX = stageRect.left + stageRect.width / 2;
         const stageCenterY = stageRect.top + stageRect.height / 2;
-
-        this.applyZoom(nextZoom, { clampPan: false });
         this.setPan(
             metrics.centerX - stageCenterX - pointer.pinchContentX * nextZoom,
             metrics.centerY - stageCenterY - pointer.pinchContentY * nextZoom,
@@ -868,6 +935,7 @@ const ReportViewer = {
 
         pointer.pinchActive = false;
         pointer.pinchStartDistance = 0;
+        pointer.pinchGridAnchor = null;
         this.dom.stage.classList.remove('is-panning');
         this.persistViewportState();
         if (this.state.mode === 'blink') this.state.blinkPaused = false;
@@ -895,11 +963,31 @@ const ReportViewer = {
         pointer.panMoved = false;
         pointer.lastPanX = e.clientX;
         pointer.lastPanY = e.clientY;
+        pointer.panBasis = this.state.mode === 'grid'
+            ? this.gridView.panBasisForPoint(e.clientX, e.clientY)
+            : null;
         this.captureStagePointer(e);
         this.dom.stage.classList.add('is-panning');
     },
 
-    stopPointerInteraction(e) {
+    updatePanFromPointer(e) {
+        const pointer = this.pointerInteraction;
+        if (!pointer.isPanning) return false;
+        if (this.pixelInspector.isStagePressPending(e.pointerId)) return true;
+
+        const dx = e.clientX - pointer.lastPanX;
+        const dy = e.clientY - pointer.lastPanY;
+        if (Math.abs(dx) > 1 || Math.abs(dy) > 1) pointer.panMoved = true;
+        pointer.lastPanX = e.clientX;
+        pointer.lastPanY = e.clientY;
+        this.panByPixels(dx, dy, e.clientX, e.clientY, {
+            save: false,
+            basis: pointer.panBasis,
+        });
+        return true;
+    },
+
+    stopPointerInteraction(e, options = {}) {
         const pointer = this.pointerInteraction;
         this.untrackPointer(e.pointerId);
         this.releasePointer(e.pointerId);
@@ -916,18 +1004,33 @@ const ReportViewer = {
         if (pointer.activePointerId !== null && e.pointerId !== pointer.activePointerId) return;
         const completedDrag = pointer.isDragging;
         const completedPan = pointer.isPanning;
+        if (!options.cancelled) {
+            this.pixelInspector.moveStagePress(e);
+            this.updatePanFromPointer(e);
+        }
         const completedPanMoved = pointer.panMoved;
         pointer.isDragging = false;
         pointer.isPanning = false;
+        pointer.panBasis = null;
         if (pointer.activePointerId === e.pointerId) {
             pointer.activePointerId = null;
         }
         pointer.panMoved = false;
         this.dom.stage.classList.remove('is-panning');
         if (this.state.mode === 'blink') this.state.blinkPaused = false;
+        if (completedDrag) this.updateSliderFromPointer(e);
+        const acquiredInspection = options.cancelled
+            ? false
+            : this.pixelInspector.endStagePress(e);
+        if (options.cancelled) this.pixelInspector.cancelStagePress();
         if (completedPan) {
             this.persistViewportState();
-            if (!completedPanMoved && (this.state.mode === 'overlay' || this.state.mode === 'diff')) {
+            if (
+                !acquiredInspection
+                && !options.cancelled
+                && !completedPanMoved
+                && (this.state.mode === 'overlay' || this.state.mode === 'diff')
+            ) {
                 this.cycleClip();
             }
         }
@@ -936,6 +1039,13 @@ const ReportViewer = {
 
     clipCount() {
         return this.state.data?.clips?.length || 0;
+    },
+
+    referenceClipIndex() {
+        return this.clipIndexOrDefault(
+            this.state.data?.default_selection?.left_clip_index,
+            0,
+        );
     },
 
     clipIndexOrDefault(value, fallback) {
@@ -988,8 +1098,12 @@ const ReportViewer = {
     },
 
     setLeftClip(idx) {
+        const nextIndex = this.clipIndexOrDefault(idx, this.state.leftClipIdx);
+        if (nextIndex !== this.state.leftClipIdx) {
+            this.pixelInspector.clearForContext('Clip changed; inspection unlocked.');
+        }
         this.storeCurrentPairAlignment();
-        this.state.leftClipIdx = this.clipIndexOrDefault(idx, this.state.leftClipIdx);
+        this.state.leftClipIdx = nextIndex;
         this.ensureDistinctPairSelection();
         this.loadCurrentPairAlignment();
         if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
@@ -997,8 +1111,12 @@ const ReportViewer = {
     },
 
     setRightClip(idx) {
+        const nextIndex = this.clipIndexOrDefault(idx, this.state.rightClipIdx);
+        if (nextIndex !== this.state.rightClipIdx) {
+            this.pixelInspector.clearForContext('Clip changed; inspection unlocked.');
+        }
         this.storeCurrentPairAlignment();
-        this.state.rightClipIdx = this.clipIndexOrDefault(idx, this.state.rightClipIdx);
+        this.state.rightClipIdx = nextIndex;
         this.ensureDistinctPairSelection();
         this.loadCurrentPairAlignment();
         if (this.state.mode === 'blink') {
@@ -1009,8 +1127,9 @@ const ReportViewer = {
     },
 
     swapPairClips() {
-        if (this.state.mode === 'overlay' || this.clipCount() <= 1) return;
+        if (this.state.mode === 'overlay' || this.state.mode === 'grid' || this.clipCount() <= 1) return;
 
+        this.pixelInspector.clearForContext('Clip changed; inspection unlocked.');
         this.storeCurrentPairAlignment();
         const previousLeft = this.state.leftClipIdx;
         this.state.leftClipIdx = this.state.rightClipIdx;
@@ -1047,7 +1166,7 @@ const ReportViewer = {
 
         if (!saved || typeof saved !== 'object') return;
 
-        if (['slider', 'overlay', 'diff', 'blink'].includes(saved.mode)) {
+        if (['slider', 'overlay', 'diff', 'blink', 'grid'].includes(saved.mode)) {
             this.state.mode = saved.mode;
         }
         if (['actual', 'width', 'height', 'custom'].includes(saved.fitMode)) {
@@ -1074,6 +1193,9 @@ const ReportViewer = {
         }
         if (this.validInspectorTab(saved.inspectorTab)) {
             this.state.inspectorTab = saved.inspectorTab;
+        }
+        if (typeof saved.pixelLensEnabled === 'boolean') {
+            this.state.pixelLensEnabled = saved.pixelLensEnabled;
         }
         if (this.validBlinkIntervalMs(saved.blinkIntervalMs)) {
             this.state.blinkIntervalMs = saved.blinkIntervalMs;
@@ -1103,7 +1225,7 @@ const ReportViewer = {
 
     persistViewportState() {
         const storage = this.localStorage();
-        if (!this.state.storageKey || !storage) return;
+        if (!this.state.storageKey || !storage) return false;
         this.storeCurrentPairAlignment();
 
         const payload = {
@@ -1122,14 +1244,17 @@ const ReportViewer = {
             filmstripSize: this.state.filmstripSize,
             inspectorOpen: this.state.inspectorOpen,
             inspectorTab: this.state.inspectorTab,
+            pixelLensEnabled: this.state.pixelLensEnabled,
             blinkIntervalMs: this.state.blinkIntervalMs,
             paletteOrientation: this.state.paletteOrientation,
             pairAlignments: this.state.pairAlignments
         };
         try {
             storage.setItem(this.state.storageKey, JSON.stringify(payload));
+            return true;
         } catch {
             // localStorage can be unavailable for file:// reports in hardened browser modes.
+            return false;
         }
     },
 
@@ -1155,7 +1280,7 @@ const ReportViewer = {
     },
 
     validInspectorTab(tab) {
-        return ['frame', 'clips', 'align', 'export'].includes(tab);
+        return ['pixel', 'frame', 'clips', 'align', 'review', 'export'].includes(tab);
     },
 
     validBlinkIntervalMs(intervalMs) {
@@ -1240,9 +1365,18 @@ const ReportViewer = {
         }
     },
 
+    ensureReviewController() {
+        if (this.reviewController) return this.reviewController;
+        this.reviewController = ReviewState.createController(this);
+        this.reviewController.bind();
+        this.reviewController.render();
+        return this.reviewController;
+    },
+
     setInspectorOpen(open, options = {}) {
         const nextOpen = Boolean(open);
         const wasOpen = this.state.inspectorOpen;
+        if (nextOpen && this.state.inspectorTab === 'review') this.ensureReviewController();
         if (nextOpen && !wasOpen && options.focus !== false) {
             const activeElement = document.activeElement;
             this.state.inspectorRestoreFocus = activeElement && typeof activeElement.focus === 'function'
@@ -1254,7 +1388,9 @@ const ReportViewer = {
         this.updateInspectorVisibility();
         if (options.save !== false) this.persistViewportState();
         if (this.state.inspectorOpen && options.focus !== false) {
-            this.focusElement(this.dom.inspectorTabs[0]);
+            const activeTab = Array.from(this.dom.inspectorTabs)
+                .find(tab => tab.dataset.inspectorTab === this.state.inspectorTab);
+            this.focusElement(activeTab);
         } else if (!this.state.inspectorOpen && wasOpen) {
             const shouldRestoreFocus = options.focus !== false;
             const restoreTarget = this.state.inspectorRestoreFocus?.isConnected
@@ -1285,6 +1421,8 @@ const ReportViewer = {
             'title',
             visible ? 'Close inspector (I)' : 'Open inspector (I)'
         );
+        this.updateInspectorTabs();
+        this.pixelInspector?.syncVisibility();
     },
 
     inspectorFocusableElements() {
@@ -1351,8 +1489,27 @@ const ReportViewer = {
     setInspectorTab(tab, options = {}) {
         if (!this.validInspectorTab(tab)) tab = 'frame';
         this.state.inspectorTab = tab;
+        if (tab === 'review') this.ensureReviewController();
         this.updateInspectorTabs();
         if (options.save !== false) this.persistViewportState();
+        this.pixelInspector?.syncVisibility();
+    },
+
+    handleInspectorTabKey(e) {
+        const tabs = Array.from(this.dom.inspectorTabs);
+        const currentIndex = tabs.indexOf(e.currentTarget);
+        if (currentIndex === -1) return;
+        let nextIndex = null;
+        if (e.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+        if (e.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length;
+        if (e.key === 'Home') nextIndex = 0;
+        if (e.key === 'End') nextIndex = tabs.length - 1;
+        if (nextIndex === null) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const nextTab = tabs[nextIndex];
+        this.setInspectorTab(nextTab.dataset.inspectorTab);
+        this.focusElement(nextTab);
     },
 
     updateInspectorTabs() {
@@ -1360,9 +1517,12 @@ const ReportViewer = {
             const isActive = tab.dataset.inspectorTab === this.state.inspectorTab;
             tab.classList.toggle('active', isActive);
             tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+            tab.tabIndex = this.state.inspectorOpen && isActive ? 0 : -1;
         });
         this.dom.inspectorPanels.forEach(panel => {
-            panel.hidden = panel.id !== `inspector-panel-${this.state.inspectorTab}`;
+            const isActive = panel.id === `inspector-panel-${this.state.inspectorTab}`;
+            panel.hidden = !isActive;
+            panel.tabIndex = this.state.inspectorOpen && isActive ? 0 : -1;
         });
     },
 
@@ -1376,8 +1536,13 @@ const ReportViewer = {
 
     currentClipRole(index) {
         const roles = [];
-        if (index === this.state.leftClipIdx && this.state.mode !== 'overlay') roles.push('Left');
-        if (index === this.state.rightClipIdx && this.state.mode !== 'overlay') roles.push('Right');
+        if (this.state.mode === 'grid' && this.gridView?.indexes().includes(index)) {
+            if (index === this.referenceClipIndex()) roles.push('Reference');
+            if (index === this.state.activeClipIdx) roles.push('Active');
+            roles.push('Visible');
+        }
+        if (index === this.state.leftClipIdx && !['overlay', 'grid'].includes(this.state.mode)) roles.push('Left');
+        if (index === this.state.rightClipIdx && !['overlay', 'grid'].includes(this.state.mode)) roles.push('Right');
         if (index === this.state.activeClipIdx && (this.state.mode === 'overlay' || this.state.mode === 'blink')) {
             roles.push(this.state.mode === 'overlay' ? 'Active' : 'Visible');
         }
@@ -1389,7 +1554,8 @@ const ReportViewer = {
             slider: 'Slider',
             overlay: 'Single',
             diff: 'Diff',
-            blink: 'Blink'
+            blink: 'Blink',
+            grid: 'Grid'
         };
         return labels[mode] || mode;
     },
@@ -1466,6 +1632,7 @@ const ReportViewer = {
             this.dom.inspectorExportSummary,
             `${this.state.data.title || 'Report'} • ${this.state.data.stats.frame_count} frames • ${this.state.data.stats.clip_count} clips • ${this.modeLabel()}`
         );
+        this.reviewController?.render();
 
         this.updateInspectorTabs();
         this.updateInspectorVisibility();
@@ -1628,7 +1795,11 @@ const ReportViewer = {
         if (this.state.activeCategoryKey === nextKey) return;
 
         this.state.activeCategoryKey = nextKey;
+        const previousFrameIdx = this.state.currentFrameIdx;
         this.normalizeCurrentFrameForFilter();
+        if (this.state.currentFrameIdx !== previousFrameIdx) {
+            this.pixelInspector.clearForContext('Frame changed; inspection unlocked.');
+        }
         this.render();
         this.scrollActiveFilmstripItem({ behavior: 'smooth', inline: 'center' });
     },
@@ -1702,14 +1873,18 @@ const ReportViewer = {
                 this.closeInfoModal();
                 return;
             }
-            if (this.isInspectorVisible()) {
-                e.preventDefault();
-                this.setInspectorOpen(false);
-                return;
-            }
             if (this.isAlignmentPopoverOpen()) {
                 e.preventDefault();
                 this.closeAlignmentPopover();
+                return;
+            }
+            if (this.pixelInspector?.unlock()) {
+                e.preventDefault();
+                return;
+            }
+            if (this.isInspectorVisible()) {
+                e.preventDefault();
+                this.setInspectorOpen(false);
                 return;
             }
             if (document.fullscreenElement) {
@@ -1722,6 +1897,12 @@ const ReportViewer = {
         if (this.dom.modal.classList.contains('open') || this.dom.infoModal.classList.contains('open')) return;
         if (this.isAlignmentPopoverOpen()) return;
         if (this.isShortcutEditableTarget(e.target)) return;
+
+        if (e.key === 'm' || e.key === 'M') {
+            e.preventDefault();
+            this.pixelInspector.open();
+            return;
+        }
 
         if (e.key === 'i' || e.key === 'I') {
             e.preventDefault();
@@ -1786,7 +1967,10 @@ const ReportViewer = {
                     if (idx < this.state.data.clips.length) {
                          if (this.state.mode === 'slider') this.setLeftClip(idx);
                          else if (this.state.mode === 'diff' || this.state.mode === 'blink') this.setRightClip(idx);
-                         else {
+                         else if (this.state.mode === 'overlay') {
+                             if (idx !== this.state.activeClipIdx) {
+                                 this.pixelInspector.clearForContext('Clip changed; inspection unlocked.');
+                             }
                              this.state.activeClipIdx = idx;
                              this.render();
                          }
@@ -1797,6 +1981,15 @@ const ReportViewer = {
 
     setMode(mode) {
         if (!this.validMode(mode)) return;
+        const previousMode = this.state.mode;
+        if (previousMode !== 'grid' && mode === 'grid') {
+            const base = this.baseCanvasSize();
+            this.state.panX = base.width > 0 ? this.state.panX / base.width : 0;
+            this.state.panY = base.height > 0 ? this.state.panY / base.height : 0;
+        }
+        if (mode !== this.state.mode) {
+            this.pixelInspector.clearForContext('Mode changed; inspection unlocked.');
+        }
         this.state.mode = mode;
         this.ensureDistinctPairSelection(mode);
         if (mode === 'blink') this.keepBlinkActiveInPair();
@@ -1827,8 +2020,15 @@ const ReportViewer = {
             'rv-mode-overlay',
             'rv-mode-diff',
             'rv-mode-blink',
+            'rv-mode-grid',
         );
         this.dom.stage.classList.add(`rv-mode-${mode}`);
+        this.gridView?.setActive(mode === 'grid');
+        if (previousMode === 'grid' && mode !== 'grid') {
+            const base = this.baseCanvasSize();
+            this.state.panX = base.width > 0 ? this.state.panX * base.width : 0;
+            this.state.panY = base.height > 0 ? this.state.panY * base.height : 0;
+        }
         this.updateModeControls();
         this.updateBlinkControls();
         this.render();
@@ -1852,11 +2052,12 @@ const ReportViewer = {
     updateModeControls() {
         const mode = this.state.mode;
         const isOverlay = mode === 'overlay';
-        this.dom.pairControls.hidden = isOverlay;
+        const isGrid = mode === 'grid';
+        this.dom.pairControls.hidden = isOverlay || isGrid;
         this.dom.activeControls.hidden = !isOverlay;
-        this.dom.leftSelect.disabled = isOverlay;
-        this.dom.rightSelect.disabled = isOverlay;
-        this.dom.btnSwapClips.disabled = isOverlay || this.clipCount() <= 1;
+        this.dom.leftSelect.disabled = isOverlay || isGrid;
+        this.dom.rightSelect.disabled = isOverlay || isGrid;
+        this.dom.btnSwapClips.disabled = isOverlay || isGrid || this.clipCount() <= 1;
         this.dom.activeSelect.disabled = !isOverlay;
 
         if (mode === 'diff') {
@@ -1883,6 +2084,9 @@ const ReportViewer = {
             : this.nearestVisibleFrameIndex(idx, visibleIndexes);
         if (nextIdx === null) return;
 
+        if (nextIdx !== this.state.currentFrameIdx) {
+            this.pixelInspector.clearForContext('Frame changed; inspection unlocked.');
+        }
         this.state.currentFrameIdx = nextIdx;
         this.render();
 
@@ -1918,6 +2122,7 @@ const ReportViewer = {
     cycleClip(direction = 1) {
         const count = this.state.data.clips.length;
         if (count <= 0) return;
+        if (this.state.mode === 'grid') return;
         if (this.state.mode === 'slider') {
             // Cycle left clip
             this.setLeftClip((this.state.leftClipIdx + direction + count) % count);
@@ -1927,7 +2132,11 @@ const ReportViewer = {
                 this.nextDistinctClipIndex(this.state.rightClipIdx, this.state.leftClipIdx, direction)
             );
         } else {
-            this.state.activeClipIdx = (this.state.activeClipIdx + direction + count) % count;
+            const nextIndex = (this.state.activeClipIdx + direction + count) % count;
+            if (nextIndex !== this.state.activeClipIdx) {
+                this.pixelInspector.clearForContext('Clip changed; inspection unlocked.');
+            }
+            this.state.activeClipIdx = nextIndex;
             this.dom.activeSelect.value = this.state.activeClipIdx;
             this.render();
         }
@@ -1951,8 +2160,10 @@ const ReportViewer = {
         this.dom.zoomVal.textContent = Math.round(this.state.zoom * 100) + '%';
         this.dom.canvas.classList.toggle('rv-canvas--pixelated', this.state.zoom > 1);
         this.dom.canvas.style.setProperty('--zoom-level', this.state.zoom);
+        this.gridView?.syncViewport();
         if (options.clampPan !== false) this.clampPan();
         this.updateSmartStageLabels();
+        this.pixelInspector?.schedulePlacement();
     },
 
     resetViewport() {
@@ -1973,8 +2184,23 @@ const ReportViewer = {
         const nextZoom = this.clampZoom(oldZoom * factor);
         if (nextZoom === oldZoom) return;
 
-        const stageCenterX = stageRect.left + stageRect.width / 2;
-        const stageCenterY = stageRect.top + stageRect.height / 2;
+        if (this.state.mode === 'grid') {
+            const anchor = this.gridView.zoomAnchorForPoint(clientX, clientY);
+            this.state.fitMode = 'custom';
+            this.updateFitButtons();
+            this.applyZoom(nextZoom, { clampPan: false });
+            const pan = this.gridView.panForZoomAnchor(anchor, clientX, clientY, nextZoom);
+            if (pan) this.setPan(pan.x, pan.y);
+            else this.clampPan();
+            return;
+        }
+
+        const viewportCenter = {
+            x: stageRect.left + stageRect.width / 2,
+            y: stageRect.top + stageRect.height / 2,
+        };
+        const stageCenterX = viewportCenter.x;
+        const stageCenterY = viewportCenter.y;
         const contentX = (clientX - stageCenterX - this.state.panX) / oldZoom;
         const contentY = (clientY - stageCenterY - this.state.panY) / oldZoom;
 
@@ -1987,6 +2213,20 @@ const ReportViewer = {
         );
     },
 
+    panByPixels(dx, dy, clientX, clientY, options = {}) {
+        if (this.state.mode !== 'grid') {
+            this.setPan(this.state.panX + dx, this.state.panY + dy, options);
+            return;
+        }
+        const basis = options.basis || this.gridView.panBasisForPoint(clientX, clientY);
+        if (!basis || basis.width <= 0 || basis.height <= 0) return;
+        this.setPan(
+            this.state.panX + dx / basis.width,
+            this.state.panY + dy / basis.height,
+            options,
+        );
+    },
+
     setPan(x, y, options = {}) {
         this.state.panX = this.numberOrDefault(x, 0);
         this.state.panY = this.numberOrDefault(y, 0);
@@ -1996,6 +2236,13 @@ const ReportViewer = {
     },
 
     clampPan() {
+        if (this.state.mode === 'grid' && this.gridView?.isActive()) {
+            const bounds = this.gridView.panBounds();
+            this.state.panX = Math.max(-bounds.x, Math.min(bounds.x, this.state.panX));
+            this.state.panY = Math.max(-bounds.y, Math.min(bounds.y, this.state.panY));
+            this.applyPan();
+            return;
+        }
         const stageRect = this.dom.stage.getBoundingClientRect();
         const base = this.baseCanvasSize();
         if (stageRect.width <= 0 || stageRect.height <= 0 || base.width <= 0 || base.height <= 0) {
@@ -2014,7 +2261,9 @@ const ReportViewer = {
     applyPan() {
         this.dom.canvas.style.setProperty('--pan-x', `${this.state.panX}px`);
         this.dom.canvas.style.setProperty('--pan-y', `${this.state.panY}px`);
+        this.gridView?.syncViewport();
         this.updateSmartStageLabels();
+        this.pixelInspector?.schedulePlacement();
     },
 
     setFitMode(mode, options = {}) {
@@ -2052,6 +2301,15 @@ const ReportViewer = {
     applyFitMode(options = {}) {
         if (this.state.fitMode === 'custom') {
             this.clampPan();
+            return;
+        }
+
+        if (this.state.mode === 'grid') {
+            // Grid cells each establish their own contained baseline. The shared zoom
+            // remains the single linked intent layered over those equal-weight cells.
+            this.applyZoom(1.0, { clampPan: false });
+            if (options.resetPan) this.setPan(0, 0, { save: false });
+            else this.clampPan();
             return;
         }
 
@@ -2264,6 +2522,7 @@ const ReportViewer = {
         this.dom.btnAlignToggle.classList.toggle('has-offset', isOffset);
         this.updateAlignmentStatus();
         this.updateInspectorData();
+        this.pixelInspector?.schedulePlacement();
     },
 
     formatSignedPixels(value, axis) {
@@ -2518,6 +2777,7 @@ const ReportViewer = {
             'active',
             isBlink && this.state.activeClipIdx === this.state.rightClipIdx
         );
+        this.pixelInspector?.render();
     },
 
     updateImages() {
@@ -2526,6 +2786,13 @@ const ReportViewer = {
             this.showStageMessage('Selected frame data is unavailable.');
             this.showStatus('Selected frame data is unavailable.', 'error');
             this.clearFrameImages();
+            return;
+        }
+
+        if (this.state.mode === 'grid') {
+            this.hideStageMessage();
+            this.clearStatus();
+            this.gridView.render();
             return;
         }
 
@@ -2602,6 +2869,7 @@ const ReportViewer = {
 
     clearFrameImages() {
         this.state.imageRequestToken += 1;
+        this.gridView?.clear();
         if (this.dom.sizerImg) this.dom.sizerImg.src = EMPTY_IMAGE_SRC;
         if (this.dom.leftImg) {
             this.dom.leftImg.src = EMPTY_IMAGE_SRC;
@@ -2693,6 +2961,7 @@ const ReportViewer = {
 
     preloadClipIndexes() {
         const indexes = new Set();
+        if (this.state.mode === 'grid') return indexes;
         if (this.state.mode === 'overlay') {
             indexes.add(this.state.activeClipIdx);
         } else {

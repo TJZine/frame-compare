@@ -13,6 +13,15 @@ const viewerPath = path.join(
     'assets',
     'viewer.js',
 );
+const pixelInspectorPath = path.join(
+    repoRoot,
+    'src',
+    'frame_compare',
+    'services',
+    'report',
+    'assets',
+    'pixel_inspector.js',
+);
 
 let activeDocument = null;
 
@@ -136,6 +145,7 @@ function fakeBody() {
 
 function loadViewer({ clipCount, savedState = null }) {
     const storage = new Map();
+    const reviewMetrics = { creates: 0, binds: 0, renders: 0 };
     const storageApi = {
         getItem(key) {
             return storage.has(key) ? storage.get(key) : null;
@@ -151,6 +161,15 @@ function loadViewer({ clipCount, savedState = null }) {
         },
         clearInterval() {},
         URL,
+        ReviewState: {
+            createController() {
+                reviewMetrics.creates += 1;
+                return {
+                    bind() { reviewMetrics.binds += 1; },
+                    render() { reviewMetrics.renders += 1; },
+                };
+            },
+        },
         document: {
             activeElement: null,
             body: fakeBody(),
@@ -170,8 +189,9 @@ function loadViewer({ clipCount, savedState = null }) {
         },
     };
     activeDocument = context.document;
-    const script = `${fs.readFileSync(viewerPath, 'utf8')}\nglobalThis.__ReportViewer = ReportViewer;`;
+    const script = `${fs.readFileSync(pixelInspectorPath, 'utf8')}\n${fs.readFileSync(viewerPath, 'utf8')}\nglobalThis.__PixelInspector = PixelInspector;\nglobalThis.__ReportViewer = ReportViewer;`;
     vm.runInNewContext(script, context, { filename: viewerPath });
+    assert.equal(typeof context.__PixelInspector.create, 'function');
 
     const viewer = context.__ReportViewer;
     const payload = viewer.normalizePayload(payloadWithClipCount(clipCount));
@@ -237,11 +257,11 @@ function loadViewer({ clipCount, savedState = null }) {
         btnInfo: fakeElement(),
         inspector: fakeElement(),
         btnInspectorClose: fakeElement(),
-        inspectorTabs: ['frame', 'clips', 'align', 'export'].map((tab) => ({
+        inspectorTabs: ['pixel', 'frame', 'clips', 'align', 'review', 'export'].map((tab) => ({
             ...fakeElement(),
             dataset: { inspectorTab: tab },
         })),
-        inspectorPanels: ['frame', 'clips', 'align', 'export'].map((tab) => ({
+        inspectorPanels: ['pixel', 'frame', 'clips', 'align', 'review', 'export'].map((tab) => ({
             ...fakeElement(),
             id: `inspector-panel-${tab}`,
         })),
@@ -299,6 +319,21 @@ function loadViewer({ clipCount, savedState = null }) {
         element.setAttribute('tabindex', '-1');
     });
     viewer.dom.inspector.querySelectorAll = () => viewer.dom.inspectorFocusables;
+    viewer.pixelInspector = {
+        beginStagePress() { return false; },
+        cancelStagePress() {},
+        clearForContext() {},
+        endStagePress() { return false; },
+        isActive() { return false; },
+        isStagePressPending() { return false; },
+        moveStagePress() {},
+        open() {},
+        render() {},
+        schedulePlacement() {},
+        syncVisibility() {},
+        unlock() { return false; },
+    };
+    viewer.reviewController = null;
     viewer.render = function renderStateOnly() {
         this.applyAlignment();
         this.persistViewportState();
@@ -311,7 +346,13 @@ function loadViewer({ clipCount, savedState = null }) {
     viewer.applyDefaultSelection();
     viewer.restorePersistedState();
     viewer.applyAlignment();
-    return { viewer, storage, storageKey: viewer.state.storageKey, document: context.document };
+    return {
+        viewer,
+        storage,
+        storageKey: viewer.state.storageKey,
+        document: context.document,
+        reviewMetrics,
+    };
 }
 
 function persisted(storage, storageKey) {
@@ -454,12 +495,13 @@ const summary = {};
 }
 
 {
-    const { viewer, storage, storageKey, document } = loadViewer({
+    const { viewer, storage, storageKey, document, reviewMetrics } = loadViewer({
         clipCount: 4,
         savedState: {
             currentFrameIdx: 1,
             inspectorOpen: true,
             inspectorTab: 'align',
+            pixelLensEnabled: true,
             blinkIntervalMs: 1200,
             blinkPaused: true,
         },
@@ -468,15 +510,29 @@ const summary = {};
     assert.equal(viewer.state.currentFrameIdx, 1);
     assert.equal(viewer.state.inspectorOpen, true);
     assert.equal(viewer.state.inspectorTab, 'align');
+    assert.equal(viewer.state.pixelLensEnabled, true);
     assert.equal(viewer.state.blinkIntervalMs, 1200);
     assert.equal(viewer.state.blinkPaused, false);
 
+    assert.equal(reviewMetrics.creates, 0);
+    viewer.setInspectorTab('review');
+    assert.equal(viewer.state.inspectorTab, 'review');
+    assert.deepEqual(reviewMetrics, { creates: 1, binds: 1, renders: 1 });
+    viewer.setInspectorTab('export');
+    viewer.setInspectorTab('review');
+    assert.equal(reviewMetrics.creates, 1);
     viewer.setInspectorTab('export');
     const focusables = viewer.dom.inspectorFocusables;
     viewer.dom.btnInspectorClose.setAttribute('tabindex', '0');
     document.activeElement = viewer.dom.btnInfo;
     viewer.setInspectorOpen(true);
+    assert.equal(document.activeElement, viewer.dom.inspectorTabs[5]);
+    const wrapEvent = keyboardEvent('ArrowRight');
+    wrapEvent.currentTarget = viewer.dom.inspectorTabs[5];
+    viewer.handleInspectorTabKey(wrapEvent);
+    assert.equal(viewer.state.inspectorTab, 'pixel');
     assert.equal(document.activeElement, viewer.dom.inspectorTabs[0]);
+    viewer.setInspectorTab('export');
     assert.equal(viewer.dom.inspector.inert, false);
     assert.equal(viewer.dom.btnInspectorClose.getAttribute('tabindex'), '0');
     viewer.setInspectorOpen(false);
@@ -489,8 +545,8 @@ const summary = {};
     viewer.setInspectorOpen(true);
     assert.equal(viewer.dom.inspector.inert, false);
     assert.equal(viewer.dom.btnInspectorClose.getAttribute('tabindex'), '0');
-    viewer.dom.inspectorTabs.forEach((element) => {
-        assert.equal(element.getAttribute('tabindex'), null);
+    viewer.dom.inspectorTabs.forEach((element, index) => {
+        assert.equal(element.tabIndex, index === 5 ? 0 : -1);
     });
     viewer.setInspectorOpen(false);
     viewer.setBlinkIntervalMs(300);
@@ -499,12 +555,15 @@ const summary = {};
     assert.equal(saved.currentFrameIdx, 1);
     assert.equal(saved.inspectorOpen, false);
     assert.equal(saved.inspectorTab, 'export');
+    assert.equal(saved.pixelLensEnabled, true);
     assert.equal(saved.blinkIntervalMs, 300);
     assert.equal(saved.blinkPaused, undefined);
     summary.inspectorBlinkKeyboardState = {
         currentFrameIdx: saved.currentFrameIdx,
         inspectorOpen: saved.inspectorOpen,
         inspectorTab: saved.inspectorTab,
+        pixelLensEnabled: saved.pixelLensEnabled,
+        rovingTabWrapped: true,
         blinkIntervalMs: saved.blinkIntervalMs,
         blinkPausedPersisted: Object.hasOwn(saved, 'blinkPaused'),
         closedInspectorInert: viewer.dom.inspector.inert,
@@ -522,13 +581,13 @@ const summary = {};
     const firstEscape = keyboardEvent('Escape');
     viewer.handleKey(firstEscape);
     assert.equal(firstEscape.defaultPrevented, true);
-    assert.equal(viewer.state.inspectorOpen, false);
-    assert.equal(viewer.isAlignmentPopoverOpen(), true);
+    assert.equal(viewer.state.inspectorOpen, true);
+    assert.equal(viewer.isAlignmentPopoverOpen(), false);
 
     const secondEscape = keyboardEvent('Escape');
     viewer.handleKey(secondEscape);
     assert.equal(secondEscape.defaultPrevented, true);
-    assert.equal(viewer.isAlignmentPopoverOpen(), false);
+    assert.equal(viewer.state.inspectorOpen, false);
 
     viewer.setInspectorOpen(true);
     viewer.setAlignmentPopoverOpen(true, { restoreFocus: false });
@@ -541,9 +600,9 @@ const summary = {};
     assert.equal(viewer.isAlignmentPopoverOpen(), true);
 
     summary.escapeOrder = {
-        inspectorClosedBeforeAlignment: true,
+        alignmentClosedBeforeInspector: true,
         legacyInfoModalWins: true,
-        alignmentStillOpenAfterInspectorEscape: true,
+        inspectorStillOpenAfterAlignmentEscape: true,
     };
 }
 
@@ -923,6 +982,119 @@ const summary = {};
         badgeTextFilteredMotion: 'Filtered: Motion',
         badgeClearedToHidden: true,
     };
+}
+
+{
+    const { viewer } = loadViewer({ clipCount: 2 });
+    let inspectionPressPending = true;
+    viewer.pixelInspector.isStagePressPending = () => inspectionPressPending;
+    viewer.pointerInteraction = {
+        isPanning: true,
+        lastPanX: 10,
+        lastPanY: 20,
+        panMoved: false,
+    };
+    viewer.state.panX = 3;
+    viewer.state.panY = 4;
+    viewer.setPan = function setPanWithoutLayout(x, y) {
+        this.state.panX = x;
+        this.state.panY = y;
+    };
+
+    assert.equal(
+        viewer.updatePanFromPointer({ pointerId: 7, clientX: 16, clientY: 20 }),
+        true,
+    );
+    assert.deepEqual([viewer.state.panX, viewer.state.panY], [3, 4]);
+    assert.deepEqual(
+        [viewer.pointerInteraction.lastPanX, viewer.pointerInteraction.lastPanY],
+        [10, 20],
+    );
+
+    inspectionPressPending = false;
+    assert.equal(
+        viewer.updatePanFromPointer({ pointerId: 7, clientX: 16.01, clientY: 20 }),
+        true,
+    );
+    assert.ok(Math.abs(viewer.state.panX - 9.01) < 1e-9);
+    assert.equal(viewer.state.panY, 4);
+    assert.equal(viewer.pointerInteraction.panMoved, true);
+
+    let cycleCount = 0;
+    inspectionPressPending = true;
+    viewer.pixelInspector.moveStagePress = (event) => {
+        inspectionPressPending = Math.hypot(event.clientX - 10, event.clientY - 20) <= 6;
+    };
+    viewer.pixelInspector.endStagePress = () => false;
+    viewer.cycleClip = () => { cycleCount += 1; };
+    viewer.persistViewportState = () => true;
+    viewer.state.mode = 'diff';
+    viewer.state.panX = 3;
+    viewer.state.panY = 4;
+    viewer.pointerInteraction = {
+        isDragging: false,
+        isPanning: true,
+        activePointerId: 7,
+        lastPanX: 10,
+        lastPanY: 20,
+        panMoved: false,
+        pointerPositions: new Map([[7, { x: 10, y: 20, type: 'touch' }]]),
+        capturedPointerIds: new Set(),
+        pinchActive: false,
+    };
+    viewer.stopPointerInteraction({ pointerId: 7, clientX: 16.01, clientY: 20 });
+    assert.ok(Math.abs(viewer.state.panX - 9.01) < 1e-9);
+    assert.equal(viewer.pointerInteraction.panMoved, false);
+    assert.equal(cycleCount, 0);
+
+    inspectionPressPending = true;
+    viewer.pointerInteraction = {
+        isDragging: false,
+        isPanning: true,
+        activePointerId: 8,
+        lastPanX: 10,
+        lastPanY: 20,
+        panMoved: false,
+        pointerPositions: new Map([[8, { x: 10, y: 20, type: 'touch' }]]),
+        capturedPointerIds: new Set(),
+        pinchActive: false,
+    };
+    viewer.stopPointerInteraction(
+        { pointerId: 8, clientX: 10, clientY: 20 },
+        { cancelled: true },
+    );
+    assert.equal(cycleCount, 0);
+    summary.pixelPanArbitration = {
+        subthresholdPanDeferred: true,
+        overThresholdPanAppliedFromOrigin: true,
+        pointerupOnlyMoveApplied: true,
+        pointerCancelDidNotCycle: true,
+    };
+}
+
+{
+    const { viewer } = loadViewer({
+        clipCount: 4,
+        savedState: { mode: 'grid' },
+    });
+    assert.equal(viewer.validPayloadMode('grid'), false);
+    assert.equal(viewer.validMode('grid'), true);
+    assert.equal(viewer.state.mode, 'grid');
+    summary.gridModeBoundary = {
+        publicPayloadRejected: true,
+        internalStoredModeRestored: true,
+    };
+}
+
+{
+    const { viewer, reviewMetrics } = loadViewer({
+        clipCount: 4,
+        savedState: { inspectorOpen: false, inspectorTab: 'review' },
+    });
+    assert.equal(reviewMetrics.creates, 0);
+    viewer.setInspectorOpen(true, { focus: false, save: false });
+    assert.deepEqual(reviewMetrics, { creates: 1, binds: 1, renders: 1 });
+    summary.lazyReviewController = { opensOnFirstVisibleUse: true, createsOnce: true };
 }
 
 console.log(JSON.stringify(summary));

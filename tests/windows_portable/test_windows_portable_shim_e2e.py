@@ -94,6 +94,66 @@ def test_windows_portable_shim_preset_apply_injection_e2e(tmp_path: Path, repo_r
 
 
 @pytest.mark.integration
+def test_windows_portable_shim_history_open_injection_e2e(tmp_path: Path, repo_root: Path) -> None:
+    exe = _powershell_exe()
+    if exe is None:
+        pytest.skip("pwsh/powershell not available")
+
+    _, shim_path, state_dir, bundle_dir = _setup_install_layout(
+        tmp_path=tmp_path, repo_root=repo_root
+    )
+    state_config_toml = state_dir / "config.toml"
+    state_config_toml.write_text('[paths]\ninput_dir = "inputs"\n', encoding="utf-8")
+    _write_valid_config_json(state_dir=state_dir, bundle_dir=bundle_dir, schema_version=1)
+
+    args_file = tmp_path / "history-args.txt"
+    bundle_launcher = bundle_dir / "frame-compare.ps1"
+    bundle_launcher.write_text(
+        "\n".join(
+            [
+                "$argsFile = $env:FC_TEST_ARGS_FILE",
+                "if ($null -eq $argsFile) { exit 2 }",
+                'Set-Content -LiteralPath $argsFile -Value ($args -join "|") -Encoding UTF8',
+                "exit 0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    command = (
+        f". '{shim_path}'; "
+        "$idx = Get-ConfigInjectionIndex -ArgsValues @('history','open','Exact Run'); "
+        "Write-Output $idx"
+    )
+    direct = subprocess.run(
+        [exe, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
+    assert direct.stdout.strip() == "2"
+
+    env = os.environ.copy()
+    env["FC_TEST_ARGS_FILE"] = str(args_file)
+    completed = _run_shim(
+        exe=exe,
+        shim_path=shim_path,
+        env=env,
+        args=["history", "open", "Exact Run"],
+    )
+    assert completed.returncode == 0, completed.stderr
+    forwarded = args_file.read_text(encoding="utf-8-sig").rstrip("\r\n").split("|")
+    assert forwarded == [
+        "history",
+        "open",
+        "--config",
+        str(state_config_toml),
+        "Exact Run",
+    ]
+
+
+@pytest.mark.integration
 def test_windows_portable_shim_prefers_bundle_config_over_state_config(
     tmp_path: Path, repo_root: Path
 ) -> None:

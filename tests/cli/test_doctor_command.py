@@ -11,6 +11,46 @@ from frame_compare.utils.progress_protocol import ProgressReporter
 
 from .cli_helpers import runner
 
+_AUDITED_HINTS = (
+    (
+        "Run Frame Compare with Python 3.13+; see "
+        "https://github.com/TJZine/frame-compare#requirements"
+    ),
+    "Make VapourSynth importable; see https://github.com/TJZine/frame-compare#quick-start",
+    (
+        "Make L-SMASH-Works available to VapourSynth; see "
+        "https://github.com/TJZine/frame-compare#quick-start"
+    ),
+    (
+        "Make VapourSynth importable before checking L-SMASH-Works; see "
+        "https://github.com/TJZine/frame-compare#quick-start"
+    ),
+    (
+        "Check the VapourSynth/plugin setup, then rerun doctor; see "
+        "https://github.com/TJZine/frame-compare#quick-start"
+    ),
+    (
+        "Provide an FFmpeg executable on PATH; see "
+        "https://github.com/TJZine/frame-compare#requirements"
+    ),
+    "Provide VSPreview; see https://github.com/TJZine/frame-compare#installation",
+    (
+        "Provide a supported Qt backend for VSPreview; see "
+        "https://github.com/TJZine/frame-compare#installation"
+    ),
+    (
+        "Check the optional VSPreview setup, then rerun doctor; see "
+        "https://github.com/TJZine/frame-compare#installation"
+    ),
+    "Review the returned HTTP status before retrying",
+    "Check network access to slow.pics, then retry",
+    "Review the request failure and network path to slow.pics before retrying",
+    "Fix config/config.toml syntax, then rerun doctor",
+    "Fix the reported config/environment validation errors, then rerun doctor",
+    "Replace the TMDB credential with a 32-character hexadecimal API key",
+    "Move the credential to FRAME_COMPARE_TMDB__API_KEY and remove TMDB_API_KEY",
+)
+
 
 def _doctor_check_entry(payload: dict[str, object], check_id: str) -> dict[str, object]:
     checks = payload["doctor"]["checks"]
@@ -324,6 +364,53 @@ def test_doctor_text_preserves_literal_brackets(monkeypatch: MonkeyPatch) -> Non
     assert "ffmpeg[optional]" in result.stdout
     assert "missing [ffmpeg]" in result.stdout
     assert "Hint: install [ffmpeg]" in result.stdout
+
+
+def test_doctor_audited_hints_are_deterministic_in_human_and_json_output(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    checks = [
+        DoctorCheck(
+            name=f"hint_{index}",
+            category="optional",
+            check_fn=lambda hint=hint: CheckResult(passed=False, message="unavailable", hint=hint),
+        )
+        for index, hint in enumerate(_AUDITED_HINTS)
+    ]
+    report = DoctorReport(
+        checks=[(check, check.check_fn()) for check in checks],
+        all_passed=False,
+        critical_failures=[],
+    )
+
+    def _run_doctor(
+        checks: list[DoctorCheck] | None = None,
+        reporter: ProgressReporter | None = None,
+    ) -> DoctorReport:
+        return report
+
+    monkeypatch.setattr("frame_compare.cli.entry.run_doctor", _run_doctor)
+
+    human_result = runner.invoke(
+        app,
+        ["doctor"],
+        color=False,
+        terminal_width=240,
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+
+    assert human_result.exit_code == 0
+    assert human_result.stderr == ""
+    normalized_human_output = " ".join(human_result.stdout.split())
+    for hint in _AUDITED_HINTS:
+        assert f"Hint: {hint}" in normalized_human_output
+
+    json_result = runner.invoke(app, ["doctor", "--json"])
+
+    assert json_result.exit_code == 0
+    assert json_result.stderr == ""
+    payload = json.loads(json_result.stdout)
+    assert [entry["install_hint"] for entry in payload["doctor"]["checks"]] == list(_AUDITED_HINTS)
 
 
 def test_doctor_top_level_frame_compare_error_uses_cli_error_contract(

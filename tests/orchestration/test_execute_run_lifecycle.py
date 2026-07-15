@@ -10,13 +10,17 @@ from typing import Any, cast
 
 import pytest
 
+from frame_compare.analysis.types import SelectionBreakdown
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
 from frame_compare.orchestration import coordinator
+from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.orchestration.errors import MixedSourceFpsError
 from frame_compare.orchestration.execution_types import (
+    ExecutionPhasePlan,
+    ExecutionState,
     MetadataPrefetch,
     PrepState,
     PublishPhaseOutput,
@@ -24,6 +28,7 @@ from frame_compare.orchestration.execution_types import (
     RenderPhaseOutput,
     RunArtifacts,
 )
+from frame_compare.orchestration.phases import Phase
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.errors import TonemapRequiresVapourSynthError
@@ -478,6 +483,80 @@ def test_execute_run_emits_reports_after_load_sources_and_after_align(
     assert alignment_calls[0][:4] == ("after_align", True, False, False)
     assert len(alignment_calls[0][4]) == 10
     assert all(isinstance(frame, int) for frame in alignment_calls[0][4])
+
+
+def test_execute_run_emits_final_selection_at_post_align_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The selection summary receives final aligned frames before later phases run."""
+    prep = PrepState(
+        workspace=_workspace(tmp_path),
+        config=ConfigSchema(),
+        input_videos=[tmp_path / "reference.mkv"],
+        analysis_selection_domain="test-selection-domain",
+        clips=[clip_state(tmp_path / "reference.mkv", label="Reference")],
+        artifacts=RunArtifacts(),
+        metadata_prefetch=MetadataPrefetch(None, False),
+        preflight_warnings=[],
+        preflight_duration=0.0,
+        load_sources_start=datetime.now(),
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+    )
+    breakdown = SelectionBreakdown(user=[101], random=[205])
+    events: list[str] = []
+    selection_calls: list[dict[str, object]] = []
+
+    async def _execute_prep(_request: RunRequest, _deps: RunDependencies) -> PrepState:
+        return prep
+
+    def _build_phase_plan(
+        *,
+        state: ExecutionState,
+        **_kwargs: object,
+    ) -> ExecutionPhasePlan:
+        async def _align(context: RunContext) -> None:
+            events.append("align")
+            state.selected_frames[:] = [2, 6]
+            context.selection_breakdown = breakdown
+
+        async def _after_align(_context: RunContext) -> None:
+            events.append("after_align_phase")
+
+        return ExecutionPhasePlan(
+            before_align=[Phase(name="align", execute=_align)],
+            after_align=[Phase(name="render", execute=_after_align)],
+        )
+
+    def _record_selection(**kwargs: object) -> None:
+        events.append("selection_report")
+        selection_calls.append(kwargs)
+
+    monkeypatch.setattr(coordinator, "execute_prep", _execute_prep)
+    monkeypatch.setattr(coordinator, "build_execution_phase_plan", _build_phase_plan)
+    monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", lambda **_kwargs: None)
+    monkeypatch.setattr(coordinator, "emit_frame_alignment_report", lambda **_kwargs: None)
+    monkeypatch.setattr(coordinator, "emit_final_selection_report", _record_selection)
+
+    request = RunRequest(
+        root=tmp_path,
+        verbose=True,
+        json_output=False,
+        quiet=False,
+        no_color=True,
+    )
+    asyncio.run(execute_run(request, deps=RunDependencies()))
+
+    assert events == ["align", "selection_report", "after_align_phase"]
+    assert len(selection_calls) == 1
+    assert selection_calls[0] == {
+        "selected_frames": [2, 6],
+        "breakdown": breakdown,
+        "verbose": True,
+        "json_output": False,
+        "quiet": False,
+        "no_color": True,
+    }
 
 
 def test_execute_run_applies_cli_overrides_before_phase_execution(

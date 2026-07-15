@@ -13,10 +13,12 @@ verification, rollback, and stop conditions. Leave helper names, local control f
 and test organization to implementation. Stop if ownership, product behavior, or
 proof depth remains unresolved.
 
-Select `worker_luna` only for an approved Sol-planned unit whose files, invariants,
-verification, and stop conditions are frozen. State why the unit is low ambiguity
-and cheap to verify. The controller integrates the result and reruns the required
-proof; otherwise use the normal Sol worker.
+Select `worker_sol_low` for a bounded unit with frozen ownership and contracts that
+still needs repository comprehension or local coding judgment. Select `worker_luna`
+only for an approved Sol-planned unit whose files, invariants, verification, and stop
+conditions are frozen; state why it is low ambiguity and cheap to verify. The
+controller integrates either result and reruns the required proof; otherwise use the
+normal Sol worker.
 
 Tracked plans begin with `Status: Active`, `Scope`, and `Owner`; mark them historical
 when complete.

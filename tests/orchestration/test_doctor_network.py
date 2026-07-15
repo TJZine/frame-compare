@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 from frame_compare.orchestration.doctor import (
@@ -32,8 +33,7 @@ def test_check_tmdb_api_key_fails_with_malformed_env(
 
     assert result.passed is False
     assert result.message == "TMDB API key has invalid format"
-    assert result.hint is not None
-    assert "32-character hexadecimal" in result.hint
+    assert result.hint == ("Replace the TMDB credential with a 32-character hexadecimal API key")
 
 
 class TestCheckSlowpics:
@@ -59,10 +59,10 @@ class TestCheckSlowpics:
         mock_client.head.assert_called_once_with("https://slow.pics/")
         assert result.passed is True
 
-    def test_check_slowpics_fails_on_http_error_status(self) -> None:
-        """Mock response status 500 → check fails with hint."""
+    @pytest.mark.parametrize("status_code", [404, 500])
+    def test_check_slowpics_fails_on_http_error_status(self, status_code: int) -> None:
         mock_response = MagicMock()
-        mock_response.status_code = 500
+        mock_response.status_code = status_code
 
         mock_client = MagicMock()
         mock_client.__enter__ = MagicMock(return_value=mock_client)
@@ -76,8 +76,46 @@ class TestCheckSlowpics:
             result = slowpics_check.check_fn()
 
         assert result.passed is False
-        assert "500" in result.message
-        assert result.hint is not None
+        assert str(status_code) in result.message
+        assert result.hint == "Review the returned HTTP status before retrying"
+
+    def test_check_slowpics_timeout_has_timeout_specific_next_action(self) -> None:
+        slowpics_check = next(c for c in collect_checks() if c.name == "slowpics")
+
+        with patch("httpx.Client", side_effect=httpx.ReadTimeout("timed out")):
+            result = slowpics_check.check_fn()
+
+        assert result.passed is False
+        assert result.message == "slow.pics connection timed out"
+        assert result.hint == "Check network access to slow.pics, then retry"
+        assert result.details == {"timeout": 5.0}
+
+    def test_check_slowpics_request_failure_has_transport_specific_next_action(self) -> None:
+        slowpics_check = next(c for c in collect_checks() if c.name == "slowpics")
+
+        with patch("httpx.Client", side_effect=httpx.ConnectError("DNS failed")):
+            result = slowpics_check.check_fn()
+
+        assert result.passed is False
+        assert result.message == "slow.pics connection failed: DNS failed"
+        assert result.hint == (
+            "Review the request failure and network path to slow.pics before retrying"
+        )
+
+    def test_check_slowpics_protocol_failure_uses_evidence_neutral_next_action(self) -> None:
+        slowpics_check = next(c for c in collect_checks() if c.name == "slowpics")
+
+        with patch(
+            "httpx.Client",
+            side_effect=httpx.RemoteProtocolError("server disconnected"),
+        ):
+            result = slowpics_check.check_fn()
+
+        assert result.passed is False
+        assert result.message == "slow.pics connection failed: server disconnected"
+        assert result.hint == (
+            "Review the request failure and network path to slow.pics before retrying"
+        )
 
 
 def test_check_tmdb_api_key_missing_mentions_workspace_config_hint(
@@ -172,8 +210,7 @@ def test_check_tmdb_api_key_fails_with_malformed_workspace_config(
 
     assert result.passed is False
     assert result.message == "TMDB API key has invalid format"
-    assert result.hint is not None
-    assert "32-character hexadecimal" in result.hint
+    assert result.hint == ("Replace the TMDB credential with a 32-character hexadecimal API key")
 
 
 def test_check_tmdb_api_key_legacy_alias_remains_warning_only(
@@ -190,9 +227,9 @@ def test_check_tmdb_api_key_legacy_alias_remains_warning_only(
 
     assert legacy_result.passed is False
     assert legacy_result.message == "TMDB API key configured via legacy variable"
-    assert legacy_result.hint is not None
-    assert "FRAME_COMPARE_TMDB__API_KEY" in legacy_result.hint
-    assert "legacy" in legacy_result.hint.lower()
+    assert legacy_result.hint == (
+        "Move the credential to FRAME_COMPARE_TMDB__API_KEY and remove TMDB_API_KEY"
+    )
 
 
 def test_check_tmdb_api_key_disabled_without_key_is_non_failing(
@@ -220,3 +257,42 @@ def test_check_tmdb_api_key_disabled_without_key_is_non_failing(
     assert result.message == "TMDB metadata lookup disabled"
     assert result.hint is None
     assert result.details == {"enabled": False}
+
+
+def test_check_tmdb_parse_failure_points_to_config_syntax(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tmdb_check = next(c for c in collect_checks() if c.name == "tmdb_api_key")
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text("[tmdb\nenabled = true", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    _clear_tmdb_env(monkeypatch)
+
+    result = tmdb_check.check_fn()
+
+    assert result.passed is False
+    assert result.message == "TMDB configuration could not be loaded"
+    assert result.hint == "Fix config/config.toml syntax, then rerun doctor"
+    assert result.details["exception_type"] == "ConfigParseError"
+
+
+def test_check_tmdb_validation_failure_does_not_guess_a_credential_fix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tmdb_check = next(c for c in collect_checks() if c.name == "tmdb_api_key")
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text("[tmdb]\nunknown = true", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    _clear_tmdb_env(monkeypatch)
+
+    result = tmdb_check.check_fn()
+
+    assert result.passed is False
+    assert result.message == "TMDB configuration could not be loaded"
+    assert result.hint == (
+        "Fix the reported config/environment validation errors, then rerun doctor"
+    )
+    assert result.details["exception_type"] == "ConfigValidationError"
+    assert "API_KEY" not in result.hint

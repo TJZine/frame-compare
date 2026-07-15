@@ -165,11 +165,16 @@ docker run --rm -it \
 ```
 
 > [!NOTE]
-> The wizard writes `config/config.toml` (gitignored) and may include secrets (e.g., a TMDB API key). Prefer setting
-> TMDB keys via `FRAME_COMPARE_TMDB__API_KEY` instead of committing them to disk.
+> The wizard guides input, reference, and frame-selection setup, reviews the proposed
+> changes, and writes only after confirmation. Existing settings and secrets are
+> preserved and hidden. Publishing and TMDB setup remain available in TOML,
+> environment variables, and presets rather than wizard prompts; prefer
+> `FRAME_COMPARE_TMDB__API_KEY` instead of committing a TMDB key.
 
 > [!TIP]
-> slow.pics uploads are disabled by default. Enable `slowpics.auto_upload` in config when you want to publish screenshots.
+> First-use wizard output explicitly sets `slowpics.auto_upload = false` as a safe
+> file baseline. Environment variables can override the file during a later run.
+> Enable publishing deliberately in config, environment variables, or a preset.
 
 ### Local (if you have VapourSynth + FFmpeg)
 

@@ -6,6 +6,7 @@ docs/archive
 .fastembed_cache
 .codex/schemas/
 .codex/skills/
+.codex/cache/
 .tmp/
 .uv_cache/
 .venv/
@@ -44,6 +45,7 @@ CODEX.md
 .agent-workflow/runs/**/appserver-events.jsonl
 .agent-workflow/runs/**/appserver-config.json
 .agent-workflow/runs/**/appserver_threads.json
+.agent-workflow/runs/**/impl-*.md
 
 # Local config (may contain secrets)
 config/*

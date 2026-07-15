@@ -104,6 +104,7 @@ def test_viewer_js_persists_report_scoped_viewport_state() -> None:
         "filmstripSize: this.state.filmstripSize",
         "inspectorOpen: this.state.inspectorOpen",
         "inspectorTab: this.state.inspectorTab",
+        "pixelLensEnabled: this.state.pixelLensEnabled",
         "blinkIntervalMs: this.state.blinkIntervalMs",
         "paletteOrientation: this.state.paletteOrientation",
         "pairAlignments: this.state.pairAlignments",
@@ -115,6 +116,124 @@ def test_viewer_js_persists_report_scoped_viewport_state() -> None:
     assert "alignY: this.state.alignY" not in persist_block
 
 
+def test_viewer_js_composes_focused_pixel_owner_before_viewer() -> None:
+    js = get_js()
+
+    assert_in_order(js, ["const PixelInspector =", "const ReportViewer ="])
+    assert "this.pixelInspector = PixelInspector.create(this);" in js
+    assert "this.pixelInspector.bind();" in js
+    assert "pointFromImageRect(image, clientX, clientY)" in js
+    assert "mapNormalizedPoint(point, targetWidth, targetHeight)" in js
+    assert "anchorIndexForMode(mode, options)" in js
+    assert "gestureExceeded(startX, startY, clientX, clientY)" in js
+    assert "Math.hypot(clientX - startX, clientY - startY) > MAX_GESTURE_DISTANCE" in js
+    assert "const MAX_GESTURE_DISTANCE = 6;" in js
+    assert "canvas.width = 1;" in js
+    assert "canvas.height = 1;" in js
+    assert js.count("documentObject.createElement('canvas')") == 1
+    assert "sampler ||= createSampler(document);" in js
+    assert "context.getImageData(0, 0, 1, 1).data" in js
+    assert "Pixel value unavailable" in js
+    assert "querySelectorAll('img')" not in js
+
+
+def test_viewer_js_composes_focused_grid_owner_without_public_default_drift() -> None:
+    js = get_js()
+    update_images = js_method_block(js, "updateImages()")
+    preload_indexes = js_method_block(js, "preloadClipIndexes()")
+    set_mode = js_method_block(js, "setMode(mode)")
+    valid_payload_mode = js_method_block(js, "validPayloadMode(mode)")
+    pinch_update = js_method_block(js, "updatePinchFromTrackedPointers()")
+
+    assert_in_order(js, ["const GridView =", "const ReportViewer ="])
+    assert "this.gridView = GridView.create(this);" in js
+    assert "this.gridView.bind();" in js
+    assert "this.gridView?.setActive(mode === 'grid');" in set_mode
+    assert "if (this.state.mode === 'grid')" in update_images
+    assert "this.gridView.render();" in update_images
+    assert "if (this.state.mode === 'grid') return indexes;" in preload_indexes
+    assert "const DESKTOP_PAGE_SIZE = 4;" in js
+    assert "const MOBILE_QUERY = '(max-width: 767px)';" in js
+    assert "indexes().map(index => buildCell(index, generation))" in js
+    assert "querySelectorAll('.rv-grid-image')" in js
+    assert "viewer.state.panX * metrics.width" in js
+    assert "viewer.state.panY * metrics.height" in js
+    assert "this.gridView.panForZoomAnchor(" in pinch_update
+    assert "this.state.panX / base.width" in set_mode
+    assert "this.state.panX * base.width" in set_mode
+    assert "const focusedClipIdx = clipIndexFromTarget(document.activeElement);" in js
+    assert "if (index === viewer.referenceClipIndex()) roles.push('Reference');" in js
+    assert "if (index === viewer.state.activeClipIdx) roles.push('Active');" in js
+    assert "default_mode: 'grid'" not in js
+    assert "'grid'" not in valid_payload_mode
+    assert "this.validPayloadMode(this.state.data.default_mode)" in js
+
+
+def test_viewer_js_uses_pixel_roving_tabs_shortcut_and_escape_priority() -> None:
+    js = get_js()
+    tabs = js_method_block(js, "handleInspectorTabKey(e)")
+    update_tabs = js_method_block(js, "updateInspectorTabs()")
+    handle_key = js_method_block(js, "handleKey(e)")
+    viewport = js_method_block(js, "bindViewportEvents()")
+
+    assert "['pixel', 'frame', 'clips', 'align', 'review', 'export']" in js
+    assert "if (e.key === 'ArrowLeft')" in tabs
+    assert "if (e.key === 'ArrowRight')" in tabs
+    assert "if (e.key === 'Home')" in tabs
+    assert "if (e.key === 'End')" in tabs
+    assert "e.stopPropagation();" in tabs
+    assert "tab.tabIndex = this.state.inspectorOpen && isActive ? 0 : -1;" in update_tabs
+    assert "panel.tabIndex = this.state.inspectorOpen && isActive ? 0 : -1;" in update_tabs
+    assert "if (e.key === 'm' || e.key === 'M')" in handle_key
+    assert_in_order(
+        handle_key,
+        [
+            "if (this.isAlignmentPopoverOpen()) {",
+            "if (this.pixelInspector?.unlock()) {",
+            "if (this.isInspectorVisible()) {",
+            "if (document.fullscreenElement) {",
+        ],
+    )
+    assert "this.pixelInspector.beginStagePress(e);" in viewport
+    assert "this.pixelInspector.moveStagePress(e);" in viewport
+    assert "this.pixelInspector.scheduleHover(e);" in viewport
+    assert "this.pixelInspector.endStagePress(e)" in js
+
+
+def test_viewer_js_composes_focused_review_owner_before_viewer() -> None:
+    js = get_js()
+    assert_in_order(js, ["const ReviewState =", "const ReportViewer ="])
+    assert "const MAX_BYTES_LABEL = MAX_BYTES.toLocaleString('en-US');" in js
+    assert "const MAX_RECORDS_LABEL = MAX_RECORDS.toLocaleString('en-US');" in js
+    for limit_message in (
+        "`Review JSON exceeds ${MAX_BYTES_LABEL} bytes.`",
+        "`Stored review JSON exceeds ${MAX_BYTES_LABEL} bytes.`",
+        "`Review record limit of ${MAX_RECORDS_LABEL} reached.`",
+        "`Import exceeds ${MAX_BYTES_LABEL} bytes.`",
+        "`Import exceeds ${MAX_BYTES_LABEL} bytes. No changes were made.`",
+    ):
+        assert limit_message in js
+    assert "frame-compare:report-review:v1:${context.reportId}" in js
+    assert "this.reviewController = null;" in js
+    assert "ensureReviewController()" in js
+    assert "this.reviewController = ReviewState.createController(this);" in js
+    assert "this.reviewController.bind();" in js
+    assert "this.reviewController?.render();" in js
+    assert "const model = create({" in js
+    assert "model.parseImport(bytes)" in js
+    assert "model.apply(importPreview)" in js
+    assert "token !== importToken" in js
+    assert "importToken += 1;" in js
+    assert "resetImportChoices();" in js
+    assert "viewer.pixelInspector?.announce?.(message);" in js
+    assert "messageWithPersistence(message)" in js
+    assert "renderedFrameOrdinal === viewer.state.currentFrameIdx" in js
+    assert "updateImportPreview();" in js
+    assert "window.setTimeout(() => URL.revokeObjectURL(url), 0);" in js
+    assert "bindReviewEvents" not in js
+    assert "reviewImportToken" not in js
+
+
 def test_viewer_js_keeps_pointer_zoom_and_alignment_hooks_behavioral() -> None:
     js = get_js()
     viewport_block = js_method_block(js, "bindViewportEvents()")
@@ -123,6 +242,7 @@ def test_viewer_js_keeps_pointer_zoom_and_alignment_hooks_behavioral() -> None:
     pinch_update_block = js_method_block(js, "updatePinchFromTrackedPointers()")
     start_pinch_block = js_method_block(js, "startPinchFromTrackedPointers()")
     finish_pinch_block = js_method_block(js, "finishPinchInteraction()")
+    pan_pointer_block = js_method_block(js, "updatePanFromPointer(e)")
 
     assert "panX: 0" in js
     assert "panY: 0" in js
@@ -144,10 +264,9 @@ def test_viewer_js_keeps_pointer_zoom_and_alignment_hooks_behavioral() -> None:
         "if (this.state.mode === 'overlay' || this.state.mode === 'diff') return;" in viewport_block
     )
     assert "this.zoomAtPoint(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1);" in viewport_block
-    assert (
-        "this.setPan(this.state.panX + dx, this.state.panY + dy, { save: false });"
-        in viewport_block
-    )
+    assert "this.panByPixels(dx, dy, e.clientX, e.clientY" in pan_pointer_block
+    assert "basis: pointer.panBasis" in pan_pointer_block
+    assert "this.pixelInspector.isStagePressPending(e.pointerId)" in pan_pointer_block
     assert "trackedTouchPointers()" in js
     assert "Math.hypot(dx, dy)" in js
     assert "this.state.fitMode = 'custom';" in start_pinch_block
@@ -209,9 +328,9 @@ def test_viewer_js_keeps_overlay_blink_filtering_and_navigation_contracts() -> N
     assert "this.scrollActiveFilmstripItem();" in render_block
     assert "this.setFrame(visibleIndexes[position + 1]);" in js
     assert "this.setFrame(visibleIndexes[position - 1]);" in js
-    assert "this.dom.pairControls.hidden = isOverlay;" in mode_block
+    assert "this.dom.pairControls.hidden = isOverlay || isGrid;" in mode_block
     assert "this.dom.activeControls.hidden = !isOverlay;" in mode_block
-    assert "this.dom.leftSelect.disabled = isOverlay;" in mode_block
+    assert "this.dom.leftSelect.disabled = isOverlay || isGrid;" in mode_block
     assert "this.dom.activeSelect.disabled = !isOverlay;" in mode_block
     assert "this.dom.leftSelect.setAttribute('aria-label', 'Base clip');" in mode_block
     assert "this.dom.leftSelect.setAttribute('aria-label', 'First blink clip');" in mode_block

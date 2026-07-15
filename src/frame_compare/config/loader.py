@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import tomllib
 from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import date, datetime, time
 from pathlib import Path
 from typing import Any, cast
 
@@ -33,6 +35,18 @@ type _SettingsSourcesCustomizer = Callable[
     ],
     tuple[PydanticBaseSettingsSource, ...],
 ]
+
+type TomlScalar = str | int | float | bool | date | datetime | time
+type TomlValue = TomlScalar | list["TomlValue"] | dict[str, "TomlValue"]
+type TomlPayload = dict[str, TomlValue]
+
+
+@dataclass(frozen=True, slots=True)
+class RawConfigDocument:
+    """Validated config plus its environment-independent parsed TOML payload."""
+
+    payload: TomlPayload
+    config: ConfigSchema
 
 
 def _env_only_settings_sources(
@@ -126,6 +140,71 @@ def load_config_from_env() -> ConfigSchema:
     except ValidationError as exc:
         normalized = normalize_pydantic_errors(cast(Any, exc.errors()))
         raise ConfigValidationError(normalized) from exc
+
+
+def load_raw_config(config_path: Path) -> RawConfigDocument:
+    """Load TOML without environment precedence and preserve every parsed value."""
+    try:
+        text = config_path.read_text(encoding="utf-8-sig")
+        untrusted: object = tomllib.loads(text)
+    except FileNotFoundError as exc:
+        raise ConfigNotFoundError(config_path) from exc
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigParseError(config_path, str(exc)) from exc
+    except UnicodeDecodeError as exc:
+        raise ConfigParseError(config_path, "configuration is not valid UTF-8") from exc
+    except OSError as exc:
+        raise ConfigParseError(config_path, f"could not read configuration ({exc})") from exc
+
+    payload = _narrow_toml_table(untrusted, path="root")
+    return RawConfigDocument(
+        payload=payload,
+        config=validate_raw_config_payload(payload, redact_inputs=True),
+    )
+
+
+def validate_raw_config_payload(
+    payload: TomlPayload,
+    *,
+    redact_inputs: bool,
+) -> ConfigSchema:
+    """Validate a parsed TOML payload without consulting environment settings."""
+    defaults_only_schema = _toml_suppressed_settings_schema(
+        "RawConfigSchema",
+        _defaults_only_settings_sources,
+    )
+    try:
+        return defaults_only_schema(**cast(Any, payload))
+    except ValidationError as exc:
+        normalized = normalize_pydantic_errors(cast(Any, exc.errors()))
+        if redact_inputs:
+            for error in normalized:
+                if "input" in error:
+                    error["input"] = "<redacted>"
+        raise ConfigValidationError(normalized) from exc
+
+
+def _narrow_toml_table(value: object, *, path: str) -> TomlPayload:
+    if not isinstance(value, dict):
+        raise ConfigParseError(Path(path), "expected a TOML table")
+
+    narrowed: TomlPayload = {}
+    for raw_key, raw_value in cast("dict[object, object]", value).items():
+        if not isinstance(raw_key, str):
+            raise ConfigParseError(Path(path), "TOML table keys must be strings")
+        narrowed[raw_key] = _narrow_toml_value(raw_value, path=f"{path}.{raw_key}")
+    return narrowed
+
+
+def _narrow_toml_value(value: object, *, path: str) -> TomlValue:
+    if isinstance(value, str | int | float | bool | date | datetime | time):
+        return value
+    if isinstance(value, list):
+        return [_narrow_toml_value(item, path=f"{path}[]") for item in cast("list[object]", value)]
+    if isinstance(value, dict):
+        nested: object = cast("dict[object, object]", value)
+        return _narrow_toml_table(nested, path=path)
+    raise ConfigParseError(Path(path), f"unsupported TOML value type: {type(value).__name__}")
 
 
 def get_default_config() -> ConfigSchema:

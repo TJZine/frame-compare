@@ -14,6 +14,7 @@ from frame_compare.config.loader import (
     get_default_config,
     load_config,
     load_config_from_env,
+    load_raw_config,
 )
 
 
@@ -122,6 +123,65 @@ def test_validation_error_raises(tmp_path: Path) -> None:
     errors = exc.value.context.details.get("validation_errors")
     assert isinstance(errors, list)
     assert len(errors) > 0
+
+
+def test_raw_config_load_ignores_environment_and_redacts_invalid_input(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        '[tmdb]\napi_key = "file-secret"\n[analysis]\nrandom_frame_count = 7\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FRAME_COMPARE_TMDB__API_KEY", "environment-secret")
+    monkeypatch.setenv("FRAME_COMPARE_SLOWPICS__AUTO_UPLOAD", "true")
+
+    document = load_raw_config(config_file)
+
+    assert document.payload["tmdb"] == {"api_key": "file-secret"}
+    assert document.config.tmdb.api_key == "file-secret"
+    assert document.config.analysis.random_frame_count == 7
+
+    config_file.write_text('[paths]\ninput_dir = "comparison_videos"\n', encoding="utf-8")
+    omitted_environment = load_raw_config(config_file)
+    assert omitted_environment.config.tmdb.api_key is None
+    assert omitted_environment.config.slowpics.auto_upload is False
+
+    config_file.write_text(
+        '[analysis]\nrandom_frame_count = "raw-secret"\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigValidationError) as exc_info:
+        load_raw_config(config_file)
+    validation_errors = exc_info.value.validation_errors
+    assert validation_errors
+    assert all(error.get("input") == "<redacted>" for error in validation_errors)
+    assert "raw-secret" not in str(exc_info.value.context.to_dict())
+
+
+def test_raw_config_load_empty_document_uses_defaults_without_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_file = tmp_path / "empty.toml"
+    config_file.write_text("", encoding="utf-8")
+    monkeypatch.setenv("FRAME_COMPARE_ANALYSIS__RANDOM_FRAME_COUNT", "77")
+
+    document = load_raw_config(config_file)
+
+    assert document.payload == {}
+    assert document.config.model_dump() == get_default_config().model_dump()
+    assert document.config.analysis.random_frame_count == 10
+
+
+def test_raw_config_load_missing_file_uses_config_not_found_error(tmp_path: Path) -> None:
+    config_file = tmp_path / "missing.toml"
+
+    with pytest.raises(ConfigNotFoundError) as exc_info:
+        load_raw_config(config_file)
+
+    assert exc_info.value.path == config_file
 
 
 def test_config_validation_error_context_is_json_serializable(tmp_path: Path) -> None:

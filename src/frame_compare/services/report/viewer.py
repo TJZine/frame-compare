@@ -16,7 +16,10 @@ def get_css() -> str:
 
 @cache
 def get_js() -> str:
-    """Load and return the JS asset."""
-    return (files("frame_compare.services.report") / "assets" / "viewer.js").read_text(
-        encoding="utf-8"
-    )
+    """Load focused viewer owners before the composition asset."""
+    assets = files("frame_compare.services.report") / "assets"
+    review_state = (assets / "review_state.js").read_text(encoding="utf-8")
+    pixel_inspector = (assets / "pixel_inspector.js").read_text(encoding="utf-8")
+    grid_view = (assets / "grid_view.js").read_text(encoding="utf-8")
+    viewer = (assets / "viewer.js").read_text(encoding="utf-8")
+    return f"{review_state}\n\n{pixel_inspector}\n\n{grid_view}\n\n{viewer}"

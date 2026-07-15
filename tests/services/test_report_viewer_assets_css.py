@@ -38,6 +38,7 @@ def test_viewer_css_keeps_stage_pointer_and_label_contracts() -> None:
 
 def test_viewer_css_keeps_hidden_state_and_empty_stage_regressions() -> None:
     css = get_css()
+    visually_hidden = css_block(css, ".rv-visually-hidden")
 
     assert "display: none;" in css_block(css, ".rv-control-group[hidden]")
     assert "display: none;" in css_block(css, ".rv-filmstrip-item[hidden]")
@@ -50,6 +51,8 @@ def test_viewer_css_keeps_hidden_state_and_empty_stage_regressions() -> None:
     assert ".rv-modal-content--wide" in css
     assert ".rv-modal-actions" in css
     assert ".rv-zoom-value" in css
+    assert "clip: rect(0 0 0 0) !important;" in visually_hidden
+    assert "clip-path: inset(50%) !important;" in visually_hidden
 
 
 def test_viewer_css_covers_timeline_layout_contracts() -> None:
@@ -130,3 +133,85 @@ def test_viewer_css_stays_offline_and_preserves_tokenized_regressions() -> None:
     )
     assert "margin" not in webkit_vertical_track
     assert "margin" not in moz_vertical_track
+
+
+def test_viewer_css_covers_pixel_inspector_roi_lens_and_tabs() -> None:
+    css = get_css()
+    roi = css_block(css, ".rv-inspection-point")
+    tabs = css_block(css, ".rv-inspector-tabs")
+    lens_image = css_block(css, ".rv-pixel-lens img")
+    grid = css_block(css, '.rv-pixel-lens[data-magnification="8"]::after')
+    coarse = css_block(css, "@media (pointer: coarse)")
+    reduced_motion = css_block(css, "@media (prefers-reduced-motion: reduce)")
+
+    assert "width: 44px;" in roi
+    assert "height: 44px;" in roi
+    assert "touch-action: none;" in roi
+    assert "overflow-x: auto;" in tabs
+    assert "display: flex;" in tabs
+    assert '.rv-pixel-lens[data-magnification="2"]' in css
+    assert '.rv-pixel-lens[data-magnification="4"]' in css
+    assert '.rv-pixel-lens[data-magnification="8"]' in css
+    assert "image-rendering: pixelated;" in lens_image
+    assert "repeating-linear-gradient" in grid
+    assert "background-position: 4px 4px;" in grid
+    assert ".rv-pixel-lens" in coarse
+    assert "display: none !important;" in coarse
+    assert "#btn-inspect" in coarse
+    assert "#pixel-lens-toggle" in coarse
+    assert "[data-pixel-magnification]" in coarse
+    assert ".rv-inspector-tabs button" in coarse
+    assert "min-width: 44px;" in coarse
+    assert "min-height: 44px;" in coarse
+    assert ".rv-pixel-lens" in reduced_motion
+    assert ".rv-inspection-point" in reduced_motion
+
+
+def test_viewer_css_covers_dense_review_slate_and_accessible_states() -> None:
+    css = get_css()
+    assert ".rv-review-panel" in css
+    assert ".rv-review-field textarea" in css
+    assert '.rv-review-status[data-tone="warning"]' in css
+    assert ".rv-review-preview fieldset" in css
+    assert "var(--annotation)" in css_block(css, ".rv-review-frame")
+    coarse = css_block(css, "@media (pointer: coarse)")
+    for selector in (
+        ".rv-review-field select",
+        ".rv-review-transfer button",
+        ".rv-review-preview button",
+        ".rv-review-check",
+        ".rv-review-preview label",
+    ):
+        assert selector in coarse
+    assert coarse.count("min-height: 44px;") >= 3
+
+
+def test_viewer_css_covers_deterministic_grid_and_mobile_cells() -> None:
+    css = get_css()
+    two = css_block(css, '.rv-grid[data-layout="two"] .rv-grid-cells')
+    three_wide = css_block(css, '.rv-grid[data-layout="three-wide"] .rv-grid-cells')
+    three_wrap = css_block(
+        css,
+        '.rv-grid[data-layout="three-wrap"] .rv-grid-cells,\n.rv-grid[data-layout="four"] .rv-grid-cells',
+    )
+    mobile = css_block(
+        css,
+        '.rv-grid[data-layout="single"] .rv-grid-cells,\n.rv-grid[data-layout="mobile"] .rv-grid-cells',
+    )
+    image = css_block(css, ".rv-grid-image")
+    coarse = css_block(css, "@media (pointer: coarse)")
+
+    assert "repeat(2, minmax(0, 1fr))" in two
+    assert "repeat(3, minmax(0, 1fr))" in three_wide
+    assert "repeat(2, minmax(0, 1fr))" in three_wrap
+    assert "grid-template-columns: minmax(0, 1fr);" in mobile
+    assert "object-fit: contain;" in image
+    assert "var(--grid-pan-x, 0px)" in image
+    assert "scale(var(--grid-zoom-level, 1))" in image
+    assert "text-overflow: ellipsis;" in css_block(css, ".rv-grid-label-text")
+    assert "border-color: var(--accent);" in css_block(css, '.rv-grid-cell[data-reference="true"]')
+    assert "var(--annotation)" in css_block(css, '.rv-grid-cell[data-active="true"]')
+    assert "overflow: hidden;" in css_block(css, ".rv-grid")
+    assert "#btn-grid-prev" in coarse
+    assert "[data-grid-retry]" in coarse
+    assert "min-width: 44px;" in coarse

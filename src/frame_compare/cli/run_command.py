@@ -22,6 +22,7 @@ from frame_compare.cli.output import (
 )
 from frame_compare.config.effective import load_effective_config
 from frame_compare.config.errors import ConfigValidationError
+from frame_compare.config.overrides import cli_config_overrides_from
 from frame_compare.config.schema import ConfigSchema, OverlayMode, ToneCurve, TonemapPreset
 from frame_compare.errors import FrameCompareError, JSONValue
 from frame_compare.orchestration.analysis_policy import (
@@ -234,6 +235,7 @@ class RunCliRawArgs:
     diagnose_paths: bool
     quiet: bool
     verbose: bool
+    dry_run: bool = False
 
 
 def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
@@ -246,11 +248,10 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
     try:
         resolve_selected_config_path(args.config_path, args.resolved_root)
         run_options = parse_run_options(args, no_color=effective_no_color)
-        request = build_run_request_from_cli(run_options)
         resolve_effective_config, load_effective_config = build_effective_config_loaders(
             args,
             deps,
-            request,
+            run_options,
         )
 
         effective_config = load_effective_config()
@@ -258,6 +259,13 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
             effective_config,
             args.resolved_root,
         )
+        validate_dry_run_mode_contract(args)
+        if args.dry_run:
+            validate_run_contracts(args, deps, normalized_config)
+            validate_dry_run_cache_contract(args)
+            handle_dry_run(args, normalized_config, console)
+            return
+
         log_level = (
             "WARNING"
             if args.quiet
@@ -276,6 +284,7 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
             return
 
         validate_run_contracts(args, deps, normalized_config)
+        request = build_run_request_from_cli(run_options)
 
         if not args.json_output and not args.quiet:
             print_run_preview(console, args, request, load_effective_config)
@@ -537,10 +546,10 @@ def _frame_selection_cli_error(
 def build_effective_config_loaders(
     args: RunCliRawArgs,
     deps: RunCommandDeps,
-    request: RunRequest,
+    options: RunCliOptions,
 ) -> tuple[EffectiveConfigLoader, EffectiveConfigLoader]:
     resolved_config: ConfigSchema | None = None
-    cli_overrides = request.cli_config_overrides()
+    cli_overrides = cli_config_overrides_from(options)
 
     def _resolve_effective_config() -> ConfigSchema:
         return load_effective_config(
@@ -556,6 +565,81 @@ def build_effective_config_loaders(
         return resolved_config
 
     return _resolve_effective_config, _load_effective_config
+
+
+def validate_dry_run_mode_contract(args: RunCliRawArgs) -> None:
+    """Reject dry-run combinations with other early-exit modes."""
+    if not args.dry_run:
+        return
+    validation_errors: list[dict[str, JSONValue]] = []
+    if args.write_config:
+        validation_errors.append(
+            {
+                "type": "value_error",
+                "loc": ["cli", "write_config"],
+                "msg": "--dry-run cannot be combined with --write-config.",
+                "input": True,
+            }
+        )
+    if args.diagnose_paths:
+        validation_errors.append(
+            {
+                "type": "value_error",
+                "loc": ["cli", "diagnose_paths"],
+                "msg": "--dry-run cannot be combined with --diagnose-paths.",
+                "input": True,
+            }
+        )
+    if not validation_errors:
+        return
+    raise ConfigValidationError(
+        validation_errors,
+        message="--dry-run is incompatible with another early-exit mode",
+        hint="Use --dry-run, --write-config, or --diagnose-paths separately",
+    )
+
+
+def validate_dry_run_cache_contract(args: RunCliRawArgs) -> None:
+    """Validate cache flags without touching cache state."""
+    if not args.no_cache or not args.from_cache_only:
+        return
+    raise ConfigValidationError(
+        [
+            {
+                "type": "value_error",
+                "loc": ["cli", "no_cache"],
+                "msg": "--no-cache and --from-cache-only are mutually exclusive.",
+                "input": True,
+            },
+            {
+                "type": "value_error",
+                "loc": ["cli", "from_cache_only"],
+                "msg": "--no-cache and --from-cache-only are mutually exclusive.",
+                "input": True,
+            },
+        ],
+        message="Cache mode flags are mutually exclusive",
+        hint="Use either --no-cache or --from-cache-only, not both",
+    )
+
+
+def handle_dry_run(args: RunCliRawArgs, config: ConfigSchema, console: Console) -> None:
+    """Build and render the CLI-owned plan before runtime request construction."""
+    from frame_compare.cli.dry_run import (
+        build_dry_run_plan,
+        dry_run_plan_json,
+        print_dry_run_plan,
+    )
+
+    plan = build_dry_run_plan(
+        root=args.resolved_root,
+        config=config,
+        from_cache_only=args.from_cache_only,
+    )
+    if args.json_output:
+        typer.echo(json.dumps(dry_run_plan_json(plan), sort_keys=True, separators=(",", ":")))
+        return
+    print_dry_run_plan(console, plan, quiet=args.quiet)
 
 
 def validate_run_contracts(args: RunCliRawArgs, deps: RunCommandDeps, config: ConfigSchema) -> None:

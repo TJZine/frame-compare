@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import httpx
 
 from frame_compare.orchestration.alignment_report import (
@@ -23,12 +25,19 @@ from frame_compare.orchestration.fps_report import (
 from frame_compare.orchestration.phases import execute_phases
 from frame_compare.orchestration.preparation import execute_prep
 from frame_compare.orchestration.progress import select_reporter
+from frame_compare.orchestration.run_result_lifecycle import (
+    record_completed_run_result,
+    record_failed_run_best_effort,
+)
+from frame_compare.orchestration.selection_report import emit_final_selection_report
 from frame_compare.orchestration.types import (
+    ReservedRunCapture,
     RunDependencies,
     RunRequest,
     RunResult,
 )
 from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
+from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.loader import DefaultVSLoader
 
 __all__ = ["RunDependencies", "RunRequest", "RunResult", "execute_run"]
@@ -67,6 +76,21 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
     Raises:
         FrameCompareError: Any preflight validation errors are propagated.
     """
+    reserved_workspace: WorkspacePaths | None = None
+    run_start: datetime | None = None
+    phase_timings: dict[str, float] = {}
+    clip_count = 0
+    selected_frame_count = 0
+    artifacts: RunArtifacts | None = None
+    preflight_warnings: tuple[str, ...] = ()
+
+    def _capture_reserved_run(capture: ReservedRunCapture) -> None:
+        nonlocal clip_count, phase_timings, preflight_warnings, reserved_workspace
+        reserved_workspace = capture.workspace
+        clip_count = capture.clip_count
+        phase_timings = {"preflight": capture.preflight_duration}
+        preflight_warnings = capture.preflight_warnings
+
     if deps is None:
         local_deps = RunDependencies()
     else:
@@ -79,6 +103,8 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             clock=deps.clock,
         )
 
+    local_deps.capture_reserved_run = _capture_reserved_run
+
     if local_deps.vs_loader is None:
         local_deps.vs_loader = DefaultVSLoader()
 
@@ -90,6 +116,8 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         )
 
     async def _execute_with_deps() -> RunResult:
+        nonlocal artifacts, clip_count, phase_timings, preflight_warnings, run_start
+        nonlocal selected_frame_count
         run_start = local_deps.clock()
         reporter = local_deps.progress
         if reporter is None:
@@ -101,6 +129,10 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                 extraction_timeout_seconds=prep.config.screenshots.ffmpeg_timeout_seconds
             )
         state = ExecutionState(artifacts=prep.artifacts)
+        artifacts = prep.artifacts
+        phase_timings = state.phase_timings
+        clip_count = len(prep.clips)
+        preflight_warnings = tuple(prep.preflight_warnings)
 
         state.phase_timings["preflight"] = prep.preflight_duration
 
@@ -154,6 +186,15 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         )
 
         await execute_phases(phase_plan.before_align, context, reporter)
+        selected_frame_count = len(state.selected_frames)
+        emit_final_selection_report(
+            selected_frames=state.selected_frames,
+            breakdown=context.selection_breakdown,
+            verbose=request.verbose,
+            json_output=request.json_output,
+            quiet=request.quiet,
+            no_color=request.no_color,
+        )
         emit_consolidated_fps_report(
             stage="after_align",
             clips=build_consolidated_fps_report(context.reference, context.comparisons),
@@ -178,8 +219,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         await execute_phases(phase_plan.after_align, context, reporter)
         run_end = local_deps.clock()
         duration_seconds = (run_end - run_start).total_seconds()
-
-        return _assemble_run_result(
+        result = _assemble_run_result(
             artifacts=prep.artifacts,
             selected_frames=state.selected_frames,
             context=context,
@@ -187,13 +227,36 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             phase_timings=state.phase_timings,
             duration_seconds=duration_seconds,
         )
+        return record_completed_run_result(
+            workspace=reserved_workspace,
+            result=result,
+            started_at=run_start,
+            completed_at=run_end,
+        )
+
+    async def _execute_and_record_failure() -> RunResult:
+        try:
+            return await _execute_with_deps()
+        except BaseException as original_error:
+            record_failed_run_best_effort(
+                workspace=reserved_workspace,
+                error=original_error,
+                started_at=run_start,
+                completed_at=local_deps.clock,
+                artifacts=artifacts,
+                clip_count=clip_count,
+                selected_frame_count=selected_frame_count,
+                phase_timings=phase_timings,
+                warnings=preflight_warnings,
+            )
+            raise
 
     if local_deps.http_client is not None:
-        return await _execute_with_deps()
+        return await _execute_and_record_failure()
 
     async with httpx.AsyncClient() as http_client:
         local_deps.http_client = http_client
         try:
-            return await _execute_with_deps()
+            return await _execute_and_record_failure()
         finally:
             local_deps.http_client = None

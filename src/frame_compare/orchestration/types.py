@@ -10,11 +10,12 @@ from typing import Literal, Protocol
 
 import httpx
 
-from frame_compare.config.overrides import CLIConfigOverrides
+from frame_compare.config.overrides import CLIConfigOverrides, cli_config_overrides_from
 from frame_compare.config.schema import OverlayMode, ToneCurve, TonemapPreset
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
 from frame_compare.utils.post_upload_actions import PostUploadActionResults
 from frame_compare.utils.progress_protocol import ProgressReporter
+from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.loader import VSLoader
 
 
@@ -63,21 +64,7 @@ class RunRequest:
 
     def cli_config_overrides(self) -> CLIConfigOverrides:
         """Project runtime CLI values into the config override DTO."""
-        return CLIConfigOverrides(
-            input_dir=self.input_dir,
-            tm_preset=self.tm_preset,
-            tm_target_nits=self.tm_target_nits,
-            tm_curve=self.tm_curve,
-            user_frames=self.user_frames,
-            random_frame_count=self.random_frame_count,
-            dark_frame_count=self.dark_frame_count,
-            bright_frame_count=self.bright_frame_count,
-            motion_frame_count=self.motion_frame_count,
-            seed=self.seed,
-            overlay_mode=self.overlay_mode,
-            no_upload=self.no_upload,
-            force_interactive_alignment=self.force_interactive_alignment,
-        )
+        return cli_config_overrides_from(self)
 
 
 def _empty_str_list() -> list[str]:
@@ -112,6 +99,16 @@ class SlowpicsUploadConfirmationFn(Protocol):
         self,
         request: SlowpicsUploadConfirmationRequest,
     ) -> SlowpicsUploadConfirmationDecision: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ReservedRunCapture:
+    """Facts known immediately after a run folder's identity is durable."""
+
+    workspace: WorkspacePaths
+    clip_count: int
+    preflight_duration: float
+    preflight_warnings: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -149,3 +146,8 @@ class RunDependencies:
     progress: ProgressReporter | None = None
     confirm_slowpics_upload: SlowpicsUploadConfirmationFn | None = None
     clock: Callable[[], datetime] = field(default=datetime.now)
+    capture_reserved_run: Callable[[ReservedRunCapture], None] | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )

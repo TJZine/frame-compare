@@ -24,6 +24,8 @@ documents that promise elsewhere.
     surface.
   - `tests/cli/test_run_output.py` for human output, JSON stdout cleanliness,
     and slow.pics post-upload presentation behavior.
+  - `tests/cli/test_history_command.py` for history config resolution, exact JSON
+    and stream contracts, exact-name opening, browser failures, and lazy help.
   - `tests/config/test_schema.py` for config schema/defaults, including the
     exact slow.pics field set.
   - `tests/config/test_overrides.py` for CLI override mapping semantics.
@@ -50,6 +52,9 @@ Current user-facing command surface:
 - `frame-compare run`
 - `frame-compare wizard`
 - `frame-compare doctor`
+- `frame-compare history`
+  - `frame-compare history list`
+  - `frame-compare history open RUN_NAME`
 - `frame-compare preset`
   - `frame-compare preset list`
   - `frame-compare preset apply`
@@ -63,6 +68,8 @@ These commands share the same root/config path resolution rules:
 - `wizard`
 - `preset apply`
 - `preset save`
+- `history list`
+- `history open`
 
 For those commands:
 
@@ -75,20 +82,27 @@ The selected config file and configured `paths.config_dir`,
 `report.output_dir` must resolve beneath the fully resolved workspace root.
 Containment follows symlinks and expands environment variables in config path
 values, so absolute paths, `..` traversal, or symlinks that escape the root fail
-with `PathEscapesRootError` / `FC-3009`. `run`, `wizard`, `preset apply`, and
-`preset save` validate their selected config destination before config reads or
-writes; `run` also validates configured contained paths before diagnostics,
-config writes, or runtime entry. `preset list` remains root-only and ignores its
-accepted `--config` value.
+with `PathEscapesRootError` / `FC-3009`. `run`, `wizard`, `preset apply`,
+`preset save`, and both `history` subcommands validate their selected config
+destination before config reads or writes; `run` also validates configured
+contained paths before diagnostics, config writes, or runtime entry. `preset list`
+remains root-only and ignores its accepted `--config` value.
 
 Media input is a read boundary, not a write boundary. Configured
 `paths.input_dir` and the `run --input` override may be relative, absolute,
 environment-expanded, or symlinked to a directory outside the workspace. This
 does not permit generated state to follow media outside the root.
 
+History commands resolve, load, and validate the selected config and contained
+configured `paths.generated_dir` using these same `--root/-r` and `--config/-c`
+rules, but they do not require the configured input directory or current video
+files to exist. This keeps recorded outcomes readable after media moves.
+
 For the installed Windows portable shim, the shim runs the bundle launcher from the
-bundle root and injects a default `--config` for `run`, `wizard`, and supported
-`preset` subcommands when the user did not pass `--config`. The injected default
+bundle root and injects a default `--config` for `run`, `wizard`, supported
+`preset` subcommands, and `history list`/`history open` when the user did not pass
+`--config`. For subgroup commands the injection occurs after the subcommand and
+before any positional history run name or preset name. The injected default
 prefers `<bundle>/config/config.toml` when it exists, otherwise it falls back to
 `%LOCALAPPDATA%/Programs/FrameCompare/state/config.toml` when that state config
 exists. That exact installed-shim state file is the sole selected-config
@@ -183,6 +197,41 @@ analysis cache validation, or fastest benchmarking. JSON error mode keeps the
 existing error payload shape, and the successful `run --json` schema is
 unchanged.
 
+## `history` Command Contract
+
+- History is read-only. Stage 1 provides only `list`, `list --json`, and exact-name
+  `open`; it does not migrate, replay, delete, rename, search, paginate, or fuzzy
+  match runs.
+- Discovery inspects contained immediate child directories of the configured
+  workspace-level generated root. Symlinked run directories are ignored, and a
+  result or legacy identity file is trusted only when its final regular-file target
+  remains inside that run directory. The shared `cache` directory is not a run
+  entry.
+- Valid V1 `run_result.toml` entries report `completed`,
+  `completed_with_warnings`, or `failed`. Legacy folders without a result record
+  report `unknown` and are never modified. Malformed or unsupported records report
+  `unavailable`; each warning goes to stderr and does not hide other entries.
+- Entries sort newest first using persisted UTC completion/start time, with an
+  exact folder-name tie-break. Legacy entries use valid persisted
+  `run_info.toml` creation time when available.
+- Human `history list` output goes to stdout and exposes the exact run name,
+  status, persisted time, and report availability. Diagnostics and warnings use
+  stderr.
+- `history list --json` writes exactly one compact object to stdout with top-level
+  key `runs`. Every entry has exactly `name`, `status`, `started_at`,
+  `completed_at`, `duration_seconds`, and `report_available`; unavailable facts
+  are JSON null and no warnings, paths, exception details, or logs are added.
+- `history open RUN_NAME` accepts one exact child folder name only. Empty names,
+  dot segments, separators, absolute/drive/UNC forms, traversal, missing or
+  non-directory entries, and symlinked run directories fail through the typed CLI error
+  path. The command reads the report path only from a valid V1 record, resolves
+  its workspace-relative path, and requires the final existing file to remain
+  beneath the configured generated root after symlink resolution.
+- A configured report elsewhere beneath the workspace root may be recorded, but
+  history intentionally refuses to open it because it is outside the generated
+  history boundary. Browser refusal or browser integration failure is a typed
+  actionable failure and never produces a success claim.
+
 ## `version` Command Contract
 
 - Prints `frame-compare <version>` to stdout.
@@ -192,6 +241,50 @@ unchanged.
 
 ### Output Modes
 
+- `--dry-run` is a runtime-only planning mode. It loads and validates the effective
+  config and CLI options, validates the resolved configured input directory,
+  discovers supported source filenames, validates filename-based source selectors,
+  and exits before `RunRequest` construction or runner invocation.
+- `--dry-run` performs no doctor checks, FFmpeg/ffprobe or media probing, analysis,
+  alignment, cache reads or writes, run-folder reservation or metadata writes,
+  rendering or report generation, network metadata/publishing, browser or clipboard
+  action, or VSPreview launch. `--no-cache` and `--from-cache-only` are still
+  validated as mutually exclusive, but neither performs cache access.
+- `--dry-run` is incompatible with `--write-config` and `--diagnose-paths`. It
+  preserves the effective future run's existing `--json`, `--quiet`, interactive,
+  frame-selection, source-selector, and cache-option compatibility validation.
+- Human dry-run output renders the same typed plan as JSON. Normal human mode shows
+  the detailed plan; `--quiet` emits only a minimal source-count/no-side-effects
+  summary. `--dry-run --json` writes exactly one JSON document to stdout, and typed
+  errors retain the standard JSON error schema and stream placement.
+- Successful dry-run JSON has exactly these top-level keys:
+  `checks_not_performed`, `dry_run`, `input`, `outputs`, `publishing`, `reference`,
+  `runtime_facts`, and `selection`. Their exact nested fields are:
+  - `input`: `resolved_directory`, `source_filenames`
+  - `reference`: `configured_selector`, `resolved_filename`
+  - `selection`: `strategy`, `requested_user_frames`, `random_frame_count`,
+    `dark_frame_count`, `bright_frame_count`, `motion_frame_count`, `random_seed`,
+    `analysis_performance_mode`, `analysis_metrics_required`
+  - `outputs`: `screenshots`, `run_folders`, `report`,
+    `report_auto_open_configured`
+  - `publishing`: `slowpics_upload`, `slowpics_visibility`,
+    `copy_url_to_clipboard_configured`, `open_in_browser_configured`,
+    `create_url_shortcut_configured`, `webhook_configured`
+  - `runtime_facts`: `run_folder_name`, `final_selected_frames`, `clip_metadata`,
+    `output_dimensions`; each contains exactly `status`, `value`, and `reason`
+- `checks_not_performed` is the fixed ordered list `doctor`, `ffprobe_or_ffmpeg`,
+  `media_probe`, `analysis`, `alignment`, `cache_reads_or_writes`,
+  `run_folder_reservation_or_metadata_writes`, `render_or_report_generation`,
+  `network_publishing_or_metadata`, and `browser_clipboard_or_vspreview`.
+- The plan never dumps effective config. The resolved input directory is its only
+  deliberately reported absolute path. Source entries are filenames only. API keys,
+  webhook URLs, tokens, and other secret values are excluded; only
+  `webhook_configured` may reveal that a webhook-backed action is configured. The
+  five `*_configured` action fields report effective configuration only; they do
+  not claim that JSON, quiet, non-TTY, upload-result, or other runtime eligibility
+  gates will permit the action. Runtime-only facts remain `unknown` with null
+  values until their existing runtime owners could determine them. When run folders
+  are disabled, `run_folder_name` is the one known null fact.
 - `--json` writes a single JSON object to stdout and suppresses human-readable summaries.
 - In that JSON object, `slowpics_url` is the only machine-readable slow.pics
   result field. No copy/open/shortcut/webhook result fields are emitted.
@@ -224,6 +317,13 @@ unchanged.
   ranges, offsets, selected aligned frames, and rejected alignment warning context
   for comparisons with material alignment information. It is suppressed by
   `--quiet` and is never emitted to `run --json` stdout.
+- Verbose human runs emit a concise `Final Selection` summary to stderr immediately
+  after alignment. It reports the final aligned frame count and each non-empty
+  `SelectionBreakdown` category in `User`, `Dark`, `Bright`, `Motion`, `Random`
+  order, with category counts and compact ranges kept in their existing source-frame
+  domain. If the breakdown is unavailable, the aligned count is still reported with
+  an unavailable indication. Normal, quiet, and JSON runs do not emit this summary,
+  and it does not add a JSON field or log event.
 - Human-readable non-quiet successful runs group final warnings by source in a
   `Warnings` panel. Existing runtime warning strings and slow.pics post-upload
   action warnings are bridged into presentation rows with source, severity,
@@ -321,6 +421,18 @@ unchanged.
   outcome manifest and does not include report URL, timings, or success/failure
   state. If `run_info.toml` cannot be written, the run fails immediately and
   best-effort cleanup removes the empty reserved run folder when possible.
+- A separate atomically written `<run-folder>/run_result.toml` V1 record captures
+  the final outcome without modifying `run_info.toml`. Successful records are
+  written after all post-run phases settle and use `completed` or
+  `completed_with_warnings`; failures after reservation get one best-effort
+  `failed` record. Failures before reservation write no record. An ordinary
+  completed-run result-write failure is warning-only and leaves the run successful;
+  an ordinary failed-run result-write failure preserves the identical original
+  exception and exit mapping. `KeyboardInterrupt` and `SystemExit` raised while
+  recording either outcome propagate. Records omit absent optional values and never
+  persist raw warning
+  or exception text, tracebacks, secrets, absolute paths, URL credentials, query,
+  or fragment data.
 - `--no-cache` deletes only the matching shared analysis cache entry for the current
   inputs, selected reference, all-source selection domain, performance mode,
   metric algorithm identity, and analysis settings before continuing. It does
@@ -904,6 +1016,7 @@ The following `run` flags are runtime-only and do not persist through `--write-c
 - `--no-color`
 - `--write-config`
 - `--diagnose-paths`
+- `--dry-run`
 - `--quiet`
 - `--verbose`
 
@@ -926,24 +1039,49 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 
 ## `wizard` Command Contract
 
-- `wizard` is interactive and writes a minimal config payload to the resolved config path.
-- It prompts for:
-  - input directory
-  - slow.pics auto-upload, defaulting to disabled
-  - slow.pics visibility (`public` or `unlisted`)
-  - slow.pics delete-after-upload
-  - optional TMDB API key
-- It validates the generated payload against `ConfigSchema` before writing.
+- `wizard` is an interactive, goal-oriented editor for input, reference, and frame
+  selection configuration. It does not run comparisons or probe media. It requires
+  both stdin and stdout to be TTYs; otherwise it fails through `FC-3017` with input
+  exit code 4 before reading config, prompting, or writing.
+- Its goals are `Random spot check` (10 seeded random frames, no metrics scan),
+  `Dark, bright, and motion coverage` (4 random plus 2 each dark, bright, and motion
+  frames in full-resolution `quality` mode), and `Specific frame numbers` (1–100
+  sorted unique non-negative frame numbers, no metrics scan). Existing configs also
+  offer a default `Keep current frame selection` no-op.
+- It discovers supported filenames through the canonical deterministic discovery and
+  source-selection owners without reading, hashing, opening, or probing media. The
+  input directory may be external. Zero files preserve reference selection; duplicate
+  stems fail before the reference prompt; automatic reference removes an explicit
+  reference key; explicit filename selection is canonically revalidated.
+- First use starts from schema defaults and writes only the confirmed partial payload,
+  including `slowpics.auto_upload = false`. Environment values still have higher
+  precedence during a later run, so the review states that the environment may
+  override this file baseline.
+- Existing TOML is parsed and validated without environment precedence, then used as
+  the persistence base. Confirmed partial patches preserve unrelated supported and
+  unknown root values, explicit empty values, dates/times, nested tables,
+  arrays-of-tables, and file-resident secrets. Environment-only values are neither
+  displayed nor persisted. Wizard validation errors redact every raw Pydantic input.
+- Before writing, the wizard validates the complete candidate and shows a semantic
+  review containing changed/new input, reference, and frame-selection facts, the
+  metrics-scan consequence, and privacy/preservation statements. It never displays
+  secret values or environment presence.
+- A no-op exits 0 without confirmation or writing. Final confirmation defaults to No;
+  No exits 0 with `Canceled; configuration unchanged.` Ctrl-C, abort, or EOF at any
+  prompt emits the same line and exits 130. All cancellation and validation paths
+  preserve an existing file byte-for-byte.
+- Only a final Yes serializes the raw candidate and calls the existing atomic text
+  writer once, with a confirmation to stderr including the resolved config path.
+  Serialization and atomic-write failures
+  use `ConfigWriteError` / exit 2; pre-replacement failures preserve old bytes and
+  temporary cleanup remains best effort.
 - It rejects a selected config destination outside the workspace before prompting,
   except for the exact installed Windows portable state-config fallback described
   under Shared Path Resolution Rules. The prompted media input may be external.
-- It does not advertise or accept unsupported slow.pics visibility values.
-- On success, it writes a concise confirmation to stderr including the resolved
-  config path.
-- Interruptions during prompting exit with the interrupted exit code.
-- Typed validation/write failures use the standard CLI error contract on stderr,
-  honor the `NO_COLOR` environment variable, and do not suggest unsupported
-  `--verbose` usage.
+- Publishing visibility/deletion and TMDB-key setup are config/environment/preset
+  concerns and are no longer wizard prompts. Typed failures continue to use the
+  standard stderr adapter, honor the `NO_COLOR` environment variable, and do not
+  suggest unsupported `--verbose` usage.
 
 ## `doctor` Command Contract
 
@@ -958,6 +1096,13 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 - Human output uses a neutral status marker for optional unavailable checks such as
   VSPreview, so optional availability gaps are visually distinct from critical
   dependency failures. This does not change `doctor --json` status values.
+- Failed checks and optional-unavailable warnings include a short deterministic next
+  action when the check can prove one. `doctor --json` exposes the same text as
+  `install_hint`. Hints distinguish missing executables, unavailable runtimes/plugins,
+  optional GUI dependency classes, network failure classes, and TMDB
+  configuration/credential classes without guessing a package-manager command or
+  install mode; when setup mode is unknown, they point to the repository's current
+  setup documentation.
 - If any critical failures are present, `doctor` exits with the dependency error exit code.
 - Optional VSPreview probe diagnostics may include exception type metadata, but do not
   expose raw probe exception messages.

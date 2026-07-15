@@ -23,11 +23,11 @@ def test_windows_portable_shim_restores_launcher_environment(repo_root: Path) ->
     assert '$originalPythonUtf8 = Get-FrameCompareShimEnvironmentValue -Name "PYTHONUTF8"' in shim
     assert '$originalPythonPath = Get-FrameCompareShimEnvironmentValue -Name "PYTHONPATH"' in shim
     assert (
-        '$originalVsExtraPluginPath = Get-FrameCompareShimEnvironmentValue -Name '
+        "$originalVsExtraPluginPath = Get-FrameCompareShimEnvironmentValue -Name "
         '"VAPOURSYNTH_EXTRA_PLUGIN_PATH"'
     ) in shim
     assert (
-        '$originalVsPluginPath = Get-FrameCompareShimEnvironmentValue -Name '
+        "$originalVsPluginPath = Get-FrameCompareShimEnvironmentValue -Name "
         '"VAPOURSYNTH_PLUGIN_PATH"'
     ) in shim
     assert 'Restore-FrameCompareShimEnvironmentValue -Name "PATH" -Value $originalPath' in shim
@@ -48,13 +48,17 @@ def test_windows_portable_shim_prefers_bundle_config_before_state_config_when_mi
         r"\$bundleConfigToml\s*=\s*Join-Path\s+\(Join-Path\s+\$bundlePath\s+\"config\"\)\s+\"config\.toml\"",
         shim,
     )
-    assert shim.index("$bundleConfigToml") < shim.index("$stateConfigToml", shim.index("$bundleConfigToml"))
+    assert shim.index("$bundleConfigToml") < shim.index(
+        "$stateConfigToml", shim.index("$bundleConfigToml")
+    )
     assert re.search(r"function\s+Test-ArgsContainConfigFlag\b", shim)
     assert re.search(r"function\s+Get-ConfigInjectionIndex\b", shim)
     assert re.search(r"function\s+Add-ArgsAtIndex\b", shim)
     assert re.search(r"\$command\s*-eq\s*\"run\".*\$command\s*-eq\s*\"wizard\"", shim, re.DOTALL)
     assert re.search(r"\$command\s*-eq\s*\"preset\"", shim)
+    assert re.search(r"\$command\s*-eq\s*\"history\"", shim)
     assert re.search(r"\$subcommand\s*-eq\s*\"list\".*\"apply\".*\"save\"", shim, re.DOTALL)
+    assert re.search(r"\$subcommand\s*-eq\s*\"list\".*\"open\"", shim, re.DOTALL)
     assert re.search(r"\$arg\.StartsWith\(\"--config=\"\)", shim)
     assert re.search(r"\$arg\s*-match\s*'\^-c", shim)
     assert re.search(r"InsertValues\s+@\(\"\-\-config\",\s*\$defaultConfigToml\)", shim)
@@ -69,6 +73,17 @@ def test_windows_portable_shim_preset_apply_injects_config_before_positional(
     shim_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare.ps1"
     shim = _read_text_or_fail(shim_path)
     assert re.search(r"\$subcommand\s*-eq\s*\"apply\"", shim)
+    assert re.search(r"return\s+\$subcommandIndex\s*\+\s*1", shim)
+
+
+def test_windows_portable_shim_history_open_injects_config_before_run_name(
+    repo_root: Path,
+) -> None:
+    """History config injection must precede the exact positional run name."""
+    shim_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare.ps1"
+    shim = _read_text_or_fail(shim_path)
+    assert re.search(r"\$command\s*-eq\s*\"history\"", shim)
+    assert re.search(r"\$subcommand\s*-eq\s*\"open\"", shim)
     assert re.search(r"return\s+\$subcommandIndex\s*\+\s*1", shim)
 
 

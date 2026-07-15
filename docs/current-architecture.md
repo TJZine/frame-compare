@@ -192,6 +192,16 @@ Primary owned paths:
   stores creation time, final folder name, naming source, source filenames,
   Frame Compare version, and optional TMDB prefetch facts. It is user-facing
   creation-time identity, not an end-of-run outcome manifest.
+- `<run-folder>/run_result.toml`: versioned V1 run outcome owned by
+  `frame_compare.services.run_result_record` and written atomically only after a
+  reserved run completes or fails. It stores sanitized workspace-relative output
+  facts, UTC lifecycle timing, bounded warning summaries, cache/phase facts,
+  slow.pics outcome, and a sanitized typed failure when applicable. The service
+  also owns strict TOML validation, immediate-child history discovery, legacy
+  `unknown` entries, malformed-record isolation, deterministic ordering, exact
+  run-name validation, record-file/run-directory containment, and report-path
+  containment. Symlinked run-directory aliases are not history entries. It never mutates
+  `run_info.toml` or migrates legacy folders.
 - `<run-folder>/generated/clip_probe.toml`: current-run clip probe cache when
   run folders are enabled
 - `generated/manual_overrides.toml` or `<run-folder>/generated/manual_overrides.toml`:
@@ -242,6 +252,14 @@ directory. The exact creation time lives in `<run-folder>/run_info.toml`, which 
 written before probing, rendering, or other runtime-heavy work. If that write
 fails, the run fails immediately and cleanup attempts to remove the empty
 reserved directory as best effort.
+
+Preparation reports the reserved `WorkspacePaths` through an internal dependency
+capture immediately after `run_info.toml` succeeds, without changing the
+`execute_prep(request, deps)` call shape. The coordinator owns whole-run outcome
+timing and asks the run-result service to write success only after post-run phases
+settle, or to make one best-effort failure write while re-raising the original
+exception unchanged. Completed-run record failures add a stable warning and do
+not change successful media work into failure.
 
 The align phase uses a typed orchestration-to-services request seam:
 `frame_compare.orchestration.phase_tasks.run_align_phase()` builds a
@@ -429,20 +447,54 @@ human, non-quiet, TTY stdout runs; JSON stdout stays a single object.
 The same CLI owner presents the local report and asks for confirmation in the
 report-confirmed workflow before post-upload URL actions are considered.
 
+`frame_compare.cli.wizard_command` owns the interactive goal-oriented config editor,
+while `frame_compare.cli.wizard_policy` owns its typed code-defined frame-selection
+patches and pure summaries. The wizard reuses orchestration's lightweight filename
+discovery and source-selection policy without importing media runtime code.
+`frame_compare.config.loader` owns environment-independent raw TOML narrowing and
+redacted schema validation for preserving an existing wizard-edited document; atomic
+replacement remains owned by `frame_compare.utils.atomic_write`.
+
 `frame_compare.services.report` owns the static offline report payload and viewer
 assets. The generated viewer exposes slider, internal overlay mode presented to
 users as Single where appropriate, diff, and pair-based blink modes; frame/category
 navigation; a HUD toggle for stage labels and current-frame metadata; a primary
 toolbar plus floating viewport palette; a collapsible, compact/normal/large
-filmstrip bottom panel; an inspector drawer with Frame, Clips, Align, and Export
-tabs; fullscreen support; viewport pan, zoom, actual/width/height fit, reveal, and
-adjacent-frame preloading. Blink mode supports 0.3s/0.7s/1.2s speeds, pause/resume, keyboard
-speed controls, and reduced-motion handling that enters Blink paused. Browser-local
+filmstrip bottom panel; an inspector drawer with Pixel, Frame, Clips, Align, Review,
+and Export tabs; fullscreen support; viewport pan, zoom, actual/width/height fit, reveal,
+and adjacent-frame preloading. `assets/pixel_inspector.js` is the focused owner for
+inspection-point acquisition, normalized cross-size coordinate mapping, bounded
+decoded-display sampling through one offscreen 1x1 canvas, ROI lock/nudge state, and
+the optional 2x/4x/8x floating lens. `assets/grid_view.js` owns the viewer-only Grid
+cell lifecycle: deterministic responsive 2/3/4 layouts, payload-order pages of at
+most four images (one below the mobile reflow boundary), loading/missing/retry
+presentation, and visible-range controls. It consumes the viewer's single viewport
+state and the pixel inspector's normalized point rather than duplicating either. In
+Grid mode the shared pan fields represent normalized image-box translation and each
+cell derives its CSS-pixel transform from its own contained image dimensions; the
+viewer converts those fields at the Grid/pair-mode boundary so mixed-aspect cells keep
+one normalized viewport center without changing pair-mode persistence semantics.
+`assets/review_state.js` owns the exact report-scoped local review schema, bounded
+bookmark/tag/note/preferred-clip records, fail-closed localStorage reads, deterministic
+V1 JSON export, strict import validation and preview, atomic merge/replace apply, and
+the Review tab's dedicated edit/import/export interaction lifecycle. That controller is
+created on first visible Review use, keeps form rendering stable across unrelated viewer
+refreshes, and routes transition announcements through the existing shared polite live
+region. Its storage is
+separate from viewport preferences and never writes into the report or run directory.
+`assets/viewer.js` caches the Review DOM and composes that focused controller with the
+other owners and the existing mode,
+pointer, viewport, alignment, and inspector state rather than owning duplicate
+coordinate conversions
+or grid mount policy. Grid remains outside the public report default-mode payload
+enum and does not preload adjacent grid pages. Blink mode supports 0.3s/0.7s/1.2s speeds,
+pause/resume, keyboard speed controls, and reduced-motion handling that enters Blink
+paused. Browser-local
 viewer state is scoped by report identity and persists current frame, view mode,
 clip selection, viewport/zoom/reveal, pair alignments, HUD visibility, filmstrip
-collapsed/size, inspector open/tab, and blink speed. Blink paused state is not
-persisted. It does not own slow.pics upload policy, prompting, or browser side
-effects.
+collapsed/size, inspector open/tab, optional-lens preference, and blink speed. Pixel
+lock and magnification are not persisted; Blink paused state is also transient. It
+does not own slow.pics upload policy, prompting, or browser side effects.
 
 Active-picture resolution is owned by `frame_compare.orchestration.active_rect`
 and optional `frame_compare.orchestration.active_rect_content` during

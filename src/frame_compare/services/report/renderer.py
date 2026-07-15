@@ -15,6 +15,7 @@ from frame_compare.services.report.payload import REPORT_VERSION
 from frame_compare.services.report.viewer import get_css, get_js
 
 ALL_CATEGORY_FILTER_KEY = "__fc_all__"
+_REVIEW_NOTE_MAX_LENGTH = 1000
 
 if TYPE_CHECKING:
     from frame_compare.services.report.payload import (
@@ -362,6 +363,17 @@ def _render_controls(
             <button data-mode="overlay" role="radio" aria-checked="false" aria-label="Single clip view" title="Single clip view (O)">Single</button>
             <button data-mode="diff" role="radio" aria-checked="false" aria-label="Difference mode" title="Difference (D)">Diff</button>
             <button data-mode="blink" role="radio" aria-checked="false" aria-label="Blink mode" title="Blink (B)">Blink</button>
+            <button data-mode="grid" role="radio" aria-checked="false" aria-label="Grid mode" title="Grid comparison">Grid</button>
+        </div>
+
+        <div class="rv-control-group rv-inspect-control">
+            <button id="btn-inspect" type="button" aria-label="Open pixel inspector" title="Inspect pixels (M)">Inspect</button>
+        </div>
+
+        <div class="rv-control-group rv-grid-controls" data-control-scope="grid" aria-label="Grid clips" hidden>
+            <button id="btn-grid-prev" type="button" aria-label="Previous grid clips">←</button>
+            <span class="rv-grid-position" data-grid-position aria-live="off"></span>
+            <button id="btn-grid-next" type="button" aria-label="Next grid clips">→</button>
         </div>
 
         <div class="rv-control-group" data-control-scope="pair" aria-label="Comparison pair">
@@ -471,6 +483,16 @@ def _render_stage() -> str:
                 <div id="label-right" class="rv-overlay-label right"></div>
             </div>
         </div>
+        <button id="rv-inspection-point" class="rv-inspection-point" type="button" aria-label="Inspection point unavailable" aria-pressed="false" tabindex="-1" hidden>
+            <span aria-hidden="true"></span>
+        </button>
+        <section id="rv-grid" class="rv-grid" aria-label="Grid comparison" hidden>
+            <div class="rv-grid-frame-error" data-grid-frame-error hidden></div>
+            <div class="rv-grid-cells" data-grid-cells></div>
+        </section>
+        <aside id="rv-pixel-lens" class="rv-pixel-lens" aria-label="Pixel lens" data-magnification="4" hidden>
+            <img src="" alt="">
+        </aside>
         <div class="rv-stage-overlay-info">
             <span class="rv-info-label" data-current-frame-label></span>
             <span class="rv-info-divider" data-current-frame-category-divider>•</span>
@@ -481,18 +503,35 @@ def _render_stage() -> str:
 
 
 def _render_inspector() -> str:
-    return """    <aside id="rv-inspector" class="rv-inspector" aria-hidden="true" aria-labelledby="rv-inspector-title" inert>
+    return f"""    <aside id="rv-inspector" class="rv-inspector" aria-hidden="true" aria-labelledby="rv-inspector-title" inert>
         <div class="rv-inspector-header">
             <div id="rv-inspector-title" class="rv-inspector-title">Inspector</div>
             <button id="btn-inspector-close" type="button" aria-label="Close inspector" title="Close inspector (I)" tabindex="-1">Close</button>
         </div>
         <div class="rv-inspector-tabs" role="tablist" aria-label="Inspector tabs">
+            <button id="inspector-tab-pixel" type="button" role="tab" data-inspector-tab="pixel" aria-selected="false" aria-controls="inspector-panel-pixel" tabindex="-1">Pixel</button>
             <button id="inspector-tab-frame" type="button" role="tab" data-inspector-tab="frame" aria-selected="true" aria-controls="inspector-panel-frame" tabindex="-1">Frame</button>
             <button id="inspector-tab-clips" type="button" role="tab" data-inspector-tab="clips" aria-selected="false" aria-controls="inspector-panel-clips" tabindex="-1">Clips</button>
             <button id="inspector-tab-align" type="button" role="tab" data-inspector-tab="align" aria-selected="false" aria-controls="inspector-panel-align" tabindex="-1">Align</button>
+            <button id="inspector-tab-review" type="button" role="tab" data-inspector-tab="review" aria-selected="false" aria-controls="inspector-panel-review" tabindex="-1">Review</button>
             <button id="inspector-tab-export" type="button" role="tab" data-inspector-tab="export" aria-selected="false" aria-controls="inspector-panel-export" tabindex="-1">Export</button>
         </div>
-        <section id="inspector-panel-frame" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-frame">
+        <section id="inspector-panel-pixel" class="rv-inspector-panel rv-pixel-panel" role="tabpanel" aria-labelledby="inspector-tab-pixel" tabindex="-1" hidden>
+            <div class="rv-pixel-toolbar">
+                <button id="pixel-lens-toggle" type="button" aria-pressed="false" tabindex="-1">Lens off</button>
+                <div class="rv-pixel-magnification" role="radiogroup" aria-label="Lens magnification">
+                    <button type="button" role="radio" data-pixel-magnification="2" aria-checked="false" aria-label="Magnification 2×" tabindex="-1">2×</button>
+                    <button type="button" role="radio" data-pixel-magnification="4" aria-checked="true" aria-label="Magnification 4×" tabindex="-1">4×</button>
+                    <button type="button" role="radio" data-pixel-magnification="8" aria-checked="false" aria-label="Magnification 8×" tabindex="-1">8×</button>
+                </div>
+            </div>
+            <p class="rv-pixel-anchor" data-pixel-anchor>Anchor: not selected</p>
+            <ol class="rv-pixel-rows" data-pixel-rows></ol>
+            <p class="rv-pixel-legend">Decoded display sample · 8-bit sRGB</p>
+            <p class="rv-inspector-note">Coordinates are zero-based with origin at top-left.</p>
+            <p class="rv-inspector-note">Normalized cross-size mapping; not scene registration.</p>
+        </section>
+        <section id="inspector-panel-frame" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-frame" tabindex="-1">
             <dl class="rv-inspector-list">
                 <div><dt>Label</dt><dd data-inspector-frame-label></dd></div>
                 <div><dt>Number</dt><dd data-inspector-frame-number></dd></div>
@@ -501,10 +540,10 @@ def _render_inspector() -> str:
                 <div><dt>Shown</dt><dd data-inspector-frame-position></dd></div>
             </dl>
         </section>
-        <section id="inspector-panel-clips" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-clips" hidden>
+        <section id="inspector-panel-clips" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-clips" tabindex="-1" hidden>
             <ol class="rv-inspector-clip-list" data-inspector-clips></ol>
         </section>
-        <section id="inspector-panel-align" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-align" hidden>
+        <section id="inspector-panel-align" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-align" tabindex="-1" hidden>
             <dl class="rv-inspector-list">
                 <div><dt>Pair</dt><dd data-inspector-align-pair></dd></div>
                 <div><dt>Preset</dt><dd data-inspector-align-preset></dd></div>
@@ -517,7 +556,43 @@ def _render_inspector() -> str:
             </div>
             <p class="rv-inspector-note">Offsets are scoped to the selected pair.</p>
         </section>
-        <section id="inspector-panel-export" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-export" hidden>
+        <section id="inspector-panel-review" class="rv-inspector-panel rv-review-panel" role="tabpanel" aria-labelledby="inspector-tab-review" tabindex="-1" hidden>
+            <p class="rv-review-frame" data-review-frame>Frame 1</p>
+            <label class="rv-review-check"><input type="checkbox" data-review-bookmark tabindex="-1"> Bookmark this frame</label>
+            <label class="rv-review-field">Tag
+                <select data-review-tag tabindex="-1">
+                    <option value="">No tag</option><option value="artifact">Artifact</option><option value="detail">Detail</option><option value="motion">Motion</option><option value="color">Color</option><option value="other">Other</option>
+                </select>
+            </label>
+            <label class="rv-review-field">Note <span data-review-note-count>0 / {_REVIEW_NOTE_MAX_LENGTH}</span>
+                <textarea data-review-note rows="5" maxlength="{_REVIEW_NOTE_MAX_LENGTH}" tabindex="-1"></textarea>
+            </label>
+            <label class="rv-review-field">Preferred clip
+                <select data-review-preferred tabindex="-1"></select>
+            </label>
+            <p class="rv-review-status" data-review-status></p>
+            <div class="rv-inspector-actions rv-review-transfer">
+                <button type="button" data-review-export tabindex="-1">Export review JSON</button>
+                <button type="button" data-review-import-trigger tabindex="-1">Import review JSON</button>
+                <input type="file" data-review-import accept=".json,application/json" hidden tabindex="-1">
+            </div>
+            <div class="rv-review-preview" data-review-preview hidden>
+                <p data-review-preview-counts></p>
+                <fieldset><legend>Apply mode</legend>
+                    <label><input type="radio" name="review-import-mode" value="merge" checked> Merge</label>
+                    <label><input type="radio" name="review-import-mode" value="replace"> Replace</label>
+                </fieldset>
+                <fieldset><legend>Conflicts</legend>
+                    <label><input type="radio" name="review-import-conflict" value="keep-local" checked> Keep local</label>
+                    <label><input type="radio" name="review-import-conflict" value="use-imported"> Use imported</label>
+                </fieldset>
+                <div class="rv-inspector-actions">
+                    <button type="button" data-review-import-apply>Apply import</button>
+                    <button type="button" data-review-import-cancel>Cancel</button>
+                </div>
+            </div>
+        </section>
+        <section id="inspector-panel-export" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-export" tabindex="-1" hidden>
             <dl class="rv-inspector-list">
                 <div><dt>Title</dt><dd data-inspector-export-title></dd></div>
                 <div><dt>Report ID</dt><dd data-inspector-export-id></dd></div>
@@ -544,6 +619,7 @@ def _render_help_modal() -> str:
                 <div class="rv-shortcut-row"><span>Toggle HUD</span><span class="rv-key">H</span></div>
                 <div class="rv-shortcut-row"><span>Toggle Filmstrip</span><span class="rv-key">F</span></div>
                 <div class="rv-shortcut-row"><span>Toggle Inspector</span><span class="rv-key">I</span></div>
+                <div class="rv-shortcut-row"><span>Inspect Pixels</span><span class="rv-key">M</span></div>
                 <div class="rv-shortcut-row"><span>Blink Pause / Speed</span><span class="rv-key">Space / [ / ]</span></div>
                 <div class="rv-shortcut-row"><span>Zoom In / Out</span><span class="rv-key">+ / -</span></div>
                 <div class="rv-shortcut-row"><span>Reset Viewport</span><span class="rv-key">R / Double-click</span></div>
@@ -649,6 +725,7 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
 <body>
 {header_html}
 <div id="viewer-status" class="rv-status" role="status" aria-live="polite" hidden></div>
+<div id="pixel-inspector-live" class="rv-visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
 {controls_html}
 {stage_html}
 {inspector_html}

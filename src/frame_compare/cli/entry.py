@@ -28,6 +28,7 @@ from frame_compare.cli.doctor_command import (
     handle_doctor,
     print_doctor_report,
 )
+from frame_compare.cli.history_command import handle_history_list, handle_history_open
 from frame_compare.cli.preset_command import (
     handle_preset_apply,
     handle_preset_list,
@@ -44,14 +45,11 @@ from frame_compare.cli.run_command import (
     handle_run,
 )
 from frame_compare.cli.wizard_command import (
-    build_minimal_config,
     handle_wizard,
     prompt_input_dir,
-    prompt_visibility,
-    validate_config,
     write_wizard_config_payload,
 )
-from frame_compare.config.loader import load_config
+from frame_compare.config.loader import TomlPayload, load_config
 from frame_compare.config.presets import apply_preset, list_presets, save_preset
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.logging import configure_logging
@@ -101,14 +99,11 @@ _open_url_in_browser = open_url_in_browser
 _doctor_report_json = doctor_report_json
 _print_doctor_report = print_doctor_report
 _prompt_input_dir = prompt_input_dir
-_prompt_visibility = prompt_visibility
 _RunCliOptions = RunCliOptions
 _build_run_request_from_cli = build_run_request_from_cli
 _coerce_cli_choice = coerce_cli_choice
 _handle_diagnose_paths = handle_diagnose_paths
 _handle_json_output = handle_json_output
-_build_minimal_config = build_minimal_config
-_validate_config = validate_config
 
 
 def _sys_stream_isatty(name: str) -> bool:
@@ -132,8 +127,12 @@ def _write_config_to(path: Path, config: ConfigSchema) -> None:
     write_config_to(path, config, text_writer=write_text_atomic)
 
 
-def _write_wizard_config_payload(config_path: Path, data: dict[str, object]) -> None:
+def _write_wizard_config_payload(config_path: Path, data: TomlPayload) -> None:
     write_wizard_config_payload(config_path, data, text_writer=write_text_atomic)
+
+
+def _prompt_text(text: str, *, default: str) -> str:
+    return str(typer.prompt(text, default=default))
 
 
 @app.callback(invoke_without_command=True)
@@ -176,6 +175,7 @@ def run(
     force_interactive_alignment: bool = _option(False, "--force-interactive-alignment"),
     json_output: bool = _option(False, "--json"),
     no_color: bool = _option(False, "--no-color"),
+    dry_run: bool = _option(False, "--dry-run"),
     write_config: bool = _option(False, "--write-config"),
     diagnose_paths: bool = _option(False, "--diagnose-paths"),
     quiet: bool = _option(False, "--quiet", "-q"),
@@ -205,6 +205,7 @@ def run(
         force_interactive_alignment=force_interactive_alignment,
         json_output=json_output,
         no_color=no_color,
+        dry_run=dry_run,
         write_config=write_config,
         diagnose_paths=diagnose_paths,
         quiet=quiet,
@@ -239,12 +240,12 @@ def wizard(
         resolved_root,
         config_path,
         prompt_input_dir=_prompt_input_dir,
-        prompt_visibility=_prompt_visibility,
+        prompt=_prompt_text,
         confirm=typer.confirm,
-        prompt_secret=typer.prompt,
         write_payload=_write_wizard_config_payload,
         handle_error=handle_error,
         stdin_is_tty=_sys_stream_isatty("stdin"),
+        stdout_is_tty=_sys_stream_isatty("stdout"),
         no_color=effective_no_color,
     )
 
@@ -261,6 +262,44 @@ def doctor(json_output: bool = _option(False, "--json")) -> None:
 
 preset_app = typer.Typer(name="preset", help="Manage configuration presets.", no_args_is_help=True)
 app.add_typer(preset_app, name="preset")
+
+history_app = typer.Typer(name="history", help="Inspect recorded runs.", no_args_is_help=True)
+app.add_typer(history_app, name="history")
+
+
+@history_app.command("list")
+def history_list(
+    root: Path = _path_option(".", "--root", "-r"),
+    config: Path | None = _option(None, "--config", "-c"),
+    json_output: bool = _option(False, "--json"),
+) -> None:
+    """List recorded runs newest first."""
+    resolved_root, config_path = _resolve_root_and_config(root, config)
+    handle_history_list(
+        resolved_root,
+        config_path,
+        json_output=json_output,
+        handle_error=handle_error,
+        no_color=no_color_requested(),
+    )
+
+
+@history_app.command("open")
+def history_open(
+    run_name: str,
+    root: Path = _path_option(".", "--root", "-r"),
+    config: Path | None = _option(None, "--config", "-c"),
+) -> None:
+    """Open one exact-name recorded report."""
+    resolved_root, config_path = _resolve_root_and_config(root, config)
+    handle_history_open(
+        run_name,
+        resolved_root,
+        config_path,
+        open_report=_maybe_open_report,
+        handle_error=handle_error,
+        no_color=no_color_requested(),
+    )
 
 
 @preset_app.command("list")
