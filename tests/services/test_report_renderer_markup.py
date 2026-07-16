@@ -568,8 +568,18 @@ def test_build_html_renders_lens_stage_controls(
     assert lens.attrs["aria-label"] == "Image magnification lens"
     assert lens.attrs["data-size"] == "medium"
     assert lens.attrs["data-comparison"] == "false"
-    assert len(find_all(lens, tag="img")) == 3
-    assert require_first(lens, tag="img", attr_name="data-lens-image", attr_value="difference")
+    for image_role in ("active", "difference", "comparison"):
+        assert (
+            len(
+                find_all(
+                    lens,
+                    tag="img",
+                    attr_name="data-lens-image",
+                    attr_value=image_role,
+                )
+            )
+            == 1
+        )
     active_role = require_first(lens, tag="span", attr_name="data-lens-role", attr_value="active")
     assert active_role.text == "ACTIVE"
     assert require_first(lens, tag="span", attr_name="data-lens-status", attr_value="active")
@@ -597,7 +607,7 @@ def test_build_html_renders_lens_stage_controls(
     assert current_source.text == "Lens is off."
     assert current_source.attrs["aria-live"] == "off"
     assert not find_all(stage, attr_name="data-lens-behavior")
-    assert not find_all(stage, tag="canvas")
+    assert not find_all(lens, tag="canvas")
     assert 'id="btn-inspect"' not in html
 
 

@@ -685,6 +685,49 @@ focusEnvironment.document.activeElement = externalFocus;
 focusController.setEnabled(false);
 assert.equal(focusEnvironment.document.activeElement, externalFocus);
 
+const transientFocusEnvironment = makeEnvironment();
+const transientFocusController = transientFocusEnvironment.Lens.create(
+    transientFocusEnvironment.viewer,
+);
+transientFocusController.bind();
+transientFocusController.setEnabled(true);
+transientFocusEnvironment.document.activeElement = (
+    transientFocusEnvironment.selectors['[data-lens-drag-handle]']
+);
+transientFocusController.clearTransient();
+assert.equal(
+    transientFocusEnvironment.document.activeElement,
+    transientFocusEnvironment.elements['btn-lens'],
+);
+assert.equal(transientFocusEnvironment.elements['rv-lens'].hidden, true);
+assert.equal(transientFocusController.state.report.enabled, true);
+
+transientFocusController.sync();
+transientFocusEnvironment.elements['btn-lens-settings'].dispatch('click');
+assert.equal(transientFocusEnvironment.elements['lens-settings-popover'].hidden, false);
+transientFocusController.clearTransient();
+assert.equal(transientFocusEnvironment.elements['lens-settings-popover'].hidden, true);
+assert.equal(
+    transientFocusEnvironment.elements['btn-lens-settings'].getAttribute('aria-expanded'),
+    'false',
+);
+assert.equal(
+    transientFocusEnvironment.document.activeElement,
+    transientFocusEnvironment.elements['btn-lens'],
+);
+
+transientFocusController.sync();
+const transientExternalFocus = fakeElement();
+transientFocusEnvironment.document.activeElement = transientExternalFocus;
+transientFocusController.clearTransient();
+assert.equal(transientFocusEnvironment.document.activeElement, transientExternalFocus);
+
+transientFocusController.sync();
+const visiblePaletteControl = transientFocusEnvironment.elements['btn-lens-zoom-in'];
+transientFocusEnvironment.document.activeElement = visiblePaletteControl;
+transientFocusController.clearTransient();
+assert.equal(transientFocusEnvironment.document.activeElement, visiblePaletteControl);
+
 const activeFailure = makeEnvironment({ autoLoadClones: false });
 const activeClone = activeFailure.selectors['[data-lens-image="active"]'];
 const activeFailureController = activeFailure.Lens.create(activeFailure.viewer);
@@ -818,6 +861,10 @@ console.log(JSON.stringify({
     touchLayoutRefreshStable: true,
     focusedDisableRestoresToggle: true,
     programmaticDisablePreservesFocus: true,
+    clearTransientRestoresVisibleFocus: true,
+    clearTransientClosesPopover: true,
+    clearTransientPreservesExternalFocus: true,
+    clearTransientPreservesPaletteFocus: true,
     cloneFailuresAreSourceMatched: true,
     detachedLoadersAreIsolated: true,
     detachedLoaderHandlersCleaned: true,

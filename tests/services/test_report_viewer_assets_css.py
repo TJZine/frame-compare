@@ -8,6 +8,14 @@ from frame_compare.services.report.viewer import get_css
 from tests.services.report_viewer_contracts import css_block
 
 
+def assert_coarse_touch_targets(coarse_css: str, selectors: tuple[str, ...]) -> None:
+    """Require every coarse-pointer selector to own a complete 44px target rule."""
+    for selector in selectors:
+        block = css_block(coarse_css, selector)
+        assert "min-width: 44px;" in block
+        assert "min-height: 44px;" in block
+
+
 def test_viewer_css_keeps_stage_pointer_and_label_contracts() -> None:
     css = get_css()
     alignment_transform_block = css_block(
@@ -230,15 +238,18 @@ def test_viewer_css_covers_production_lens_and_touch_controls() -> None:
     assert ".rv-lens-fixed-status" in css
     assert ".rv-lens-titlebar" not in css
     assert ".rv-lens-controls" not in css
-    assert "#btn-lens" in coarse
-    assert ".rv-lens-palette-controls button" in coarse
-    assert ".rv-lens-grip" in coarse
-    assert "[data-lens-size]" in coarse
-    assert "[data-lens-marker]" in coarse
+    assert_coarse_touch_targets(
+        coarse,
+        (
+            "#btn-lens",
+            ".rv-lens-palette-controls button",
+            ".rv-lens-grip",
+            "[data-lens-size]",
+            "[data-lens-marker]",
+            ".rv-inspector-tabs button",
+        ),
+    )
     assert "[data-lens-behavior]" not in coarse
-    assert ".rv-inspector-tabs button" in coarse
-    assert "min-width: 44px;" in coarse
-    assert "min-height: 44px;" in coarse
     assert ".rv-lens" in reduced_motion
     assert ".rv-lens-target" in reduced_motion
     assert "display: none !important" not in coarse
@@ -252,15 +263,16 @@ def test_viewer_css_covers_dense_review_slate_and_accessible_states() -> None:
     assert ".rv-review-preview fieldset" in css
     assert "var(--signal)" in css_block(css, ".rv-review-frame")
     coarse = css_block(css, "@media (pointer: coarse)")
-    for selector in (
-        ".rv-review-field select",
-        ".rv-review-transfer button",
-        ".rv-review-preview button",
-        ".rv-review-check",
-        ".rv-review-preview label",
-    ):
-        assert selector in coarse
-    assert coarse.count("min-height: 44px;") >= 3
+    assert_coarse_touch_targets(
+        coarse,
+        (
+            ".rv-review-field select",
+            ".rv-review-transfer button",
+            ".rv-review-preview button",
+            ".rv-review-check",
+            ".rv-review-preview label",
+        ),
+    )
 
 
 def test_viewer_css_covers_deterministic_grid_and_mobile_cells() -> None:
@@ -289,6 +301,7 @@ def test_viewer_css_covers_deterministic_grid_and_mobile_cells() -> None:
     assert "border-color: var(--signal);" in css_block(css, '.rv-grid-cell[data-reference="true"]')
     assert "var(--signal)" in css_block(css, '.rv-grid-cell[data-active="true"]')
     assert "overflow: hidden;" in css_block(css, ".rv-grid")
-    assert "#btn-grid-prev" in coarse
-    assert "[data-grid-retry]" in coarse
-    assert "min-width: 44px;" in coarse
+    assert_coarse_touch_targets(
+        coarse,
+        ("#btn-grid-prev", "#btn-grid-next", "[data-grid-retry]", ".rv-grid-cell"),
+    )

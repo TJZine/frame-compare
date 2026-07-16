@@ -6,30 +6,14 @@ import json
 from pathlib import Path
 
 import pytest
-from pyright import node as pyright_node
+
+from .node_harness import run_node_harness
 
 
 @pytest.mark.unit
-def test_viewer_state_harness_exercises_pair_scoped_alignment(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
     harness = Path(__file__).with_name("viewer_state_harness.js")
-
-    monkeypatch.setattr(pyright_node, "USE_NODEJS_WHEEL", True)
-    monkeypatch.setattr(pyright_node, "USE_GLOBAL_NODE", False)
-    monkeypatch.setattr(
-        pyright_node,
-        "_install_node_env",
-        lambda: pytest.fail("viewer-state harness must use preinstalled nodejs wheel"),
-    )
-    result = pyright_node.run(
-        "node",
-        str(harness),
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=10,
-    )
+    result = run_node_harness(harness)
 
     assert result.returncode == 0, result.stdout + result.stderr
     summary = json.loads(result.stdout.strip().splitlines()[-1])

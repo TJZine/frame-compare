@@ -6,30 +6,14 @@ import json
 from pathlib import Path
 
 import pytest
-from pyright import node as pyright_node
+
+from .node_harness import run_node_harness
 
 
 @pytest.mark.unit
-def test_lens_harness_proves_mapping_behavior_comparison_and_storage(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_lens_harness_proves_mapping_behavior_comparison_and_storage() -> None:
     harness = Path(__file__).with_name("lens_harness.js")
-
-    monkeypatch.setattr(pyright_node, "USE_NODEJS_WHEEL", True)
-    monkeypatch.setattr(pyright_node, "USE_GLOBAL_NODE", False)
-    monkeypatch.setattr(
-        pyright_node,
-        "_install_node_env",
-        lambda: pytest.fail("lens harness must use preinstalled nodejs wheel"),
-    )
-    result = pyright_node.run(
-        "node",
-        str(harness),
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=10,
-    )
+    result = run_node_harness(harness)
 
     assert result.returncode == 0, result.stdout + result.stderr
     summary = json.loads(result.stdout.strip().splitlines()[-1])
@@ -50,6 +34,10 @@ def test_lens_harness_proves_mapping_behavior_comparison_and_storage(
         "touchLayoutRefreshStable": True,
         "focusedDisableRestoresToggle": True,
         "programmaticDisablePreservesFocus": True,
+        "clearTransientRestoresVisibleFocus": True,
+        "clearTransientClosesPopover": True,
+        "clearTransientPreservesExternalFocus": True,
+        "clearTransientPreservesPaletteFocus": True,
         "cloneFailuresAreSourceMatched": True,
         "detachedLoadersAreIsolated": True,
         "detachedLoaderHandlersCleaned": True,

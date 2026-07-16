@@ -1142,6 +1142,13 @@ const Lens = (() => {
         }
 
         function clearTransient() {
+            const activeElement = document.activeElement;
+            const restoreToggleFocus = Boolean(
+                dom.lens?.contains?.(activeElement)
+                || dom.popover?.contains?.(activeElement)
+            );
+            closeSettings({ restoreFocus: false });
+            if (restoreToggleFocus) dom.toggle?.focus?.();
             state.point = null;
             state.activeClipIdx = null;
             state.activeImage = null;
