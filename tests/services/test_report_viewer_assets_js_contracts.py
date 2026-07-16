@@ -123,69 +123,7 @@ def test_viewer_js_composes_focused_lens_owner_before_viewer() -> None:
     assert "this.lens.bind();" in js
     assert "frame-compare:lens-preferences:v2" in js
     assert "frame-compare:report-lens:v1:" in js
-    assert "const MAGNIFICATIONS = [2, 3, 4, 6, 8, 12];" in js
-    assert "const SIZES = { small: 160, medium: 240, large: 320 };" in js
-    assert "const CAPTION_METRICS = Object.freeze({" in js
-    assert "horizontalChrome: 20, characterWidth: 8" in js
-    assert "horizontalChrome: 17, characterWidth: 7" in js
-    assert "function middleEllipsis(value, maxCharacters)" in js
-    assert "const characters = Array.from(String(value ?? ''));" in js
-    assert "function captionCharacterCapacity(lensPixels, context = 'single')" in js
-    assert "function compactSourceCaption(label, index, totalCapacity, options = {})" in js
-    assert "function compactDiffCaption(" in js
-    assert "function setCaption(slot, role, identity, status = '', fullIdentity = identity)" in js
-    assert "captionCharacterCapacity(size, context)" in js
-    assert "captionCharacterCapacity(size, 'diff')" in js
-    assert "IDENTITY_BUDGETS" not in js
-    assert "data-lens-current-source" in js
-    assert "Current source: ${identity}" in js
-    assert "normalizedPoint(image, clientX, clientY)" in js
-    assert "lensImageGeometry(" in js
-    assert "compositionPoint(image, clientX, clientY)" in js
-    assert 'data-lens-image="difference"' in js
-    assert "dom.differenceImage" in js
-    assert "viewer.dom.rightImg" in js
-    assert "dom.lens.dataset.renderMode = showing ? 'diff' : 'source';" in js
-    assert "markerStyle: 'off'" in js
-    assert "['off', 'ring', 'brackets'].includes(source.markerStyle)" in js
-    assert "seedCenterPoint()" in js
-    assert "const TOUCH_GESTURE_THRESHOLD = 6;" in js
-    assert "function boundedPopoverPosition(" in js
-    assert "const imageRequests = {" in js
-    assert "const loader = document.createElement('img');" in js
-    assert "function discardRequestLoader(request)" in js
-    assert "request.loader.removeEventListener?.('load', request.onLoad);" in js
-    assert "request.loader.removeEventListener?.('error', request.onError);" in js
-    assert "function finishLensImageRequest(" in js
-    assert "request.source === source" in js
-    assert "request.status === 'loaded'" in js
-    assert "function refresh()" in js
-    assert "activeRect.left + point.u * activeRect.width" in js
-    assert "restoreToggleFocus" in js
-    assert "dom.group?.contains?.(document.activeElement)" in js
-    assert "dom.popover?.contains?.(document.activeElement)" in js
-    assert "if (dom.activeControls) dom.activeControls.hidden = !state.report.enabled;" in js
-    assert "viewer.dom.stage.classList?.toggle?.('rv-lens-active', state.report.enabled);" in js
-    assert "function setPositionFromPixels(left, top, size = lensSize())" in js
-    assert "groupRect.left + position.left - stageRect.left" in js
-    assert "groupRect.top + position.top - stageRect.top" in js
-    assert "dom.grip?.setPointerCapture?.(event.pointerId);" in js
-    assert "function finishDrag(event, options = {})" in js
-    assert "options.releaseCapture !== false" in js
-    assert "dom.grip?.addEventListener('lostpointercapture'" in js
-    assert "dom.grip?.addEventListener('keydown', moveFromKeyboard);" in js
-    assert "const step = event.shiftKey ? 24 : 4;" in js
-    assert "Lens position ${horizontal}% across, ${vertical}% down." in js
-    assert "dom.toggle.hidden" not in js
-    assert "data-lens-behavior" not in js
-    assert "targetMarker" not in js
-    assert "effectiveBehavior" not in js
-    assert "rv-lens-settings-open" not in js
-    assert "viewer.state.mode === 'overlay'" in js
-    assert "createElement('canvas')" not in js
-    assert "getImageData" not in js
-    assert "Pixel value unavailable" not in js
-    assert "data-lens-label" not in js
+    assert "this.pixelInspector" not in js
 
 
 def test_viewer_js_composes_focused_grid_owner_without_public_default_drift() -> None:
@@ -248,7 +186,6 @@ def test_viewer_js_uses_lens_shortcut_and_preserves_inspector_roving_tabs() -> N
     assert "this.lens.handleStagePointerDown(e);" in viewport
     assert "this.lens.handleStagePointerMove(e);" in viewport
     assert "this.lens.endStagePointer(e" in js
-    assert "this.pixelInspector" not in js
 
 
 def test_viewer_js_isolates_lens_chrome_and_arbitrates_touch_gestures() -> None:

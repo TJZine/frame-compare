@@ -588,6 +588,11 @@ def test_build_html_renders_lens_stage_controls(
         lens, tag="span", attr_name="data-lens-role", attr_value="comparison"
     )
     assert comparison_role.text == "COMPARE"
+    comparison_status = require_first(
+        lens, tag="span", attr_name="data-lens-status", attr_value="comparison"
+    )
+    assert "hidden" in comparison_status.attrs
+    assert comparison_status.text == ""
     assert require_first(lens, tag="span", attr_name="data-lens-identity", attr_value="comparison")
     grip = require_first(lens, tag="button", attr_name="data-lens-drag-handle")
     assert grip.attrs["aria-label"] == "Move lens window"

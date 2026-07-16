@@ -491,10 +491,6 @@ const Lens = (() => {
             return true;
         }
 
-        function coarsePointerActive() {
-            return Boolean(window.matchMedia?.('(pointer: coarse)')?.matches);
-        }
-
         function lensSize() {
             const stageRect = viewer.dom.stage.getBoundingClientRect();
             const available = Math.max(1, Math.floor(Math.min(stageRect.width, stageRect.height) - 16));
@@ -1096,18 +1092,16 @@ const Lens = (() => {
 
         function handleStagePointerDown(event) {
             if (!state.report.enabled) return false;
-            if (event.pointerType === 'touch' || coarsePointerActive()) {
-                const entry = entryForPointer(event.clientX, event.clientY);
-                const point = normalizedPoint(entry?.image, event.clientX, event.clientY);
-                if (!entry || !point) return false;
-                state.touchPending = {
-                    pointerId: event.pointerId,
-                    startX: event.clientX,
-                    startY: event.clientY,
-                };
-                return true;
-            }
-            return false;
+            if (event.pointerType !== 'touch') return false;
+            const entry = entryForPointer(event.clientX, event.clientY);
+            const point = normalizedPoint(entry?.image, event.clientX, event.clientY);
+            if (!entry || !point) return false;
+            state.touchPending = {
+                pointerId: event.pointerId,
+                startX: event.clientX,
+                startY: event.clientY,
+            };
+            return true;
         }
 
         function handleStagePointerMove(event) {
@@ -1121,7 +1115,7 @@ const Lens = (() => {
                 state.touchPending = null;
                 return 'released';
             }
-            if (event.pointerType === 'touch' || coarsePointerActive()) return false;
+            if (event.pointerType === 'touch') return false;
             return updatePoint(event);
         }
 

@@ -425,6 +425,32 @@ assert.equal(controller.state.point.v, 2 / 9);
 assert.equal(environment.elements['rv-lens'].style.left, fixedLeft);
 assert.equal(environment.elements['rv-lens'].style.top, fixedTop);
 
+const coarseMouse = makeEnvironment({ coarse: true });
+const coarseMouseController = coarseMouse.Lens.create(coarseMouse.viewer);
+coarseMouseController.bind();
+coarseMouseController.setEnabled(true);
+assert.equal(
+    coarseMouseController.handleStagePointerDown({
+        pointerId: 21,
+        clientX: 300,
+        clientY: 200,
+        pointerType: 'mouse',
+    }),
+    false,
+);
+assert.equal(coarseMouseController.state.touchPending, null);
+assert.equal(
+    coarseMouseController.handleStagePointerMove({
+        pointerId: 21,
+        clientX: 300,
+        clientY: 200,
+        pointerType: 'mouse',
+    }),
+    true,
+);
+assert.equal(coarseMouseController.state.point.u, 0.25);
+assert.equal(coarseMouseController.state.point.v, 2 / 9);
+
 environment.viewer.state.mode = 'diff';
 controller.sync();
 assert.equal(environment.elements['rv-lens'].dataset.renderMode, 'diff');
@@ -855,6 +881,7 @@ console.log(JSON.stringify({
     staleContextReseeds: true,
     immediateActivation: true,
     stablePaletteAndFixedWindow: true,
+    coarsePrimaryMouseTracking: true,
     fixedTouchSampling: true,
     lostPointerCaptureRecovers: true,
     touchDragReleasesWithoutSampling: true,

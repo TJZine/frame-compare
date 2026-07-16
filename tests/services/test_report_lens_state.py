@@ -28,6 +28,7 @@ def test_lens_harness_proves_mapping_behavior_comparison_and_storage() -> None:
         "staleContextReseeds": True,
         "immediateActivation": True,
         "stablePaletteAndFixedWindow": True,
+        "coarsePrimaryMouseTracking": True,
         "fixedTouchSampling": True,
         "lostPointerCaptureRecovers": True,
         "touchDragReleasesWithoutSampling": True,
