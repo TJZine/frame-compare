@@ -162,6 +162,7 @@ def test_viewer_css_uses_projection_brass_as_the_single_interaction_signal() -> 
     assert "color: var(--signal-ink);" in css_block(css, ".rv-control-group button.active")
     assert "color: var(--signal-ink);" in css_block(css, "button.active")
     assert "color: var(--signal-ink);" in css_block(css, ".rv-lens-setting-options button.active")
+    assert "color: var(--text-primary);" in css_block(css, ".rv-filter-chip.active")
     assert "--category-accent: var(--signal);" in css_block(
         css,
         '.rv-filmstrip-accent[data-category="selected"],\n.rv-filmstrip-accent[data-category="Selected"],\n.rv-filter-chip[data-category="selected"],\n.rv-filter-chip[data-category="Selected"]',

@@ -1612,6 +1612,7 @@ select optgroup {
     background: color-mix(in hsl, var(--category-accent) 12%, transparent);
     border-color: var(--category-accent);
     box-shadow: 0 0 8px rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
 }
 
 .rv-category-badge {
