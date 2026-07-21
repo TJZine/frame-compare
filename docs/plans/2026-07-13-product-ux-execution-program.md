@@ -156,6 +156,15 @@ Use the copy/paste session packets in
 companion contains workflow instructions only; this active plan remains the sole
 authority for product behavior, package scope, and stop conditions.
 
+The tracked
+[`2026-07-14-report-interaction-design-contract.md`](2026-07-14-report-interaction-design-contract.md)
+is a supporting reference incorporated by this active plan for Units 8–11. Its
+maintainer-approved amendments control their scoped report-interaction decisions
+through this incorporation; the file does not activate a second plan or override
+unrelated program scope and stop conditions. Keep it in reference context while
+these units depend on it. When this program closes, mark the supporting document
+historical or move it to historical/reference context in the same pass.
+
 ### Authorized persistent-controller mode
 
 The maintainer authorized a single persistent main controller to execute this

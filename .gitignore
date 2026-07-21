@@ -38,6 +38,8 @@ CODEX.md
 **/generated/vspreview_sessions/
 .desloppify/
 .agents/skills/desloppify/
+/scorecard.png
+/docker-build.log
 
 
 # FC2 app-server runtime (ephemeral)

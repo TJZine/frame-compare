@@ -2,6 +2,19 @@
 
 This document describes the present-day Frame Compare codebase. It is intentionally about what exists now, not desired future structure.
 
+## Contents
+
+- [Operating Stance](#operating-stance)
+- [Composition Roots](#composition-roots)
+- [Runtime Flow](#runtime-flow)
+- [Module Boundaries](#module-boundaries)
+- [Persistence And Filesystem Owners](#persistence-and-filesystem-owners)
+- [External Boundaries](#external-boundaries)
+- [Public Boundaries](#public-boundaries)
+- [Current Hotspots](#current-hotspots)
+- [Working Rules That Follow From The Codebase](#working-rules-that-follow-from-the-codebase)
+- [Unknowns And Maintainer Decisions Still Open](#unknowns-and-maintainer-decisions-still-open)
+
 ## Operating Stance
 
 Frame Compare is a CLI-first packaged Python app with importable internal modules. The CLI and release artifacts are the primary supported surfaces.
@@ -465,6 +478,8 @@ discovery and source-selection policy without importing media runtime code.
 redacted schema validation for preserving an existing wizard-edited document; atomic
 replacement remains owned by `frame_compare.utils.atomic_write`.
 
+### Report Viewer
+
 `frame_compare.services.report` owns the static offline report payload and viewer
 assets. The generated viewer exposes slider, internal overlay mode presented to
 users as Single where appropriate, diff, and pair-based blink modes; frame/category
@@ -472,7 +487,11 @@ navigation; a HUD toggle for stage labels and current-frame metadata; a primary
 toolbar plus floating viewport palette; a collapsible, compact/normal/large
 filmstrip bottom panel; an inspector drawer with Frame, Clips, Align, Review, and
 Export tabs; fullscreen support; viewport pan, zoom, actual/width/height fit, reveal,
-and adjacent-frame preloading. `assets/lens.js` is the focused owner for the optional
+and adjacent-frame preloading.
+
+#### Lens
+
+`assets/lens.js` is the focused owner for the optional
 floating image lens: normalized per-source mapping, fixed-window placement, dedicated
 edge-grip dragging, pending touch tap-versus-viewport-gesture ownership,
 160/240/320px sizing, 2x/3x/4x/6x/8x/12x magnification, Off/Ring/Brackets sample
@@ -500,6 +519,9 @@ with request tokens retained as defense in depth. Stale load/error callbacks can
 revive superseded content, same-source failures do not retry continuously, and
 unavailable content remains visibly honest. It magnifies existing image elements
 without canvas decoding or pixel-value claims.
+
+#### Grid
+
 `assets/grid_view.js` owns the viewer-only Grid
 cell lifecycle: deterministic responsive 2/3/4 layouts, payload-order pages of at
 most four images (one below the mobile reflow boundary), loading/missing/retry
@@ -509,6 +531,9 @@ Grid mode the shared pan fields represent normalized image-box translation and e
 cell derives its CSS-pixel transform from its own contained image dimensions; the
 viewer converts those fields at the Grid/pair-mode boundary so mixed-aspect cells keep
 one normalized viewport center without changing pair-mode persistence semantics.
+
+#### Review State And Viewer Composition
+
 `assets/review_state.js` owns the exact report-scoped local review schema, bounded
 bookmark/tag/note/preferred-clip records, fail-closed localStorage reads, deterministic
 V1 JSON export, strict import validation and preview, atomic merge/replace apply, and
@@ -524,7 +549,11 @@ coordinate conversions
 or grid mount policy. Grid remains outside the public report default-mode payload
 enum and does not preload adjacent grid pages. Blink mode supports 0.3s/0.7s/1.2s speeds,
 pause/resume, keyboard speed controls, and reduced-motion handling that enters Blink
-paused. Browser-local
+paused.
+
+#### Browser-Local State
+
+Browser-local
 viewer state is scoped by report identity and persists current frame, view mode,
 clip selection, viewport/zoom/reveal, pair alignments, HUD visibility, filmstrip
 collapsed/size, inspector open/tab, and blink speed. Lens preferences use a separate

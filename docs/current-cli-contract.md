@@ -3,6 +3,28 @@
 This document describes the present-day user-facing CLI contract for Frame Compare.
 It is intentionally about current behavior, not desired future behavior.
 
+## Contents
+
+- [Operating Stance](#operating-stance)
+- [Authority And Update Rules](#authority-and-update-rules)
+- [Command Surface](#command-surface)
+- [Shared Path Resolution Rules](#shared-path-resolution-rules)
+- [Config-Only Sources Surface](#config-only-sources-surface)
+- [`history` Command Contract](#history-command-contract)
+- [`version` Command Contract](#version-command-contract)
+- [`run` Command Contract](#run-command-contract)
+- [CLI Flag To Config Mapping](#cli-flag-to-config-mapping)
+- [Config-Only Analysis Surface](#config-only-analysis-surface)
+- [Config-Only slow.pics Surface](#config-only-slowpics-surface)
+- [VSPreview Interactive Diagnostics](#vspreview-interactive-diagnostics)
+- [Config-Only Screenshot Surface](#config-only-screenshot-surface)
+- [Config Validation, Logging, And Migration](#config-validation-logging-and-migration)
+- [Config-Only Audio Alignment Surface](#config-only-audio-alignment-surface)
+- [Persistence Rules](#persistence-rules)
+- [`wizard` Command Contract](#wizard-command-contract)
+- [`doctor` Command Contract](#doctor-command-contract)
+- [`preset` Command Contract](#preset-command-contract)
+
 ## Operating Stance
 
 Frame Compare is a CLI-first packaged Python app. Command names, flags, exit behavior,

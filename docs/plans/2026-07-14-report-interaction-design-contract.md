@@ -1,16 +1,19 @@
-Status: Approved Unit 7 design contract / Unit 8 integrated / Lens v2 amendment approved 2026-07-15
+Status: Reference — incorporated by the active Product and UX execution program
 Scope: Generated-report interaction decisions consumed by Product/UX Units 8–11
 Owner: Frame Compare maintainer and the active Product/UX execution program
+Lifecycle: Keep in reference context while Units 8–11 depend on it; mark Historical or move to historical/reference context when the active program closes
 
 # Report interaction design contract
 
 ## Controlling maintainer-approved Lens v2 amendment — 2026-07-15
 
-This amendment is the current authority for the local report lens. The maintainer
-explicitly approved it through the 2026-07-15 report-viewer task. It supersedes every
-contradictory **Frozen** or implementation instruction elsewhere in this document,
-the active execution program, and the Unit 8 handoff. Earlier text remains only as a
-historical record of the implementation integrated at `d24f094`.
+This amendment is the current incorporated design reference for the local report
+lens. The maintainer explicitly approved it through the 2026-07-15 report-viewer
+task, and the active Product and UX execution program incorporates it for the scoped
+report-interaction decisions. It supersedes every contradictory **Frozen** or
+implementation instruction elsewhere in this document and the Unit 8 handoff.
+Earlier text remains only as a historical record of the implementation integrated
+at `d24f094`.
 
 The following behavior is removed and must not be reintroduced without a new explicit
 maintainer decision: the Pixel inspector tab; `Inspect` button; `M` shortcut; public
