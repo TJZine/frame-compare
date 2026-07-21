@@ -595,16 +595,32 @@ opened. If it is not opened, the CLI prints the report path before prompting.
 ### slow.pics Webhook Policy
 
 - Webhook delivery is owned by `frame_compare.services.slowpics_webhook`.
-- The payload is exactly `{"content":"<slowpics_url>"}` serialized as JSON.
+- The payload is exactly `{"content":"<slowpics_url>"}` serialized as JSON. This
+  is the Discord incoming-webhook shape; an arbitrary endpoint must explicitly
+  accept that same contract. Frame Compare does not infer providers or maintain
+  provider-specific payload adapters.
+- The request identifies Frame Compare with a versioned `User-Agent` compatible
+  with Discord's HTTP API requirements.
 - The configured webhook URL must be a strict external HTTPS endpoint:
   non-HTTPS URLs, localhost names, loopback, private, link-local, multicast,
   reserved, unspecified, and otherwise non-public IP targets are rejected.
+  URL fragments are rejected because fragments are not transmitted in HTTP
+  requests.
 - Hostname targets are rejected when DNS resolution fails, returns no addresses,
   includes an unparseable address, or includes any disallowed address.
 - Delivery prevents validation-to-connect DNS rebinding by connecting to a
   prevalidated pinned IP address while preserving TLS certificate verification
   and SNI for the original hostname.
-- Delivery uses no redirects, a fixed 10 second timeout, and 3 attempts.
+- Delivery uses no redirects, a fixed 10 second absolute deadline per attempt,
+  and at most 3 attempts. Pre-send connection and transient TLS transport
+  failures plus 5xx responses use deterministic 1-second then 2-second backoff.
+  TLS certificate-verification failures are permanent and fail immediately.
+- HTTP 429 is retried only when the endpoint returns a valid numeric
+  `Retry-After` of at most 10 seconds. Missing, invalid, or longer delays fail
+  warning-only instead of blocking the run beyond the webhook delivery budget.
+- Once request transmission begins, a transport or response failure is treated
+  as an unknown delivery outcome and is not retried, because another POST could
+  create a duplicate notification.
 - The webhook request path is isolated from the slow.pics upload client: it does
   not reuse slow.pics cookies, headers, client state, redirect policy, proxy
   settings, or environment trust.
@@ -783,6 +799,11 @@ attempted, generated-report auto-open is suppressed for that run.
 `create_url_shortcut` and `webhook_url` run after successful upload whenever
 configured, including `--json` and `--quiet`. Their warning-only failures remain
 off JSON stdout and do not fail the run.
+
+`webhook_url` is trimmed during config validation and a blank value is treated
+as disabled. Webhook URLs normally contain a secret token. Prefer the
+`FRAME_COMPARE_SLOWPICS__WEBHOOK_URL` environment variable for unattended or
+shared workspaces, and do not commit a live webhook URL to version control.
 
 The JSON output schema remains unchanged by report-confirmed upload:
 `slowpics_url` is still the only machine-readable slow.pics result field.

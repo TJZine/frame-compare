@@ -283,6 +283,14 @@ class SlowpicsConfig(BaseModel):
     create_url_shortcut: bool = True
     webhook_url: str | None = None
 
+    @field_validator("webhook_url", mode="before")
+    @classmethod
+    def normalize_webhook_url(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip()
+        return normalized or None
+
     @field_validator("title", "title_template", "title_suffix")
     @classmethod
     def validate_title_text(cls, value: str, info: ValidationInfo) -> str:

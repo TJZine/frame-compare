@@ -181,7 +181,7 @@ async def test_run_slowpics_post_upload_actions_logs_shortcut_warning(
 async def test_run_slowpics_post_upload_actions_webhook_failure_is_warning_only_and_redacted(
     tmp_path: Path, monkeypatch
 ) -> None:
-    warning = "slow.pics webhook: delivery failed after 3 attempts"
+    warning = "slow.pics webhook: delivery failed"
     warning_calls: list[tuple[str, dict[str, object]]] = []
 
     async def _fake_deliver_slowpics_webhook(

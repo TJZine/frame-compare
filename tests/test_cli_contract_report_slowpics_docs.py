@@ -237,10 +237,17 @@ def test_current_cli_contract_documents_slowpics_post_upload_behavior() -> None:
     for expected in (
         "`frame_compare.services.slowpics_webhook`",
         'payload is exactly `{"content":"<slowpics_url>"}`',
+        "Discord incoming-webhook shape",
+        "versioned `User-Agent`",
         "strict external HTTPS endpoint",
         "prevalidated pinned IP address",
         "does not reuse slow.pics cookies, headers, client state",
-        "fixed 10 second timeout, and 3 attempts",
+        "fixed 10 second absolute deadline per attempt",
+        "at most 3 attempts",
+        "deterministic 1-second then 2-second backoff",
+        "TLS certificate-verification failures are permanent",
+        "valid numeric `Retry-After` of at most 10 seconds",
+        "unknown delivery outcome and is not retried",
         "redacted from warnings and logs",
         "Delivery failures are warning-only",
     ):

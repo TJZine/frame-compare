@@ -216,6 +216,25 @@ for the full behavior and the
 [benchmark history](docs/analysis-benchmark-history.md) for hardware-dependent
 evidence.
 
+### Webhook Notifications
+
+After a successful slow.pics upload, Frame Compare can post the comparison URL
+to a Discord-compatible incoming webhook. The webhook URL contains a secret, so
+prefer an environment variable instead of committing it to `config.toml`:
+
+```bash
+export FRAME_COMPARE_SLOWPICS__AUTO_UPLOAD=true
+export FRAME_COMPARE_SLOWPICS__WEBHOOK_URL="https://discord.com/api/webhooks/WEBHOOK_ID/WEBHOOK_TOKEN"
+frame-compare run --root .
+```
+
+The payload is `{"content":"<slowpics_url>"}`. Delivery requires an external
+HTTPS endpoint, follows no redirects, and remains warning-only if notification
+delivery fails. Other webhook providers must accept that payload shape; Frame
+Compare does not guess the provider from a secret URL. See the
+[webhook contract](docs/current-cli-contract.md#slowpics-webhook-policy) for the
+security and retry policy.
+
 ### Reports
 
 | Aspect | Detail |

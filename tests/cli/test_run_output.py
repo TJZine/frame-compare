@@ -102,7 +102,7 @@ def test_run_quiet_suppresses_at_a_glance_but_keeps_minimal_summary(
 def test_run_json_is_machine_only_and_omits_post_upload_actions(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    warning = "slow.pics webhook: delivery failed after 3 attempts"
+    warning = "slow.pics webhook: delivery failed"
 
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         return RunResult(

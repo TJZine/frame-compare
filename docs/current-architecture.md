@@ -438,6 +438,11 @@ targets, rejects disallowed IP literals and DNS answers, connects to a
 prevalidated pinned address while preserving TLS verification for the original
 hostname, sends the JSON `content` payload without redirects, and does not reuse
 slow.pics client cookies, headers, proxy/environment trust, or transport state.
+It identifies the versioned client, applies an absolute per-attempt deadline and
+bounded pre-send/5xx backoff, fails permanent certificate-verification errors,
+honors only short valid `Retry-After` rate-limit delays, and does not retry after
+request transmission when the delivery outcome is unknown so it does not knowingly
+create duplicate notifications.
 Webhook failures are warning-only and redact configured URL details.
 
 `frame_compare.cli.entry` and its run-command helper own interactive-only

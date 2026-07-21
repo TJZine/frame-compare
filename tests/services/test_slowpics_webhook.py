@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ssl
 from collections.abc import Callable
 
 import pytest
@@ -8,20 +9,29 @@ from frame_compare.services.slowpics_webhook import (
     WEBHOOK_ATTEMPTS,
     WEBHOOK_CONTENT_TYPE,
     WEBHOOK_FAILURE_WARNING,
+    WEBHOOK_MAX_RETRY_AFTER_SECONDS,
+    WEBHOOK_RETRY_BASE_DELAY_SECONDS,
     WEBHOOK_TIMEOUT_SECONDS,
+    WEBHOOK_USER_AGENT,
     WEBHOOK_VALIDATION_WARNING,
     SlowpicsWebhookResult,
     WebhookDeliveryRequest,
+    WebhookDeliveryUncertainError,
     WebhookResponse,
     deliver_slowpics_webhook,
     send_pinned_https_webhook_request,
 )
 
 type Resolver = Callable[[str, int], tuple[str, ...]]
+type Sleeper = Callable[[float], None]
 
 
 def _public_resolver(_hostname: str, _port: int) -> tuple[str, ...]:
     return ("93.184.216.34",)
+
+
+def _no_sleep(_delay_seconds: float) -> None:
+    return
 
 
 async def _deliver(
@@ -29,12 +39,14 @@ async def _deliver(
     *,
     resolver: Resolver = _public_resolver,
     connector: Callable[[WebhookDeliveryRequest], WebhookResponse],
+    sleeper: Sleeper = _no_sleep,
 ) -> SlowpicsWebhookResult:
     return await deliver_slowpics_webhook(
         webhook_url=webhook_url,
         slowpics_url="https://slow.pics/c/example",
         resolver=resolver,
         connector=connector,
+        sleeper=sleeper,
     )
 
 
@@ -48,6 +60,7 @@ def _unexpected_connector(_request: WebhookDeliveryRequest) -> WebhookResponse:
         "http://hooks.example.test/path",
         "https://localhost/path",
         "https://worker.localhost/path",
+        "https://hooks.example.test/path#secret-token",
     ],
 )
 async def test_rejects_non_https_and_localhost_names(url: str) -> None:
@@ -192,6 +205,7 @@ async def test_delivery_connects_to_resolved_ip_preserving_hostname_sni_and_host
     assert request.body == b'{"content":"https://slow.pics/c/example"}'
     assert dict(request.headers) == {
         "Host": "hooks.example.test:8443",
+        "User-Agent": WEBHOOK_USER_AGENT,
         "Content-Type": WEBHOOK_CONTENT_TYPE,
         "Content-Length": str(len(request.body)),
         "Connection": "close",
@@ -269,22 +283,25 @@ async def test_redirect_response_is_failure_without_followup_request() -> None:
 
 @pytest.mark.parametrize(
     "failure",
-    ["timeout", "connection", "server"],
+    ["connection", "server"],
 )
-async def test_retryable_timeout_connection_and_server_failures_attempt_three_times(
+async def test_retryable_connection_and_server_failures_use_bounded_backoff(
     failure: str,
 ) -> None:
     calls: list[WebhookDeliveryRequest] = []
+    sleep_calls: list[float] = []
 
     def _connector(request: WebhookDeliveryRequest) -> WebhookResponse:
         calls.append(request)
-        if failure == "timeout":
-            raise TimeoutError("timed out")
         if failure == "connection":
             raise OSError("connection failed")
         return WebhookResponse(status_code=503)
 
-    result = await _deliver("https://hooks.example.test/path", connector=_connector)
+    result = await _deliver(
+        "https://hooks.example.test/path",
+        connector=_connector,
+        sleeper=sleep_calls.append,
+    )
 
     assert result.success is False
     assert result.warning is not None
@@ -294,6 +311,77 @@ async def test_retryable_timeout_connection_and_server_failures_attempt_three_ti
         WEBHOOK_TIMEOUT_SECONDS,
         WEBHOOK_TIMEOUT_SECONDS,
     ]
+    assert sleep_calls == [
+        WEBHOOK_RETRY_BASE_DELAY_SECONDS,
+        WEBHOOK_RETRY_BASE_DELAY_SECONDS * 2,
+    ]
+
+
+async def test_delivery_unknown_after_request_send_is_not_retried() -> None:
+    calls = 0
+
+    def _connector(_request: WebhookDeliveryRequest) -> WebhookResponse:
+        nonlocal calls
+        calls += 1
+        raise WebhookDeliveryUncertainError("response timed out after request send")
+
+    result = await _deliver("https://hooks.example.test/path", connector=_connector)
+
+    assert result == SlowpicsWebhookResult(success=False, warning=WEBHOOK_FAILURE_WARNING)
+    assert calls == 1
+
+
+async def test_certificate_verification_failure_is_not_retried() -> None:
+    calls = 0
+
+    def _connector(_request: WebhookDeliveryRequest) -> WebhookResponse:
+        nonlocal calls
+        calls += 1
+        raise ssl.SSLCertVerificationError("certificate verification failed")
+
+    result = await _deliver("https://hooks.example.test/path", connector=_connector)
+
+    assert result == SlowpicsWebhookResult(success=False, warning=WEBHOOK_FAILURE_WARNING)
+    assert calls == 1
+
+
+async def test_rate_limit_retries_after_short_server_delay() -> None:
+    calls = 0
+    sleep_calls: list[float] = []
+
+    def _connector(_request: WebhookDeliveryRequest) -> WebhookResponse:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return WebhookResponse(status_code=429, retry_after_seconds=2.5)
+        return WebhookResponse(status_code=204)
+
+    result = await _deliver(
+        "https://hooks.example.test/path",
+        connector=_connector,
+        sleeper=sleep_calls.append,
+    )
+
+    assert result == SlowpicsWebhookResult(success=True, detail="HTTP 204")
+    assert calls == 2
+    assert sleep_calls == [2.5]
+
+
+@pytest.mark.parametrize("retry_after", [None, WEBHOOK_MAX_RETRY_AFTER_SECONDS + 0.1])
+async def test_rate_limit_without_usable_bounded_delay_is_not_retried(
+    retry_after: float | None,
+) -> None:
+    calls = 0
+
+    def _connector(_request: WebhookDeliveryRequest) -> WebhookResponse:
+        nonlocal calls
+        calls += 1
+        return WebhookResponse(status_code=429, retry_after_seconds=retry_after)
+
+    result = await _deliver("https://hooks.example.test/path", connector=_connector)
+
+    assert result == SlowpicsWebhookResult(success=False, warning=WEBHOOK_FAILURE_WARNING)
+    assert calls == 1
 
 
 async def test_retryable_failures_rotate_across_validated_addresses() -> None:
@@ -336,3 +424,166 @@ async def test_warnings_redact_configured_webhook_url_details() -> None:
     assert "webhook" in result.warning
     assert "/webhook/token" not in result.warning
     assert "secret=value" not in result.warning
+
+
+def test_pinned_transport_parses_retry_after_and_preserves_sni(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent: list[bytes] = []
+    connected: list[tuple[str, int]] = []
+    server_names: list[str] = []
+
+    class FakeSocket:
+        def __init__(self, _family: int, _socket_type: int) -> None:
+            return
+
+        def settimeout(self, _timeout: float) -> None:
+            return
+
+        def connect(self, address: tuple[str, int]) -> None:
+            connected.append(address)
+
+        def close(self) -> None:
+            return
+
+    class FakeTlsSocket:
+        def __init__(self) -> None:
+            self._response = bytearray(
+                b"HTTP/1.1 429 Too Many Requests\r\n"
+                b"Content-Type: application/json\r\n"
+                b"Retry-After: 2.5\r\n\r\n"
+            )
+
+        def __enter__(self) -> FakeTlsSocket:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return
+
+        def settimeout(self, _timeout: float) -> None:
+            return
+
+        def sendall(self, request_bytes: bytes) -> None:
+            sent.append(request_bytes)
+
+        def recv(self, bufsize: int) -> bytes:
+            chunk = bytes(self._response[:bufsize])
+            del self._response[:bufsize]
+            return chunk
+
+    class FakeContext:
+        def wrap_socket(
+            self,
+            _socket: FakeSocket,
+            *,
+            server_hostname: str,
+        ) -> FakeTlsSocket:
+            server_names.append(server_hostname)
+            return FakeTlsSocket()
+
+    monkeypatch.setattr("frame_compare.services.slowpics_webhook.socket.socket", FakeSocket)
+    monkeypatch.setattr(
+        "frame_compare.services.slowpics_webhook.ssl.create_default_context",
+        FakeContext,
+    )
+    request = WebhookDeliveryRequest(
+        hostname="hooks.example.test",
+        port=443,
+        resolved_ip="93.184.216.34",
+        host_header="hooks.example.test",
+        target="/webhook/token",
+        headers=(("Host", "hooks.example.test"), ("User-Agent", WEBHOOK_USER_AGENT)),
+        body=b"{}",
+        timeout_seconds=WEBHOOK_TIMEOUT_SECONDS,
+    )
+
+    response = send_pinned_https_webhook_request(request)
+
+    assert response == WebhookResponse(status_code=429, retry_after_seconds=2.5)
+    assert connected == [("93.184.216.34", 443)]
+    assert server_names == ["hooks.example.test"]
+    assert sent == [
+        b"POST /webhook/token HTTP/1.1\r\n"
+        b"Host: hooks.example.test\r\n"
+        + f"User-Agent: {WEBHOOK_USER_AGENT}\r\n\r\n".encode("ascii")
+        + b"{}"
+    ]
+
+
+def test_pinned_transport_enforces_absolute_response_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = [0.0]
+    sent = 0
+    recv_calls = 0
+
+    class FakeSocket:
+        def __init__(self, _family: int, _socket_type: int) -> None:
+            return
+
+        def settimeout(self, _timeout: float) -> None:
+            return
+
+        def connect(self, _address: tuple[str, int]) -> None:
+            return
+
+        def close(self) -> None:
+            return
+
+    class FakeTlsSocket:
+        def __init__(self) -> None:
+            self._response = bytearray(b"HTTP/1.1 204 No Content\r\n\r\n")
+
+        def __enter__(self) -> FakeTlsSocket:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return
+
+        def settimeout(self, _timeout: float) -> None:
+            return
+
+        def sendall(self, _request_bytes: bytes) -> None:
+            nonlocal sent
+            sent += 1
+
+        def recv(self, _bufsize: int) -> bytes:
+            nonlocal recv_calls
+            recv_calls += 1
+            clock[0] += 4.0
+            if not self._response:
+                return b""
+            return bytes((self._response.pop(0),))
+
+    class FakeContext:
+        def wrap_socket(
+            self,
+            _socket: FakeSocket,
+            *,
+            server_hostname: str,
+        ) -> FakeTlsSocket:
+            assert server_hostname == "hooks.example.test"
+            return FakeTlsSocket()
+
+    monkeypatch.setattr("frame_compare.services.slowpics_webhook.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr("frame_compare.services.slowpics_webhook.socket.socket", FakeSocket)
+    monkeypatch.setattr(
+        "frame_compare.services.slowpics_webhook.ssl.create_default_context",
+        FakeContext,
+    )
+    request = WebhookDeliveryRequest(
+        hostname="hooks.example.test",
+        port=443,
+        resolved_ip="93.184.216.34",
+        host_header="hooks.example.test",
+        target="/webhook/token",
+        headers=(("Host", "hooks.example.test"),),
+        body=b"{}",
+        timeout_seconds=WEBHOOK_TIMEOUT_SECONDS,
+    )
+
+    with pytest.raises(WebhookDeliveryUncertainError):
+        send_pinned_https_webhook_request(request)
+
+    assert sent == 1
+    assert recv_calls == 3

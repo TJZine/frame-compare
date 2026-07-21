@@ -239,7 +239,7 @@ def test_execute_run_webhook_action_warning_is_warning_only(
     config = ConfigSchema()
     config.slowpics.auto_upload = True
     config.report.enable = False
-    webhook_warning = "slow.pics webhook: delivery failed after 3 attempts"
+    webhook_warning = "slow.pics webhook: delivery failed"
     render = RenderArtifacts(
         screenshots_by_label={"Reference": [tmp_path / "screenshots" / "planned.png"]},
         screenshot_dir=tmp_path / "screenshots",

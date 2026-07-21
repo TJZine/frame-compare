@@ -373,6 +373,14 @@ def test_slowpics_config_public_surface_is_frozen_to_approved_fields_and_default
     assert get_default_config().slowpics.model_dump(mode="json") == expected_defaults
 
 
+def test_slowpics_webhook_url_trims_values_and_treats_blank_as_disabled() -> None:
+    assert SlowpicsConfig(webhook_url="  ").webhook_url is None
+    assert (
+        SlowpicsConfig(webhook_url="  https://discord.com/api/webhooks/id/token  ").webhook_url
+        == "https://discord.com/api/webhooks/id/token"
+    )
+
+
 def test_sources_config_defaults_and_override_schema() -> None:
     config = SourcesConfig(
         reference="00-reference.mkv",
@@ -557,7 +565,10 @@ def test_default_config_toml_documents_approved_slowpics_defaults() -> None:
         "open_in_browser": True,
         "create_url_shortcut": True,
     }
-    assert "# webhook_url = null" in DEFAULT_CONFIG_TOML
+    assert (
+        '# webhook_url = "https://discord.com/api/webhooks/WEBHOOK_ID/WEBHOOK_TOKEN"'
+        in DEFAULT_CONFIG_TOML
+    )
 
 
 def test_schema_model_enums_accept_config_strings_and_reject_unknown_values() -> None:
