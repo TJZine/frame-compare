@@ -11,6 +11,7 @@ from frame_compare.services.slowpics_shortcut import SlowpicsShortcutResult
 from frame_compare.services.slowpics_webhook import (
     WEBHOOK_VALIDATION_WARNING,
     SlowpicsWebhookResult,
+    WebhookFailureKind,
 )
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.types import WorkspacePaths
@@ -191,7 +192,12 @@ async def test_run_slowpics_post_upload_actions_webhook_failure_is_warning_only_
     ) -> SlowpicsWebhookResult:
         assert webhook_url == "https://secret.example.test/webhook/token?secret=value"
         assert slowpics_url == "https://slow.pics/c/example"
-        return SlowpicsWebhookResult(success=False, warning=warning)
+        return SlowpicsWebhookResult(
+            success=False,
+            warning=warning,
+            failure_kind=WebhookFailureKind.HTTP_STATUS,
+            status_code=404,
+        )
 
     def _capture_warning(event: str, **kwargs: object) -> None:
         warning_calls.append((event, kwargs))
@@ -215,7 +221,14 @@ async def test_run_slowpics_post_upload_actions_webhook_failure_is_warning_only_
     assert "/webhook/token" not in warning
     assert "secret=value" not in warning
     assert warning_calls == [
-        ("slowpics_webhook_delivery_failed", {"warning": warning}),
+        (
+            "slowpics_webhook_delivery_failed",
+            {
+                "warning": warning,
+                "failure_kind": "http_status",
+                "status_code": 404,
+            },
+        ),
     ]
 
 

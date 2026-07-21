@@ -113,7 +113,7 @@ def test_first_use_multiple_files_uses_canonical_order_and_coverage_patch() -> N
         assert "Metric scan: quality" in result.stdout
 
 
-def test_existing_config_round_trips_raw_types_unknown_tables_empty_and_secrets(
+def test_existing_config_preserves_raw_values_but_strips_webhook_secret(
     monkeypatch: MonkeyPatch,
 ) -> None:
     with runner.isolated_filesystem():
@@ -164,10 +164,13 @@ name = "first"
         assert payload["stamp"] == datetime(2026, 7, 14, 1, 2, 3, tzinfo=UTC)
         assert payload["unknown"] == {"nested": {"empty": ""}, "items": [{"name": "first"}]}
         assert payload["tmdb"]["api_key"] == "sentinel-secret"
+        assert "webhook_url" not in payload["slowpics"]
         assert "environment-only-secret" not in config_path.read_text(encoding="utf-8")
         assert payload["analysis"]["random_seed"] == 99
         assert payload["analysis"]["performance_mode"] == "performance"
-        assert "Sensitive values: preserved and hidden" in result.stdout
+        assert "Publishing settings: preserved except webhook URL" in result.stdout
+        assert "Webhook URL: removed from generated configuration" in result.stdout
+        assert "Other sensitive values: preserved and hidden" in result.stdout
 
 
 def test_existing_config_ignores_environment_only_values_during_review(
@@ -244,6 +247,7 @@ def test_existing_keep_is_true_noop_without_confirmation_or_write(
         config_path.parent.mkdir()
         original = (
             b'[paths]\ninput_dir = "comparison_videos"\n\n[analysis]\nrandom_frame_count = 9\n'
+            b'\n[slowpics]\nwebhook_url = "https://secret.invalid/token"\n'
         )
         config_path.write_bytes(original)
         monkeypatch.setattr(
@@ -538,7 +542,10 @@ def test_writer_serializes_raw_toml_once_and_maps_failure(
 ) -> None:
     destination = tmp_path / "config.toml"
     calls: list[str] = []
-    payload: TomlPayload = {"unknown": {"empty": ""}}
+    payload: TomlPayload = {
+        "unknown": {"empty": ""},
+        "slowpics": {"webhook_url": "https://secret.invalid/token"},
+    }
 
     def _writer(path: Path, content: str, *, encoding: str) -> None:
         assert path == destination
@@ -547,7 +554,8 @@ def test_writer_serializes_raw_toml_once_and_maps_failure(
 
     write_wizard_config_payload(destination, payload, text_writer=_writer)
     assert len(calls) == 1
-    assert tomllib.loads(calls[0]) == payload
+    assert tomllib.loads(calls[0]) == {"unknown": {"empty": ""}, "slowpics": {}}
+    assert payload["slowpics"] == {"webhook_url": "https://secret.invalid/token"}
 
     def _failure(path: Path, content: str, *, encoding: str) -> None:
         del path, content, encoding

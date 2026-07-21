@@ -625,6 +625,9 @@ opened. If it is not opened, the CLI prints the report path before prompting.
   not reuse slow.pics cookies, headers, client state, redirect policy, proxy
   settings, or environment trust.
 - Webhook URL details are redacted from warnings and logs.
+- Failed deliveries carry a typed safe diagnostic category and, for HTTP failures,
+  the numeric response status into structured logs. Diagnostics never include the
+  configured endpoint, request target, query, or response body.
 - Delivery failures are warning-only and do not write to JSON stdout.
 
 ## CLI Flag To Config Mapping
@@ -804,6 +807,12 @@ off JSON stdout and do not fail the run.
 as disabled. Webhook URLs normally contain a secret token. Prefer the
 `FRAME_COMPARE_SLOWPICS__WEBHOOK_URL` environment variable for unattended or
 shared workspaces, and do not commit a live webhook URL to version control.
+Runtime loading continues to accept manually authored TOML values, but generated
+configuration and preset files always omit `webhook_url`. This includes
+`run --write-config`, confirmed `wizard` rewrites, `preset save`, and the rewritten
+config produced by `preset apply`; those operations remove any existing persisted
+webhook URL rather than copying effective environment or file values into generated
+TOML.
 
 The JSON output schema remains unchanged by report-confirmed upload:
 `slowpics_url` is still the only machine-readable slow.pics result field.
@@ -1081,12 +1090,16 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 - Existing TOML is parsed and validated without environment precedence, then used as
   the persistence base. Confirmed partial patches preserve unrelated supported and
   unknown root values, explicit empty values, dates/times, nested tables,
-  arrays-of-tables, and file-resident secrets. Environment-only values are neither
-  displayed nor persisted. Wizard validation errors redact every raw Pydantic input.
+  arrays-of-tables, and file-resident secrets other than `slowpics.webhook_url`.
+  A confirmed wizard rewrite removes that webhook secret through the shared
+  config-persistence policy; a true no-op leaves the original file byte-for-byte.
+  Environment-only values are neither displayed nor persisted. Wizard validation
+  errors redact every raw Pydantic input.
 - Before writing, the wizard validates the complete candidate and shows a semantic
   review containing changed/new input, reference, and frame-selection facts, the
-  metrics-scan consequence, and privacy/preservation statements. It never displays
-  secret values or environment presence.
+  metrics-scan consequence, and privacy/preservation statements, including explicit
+  notice when a persisted webhook URL will be removed. It never displays secret
+  values or environment presence.
 - A no-op exits 0 without confirmation or writing. Final confirmation defaults to No;
   No exits 0 with `Canceled; configuration unchanged.` Ctrl-C, abort, or EOF at any
   prompt emits the same line and exits 130. All cancellation and validation paths

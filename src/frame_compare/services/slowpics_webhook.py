@@ -11,6 +11,7 @@ import ssl
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Protocol
 from urllib.parse import urlparse
 
@@ -46,6 +47,18 @@ class WebhookDeliveryUncertainError(OSError):
     """The request may have reached the endpoint, so retrying could duplicate it."""
 
 
+class WebhookFailureKind(StrEnum):
+    """Safe diagnostic categories for webhook delivery failures."""
+
+    VALIDATION = "validation"
+    DELIVERY_UNCERTAIN = "delivery_uncertain"
+    CERTIFICATE = "certificate"
+    TIMEOUT = "timeout"
+    TRANSPORT = "transport"
+    RATE_LIMITED = "rate_limited"
+    HTTP_STATUS = "http_status"
+
+
 @dataclass(frozen=True)
 class SlowpicsWebhookResult:
     """Result of a post-upload webhook delivery attempt."""
@@ -53,6 +66,8 @@ class SlowpicsWebhookResult:
     success: bool
     detail: str | None = None
     warning: str | None = None
+    failure_kind: WebhookFailureKind | None = None
+    status_code: int | None = None
 
 
 @dataclass(frozen=True)
@@ -177,7 +192,10 @@ def _deliver_slowpics_webhook_sync(
 ) -> SlowpicsWebhookResult:
     target = _validate_webhook_url(webhook_url, resolver)
     if target is None:
-        return SlowpicsWebhookResult(success=False, warning=WEBHOOK_VALIDATION_WARNING)
+        return _failure_result(
+            WebhookFailureKind.VALIDATION,
+            warning=WEBHOOK_VALIDATION_WARNING,
+        )
 
     body = json.dumps({"content": slowpics_url}, separators=(",", ":")).encode("utf-8")
     headers = (
@@ -187,7 +205,6 @@ def _deliver_slowpics_webhook_sync(
         ("Content-Length", str(len(body))),
         ("Connection", "close"),
     )
-    last_status: int | None = None
     for attempt in range(1, WEBHOOK_ATTEMPTS + 1):
         resolved_ip = target.resolved_ips[(attempt - 1) % len(target.resolved_ips)]
         request = WebhookDeliveryRequest(
@@ -203,21 +220,20 @@ def _deliver_slowpics_webhook_sync(
         try:
             response = connector(request)
         except WebhookDeliveryUncertainError:
-            return SlowpicsWebhookResult(success=False, warning=WEBHOOK_FAILURE_WARNING)
+            return _failure_result(WebhookFailureKind.DELIVERY_UNCERTAIN)
         except ssl.SSLCertVerificationError:
-            return SlowpicsWebhookResult(success=False, warning=WEBHOOK_FAILURE_WARNING)
+            return _failure_result(WebhookFailureKind.CERTIFICATE)
         except TimeoutError:
             if attempt == WEBHOOK_ATTEMPTS:
-                return SlowpicsWebhookResult(success=False, warning=WEBHOOK_FAILURE_WARNING)
+                return _failure_result(WebhookFailureKind.TIMEOUT)
             sleeper(_retry_backoff_seconds(attempt))
             continue
         except (OSError, UnicodeError, ValueError):
             if attempt == WEBHOOK_ATTEMPTS:
-                return SlowpicsWebhookResult(success=False, warning=WEBHOOK_FAILURE_WARNING)
+                return _failure_result(WebhookFailureKind.TRANSPORT)
             sleeper(_retry_backoff_seconds(attempt))
             continue
 
-        last_status = response.status_code
         if 200 <= response.status_code <= 299:
             return SlowpicsWebhookResult(success=True, detail=f"HTTP {response.status_code}")
         if response.status_code == 429:
@@ -229,14 +245,33 @@ def _deliver_slowpics_webhook_sync(
             ):
                 sleeper(retry_after)
                 continue
-            return SlowpicsWebhookResult(success=False, warning=WEBHOOK_FAILURE_WARNING)
+            return _failure_result(
+                WebhookFailureKind.RATE_LIMITED,
+                status_code=response.status_code,
+            )
         if 500 <= response.status_code <= 599 and attempt < WEBHOOK_ATTEMPTS:
             sleeper(_retry_backoff_seconds(attempt))
             continue
-        return SlowpicsWebhookResult(success=False, warning=WEBHOOK_FAILURE_WARNING)
+        return _failure_result(
+            WebhookFailureKind.HTTP_STATUS,
+            status_code=response.status_code,
+        )
 
-    detail = f"HTTP {last_status}" if last_status is not None else None
-    return SlowpicsWebhookResult(success=False, detail=detail, warning=WEBHOOK_FAILURE_WARNING)
+    raise AssertionError("Webhook retry loop exhausted without a terminal result")
+
+
+def _failure_result(
+    failure_kind: WebhookFailureKind,
+    *,
+    warning: str = WEBHOOK_FAILURE_WARNING,
+    status_code: int | None = None,
+) -> SlowpicsWebhookResult:
+    return SlowpicsWebhookResult(
+        success=False,
+        warning=warning,
+        failure_kind=failure_kind,
+        status_code=status_code,
+    )
 
 
 def _validate_webhook_url(

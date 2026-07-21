@@ -17,6 +17,7 @@ from frame_compare.config.errors import (
     PresetNameInvalidError,
     PresetNotFoundError,
 )
+from frame_compare.config.persistence import dump_config_for_persistence
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.utils import deep_merge
 from frame_compare.errors import normalize_pydantic_errors
@@ -76,8 +77,7 @@ def save_preset(
 
     preset_path = directory / f"{name}.toml"
 
-    # exclude_none=True: TOML has no null; omitted keys use defaults when loaded
-    data = config.model_dump(mode="json", exclude_none=True)
+    data = dump_config_for_persistence(config)
     toml_text = tomli_w.dumps(data)
     try:
         directory.mkdir(parents=True, exist_ok=True)

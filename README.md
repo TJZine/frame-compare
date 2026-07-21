@@ -228,6 +228,11 @@ export FRAME_COMPARE_SLOWPICS__WEBHOOK_URL="https://discord.com/api/webhooks/WEB
 frame-compare run --root .
 ```
 
+Frame Compare accepts manually authored `webhook_url` TOML values, but generated
+configuration and preset files deliberately omit the secret, including output
+from `run --write-config`, confirmed `wizard` rewrites, `preset save`, and
+`preset apply`.
+
 The payload is `{"content":"<slowpics_url>"}`. Delivery requires an external
 HTTPS endpoint, follows no redirects, and remains warning-only if notification
 delivery fails. Other webhook providers must accept that payload shape; Frame

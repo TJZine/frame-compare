@@ -184,6 +184,10 @@ def test_run_write_config_respects_root_and_config_and_does_not_invoke_runner(
         raise AssertionError("runner.run should not be invoked for --write-config")
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+    monkeypatch.setenv(
+        "FRAME_COMPARE_SLOWPICS__WEBHOOK_URL",
+        "https://discord.com/api/webhooks/env-id/env-secret",
+    )
 
     with runner.isolated_filesystem():
         root = Path("workspace")
@@ -208,6 +212,7 @@ tmdb_id = 42
 tmdb_media_type = "movie"
 remove_after_days = 30
 image_upload_timeout_seconds = 240.0
+webhook_url = "https://discord.com/api/webhooks/file-id/file-secret"
 """,
             encoding="utf-8",
         )
@@ -243,6 +248,10 @@ image_upload_timeout_seconds = 240.0
         assert data["slowpics"]["tmdb_media_type"] == "movie"
         assert data["slowpics"]["remove_after_days"] == 30
         assert data["slowpics"]["image_upload_timeout_seconds"] == 240.0
+        assert "webhook_url" not in data["slowpics"]
+        written_text = config_path.read_text(encoding="utf-8")
+        assert "env-secret" not in written_text
+        assert "file-secret" not in written_text
 
 
 def test_run_write_config_json_preserves_previous_offsets_and_writes_config(

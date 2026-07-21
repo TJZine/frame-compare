@@ -143,6 +143,9 @@ The repo uses filesystem persistence, not a database.
 Primary owned paths:
 
 - `config/config.toml` and `config/presets/*.toml`: config owners
+- `frame_compare.config.persistence`: secret-safe serialization shared by generated
+  config and preset writes; runtime-only `slowpics.webhook_url` values are excluded
+  from every generated TOML payload
 - `<resolved paths.generated_dir>/cache/analysis/<label>__<fingerprint>.compframes`:
   shared analysis metrics cache (defaults to `generated/cache/analysis/` under the
   workspace root, but follows the configured `paths.generated_dir`). The full
@@ -443,7 +446,9 @@ bounded pre-send/5xx backoff, fails permanent certificate-verification errors,
 honors only short valid `Retry-After` rate-limit delays, and does not retry after
 request transmission when the delivery outcome is unknown so it does not knowingly
 create duplicate notifications.
-Webhook failures are warning-only and redact configured URL details.
+Webhook failures are warning-only and redact configured URL details. Typed safe
+failure categories and optional HTTP status codes feed structured diagnostics without
+retaining the configured endpoint.
 
 `frame_compare.cli.entry` and its run-command helper own interactive-only
 slow.pics URL copy/browser actions and the precedence rule between slow.pics

@@ -94,6 +94,9 @@ def test_current_cli_contract_documents_slowpics_config_surface_and_defaults() -
         "adds no `run` flag, no wizard prompt, and no `run --json` stdout field",
         "incompatible with `--json`, `--quiet`, non-TTY stdin, non-TTY stdout",
         "`report.enable = false`",
+        "generated configuration and preset files always omit `webhook_url`",
+        "`run --write-config`, confirmed `wizard` rewrites, `preset save`",
+        "`preset apply`",
     ):
         assert expected in normalized_slowpics_section
     assert (
@@ -249,6 +252,8 @@ def test_current_cli_contract_documents_slowpics_post_upload_behavior() -> None:
         "valid numeric `Retry-After` of at most 10 seconds",
         "unknown delivery outcome and is not retried",
         "redacted from warnings and logs",
+        "typed safe diagnostic category",
+        "numeric response status into structured logs",
         "Delivery failures are warning-only",
     ):
         assert expected in normalized_webhook
@@ -379,6 +384,8 @@ def test_current_architecture_documents_slowpics_post_upload_owner_seams() -> No
         "`frame_compare.services.slowpics_webhook` owns isolated outbound webhook",
         "prevalidated pinned address while preserving TLS verification",
         "does not reuse slow.pics client cookies, headers",
+        "`frame_compare.config.persistence`",
+        "Typed safe failure categories and optional HTTP status codes",
         "`frame_compare.cli.entry` and its run-command helper own interactive-only",
         "precedence rule between slow.pics browser opening and generated-report auto-open",
         "JSON stdout stays a single object",

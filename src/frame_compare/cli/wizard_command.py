@@ -17,6 +17,7 @@ from frame_compare.config.loader import (
     load_raw_config,
     validate_raw_config_payload,
 )
+from frame_compare.config.persistence import strip_nonpersistable_config_values
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.error_categories import InputError
 from frame_compare.error_context import ErrorContext
@@ -39,7 +40,6 @@ from .wizard_policy import (
     WizardGoal,
     copy_payload,
     coverage_goal,
-    has_sensitive_file_keys,
     keep_goal,
     parse_specific_frames,
     random_goal,
@@ -162,6 +162,7 @@ def handle_wizard(
             )
             return
 
+        strip_nonpersistable_config_values(candidate)
         validated_candidate = validate_raw_config_payload(candidate, redact_inputs=True)
         validate_and_normalize_config_paths(validated_candidate, root)
         _print_review(
@@ -390,11 +391,18 @@ def _print_review(
         old_summary = keep_goal(old_config).summary if existing else "<default>"
         typer.echo(f"  Frame selection: {old_summary} -> {goal.summary}")
     typer.echo(f"  Metric scan: {goal.metric_scan}")
-    publishing = "preserved" if existing else "file default disabled"
+    webhook_removed = existing and table_key(original, "slowpics", "webhook_url") is not None
+    publishing = (
+        "preserved except webhook URL"
+        if webhook_removed
+        else ("preserved" if existing else "file default disabled")
+    )
     typer.echo(f"  Publishing settings: {publishing}; environment may override at run time")
     typer.echo("  Other settings: preserved")
-    if existing and has_sensitive_file_keys(original):
-        typer.echo("  Sensitive values: preserved and hidden")
+    if webhook_removed:
+        typer.echo("  Webhook URL: removed from generated configuration")
+    if existing and table_key(original, "tmdb", "api_key") is not None:
+        typer.echo("  Other sensitive values: preserved and hidden")
     if stale_reference:
         typer.echo(f"  {_STALE_REFERENCE_WARNING}")
 
@@ -413,8 +421,10 @@ def write_wizard_config_payload(
     text_writer: TextWriter,
 ) -> None:
     """Serialize one validated raw payload and write through the atomic owner."""
+    persisted_data = copy_payload(data)
+    strip_nonpersistable_config_values(persisted_data)
     try:
-        toml_text = tomli_w.dumps(data)
+        toml_text = tomli_w.dumps(persisted_data)
     except (TypeError, ValueError) as exc:
         safe_error = OSError("TOML serialization failed")
         raise ConfigWriteError(

@@ -17,6 +17,7 @@ from frame_compare.services.slowpics_webhook import (
     SlowpicsWebhookResult,
     WebhookDeliveryRequest,
     WebhookDeliveryUncertainError,
+    WebhookFailureKind,
     WebhookResponse,
     deliver_slowpics_webhook,
     send_pinned_https_webhook_request,
@@ -150,6 +151,7 @@ async def test_malformed_ipv6_url_returns_sanitized_validation_warning() -> None
     assert result == SlowpicsWebhookResult(
         success=False,
         warning=WEBHOOK_VALIDATION_WARNING,
+        failure_kind=WebhookFailureKind.VALIDATION,
     )
     assert result.warning is not None
     assert "::1" not in result.warning
@@ -175,6 +177,7 @@ async def test_non_ascii_url_components_return_sanitized_validation_warning(
     assert result == SlowpicsWebhookResult(
         success=False,
         warning=WEBHOOK_VALIDATION_WARNING,
+        failure_kind=WebhookFailureKind.VALIDATION,
     )
     assert result.warning is not None
     for fragment in sensitive_fragments:
@@ -232,6 +235,7 @@ async def test_connector_serialization_failure_returns_sanitized_warning() -> No
     assert result == SlowpicsWebhookResult(
         success=False,
         warning=WEBHOOK_FAILURE_WARNING,
+        failure_kind=WebhookFailureKind.TRANSPORT,
     )
     assert calls == WEBHOOK_ATTEMPTS
     assert result.warning is not None
@@ -278,6 +282,8 @@ async def test_redirect_response_is_failure_without_followup_request() -> None:
 
     assert result.success is False
     assert result.warning is not None
+    assert result.failure_kind is WebhookFailureKind.HTTP_STATUS
+    assert result.status_code == 302
     assert len(calls) == 1
 
 
@@ -305,6 +311,10 @@ async def test_retryable_connection_and_server_failures_use_bounded_backoff(
 
     assert result.success is False
     assert result.warning is not None
+    assert result.failure_kind is (
+        WebhookFailureKind.TRANSPORT if failure == "connection" else WebhookFailureKind.HTTP_STATUS
+    )
+    assert result.status_code == (503 if failure == "server" else None)
     assert len(calls) == WEBHOOK_ATTEMPTS
     assert [request.timeout_seconds for request in calls] == [
         WEBHOOK_TIMEOUT_SECONDS,
@@ -327,7 +337,11 @@ async def test_delivery_unknown_after_request_send_is_not_retried() -> None:
 
     result = await _deliver("https://hooks.example.test/path", connector=_connector)
 
-    assert result == SlowpicsWebhookResult(success=False, warning=WEBHOOK_FAILURE_WARNING)
+    assert result == SlowpicsWebhookResult(
+        success=False,
+        warning=WEBHOOK_FAILURE_WARNING,
+        failure_kind=WebhookFailureKind.DELIVERY_UNCERTAIN,
+    )
     assert calls == 1
 
 
@@ -341,7 +355,11 @@ async def test_certificate_verification_failure_is_not_retried() -> None:
 
     result = await _deliver("https://hooks.example.test/path", connector=_connector)
 
-    assert result == SlowpicsWebhookResult(success=False, warning=WEBHOOK_FAILURE_WARNING)
+    assert result == SlowpicsWebhookResult(
+        success=False,
+        warning=WEBHOOK_FAILURE_WARNING,
+        failure_kind=WebhookFailureKind.CERTIFICATE,
+    )
     assert calls == 1
 
 
@@ -380,7 +398,12 @@ async def test_rate_limit_without_usable_bounded_delay_is_not_retried(
 
     result = await _deliver("https://hooks.example.test/path", connector=_connector)
 
-    assert result == SlowpicsWebhookResult(success=False, warning=WEBHOOK_FAILURE_WARNING)
+    assert result == SlowpicsWebhookResult(
+        success=False,
+        warning=WEBHOOK_FAILURE_WARNING,
+        failure_kind=WebhookFailureKind.RATE_LIMITED,
+        status_code=429,
+    )
     assert calls == 1
 
 
@@ -402,6 +425,7 @@ async def test_retryable_failures_rotate_across_validated_addresses() -> None:
 
     assert result.success is False
     assert result.warning is not None
+    assert result.failure_kind is WebhookFailureKind.TIMEOUT
     assert [request.resolved_ip for request in calls] == [
         "93.184.216.34",
         "1.1.1.1",

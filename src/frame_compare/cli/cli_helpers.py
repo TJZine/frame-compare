@@ -19,6 +19,7 @@ from typer.core import TyperGroup
 
 from frame_compare.cli.errors import ExitCode, format_error_console, get_exit_code
 from frame_compare.config.errors import ConfigWriteError
+from frame_compare.config.persistence import dump_config_for_persistence
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.errors import FrameCompareError
 
@@ -113,7 +114,7 @@ def resolve_root_and_config(root: Path, config: Path | None) -> tuple[Path, Path
 
 
 def write_config_to(path: Path, config: ConfigSchema, *, text_writer: TextWriter) -> None:
-    data = config.model_dump(mode="json", exclude_none=True)
+    data = dump_config_for_persistence(config)
     toml_text = tomli_w.dumps(data)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

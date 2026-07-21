@@ -372,12 +372,21 @@ def test_preset_list_error_uses_default_terminal_color_policy(
     }
 
 
-def test_preset_save_respects_root_and_config_writes_preset_file() -> None:
+def test_preset_save_respects_root_and_config_writes_secret_safe_preset(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "FRAME_COMPARE_SLOWPICS__WEBHOOK_URL",
+        "https://discord.com/api/webhooks/env-id/env-secret",
+    )
     with runner.isolated_filesystem():
         root = Path("workspace")
         config_path = root / "configs" / "config.toml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(MINIMAL_CONFIG)
+        config_path.write_text(
+            MINIMAL_CONFIG
+            + '\n[slowpics]\nwebhook_url = "https://discord.com/api/webhooks/id/file-secret"\n'
+        )
 
         result = runner.invoke(
             app,
@@ -387,6 +396,10 @@ def test_preset_save_respects_root_and_config_writes_preset_file() -> None:
         preset_path = root / "config" / "presets" / "sample.toml"
         assert preset_path.exists()
         assert f"Saved preset 'sample' to {preset_path.resolve()}" in result.stderr
+        preset_text = preset_path.read_text(encoding="utf-8")
+        assert "webhook_url" not in preset_text
+        assert "env-secret" not in preset_text
+        assert "file-secret" not in preset_text
 
 
 def test_preset_save_write_error_uses_cli_error_contract(
@@ -415,12 +428,21 @@ def test_preset_save_write_error_uses_cli_error_contract(
     assert "Traceback" not in result.stderr
 
 
-def test_preset_apply_respects_root_and_config_updates_config_file() -> None:
+def test_preset_apply_updates_config_and_strips_webhook_secret(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "FRAME_COMPARE_SLOWPICS__WEBHOOK_URL",
+        "https://discord.com/api/webhooks/env-id/env-secret",
+    )
     with runner.isolated_filesystem():
         root = Path("workspace")
         config_path = root / "configs" / "config.toml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(MINIMAL_CONFIG)
+        config_path.write_text(
+            MINIMAL_CONFIG
+            + '\n[slowpics]\nwebhook_url = "https://discord.com/api/webhooks/id/file-secret"\n'
+        )
         presets_dir = root / "config" / "presets"
         presets_dir.mkdir(parents=True, exist_ok=True)
         (presets_dir / "boost.toml").write_text(
@@ -437,3 +459,7 @@ def test_preset_apply_respects_root_and_config_updates_config_file() -> None:
         assert f"Applied preset 'boost' to {config_path.resolve()}" in result.stderr
         data = tomllib.loads(config_path.read_text(encoding="utf-8"))
         assert data["analysis"]["random_frame_count"] == 22
+        assert "webhook_url" not in data["slowpics"]
+        config_text = config_path.read_text(encoding="utf-8")
+        assert "env-secret" not in config_text
+        assert "file-secret" not in config_text
