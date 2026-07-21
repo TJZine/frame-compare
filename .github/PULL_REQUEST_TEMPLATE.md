@@ -26,20 +26,20 @@ Closes #
 ### Code Quality
 
 - [ ] My code follows the project's style guidelines (Ruff)
-- [ ] I have run `ruff check .` and `ruff format .` locally
-- [ ] I have run `pyright --warnings` with no new errors
+- [ ] I have run the risk-matched verification required by `docs/ENGINEERING_RUNBOOK.md`
+- [ ] When required, `.venv/bin/ruff check .` passes
+- [ ] When required, `.venv/bin/pyright --warnings` passes with no new errors
 - [ ] My changes generate no new warnings
 
 ### Testing
 
 - [ ] I have added tests that prove my fix/feature works
-- [ ] New and existing unit tests pass locally (`pytest -q`)
+- [ ] When required, new and existing tests pass locally (`.venv/bin/pytest -q`)
 - [ ] I have run the canonical import-linter command from the runbook to verify import contracts
 
 ### Documentation
 
 - [ ] I have updated the documentation accordingly
-- [ ] I have updated the CHANGELOG.md (if applicable)
 
 ## PR Title Format
 

@@ -25,7 +25,7 @@ identify stable responsibility categories rather than a second owner map.
 
 - CLI command routing, human summaries, JSON modes, and browser auto-open: [`src/frame_compare/cli/entry.py`](../../../src/frame_compare/cli/entry.py)
 - CLI formatting helpers: [`src/frame_compare/cli/output.py`](../../../src/frame_compare/cli/output.py)
-- HTML report generation: [`src/frame_compare/services/report.py`](../../../src/frame_compare/services/report.py)
+- HTML report generation: [`src/frame_compare/services/report/`](../../../src/frame_compare/services/report/)
 - Screenshot naming and render outputs: [`src/frame_compare/render/`](../../../src/frame_compare/render/)
 - Overlay text composition: [`src/frame_compare/render/overlay_text.py`](../../../src/frame_compare/render/overlay_text.py)
 - Progress display: [`src/frame_compare/orchestration/progress.py`](../../../src/frame_compare/orchestration/progress.py) and [`src/frame_compare/utils/progress.py`](../../../src/frame_compare/utils/progress.py)

@@ -37,7 +37,6 @@ If a task needs a broader compatibility promise, the maintainer must confirm it 
 - `README.md`: product overview, install, quickstart
 - `CONTRIBUTING.md`: contributor onboarding and PR mechanics
 - `docs/plans/**`: reference-only unless the file starts with `Status: Active`
-- `docs/archive/**`: historical reference only, never current authority
 - `.codex/cache/**`: local cache material only, never current authority
 
 Do not create a second runbook, second architecture summary, or second current CLI contract.
@@ -375,7 +374,7 @@ Use this as the default routing shortcut before exploring deeper:
 
 | Task family | Primary authority | Typical owner files | Default tier | Default verification |
 | --- | --- | --- | --- | --- |
-| CLI/config contract change | `docs/current-cli-contract.md` | `src/frame_compare/cli/entry.py`, `src/frame_compare/config/overrides.py`, `tests/cli/test_cli_commands.py`, `tests/config/test_overrides.py`, `tests/test_cli_contract_docs.py` | High | Full verification |
+| CLI/config contract change | `docs/current-cli-contract.md` | `src/frame_compare/cli/entry.py`, `src/frame_compare/config/overrides.py`, focused `tests/cli/test_*.py`, `tests/config/test_overrides.py`, `tests/test_cli_contract_docs.py` | High | Full verification |
 | Internal logic change outside hotspots/public CLI | `docs/current-architecture.md` | Existing owner module plus nearby tests | Medium | Logic verification |
 | Hotspot or runtime pipeline change | `docs/current-architecture.md` | `orchestration/`, `render/`, `vs/`, hotspot files, adjacent tests | High | Full verification, plus Docker when listed under Docker/runtime verification |
 | Docker/runtime environment change | this runbook + `docs/current-architecture.md` | `Dockerfile`, `docker-compose*.yml`, `tools/verify_docker_*.sh`, `.github/workflows/docker-integration.yml`, Docker workflow/contract tests, runtime integration tests | High | Full verification plus Docker/runtime verification |
@@ -440,7 +439,7 @@ Review should prioritize:
 - filesystem ownership leaks
 - undocumented authority drift
 
-Changes in `orchestration/coordinator.py`, `errors.py`, `services/report.py`, or packaging workflows should receive extra scrutiny because they are current hotspots or blast-radius multipliers.
+Changes in `orchestration/coordinator.py`, `errors.py`, `services/report/**`, or packaging workflows should receive extra scrutiny because they are current hotspots or blast-radius multipliers.
 
 Production LOC is an architecture-attention signal, not a decomposition rule.
 Exclude generated assets. For a touched owner above 500 lines, inspect the full file

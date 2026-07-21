@@ -40,8 +40,11 @@ documents that promise elsewhere.
   argument parsing, stdout/stderr behavior, and interactive post-run behavior.
 - `src/frame_compare/config/overrides.py` owns CLI flag to config override mappings.
 - Primary executable contract checks include:
-  - `tests/cli/test_cli_commands.py` for help text, JSON payloads, report auto-open
-    gating, and command-level CLI behavior.
+  - `tests/cli/test_help_and_import.py` for command registration, help text, and
+    lazy-import behavior.
+  - `tests/cli/test_run_command.py`, `tests/cli/test_run_json_errors.py`, and
+    `tests/cli/test_run_report_open.py` for command behavior, JSON errors, and
+    report auto-open gating.
   - `tests/cli/test_run_slowpics_options.py` for the slow.pics `run` option
     surface.
   - `tests/cli/test_run_output.py` for human output, JSON stdout cleanliness,

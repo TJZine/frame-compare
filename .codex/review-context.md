@@ -2,7 +2,7 @@
 
 Schema-Version: 1
 Profile-Status: explicit
-Last-Updated: 2026-07-14
+Last-Updated: 2026-07-21
 Repo-Name: frame-compare
 Default-Branch: main
 Profile-Scope: suggestion-review and pr-commit-review
@@ -54,7 +54,6 @@ Current truth:
 
 Historical/reference only:
 - `docs/DECISIONS.md` for historical exceptions/decisions
-- `docs/archive/**`
 - `docs/plans/**` unless the file starts with `Status: Active`
 - `.codex/cache/**` local cache only
 
@@ -87,7 +86,7 @@ Trigger architecture/deep review:
 - `src/frame_compare/errors.py`
 - `src/frame_compare/render/**`
 - `src/frame_compare/vs/**`
-- `src/frame_compare/services/report.py`
+- `src/frame_compare/services/report/**`
 - `src/frame_compare/services/metadata.py`
 - `src/frame_compare/services/publishers.py`
 - `src/frame_compare/utils/subproc.py`
