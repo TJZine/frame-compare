@@ -672,3 +672,24 @@ Implemented deterministic precedence in `align_clips`: manual override > cached 
 
 - Reduces hidden configuration paths and precedence ambiguity.
 - Makes runtime/doctor behavior explicit and easier to maintain.
+
+## 2026-07-14 — Defer Presentation-Blind Reports
+
+### Scope
+
+**Context:** The generated report was evaluated for a presentation-blind comparison
+mode.
+
+**Decision:** Do not add or advertise a viewer-only blind mode. Ordinary report
+artifacts can expose source identity through baked screenshot overlays, physical
+image filenames or URLs, metadata, and initial presentation. The current payload
+also has no trustworthy eligibility fact proving that an artifact is clean.
+
+Reconsider the feature only as a separately approved clean-artifact workflow with
+explicit eligibility/versioning, neutral naming and delivery, first-paint behavior,
+reveal semantics, review-state transfer, and publishing rules. The claim must remain
+limited to presentation blindness; it must not imply adversarial or storage-level
+secrecy.
+
+**Rationale:** Preserves honest product language and prevents a UI-only control from
+making a guarantee that the underlying generated files cannot support.

@@ -492,6 +492,12 @@ filmstrip bottom panel; an inspector drawer with Frame, Clips, Align, Review, an
 Export tabs; fullscreen support; viewport pan, zoom, actual/width/height fit, reveal,
 and adjacent-frame preloading.
 
+The ordinary report artifact does not claim presentation blindness. Source identity
+can be present in baked screenshot overlays, physical image filenames, and report
+metadata, so viewer-only label hiding cannot provide an honest blind workflow. Any
+future blind comparison must use an explicitly eligible clean artifact and a
+separately approved invocation, delivery, reveal, and publishing contract.
+
 #### Lens
 
 `assets/lens.js` is the focused owner for the optional
