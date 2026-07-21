@@ -1152,6 +1152,12 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 - Human output uses a neutral status marker for optional unavailable checks such as
   VSPreview, so optional availability gaps are visually distinct from critical
   dependency failures. This does not change `doctor --json` status values.
+- Human output uses a warning marker, rather than the critical-failure marker, for
+  failed non-core checks such as network reachability or missing optional integration
+  configuration. It ends with a deterministic readiness summary that distinguishes a
+  blocked core runtime, a ready core runtime with noncritical warnings, and a fully
+  passing check set. These presentation changes do not alter JSON fields, JSON status
+  values, or exit-code behavior.
 - Failed checks and optional-unavailable warnings include a short deterministic next
   action when the check can prove one. `doctor --json` exposes the same text as
   `install_hint`. Hints distinguish missing executables, unavailable runtimes/plugins,

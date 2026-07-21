@@ -173,11 +173,8 @@ def test_readme_docker_examples_do_not_use_removed_frame_count_flags(repo_root: 
 
     docker_sections = [
         match.group(0)
-        for match in re.finditer(
-            r"```bash\n(?:docker|bash tools/verify_docker_integration\.sh).*?\n```",
-            readme,
-            re.DOTALL,
-        )
+        for match in re.finditer(r"```bash\n.*?\n```", readme, re.DOTALL)
+        if "docker" in match.group(0)
     ]
 
     assert docker_sections, "Expected README to include Docker command examples."

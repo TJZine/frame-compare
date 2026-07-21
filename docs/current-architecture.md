@@ -365,7 +365,10 @@ documentation as the external contract reference.
 
 Current Docker owner seams for optional profiles remain explicit:
 
-- `docker-compose.yml`: default headless software-Vulkan services
+- `docker-compose.yml`: default headless software-Vulkan services, including a
+  configuration-writable `frame-compare-wizard` setup service and a
+  configuration-read-only `frame-compare-run` service with persistent screenshot
+  and generated-output mounts
 - `docker-compose.gpu-nvidia.yml`: opt-in NVIDIA GPU override/profile only
 - `docker-compose.gui-linux.yml`: opt-in Linux X11/VSPreview override/profile only
 - `tools/verify_docker_integration.sh`: canonical default Docker gate

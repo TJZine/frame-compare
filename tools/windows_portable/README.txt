@@ -30,16 +30,29 @@ NOTES:
   - If the bundle is moved, run `install.cmd` again from the new location.
 
 QUICK START:
-  frame-compare wizard
-  frame-compare doctor
-  frame-compare run
+  1. Put at least two supported video files under .\comparison_videos\.
+     Supported extensions: .mkv, .mp4, .avi, .m2ts, and .ts.
+  2. Open a new terminal after installation.
+  3. Run these commands in order:
+     frame-compare wizard
+     frame-compare doctor
+     frame-compare run --dry-run
+     frame-compare run
+
+  Optional or network doctor warnings do not make doctor exit with a dependency
+  error, but review them against the workflow you intend to use.
+
+RUN HISTORY:
+  frame-compare history list
+  frame-compare history open <run-name>
 
 OPTIONAL (Interactive Audio Alignment / VSPreview):
   The full portable bundle includes VSPreview + PyQt6. If you set:
     [audio_alignment]
     use_vspreview = true
   interactive alignment can run out of the box.
-  For source installs, install optional deps:
+  If you run the repository's Python environment directly instead of using the
+  built portable bundle, install optional deps with:
     uv sync --group dev --extra vspreview --frozen
   or:
     pip install -e ".[vspreview]"

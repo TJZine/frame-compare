@@ -40,20 +40,16 @@ cd frame-compare
 
 ### 2. Install dependencies
 
-**With uv (recommended):**
+Use the repository's canonical frozen uv environment:
 
 ```bash
 uv sync --group dev --frozen
 ```
 
-**With pip:**
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate  # or `.venv\Scripts\activate` on Windows
-pip install -e .
-pip install pytest pytest-cov ruff pyright
-```
+The project uses uv dependency groups and its lockfile for the complete contributor
+toolchain. A pip-only editable install can run the application, but it is not a
+substitute for the canonical environment and cannot be assumed to reproduce the
+full local or CI gates.
 
 ### 3. Verify your setup
 
