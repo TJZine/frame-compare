@@ -53,6 +53,9 @@ packages = ["src/frame_compare"]
 
 # ─── Dependency Groups (PEP 735) ───────────────────────────────────────────────
 [dependency-groups]
+docs = [
+    "zensical==0.0.51",
+]
 dev = [
     "anyio>=4.12.0",
     "bandit[toml]>=1.8.0",

@@ -9,6 +9,7 @@ Thank you for your interest in contributing! This guide will help you get starte
 - [Prerequisites](#prerequisites)
 - [Development Setup](#development-setup)
 - [Making Changes](#making-changes)
+- [Documentation Development](#documentation-development)
 - [Pull Request Workflow](#pull-request-workflow)
 - [Code Style](#code-style)
 - [Testing Requirements](#testing-requirements)
@@ -76,6 +77,38 @@ git checkout -b feat/your-feature-name
 
 Use the [Engineering Runbook](docs/ENGINEERING_RUNBOOK.md) to choose and run the
 required verification for the current change.
+
+---
+
+## Documentation Development
+
+Authored documentation lives under `docs/`. The root `zensical.toml` owns the public
+site navigation and built-in presentation features; do not duplicate documentation in
+a separate site project. Generated output belongs in the ignored `site/` directory.
+
+Install the locked documentation toolchain and run a strict build:
+
+```bash
+uv sync --only-group docs --locked
+uv run --no-sync python scripts/generate_api_docs.py --check
+uv run --no-sync zensical build --clean --strict
+```
+
+For a local preview, run:
+
+```bash
+uv run --no-sync zensical serve
+```
+
+A docs-only sync replaces the normal contributor environment. Restore both groups
+before running development checks while continuing documentation work:
+
+```bash
+uv sync --group dev --group docs --locked
+```
+
+Keep `docs/api.md` generated through `scripts/generate_api_docs.py`. Changes to the
+generator or its source definitions must pass the drift check above.
 
 ---
 

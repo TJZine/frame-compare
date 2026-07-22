@@ -22,6 +22,7 @@ CODEX.md
 /screenshots/
 /report.html
 /generated/
+/site/
 **/screens/*.png
 **/screens/**/*.png
 **/screens/report.html
