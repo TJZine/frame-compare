@@ -149,13 +149,6 @@ def table_key(payload: TomlPayload, table_name: str, key: str) -> TomlValue | No
     return cast("TomlPayload", current).get(key)
 
 
-def has_sensitive_file_keys(payload: TomlPayload) -> bool:
-    return (
-        table_key(payload, "tmdb", "api_key") is not None
-        or table_key(payload, "slowpics", "webhook_url") is not None
-    )
-
-
 def summarize_frame_selection(config: ConfigSchema) -> str:
     analysis = config.analysis
     if analysis.user_frames and not any(

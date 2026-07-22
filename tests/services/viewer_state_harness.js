@@ -13,14 +13,14 @@ const viewerPath = path.join(
     'assets',
     'viewer.js',
 );
-const pixelInspectorPath = path.join(
+const lensPath = path.join(
     repoRoot,
     'src',
     'frame_compare',
     'services',
     'report',
     'assets',
-    'pixel_inspector.js',
+    'lens.js',
 );
 
 let activeDocument = null;
@@ -189,9 +189,9 @@ function loadViewer({ clipCount, savedState = null }) {
         },
     };
     activeDocument = context.document;
-    const script = `${fs.readFileSync(pixelInspectorPath, 'utf8')}\n${fs.readFileSync(viewerPath, 'utf8')}\nglobalThis.__PixelInspector = PixelInspector;\nglobalThis.__ReportViewer = ReportViewer;`;
+    const script = `${fs.readFileSync(lensPath, 'utf8')}\n${fs.readFileSync(viewerPath, 'utf8')}\nglobalThis.__Lens = Lens;\nglobalThis.__ReportViewer = ReportViewer;`;
     vm.runInNewContext(script, context, { filename: viewerPath });
-    assert.equal(typeof context.__PixelInspector.create, 'function');
+    assert.equal(typeof context.__Lens.create, 'function');
 
     const viewer = context.__ReportViewer;
     const payload = viewer.normalizePayload(payloadWithClipCount(clipCount));
@@ -257,11 +257,11 @@ function loadViewer({ clipCount, savedState = null }) {
         btnInfo: fakeElement(),
         inspector: fakeElement(),
         btnInspectorClose: fakeElement(),
-        inspectorTabs: ['pixel', 'frame', 'clips', 'align', 'review', 'export'].map((tab) => ({
+        inspectorTabs: ['frame', 'clips', 'align', 'review', 'export'].map((tab) => ({
             ...fakeElement(),
             dataset: { inspectorTab: tab },
         })),
-        inspectorPanels: ['pixel', 'frame', 'clips', 'align', 'review', 'export'].map((tab) => ({
+        inspectorPanels: ['frame', 'clips', 'align', 'review', 'export'].map((tab) => ({
             ...fakeElement(),
             id: `inspector-panel-${tab}`,
         })),
@@ -319,19 +319,20 @@ function loadViewer({ clipCount, savedState = null }) {
         element.setAttribute('tabindex', '-1');
     });
     viewer.dom.inspector.querySelectorAll = () => viewer.dom.inspectorFocusables;
-    viewer.pixelInspector = {
-        beginStagePress() { return false; },
-        cancelStagePress() {},
-        clearForContext() {},
-        endStagePress() { return false; },
-        isActive() { return false; },
-        isStagePressPending() { return false; },
-        moveStagePress() {},
-        open() {},
+    viewer.lens = {
+        state: { report: { enabled: false }, point: null },
+        transientClears: 0,
+        refreshes: 0,
+        syncs: 0,
+        cancelTouchPending() {},
+        clearTransient() { this.transientClears += 1; },
+        endStagePointer() { return true; },
+        handleStagePointerDown() { return false; },
+        handleStagePointerMove() { return false; },
+        refresh() { this.refreshes += 1; },
         render() {},
-        schedulePlacement() {},
-        syncVisibility() {},
-        unlock() { return false; },
+        setEnabled(enabled) { this.state.report.enabled = Boolean(enabled); },
+        sync() { this.syncs += 1; },
     };
     viewer.reviewController = null;
     viewer.render = function renderStateOnly() {
@@ -501,7 +502,6 @@ const summary = {};
             currentFrameIdx: 1,
             inspectorOpen: true,
             inspectorTab: 'align',
-            pixelLensEnabled: true,
             blinkIntervalMs: 1200,
             blinkPaused: true,
         },
@@ -510,7 +510,6 @@ const summary = {};
     assert.equal(viewer.state.currentFrameIdx, 1);
     assert.equal(viewer.state.inspectorOpen, true);
     assert.equal(viewer.state.inspectorTab, 'align');
-    assert.equal(viewer.state.pixelLensEnabled, true);
     assert.equal(viewer.state.blinkIntervalMs, 1200);
     assert.equal(viewer.state.blinkPaused, false);
 
@@ -526,11 +525,11 @@ const summary = {};
     viewer.dom.btnInspectorClose.setAttribute('tabindex', '0');
     document.activeElement = viewer.dom.btnInfo;
     viewer.setInspectorOpen(true);
-    assert.equal(document.activeElement, viewer.dom.inspectorTabs[5]);
+    assert.equal(document.activeElement, viewer.dom.inspectorTabs[4]);
     const wrapEvent = keyboardEvent('ArrowRight');
-    wrapEvent.currentTarget = viewer.dom.inspectorTabs[5];
+    wrapEvent.currentTarget = viewer.dom.inspectorTabs[4];
     viewer.handleInspectorTabKey(wrapEvent);
-    assert.equal(viewer.state.inspectorTab, 'pixel');
+    assert.equal(viewer.state.inspectorTab, 'frame');
     assert.equal(document.activeElement, viewer.dom.inspectorTabs[0]);
     viewer.setInspectorTab('export');
     assert.equal(viewer.dom.inspector.inert, false);
@@ -546,7 +545,7 @@ const summary = {};
     assert.equal(viewer.dom.inspector.inert, false);
     assert.equal(viewer.dom.btnInspectorClose.getAttribute('tabindex'), '0');
     viewer.dom.inspectorTabs.forEach((element, index) => {
-        assert.equal(element.tabIndex, index === 5 ? 0 : -1);
+        assert.equal(element.tabIndex, index === 4 ? 0 : -1);
     });
     viewer.setInspectorOpen(false);
     viewer.setBlinkIntervalMs(300);
@@ -555,14 +554,14 @@ const summary = {};
     assert.equal(saved.currentFrameIdx, 1);
     assert.equal(saved.inspectorOpen, false);
     assert.equal(saved.inspectorTab, 'export');
-    assert.equal(saved.pixelLensEnabled, true);
+    assert.equal(saved.pixelLensEnabled, undefined);
     assert.equal(saved.blinkIntervalMs, 300);
     assert.equal(saved.blinkPaused, undefined);
     summary.inspectorBlinkKeyboardState = {
         currentFrameIdx: saved.currentFrameIdx,
         inspectorOpen: saved.inspectorOpen,
         inspectorTab: saved.inspectorTab,
-        pixelLensEnabled: saved.pixelLensEnabled,
+        lensExcludedFromViewport: !Object.hasOwn(saved, 'pixelLensEnabled'),
         rovingTabWrapped: true,
         blinkIntervalMs: saved.blinkIntervalMs,
         blinkPausedPersisted: Object.hasOwn(saved, 'blinkPaused'),
@@ -869,6 +868,7 @@ const summary = {};
     assert.equal(viewer.dom.canvas.style.values['--align-y'], '-4px');
     assert.equal(viewer.dom.leftLayer.classList.contains('rv-layer--aligned-active'), true);
     viewer.clearFrameImages();
+    assert.equal(viewer.lens.transientClears, 1);
     assert.equal(viewer.dom.leftLayer.classList.contains('rv-layer--aligned-active'), false);
     assert.equal(viewer.dom.leftLayer.classList.contains('active'), false);
     viewer.state.activeClipIdx = viewer.state.leftClipIdx;
@@ -881,6 +881,7 @@ const summary = {};
         alignedComparisonActive: true,
         baseClipUnshifted: true,
         emptyStateClearsAlignment: true,
+        emptyStateClearsLensTransient: true,
     };
 }
 
@@ -986,13 +987,13 @@ const summary = {};
 
 {
     const { viewer } = loadViewer({ clipCount: 2 });
-    let inspectionPressPending = true;
-    viewer.pixelInspector.isStagePressPending = () => inspectionPressPending;
     viewer.pointerInteraction = {
         isPanning: true,
+        activePointerId: 7,
         lastPanX: 10,
         lastPanY: 20,
         panMoved: false,
+        panBasis: null,
     };
     viewer.state.panX = 3;
     viewer.state.panY = 4;
@@ -1005,70 +1006,136 @@ const summary = {};
         viewer.updatePanFromPointer({ pointerId: 7, clientX: 16, clientY: 20 }),
         true,
     );
-    assert.deepEqual([viewer.state.panX, viewer.state.panY], [3, 4]);
-    assert.deepEqual(
-        [viewer.pointerInteraction.lastPanX, viewer.pointerInteraction.lastPanY],
-        [10, 20],
-    );
-
-    inspectionPressPending = false;
-    assert.equal(
-        viewer.updatePanFromPointer({ pointerId: 7, clientX: 16.01, clientY: 20 }),
-        true,
-    );
-    assert.ok(Math.abs(viewer.state.panX - 9.01) < 1e-9);
+    assert.deepEqual([viewer.state.panX, viewer.state.panY], [9, 4]);
     assert.equal(viewer.state.panY, 4);
     assert.equal(viewer.pointerInteraction.panMoved, true);
-
     let cycleCount = 0;
-    inspectionPressPending = true;
-    viewer.pixelInspector.moveStagePress = (event) => {
-        inspectionPressPending = Math.hypot(event.clientX - 10, event.clientY - 20) <= 6;
-    };
-    viewer.pixelInspector.endStagePress = () => false;
     viewer.cycleClip = () => { cycleCount += 1; };
     viewer.persistViewportState = () => true;
-    viewer.state.mode = 'diff';
-    viewer.state.panX = 3;
-    viewer.state.panY = 4;
-    viewer.pointerInteraction = {
-        isDragging: false,
-        isPanning: true,
-        activePointerId: 7,
-        lastPanX: 10,
-        lastPanY: 20,
-        panMoved: false,
-        pointerPositions: new Map([[7, { x: 10, y: 20, type: 'touch' }]]),
-        capturedPointerIds: new Set(),
-        pinchActive: false,
-    };
-    viewer.stopPointerInteraction({ pointerId: 7, clientX: 16.01, clientY: 20 });
-    assert.ok(Math.abs(viewer.state.panX - 9.01) < 1e-9);
-    assert.equal(viewer.pointerInteraction.panMoved, false);
-    assert.equal(cycleCount, 0);
-
-    inspectionPressPending = true;
+    viewer.state.mode = 'overlay';
     viewer.pointerInteraction = {
         isDragging: false,
         isPanning: true,
         activePointerId: 8,
-        lastPanX: 10,
-        lastPanY: 20,
+        lastPanX: 20,
+        lastPanY: 30,
         panMoved: false,
-        pointerPositions: new Map([[8, { x: 10, y: 20, type: 'touch' }]]),
+        panBasis: null,
+        pointerPositions: new Map([[8, { x: 20, y: 30, type: 'touch' }]]),
         capturedPointerIds: new Set(),
         pinchActive: false,
+        lensPointHandled: true,
+        lensTouchStart: { pointerId: 8, clientX: 20, clientY: 30 },
     };
-    viewer.stopPointerInteraction(
-        { pointerId: 8, clientX: 10, clientY: 20 },
-        { cancelled: true },
-    );
+    viewer.stopPointerInteraction({ pointerId: 8, clientX: 20, clientY: 30 });
     assert.equal(cycleCount, 0);
-    summary.pixelPanArbitration = {
-        subthresholdPanDeferred: true,
-        overThresholdPanAppliedFromOrigin: true,
-        pointerupOnlyMoveApplied: true,
-        pointerCancelDidNotCycle: true,
+    summary.lensPanIndependence = {
+        panAppliedWithoutInspectorGestureGate: true,
+        panMovedRecorded: true,
+        touchLensTapDidNotCycle: true,
+    };
+}
+
+{
+    const { viewer } = loadViewer({ clipCount: 2 });
+    viewer.lens.state.report.enabled = true;
+    viewer.lens.state.point = { u: 0.25, v: 2 / 9 };
+    viewer.lens.refreshes = 0;
+    viewer.lens.syncs = 0;
+    const touchSample = { ...viewer.lens.state.point };
+    viewer.state.panX = 12;
+    viewer.state.panY = -7;
+    viewer.applyPan();
+    viewer.applyZoom(1.75, { clampPan: false });
+    viewer.applyAlignment();
+    assert.deepEqual(viewer.lens.state.point, touchSample);
+    assert.equal(viewer.lens.refreshes, 3);
+    assert.equal(viewer.lens.syncs, 0);
+    summary.lensLayoutRefresh = {
+        touchPanPreservedSample: true,
+        pinchZoomPreservedSample: true,
+        alignmentPreservedSample: true,
+        contextSyncNotUsed: true,
+    };
+}
+
+{
+    const { viewer } = loadViewer({ clipCount: 4 });
+    const routed = {};
+    for (const mode of ['slider', 'overlay', 'diff', 'blink', 'grid']) {
+        let panStarts = 0;
+        let panMoves = 0;
+        let sliderMoves = 0;
+        viewer.state.mode = mode;
+        viewer.pointerInteraction = {
+            isDragging: false,
+            isPanning: false,
+            capturedPointerIds: new Set(),
+        };
+        viewer.startPanFromPointer = () => { panStarts += 1; };
+        viewer.updatePanFromPointer = () => { panMoves += 1; return true; };
+        viewer.updateSliderFromPointer = () => { sliderMoves += 1; };
+        viewer.captureStagePointer = () => {};
+        viewer.startDeferredViewportGesture(
+            { pointerId: 1, pointerType: 'touch', button: 0, clientX: 30, clientY: 40 },
+            { clientX: 10, clientY: 20 },
+        );
+        routed[mode] = { panStarts, panMoves, sliderMoves };
+    }
+    assert.deepEqual(routed.slider, { panStarts: 0, panMoves: 0, sliderMoves: 1 });
+    for (const mode of ['overlay', 'diff', 'blink', 'grid']) {
+        assert.deepEqual(routed[mode], { panStarts: 1, panMoves: 1, sliderMoves: 0 });
+    }
+    assert.equal(viewer.isViewerChromeEvent({
+        target: { closest(selector) { return selector.includes('.rv-lens') ? this : null; } },
+    }), true);
+    assert.equal(viewer.isViewerChromeEvent({
+        target: {
+            closest(selector) {
+                return selector.split(', ').includes('.rv-lens-settings') ? this : null;
+            },
+        },
+    }), true);
+    assert.equal(viewer.isViewerChromeEvent({ target: { closest() { return null; } } }), false);
+    let resets = 0;
+    let zooms = 0;
+    let pans = 0;
+    const chromeTarget = {
+        closest(selector) {
+            return selector.split(', ').includes('.rv-lens-settings') ? this : null;
+        },
+    };
+    viewer.resetViewport = () => { resets += 1; };
+    viewer.zoomAtPoint = () => { zooms += 1; };
+    viewer.panByPixels = () => { pans += 1; };
+    viewer.state.mode = 'slider';
+    viewer.handleViewportDoubleClick({ target: chromeTarget, preventDefault() {} });
+    viewer.handleViewportWheel({
+        target: chromeTarget,
+        preventDefault() {},
+        shiftKey: false,
+        deltaX: 0,
+        deltaY: -1,
+        clientX: 10,
+        clientY: 10,
+    });
+    assert.deepEqual([resets, zooms, pans], [0, 0, 0]);
+    viewer.handleViewportDoubleClick({ target: { closest() { return null; } }, preventDefault() {} });
+    viewer.handleViewportWheel({
+        target: { closest() { return null; } },
+        preventDefault() {},
+        shiftKey: false,
+        deltaX: 0,
+        deltaY: -1,
+        clientX: 10,
+        clientY: 10,
+    });
+    assert.deepEqual([resets, zooms, pans], [1, 1, 0]);
+    summary.deferredTouchOwnership = {
+        sliderRetainsRevealDrag: true,
+        allPanModesRetainPanDrag: true,
+        viewerChromeRecognized: true,
+        chromeWheelAndDoubleClickIsolated: true,
     };
 }
 

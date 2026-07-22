@@ -138,6 +138,7 @@ def test_doctor_exit_code_is_3_on_core_failure(monkeypatch: MonkeyPatch) -> None
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 3
     assert "\u274c vapoursynth" in result.stdout
+    assert "Core runtime is not ready; resolve required checks above." in result.stdout
 
 
 def _run_doctor_optional_failure_and_assert(monkeypatch: MonkeyPatch) -> None:
@@ -163,7 +164,9 @@ def _run_doctor_optional_failure_and_assert(monkeypatch: MonkeyPatch) -> None:
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 0
     assert result.stderr == ""
-    assert "\u274c slowpics" in result.stdout
+    assert "\u26a0 slowpics" in result.stdout
+    assert "\u274c slowpics" not in result.stdout
+    assert "Core runtime checks passed; optional or network checks need attention." in result.stdout
 
 
 def test_doctor_exit_code_is_0_on_optional_or_network_failure(monkeypatch: MonkeyPatch) -> None:
@@ -200,6 +203,7 @@ def test_doctor_human_marks_optional_failed_check_neutrally(monkeypatch: MonkeyP
     assert result.stderr == ""
     assert "- ffmpeg" in result.stdout
     assert "\u274c ffmpeg" not in result.stdout
+    assert "Core runtime checks passed; optional or network checks need attention." in result.stdout
 
 
 def test_doctor_human_marks_optional_vspreview_unavailable_neutrally(
@@ -318,6 +322,7 @@ def test_doctor_human_marks_available_optional_vspreview_as_pass(
     assert result.stderr == ""
     assert "\u2705 vspreview" in result.stdout
     assert "- vspreview" not in result.stdout
+    assert "Core runtime checks passed." in result.stdout
 
     json_result = runner.invoke(app, ["doctor", "--json"])
     assert json_result.exit_code == 0

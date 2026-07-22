@@ -89,7 +89,9 @@ def test_current_cli_contract_names_primary_executable_contract_checks() -> None
     )[0]
 
     expected_checks = (
-        "`tests/cli/test_cli_commands.py` for help text, JSON payloads, report auto-open",
+        "`tests/cli/test_help_and_import.py` for command registration, help text, and",
+        "`tests/cli/test_run_command.py`, `tests/cli/test_run_json_errors.py`, and",
+        "`tests/cli/test_run_report_open.py` for command behavior, JSON errors, and",
         "`tests/config/test_overrides.py` for CLI override mapping semantics.",
         "`tests/e2e/test_cli_version.py` for the public `version` command contract.",
         "`tests/cli/test_exit_codes.py` for exit-code behavior.",

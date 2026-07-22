@@ -126,7 +126,7 @@ def test_build_html_exposes_viewer_only_grid_controls_and_empty_mount(
     assert "hidden" in grid.attrs
     assert cells.children == []
     assert script_payload(html)["default_mode"] == "slider"
-    assert html.count('id="pixel-inspector-live"') == 1
+    assert html.count('id="viewer-live"') == 1
 
 
 def test_build_html_keeps_ten_plus_long_label_clips_reachable_and_mobile_safe(
@@ -506,8 +506,8 @@ def test_build_html_renders_inspector_drawer(report_payload: ReportPayload) -> N
     tab_names = [
         child.attrs.get("data-inspector-tab") for child in tablist.children if child.tag == "button"
     ]
-    assert tab_names == ["pixel", "frame", "clips", "align", "review", "export"]
-    for tab in ("pixel", "frame", "clips", "align", "review", "export"):
+    assert tab_names == ["frame", "clips", "align", "review", "export"]
+    for tab in ("frame", "clips", "align", "review", "export"):
         tab_button = require_first(
             tablist, tag="button", attr_name="data-inspector-tab", attr_value=tab
         )
@@ -519,31 +519,9 @@ def test_build_html_renders_inspector_drawer(report_payload: ReportPayload) -> N
     assert "data-inspector-frame-position" in html
     assert "data-inspector-clips" in html
     assert "data-inspector-align-pair" in html
-    pixel_panel = require_first(inspector, element_id="inspector-panel-pixel")
-    assert "hidden" in pixel_panel.attrs
-    assert "Decoded display sample · 8-bit sRGB" in pixel_panel.text
-    assert "Normalized cross-size mapping; not scene registration." in pixel_panel.text
-    lens_toggle = require_first(pixel_panel, tag="button", element_id="pixel-lens-toggle")
-    assert lens_toggle.attrs["aria-pressed"] == "false"
-    magnification = find_all(
-        pixel_panel,
-        tag="button",
-        attr_name="data-pixel-magnification",
-    )
-    assert [button.attrs["data-pixel-magnification"] for button in magnification] == [
-        "2",
-        "4",
-        "8",
-    ]
-    assert [button.attrs["aria-label"] for button in magnification] == [
-        "Magnification 2×",
-        "Magnification 4×",
-        "Magnification 8×",
-    ]
-    live = require_first(document, tag="div", element_id="pixel-inspector-live")
+    live = require_first(document, tag="div", element_id="viewer-live")
     assert live.attrs["role"] == "status"
     assert live.attrs["aria-live"] == "polite"
-    assert find_all(pixel_panel, tag="div", element_id="pixel-inspector-live") == []
     for button_id in (
         "btn-inspector-close",
         "btn-inspector-reset-current-align",
@@ -564,34 +542,78 @@ def test_build_html_renders_inspector_drawer(report_payload: ReportPayload) -> N
     review_status = require_first(review_panel, attr_name="data-review-status")
     assert "role" not in review_status.attrs
     assert "aria-live" not in review_status.attrs
-    assert html.count('id="pixel-inspector-live"') == 1
+    assert html.count('id="viewer-live"') == 1
+    assert "inspector-panel-pixel" not in html
+    assert "Pixel value unavailable" not in html
     assert "data-focus-frame" not in html
     assert "data-focus-mode" not in html
     assert "data-focus-pair" not in html
 
 
-def test_build_html_renders_pixel_inspection_stage_controls(
+def test_build_html_renders_lens_stage_controls(
     report_payload: ReportPayload,
 ) -> None:
     html = build_html(report_payload)
     document = parse_elements(html)
-    controls = require_first(document, tag="div", class_name="rv-controls")
-    inspect_button = require_first(controls, tag="button", element_id="btn-inspect")
-    assert inspect_button.attrs["aria-label"] == "Open pixel inspector"
-    assert inspect_button.attrs["title"] == "Inspect pixels (M)"
-
     stage = require_first(document, tag="div", class_name="rv-viewer-stage")
-    roi = require_first(stage, tag="button", element_id="rv-inspection-point")
-    assert roi.attrs["aria-label"] == "Inspection point unavailable"
-    assert roi.attrs["aria-pressed"] == "false"
-    assert roi.attrs["tabindex"] == "-1"
-    assert "hidden" in roi.attrs
+    palette = require_first(stage, tag="div", class_name="rv-viewport-palette")
+    lens_button = require_first(palette, tag="button", element_id="btn-lens")
+    assert lens_button.attrs["aria-label"] == "Turn lens on"
+    assert lens_button.attrs["aria-pressed"] == "false"
+    assert lens_button.attrs["title"] == "Toggle lens (L)"
 
-    lens = require_first(stage, tag="aside", element_id="rv-pixel-lens")
-    assert lens.attrs["aria-label"] == "Pixel lens"
-    assert lens.attrs["data-magnification"] == "4"
-    assert len(find_all(lens, tag="img")) == 1
-    assert not find_all(stage, tag="canvas")
+    target = require_first(stage, tag="span", element_id="rv-lens-target")
+    assert "hidden" in target.attrs
+    lens = require_first(stage, tag="aside", element_id="rv-lens")
+    assert lens.attrs["aria-label"] == "Image magnification lens"
+    assert lens.attrs["data-size"] == "medium"
+    assert lens.attrs["data-comparison"] == "false"
+    for image_role in ("active", "difference", "comparison"):
+        assert (
+            len(
+                find_all(
+                    lens,
+                    tag="img",
+                    attr_name="data-lens-image",
+                    attr_value=image_role,
+                )
+            )
+            == 1
+        )
+    active_role = require_first(lens, tag="span", attr_name="data-lens-role", attr_value="active")
+    assert active_role.text == "ACTIVE"
+    assert require_first(lens, tag="span", attr_name="data-lens-status", attr_value="active")
+    assert require_first(lens, tag="span", attr_name="data-lens-identity", attr_value="active")
+    comparison_role = require_first(
+        lens, tag="span", attr_name="data-lens-role", attr_value="comparison"
+    )
+    assert comparison_role.text == "COMPARE"
+    comparison_status = require_first(
+        lens, tag="span", attr_name="data-lens-status", attr_value="comparison"
+    )
+    assert "hidden" in comparison_status.attrs
+    assert comparison_status.text == ""
+    assert require_first(lens, tag="span", attr_name="data-lens-identity", attr_value="comparison")
+    grip = require_first(lens, tag="button", attr_name="data-lens-drag-handle")
+    assert grip.attrs["aria-label"] == "Move lens window"
+    assert not find_all(lens, tag="div", class_name="rv-lens-titlebar")
+    assert not find_all(lens, tag="button", element_id="btn-lens-settings")
+
+    settings = require_first(stage, tag="div", element_id="lens-settings-popover")
+    assert settings.attrs["role"] == "dialog"
+    assert "hidden" in settings.attrs
+    settings_trigger = require_first(palette, tag="button", element_id="btn-lens-settings")
+    assert settings_trigger.attrs["aria-controls"] == "lens-settings-popover"
+    assert not find_all(palette, tag="div", element_id="lens-settings-popover")
+    assert not find_all(lens, tag="div", element_id="lens-settings-popover")
+    assert require_first(settings, tag="input", element_id="lens-comparison-enabled")
+    assert require_first(settings, tag="button", attr_name="data-lens-marker", attr_value="off")
+    current_source = require_first(settings, tag="output", attr_name="data-lens-current-source")
+    assert current_source.text == "Lens is off."
+    assert current_source.attrs["aria-live"] == "off"
+    assert not find_all(stage, attr_name="data-lens-behavior")
+    assert not find_all(lens, tag="canvas")
+    assert 'id="btn-inspect"' not in html
 
 
 def test_build_html_renders_keyboard_help_accessibility_hooks(

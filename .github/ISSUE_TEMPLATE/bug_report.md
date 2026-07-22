@@ -15,8 +15,8 @@ A clear and concise description of the bug.
 - **OS**: [e.g., Ubuntu 22.04, Windows 11, macOS 14]
 - **Python Version**: [e.g., 3.13.1]
 - **Frame Compare Version**: [e.g., 0.1.0]
-- **Installation Method**: [Docker / pip / uv]
-- **VapourSynth Version** (if applicable): [e.g., R72]
+- **Installation Method**: [Windows portable / Docker / native uv / native pip]
+- **VapourSynth Version** (if applicable): [e.g., R76]
 
 ## Steps to Reproduce
 

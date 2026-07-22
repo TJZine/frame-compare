@@ -24,7 +24,7 @@
 | 📸 **Screenshot Rendering** | VapourSynth/FFmpeg with customizable overlays |
 | 🌐 **slow.pics Publishing** | Opt-in uploads with retry logic and rate limiting |
 | 📄 **HTML Reports** | Offline comparison viewer with slider, overlay, diff, and pair blink modes |
-| 🔧 **Zero-Config Docker** | Reproducible container runtime for backend proof and CLI usage |
+| 🔧 **Reproducible Docker Runtime** | Pinned container runtime for backend proof and CLI usage |
 
 ---
 
@@ -35,6 +35,7 @@
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Usage](#usage)
+- [Troubleshooting](#troubleshooting)
 - [Documentation](#documentation)
 - [Quality & Verification](#quality--verification)
 - [Releases & Versioning](#releases--versioning)
@@ -76,37 +77,31 @@ viewer and optional slow.pics uploads.
 
 ## Requirements
 
-| Requirement | Version | Notes |
-| ----------- | ------- | ----- |
-| Python | 3.13+ | Required |
-| uv | Latest | Recommended (or pip) |
-| FFmpeg | Any recent | Must be on `PATH` |
-| VapourSynth | R76 | Optional, for primary renderer |
+Requirements depend on the runtime route:
+
+| Route | Host requirements | Runtime posture |
+| --- | --- | --- |
+| Windows portable | Windows 10/11 x64 and PowerShell | Most complete native route; the full bundle includes Python, FFmpeg, VapourSynth R76, plugins, VSPreview, and PyQt6 |
+| Docker | Docker Desktop or Docker Engine with Compose | Recommended reproducible headless route for macOS and Linux |
+| Native source | Python 3.13+, `uv` or pip, FFmpeg on `PATH`, VapourSynth R76, and L-SMASH-Works | Advanced route; the default renderer requires VapourSynth and its source plugin |
+
+VSPreview is optional for interactive manual alignment. VapourSynth is not optional
+for the default renderer: an FFmpeg-only route requires
+`screenshots.use_ffmpeg = true`, and HDR frames that require tonemapping still need
+the VapourSynth path.
 
 ---
 
 ## Installation
 
-> [!TIP]
-> Prefer `uv` for reproducible environments.
+Choose one route and then follow its first-run sequence below.
 
-### With uv (Recommended)
-
-```bash
-uv sync --group dev --frozen
-```
-
-### With pip
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -U pip
-pip install -e .
-
-# Dev tools (uv groups not supported by pip)
-pip install pytest pytest-cov ruff pyright
-```
+| Route | Best for | Start here |
+| --- | --- | --- |
+| Docker | macOS/Linux users who want the reproducible backend runtime | [Docker Quick Start](#docker-recommended-for-macoslinux) |
+| Windows portable | Windows users who want the complete native runtime and updater | [Windows Portable Guide](docs/windows-portable.md) |
+| Native source | Advanced users with an existing FFmpeg/VapourSynth toolchain | [Native Source Quick Start](#native-source-advanced) |
+| Contributor | Development, tests, and code changes | [Contributing](CONTRIBUTING.md) |
 
 ### Windows Portable
 
@@ -115,7 +110,12 @@ pip install pytest pytest-cov ruff pyright
 > VSPreview + PyQt6 for interactive manual alignment, GPU-accelerated tonemapping, and
 > the native installer/update flow. None of these are available in the Docker path.
 
-From a GitHub release zip:
+Release bundles are the intended primary route. If the
+[GitHub Releases page](https://github.com/TJZine/frame-compare/releases) does not yet
+contain a `frame-compare-portable-win-x64-<tag>.zip`, use the source-build route in
+the Windows guide.
+
+From a published GitHub release zip:
 
 ```powershell
 # Download and extract frame-compare-portable-win-x64-<tag>.zip, then:
@@ -123,13 +123,9 @@ From a GitHub release zip:
 ```
 
 Source builds produce `dist/frame-compare-portable-win-x64`; that bundle root is
-not the repository root. The installed bundle keeps the default config/ and comparison_videos/ directories in the bundle root, includes VSPreview + PyQt6,
-and ships the `frame-compare-update apply` updater command. For source builds
-with the interactive preview stack, use:
-
-```bash
-uv sync --group dev --extra vspreview --frozen
-```
+not the repository root. The installed bundle keeps the default `config/` and
+`comparison_videos/` directories in the bundle root, includes VSPreview + PyQt6,
+and ships the `frame-compare-update apply` updater command.
 
 Full details (source builds, directory layout, updater): **[Windows Portable Guide](docs/windows-portable.md)**
 
@@ -140,28 +136,35 @@ Full details (source builds, directory layout, updater): **[Windows Portable Gui
 > [!IMPORTANT]
 > The full pipeline depends on external tools (FFmpeg, VapourSynth + plugins). The most reproducible way to run end-to-end commands is via **Docker**.
 
-### Docker (Recommended)
+### Docker (Recommended for macOS/Linux)
+
+Run these commands from the cloned repository. The host UID/GID variables make
+the setup and runtime containers write bind-mounted files as the current user;
+Compose falls back to `1000:1000` if they are unset. Pre-creating the directories
+keeps their ownership predictable. Before the wizard, copy at least two supported
+video files into `comparison_videos/`.
+Supported extensions are `.mkv`, `.mp4`, `.avi`, `.m2ts`, and `.ts`
+(case-insensitive).
 
 ```bash
-docker build -t frame-compare:dev .
+export FRAME_COMPARE_HOST_UID="$(id -u)"
+export FRAME_COMPARE_HOST_GID="$(id -g)"
+mkdir -p config comparison_videos screenshots generated
 
-# Diagnostics
-docker run --rm frame-compare:dev doctor --json
+# Build the shared runtime image.
+docker compose build frame-compare-run
 
-# Interactive wizard
-docker run --rm -it \
-  -v "$PWD":/workspace \
-  -w /workspace \
-  frame-compare:dev wizard
+# Create or review config/config.toml. Only this service mounts config writable.
+docker compose run --rm frame-compare-wizard
 
-# Run the pipeline
-docker run --rm -it \
-  -v "$PWD/comparison_videos":/workspace/comparison_videos:ro \
-  -v "$PWD/output":/workspace/screenshots \
-  -w /workspace \
-  frame-compare:dev run \
-    --root /workspace \
-    --input /workspace/comparison_videos
+# Check required runtime dependencies and review any noncritical warnings.
+docker compose run --rm frame-compare-run doctor
+
+# Validate config, filenames, selection intent, and output intent without side effects.
+docker compose run --rm frame-compare-run run --root /workspace --dry-run
+
+# Run the pipeline. Config and media are read-only; outputs persist on the host.
+docker compose run --rm frame-compare-run run --root /workspace
 ```
 
 > [!NOTE]
@@ -176,13 +179,44 @@ docker run --rm -it \
 > file baseline. Environment variables can override the file during a later run.
 > Enable publishing deliberately in config, environment variables, or a preset.
 
-### Local (if you have VapourSynth + FFmpeg)
+With the default run-folder policy, screenshots and reports persist together beneath
+`generated/`; `screenshots/` is used when run folders are disabled. Containerized
+runs cannot directly open the host browser. If host Python is available, use the
+exact report path printed by the run with:
 
 ```bash
-uv sync --group dev --frozen
-frame-compare doctor          # check for missing deps
-frame-compare run --root . --input ./comparison_videos
+python tools/open_docker_host_target.py "<report_path_from_run_output>"
 ```
+
+Without host Python, replace the printed `/workspace/generated/` or
+`/workspace/screenshots/` prefix with the corresponding `./generated/` or
+`./screenshots/` host directory and open `report.html` normally.
+
+See [Docker Environments](docs/docker-environments.md) for the service map, host
+report opening, and optional Linux GPU/GUI profiles.
+
+### Native Source (Advanced)
+
+Run these commands from a clone after installing the native FFmpeg, VapourSynth R76,
+and L-SMASH-Works prerequisites. `uv run --no-sync` executes the project from its
+managed environment without requiring shell activation.
+
+```bash
+uv sync --no-dev --extra vspreview --frozen
+
+# Put at least two supported clips in comparison_videos/, then:
+uv run --no-sync frame-compare wizard
+uv run --no-sync frame-compare doctor
+uv run --no-sync frame-compare run --root . --dry-run
+uv run --no-sync frame-compare run --root .
+```
+
+The `vspreview` extra supplies the repository-managed VapourSynth Python/VSPreview
+dependency route; L-SMASH-Works must still be available to that runtime. For a
+pip-managed source installation, create and activate a Python 3.13+ environment,
+run `python -m pip install ".[vspreview]"`, and then use the same `frame-compare`
+subcommands without the `uv run --no-sync` prefix. Contributor editable installs and
+development dependencies are documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
@@ -216,6 +250,30 @@ for the full behavior and the
 [benchmark history](docs/analysis-benchmark-history.md) for hardware-dependent
 evidence.
 
+### Webhook Notifications
+
+After a successful slow.pics upload, Frame Compare can post the comparison URL
+to a Discord-compatible incoming webhook. The webhook URL contains a secret, so
+prefer an environment variable instead of committing it to `config.toml`:
+
+```bash
+export FRAME_COMPARE_SLOWPICS__AUTO_UPLOAD=true
+export FRAME_COMPARE_SLOWPICS__WEBHOOK_URL="https://discord.com/api/webhooks/WEBHOOK_ID/WEBHOOK_TOKEN"
+frame-compare run --root .
+```
+
+Frame Compare accepts manually authored `webhook_url` TOML values, but generated
+configuration and preset files deliberately omit the secret, including output
+from `run --write-config`, confirmed `wizard` rewrites, `preset save`, and
+`preset apply`.
+
+The payload is `{"content":"<slowpics_url>"}`. Delivery requires an external
+HTTPS endpoint, follows no redirects, and remains warning-only if notification
+delivery fails. Other webhook providers must accept that payload shape; Frame
+Compare does not guess the provider from a secret URL. See the
+[webhook contract](docs/current-cli-contract.md#slowpics-webhook-policy) for the
+security and retry policy.
+
 ### Reports
 
 | Aspect | Detail |
@@ -236,6 +294,26 @@ Overlay font rendering uses system/default fonts; appearance varies by OS.
 The default Docker path is headless and deterministic (software Vulkan, CI parity).
 For GPU acceleration, X11 GUI profiles, and platform-specific details, see
 **[Docker Environments](docs/docker-environments.md)**.
+
+---
+
+## Troubleshooting
+
+| Symptom | What to do |
+| --- | --- |
+| `frame-compare: command not found` after `uv sync` | Use `uv run --no-sync frame-compare ...`, activate `.venv`, or use `.venv/bin/frame-compare` directly. |
+| `FC-1001` says the configuration file is missing | Run `frame-compare wizard` through the same native or Docker workspace route that will run the pipeline. |
+| No videos are discovered | Put at least two `.mkv`, `.mp4`, `.avi`, `.m2ts`, or `.ts` files in the configured input directory, normally `comparison_videos/`, then rerun `run --dry-run`. |
+| Doctor reports VapourSynth or L-SMASH-Works as missing | Use the Docker or Windows portable route, or repair the native VapourSynth R76/plugin installation before using the default renderer. |
+| Doctor reports an optional/network warning | Doctor remains non-blocking, but review the warning against the intended workflow. Disabled integrations need no setup; FFmpeg-dependent workflows still require FFmpeg. |
+| Docker cannot write config or output directories | Export `FRAME_COMPARE_HOST_UID="$(id -u)"` and `FRAME_COMPARE_HOST_GID="$(id -g)"`, create `config`, `comparison_videos`, `screenshots`, and `generated` as that host user, then rerun Compose. |
+| A Docker run produced a report but did not open a browser | Run `python tools/open_docker_host_target.py "<report_path_from_run_output>"` on the host. |
+| The Windows command is unavailable immediately after installation | Open a new terminal so the updated user `PATH` is loaded. |
+
+For detailed Docker host/runtime limitations, see
+[Docker Environments](docs/docker-environments.md). For portable installation,
+update, and rollback issues, see the
+[Windows Portable Guide](docs/windows-portable.md).
 
 ---
 

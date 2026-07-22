@@ -2,6 +2,19 @@
 
 This document describes the present-day Frame Compare codebase. It is intentionally about what exists now, not desired future structure.
 
+## Contents
+
+- [Operating Stance](#operating-stance)
+- [Composition Roots](#composition-roots)
+- [Runtime Flow](#runtime-flow)
+- [Module Boundaries](#module-boundaries)
+- [Persistence And Filesystem Owners](#persistence-and-filesystem-owners)
+- [External Boundaries](#external-boundaries)
+- [Public Boundaries](#public-boundaries)
+- [Current Hotspots](#current-hotspots)
+- [Working Rules That Follow From The Codebase](#working-rules-that-follow-from-the-codebase)
+- [Unknowns And Maintainer Decisions Still Open](#unknowns-and-maintainer-decisions-still-open)
+
 ## Operating Stance
 
 Frame Compare is a CLI-first packaged Python app with importable internal modules. The CLI and release artifacts are the primary supported surfaces.
@@ -143,6 +156,9 @@ The repo uses filesystem persistence, not a database.
 Primary owned paths:
 
 - `config/config.toml` and `config/presets/*.toml`: config owners
+- `frame_compare.config.persistence`: secret-safe serialization shared by generated
+  config and preset writes; runtime-only `slowpics.webhook_url` values are excluded
+  from every generated TOML payload
 - `<resolved paths.generated_dir>/cache/analysis/<label>__<fingerprint>.compframes`:
   shared analysis metrics cache (defaults to `generated/cache/analysis/` under the
   workspace root, but follows the configured `paths.generated_dir`). The full
@@ -349,7 +365,10 @@ documentation as the external contract reference.
 
 Current Docker owner seams for optional profiles remain explicit:
 
-- `docker-compose.yml`: default headless software-Vulkan services
+- `docker-compose.yml`: default headless software-Vulkan services, including a
+  configuration-writable `frame-compare-wizard` setup service and a
+  configuration-read-only `frame-compare-run` service with persistent screenshot
+  and generated-output mounts
 - `docker-compose.gpu-nvidia.yml`: opt-in NVIDIA GPU override/profile only
 - `docker-compose.gui-linux.yml`: opt-in Linux X11/VSPreview override/profile only
 - `tools/verify_docker_integration.sh`: canonical default Docker gate
@@ -438,7 +457,14 @@ targets, rejects disallowed IP literals and DNS answers, connects to a
 prevalidated pinned address while preserving TLS verification for the original
 hostname, sends the JSON `content` payload without redirects, and does not reuse
 slow.pics client cookies, headers, proxy/environment trust, or transport state.
-Webhook failures are warning-only and redact configured URL details.
+It identifies the versioned client, applies an absolute per-attempt deadline and
+bounded pre-send/5xx backoff, fails permanent certificate-verification errors,
+honors only short valid `Retry-After` rate-limit delays, and does not retry after
+request transmission when the delivery outcome is unknown so it does not knowingly
+create duplicate notifications.
+Webhook failures are warning-only and redact configured URL details. Typed safe
+failure categories and optional HTTP status codes feed structured diagnostics without
+retaining the configured endpoint.
 
 `frame_compare.cli.entry` and its run-command helper own interactive-only
 slow.pics URL copy/browser actions and the precedence rule between slow.pics
@@ -455,25 +481,68 @@ discovery and source-selection policy without importing media runtime code.
 redacted schema validation for preserving an existing wizard-edited document; atomic
 replacement remains owned by `frame_compare.utils.atomic_write`.
 
+### Report Viewer
+
 `frame_compare.services.report` owns the static offline report payload and viewer
 assets. The generated viewer exposes slider, internal overlay mode presented to
 users as Single where appropriate, diff, and pair-based blink modes; frame/category
 navigation; a HUD toggle for stage labels and current-frame metadata; a primary
 toolbar plus floating viewport palette; a collapsible, compact/normal/large
-filmstrip bottom panel; an inspector drawer with Pixel, Frame, Clips, Align, Review,
-and Export tabs; fullscreen support; viewport pan, zoom, actual/width/height fit, reveal,
-and adjacent-frame preloading. `assets/pixel_inspector.js` is the focused owner for
-inspection-point acquisition, normalized cross-size coordinate mapping, bounded
-decoded-display sampling through one offscreen 1x1 canvas, ROI lock/nudge state, and
-the optional 2x/4x/8x floating lens. `assets/grid_view.js` owns the viewer-only Grid
+filmstrip bottom panel; an inspector drawer with Frame, Clips, Align, Review, and
+Export tabs; fullscreen support; viewport pan, zoom, actual/width/height fit, reveal,
+and adjacent-frame preloading.
+
+The ordinary report artifact does not claim presentation blindness. Source identity
+can be present in baked screenshot overlays, physical image filenames, and report
+metadata, so viewer-only label hiding cannot provide an honest blind workflow. Any
+future blind comparison must use an explicitly eligible clean artifact and a
+separately approved invocation, delivery, reveal, and publishing contract.
+
+#### Lens
+
+`assets/lens.js` is the focused owner for the optional
+floating image lens: normalized per-source mapping, fixed-window placement, dedicated
+edge-grip dragging, pending touch tap-versus-viewport-gesture ownership,
+160/240/320px sizing, 2x/3x/4x/6x/8x/12x magnification, Off/Ring/Brackets sample
+marking, and an optional Single-mode active/comparison split. The sample follows
+pointer movement across the displayed source while the lens window stays fixed;
+only its grip can move the window. Diff uses separate aligned base and difference DOM
+images with CSS difference blending, while the viewer exposes one palette/lens chrome
+event boundary so bubbled pointer, wheel, and double-click input cannot mutate the
+viewport. Activation seeds a transient center point and retains the stable palette
+Lens group, which owns zoom, fixed status, and stage-clamped settings. The display-only
+lens body has no titlebar or controls. It uses compact mode-aware ACTIVE, COMPARE, and
+DIFF badges plus deterministic, stage-size-aware middle-ellipsized identity rails that
+preserve source name beginnings and suffixes; Lens Settings exposes the full wrapping
+current-source label. Report interaction highlights, including lens markers and its grip, share one
+Projection Brass signal token family while semantic status and frame-category colors
+remain separate. Grip pointer dragging uses capture, while its
+arrow-key operation supports a larger Shift step, clamps to the stage, persists the
+position, and prevents viewer shortcuts. Touch sampling remains a deliberate tap;
+touch movement beyond its threshold returns ownership to viewport gestures.
+Context sync remaps or reseeds the target when frames, modes, sources, or Grid entries
+change; layout refresh preserves the normalized sample through pan, zoom, fit, and
+alignment changes. Each Lens clone slot uses a detached, source-matched image loader;
+supersede, completion, and clearing remove both loader handlers and discard the loader,
+with request tokens retained as defense in depth. Stale load/error callbacks cannot
+revive superseded content, same-source failures do not retry continuously, and
+unavailable content remains visibly honest. It magnifies existing image elements
+without canvas decoding or pixel-value claims.
+
+#### Grid
+
+`assets/grid_view.js` owns the viewer-only Grid
 cell lifecycle: deterministic responsive 2/3/4 layouts, payload-order pages of at
 most four images (one below the mobile reflow boundary), loading/missing/retry
 presentation, and visible-range controls. It consumes the viewer's single viewport
-state and the pixel inspector's normalized point rather than duplicating either. In
+state while exposing visible image entries to the lens rather than duplicating either. In
 Grid mode the shared pan fields represent normalized image-box translation and each
 cell derives its CSS-pixel transform from its own contained image dimensions; the
 viewer converts those fields at the Grid/pair-mode boundary so mixed-aspect cells keep
 one normalized viewport center without changing pair-mode persistence semantics.
+
+#### Review State And Viewer Composition
+
 `assets/review_state.js` owns the exact report-scoped local review schema, bounded
 bookmark/tag/note/preferred-clip records, fail-closed localStorage reads, deterministic
 V1 JSON export, strict import validation and preview, atomic merge/replace apply, and
@@ -489,11 +558,21 @@ coordinate conversions
 or grid mount policy. Grid remains outside the public report default-mode payload
 enum and does not preload adjacent grid pages. Blink mode supports 0.3s/0.7s/1.2s speeds,
 pause/resume, keyboard speed controls, and reduced-motion handling that enters Blink
-paused. Browser-local
+paused.
+
+#### Browser-Local State
+
+Browser-local
 viewer state is scoped by report identity and persists current frame, view mode,
 clip selection, viewport/zoom/reveal, pair alignments, HUD visibility, filmstrip
-collapsed/size, inspector open/tab, optional-lens preference, and blink speed. Pixel
-lock and magnification are not persisted; Blink paused state is also transient. It
+collapsed/size, inspector open/tab, and blink speed. Lens preferences use a separate
+best-effort browser-global v2 key for magnification, size, and sample-marker style,
+whose default is Off. Report-scoped lens state stores enabled state, fixed normalized
+window position, and Single comparison selection. Grip drag end and keyboard movement
+persist that normalized position so size and responsive layout changes preserve its
+relative placement. Pointer/sample position and Blink paused state are
+transient. Storage failure leaves the lens usable for the current session and is
+reported quietly inside its settings popover. It
 does not own slow.pics upload policy, prompting, or browser side effects.
 
 Active-picture resolution is owned by `frame_compare.orchestration.active_rect`

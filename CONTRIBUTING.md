@@ -40,20 +40,16 @@ cd frame-compare
 
 ### 2. Install dependencies
 
-**With uv (recommended):**
+Use the repository's canonical frozen uv environment:
 
 ```bash
 uv sync --group dev --frozen
 ```
 
-**With pip:**
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate  # or `.venv\Scripts\activate` on Windows
-pip install -e .
-pip install pytest pytest-cov ruff pyright
-```
+The project uses uv dependency groups and its lockfile for the complete contributor
+toolchain. A pip-only editable install can run the application, but it is not a
+substitute for the canonical environment and cannot be assumed to reproduce the
+full local or CI gates.
 
 ### 3. Verify your setup
 
@@ -134,13 +130,13 @@ We use [Ruff](https://docs.astral.sh/ruff/) for linting and formatting:
 
 ```bash
 # Check for issues
-.venv/bin/ruff check .
+uv run --no-sync ruff check .
 
 # Auto-fix safe issues
-.venv/bin/ruff check --fix .
+uv run --no-sync ruff check --fix .
 
 # Format code
-.venv/bin/ruff format .
+uv run --no-sync ruff format .
 ```
 
 ### Type Checking
@@ -148,7 +144,7 @@ We use [Ruff](https://docs.astral.sh/ruff/) for linting and formatting:
 We use [Pyright](https://microsoft.github.io/pyright/) in strict mode:
 
 ```bash
-.venv/bin/pyright --warnings
+uv run --no-sync pyright --warnings
 ```
 
 > [!IMPORTANT]
@@ -181,14 +177,14 @@ markers for heavier routes such as `integration`, `e2e`, `vs_required`, `slow`, 
 
 ```bash
 # All unit tests
-.venv/bin/pytest -q
+uv run --no-sync pytest -q
 
 # Specific markers
-.venv/bin/pytest -m unit
-.venv/bin/pytest -m "not vs_required"
+uv run --no-sync pytest -m unit
+uv run --no-sync pytest -m "not vs_required"
 
 # With coverage
-.venv/bin/pytest --cov=src/frame_compare --cov-report=term-missing
+uv run --no-sync pytest --cov=src/frame_compare --cov-report=term-missing
 ```
 
 ### Docker Integration Tests

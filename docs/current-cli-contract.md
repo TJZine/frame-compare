@@ -3,6 +3,28 @@
 This document describes the present-day user-facing CLI contract for Frame Compare.
 It is intentionally about current behavior, not desired future behavior.
 
+## Contents
+
+- [Operating Stance](#operating-stance)
+- [Authority And Update Rules](#authority-and-update-rules)
+- [Command Surface](#command-surface)
+- [Shared Path Resolution Rules](#shared-path-resolution-rules)
+- [Config-Only Sources Surface](#config-only-sources-surface)
+- [`history` Command Contract](#history-command-contract)
+- [`version` Command Contract](#version-command-contract)
+- [`run` Command Contract](#run-command-contract)
+- [CLI Flag To Config Mapping](#cli-flag-to-config-mapping)
+- [Config-Only Analysis Surface](#config-only-analysis-surface)
+- [Config-Only slow.pics Surface](#config-only-slowpics-surface)
+- [VSPreview Interactive Diagnostics](#vspreview-interactive-diagnostics)
+- [Config-Only Screenshot Surface](#config-only-screenshot-surface)
+- [Config Validation, Logging, And Migration](#config-validation-logging-and-migration)
+- [Config-Only Audio Alignment Surface](#config-only-audio-alignment-surface)
+- [Persistence Rules](#persistence-rules)
+- [`wizard` Command Contract](#wizard-command-contract)
+- [`doctor` Command Contract](#doctor-command-contract)
+- [`preset` Command Contract](#preset-command-contract)
+
 ## Operating Stance
 
 Frame Compare is a CLI-first packaged Python app. Command names, flags, exit behavior,
@@ -18,8 +40,11 @@ documents that promise elsewhere.
   argument parsing, stdout/stderr behavior, and interactive post-run behavior.
 - `src/frame_compare/config/overrides.py` owns CLI flag to config override mappings.
 - Primary executable contract checks include:
-  - `tests/cli/test_cli_commands.py` for help text, JSON payloads, report auto-open
-    gating, and command-level CLI behavior.
+  - `tests/cli/test_help_and_import.py` for command registration, help text, and
+    lazy-import behavior.
+  - `tests/cli/test_run_command.py`, `tests/cli/test_run_json_errors.py`, and
+    `tests/cli/test_run_report_open.py` for command behavior, JSON errors, and
+    report auto-open gating.
   - `tests/cli/test_run_slowpics_options.py` for the slow.pics `run` option
     surface.
   - `tests/cli/test_run_output.py` for human output, JSON stdout cleanliness,
@@ -595,20 +620,39 @@ opened. If it is not opened, the CLI prints the report path before prompting.
 ### slow.pics Webhook Policy
 
 - Webhook delivery is owned by `frame_compare.services.slowpics_webhook`.
-- The payload is exactly `{"content":"<slowpics_url>"}` serialized as JSON.
+- The payload is exactly `{"content":"<slowpics_url>"}` serialized as JSON. This
+  is the Discord incoming-webhook shape; an arbitrary endpoint must explicitly
+  accept that same contract. Frame Compare does not infer providers or maintain
+  provider-specific payload adapters.
+- The request identifies Frame Compare with a versioned `User-Agent` compatible
+  with Discord's HTTP API requirements.
 - The configured webhook URL must be a strict external HTTPS endpoint:
   non-HTTPS URLs, localhost names, loopback, private, link-local, multicast,
   reserved, unspecified, and otherwise non-public IP targets are rejected.
+  URL fragments are rejected because fragments are not transmitted in HTTP
+  requests.
 - Hostname targets are rejected when DNS resolution fails, returns no addresses,
   includes an unparseable address, or includes any disallowed address.
 - Delivery prevents validation-to-connect DNS rebinding by connecting to a
   prevalidated pinned IP address while preserving TLS certificate verification
   and SNI for the original hostname.
-- Delivery uses no redirects, a fixed 10 second timeout, and 3 attempts.
+- Delivery uses no redirects, a fixed 10 second absolute deadline per attempt,
+  and at most 3 attempts. Pre-send connection and transient TLS transport
+  failures plus 5xx responses use deterministic 1-second then 2-second backoff.
+  TLS certificate-verification failures are permanent and fail immediately.
+- HTTP 429 is retried only when the endpoint returns a valid numeric
+  `Retry-After` of at most 10 seconds. Missing, invalid, or longer delays fail
+  warning-only instead of blocking the run beyond the webhook delivery budget.
+- Once request transmission begins, a transport or response failure is treated
+  as an unknown delivery outcome and is not retried, because another POST could
+  create a duplicate notification.
 - The webhook request path is isolated from the slow.pics upload client: it does
   not reuse slow.pics cookies, headers, client state, redirect policy, proxy
   settings, or environment trust.
 - Webhook URL details are redacted from warnings and logs.
+- Failed deliveries carry a typed safe diagnostic category and, for HTTP failures,
+  the numeric response status into structured logs. Diagnostics never include the
+  configured endpoint, request target, query, or response body.
 - Delivery failures are warning-only and do not write to JSON stdout.
 
 ## CLI Flag To Config Mapping
@@ -783,6 +827,17 @@ attempted, generated-report auto-open is suppressed for that run.
 `create_url_shortcut` and `webhook_url` run after successful upload whenever
 configured, including `--json` and `--quiet`. Their warning-only failures remain
 off JSON stdout and do not fail the run.
+
+`webhook_url` is trimmed during config validation and a blank value is treated
+as disabled. Webhook URLs normally contain a secret token. Prefer the
+`FRAME_COMPARE_SLOWPICS__WEBHOOK_URL` environment variable for unattended or
+shared workspaces, and do not commit a live webhook URL to version control.
+Runtime loading continues to accept manually authored TOML values, but generated
+configuration and preset files always omit `webhook_url`. This includes
+`run --write-config`, confirmed `wizard` rewrites, `preset save`, and the rewritten
+config produced by `preset apply`; those operations remove any existing persisted
+webhook URL rather than copying effective environment or file values into generated
+TOML.
 
 The JSON output schema remains unchanged by report-confirmed upload:
 `slowpics_url` is still the only machine-readable slow.pics result field.
@@ -1060,12 +1115,16 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 - Existing TOML is parsed and validated without environment precedence, then used as
   the persistence base. Confirmed partial patches preserve unrelated supported and
   unknown root values, explicit empty values, dates/times, nested tables,
-  arrays-of-tables, and file-resident secrets. Environment-only values are neither
-  displayed nor persisted. Wizard validation errors redact every raw Pydantic input.
+  arrays-of-tables, and file-resident secrets other than `slowpics.webhook_url`.
+  A confirmed wizard rewrite removes that webhook secret through the shared
+  config-persistence policy; a true no-op leaves the original file byte-for-byte.
+  Environment-only values are neither displayed nor persisted. Wizard validation
+  errors redact every raw Pydantic input.
 - Before writing, the wizard validates the complete candidate and shows a semantic
   review containing changed/new input, reference, and frame-selection facts, the
-  metrics-scan consequence, and privacy/preservation statements. It never displays
-  secret values or environment presence.
+  metrics-scan consequence, and privacy/preservation statements, including explicit
+  notice when a persisted webhook URL will be removed. It never displays secret
+  values or environment presence.
 - A no-op exits 0 without confirmation or writing. Final confirmation defaults to No;
   No exits 0 with `Canceled; configuration unchanged.` Ctrl-C, abort, or EOF at any
   prompt emits the same line and exits 130. All cancellation and validation paths
@@ -1096,6 +1155,12 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 - Human output uses a neutral status marker for optional unavailable checks such as
   VSPreview, so optional availability gaps are visually distinct from critical
   dependency failures. This does not change `doctor --json` status values.
+- Human output uses a warning marker, rather than the critical-failure marker, for
+  failed non-core checks such as network reachability or missing optional integration
+  configuration. It ends with a deterministic readiness summary that distinguishes a
+  blocked core runtime, a ready core runtime with noncritical warnings, and a fully
+  passing check set. These presentation changes do not alter JSON fields, JSON status
+  values, or exit-code behavior.
 - Failed checks and optional-unavailable warnings include a short deterministic next
   action when the check can prove one. `doctor --json` exposes the same text as
   `install_hint`. Hints distinguish missing executables, unavailable runtimes/plugins,

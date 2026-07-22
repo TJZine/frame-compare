@@ -1,5 +1,4 @@
 .DS_Store
-docs/archive
 # Local tool caches / indexes
 .codanna/
 .mcp_sequential_thinking/
@@ -38,6 +37,8 @@ CODEX.md
 **/generated/vspreview_sessions/
 .desloppify/
 .agents/skills/desloppify/
+/scorecard.png
+/docker-build.log
 
 
 # FC2 app-server runtime (ephemeral)

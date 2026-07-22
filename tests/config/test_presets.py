@@ -81,6 +81,23 @@ def test_save_preset_creates_file(tmp_path: Path) -> None:
     assert (tmp_path / "my_preset.toml").exists()
 
 
+def test_save_preset_omits_webhook_secret(tmp_path: Path) -> None:
+    from frame_compare.config.loader import get_default_config
+
+    config = get_default_config()
+    config.slowpics.title = "Secret-safe preset"
+    config.slowpics.webhook_url = "https://discord.com/api/webhooks/id/secret-token"
+
+    save_preset("safe", config, presets_dir=tmp_path)
+
+    data = load_preset("safe", presets_dir=tmp_path)
+    slowpics = data["slowpics"]
+    assert isinstance(slowpics, dict)
+    assert slowpics["title"] == "Secret-safe preset"
+    assert "webhook_url" not in slowpics
+    assert "secret-token" not in (tmp_path / "safe.toml").read_text(encoding="utf-8")
+
+
 def test_save_preset_uses_atomic_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from frame_compare.config.loader import get_default_config
 

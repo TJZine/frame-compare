@@ -366,10 +366,6 @@ def _render_controls(
             <button data-mode="grid" role="radio" aria-checked="false" aria-label="Grid mode" title="Grid comparison">Grid</button>
         </div>
 
-        <div class="rv-control-group rv-inspect-control">
-            <button id="btn-inspect" type="button" aria-label="Open pixel inspector" title="Inspect pixels (M)">Inspect</button>
-        </div>
-
         <div class="rv-control-group rv-grid-controls" data-control-scope="grid" aria-label="Grid clips" hidden>
             <button id="btn-grid-prev" type="button" aria-label="Previous grid clips">←</button>
             <span class="rv-grid-position" data-grid-position aria-live="off"></span>
@@ -398,6 +394,38 @@ def _render_controls(
         <div id="alignment-status" class="rv-alignment-status" role="status" aria-live="polite">Aligned: none</div>
         </div>
     </div>"""
+
+
+def _render_lens_settings() -> str:
+    return """        <div id="lens-settings-popover" class="rv-lens-settings" role="dialog" aria-label="Lens settings" hidden>
+            <fieldset>
+                <legend>Size</legend>
+                <div class="rv-lens-setting-options" role="radiogroup" aria-label="Lens size">
+                    <button type="button" role="radio" data-lens-size="small" aria-checked="false">Small</button>
+                    <button type="button" role="radio" data-lens-size="medium" aria-checked="true">Medium</button>
+                    <button type="button" role="radio" data-lens-size="large" aria-checked="false">Large</button>
+                </div>
+            </fieldset>
+            <fieldset>
+                <legend>Sample marker</legend>
+                <div class="rv-lens-setting-options" role="radiogroup" aria-label="Sample marker style">
+                    <button type="button" role="radio" data-lens-marker="off" aria-checked="true">Off</button>
+                    <button type="button" role="radio" data-lens-marker="ring" aria-checked="false">Ring</button>
+                    <button type="button" role="radio" data-lens-marker="brackets" aria-checked="false">Brackets</button>
+                </div>
+            </fieldset>
+            <div data-lens-comparison-settings hidden>
+                <label class="rv-lens-check"><input id="lens-comparison-enabled" type="checkbox"> Compare inside lens</label>
+                <label class="rv-lens-select">Comparison source
+                    <select id="lens-comparison-target"></select>
+                </label>
+            </div>
+            <label class="rv-lens-current-source">Current source
+                <output data-lens-current-source aria-live="off">Lens is off.</output>
+            </label>
+            <button id="btn-lens-reset" type="button">Reset lens settings and position</button>
+            <p class="rv-lens-persistence" data-lens-persistence></p>
+        </div>"""
 
 
 def _render_viewport_palette() -> str:
@@ -454,6 +482,17 @@ def _render_viewport_palette() -> str:
             <button id="btn-overlays" class="active" aria-label="Hide HUD" aria-pressed="true" title="Hide HUD (H)">HUD</button>
         </div>
 
+        <div class="rv-palette-group rv-lens-palette-group" data-lens-palette-group>
+            <button id="btn-lens" type="button" aria-label="Turn lens on" aria-pressed="false" title="Toggle lens (L)">Lens</button>
+            <div class="rv-lens-palette-controls" data-lens-active-controls hidden>
+                <button id="btn-lens-zoom-out" type="button" aria-label="Decrease lens magnification">−</button>
+                <output data-lens-zoom aria-label="Lens magnification">4×</output>
+                <button id="btn-lens-zoom-in" type="button" aria-label="Increase lens magnification">+</button>
+                <span class="rv-lens-fixed-status" aria-label="Lens window behavior">Fixed</span>
+                <button id="btn-lens-settings" type="button" aria-label="Lens settings" aria-haspopup="dialog" aria-controls="lens-settings-popover" aria-expanded="false">⚙</button>
+            </div>
+        </div>
+
         <div class="rv-palette-group rv-blink-controls" data-control-scope="blink" hidden>
             <button id="btn-blink-pause" aria-label="Pause blink" aria-pressed="false" title="Pause blink (Space)">Pause</button>
             <select id="blink-speed" aria-label="Blink speed">
@@ -483,15 +522,32 @@ def _render_stage() -> str:
                 <div id="label-right" class="rv-overlay-label right"></div>
             </div>
         </div>
-        <button id="rv-inspection-point" class="rv-inspection-point" type="button" aria-label="Inspection point unavailable" aria-pressed="false" tabindex="-1" hidden>
-            <span aria-hidden="true"></span>
-        </button>
+        <span id="rv-lens-target" class="rv-lens-target" aria-hidden="true" hidden><i></i><i></i><i></i><i></i></span>
         <section id="rv-grid" class="rv-grid" aria-label="Grid comparison" hidden>
             <div class="rv-grid-frame-error" data-grid-frame-error hidden></div>
             <div class="rv-grid-cells" data-grid-cells></div>
         </section>
-        <aside id="rv-pixel-lens" class="rv-pixel-lens" aria-label="Pixel lens" data-magnification="4" hidden>
-            <img src="" alt="">
+        <aside id="rv-lens" class="rv-lens" aria-label="Image magnification lens" data-size="medium" data-comparison="false" hidden>
+            <div class="rv-lens-view" aria-hidden="true">
+                <div class="rv-lens-pane rv-lens-pane--active">
+                    <img class="rv-lens-image rv-lens-image--active" data-lens-image="active" src="" alt="">
+                    <img class="rv-lens-image rv-lens-image--difference" data-lens-image="difference" src="" alt="">
+                    <div class="rv-lens-caption">
+                        <span class="rv-lens-role" data-lens-role="active">ACTIVE</span>
+                    </div>
+                    <span class="rv-lens-status" data-lens-status="active" hidden></span>
+                    <span class="rv-lens-identity" data-lens-identity="active"></span>
+                </div>
+                <div class="rv-lens-pane rv-lens-pane--comparison">
+                    <img class="rv-lens-image rv-lens-image--comparison" data-lens-image="comparison" src="" alt="">
+                    <div class="rv-lens-caption">
+                        <span class="rv-lens-role" data-lens-role="comparison">COMPARE</span>
+                    </div>
+                    <span class="rv-lens-status" data-lens-status="comparison" hidden></span>
+                    <span class="rv-lens-identity" data-lens-identity="comparison"></span>
+                </div>
+            </div>
+            <button class="rv-lens-grip" type="button" data-lens-drag-handle aria-label="Move lens window" title="Drag to move lens; use arrow keys when focused"><span aria-hidden="true">⠿</span></button>
         </aside>
         <div class="rv-stage-overlay-info">
             <span class="rv-info-label" data-current-frame-label></span>
@@ -499,6 +555,7 @@ def _render_stage() -> str:
             <span class="rv-info-category" data-current-frame-category></span>
         </div>
 {_render_viewport_palette()}
+{_render_lens_settings()}
     </div>"""
 
 
@@ -509,28 +566,12 @@ def _render_inspector() -> str:
             <button id="btn-inspector-close" type="button" aria-label="Close inspector" title="Close inspector (I)" tabindex="-1">Close</button>
         </div>
         <div class="rv-inspector-tabs" role="tablist" aria-label="Inspector tabs">
-            <button id="inspector-tab-pixel" type="button" role="tab" data-inspector-tab="pixel" aria-selected="false" aria-controls="inspector-panel-pixel" tabindex="-1">Pixel</button>
             <button id="inspector-tab-frame" type="button" role="tab" data-inspector-tab="frame" aria-selected="true" aria-controls="inspector-panel-frame" tabindex="-1">Frame</button>
             <button id="inspector-tab-clips" type="button" role="tab" data-inspector-tab="clips" aria-selected="false" aria-controls="inspector-panel-clips" tabindex="-1">Clips</button>
             <button id="inspector-tab-align" type="button" role="tab" data-inspector-tab="align" aria-selected="false" aria-controls="inspector-panel-align" tabindex="-1">Align</button>
             <button id="inspector-tab-review" type="button" role="tab" data-inspector-tab="review" aria-selected="false" aria-controls="inspector-panel-review" tabindex="-1">Review</button>
             <button id="inspector-tab-export" type="button" role="tab" data-inspector-tab="export" aria-selected="false" aria-controls="inspector-panel-export" tabindex="-1">Export</button>
         </div>
-        <section id="inspector-panel-pixel" class="rv-inspector-panel rv-pixel-panel" role="tabpanel" aria-labelledby="inspector-tab-pixel" tabindex="-1" hidden>
-            <div class="rv-pixel-toolbar">
-                <button id="pixel-lens-toggle" type="button" aria-pressed="false" tabindex="-1">Lens off</button>
-                <div class="rv-pixel-magnification" role="radiogroup" aria-label="Lens magnification">
-                    <button type="button" role="radio" data-pixel-magnification="2" aria-checked="false" aria-label="Magnification 2×" tabindex="-1">2×</button>
-                    <button type="button" role="radio" data-pixel-magnification="4" aria-checked="true" aria-label="Magnification 4×" tabindex="-1">4×</button>
-                    <button type="button" role="radio" data-pixel-magnification="8" aria-checked="false" aria-label="Magnification 8×" tabindex="-1">8×</button>
-                </div>
-            </div>
-            <p class="rv-pixel-anchor" data-pixel-anchor>Anchor: not selected</p>
-            <ol class="rv-pixel-rows" data-pixel-rows></ol>
-            <p class="rv-pixel-legend">Decoded display sample · 8-bit sRGB</p>
-            <p class="rv-inspector-note">Coordinates are zero-based with origin at top-left.</p>
-            <p class="rv-inspector-note">Normalized cross-size mapping; not scene registration.</p>
-        </section>
         <section id="inspector-panel-frame" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-frame" tabindex="-1">
             <dl class="rv-inspector-list">
                 <div><dt>Label</dt><dd data-inspector-frame-label></dd></div>
@@ -619,7 +660,7 @@ def _render_help_modal() -> str:
                 <div class="rv-shortcut-row"><span>Toggle HUD</span><span class="rv-key">H</span></div>
                 <div class="rv-shortcut-row"><span>Toggle Filmstrip</span><span class="rv-key">F</span></div>
                 <div class="rv-shortcut-row"><span>Toggle Inspector</span><span class="rv-key">I</span></div>
-                <div class="rv-shortcut-row"><span>Inspect Pixels</span><span class="rv-key">M</span></div>
+                <div class="rv-shortcut-row"><span>Toggle Lens</span><span class="rv-key">L</span></div>
                 <div class="rv-shortcut-row"><span>Blink Pause / Speed</span><span class="rv-key">Space / [ / ]</span></div>
                 <div class="rv-shortcut-row"><span>Zoom In / Out</span><span class="rv-key">+ / -</span></div>
                 <div class="rv-shortcut-row"><span>Reset Viewport</span><span class="rv-key">R / Double-click</span></div>
@@ -725,7 +766,7 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
 <body>
 {header_html}
 <div id="viewer-status" class="rv-status" role="status" aria-live="polite" hidden></div>
-<div id="pixel-inspector-live" class="rv-visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
+<div id="viewer-live" class="rv-visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
 {controls_html}
 {stage_html}
 {inspector_html}

@@ -98,7 +98,7 @@ image_upload_timeout_seconds = 180.0
 copy_url_to_clipboard = true
 open_in_browser = true
 create_url_shortcut = true
-# webhook_url = null
+# webhook_url = "https://discord.com/api/webhooks/WEBHOOK_ID/WEBHOOK_TOKEN"
 
 [tmdb]
 # api_key = "your-api-key"

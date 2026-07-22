@@ -26,8 +26,8 @@ categories below are routing aids, not a second authoritative inventory.
 - Config and presets: `src/frame_compare/config/**`
 - CLI flag to config mapping: [`src/frame_compare/config/overrides.py`](../../../src/frame_compare/config/overrides.py)
 - Runtime path set and run folders: `WorkspacePaths` and `src/frame_compare/services/run_folder.py`
-- Analysis/probe/alignment caches: `src/frame_compare/analysis/**`, `src/frame_compare/orchestration/probe_cache.py`, and alignment services
-- Generated reports: [`src/frame_compare/services/report.py`](../../../src/frame_compare/services/report.py)
+- Analysis/probe/alignment caches: `src/frame_compare/analysis/**`, `src/frame_compare/orchestration/probing/probe_cache.py`, and alignment services
+- Generated reports: [`src/frame_compare/services/report/`](../../../src/frame_compare/services/report/)
 - Atomic write mechanics: [`src/frame_compare/utils/atomic_write.py`](../../../src/frame_compare/utils/atomic_write.py)
 - Windows portable outputs: `tools/windows_portable/**`
 

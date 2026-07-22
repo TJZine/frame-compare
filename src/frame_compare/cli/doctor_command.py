@@ -22,6 +22,7 @@ _STATUS_ICONS = {
     False: "\u274c",  # ❌
 }
 _OPTIONAL_STATUS_ICON = "-"
+_WARNING_STATUS_ICON = "\u26a0"  # ⚠
 
 
 class RunDoctorFn(Protocol):
@@ -124,6 +125,21 @@ def print_doctor_report(report: DoctorReport) -> None:
         if result.hint:
             console.print(f"   {''.ljust(label_width)}   [dim]Hint: {escape(result.hint)}[/]")
 
+    noncritical_failures = [
+        check.name
+        for check, result in report.checks
+        if not result.passed and check.name not in critical_failures
+    ]
+    console.print()
+    if critical_failures:
+        console.print("[red]Core runtime is not ready; resolve required checks above.[/]")
+    elif noncritical_failures:
+        console.print(
+            "[yellow]Core runtime checks passed; optional or network checks need attention.[/]"
+        )
+    else:
+        console.print("[green]Core runtime checks passed.[/]")
+
 
 def _doctor_status_icon(
     *,
@@ -141,8 +157,8 @@ def _doctor_status_icon(
         available=available,
     ):
         return _OPTIONAL_STATUS_ICON
-    if not passed and category == "optional":
-        return _OPTIONAL_STATUS_ICON
+    if not passed:
+        return _OPTIONAL_STATUS_ICON if category == "optional" else _WARNING_STATUS_ICON
     return _STATUS_ICONS.get(passed, "\u2022")
 
 

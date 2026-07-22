@@ -1,4 +1,26 @@
 services:
+  # One-time interactive setup. Config is writable here because the wizard owns
+  # confirmed config creation and updates; media remains read-only.
+  frame-compare-wizard:
+    profiles:
+      - setup
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: frame-compare:dev
+    user: "${FRAME_COMPARE_HOST_UID:-1000}:${FRAME_COMPARE_HOST_GID:-1000}"
+    volumes:
+      - ./comparison_videos:/workspace/comparison_videos:ro
+      - ./config:/workspace/config
+    working_dir: /workspace
+    environment:
+      - HOME=/tmp/framecompare-home
+      - PYTHONUSERBASE=/home/framecompare/.local
+      - VAPOURSYNTH_EXTRA_PLUGIN_PATH=/opt/vapoursynth-extra-plugins
+    command: ["wizard", "--root", "/workspace"]
+    stdin_open: true
+    tty: true
+
   frame-compare:
     build:
       context: .
@@ -37,6 +59,7 @@ services:
       context: .
       dockerfile: Dockerfile
     image: frame-compare:dev
+    user: "${FRAME_COMPARE_HOST_UID:-1000}:${FRAME_COMPARE_HOST_GID:-1000}"
     volumes:
       - ./comparison_videos:/workspace/comparison_videos:ro
       - ./config:/workspace/config:ro
@@ -44,4 +67,6 @@ services:
       - ./generated:/workspace/generated
     working_dir: /workspace
     environment:
+      - HOME=/tmp/framecompare-home
+      - PYTHONUSERBASE=/home/framecompare/.local
       - VAPOURSYNTH_EXTRA_PLUGIN_PATH=/opt/vapoursynth-extra-plugins

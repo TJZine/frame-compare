@@ -1,7 +1,8 @@
-"""Passive live probes for the slow.pics browser upload protocol.
+"""Opt-in live probes for slow.pics and outbound webhook integration.
 
-These tests intentionally avoid image uploads and comparison creation. They are
-skipped by default because they use the live slow.pics site.
+The slow.pics probe is passive and avoids image uploads/comparison creation. The
+webhook probe posts one visible notification to an explicitly supplied endpoint.
+Both are skipped by default.
 """
 
 from __future__ import annotations
@@ -14,9 +15,33 @@ from urllib.parse import urljoin, urlparse
 import httpx
 import pytest
 
+from frame_compare.services.slowpics_webhook import deliver_slowpics_webhook
+
 pytestmark = pytest.mark.network
 
 _LIVE_SLOWPICS_ENABLED = os.environ.get("FRAME_COMPARE_LIVE_SLOWPICS") == "1"
+_LIVE_WEBHOOK_ENABLED = os.environ.get("FRAME_COMPARE_LIVE_WEBHOOK") == "1" and bool(
+    os.environ.get("FRAME_COMPARE_LIVE_WEBHOOK_URL")
+)
+
+
+@pytest.mark.skipif(
+    not _LIVE_WEBHOOK_ENABLED,
+    reason=(
+        "Set FRAME_COMPARE_LIVE_WEBHOOK=1 and FRAME_COMPARE_LIVE_WEBHOOK_URL to post "
+        "one live smoke notification"
+    ),
+)
+async def test_live_webhook_delivery_posts_one_notification() -> None:
+    webhook_url = os.environ["FRAME_COMPARE_LIVE_WEBHOOK_URL"]
+
+    result = await deliver_slowpics_webhook(
+        webhook_url=webhook_url,
+        slowpics_url="https://slow.pics/c/frame-compare-live-webhook-smoke",
+    )
+
+    assert result.success is True
+    assert result.warning is None
 
 
 class _ScriptParser(HTMLParser):

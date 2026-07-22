@@ -8,6 +8,14 @@ from frame_compare.services.report.viewer import get_css
 from tests.services.report_viewer_contracts import css_block
 
 
+def assert_coarse_touch_targets(coarse_css: str, selectors: tuple[str, ...]) -> None:
+    """Require every coarse-pointer selector to own a complete 44px target rule."""
+    for selector in selectors:
+        block = css_block(coarse_css, selector)
+        assert "min-width: 44px;" in block
+        assert "min-height: 44px;" in block
+
+
 def test_viewer_css_keeps_stage_pointer_and_label_contracts() -> None:
     css = get_css()
     alignment_transform_block = css_block(
@@ -135,36 +143,116 @@ def test_viewer_css_stays_offline_and_preserves_tokenized_regressions() -> None:
     assert "margin" not in moz_vertical_track
 
 
-def test_viewer_css_covers_pixel_inspector_roi_lens_and_tabs() -> None:
+def test_viewer_css_uses_projection_brass_as_the_single_interaction_signal() -> None:
     css = get_css()
-    roi = css_block(css, ".rv-inspection-point")
+    root = css_block(css, ":root")
+
+    for declaration in (
+        "--signal: #d8a448;",
+        "--signal-hover: #e8bc68;",
+        "--signal-muted: rgba(216, 164, 72, 0.14);",
+        "--signal-glow: rgba(216, 164, 72, 0.25);",
+        "--signal-ink: #16120a;",
+        "--signal-border: rgba(216, 164, 72, 0.45);",
+    ):
+        assert declaration in root
+    for obsolete in (
+        "--accent",
+        "--divider",
+        "--annotation",
+        "#38bdf8",
+        "#7dd3fc",
+        "#3b82f6",
+        "rgba(56, 189, 248",
+        "rgba(59, 130, 246",
+    ):
+        assert obsolete not in css.lower()
+    assert "color: var(--signal-ink);" in css_block(css, ".rv-control-group button.active")
+    assert "color: var(--signal-ink);" in css_block(css, "button.active")
+    assert "color: var(--signal-ink);" in css_block(css, ".rv-lens-setting-options button.active")
+    assert "color: var(--text-primary);" in css_block(css, ".rv-filter-chip.active")
+    assert "--category-accent: var(--signal);" in css_block(
+        css,
+        '.rv-filmstrip-accent[data-category="selected"],\n.rv-filmstrip-accent[data-category="Selected"],\n.rv-filter-chip[data-category="selected"],\n.rv-filter-chip[data-category="Selected"]',
+    )
+
+
+def test_viewer_css_covers_production_lens_and_touch_controls() -> None:
+    css = get_css()
+    target = css_block(css, ".rv-lens-target")
+    ring = css_block(css, '.rv-lens-target[data-marker-style="ring"]')
+    brackets = css_block(css, '.rv-lens-target[data-marker-style="brackets"] > i')
     tabs = css_block(css, ".rv-inspector-tabs")
-    lens_image = css_block(css, ".rv-pixel-lens img")
-    grid = css_block(css, '.rv-pixel-lens[data-magnification="8"]::after')
+    lens = css_block(css, ".rv-lens {")
+    grip = css_block(css, ".rv-lens-grip")
+    lens_image = css_block(css, ".rv-lens-pane img")
+    identity = css_block(css, ".rv-lens-identity")
+    split_identity = css_block(css, '.rv-lens[data-comparison="true"] .rv-lens-identity')
+    settings = css_block(css, ".rv-lens-settings")
+    vertical_palette = css_block(css, '.rv-viewport-palette[data-orientation="vertical"]')
     coarse = css_block(css, "@media (pointer: coarse)")
     reduced_motion = css_block(css, "@media (prefers-reduced-motion: reduce)")
 
-    assert "width: 44px;" in roi
-    assert "height: 44px;" in roi
-    assert "touch-action: none;" in roi
+    assert "width: 20px;" in target
+    assert "pointer-events: none;" in target
+    assert "border: 1px solid var(--signal);" in ring
+    assert "border-radius: 50%;" in ring
+    assert "display: block;" in brackets
     assert "overflow-x: auto;" in tabs
     assert "display: flex;" in tabs
-    assert '.rv-pixel-lens[data-magnification="2"]' in css
-    assert '.rv-pixel-lens[data-magnification="4"]' in css
-    assert '.rv-pixel-lens[data-magnification="8"]' in css
+    assert "--lens-size: 240px;" in lens
+    assert "pointer-events: none;" in lens
+    assert "cursor: grab;" in grip
+    assert "pointer-events: auto;" in grip
+    assert "touch-action: none;" in grip
+    assert "cursor: grabbing;" in css_block(css, ".rv-lens-grip.is-dragging")
+    assert "cursor: default;" in css_block(
+        css,
+        ".rv-viewer-stage.rv-lens-active,\n.rv-viewer-stage.rv-lens-active.is-panning",
+    )
     assert "image-rendering: pixelated;" in lens_image
-    assert "repeating-linear-gradient" in grid
-    assert "background-position: 4px 4px;" in grid
-    assert ".rv-pixel-lens" in coarse
-    assert "display: none !important;" in coarse
-    assert "#btn-inspect" in coarse
-    assert "#pixel-lens-toggle" in coarse
-    assert "[data-pixel-magnification]" in coarse
-    assert ".rv-inspector-tabs button" in coarse
-    assert "min-width: 44px;" in coarse
-    assert "min-height: 44px;" in coarse
-    assert ".rv-pixel-lens" in reduced_motion
-    assert ".rv-inspection-point" in reduced_motion
+    assert "background: var(--signal);" in css_block(css, ".rv-lens-role {")
+    assert "color: var(--signal-ink);" in css_block(css, ".rv-lens-role {")
+    assert "right: 4px;" in identity
+    assert "left: 4px;" in identity
+    assert "padding: 3px 5px;" in identity
+    assert "font-size: var(--text-xs);" in identity
+    assert "white-space: nowrap;" in identity
+    assert "padding-inline: 3px;" in split_identity
+    assert "font-size: 0.625rem;" in split_identity
+    assert "overflow-wrap: anywhere;" in css_block(css, ".rv-lens-current-source output")
+    assert "mix-blend-mode: difference;" in css_block(
+        css, '.rv-lens[data-render-mode="diff"] .rv-lens-image--difference'
+    )
+    assert "width: min(260px, calc(100vw - 24px));" in settings
+    assert "z-index: 36;" in settings
+    assert "top: 8px;" in settings
+    assert "left: 8px;" in settings
+    assert "overflow: auto;" in settings
+    assert "overscroll-behavior: contain;" in settings
+    assert "max-height: calc(100% - 2rem);" in vertical_palette
+    assert "overflow-y: auto;" in vertical_palette
+    assert ".rv-lens-settings-open" not in css
+    assert '.rv-lens[data-comparison="true"] .rv-lens-pane--comparison' in css
+    assert ".rv-lens-palette-controls" in css
+    assert ".rv-lens-fixed-status" in css
+    assert ".rv-lens-titlebar" not in css
+    assert ".rv-lens-controls" not in css
+    assert_coarse_touch_targets(
+        coarse,
+        (
+            "#btn-lens",
+            ".rv-lens-palette-controls button",
+            ".rv-lens-grip",
+            "[data-lens-size]",
+            "[data-lens-marker]",
+            ".rv-inspector-tabs button",
+        ),
+    )
+    assert "[data-lens-behavior]" not in coarse
+    assert ".rv-lens" in reduced_motion
+    assert ".rv-lens-target" in reduced_motion
+    assert "display: none !important" not in coarse
 
 
 def test_viewer_css_covers_dense_review_slate_and_accessible_states() -> None:
@@ -173,17 +261,18 @@ def test_viewer_css_covers_dense_review_slate_and_accessible_states() -> None:
     assert ".rv-review-field textarea" in css
     assert '.rv-review-status[data-tone="warning"]' in css
     assert ".rv-review-preview fieldset" in css
-    assert "var(--annotation)" in css_block(css, ".rv-review-frame")
+    assert "var(--signal)" in css_block(css, ".rv-review-frame")
     coarse = css_block(css, "@media (pointer: coarse)")
-    for selector in (
-        ".rv-review-field select",
-        ".rv-review-transfer button",
-        ".rv-review-preview button",
-        ".rv-review-check",
-        ".rv-review-preview label",
-    ):
-        assert selector in coarse
-    assert coarse.count("min-height: 44px;") >= 3
+    assert_coarse_touch_targets(
+        coarse,
+        (
+            ".rv-review-field select",
+            ".rv-review-transfer button",
+            ".rv-review-preview button",
+            ".rv-review-check",
+            ".rv-review-preview label",
+        ),
+    )
 
 
 def test_viewer_css_covers_deterministic_grid_and_mobile_cells() -> None:
@@ -209,9 +298,10 @@ def test_viewer_css_covers_deterministic_grid_and_mobile_cells() -> None:
     assert "var(--grid-pan-x, 0px)" in image
     assert "scale(var(--grid-zoom-level, 1))" in image
     assert "text-overflow: ellipsis;" in css_block(css, ".rv-grid-label-text")
-    assert "border-color: var(--accent);" in css_block(css, '.rv-grid-cell[data-reference="true"]')
-    assert "var(--annotation)" in css_block(css, '.rv-grid-cell[data-active="true"]')
+    assert "border-color: var(--signal);" in css_block(css, '.rv-grid-cell[data-reference="true"]')
+    assert "var(--signal)" in css_block(css, '.rv-grid-cell[data-active="true"]')
     assert "overflow: hidden;" in css_block(css, ".rv-grid")
-    assert "#btn-grid-prev" in coarse
-    assert "[data-grid-retry]" in coarse
-    assert "min-width: 44px;" in coarse
+    assert_coarse_touch_targets(
+        coarse,
+        ("#btn-grid-prev", "#btn-grid-next", "[data-grid-retry]", ".rv-grid-cell"),
+    )

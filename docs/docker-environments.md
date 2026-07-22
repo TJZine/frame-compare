@@ -13,11 +13,32 @@ For basic Docker usage (build, doctor, run), see the
 The default Docker path is headless and deterministic: it uses software Vulkan and
 matches the CI-safe backend proof path rather than a desktop GUI workflow.
 
+The [README Docker Quick Start](../README.md#docker-recommended-for-macoslinux)
+is the canonical user journey. It pre-creates host-owned bind directories, creates
+configuration through the setup service, validates the intended run without side
+effects, and then uses the production-like run service.
+
 For reproducible "real deps" verification, prefer Docker:
 
 ```bash
 bash tools/verify_docker_integration.sh
 ```
+
+---
+
+## Default Compose Services
+
+| Service | Purpose | Mount policy |
+| --- | --- | --- |
+| `frame-compare-wizard` | One-time or intentional interactive configuration, isolated behind the `setup` profile and started explicitly by the quick-start command | `config/` writable; `comparison_videos/` read-only |
+| `frame-compare-run` | Doctor, dry-run, normal runs, history, and other production-like CLI commands | `config/` and media read-only; `screenshots/` and `generated/` writable |
+| `frame-compare` | Interactive development shell | Runtime workspace mounts with a shell entrypoint |
+| `frame-compare-test` | Real-dependency integration verification | Repository mounted at the image source path |
+
+Use the wizard and run services as a pair so configuration and output paths remain
+consistent. The setup service is the only default user service that deliberately
+grants configuration write access. The README route also maps both services to the
+current host UID/GID so their writable bind-mount output remains host-owned.
 
 ---
 
@@ -143,8 +164,9 @@ The helper only translates the default compose output mounts used by
 - `/workspace/generated` -> `./generated`
 
 Use the exact `report_path` printed by the run. With the default
-`report.output_dir = null`, reports are written under `/workspace/screenshots`,
-not `/workspace/generated`.
+`paths.use_run_folders = true`, screenshots and the report are grouped beneath
+`/workspace/generated/<run>/`. When run folders are disabled,
+`report.output_dir = null` places the report beneath `/workspace/screenshots`.
 
 The helper rejects `/workspace/config`, `/workspace/comparison_videos`,
 non-canonical paths, symlink escapes, and non-`https://slow.pics/...` URLs.

@@ -104,7 +104,6 @@ def test_viewer_js_persists_report_scoped_viewport_state() -> None:
         "filmstripSize: this.state.filmstripSize",
         "inspectorOpen: this.state.inspectorOpen",
         "inspectorTab: this.state.inspectorTab",
-        "pixelLensEnabled: this.state.pixelLensEnabled",
         "blinkIntervalMs: this.state.blinkIntervalMs",
         "paletteOrientation: this.state.paletteOrientation",
         "pairAlignments: this.state.pairAlignments",
@@ -116,25 +115,15 @@ def test_viewer_js_persists_report_scoped_viewport_state() -> None:
     assert "alignY: this.state.alignY" not in persist_block
 
 
-def test_viewer_js_composes_focused_pixel_owner_before_viewer() -> None:
+def test_viewer_js_composes_focused_lens_owner_before_viewer() -> None:
     js = get_js()
 
-    assert_in_order(js, ["const PixelInspector =", "const ReportViewer ="])
-    assert "this.pixelInspector = PixelInspector.create(this);" in js
-    assert "this.pixelInspector.bind();" in js
-    assert "pointFromImageRect(image, clientX, clientY)" in js
-    assert "mapNormalizedPoint(point, targetWidth, targetHeight)" in js
-    assert "anchorIndexForMode(mode, options)" in js
-    assert "gestureExceeded(startX, startY, clientX, clientY)" in js
-    assert "Math.hypot(clientX - startX, clientY - startY) > MAX_GESTURE_DISTANCE" in js
-    assert "const MAX_GESTURE_DISTANCE = 6;" in js
-    assert "canvas.width = 1;" in js
-    assert "canvas.height = 1;" in js
-    assert js.count("documentObject.createElement('canvas')") == 1
-    assert "sampler ||= createSampler(document);" in js
-    assert "context.getImageData(0, 0, 1, 1).data" in js
-    assert "Pixel value unavailable" in js
-    assert "querySelectorAll('img')" not in js
+    assert_in_order(js, ["const Lens =", "const ReportViewer ="])
+    assert "this.lens = Lens.create(this);" in js
+    assert "this.lens.bind();" in js
+    assert "frame-compare:lens-preferences:v2" in js
+    assert "frame-compare:report-lens:v1:" in js
+    assert "this.pixelInspector" not in js
 
 
 def test_viewer_js_composes_focused_grid_owner_without_public_default_drift() -> None:
@@ -169,14 +158,14 @@ def test_viewer_js_composes_focused_grid_owner_without_public_default_drift() ->
     assert "this.validPayloadMode(this.state.data.default_mode)" in js
 
 
-def test_viewer_js_uses_pixel_roving_tabs_shortcut_and_escape_priority() -> None:
+def test_viewer_js_uses_lens_shortcut_and_preserves_inspector_roving_tabs() -> None:
     js = get_js()
     tabs = js_method_block(js, "handleInspectorTabKey(e)")
     update_tabs = js_method_block(js, "updateInspectorTabs()")
     handle_key = js_method_block(js, "handleKey(e)")
     viewport = js_method_block(js, "bindViewportEvents()")
 
-    assert "['pixel', 'frame', 'clips', 'align', 'review', 'export']" in js
+    assert "['frame', 'clips', 'align', 'review', 'export']" in js
     assert "if (e.key === 'ArrowLeft')" in tabs
     assert "if (e.key === 'ArrowRight')" in tabs
     assert "if (e.key === 'Home')" in tabs
@@ -184,20 +173,43 @@ def test_viewer_js_uses_pixel_roving_tabs_shortcut_and_escape_priority() -> None
     assert "e.stopPropagation();" in tabs
     assert "tab.tabIndex = this.state.inspectorOpen && isActive ? 0 : -1;" in update_tabs
     assert "panel.tabIndex = this.state.inspectorOpen && isActive ? 0 : -1;" in update_tabs
-    assert "if (e.key === 'm' || e.key === 'M')" in handle_key
+    assert "if (e.key === 'l' || e.key === 'L')" in handle_key
+    assert "if (e.key === 'm' || e.key === 'M')" not in handle_key
     assert_in_order(
         handle_key,
         [
             "if (this.isAlignmentPopoverOpen()) {",
-            "if (this.pixelInspector?.unlock()) {",
             "if (this.isInspectorVisible()) {",
             "if (document.fullscreenElement) {",
         ],
     )
-    assert "this.pixelInspector.beginStagePress(e);" in viewport
-    assert "this.pixelInspector.moveStagePress(e);" in viewport
-    assert "this.pixelInspector.scheduleHover(e);" in viewport
-    assert "this.pixelInspector.endStagePress(e)" in js
+    assert "this.lens.handleStagePointerDown(e);" in viewport
+    assert "this.lens.handleStagePointerMove(e);" in viewport
+    assert "this.lens.endStagePointer(e" in js
+
+
+def test_viewer_js_isolates_lens_chrome_and_arbitrates_touch_gestures() -> None:
+    js = get_js()
+    viewport = js_method_block(js, "bindViewportEvents()")
+    guard = js_method_block(js, "isViewerChromeEvent(e)")
+    wheel = js_method_block(js, "handleViewportWheel(e)")
+    double_click = js_method_block(js, "handleViewportDoubleClick(e)")
+    deferred = js_method_block(js, "startDeferredViewportGesture(e, start)")
+    stop = js_method_block(js, "stopPointerInteraction(e, options = {})")
+
+    assert ".rv-viewport-palette, .rv-lens, .rv-lens-settings" in guard
+    assert viewport.count("if (this.isViewerChromeEvent(e)) return;") == 2
+    assert "if (this.isViewerChromeEvent(e)) return;" in wheel
+    assert "if (this.isViewerChromeEvent(e)) return;" in double_click
+    assert "lensTouchStart" in viewport
+    assert "lensMove === 'pending'" in viewport
+    assert "lensMove === 'released'" in viewport
+    assert "this.lens.cancelTouchPending();" in viewport
+    assert "this.startDeferredViewportGesture(e, pointer.lensTouchStart);" in viewport
+    assert "this.startPanFromPointer(origin);" in deferred
+    assert "this.updateSliderFromPointer(e);" in deferred
+    assert "this.lens.endStagePointer(e" in stop
+    assert "if (wasLensTapPending)" in stop
 
 
 def test_viewer_js_composes_focused_review_owner_before_viewer() -> None:
@@ -225,7 +237,8 @@ def test_viewer_js_composes_focused_review_owner_before_viewer() -> None:
     assert "token !== importToken" in js
     assert "importToken += 1;" in js
     assert "resetImportChoices();" in js
-    assert "viewer.pixelInspector?.announce?.(message);" in js
+    assert "viewer.announce?.(message);" in js
+    assert "viewer-live" in js
     assert "messageWithPersistence(message)" in js
     assert "renderedFrameOrdinal === viewer.state.currentFrameIdx" in js
     assert "updateImportPreview();" in js
@@ -238,11 +251,17 @@ def test_viewer_js_keeps_pointer_zoom_and_alignment_hooks_behavioral() -> None:
     js = get_js()
     viewport_block = js_method_block(js, "bindViewportEvents()")
     commit_image_state_block = js_method_block(js, "commitImageState(imageState)")
+    apply_image_state_block = js_method_block(js, "applyImageState(imageState)")
     update_slider_block = js_method_block(js, "updateSliderFromPointer(e)")
     pinch_update_block = js_method_block(js, "updatePinchFromTrackedPointers()")
     start_pinch_block = js_method_block(js, "startPinchFromTrackedPointers()")
     finish_pinch_block = js_method_block(js, "finishPinchInteraction()")
     pan_pointer_block = js_method_block(js, "updatePanFromPointer(e)")
+    wheel_block = js_method_block(js, "handleViewportWheel(e)")
+    double_click_block = js_method_block(js, "handleViewportDoubleClick(e)")
+    apply_zoom_block = js_method_block(js, "applyZoom(level, options = {})")
+    apply_pan_block = js_method_block(js, "applyPan()")
+    apply_alignment_block = js_method_block(js, "applyAlignment()")
 
     assert "panX: 0" in js
     assert "panY: 0" in js
@@ -261,12 +280,13 @@ def test_viewer_js_keeps_pointer_zoom_and_alignment_hooks_behavioral() -> None:
     assert "window.addEventListener('resize', () => this.applyFitMode())" in viewport_block
     assert "addEventListener('load', () => this.applyFitMode())" in viewport_block
     assert (
-        "if (this.state.mode === 'overlay' || this.state.mode === 'diff') return;" in viewport_block
+        "if (this.state.mode === 'overlay' || this.state.mode === 'diff') return;"
+        in double_click_block
     )
-    assert "this.zoomAtPoint(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1);" in viewport_block
+    assert "this.zoomAtPoint(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1);" in wheel_block
     assert "this.panByPixels(dx, dy, e.clientX, e.clientY" in pan_pointer_block
     assert "basis: pointer.panBasis" in pan_pointer_block
-    assert "this.pixelInspector.isStagePressPending(e.pointerId)" in pan_pointer_block
+    assert "pixelInspector" not in pan_pointer_block
     assert "trackedTouchPointers()" in js
     assert "Math.hypot(dx, dy)" in js
     assert "this.state.fitMode = 'custom';" in start_pinch_block
@@ -274,6 +294,10 @@ def test_viewer_js_keeps_pointer_zoom_and_alignment_hooks_behavioral() -> None:
     assert "this.clampZoom(" in pinch_update_block
     assert "this.applyZoom(nextZoom, { clampPan: false });" in pinch_update_block
     assert "this.persistViewportState();" in finish_pinch_block
+    assert "this.lens?.refresh();" in apply_zoom_block
+    assert "this.lens?.refresh();" in apply_pan_block
+    assert "this.lens?.refresh();" in apply_alignment_block
+    assert "this.lens?.sync();" in apply_image_state_block
     assert "const rect = this.sliderCanvasRect();" in update_slider_block
     assert (
         "const clampedClientX = Math.max(rect.left, Math.min(rect.right, e.clientX));"
@@ -339,6 +363,7 @@ def test_viewer_js_keeps_overlay_blink_filtering_and_navigation_contracts() -> N
 def test_viewer_js_keeps_empty_state_metadata_and_preload_contracts() -> None:
     js = get_js()
     render_empty_block = js_method_block(js, "renderEmptyState(message)")
+    clear_frame_block = js_method_block(js, "clearFrameImages()")
     disable_controls_block = js_method_block(js, "disableViewerControls(disabled)")
     update_metadata_block = js_method_block(js, "updateCurrentFrameMetadata(frameData)")
     preload_block = js_method_block(js, "preloadImages()")
@@ -351,6 +376,7 @@ def test_viewer_js_keeps_empty_state_metadata_and_preload_contracts() -> None:
     assert "this.disableViewerControls(true);" in render_empty_block
     assert "this.showStageMessage(message);" in render_empty_block
     assert "this.clearFrameImages();" in render_empty_block
+    assert "this.lens?.clearTransient?.();" in clear_frame_block
     assert "if (control === this.dom.btnHelp) return;" in disable_controls_block
     assert "hasRenderableData()" in js
     assert "this.dom.currentFrameCategoryDivider.hidden = !showCategory;" in update_metadata_block

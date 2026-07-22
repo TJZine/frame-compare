@@ -74,7 +74,7 @@ const GridView = (() => {
         }
 
         function announce(message) {
-            viewer.pixelInspector?.announce?.(message);
+            viewer.announce?.(message);
         }
 
         function updateControls(options = {}) {
@@ -191,7 +191,7 @@ const GridView = (() => {
         function sizeImages() {
             entries().forEach(entry => sizeImage(entry.image));
             viewer.clampPan?.();
-            viewer.pixelInspector?.schedulePlacement?.();
+            viewer.lens?.refresh?.();
         }
 
         function updateFrameError() {
@@ -215,7 +215,7 @@ const GridView = (() => {
             image.hidden = false;
             sizeImage(image);
             updateFrameError();
-            viewer.pixelInspector?.render?.();
+            viewer.lens?.sync?.();
         }
 
         function handleError(cell, image, index, src, generation) {
@@ -309,7 +309,7 @@ const GridView = (() => {
                 viewer.state.activeClipIdx = index;
                 updateCellRoles();
                 viewer.updateInspectorData?.();
-                viewer.pixelInspector?.focusGridCell?.(index, image);
+                viewer.lens?.sync?.();
             });
 
             if (src) image.src = src;
@@ -331,7 +331,7 @@ const GridView = (() => {
             updateFrameError();
             syncViewport();
             viewer.updateCurrentFrameMetadata(currentFrame());
-            viewer.pixelInspector?.render?.();
+            viewer.lens?.sync?.();
             if (Number.isInteger(focusedClipIdx) && indexes().includes(focusedClipIdx)) {
                 Array.from(dom.cells.querySelectorAll('.rv-grid-cell'))
                     .find(cell => Number(cell.dataset.clipIndex) === focusedClipIdx)

@@ -165,7 +165,7 @@ const viewer = {
         },
     },
     localStorage: () => storage,
-    pixelInspector: { announce(message) { announcements.push(message); } },
+    announce(message) { announcements.push(message); },
     setText(target, text) { target.textContent = String(text); },
 };
 
@@ -194,9 +194,7 @@ function warningViewer(storageApi) {
                 },
             },
             localStorage: () => storageApi,
-            pixelInspector: {
-                announce(message) { warningAnnouncements.push(message); },
-            },
+            announce(message) { warningAnnouncements.push(message); },
             setText(target, text) { target.textContent = String(text); },
         },
     };
@@ -212,11 +210,11 @@ async function main() {
     dom.reviewNote.value = 'working note';
     dom.reviewNote.fire('input');
     const replacementCount = dom.reviewPreferred.replaceCount;
-    viewer.pixelInspector.announce('Inspection point locked.');
+    viewer.announce('Lens on.');
     controller.render();
     assert.equal(dom.reviewNote.value, 'working note');
     assert.equal(dom.reviewPreferred.replaceCount, replacementCount);
-    assert.equal(announcements.at(-1), 'Inspection point locked.');
+    assert.equal(announcements.at(-1), 'Lens on.');
 
     await dom.reviewImport.fire('change', { files: [file('empty.json', exported([]))] });
     modeMerge.checked = false;

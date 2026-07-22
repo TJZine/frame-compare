@@ -10,7 +10,7 @@ def test_windows_portable_docs_describe_default_workspace_directories(repo_root:
     portable_readme_path = repo_root / "tools" / "windows_portable" / "README.txt"
     readme = _read_text_or_fail(readme_path)
     portable_readme = _read_text_or_fail(portable_readme_path)
-    assert "config/ and comparison_videos/ directories in the bundle root" in readme
+    assert "default `config/` and\n`comparison_videos/` directories in the bundle root" in readme
     assert "comparison_videos" in portable_readme
 
 
@@ -27,12 +27,31 @@ def test_windows_portable_docs_disambiguate_source_bundle_root(repo_root: Path) 
 
 
 def test_windows_portable_docs_use_frozen_uv_sync_for_vspreview_extra(repo_root: Path) -> None:
-    readme_path = repo_root / "README.md"
+    windows_guide_path = repo_root / "docs" / "windows-portable.md"
     portable_readme_path = repo_root / "tools" / "windows_portable" / "README.txt"
-    readme = _read_text_or_fail(readme_path)
+    windows_guide = _read_text_or_fail(windows_guide_path)
     portable_readme = _read_text_or_fail(portable_readme_path)
-    assert "uv sync --group dev --extra vspreview --frozen" in readme
+    assert "uv sync --group dev --extra vspreview --frozen" in windows_guide
     assert "uv sync --group dev --extra vspreview --frozen" in portable_readme
+
+
+def test_windows_portable_docs_include_a_safe_first_run_sequence(repo_root: Path) -> None:
+    windows_guide = _read_text_or_fail(repo_root / "docs" / "windows-portable.md")
+    portable_readme = _read_text_or_fail(repo_root / "tools" / "windows_portable" / "README.txt")
+
+    expected_steps = (
+        "frame-compare wizard",
+        "frame-compare doctor",
+        "frame-compare run --dry-run",
+    )
+    positions = [windows_guide.index(step) for step in expected_steps]
+    final_run_position = windows_guide.index("   frame-compare run\n", positions[-1])
+    assert positions == sorted(positions)
+    assert final_run_position > positions[-1]
+    for step in (*expected_steps, "frame-compare run"):
+        assert step in portable_readme
+    assert "Optional or network warnings do not make doctor exit" in windows_guide
+    assert "open a new terminal" in windows_guide
 
 
 def test_windows_portable_readme_release_signing_header_has_no_leading_space(

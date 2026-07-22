@@ -94,7 +94,12 @@ async def _deliver_webhook_actions(
         )
 
     if result.warning is not None:
-        log.warning("slowpics_webhook_delivery_failed", warning=result.warning)
+        log.warning(
+            "slowpics_webhook_delivery_failed",
+            warning=result.warning,
+            failure_kind=(result.failure_kind.value if result.failure_kind is not None else None),
+            status_code=result.status_code,
+        )
     return (
         PostUploadActionResult(
             kind="webhook",
