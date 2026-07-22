@@ -4,7 +4,7 @@
 > GUI profiles, and the host open helper.
 
 For basic Docker usage (build, doctor, run), see the
-[Quick Start](../README.md#quick-start) in the README.
+[Docker getting-started guide](getting-started/docker.md).
 
 ---
 
@@ -13,7 +13,7 @@ For basic Docker usage (build, doctor, run), see the
 The default Docker path is headless and deterministic: it uses software Vulkan and
 matches the CI-safe backend proof path rather than a desktop GUI workflow.
 
-The [README Docker Quick Start](../README.md#docker-recommended-for-macoslinux)
+The [Docker getting-started guide](getting-started/docker.md)
 is the canonical user journey. It pre-creates host-owned bind directories, creates
 configuration through the setup service, validates the intended run without side
 effects, and then uses the production-like run service.
