@@ -30,6 +30,10 @@ EXPECTED_ACTIONS = {
     "actions/upload-pages-artifact": "fc324d3547104276b827a68afc52ff2a11cc49c9",
     "actions/deploy-pages": "cd2ce8fcbc39b97be8ca5fce6e763baed58fa128",
 }
+EXPECTED_DEPLOY_GATE = (
+    "github.ref == 'refs/heads/main' && "
+    "(github.event_name == 'push' || github.event_name == 'workflow_dispatch')"
+)
 
 
 def _load_workflow(repo_root: Path) -> tuple[str, dict[str, Any]]:
@@ -48,7 +52,7 @@ def test_docs_workflow_events_and_paths_are_scoped(repo_root: Path) -> None:
     events = workflow["on"]
 
     assert set(events) == {"pull_request", "push", "workflow_dispatch"}
-    assert events["pull_request"]["branches"] == ["main"]
+    assert events["pull_request"]["branches"] == ["main", "cleanup"]
     assert events["push"]["branches"] == ["main"]
     assert set(events["pull_request"]["paths"]) == EXPECTED_PATHS
     assert set(events["push"]["paths"]) == EXPECTED_PATHS
@@ -96,13 +100,12 @@ def test_docs_workflow_gates_pages_steps_and_deployment(repo_root: Path) -> None
     build = workflow["jobs"]["build"]
     deploy = workflow["jobs"]["deploy"]
 
-    expected_gate = "github.event_name != 'pull_request'"
     configure = _step_by_name(build, "Configure GitHub Pages")
     upload = _step_by_name(build, "Upload GitHub Pages artifact")
-    assert configure["if"] == expected_gate
-    assert upload["if"] == expected_gate
+    assert configure["if"] == EXPECTED_DEPLOY_GATE
+    assert upload["if"] == EXPECTED_DEPLOY_GATE
     assert upload["with"]["path"] == "site/"
-    assert deploy["if"] == expected_gate
+    assert deploy["if"] == EXPECTED_DEPLOY_GATE
     assert deploy["needs"] == "build"
     assert deploy["environment"] == {
         "name": "github-pages",
