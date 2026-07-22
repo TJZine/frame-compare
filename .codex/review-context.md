@@ -2,7 +2,7 @@
 
 Schema-Version: 1
 Profile-Status: explicit
-Last-Updated: 2026-07-21
+Last-Updated: 2026-07-22
 Repo-Name: frame-compare
 Default-Branch: main
 Profile-Scope: suggestion-review and pr-commit-review
@@ -123,36 +123,36 @@ uv sync --group dev --frozen
 
 Fast/local sanity:
 ```bash
-.venv/bin/ruff check .
+uv run --no-sync ruff check .
 # plus targeted pytest when touched module has direct tests
 ```
 
 Logic verification:
 ```bash
-.venv/bin/pyright --warnings
-.venv/bin/ruff check .
-.venv/bin/bandit -c pyproject.toml -r src --severity-level medium
-.venv/bin/pytest -q
-UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
+uv run --no-sync pyright --warnings
+uv run --no-sync ruff check .
+uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium
+uv run --no-sync pytest -q
+uv run --no-sync lint-imports --config importlinter.ini
 ```
 
 Full verification:
 ```bash
-.venv/bin/pyright --warnings
-.venv/bin/ruff check .
-.venv/bin/bandit -c pyproject.toml -r src --severity-level medium
-.venv/bin/pytest -q
-UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
+uv run --no-sync pyright --warnings
+uv run --no-sync ruff check .
+uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium
+uv run --no-sync pytest -q
+uv run --no-sync lint-imports --config importlinter.ini
 ```
 
 Docs/API verification:
 ```bash
-UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_api_docs.py --check
+uv run --no-sync python scripts/generate_api_docs.py --check
 ```
 
 Regenerate API docs:
 ```bash
-UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_api_docs.py
+uv run --no-sync python scripts/generate_api_docs.py
 ```
 
 Docker/runtime verification:

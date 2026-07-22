@@ -52,21 +52,21 @@ uv sync --group dev --frozen
 Core local gates:
 
 ```bash
-.venv/bin/pyright --warnings
-.venv/bin/ruff check .
-.venv/bin/bandit -c pyproject.toml -r src --severity-level medium
-.venv/bin/pytest -q
-UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
+uv run --no-sync pyright --warnings
+uv run --no-sync ruff check .
+uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium
+uv run --no-sync pytest -q
+uv run --no-sync lint-imports --config importlinter.ini
 ```
 
 API documentation regeneration and drift check:
 
 ```bash
 # Regenerate docs/api.md
-UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_api_docs.py
+uv run --no-sync python scripts/generate_api_docs.py
 
 # Check docs/api.md for drift (also run automatically as part of the pytest suite)
-UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_api_docs.py --check
+uv run --no-sync python scripts/generate_api_docs.py --check
 ```
 
 Docker integration gate:
@@ -134,11 +134,11 @@ Required for:
 Run:
 
 ```bash
-.venv/bin/pyright --warnings
-.venv/bin/ruff check .
-.venv/bin/bandit -c pyproject.toml -r src --severity-level medium
-.venv/bin/pytest -q
-UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
+uv run --no-sync pyright --warnings
+uv run --no-sync ruff check .
+uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium
+uv run --no-sync pytest -q
+uv run --no-sync lint-imports --config importlinter.ini
 ```
 
 ### Docker / Runtime Verification
@@ -252,7 +252,7 @@ use the smallest structural proof that covers the edited surface:
 
 Always run `git diff --check`. Parse edited TOML or YAML with the repo's existing
 tooling, and inspect changed skill, role, and launcher paths or references
-directly. Run `.venv/bin/pytest -q tests/test_cli_contract_docs.py` when
+directly. Run `uv run --no-sync pytest -q tests/test_cli_contract_docs.py` when
 `AGENTS.md`, the current CLI authority links, or CLI contract documentation
 changes.
 

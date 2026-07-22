@@ -27,14 +27,14 @@ Closes #
 
 - [ ] My code follows the project's style guidelines (Ruff)
 - [ ] I have run the risk-matched verification required by `docs/ENGINEERING_RUNBOOK.md`
-- [ ] When required, `.venv/bin/ruff check .` passes
-- [ ] When required, `.venv/bin/pyright --warnings` passes with no new errors
+- [ ] When required, `uv run --no-sync ruff check .` passes
+- [ ] When required, `uv run --no-sync pyright --warnings` passes with no new errors
 - [ ] My changes generate no new warnings
 
 ### Testing
 
 - [ ] I have added tests that prove my fix/feature works
-- [ ] When required, new and existing tests pass locally (`.venv/bin/pytest -q`)
+- [ ] When required, new and existing tests pass locally (`uv run --no-sync pytest -q`)
 - [ ] I have run the canonical import-linter command from the runbook to verify import contracts
 
 ### Documentation

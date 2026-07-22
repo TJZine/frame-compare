@@ -130,13 +130,13 @@ We use [Ruff](https://docs.astral.sh/ruff/) for linting and formatting:
 
 ```bash
 # Check for issues
-.venv/bin/ruff check .
+uv run --no-sync ruff check .
 
 # Auto-fix safe issues
-.venv/bin/ruff check --fix .
+uv run --no-sync ruff check --fix .
 
 # Format code
-.venv/bin/ruff format .
+uv run --no-sync ruff format .
 ```
 
 ### Type Checking
@@ -144,7 +144,7 @@ We use [Ruff](https://docs.astral.sh/ruff/) for linting and formatting:
 We use [Pyright](https://microsoft.github.io/pyright/) in strict mode:
 
 ```bash
-.venv/bin/pyright --warnings
+uv run --no-sync pyright --warnings
 ```
 
 > [!IMPORTANT]
@@ -177,14 +177,14 @@ markers for heavier routes such as `integration`, `e2e`, `vs_required`, `slow`, 
 
 ```bash
 # All unit tests
-.venv/bin/pytest -q
+uv run --no-sync pytest -q
 
 # Specific markers
-.venv/bin/pytest -m unit
-.venv/bin/pytest -m "not vs_required"
+uv run --no-sync pytest -m unit
+uv run --no-sync pytest -m "not vs_required"
 
 # With coverage
-.venv/bin/pytest --cov=src/frame_compare --cov-report=term-missing
+uv run --no-sync pytest --cov=src/frame_compare --cov-report=term-missing
 ```
 
 ### Docker Integration Tests
