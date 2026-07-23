@@ -1,0 +1,69 @@
+[project]
+site_name = "Frame Compare"
+site_description = "Video frame comparison tool with tonemapping and slow.pics integration"
+site_url = "https://tjzine.github.io/frame-compare/"
+repo_url = "https://github.com/TJZine/frame-compare"
+edit_uri = "edit/main/docs/"
+docs_dir = "docs"
+site_dir = "site"
+nav = [
+  { "Home" = "index.md" },
+  { "Getting Started" = [
+    { "Choose Your Installation" = "getting-started/index.md" },
+    { "Docker" = "getting-started/docker.md" },
+    { "Windows Portable" = "windows-portable.md" },
+    { "Native Source" = "getting-started/native.md" },
+    { "First Comparison" = "guides/first-comparison.md" },
+    { "Troubleshooting" = "guides/troubleshooting.md" },
+  ] },
+  { "Guides" = [
+    { "Analysis Modes" = "guides/analysis-modes.md" },
+    { "Reports and Overlays" = "guides/reports-and-overlays.md" },
+    { "Publishing and Webhooks" = "guides/publishing-and-webhooks.md" },
+    { "Advanced Docker Environments" = "docker-environments.md" },
+  ] },
+  { "Reference" = [
+    { "CLI and Configuration Contract" = "current-cli-contract.md" },
+    { "API Reference" = "api.md" },
+  ] },
+  { "Development" = [
+    { "Contributing" = "https://github.com/TJZine/frame-compare/blob/main/CONTRIBUTING.md" },
+    { "Current Architecture" = "current-architecture.md" },
+    { "Engineering Runbook" = "ENGINEERING_RUNBOOK.md" },
+    { "Historical Decisions" = "DECISIONS.md" },
+  ] },
+  { "Performance Evidence" = [
+    { "Analysis Performance Validation" = "analysis-performance-validation.md" },
+    { "Analysis Benchmark History" = "analysis-benchmark-history.md" },
+  ] },
+]
+
+[project.theme]
+language = "en"
+font = false
+features = [
+  "content.action.edit",
+  "content.action.view",
+  "content.code.copy",
+  "navigation.sections",
+  "navigation.path",
+  "navigation.top",
+  "navigation.footer",
+  "navigation.instant",
+  "search.highlight",
+]
+
+[[project.theme.palette]]
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"
+
+[project.markdown_extensions.pymdownx.superfences]
+custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]

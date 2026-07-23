@@ -1,3 +1,8 @@
+---
+search:
+  exclude: true
+---
+
 # TODO
 
 > Non-authoritative backlog. These items are candidates, not approved plans or

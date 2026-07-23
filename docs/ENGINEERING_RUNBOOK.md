@@ -69,6 +69,31 @@ uv run --no-sync python scripts/generate_api_docs.py
 uv run --no-sync python scripts/generate_api_docs.py --check
 ```
 
+Documentation site setup, strict build, and local preview:
+
+```bash
+# Install only the locked documentation toolchain
+uv sync --only-group docs --locked
+
+# Check generated API documentation before building the site
+uv run --no-sync python scripts/generate_api_docs.py --check
+
+# Build with link and configuration validation
+uv run --no-sync zensical build --clean --strict
+
+# Preview the site locally
+uv run --no-sync zensical serve
+```
+
+`docs/**` owns authored site content, while root `zensical.toml` owns site structure,
+navigation, and built-in presentation features. Generated output belongs in the ignored
+`site/` directory. Restore the contributor environment together with the documentation
+toolchain before running Python gates after a docs-only sync:
+
+```bash
+uv sync --group dev --group docs --locked
+```
+
 Docker integration gate:
 
 ```bash

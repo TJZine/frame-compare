@@ -1,0 +1,105 @@
+name: Documentation
+
+on:
+  pull_request:
+    branches: [main, cleanup]
+    paths: &docs-paths
+      - docs/**
+      - README.md
+      - CONTRIBUTING.md
+      - zensical.toml
+      - pyproject.toml
+      - uv.lock
+      - .gitignore
+      - .github/workflows/docs.yml
+      - .github/ISSUE_TEMPLATE/config.yml
+      - scripts/generate_api_docs.py
+      - scripts/api_docs/**
+      - tests/workflows/test_docs_workflow.py
+  push:
+    branches: [main]
+    paths: *docs-paths
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build documentation
+    runs-on: ubuntu-latest
+    concurrency:
+      group: docs-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.31"
+          enable-cache: false
+
+      - name: Install documentation dependencies
+        run: uv sync --only-group docs --locked
+
+      - name: Check generated API documentation
+        run: uv run --no-sync python scripts/generate_api_docs.py --check
+
+      - name: Build documentation
+        run: uv run --no-sync zensical build --clean --strict
+
+      - name: Check user documentation search scope
+        run: |
+          uv run --no-sync python - <<'PY'
+          import json
+          from pathlib import Path
+
+          items = json.loads(Path("site/search.json").read_text(encoding="utf-8"))["items"]
+          internal = [
+              item["location"]
+              for item in items
+              if item["location"].startswith(("TODO/", "plans/"))
+          ]
+          if internal:
+              raise SystemExit(f"Internal documentation leaked into search: {internal}")
+          PY
+
+      - name: Configure GitHub Pages
+        if: &deploy-from-main >-
+          github.ref == 'refs/heads/main' &&
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Upload GitHub Pages artifact
+        if: *deploy-from-main
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site/
+
+  deploy:
+    name: Deploy documentation
+    if: *deploy-from-main
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
