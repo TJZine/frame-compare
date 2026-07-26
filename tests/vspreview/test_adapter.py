@@ -883,15 +883,15 @@ def test_check_vspreview_availability_by_owner_branch(
     assert expected_message in result.message
     expected_hints = {
         VSPreviewAvailabilityStatus.MISSING_EXEC_AND_MODULE: (
-            "Provide VSPreview; see https://github.com/TJZine/frame-compare#installation"
+            "Provide VSPreview; see https://tjzine.github.io/frame-compare/getting-started/native/"
         ),
         VSPreviewAvailabilityStatus.MISSING_QT_BACKEND: (
             "Provide a supported Qt backend for VSPreview; see "
-            "https://github.com/TJZine/frame-compare#installation"
+            "https://tjzine.github.io/frame-compare/getting-started/native/"
         ),
         VSPreviewAvailabilityStatus.PROBE_FAILED: (
             "Check the optional VSPreview setup, then rerun doctor; see "
-            "https://github.com/TJZine/frame-compare#installation"
+            "https://tjzine.github.io/frame-compare/getting-started/native/"
         ),
     }
     assert result.hint == expected_hints.get(expected_status)
