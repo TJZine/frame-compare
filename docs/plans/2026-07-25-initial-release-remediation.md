@@ -27,7 +27,7 @@ Decisions recorded July 26, 2026:
 | Support posture | Windows portable is the primary, most feature-complete route; default Docker is the primary headless macOS/Linux route; native source is advanced; NVIDIA/X11 remain experimental | Documented |
 | Windows updates | Signed code-only updates are required for the first public Windows release | Approved; key generation, secret setup, and end-to-end proof remain |
 | Release authentication | Configure `RELEASE_PLEASE_TOKEN` as a fine-grained PAT or GitHub App token so release-created events can trigger the Windows asset workflow | Approved; repository secret setup and proof remain |
-| Licensing | Prefer the conservative, no-commercial-license route of aligning Frame Compare with PyQt6 under `GPL-3.0-only` | Recommended; requires final maintainer confirmation before relicensing files |
+| Licensing | Align Frame Compare with PyQt6 under `GPL-3.0-only`; do not purchase or depend on a commercial PyQt license | Repository relicensing implemented; exact-artifact compliance remains |
 | User checksum guidance | Teach users to verify the published Windows ZIP against its `.sha256` asset | Implemented and strictly built |
 | VSPreview recovery links | Point doctor hints to the canonical native-source Zensical guide | Implemented with focused adapter/CLI tests |
 
@@ -67,7 +67,7 @@ advances before the squash merge.
 | F-01 | `tools/windows_portable/update_public_key.xml` contains replacement markers and a non-release modulus; release/manual builds pass `-RequireReleasePublicKey` | The release path validates a key that cannot qualify as a real release key, so the official Windows build fails closed | Committed real public key validates; matching protected private key signs an update that the installed client accepts |
 | F-02 | `.github/workflows/release-please.yml` falls back to `github.token`; `.github/workflows/windows-portable.yml` listens for a separate release event | GitHub suppresses new workflow runs caused by events created with `GITHUB_TOKEN`, so the release can exist without triggering asset creation | Confirm non-`GITHUB_TOKEN` credential and observe a disposable Release Please prerelease trigger the Windows workflow |
 | F-03 | There are no prior release tags while `pyproject.toml` and `.release-please-manifest.json` already say `0.1.0`; the branch contains extensive feature history | Release Please may interpret `0.1.0` as already released and calculate a later version from all visible history | Previewed release PR/tag/changelog exactly match the maintainer-approved bootstrap version and commit boundary |
-| F-04 | The Windows builder installs PyQt6/PyQt6-Qt6 into the public bundle; PyQt6 package metadata is `GPL-3.0-only` or commercial while the repository is Apache-2.0; repository history shows only the maintainer’s Tristan/TJZine author identities | Redistributing the combined release without an explicit compatible-license posture creates avoidable ambiguity | Maintainer confirms the `GPL-3.0-only` route, all project metadata/notices are updated, and the exact artifact’s licenses and corresponding-source path are inspected |
+| F-04 | The Windows builder installs PyQt6/PyQt6-Qt6 into the public bundle; at the review baseline PyQt6 package metadata was `GPL-3.0-only` or commercial while the repository was Apache-2.0; the project is now `GPL-3.0-only` | Redistributing the combined release without inspecting the exact artifact’s license inventory and corresponding-source path could still leave compliance gaps | Inspect the exact artifact’s licenses, notices, and corresponding-source path after the completed project relicensing |
 | F-05 | Generated CLI help shows command names and options with little or no explanatory text for key first-run surfaces | New users cannot infer safe command intent, defaults, or route-specific invocation from the CLI itself | Human-reviewed top-level and per-command help with focused contract tests |
 | F-06 | `CHANGELOG.md` contains repeated internal phase/scaffold history and obsolete implementation detail | Release notes obscure actual user value and limitations and can misrepresent the initial release | First-release changelog reviewed as a concise user-facing capability/limitation record |
 | F-07 | Workflow publishes `.sha256` assets, while the prior Windows guide only instructed users to download and execute the ZIP | Integrity data exists but users are not told how to use it | Published guide includes copy/paste verification and a fail-closed mismatch instruction |
@@ -110,9 +110,9 @@ advances before the squash merge.
   runner.
 - Private signing key material must never enter the repository, task transcript,
   command line, CI logs, or release artifacts.
-- Licensing changes require explicit maintainer confirmation. The plan may recommend
-  the conservative `GPL-3.0-only` route but implementation agents must not silently
-  relicense the project.
+- The maintainer explicitly approved `GPL-3.0-only` on July 26, 2026. Preserve
+  third-party license texts and do not expand that approval into dual licensing,
+  copyright assignment, a CLA, or a commercial-license path.
 - Only one active plan should exist for this workstream.
 
 ### Non-goals
@@ -356,16 +356,16 @@ Accepted finding IDs: F-04.
 Goal: align the project and Windows distribution with PyQt6’s
 `GPL-3.0-only` terms without buying commercial licenses.
 
+Status: repository relicensing is complete; exact Windows artifact and
+corresponding-source verification remain.
+
 Risk reduced: public distribution without satisfying applicable GPL/commercial and
 Qt obligations.
 
 Scope:
 
-- Obtain explicit maintainer confirmation for the recommended
-  `GPL-3.0-only` project license.
-- Replace the project Apache license with the complete GPLv3 text and update package
-  metadata, classifiers, badges, user documentation, contributor terms, and bundle
-  project-license output.
+- Retain the completed GPLv3 project-license, package metadata, badge, user
+  documentation, contributor terms, and bundle project-license output changes.
 - Inventory the exact PyQt6, PyQt6-Qt6, Qt, and related packages shipped.
 - Preserve every applicable third-party license and notice; Apache-2.0 components
   retain their original notices within the GPLv3 distribution.
@@ -388,9 +388,9 @@ Expected behavior change: project licensing and distribution metadata change to
 `GPL-3.0-only`; runtime behavior and the feature-complete Windows bundle remain
 unchanged.
 
-Implementation approach: after explicit maintainer confirmation, implement the
-license change as one reviewable package and freeze public Windows distribution until
-the exact bundle/source pair passes the license inventory.
+Implementation approach: preserve the approved repository license change and freeze
+public Windows distribution until the exact bundle/source pair passes the license
+inventory.
 
 Verification:
 
@@ -409,8 +409,6 @@ same-pass user documentation updates.
 
 Open questions:
 
-- Has the maintainer explicitly approved changing Frame Compare itself to
-  `GPL-3.0-only`?
 - What exact release asset or repository link is the canonical corresponding-source
   location for each Windows binary tag?
 
@@ -798,7 +796,7 @@ Suggested owner role: maintainer/release manager.
 | Sequence | Work | Parallelism |
 | --- | --- | --- |
 | 0 | User install docs, checksum instructions, stale VSPreview links, and release auto-merge removal | Completed baseline; retain tests and strict docs proof |
-| 1 | Explicitly confirm and implement P2 `GPL-3.0-only` posture | Do before P0 because both packages touch project/package metadata |
+| 1 | Finish P2 exact-artifact license inventory and corresponding-source proof | Repository relicensing is complete; finish before P0/P3 release rehearsal |
 | 2 | P1 signing-key tooling and maintainer key generation | May begin alongside P2 when documentation files do not overlap |
 | 3 | P0 `v0.1.0` bootstrap configuration | Starts after P2 settles `pyproject.toml`; recalculate `bootstrap-sha` immediately before merge |
 | 4 | P4 remaining CLI help and changelog work | CLI help may proceed earlier; final changelog wording waits for P0/P2 |

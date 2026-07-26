@@ -242,7 +242,7 @@ Releases are automated from `main` using [Release Please](https://github.com/goo
 
 - On every push to `main`, the Release Please workflow opens or updates a PR like `chore(release): v0.1.1`.
 - Merging that PR publishes the GitHub Release and tag (e.g. `v0.1.1`).
-- If the repo has Auto-merge enabled, the workflow attempts to set the release PR to auto-merge once required checks pass.
+- Release PRs require maintainer review and are never auto-merged by the workflow.
 
 ### CI on release PRs (recommended)
 
