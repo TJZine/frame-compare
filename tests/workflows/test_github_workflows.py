@@ -35,6 +35,14 @@ def test_release_please_owns_python_version_sources(repo_root: Path) -> None:
     assert release_manifest["."] == project["version"] == package_version
 
 
+def test_release_please_workflow_requires_human_review(repo_root: Path) -> None:
+    workflow_path = repo_root / ".github" / "workflows" / "release-please.yml"
+    workflow = _read_text_or_fail(workflow_path)
+
+    assert "gh pr merge" not in workflow
+    assert "--auto" not in workflow
+
+
 def test_docker_integration_workflow_covers_supported_pull_request_bases(repo_root: Path) -> None:
     workflow_path = repo_root / ".github" / "workflows" / "docker-integration.yml"
     workflow = _read_text_or_fail(workflow_path)
