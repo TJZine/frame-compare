@@ -43,6 +43,19 @@ def test_release_please_workflow_requires_human_review(repo_root: Path) -> None:
     assert "--auto" not in workflow
 
 
+def test_ci_requires_clean_distribution_build_and_install(repo_root: Path) -> None:
+    workflow_path = repo_root / ".github" / "workflows" / "ci.yml"
+    workflow = _read_text_or_fail(workflow_path)
+
+    assert "uv build --out-dir dist" in workflow
+    assert ".dist-venv/bin/python scripts/verify_distribution.py dist" in workflow
+    assert "uv pip install --python .dist-venv/bin/python dist/*.whl" in workflow
+    assert ".dist-venv/bin/frame-compare version" in workflow
+    assert ".dist-venv/bin/frame-compare --help" in workflow
+    assert "needs: [lint, security, typecheck, test, import-lints, package]" in workflow
+    assert '[[ "${{ needs.package.result }}" != "success" ]]' in workflow
+
+
 def test_docker_integration_workflow_covers_supported_pull_request_bases(repo_root: Path) -> None:
     workflow_path = repo_root / ".github" / "workflows" / "docker-integration.yml"
     workflow = _read_text_or_fail(workflow_path)

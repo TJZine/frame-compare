@@ -49,13 +49,13 @@ advances before the squash merge.
 | F-03 | First-release version and Release Please bootstrap history are ambiguous | Inferred release risk | S2 | High | Could publish an unintended `v0.2.0` or an oversized/misleading changelog |
 | F-04 | PyQt6 redistribution under the project’s intended license posture lacks a recorded compatible-license disposition | Confirmed license mismatch requiring maintainer disposition | S1 | High | Blocks public Windows binary distribution until the project and artifact license posture is aligned |
 | F-05 | Top-level and command-specific CLI help is too sparse for first-time users | Confirmed UX defect | S2 | High | Does not block mechanics, but materially harms first-use quality |
-| F-06 | `CHANGELOG.md` reads as internal phase/scaffold history instead of a public first-release changelog | Confirmed docs/release defect | S2 | High | Release notes would be noisy and misleading |
+| F-06 | `CHANGELOG.md` read as internal phase/scaffold history instead of a public first-release changelog | Confirmed docs/release defect | S2 | High | Resolved with a concise user-facing alpha changelog; re-review the generated release PR |
 | F-07 | Published Windows `.sha256` assets lacked user verification instructions | Confirmed docs defect | S3 | High | Resolved in the documentation package associated with this plan |
 | F-08 | A doctor remediation hint points to a stale README installation anchor | Confirmed UX/docs defect | S3 | High | Resolved by linking to the native-source Zensical guide |
 | F-09 | No clean Apple Silicon Docker proof was available during review | Verification gap | S2 | Medium | Do not claim Apple Silicon confidence until separately proved |
 | F-10 | Optional Linux NVIDIA and X11 routes remain host-dependent and unproved in baseline CI | Known verification limitation | S3 | High | Keep labeled experimental; does not block supported default route |
 | F-11 | Dependency vulnerability status was not independently audited for the release graph/bundle | Verification gap | S2 | Medium | Requires a release-time dependency/security audit |
-| F-12 | Distribution build is not an explicit CI gate, despite clean archive build succeeding locally | Inferred build/release gap | S2 | Medium | A packaging regression could reach `main` unnoticed |
+| F-12 | Distribution build was not an explicit CI gate, despite clean archive build succeeding locally | Inferred build/release gap | S2 | Medium | Resolved with a required clean build, artifact inspection, fresh wheel install, and CLI smoke job |
 | F-13 | Overlay font fallback can vary across hosts | Known determinism limitation | S3 | High | Document/test tolerance; do not claim cross-platform pixel identity |
 | F-14 | Docker base image and system package inputs are not fully digest/snapshot pinned | Supply-chain hardening opportunity | S3 | Medium | Track after first-release blockers unless threat model elevates it |
 | F-15 | Release-candidate asset installation and end-to-end use have not been rehearsed from the exact published artifacts | Verification gap | S1 | High | Blocks final go/no-go |
@@ -480,6 +480,9 @@ Suggested owner role: release-workflow implementer.
 
 Accepted finding IDs: F-05, F-06, and F-08.
 
+Status: the doctor link and public-alpha changelog are complete; CLI command and
+option help remain.
+
 Goal: make the CLI self-explanatory and the first public changelog concise,
 user-oriented, and accurate.
 
@@ -602,6 +605,9 @@ Suggested owner role: documentation owner.
 
 Accepted finding IDs: F-11, F-12, and F-14.
 
+Status: the distribution build/install/inspection CI gate is complete. Dependency
+audit policy, the Windows bundle inventory, and the Docker pinning decision remain.
+
 Goal: catch distribution and dependency problems before merge or release and record
 the remaining container pinning decision.
 
@@ -625,6 +631,7 @@ warning.
 Primary files/symbols:
 
 - `.github/workflows/ci.yml`
+- `scripts/verify_distribution.py`
 - `pyproject.toml`
 - `uv.lock`
 - `Dockerfile`
@@ -799,9 +806,9 @@ Suggested owner role: maintainer/release manager.
 | 1 | Finish P2 exact-artifact license inventory and corresponding-source proof | Repository relicensing is complete; finish before P0/P3 release rehearsal |
 | 2 | P1 signing-key tooling and maintainer key generation | May begin alongside P2 when documentation files do not overlap |
 | 3 | P0 `v0.1.0` bootstrap configuration | Starts after P2 settles `pyproject.toml`; recalculate `bootstrap-sha` immediately before merge |
-| 4 | P4 remaining CLI help and changelog work | CLI help may proceed earlier; final changelog wording waits for P0/P2 |
+| 4 | P4 remaining CLI help and final generated-release-note review | Public alpha changelog is complete; confirm Release Please output after P0 |
 | 5 | P3 release authentication and exact event-chain proof | Starts only after P0/P1/P2 have usable release state |
-| 6 | P6 build/security gates | After dependency/license direction is stable |
+| 6 | P6 dependency audit policy, Windows inventory, and Docker pinning decision | Distribution build/install/inspection CI gate is complete |
 | 7 | P7 exact RC rehearsal | Only after every prior blocker package exits |
 | 8 | P8 official publish | Only after explicit maintainer go/no-go |
 
