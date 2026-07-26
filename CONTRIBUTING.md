@@ -80,6 +80,13 @@ required verification for the current change.
 
 ---
 
+## Contribution licensing
+
+Submitted contributions are licensed under `GPL-3.0-only`, and contributors affirm
+that they have the right to submit them under those terms.
+
+---
+
 ## Documentation Development
 
 Authored documentation lives under `docs/`. The root `zensical.toml` owns the public

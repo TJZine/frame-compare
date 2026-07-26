@@ -4,7 +4,7 @@
 > screenshots, offline reports, and optional publishable outputs.
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-3776AB?logo=python&logoColor=white)](#requirements)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
 [![CI](https://github.com/TJZine/frame-compare/actions/workflows/ci.yml/badge.svg)](https://github.com/TJZine/frame-compare/actions/workflows/ci.yml)
 
 **[Read the documentation](docs/index.md)** to choose an installation route, run a
@@ -113,7 +113,8 @@ prefix, and Release Please automates releases from `main`.
 ## License
 
 Frame Compare is licensed under the
-[Apache License 2.0](https://github.com/TJZine/frame-compare/blob/main/LICENSE).
+[GNU General Public License v3.0 only](https://github.com/TJZine/frame-compare/blob/main/LICENSE)
+(`GPL-3.0-only`).
 
 ```text
 Copyright 2025-2026 Tristan <zine96@proton.me>
