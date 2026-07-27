@@ -27,7 +27,8 @@ entrypoint shim only; it must not become a second runbook.
   JSON, config persistence, and report-open behavior.
 - `importlinter.ini` owns import-layer direction.
 - `pyproject.toml` owns local Python tooling policy and pytest markers.
-- `docs/plans/**` is reference-only unless the file starts with `Status: Active`.
+- `docs/plans/**` is reference-only unless the required search-exclusion front
+  matter is followed by `Status: Active`.
 - `.agents/rules/general-guidelines.md` is Antigravity routing material only. If it
   conflicts with the files above, follow those files and update this shim.
 

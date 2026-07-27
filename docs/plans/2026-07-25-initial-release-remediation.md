@@ -1,3 +1,8 @@
+---
+search:
+  exclude: true
+---
+
 Status: Active
 Scope: Initial public release readiness and production-review remediation
 Owner: Maintainer
