@@ -9,6 +9,7 @@ Thank you for your interest in contributing! This guide will help you get starte
 - [Prerequisites](#prerequisites)
 - [Development Setup](#development-setup)
 - [Making Changes](#making-changes)
+- [Contribution licensing](#contribution-licensing)
 - [Documentation Development](#documentation-development)
 - [Pull Request Workflow](#pull-request-workflow)
 - [Code Style](#code-style)
