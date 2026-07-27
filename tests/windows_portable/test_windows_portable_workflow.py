@@ -6,6 +6,8 @@ from pathlib import Path
 from tests.workflow_helpers import (
     assert_release_asset_name_hardening as _assert_release_asset_name_hardening,
 )
+from tests.workflow_helpers import load_workflow as _load_workflow
+from tests.workflow_helpers import step_by_name as _step_by_name
 
 from ._helpers import read_text_or_fail as _read_text_or_fail
 
@@ -156,30 +158,30 @@ def test_windows_portable_workflow_requires_signing_for_release_like_events(
     repo_root: Path,
 ) -> None:
     workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
-    workflow = _read_text_or_fail(workflow_path)
+    source = _read_text_or_fail(workflow_path)
+    workflow = _load_workflow(workflow_path)
+    sign_update_step = _step_by_name(workflow["jobs"]["build"], "Sign code-only update zip")
+    sign_update_run = sign_update_step["run"]
 
-    assert "Pull requests prove unsigned update zip creation without signing secrets." in workflow
-    assert "Release/manual runs require a signed update and fail closed" in workflow
-    assert (
-        "if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'" in workflow
+    assert "Pull requests prove unsigned update zip creation without signing secrets." in source
+    assert "Release/manual runs require a signed update and fail closed" in source
+    assert sign_update_step["if"] == (
+        "github.event_name == 'release' || github.event_name == 'workflow_dispatch'"
     )
-    assert (
-        "WINDOWS_UPDATE_SIGNING_KEY_XML: ${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}" in workflow
+    assert sign_update_step["env"]["WINDOWS_UPDATE_SIGNING_KEY_XML"] == (
+        "${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}"
     )
-    assert "WINDOWS_UPDATE_SIGNING_KEY_XML is required for release and manual runs." in workflow
-    assert "$env:SIGNING_KEY_XML_PATH = $keyPath" in workflow
-    assert "tools/windows_portable/sign_update.ps1" in workflow
-    assert "-UpdateZip $env:UPDATE_ZIP" in workflow
-    assert "signed=false" not in workflow
-    assert "signed=true" not in workflow
-    assert "update_signed" not in workflow
-    sign_update_step = re.search(
-        r"- name: Sign code-only update zip[\s\S]*?(?=\n      - name:)",
-        workflow,
+    assert "WINDOWS_UPDATE_SIGNING_KEY_XML is required for release and manual runs." in (
+        sign_update_run
     )
-    assert sign_update_step is not None, "Sign code-only update zip step not found"
-    assert "pull_request" not in sign_update_step.group(0)
-    assert "exit 0" not in sign_update_step.group(0)
+    assert "$env:SIGNING_KEY_XML_PATH = $keyPath" in sign_update_run
+    assert "tools/windows_portable/sign_update.ps1" in sign_update_run
+    assert "-UpdateZip $env:UPDATE_ZIP" in sign_update_run
+    assert "pull_request" not in sign_update_step["if"]
+    assert "exit 0" not in sign_update_run
+    assert "signed=false" not in sign_update_run
+    assert "signed=true" not in sign_update_run
+    assert "update_signed" not in source
 
 
 def test_windows_portable_workflow_verifies_and_uploads_update_artifact(
