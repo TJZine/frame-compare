@@ -152,35 +152,34 @@ def test_windows_portable_workflow_builds_code_only_update_after_bundle(
     assert "UPDATE_ZIP=$updateZip" in workflow
 
 
-def test_windows_portable_workflow_signs_update_only_for_release_like_events(
+def test_windows_portable_workflow_requires_signing_for_release_like_events(
     repo_root: Path,
 ) -> None:
     workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
     workflow = _read_text_or_fail(workflow_path)
 
-    assert "Pull requests prove update zip creation without requiring signing secrets." in workflow
-    assert (
-        "Release/manual runs sign only when the private key XML secret is configured." in workflow
-    )
-    assert "id: sign_update" in workflow
+    assert "Pull requests prove unsigned update zip creation without signing secrets." in workflow
+    assert "Release/manual runs require a signed update and fail closed" in workflow
     assert (
         "if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'" in workflow
     )
     assert (
         "WINDOWS_UPDATE_SIGNING_KEY_XML: ${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}" in workflow
     )
-    assert "::notice::Skipping signed update zip; WINDOWS_UPDATE_SIGNING_KEY_XML secret" in workflow
+    assert "WINDOWS_UPDATE_SIGNING_KEY_XML is required for release and manual runs." in workflow
     assert "$env:SIGNING_KEY_XML_PATH = $keyPath" in workflow
     assert "tools/windows_portable/sign_update.ps1" in workflow
     assert "-UpdateZip $env:UPDATE_ZIP" in workflow
-    assert "signed=false" in workflow
-    assert "signed=true" in workflow
+    assert "signed=false" not in workflow
+    assert "signed=true" not in workflow
+    assert "update_signed" not in workflow
     sign_update_step = re.search(
         r"- name: Sign code-only update zip[\s\S]*?(?=\n      - name:)",
         workflow,
     )
     assert sign_update_step is not None, "Sign code-only update zip step not found"
     assert "pull_request" not in sign_update_step.group(0)
+    assert "exit 0" not in sign_update_step.group(0)
 
 
 def test_windows_portable_workflow_verifies_and_uploads_update_artifact(
@@ -196,6 +195,10 @@ def test_windows_portable_workflow_verifies_and_uploads_update_artifact(
     assert 'target_platform -ne "windows-x64"' in workflow
     assert 'payload_root -ne "payload"' in workflow
     assert 'signature_file -ne "update-manifest.sig"' in workflow
+    assert (
+        "REQUIRE_SIGNED_UPDATE: ${{ github.event_name == 'release' || "
+        "github.event_name == 'workflow_dispatch' }}"
+    ) in workflow
     assert "Signed update zip is missing update-manifest.sig." in workflow
     assert "Upload code-only update artifact" in workflow
     assert "name: frame-compare-update-win-x64" in workflow
@@ -203,17 +206,20 @@ def test_windows_portable_workflow_verifies_and_uploads_update_artifact(
     assert "dist/frame-compare-update-win-x64-*.zip.sha256" in workflow
 
 
-def test_windows_portable_workflow_uploads_signed_update_release_asset_conditionally(
+def test_windows_portable_workflow_requires_signed_update_release_assets(
     repo_root: Path,
 ) -> None:
     workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
     workflow = _read_text_or_fail(workflow_path)
 
-    assert "update_signed: ${{ steps.sign_update.outputs.signed }}" in workflow
     assert "Download signed update artifact" in workflow
     assert "Prepare versioned signed update asset" in workflow
-    assert "Upload signed update release asset" in workflow
-    assert workflow.count("if: needs.build.outputs.update_signed == 'true'") == 3
+    assert "Verify required release asset set" in workflow
+    assert "Upload required release assets" in workflow
+    assert "if: needs.build.outputs.update_signed == 'true'" not in workflow
+    assert workflow.count("if-no-files-found: error") == 2
+    assert workflow.count("fail_on_unmatched_files: true") == 1
+    assert "Missing required release asset: $asset" in workflow
     assert "mapfile -t update_zips" in workflow
     assert "Expected exactly one signed update zip artifact, found ${#update_zips[@]}." in workflow
     assert "frame-compare-update-win-x64-${ASSET_TAG}.zip" in workflow

@@ -451,8 +451,8 @@ Implementation approach:
 1. Audit secret presence and token permissions without exposing the token.
 2. Create a disposable prerelease or RC tag through the actual Release Please path.
 3. Observe the release event and Windows workflow.
-4. Require the portable ZIP and checksum; require the signed update ZIP/checksum if
-   updates are part of the release promise.
+4. Require the portable ZIP and checksum, plus the signed update ZIP and checksum,
+   for every public Windows release and release-like manual rehearsal.
 
 Verification:
 
@@ -460,7 +460,7 @@ Verification:
 - Windows workflow starts from the release event without manual intervention.
 - Checkout resolves the exact tag.
 - Versioned portable ZIP and `.sha256` attach to the GitHub release.
-- Signed update ZIP and `.sha256` attach when required.
+- Signed update ZIP and `.sha256` attach for every public Windows release.
 - A deliberately missing required secret or asset produces an explicit failure.
 
 Rollback / safety notes: use a prerelease and delete only the disposable release/tag
