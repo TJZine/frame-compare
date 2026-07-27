@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import csv
 import email.policy
+import hashlib
+import io
 import tarfile
 import zipfile
 from collections.abc import Iterable
@@ -73,6 +77,49 @@ def _metadata_from_bytes(data: bytes, *, artifact: Path) -> Message:
     return metadata
 
 
+def _verify_wheel_record(
+    archive: zipfile.ZipFile,
+    *,
+    record_name: str,
+    artifact: Path,
+) -> None:
+    file_names = [info.filename for info in archive.infolist() if not info.is_dir()]
+    if len(file_names) != len(set(file_names)):
+        _fail(f"{artifact.name} contains duplicate archive members")
+
+    try:
+        record_text = archive.read(record_name).decode("utf-8")
+        reader = csv.reader(io.StringIO(record_text, newline=""))
+        records: dict[str, tuple[str, str]] = {}
+        for row in reader:
+            if len(row) != 3:
+                _fail(f"{artifact.name} RECORD contains a malformed row")
+            path, digest, size = row
+            if path in records:
+                _fail(f"{artifact.name} RECORD contains duplicate path {path!r}")
+            records[path] = (digest, size)
+    except (UnicodeDecodeError, csv.Error) as error:
+        _fail(f"{artifact.name} RECORD is invalid: {error}")
+
+    archived = set(file_names)
+    recorded = set(records)
+    if archived != recorded:
+        missing = sorted(archived - recorded)
+        stale = sorted(recorded - archived)
+        _fail(f"{artifact.name} RECORD paths differ: missing={missing!r} stale={stale!r}")
+    if records[record_name] != ("", ""):
+        _fail(f"{artifact.name} RECORD must not hash itself")
+
+    for name in file_names:
+        if name == record_name:
+            continue
+        data = archive.read(name)
+        digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
+        expected = (f"sha256={digest}", str(len(data)))
+        if records[name] != expected:
+            _fail(f"{artifact.name} RECORD mismatch for {name!r}")
+
+
 def _verify_wheel(wheel: Path) -> str:
     with zipfile.ZipFile(wheel) as archive:
         names = _validate_member_names(archive.namelist(), artifact=wheel)
@@ -102,6 +149,11 @@ def _verify_wheel(wheel: Path) -> str:
             _fail(f"{wheel.name} LICENSE is not in the METADATA dist-info directory")
         if not any(name.startswith("frame_compare/") for name in names):
             _fail(f"{wheel.name} does not contain the frame_compare package")
+        _verify_wheel_record(
+            archive,
+            record_name=record_names[0],
+            artifact=wheel,
+        )
         metadata = _metadata_from_bytes(archive.read(metadata_name), artifact=wheel)
     return str(metadata["Version"])
 

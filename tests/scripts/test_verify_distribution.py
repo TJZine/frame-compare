@@ -66,6 +66,20 @@ def _write_wheel(
             archive.writestr(duplicate_name, contents[duplicate_name])
 
 
+def _replace_wheel_member(wheel: Path, member_name: str, value: str) -> None:
+    replacement = value.encode()
+    with zipfile.ZipFile(wheel) as archive:
+        members = [(info, archive.read(info)) for info in archive.infolist()]
+    with zipfile.ZipFile(wheel, "w") as archive:
+        for info, data in members:
+            archive.writestr(info, replacement if info.filename == member_name else data)
+
+
+def _read_wheel_member(wheel: Path, member_name: str) -> str:
+    with zipfile.ZipFile(wheel) as archive:
+        return archive.read(member_name).decode()
+
+
 def _add_tar_text(archive: tarfile.TarFile, name: str, value: str) -> None:
     data = value.encode()
     member = tarfile.TarInfo(name)
@@ -119,6 +133,134 @@ def test_distribution_verifier_accepts_expected_artifacts(tmp_path: Path, repo_r
     assert result.returncode == 0
     assert "distribution verification passed: version=0.1.0" in result.stdout
     assert result.stderr == ""
+
+
+def test_distribution_verifier_rejects_payload_modified_after_record_generation(
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    _write_wheel(tmp_path)
+    _write_sdist(tmp_path)
+    wheel = tmp_path / "frame_compare-0.1.0-py3-none-any.whl"
+    _replace_wheel_member(wheel, "frame_compare/__init__.py", '__version__ = "0.1.1"\n')
+
+    result = _run_verifier(repo_root, tmp_path)
+
+    assert result.returncode != 0
+    assert "RECORD mismatch for 'frame_compare/__init__.py'" in result.stderr
+
+
+def test_distribution_verifier_rejects_stale_record_entry(
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    _write_wheel(tmp_path)
+    _write_sdist(tmp_path)
+    wheel = tmp_path / "frame_compare-0.1.0-py3-none-any.whl"
+    record_name = "frame_compare-0.1.0.dist-info/RECORD"
+    record = _read_wheel_member(wheel, record_name)
+    _replace_wheel_member(wheel, record_name, f"{record}stale.py,sha256=unused,0\n")
+
+    result = _run_verifier(repo_root, tmp_path)
+
+    assert result.returncode != 0
+    assert "RECORD paths differ" in result.stderr
+    assert "stale.py" in result.stderr
+
+
+def test_distribution_verifier_rejects_incorrect_record_size(
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    _write_wheel(tmp_path)
+    _write_sdist(tmp_path)
+    wheel = tmp_path / "frame_compare-0.1.0-py3-none-any.whl"
+    record_name = "frame_compare-0.1.0.dist-info/RECORD"
+    record = _read_wheel_member(wheel, record_name)
+    rows = record.splitlines()
+    payload_row = next(row for row in rows if row.startswith("frame_compare/__init__.py,"))
+    path, digest, size = payload_row.split(",")
+    rows[rows.index(payload_row)] = f"{path},{digest},{int(size) + 1}"
+    _replace_wheel_member(wheel, record_name, f"{'\n'.join(rows)}\n")
+
+    result = _run_verifier(repo_root, tmp_path)
+
+    assert result.returncode != 0
+    assert "RECORD mismatch for 'frame_compare/__init__.py'" in result.stderr
+
+
+def test_distribution_verifier_rejects_missing_record_entry(
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    _write_wheel(tmp_path)
+    _write_sdist(tmp_path)
+    wheel = tmp_path / "frame_compare-0.1.0-py3-none-any.whl"
+    record_name = "frame_compare-0.1.0.dist-info/RECORD"
+    rows = _read_wheel_member(wheel, record_name).splitlines()
+    rows = [row for row in rows if not row.startswith("frame_compare/__init__.py,")]
+    _replace_wheel_member(wheel, record_name, f"{'\n'.join(rows)}\n")
+
+    result = _run_verifier(repo_root, tmp_path)
+
+    assert result.returncode != 0
+    assert "RECORD paths differ" in result.stderr
+    assert "frame_compare/__init__.py" in result.stderr
+
+
+def test_distribution_verifier_rejects_malformed_record_row(
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    _write_wheel(tmp_path)
+    _write_sdist(tmp_path)
+    wheel = tmp_path / "frame_compare-0.1.0-py3-none-any.whl"
+    record_name = "frame_compare-0.1.0.dist-info/RECORD"
+    record = _read_wheel_member(wheel, record_name)
+    _replace_wheel_member(wheel, record_name, f"{record}malformed\n")
+
+    result = _run_verifier(repo_root, tmp_path)
+
+    assert result.returncode != 0
+    assert "RECORD contains a malformed row" in result.stderr
+
+
+def test_distribution_verifier_rejects_duplicate_record_path(
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    _write_wheel(tmp_path)
+    _write_sdist(tmp_path)
+    wheel = tmp_path / "frame_compare-0.1.0-py3-none-any.whl"
+    record_name = "frame_compare-0.1.0.dist-info/RECORD"
+    record = _read_wheel_member(wheel, record_name)
+    first_row = record.splitlines()[0]
+    _replace_wheel_member(wheel, record_name, f"{record}{first_row}\n")
+
+    result = _run_verifier(repo_root, tmp_path)
+
+    assert result.returncode != 0
+    assert "RECORD contains duplicate path" in result.stderr
+
+
+def test_distribution_verifier_rejects_duplicate_payload_member(
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    _write_wheel(tmp_path)
+    _write_sdist(tmp_path)
+    wheel = tmp_path / "frame_compare-0.1.0-py3-none-any.whl"
+    payload_name = "frame_compare/__init__.py"
+    with (
+        pytest.warns(UserWarning, match="Duplicate name"),
+        zipfile.ZipFile(wheel, "a") as archive,
+    ):
+        archive.writestr(payload_name, archive.read(payload_name))
+
+    result = _run_verifier(repo_root, tmp_path)
+
+    assert result.returncode != 0
+    assert "contains duplicate archive members" in result.stderr
 
 
 def test_distribution_verifier_rejects_local_environment_state(
