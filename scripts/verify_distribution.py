@@ -77,14 +77,32 @@ def _verify_wheel(wheel: Path) -> str:
     with zipfile.ZipFile(wheel) as archive:
         names = _validate_member_names(archive.namelist(), artifact=wheel)
         metadata_names = [name for name in names if name.endswith(".dist-info/METADATA")]
+        wheel_names = [name for name in names if name.endswith(".dist-info/WHEEL")]
+        record_names = [name for name in names if name.endswith(".dist-info/RECORD")]
         license_names = [name for name in names if name.endswith(".dist-info/licenses/LICENSE")]
-        if len(metadata_names) != 1:
-            _fail(f"{wheel.name} must contain exactly one dist-info METADATA file")
-        if len(license_names) != 1:
-            _fail(f"{wheel.name} must contain exactly one packaged project LICENSE")
+        required_members = {
+            "dist-info METADATA": metadata_names,
+            "dist-info WHEEL": wheel_names,
+            "dist-info RECORD": record_names,
+            "packaged project LICENSE": license_names,
+        }
+        for label, matches in required_members.items():
+            if len(matches) != 1:
+                _fail(f"{wheel.name} must contain exactly one {label} file")
+
+        metadata_name = metadata_names[0]
+        dist_info_dir = PurePosixPath(metadata_name).parent
+        if len(dist_info_dir.parts) != 1:
+            _fail(f"{wheel.name} dist-info directory must be at the archive root")
+        if PurePosixPath(wheel_names[0]).parent != dist_info_dir:
+            _fail(f"{wheel.name} WHEEL is not in the METADATA dist-info directory")
+        if PurePosixPath(record_names[0]).parent != dist_info_dir:
+            _fail(f"{wheel.name} RECORD is not in the METADATA dist-info directory")
+        if PurePosixPath(license_names[0]).parent.parent != dist_info_dir:
+            _fail(f"{wheel.name} LICENSE is not in the METADATA dist-info directory")
         if not any(name.startswith("frame_compare/") for name in names):
             _fail(f"{wheel.name} does not contain the frame_compare package")
-        metadata = _metadata_from_bytes(archive.read(metadata_names[0]), artifact=wheel)
+        metadata = _metadata_from_bytes(archive.read(metadata_name), artifact=wheel)
     return str(metadata["Version"])
 
 
@@ -95,6 +113,11 @@ def _verify_sdist(sdist: Path) -> str:
         linked = [member.name for member in members if member.issym() or member.islnk()]
         if linked:
             _fail(f"{sdist.name} contains links: {linked!r}")
+        unsupported = [
+            member.name for member in members if not member.isfile() and not member.isdir()
+        ]
+        if unsupported:
+            _fail(f"{sdist.name} contains unsupported member types: {unsupported!r}")
         metadata_names = [name for name in names if name.endswith("/PKG-INFO")]
         if len(metadata_names) != 1:
             _fail(f"{sdist.name} must contain exactly one PKG-INFO file")
