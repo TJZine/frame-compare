@@ -306,12 +306,15 @@ def _calculate_dense_planestats_metrics(
             with record_span(timing_recorder, f"{timing_prefix}_graph_build"):
                 import vapoursynth as vs
 
-                core = _dynamic_attr(vs, "core")
-                std = _dynamic_attr(core, "std")
-                splice = cast(_SpliceFn, _dynamic_attr(std, "Splice"))
-                previous = splice(clips=[luma[0:1], luma[0:-1]])
                 plane_stats = cast(_PlaneStatsFn, _dynamic_attr(luma.std, "PlaneStats"))
-                stats = cast(_FrameReadable, plane_stats(previous))
+                if luma.num_frames == 1:
+                    stats = cast(_FrameReadable, plane_stats())
+                else:
+                    core = _dynamic_attr(vs, "core")
+                    std = _dynamic_attr(core, "std")
+                    splice = cast(_SpliceFn, _dynamic_attr(std, "Splice"))
+                    previous = splice(clips=[luma[0:1], luma[0:-1]])
+                    stats = cast(_FrameReadable, plane_stats(previous))
             failure_stage = "frame access"
             for n in range(luma.num_frames):
                 frame_started = perf_counter() if timing_recorder is not None else 0.0
