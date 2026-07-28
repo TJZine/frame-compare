@@ -18,6 +18,12 @@ def test_release_please_owns_python_version_sources(repo_root: Path) -> None:
 
     with (repo_root / "pyproject.toml").open("rb") as pyproject_file:
         project = tomllib.load(pyproject_file)["project"]
+    with (repo_root / "uv.lock").open("rb") as lock_file:
+        locked_project = next(
+            package
+            for package in tomllib.load(lock_file)["package"]
+            if package["name"] == project["name"]
+        )
 
     package_name = project["name"].replace("-", "_")
     package_source = _read_text_or_fail(repo_root / "src" / package_name / "__init__.py")
@@ -34,7 +40,33 @@ def test_release_please_owns_python_version_sources(repo_root: Path) -> None:
 
     assert release_config["release-type"] == "python"
     assert release_config["packages"]["."]["release-type"] == "python"
-    assert release_manifest["."] == project["version"] == package_version
+    assert (
+        release_manifest["."]
+        == project["version"]
+        == package_version
+        == locked_project["version"]
+    )
+
+
+def test_initial_release_bootstrap_is_explicit(repo_root: Path) -> None:
+    release_config = json.loads(_read_text_or_fail(repo_root / "release-please-config.json"))
+    release_manifest = json.loads(_read_text_or_fail(repo_root / ".release-please-manifest.json"))
+
+    assert release_manifest["."] == "0.0.0"
+    assert release_config["release-as"] == "0.1.0"
+    assert (
+        release_config["bootstrap-sha"]
+        == "f212c475b584ac97d309736abd268df41c96d876"
+    )
+    assert release_config["packages"]["."]["extra-files"] == [
+        {
+            "type": "toml",
+            "path": "uv.lock",
+            "jsonpath": "$.package[?(@.name.value == 'frame-compare')].version",
+        }
+    ]
+    assert "prerelease" not in release_config
+    assert "prerelease-type" not in release_config
 
 
 def test_release_please_workflow_requires_human_review(repo_root: Path) -> None:
