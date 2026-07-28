@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -86,6 +87,30 @@ def _run_keygen(
     )
 
 
+def _run_public_key_validation(
+    *,
+    exe: str,
+    validator: Path,
+    public_path: Path,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            exe,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(validator),
+            "-PublicKeyPath",
+            str(public_path),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30.0,
+    )
+
+
 def _copy_keygen_owner(*, repo_root: Path, tmp_path: Path) -> tuple[Path, Path, Path]:
     copied_repo = tmp_path / "copied-repo"
     owner_dir = copied_repo / "tools" / "windows_portable"
@@ -154,23 +179,87 @@ def test_windows_update_keygen_creates_redacted_compatible_keypair(
         assert stat.S_IMODE(private_path.stat().st_mode) == 0o600
 
     validator = repo_root / "tools" / "windows_portable" / "validate_update_public_key.ps1"
-    validation = subprocess.run(
-        [
-            exe,
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(validator),
-            "-PublicKeyPath",
-            str(public_path),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=30.0,
+    validation = _run_public_key_validation(
+        exe=exe,
+        validator=validator,
+        public_path=public_path,
     )
     assert validation.returncode == 0, validation.stderr
+
+
+@pytest.mark.integration
+def test_windows_public_key_validator_accepts_public_only_rsa_xml(
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    exe = _powershell_exe()
+    if exe is None:
+        pytest.skip("pwsh/powershell not available")
+
+    modulus = base64.b64encode(b"\x80" + (b"\x01" * 255)).decode("ascii")
+    public_path = tmp_path / "public.xml"
+    public_path.write_text(
+        f"<RSAKeyValue><Modulus>{modulus}</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>",
+        encoding="utf-8",
+    )
+    validator = repo_root / "tools" / "windows_portable" / "validate_update_public_key.ps1"
+
+    validation = _run_public_key_validation(
+        exe=exe,
+        validator=validator,
+        public_path=public_path,
+    )
+
+    assert validation.returncode == 0, validation.stderr
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "xml_text",
+    [
+        (
+            "<RSAKeyValue><Modulus>{modulus}</Modulus><Exponent>AQAB</Exponent>"
+            "<D>AQAB</D></RSAKeyValue>"
+        ),
+        (
+            "<RSAKeyValue><Modulus>{modulus}</Modulus><Exponent>AQAB</Exponent>"
+            "<Unexpected>AQAB</Unexpected></RSAKeyValue>"
+        ),
+        "<RSAKeyValue><Exponent>AQAB</Exponent><Modulus>{modulus}</Modulus></RSAKeyValue>",
+        "<RSAKeyValue><Modulus>{modulus}</Modulus><Exponent>%%%</Exponent></RSAKeyValue>",
+        "<RSAKeyValue><Modulus>{modulus}</Modulus><Exponent>AA==</Exponent></RSAKeyValue>",
+        "<PublicKey><Modulus>{modulus}</Modulus><Exponent>AQAB</Exponent></PublicKey>",
+    ],
+    ids=[
+        "private-field",
+        "unexpected-field",
+        "reordered-fields",
+        "malformed-exponent",
+        "non-importable-exponent",
+        "wrong-root",
+    ],
+)
+def test_windows_public_key_validator_rejects_non_public_or_malformed_xml(
+    tmp_path: Path,
+    repo_root: Path,
+    xml_text: str,
+) -> None:
+    exe = _powershell_exe()
+    if exe is None:
+        pytest.skip("pwsh/powershell not available")
+
+    modulus = base64.b64encode(b"\x80" + (b"\x01" * 255)).decode("ascii")
+    public_path = tmp_path / "invalid-public.xml"
+    public_path.write_text(xml_text.format(modulus=modulus), encoding="utf-8")
+    validator = repo_root / "tools" / "windows_portable" / "validate_update_public_key.ps1"
+
+    validation = _run_public_key_validation(
+        exe=exe,
+        validator=validator,
+        public_path=public_path,
+    )
+
+    assert validation.returncode != 0
 
 
 @pytest.mark.integration
