@@ -58,6 +58,19 @@ def test_ci_requires_clean_distribution_build_and_install(repo_root: Path) -> No
     assert '[[ "${{ needs.package.result }}" != "success" ]]' in workflow
 
 
+def test_direct_build_tools_are_pinned_exactly(repo_root: Path) -> None:
+    for workflow_name in ("ci.yml", "docs.yml", "windows-portable.yml"):
+        workflow = _read_text_or_fail(repo_root / ".github" / "workflows" / workflow_name)
+        setup_count = workflow.count("astral-sh/setup-uv@")
+        assert setup_count > 0
+        assert workflow.count('version: "0.11.31"') == setup_count
+        assert 'version: "latest"' not in workflow
+
+    with (repo_root / "pyproject.toml").open("rb") as pyproject_file:
+        build_system = tomllib.load(pyproject_file)["build-system"]
+    assert build_system["requires"] == ["hatchling==1.31.0"]
+
+
 def test_docker_integration_workflow_covers_supported_pull_request_bases(repo_root: Path) -> None:
     workflow_path = repo_root / ".github" / "workflows" / "docker-integration.yml"
     workflow = _read_text_or_fail(workflow_path)
@@ -94,7 +107,7 @@ def test_dockerfile_installs_lock_export_with_hashes(repo_root: Path) -> None:
     dockerfile_path = repo_root / "Dockerfile"
     dockerfile = _read_text_or_fail(dockerfile_path)
 
-    assert "FROM ghcr.io/astral-sh/uv:0.11.16 AS uv" in dockerfile
+    assert "FROM ghcr.io/astral-sh/uv:0.11.31 AS uv" in dockerfile
     assert "COPY --from=uv /uv /uvx /usr/local/bin/" in dockerfile
     assert re.search(
         r"COPY --chown=framecompare:framecompare pyproject\.toml uv\.lock\b", dockerfile
