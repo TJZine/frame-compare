@@ -16,6 +16,10 @@ sequenced work packages for the first public Frame Compare release. It does not
 authorize a release by itself. Each release blocker must be closed with the evidence
 defined below before the first production tag is published.
 
+The Windows-specific implementation and verification sequence is expanded in the
+[Windows Initial-Release Handoff](2026-07-27-windows-release-handoff.md). That file
+is a supporting handoff, not a second active plan.
+
 The review baseline was branch `stage1` at commit
 `eb88cbdb09099ee10e238da365c3d995d3eed20f`. Revalidate findings against the current
 head before implementation if that baseline changes materially.
@@ -332,7 +336,8 @@ Verification:
 
 - `validate_update_public_key.ps1` passes.
 - `build_portable.ps1 -RequireReleasePublicKey` passes on Windows.
-- Workflow output reports `signed=true`.
+- The protected workflow signing step succeeds and the update artifact contains
+  `update-manifest.sig`.
 - `update-manifest.sig` exists.
 - Tampering with the manifest or payload is rejected.
 - Valid update apply and rollback both succeed.
