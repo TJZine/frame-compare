@@ -15,6 +15,7 @@
       "name": "Python embeddable package (amd64)",
       "version": "3.13.13",
       "url": "https://www.python.org/ftp/python/3.13.13/python-3.13.13-embed-amd64.zip",
+      "source_url": "https://www.python.org/ftp/python/3.13.13/Python-3.13.13.tgz",
       "sha256": "8766a8775746235e23cf5aee5027ab1060bb981d93110577adcf3508aa0cbd55",
       "bytes": 10950201,
       "license": {
@@ -31,6 +32,7 @@
       "name": "VapourSynth 64-bit portable",
       "version": "R76",
       "url": "https://github.com/vapoursynth/vapoursynth/releases/download/R76/VapourSynth64-Portable-R76.zip",
+      "source_url": "https://github.com/vapoursynth/vapoursynth/archive/aa7e83a0aaf87477b5e0fc13c5b97c5aa15a06b7.tar.gz",
       "sha256": "db41537f3eb3f92fe1ff92ae59b4728129199e2afe3ba3b93d8527b46a7ba30c",
       "bytes": 15000063,
       "license": {
@@ -55,6 +57,7 @@
       "name": "L-SMASH Works (VapourSynth plugin)",
       "version": "1282.0.0.0",
       "url": "https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/releases/download/1282/L-SMASH-Works-r1282.0.0.0.7z",
+      "source_url": "https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/archive/0079a06ee384061ecdadd0de03df4e0493dd56ab.tar.gz",
       "sha256": "704b97db3d74667d13d4fa2a5cd94e36f885cd0158366efa1b8e43bf9e426bd7",
       "bytes": 29754280,
       "license": {
@@ -86,6 +89,7 @@
       "name": "vs-placebo (VapourSynth plugin wheel)",
       "version": "2.0.2",
       "url": "https://files.pythonhosted.org/packages/a2/50/db34253e55e082ca7d0632b264fc042b6afb7474ed4b936b3a297f190749/vs_placebo-2.0.2-py3-none-win_amd64.whl",
+      "source_url": "https://github.com/Lypheo/vs-placebo/archive/ccb4beac9080510f2eb830d948449392e2e5c34a.tar.gz",
       "sha256": "5a08511dc9feaa48a76373e5e8869bef0d4a6c2096607f92364e6a72ce975f94",
       "bytes": 6136385,
       "license": {
@@ -109,6 +113,8 @@
       "name": "FFmpeg (BtbN build, win64, LGPL-only)",
       "version": "n8.1.1-9-g58d4114d36 (autobuild-2026-05-31-13-22)",
       "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-05-31-13-22/ffmpeg-n8.1.1-9-g58d4114d36-win64-lgpl-8.1.zip",
+      "source_url": "https://github.com/FFmpeg/FFmpeg/archive/58d4114d36f22118c94f3e402c5c658d1790a5ee.tar.gz",
+      "build_source_url": "https://github.com/BtbN/FFmpeg-Builds/tree/autobuild-2026-05-31-13-22",
       "sha256": "e6008e7d50417513f127c1204b08a5fb8657cfb1d2732dbf0917fb47a9f980cd",
       "bytes": 198645412,
       "license": {
@@ -121,6 +127,14 @@
         "destination": "ffmpeg",
         "strip_prefix": "ffmpeg-n8.1.1-9-g58d4114d36-win64-lgpl-8.1/"
       }
+    }
+  ],
+  "corresponding_sources": [
+    {
+      "name": "Qt",
+      "version": "6.10.2",
+      "license": "LGPL-3.0-only",
+      "source_url": "https://download.qt.io/official_releases/qt/6.10/6.10.2/single/qt-everywhere-src-6.10.2.tar.xz"
     }
   ],
   "notes": "Deliberately excludes ffms2 from the baseline bundle: it is not required by the current loader path (lsmas is required), and adding it to Windows remains a loader-policy/licensing decision requiring explicit approval."

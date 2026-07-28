@@ -636,6 +636,7 @@ function Assert-BundleRuntime([string]$BundleRoot) {
 
   $ffmpeg = Join-Path $BundleRoot "ffmpeg\\bin\\ffmpeg.exe"
   $mediaPath = Join-Path $BundleRoot "runtime-smoke.mp4"
+  $mediaIndexPath = "$mediaPath.lwi"
   $smokePath = Join-Path $BundleRoot "runtime-smoke.py"
   try {
     Set-BundleRuntimeEnvironment -BundleRoot $BundleRoot
@@ -814,6 +815,7 @@ else:
   } finally {
     Remove-Item -Force -LiteralPath $smokePath -ErrorAction SilentlyContinue
     Remove-Item -Force -LiteralPath $mediaPath -ErrorAction SilentlyContinue
+    Remove-Item -Force -LiteralPath $mediaIndexPath -ErrorAction SilentlyContinue
     Restore-ProcessEnvironmentValue -Name "PATH" -Value $originalPath
     Restore-ProcessEnvironmentValue -Name "PYTHONUTF8" -Value $originalPythonUtf8
     Restore-ProcessEnvironmentValue -Name "PYTHONPATH" -Value $originalPythonPath
@@ -923,6 +925,53 @@ function Copy-Licenses([string]$BundleRoot, [pscustomobject[]]$Artifacts) {
   }
 }
 
+function Copy-RequiredQtLicenseDirectories([string]$BundleRoot) {
+  $sitePackages = Join-Path $BundleRoot "app\\site-packages"
+  $licensesDir = Join-Path $BundleRoot "licenses"
+  $required = @(
+    @{ Pattern = "pyqt6-*.dist-info"; Destination = "PyQt6" },
+    @{ Pattern = "pyqt6_qt6-*.dist-info"; Destination = "Qt" },
+    @{ Pattern = "pyqt6_sip-*.dist-info"; Destination = "PyQt6-sip" }
+  )
+
+  foreach ($entry in $required) {
+    $matches = @(Get-ChildItem -LiteralPath $sitePackages -Directory -Filter $entry.Pattern)
+    if ($matches.Count -ne 1) {
+      throw "Expected exactly one $($entry.Pattern) license owner, found $($matches.Count)."
+    }
+    $sourceLicense = Join-Path $matches[0].FullName "LICENSE"
+    if (!(Test-Path -LiteralPath $sourceLicense -PathType Leaf)) {
+      throw "Required license file is missing: $sourceLicense"
+    }
+    $destination = Join-Path $licensesDir $entry.Destination
+    Ensure-Directory -Path $destination
+    Copy-Item -Force -LiteralPath $sourceLicense -Destination (
+      Join-Path $destination "LICENSE.txt"
+    )
+  }
+}
+
+function Write-BundleInventory([string]$BundleRoot) {
+  $python = Join-Path $BundleRoot "python\\python.exe"
+  $inventoryScript = Join-Path $RepoRoot "tools\\windows_portable\\write_bundle_inventory.py"
+  if (!(Test-Path -LiteralPath $inventoryScript -PathType Leaf)) {
+    throw "Bundle inventory owner not found: $inventoryScript"
+  }
+
+  $arguments = @(
+    $inventoryScript,
+    "--bundle-root", $BundleRoot,
+    "--manifest", $ManifestPath,
+    "--repo-root", $RepoRoot,
+    "--output", (Join-Path $BundleRoot "bundle_inventory.json")
+  )
+  if ($RequireReleasePublicKey) {
+    $arguments += "--require-clean-repo"
+  }
+  & $python @arguments
+  Assert-LastExitCode -CommandLabel "Windows bundle inventory"
+}
+
 function Main() {
   if ($RequireReleasePublicKey) {
     Assert-ReleasePublicKey
@@ -974,6 +1023,8 @@ function Main() {
 
   # Licenses
   Copy-Licenses -BundleRoot $OutDir -Artifacts $artifacts
+  Copy-RequiredQtLicenseDirectories -BundleRoot $OutDir
+  Write-BundleInventory -BundleRoot $OutDir
 
   Write-Host "OK: portable bundle assembled at $OutDir"
 }
