@@ -81,12 +81,13 @@ def test_save_preset_creates_file(tmp_path: Path) -> None:
     assert (tmp_path / "my_preset.toml").exists()
 
 
-def test_save_preset_omits_webhook_secret(tmp_path: Path) -> None:
+def test_save_preset_omits_generated_secrets(tmp_path: Path) -> None:
     from frame_compare.config.loader import get_default_config
 
     config = get_default_config()
     config.slowpics.title = "Secret-safe preset"
     config.slowpics.webhook_url = "https://discord.com/api/webhooks/id/secret-token"
+    config.tmdb.api_key = "sentinel-tmdb-api-key"
 
     save_preset("safe", config, presets_dir=tmp_path)
 
@@ -95,7 +96,10 @@ def test_save_preset_omits_webhook_secret(tmp_path: Path) -> None:
     assert isinstance(slowpics, dict)
     assert slowpics["title"] == "Secret-safe preset"
     assert "webhook_url" not in slowpics
-    assert "secret-token" not in (tmp_path / "safe.toml").read_text(encoding="utf-8")
+    assert "api_key" not in data["tmdb"]
+    preset_text = (tmp_path / "safe.toml").read_text(encoding="utf-8")
+    assert "secret-token" not in preset_text
+    assert "sentinel-tmdb-api-key" not in preset_text
 
 
 def test_save_preset_uses_atomic_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

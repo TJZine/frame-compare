@@ -31,12 +31,16 @@ def test_load_from_toml_file(tmp_path: Path) -> None:
         """
         [analysis]
         random_frame_count = 20
+
+        [tmdb]
+        api_key = "sentinel-tmdb-api-key"
         """,
         encoding="utf-8",
     )
 
     config = load_config(config_path=config_file)
     assert config.analysis.random_frame_count == 20
+    assert config.tmdb.api_key == "sentinel-tmdb-api-key"
     # Other values remain defaults
     assert config.paths.input_dir == "comparison_videos"
 
@@ -292,10 +296,10 @@ def test_tmdb_api_key_nested_var_takes_precedence(
     """Canonical TMDB nested var is used when both vars are set."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TMDB_API_KEY", "legacy_key")
-    monkeypatch.setenv("FRAME_COMPARE_TMDB__API_KEY", "new_key")
+    monkeypatch.setenv("FRAME_COMPARE_TMDB__API_KEY", "sentinel-tmdb-api-key")
 
     config = load_config()
-    assert config.tmdb.api_key == "new_key"
+    assert config.tmdb.api_key == "sentinel-tmdb-api-key"
 
 
 def test_log_level_legacy_alias_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -157,8 +157,8 @@ Primary owned paths:
 
 - `config/config.toml` and `config/presets/*.toml`: config owners
 - `frame_compare.config.persistence`: secret-safe serialization shared by generated
-  config and preset writes; runtime-only `slowpics.webhook_url` values are excluded
-  from every generated TOML payload
+  config and preset writes; runtime `slowpics.webhook_url` and `tmdb.api_key` values
+  are excluded from every generated TOML payload
 - `<resolved paths.generated_dir>/cache/analysis/<label>__<fingerprint>.compframes`:
   shared analysis metrics cache (defaults to `generated/cache/analysis/` under the
   workspace root, but follows the configured `paths.generated_dir`). The full

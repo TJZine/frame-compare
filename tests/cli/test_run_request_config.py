@@ -188,6 +188,7 @@ def test_run_write_config_respects_root_and_config_and_does_not_invoke_runner(
         "FRAME_COMPARE_SLOWPICS__WEBHOOK_URL",
         "https://discord.com/api/webhooks/env-id/env-secret",
     )
+    monkeypatch.setenv("FRAME_COMPARE_TMDB__API_KEY", "sentinel-tmdb-api-key")
 
     with runner.isolated_filesystem():
         root = Path("workspace")
@@ -213,6 +214,9 @@ tmdb_media_type = "movie"
 remove_after_days = 30
 image_upload_timeout_seconds = 240.0
 webhook_url = "https://discord.com/api/webhooks/file-id/file-secret"
+
+[tmdb]
+api_key = "sentinel-tmdb-api-key"
 """,
             encoding="utf-8",
         )
@@ -249,9 +253,12 @@ webhook_url = "https://discord.com/api/webhooks/file-id/file-secret"
         assert data["slowpics"]["remove_after_days"] == 30
         assert data["slowpics"]["image_upload_timeout_seconds"] == 240.0
         assert "webhook_url" not in data["slowpics"]
+        assert "api_key" not in data["tmdb"]
         written_text = config_path.read_text(encoding="utf-8")
         assert "env-secret" not in written_text
         assert "file-secret" not in written_text
+        assert "sentinel-tmdb-api-key" not in written_text
+        assert "sentinel-tmdb-api-key" not in result.stdout + result.stderr
 
 
 def test_run_write_config_json_preserves_previous_offsets_and_writes_config(
