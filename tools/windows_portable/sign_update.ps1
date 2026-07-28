@@ -1,6 +1,9 @@
 Param(
   [Parameter(Mandatory = $true)]
-  [string]$UpdateZip
+  [string]$UpdateZip,
+
+  [Parameter(Mandatory = $true)]
+  [string]$ExpectedPublicKeyPath
 )
 
 $ErrorActionPreference = "Stop"
@@ -142,6 +145,25 @@ function Sign-ManifestBytes([System.Security.Cryptography.RSA]$Rsa, [byte[]]$Byt
   }
 }
 
+function Test-ManifestSignature(
+  [System.Security.Cryptography.RSA]$Rsa,
+  [byte[]]$Bytes,
+  [byte[]]$Signature
+) {
+  try {
+    return $Rsa.VerifyData(
+      $Bytes,
+      $Signature,
+      [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+      [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
+    )
+  } catch [System.Management.Automation.MethodException] {
+    return $Rsa.VerifyData($Bytes, "SHA256", $Signature)
+  } catch [System.MissingMethodException] {
+    return $Rsa.VerifyData($Bytes, "SHA256", $Signature)
+  }
+}
+
 $resolvedUpdateZip = (Resolve-Path -LiteralPath $UpdateZip).Path
 
 $keyPath = $env:SIGNING_KEY_XML_PATH
@@ -166,9 +188,18 @@ $resolvedKeyXml = (Resolve-Path -LiteralPath $keyPath).Path
 $privateKeyText = Get-Content -LiteralPath $resolvedKeyXml -Raw
 
 $rsa = $null
+$expectedPublicRsa = $null
 $zip = $null
 try {
   $rsa = New-RsaFromXml -KeyXmlText $privateKeyText
+  $resolvedExpectedPublicKey = (Resolve-Path -LiteralPath $ExpectedPublicKeyPath).Path
+  $expectedPublicKeyText = Get-Content -LiteralPath $resolvedExpectedPublicKey -Raw
+  $derivedPublicKeyText = Get-PublicRsaXml -KeyXmlText $privateKeyText
+  $canonicalExpectedPublicKeyText = Get-PublicRsaXml -KeyXmlText $expectedPublicKeyText
+  if ($derivedPublicKeyText -cne $canonicalExpectedPublicKeyText) {
+    throw "Signing key does not match the expected update public key."
+  }
+  $expectedPublicRsa = New-RsaFromXml -KeyXmlText $expectedPublicKeyText
 
   $zip = [System.IO.Compression.ZipFile]::Open($resolvedUpdateZip, [System.IO.Compression.ZipArchiveMode]::Update)
   $manifestEntry = $zip.GetEntry("update-manifest.json")
@@ -188,6 +219,11 @@ try {
   Assert-SafeRelativePath -PathValue $signatureFile -FieldName "signature_file"
 
   $signatureBytes = Sign-ManifestBytes -Rsa $rsa -Bytes $manifestBytes
+  if (
+    -not (Test-ManifestSignature -Rsa $expectedPublicRsa -Bytes $manifestBytes -Signature $signatureBytes)
+  ) {
+    throw "Produced signature does not verify against the expected update public key."
+  }
   $signatureBase64 = [System.Convert]::ToBase64String($signatureBytes)
   Write-StringEntry -Zip $zip -EntryPath $signatureFile -Content $signatureBase64
 
@@ -207,5 +243,9 @@ try {
   if ($null -ne $rsa) {
     try { $rsa.Clear() } catch { }
     $rsa.Dispose()
+  }
+  if ($null -ne $expectedPublicRsa) {
+    try { $expectedPublicRsa.Clear() } catch { }
+    $expectedPublicRsa.Dispose()
   }
 }
