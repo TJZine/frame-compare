@@ -87,7 +87,8 @@ RELEASE SIGNING (Maintainers):
 
     The generator refuses repository-contained or existing private outputs, replaces
     only the known public-key placeholder, applies a current-user-only private-file
-    ACL on Windows, and reports only public metadata and a public-key fingerprint.
+    ACL on Windows or owner-read/write-only permissions on POSIX, and reports only
+    public metadata and a public-key fingerprint.
     Commit only tools\windows_portable\update_public_key.xml. Never paste private
     XML into a command line, task, log, issue, PR, commit, or release artifact.
 

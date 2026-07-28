@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
+import stat
 import subprocess
 import zipfile
 from pathlib import Path
@@ -148,6 +150,8 @@ def test_windows_update_keygen_creates_redacted_compatible_keypair(
     assert "<RSAKeyValue>" not in combined_output
     assert "<P>" not in combined_output
     assert "Public key fingerprint (SHA256 over XML):" in proc.stdout
+    if os.name != "nt":
+        assert stat.S_IMODE(private_path.stat().st_mode) == 0o600
 
     validator = repo_root / "tools" / "windows_portable" / "validate_update_public_key.ps1"
     validation = subprocess.run(
@@ -368,6 +372,40 @@ def test_windows_portable_build_update_manifest_entries_use_mutable_list(repo_ro
     fn = _extract_powershell_function(build_script, "New-ManifestFiles")
     assert "System.Collections.Generic.List[object]" in fn
     assert re.search(r"\$entries\.Add\(", fn)
+
+
+def test_windows_portable_build_update_rejects_native_parent_prefix(repo_root: Path) -> None:
+    build_path = repo_root / "tools" / "windows_portable" / "build_update.ps1"
+    build_script = _read_text_or_fail(build_path)
+    fn = _extract_powershell_function(build_script, "New-ManifestFiles")
+    checked_prefixes = re.findall(r'\$relative\.StartsWith\("([^"]+)"\)', fn)
+
+    assert "..\\" in checked_prefixes
+    assert "..\\\\" not in checked_prefixes
+    assert "../" in checked_prefixes
+
+
+def test_windows_update_keygen_hardens_windows_and_posix_private_files(
+    repo_root: Path,
+) -> None:
+    keygen_path = repo_root / "tools" / "windows_portable" / "generate_update_keypair.ps1"
+    keygen = _read_text_or_fail(keygen_path)
+    fn = _extract_powershell_function(keygen, "Set-PrivateFilePermissions")
+
+    assert "Test-Path -LiteralPath $PathValue -PathType Leaf" in fn
+    assert "[System.IO.File]::SetUnixFileMode($PathValue, $ownerOnly)" in fn
+    assert "[System.IO.File]::GetUnixFileMode($PathValue)" in fn
+    assert "[System.Security.Principal.WindowsIdentity]::GetCurrent()" in fn
+    assert "$acl.SetAccessRuleProtection($true, $false)" in fn
+
+    writer_fn = _extract_powershell_function(keygen, "Write-PrivateFile")
+    assert "[System.IO.FileStreamOptions]::new()" in writer_fn
+    assert "$options.Mode = [System.IO.FileMode]::CreateNew" in writer_fn
+    assert "$options.Share = [System.IO.FileShare]::None" in writer_fn
+    assert "$options.UnixCreateMode = Get-OwnerOnlyUnixFileMode" in writer_fn
+    assert writer_fn.index("Set-PrivateFilePermissions -PathValue $PathValue") < writer_fn.index(
+        "$writer.Write($Content)"
+    )
 
 
 def test_windows_portable_build_update_hashes_staged_payload_files(repo_root: Path) -> None:

@@ -33,6 +33,7 @@ SOURCE_SCRIPTS = (
     "tools/windows_portable/write_bundle_inventory.py",
 )
 PRIVATE_RSA_FIELDS = ("P", "Q", "DP", "DQ", "InverseQ", "D")
+PROHIBITED_BUNDLE_FILENAMES = frozenset({".env", "config.toml", "report.html"})
 
 
 def _parse_args() -> argparse.Namespace:
@@ -172,17 +173,13 @@ def _manifest_inventory(manifest: JsonObject) -> tuple[list[JsonObject], list[Js
             source_urls.append(build_source_url)
         artifacts.append(
             {
-                "binary_sha256": _require_str(
-                    artifact.get("sha256"), f"{artifact_id}.sha256"
-                ),
+                "binary_sha256": _require_str(artifact.get("sha256"), f"{artifact_id}.sha256"),
                 "binary_url": _require_str(artifact.get("url"), f"{artifact_id}.url"),
                 "id": artifact_id,
                 "license_spdx": _require_str(
                     license_info.get("spdx"), f"{artifact_id}.license.spdx"
                 ),
-                "license_url": _require_str(
-                    license_info.get("url"), f"{artifact_id}.license.url"
-                ),
+                "license_url": _require_str(license_info.get("url"), f"{artifact_id}.license.url"),
                 "name": _require_str(artifact.get("name"), f"{artifact_id}.name"),
                 "source_urls": sorted(source_urls),
                 "version": _require_str(artifact.get("version"), f"{artifact_id}.version"),
@@ -202,9 +199,7 @@ def _manifest_inventory(manifest: JsonObject) -> tuple[list[JsonObject], list[Js
             {
                 "license": _require_str(source.get("license"), f"source[{index}].license"),
                 "name": _require_str(source.get("name"), f"source[{index}].name"),
-                "source_url": _require_str(
-                    source.get("source_url"), f"source[{index}].source_url"
-                ),
+                "source_url": _require_str(source.get("source_url"), f"source[{index}].source_url"),
                 "version": _require_str(source.get("version"), f"source[{index}].version"),
             }
         )
@@ -233,17 +228,19 @@ def _assert_safe_bundle(bundle_root: Path) -> None:
     for path in bundle_root.rglob("*"):
         if not path.is_file():
             continue
-        relative = path.relative_to(bundle_root).as_posix()
-        lowered = relative.lower()
-        if lowered.startswith(("config/", "comparison_videos/")):
-            prohibited.append(relative)
-        if lowered.startswith("runtime-smoke"):
-            prohibited.append(relative)
-        if "/__pycache__/" in f"/{lowered}" or lowered.endswith((".pyc", ".pyo")):
-            prohibited.append(relative)
-        if lowered.endswith((".private.xml", "/.env", "/config.toml", "/report.html")):
-            prohibited.append(relative)
-        if "private_key" in lowered or "private-key" in lowered:
+        relative_path = path.relative_to(bundle_root)
+        relative = relative_path.as_posix()
+        lowered_parts = tuple(part.casefold() for part in relative_path.parts)
+        lowered = "/".join(lowered_parts)
+        if (
+            lowered_parts[0] in {"config", "comparison_videos"}
+            or lowered.startswith("runtime-smoke")
+            or "__pycache__" in lowered_parts
+            or lowered.endswith((".pyc", ".pyo", ".private.xml"))
+            or lowered_parts[-1] in PROHIBITED_BUNDLE_FILENAMES
+            or "private_key" in lowered
+            or "private-key" in lowered
+        ):
             prohibited.append(relative)
     if prohibited:
         raise ValueError(
@@ -267,9 +264,7 @@ def _write_source_urls(
     corresponding_sources: list[JsonObject],
     distributions: list[JsonObject],
 ) -> None:
-    source_archive = (
-        f"https://github.com/TJZine/frame-compare/archive/{commit_sha}.tar.gz"
-    )
+    source_archive = f"https://github.com/TJZine/frame-compare/archive/{commit_sha}.tar.gz"
     lines = [
         f"Frame Compare {app_version} source ({commit_sha}): {source_archive}",
         "",
@@ -277,17 +272,14 @@ def _write_source_urls(
     ]
     for artifact in artifacts:
         for source_url in cast(list[str], artifact["source_urls"]):
-            lines.append(
-                f"- {artifact['name']} {artifact['version']}: {source_url}"
-            )
+            lines.append(f"- {artifact['name']} {artifact['version']}: {source_url}")
     lines.extend(("", "Additional corresponding sources:"))
     for source in corresponding_sources:
         lines.append(f"- {source['name']} {source['version']}: {source['source_url']}")
     lines.extend(("", "Installed Python distribution version pages:"))
     for distribution in distributions:
         lines.append(
-            f"- {distribution['name']} {distribution['version']}: "
-            f"{distribution['source_url']}"
+            f"- {distribution['name']} {distribution['version']}: {distribution['source_url']}"
         )
     (bundle_root / "licenses" / "SOURCE_URLS.txt").write_text(
         "\n".join(lines) + "\n",
@@ -311,13 +303,10 @@ def _write_notices(
         "Manifest-provided runtimes:",
     ]
     lines.extend(
-        f"- {item['name']} {item['version']} ({item['license_spdx']})"
-        for item in artifacts
+        f"- {item['name']} {item['version']} ({item['license_spdx']})" for item in artifacts
     )
     lines.extend(("", "Installed Python distributions:"))
-    lines.extend(
-        f"- {item['name']} {item['version']}" for item in distributions
-    )
+    lines.extend(f"- {item['name']} {item['version']}" for item in distributions)
     (bundle_root / "licenses" / "THIRD_PARTY_NOTICES.txt").write_text(
         "\n".join(lines) + "\n",
         encoding="utf-8",

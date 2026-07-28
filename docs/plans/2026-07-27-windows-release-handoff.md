@@ -227,8 +227,8 @@ Required contract:
 - no private parameter, XML, or file content is written to stdout/stderr;
 - status output may contain paths, key size, key ID, generation date, and a
   fingerprint derived from the public XML only;
-- the private file receives a current-user-only ACL where the output filesystem
-  supports Windows ACLs, and ACL failure is reported rather than silently ignored;
+- the private file receives a current-user-only ACL on Windows or owner-read/write-only
+  permissions on POSIX, and permission-hardening failure aborts key generation;
 - RSA and file handles are disposed deterministically;
 - partial failure does not leave half-written key files;
 - tests use disposable keys under pytest temporary directories, never the real key.

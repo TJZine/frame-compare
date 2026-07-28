@@ -292,6 +292,39 @@ def test_windows_portable_build_has_release_public_key_gate(repo_root: Path) -> 
     )
 
 
+def test_windows_portable_build_surfaces_dirty_app_source_before_archiving(
+    repo_root: Path,
+) -> None:
+    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    build_script = _read_text_or_fail(build_path)
+    function_start = build_script.index("function Copy-RepoApp")
+    function_end = build_script.index("function Configure-EmbeddedPython")
+    copy_repo_app = build_script[function_start:function_end]
+
+    status_command = (
+        "git -C $RepoRoot status --porcelain=v1 --untracked-files=all -- src/frame_compare"
+    )
+    archive_command = "git -C $RepoRoot archive"
+    assert status_command in copy_repo_app
+    assert 'Assert-LastExitCode -CommandLabel "inspect Frame Compare source worktree"' in (
+        copy_repo_app
+    )
+    assert "if ($RequireReleasePublicKey)" in copy_repo_app
+    assert "throw $dirtySourceMessage" in copy_repo_app
+    assert "Write-Warning $dirtySourceMessage" in copy_repo_app
+    assert copy_repo_app.index(status_command) < copy_repo_app.index(archive_command)
+
+
+def test_windows_portable_build_reads_version_from_archived_app_source(
+    repo_root: Path,
+) -> None:
+    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    build_script = _read_text_or_fail(build_path)
+
+    assert 'Get-AppVersionFromSource -RepoRootPath (Join-Path $OutDir "app")' in build_script
+    assert "Get-AppVersionFromSource -RepoRootPath $RepoRoot" not in build_script
+
+
 def test_windows_portable_build_runtime_validation_checks_qt_stack(repo_root: Path) -> None:
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     build_script = _read_text_or_fail(build_path)
@@ -520,9 +553,21 @@ def test_windows_portable_bundle_inventory_is_sorted_exact_and_path_safe(
 
 @pytest.mark.parametrize(
     "relative_path",
-    ["runtime-smoke.mp4.lwi", "app/src/frame_compare/__pycache__/module.pyc"],
+    [
+        "runtime-smoke.mp4.lwi",
+        "app/src/frame_compare/__pycache__/module.pyc",
+        "config/local.toml",
+        "comparison_videos/input.mkv",
+        ".env",
+        "app/.env",
+        "config.toml",
+        "app/config.toml",
+        "report.html",
+        "app/report.html",
+        "private_key.xml",
+    ],
 )
-def test_windows_portable_bundle_inventory_rejects_generated_cache_residue(
+def test_windows_portable_bundle_inventory_rejects_prohibited_local_and_generated_files(
     tmp_path: Path,
     repo_root: Path,
     relative_path: str,
@@ -563,10 +608,10 @@ def test_windows_portable_builder_writes_inventory_and_cleans_runtime_index(
     assert "write_bundle_inventory.py" in build_script
     assert "bundle_inventory.json" in build_script
     assert "--require-clean-repo" in build_script
-    assert 'Remove-Item -Force -LiteralPath $mediaIndexPath' in build_script
+    assert "Remove-Item -Force -LiteralPath $mediaIndexPath" in build_script
     assert "function Copy-RequiredQtLicenseDirectories" in build_script
-    assert 'Join-Path $matches[0].FullName "LICENSE"' in build_script
-    assert 'Join-Path $matches[0].FullName "licenses\\\\LICENSE"' in build_script
+    assert 'Join-Path $licenseOwners[0].FullName "LICENSE"' in build_script
+    assert 'Join-Path $licenseOwners[0].FullName "licenses\\\\LICENSE"' in build_script
     assert "$licenseCandidates.Count -ne 1" in build_script
     assert "git -C $RepoRoot archive" in build_script
     assert "HEAD src/frame_compare" in build_script

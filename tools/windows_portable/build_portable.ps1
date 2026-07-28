@@ -422,6 +422,21 @@ function Copy-RepoApp([string]$BundleRoot) {
   Ensure-Directory -Path $srcRoot
   Ensure-Directory -Path $sitePackages
 
+  $sourceStatus = @(
+    & git -C $RepoRoot status --porcelain=v1 --untracked-files=all -- src/frame_compare
+  )
+  Assert-LastExitCode -CommandLabel "inspect Frame Compare source worktree"
+  if ($sourceStatus.Count -gt 0) {
+    $dirtySourceMessage = (
+      "Uncommitted changes exist under src/frame_compare; the portable bundle " +
+      "packages committed HEAD and will exclude them."
+    )
+    if ($RequireReleasePublicKey) {
+      throw $dirtySourceMessage
+    }
+    Write-Warning $dirtySourceMessage
+  }
+
   $archivePath = Join-Path $CacheDir (
     "frame_compare_source_$([System.Guid]::NewGuid().ToString('N')).tar"
   )
@@ -970,14 +985,16 @@ function Copy-RequiredQtLicenseDirectories([string]$BundleRoot) {
   )
 
   foreach ($entry in $required) {
-    $matches = @(Get-ChildItem -LiteralPath $sitePackages -Directory -Filter $entry.Pattern)
-    if ($matches.Count -ne 1) {
-      throw "Expected exactly one $($entry.Pattern) license owner, found $($matches.Count)."
+    $licenseOwners = @(
+      Get-ChildItem -LiteralPath $sitePackages -Directory -Filter $entry.Pattern
+    )
+    if ($licenseOwners.Count -ne 1) {
+      throw "Expected exactly one $($entry.Pattern) license owner, found $($licenseOwners.Count)."
     }
     $licenseCandidates = @(
       @(
-        (Join-Path $matches[0].FullName "LICENSE"),
-        (Join-Path $matches[0].FullName "licenses\\LICENSE")
+        (Join-Path $licenseOwners[0].FullName "LICENSE"),
+        (Join-Path $licenseOwners[0].FullName "licenses\\LICENSE")
       ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
     )
     if ($licenseCandidates.Count -ne 1) {
@@ -1046,7 +1063,7 @@ function Main() {
   Copy-RepoApp -BundleRoot $OutDir
   Install-PythonDeps -BundleRoot $OutDir -VsCoreRoot (Join-Path $OutDir "vs\\core")
   Install-PythonWheelArtifacts -BundleRoot $OutDir -Artifacts $artifacts -Downloaded $downloaded
-  Write-BundleInfo -BundleRoot $OutDir -AppVersion (Get-AppVersionFromSource -RepoRootPath $RepoRoot)
+  Write-BundleInfo -BundleRoot $OutDir -AppVersion (Get-AppVersionFromSource -RepoRootPath (Join-Path $OutDir "app"))
   Configure-EmbeddedPython -BundleRoot $OutDir
   Assert-BundleRuntime -BundleRoot $OutDir
   Remove-PythonBytecodeCaches -BundleRoot $OutDir

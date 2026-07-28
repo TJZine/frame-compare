@@ -98,8 +98,24 @@ function Get-PrivateXml([System.Security.Cryptography.RSAParameters]$Parameters)
   )
 }
 
-function Set-PrivateFileAcl([string]$PathValue) {
+function Get-OwnerOnlyUnixFileMode() {
+  return (
+    [System.IO.UnixFileMode]::UserRead -bor
+    [System.IO.UnixFileMode]::UserWrite
+  )
+}
+
+function Set-PrivateFilePermissions([string]$PathValue) {
+  if (!(Test-Path -LiteralPath $PathValue -PathType Leaf)) {
+    throw "Private key file does not exist: $PathValue"
+  }
+
   if ($env:OS -ne "Windows_NT") {
+    $ownerOnly = Get-OwnerOnlyUnixFileMode
+    [System.IO.File]::SetUnixFileMode($PathValue, $ownerOnly)
+    if ([System.IO.File]::GetUnixFileMode($PathValue) -ne $ownerOnly) {
+      throw "Failed to enforce owner-only permissions on private key: $PathValue"
+    }
     return
   }
 
@@ -119,6 +135,38 @@ function Set-PrivateFileAcl([string]$PathValue) {
   [void]$acl.AddAccessRule($accessRule)
   $acl.SetOwner($identity.User)
   Set-Acl -LiteralPath $PathValue -AclObject $acl
+}
+
+function Write-PrivateFile(
+  [string]$PathValue,
+  [string]$Content,
+  [System.Text.Encoding]$Encoding
+) {
+  $options = [System.IO.FileStreamOptions]::new()
+  $options.Mode = [System.IO.FileMode]::CreateNew
+  $options.Access = [System.IO.FileAccess]::Write
+  $options.Share = [System.IO.FileShare]::None
+  if ($env:OS -ne "Windows_NT") {
+    $options.UnixCreateMode = Get-OwnerOnlyUnixFileMode
+  }
+
+  $stream = $null
+  $writer = $null
+  try {
+    $stream = [System.IO.FileStream]::new($PathValue, $options)
+    Set-PrivateFilePermissions -PathValue $PathValue
+
+    $writer = [System.IO.StreamWriter]::new($stream, $Encoding, 4096, $false)
+    $stream = $null
+    $writer.Write($Content)
+    $writer.Flush()
+  } finally {
+    if ($null -ne $writer) {
+      $writer.Dispose()
+    } elseif ($null -ne $stream) {
+      $stream.Dispose()
+    }
+  }
 }
 
 function Get-Sha256Hex([string]$Text) {
@@ -201,8 +249,10 @@ try {
   )
   $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
   [System.IO.File]::WriteAllText($publicTemp, $publicFileText, $utf8NoBom)
-  [System.IO.File]::WriteAllText($privateTemp, $privateXml + "`n", $utf8NoBom)
-  Set-PrivateFileAcl -PathValue $privateTemp
+  Write-PrivateFile `
+    -PathValue $privateTemp `
+    -Content ($privateXml + "`n") `
+    -Encoding $utf8NoBom
 
   [System.IO.File]::Move($privateTemp, $resolvedPrivatePath)
   $privateTemp = $null

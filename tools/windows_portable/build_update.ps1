@@ -65,7 +65,7 @@ function New-ManifestFiles([string]$SourceRoot, [string]$PayloadRoot) {
     if (
       [System.IO.Path]::IsPathRooted($relative) -or
       $relative -eq ".." -or
-      $relative.StartsWith("..\\") -or
+      $relative.StartsWith("..\") -or
       $relative.StartsWith("../")
     ) {
       throw "Source file escaped src/frame_compare: $($sourceFile.FullName)"
