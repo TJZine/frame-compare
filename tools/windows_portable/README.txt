@@ -73,11 +73,23 @@ UPDATING (Code-Only Update Package):
     - Non-interactive sessions fail safely instead of prompting.
 
 RELEASE SIGNING (Maintainers):
-  One-time key generation (private key must stay out-of-repo):
-    - Generate RSA keypair (PKCS#1/SHA256 compatible with PowerShell 5.1).
-    - Commit only the public key XML at:
-        tools\windows_portable\update_public_key.xml
-    - Record key_id and generation date in release notes.
+  One-time key generation is MAINTAINER-ONLY. Run it in a separate, ordinary
+  PowerShell 7 window. The private path must be an encrypted location outside the
+  repository, task terminals, caches, and release artifacts:
+    $keyId = "frame-compare-update-2026-01"
+    pwsh -NoProfile -ExecutionPolicy Bypass `
+      -File .\tools\windows_portable\generate_update_keypair.ps1 `
+      -PublicKeyPath .\tools\windows_portable\update_public_key.xml `
+      -PrivateKeyPath "<encrypted-location-outside-the-repository>" `
+      -KeyId $keyId `
+      -KeySize 3072 `
+      -ReplacePlaceholderPublicKey
+
+    The generator refuses repository-contained or existing private outputs, replaces
+    only the known public-key placeholder, applies a current-user-only private-file
+    ACL on Windows, and reports only public metadata and a public-key fingerprint.
+    Commit only tools\windows_portable\update_public_key.xml. Never paste private
+    XML into a command line, task, log, issue, PR, commit, or release artifact.
 
   Build + sign update zip:
     Run with pwsh (PowerShell 7+) on CI / modern Windows. Signing and verification use

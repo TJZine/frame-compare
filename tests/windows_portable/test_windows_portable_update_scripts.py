@@ -2,9 +2,16 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
+import pytest
+
+from ._helpers import powershell_exe as _powershell_exe
 from ._helpers import read_text_or_fail as _read_text_or_fail
+
+_KEYGEN_TIMEOUT_SECONDS = 60.0
 
 
 def _extract_powershell_function(script: str, name: str) -> str:
@@ -32,12 +39,226 @@ def test_windows_portable_update_artifacts_exist(repo_root: Path) -> None:
         repo_root / "tools" / "windows_portable" / "bundle_info.schema.json",
         repo_root / "tools" / "windows_portable" / "update_public_key.xml",
         repo_root / "tools" / "windows_portable" / "build_update.ps1",
+        repo_root / "tools" / "windows_portable" / "generate_update_keypair.ps1",
         repo_root / "tools" / "windows_portable" / "sign_update.ps1",
         repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1",
         repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.cmd",
     ]
     for path in paths:
         assert path.exists(), f"Required file not found: {path}"
+
+
+def _run_keygen(
+    *,
+    exe: str,
+    script: Path,
+    public_path: Path,
+    private_path: Path,
+    replace_placeholder: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    args = [
+        exe,
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(script),
+        "-PublicKeyPath",
+        str(public_path),
+        "-PrivateKeyPath",
+        str(private_path),
+        "-KeyId",
+        "frame-compare-update-test-01",
+        "-KeySize",
+        "2048",
+    ]
+    if replace_placeholder:
+        args.append("-ReplacePlaceholderPublicKey")
+    return subprocess.run(
+        args,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=_KEYGEN_TIMEOUT_SECONDS,
+    )
+
+
+def _copy_keygen_owner(*, repo_root: Path, tmp_path: Path) -> tuple[Path, Path, Path]:
+    copied_repo = tmp_path / "copied-repo"
+    owner_dir = copied_repo / "tools" / "windows_portable"
+    owner_dir.mkdir(parents=True)
+    script = owner_dir / "generate_update_keypair.ps1"
+    placeholder = owner_dir / "update_public_key.xml"
+    shutil.copy2(
+        repo_root / "tools" / "windows_portable" / "generate_update_keypair.ps1",
+        script,
+    )
+    shutil.copy2(
+        repo_root / "tools" / "windows_portable" / "update_public_key.xml",
+        placeholder,
+    )
+    return copied_repo, script, placeholder
+
+
+@pytest.mark.integration
+def test_windows_update_keygen_creates_redacted_compatible_keypair(
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    exe = _powershell_exe()
+    if exe is None:
+        pytest.skip("pwsh/powershell not available")
+
+    public_path = tmp_path / "public.xml"
+    private_path = tmp_path / "private.xml"
+    script = repo_root / "tools" / "windows_portable" / "generate_update_keypair.ps1"
+    proc = _run_keygen(
+        exe=exe,
+        script=script,
+        public_path=public_path,
+        private_path=private_path,
+    )
+    assert proc.returncode == 0, f"stdout:\n{proc.stdout}\n\nstderr:\n{proc.stderr}"
+
+    public_text = public_path.read_text(encoding="utf-8")
+    private_text = private_path.read_text(encoding="utf-8")
+    assert "key_id: frame-compare-update-test-01" in public_text
+    assert "generated_at:" in public_text
+    assert public_text.count("<Modulus>") == 1
+    assert public_text.count("<Exponent>") == 1
+    for private_field in ("P", "Q", "DP", "DQ", "InverseQ", "D"):
+        assert f"<{private_field}>" not in public_text
+        assert f"<{private_field}>" in private_text
+
+    combined_output = proc.stdout + proc.stderr
+    assert private_text.strip() not in combined_output
+    assert "<RSAKeyValue>" not in combined_output
+    assert "<P>" not in combined_output
+    assert "Public key fingerprint (SHA256 over XML):" in proc.stdout
+
+    validator = repo_root / "tools" / "windows_portable" / "validate_update_public_key.ps1"
+    validation = subprocess.run(
+        [
+            exe,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(validator),
+            "-PublicKeyPath",
+            str(public_path),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30.0,
+    )
+    assert validation.returncode == 0, validation.stderr
+
+
+@pytest.mark.integration
+def test_windows_update_keygen_refuses_existing_outputs(
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    exe = _powershell_exe()
+    if exe is None:
+        pytest.skip("pwsh/powershell not available")
+
+    script = repo_root / "tools" / "windows_portable" / "generate_update_keypair.ps1"
+    public_path = tmp_path / "public.xml"
+    private_path = tmp_path / "private.xml"
+    private_path.write_text("sentinel", encoding="utf-8")
+    private_refusal = _run_keygen(
+        exe=exe,
+        script=script,
+        public_path=public_path,
+        private_path=private_path,
+    )
+    assert private_refusal.returncode != 0
+    assert "already exists" in private_refusal.stderr
+    assert private_path.read_text(encoding="utf-8") == "sentinel"
+    assert not public_path.exists()
+
+    private_path.unlink()
+    public_path.write_text("real-public-sentinel", encoding="utf-8")
+    public_refusal = _run_keygen(
+        exe=exe,
+        script=script,
+        public_path=public_path,
+        private_path=private_path,
+        replace_placeholder=True,
+    )
+    assert public_refusal.returncode != 0
+    assert "known repository placeholder" in public_refusal.stderr
+    assert public_path.read_text(encoding="utf-8") == "real-public-sentinel"
+    assert not private_path.exists()
+
+
+@pytest.mark.integration
+def test_windows_update_keygen_rejects_repository_private_path(
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    exe = _powershell_exe()
+    if exe is None:
+        pytest.skip("pwsh/powershell not available")
+
+    copied_repo, script, placeholder = _copy_keygen_owner(
+        repo_root=repo_root,
+        tmp_path=tmp_path,
+    )
+    private_path = copied_repo / "private.xml"
+    before = placeholder.read_bytes()
+    proc = _run_keygen(
+        exe=exe,
+        script=script,
+        public_path=placeholder,
+        private_path=private_path,
+        replace_placeholder=True,
+    )
+    assert proc.returncode != 0
+    assert "outside the repository" in proc.stderr
+    assert placeholder.read_bytes() == before
+    assert not private_path.exists()
+
+
+@pytest.mark.integration
+def test_windows_update_keygen_replaces_only_placeholder_once(
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    exe = _powershell_exe()
+    if exe is None:
+        pytest.skip("pwsh/powershell not available")
+
+    _copied_repo, script, placeholder = _copy_keygen_owner(
+        repo_root=repo_root,
+        tmp_path=tmp_path,
+    )
+    private_path = tmp_path / "private.xml"
+    first = _run_keygen(
+        exe=exe,
+        script=script,
+        public_path=placeholder,
+        private_path=private_path,
+        replace_placeholder=True,
+    )
+    assert first.returncode == 0, f"stdout:\n{first.stdout}\n\nstderr:\n{first.stderr}"
+    public_after_first = placeholder.read_bytes()
+
+    second_private = tmp_path / "private-2.xml"
+    second = _run_keygen(
+        exe=exe,
+        script=script,
+        public_path=placeholder,
+        private_path=second_private,
+        replace_placeholder=True,
+    )
+    assert second.returncode != 0
+    assert "known repository placeholder" in second.stderr
+    assert placeholder.read_bytes() == public_after_first
+    assert not second_private.exists()
 
 
 def test_windows_portable_update_manifest_schema_disallows_empty_from_app_version_max(
