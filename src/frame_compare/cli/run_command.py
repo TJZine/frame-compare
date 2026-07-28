@@ -57,7 +57,7 @@ class ConsoleFactory(Protocol):
 
 
 class ConfigureLoggingFn(Protocol):
-    def __call__(self, *, level: str, format: str) -> None: ...
+    def __call__(self, *, level: str, log_format: str) -> None: ...
 
 
 class RunContractFailure(Enum):
@@ -272,7 +272,7 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
             else ("DEBUG" if args.verbose else normalized_config.logging.level.value)
         )
         log_format = "json" if args.json_output else normalized_config.logging.format.value
-        deps.configure_logging(level=log_level, format=log_format)
+        deps.configure_logging(level=log_level, log_format=log_format)
 
         if args.diagnose_paths:
             handle_diagnose_paths(args.resolved_root, args.config_path, normalized_config)

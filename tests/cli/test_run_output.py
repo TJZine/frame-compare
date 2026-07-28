@@ -172,9 +172,9 @@ def test_run_logging_config_and_cli_precedence(
 ) -> None:
     captured: dict[str, str] = {}
 
-    def _configure_logging(*, level: str, format: str) -> None:
+    def _configure_logging(*, level: str, log_format: str) -> None:
         captured["level"] = level
-        captured["format"] = format
+        captured["format"] = log_format
 
     monkeypatch.setattr("frame_compare.cli.entry.configure_logging", _configure_logging)
     monkeypatch.setattr(

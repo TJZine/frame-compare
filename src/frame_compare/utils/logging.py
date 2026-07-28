@@ -1,10 +1,7 @@
-import io
 import logging
 import sys
-from collections.abc import Iterable
 from contextvars import ContextVar
-from types import TracebackType
-from typing import Any, BinaryIO, TextIO
+from typing import Protocol, TextIO, cast
 from uuid import uuid4
 
 import structlog
@@ -12,15 +9,20 @@ import structlog
 _run_id: ContextVar[str] = ContextVar("run_id", default="")
 
 
-class _StderrProxy(io.TextIOBase, TextIO):
+class _WritableStream(Protocol):
+    def write(self, message: str, /) -> int | None: ...
+
+    def flush(self) -> None: ...
+
+
+class _StderrStream:
     def __init__(self) -> None:
-        super().__init__()
         # Keep a fallback reference for interpreter shutdown, when `sys` can be
         # partially torn down. During normal operation (including pytest
         # capturing), we prefer the current `sys.stderr`.
         self._fallback_stream = sys.stderr
 
-    def _get_stream(self) -> object:
+    def _get_stream(self) -> _WritableStream | None:
         """Return the active stderr-like stream, falling back safely."""
         try:
             current = sys.stderr
@@ -33,12 +35,10 @@ class _StderrProxy(io.TextIOBase, TextIO):
         if stream is None:
             return 0
         try:
-            written: object = stream.write(message)  # type: ignore[attr-defined]
+            written = stream.write(message)
             if written is None:
                 return len(message)
-            if isinstance(written, int):
-                return written
-            return 0
+            return written
         except (ValueError, OSError):
             # E.g. pytest may close capture streams during teardown.
             return 0
@@ -48,115 +48,9 @@ class _StderrProxy(io.TextIOBase, TextIO):
         if stream is None:
             return
         try:
-            stream.flush()  # type: ignore[attr-defined]
+            stream.flush()
         except (ValueError, OSError):
             return
-
-    def readable(self) -> bool:
-        return False
-
-    def writable(self) -> bool:
-        return True
-
-    def seekable(self) -> bool:
-        return False
-
-    def isatty(self) -> bool:  # pragma: no cover - passthrough
-        stream = self._get_stream()
-        if stream is None:
-            return False
-        try:
-            return bool(stream.isatty())  # type: ignore[attr-defined]
-        except (ValueError, OSError):
-            return False
-
-    def fileno(self) -> int:  # pragma: no cover - passthrough
-        stream = self._get_stream()
-        if stream is None:
-            raise io.UnsupportedOperation("stderr has no fileno")
-        try:
-            return int(stream.fileno())  # type: ignore[attr-defined]
-        except (ValueError, OSError) as exc:
-            raise io.UnsupportedOperation("stderr has no fileno") from exc
-
-    def read(self, size: int | None = -1) -> str:  # pragma: no cover - not supported
-        raise io.UnsupportedOperation("stderr is not readable")
-
-    def readline(self, size: int | None = -1) -> str:  # pragma: no cover - not supported
-        raise io.UnsupportedOperation("stderr is not readable")
-
-    def readlines(self, hint: int | None = -1) -> list[str]:  # pragma: no cover - not supported
-        raise io.UnsupportedOperation("stderr is not readable")
-
-    def seek(self, offset: int, whence: int = 0) -> int:  # pragma: no cover - not supported
-        raise io.UnsupportedOperation("stderr is not seekable")
-
-    def tell(self) -> int:  # pragma: no cover - not supported
-        raise io.UnsupportedOperation("stderr is not seekable")
-
-    def truncate(self, size: int | None = None) -> int:  # pragma: no cover - not supported
-        raise io.UnsupportedOperation("stderr is not seekable")
-
-    def writelines(self, lines: Iterable[str]) -> None:
-        for line in lines:
-            self.write(line)
-
-    @property
-    def buffer(self) -> BinaryIO:
-        stream = self._get_stream()
-        return getattr(stream, "buffer", io.BytesIO())
-
-    @property
-    def encoding(self) -> str:  # type: ignore[override]
-        stream = self._get_stream()
-        return getattr(stream, "encoding", "utf-8") or "utf-8"
-
-    @property
-    def errors(self) -> str | None:  # type: ignore[override]
-        stream = self._get_stream()
-        return getattr(stream, "errors", None)
-
-    @property
-    def line_buffering(self) -> bool:  # type: ignore[override]
-        stream = self._get_stream()
-        return bool(getattr(stream, "line_buffering", False))
-
-    @property
-    def newlines(self) -> Any:  # type: ignore[override]
-        stream = self._get_stream()
-        return getattr(stream, "newlines", None)
-
-    @property
-    def mode(self) -> str:  # type: ignore[override]
-        stream = self._get_stream()
-        return getattr(stream, "mode", "w")
-
-    @property
-    def name(self) -> str:  # type: ignore[override]
-        stream = self._get_stream()
-        return getattr(stream, "name", "<stderr>")
-
-    @property
-    def closed(self) -> bool:
-        stream = self._get_stream()
-        return bool(getattr(stream, "closed", False))
-
-    def __enter__(self) -> "_StderrProxy":
-        return self
-
-    def __exit__(
-        self,
-        _type: type[BaseException] | None,
-        _value: BaseException | None,
-        _traceback: TracebackType | None,
-    ) -> None:
-        self.flush()
-
-    def close(self) -> None:  # pragma: no cover - avoid closing stderr
-        self.flush()
-
-
-_STDERR_PROXY = _StderrProxy()
 
 
 def new_run_id() -> str:
@@ -179,7 +73,6 @@ def get_run_id() -> str:
 def configure_logging(
     level: str = "INFO",
     log_format: str = "console",
-    **kwargs: object,
 ) -> None:
     """Configure structlog with either console or JSON output.
 
@@ -195,15 +88,6 @@ def configure_logging(
         - Unknown format strings silently fall back to console renderer.
         - Safe to call multiple times; later calls reconfigure structlog globally.
     """
-    format_override = kwargs.pop("format", None)
-    if format_override is not None:
-        if isinstance(format_override, str):
-            log_format = format_override
-        else:
-            raise TypeError("format must be str")
-    if kwargs:
-        unexpected = ", ".join(sorted(kwargs.keys()))
-        raise TypeError(f"Unexpected keyword arguments: {unexpected}")
     # Map level string to logging constant; fallback to INFO for unknown
     level_num = getattr(logging, level.upper(), logging.INFO)
 
@@ -222,5 +106,7 @@ def configure_logging(
     structlog.configure(
         processors=processors,
         wrapper_class=structlog.make_filtering_bound_logger(level_num),
-        logger_factory=structlog.PrintLoggerFactory(file=_StderrProxy()),
+        logger_factory=structlog.PrintLoggerFactory(
+            file=cast(TextIO, _StderrStream()),
+        ),
     )
