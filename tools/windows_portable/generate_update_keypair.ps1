@@ -1,3 +1,5 @@
+#Requires -Version 7.3
+
 Param(
   [Parameter(Mandatory = $true)]
   [string]$PublicKeyPath,

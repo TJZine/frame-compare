@@ -140,7 +140,7 @@ Prepare:
 
 - Windows 10 or 11, x64
 - a trusted local account or disposable Windows VM/user profile for acceptance
-- PowerShell 7 available as `pwsh`
+- PowerShell 7.3 or newer available as `pwsh`
 - Windows PowerShell 5.1 retained for updater compatibility checks where practical
 - Git
 - `uv` on `PATH` or permission to install it through the documented source installer
@@ -183,7 +183,7 @@ Expected:
 
 - `git status --short` is empty;
 - the intended `stage1` head is checked out;
-- `pwsh` is PowerShell 7 or newer;
+- `pwsh` is PowerShell 7.3 or newer;
 - `uv` works before implementation begins.
 
 Bootstrap and establish the test baseline:
@@ -272,7 +272,7 @@ the tooling commit and disposable-key tests pass.
 
 This entire section is MAINTAINER-ONLY.
 
-1. Open a separate non-Codex PowerShell 7 window.
+1. Open a separate non-Codex PowerShell 7.3+ window.
 2. Mount or unlock the encrypted location that will hold the private key.
 3. Run the reviewed key-generation script. Use a private path outside the clone and
    a public path at `tools\windows_portable\update_public_key.xml`.

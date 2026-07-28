@@ -408,6 +408,17 @@ def test_windows_update_keygen_hardens_windows_and_posix_private_files(
     )
 
 
+def test_windows_update_keygen_requires_powershell_7_3_before_runtime_types(
+    repo_root: Path,
+) -> None:
+    keygen_path = repo_root / "tools" / "windows_portable" / "generate_update_keypair.ps1"
+    keygen = _read_text_or_fail(keygen_path)
+
+    requirement = "#Requires -Version 7.3"
+    assert keygen.startswith(f"{requirement}\n")
+    assert keygen.index(requirement) < keygen.index("function Get-OwnerOnlyUnixFileMode")
+
+
 def test_windows_portable_build_update_hashes_staged_payload_files(repo_root: Path) -> None:
     build_path = repo_root / "tools" / "windows_portable" / "build_update.ps1"
     build_script = _read_text_or_fail(build_path)

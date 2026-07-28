@@ -74,7 +74,7 @@ UPDATING (Code-Only Update Package):
 
 RELEASE SIGNING (Maintainers):
   One-time key generation is MAINTAINER-ONLY. Run it in a separate, ordinary
-  PowerShell 7 window. The private path must be an encrypted location outside the
+  PowerShell 7.3+ window. The private path must be an encrypted location outside the
   repository, task terminals, caches, and release artifacts:
     $keyId = "frame-compare-update-2026-01"
     pwsh -NoProfile -ExecutionPolicy Bypass `
