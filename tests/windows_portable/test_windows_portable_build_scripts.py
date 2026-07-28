@@ -571,3 +571,7 @@ def test_windows_portable_builder_writes_inventory_and_cleans_runtime_index(
     assert "git -C $RepoRoot archive" in build_script
     assert "HEAD src/frame_compare" in build_script
     assert "Copy-Item -Recurse -Force -LiteralPath $pkgSrc" not in build_script
+    assert "function Remove-PythonBytecodeCaches" in build_script
+    assert 'Filter "__pycache__"' in build_script
+    assert '$env:PYTHONDONTWRITEBYTECODE = "1"' in build_script
+    assert "& $python -B @arguments" in build_script
