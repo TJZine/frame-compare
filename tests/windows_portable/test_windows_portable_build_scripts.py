@@ -3,6 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 from ._helpers import read_text_or_fail as _read_text_or_fail
@@ -382,3 +385,174 @@ def test_windows_portable_manifest_vendored_license_files_exist_and_match_hashes
             actual_hash = hashlib.sha256(license_bytes).hexdigest()
             assert actual_hash == license_file["sha256"]
             assert license_file["source_url"].startswith("https://raw.githubusercontent.com/")
+
+
+def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
+    bundle = tmp_path / "bundle"
+    site_packages = bundle / "app" / "site-packages"
+    licenses = bundle / "licenses"
+    shim = bundle / "shim"
+    site_packages.mkdir(parents=True)
+    licenses.mkdir()
+    shim.mkdir()
+
+    distributions = {
+        "PyQt6": ("6.10.2", "GPL-3.0-only"),
+        "PyQt6-Qt6": ("6.10.2", "LGPL-3.0-only"),
+        "PyQt6-sip": ("13.10.3", "BSD-2-Clause"),
+        "VapourSynth": ("76", "LGPL-2.1-or-later"),
+        "VSPreview": ("0.20.1", "Apache-2.0"),
+    }
+    for index, (name, (version, license_expression)) in enumerate(distributions.items()):
+        dist_info = site_packages / f"package_{index}-{version}.dist-info"
+        dist_info.mkdir()
+        (dist_info / "METADATA").write_text(
+            "\n".join(
+                [
+                    "Metadata-Version: 2.4",
+                    f"Name: {name}",
+                    f"Version: {version}",
+                    f"License-Expression: {license_expression}",
+                    "Project-URL: Source Code, https://example.invalid/source",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+    (licenses / "frame-compare-LICENSE.txt").write_text("GPL test fixture\n", encoding="utf-8")
+    shutil.copy2(
+        repo_root / "tools" / "windows_portable" / "update_public_key.xml",
+        shim / "update_public_key.xml",
+    )
+    (bundle / "bundle_info.json").write_text(
+        json.dumps(
+            {
+                "app_version": "0.1.0",
+                "requirements_lock_sha256": "a" * 64,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return bundle
+
+
+def _run_bundle_inventory(
+    *,
+    bundle: Path,
+    repo_root: Path,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            sys.executable,
+            str(repo_root / "tools" / "windows_portable" / "write_bundle_inventory.py"),
+            "--bundle-root",
+            str(bundle),
+            "--manifest",
+            str(repo_root / "tools" / "windows_portable" / "manifest.windows-x64.json"),
+            "--repo-root",
+            str(repo_root),
+            "--output",
+            str(bundle / "bundle_inventory.json"),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30.0,
+    )
+
+
+def test_windows_portable_bundle_inventory_is_sorted_exact_and_path_safe(
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    bundle = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
+    result = _run_bundle_inventory(bundle=bundle, repo_root=repo_root)
+    assert result.returncode == 0, f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
+
+    inventory_text = (bundle / "bundle_inventory.json").read_text(encoding="utf-8")
+    inventory = json.loads(inventory_text)
+    assert str(tmp_path) not in inventory_text
+    assert inventory["bundle"]["frame_compare_license"] == "GPL-3.0-only"
+    assert re.fullmatch(r"[a-f0-9]{40}", inventory["bundle"]["commit_sha"])
+    assert inventory["bundle"]["commit_sha"] in inventory["bundle"]["source_archive_url"]
+    assert inventory["bundle"]["requirements_lock_sha256"] == "a" * 64
+
+    distribution_names = [
+        distribution["name"] for distribution in inventory["python_distributions"]
+    ]
+    assert distribution_names == sorted(distribution_names, key=str.lower)
+    assert {
+        "pyqt6",
+        "pyqt6-qt6",
+        "pyqt6-sip",
+        "vapoursynth",
+        "vspreview",
+    } <= {name.lower() for name in distribution_names}
+    assert all(
+        distribution["source_url"].endswith(f"/{distribution['version']}/")
+        for distribution in inventory["python_distributions"]
+    )
+
+    artifact_ids = [artifact["id"] for artifact in inventory["manifest_artifacts"]]
+    assert artifact_ids == sorted(artifact_ids)
+    assert all(artifact["source_urls"] for artifact in inventory["manifest_artifacts"])
+    assert any(
+        source["name"] == "Qt"
+        and source["version"] == "6.10.2"
+        and "/6.10/6.10.2/" in source["source_url"]
+        for source in inventory["corresponding_sources"]
+    )
+    assert inventory["source_build_install_scripts"] == sorted(
+        inventory["source_build_install_scripts"]
+    )
+
+    license_paths = [license_entry["path"] for license_entry in inventory["licenses"]]
+    assert license_paths == sorted(license_paths)
+    assert "licenses/frame-compare-LICENSE.txt" in license_paths
+    source_urls = (bundle / "licenses" / "SOURCE_URLS.txt").read_text(encoding="utf-8")
+    assert inventory["bundle"]["commit_sha"] in source_urls
+    assert "qt-everywhere-src-6.10.2.tar.xz" in source_urls
+    assert (bundle / "licenses" / "THIRD_PARTY_NOTICES.txt").is_file()
+
+
+def test_windows_portable_bundle_inventory_rejects_runtime_smoke_residue(
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    bundle = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
+    (bundle / "runtime-smoke.mp4.lwi").write_text("generated index", encoding="utf-8")
+    result = _run_bundle_inventory(bundle=bundle, repo_root=repo_root)
+    assert result.returncode != 0
+    assert "prohibited local/generated files found in bundle" in result.stderr
+
+
+def test_windows_portable_manifest_records_exact_source_locations(repo_root: Path) -> None:
+    manifest_path = repo_root / "tools" / "windows_portable" / "manifest.windows-x64.json"
+    manifest = json.loads(_read_text_or_fail(manifest_path))
+    assert manifest["corresponding_sources"]
+    for artifact in manifest["artifacts"]:
+        assert artifact["source_url"].startswith("https://")
+        assert artifact["version"].split()[0].lower().replace("r", "") in (
+            artifact["source_url"].lower() + artifact["url"].lower()
+        )
+
+    qt_source = next(
+        source for source in manifest["corresponding_sources"] if source["name"] == "Qt"
+    )
+    assert qt_source["version"] == "6.10.2"
+    assert "/6.10/6.10.2/" in qt_source["source_url"]
+
+
+def test_windows_portable_builder_writes_inventory_and_cleans_runtime_index(
+    repo_root: Path,
+) -> None:
+    build_script = _read_text_or_fail(
+        repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    )
+    assert "function Write-BundleInventory" in build_script
+    assert "write_bundle_inventory.py" in build_script
+    assert "bundle_inventory.json" in build_script
+    assert "--require-clean-repo" in build_script
+    assert 'Remove-Item -Force -LiteralPath $mediaIndexPath' in build_script
+    assert "function Copy-RequiredQtLicenseDirectories" in build_script

@@ -111,6 +111,10 @@ THIRD-PARTY LICENSES / SOURCE AVAILABILITY:
   - The build outputs:
       .\licenses\
       .\licenses\python\
+      .\licenses\PyQt6\
+      .\licenses\PyQt6-sip\
+      .\licenses\Qt\
+      .\bundle_inventory.json
   - Python wheel license files are copied from installed *.dist-info metadata.
   - Third-party runtime licenses that do not reliably ship in extracted bundle
     paths are copied from manifest-declared, repo-tracked files under:
@@ -122,9 +126,14 @@ THIRD-PARTY LICENSES / SOURCE AVAILABILITY:
     Note: newer PyQt6 wheels may ship additional license texts under individual
     wheel *.dist-info\licenses directories;
     the build script copies dist-info license directories when present.
-  - Source pointers are shipped in:
+  - Deterministic component versions, declared license metadata, copied
+    license/notice hashes, requirements-lock fingerprint, exact Frame Compare
+    source commit/archive, and build/install script inventory are shipped in:
+      .\bundle_inventory.json
+  - Exact-version/commit source pointers are shipped in:
       .\licenses\SOURCE_URLS.txt
-    (Qt, FFmpeg, VapourSynth upstream source locations)
+  - A human-readable component summary is shipped in:
+      .\licenses\THIRD_PARTY_NOTICES.txt
 
 DOCUMENTATION:
   https://github.com/TJZine/frame-compare
