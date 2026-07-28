@@ -4,6 +4,7 @@ import json
 import re
 import shutil
 import subprocess
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -93,9 +94,21 @@ def _copy_keygen_owner(*, repo_root: Path, tmp_path: Path) -> tuple[Path, Path, 
         repo_root / "tools" / "windows_portable" / "generate_update_keypair.ps1",
         script,
     )
-    shutil.copy2(
-        repo_root / "tools" / "windows_portable" / "update_public_key.xml",
-        placeholder,
+    placeholder.write_text(
+        "\n".join(
+            [
+                "<!--",
+                "  key_id: REPLACE_WITH_RELEASE_KEY_ID",
+                "  generated_at: REPLACE_WITH_UTC_DATE",
+                "-->",
+                "<RSAKeyValue>",
+                "  <Modulus>AQAB</Modulus>",
+                "  <Exponent>AQAB</Exponent>",
+                "</RSAKeyValue>",
+                "",
+            ]
+        ),
+        encoding="utf-8",
     )
     return copied_repo, script, placeholder
 
@@ -366,6 +379,68 @@ def test_windows_portable_build_update_hashes_staged_payload_files(repo_root: Pa
         fn,
     )
     assert re.search(r"Get-FileHash\s+-LiteralPath\s+\$destFile\s+-Algorithm\s+SHA256", fn)
+
+
+@pytest.mark.integration
+def test_windows_portable_build_update_preserves_relative_paths_and_excludes_caches(
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    exe = _powershell_exe()
+    if exe is None:
+        pytest.skip("pwsh/powershell not available")
+
+    fake_repo = tmp_path / "repo"
+    package = fake_repo / "src" / "frame_compare"
+    render = package / "render"
+    cache = render / "__pycache__"
+    cache.mkdir(parents=True)
+    (package / "__init__.py").write_text('__version__ = "1.2.3"\n', encoding="utf-8")
+    (render / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (cache / "module.cpython-313.pyc").write_bytes(b"cache")
+
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "bundle_info.json").write_text(
+        json.dumps({"requirements_lock_sha256": "a" * 64}),
+        encoding="utf-8",
+    )
+    update_zip = tmp_path / "update.zip"
+    build_script = repo_root / "tools" / "windows_portable" / "build_update.ps1"
+    result = subprocess.run(
+        [
+            exe,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(build_script),
+            "-BundleDir",
+            str(bundle),
+            "-RepoRoot",
+            str(fake_repo),
+            "-OutFile",
+            str(update_zip),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30.0,
+    )
+    assert result.returncode == 0, f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
+
+    with zipfile.ZipFile(update_zip) as archive:
+        names = sorted(archive.namelist())
+        manifest = json.loads(archive.read("update-manifest.json"))
+    assert names == [
+        "payload/app/src/frame_compare/__init__.py",
+        "payload/app/src/frame_compare/render/module.py",
+        "update-manifest.json",
+    ]
+    assert [entry["path"] for entry in manifest["files"]] == [
+        "app/src/frame_compare/__init__.py",
+        "app/src/frame_compare/render/module.py",
+    ]
 
 
 def test_windows_portable_sign_update_avoids_private_key_path_cli_argument(repo_root: Path) -> None:

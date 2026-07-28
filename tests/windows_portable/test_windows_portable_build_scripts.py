@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from ._helpers import read_text_or_fail as _read_text_or_fail
 
 
@@ -516,12 +518,19 @@ def test_windows_portable_bundle_inventory_is_sorted_exact_and_path_safe(
     assert (bundle / "licenses" / "THIRD_PARTY_NOTICES.txt").is_file()
 
 
-def test_windows_portable_bundle_inventory_rejects_runtime_smoke_residue(
+@pytest.mark.parametrize(
+    "relative_path",
+    ["runtime-smoke.mp4.lwi", "app/src/frame_compare/__pycache__/module.pyc"],
+)
+def test_windows_portable_bundle_inventory_rejects_generated_cache_residue(
     tmp_path: Path,
     repo_root: Path,
+    relative_path: str,
 ) -> None:
     bundle = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
-    (bundle / "runtime-smoke.mp4.lwi").write_text("generated index", encoding="utf-8")
+    residue = bundle / relative_path
+    residue.parent.mkdir(parents=True, exist_ok=True)
+    residue.write_text("generated index", encoding="utf-8")
     result = _run_bundle_inventory(bundle=bundle, repo_root=repo_root)
     assert result.returncode != 0
     assert "prohibited local/generated files found in bundle" in result.stderr
@@ -559,3 +568,6 @@ def test_windows_portable_builder_writes_inventory_and_cleans_runtime_index(
     assert 'Join-Path $matches[0].FullName "LICENSE"' in build_script
     assert 'Join-Path $matches[0].FullName "licenses\\\\LICENSE"' in build_script
     assert "$licenseCandidates.Count -ne 1" in build_script
+    assert "git -C $RepoRoot archive" in build_script
+    assert "HEAD src/frame_compare" in build_script
+    assert "Copy-Item -Recurse -Force -LiteralPath $pkgSrc" not in build_script
