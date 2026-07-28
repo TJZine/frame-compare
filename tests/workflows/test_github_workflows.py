@@ -77,9 +77,7 @@ def test_ci_runs_generated_report_smoke_in_preflighted_system_browser(
     assert 'echo "REPORT_BROWSER=$browser" >> "$GITHUB_ENV"' in preflight_script
 
     smoke = named_steps["Run generated report browser smoke"]
-    assert (
-        smoke["run"] == "uv run --no-sync pytest -q tests/integration/test_report_browser_smoke.py"
-    )
+    assert smoke["run"] == "uv run --no-sync pytest -q tests/browser/test_report_browser_smoke.py"
 
 
 def test_direct_build_tools_are_pinned_exactly(repo_root: Path) -> None:

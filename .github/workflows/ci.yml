@@ -221,7 +221,7 @@ jobs:
           echo "REPORT_BROWSER=$browser" >> "$GITHUB_ENV"
 
       - name: Run generated report browser smoke
-        run: uv run --no-sync pytest -q tests/integration/test_report_browser_smoke.py
+        run: uv run --no-sync pytest -q tests/browser/test_report_browser_smoke.py
 
   # All jobs must pass for PR merge
   ci-pass:
