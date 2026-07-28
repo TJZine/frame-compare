@@ -165,12 +165,28 @@ frame-compare history open <run-name>
 Apply a code-only update zip:
 
 ```powershell
-frame-compare-update apply .\frame-compare-update-win-x64-0.1.1.zip
+frame-compare-update apply .\frame-compare-update-win-x64-<tag>.zip
 ```
 
 The updater is offline-first and verifies signature + file hashes before applying
 changes. If dependency fingerprints do not match, the default action is cancel;
 unsafe apply requires explicit confirmation.
+
+Every published Windows release must contain exactly these mandatory assets, using
+the release tag verbatim (for example `v0.1.0` or `v0.1.0-rc.1`):
+
+- `frame-compare-portable-win-x64-<tag>.zip`
+- `frame-compare-portable-win-x64-<tag>.zip.sha256`
+- `frame-compare-update-win-x64-<tag>.zip`
+- `frame-compare-update-win-x64-<tag>.zip.sha256`
+
+RCs are always GitHub prereleases. Stable publication rejects RC versions/tags and
+is protected by the repository's `production` environment. Dispatch the existing
+**Windows portable** workflow with operation `release`; it calls the exact-commit
+build and release boundaries. The release path builds, signs, verifies the
+signature against the committed public key, and verifies these files before
+creating a new draft. The draft is made public only after every remote SHA-256
+digest matches the locally verified asset.
 
 ### Backup Management
 

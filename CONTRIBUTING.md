@@ -237,19 +237,52 @@ For Docker-based verification requirements, use the
 
 ## Releases
 
-Releases are automated from `main` using [Release Please](https://github.com/googleapis/release-please).
+Release Please owns reviewed version/changelog PRs after initialization. The
+guarded Windows workflow owns every public release so mandatory assets always
+exist before publication.
 
-### How it works (no manual tagging)
+### Initial `v0.1.0`
 
-- On every push to `main`, the Release Please workflow opens or updates a PR like `chore(release): v0.1.1`.
-- Merging that PR publishes the GitHub Release and tag (e.g. `v0.1.1`).
-- Release PRs require maintainer review and are never auto-merged by the workflow.
+- Prepare and accept a disposable RC on `cleanup` or an approved release branch.
+- After RC acceptance, align every version source and `CHANGELOG.md` at `0.1.0`
+  and remove temporary `bootstrap-sha`/`release-as` settings on that branch.
+- Squash-merge once into `main`. That exact squash commit is the source for
+  `v0.1.0`; there is no generated initial version-bump commit.
+- A maintainer dispatches **Windows portable** from `main` with operation
+  `release`, channel `stable`, version `0.1.0`, tag `v0.1.0`, and the exact
+  40-character `main` SHA.
+- The workflow rejects a moved `main`, existing tag/release, version disagreement,
+  RC syntax, missing changelog entry, incomplete assets, or unsigned update. It
+  creates and verifies a complete draft first, then publishes as its final step.
+- Stable publication uses the protected GitHub `production` environment and
+  requires maintainer approval.
 
-### CI on release PRs (recommended)
+Do not create or move the tag manually. Live RC/stable dispatches, environment
+approval, release/tag cleanup, and the final squash are maintainer-only operations.
 
-GitHub does not trigger other workflows from PRs created using the default `GITHUB_TOKEN`. To ensure CI runs on the
-Release Please PR, add a `RELEASE_PLEASE_TOKEN` repo secret (a fine-scoped PAT or GitHub App token with permissions to
-open PRs and create releases). The workflow falls back to `GITHUB_TOKEN` if the secret is not set.
+### Later releases
+
+After the published stable `v0.1.0` release exists, [Release
+Please](https://github.com/googleapis/release-please) resumes version-PR behavior
+on pushes to `main`:
+
+- it opens or updates a human-reviewed release PR;
+- it never auto-merges that PR;
+- it does not create a tag or GitHub release;
+- after merging the approved release PR, a maintainer publishes its exact `main`
+  commit through **Windows portable** with operation `release`, the final version
+  and tag, and the exact SHA.
+
+Configure `RELEASE_PLEASE_TOKEN` as a narrowly scoped fine-grained PAT or GitHub
+App token when release-created pull requests must trigger the normal CI suite.
+Restrict it to this repository, use a bounded lifetime, and grant only the
+contents and pull-request permissions required by the pinned action.
+
+Repository maintainers must also create a `production` Actions environment,
+configure required reviewers, prevent self-review where supported, and restrict
+deployment branches/tags to the approved stable policy. The environment protects
+every stable publication job; repository secrets remain configured under Actions
+without exposing their values.
 
 ---
 

@@ -123,7 +123,7 @@ Windows code-only update packaging path:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/build_update.ps1 -BundleDir .\dist\frame-compare-portable-win-x64 -OutFile .\dist\frame-compare-update-win-x64-<version>.zip
-pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/sign_update.ps1 -UpdateZip .\dist\frame-compare-update-win-x64-<version>.zip
+pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/sign_update.ps1 -UpdateZip .\dist\frame-compare-update-win-x64-<version>.zip -ExpectedPublicKeyPath .\tools\windows_portable\update_public_key.xml
 ```
 
 The Windows commands require a Windows host with PowerShell and the expected toolchain. In non-Windows environments, treat them as documented-only unless a compatible runner is available.
@@ -243,7 +243,10 @@ documented-only/unverified rather than supported.
 
 Required when changing:
 
+- `.github/workflows/release.yml`
+- `.github/workflows/release-please.yml`
 - `.github/workflows/windows-portable.yml`
+- `.github/workflows/windows-portable-build.yml`
 - anything under `tools/windows_portable/**`
 - installer/update commands or release asset layout in docs
 - bundle/update manifests and signing flow
@@ -259,13 +262,34 @@ Canonical verification path:
 
 Current CI ownership:
 
-- `.github/workflows/windows-portable.yml` is the canonical CI path for the full portable bundle.
-- `.github/workflows/windows-portable.yml` also builds and verifies a code-only
+- `.github/workflows/windows-portable.yml` is the existing default-branch
+  PR/manual entrypoint. Its `release` operation calls
+  `.github/workflows/release.yml` from the selected exact commit, which requires
+  channel/version/tag/SHA inputs, rechecks stable against current `main`, rejects
+  tag/release collisions, and publishes only after a complete draft asset proof.
+  Keeping dispatch at this pre-existing path makes the pre-merge RC reachable
+  without a preparatory commit on `main`.
+- `.github/workflows/release-please.yml` stays dormant until a published stable
+  `v0.1.0` exists, then resumes human-reviewed version/changelog PR behavior with
+  GitHub-release creation disabled. The guarded entrypoint publishes later
+  releases too.
+- `.github/workflows/windows-portable-build.yml` is the reusable full portable
+  build/sign/verification boundary called by PR, manual verification, and the
+  release orchestrator.
+- `.github/workflows/windows-portable-build.yml` also builds and verifies a code-only
   update zip after the full bundle exists. Pull requests prove unsigned update
-  zip creation and layout. Release and manual runs require
+  zip creation and layout. Reusable release and manual runs require
   `WINDOWS_UPDATE_SIGNING_KEY_XML`; they fail before artifact publication when
-  the secret is absent or signing fails. Every public Windows release includes
-  the signed update zip and its checksum.
+  the secret is absent, does not match the committed public key, or signing
+  verification fails. Every public Windows release includes the signed update zip
+  and its checksum.
+
+The first stable lifecycle is release-branch finalization, one squash merge into
+`main`, then an exact-SHA guarded dispatch. Do not use a Release Please-generated
+initial version-bump commit. Remove temporary `bootstrap-sha` and `release-as`
+only during final stable preparation after RC acceptance; the stable validator
+rejects them if they remain. Live RC/stable dispatches, production approval,
+remote tag/release cleanup, and the final merge are maintainer-only.
 
 When updater or release-package logic changes and the signed-update path cannot
 run locally or in CI with `WINDOWS_UPDATE_SIGNING_KEY_XML`, mark signing as

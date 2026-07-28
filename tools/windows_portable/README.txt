@@ -98,7 +98,7 @@ RELEASE SIGNING (Maintainers):
     RSA parameters and keep a Windows PowerShell 5.1-compatible legacy fallback.
     pwsh -File .\tools\windows_portable\build_update.ps1 -BundleDir .\dist\frame-compare-portable-win-x64 -OutFile .\dist\frame-compare-update-win-x64-0.1.1.zip
     $env:SIGNING_KEY_XML_PATH = "<secure-private-key.xml>"
-    pwsh -File .\tools\windows_portable\sign_update.ps1 -UpdateZip .\dist\frame-compare-update-win-x64-0.1.1.zip
+    pwsh -File .\tools\windows_portable\sign_update.ps1 -UpdateZip .\dist\frame-compare-update-win-x64-0.1.1.zip -ExpectedPublicKeyPath .\tools\windows_portable\update_public_key.xml
 
     CI guidance:
       - Prefer injecting the signing key path via a masked secret into SIGNING_KEY_XML_PATH.

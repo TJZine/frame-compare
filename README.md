@@ -108,7 +108,8 @@ optional VSPreview details.
 
 The verification command set and quality policy are maintained in the
 [Engineering Runbook](docs/ENGINEERING_RUNBOOK.md). Tags follow SemVer with a `v`
-prefix, and Release Please automates releases from `main`.
+prefix. The guarded exact-commit workflow publishes every release; Release Please
+handles normal version/changelog PRs after stable `v0.1.0` exists.
 
 ## License
 

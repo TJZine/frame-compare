@@ -14,11 +14,32 @@ Owner: Maintainer and Windows release implementer
 Use this handoff on a trusted Windows 10/11 x64 machine to finish the
 Windows-specific portions of the initial public-release remediation. The active
 remediation plan remains authoritative. This document narrows its P1, P2, P3, P6,
-and P7 requirements into a safe execution order with explicit proof and stop
+P7, and P8 requirements into a safe execution order with explicit proof and stop
 conditions.
 
 This handoff does not authorize publishing `v0.1.0`. It prepares and proves the
 Windows release path so the maintainer can later make a separate go/no-go decision.
+
+## Single-merge release authority
+
+The final squash merge into `main` is the exact source commit for `v0.1.0`. Release
+Please must not create a second initial version-bump commit. The pre-existing
+**Windows portable** workflow path is the dispatchable PR/manual/release entrypoint
+and calls exact-commit reusable orchestration and build/sign/verification
+boundaries. It no longer publishes after a `release` event.
+
+Keep all version sources at `0.0.0` while P3 through P6 remain open. For an
+approved P7 rehearsal, align them and the changelog at a PEP 440 RC version such as
+`0.1.0rc1` and use tag `v0.1.0-rc.1`. After RC acceptance, finalize `0.1.0`, the
+changelog, and removal of temporary `bootstrap-sha`/`release-as` fields on the
+release branch before the one squash merge. Stable publication requires an
+explicit **Windows portable** dispatch with operation `release`, the exact new
+`main` head, and approval through the protected GitHub `production` environment.
+
+Live RC creation, stable tag creation, release publication, protected-environment
+approval, destructive remote tag/release cleanup, and merging into `main` are
+MAINTAINER-ONLY. The real Windows private signing key remains outside Codex under
+all circumstances.
 
 ## Paste-ready Windows Codex prompt
 
@@ -26,7 +47,7 @@ Paste the following into a new Codex task opened from the Windows clone:
 
 ```text
 Work on Frame Compare's initial Windows release readiness from the checked-out
-stage1 branch. Read AGENTS.md, docs/ENGINEERING_RUNBOOK.md,
+cleanup or approved release-candidate branch. Read AGENTS.md, docs/ENGINEERING_RUNBOOK.md,
 docs/plans/2026-07-25-initial-release-remediation.md, and
 docs/plans/2026-07-27-windows-release-handoff.md completely before changing files.
 
@@ -46,7 +67,8 @@ command output, CI logs, caches, and release artifacts.
 Begin with the handoff preflight. Report the checked-out commit, worktree status,
 available PowerShell executables, and which Windows tests run rather than skip.
 Implement and verify one package at a time. Stop on any handoff stop condition.
-Do not create or publish the official v0.1.0 tag or merge a release PR.
+Do not create or publish any live RC, create or publish the official v0.1.0 tag,
+approve the production environment, or merge the release branch into main.
 ```
 
 ## Baseline and current state
@@ -63,7 +85,7 @@ discard newer work to force an old handoff snapshot.
 A committed real public key proves only public repository state. It does not prove
 that `WINDOWS_UPDATE_SIGNING_KEY_XML` exists, contains the matching private half,
 successfully signs an update, produces an update the installed client accepts and
-rolls back, or is exercised by the release-event chain. Record each of those as a
+rolls back, or is exercised by the guarded release orchestrator. Record each as a
 separate gate.
 
 ## Scope map
@@ -72,20 +94,20 @@ separate gate.
 | --- | --- | --- |
 | P1 signing trust | Implement safe key-generation tooling; install only the real public key; prove signing, rejection, apply, and rollback | Public-key validation, non-skipped Windows E2E, signed update proof |
 | P2 redistribution | Inspect the exact built bundle; close license/notice/source gaps | Versioned inventory, required license texts, immutable source pointers |
-| P3 release assets | Prove `workflow_dispatch` signing and later prove the release-event chain without using the official tag | Successful required-secret run and complete artifact set |
+| P3 release assets | Prove reusable signed Windows artifacts and the guarded draft-first orchestrator without using the official tag | Successful required-secret run and complete exact asset set |
 | P6 Windows inventory | Produce a repeatable exact bundle inventory | Deterministic machine-readable inventory from the extracted bundle |
 | P7 Windows acceptance | Install and use the downloaded release-candidate artifacts | Completed clean-profile acceptance record |
 
 The following are not Windows-only and must not be silently declared complete by
 this task:
 
-- P0 Release Please bootstrap configuration and final squash boundary
+- P0 final version/changelog preparation and final squash boundary
 - remaining P4 CLI help polish
 - P6 vulnerability-audit authority, blocking severity, and exception policy
 - P6 Docker digest/snapshot decision
 - Apple Silicon default-Docker proof
 - optional Linux NVIDIA/X11 proof
-- official `v0.1.0` publication and post-release observation
+- final squash merge, official `v0.1.0` publication, production approval, and post-release observation
 
 ## Security boundary
 
@@ -168,10 +190,13 @@ Run in PowerShell from the intended parent directory:
 git clone https://github.com/TJZine/frame-compare.git
 Set-Location .\frame-compare
 git fetch origin
-git switch stage1
-git pull --ff-only origin stage1
+git switch cleanup
+git pull --ff-only origin cleanup
 git status --short
 git rev-parse HEAD
+git rev-parse origin/main
+git rev-parse origin/cleanup
+git rev-list --left-right --count origin/cleanup...HEAD
 git log -10 --oneline
 
 pwsh --version
@@ -182,7 +207,8 @@ uv --version
 Expected:
 
 - `git status --short` is empty;
-- the intended `stage1` head is checked out;
+- the intended `cleanup` or approved release-candidate head is checked out and the
+  recorded remote boundary has not moved;
 - `pwsh` is PowerShell 7.3 or newer;
 - `uv` works before implementation begins.
 
@@ -466,7 +492,8 @@ $env:SIGNING_KEY_XML_PATH = "<encrypted-private-key-path>"
 try {
   pwsh -NoProfile -ExecutionPolicy Bypass `
     -File .\tools\windows_portable\sign_update.ps1 `
-    -UpdateZip .\dist\frame-compare-update-win-x64-0.1.0.zip
+    -UpdateZip .\dist\frame-compare-update-win-x64-<current-version>.zip `
+    -ExpectedPublicKeyPath .\tools\windows_portable\update_public_key.xml
 } finally {
   Remove-Item Env:\SIGNING_KEY_XML_PATH -ErrorAction SilentlyContinue
 }
@@ -545,41 +572,88 @@ Expected:
 
 ## W7: Prove the protected GitHub Actions path
 
-This step requires the public-key commit and the
-`WINDOWS_UPDATE_SIGNING_KEY_XML` repository secret to be pushed to a branch.
+This step requires the public-key commit and reusable Windows workflow to be pushed
+to the candidate branch. The maintainer confirms—without disclosing values—that
+`WINDOWS_UPDATE_SIGNING_KEY_XML` is configured.
 
-In GitHub Actions:
+First prove the standalone manual Windows boundary:
 
 1. Open the `windows-portable` workflow.
-2. Choose **Run workflow**.
-3. Select the branch containing the public key and Windows remediation commits.
-4. Start the `workflow_dispatch` run.
-5. Confirm the public-key validation step passes.
-6. Confirm the signing step completes; absence of the secret must fail the run.
-7. Confirm bundle and update ZIP/checksum artifacts are uploaded.
-8. Download the artifacts to a clean directory.
-9. Verify both SHA-256 files before extraction.
-10. Inspect the update ZIP for `update-manifest.json`,
-    `update-manifest.sig`, and the code payload.
-11. Confirm logs and artifacts contain no private key material.
+2. Choose **Run workflow** on the candidate branch.
+3. Start the manual run.
+4. Confirm public-key validation and signing complete; an absent secret must fail.
+5. Confirm the portable ZIP/checksum and signed update ZIP/checksum artifacts exist.
+6. Download to a clean directory and verify both checksums.
+7. Inspect the update ZIP for `update-manifest.json`, `update-manifest.sig`, and
+   the code payload.
+8. Confirm logs and artifacts contain no private material.
 
-`workflow_dispatch` proves the protected Windows build/sign path. It does not prove
-that a Release Please-created release triggers the separate release event.
+Then stop. Before any live RC rehearsal, report:
 
-`RELEASE_PLEASE_TOKEN` must also be configured as a narrowly scoped fine-grained PAT
-or GitHub App token capable of creating/updating the release PR and publishing the
-release. For a fine-grained PAT, restrict repository access to
-`TJZine/frame-compare`, use a bounded expiration, and grant only the required
-repository permissions—currently **Contents: read and write** and
-**Pull requests: read and write**. Recheck those permissions against the pinned
-Release Please action before creating the credential. GitHub documents fine-grained
-token permissions in
-[Permissions required for fine-grained personal access tokens](https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens).
+```text
+MAINTAINER CHECKPOINT
+candidate_sha: <exact full candidate SHA>
+rc_version: <PEP 440 X.Y.ZrcN matching all version sources and changelog>
+rc_tag: <vX.Y.Z-rc.N>
+protected_secrets_configured_without_disclosure: yes | no
+expected_assets:
+- frame-compare-portable-win-x64-<rc_tag>.zip
+- frame-compare-portable-win-x64-<rc_tag>.zip.sha256
+- frame-compare-update-win-x64-<rc_tag>.zip
+- frame-compare-update-win-x64-<rc_tag>.zip.sha256
+rollback: maintainer deletes only the exact disposable RC release/tag after
+confirming its target; never reuse or move the tag
+official_v0.1.0_action_will_occur: no
+```
 
-Prove the actual Release Please → published release → Windows workflow chain with a
-disposable repository or explicitly disposable prerelease path. Do not use the
-official `v0.1.0` tag as the first experiment. If there is no safe disposable proof
-path, return that as an unresolved P3 blocker rather than improvising on `main`.
+RC dispatch is MAINTAINER-ONLY. After the maintainer explicitly confirms the
+checkpoint, they select the candidate branch in **Windows portable**, choose
+operation `release`, and dispatch channel `rc` with the exact fields above. The
+workflow must:
+
+- check out and build the exact candidate SHA;
+- reject any pre-existing tag or release;
+- reject version-source/changelog disagreement or an invalid RC tag;
+- call the same reusable Windows build/sign/verification boundary used by stable;
+- create a draft prerelease targeted at that SHA;
+- attach exactly the four mandatory versioned assets;
+- verify checksums, signed update layout, complete remote asset names, and tag target;
+- publish the prerelease only as its final step.
+
+Paste-ready dispatch from a separate maintainer PowerShell session:
+
+```powershell
+$CandidateBranch = 'cleanup'
+$CandidateSha = (git rev-parse $CandidateBranch).Trim()
+$RcVersion = '0.1.0rc1'
+$RcTag = 'v0.1.0-rc.1'
+gh workflow run windows-portable.yml --ref $CandidateBranch `
+  -f operation=release `
+  -f channel=rc `
+  -f version=$RcVersion `
+  -f tag=$RcTag `
+  -f expected_sha=$CandidateSha
+```
+
+If any step fails, leave the RC unpublished. Remote release/tag cleanup is
+MAINTAINER-ONLY in a separate browser or PowerShell session. Never use `v0.1.0` as
+the rehearsal tag and never promote an RC tag in place.
+
+For cleanup, first confirm the exact target, then delete only the disposable RC:
+
+```powershell
+gh api "repos/TJZine/frame-compare/git/ref/tags/$RcTag" --jq '.object.sha'
+gh release view $RcTag --json tagName,isDraft,isPrerelease,url
+# Continue only when the SHA equals $CandidateSha and the tag is the disposable RC.
+gh release delete $RcTag --yes
+gh api --method DELETE "repos/TJZine/frame-compare/git/refs/tags/$RcTag"
+```
+
+`RELEASE_PLEASE_TOKEN` remains required only for post-`v0.1.0` Release Please
+version-PR behavior; Release Please does not publish tags/releases. Restrict a
+fine-grained PAT or GitHub App installation to
+`TJZine/frame-compare`, use a bounded lifetime, and grant only required contents
+and pull-request permissions. It is not the initial-release publication trigger.
 
 ## W8: Exact downloaded-asset acceptance
 
@@ -654,7 +728,8 @@ tampered_manifest_rejected: PASS | FAIL
 tampered_payload_rejected: PASS | FAIL
 rollback: PASS | FAIL
 workflow_dispatch_signed_artifacts: PASS | FAIL
-release_event_chain: PASS | FAIL | NOT YET PROVED
+guarded_orchestrator_rc: PASS | FAIL | NOT YET PROVED
+draft_first_complete_assets: PASS | FAIL | NOT YET PROVED
 clean_profile_rc_acceptance: PASS | FAIL | NOT YET RUN
 
 portable_zip_sha256:
@@ -679,7 +754,7 @@ Use separate commits when each scope is present:
 4. `test(release): prove signed Windows update lifecycle`
 5. `docs(release): record Windows release evidence`
 
-Do not mix signing-key changes with CLI help, Release Please bootstrap metadata,
+Do not mix signing-key changes with CLI help, Release Please state metadata,
 Docker hardening, or unrelated cleanup.
 
 Push only after the intended commits pass the full Windows gate and the diff contains
@@ -701,7 +776,12 @@ Stop immediately and report the blocker when:
 - checksum verification fails;
 - the downloaded candidate behaves differently from the workspace-built bundle;
 - the intended Git history requires destructive rewriting;
-- the official tag would be the first proof of release-event chaining.
+- the official tag would be the first proof of guarded orchestration;
+- the guarded workflow could publish before all four assets are attached and verified;
+- RC and stable inputs cannot be distinguished fail-closed;
+- stable publication is not gated by the protected `production` environment;
+- `main` or the candidate branch moves across the recorded SHA boundary;
+- final preparation still contains temporary `bootstrap-sha` or `release-as`.
 
 ## Handoff back to the primary release task
 
