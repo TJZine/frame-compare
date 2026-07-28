@@ -4,9 +4,6 @@ import re
 import tomllib
 from pathlib import Path
 
-from tests.workflow_helpers import (
-    assert_release_asset_name_hardening as _assert_release_asset_name_hardening,
-)
 from tests.workflow_helpers import load_workflow as _load_workflow
 from tests.workflow_helpers import read_text_or_fail as _read_text_or_fail
 from tests.workflow_helpers import step_by_name as _step_by_name
@@ -48,7 +45,7 @@ def test_release_please_owns_python_version_sources(repo_root: Path) -> None:
     )
 
 
-def test_initial_release_bootstrap_is_explicit(repo_root: Path) -> None:
+def test_initial_release_remains_at_temporary_prerelease_state(repo_root: Path) -> None:
     release_config = json.loads(_read_text_or_fail(repo_root / "release-please-config.json"))
     release_manifest = json.loads(_read_text_or_fail(repo_root / ".release-please-manifest.json"))
 
@@ -75,6 +72,163 @@ def test_release_please_workflow_requires_human_review(repo_root: Path) -> None:
 
     assert "gh pr merge" not in workflow
     assert "--auto" not in workflow
+
+
+def test_release_please_is_dormant_until_published_stable_v010(repo_root: Path) -> None:
+    workflow = _load_workflow(repo_root / ".github" / "workflows" / "release-please.yml")
+    source = _read_text_or_fail(repo_root / ".github" / "workflows" / "release-please.yml")
+    guard = workflow["jobs"]["initial_release_guard"]
+    release = workflow["jobs"]["release_please"]
+
+    assert workflow["concurrency"] == {
+        "group": "release-please-main",
+        "cancel-in-progress": "false",
+    }
+    assert guard["permissions"] == {"contents": "read"}
+    assert guard["timeout-minutes"] == "5"
+    assert release["needs"] == "initial_release_guard"
+    assert release["if"] == "needs.initial_release_guard.outputs.enabled == 'true'"
+    assert release["permissions"] == {
+        "contents": "write",
+        "pull-requests": "write",
+    }
+    assert "releases/tags/v0.1.0" in source
+    assert "git/ref/tags/v0.1.0" in source
+    assert 'draft" != "false"' in source
+    assert 'prerelease" != "false"' in source
+    assert "enabled=true" in source
+    assert release["steps"][0]["with"]["skip-github-release"] == "true"
+
+
+def test_guarded_release_workflow_has_explicit_immutable_inputs(repo_root: Path) -> None:
+    entry_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
+    entry = _load_workflow(entry_path)
+    dispatch = entry["on"]["workflow_dispatch"]["inputs"]
+    release_job = entry["jobs"]["release"]
+    pull_request_job = entry["jobs"]["verify_pull_request"]
+    manual_job = entry["jobs"]["verify_manual"]
+
+    workflow_path = repo_root / ".github" / "workflows" / "release.yml"
+    workflow = _load_workflow(workflow_path)
+    source = _read_text_or_fail(workflow_path)
+    call = workflow["on"]["workflow_call"]["inputs"]
+
+    assert set(entry["on"]) == {"pull_request", "workflow_dispatch"}
+    assert set(dispatch) == {"operation", "channel", "version", "tag", "expected_sha"}
+    assert dispatch["operation"]["options"] == ["verify", "release"]
+    assert dispatch["channel"]["options"] == ["rc", "stable"]
+    assert set(call) == {"channel", "version", "tag", "expected_sha"}
+    assert all(value["required"] == "true" for value in call.values())
+    assert release_job["uses"] == "./.github/workflows/release.yml"
+    assert release_job["permissions"] == {"contents": "write"}
+    assert release_job["concurrency"] == {
+        "group": "frame-compare-release-${{ inputs.tag }}",
+        "cancel-in-progress": "false",
+    }
+    assert "secrets" not in pull_request_job
+    assert pull_request_job["with"]["require_signing"] == "false"
+    assert manual_job["with"]["require_signing"] == "true"
+    assert manual_job["secrets"]["WINDOWS_UPDATE_SIGNING_KEY_XML"] == (
+        "${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}"
+    )
+    assert workflow["permissions"] == {}
+    assert "workflow_dispatch" not in workflow["on"]
+    assert "ref: ${{ inputs.expected_sha }}" in source
+    assert "The selected workflow ref head must equal expected_sha." in source
+    assert "Stable publication must be dispatched from the main branch." in source
+    assert "--expected-sha \"$EXPECTED_SHA\"" in source
+    assert "--main-sha \"$MAIN_SHA\"" in source
+
+
+def test_guarded_release_workflow_fails_closed_on_collisions_and_permissions(
+    repo_root: Path,
+) -> None:
+    workflow_path = repo_root / ".github" / "workflows" / "release.yml"
+    workflow = _load_workflow(workflow_path)
+    source = _read_text_or_fail(workflow_path)
+
+    assert workflow["jobs"]["preflight"]["permissions"] == {"contents": "read"}
+    assert workflow["jobs"]["windows"]["permissions"] == {"contents": "read"}
+    assert workflow["jobs"]["publish"]["permissions"] == {"contents": "write"}
+    assert source.count("Reject existing tag or release") == 1
+    assert source.count("check_absent()") == 2
+    assert source.count("HTTP 404") == 2
+    assert "Unable to prove that $label is absent." in source
+    assert "Unable to prove that $label remains absent." in source
+    assert source.index("Reject existing tag or release") < source.index(
+        "Build, sign, and verify Windows assets"
+    )
+    assert "Main advanced after preflight; refusing stable publication." in source
+    assert source.index("Recheck main, collisions, and create exact tag") < source.index(
+        "Create a new draft release"
+    )
+
+
+def test_guarded_release_workflow_builds_before_draft_and_publishes_last(
+    repo_root: Path,
+) -> None:
+    workflow_path = repo_root / ".github" / "workflows" / "release.yml"
+    workflow = _load_workflow(workflow_path)
+    source = _read_text_or_fail(workflow_path)
+    windows = workflow["jobs"]["windows"]
+    publish = workflow["jobs"]["publish"]
+
+    assert windows["uses"] == "./.github/workflows/windows-portable-build.yml"
+    assert windows["with"] == {
+        "expected_sha": "${{ inputs.expected_sha }}",
+        "release_tag": "${{ inputs.tag }}",
+        "require_signing": "true",
+        "prepare_release_assets": "true",
+    }
+    assert windows["secrets"]["WINDOWS_UPDATE_SIGNING_KEY_XML"] == (
+        "${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}"
+    )
+    assert publish["needs"] == ["preflight", "windows"]
+    assert publish["environment"]["name"] == (
+        "${{ inputs.channel == 'stable' && 'production' || 'release-candidate' }}"
+    )
+    assert '-F "draft=true"' in source
+    assert 'gh api --method POST "repos/${GITHUB_REPOSITORY}/releases"' in source
+    assert source.index("Verify complete local asset set") < source.index(
+        "Create a new draft release"
+    )
+    assert source.index("Create a new draft release") < source.index(
+        "Attach every mandatory asset to the new draft"
+    )
+    assert source.index("Attach every mandatory asset to the new draft") < source.index(
+        "Verify draft target and exact remote asset bytes"
+    )
+    assert source.index("Verify draft target and exact remote asset bytes") < source.index(
+        "Publish verified release"
+    )
+    assert source.index("Publish verified release") < source.index(
+        "Verify final publication state"
+    )
+
+
+def test_guarded_release_workflow_requires_exact_four_signed_assets(repo_root: Path) -> None:
+    source = _read_text_or_fail(repo_root / ".github" / "workflows" / "release.yml")
+    expected_names = (
+        "frame-compare-portable-win-x64-${RELEASE_TAG}.zip",
+        "frame-compare-portable-win-x64-${RELEASE_TAG}.zip.sha256",
+        "frame-compare-update-win-x64-${RELEASE_TAG}.zip",
+        "frame-compare-update-win-x64-${RELEASE_TAG}.zip.sha256",
+    )
+
+    for name in expected_names:
+        assert source.count(name) >= 2
+    assert "sha256sum --check" in source
+    assert '"update-manifest.sig"' in source
+    assert "payload/app/src/frame_compare/" in source
+    assert "does not contain the exact mandatory set" in source
+    assert "exact non-empty mandatory asset set" in source
+    assert '.digest // ""' in source
+    assert '"sha256:${local_hash}"' in source
+    assert "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/" in source
+    assert '--write-out \'%{http_code}\'' in source
+    assert '"$http_status" != "201"' in source
+    assert "api.uploads.github.com" not in source
+    assert "tag_sha\" != \"$EXPECTED_SHA\"" in source
 
 
 def test_ci_requires_clean_distribution_build_and_install(repo_root: Path) -> None:
@@ -113,7 +267,7 @@ def test_ci_runs_generated_report_smoke_in_preflighted_system_browser(
 
 
 def test_direct_build_tools_are_pinned_exactly(repo_root: Path) -> None:
-    for workflow_name in ("ci.yml", "docs.yml", "windows-portable.yml"):
+    for workflow_name in ("ci.yml", "docs.yml", "windows-portable-build.yml"):
         workflow = _read_text_or_fail(repo_root / ".github" / "workflows" / workflow_name)
         setup_count = workflow.count("astral-sh/setup-uv@")
         assert setup_count > 0
@@ -292,14 +446,14 @@ def test_dockerfile_installs_project_without_dependency_resolution(repo_root: Pa
 
 
 def test_windows_portable_workflow_disables_uv_cache_for_pull_requests(repo_root: Path) -> None:
-    workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
+    workflow_path = repo_root / ".github" / "workflows" / "windows-portable-build.yml"
     workflow = _read_text_or_fail(workflow_path)
 
-    assert "enable-cache: ${{ github.event_name != 'pull_request' }}" in workflow
+    assert "enable-cache: ${{ inputs.require_signing }}" in workflow
 
 
 def test_windows_portable_workflow_keeps_python_313_release_path(repo_root: Path) -> None:
-    workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
+    workflow_path = repo_root / ".github" / "workflows" / "windows-portable-build.yml"
     workflow = _read_text_or_fail(workflow_path)
 
     assert 'python-version: "3.13.13"' in workflow
@@ -308,36 +462,24 @@ def test_windows_portable_workflow_keeps_python_313_release_path(repo_root: Path
     assert "WINDOWS_WORKFLOW_PROOF" not in workflow
 
 
-def test_windows_portable_workflow_limits_release_write_permissions(repo_root: Path) -> None:
-    workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
+def test_windows_portable_workflow_is_read_only_reusable_boundary(repo_root: Path) -> None:
+    workflow_path = repo_root / ".github" / "workflows" / "windows-portable-build.yml"
     workflow = _read_text_or_fail(workflow_path)
 
     assert re.search(r"permissions:\s*\n\s+contents:\s+read", workflow)
     assert re.search(r"jobs:\s*\n\s+build:\s*\n\s+permissions:\s*\n\s+contents:\s+read", workflow)
-    assert re.search(
-        r"release-assets:\s*\n\s+if:\s+github\.event_name == 'release'\s*\n\s+needs:\s+build\s*\n\s+permissions:\s*\n\s+contents:\s+write",
-        workflow,
-    )
-    assert "Download bundle artifact" in workflow
-    assert "path: dist/release-assets" in workflow
-    assert "Resolve release asset names" in workflow
-    assert "Prepare versioned release asset" in workflow
-    _assert_release_asset_name_hardening(workflow)
-    assert "steps.release_names.outputs.asset_tag" in workflow
-    assert 'hash="$(sha256sum "$zip" | cut -d \' \' -f 1)"' in workflow
-    assert 'printf \'%s  %s\\n\' "$hash" "$(basename "$zip")" > "$zip.sha256"' in workflow
-    assert (
-        "dist/release-assets/frame-compare-portable-win-x64-${{ "
-        "steps.release_names.outputs.asset_tag }}.zip"
-    ) in workflow
-    assert (
-        "dist/release-assets/frame-compare-portable-win-x64-${{ "
-        "steps.release_names.outputs.asset_tag }}.zip.sha256"
-    ) in workflow
+    assert "contents: write" not in workflow
+    assert "release:" not in workflow
+    assert "softprops/action-gh-release" not in workflow
+    assert "workflow_call:" in workflow
+    assert "expected_sha:" in workflow
+    assert "release_tag:" in workflow
+    assert "REQUIRE_SIGNING: ${{ inputs.require_signing }}" in workflow
+    assert "prepare_release_assets:" in workflow
 
 
 def test_windows_portable_workflow_smokes_installed_shim(repo_root: Path) -> None:
-    workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
+    workflow_path = repo_root / ".github" / "workflows" / "windows-portable-build.yml"
     workflow = _read_text_or_fail(workflow_path)
 
     assert "Smoke: extracted install shim" in workflow
@@ -350,7 +492,7 @@ def test_windows_portable_workflow_smokes_installed_shim(repo_root: Path) -> Non
 def test_windows_portable_workflow_proves_code_only_update_without_pr_secrets(
     repo_root: Path,
 ) -> None:
-    workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
+    workflow_path = repo_root / ".github" / "workflows" / "windows-portable-build.yml"
     workflow = _read_text_or_fail(workflow_path)
 
     assert workflow.index("Build portable bundle") < workflow.index("Build code-only update zip")
@@ -366,46 +508,39 @@ def test_windows_portable_workflow_proves_code_only_update_without_pr_secrets(
 def test_windows_portable_workflow_requires_signed_update_release_assets(
     repo_root: Path,
 ) -> None:
-    workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
+    workflow_path = repo_root / ".github" / "workflows" / "windows-portable-build.yml"
     source = _read_text_or_fail(workflow_path)
     workflow = _load_workflow(workflow_path)
     build = workflow["jobs"]["build"]
-    release_assets = workflow["jobs"]["release-assets"]
     sign = _step_by_name(build, "Sign code-only update zip")
     verify = _step_by_name(build, "Verify code-only update zip layout")
-    download = _step_by_name(release_assets, "Download signed update artifact")
-    prepare = _step_by_name(release_assets, "Prepare versioned signed update asset")
-    verify_assets = _step_by_name(release_assets, "Verify required release asset set")
-    upload = _step_by_name(release_assets, "Upload required release assets")
+    prepare = _step_by_name(build, "Prepare exact orchestrated release assets")
+    verify_assets = _step_by_name(build, "Verify exact orchestrated release asset set")
+    upload = _step_by_name(build, "Upload exact orchestrated release assets")
 
-    assert release_assets["if"] == "github.event_name == 'release'"
+    assert set(workflow["jobs"]) == {"build"}
     assert sign["env"]["WINDOWS_UPDATE_SIGNING_KEY_XML"] == (
         "${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}"
     )
-    assert "WINDOWS_UPDATE_SIGNING_KEY_XML is required for release and manual runs." in sign["run"]
+    assert (
+        "WINDOWS_UPDATE_SIGNING_KEY_XML is required for reusable release and manual runs."
+        in sign["run"]
+    )
     assert "tools/windows_portable/sign_update.ps1" in sign["run"]
-    assert verify["env"]["REQUIRE_SIGNED_UPDATE"] == (
-        "${{ github.event_name == 'release' || github.event_name == 'workflow_dispatch' }}"
-    )
+    assert sign["if"] == "env.REQUIRE_SIGNING == 'true'"
+    assert verify["env"]["REQUIRE_SIGNED_UPDATE"] == "${{ env.REQUIRE_SIGNING }}"
     assert "Signed update zip is missing update-manifest.sig." in verify["run"]
-    assert download["with"] == {
-        "name": "frame-compare-update-win-x64",
-        "path": "dist/release-assets",
-    }
-    assert "mapfile -t update_zips" in prepare["run"]
+    assert prepare["if"] == "inputs.prepare_release_assets"
     assert (
-        "Expected exactly one signed update zip artifact, found ${#update_zips[@]}."
-        in (prepare["run"])
+        "Expected exactly one signed update zip, found $($updateSources.Count)."
+        in prepare["run"]
     )
-    assert "frame-compare-update-win-x64-${ASSET_TAG}.zip" in prepare["run"]
-    assert "Missing required release asset: $asset" in verify_assets["run"]
-    assert upload["with"]["fail_on_unmatched_files"] == "true"
+    assert "frame-compare-update-win-x64-$($env:RELEASE_TAG).zip" in prepare["run"]
+    assert "exact mandatory set" in verify_assets["run"]
+    assert upload["with"]["if-no-files-found"] == "error"
+    assert upload["with"]["name"] == "frame-compare-release-assets"
     assert (
         "dist/release-assets/frame-compare-update-win-x64-${{ "
-        "steps.release_names.outputs.asset_tag }}.zip"
-    ) in upload["with"]["files"]
-    assert (
-        "dist/release-assets/frame-compare-update-win-x64-${{ "
-        "steps.release_names.outputs.asset_tag }}.zip.sha256"
-    ) in upload["with"]["files"]
+        "inputs.release_tag }}.zip.sha256"
+    ) in upload["with"]["path"]
     assert "update_signed" not in source

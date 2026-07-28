@@ -180,6 +180,7 @@ def _sign_update_zip(
     repo_root: Path,
     update_zip_path: Path,
     private_key_path: Path,
+    expected_public_key_path: Path,
 ) -> dict[str, str]:
     env = os.environ.copy()
     env["SIGNING_KEY_XML_PATH"] = str(private_key_path)
@@ -193,6 +194,8 @@ def _sign_update_zip(
             "-File",
             str(sign_script),
             str(update_zip_path),
+            "-ExpectedPublicKeyPath",
+            str(expected_public_key_path),
         ],
         env=env,
         capture_output=True,
@@ -315,6 +318,7 @@ def test_windows_portable_update_apply_e2e(tmp_path: Path, repo_root: Path) -> N
         repo_root=repo_root,
         update_zip_path=update_zip_path,
         private_key_path=private_key_path,
+        expected_public_key_path=shim_update_ps1.parent / "update_public_key.xml",
     )
 
     installed_tree = bundle_dir / "app" / "src" / "frame_compare"

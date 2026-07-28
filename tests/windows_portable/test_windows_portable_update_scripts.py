@@ -723,6 +723,9 @@ def test_windows_portable_update_signature_uses_explicit_pkcs1_sha256(
     updater = _read_text_or_fail(updater_path)
 
     assert "function Sign-ManifestBytes" in sign_script
+    assert "function Test-ManifestSignature" in sign_script
+    assert "Signing key does not match the expected update public key." in sign_script
+    assert "Produced signature does not verify against the expected update public key." in sign_script
     assert "[System.Security.Cryptography.HashAlgorithmName]::SHA256" in sign_script
     assert "[System.Security.Cryptography.RSASignaturePadding]::Pkcs1" in sign_script
     assert "function Test-ManifestSignature" in updater
