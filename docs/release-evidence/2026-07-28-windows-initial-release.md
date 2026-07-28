@@ -79,5 +79,7 @@ private-key-like residue.
   release-event chain is proved through an explicitly disposable prerelease path.
 - Windows P7 is not complete until the exact assets from that approved prerelease
   pass the clean-profile SDR/HDR, report, update, rollback, and uninstall matrix.
-- No private key value, private-key hash, private storage path, or signing secret
-  was accessed or recorded.
+- Codex did not access any private key value, private-key hash, private storage
+  path, or signing secret. The GitHub workflow consumed the configured secret
+  without disclosing or recording it in repository content, task output, logs,
+  caches, or artifacts.
