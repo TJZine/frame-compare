@@ -254,6 +254,7 @@ function Restore-FrameCompareLauncherEnvironmentValue([string]$Name, [object]$Va
 
 $originalPath = Get-FrameCompareLauncherEnvironmentValue -Name "PATH"
 $originalPythonUtf8 = Get-FrameCompareLauncherEnvironmentValue -Name "PYTHONUTF8"
+$originalPythonDontWriteBytecode = Get-FrameCompareLauncherEnvironmentValue -Name "PYTHONDONTWRITEBYTECODE"
 $originalPythonPath = Get-FrameCompareLauncherEnvironmentValue -Name "PYTHONPATH"
 $originalVsExtraPluginPath = Get-FrameCompareLauncherEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH"
 $originalVsPluginPath = Get-FrameCompareLauncherEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH"
@@ -262,6 +263,7 @@ $exitCode = 1
 $locationPushed = $false
 try {
   $env:PYTHONUTF8 = "1"
+  $env:PYTHONDONTWRITEBYTECODE = "1"
   $env:PYTHONPATH = "$bundleRoot\\app\\src;$bundleRoot\\app\\site-packages"
   $env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = "$bundleRoot\\vs\\extra-plugins"
   Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue
@@ -314,6 +316,7 @@ try {
   }
   Restore-FrameCompareLauncherEnvironmentValue -Name "PATH" -Value $originalPath
   Restore-FrameCompareLauncherEnvironmentValue -Name "PYTHONUTF8" -Value $originalPythonUtf8
+  Restore-FrameCompareLauncherEnvironmentValue -Name "PYTHONDONTWRITEBYTECODE" -Value $originalPythonDontWriteBytecode
   Restore-FrameCompareLauncherEnvironmentValue -Name "PYTHONPATH" -Value $originalPythonPath
   Restore-FrameCompareLauncherEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH" -Value $originalVsExtraPluginPath
   Restore-FrameCompareLauncherEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH" -Value $originalVsPluginPath
@@ -529,6 +532,7 @@ function Install-PythonWheelArtifacts([string]$BundleRoot, [pscustomobject[]]$Ar
 
 function Set-BundleRuntimeEnvironment([string]$BundleRoot) {
   $env:PYTHONUTF8 = "1"
+  $env:PYTHONDONTWRITEBYTECODE = "1"
   $env:PYTHONPATH = "$BundleRoot\\app\\src;$BundleRoot\\app\\site-packages"
   $env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = "$BundleRoot\\vs\\extra-plugins"
   Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue
@@ -642,6 +646,7 @@ function Assert-BundleRuntime([string]$BundleRoot) {
 
   $originalPath = Get-ProcessEnvironmentValue -Name "PATH"
   $originalPythonUtf8 = Get-ProcessEnvironmentValue -Name "PYTHONUTF8"
+  $originalPythonDontWriteBytecode = Get-ProcessEnvironmentValue -Name "PYTHONDONTWRITEBYTECODE"
   $originalPythonPath = Get-ProcessEnvironmentValue -Name "PYTHONPATH"
   $originalVsExtraPluginPath = Get-ProcessEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH"
   $originalVsPluginPath = Get-ProcessEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH"
@@ -830,6 +835,7 @@ else:
     Remove-Item -Force -LiteralPath $mediaIndexPath -ErrorAction SilentlyContinue
     Restore-ProcessEnvironmentValue -Name "PATH" -Value $originalPath
     Restore-ProcessEnvironmentValue -Name "PYTHONUTF8" -Value $originalPythonUtf8
+    Restore-ProcessEnvironmentValue -Name "PYTHONDONTWRITEBYTECODE" -Value $originalPythonDontWriteBytecode
     Restore-ProcessEnvironmentValue -Name "PYTHONPATH" -Value $originalPythonPath
     Restore-ProcessEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH" -Value $originalVsExtraPluginPath
     Restore-ProcessEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH" -Value $originalVsPluginPath
@@ -860,6 +866,23 @@ function Copy-PythonDistLicenses([string]$SitePackages, [string]$LicensesPythonD
   $qtLicenses = Join-Path $SitePackages "PyQt6\\Qt6\\licenses"
   if (Test-Path -LiteralPath $qtLicenses) {
     Copy-Item -Recurse -Force -LiteralPath $qtLicenses -Destination (Join-Path $LicensesPythonDir "PyQt6-Qt-licenses")
+  }
+}
+
+function Remove-PythonBytecodeCaches([string]$BundleRoot) {
+  $cacheDirs = @(
+    Get-ChildItem -LiteralPath $BundleRoot -Recurse -Directory -Filter "__pycache__" |
+      Sort-Object FullName -Descending
+  )
+  foreach ($cacheDir in $cacheDirs) {
+    Remove-Item -LiteralPath $cacheDir.FullName -Recurse -Force
+  }
+  $bytecodeFiles = @(
+    Get-ChildItem -LiteralPath $BundleRoot -Recurse -File |
+      Where-Object { $_.Extension -in @(".pyc", ".pyo") }
+  )
+  foreach ($bytecodeFile in $bytecodeFiles) {
+    Remove-Item -LiteralPath $bytecodeFile.FullName -Force
   }
 }
 
@@ -985,7 +1008,7 @@ function Write-BundleInventory([string]$BundleRoot) {
   if ($RequireReleasePublicKey) {
     $arguments += "--require-clean-repo"
   }
-  & $python @arguments
+  & $python -B @arguments
   Assert-LastExitCode -CommandLabel "Windows bundle inventory"
 }
 
@@ -1026,6 +1049,7 @@ function Main() {
   Write-BundleInfo -BundleRoot $OutDir -AppVersion (Get-AppVersionFromSource -RepoRootPath $RepoRoot)
   Configure-EmbeddedPython -BundleRoot $OutDir
   Assert-BundleRuntime -BundleRoot $OutDir
+  Remove-PythonBytecodeCaches -BundleRoot $OutDir
 
   # Launchers
   Write-LauncherFiles -BundleRoot $OutDir
