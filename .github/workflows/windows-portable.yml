@@ -1,0 +1,391 @@
+name: windows-portable
+
+on:
+  pull_request:
+  workflow_dispatch:
+  release:
+    types: [published, prereleased]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.event_name == 'release' && format('refs/tags/{0}', github.event.release.tag_name) || github.ref }}
+          persist-credentials: false
+
+      - name: Setup Python 3.13.13
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13.13"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
+        with:
+          version: "0.11.31"
+          enable-cache: ${{ github.event_name != 'pull_request' }}
+
+      - name: Install dev dependencies (frozen)
+        run: uv sync --group dev --frozen
+
+      - name: Unit tests (mocked VS)
+        run: uv run --no-sync pytest -q
+
+      - name: Validate update public key
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/validate_update_public_key.ps1 `
+            -PublicKeyPath tools/windows_portable/update_public_key.xml
+
+      - name: Build portable bundle
+        shell: pwsh
+        run: |
+          $out = "dist/frame-compare-portable-win-x64"
+          $buildArgs = @(
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            "tools/windows_portable/build_portable.ps1",
+            "-ManifestPath",
+            "tools/windows_portable/manifest.windows-x64.json",
+            "-OutDir",
+            $out,
+            "-CacheDir",
+            ".portable_cache"
+          )
+          if ("${{ github.event_name }}" -eq "release" -or "${{ github.event_name }}" -eq "workflow_dispatch") {
+            $buildArgs += "-RequireReleasePublicKey"
+          }
+          pwsh @buildArgs
+
+      - name: Verify bundle workspace directories
+        shell: pwsh
+        run: |
+          $bundle = (Resolve-Path "dist/frame-compare-portable-win-x64").Path
+          $bundleConfigDir = Join-Path $bundle "config"
+          $bundleInputDir = Join-Path $bundle "comparison_videos"
+          $vsPackagePlugins = Join-Path $bundle "app/site-packages/vapoursynth/plugins"
+          $extraPluginRoot = Join-Path $bundle "vs/extra-plugins"
+          $lsmasManifest = Join-Path $extraPluginRoot "lsmas/manifest.vs"
+
+          if (!(Test-Path -LiteralPath $bundleConfigDir -PathType Container)) {
+            throw "Missing default workspace directory in bundle: $bundleConfigDir"
+          }
+          if (!(Test-Path -LiteralPath $bundleInputDir -PathType Container)) {
+            throw "Missing default workspace directory in bundle: $bundleInputDir"
+          }
+          if (!(Test-Path -LiteralPath $vsPackagePlugins -PathType Container)) {
+            throw "Missing R74+ VapourSynth package plugin directory: $vsPackagePlugins"
+          }
+          if (!(Test-Path -LiteralPath $extraPluginRoot -PathType Container)) {
+            throw "Missing extra VapourSynth plugin directory: $extraPluginRoot"
+          }
+          if (!(Test-Path -LiteralPath $lsmasManifest -PathType Leaf)) {
+            throw "Missing L-SMASH manifest: $lsmasManifest"
+          }
+
+      - name: "Smoke: doctor --json"
+        shell: pwsh
+        run: |
+          $bundle = (Resolve-Path "dist/frame-compare-portable-win-x64").Path
+          $output = & "$bundle/frame-compare.ps1" doctor --json 2>&1
+          $exitCode = $LASTEXITCODE
+          $knownNoise = "Core plugin autoloading failed. Installation is broken!"
+          foreach ($line in $output) {
+            if ($line -eq $knownNoise) {
+              continue
+            }
+            Write-Host $line
+          }
+          if ($exitCode -ne 0) {
+            exit $exitCode
+          }
+
+      - name: Package zip
+        shell: pwsh
+        run: |
+          $bundle = "dist/frame-compare-portable-win-x64"
+          $zip = "dist/frame-compare-portable-win-x64.zip"
+          if (Test-Path $zip) { Remove-Item -Force $zip }
+          Compress-Archive -Path $bundle -DestinationPath $zip
+          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          Set-Content -Path "$zip.sha256" -Value "$hash  $(Split-Path -Leaf $zip)" -Encoding ASCII
+
+      - name: Verify zip layout
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zipPath = (Resolve-Path "dist/frame-compare-portable-win-x64.zip").Path
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+          try {
+            $entries = @($zip.Entries | ForEach-Object { $_.FullName })
+          } finally {
+            $zip.Dispose()
+          }
+
+          $required = @(
+            "frame-compare-portable-win-x64/install.cmd",
+            "frame-compare-portable-win-x64/install.ps1",
+            "frame-compare-portable-win-x64/frame-compare.ps1",
+            "frame-compare-portable-win-x64/frame-compare-update.cmd",
+            "frame-compare-portable-win-x64/frame-compare-update.ps1",
+            "frame-compare-portable-win-x64/shim/frame-compare.cmd",
+            "frame-compare-portable-win-x64/shim/frame-compare-update.cmd",
+            "frame-compare-portable-win-x64/shim/frame-compare-update.ps1"
+          )
+          foreach ($r in $required) {
+            if ($entries -notcontains $r) {
+              throw "Missing zip entry: $r"
+            }
+          }
+          foreach ($e in $entries) {
+            if (-not $e.StartsWith("frame-compare-portable-win-x64/")) {
+              throw "Non-folder-contained entry: $e"
+            }
+          }
+
+      - name: Verify extracted zip workspace directories
+        shell: pwsh
+        run: |
+          $zip = (Resolve-Path "dist/frame-compare-portable-win-x64.zip").Path
+          $extractRoot = Join-Path "dist" "zip_extract_check"
+          if (Test-Path -LiteralPath $extractRoot) {
+            Remove-Item -Recurse -Force -LiteralPath $extractRoot
+          }
+          Expand-Archive -LiteralPath $zip -DestinationPath $extractRoot -Force
+
+          $bundle = Join-Path $extractRoot "frame-compare-portable-win-x64"
+          $bundleConfigDir = Join-Path $bundle "config"
+          $bundleInputDir = Join-Path $bundle "comparison_videos"
+          if (!(Test-Path -LiteralPath $bundleConfigDir -PathType Container)) {
+            throw "Missing default workspace directory in extracted zip: $bundleConfigDir"
+          }
+          if (!(Test-Path -LiteralPath $bundleInputDir -PathType Container)) {
+            throw "Missing default workspace directory in extracted zip: $bundleInputDir"
+          }
+
+      - name: "Smoke: extracted install shim"
+        shell: pwsh
+        run: |
+          $bundle = (Resolve-Path "dist/zip_extract_check/frame-compare-portable-win-x64").Path
+          & "$bundle/install.cmd"
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+          $shim = Join-Path $env:LOCALAPPDATA "Programs/FrameCompare/bin/frame-compare.cmd"
+          if (!(Test-Path -LiteralPath $shim -PathType Leaf)) {
+            throw "Installed shim not found: $shim"
+          }
+
+          $versionOutput = & $shim version
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+          if ($versionOutput -notmatch "^frame-compare \d+\.\d+\.\d+") {
+            throw "Unexpected version output from installed shim: $versionOutput"
+          }
+
+          & $shim --help | Out-Host
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Build code-only update zip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          $bundle = "dist/frame-compare-portable-win-x64"
+          $version = (uv run --no-sync python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])").Trim()
+          $updateZip = "dist/frame-compare-update-win-x64-$version.zip"
+          pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/build_update.ps1 `
+            -BundleDir $bundle `
+            -OutFile $updateZip
+          "UPDATE_ZIP=$updateZip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      # Pull requests prove unsigned update zip creation without signing secrets.
+      # Release/manual runs require a signed update and fail closed without the key.
+      - name: Sign code-only update zip
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        env:
+          WINDOWS_UPDATE_SIGNING_KEY_XML: ${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_UPDATE_SIGNING_KEY_XML)) {
+            throw "WINDOWS_UPDATE_SIGNING_KEY_XML is required for release and manual runs."
+          }
+
+          $keyPath = Join-Path $env:RUNNER_TEMP "frame-compare-update-signing-key.xml"
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+          try {
+            [System.IO.File]::WriteAllText($keyPath, $env:WINDOWS_UPDATE_SIGNING_KEY_XML, $utf8NoBom)
+            $env:SIGNING_KEY_XML_PATH = $keyPath
+            pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/sign_update.ps1 `
+              -UpdateZip $env:UPDATE_ZIP
+          } finally {
+            Remove-Item Env:\SIGNING_KEY_XML_PATH -ErrorAction SilentlyContinue
+            if (Test-Path -LiteralPath $keyPath -PathType Leaf) {
+              Remove-Item -LiteralPath $keyPath -Force
+            }
+          }
+
+      - name: Hash code-only update zip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $hash = (Get-FileHash -Algorithm SHA256 $env:UPDATE_ZIP).Hash.ToLowerInvariant()
+          Set-Content -Path "$env:UPDATE_ZIP.sha256" -Value "$hash  $(Split-Path -Leaf $env:UPDATE_ZIP)" -Encoding ASCII
+
+      - name: Verify code-only update zip layout
+        shell: pwsh
+        env:
+          REQUIRE_SIGNED_UPDATE: ${{ github.event_name == 'release' || github.event_name == 'workflow_dispatch' }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zipPath = (Resolve-Path $env:UPDATE_ZIP).Path
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+          try {
+            $entries = @($zip.Entries | ForEach-Object { $_.FullName })
+            $manifestEntry = $zip.GetEntry("update-manifest.json")
+            if ($null -eq $manifestEntry) {
+              throw "Missing update manifest in update zip."
+            }
+            $reader = New-Object System.IO.StreamReader($manifestEntry.Open(), [System.Text.Encoding]::UTF8)
+            try {
+              $manifest = $reader.ReadToEnd() | ConvertFrom-Json
+            } finally {
+              $reader.Dispose()
+            }
+          } finally {
+            $zip.Dispose()
+          }
+
+          if ($entries -notcontains "update-manifest.json") {
+            throw "Missing update-manifest.json in update zip."
+          }
+          if (-not ($entries | Where-Object { $_.StartsWith("payload/app/src/frame_compare/") })) {
+            throw "Missing code payload under payload/app/src/frame_compare/."
+          }
+          if ($manifest.target_platform -ne "windows-x64") {
+            throw "Unexpected update target platform: $($manifest.target_platform)"
+          }
+          if ($manifest.payload_root -ne "payload") {
+            throw "Unexpected update payload root: $($manifest.payload_root)"
+          }
+          if ($manifest.signature_file -ne "update-manifest.sig") {
+            throw "Unexpected update signature file: $($manifest.signature_file)"
+          }
+          if ($env:REQUIRE_SIGNED_UPDATE -eq "true" -and $entries -notcontains "update-manifest.sig") {
+            throw "Signed update zip is missing update-manifest.sig."
+          }
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frame-compare-portable-win-x64
+          path: |
+            dist/frame-compare-portable-win-x64.zip
+            dist/frame-compare-portable-win-x64.zip.sha256
+          if-no-files-found: error
+
+      - name: Upload code-only update artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frame-compare-update-win-x64
+          path: |
+            dist/frame-compare-update-win-x64-*.zip
+            dist/frame-compare-update-win-x64-*.zip.sha256
+          if-no-files-found: error
+
+  release-assets:
+    if: github.event_name == 'release'
+    needs: build
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download bundle artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: frame-compare-portable-win-x64
+          path: dist/release-assets
+
+      - name: Download signed update artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: frame-compare-update-win-x64
+          path: dist/release-assets
+
+      - name: Resolve release asset names
+        id: release_names
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          asset_tag="${RELEASE_TAG//\//-}"
+          printf 'asset_tag=%s\n' "$asset_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare versioned release asset
+        env:
+          ASSET_TAG: ${{ steps.release_names.outputs.asset_tag }}
+        run: |
+          zip="dist/release-assets/frame-compare-portable-win-x64-${ASSET_TAG}.zip"
+          cp dist/release-assets/frame-compare-portable-win-x64.zip "$zip"
+          hash="$(sha256sum "$zip" | cut -d ' ' -f 1)"
+          printf '%s  %s\n' "$hash" "$(basename "$zip")" > "$zip.sha256"
+
+      - name: Prepare versioned signed update asset
+        env:
+          ASSET_TAG: ${{ steps.release_names.outputs.asset_tag }}
+        run: |
+          mapfile -t update_zips < <(find dist/release-assets -maxdepth 1 -name 'frame-compare-update-win-x64-*.zip' ! -name '*.sha256')
+          if [ "${#update_zips[@]}" -ne 1 ]; then
+            echo "Expected exactly one signed update zip artifact, found ${#update_zips[@]}." >&2
+            exit 1
+          fi
+          update_zip="${update_zips[0]}"
+          versioned_update_zip="dist/release-assets/frame-compare-update-win-x64-${ASSET_TAG}.zip"
+          cp "$update_zip" "$versioned_update_zip"
+          hash="$(sha256sum "$versioned_update_zip" | cut -d ' ' -f 1)"
+          printf '%s  %s\n' "$hash" "$(basename "$versioned_update_zip")" > "$versioned_update_zip.sha256"
+
+      - name: Verify required release asset set
+        env:
+          ASSET_TAG: ${{ steps.release_names.outputs.asset_tag }}
+        run: |
+          required=(
+            "dist/release-assets/frame-compare-portable-win-x64-${ASSET_TAG}.zip"
+            "dist/release-assets/frame-compare-portable-win-x64-${ASSET_TAG}.zip.sha256"
+            "dist/release-assets/frame-compare-update-win-x64-${ASSET_TAG}.zip"
+            "dist/release-assets/frame-compare-update-win-x64-${ASSET_TAG}.zip.sha256"
+          )
+          for asset in "${required[@]}"; do
+            if [ ! -f "$asset" ]; then
+              echo "Missing required release asset: $asset" >&2
+              exit 1
+            fi
+          done
+
+      - name: Upload required release assets
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          prerelease: ${{ github.event.release.prerelease || contains(github.event.release.tag_name, '-rc') }}
+          fail_on_unmatched_files: true
+          files: |
+            dist/release-assets/frame-compare-portable-win-x64-${{ steps.release_names.outputs.asset_tag }}.zip
+            dist/release-assets/frame-compare-portable-win-x64-${{ steps.release_names.outputs.asset_tag }}.zip.sha256
+            dist/release-assets/frame-compare-update-win-x64-${{ steps.release_names.outputs.asset_tag }}.zip
+            dist/release-assets/frame-compare-update-win-x64-${{ steps.release_names.outputs.asset_tag }}.zip.sha256
