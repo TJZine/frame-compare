@@ -55,6 +55,11 @@ def _workspace(tmp_path: Path) -> WorkspacePaths:
     )
 
 
+def _zero_monotonic_timer() -> float:
+    """Return a stable monotonic timestamp for tests that do not exercise timing."""
+    return 0.0
+
+
 def test_execute_run_returns_success_and_records_preflight_timing(
     tmp_path: Path,
 ) -> None:
@@ -127,7 +132,7 @@ def test_execute_run_returns_preflight_and_runtime_warnings(
         metadata_prefetch=MetadataPrefetch(None, False),
         preflight_warnings=["preflight: warned"],
         preflight_duration=0.0,
-        load_sources_start=0.0,
+        load_sources_start=_zero_monotonic_timer(),
         selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
 
@@ -141,7 +146,12 @@ def test_execute_run_returns_preflight_and_runtime_warnings(
     monkeypatch.setattr(coordinator, "execute_phases", fake_execute_phases)
     monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", lambda *a, **kw: None)
 
-    result = asyncio.run(execute_run(RunRequest(root=tmp_path, quiet=True), deps=RunDependencies()))
+    result = asyncio.run(
+        execute_run(
+            RunRequest(root=tmp_path, quiet=True),
+            deps=RunDependencies(monotonic_timer=_zero_monotonic_timer),
+        )
+    )
 
     assert result.success is True
     assert result.post_upload_actions == (shortcut,)
@@ -173,7 +183,7 @@ def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
         metadata_prefetch=MetadataPrefetch(None, False),
         preflight_warnings=[],
         preflight_duration=0.0,
-        load_sources_start=0.0,
+        load_sources_start=_zero_monotonic_timer(),
         selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
 
@@ -219,7 +229,11 @@ def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
         skip_metadata=True,
         quiet=True,
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(
+        vs_loader=FakeVSLoader(),
+        ffmpeg_runner=FakeFFmpegRunner(),
+        monotonic_timer=_zero_monotonic_timer,
+    )
 
     result = asyncio.run(execute_run(request, deps=deps))
 
@@ -253,7 +267,7 @@ def test_execute_run_webhook_action_warning_is_warning_only(
         metadata_prefetch=MetadataPrefetch(None, False),
         preflight_warnings=[],
         preflight_duration=0.0,
-        load_sources_start=0.0,
+        load_sources_start=_zero_monotonic_timer(),
         selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
 
@@ -292,7 +306,11 @@ def test_execute_run_webhook_action_warning_is_warning_only(
         skip_metadata=True,
         quiet=True,
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(
+        vs_loader=FakeVSLoader(),
+        ffmpeg_runner=FakeFFmpegRunner(),
+        monotonic_timer=_zero_monotonic_timer,
+    )
 
     result = asyncio.run(execute_run(request, deps=deps))
 
@@ -329,7 +347,7 @@ def test_execute_run_report_warning_blocks_delete_after_upload_cleanup(
         metadata_prefetch=MetadataPrefetch(None, False),
         preflight_warnings=[],
         preflight_duration=0.0,
-        load_sources_start=0.0,
+        load_sources_start=_zero_monotonic_timer(),
         selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
 
@@ -369,7 +387,11 @@ def test_execute_run_report_warning_blocks_delete_after_upload_cleanup(
         skip_metadata=True,
         quiet=True,
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(
+        vs_loader=FakeVSLoader(),
+        ffmpeg_runner=FakeFFmpegRunner(),
+        monotonic_timer=_zero_monotonic_timer,
+    )
 
     result = asyncio.run(execute_run(request, deps=deps))
 
@@ -499,7 +521,7 @@ def test_execute_run_emits_final_selection_at_post_align_boundary(
         metadata_prefetch=MetadataPrefetch(None, False),
         preflight_warnings=[],
         preflight_duration=0.0,
-        load_sources_start=0.0,
+        load_sources_start=_zero_monotonic_timer(),
         selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
     breakdown = SelectionBreakdown(user=[101], random=[205])
@@ -544,7 +566,12 @@ def test_execute_run_emits_final_selection_at_post_align_boundary(
         quiet=False,
         no_color=True,
     )
-    asyncio.run(execute_run(request, deps=RunDependencies()))
+    asyncio.run(
+        execute_run(
+            request,
+            deps=RunDependencies(monotonic_timer=_zero_monotonic_timer),
+        )
+    )
 
     assert events == ["align", "selection_report", "after_align_phase"]
     assert len(selection_calls) == 1
