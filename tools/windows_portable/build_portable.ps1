@@ -939,13 +939,16 @@ function Copy-RequiredQtLicenseDirectories([string]$BundleRoot) {
     if ($matches.Count -ne 1) {
       throw "Expected exactly one $($entry.Pattern) license owner, found $($matches.Count)."
     }
-    $sourceLicense = Join-Path $matches[0].FullName "LICENSE"
-    if (!(Test-Path -LiteralPath $sourceLicense -PathType Leaf)) {
-      throw "Required license file is missing: $sourceLicense"
+    $licenseCandidates = @(
+      (Join-Path $matches[0].FullName "LICENSE"),
+      (Join-Path $matches[0].FullName "licenses\\LICENSE")
+    ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
+    if ($licenseCandidates.Count -ne 1) {
+      throw "Expected exactly one license file for $($entry.Pattern), found $($licenseCandidates.Count)."
     }
     $destination = Join-Path $licensesDir $entry.Destination
     Ensure-Directory -Path $destination
-    Copy-Item -Force -LiteralPath $sourceLicense -Destination (
+    Copy-Item -Force -LiteralPath $licenseCandidates[0] -Destination (
       Join-Path $destination "LICENSE.txt"
     )
   }
