@@ -1,4 +1,5 @@
 import asyncio
+import os
 import subprocess
 import sys
 
@@ -56,5 +57,5 @@ def test_run_subprocess_inside_running_event_loop() -> None:
     result = asyncio.run(invoke())
 
     assert isinstance(result, subprocess.CompletedProcess)
-    assert result.stdout == b"from-loop\n"
+    assert result.stdout == f"from-loop{os.linesep}".encode()
     assert result.stderr == b""
