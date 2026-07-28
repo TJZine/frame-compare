@@ -190,17 +190,18 @@ next wave begins.
 | R-11 | Logging uses a large stderr proxy, unused singleton, and an unused `**kwargs` format bridge. Reduce it to the smallest late-bound write/flush stream and use the explicit `log_format` keyword. | Current `sys.stderr` capture, repeated configuration, shutdown, JSON stdout purity, levels, and renderers remain correct. |
 | R-12 | `cli/entry.py` retains confirmed-unused private aliases/imports. Remove only exact dead aliases, preserving `_RunnerProxy`, lazy imports, meaningful Protocols, and explicit CLI/config mappings. | Focused CLI/lazy-import tests and the full gate pass with a recorded physical LOC delta. |
 
-#### R-09 viewer assertion deletion ledger
+### R-09 viewer assertion deletion ledger
 
 The R-09 cleanup reduced the source-shape test surface from 709 to 585 physical
 lines: `test_report_viewer_assets_js_contracts.py` changed from 402 to 282 and
 `test_report_viewer_assets_css.py` from 307 to 303. The 124 removed lines are
-mapped below. Existing executable harnesses were run before deletion; no
-replacement harness or assertion was added.
+mapped below. The original cleanup relied on the existing executable harnesses.
+The July 28 follow-up extended the viewer state harness with an explicit
+alignment-popover Escape ordering assertion.
 
 | Deleted source-shape group | Equal-or-stronger proof | Assertions deliberately retained |
 | --- | --- | --- |
-| Alignment popover method names and Escape-handler body/order | `viewer_state_harness.js` executes global Escape and proves the alignment popover closes before the inspector while legacy modal precedence remains intact; `test_report_viewer_state.py` asserts `escapeOrder`. | Document and popover keydown registration plus alignment-before-keyboard binding order remain as dependency-wiring contracts. |
+| Alignment popover method names and Escape-handler body/order | `viewer_state_harness.js` executes popover-target and global Escape paths, proves the popover handler prevents global shortcut fallthrough, and proves the alignment popover closes before the inspector while legacy modal precedence remains intact; `test_report_viewer_state.py` asserts `escapeOrder`. | Document and popover keydown registration plus alignment-before-keyboard binding order remain as dependency-wiring contracts. |
 | Viewport restore spellings for left/right/active clips, filmstrip, inspector, blink interval, palette orientation, current frame, normalized pair alignments, pair loading, and filter normalization | `viewer_state_harness.js` executes restore/persist paths for all of these states; `test_report_viewer_state.py` asserts the restored selection, pair keys, filmstrip fallback, inspector/tab/blink state, and palette orientation. | Exact report-scoped storage key, JSON-load seam, unmatched overlay restore, pan/overlay persistence, and flattened-alignment exclusions remain. |
 | Viewport persistence spellings for current frame, mode, filmstrip state/size, inspector state/tab, blink interval, palette orientation, and pair alignments | The same executable viewport harness reads the persisted document and asserts these values, including exclusion of paused blink state and flattened pair alignment. | Unmatched pan/overlay fields and exact negative schema assertions remain source contracts. |
 | Grid activation, render/preload routing, constants, page construction, pan mapping, zoom anchoring, focus preservation, role cues, and public-default spelling checks | `grid_view_harness.js` exercises the real owner lifecycle, layouts, page limits, retries, pan normalization, focus retention, and reference/active cues. `viewer_state_harness.js` proves public payload rejection and internal stored-grid restoration. | Grid-before-viewer asset order plus create/bind composition remain dependency-order contracts. |

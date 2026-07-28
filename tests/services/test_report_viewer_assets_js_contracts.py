@@ -35,7 +35,7 @@ def test_viewer_js_preserves_modal_escape_and_focus_restore_contracts() -> None:
     assert "this.focusElement(first);" in help_key_block
 
 
-def test_viewer_js_closes_alignment_popover_before_global_escape_shortcuts() -> None:
+def test_viewer_js_binds_alignment_popover_before_global_shortcuts() -> None:
     js = get_js()
     bind_interaction_block = js_method_block(js, "bindInteractionEvents()")
     alignment_block = js_method_block(js, "bindAlignmentEvents()")
