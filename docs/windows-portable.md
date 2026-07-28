@@ -17,11 +17,30 @@ Release bundles are the intended recommended route. If the
 `frame-compare-portable-win-x64-<tag>.zip`, use the source-build route below.
 
 ```powershell
-# 1) Download frame-compare-portable-win-x64-<tag>.zip from the GitHub Release
-# 2) Extract it
+# 1) Download both files from the same GitHub Release:
+#    frame-compare-portable-win-x64-<tag>.zip
+#    frame-compare-portable-win-x64-<tag>.zip.sha256
+# 2) Verify the ZIP as shown below, then extract it.
 # 3) From the extracted folder:
 .\install.cmd
 ```
+
+Verify the ZIP before extracting or running it. Replace `<tag>` in both filenames
+with the release tag shown on GitHub:
+
+```powershell
+$zip = ".\frame-compare-portable-win-x64-<tag>.zip"
+$checksumFile = "$zip.sha256"
+$expected = ((Get-Content -LiteralPath $checksumFile -Raw).Trim() -split "\s+")[0].ToLowerInvariant()
+$actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actual -ne $expected) {
+    throw "SHA-256 mismatch. Do not install this download."
+}
+"SHA-256 verified: $actual"
+```
+
+The expected and actual hashes must match exactly. Delete and download both files
+again if verification fails; do not bypass a mismatch.
 
 ### From a Cloned Repo
 

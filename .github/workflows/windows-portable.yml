@@ -13,8 +13,6 @@ jobs:
   build:
     permissions:
       contents: read
-    outputs:
-      update_signed: ${{ steps.sign_update.outputs.signed }}
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -214,10 +212,9 @@ jobs:
             -OutFile $updateZip
           "UPDATE_ZIP=$updateZip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      # Pull requests prove update zip creation without requiring signing secrets.
-      # Release/manual runs sign only when the private key XML secret is configured.
+      # Pull requests prove unsigned update zip creation without signing secrets.
+      # Release/manual runs require a signed update and fail closed without the key.
       - name: Sign code-only update zip
-        id: sign_update
         if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
         shell: pwsh
         env:
@@ -226,9 +223,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           $PSNativeCommandUseErrorActionPreference = $true
           if ([string]::IsNullOrWhiteSpace($env:WINDOWS_UPDATE_SIGNING_KEY_XML)) {
-            Write-Host "::notice::Skipping signed update zip; WINDOWS_UPDATE_SIGNING_KEY_XML secret is not configured."
-            "signed=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-            exit 0
+            throw "WINDOWS_UPDATE_SIGNING_KEY_XML is required for release and manual runs."
           }
 
           $keyPath = Join-Path $env:RUNNER_TEMP "frame-compare-update-signing-key.xml"
@@ -238,7 +233,6 @@ jobs:
             $env:SIGNING_KEY_XML_PATH = $keyPath
             pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/sign_update.ps1 `
               -UpdateZip $env:UPDATE_ZIP
-            "signed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           } finally {
             Remove-Item Env:\SIGNING_KEY_XML_PATH -ErrorAction SilentlyContinue
             if (Test-Path -LiteralPath $keyPath -PathType Leaf) {
@@ -255,6 +249,8 @@ jobs:
 
       - name: Verify code-only update zip layout
         shell: pwsh
+        env:
+          REQUIRE_SIGNED_UPDATE: ${{ github.event_name == 'release' || github.event_name == 'workflow_dispatch' }}
         run: |
           $ErrorActionPreference = "Stop"
           Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -291,7 +287,7 @@ jobs:
           if ($manifest.signature_file -ne "update-manifest.sig") {
             throw "Unexpected update signature file: $($manifest.signature_file)"
           }
-          if ("${{ steps.sign_update.outputs.signed }}" -eq "true" -and $entries -notcontains "update-manifest.sig") {
+          if ($env:REQUIRE_SIGNED_UPDATE -eq "true" -and $entries -notcontains "update-manifest.sig") {
             throw "Signed update zip is missing update-manifest.sig."
           }
 
@@ -302,6 +298,7 @@ jobs:
           path: |
             dist/frame-compare-portable-win-x64.zip
             dist/frame-compare-portable-win-x64.zip.sha256
+          if-no-files-found: error
 
       - name: Upload code-only update artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -310,6 +307,7 @@ jobs:
           path: |
             dist/frame-compare-update-win-x64-*.zip
             dist/frame-compare-update-win-x64-*.zip.sha256
+          if-no-files-found: error
 
   release-assets:
     if: github.event_name == 'release'
@@ -325,7 +323,6 @@ jobs:
           path: dist/release-assets
 
       - name: Download signed update artifact
-        if: needs.build.outputs.update_signed == 'true'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: frame-compare-update-win-x64
@@ -349,7 +346,6 @@ jobs:
           printf '%s  %s\n' "$hash" "$(basename "$zip")" > "$zip.sha256"
 
       - name: Prepare versioned signed update asset
-        if: needs.build.outputs.update_signed == 'true'
         env:
           ASSET_TAG: ${{ steps.release_names.outputs.asset_tag }}
         run: |
@@ -364,21 +360,31 @@ jobs:
           hash="$(sha256sum "$versioned_update_zip" | cut -d ' ' -f 1)"
           printf '%s  %s\n' "$hash" "$(basename "$versioned_update_zip")" > "$versioned_update_zip.sha256"
 
-      - name: Upload release bundle asset
+      - name: Verify required release asset set
+        env:
+          ASSET_TAG: ${{ steps.release_names.outputs.asset_tag }}
+        run: |
+          required=(
+            "dist/release-assets/frame-compare-portable-win-x64-${ASSET_TAG}.zip"
+            "dist/release-assets/frame-compare-portable-win-x64-${ASSET_TAG}.zip.sha256"
+            "dist/release-assets/frame-compare-update-win-x64-${ASSET_TAG}.zip"
+            "dist/release-assets/frame-compare-update-win-x64-${ASSET_TAG}.zip.sha256"
+          )
+          for asset in "${required[@]}"; do
+            if [ ! -f "$asset" ]; then
+              echo "Missing required release asset: $asset" >&2
+              exit 1
+            fi
+          done
+
+      - name: Upload required release assets
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
         with:
           tag_name: ${{ github.event.release.tag_name }}
           prerelease: ${{ github.event.release.prerelease || contains(github.event.release.tag_name, '-rc') }}
+          fail_on_unmatched_files: true
           files: |
             dist/release-assets/frame-compare-portable-win-x64-${{ steps.release_names.outputs.asset_tag }}.zip
             dist/release-assets/frame-compare-portable-win-x64-${{ steps.release_names.outputs.asset_tag }}.zip.sha256
-
-      - name: Upload signed update release asset
-        if: needs.build.outputs.update_signed == 'true'
-        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
-        with:
-          tag_name: ${{ github.event.release.tag_name }}
-          prerelease: ${{ github.event.release.prerelease || contains(github.event.release.tag_name, '-rc') }}
-          files: |
             dist/release-assets/frame-compare-update-win-x64-${{ steps.release_names.outputs.asset_tag }}.zip
             dist/release-assets/frame-compare-update-win-x64-${{ steps.release_names.outputs.asset_tag }}.zip.sha256

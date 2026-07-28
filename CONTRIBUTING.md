@@ -9,6 +9,7 @@ Thank you for your interest in contributing! This guide will help you get starte
 - [Prerequisites](#prerequisites)
 - [Development Setup](#development-setup)
 - [Making Changes](#making-changes)
+- [Contribution licensing](#contribution-licensing)
 - [Documentation Development](#documentation-development)
 - [Pull Request Workflow](#pull-request-workflow)
 - [Code Style](#code-style)
@@ -77,6 +78,13 @@ git checkout -b feat/your-feature-name
 
 Use the [Engineering Runbook](docs/ENGINEERING_RUNBOOK.md) to choose and run the
 required verification for the current change.
+
+---
+
+## Contribution licensing
+
+Submitted contributions are licensed under `GPL-3.0-only`, and contributors affirm
+that they have the right to submit them under those terms.
 
 ---
 
@@ -235,7 +243,7 @@ Releases are automated from `main` using [Release Please](https://github.com/goo
 
 - On every push to `main`, the Release Please workflow opens or updates a PR like `chore(release): v0.1.1`.
 - Merging that PR publishes the GitHub Release and tag (e.g. `v0.1.1`).
-- If the repo has Auto-merge enabled, the workflow attempts to set the release PR to auto-merge once required checks pass.
+- Release PRs require maintainer review and are never auto-merged by the workflow.
 
 ### CI on release PRs (recommended)
 

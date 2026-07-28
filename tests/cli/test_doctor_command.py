@@ -33,14 +33,14 @@ _AUDITED_HINTS = (
         "Provide an FFmpeg executable on PATH; see "
         "https://github.com/TJZine/frame-compare#requirements"
     ),
-    "Provide VSPreview; see https://github.com/TJZine/frame-compare#installation",
+    ("Provide VSPreview; see https://tjzine.github.io/frame-compare/getting-started/native/"),
     (
         "Provide a supported Qt backend for VSPreview; see "
-        "https://github.com/TJZine/frame-compare#installation"
+        "https://tjzine.github.io/frame-compare/getting-started/native/"
     ),
     (
         "Check the optional VSPreview setup, then rerun doctor; see "
-        "https://github.com/TJZine/frame-compare#installation"
+        "https://tjzine.github.io/frame-compare/getting-started/native/"
     ),
     "Review the returned HTTP status before retrying",
     "Check network access to slow.pics, then retry",

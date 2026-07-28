@@ -7,7 +7,9 @@ from pathlib import Path
 from tests.workflow_helpers import (
     assert_release_asset_name_hardening as _assert_release_asset_name_hardening,
 )
+from tests.workflow_helpers import load_workflow as _load_workflow
 from tests.workflow_helpers import read_text_or_fail as _read_text_or_fail
+from tests.workflow_helpers import step_by_name as _step_by_name
 
 
 def test_release_please_owns_python_version_sources(repo_root: Path) -> None:
@@ -33,6 +35,27 @@ def test_release_please_owns_python_version_sources(repo_root: Path) -> None:
     assert release_config["release-type"] == "python"
     assert release_config["packages"]["."]["release-type"] == "python"
     assert release_manifest["."] == project["version"] == package_version
+
+
+def test_release_please_workflow_requires_human_review(repo_root: Path) -> None:
+    workflow_path = repo_root / ".github" / "workflows" / "release-please.yml"
+    workflow = _read_text_or_fail(workflow_path)
+
+    assert "gh pr merge" not in workflow
+    assert "--auto" not in workflow
+
+
+def test_ci_requires_clean_distribution_build_and_install(repo_root: Path) -> None:
+    workflow_path = repo_root / ".github" / "workflows" / "ci.yml"
+    workflow = _read_text_or_fail(workflow_path)
+
+    assert "uv build --out-dir dist" in workflow
+    assert ".dist-venv/bin/python scripts/verify_distribution.py dist" in workflow
+    assert "uv pip install --python .dist-venv/bin/python dist/*.whl" in workflow
+    assert ".dist-venv/bin/frame-compare version" in workflow
+    assert ".dist-venv/bin/frame-compare --help" in workflow
+    assert "needs: [lint, security, typecheck, test, import-lints, package]" in workflow
+    assert '[[ "${{ needs.package.result }}" != "success" ]]' in workflow
 
 
 def test_docker_integration_workflow_covers_supported_pull_request_bases(repo_root: Path) -> None:
@@ -260,32 +283,55 @@ def test_windows_portable_workflow_proves_code_only_update_without_pr_secrets(
     assert "tools/windows_portable/build_update.ps1" in workflow
     assert "frame-compare-update-win-x64-$version.zip" in workflow
     assert "UPDATE_ZIP=$updateZip" in workflow
-    assert "Pull requests prove update zip creation without requiring signing secrets." in workflow
+    assert "Pull requests prove unsigned update zip creation without signing secrets." in workflow
     assert "Upload code-only update artifact" in workflow
     assert "name: frame-compare-update-win-x64" in workflow
     assert "dist/frame-compare-update-win-x64-*.zip" in workflow
 
 
-def test_windows_portable_workflow_gates_signed_update_release_assets(
+def test_windows_portable_workflow_requires_signed_update_release_assets(
     repo_root: Path,
 ) -> None:
     workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
-    workflow = _read_text_or_fail(workflow_path)
+    source = _read_text_or_fail(workflow_path)
+    workflow = _load_workflow(workflow_path)
+    build = workflow["jobs"]["build"]
+    release_assets = workflow["jobs"]["release-assets"]
+    sign = _step_by_name(build, "Sign code-only update zip")
+    verify = _step_by_name(build, "Verify code-only update zip layout")
+    download = _step_by_name(release_assets, "Download signed update artifact")
+    prepare = _step_by_name(release_assets, "Prepare versioned signed update asset")
+    verify_assets = _step_by_name(release_assets, "Verify required release asset set")
+    upload = _step_by_name(release_assets, "Upload required release assets")
 
-    assert "update_signed: ${{ steps.sign_update.outputs.signed }}" in workflow
-    assert (
-        "WINDOWS_UPDATE_SIGNING_KEY_XML: ${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}" in workflow
+    assert release_assets["if"] == "github.event_name == 'release'"
+    assert sign["env"]["WINDOWS_UPDATE_SIGNING_KEY_XML"] == (
+        "${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}"
     )
-    assert "::notice::Skipping signed update zip; WINDOWS_UPDATE_SIGNING_KEY_XML secret" in workflow
-    assert "tools/windows_portable/sign_update.ps1" in workflow
-    assert "if: needs.build.outputs.update_signed == 'true'" in workflow
-    assert "Download signed update artifact" in workflow
-    assert "Prepare versioned signed update asset" in workflow
-    assert "Upload signed update release asset" in workflow
-    assert "mapfile -t update_zips" in workflow
-    assert "Expected exactly one signed update zip artifact, found ${#update_zips[@]}." in workflow
-    assert "frame-compare-update-win-x64-${ASSET_TAG}.zip" in workflow
+    assert "WINDOWS_UPDATE_SIGNING_KEY_XML is required for release and manual runs." in sign["run"]
+    assert "tools/windows_portable/sign_update.ps1" in sign["run"]
+    assert verify["env"]["REQUIRE_SIGNED_UPDATE"] == (
+        "${{ github.event_name == 'release' || github.event_name == 'workflow_dispatch' }}"
+    )
+    assert "Signed update zip is missing update-manifest.sig." in verify["run"]
+    assert download["with"] == {
+        "name": "frame-compare-update-win-x64",
+        "path": "dist/release-assets",
+    }
+    assert "mapfile -t update_zips" in prepare["run"]
+    assert (
+        "Expected exactly one signed update zip artifact, found ${#update_zips[@]}."
+        in (prepare["run"])
+    )
+    assert "frame-compare-update-win-x64-${ASSET_TAG}.zip" in prepare["run"]
+    assert "Missing required release asset: $asset" in verify_assets["run"]
+    assert upload["with"]["fail_on_unmatched_files"] == "true"
     assert (
         "dist/release-assets/frame-compare-update-win-x64-${{ "
         "steps.release_names.outputs.asset_tag }}.zip"
-    ) in workflow
+    ) in upload["with"]["files"]
+    assert (
+        "dist/release-assets/frame-compare-update-win-x64-${{ "
+        "steps.release_names.outputs.asset_tag }}.zip.sha256"
+    ) in upload["with"]["files"]
+    assert "update_signed" not in source

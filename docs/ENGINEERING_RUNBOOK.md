@@ -36,7 +36,8 @@ If a task needs a broader compatibility promise, the maintainer must confirm it 
   and `pr-commit-review`
 - `README.md`: product overview, install, quickstart
 - `CONTRIBUTING.md`: contributor onboarding and PR mechanics
-- `docs/plans/**`: reference-only unless the file starts with `Status: Active`
+- `docs/plans/**`: reference-only unless the file has the required search-exclusion
+  front matter followed by `Status: Active`
 - `.codex/cache/**`: local cache material only, never current authority
 
 Do not create a second runbook, second architecture summary, or second current CLI contract.
@@ -261,8 +262,10 @@ Current CI ownership:
 - `.github/workflows/windows-portable.yml` is the canonical CI path for the full portable bundle.
 - `.github/workflows/windows-portable.yml` also builds and verifies a code-only
   update zip after the full bundle exists. Pull requests prove unsigned update
-  zip creation and layout. Release and manual runs sign the update zip only when
-  the `WINDOWS_UPDATE_SIGNING_KEY_XML` secret is configured.
+  zip creation and layout. Release and manual runs require
+  `WINDOWS_UPDATE_SIGNING_KEY_XML`; they fail before artifact publication when
+  the secret is absent or signing fails. Every public Windows release includes
+  the signed update zip and its checksum.
 
 When updater or release-package logic changes and the signed-update path cannot
 run locally or in CI with `WINDOWS_UPDATE_SIGNING_KEY_XML`, mark signing as
@@ -437,11 +440,17 @@ It becomes authoritative only when all of these are true:
 
 1. The work needs a durable cross-session handoff, or the maintainer explicitly asks for a tracked plan file.
 2. A dated plan file is created or updated under `docs/plans/`.
-3. The plan starts with a metadata block containing `Status: Active`.
+3. The plan has the required Zensical search-exclusion front matter followed by an
+   activation metadata block containing `Status: Active`.
 
-Required active-plan metadata block:
+Required active-plan preamble:
 
 ```text
+---
+search:
+  exclude: true
+---
+
 Status: Active
 Scope: <task scope>
 Owner: <person or session>
@@ -450,6 +459,8 @@ Owner: <person or session>
 Rules:
 
 - If no active-plan marker exists, treat `docs/plans/` as reference-only.
+- Keep `search.exclude: true` on every tracked plan so internal planning material
+  cannot enter the user-documentation search index.
 - For single-session work, keep the plan inline unless a durable handoff is needed.
 - Only one active plan should exist per workstream.
 - When the work closes, change the marker to `Status: Historical` or move the document to historical/reference context in the same pass.

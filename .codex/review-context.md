@@ -54,7 +54,8 @@ Current truth:
 
 Historical/reference only:
 - `docs/DECISIONS.md` for historical exceptions/decisions
-- `docs/plans/**` unless the file starts with `Status: Active`
+- `docs/plans/**` unless the file has the required search-exclusion front matter
+  followed by `Status: Active`
 - `.codex/cache/**` local cache only
 
 ## Control-Plane / Config Paths

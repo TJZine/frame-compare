@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any, cast
 
-import yaml
+from tests.workflow_helpers import load_workflow as _load_workflow
+from tests.workflow_helpers import step_by_name as _step_by_name
 
 from ._helpers import read_text_or_fail
 
@@ -36,19 +36,8 @@ EXPECTED_DEPLOY_GATE = (
 )
 
 
-def _load_workflow(repo_root: Path) -> tuple[str, dict[str, Any]]:
-    source = read_text_or_fail(repo_root / ".github" / "workflows" / "docs.yml")
-    parsed = yaml.load(source, Loader=yaml.BaseLoader)
-    assert isinstance(parsed, dict)
-    return source, cast(dict[str, Any], parsed)
-
-
-def _step_by_name(job: dict[str, Any], name: str) -> dict[str, Any]:
-    return cast(dict[str, Any], next(step for step in job["steps"] if step["name"] == name))
-
-
 def test_docs_workflow_events_and_paths_are_scoped(repo_root: Path) -> None:
-    _, workflow = _load_workflow(repo_root)
+    workflow = _load_workflow(repo_root / ".github" / "workflows" / "docs.yml")
     events = workflow["on"]
 
     assert set(events) == {"pull_request", "push", "workflow_dispatch"}
@@ -59,7 +48,7 @@ def test_docs_workflow_events_and_paths_are_scoped(repo_root: Path) -> None:
 
 
 def test_docs_workflow_permissions_and_concurrency_are_isolated(repo_root: Path) -> None:
-    _, workflow = _load_workflow(repo_root)
+    workflow = _load_workflow(repo_root / ".github" / "workflows" / "docs.yml")
     build = workflow["jobs"]["build"]
     deploy = workflow["jobs"]["deploy"]
 
@@ -74,7 +63,9 @@ def test_docs_workflow_permissions_and_concurrency_are_isolated(repo_root: Path)
 
 
 def test_docs_workflow_builds_strictly_from_locked_docs_group(repo_root: Path) -> None:
-    source, workflow = _load_workflow(repo_root)
+    workflow_path = repo_root / ".github" / "workflows" / "docs.yml"
+    source = read_text_or_fail(workflow_path)
+    workflow = _load_workflow(workflow_path)
     build = workflow["jobs"]["build"]
 
     assert _step_by_name(build, "Set up Python")["with"]["python-version"] == "3.13"
@@ -96,7 +87,7 @@ def test_docs_workflow_builds_strictly_from_locked_docs_group(repo_root: Path) -
 
 
 def test_docs_workflow_gates_pages_steps_and_deployment(repo_root: Path) -> None:
-    _, workflow = _load_workflow(repo_root)
+    workflow = _load_workflow(repo_root / ".github" / "workflows" / "docs.yml")
     build = workflow["jobs"]["build"]
     deploy = workflow["jobs"]["deploy"]
 
@@ -114,7 +105,9 @@ def test_docs_workflow_gates_pages_steps_and_deployment(repo_root: Path) -> None
 
 
 def test_docs_workflow_pins_actions_to_expected_full_shas(repo_root: Path) -> None:
-    source, workflow = _load_workflow(repo_root)
+    workflow_path = repo_root / ".github" / "workflows" / "docs.yml"
+    source = read_text_or_fail(workflow_path)
+    workflow = _load_workflow(workflow_path)
     action_uses = [
         step["uses"] for job in workflow["jobs"].values() for step in job["steps"] if "uses" in step
     ]

@@ -99,7 +99,8 @@ def check_vspreview_availability() -> VSPreviewAvailability:
                 status=VSPreviewAvailabilityStatus.MISSING_EXEC_AND_MODULE,
                 message="VSPreview not installed (optional for manual alignment)",
                 hint=(
-                    "Provide VSPreview; see https://github.com/TJZine/frame-compare#installation"
+                    "Provide VSPreview; see "
+                    "https://tjzine.github.io/frame-compare/getting-started/native/"
                 ),
             )
 
@@ -119,7 +120,7 @@ def check_vspreview_availability() -> VSPreviewAvailability:
             message="Qt backend missing for VSPreview (optional for manual alignment)",
             hint=(
                 "Provide a supported Qt backend for VSPreview; see "
-                "https://github.com/TJZine/frame-compare#installation"
+                "https://tjzine.github.io/frame-compare/getting-started/native/"
             ),
         )
     except Exception as exc:
@@ -128,7 +129,7 @@ def check_vspreview_availability() -> VSPreviewAvailability:
             message="VSPreview availability probe failed (optional for manual alignment)",
             hint=(
                 "Check the optional VSPreview setup, then rerun doctor; see "
-                "https://github.com/TJZine/frame-compare#installation"
+                "https://tjzine.github.io/frame-compare/getting-started/native/"
             ),
             error_details={
                 "exception_type": type(exc).__name__,
