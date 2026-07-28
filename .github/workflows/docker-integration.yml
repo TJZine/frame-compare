@@ -10,6 +10,7 @@ on:
       - uv.lock
       - tools/verify_docker_*.sh
       - tests/workflows/**
+      - src/frame_compare/analysis/**
       - src/frame_compare/render/**
       - src/frame_compare/vs/**
       - tests/integration/**
