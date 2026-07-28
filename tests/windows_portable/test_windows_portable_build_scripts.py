@@ -556,3 +556,6 @@ def test_windows_portable_builder_writes_inventory_and_cleans_runtime_index(
     assert "--require-clean-repo" in build_script
     assert 'Remove-Item -Force -LiteralPath $mediaIndexPath' in build_script
     assert "function Copy-RequiredQtLicenseDirectories" in build_script
+    assert 'Join-Path $matches[0].FullName "LICENSE"' in build_script
+    assert 'Join-Path $matches[0].FullName "licenses\\\\LICENSE"' in build_script
+    assert "$licenseCandidates.Count -ne 1" in build_script
