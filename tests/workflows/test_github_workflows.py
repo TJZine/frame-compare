@@ -54,8 +54,32 @@ def test_ci_requires_clean_distribution_build_and_install(repo_root: Path) -> No
     assert "uv pip install --python .dist-venv/bin/python dist/*.whl" in workflow
     assert ".dist-venv/bin/frame-compare version" in workflow
     assert ".dist-venv/bin/frame-compare --help" in workflow
-    assert "needs: [lint, security, typecheck, test, import-lints, package]" in workflow
+    assert (
+        "needs: [lint, security, typecheck, test, import-lints, package, report-browser]"
+        in workflow
+    )
     assert '[[ "${{ needs.package.result }}" != "success" ]]' in workflow
+
+
+def test_ci_runs_generated_report_smoke_in_preflighted_system_browser(
+    repo_root: Path,
+) -> None:
+    workflow = _load_workflow(repo_root / ".github" / "workflows" / "ci.yml")
+    job = workflow["jobs"]["report-browser"]
+
+    assert job["runs-on"] == "ubuntu-24.04"
+    named_steps = {step["name"]: step for step in job["steps"] if "name" in step}
+    preflight = named_steps["Preflight Chrome or Chromium"]
+    preflight_script = preflight["run"]
+    assert "command -v google-chrome" in preflight_script
+    assert "command -v chromium" in preflight_script
+    assert "ERROR: Ubuntu 24.04 runner has no Chrome or Chromium executable." in preflight_script
+    assert 'echo "REPORT_BROWSER=$browser" >> "$GITHUB_ENV"' in preflight_script
+
+    smoke = named_steps["Run generated report browser smoke"]
+    assert (
+        smoke["run"] == "uv run --no-sync pytest -q tests/integration/test_report_browser_smoke.py"
+    )
 
 
 def test_direct_build_tools_are_pinned_exactly(repo_root: Path) -> None:
