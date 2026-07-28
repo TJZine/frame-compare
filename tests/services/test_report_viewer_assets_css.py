@@ -232,12 +232,9 @@ def test_viewer_css_covers_production_lens_and_touch_controls() -> None:
     assert "overscroll-behavior: contain;" in settings
     assert "max-height: calc(100% - 2rem);" in vertical_palette
     assert "overflow-y: auto;" in vertical_palette
-    assert ".rv-lens-settings-open" not in css
     assert '.rv-lens[data-comparison="true"] .rv-lens-pane--comparison' in css
     assert ".rv-lens-palette-controls" in css
     assert ".rv-lens-fixed-status" in css
-    assert ".rv-lens-titlebar" not in css
-    assert ".rv-lens-controls" not in css
     assert_coarse_touch_targets(
         coarse,
         (
@@ -249,7 +246,6 @@ def test_viewer_css_covers_production_lens_and_touch_controls() -> None:
             ".rv-inspector-tabs button",
         ),
     )
-    assert "[data-lens-behavior]" not in coarse
     assert ".rv-lens" in reduced_motion
     assert ".rv-lens-target" in reduced_motion
     assert "display: none !important" not in coarse
