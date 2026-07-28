@@ -239,6 +239,8 @@ def _assert_safe_bundle(bundle_root: Path) -> None:
             prohibited.append(relative)
         if lowered.startswith("runtime-smoke"):
             prohibited.append(relative)
+        if "/__pycache__/" in f"/{lowered}" or lowered.endswith((".pyc", ".pyo")):
+            prohibited.append(relative)
         if lowered.endswith((".private.xml", "/.env", "/config.toml", "/report.html")):
             prohibited.append(relative)
         if "private_key" in lowered or "private-key" in lowered:

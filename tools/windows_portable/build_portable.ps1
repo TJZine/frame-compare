@@ -419,11 +419,23 @@ function Copy-RepoApp([string]$BundleRoot) {
   Ensure-Directory -Path $srcRoot
   Ensure-Directory -Path $sitePackages
 
-  $pkgSrc = Join-Path $RepoRoot "src\\frame_compare"
-  if (!(Test-Path -LiteralPath $pkgSrc)) {
-    throw "Repo package not found: $pkgSrc"
+  $archivePath = Join-Path $CacheDir (
+    "frame_compare_source_$([System.Guid]::NewGuid().ToString('N')).tar"
+  )
+  try {
+    & git -C $RepoRoot archive --format=tar --output=$archivePath HEAD src/frame_compare
+    Assert-LastExitCode -CommandLabel "git archive Frame Compare source"
+    if (!(Get-Command tar -ErrorAction SilentlyContinue)) {
+      throw "tar is required on PATH to extract the committed Frame Compare source."
+    }
+    tar -xf $archivePath -C $appRoot
+    Assert-LastExitCode -CommandLabel "extract committed Frame Compare source"
+  } finally {
+    Remove-Item -Force -LiteralPath $archivePath -ErrorAction SilentlyContinue
   }
-  Copy-Item -Recurse -Force -LiteralPath $pkgSrc -Destination (Join-Path $srcRoot "frame_compare")
+  if (!(Test-Path -LiteralPath (Join-Path $srcRoot "frame_compare\\__init__.py"))) {
+    throw "Committed Frame Compare source was not extracted into the bundle."
+  }
 }
 
 function Configure-EmbeddedPython([string]$BundleRoot) {
