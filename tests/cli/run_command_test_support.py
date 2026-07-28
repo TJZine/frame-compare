@@ -122,7 +122,7 @@ def _deps(options: DepsOptions | None = None, opened: list[Path] | None = None) 
         load_config=opts.load_config,
         write_config_to=opts.write_config_to,
         handle_error=opts.handle_error,
-        configure_logging=lambda *, level, format: None,
+        configure_logging=lambda *, level, log_format: None,
         console_factory=_console_factory,
         open_report=opts.open_report or _open_report,
         copy_to_clipboard=opts.copy_to_clipboard or (lambda _text: None),

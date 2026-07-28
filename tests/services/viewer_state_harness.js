@@ -66,6 +66,7 @@ function payloadWithClipCount(clipCount) {
 function fakeElement() {
     const classes = new Set();
     const attributes = new Map();
+    const listeners = new Map();
     return {
         value: '',
         textContent: '',
@@ -111,6 +112,17 @@ function fakeElement() {
         },
         contains(target) {
             return target === this;
+        },
+        addEventListener(type, listener) {
+            const registered = listeners.get(type) || [];
+            registered.push(listener);
+            listeners.set(type, registered);
+        },
+        dispatch(type, event = {}) {
+            if (!Object.hasOwn(event, 'target')) event.target = this;
+            for (const listener of listeners.get(type) || []) {
+                listener(event);
+            }
         },
         focus() {
             if (activeDocument) activeDocument.activeElement = this;
@@ -252,6 +264,7 @@ function loadViewer({ clipCount, savedState = null }) {
         alignmentPreset: fakeElement(),
         alignX: fakeElement(),
         alignY: fakeElement(),
+        btnAlignmentReset: fakeElement(),
         btnAlignToggle: fakeElement(),
         alignmentStatus: fakeElement(),
         btnInfo: fakeElement(),
@@ -365,10 +378,13 @@ function keyboardEvent(key) {
         key,
         target: { tagName: 'DIV', isContentEditable: false, closest() { return null; } },
         defaultPrevented: false,
+        propagationStopped: false,
         preventDefault() {
             this.defaultPrevented = true;
         },
-        stopPropagation() {},
+        stopPropagation() {
+            this.propagationStopped = true;
+        },
     };
 }
 
@@ -575,6 +591,17 @@ const summary = {};
 {
     const { viewer } = loadViewer({ clipCount: 4 });
 
+    viewer.bindAlignmentEvents();
+    viewer.setInspectorOpen(true);
+    viewer.setAlignmentPopoverOpen(true, { restoreFocus: false });
+    const popoverEscape = keyboardEvent('Escape');
+    viewer.dom.alignPopover.dispatch('keydown', popoverEscape);
+    if (!popoverEscape.propagationStopped) viewer.handleKey(popoverEscape);
+    assert.equal(popoverEscape.defaultPrevented, true);
+    assert.equal(popoverEscape.propagationStopped, true);
+    assert.equal(viewer.isAlignmentPopoverOpen(), false);
+    assert.equal(viewer.state.inspectorOpen, true);
+
     viewer.setInspectorOpen(true);
     viewer.setAlignmentPopoverOpen(true, { restoreFocus: false });
     const firstEscape = keyboardEvent('Escape');
@@ -599,6 +626,11 @@ const summary = {};
     assert.equal(viewer.isAlignmentPopoverOpen(), true);
 
     summary.escapeOrder = {
+        popoverHandlerPreventedGlobalShortcut: (
+            popoverEscape.defaultPrevented
+            && popoverEscape.propagationStopped
+            && viewer.state.inspectorOpen
+        ),
         alignmentClosedBeforeInspector: true,
         legacyInfoModalWins: true,
         inspectorStillOpenAfterAlignmentEscape: true,

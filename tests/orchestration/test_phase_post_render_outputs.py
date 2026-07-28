@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -436,7 +435,7 @@ async def test_report_confirmed_decline_skips_publish(
     async with httpx.AsyncClient() as client:
         phases = build_phases_after_align(
             request=RunRequest(root=tmp_path),
-            clock=lambda: datetime(2026, 5, 31, tzinfo=UTC),
+            monotonic_timer=lambda: 0.0,
             ffmpeg_runner=cast(Any, _RenderRunner()),
             http_client=client,
             state=state,
@@ -488,7 +487,7 @@ async def test_report_confirmed_available_report_confirms_then_publishes(
     async with httpx.AsyncClient() as client:
         phases = build_phases_after_align(
             request=RunRequest(root=tmp_path),
-            clock=lambda: datetime(2026, 5, 31, tzinfo=UTC),
+            monotonic_timer=lambda: 0.0,
             ffmpeg_runner=cast(Any, _RenderRunner()),
             http_client=client,
             state=state,
@@ -539,7 +538,7 @@ async def test_report_confirmed_report_failure_skips_prompt_and_publish(
     async with httpx.AsyncClient() as client:
         phases = build_phases_after_align(
             request=RunRequest(root=tmp_path),
-            clock=lambda: datetime(2026, 5, 31, tzinfo=UTC),
+            monotonic_timer=lambda: 0.0,
             ffmpeg_runner=cast(Any, _RenderRunner()),
             http_client=client,
             state=state,
@@ -587,7 +586,7 @@ async def test_report_confirmed_report_payload_uses_no_slowpics_url(
 
     phases = build_phases_after_align(
         request=RunRequest(root=tmp_path),
-        clock=lambda: datetime(2026, 5, 31, tzinfo=UTC),
+        monotonic_timer=lambda: 0.0,
         ffmpeg_runner=cast(Any, _RenderRunner()),
         http_client=None,
         state=state,
@@ -793,7 +792,7 @@ async def test_warn_only_publish_phase_keeps_sanitized_service_error_in_warning_
     async with httpx.AsyncClient() as client:
         phases = build_phases_after_align(
             request=RunRequest(root=tmp_path),
-            clock=lambda: datetime(2026, 5, 31, tzinfo=UTC),
+            monotonic_timer=lambda: 0.0,
             ffmpeg_runner=cast(Any, _RenderRunner()),
             http_client=client,
             state=state,

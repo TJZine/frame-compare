@@ -1088,14 +1088,34 @@ async def test_publish_to_slowpics_metadata_timeout_and_request_error_do_not_ret
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("retry_after", "expected_delay"),
+    [
+        ("-1", 0.0),
+        ("nan", 60.0),
+        ("inf", 60.0),
+        ("-inf", 0.0),
+        ("1e300", 60.0),
+        ("past-date", 0.0),
+        ("future-date", 60.0),
+        ("not-a-retry-delay", 60.0),
+        (None, 60.0),
+    ],
+)
 async def test_publish_to_slowpics_metadata_retries_response_rate_limit(
     tmp_path: Path,
     async_client: httpx.AsyncClient,
     respx_mock,
     mock_sleep,
+    retry_after: str | None,
+    expected_delay: float,
 ) -> None:
     upload_plan = _plan(tmp_path, rows=1, cols=1)
-    retry_at = datetime.now(UTC) + timedelta(seconds=120)
+    if retry_after == "past-date":
+        retry_after = format_datetime(datetime.now(UTC) - timedelta(seconds=120))
+    elif retry_after == "future-date":
+        retry_after = format_datetime(datetime.now(UTC) + timedelta(seconds=120))
+    retry_headers = {"Retry-After": retry_after} if retry_after is not None else {}
     respx_mock.get("https://slow.pics/comparison").mock(
         return_value=httpx.Response(
             200,
@@ -1104,7 +1124,7 @@ async def test_publish_to_slowpics_metadata_retries_response_rate_limit(
     )
     metadata_route = respx_mock.post("https://slow.pics/upload/comparison")
     metadata_route.side_effect = [
-        httpx.Response(429, headers={"Retry-After": format_datetime(retry_at)}),
+        httpx.Response(429, headers=retry_headers),
         httpx.Response(200, json=_metadata_payload(rows=1, cols=1)),
     ]
     respx_mock.post("https://slow.pics/upload/image/image-0-0-secret").mock(
@@ -1120,7 +1140,7 @@ async def test_publish_to_slowpics_metadata_retries_response_rate_limit(
 
     assert result.url == "https://slow.pics/c/first-key"
     assert metadata_route.call_count == 2
-    mock_sleep.assert_awaited_once()
+    mock_sleep.assert_awaited_once_with(expected_delay)
 
 
 @pytest.mark.anyio

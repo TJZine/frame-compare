@@ -379,6 +379,7 @@ def test_preset_save_respects_root_and_config_writes_secret_safe_preset(
         "FRAME_COMPARE_SLOWPICS__WEBHOOK_URL",
         "https://discord.com/api/webhooks/env-id/env-secret",
     )
+    monkeypatch.setenv("FRAME_COMPARE_TMDB__API_KEY", "sentinel-tmdb-api-key")
     with runner.isolated_filesystem():
         root = Path("workspace")
         config_path = root / "configs" / "config.toml"
@@ -386,6 +387,7 @@ def test_preset_save_respects_root_and_config_writes_secret_safe_preset(
         config_path.write_text(
             MINIMAL_CONFIG
             + '\n[slowpics]\nwebhook_url = "https://discord.com/api/webhooks/id/file-secret"\n'
+            + '\n[tmdb]\napi_key = "sentinel-tmdb-api-key"\n'
         )
 
         result = runner.invoke(
@@ -400,6 +402,8 @@ def test_preset_save_respects_root_and_config_writes_secret_safe_preset(
         assert "webhook_url" not in preset_text
         assert "env-secret" not in preset_text
         assert "file-secret" not in preset_text
+        assert "sentinel-tmdb-api-key" not in preset_text
+        assert "sentinel-tmdb-api-key" not in result.stdout + result.stderr
 
 
 def test_preset_save_write_error_uses_cli_error_contract(
@@ -435,6 +439,7 @@ def test_preset_apply_updates_config_and_strips_webhook_secret(
         "FRAME_COMPARE_SLOWPICS__WEBHOOK_URL",
         "https://discord.com/api/webhooks/env-id/env-secret",
     )
+    monkeypatch.setenv("FRAME_COMPARE_TMDB__API_KEY", "sentinel-tmdb-api-key")
     with runner.isolated_filesystem():
         root = Path("workspace")
         config_path = root / "configs" / "config.toml"
@@ -442,6 +447,7 @@ def test_preset_apply_updates_config_and_strips_webhook_secret(
         config_path.write_text(
             MINIMAL_CONFIG
             + '\n[slowpics]\nwebhook_url = "https://discord.com/api/webhooks/id/file-secret"\n'
+            + '\n[tmdb]\napi_key = "sentinel-tmdb-api-key"\n'
         )
         presets_dir = root / "config" / "presets"
         presets_dir.mkdir(parents=True, exist_ok=True)
@@ -460,6 +466,9 @@ def test_preset_apply_updates_config_and_strips_webhook_secret(
         data = tomllib.loads(config_path.read_text(encoding="utf-8"))
         assert data["analysis"]["random_frame_count"] == 22
         assert "webhook_url" not in data["slowpics"]
+        assert "api_key" not in data["tmdb"]
         config_text = config_path.read_text(encoding="utf-8")
         assert "env-secret" not in config_text
         assert "file-secret" not in config_text
+        assert "sentinel-tmdb-api-key" not in config_text
+        assert "sentinel-tmdb-api-key" not in result.stdout + result.stderr

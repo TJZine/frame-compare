@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
 import subprocess
 import sys
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -21,45 +23,41 @@ _POWERSHELL_SIGN_TIMEOUT_SECONDS = 30.0
 _POWERSHELL_APPLY_TIMEOUT_SECONDS = 30.0
 
 
-def _generate_rsa_keypair(*, exe: str) -> tuple[str, str]:
-    key_gen_cmd = (
-        "function B64([byte[]]$Bytes) { [Convert]::ToBase64String($Bytes) }; "
-        "$rsa = [System.Security.Cryptography.RSA]::Create(); "
-        "$rsa.KeySize = 2048; "
-        "$private = $rsa.ExportParameters($true); "
-        "$public = $rsa.ExportParameters($false); "
-        "$privateXml = '<RSAKeyValue>' + "
-        "'<Modulus>' + (B64 $private.Modulus) + '</Modulus>' + "
-        "'<Exponent>' + (B64 $private.Exponent) + '</Exponent>' + "
-        "'<P>' + (B64 $private.P) + '</P>' + "
-        "'<Q>' + (B64 $private.Q) + '</Q>' + "
-        "'<DP>' + (B64 $private.DP) + '</DP>' + "
-        "'<DQ>' + (B64 $private.DQ) + '</DQ>' + "
-        "'<InverseQ>' + (B64 $private.InverseQ) + '</InverseQ>' + "
-        "'<D>' + (B64 $private.D) + '</D>' + "
-        "'</RSAKeyValue>'; "
-        "$publicXml = '<RSAKeyValue>' + "
-        "'<Modulus>' + (B64 $public.Modulus) + '</Modulus>' + "
-        "'<Exponent>' + (B64 $public.Exponent) + '</Exponent>' + "
-        "'</RSAKeyValue>'; "
-        "$rsa.Dispose(); "
-        "Write-Output '---PRIVATE---'; "
-        "Write-Output $privateXml; "
-        "Write-Output '---PUBLIC---'; "
-        "Write-Output $publicXml;"
+def _generate_rsa_keypair(
+    *,
+    exe: str,
+    repo_root: Path,
+    tmp_path: Path,
+) -> tuple[Path, str]:
+    private_key_path = tmp_path / "private_key.xml"
+    public_key_path = tmp_path / "public_key.xml"
+    keygen_script = (
+        repo_root / "tools" / "windows_portable" / "generate_update_keypair.ps1"
     )
     proc = subprocess.run(
-        [exe, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", key_gen_cmd],
+        [
+            exe,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(keygen_script),
+            "-PublicKeyPath",
+            str(public_key_path),
+            "-PrivateKeyPath",
+            str(private_key_path),
+            "-KeyId",
+            "frame-compare-update-e2e-test",
+            "-KeySize",
+            "2048",
+        ],
         capture_output=True,
         text=True,
         check=True,
         timeout=_POWERSHELL_KEYGEN_TIMEOUT_SECONDS,
     )
-    stdout = proc.stdout
-    assert "---PRIVATE---" in stdout and "---PUBLIC---" in stdout
-    private_key_xml = stdout.split("---PRIVATE---")[1].split("---PUBLIC---")[0].strip()
-    public_key_xml = stdout.split("---PUBLIC---")[1].strip()
-    return private_key_xml, public_key_xml
+    assert "<RSAKeyValue>" not in proc.stdout + proc.stderr
+    return private_key_path, public_key_path.read_text(encoding="utf-8")
 
 
 def _setup_update_install(
@@ -141,8 +139,6 @@ def _write_mock_bundle(*, bundle_dir: Path) -> Path:
 
 
 def _build_update_zip(*, tmp_path: Path) -> Path:
-    import hashlib
-
     update_staging = tmp_path / "update_staging"
     update_staging.mkdir()
 
@@ -205,6 +201,7 @@ def _sign_update_zip(
         timeout=_POWERSHELL_SIGN_TIMEOUT_SECONDS,
     )
     assert "Signed:" in sign_proc.stdout
+    env.pop("SIGNING_KEY_XML_PATH")
     return env
 
 
@@ -246,15 +243,65 @@ def _assert_update_applied(*, bundle_dir: Path, version_py: Path) -> None:
     assert backup_version_py.read_text(encoding="utf-8") == _OLD_VERSION_CONTENT
 
 
+def _snapshot_tree(path: Path) -> dict[str, str]:
+    return {
+        file.relative_to(path).as_posix(): hashlib.sha256(file.read_bytes()).hexdigest()
+        for file in sorted(path.rglob("*"))
+        if file.is_file()
+    }
+
+
+def _rewrite_zip_entry(
+    *,
+    source_zip: Path,
+    target_zip: Path,
+    entry_name: str,
+    transform: Callable[[bytes], bytes],
+) -> None:
+    with zipfile.ZipFile(source_zip, mode="r") as source:
+        entries = [(info, source.read(info.filename)) for info in source.infolist()]
+    with zipfile.ZipFile(target_zip, mode="w") as target:
+        for info, content in entries:
+            if info.filename == entry_name:
+                content = transform(content)
+            target.writestr(info, content)
+
+
+def _run_update_command(
+    *,
+    exe: str,
+    env: dict[str, str],
+    shim_update_ps1: Path,
+    args: list[str],
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            exe,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(shim_update_ps1),
+            *args,
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=_POWERSHELL_APPLY_TIMEOUT_SECONDS,
+    )
+
+
 @pytest.mark.integration
 def test_windows_portable_update_apply_e2e(tmp_path: Path, repo_root: Path) -> None:
     exe = _powershell_exe()
     if exe is None:
         pytest.skip("pwsh/powershell not available")
 
-    private_key_xml, public_key_xml = _generate_rsa_keypair(exe=exe)
-    private_key_path = tmp_path / "private_key.xml"
-    private_key_path.write_text(private_key_xml, encoding="utf-8")
+    private_key_path, public_key_xml = _generate_rsa_keypair(
+        exe=exe,
+        repo_root=repo_root,
+        tmp_path=tmp_path,
+    )
 
     bundle_dir, shim_update_ps1, _state_dir = _setup_update_install(
         tmp_path=tmp_path,
@@ -270,6 +317,47 @@ def test_windows_portable_update_apply_e2e(tmp_path: Path, repo_root: Path) -> N
         private_key_path=private_key_path,
     )
 
+    installed_tree = bundle_dir / "app" / "src" / "frame_compare"
+    original_snapshot = _snapshot_tree(installed_tree)
+
+    manifest_tampered_zip = tmp_path / "manifest-tampered.zip"
+    _rewrite_zip_entry(
+        source_zip=update_zip_path,
+        target_zip=manifest_tampered_zip,
+        entry_name="update-manifest.json",
+        transform=lambda content: content + b"\n",
+    )
+    manifest_rejection = _apply_update(
+        exe=exe,
+        env=env,
+        bundle_dir=bundle_dir,
+        shim_update_ps1=shim_update_ps1,
+        update_zip_path=manifest_tampered_zip,
+    )
+    assert manifest_rejection.returncode != 0
+    assert "Signature missing or invalid" in manifest_rejection.stderr
+    assert _snapshot_tree(installed_tree) == original_snapshot
+    assert not (bundle_dir / "app" / ".update_backups").exists()
+
+    payload_tampered_zip = tmp_path / "payload-tampered.zip"
+    _rewrite_zip_entry(
+        source_zip=update_zip_path,
+        target_zip=payload_tampered_zip,
+        entry_name="payload/app/src/frame_compare/version.py",
+        transform=lambda content: content + b"# tampered\n",
+    )
+    payload_rejection = _apply_update(
+        exe=exe,
+        env=env,
+        bundle_dir=bundle_dir,
+        shim_update_ps1=shim_update_ps1,
+        update_zip_path=payload_tampered_zip,
+    )
+    assert payload_rejection.returncode != 0
+    assert "Payload hash mismatch" in payload_rejection.stderr
+    assert _snapshot_tree(installed_tree) == original_snapshot
+    assert not (bundle_dir / "app" / ".update_backups").exists()
+
     apply_proc = _apply_update(
         exe=exe,
         env=env,
@@ -282,3 +370,15 @@ def test_windows_portable_update_apply_e2e(tmp_path: Path, repo_root: Path) -> N
     )
 
     _assert_update_applied(bundle_dir=bundle_dir, version_py=version_py)
+    backup_root = bundle_dir / "app" / ".update_backups"
+    backup_id = next(backup_root.iterdir()).name
+    rollback = _run_update_command(
+        exe=exe,
+        env=env,
+        shim_update_ps1=shim_update_ps1,
+        args=["rollback", backup_id],
+    )
+    assert rollback.returncode == 0, (
+        f"stdout:\n{rollback.stdout}\n\nstderr:\n{rollback.stderr}"
+    )
+    assert _snapshot_tree(installed_tree) == original_snapshot

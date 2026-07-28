@@ -78,6 +78,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
     """
     reserved_workspace: WorkspacePaths | None = None
     run_start: datetime | None = None
+    run_timer_start: float | None = None
     phase_timings: dict[str, float] = {}
     clip_count = 0
     selected_frame_count = 0
@@ -101,6 +102,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             progress=deps.progress,
             confirm_slowpics_upload=deps.confirm_slowpics_upload,
             clock=deps.clock,
+            monotonic_timer=deps.monotonic_timer,
         )
 
     local_deps.capture_reserved_run = _capture_reserved_run
@@ -117,8 +119,10 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
 
     async def _execute_with_deps() -> RunResult:
         nonlocal artifacts, clip_count, phase_timings, preflight_warnings, run_start
+        nonlocal run_timer_start
         nonlocal selected_frame_count
         run_start = local_deps.clock()
+        run_timer_start = local_deps.monotonic_timer()
         reporter = local_deps.progress
         if reporter is None:
             raise RuntimeError("Progress reporter must be initialized before execution.")
@@ -158,10 +162,9 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             quiet=request.quiet,
             no_color=request.no_color,
         )
-        load_sources_end = local_deps.clock()
-        state.phase_timings["load_sources"] = (
-            load_sources_end - prep.load_sources_start
-        ).total_seconds()
+        state.phase_timings["load_sources"] = max(
+            0.0, local_deps.monotonic_timer() - prep.load_sources_start
+        )
 
         state.phase_timings.update(
             {
@@ -217,8 +220,8 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             no_color=request.no_color,
         )
         await execute_phases(phase_plan.after_align, context, reporter)
+        duration_seconds = max(0.0, local_deps.monotonic_timer() - run_timer_start)
         run_end = local_deps.clock()
-        duration_seconds = (run_end - run_start).total_seconds()
         result = _assemble_run_result(
             artifacts=prep.artifacts,
             selected_frames=state.selected_frames,
@@ -238,11 +241,17 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         try:
             return await _execute_with_deps()
         except BaseException as original_error:
+            duration_seconds = (
+                0.0
+                if run_timer_start is None
+                else max(0.0, local_deps.monotonic_timer() - run_timer_start)
+            )
             record_failed_run_best_effort(
                 workspace=reserved_workspace,
                 error=original_error,
                 started_at=run_start,
                 completed_at=local_deps.clock,
+                duration_seconds=duration_seconds,
                 artifacts=artifacts,
                 clip_count=clip_count,
                 selected_frame_count=selected_frame_count,

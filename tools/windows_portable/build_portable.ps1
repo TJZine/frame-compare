@@ -254,6 +254,7 @@ function Restore-FrameCompareLauncherEnvironmentValue([string]$Name, [object]$Va
 
 $originalPath = Get-FrameCompareLauncherEnvironmentValue -Name "PATH"
 $originalPythonUtf8 = Get-FrameCompareLauncherEnvironmentValue -Name "PYTHONUTF8"
+$originalPythonDontWriteBytecode = Get-FrameCompareLauncherEnvironmentValue -Name "PYTHONDONTWRITEBYTECODE"
 $originalPythonPath = Get-FrameCompareLauncherEnvironmentValue -Name "PYTHONPATH"
 $originalVsExtraPluginPath = Get-FrameCompareLauncherEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH"
 $originalVsPluginPath = Get-FrameCompareLauncherEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH"
@@ -262,6 +263,7 @@ $exitCode = 1
 $locationPushed = $false
 try {
   $env:PYTHONUTF8 = "1"
+  $env:PYTHONDONTWRITEBYTECODE = "1"
   $env:PYTHONPATH = "$bundleRoot\\app\\src;$bundleRoot\\app\\site-packages"
   $env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = "$bundleRoot\\vs\\extra-plugins"
   Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue
@@ -314,6 +316,7 @@ try {
   }
   Restore-FrameCompareLauncherEnvironmentValue -Name "PATH" -Value $originalPath
   Restore-FrameCompareLauncherEnvironmentValue -Name "PYTHONUTF8" -Value $originalPythonUtf8
+  Restore-FrameCompareLauncherEnvironmentValue -Name "PYTHONDONTWRITEBYTECODE" -Value $originalPythonDontWriteBytecode
   Restore-FrameCompareLauncherEnvironmentValue -Name "PYTHONPATH" -Value $originalPythonPath
   Restore-FrameCompareLauncherEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH" -Value $originalVsExtraPluginPath
   Restore-FrameCompareLauncherEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH" -Value $originalVsPluginPath
@@ -419,11 +422,38 @@ function Copy-RepoApp([string]$BundleRoot) {
   Ensure-Directory -Path $srcRoot
   Ensure-Directory -Path $sitePackages
 
-  $pkgSrc = Join-Path $RepoRoot "src\\frame_compare"
-  if (!(Test-Path -LiteralPath $pkgSrc)) {
-    throw "Repo package not found: $pkgSrc"
+  $sourceStatus = @(
+    & git -C $RepoRoot status --porcelain=v1 --untracked-files=all -- src/frame_compare
+  )
+  Assert-LastExitCode -CommandLabel "inspect Frame Compare source worktree"
+  if ($sourceStatus.Count -gt 0) {
+    $dirtySourceMessage = (
+      "Uncommitted changes exist under src/frame_compare; the portable bundle " +
+      "packages committed HEAD and will exclude them."
+    )
+    if ($RequireReleasePublicKey) {
+      throw $dirtySourceMessage
+    }
+    Write-Warning $dirtySourceMessage
   }
-  Copy-Item -Recurse -Force -LiteralPath $pkgSrc -Destination (Join-Path $srcRoot "frame_compare")
+
+  $archivePath = Join-Path $CacheDir (
+    "frame_compare_source_$([System.Guid]::NewGuid().ToString('N')).tar"
+  )
+  try {
+    & git -C $RepoRoot archive --format=tar --output=$archivePath HEAD src/frame_compare
+    Assert-LastExitCode -CommandLabel "git archive Frame Compare source"
+    if (!(Get-Command tar -ErrorAction SilentlyContinue)) {
+      throw "tar is required on PATH to extract the committed Frame Compare source."
+    }
+    tar -xf $archivePath -C $appRoot
+    Assert-LastExitCode -CommandLabel "extract committed Frame Compare source"
+  } finally {
+    Remove-Item -Force -LiteralPath $archivePath -ErrorAction SilentlyContinue
+  }
+  if (!(Test-Path -LiteralPath (Join-Path $srcRoot "frame_compare\\__init__.py"))) {
+    throw "Committed Frame Compare source was not extracted into the bundle."
+  }
 }
 
 function Configure-EmbeddedPython([string]$BundleRoot) {
@@ -517,6 +547,7 @@ function Install-PythonWheelArtifacts([string]$BundleRoot, [pscustomobject[]]$Ar
 
 function Set-BundleRuntimeEnvironment([string]$BundleRoot) {
   $env:PYTHONUTF8 = "1"
+  $env:PYTHONDONTWRITEBYTECODE = "1"
   $env:PYTHONPATH = "$BundleRoot\\app\\src;$BundleRoot\\app\\site-packages"
   $env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = "$BundleRoot\\vs\\extra-plugins"
   Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue
@@ -630,12 +661,14 @@ function Assert-BundleRuntime([string]$BundleRoot) {
 
   $originalPath = Get-ProcessEnvironmentValue -Name "PATH"
   $originalPythonUtf8 = Get-ProcessEnvironmentValue -Name "PYTHONUTF8"
+  $originalPythonDontWriteBytecode = Get-ProcessEnvironmentValue -Name "PYTHONDONTWRITEBYTECODE"
   $originalPythonPath = Get-ProcessEnvironmentValue -Name "PYTHONPATH"
   $originalVsExtraPluginPath = Get-ProcessEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH"
   $originalVsPluginPath = Get-ProcessEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH"
 
   $ffmpeg = Join-Path $BundleRoot "ffmpeg\\bin\\ffmpeg.exe"
   $mediaPath = Join-Path $BundleRoot "runtime-smoke.mp4"
+  $mediaIndexPath = "$mediaPath.lwi"
   $smokePath = Join-Path $BundleRoot "runtime-smoke.py"
   try {
     Set-BundleRuntimeEnvironment -BundleRoot $BundleRoot
@@ -814,8 +847,10 @@ else:
   } finally {
     Remove-Item -Force -LiteralPath $smokePath -ErrorAction SilentlyContinue
     Remove-Item -Force -LiteralPath $mediaPath -ErrorAction SilentlyContinue
+    Remove-Item -Force -LiteralPath $mediaIndexPath -ErrorAction SilentlyContinue
     Restore-ProcessEnvironmentValue -Name "PATH" -Value $originalPath
     Restore-ProcessEnvironmentValue -Name "PYTHONUTF8" -Value $originalPythonUtf8
+    Restore-ProcessEnvironmentValue -Name "PYTHONDONTWRITEBYTECODE" -Value $originalPythonDontWriteBytecode
     Restore-ProcessEnvironmentValue -Name "PYTHONPATH" -Value $originalPythonPath
     Restore-ProcessEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH" -Value $originalVsExtraPluginPath
     Restore-ProcessEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH" -Value $originalVsPluginPath
@@ -846,6 +881,23 @@ function Copy-PythonDistLicenses([string]$SitePackages, [string]$LicensesPythonD
   $qtLicenses = Join-Path $SitePackages "PyQt6\\Qt6\\licenses"
   if (Test-Path -LiteralPath $qtLicenses) {
     Copy-Item -Recurse -Force -LiteralPath $qtLicenses -Destination (Join-Path $LicensesPythonDir "PyQt6-Qt-licenses")
+  }
+}
+
+function Remove-PythonBytecodeCaches([string]$BundleRoot) {
+  $cacheDirs = @(
+    Get-ChildItem -LiteralPath $BundleRoot -Recurse -Directory -Filter "__pycache__" |
+      Sort-Object FullName -Descending
+  )
+  foreach ($cacheDir in $cacheDirs) {
+    Remove-Item -LiteralPath $cacheDir.FullName -Recurse -Force
+  }
+  $bytecodeFiles = @(
+    Get-ChildItem -LiteralPath $BundleRoot -Recurse -File |
+      Where-Object { $_.Extension -in @(".pyc", ".pyo") }
+  )
+  foreach ($bytecodeFile in $bytecodeFiles) {
+    Remove-Item -LiteralPath $bytecodeFile.FullName -Force
   }
 }
 
@@ -923,6 +975,60 @@ function Copy-Licenses([string]$BundleRoot, [pscustomobject[]]$Artifacts) {
   }
 }
 
+function Copy-RequiredQtLicenseDirectories([string]$BundleRoot) {
+  $sitePackages = Join-Path $BundleRoot "app\\site-packages"
+  $licensesDir = Join-Path $BundleRoot "licenses"
+  $required = @(
+    @{ Pattern = "pyqt6-*.dist-info"; Destination = "PyQt6" },
+    @{ Pattern = "pyqt6_qt6-*.dist-info"; Destination = "Qt" },
+    @{ Pattern = "pyqt6_sip-*.dist-info"; Destination = "PyQt6-sip" }
+  )
+
+  foreach ($entry in $required) {
+    $licenseOwners = @(
+      Get-ChildItem -LiteralPath $sitePackages -Directory -Filter $entry.Pattern
+    )
+    if ($licenseOwners.Count -ne 1) {
+      throw "Expected exactly one $($entry.Pattern) license owner, found $($licenseOwners.Count)."
+    }
+    $licenseCandidates = @(
+      @(
+        (Join-Path $licenseOwners[0].FullName "LICENSE"),
+        (Join-Path $licenseOwners[0].FullName "licenses\\LICENSE")
+      ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
+    )
+    if ($licenseCandidates.Count -ne 1) {
+      throw "Expected exactly one license file for $($entry.Pattern), found $($licenseCandidates.Count)."
+    }
+    $destination = Join-Path $licensesDir $entry.Destination
+    Ensure-Directory -Path $destination
+    Copy-Item -Force -LiteralPath $licenseCandidates[0] -Destination (
+      Join-Path $destination "LICENSE.txt"
+    )
+  }
+}
+
+function Write-BundleInventory([string]$BundleRoot) {
+  $python = Join-Path $BundleRoot "python\\python.exe"
+  $inventoryScript = Join-Path $RepoRoot "tools\\windows_portable\\write_bundle_inventory.py"
+  if (!(Test-Path -LiteralPath $inventoryScript -PathType Leaf)) {
+    throw "Bundle inventory owner not found: $inventoryScript"
+  }
+
+  $arguments = @(
+    $inventoryScript,
+    "--bundle-root", $BundleRoot,
+    "--manifest", $ManifestPath,
+    "--repo-root", $RepoRoot,
+    "--output", (Join-Path $BundleRoot "bundle_inventory.json")
+  )
+  if ($RequireReleasePublicKey) {
+    $arguments += "--require-clean-repo"
+  }
+  & $python -B @arguments
+  Assert-LastExitCode -CommandLabel "Windows bundle inventory"
+}
+
 function Main() {
   if ($RequireReleasePublicKey) {
     Assert-ReleasePublicKey
@@ -957,9 +1063,10 @@ function Main() {
   Copy-RepoApp -BundleRoot $OutDir
   Install-PythonDeps -BundleRoot $OutDir -VsCoreRoot (Join-Path $OutDir "vs\\core")
   Install-PythonWheelArtifacts -BundleRoot $OutDir -Artifacts $artifacts -Downloaded $downloaded
-  Write-BundleInfo -BundleRoot $OutDir -AppVersion (Get-AppVersionFromSource -RepoRootPath $RepoRoot)
+  Write-BundleInfo -BundleRoot $OutDir -AppVersion (Get-AppVersionFromSource -RepoRootPath (Join-Path $OutDir "app"))
   Configure-EmbeddedPython -BundleRoot $OutDir
   Assert-BundleRuntime -BundleRoot $OutDir
+  Remove-PythonBytecodeCaches -BundleRoot $OutDir
 
   # Launchers
   Write-LauncherFiles -BundleRoot $OutDir
@@ -974,6 +1081,8 @@ function Main() {
 
   # Licenses
   Copy-Licenses -BundleRoot $OutDir -Artifacts $artifacts
+  Copy-RequiredQtLicenseDirectories -BundleRoot $OutDir
+  Write-BundleInventory -BundleRoot $OutDir
 
   Write-Host "OK: portable bundle assembled at $OutDir"
 }

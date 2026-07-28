@@ -60,6 +60,10 @@ boundaries. `frame_compare.orchestration.types` owns the public run request,
 dependency, result, and callback DTO contract; internal phase outputs and
 mutable preparation/execution carriers live in
 `frame_compare.orchestration.execution_types`.
+`RunDependencies` supplies aware UTC wall time for persisted start/completion
+timestamps and a separate monotonic timer for preflight, source loading, phases,
+and total success/failure durations. Persisted `duration_seconds` comes from that
+monotonic total rather than wall-clock subtraction.
 Current phase-family owners are intentionally explicit:
 
 - `frame_compare.orchestration.phase_selection`: frame-plan and analyze phase bodies plus shared selection/frame-translation helpers
@@ -157,8 +161,8 @@ Primary owned paths:
 
 - `config/config.toml` and `config/presets/*.toml`: config owners
 - `frame_compare.config.persistence`: secret-safe serialization shared by generated
-  config and preset writes; runtime-only `slowpics.webhook_url` values are excluded
-  from every generated TOML payload
+  config and preset writes; runtime `slowpics.webhook_url` and `tmdb.api_key` values
+  are excluded from every generated TOML payload
 - `<resolved paths.generated_dir>/cache/analysis/<label>__<fingerprint>.compframes`:
   shared analysis metrics cache (defaults to `generated/cache/analysis/` under the
   workspace root, but follows the configured `paths.generated_dir`). The full

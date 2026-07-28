@@ -27,8 +27,24 @@ def test_performance_strategy_black_clip_has_zero_luminance_and_motion() -> None
         reporter=None,
     )
 
-    assert result.luminance == pytest.approx([0.0, 0.0, 0.0])
-    assert result.motion == pytest.approx([0.0, 0.0, 0.0])
+    assert result.luminance == pytest.approx([0.0])
+    assert result.motion == pytest.approx([0.0])
+    assert result.sampled_source_frames == (1,)
+
+
+@pytest.mark.vs_required
+def test_performance_strategy_one_frame_clip_uses_real_planestats() -> None:
+    clip = vs.core.std.BlankClip(width=16, height=16, length=1, format=vs.GRAY8, color=64)
+
+    result = calculate_metric_strategy(
+        _source(clip),
+        AnalysisConfig(performance_mode="performance"),
+        reporter=None,
+    )
+
+    assert result.luminance == pytest.approx([64 / 255])
+    assert result.motion == pytest.approx([0.0])
+    assert result.sampled_source_frames == (0,)
 
 
 @pytest.mark.vs_required
@@ -41,14 +57,15 @@ def test_performance_strategy_white_clip_has_full_luminance_and_zero_motion() ->
         reporter=None,
     )
 
-    assert result.luminance == pytest.approx([1.0, 1.0, 1.0])
-    assert result.motion == pytest.approx([0.0, 0.0, 0.0])
+    assert result.luminance == pytest.approx([1.0])
+    assert result.motion == pytest.approx([0.0])
+    assert result.sampled_source_frames == (1,)
 
 
 @pytest.mark.vs_required
 def test_performance_strategy_black_to_white_motion_is_at_current_frame() -> None:
     black = vs.core.std.BlankClip(width=16, height=16, length=1, format=vs.GRAY8, color=0)
-    white = vs.core.std.BlankClip(width=16, height=16, length=1, format=vs.GRAY8, color=255)
+    white = vs.core.std.BlankClip(width=16, height=16, length=3, format=vs.GRAY8, color=255)
     clip = black + white
 
     result = calculate_metric_strategy(
@@ -57,8 +74,9 @@ def test_performance_strategy_black_to_white_motion_is_at_current_frame() -> Non
         reporter=None,
     )
 
-    assert result.motion[0] == 0.0
-    assert result.motion[1] > result.motion[0]
+    assert result.luminance == pytest.approx([1.0])
+    assert result.motion[0] > 0.0
+    assert result.sampled_source_frames == (1,)
 
 
 @pytest.mark.vs_required
@@ -69,7 +87,8 @@ def test_performance_strategy_repeated_runs_are_identical() -> None:
     first = calculate_metric_strategy(_source(clip), config, reporter=None)
     second = calculate_metric_strategy(_source(clip), config, reporter=None)
 
-    assert first.luminance == pytest.approx([64 / 255] * 4)
-    assert first.motion == pytest.approx([0.0, 0.0, 0.0, 0.0])
+    assert first.luminance == pytest.approx([64 / 255])
+    assert first.motion == pytest.approx([0.0])
+    assert first.sampled_source_frames == (1,)
     assert second.luminance == first.luminance
     assert second.motion == first.motion

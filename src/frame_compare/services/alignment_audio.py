@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
+from subprocess import CalledProcessError, TimeoutExpired
 from typing import cast
 
 import numpy as np
@@ -13,7 +14,7 @@ import numpy as np
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentChannelStrategy
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
-from frame_compare.utils.subproc import CalledProcessError, TimeoutExpired, run_subprocess
+from frame_compare.utils.subproc import run_subprocess
 
 _FFPROBE_TIMEOUT_SECONDS = 15.0
 _FFMPEG_AUDIO_TIMEOUT_SECONDS = 120.0
@@ -141,7 +142,9 @@ def probe_fps(video_path: Path) -> Fraction:
         ) from e
 
 
-def _parse_audio_stream(stream_obj: object, *, audio_stream_index: int, video_path: Path) -> AudioStreamInfo:
+def _parse_audio_stream(
+    stream_obj: object, *, audio_stream_index: int, video_path: Path
+) -> AudioStreamInfo:
     if not isinstance(stream_obj, dict):
         raise FFmpegError(f"ffprobe returned invalid audio stream data for {video_path.name}", 0)
     stream = cast(dict[str, object], stream_obj)
@@ -227,7 +230,9 @@ def _text_match_score(reference_value: str | None, candidate_value: str | None) 
     return (2, 0)
 
 
-def _numeric_match_score(reference_value: int | None, candidate_value: int | None) -> tuple[int, int]:
+def _numeric_match_score(
+    reference_value: int | None, candidate_value: int | None
+) -> tuple[int, int]:
     if reference_value is None:
         return (0, 0)
     if candidate_value == reference_value:

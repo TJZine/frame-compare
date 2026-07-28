@@ -839,6 +839,10 @@ config produced by `preset apply`; those operations remove any existing persiste
 webhook URL rather than copying effective environment or file values into generated
 TOML.
 
+The same generated-file policy omits `tmdb.api_key` from all four write paths.
+Runtime loading continues to accept a manually authored `[tmdb].api_key` or
+`FRAME_COMPARE_TMDB__API_KEY`; generated files never copy either effective value.
+
 The JSON output schema remains unchanged by report-confirmed upload:
 `slowpics_url` is still the only machine-readable slow.pics result field.
 
@@ -1115,8 +1119,8 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 - Existing TOML is parsed and validated without environment precedence, then used as
   the persistence base. Confirmed partial patches preserve unrelated supported and
   unknown root values, explicit empty values, dates/times, nested tables,
-  arrays-of-tables, and file-resident secrets other than `slowpics.webhook_url`.
-  A confirmed wizard rewrite removes that webhook secret through the shared
+  arrays-of-tables, and file-resident secrets other than `slowpics.webhook_url` and
+  `tmdb.api_key`. A confirmed wizard rewrite removes both secrets through the shared
   config-persistence policy; a true no-op leaves the original file byte-for-byte.
   Environment-only values are neither displayed nor persisted. Wizard validation
   errors redact every raw Pydantic input.
@@ -1145,7 +1149,7 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 ## `doctor` Command Contract
 
 - `doctor` runs dependency diagnostics through `run_doctor`.
-- `doctor --json` writes a single JSON object to stdout using `_doctor_report_json`.
+- `doctor --json` writes a single JSON object to stdout through the doctor command owner.
 - If the `doctor` command hits a typed top-level failure before it can produce a
   `DoctorReport`, it uses the standard CLI error contract. In `--json` mode that means
   the standard error payload is written to stdout.

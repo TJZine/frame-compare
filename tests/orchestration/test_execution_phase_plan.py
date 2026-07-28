@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 
 from frame_compare.analysis.types import SelectionBreakdown, SelectionDetail
@@ -68,7 +67,7 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
         metadata_prefetch=MetadataPrefetch(None, False),
         preflight_warnings=[],
         preflight_duration=0.0,
-        load_sources_start=datetime.now(),
+        load_sources_start=0.0,
         selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
 
@@ -118,7 +117,7 @@ def test_build_execution_phase_plan_moves_report_before_publish_for_confirmed_up
         metadata_prefetch=MetadataPrefetch(None, False),
         preflight_warnings=[],
         preflight_duration=0.0,
-        load_sources_start=datetime.now(),
+        load_sources_start=0.0,
         selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
 
@@ -155,7 +154,7 @@ def test_build_phases_before_align_skips_analyze_when_request_skips_analysis(
 
     phases = build_phases_before_align(
         request=RunRequest(root=tmp_path, skip_analysis=True),
-        clock=datetime.now,
+        monotonic_timer=lambda: 0.0,
         state=state,
         input_videos=[tmp_path / "ref.mkv"],
         workspace=workspace,

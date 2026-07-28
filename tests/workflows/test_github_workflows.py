@@ -54,8 +54,43 @@ def test_ci_requires_clean_distribution_build_and_install(repo_root: Path) -> No
     assert "uv pip install --python .dist-venv/bin/python dist/*.whl" in workflow
     assert ".dist-venv/bin/frame-compare version" in workflow
     assert ".dist-venv/bin/frame-compare --help" in workflow
-    assert "needs: [lint, security, typecheck, test, import-lints, package]" in workflow
+    assert (
+        "needs: [lint, security, typecheck, test, import-lints, package, report-browser]"
+        in workflow
+    )
     assert '[[ "${{ needs.package.result }}" != "success" ]]' in workflow
+
+
+def test_ci_runs_generated_report_smoke_in_preflighted_system_browser(
+    repo_root: Path,
+) -> None:
+    workflow = _load_workflow(repo_root / ".github" / "workflows" / "ci.yml")
+    job = workflow["jobs"]["report-browser"]
+
+    assert job["runs-on"] == "ubuntu-24.04"
+    named_steps = {step["name"]: step for step in job["steps"] if "name" in step}
+    preflight = named_steps["Preflight Chrome or Chromium"]
+    preflight_script = preflight["run"]
+    assert "command -v google-chrome" in preflight_script
+    assert "command -v chromium" in preflight_script
+    assert "ERROR: Ubuntu 24.04 runner has no Chrome or Chromium executable." in preflight_script
+    assert 'echo "REPORT_BROWSER=$browser" >> "$GITHUB_ENV"' in preflight_script
+
+    smoke = named_steps["Run generated report browser smoke"]
+    assert smoke["run"] == "uv run --no-sync pytest -q tests/browser/test_report_browser_smoke.py"
+
+
+def test_direct_build_tools_are_pinned_exactly(repo_root: Path) -> None:
+    for workflow_name in ("ci.yml", "docs.yml", "windows-portable.yml"):
+        workflow = _read_text_or_fail(repo_root / ".github" / "workflows" / workflow_name)
+        setup_count = workflow.count("astral-sh/setup-uv@")
+        assert setup_count > 0
+        assert workflow.count('version: "0.11.31"') == setup_count
+        assert 'version: "latest"' not in workflow
+
+    with (repo_root / "pyproject.toml").open("rb") as pyproject_file:
+        build_system = tomllib.load(pyproject_file)["build-system"]
+    assert build_system["requires"] == ["hatchling==1.31.0"]
 
 
 def test_docker_integration_workflow_covers_supported_pull_request_bases(repo_root: Path) -> None:
@@ -83,11 +118,18 @@ def test_docker_integration_workflow_watches_docker_overrides_and_verify_scripts
     assert "- tests/workflows/**" in workflow
 
 
+def test_docker_integration_workflow_watches_analysis_sources(repo_root: Path) -> None:
+    workflow_path = repo_root / ".github" / "workflows" / "docker-integration.yml"
+    workflow = _read_text_or_fail(workflow_path)
+
+    assert "- src/frame_compare/analysis/**" in workflow
+
+
 def test_dockerfile_installs_lock_export_with_hashes(repo_root: Path) -> None:
     dockerfile_path = repo_root / "Dockerfile"
     dockerfile = _read_text_or_fail(dockerfile_path)
 
-    assert "FROM ghcr.io/astral-sh/uv:0.11.16 AS uv" in dockerfile
+    assert "FROM ghcr.io/astral-sh/uv:0.11.31 AS uv" in dockerfile
     assert "COPY --from=uv /uv /uvx /usr/local/bin/" in dockerfile
     assert re.search(
         r"COPY --chown=framecompare:framecompare pyproject\.toml uv\.lock\b", dockerfile

@@ -55,6 +55,7 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
     assert inspector_state["clearedKeyboardFocusRestoreTarget"] is True
 
     assert summary["escapeOrder"] == {
+        "popoverHandlerPreventedGlobalShortcut": True,
         "alignmentClosedBeforeInspector": True,
         "legacyInfoModalWins": True,
         "inspectorStillOpenAfterAlignmentEscape": True,

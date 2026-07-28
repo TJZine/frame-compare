@@ -498,7 +498,7 @@ async def execute_prep(
     request: RunRequest,
     deps: RunDependencies,
 ) -> PrepState:
-    preflight_start = deps.clock()
+    preflight_start = deps.monotonic_timer()
     if request.no_cache and request.from_cache_only:
         raise MetricsCalculationError(
             "Flags --no-cache and --from-cache-only are mutually exclusive."
@@ -509,10 +509,9 @@ async def execute_prep(
         config_path=request.config_path,
         overrides=build_preflight_input_dir_override(request.input_dir),
     )
-    preflight_end = deps.clock()
-    preflight_duration = (preflight_end - preflight_start).total_seconds()
+    preflight_duration = max(0.0, deps.monotonic_timer() - preflight_start)
 
-    load_sources_start = deps.clock()
+    load_sources_start = deps.monotonic_timer()
     workspace = preflight.workspace
     config = resolve_effective_config(preflight.config, request.cli_config_overrides())
     validate_skip_analysis_frame_selection_contract(

@@ -2,61 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
-from asyncio.subprocess import PIPE
-from collections.abc import Coroutine, Sequence
-from dataclasses import dataclass
+from collections.abc import Sequence
 from pathlib import Path
-from queue import Queue
 from shutil import which
-from threading import Thread
-from typing import Any
-
-
-@dataclass(frozen=True)
-class CompletedProcess:
-    """Completed child-process result."""
-
-    args: tuple[str, ...]
-    returncode: int
-    stdout: bytes
-    stderr: bytes
-
-
-class CalledProcessError(RuntimeError):
-    """Raised when a child process exits non-zero and check=True."""
-
-    def __init__(
-        self,
-        returncode: int,
-        cmd: Sequence[str],
-        *,
-        output: bytes = b"",
-        stderr: bytes = b"",
-    ) -> None:
-        super().__init__(f"Command {list(cmd)!r} returned non-zero exit status {returncode}.")
-        self.returncode = returncode
-        self.cmd = list(cmd)
-        self.output = output
-        self.stderr = stderr
-
-
-class TimeoutExpired(RuntimeError):
-    """Raised when a child process exceeds the configured timeout."""
-
-    def __init__(
-        self,
-        cmd: Sequence[str],
-        timeout: float,
-        *,
-        output: bytes = b"",
-        stderr: bytes = b"",
-    ) -> None:
-        super().__init__(f"Command {list(cmd)!r} timed out after {timeout} seconds.")
-        self.cmd = list(cmd)
-        self.timeout = timeout
-        self.output = output
-        self.stderr = stderr
+from subprocess import CompletedProcess, run
 
 
 def _resolve_cwd(cwd: Path | None) -> Path | None:
@@ -100,88 +49,13 @@ def _normalize_argv(argv: Sequence[str], cwd: Path | None) -> list[str]:
     return normalized
 
 
-async def _run_async(
-    argv: Sequence[str],
-    *,
-    timeout_seconds: float | None,
-    cwd: Path | None,
-    check: bool,
-) -> CompletedProcess:
-    resolved_cwd = _resolve_cwd(cwd)
-    normalized_argv = _normalize_argv(argv, resolved_cwd)
-    proc = await asyncio.create_subprocess_exec(
-        *normalized_argv,
-        cwd=str(resolved_cwd) if resolved_cwd is not None else None,
-        stdout=PIPE,
-        stderr=PIPE,
-    )
-
-    try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
-    except TimeoutError as exc:
-        proc.kill()
-        stdout, stderr = await proc.communicate()
-        raise TimeoutExpired(
-            normalized_argv,
-            timeout_seconds if timeout_seconds is not None else 0.0,
-            output=stdout,
-            stderr=stderr,
-        ) from exc
-
-    returncode = proc.returncode
-    if returncode is None:  # pragma: no cover - communicate() should finalize the process
-        raise RuntimeError("process finished without return code")
-
-    result = CompletedProcess(
-        args=tuple(normalized_argv),
-        returncode=returncode,
-        stdout=stdout,
-        stderr=stderr,
-    )
-    if check and result.returncode != 0:
-        raise CalledProcessError(
-            result.returncode,
-            result.args,
-            output=result.stdout,
-            stderr=result.stderr,
-        )
-    return result
-
-
-def _run_awaitable(awaitable: Coroutine[Any, Any, CompletedProcess]) -> CompletedProcess:
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(awaitable)
-
-    queue: Queue[tuple[bool, object]] = Queue(maxsize=1)
-
-    def _thread_main() -> None:
-        try:
-            queue.put((True, asyncio.run(awaitable)))
-        except BaseException as exc:  # pragma: no cover - thread bridge
-            queue.put((False, exc))
-
-    thread = Thread(target=_thread_main, daemon=True)
-    thread.start()
-    thread.join()
-    ok, value = queue.get()
-    if ok:
-        if not isinstance(value, CompletedProcess):  # pragma: no cover - defensive
-            raise RuntimeError("process thread returned unexpected result type")
-        return value
-    if not isinstance(value, BaseException):  # pragma: no cover - defensive
-        raise RuntimeError("process thread returned unexpected error type")
-    raise value
-
-
 def run_subprocess(
     argv: Sequence[str],
     *,
     timeout_seconds: float | None = None,
     cwd: Path | None = None,
     check: bool = True,
-) -> CompletedProcess:
+) -> CompletedProcess[bytes]:
     """
     Execute a command with explicit argv validation and captured output.
 
@@ -191,11 +65,13 @@ def run_subprocess(
         cwd: Working directory
         check: Whether to raise CalledProcessError on non-zero exit code
     """
-    return _run_awaitable(
-        _run_async(
-            argv,
-            timeout_seconds=timeout_seconds,
-            cwd=cwd,
-            check=check,
-        )
+    resolved_cwd = _resolve_cwd(cwd)
+    normalized_argv = _normalize_argv(argv, resolved_cwd)
+    return run(
+        normalized_argv,
+        cwd=resolved_cwd,
+        capture_output=True,
+        timeout=timeout_seconds,
+        check=check,
+        shell=False,
     )

@@ -15,7 +15,6 @@ from frame_compare.cli.cli_helpers import (
     copy_text_to_clipboard,
     handle_error,
     open_url_in_browser,
-    prepare_toml_payload,
     resolve_root_and_config,
     stabilize_typer_help_width,
     write_config_to,
@@ -23,11 +22,7 @@ from frame_compare.cli.cli_helpers import (
 from frame_compare.cli.cli_helpers import (
     maybe_open_report as _maybe_open_report,
 )
-from frame_compare.cli.doctor_command import (
-    doctor_report_json,
-    handle_doctor,
-    print_doctor_report,
-)
+from frame_compare.cli.doctor_command import handle_doctor
 from frame_compare.cli.history_command import handle_history_list, handle_history_open
 from frame_compare.cli.preset_command import (
     handle_preset_apply,
@@ -35,13 +30,8 @@ from frame_compare.cli.preset_command import (
     handle_preset_save,
 )
 from frame_compare.cli.run_command import (
-    RunCliOptions,
     RunCliRawArgs,
     RunCommandDeps,
-    build_run_request_from_cli,
-    coerce_cli_choice,
-    handle_diagnose_paths,
-    handle_json_output,
     handle_run,
 )
 from frame_compare.cli.wizard_command import (
@@ -92,18 +82,10 @@ app = typer.Typer(
 
 
 _stabilize_typer_help_width = stabilize_typer_help_width
-_prepare_toml_payload = prepare_toml_payload
 _resolve_root_and_config = resolve_root_and_config
 _copy_text_to_clipboard = copy_text_to_clipboard
 _open_url_in_browser = open_url_in_browser
-_doctor_report_json = doctor_report_json
-_print_doctor_report = print_doctor_report
 _prompt_input_dir = prompt_input_dir
-_RunCliOptions = RunCliOptions
-_build_run_request_from_cli = build_run_request_from_cli
-_coerce_cli_choice = coerce_cli_choice
-_handle_diagnose_paths = handle_diagnose_paths
-_handle_json_output = handle_json_output
 
 
 def _sys_stream_isatty(name: str) -> bool:

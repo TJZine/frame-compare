@@ -11,9 +11,13 @@ def strip_nonpersistable_config_values(payload: object) -> None:
     """Remove secret values that generated configuration must never contain."""
     if not isinstance(payload, dict):
         return
-    slowpics = cast("dict[object, object]", payload).get("slowpics")
+    config_payload = cast("dict[object, object]", payload)
+    slowpics = config_payload.get("slowpics")
     if isinstance(slowpics, dict):
         cast("dict[object, object]", slowpics).pop("webhook_url", None)
+    tmdb = config_payload.get("tmdb")
+    if isinstance(tmdb, dict):
+        cast("dict[object, object]", tmdb).pop("api_key", None)
 
 
 def dump_config_for_persistence(config: ConfigSchema) -> dict[str, object]:

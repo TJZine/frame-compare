@@ -564,6 +564,8 @@ def test_performance_strategy_one_frame_motion_is_zero(
 
     assert result.luminance == [0.5]
     assert result.motion == [0.0]
+    assert source.clip.planestats_clipb_flags == [False]
+    assert source.clip.slice_calls == [(0, 1, None)]
 
 
 def test_performance_strategy_constant_clip_is_deterministic_with_zero_motion(

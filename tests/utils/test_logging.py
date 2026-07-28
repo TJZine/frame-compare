@@ -1,6 +1,7 @@
+import io
+import json
 import re
 import sys
-from pathlib import Path
 
 import pytest
 import structlog
@@ -46,16 +47,16 @@ def test_get_run_id_default_unknown():
 
 
 def test_configure_logging_json_format():
-    """Test that configure_logging with format='json' adds JSONRenderer."""
-    configure_logging(format="json")
+    """Test that configure_logging with log_format='json' adds JSONRenderer."""
+    configure_logging(log_format="json")
     config = structlog.get_config()
     processors = config["processors"]
     assert any(isinstance(p, structlog.processors.JSONRenderer) for p in processors)
 
 
 def test_configure_logging_console_format():
-    """Test that configure_logging with format='console' adds ConsoleRenderer."""
-    configure_logging(format="console")
+    """Test that configure_logging with log_format='console' adds ConsoleRenderer."""
+    configure_logging(log_format="console")
     config = structlog.get_config()
     processors = config["processors"]
     assert any(isinstance(p, structlog.dev.ConsoleRenderer) for p in processors)
@@ -63,7 +64,7 @@ def test_configure_logging_console_format():
 
 def test_configure_logging_unknown_format_falls_back_to_console():
     """Test that configure_logging with unknown format falls back to console."""
-    configure_logging(format="invalid")
+    configure_logging(log_format="invalid")
     config = structlog.get_config()
     processors = config["processors"]
     assert any(isinstance(p, structlog.dev.ConsoleRenderer) for p in processors)
@@ -97,12 +98,7 @@ def test_configure_logging_unknown_level_falls_back_to_info():
     assert log.info("test") is not None  # allowed
 
 
-def test_configure_logging_rejects_log_file_param() -> None:
-    with pytest.raises(TypeError):
-        configure_logging(log_file=Path("x.log"))
-
-
-def test_stderr_proxy_accepts_stream_write_returning_none(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_logging_accepts_stream_write_returning_none(monkeypatch: pytest.MonkeyPatch) -> None:
     class NoneReturningStderr:
         def __init__(self) -> None:
             self.messages: list[str] = []
@@ -115,7 +111,42 @@ def test_stderr_proxy_accepts_stream_write_returning_none(monkeypatch: pytest.Mo
 
     stream = NoneReturningStderr()
     monkeypatch.setattr(sys, "stderr", stream)
-    proxy = logging_module._StderrProxy()  # pyright: ignore[reportPrivateUsage]
+    configure_logging()
 
-    assert proxy.write("message") == len("message")
-    assert stream.messages == ["message"]
+    structlog.get_logger().info("message")
+
+    assert "message" in "".join(stream.messages)
+
+
+def test_logging_uses_current_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_logging()
+    stream = io.StringIO()
+    monkeypatch.setattr(sys, "stderr", stream)
+
+    structlog.get_logger().info("late bound")
+
+    assert "late bound" in stream.getvalue()
+
+
+def test_logging_falls_back_when_stderr_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fallback = io.StringIO()
+    monkeypatch.setattr(sys, "stderr", fallback)
+    configure_logging()
+    monkeypatch.setattr(sys, "stderr", None)
+
+    structlog.get_logger().info("shutdown")
+
+    assert "shutdown" in fallback.getvalue()
+
+
+def test_repeated_configuration_replaces_renderer(monkeypatch: pytest.MonkeyPatch) -> None:
+    stream = io.StringIO()
+    monkeypatch.setattr(sys, "stderr", stream)
+    configure_logging(log_format="console")
+    configure_logging(log_format="json")
+
+    structlog.get_logger().info("message")
+
+    assert json.loads(stream.getvalue())["event"] == "message"

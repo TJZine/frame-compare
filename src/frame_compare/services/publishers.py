@@ -1,6 +1,7 @@
 """Publishing services for Frame Compare."""
 
 import asyncio
+import math
 import random
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import ExitStack
@@ -34,6 +35,7 @@ SLOWPICS_METADATA_UPLOAD_URL = f"{SLOWPICS_BASE_URL}/upload/comparison"
 SLOWPICS_IMAGE_UPLOAD_URL_TEMPLATE = f"{SLOWPICS_BASE_URL}/upload/image/{{image_uuid}}"
 SLOWPICS_RETRY_BASE_DELAY_SECONDS = 1.0
 SLOWPICS_RETRY_MAX_DELAY_SECONDS = 30.0
+SLOWPICS_RETRY_AFTER_MAX_DELAY_SECONDS = 60.0
 SLOWPICS_RETRY_JITTER_FACTOR = 0.1
 SLOWPICS_IMAGE_UPLOAD_CONCURRENCY = 3
 SLOWPICS_BROWSER_ID_SENTINEL = "eb80db10-97a7-11ee-8f6f-bfa69501bb51"
@@ -175,23 +177,28 @@ class SlowpicsPublisher:
 
     def _retry_after_delay(self, retry_after: str | None, default_delay: float = 60.0) -> float:
         if retry_after is None:
-            return default_delay
+            return self._clamp_retry_after_delay(default_delay)
 
         retry_after_seconds = self._parse_retry_after_seconds(retry_after)
         if retry_after_seconds is not None:
-            return retry_after_seconds
+            return self._clamp_retry_after_delay(retry_after_seconds)
 
         retry_at = self._parse_retry_after_date(retry_after)
         if retry_at is None:
-            return default_delay
+            return self._clamp_retry_after_delay(default_delay)
 
         if retry_at.tzinfo is None:
             retry_at = retry_at.replace(tzinfo=UTC)
-        return max(0.0, (retry_at - datetime.now(UTC)).total_seconds())
+        return self._clamp_retry_after_delay((retry_at - datetime.now(UTC)).total_seconds())
+
+    def _clamp_retry_after_delay(self, delay: float) -> float:
+        if math.isnan(delay):
+            return SLOWPICS_RETRY_AFTER_MAX_DELAY_SECONDS
+        return min(max(0.0, delay), SLOWPICS_RETRY_AFTER_MAX_DELAY_SECONDS)
 
     def _parse_retry_after_seconds(self, retry_after: str) -> float | None:
         try:
-            return max(0.0, float(retry_after))
+            return float(retry_after)
         except ValueError:
             return None
 

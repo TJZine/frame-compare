@@ -113,7 +113,7 @@ def test_first_use_multiple_files_uses_canonical_order_and_coverage_patch() -> N
         assert "Metric scan: quality" in result.stdout
 
 
-def test_existing_config_preserves_raw_values_but_strips_webhook_secret(
+def test_existing_config_preserves_raw_values_but_strips_generated_secrets(
     monkeypatch: MonkeyPatch,
 ) -> None:
     with runner.isolated_filesystem():
@@ -163,14 +163,14 @@ name = "first"
         assert payload["clock"] == time(1, 2, 3)
         assert payload["stamp"] == datetime(2026, 7, 14, 1, 2, 3, tzinfo=UTC)
         assert payload["unknown"] == {"nested": {"empty": ""}, "items": [{"name": "first"}]}
-        assert payload["tmdb"]["api_key"] == "sentinel-secret"
+        assert "api_key" not in payload["tmdb"]
         assert "webhook_url" not in payload["slowpics"]
         assert "environment-only-secret" not in config_path.read_text(encoding="utf-8")
         assert payload["analysis"]["random_seed"] == 99
         assert payload["analysis"]["performance_mode"] == "performance"
         assert "Publishing settings: preserved except webhook URL" in result.stdout
         assert "Webhook URL: removed from generated configuration" in result.stdout
-        assert "Other sensitive values: preserved and hidden" in result.stdout
+        assert "TMDB API key: removed from generated configuration" in result.stdout
 
 
 def test_existing_config_ignores_environment_only_values_during_review(
@@ -545,6 +545,7 @@ def test_writer_serializes_raw_toml_once_and_maps_failure(
     payload: TomlPayload = {
         "unknown": {"empty": ""},
         "slowpics": {"webhook_url": "https://secret.invalid/token"},
+        "tmdb": {"api_key": "sentinel-secret"},
     }
 
     def _writer(path: Path, content: str, *, encoding: str) -> None:
@@ -554,8 +555,14 @@ def test_writer_serializes_raw_toml_once_and_maps_failure(
 
     write_wizard_config_payload(destination, payload, text_writer=_writer)
     assert len(calls) == 1
-    assert tomllib.loads(calls[0]) == {"unknown": {"empty": ""}, "slowpics": {}}
+    assert tomllib.loads(calls[0]) == {
+        "unknown": {"empty": ""},
+        "slowpics": {},
+        "tmdb": {},
+    }
     assert payload["slowpics"] == {"webhook_url": "https://secret.invalid/token"}
+    assert payload["tmdb"] == {"api_key": "sentinel-secret"}
+    assert "sentinel-secret" not in calls[0]
 
     def _failure(path: Path, content: str, *, encoding: str) -> None:
         del path, content, encoding
@@ -570,5 +577,7 @@ def test_writer_serializes_raw_toml_once_and_maps_failure(
     monkeypatch.setattr("frame_compare.cli.wizard_command.tomli_w.dumps", _serialization_failure)
     with pytest.raises(ConfigWriteError, match="Failed to write configuration file") as exc_info:
         write_wizard_config_payload(destination, payload, text_writer=_writer)
-    assert "sentinel serialization detail" not in str(exc_info.value.context.to_dict())
+    safe_error = str(exc_info.value.context.to_dict())
+    assert "sentinel serialization detail" not in safe_error
+    assert "sentinel-secret" not in safe_error
     assert len(calls) == 1

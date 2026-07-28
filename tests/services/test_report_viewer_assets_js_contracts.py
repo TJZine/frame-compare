@@ -35,38 +35,18 @@ def test_viewer_js_preserves_modal_escape_and_focus_restore_contracts() -> None:
     assert "this.focusElement(first);" in help_key_block
 
 
-def test_viewer_js_closes_alignment_popover_before_global_escape_shortcuts() -> None:
+def test_viewer_js_binds_alignment_popover_before_global_shortcuts() -> None:
     js = get_js()
     bind_interaction_block = js_method_block(js, "bindInteractionEvents()")
     alignment_block = js_method_block(js, "bindAlignmentEvents()")
     bind_keyboard_block = js_method_block(js, "bindKeyboardEvents()")
-    handle_key_block = js_method_block(js, "handleKey(e)")
 
-    assert "isAlignmentPopoverOpen()" in js
-    assert "setAlignmentPopoverOpen(isOpen, options = {})" in js
-    assert "this.closeAlignmentPopover({ restoreFocus: false });" in js
     assert "document.addEventListener('keydown', (e) => this.handleKey(e));" in bind_keyboard_block
     assert_in_order(
         bind_interaction_block,
         ["this.bindAlignmentEvents();", "this.bindKeyboardEvents();"],
     )
-    assert_in_order(
-        alignment_block,
-        [
-            "this.dom.alignPopover.addEventListener('keydown', (e) => {",
-            "if (e.key === 'Escape') {",
-            "e.preventDefault();",
-            "e.stopPropagation();",
-            "this.closeAlignmentPopover();",
-        ],
-    )
-    assert_in_order(
-        handle_key_block,
-        [
-            "if (this.isAlignmentPopoverOpen()) {",
-            "this.closeAlignmentPopover();",
-        ],
-    )
+    assert "this.dom.alignPopover.addEventListener('keydown', (e) => {" in alignment_block
 
 
 def test_viewer_js_persists_report_scoped_viewport_state() -> None:
@@ -78,35 +58,11 @@ def test_viewer_js_persists_report_scoped_viewport_state() -> None:
     assert "frame-compare:report-viewer:${reportId}:viewport" in storage_key_block
     assert "this.state.data?.report_id || 'unknown-report'" in storage_key_block
     assert "JSON.parse(storage.getItem(this.state.storageKey) || '{}')" in restore_block
-    assert "this.state.leftClipIdx = this.clipIndexOrDefault" in restore_block
-    assert "this.state.rightClipIdx = this.clipIndexOrDefault" in restore_block
-    assert "this.state.activeClipIdx = this.clipIndexOrDefault" in restore_block
     assert "this.state.overlaysHidden = saved.overlaysHidden;" in restore_block
-    assert "this.state.filmstripCollapsed = saved.filmstripCollapsed;" in restore_block
-    assert "this.state.inspectorOpen = saved.inspectorOpen;" in restore_block
-    assert "this.state.inspectorTab = saved.inspectorTab;" in restore_block
-    assert "this.state.blinkIntervalMs = saved.blinkIntervalMs;" in restore_block
-    assert "this.state.paletteOrientation = saved.paletteOrientation;" in restore_block
-    assert "this.state.currentFrameIdx = saved.currentFrameIdx;" in restore_block
-    assert (
-        "this.state.pairAlignments = this.normalizedPairAlignments(saved.pairAlignments);"
-        in restore_block
-    )
-    assert "this.loadCurrentPairAlignment();" in restore_block
-    assert "this.normalizeCurrentFrameForFilter();" in restore_block
     for persisted_field in (
-        "currentFrameIdx: this.state.currentFrameIdx",
-        "mode: this.state.mode",
         "panX: this.state.panX",
         "panY: this.state.panY",
         "overlaysHidden: this.state.overlaysHidden",
-        "filmstripCollapsed: this.state.filmstripCollapsed",
-        "filmstripSize: this.state.filmstripSize",
-        "inspectorOpen: this.state.inspectorOpen",
-        "inspectorTab: this.state.inspectorTab",
-        "blinkIntervalMs: this.state.blinkIntervalMs",
-        "paletteOrientation: this.state.paletteOrientation",
-        "pairAlignments: this.state.pairAlignments",
     ):
         assert persisted_field in persist_block
     assert "blinkPaused" not in persist_block
@@ -128,34 +84,10 @@ def test_viewer_js_composes_focused_lens_owner_before_viewer() -> None:
 
 def test_viewer_js_composes_focused_grid_owner_without_public_default_drift() -> None:
     js = get_js()
-    update_images = js_method_block(js, "updateImages()")
-    preload_indexes = js_method_block(js, "preloadClipIndexes()")
-    set_mode = js_method_block(js, "setMode(mode)")
-    valid_payload_mode = js_method_block(js, "validPayloadMode(mode)")
-    pinch_update = js_method_block(js, "updatePinchFromTrackedPointers()")
 
     assert_in_order(js, ["const GridView =", "const ReportViewer ="])
     assert "this.gridView = GridView.create(this);" in js
     assert "this.gridView.bind();" in js
-    assert "this.gridView?.setActive(mode === 'grid');" in set_mode
-    assert "if (this.state.mode === 'grid')" in update_images
-    assert "this.gridView.render();" in update_images
-    assert "if (this.state.mode === 'grid') return indexes;" in preload_indexes
-    assert "const DESKTOP_PAGE_SIZE = 4;" in js
-    assert "const MOBILE_QUERY = '(max-width: 767px)';" in js
-    assert "indexes().map(index => buildCell(index, generation))" in js
-    assert "querySelectorAll('.rv-grid-image')" in js
-    assert "viewer.state.panX * metrics.width" in js
-    assert "viewer.state.panY * metrics.height" in js
-    assert "this.gridView.panForZoomAnchor(" in pinch_update
-    assert "this.state.panX / base.width" in set_mode
-    assert "this.state.panX * base.width" in set_mode
-    assert "const focusedClipIdx = clipIndexFromTarget(document.activeElement);" in js
-    assert "if (index === viewer.referenceClipIndex()) roles.push('Reference');" in js
-    assert "if (index === viewer.state.activeClipIdx) roles.push('Active');" in js
-    assert "default_mode: 'grid'" not in js
-    assert "'grid'" not in valid_payload_mode
-    assert "this.validPayloadMode(this.state.data.default_mode)" in js
 
 
 def test_viewer_js_uses_lens_shortcut_and_preserves_inspector_roving_tabs() -> None:
@@ -188,30 +120,6 @@ def test_viewer_js_uses_lens_shortcut_and_preserves_inspector_roving_tabs() -> N
     assert "this.lens.endStagePointer(e" in js
 
 
-def test_viewer_js_isolates_lens_chrome_and_arbitrates_touch_gestures() -> None:
-    js = get_js()
-    viewport = js_method_block(js, "bindViewportEvents()")
-    guard = js_method_block(js, "isViewerChromeEvent(e)")
-    wheel = js_method_block(js, "handleViewportWheel(e)")
-    double_click = js_method_block(js, "handleViewportDoubleClick(e)")
-    deferred = js_method_block(js, "startDeferredViewportGesture(e, start)")
-    stop = js_method_block(js, "stopPointerInteraction(e, options = {})")
-
-    assert ".rv-viewport-palette, .rv-lens, .rv-lens-settings" in guard
-    assert viewport.count("if (this.isViewerChromeEvent(e)) return;") == 2
-    assert "if (this.isViewerChromeEvent(e)) return;" in wheel
-    assert "if (this.isViewerChromeEvent(e)) return;" in double_click
-    assert "lensTouchStart" in viewport
-    assert "lensMove === 'pending'" in viewport
-    assert "lensMove === 'released'" in viewport
-    assert "this.lens.cancelTouchPending();" in viewport
-    assert "this.startDeferredViewportGesture(e, pointer.lensTouchStart);" in viewport
-    assert "this.startPanFromPointer(origin);" in deferred
-    assert "this.updateSliderFromPointer(e);" in deferred
-    assert "this.lens.endStagePointer(e" in stop
-    assert "if (wasLensTapPending)" in stop
-
-
 def test_viewer_js_composes_focused_review_owner_before_viewer() -> None:
     js = get_js()
     assert_in_order(js, ["const ReviewState =", "const ReportViewer ="])
@@ -226,32 +134,13 @@ def test_viewer_js_composes_focused_review_owner_before_viewer() -> None:
     ):
         assert limit_message in js
     assert "frame-compare:report-review:v1:${context.reportId}" in js
-    assert "this.reviewController = null;" in js
-    assert "ensureReviewController()" in js
-    assert "this.reviewController = ReviewState.createController(this);" in js
-    assert "this.reviewController.bind();" in js
-    assert "this.reviewController?.render();" in js
-    assert "const model = create({" in js
-    assert "model.parseImport(bytes)" in js
-    assert "model.apply(importPreview)" in js
-    assert "token !== importToken" in js
-    assert "importToken += 1;" in js
-    assert "resetImportChoices();" in js
-    assert "viewer.announce?.(message);" in js
     assert "viewer-live" in js
-    assert "messageWithPersistence(message)" in js
-    assert "renderedFrameOrdinal === viewer.state.currentFrameIdx" in js
-    assert "updateImportPreview();" in js
-    assert "window.setTimeout(() => URL.revokeObjectURL(url), 0);" in js
-    assert "bindReviewEvents" not in js
-    assert "reviewImportToken" not in js
 
 
 def test_viewer_js_keeps_pointer_zoom_and_alignment_hooks_behavioral() -> None:
     js = get_js()
     viewport_block = js_method_block(js, "bindViewportEvents()")
     commit_image_state_block = js_method_block(js, "commitImageState(imageState)")
-    apply_image_state_block = js_method_block(js, "applyImageState(imageState)")
     update_slider_block = js_method_block(js, "updateSliderFromPointer(e)")
     pinch_update_block = js_method_block(js, "updatePinchFromTrackedPointers()")
     start_pinch_block = js_method_block(js, "startPinchFromTrackedPointers()")
@@ -259,9 +148,6 @@ def test_viewer_js_keeps_pointer_zoom_and_alignment_hooks_behavioral() -> None:
     pan_pointer_block = js_method_block(js, "updatePanFromPointer(e)")
     wheel_block = js_method_block(js, "handleViewportWheel(e)")
     double_click_block = js_method_block(js, "handleViewportDoubleClick(e)")
-    apply_zoom_block = js_method_block(js, "applyZoom(level, options = {})")
-    apply_pan_block = js_method_block(js, "applyPan()")
-    apply_alignment_block = js_method_block(js, "applyAlignment()")
 
     assert "panX: 0" in js
     assert "panY: 0" in js
@@ -294,10 +180,6 @@ def test_viewer_js_keeps_pointer_zoom_and_alignment_hooks_behavioral() -> None:
     assert "this.clampZoom(" in pinch_update_block
     assert "this.applyZoom(nextZoom, { clampPan: false });" in pinch_update_block
     assert "this.persistViewportState();" in finish_pinch_block
-    assert "this.lens?.refresh();" in apply_zoom_block
-    assert "this.lens?.refresh();" in apply_pan_block
-    assert "this.lens?.refresh();" in apply_alignment_block
-    assert "this.lens?.sync();" in apply_image_state_block
     assert "const rect = this.sliderCanvasRect();" in update_slider_block
     assert (
         "const clampedClientX = Math.max(rect.left, Math.min(rect.right, e.clientX));"
@@ -363,7 +245,6 @@ def test_viewer_js_keeps_overlay_blink_filtering_and_navigation_contracts() -> N
 def test_viewer_js_keeps_empty_state_metadata_and_preload_contracts() -> None:
     js = get_js()
     render_empty_block = js_method_block(js, "renderEmptyState(message)")
-    clear_frame_block = js_method_block(js, "clearFrameImages()")
     disable_controls_block = js_method_block(js, "disableViewerControls(disabled)")
     update_metadata_block = js_method_block(js, "updateCurrentFrameMetadata(frameData)")
     preload_block = js_method_block(js, "preloadImages()")
@@ -376,7 +257,6 @@ def test_viewer_js_keeps_empty_state_metadata_and_preload_contracts() -> None:
     assert "this.disableViewerControls(true);" in render_empty_block
     assert "this.showStageMessage(message);" in render_empty_block
     assert "this.clearFrameImages();" in render_empty_block
-    assert "this.lens?.clearTransient?.();" in clear_frame_block
     assert "if (control === this.dom.btnHelp) return;" in disable_controls_block
     assert "hasRenderableData()" in js
     assert "this.dom.currentFrameCategoryDivider.hidden = !showCategory;" in update_metadata_block

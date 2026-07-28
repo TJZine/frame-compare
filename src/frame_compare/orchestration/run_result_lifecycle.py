@@ -36,24 +36,25 @@ def record_completed_run_result(
     if workspace is None or workspace.run_dir is None:
         return result
     try:
+        record = completed_record(
+            workspace=workspace,
+            facts=CompletedRunFacts(
+                report_path=result.report_path,
+                screenshot_dir=result.screenshot_dir,
+                clip_count=result.clips_processed,
+                selected_frame_count=result.frame_count,
+                warnings=tuple(result.warnings),
+                metrics_cache_status=result.metrics_cache_status,
+                phase_timings=result.phase_timings,
+                slowpics_url=result.slowpics_url,
+                slowpics_confirmation_status=result.slowpics_upload_confirmation_status,
+            ),
+            started_at=started_at,
+            completed_at=max(started_at, completed_at),
+        )
         write_run_result(
             workspace.run_dir,
-            completed_record(
-                workspace=workspace,
-                facts=CompletedRunFacts(
-                    report_path=result.report_path,
-                    screenshot_dir=result.screenshot_dir,
-                    clip_count=result.clips_processed,
-                    selected_frame_count=result.frame_count,
-                    warnings=tuple(result.warnings),
-                    metrics_cache_status=result.metrics_cache_status,
-                    phase_timings=result.phase_timings,
-                    slowpics_url=result.slowpics_url,
-                    slowpics_confirmation_status=result.slowpics_upload_confirmation_status,
-                ),
-                started_at=started_at,
-                completed_at=completed_at,
-            ),
+            replace(record, duration_seconds=max(0.0, result.duration_seconds)),
         )
     except Exception:
         with contextlib.suppress(Exception):
@@ -68,6 +69,7 @@ def record_failed_run_best_effort(
     error: BaseException,
     started_at: datetime | None,
     completed_at: Callable[[], datetime],
+    duration_seconds: float,
     artifacts: RunArtifacts | None,
     clip_count: int,
     selected_frame_count: int,
@@ -78,32 +80,34 @@ def record_failed_run_best_effort(
     if started_at is None or workspace is None or workspace.run_dir is None:
         return
     try:
+        completion_time = max(started_at, completed_at())
+        record = failed_record(
+            error=error,
+            started_at=started_at,
+            completed_at=completion_time,
+            facts=FailedRunFacts(
+                clip_count=clip_count,
+                selected_frame_count=selected_frame_count,
+                phase_timings=phase_timings,
+                report_path=None if artifacts is None else artifacts.report_path,
+                screenshot_dir=(
+                    None
+                    if artifacts is None or artifacts.render is None
+                    else artifacts.render.screenshot_dir
+                ),
+                metrics_cache_status=(
+                    "skipped" if artifacts is None else artifacts.metrics_cache_status
+                ),
+                slowpics_url=None if artifacts is None else artifacts.slowpics_url,
+                warnings=(
+                    warnings if artifacts is None else (*warnings, *sorted(artifacts.warnings))
+                ),
+            ),
+            workspace=workspace,
+        )
         write_run_result(
             workspace.run_dir,
-            failed_record(
-                error=error,
-                started_at=started_at,
-                completed_at=completed_at(),
-                facts=FailedRunFacts(
-                    clip_count=clip_count,
-                    selected_frame_count=selected_frame_count,
-                    phase_timings=phase_timings,
-                    report_path=None if artifacts is None else artifacts.report_path,
-                    screenshot_dir=(
-                        None
-                        if artifacts is None or artifacts.render is None
-                        else artifacts.render.screenshot_dir
-                    ),
-                    metrics_cache_status=(
-                        "skipped" if artifacts is None else artifacts.metrics_cache_status
-                    ),
-                    slowpics_url=None if artifacts is None else artifacts.slowpics_url,
-                    warnings=(
-                        warnings if artifacts is None else (*warnings, *sorted(artifacts.warnings))
-                    ),
-                ),
-                workspace=workspace,
-            ),
+            replace(record, duration_seconds=max(0.0, duration_seconds)),
         )
     except Exception:
         with contextlib.suppress(Exception):

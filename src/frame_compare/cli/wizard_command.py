@@ -402,7 +402,7 @@ def _print_review(
     if webhook_removed:
         typer.echo("  Webhook URL: removed from generated configuration")
     if existing and table_key(original, "tmdb", "api_key") is not None:
-        typer.echo("  Other sensitive values: preserved and hidden")
+        typer.echo("  TMDB API key: removed from generated configuration")
     if stale_reference:
         typer.echo(f"  {_STALE_REFERENCE_WARNING}")
 

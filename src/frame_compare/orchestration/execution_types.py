@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -201,7 +200,7 @@ class PrepState:
     metadata_prefetch: MetadataPrefetch
     preflight_warnings: list[str]
     preflight_duration: float
-    load_sources_start: datetime
+    load_sources_start: float
     analysis_selection_domain: str
     selection_window: SelectionWindow
     analysis_clip: ClipState | None = None

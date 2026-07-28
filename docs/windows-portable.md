@@ -80,6 +80,27 @@ When using `.\tools\windows_portable\install-from-source.cmd`, the bundle root i
 at `dist/frame-compare-portable-win-x64/config/config.toml` and videos under
 `dist/frame-compare-portable-win-x64/comparison_videos/`.
 
+### Release Inventory and Corresponding Source
+
+Every built bundle contains `bundle_inventory.json`, a deterministic
+machine-readable record of:
+
+- the Frame Compare version, exact source commit, `GPL-3.0-only` license, and
+  corresponding source archive;
+- every installed Python distribution with its exact version and declared
+  license metadata;
+- each manifest-provided runtime artifact with its binary hash, license, and
+  exact source location;
+- every copied license or notice path and SHA-256;
+- the requirements-lock fingerprint and the build/install scripts available at
+  the recorded source commit.
+
+Human-readable exact source pointers are also included at
+`licenses/SOURCE_URLS.txt`, and the component summary is at
+`licenses/THIRD_PARTY_NOTICES.txt`. PyQt6 and Qt license copies are retained in
+dedicated `licenses/PyQt6/`, `licenses/PyQt6-sip/`, and `licenses/Qt/`
+directories in addition to the complete Python distribution license inventory.
+
 ---
 
 ## First Comparison
@@ -169,7 +190,11 @@ frame-compare-update purge-backups --keep 5
 ## Uninstalling
 
 Run `uninstall.cmd` from the current portable bundle root. This removes the installed
-user shim; it does not silently delete the portable bundle or your comparison files.
+user shim and its managed PATH entry. It preserves the installed
+`state/config.toml` byte-for-byte and leaves unknown files under the installed
+`state`, `bin`, or root directories in place, so reinstalling reuses the existing
+configuration. The uninstall does not silently delete the portable bundle or your
+comparison files.
 
 ---
 

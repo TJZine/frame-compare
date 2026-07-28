@@ -73,11 +73,24 @@ UPDATING (Code-Only Update Package):
     - Non-interactive sessions fail safely instead of prompting.
 
 RELEASE SIGNING (Maintainers):
-  One-time key generation (private key must stay out-of-repo):
-    - Generate RSA keypair (PKCS#1/SHA256 compatible with PowerShell 5.1).
-    - Commit only the public key XML at:
-        tools\windows_portable\update_public_key.xml
-    - Record key_id and generation date in release notes.
+  One-time key generation is MAINTAINER-ONLY. Run it in a separate, ordinary
+  PowerShell 7.3+ window. The private path must be an encrypted location outside the
+  repository, task terminals, caches, and release artifacts:
+    $keyId = "frame-compare-update-2026-01"
+    pwsh -NoProfile -ExecutionPolicy Bypass `
+      -File .\tools\windows_portable\generate_update_keypair.ps1 `
+      -PublicKeyPath .\tools\windows_portable\update_public_key.xml `
+      -PrivateKeyPath "<encrypted-location-outside-the-repository>" `
+      -KeyId $keyId `
+      -KeySize 3072 `
+      -ReplacePlaceholderPublicKey
+
+    The generator refuses repository-contained or existing private outputs, replaces
+    only the known public-key placeholder, applies a current-user-only private-file
+    ACL on Windows or owner-read/write-only permissions on POSIX, and reports only
+    public metadata and a public-key fingerprint.
+    Commit only tools\windows_portable\update_public_key.xml. Never paste private
+    XML into a command line, task, log, issue, PR, commit, or release artifact.
 
   Build + sign update zip:
     Run with pwsh (PowerShell 7+) on CI / modern Windows. Signing and verification use
@@ -99,6 +112,10 @@ THIRD-PARTY LICENSES / SOURCE AVAILABILITY:
   - The build outputs:
       .\licenses\
       .\licenses\python\
+      .\licenses\PyQt6\
+      .\licenses\PyQt6-sip\
+      .\licenses\Qt\
+      .\bundle_inventory.json
   - Python wheel license files are copied from installed *.dist-info metadata.
   - Third-party runtime licenses that do not reliably ship in extracted bundle
     paths are copied from manifest-declared, repo-tracked files under:
@@ -110,9 +127,14 @@ THIRD-PARTY LICENSES / SOURCE AVAILABILITY:
     Note: newer PyQt6 wheels may ship additional license texts under individual
     wheel *.dist-info\licenses directories;
     the build script copies dist-info license directories when present.
-  - Source pointers are shipped in:
+  - Deterministic component versions, declared license metadata, copied
+    license/notice hashes, requirements-lock fingerprint, exact Frame Compare
+    source commit/archive, and build/install script inventory are shipped in:
+      .\bundle_inventory.json
+  - Exact-version/commit source pointers are shipped in:
       .\licenses\SOURCE_URLS.txt
-    (Qt, FFmpeg, VapourSynth upstream source locations)
+  - A human-readable component summary is shipped in:
+      .\licenses\THIRD_PARTY_NOTICES.txt
 
 DOCUMENTATION:
   https://github.com/TJZine/frame-compare

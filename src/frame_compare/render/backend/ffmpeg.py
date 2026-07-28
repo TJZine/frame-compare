@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from subprocess import CalledProcessError, TimeoutExpired
 from typing import TYPE_CHECKING, Protocol, cast
 
 from frame_compare.render.backend._ffmpeg_frame import build_extract_frame_argv
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
-from frame_compare.utils.subproc import CalledProcessError, TimeoutExpired, run_subprocess
+from frame_compare.utils.subproc import run_subprocess
 from frame_compare.vs.types import HDRMetadata
 
 if TYPE_CHECKING:
