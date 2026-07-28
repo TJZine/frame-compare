@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, cast
@@ -128,7 +127,7 @@ def test_execute_run_returns_preflight_and_runtime_warnings(
         metadata_prefetch=MetadataPrefetch(None, False),
         preflight_warnings=["preflight: warned"],
         preflight_duration=0.0,
-        load_sources_start=datetime.now(),
+        load_sources_start=0.0,
         selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
 
@@ -174,7 +173,7 @@ def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
         metadata_prefetch=MetadataPrefetch(None, False),
         preflight_warnings=[],
         preflight_duration=0.0,
-        load_sources_start=datetime.now(),
+        load_sources_start=0.0,
         selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
 
@@ -254,7 +253,7 @@ def test_execute_run_webhook_action_warning_is_warning_only(
         metadata_prefetch=MetadataPrefetch(None, False),
         preflight_warnings=[],
         preflight_duration=0.0,
-        load_sources_start=datetime.now(),
+        load_sources_start=0.0,
         selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
 
@@ -330,7 +329,7 @@ def test_execute_run_report_warning_blocks_delete_after_upload_cleanup(
         metadata_prefetch=MetadataPrefetch(None, False),
         preflight_warnings=[],
         preflight_duration=0.0,
-        load_sources_start=datetime.now(),
+        load_sources_start=0.0,
         selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
 
@@ -500,7 +499,7 @@ def test_execute_run_emits_final_selection_at_post_align_boundary(
         metadata_prefetch=MetadataPrefetch(None, False),
         preflight_warnings=[],
         preflight_duration=0.0,
-        load_sources_start=datetime.now(),
+        load_sources_start=0.0,
         selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
     breakdown = SelectionBreakdown(user=[101], random=[205])

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
+from time import monotonic
 from typing import Literal, Protocol
 
 import httpx
@@ -73,6 +74,10 @@ def _empty_str_list() -> list[str]:
 
 def _empty_phase_timings() -> dict[str, float]:
     return {}
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
 
 
 type SlowpicsUploadConfirmationDecision = Literal["confirmed", "declined"]
@@ -145,7 +150,8 @@ class RunDependencies:
     http_client: httpx.AsyncClient | None = None
     progress: ProgressReporter | None = None
     confirm_slowpics_upload: SlowpicsUploadConfirmationFn | None = None
-    clock: Callable[[], datetime] = field(default=datetime.now)
+    clock: Callable[[], datetime] = field(default=_utc_now)
+    monotonic_timer: Callable[[], float] = field(default=monotonic)
     capture_reserved_run: Callable[[ReservedRunCapture], None] | None = field(
         default=None,
         init=False,

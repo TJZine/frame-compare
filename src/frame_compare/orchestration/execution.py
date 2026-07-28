@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Awaitable, Callable
-from datetime import datetime
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -70,7 +69,7 @@ def _create_timed_phase(
     skip_condition: Callable[[ConfigSchema], bool] | None,
     executor: Callable[[RunContext], PhaseOutput | Awaitable[PhaseOutput]],
     state: ExecutionState,
-    clock: Callable[[], datetime],
+    monotonic_timer: Callable[[], float],
     phase_timings: dict[str, float],
     warnings: list[str],
     *,
@@ -78,7 +77,7 @@ def _create_timed_phase(
     progress_total: int = 1,
 ) -> Phase:
     async def _execute(ctx: RunContext) -> None:
-        start = clock()
+        start = monotonic_timer()
         try:
             maybe_awaitable = executor(ctx)
             if inspect.isawaitable(maybe_awaitable):
@@ -92,8 +91,7 @@ def _create_timed_phase(
                 raise
             raise
         finally:
-            end = clock()
-            phase_timings[timing_key] = (end - start).total_seconds()
+            phase_timings[timing_key] = max(0.0, monotonic_timer() - start)
 
     return Phase(
         name=name,
@@ -107,7 +105,7 @@ def _create_timed_phase(
 def build_phases_before_align(
     *,
     request: RunRequest,
-    clock: Callable[[], datetime],
+    monotonic_timer: Callable[[], float],
     state: ExecutionState,
     input_videos: list[Path],
     workspace: WorkspacePaths,
@@ -120,7 +118,7 @@ def build_phases_before_align(
             None,
             select_initial_frame_plan,
             state=state,
-            clock=clock,
+            monotonic_timer=monotonic_timer,
             phase_timings=state.phase_timings,
             warnings=state.warnings,
         ),
@@ -136,7 +134,7 @@ def build_phases_before_align(
                 vs_loader=vs_loader,
             ),
             state=state,
-            clock=clock,
+            monotonic_timer=monotonic_timer,
             phase_timings=state.phase_timings,
             warnings=state.warnings,
             warn_only=True,
@@ -148,7 +146,7 @@ def build_phases_before_align(
             lambda config: not config.audio_alignment.enable,
             partial(run_align_phase, selected_frames=state.selected_frames),
             state=state,
-            clock=clock,
+            monotonic_timer=monotonic_timer,
             phase_timings=state.phase_timings,
             warnings=state.warnings,
             warn_only=True,
@@ -160,7 +158,7 @@ def build_phases_before_align(
 def build_phases_after_align(
     *,
     request: RunRequest,
-    clock: Callable[[], datetime],
+    monotonic_timer: Callable[[], float],
     ffmpeg_runner: FFmpegRunner,
     http_client: httpx.AsyncClient | None,
     state: ExecutionState,
@@ -223,7 +221,7 @@ def build_phases_after_align(
                 runner=ffmpeg_runner,
             ),
             state=state,
-            clock=clock,
+            monotonic_timer=monotonic_timer,
             phase_timings=state.phase_timings,
             warnings=state.warnings,
         ),
@@ -237,7 +235,7 @@ def build_phases_after_align(
                 metadata_prefetch=metadata_prefetch,
             ),
             state=state,
-            clock=clock,
+            monotonic_timer=monotonic_timer,
             phase_timings=state.phase_timings,
             warnings=state.warnings,
             warn_only=True,
@@ -249,7 +247,7 @@ def build_phases_after_align(
         lambda config: not config.slowpics.auto_upload,
         _run_publish_with_current_artifacts,
         state=state,
-        clock=clock,
+        monotonic_timer=monotonic_timer,
         phase_timings=state.phase_timings,
         warnings=state.warnings,
         warn_only=True,
@@ -260,7 +258,7 @@ def build_phases_after_align(
         lambda config: not config.report.enable,
         _run_report_with_current_artifacts,
         state=state,
-        clock=clock,
+        monotonic_timer=monotonic_timer,
         phase_timings=state.phase_timings,
         warnings=state.warnings,
         warn_only=True,
@@ -271,7 +269,7 @@ def build_phases_after_align(
         None,
         _run_confirm_slowpics_upload_with_current_artifacts,
         state=state,
-        clock=clock,
+        monotonic_timer=monotonic_timer,
         phase_timings=state.phase_timings,
         warnings=state.warnings,
     )
@@ -281,7 +279,7 @@ def build_phases_after_align(
         None,
         _run_post_report_cleanup_with_current_artifacts,
         state=state,
-        clock=clock,
+        monotonic_timer=monotonic_timer,
         phase_timings=state.phase_timings,
         warnings=state.warnings,
     )
@@ -320,7 +318,7 @@ def build_execution_phase_plan(
     """
     before_align = build_phases_before_align(
         request=request,
-        clock=deps.clock,
+        monotonic_timer=deps.monotonic_timer,
         state=state,
         input_videos=prep.input_videos,
         workspace=prep.workspace,
@@ -333,7 +331,7 @@ def build_execution_phase_plan(
 
     after_align = build_phases_after_align(
         request=request,
-        clock=deps.clock,
+        monotonic_timer=deps.monotonic_timer,
         ffmpeg_runner=ffmpeg_runner,
         http_client=deps.http_client,
         state=state,

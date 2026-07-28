@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -35,6 +36,10 @@ class DummyFFmpegRunner:
 
 def test_run_dependencies_exported_from_orchestration() -> None:
     assert PublicRunDependencies is RunDependencies
+
+
+def test_run_dependencies_default_clock_is_aware_utc() -> None:
+    assert RunDependencies().clock().tzinfo is UTC
 
 
 def test_execute_run_initializes_local_dependencies_without_mutating_injected_deps(

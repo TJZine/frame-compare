@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
 from fractions import Fraction
 from pathlib import Path
 
@@ -398,7 +397,7 @@ def test_publish_phase_skip_condition_uses_effective_slowpics_config() -> None:
 
     phases = build_phases_after_align(
         request=RunRequest(root=Path("."), no_upload=False),
-        clock=lambda: datetime(2026, 5, 21, tzinfo=UTC),
+        monotonic_timer=lambda: 0.0,
         ffmpeg_runner=object(),
         http_client=None,
         state=state,

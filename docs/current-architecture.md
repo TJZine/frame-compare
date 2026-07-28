@@ -60,6 +60,10 @@ boundaries. `frame_compare.orchestration.types` owns the public run request,
 dependency, result, and callback DTO contract; internal phase outputs and
 mutable preparation/execution carriers live in
 `frame_compare.orchestration.execution_types`.
+`RunDependencies` supplies aware UTC wall time for persisted start/completion
+timestamps and a separate monotonic timer for preflight, source loading, phases,
+and total success/failure durations. Persisted `duration_seconds` comes from that
+monotonic total rather than wall-clock subtraction.
 Current phase-family owners are intentionally explicit:
 
 - `frame_compare.orchestration.phase_selection`: frame-plan and analyze phase bodies plus shared selection/frame-translation helpers
