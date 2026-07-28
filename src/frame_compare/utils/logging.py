@@ -26,7 +26,7 @@ class _StderrStream:
         """Return the active stderr-like stream, falling back safely."""
         try:
             current = sys.stderr
-        except Exception:
+        except AttributeError:
             current = None
         return current if current is not None else self._fallback_stream
 
