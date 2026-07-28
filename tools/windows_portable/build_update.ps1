@@ -60,9 +60,24 @@ function Get-ExpectedRequirementsFingerprint([string]$ResolvedBundleDir) {
 
 function New-ManifestFiles([string]$SourceRoot, [string]$PayloadRoot) {
   $entries = New-Object 'System.Collections.Generic.List[object]'
-  $sourcePrefix = $SourceRoot.TrimEnd("\")
-  foreach ($sourceFile in (Get-ChildItem -LiteralPath $sourcePrefix -Recurse -File | Sort-Object FullName)) {
-    $relative = $sourceFile.FullName.Substring($sourcePrefix.Length + 1)
+  foreach ($sourceFile in (Get-ChildItem -LiteralPath $SourceRoot -Recurse -File | Sort-Object FullName)) {
+    $relative = [System.IO.Path]::GetRelativePath($SourceRoot, $sourceFile.FullName)
+    if (
+      [System.IO.Path]::IsPathRooted($relative) -or
+      $relative -eq ".." -or
+      $relative.StartsWith("..\\") -or
+      $relative.StartsWith("../")
+    ) {
+      throw "Source file escaped src/frame_compare: $($sourceFile.FullName)"
+    }
+    $relativePortable = ConvertTo-PortablePath -PathValue $relative
+    if (
+      $relativePortable -match '(^|/)__pycache__(/|$)' -or
+      $relativePortable.EndsWith(".pyc") -or
+      $relativePortable.EndsWith(".pyo")
+    ) {
+      continue
+    }
     $payloadRelative = ConvertTo-PortablePath -PathValue $relative
     $manifestPath = "app/src/frame_compare/$payloadRelative"
     $destFile = Join-Path $PayloadRoot $relative
