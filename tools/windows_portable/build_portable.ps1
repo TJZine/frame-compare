@@ -940,9 +940,11 @@ function Copy-RequiredQtLicenseDirectories([string]$BundleRoot) {
       throw "Expected exactly one $($entry.Pattern) license owner, found $($matches.Count)."
     }
     $licenseCandidates = @(
-      (Join-Path $matches[0].FullName "LICENSE"),
-      (Join-Path $matches[0].FullName "licenses\\LICENSE")
-    ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
+      @(
+        (Join-Path $matches[0].FullName "LICENSE"),
+        (Join-Path $matches[0].FullName "licenses\\LICENSE")
+      ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
+    )
     if ($licenseCandidates.Count -ne 1) {
       throw "Expected exactly one license file for $($entry.Pattern), found $($licenseCandidates.Count)."
     }
