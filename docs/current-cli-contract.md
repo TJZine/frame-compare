@@ -1149,7 +1149,7 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 ## `doctor` Command Contract
 
 - `doctor` runs dependency diagnostics through `run_doctor`.
-- `doctor --json` writes a single JSON object to stdout using `_doctor_report_json`.
+- `doctor --json` writes a single JSON object to stdout through the doctor command owner.
 - If the `doctor` command hits a typed top-level failure before it can produce a
   `DoctorReport`, it uses the standard CLI error contract. In `--json` mode that means
   the standard error payload is written to stdout.
