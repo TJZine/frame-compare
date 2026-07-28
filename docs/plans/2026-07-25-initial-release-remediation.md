@@ -20,9 +20,10 @@ The Windows-specific implementation and verification sequence is expanded in the
 [Windows Initial-Release Handoff](2026-07-27-windows-release-handoff.md). That file
 is a supporting handoff, not a second active plan.
 
-The review baseline was branch `stage1` at commit
-`eb88cbdb09099ee10e238da365c3d995d3eed20f`. Revalidate findings against the current
-head before implementation if that baseline changes materially.
+The original review baseline was branch `stage1` at commit
+`eb88cbdb09099ee10e238da365c3d995d3eed20f`. R-00 revalidated the plan on July 28,
+2026 at `c07e07f1c9d655c83c840562bf274fb148c2d9dc`. Revalidate the branch, head,
+worktree, and intervening commits again before relying on either snapshot.
 
 ## Decision record and current status
 
@@ -34,7 +35,7 @@ Decisions recorded July 26, 2026:
 | Initial squash title | Use a Conventional Commit such as `feat: prepare initial public release`; keep the detailed release inventory in the commit/PR body | Approved; a version-only title would not give Release Please a release type |
 | Release review | Release Please PRs require human review; no automatic merge | Implemented with a workflow contract test |
 | Support posture | Windows portable is the primary, most feature-complete route; default Docker is the primary headless macOS/Linux route; native source is advanced; NVIDIA/X11 remain experimental | Documented |
-| Windows updates | Signed code-only updates are required for the first public Windows release | Approved; key generation, secret setup, and end-to-end proof remain |
+| Windows updates | Signed code-only updates are required for the first public Windows release | Key-generation tooling and a real 3072-bit public key are committed; protected-secret existence, the matching private half, real-key signing/apply/rollback, and release-event proof remain external gates |
 | Release authentication | Configure `RELEASE_PLEASE_TOKEN` as a fine-grained PAT or GitHub App token so release-created events can trigger the Windows asset workflow | Approved; repository secret setup and proof remain |
 | Licensing | Align Frame Compare with PyQt6 under `GPL-3.0-only`; do not purchase or depend on a commercial PyQt license | Repository relicensing implemented; exact-artifact compliance remains |
 | User checksum guidance | Teach users to verify the published Windows ZIP against its `.sha256` asset | Implemented and strictly built |
@@ -53,7 +54,7 @@ advances before the squash merge.
 
 | ID | Finding | Type | Severity | Confidence | Release effect |
 | --- | --- | --- | --- | --- | --- |
-| F-01 | Windows release public key is still a placeholder | Confirmed defect | S1 | High | Blocks official Windows bundle and update release |
+| F-01 | Windows signing trust is incomplete beyond the committed real public key | External verification gap | S1 | High | Blocks official Windows update release until the protected matching private key and complete signed-update lifecycle are proved |
 | F-02 | Release-event authentication may not trigger the Windows asset workflow | Insufficient deployment data / conditional defect | S1 | High in mechanism; environment unknown | Blocks automatic release assets unless a PAT or GitHub App token is configured |
 | F-03 | First-release version and Release Please bootstrap history are ambiguous | Inferred release risk | S2 | High | Could publish an unintended `v0.2.0` or an oversized/misleading changelog |
 | F-04 | PyQt6 redistribution under the project’s intended license posture lacks a recorded compatible-license disposition | Confirmed license mismatch requiring maintainer disposition | S1 | High | Blocks public Windows binary distribution until the project and artifact license posture is aligned |
@@ -73,7 +74,7 @@ advances before the squash merge.
 
 | ID | Evidence | Risk mechanism | Closure proof |
 | --- | --- | --- | --- |
-| F-01 | `tools/windows_portable/update_public_key.xml` contains replacement markers and a non-release modulus; release/manual builds pass `-RequireReleasePublicKey` | The release path validates a key that cannot qualify as a real release key, so the official Windows build fails closed | Committed real public key validates; matching protected private key signs an update that the installed client accepts |
+| F-01 | `tools/windows_portable/update_public_key.xml` now contains a non-placeholder 3072-bit public key with only `Modulus` and `Exponent`, key ID `frame-compare-update-2026-01`, and UTC generation metadata; repository evidence cannot prove the protected secret or matching private half | A syntactically real public key alone does not establish that CI holds its matching private key or that installed clients accept updates signed by it | Validate the committed public key on Windows; confirm the protected secret exists without exposing it; prove the matching private key signs an update that the installed client accepts; prove tamper rejection, apply, rollback, and release-event asset production |
 | F-02 | `.github/workflows/release-please.yml` falls back to `github.token`; `.github/workflows/windows-portable.yml` listens for a separate release event | GitHub suppresses new workflow runs caused by events created with `GITHUB_TOKEN`, so the release can exist without triggering asset creation | Confirm non-`GITHUB_TOKEN` credential and observe a disposable Release Please prerelease trigger the Windows workflow |
 | F-03 | There are no prior release tags while `pyproject.toml` and `.release-please-manifest.json` already say `0.1.0`; the branch contains extensive feature history | Release Please may interpret `0.1.0` as already released and calculate a later version from all visible history | Previewed release PR/tag/changelog exactly match the maintainer-approved bootstrap version and commit boundary |
 | F-04 | The Windows builder installs PyQt6/PyQt6-Qt6 into the public bundle; at the review baseline PyQt6 package metadata was `GPL-3.0-only` or commercial while the repository was Apache-2.0; the project is now `GPL-3.0-only` | Redistributing the combined release without inspecting the exact artifact’s license inventory and corresponding-source path could still leave compliance gaps | Inspect the exact artifact’s licenses, notices, and corresponding-source path after the completed project relicensing |
@@ -165,6 +166,74 @@ published artifacts.
 - Offline HTML reporting with no telemetry found in the review.
 - Signed-update design with file hashing, dependency fingerprint checks, backups,
   rollback, and fail-closed behavior.
+
+## July 28 remediation implementation program
+
+R-00 reconciled the accepted production-remediation findings below with current
+`stage1`. These packages are part of this active plan and precede the remaining
+release-candidate gates. Each package must remain independently revertible, receive
+focused proof and diff inspection, and pass the wave integration gate before the
+next wave begins.
+
+| Package | Accepted finding and bounded remedy | Required closure proof |
+| --- | --- | --- |
+| R-01 | The Windows uninstaller recursively removes the install root and can destroy persistent configuration or unknown files. Remove only exact managed PATH/file entries; remove `bin`, `state`, or the root only when each is empty; preserve `state/config.toml` and unknown files; do not add purge behavior. | Non-skipped Windows install → edit config → uninstall → reinstall E2E preserves exact config bytes and unknown files. |
+| R-02 | Generated TOML can persist `tmdb.api_key`. Strip it through the existing central persistence owner for every generated-file path while continuing to accept manually authored TOML and environment keys at runtime. Do not add provenance, encryption, migration, or a general secret framework. | Generated files, logs, and errors never contain the key; direct TOML and environment loading still work. |
+| R-03 | Run timing mixes naive wall time with elapsed-duration calculation. Use aware UTC only for `started_at`/`completed_at` and an injected monotonic timer for preflight, loading, phases, success/failure totals, and persisted `duration_seconds`; preserve existing schemas and avoid a timing service. | Forward and backward wall-clock jumps leave monotonic phase and persisted durations correct. |
+| R-04 | slow.pics `Retry-After` parsing can resolve unsafe delays. Keep policy in `services/publishers.py` and constrain every resolved delay to a finite `0..60` seconds. Do not add shared/configurable retry infrastructure. | Negative, NaN, both infinities, huge, past/future date, malformed, and missing-header cases pass. |
+| R-05 | The real VapourSynth metric test is outside the Docker zero-skip selection and analysis-owner changes do not trigger the workflow. Relocate the existing test without changing behavior and add `src/frame_compare/analysis/**` to the workflow triggers. | Docker zero-skip gate selects and runs the real metric proof; Docker workflow contract covers the trigger. |
+| R-06 | Optional coverage omits every `*/types.py`. Remove that blanket omission without adding mandatory coverage CI or padding tests. | Optional coverage includes those files and records the honest result; the prior diagnostic was approximately 90.046%. |
+| R-07 | Direct build tools are not deterministically versioned. Pin one exact tested uv version across workflows and exact tested Hatchling version; do not add transitive hash-refresh machinery absent reproduced drift. | Clean isolated wheel/sdist build, inspection, fresh install, and installed CLI smoke pass. |
+| R-08 | Offline reports lack a real-browser initialization proof. Add one generated-report smoke on explicit Ubuntu 24.04 using the preinstalled Chrome/Chromium, with a clear binary preflight and no browser framework/download dependency. | Browser observes post-initialization DOM plus representative active and ARIA state. |
+| R-09 | Viewer tests contain source-spelling assertions whose behavioral value is unclear. Create a deletion ledger and remove an assertion only when mapped to the Node harness, R-08 browser proof, or a documented no-behavior conclusion; retain unmatched security, embedding, dependency-order, accessibility, CSS, and behavioral assertions. | Every deletion has equal-or-stronger mapped proof; stop if replacement proof is larger or weaker. |
+| R-10 | Subprocess execution uses an async → thread → second event loop → blocking join bridge. Replace it with synchronous `subprocess.run`, preferring stdlib result/error types while preserving validation, byte streams, timeout cleanup, `check`, shell avoidance, and FFmpeg translation. | Already-running-event-loop use plus FFmpeg, alignment, Docker, and Windows-sensitive proof passes. |
+| R-11 | Logging uses a large stderr proxy, unused singleton, and an unused `**kwargs` format bridge. Reduce it to the smallest late-bound write/flush stream and use the explicit `log_format` keyword. | Current `sys.stderr` capture, repeated configuration, shutdown, JSON stdout purity, levels, and renderers remain correct. |
+| R-12 | `cli/entry.py` retains confirmed-unused private aliases/imports. Remove only exact dead aliases, preserving `_RunnerProxy`, lazy imports, meaningful Protocols, and explicit CLI/config mappings. | Focused CLI/lazy-import tests and the full gate pass with a recorded physical LOC delta. |
+
+### Remediation execution and integration gates
+
+1. R-00 plan reconciliation and the separate explorer-role commit.
+2. Wave 1: R-01 through R-04 on disjoint owners, then independent integration
+   review and the full repository gate.
+3. Wave 2: R-05 and R-06, then serialized R-07, R-08, and R-09, followed by
+   independent integration review, the full gate, and Docker verification.
+4. Wave 3: R-10 and R-11, then R-12, followed by independent integration review,
+   the full gate, and all applicable runtime proof.
+5. Proceed to the existing P0-P8 release-candidate gates only after every applicable
+   remediation gate passes. Windows-only, GitHub-only, protected-secret, and
+   release-event evidence must remain explicit external gates when unavailable.
+
+After every wave run:
+
+```bash
+uv run --no-sync pyright --warnings
+uv run --no-sync ruff check .
+uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium
+uv run --no-sync pytest -q
+uv run --no-sync lint-imports --config importlinter.ini
+git diff --check
+```
+
+Run `bash tools/verify_docker_integration.sh` for VapourSynth, FFmpeg, alignment,
+tonemap, or Docker-sensitive changes. Run API-doc drift and strict documentation
+checks when their surfaces change. The Windows portable workflow remains required
+for R-01 and R-10 even when local macOS proof passes. Record physical before/after
+LOC for cleanup packages R-09 through R-12; LOC is evidence, not a quota.
+
+Touch-triggered opportunities are deliberately not standalone packages: consolidate
+duplicate input discovery only while changing its preparation owner and only when a
+single deterministic snapshot is measurably simpler; remove alignment or tonemap
+private aliases only while those owners are already touched and proof remains at
+least as strong.
+
+Metadata-creation POST idempotency remains a parked residual risk because no
+official slow.pics idempotency guarantee is known. Do not invent request IDs or
+deduplication. Revisit only with an official contract or maintainer decision; the
+conservative future option is no response-status retry for that metadata POST.
+Also preserve the 93 public config fields, the
+`RunCliRawArgs -> RunCliOptions -> RunRequest` conversion, phase-output ownership,
+strict result parsing/redaction, webhook address pinning, raw offline embedding,
+lazy imports, CLI stream/exit/JSON contracts, and Windows/Docker behavior.
 
 ## Plan summary
 
@@ -287,18 +356,23 @@ Suggested owner role: maintainer plus release-workflow implementer.
 
 Accepted finding IDs: F-01.
 
-Goal: replace the placeholder update public key with the public half of a protected
-release keypair and prove the complete signed-update lifecycle.
+Status: key-generation tooling and a real public key are committed. Repository
+inspection proves only the public half; the protected secret, matching private half,
+real-key signing, installed-client update application/rollback, and release-event
+evidence remain unproved.
 
-Risk reduced: official Windows builds currently fail release-key validation, and an
-incorrect key relationship would make legitimate updates unverifiable.
+Goal: complete the protected public/private-key relationship and prove the complete
+signed-update lifecycle.
+
+Risk reduced: an absent or mismatched protected private key would make legitimate
+updates unavailable or unverifiable even though the committed public key is real.
 
 Scope:
 
-- Add a maintainer-only PowerShell key-generation script with explicit public and
-  private output paths and no logging of private parameters.
+- Preserve the committed maintainer-only PowerShell key-generation script with
+  explicit public and private output paths and no logging of private parameters.
 - Generate a release RSA keypair using an approved offline process.
-- Commit only the public key with a real key ID and generation date.
+- Preserve only the committed public key with its real key ID and generation date.
 - Store the private key XML as the protected
   `WINDOWS_UPDATE_SIGNING_KEY_XML` Actions secret.
 - Validate the public key with the repository script.
@@ -322,14 +396,15 @@ that signature before applying changes.
 
 Implementation approach:
 
-1. Add and test the maintainer key-generation procedure without creating a real
-   private release key in the repository or task environment.
-2. The maintainer generates and backs up the real keypair on a trusted Windows
-   machine outside CI logs and the repository.
-3. Replace the placeholder public key and metadata.
-4. Configure the private key as `WINDOWS_UPDATE_SIGNING_KEY_XML`.
-5. Use `workflow_dispatch` to exercise the protected signing path.
-6. Download the artifact, verify it offline, apply it to a test bundle, and roll
+1. Revalidate the committed key-generation procedure and public key without reading
+   or creating private release material in the repository or task environment.
+2. The maintainer confirms that the protected private key matching the committed
+   public key is backed up on a trusted Windows machine outside CI logs and the
+   repository.
+3. Confirm the matching private key is configured as
+   `WINDOWS_UPDATE_SIGNING_KEY_XML`.
+4. Use `workflow_dispatch` to exercise the protected signing path.
+5. Download the artifact, verify it offline, apply it to a test bundle, and roll
    back.
 
 Verification:

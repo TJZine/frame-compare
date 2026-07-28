@@ -51,25 +51,20 @@ Do not create or publish the official v0.1.0 tag or merge a release PR.
 
 ## Baseline and current state
 
-At handoff authoring time on July 27, 2026:
+The active remediation plan owns volatile implementation and gate status. Do not
+copy an authoring-time branch, commit, worktree, key, secret, or workflow snapshot
+from this supporting handoff.
 
-- branch: `stage1`
-- commit: `5352c4be`
-- remote state: `stage1` matched `origin/stage1`
-- worktree: clean
-- project license: `GPL-3.0-only`
-- `tools/windows_portable/update_public_key.xml`: still a placeholder
-- release/manual Windows workflow runs: already fail closed when the public key or
-  `WINDOWS_UPDATE_SIGNING_KEY_XML` secret is missing
-- pull-request Windows workflow runs: build an unsigned development update without
-  requiring signing secrets
-- public Windows releases: require the portable ZIP/checksum and signed update
-  ZIP/checksum
+At the start of each Windows session, record the actual branch, full head, remote
+relationship, worktree status, public-key validation result, and every skipped
+Windows test. Reread the active plan and review intervening commits. Never reset or
+discard newer work to force an old handoff snapshot.
 
-The branch may advance after this document is committed. A newer clean
-`origin/stage1` is acceptable, but the Windows task must reread the active plan and
-review intervening commits before continuing. Do not reset or discard newer work to
-force the authoring-time commit.
+A committed real public key proves only public repository state. It does not prove
+that `WINDOWS_UPDATE_SIGNING_KEY_XML` exists, contains the matching private half,
+successfully signs an update, produces an update the installed client accepts and
+rolls back, or is exercised by the release-event chain. Record each of those as a
+separate gate.
 
 ## Scope map
 
