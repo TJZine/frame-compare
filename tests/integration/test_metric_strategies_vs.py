@@ -33,6 +33,21 @@ def test_performance_strategy_black_clip_has_zero_luminance_and_motion() -> None
 
 
 @pytest.mark.vs_required
+def test_performance_strategy_one_frame_clip_uses_real_planestats() -> None:
+    clip = vs.core.std.BlankClip(width=16, height=16, length=1, format=vs.GRAY8, color=64)
+
+    result = calculate_metric_strategy(
+        _source(clip),
+        AnalysisConfig(performance_mode="performance"),
+        reporter=None,
+    )
+
+    assert result.luminance == pytest.approx([64 / 255])
+    assert result.motion == pytest.approx([0.0])
+    assert result.sampled_source_frames == (0,)
+
+
+@pytest.mark.vs_required
 def test_performance_strategy_white_clip_has_full_luminance_and_zero_motion() -> None:
     clip = vs.core.std.BlankClip(width=16, height=16, length=3, format=vs.GRAY8, color=255)
 
