@@ -8,8 +8,18 @@ function ConvertTo-NormalizedPathEntry([string]$PathEntry) {
   return $PathEntry.Trim().Trim('"').TrimEnd('\').ToLowerInvariant()
 }
 
+function Remove-DirectoryIfEmpty([string]$Path) {
+  if (
+    (Test-Path -LiteralPath $Path -PathType Container) -and
+    @(Get-ChildItem -LiteralPath $Path -Force).Count -eq 0
+  ) {
+    Remove-Item -LiteralPath $Path -Force
+  }
+}
+
 $installRoot = Join-Path (Join-Path $env:LOCALAPPDATA "Programs") "FrameCompare"
 $binDir = Join-Path $installRoot "bin"
+$stateDir = Join-Path $installRoot "state"
 
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 $entries = @()
@@ -33,9 +43,16 @@ foreach ($file in @("frame-compare.ps1", "frame-compare.cmd", "frame-compare-upd
   }
 }
 
-if (Test-Path -LiteralPath $installRoot) {
-  Remove-Item -Recurse -Force -LiteralPath $installRoot
+foreach ($file in @("config.json", "config.json.tmp")) {
+  $path = Join-Path $stateDir $file
+  if (Test-Path -LiteralPath $path) {
+    Remove-Item -LiteralPath $path -Force
+  }
 }
+
+Remove-DirectoryIfEmpty -Path $binDir
+Remove-DirectoryIfEmpty -Path $stateDir
+Remove-DirectoryIfEmpty -Path $installRoot
 
 Write-Host "Uninstalled Frame Compare shim."
 Write-Host "Open a new terminal to observe PATH changes."

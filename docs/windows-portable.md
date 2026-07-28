@@ -190,7 +190,11 @@ frame-compare-update purge-backups --keep 5
 ## Uninstalling
 
 Run `uninstall.cmd` from the current portable bundle root. This removes the installed
-user shim; it does not silently delete the portable bundle or your comparison files.
+user shim and its managed PATH entry. It preserves the installed
+`state/config.toml` byte-for-byte and leaves unknown files under the installed
+`state`, `bin`, or root directories in place, so reinstalling reuses the existing
+configuration. The uninstall does not silently delete the portable bundle or your
+comparison files.
 
 ---
 
