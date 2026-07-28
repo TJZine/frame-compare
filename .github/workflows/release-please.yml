@@ -5,12 +5,55 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+
+concurrency:
+  group: release-please-main
+  cancel-in-progress: false
 
 jobs:
+  initial_release_guard:
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      enabled: ${{ steps.guard.outputs.enabled }}
+    steps:
+      - name: Require published stable v0.1.0
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'enabled=false\n' >> "$GITHUB_OUTPUT"
+          if ! release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/v0.1.0" 2>/dev/null)"; then
+            echo "Release Please remains dormant until stable v0.1.0 is published."
+            exit 0
+          fi
+          draft="$(jq -r '.draft' <<<"$release_json")"
+          prerelease="$(jq -r '.prerelease' <<<"$release_json")"
+          tag_name="$(jq -r '.tag_name' <<<"$release_json")"
+          if [[ "$draft" != "false" || "$prerelease" != "false" || "$tag_name" != "v0.1.0" ]]; then
+            echo "Release Please remains dormant until v0.1.0 is a published stable release."
+            exit 0
+          fi
+          tag_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/v0.1.0" --jq '.object.sha')"
+          if [[ ! "$tag_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Published v0.1.0 does not resolve to a direct commit tag." >&2
+            exit 1
+          fi
+          printf 'enabled=true\n' >> "$GITHUB_OUTPUT"
+
   release_please:
+    needs: initial_release_guard
+    if: needs.initial_release_guard.outputs.enabled == 'true'
+    permissions:
+      contents: write
+      pull-requests: write
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Run release-please
         id: release
@@ -19,3 +62,4 @@ jobs:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          skip-github-release: true
