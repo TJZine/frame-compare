@@ -212,24 +212,39 @@ def test_windows_portable_workflow_requires_signed_update_release_assets(
     repo_root: Path,
 ) -> None:
     workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
-    workflow = _read_text_or_fail(workflow_path)
+    workflow = _load_workflow(workflow_path)
+    build = workflow["jobs"]["build"]
+    release_assets = workflow["jobs"]["release-assets"]
+    upload_bundle = _step_by_name(build, "Upload bundle artifact")
+    upload_update = _step_by_name(build, "Upload code-only update artifact")
+    download = _step_by_name(release_assets, "Download signed update artifact")
+    prepare = _step_by_name(release_assets, "Prepare versioned signed update asset")
+    verify_assets = _step_by_name(release_assets, "Verify required release asset set")
+    upload = _step_by_name(release_assets, "Upload required release assets")
 
-    assert "Download signed update artifact" in workflow
-    assert "Prepare versioned signed update asset" in workflow
-    assert "Verify required release asset set" in workflow
-    assert "Upload required release assets" in workflow
-    assert "if: needs.build.outputs.update_signed == 'true'" not in workflow
-    assert workflow.count("if-no-files-found: error") == 2
-    assert workflow.count("fail_on_unmatched_files: true") == 1
-    assert "Missing required release asset: $asset" in workflow
-    assert "mapfile -t update_zips" in workflow
-    assert "Expected exactly one signed update zip artifact, found ${#update_zips[@]}." in workflow
-    assert "frame-compare-update-win-x64-${ASSET_TAG}.zip" in workflow
+    assert release_assets["if"] == "github.event_name == 'release'"
+    assert "outputs" not in build
+    assert "if" not in download
+    assert download["with"] == {
+        "name": "frame-compare-update-win-x64",
+        "path": "dist/release-assets",
+    }
+    assert "if" not in prepare
+    assert upload_bundle["with"]["if-no-files-found"] == "error"
+    assert upload_update["with"]["if-no-files-found"] == "error"
+    assert "mapfile -t update_zips" in prepare["run"]
+    assert (
+        "Expected exactly one signed update zip artifact, found ${#update_zips[@]}."
+        in prepare["run"]
+    )
+    assert "frame-compare-update-win-x64-${ASSET_TAG}.zip" in prepare["run"]
+    assert "Missing required release asset: $asset" in verify_assets["run"]
+    assert upload["with"]["fail_on_unmatched_files"] == "true"
     assert (
         "dist/release-assets/frame-compare-update-win-x64-${{ "
         "steps.release_names.outputs.asset_tag }}.zip"
-    ) in workflow
+    ) in upload["with"]["files"]
     assert (
         "dist/release-assets/frame-compare-update-win-x64-${{ "
         "steps.release_names.outputs.asset_tag }}.zip.sha256"
-    ) in workflow
+    ) in upload["with"]["files"]
