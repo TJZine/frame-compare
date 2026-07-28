@@ -1,9 +1,5 @@
 <!--
-  key_id: REPLACE_WITH_RELEASE_KEY_ID
-  generated_at: REPLACE_WITH_UTC_DATE
-  NOTE: Replace this placeholder with the real release public key.
+  key_id: frame-compare-update-2026-01
+  generated_at: 2026-07-28T01:47:52Z
 -->
-<RSAKeyValue>
-  <Modulus>AQAB</Modulus>
-  <Exponent>AQAB</Exponent>
-</RSAKeyValue>
+<RSAKeyValue><Modulus>pzLGMhZG+kCQ1s6IZk9kGoGPMh2/K4r7t70i2E3Vwos+N4ifMVB5fjL429V4811ZhbodssvbXtzR+uSaiFSm5nPyPAghAeY6Wro0r+YGi/jZHW9sYMt1fxCmDnVutdkiepFJCNdlUt5joQlf2rDEq97ivBUkYzj75h+AIwJ54fSuIMv0EjTA9BctyovpXcJmxrykT4f1hu3FALt8nxHSNRmoNirHX8X1Vzos0DBK19pvDbVqaKw2Lkcgi3p9sgCQQOQGB+MmS0e38qzP2KH0OVDaDRvcQXJzOlVG4N0FsWFctgzNo3/LF3UU4ojsQGyvnN/pO/vaIJIpIT1MV/aOMt+ZlXomcC+A/aHREj3bYdY4zR10AcO4deRybebLCme5DZZF/V/9sRcwRZCbo+uMzP/S/y0yw5BdbXan80irJ54heFSQ1J1a3Zltx79MqBrOAx+0svcRbOsDZWQD20jNHa7LnV4DzawqN8bc3QuqU62neZyYi0Aw7OPQlfDo/6TR</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>
