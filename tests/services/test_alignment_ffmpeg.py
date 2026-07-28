@@ -4,6 +4,7 @@
 
 from fractions import Fraction
 from pathlib import Path
+from subprocess import CalledProcessError, TimeoutExpired
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -28,7 +29,6 @@ from frame_compare.services.alignment_audio import (
 )
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
-from frame_compare.utils.subproc import CalledProcessError, TimeoutExpired
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")

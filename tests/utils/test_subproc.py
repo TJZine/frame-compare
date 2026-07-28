@@ -1,8 +1,10 @@
+import asyncio
+import subprocess
 import sys
 
 import pytest
 
-from frame_compare.utils.subproc import CalledProcessError, TimeoutExpired, run_subprocess
+from frame_compare.utils.subproc import run_subprocess
 
 
 def test_run_subprocess_check_true():
@@ -22,7 +24,7 @@ def test_run_subprocess_check_false():
 
 def test_run_subprocess_failure():
     """Assert CalledProcessError raised on exit 1 (when check=True)."""
-    with pytest.raises(CalledProcessError):
+    with pytest.raises(subprocess.CalledProcessError):
         run_subprocess([sys.executable, "-c", "import sys; sys.exit(1)"])
 
 
@@ -31,7 +33,7 @@ def test_run_subprocess_timeout():
     argv = [sys.executable, "-c", "import time; time.sleep(1)"]
     timeout_seconds = 0.01
 
-    with pytest.raises(TimeoutExpired) as exc_info:
+    with pytest.raises(subprocess.TimeoutExpired) as exc_info:
         run_subprocess(argv, timeout_seconds=timeout_seconds)
 
     assert exc_info.value.cmd[-2:] == ["-c", "import time; time.sleep(1)"]
@@ -42,3 +44,17 @@ def test_run_subprocess_not_found():
     """Assert FileNotFoundError raised when bin missing."""
     with pytest.raises(FileNotFoundError):
         run_subprocess(["non_existent_command_12345"])
+
+
+def test_run_subprocess_inside_running_event_loop() -> None:
+    """Assert the synchronous helper is safe to call while an event loop is running."""
+
+    async def invoke() -> subprocess.CompletedProcess[bytes]:
+        asyncio.get_running_loop()
+        return run_subprocess([sys.executable, "-c", "print('from-loop')"])
+
+    result = asyncio.run(invoke())
+
+    assert isinstance(result, subprocess.CompletedProcess)
+    assert result.stdout == b"from-loop\n"
+    assert result.stderr == b""

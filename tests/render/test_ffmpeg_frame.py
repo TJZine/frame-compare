@@ -15,7 +15,6 @@ from frame_compare.render.geometry import (
     SourceGeometry,
 )
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
-from frame_compare.utils.subproc import CalledProcessError
 
 
 def test_build_extract_frame_argv_supports_optional_overwrite() -> None:
@@ -193,7 +192,7 @@ def test_default_ffmpeg_runner_extract_frame_wraps_missing_input_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     run_subprocess = MagicMock(
-        side_effect=CalledProcessError(
+        side_effect=subprocess.CalledProcessError(
             1,
             ["ffmpeg"],
             stderr=b"No such file or directory",
