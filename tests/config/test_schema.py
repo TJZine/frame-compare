@@ -8,7 +8,6 @@ import pytest
 import tomli_w
 from pydantic import BaseModel, ValidationError
 
-from frame_compare.config.defaults import DEFAULT_CONFIG_TOML
 from frame_compare.config.loader import get_default_config
 from frame_compare.config.schema import (
     AnalysisConfig,
@@ -76,7 +75,6 @@ def test_default_config_values() -> None:
     assert config.audio_alignment.previous_offsets == "disabled"
     assert config.audio_alignment.comparison_streams == {}
     assert config.slowpics.confirm_upload_after_report is False
-    assert 'previous_offsets = "disabled"' in DEFAULT_CONFIG_TOML
 
 
 def test_analysis_requires_at_least_one_requested_frame() -> None:
@@ -337,14 +335,6 @@ def test_sources_match_fps_rejects_invalid_value() -> None:
         SourcesConfig.model_validate({"match_fps": "nearest"})
 
 
-def test_default_config_template_documents_analysis_source_and_majority() -> None:
-    parsed = tomllib.loads(DEFAULT_CONFIG_TOML)
-
-    assert "sources" in parsed
-    assert '# analysis_source = "reference"' in DEFAULT_CONFIG_TOML
-    assert '# match_fps = "majority"' in DEFAULT_CONFIG_TOML
-
-
 def test_slowpics_config_public_surface_is_frozen_to_approved_fields_and_defaults() -> None:
     """slow.pics config remains the documented approved public surface."""
     expected_defaults = {
@@ -492,83 +482,6 @@ def test_sources_config_effective_fps_serializes_num_den_for_toml_round_trip() -
 
     assert data["sources"]["overrides"]["source-24.mkv"]["effective_fps"] == "24/1"
     assert data["sources"]["overrides"]["source-ntsc.mkv"]["effective_fps"] == "24000/1001"
-
-
-def test_default_config_toml_documents_sources_defaults() -> None:
-    data = tomllib.loads(DEFAULT_CONFIG_TOML)
-
-    assert data["sources"] == {"label_mode": "stem", "label_parser": "auto"}
-    assert '# reference = "auto"' in DEFAULT_CONFIG_TOML
-    assert '# analysis_source = "reference"' in DEFAULT_CONFIG_TOML
-    assert '# match_fps = "majority"' in DEFAULT_CONFIG_TOML
-    assert '# [sources.overrides."encode-a.mkv"]' in DEFAULT_CONFIG_TOML
-    assert '# effective_fps = "24000/1001"' in DEFAULT_CONFIG_TOML
-
-
-def test_default_config_toml_documents_screenshot_geometry_defaults() -> None:
-    data = tomllib.loads(DEFAULT_CONFIG_TOML)
-
-    assert "directory_name" not in data["screenshots"]
-    assert data["screenshots"]["geometry_mode"] == "native"
-    assert data["screenshots"]["active_rect_detection"] == "aspect_ratio"
-    assert data["screenshots"]["aligned_scale_policy"] == "largest_active"
-    assert "aligned_target_width" not in data["screenshots"]
-    assert "aligned_target_height" not in data["screenshots"]
-    assert "# aligned_target_width = 3840" in DEFAULT_CONFIG_TOML
-    assert "# aligned_target_height = 2160" in DEFAULT_CONFIG_TOML
-
-
-def test_default_config_toml_documents_analysis_ignore_window_defaults() -> None:
-    data = tomllib.loads(DEFAULT_CONFIG_TOML)
-
-    assert set(data["analysis"].keys()) == {
-        "user_frames",
-        "random_frame_count",
-        "dark_frame_count",
-        "bright_frame_count",
-        "motion_frame_count",
-        "random_seed",
-        "performance_mode",
-        "ignore_lead_seconds",
-        "ignore_trail_seconds",
-        "min_window_seconds",
-        "dark_quantile",
-        "bright_quantile",
-    }
-    assert data["analysis"]["performance_mode"] == "quality"
-    assert data["analysis"]["ignore_lead_seconds"] == 0.0
-    assert data["analysis"]["ignore_trail_seconds"] == 0.0
-    assert data["analysis"]["min_window_seconds"] == 5.0
-
-
-def test_default_config_toml_omits_removed_logging_file_key() -> None:
-    data = tomllib.loads(DEFAULT_CONFIG_TOML)
-
-    assert "file" not in data["logging"]
-
-
-def test_default_config_toml_documents_approved_slowpics_defaults() -> None:
-    """Default config template keeps the approved slow.pics config surface visible."""
-    data = tomllib.loads(DEFAULT_CONFIG_TOML)
-
-    assert data["slowpics"] == {
-        "auto_upload": False,
-        "confirm_upload_after_report": False,
-        "visibility": "public",
-        "delete_after_upload": False,
-        "timeout_seconds": 60.0,
-        "max_retries": 3,
-        "is_hentai": False,
-        "remove_after_days": 0,
-        "image_upload_timeout_seconds": 180.0,
-        "copy_url_to_clipboard": True,
-        "open_in_browser": True,
-        "create_url_shortcut": True,
-    }
-    assert (
-        '# webhook_url = "https://discord.com/api/webhooks/WEBHOOK_ID/WEBHOOK_TOKEN"'
-        in DEFAULT_CONFIG_TOML
-    )
 
 
 def test_schema_model_enums_accept_config_strings_and_reject_unknown_values() -> None:

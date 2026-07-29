@@ -50,7 +50,6 @@ def _base_args() -> RunCliRawArgs:
         dark_frame_count=None,
         bright_frame_count=None,
         motion_frame_count=None,
-        removed_frame_count=None,
         seed=None,
         overlay=None,
         skip_analysis=False,

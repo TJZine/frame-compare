@@ -17,20 +17,11 @@ from frame_compare.cli.errors import (
 )
 from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.errors import (
-    DirectoryNotWritableError,
     ErrorContext,
-    FileTooLargeError,
     FrameCompareError,
-    GenericInternalError,
-    IncompatibleVideosError,
-    InvariantViolationError,
     PathEscapesRootError,
-    ProcessingOutOfMemoryError,
-    ProcessingTimeoutError,
-    PythonVersionError,
-    UnexpectedStateError,
-    VideoCorruptError,
-    VideoOpenError,
+    normalize_pydantic_errors,
+    redact_url_for_error,
 )
 from frame_compare.orchestration.errors import (
     DirectoryNotFoundError,
@@ -46,20 +37,16 @@ from frame_compare.render.errors import (
 from frame_compare.services.errors import (
     AudioAlignmentError,
     MetadataError,
-    NetworkTimeoutError,
-    NetworkUnreachableError,
     ReportError,
     SlowpicsError,
     SlowpicsRateLimitedError,
     SlowpicsUnavailableError,
-    SSLError,
     TmdbError,
     TmdbRateLimitedError,
 )
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 from frame_compare.vs.errors import (
-    LibplaceboError,
     PluginNotFoundError,
     SourceLoadError,
     TonemapError,
@@ -86,21 +73,14 @@ def _render_rich_markup(markup: str) -> str:
         (VapourSynthNotFoundError, (), "FC-2001"),
         (VapourSynthError, ("test",), "FC-2002"),
         (PluginNotFoundError, ("lsmas",), "FC-2003"),
-        (LibplaceboError, ("test",), "FC-2004"),
         (FFmpegNotFoundError, (), "FC-2005"),
         (FFmpegError, ("test", 1), "FC-2006"),
         (VSPreviewNotFoundError, (), "FC-2008"),
         (TonemapRequiresVapourSynthError, (), "FC-2009"),
-        (PythonVersionError, ("3.11",), "FC-2010"),
         # InputError (FC-3xxx)
         (NoVideosFoundError, (Path("/test"),), "FC-3001"),
-        (VideoOpenError, (Path("/test"),), "FC-3002"),
-        (VideoCorruptError, (Path("/test"),), "FC-3003"),
         (InsufficientFramesError, (Path("/test"), 10, 20), "FC-3004"),
-        (IncompatibleVideosError, ("test",), "FC-3005"),
         (DirectoryNotFoundError, (Path("/test"),), "FC-3006"),
-        (DirectoryNotWritableError, (Path("/test"),), "FC-3007"),
-        (FileTooLargeError, (Path("/test"), 100, 50), "FC-3008"),
         (PathEscapesRootError, (Path("/root"), Path("/other")), "FC-3009"),
         # ProcessingError (FC-4xxx)
         (FrameExtractionError, (42, "clip.mkv"), "FC-4001"),
@@ -110,8 +90,6 @@ def _render_rich_markup(markup: str) -> str:
         (AudioAlignmentError, ("test",), "FC-4005"),
         (CacheCorruptionError, (Path("/cache"),), "FC-4006"),
         (CacheVersionMismatchError, ("1.0", "2.0"), "FC-4007"),
-        (ProcessingOutOfMemoryError, (), "FC-4010"),
-        (ProcessingTimeoutError, ("op", 30.0), "FC-4011"),
         (SelectionError, ("reason", 10, 5), "FC-4012"),
         (EncodingError, (Path("/out.png"), "test"), "FC-4013"),
         (OverlayError, ("test",), "FC-4014"),
@@ -120,18 +98,11 @@ def _render_rich_markup(markup: str) -> str:
         (ReportError, ("test",), "FC-4017"),
         (VSPreviewError, ("test",), "FC-4019"),
         # NetworkError (FC-5xxx)
-        (NetworkUnreachableError, (), "FC-5001"),
         (SlowpicsError, ("test",), "FC-5002"),
         (SlowpicsRateLimitedError, (), "FC-5003"),
         (SlowpicsUnavailableError, (), "FC-5004"),
         (TmdbError, ("test",), "FC-5005"),
         (TmdbRateLimitedError, (), "FC-5006"),
-        (NetworkTimeoutError, ("slow.pics", 30.0), "FC-5007"),
-        (SSLError, ("test",), "FC-5008"),
-        # InternalError (FC-9xxx)
-        (GenericInternalError, ("test",), "FC-9001"),
-        (InvariantViolationError, ("test",), "FC-9002"),
-        (UnexpectedStateError, ("test",), "FC-9003"),
     ],
 )
 def test_exception_class_contract(error_class, args, expected_code):
@@ -187,24 +158,6 @@ def test_insufficient_frames_error_details_shape():
     assert details["required"] == required
 
 
-def test_network_timeout_error_redacts_sensitive_url_components() -> None:
-    error = NetworkTimeoutError(
-        "https://user:secret@example.com/path/to/api?token=abc123#fragment",
-        7.5,
-    )
-
-    assert "secret" not in error.context.message
-    assert "abc123" not in error.context.message
-    assert "fragment" not in error.context.message
-    assert "https://example.com/path/to/api" in error.context.message
-
-    details = error.context.details
-    assert details == {
-        "url": "https://example.com/path/to/api",
-        "timeout": 7.5,
-    }
-
-
 def test_vspreview_error_omits_public_details() -> None:
     error = VSPreviewError("launch exited with code 3")
 
@@ -244,7 +197,8 @@ def test_get_exit_code_network():
 
 
 def test_get_exit_code_internal():
-    assert get_exit_code(GenericInternalError("test")) == ExitCode.GENERAL_ERROR
+    error = FrameCompareError(ErrorContext(code="FC-9000", name="INTERNAL", message="test"))
+    assert get_exit_code(error) == ExitCode.GENERAL_ERROR
 
 
 def test_get_exit_code_unknown():
@@ -343,3 +297,40 @@ def test_format_error_json():
     payload = data["error"]
     assert isinstance(payload, dict)
     assert payload["code"] == "FC-4004"
+
+
+def test_error_context_omits_non_public_and_empty_fields() -> None:
+    context = ErrorContext(
+        code="FC-0001",
+        name="SAMPLE",
+        message="Sample failure",
+        details={},
+        hint="",
+        cause=RuntimeError("secret stack detail"),
+    )
+
+    assert context.to_dict() == {
+        "code": "FC-0001",
+        "name": "SAMPLE",
+        "message": "Sample failure",
+    }
+    assert "secret stack detail" not in str(FrameCompareError(context))
+
+
+def test_error_formatting_helpers_are_json_safe() -> None:
+    url = "https://user:secret@[2001:db8::1]:443/path?api_key=secret#frag"
+    assert redact_url_for_error(url) == "https://[2001:db8::1]:443/path"
+
+    assert normalize_pydantic_errors(
+        [
+            {
+                "loc": ("analysis", "frame_count"),
+                "ctx": {"limit": 100, "path": Path("/config.toml")},
+            }
+        ]
+    ) == [
+        {
+            "loc": ["analysis", "frame_count"],
+            "ctx": {"limit": 100, "path": str(Path("/config.toml"))},
+        }
+    ]

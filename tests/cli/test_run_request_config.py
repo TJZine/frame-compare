@@ -351,23 +351,6 @@ previous_offsets = "always"
     }
 
 
-def test_run_removed_frame_count_uses_owned_human_error_contract(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
-        raise AssertionError("runner.run should not be invoked for removed frame-count option")
-
-    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
-
-    result = _invoke_run_with_minimal_workspace(["-n", "12"])
-
-    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
-    assert result.stdout == ""
-    assert "--frame-count/-n has been removed" in result.stderr
-    assert "Usage:" not in result.stderr
-    assert "Traceback" not in result.stderr
-
-
 def test_run_invalid_frames_uses_owned_human_error_contract(
     monkeypatch: MonkeyPatch,
 ) -> None:

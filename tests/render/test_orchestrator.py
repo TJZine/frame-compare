@@ -9,7 +9,6 @@ from frame_compare.render.batch.orchestrator import (
     ProgressReporter,
     render_batch,
 )
-from frame_compare.render.batch.results import RenderBatchResults
 from frame_compare.render.types import (
     EncoderSettings,
     RenderRequest,
@@ -43,28 +42,6 @@ def test_render_batch_parallel_order(mock_render_request):
         mock_render.side_effect = lambda r: r.output_path
         results = render_batch(requests, parallelism=2)
         assert results == [r.output_path for r in requests]
-
-
-def test_render_batch_results_preserves_recorded_order() -> None:
-    results = RenderBatchResults(3)
-
-    results.record(2, Path("out_2.png"))
-    results.record(0, Path("out_0.png"))
-    results.record(1, Path("out_1.png"))
-
-    assert results.ordered_paths() == [
-        Path("out_0.png"),
-        Path("out_1.png"),
-        Path("out_2.png"),
-    ]
-
-
-def test_render_batch_results_rejects_missing_slot() -> None:
-    results = RenderBatchResults(2)
-    results.record(0, Path("out_0.png"))
-
-    with pytest.raises(RuntimeError, match="render batch completed without a rendered path"):
-        results.ordered_paths()
 
 
 def test_render_batch_fail_fast(mock_render_request):

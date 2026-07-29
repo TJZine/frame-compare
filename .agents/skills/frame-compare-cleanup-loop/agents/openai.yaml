@@ -1,6 +1,0 @@
-interface:
-  display_name: "Frame Compare Cleanup Loop"
-  short_description: "Launch the multi-step cleanup/refactor controller workflow"
-  default_prompt: "Use $frame-compare-cleanup-loop for this task."
-policy:
-  allow_implicit_invocation: false

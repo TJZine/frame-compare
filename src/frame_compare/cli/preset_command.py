@@ -14,28 +14,7 @@ from frame_compare.orchestration.preflight import (
     validate_and_normalize_config_paths,
 )
 
-
-class LoadConfigFn(Protocol):
-    def __call__(
-        self,
-        config_path: Path | None = None,
-        overrides: dict[str, object] | None = None,
-    ) -> ConfigSchema: ...
-
-
-class WriteConfigFn(Protocol):
-    def __call__(self, path: Path, config: ConfigSchema) -> None: ...
-
-
-class HandleErrorFn(Protocol):
-    def __call__(
-        self,
-        error: Exception,
-        *,
-        no_color: bool,
-        verbose: bool,
-        verbose_hint: str | None = "--verbose",
-    ) -> int: ...
+from .cli_helpers import HandleErrorFn, LoadConfigFn, WriteConfigFn
 
 
 class ListPresetsFn(Protocol):

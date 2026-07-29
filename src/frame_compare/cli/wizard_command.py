@@ -33,7 +33,7 @@ from frame_compare.orchestration.source_selection import (
     resolve_source_selector,
 )
 
-from .cli_helpers import TextWriter
+from .cli_helpers import HandleErrorFn, TextWriter
 from .wizard_policy import (
     GOAL_MENU_LINES,
     GoalChoice,
@@ -70,17 +70,6 @@ class PromptInputDirFn(Protocol):
 
 class WriteWizardPayloadFn(Protocol):
     def __call__(self, config_path: Path, data: TomlPayload) -> None: ...
-
-
-class HandleErrorFn(Protocol):
-    def __call__(
-        self,
-        error: Exception,
-        *,
-        no_color: bool,
-        verbose: bool,
-        verbose_hint: str | None = "--verbose",
-    ) -> int: ...
 
 
 class WizardTerminalRequiredError(InputError):

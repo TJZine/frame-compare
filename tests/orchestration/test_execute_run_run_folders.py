@@ -29,7 +29,7 @@ from frame_compare.config.schema import AnalysisConfig
 from frame_compare.orchestration import phase_selection, preparation
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.orchestration.probing.probe_cache import load_clip_probe_cache
-from frame_compare.services.run_folder import RunFolderReservation, derive_run_folder_name
+from frame_compare.services.run_folder import RunFolderReservation, reserve_run_folder
 from frame_compare.vs.types import SourceInfo
 from frame_compare.vspreview.overrides import MANUAL_OVERRIDES_FILE
 
@@ -57,6 +57,13 @@ random_frame_count = 0
 dark_frame_count = 1
 """
 )
+
+
+def _reserve_expected_source_run_name(tmp_path: Path) -> str:
+    return reserve_run_folder(
+        tmp_path / "expected_run_names",
+        filenames=["source.mkv"],
+    ).folder_name
 
 
 class ClipStub:
@@ -167,7 +174,7 @@ def test_execute_run_from_cache_only_does_not_reserve_run_folder_when_metrics_ca
     create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
-    run_name = derive_run_folder_name(filenames=["source.mkv"])
+    run_name = _reserve_expected_source_run_name(tmp_path)
     run_dir = tmp_path / "generated" / run_name
 
     request = RunRequest(
@@ -208,7 +215,7 @@ def test_execute_run_from_cache_only_uses_shared_cache_when_run_folders_enabled(
 
     result = asyncio.run(execute_run(request, deps=deps))
 
-    run_name = derive_run_folder_name(filenames=["source.mkv"])
+    run_name = _reserve_expected_source_run_name(tmp_path)
     assert result.success is True
     assert result.cache_hit is True
     assert result.warnings == []
@@ -461,7 +468,7 @@ def test_execute_run_normal_rerun_creates_fresh_run_folder_and_uses_shared_cache
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
 
-    run_name = derive_run_folder_name(filenames=["source.mkv"])
+    run_name = _reserve_expected_source_run_name(tmp_path)
     existing_run_dir = tmp_path / "generated" / run_name
     existing_run_dir.mkdir(parents=True)
     config = load_config(tmp_path / "config" / "config.toml")
@@ -503,7 +510,7 @@ def test_execute_run_from_cache_only_ignores_old_run_folder_cache(
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
 
-    run_name = derive_run_folder_name(filenames=["source.mkv"])
+    run_name = _reserve_expected_source_run_name(tmp_path)
     run_generated_dir = tmp_path / "generated" / run_name / "generated"
     source_path = input_dir / "source.mkv"
     config = load_config(tmp_path / "config" / "config.toml")

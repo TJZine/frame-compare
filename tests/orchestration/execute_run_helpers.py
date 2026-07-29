@@ -33,7 +33,7 @@ from frame_compare.orchestration.probing.probe_cache import (
 )
 from frame_compare.orchestration.selection_domain import (
     build_analysis_selection_domain_token,
-    build_selection_domain_clips,
+    build_selection_domain_clips_with_diagnostics,
     compute_selection_window_for_clips,
 )
 from frame_compare.orchestration.source_selection import SourceSelection, resolve_source_selection
@@ -190,7 +190,7 @@ def analysis_selection_domain_for_cache_inputs(
 ) -> str:
     ordered_paths = _resolved_cache_inputs(video_paths, config)
     snapshots_by_path = {path: _clip_probe_snapshot_for_cache_input(path) for path in ordered_paths}
-    clips = build_selection_domain_clips(
+    clips = build_selection_domain_clips_with_diagnostics(
         ordered_paths=ordered_paths,
         snapshots_by_path=snapshots_by_path,
         overrides_by_path=_resolved_cache_overrides(video_paths, config),
@@ -200,7 +200,7 @@ def analysis_selection_domain_for_cache_inputs(
         },
         match_fps=config.sources.match_fps,
         active_rect_detection=config.screenshots.active_rect_detection,
-    )
+    ).clips
     window = compute_selection_window_for_clips(clips=clips, config=config)
     analysis_clip = clips[0]
     if analysis_source_path is not None:
@@ -234,7 +234,7 @@ def metric_cache_request_for_cache_inputs(
 ) -> MetricCacheRequest:
     ordered_paths = _resolved_cache_inputs(video_paths, config)
     snapshots_by_path = {path: _clip_probe_snapshot_for_cache_input(path) for path in ordered_paths}
-    clips = build_selection_domain_clips(
+    clips = build_selection_domain_clips_with_diagnostics(
         ordered_paths=ordered_paths,
         snapshots_by_path=snapshots_by_path,
         overrides_by_path=_resolved_cache_overrides(video_paths, config),
@@ -244,7 +244,7 @@ def metric_cache_request_for_cache_inputs(
         },
         match_fps=config.sources.match_fps,
         active_rect_detection=config.screenshots.active_rect_detection,
-    )
+    ).clips
     analysis_clip = clips[0]
     if analysis_source_path is not None:
         analysis_clip = next(clip for clip in clips if clip.path == analysis_source_path)

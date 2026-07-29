@@ -164,12 +164,3 @@ class ScreenshotRenderOptions:
     display_frames: list[int] | None = None
     selection_labels: list[str | None] | None = None
     ffmpeg_runner: FFmpegRunner | None = None
-
-
-@dataclass(frozen=True)
-class ScreenshotResult:
-    """Result of a batch screenshot operation."""
-
-    label: str  # Video label
-    paths: list[Path]  # List of generated screenshot paths
-    frame_count: int  # Number of frames rendered

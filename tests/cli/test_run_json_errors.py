@@ -444,23 +444,6 @@ def test_run_json_invalid_frames_outputs_config_error_schema(
     ]
 
 
-def test_run_json_removed_frame_count_outputs_config_error_schema(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
-        raise AssertionError("runner.run should not be invoked for removed frame-count option")
-
-    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
-
-    result = _invoke_run_with_minimal_workspace(["--json", "--frame-count", "12"])
-
-    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
-    assert result.stderr == ""
-    payload = json.loads(result.stdout)
-    assert payload["error"]["message"] == "--frame-count/-n has been removed"
-    assert payload["error"]["details"]["validation_errors"][0]["loc"] == ["cli", "frame_count"]
-
-
 def test_run_json_skip_analysis_rejects_metric_frame_count_before_runner(
     monkeypatch: MonkeyPatch,
 ) -> None:

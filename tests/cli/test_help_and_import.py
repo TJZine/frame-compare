@@ -70,8 +70,8 @@ def test_run_help_shows_all_options():
     }
 
     assert set(REQUIRED_RUN_OPTIONS).issubset(declared_options)
-    assert "--frame-count" in declared_options
-    assert "-n" in declared_options
+    assert "--frame-count" not in declared_options
+    assert "-n" not in declared_options
 
     result = runner.invoke(
         app,
@@ -99,6 +99,27 @@ def test_run_help_shows_all_options():
         assert opt in output
     assert "--frame-count" not in output
     assert " -n " not in output
+
+
+@pytest.mark.parametrize("retired_option", ["--frame-count", "-n"])
+def test_run_rejects_retired_frame_count_options(
+    retired_option: str, monkeypatch: MonkeyPatch
+) -> None:
+    def _unexpected_run(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("run handler must not execute for an unknown option")
+
+    monkeypatch.setattr("frame_compare.cli.entry.handle_run", _unexpected_run)
+
+    result = runner.invoke(
+        app,
+        ["run", retired_option, "7"],
+        color=False,
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert f"No such option '{retired_option}'" in _normalize_cli_output(result.stderr)
 
 
 @pytest.mark.parametrize(

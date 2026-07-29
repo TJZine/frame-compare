@@ -1,13 +1,10 @@
 """Tests for run folder naming utilities."""
 
 from pathlib import Path
-from unittest.mock import patch
 
 from frame_compare.services.run_folder import (
     _combine_filename_stems,
-    derive_run_folder_name,
     find_common_metadata,
-    get_existing_run_folders,
     reserve_run_folder,
     sanitize_folder_name,
 )
@@ -144,193 +141,6 @@ def test_combine_filename_stems_empty_list() -> None:
     assert result == "unnamed_run"
 
 
-# ─── derive_run_folder_name Tests ─────────────────────────────────────────────
-
-
-def test_derive_run_folder_name_uses_tmdb_first() -> None:
-    tmdb = TmdbMetadata(
-        tmdb_id=550,
-        title="Fight Club",
-        original_title="Fight Club",
-        year=1999,
-        media_type="movie",
-    )
-    result = derive_run_folder_name(
-        filenames=["random.filename.mkv"],
-        tmdb_metadata=tmdb,
-    )
-    assert result == "Fight Club (1999)"
-
-
-def test_derive_run_folder_name_avoids_reserved_tmdb_title_without_year() -> None:
-    tmdb = TmdbMetadata(
-        tmdb_id=1,
-        title="NUL",
-        original_title="NUL",
-        year=0,
-        media_type="movie",
-    )
-    result = derive_run_folder_name(
-        filenames=["random.filename.mkv"],
-        tmdb_metadata=tmdb,
-    )
-    assert result == "NUL run"
-
-
-def test_derive_run_folder_name_avoids_reserved_parsed_metadata_title(
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr(
-        "frame_compare.services.run_folder.parse_filename",
-        lambda _filename: ParsedMetadata(title="CON", year=None),
-    )
-
-    result = derive_run_folder_name(
-        filenames=["CON.mkv"],
-        tmdb_metadata=None,
-    )
-
-    assert result == "CON run"
-
-
-def test_derive_run_folder_name_avoids_reserved_filename_stem_fallback(
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr(
-        "frame_compare.services.run_folder.parse_filename",
-        lambda _filename: ParsedMetadata(title="", year=None),
-    )
-
-    result = derive_run_folder_name(
-        filenames=["AUX.mkv"],
-        tmdb_metadata=None,
-    )
-
-    assert result == "AUX run"
-
-
-def test_derive_run_folder_name_falls_back_to_guessit() -> None:
-    result = derive_run_folder_name(
-        filenames=["Inception.2010.BluRay.1080p.mkv"],
-        tmdb_metadata=None,
-    )
-    assert "Inception" in result
-    assert "2010" in result
-
-
-def test_derive_run_folder_name_combines_stems_as_fallback() -> None:
-    result = derive_run_folder_name(
-        filenames=["video1.mkv", "video2.mkv"],
-        tmdb_metadata=None,
-    )
-    # Fallback to combined stems
-    assert "video1" in result.lower() or "video2" in result.lower()
-
-
-def test_derive_run_folder_name_handles_collision() -> None:
-    result = derive_run_folder_name(
-        filenames=["Fight.Club.1999.mkv"],
-        tmdb_metadata=None,
-        existing_folders=["Fight Club (1999)"],
-    )
-    assert result == "Fight Club (1999)_2"
-
-
-def test_derive_run_folder_name_collision_respects_max_length() -> None:
-    long_title = "A" * 64
-    tmdb = TmdbMetadata(
-        tmdb_id=1,
-        title=long_title,
-        original_title=long_title,
-        year=0,
-        media_type="movie",
-    )
-    result = derive_run_folder_name(
-        filenames=["source.mkv"],
-        tmdb_metadata=tmdb,
-        existing_folders=[long_title],
-    )
-    assert len(result) <= 64
-    assert result.endswith("_2")
-
-
-def test_derive_run_folder_name_retries_when_numeric_name_exists() -> None:
-    result = derive_run_folder_name(
-        filenames=["Fight.Club.1999.mkv"],
-        tmdb_metadata=None,
-        existing_folders=[
-            "Fight Club (1999)",
-            "Fight Club (1999)_2",
-        ],
-    )
-
-    assert result == "Fight Club (1999)_3"
-
-
-def test_derive_run_folder_name_no_collision() -> None:
-    result = derive_run_folder_name(
-        filenames=["Fight.Club.1999.mkv"],
-        tmdb_metadata=None,
-        existing_folders=["Other Movie (2020)"],
-    )
-    # No timestamp needed
-    assert "_20" not in result  # No timestamp pattern
-
-
-def test_derive_run_folder_name_empty_filenames() -> None:
-    result = derive_run_folder_name(filenames=[], existing_folders=[])
-    assert result == "unnamed_run"
-
-
-def test_derive_run_folder_name_empty_filenames_retries_when_base_exists() -> None:
-    result = derive_run_folder_name(
-        filenames=[],
-        existing_folders=["unnamed_run"],
-    )
-
-    assert result == "unnamed_run_2"
-
-
-def test_derive_run_folder_name_falls_back_to_random_suffix_after_numeric_window() -> None:
-    existing_folders = ["Fight Club (1999)", *(f"Fight Club (1999)_{i}" for i in range(2, 102))]
-    with patch("frame_compare.services.run_folder.uuid.uuid4") as uuid4:
-        uuid4.return_value.hex = "abcdef1234567890"
-        result = derive_run_folder_name(
-            filenames=["Fight.Club.1999.mkv"],
-            existing_folders=existing_folders,
-        )
-
-    assert result == "Fight Club (1999)_abcdef12"
-
-
-# ─── get_existing_run_folders Tests ───────────────────────────────────────────
-
-
-def test_get_existing_run_folders_returns_directories_only(tmp_path: Path) -> None:
-    # Create mix of files and directories
-    (tmp_path / "run_folder_1").mkdir()
-    (tmp_path / "run_folder_2").mkdir()
-    (tmp_path / "video.mkv").touch()
-
-    result = get_existing_run_folders(tmp_path)
-
-    assert "run_folder_1" in result
-    assert "run_folder_2" in result
-    assert "video.mkv" not in result
-
-
-def test_get_existing_run_folders_nonexistent_dir() -> None:
-    result = get_existing_run_folders(Path("/nonexistent/path"))
-    assert result == []
-
-
-def test_get_existing_run_folders_existing_file_returns_empty(tmp_path: Path) -> None:
-    path = tmp_path / "not_a_dir"
-    path.write_text("x", encoding="utf-8")
-    result = get_existing_run_folders(path)
-    assert result == []
-
-
 # ─── reserve_run_folder Tests ───────────────────────────────────────────
 
 
@@ -378,6 +188,66 @@ def test_reserve_run_folder_handles_collisions_atomically(tmp_path: Path) -> Non
     assert result.base_name == "Fight Club (1999)"
     assert result.naming_source == "tmdb"
     assert result.path.exists()
+    assert result.path.is_dir()
+
+
+def test_reserve_run_folder_retries_numeric_collisions(tmp_path: Path) -> None:
+    (tmp_path / "Fight Club (1999)").mkdir()
+    (tmp_path / "Fight Club (1999)_2").mkdir()
+
+    result = reserve_run_folder(
+        input_dir=tmp_path,
+        filenames=["Fight.Club.1999.mkv"],
+        tmdb_metadata=None,
+    )
+
+    assert result.folder_name == "Fight Club (1999)_3"
+    assert result.path.is_dir()
+
+
+def test_reserve_run_folder_collision_suffix_preserves_length_limit(tmp_path: Path) -> None:
+    long_title = "A" * 64
+    (tmp_path / long_title).mkdir()
+    tmdb = TmdbMetadata(
+        tmdb_id=1,
+        title=long_title,
+        original_title=long_title,
+        year=0,
+        media_type="movie",
+    )
+
+    result = reserve_run_folder(
+        input_dir=tmp_path,
+        filenames=["source.mkv"],
+        tmdb_metadata=tmdb,
+    )
+
+    assert len(result.folder_name) == 64
+    assert result.folder_name.endswith("_2")
+    assert result.path.is_dir()
+
+
+def test_reserve_run_folder_uses_uuid_after_numeric_window(tmp_path: Path, monkeypatch) -> None:
+    base_name = "Fight Club (1999)"
+    (tmp_path / base_name).mkdir()
+    for attempt in range(2, 102):
+        (tmp_path / f"{base_name}_{attempt}").mkdir()
+
+    class FixedUuid:
+        hex = "abcdef1234567890"
+
+    monkeypatch.setattr(
+        "frame_compare.services.run_folder.uuid.uuid4",
+        lambda: FixedUuid(),
+    )
+
+    result = reserve_run_folder(
+        input_dir=tmp_path,
+        filenames=["Fight.Club.1999.mkv"],
+        tmdb_metadata=None,
+    )
+
+    assert result.folder_name == "Fight Club (1999)_abcdef12"
     assert result.path.is_dir()
 
 

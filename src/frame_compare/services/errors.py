@@ -7,7 +7,6 @@ from frame_compare.errors import (
     InputError,
     NetworkError,
     ProcessingError,
-    redact_url_for_error,
 )
 
 
@@ -84,20 +83,6 @@ class ReportError(ProcessingError):
         )
 
 
-class NetworkUnreachableError(NetworkError):
-    """No internet connection (FC-5001)."""
-
-    def __init__(self) -> None:
-        super().__init__(
-            ErrorContext(
-                code="FC-5001",
-                name="NETWORK_UNREACHABLE",
-                message="Network unreachable",
-                hint="Check internet connection",
-            )
-        )
-
-
 class SlowpicsError(NetworkError):
     """General slow.pics API failure (FC-5002)."""
 
@@ -168,42 +153,3 @@ class TmdbRateLimitedError(NetworkError):
                 hint="Wait before retrying",
             )
         )
-
-
-class NetworkTimeoutError(NetworkError):
-    """Request timed out (FC-5007)."""
-
-    def __init__(self, url: str, timeout: float) -> None:
-        redacted_url = redact_url_for_error(url)
-        super().__init__(
-            ErrorContext(
-                code="FC-5007",
-                name="NETWORK_TIMEOUT",
-                message=f"Request to {redacted_url} timed out after {timeout}s",
-                hint="Check connection speed",
-                details={"url": redacted_url, "timeout": timeout},
-            )
-        )
-
-
-class SSLError(NetworkError):
-    """Certificate verification failed (FC-5008)."""
-
-    def __init__(self, reason: str) -> None:
-        super().__init__(
-            ErrorContext(
-                code="FC-5008",
-                name="SSL_ERROR",
-                message=f"SSL verification failed: {reason}",
-                hint="Check system certificates",
-                details={"reason": reason},
-            )
-        )
-
-
-class ServiceError(NetworkError):
-    """Marker base for service failures."""
-
-
-class PublishError(NetworkError):
-    """Marker base for publishing failures."""
