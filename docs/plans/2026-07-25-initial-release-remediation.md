@@ -1110,6 +1110,22 @@ pull request. They have different reviewers, rollback strategies, and proof surf
 | Clean wheel/sdist + fresh install | Version check | No | No | No | Yes | No | Required | Required |
 | Dependency/license inventory | No | Windows key tooling only | Required | No | No | No | Required | Confirm final artifacts |
 
+## Pre-RC verification record
+
+The executable verification baseline is commit
+`eac76e64ebe5b68fece449ce2d6db54028500c55`; this record-only documentation
+update does not change that proof surface.
+
+| Risk | Primary proof mode | Command or evidence | Expected outcome | Result / unavailable proof |
+| --- | --- | --- | --- | --- |
+| Guarded release publishes a mutable or wrong ref | Contract tests plus official schema validation | Focused `tests/workflows/test_github_workflows.py` and `tests/workflows/test_release_contract.py`; `check-jsonschema==0.37.4` against Release Please's official `config.json` | Exact SHA/version/channel rules, collisions, draft-first publication, complete assets, permissions, concurrency, and initial dormancy fail closed | Passed; all eight workflow YAML files also parsed |
+| Windows update is unsigned, incomplete, or accepts tampering | Disposable-key end-to-end tests plus exact downloaded artifact proof | Focused Windows workflow/build/update tests; successful signed run `30421868955` and isolated local apply/rollback/tamper checks | Four mandatory assets, valid disposable signature, backup/rollback, and manifest/payload tamper rejection | Passed; no real private key was accessed |
+| Public CLI/config behavior drifts | Full logic suite plus focused CLI contract suite | Full `pytest -q`; focused CLI tests and generated `--help` inspection | Existing streams, exits, flags, persistence, and config semantics remain unchanged while help explains effects | Passed |
+| Documentation overstates install routes or renders poorly | Strict build, source-claim audit, desktop/mobile preview | API-doc drift check; `zensical build --clean --strict`; focused docs/workflow tests; desktop and 390-pixel preview | Links/configuration pass; tables remain contained; route claims match Docker, Compose, Windows manifest, and package metadata | Passed except live Mermaid SVG execution: unavailable in the in-app browser for both this site and Zensical's official diagrams page; generated native Mermaid markup/configuration verified |
+| Vulnerable or inconsistent Python distributions ship | Locked graph audit plus clean package reconstruction | Linux/Windows CI audit contract; Windows `pip-audit` against hashed all-extras export; detached clean worktree build, archive inspection, fresh install, version/help smoke | No advisory or collection failure; one wheel and sdist agree and exclude local/sensitive state | Windows audit passed with no known vulnerabilities after fixed lock updates; Ubuntu matrix proof awaits CI |
+| Mutable Docker bases or broken container integration | Digest contract and canonical Docker integration workflow | OCI index digest resolution; Dockerfile contract tests; `bash tools/verify_docker_integration.sh` | uv/Python bases resolve by digest and the canonical software-Vulkan route passes | Digest and contracts passed. Docker and executable Bash were unavailable locally; the candidate SHA must pass the GitHub Docker Integration workflow before RC dispatch |
+| Hidden local state affects results | Detached clean-worktree verification | Frozen sync followed by Pyright, Ruff, Bandit, full pytest, import-linter, docs, workflow, audit, and distribution gates | Tracked tree stays clean and all gates pass independently of the development checkout | Passed at the baseline commit; ignored outputs were confined to and removed with the disposable worktree |
+
 ## Review gates
 
 ### Gate A: Decisions recorded
@@ -1188,8 +1204,9 @@ support contract:
   support policy are suitable for users installing without the repository.
 - Consider bundled/project-controlled fonts only if cross-platform overlay
   determinism becomes a product requirement.
-- Revisit full Docker digest/apt snapshot pinning after measuring maintenance cost
-  and defining update ownership.
+- Revisit apt snapshot pinning after measuring maintenance cost and defining a
+  system-package vulnerability refresh process; base image digests are already
+  pinned and weekly Dependabot-owned.
 - Continue monitoring cohesive architecture hotspots; split only when a distinct
   responsibility and contract emerge.
 
