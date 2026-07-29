@@ -42,41 +42,6 @@ from frame_compare.config.schema_models import (
 from frame_compare.config.schema_sources import TomlConfigSettingsSourceNoBOM
 
 
-def test_default_config_values() -> None:
-    """Test that default config has expected values."""
-    config = get_default_config()
-    assert config.analysis.user_frames == []
-    assert config.analysis.random_frame_count == 10
-    assert config.analysis.dark_frame_count == 0
-    assert config.analysis.bright_frame_count == 0
-    assert config.analysis.motion_frame_count == 0
-    assert config.analysis.performance_mode == AnalysisPerformanceMode.QUALITY
-    assert config.analysis.ignore_lead_seconds == 0.0
-    assert config.analysis.ignore_trail_seconds == 0.0
-    assert config.analysis.min_window_seconds == 5.0
-    assert config.color.target_nits == 100
-    assert config.paths.input_dir == "comparison_videos"
-    assert config.sources.reference is None
-    assert config.sources.analysis_source == "reference"
-    assert config.sources.match_fps == SourceMatchFpsMode.DISABLED
-    assert config.sources.overrides == {}
-    assert config.screenshots.geometry_mode == ScreenshotGeometryMode.NATIVE
-    assert config.screenshots.active_rect_detection == ScreenshotActiveRectDetection.ASPECT_RATIO
-    assert config.screenshots.aligned_scale_policy == ScreenshotAlignedScalePolicy.LARGEST_ACTIVE
-    assert config.screenshots.aligned_target_width is None
-    assert config.screenshots.aligned_target_height is None
-    assert config.screenshots.vs_writer == VsScreenshotWriter.AUTO
-    assert config.tmdb.year_tolerance == 2
-    assert config.tmdb.category_preference is None
-    assert config.audio_alignment.correlation_mode == "raw_fft"
-    assert config.audio_alignment.preprocessing_mode == "none"
-    assert config.audio_alignment.channel_strategy == "mono_downmix"
-    assert config.audio_alignment.refinement_mode == "disabled"
-    assert config.audio_alignment.previous_offsets == "disabled"
-    assert config.audio_alignment.comparison_streams == {}
-    assert config.slowpics.confirm_upload_after_report is False
-
-
 def test_analysis_requires_at_least_one_requested_frame() -> None:
     with pytest.raises(ValidationError, match="at least one analysis frame selector"):
         AnalysisConfig(random_frame_count=0)
@@ -167,22 +132,8 @@ def test_report_output_dir_empty_string_to_none() -> None:
     assert config.output_dir is None
 
 
-def test_report_auto_open_default_true() -> None:
-    """Report should auto-open by default in interactive CLI runs."""
-    config = ReportConfig()
-    assert config.auto_open is True
-
-
-def test_nested_model_defaults() -> None:
-    """Test that root config initializes nested models with defaults."""
-    config = get_default_config()
-    assert config.paths.input_dir == "comparison_videos"
-    assert config.analysis.random_seed == 42
-    assert config.color.enable_tonemap is True
-
-
 def test_schema_model_section_defaults_are_representative() -> None:
-    """Extracted section models keep the documented runtime defaults."""
+    """Section models keep the canonical runtime defaults."""
     paths = PathsConfig()
     analysis = AnalysisConfig()
     audio = AudioAlignmentConfig()
@@ -211,6 +162,7 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert analysis.ignore_lead_seconds == 0.0
     assert analysis.ignore_trail_seconds == 0.0
     assert analysis.min_window_seconds == 5.0
+    assert analysis.random_seed == 42
     assert analysis.dark_quantile == 0.05
     assert analysis.bright_quantile == 0.95
     assert audio.sample_rate == 8000
@@ -240,6 +192,7 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert screenshots.aligned_target_height is None
     assert screenshots.vs_writer == VsScreenshotWriter.AUTO
     assert color.target_nits == 100
+    assert color.enable_tonemap is True
     assert color.contrast_recovery == 0.3
     assert color.preset == "reference"
     assert slowpics.confirm_upload_after_report is False
@@ -260,6 +213,7 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert tmdb.category_preference is None
     assert report.default_mode == "slider"
     assert report.embed_images is False
+    assert report.auto_open is True
     assert diagnostics.model_dump() == {
         "per_frame_nits": False,
     }

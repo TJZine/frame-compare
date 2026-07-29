@@ -5,7 +5,7 @@
 import tomllib
 from fractions import Fraction
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 import pytest
@@ -264,18 +264,6 @@ def test_align_clips_from_request_prompt_mode_auto_reuses_computed_offsets_witho
     mock_vs.assert_called_once()
 
 
-def test_align_clips_from_request_rejects_reuse_without_cache_results(tmp_path: Path) -> None:
-    ref = tmp_path / "ref.mkv"
-    comp = tmp_path / "comp.mkv"
-    ref.touch()
-    comp.touch()
-    config = AlignmentConfig(cache_results=False, previous_offsets="prompt")
-    request = _alignment_request(tmp_path, reference=ref, comparisons=[comp], config=config)
-
-    with pytest.raises(AudioAlignmentError, match="cache_results"):
-        align_clips_from_request(request, config)
-
-
 def test_align_clips_from_request_prompt_no_reuses_computed_offsets_without_audio_rerun(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -337,9 +325,11 @@ def test_align_clips_from_request_prompt_no_reuses_computed_offsets_without_audi
     mock_vs.assert_called_once()
 
 
-def test_align_clips_from_request_prompt_yes_reuses_confirmed_offsets_skips_vspreview(
+@pytest.mark.parametrize("policy", ["prompt", "always"])
+def test_align_clips_from_request_reuses_confirmed_offsets_skips_vspreview(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    policy: str,
 ) -> None:
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
@@ -347,7 +337,7 @@ def test_align_clips_from_request_prompt_yes_reuses_confirmed_offsets_skips_vspr
     ref.touch()
     comp.touch()
     generated_dir.mkdir()
-    config = AlignmentConfig(previous_offsets="prompt", use_vspreview=True)
+    config = AlignmentConfig(previous_offsets=policy, use_vspreview=True)
     request = _alignment_request(
         tmp_path,
         reference=ref,
@@ -375,9 +365,10 @@ def test_align_clips_from_request_prompt_yes_reuses_confirmed_offsets_skips_vspr
         "frame_compare.services.alignment_previous_offsets.load_reusable_offset_entries",
         lambda _request, *, comparisons=None: reusable,
     )
+    prompt = Mock(return_value=True)
     monkeypatch.setattr(
         "frame_compare.services.alignment_previous_offsets.prompt_for_previous_alignment_offset_reuse",
-        lambda **_: True,
+        prompt,
     )
 
     with (
@@ -394,65 +385,7 @@ def test_align_clips_from_request_prompt_yes_reuses_confirmed_offsets_skips_vspr
     mock_extract_ref.assert_not_called()
     mock_extract_comp.assert_not_called()
     mock_vs.assert_not_called()
-
-
-def test_align_clips_from_request_always_reuses_confirmed_offsets_skips_vspreview(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    ref = tmp_path / "ref.mkv"
-    comp = tmp_path / "comp.mkv"
-    generated_dir = tmp_path / "generated"
-    ref.touch()
-    comp.touch()
-    generated_dir.mkdir()
-    config = AlignmentConfig(previous_offsets="always", use_vspreview=True)
-    request = _alignment_request(
-        tmp_path,
-        reference=ref,
-        comparisons=[comp],
-        config=config,
-        generated_dir=generated_dir,
-    )
-    reusable = {
-        comparison_cache_key(request.comparisons[0]): ReusableAlignmentEntry(
-            result=AlignmentResult(ref.name, comp.name, 9, 0.375, 1.0, None, "cached"),
-            accepted_at="2026-06-06T12:00:00Z",
-            origin="vspreview_confirmed",
-            computed_result=AlignmentResult(
-                ref.name,
-                comp.name,
-                3,
-                0.125,
-                0.9,
-                "cross_correlation",
-                "cached",
-            ),
-        )
-    }
-    monkeypatch.setattr(
-        "frame_compare.services.alignment_previous_offsets.load_reusable_offset_entries",
-        lambda _request, *, comparisons=None: reusable,
-    )
-    monkeypatch.setattr(
-        "frame_compare.services.alignment_previous_offsets.prompt_for_previous_alignment_offset_reuse",
-        lambda **_: (_ for _ in ()).throw(AssertionError("always mode prompt")),
-    )
-
-    with (
-        patch("frame_compare.services.alignment._probe_fps") as mock_probe,
-        patch("frame_compare.services.alignment._extract_reference_audio") as mock_extract_ref,
-        patch("frame_compare.services.alignment._extract_matching_audio") as mock_extract_comp,
-        patch("frame_compare.services.alignment.maybe_launch_alignment_vspreview") as mock_vs,
-    ):
-        results = align_clips_from_request(request, config)
-
-    assert results[0].source == "cached"
-    assert results[0].frame_offset == 9
-    mock_probe.assert_not_called()
-    mock_extract_ref.assert_not_called()
-    mock_extract_comp.assert_not_called()
-    mock_vs.assert_not_called()
+    assert prompt.call_count == (1 if policy == "prompt" else 0)
 
 
 def test_align_clips_from_request_prompt_no_uses_computed_fallback_for_confirmed_entry(
@@ -682,20 +615,6 @@ def test_align_clips_from_request_prompt_passes_real_shared_prompt_metadata(
     assert len(rows) == 1
     assert rows[0].accepted_at == "2026-06-06T12:34:56Z"
     assert rows[0].source == "confirmed"
-
-
-def test_align_clips_from_request_rejects_force_interactive_previous_offsets(
-    tmp_path: Path,
-) -> None:
-    ref = tmp_path / "ref.mkv"
-    comp = tmp_path / "comp.mkv"
-    ref.touch()
-    comp.touch()
-    config = AlignmentConfig(previous_offsets="always", force_interactive=True)
-    request = _alignment_request(tmp_path, reference=ref, comparisons=[comp], config=config)
-
-    with pytest.raises(AudioAlignmentError, match="force_interactive"):
-        align_clips_from_request(request, config)
 
 
 def test_align_clips_from_request_reuses_shared_offsets_for_unresolved_only_after_manual_override(
@@ -1027,6 +946,34 @@ def test_align_clips_from_request_vspreview_confirmed_entry_keeps_computed_fallb
     assert provenance.computed_result is not None
     assert provenance.computed_result.frame_offset == 12
     assert provenance.computed_result.algorithm == "cross_correlation"
+
+
+@pytest.mark.parametrize(
+    ("config", "error_match"),
+    [
+        (
+            AlignmentConfig(cache_results=False, previous_offsets="prompt"),
+            "cache_results",
+        ),
+        (
+            AlignmentConfig(force_interactive=True, previous_offsets="always"),
+            "force_interactive",
+        ),
+    ],
+)
+def test_align_clips_from_request_rejects_invalid_previous_offset_policy_combinations(
+    tmp_path: Path,
+    config: AlignmentConfig,
+    error_match: str,
+) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+    request = _alignment_request(tmp_path, reference=ref, comparisons=[comp], config=config)
+
+    with pytest.raises(AudioAlignmentError, match=error_match):
+        align_clips_from_request(request, config)
 
 
 @pytest.mark.parametrize(

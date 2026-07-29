@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from ._helpers import read_text_or_fail as _read_text_or_fail
+from tests.workflow_helpers import read_text_or_fail as _read_text_or_fail
 
 
 def test_default_compose_separates_wizard_config_writes_from_normal_runs(

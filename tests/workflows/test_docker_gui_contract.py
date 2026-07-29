@@ -6,9 +6,10 @@ from pathlib import Path
 
 import yaml
 
+from tests.workflow_helpers import read_text_or_fail as _read_text_or_fail
+
 from ._helpers import SCRIPT_SUBPROCESS_TIMEOUT_SECONDS
 from ._helpers import bash_executable_or_skip as _bash_executable_or_skip
-from ._helpers import read_text_or_fail as _read_text_or_fail
 from ._helpers import with_bash_env as _with_bash_env
 from ._helpers import write_bash_env as _write_bash_env
 
