@@ -241,10 +241,40 @@ def test_ci_requires_clean_distribution_build_and_install(repo_root: Path) -> No
     assert ".dist-venv/bin/frame-compare version" in workflow
     assert ".dist-venv/bin/frame-compare --help" in workflow
     assert (
-        "needs: [lint, security, typecheck, test, import-lints, package, report-browser]"
-        in workflow
+        "needs: [lint, security, dependency-audit, typecheck, test, import-lints, "
+        "package, report-browser]" in workflow
     )
+    assert '[[ "${{ needs.dependency-audit.result }}" != "success" ]]' in workflow
     assert '[[ "${{ needs.package.result }}" != "success" ]]' in workflow
+
+
+def test_ci_audits_locked_runtime_dependencies_on_linux_and_windows(
+    repo_root: Path,
+) -> None:
+    workflow = _load_workflow(repo_root / ".github" / "workflows" / "ci.yml")
+    job = workflow["jobs"]["dependency-audit"]
+
+    assert job["runs-on"] == "${{ matrix.os }}"
+    assert job["timeout-minutes"] == "15"
+    assert job["strategy"] == {
+        "fail-fast": "false",
+        "matrix": {"os": ["ubuntu-latest", "windows-latest"]},
+    }
+    named_steps = {step["name"]: step for step in job["steps"] if "name" in step}
+    assert named_steps["Install locked audit tool"]["run"] == "uv sync --group dev --frozen"
+    assert named_steps["Export locked runtime graph"]["run"] == (
+        "uv export --frozen --no-dev --all-extras --no-emit-project "
+        "--format requirements.txt "
+        '--output-file "${{ runner.temp }}/audit-requirements.txt"'
+    )
+    audit = named_steps["Reject known dependency vulnerabilities"]["run"]
+    assert "uv run --no-sync pip-audit" in audit
+    assert "--strict" in audit
+    assert "--require-hashes" in audit
+    assert "--disable-pip" in audit
+    assert "--vulnerability-service pypi" in audit
+    assert '--requirement "${{ runner.temp }}/audit-requirements.txt"' in audit
+    assert "--ignore-vuln" not in audit
 
 
 def test_ci_runs_generated_report_smoke_in_preflighted_system_browser(
@@ -275,8 +305,27 @@ def test_direct_build_tools_are_pinned_exactly(repo_root: Path) -> None:
         assert 'version: "latest"' not in workflow
 
     with (repo_root / "pyproject.toml").open("rb") as pyproject_file:
-        build_system = tomllib.load(pyproject_file)["build-system"]
+        pyproject = tomllib.load(pyproject_file)
+    build_system = pyproject["build-system"]
     assert build_system["requires"] == ["hatchling==1.31.0"]
+    assert "pip-audit==2.10.1" in pyproject["dependency-groups"]["dev"]
+
+
+def test_docker_base_images_are_digest_pinned(repo_root: Path) -> None:
+    dockerfile = _read_text_or_fail(repo_root / "Dockerfile")
+
+    uv_image = (
+        "ghcr.io/astral-sh/uv:0.11.31"
+        "@sha256:ecd4de2f060c64bea0ff8ecb182ddf46ba3fcccdc8a60cfdbaf20d1a047d7437"
+    )
+    python_image = (
+        "python:3.13.13-slim-trixie"
+        "@sha256:aa938a849bcb82dce8f49480f056ab82bf5c1c3ebc294f0430f37b6820e7f286"
+    )
+    assert f"FROM {uv_image} AS uv" in dockerfile
+    assert dockerfile.count(f"FROM {python_image}") == 2
+    assert "FROM ghcr.io/astral-sh/uv:0.11.31 AS uv" not in dockerfile
+    assert "FROM python:3.13.13-slim-trixie AS" not in dockerfile
 
 
 def test_docker_integration_workflow_covers_supported_pull_request_bases(repo_root: Path) -> None:
@@ -315,7 +364,7 @@ def test_dockerfile_installs_lock_export_with_hashes(repo_root: Path) -> None:
     dockerfile_path = repo_root / "Dockerfile"
     dockerfile = _read_text_or_fail(dockerfile_path)
 
-    assert "FROM ghcr.io/astral-sh/uv:0.11.31 AS uv" in dockerfile
+    assert "FROM ghcr.io/astral-sh/uv:0.11.31@sha256:" in dockerfile
     assert "COPY --from=uv /uv /uvx /usr/local/bin/" in dockerfile
     assert re.search(
         r"COPY --chown=framecompare:framecompare pyproject\.toml uv\.lock\b", dockerfile
