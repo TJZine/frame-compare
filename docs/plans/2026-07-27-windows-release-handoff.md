@@ -98,6 +98,22 @@ separate gate.
 | P6 Windows inventory | Produce a repeatable exact bundle inventory | Deterministic machine-readable inventory from the extracted bundle |
 | P7 Windows acceptance | Install and use the downloaded release-candidate artifacts | Completed clean-profile acceptance record |
 
+Current pre-RC evidence:
+
+- workflow run `30421868955` built commit
+  `87abcb5f4711bcd88d791afdf14c109f1450f383` with signing required;
+- the downloaded signed update verified against the committed public key, applied
+  without an unsafe warning, created a backup, and rolled back to an identical
+  source-tree digest;
+- manifest and payload tampering were rejected without changing installed files or
+  creating backups;
+- the downloaded portable artifact inventory contained 57 Python distributions,
+  92 SHA-256-verified license files, five manifest-provided runtimes, the exact
+  Frame Compare source archive and build-script inventory, and the Qt 6.10.2
+  corresponding-source archive;
+- clean-profile and user-facing RC acceptance remain P7 and must use the versioned
+  downloaded RC assets.
+
 The following are not Windows-only and must not be silently declared complete by
 this task:
 

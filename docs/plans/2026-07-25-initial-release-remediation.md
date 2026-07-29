@@ -471,10 +471,13 @@ Suggested owner role: maintainer plus release-workflow implementer.
 
 Accepted finding IDs: F-01.
 
-Status: key-generation tooling and a real public key are committed. Repository
-inspection proves only the public half; the protected secret, matching private half,
-real-key signing, installed-client update application/rollback, and guarded-workflow
-evidence remain unproved.
+Status: complete for pre-RC preparation. Required-secret workflow run
+`30421868955` at `87abcb5f4711bcd88d791afdf14c109f1450f383` produced a signed
+update that verified against the committed public key. An isolated installed-client
+rehearsal applied it without an unsafe warning, created and listed a backup, rolled
+back to an identical source-tree digest, and rejected both manifest and payload
+tampering without changing installed files. Clean-profile acceptance of the
+versioned downloaded RC remains P7.
 
 Goal: complete the protected public/private-key relationship and prove the complete
 signed-update lifecycle.
@@ -556,8 +559,13 @@ Accepted finding IDs: F-04.
 Goal: align the project and Windows distribution with PyQt6’s
 `GPL-3.0-only` terms without buying commercial licenses.
 
-Status: repository relicensing is complete; exact Windows artifact and
-corresponding-source verification remain.
+Status: complete for pre-RC preparation. The exact portable artifact from workflow
+run `30421868955` at `87abcb5f4711bcd88d791afdf14c109f1450f383` records
+`GPL-3.0-only`, 57 installed Python distributions, 92 hashed license files, five
+manifest-provided runtime artifacts, the exact Frame Compare source archive, 12
+source/build/install scripts, and the Qt 6.10.2 corresponding-source archive.
+Every recorded license file was present with its expected SHA-256; every runtime
+artifact had license and source metadata; all source locations were reachable.
 
 Risk reduced: public distribution without satisfying applicable GPL/commercial and
 Qt obligations.
@@ -607,10 +615,9 @@ Dependencies: none; run in parallel with P0/P1.
 Risks: removing PyQt6 may change the “most complete distribution” promise and require
 same-pass user documentation updates.
 
-Open questions:
-
-- What exact release asset or repository link is the canonical corresponding-source
-  location for each Windows binary tag?
+Open questions: none. `bundle_inventory.json` and `licenses/SOURCE_URLS.txt` pin the
+Frame Compare source archive by exact build commit and pin redistributed runtime
+sources by version or commit. The release tag must resolve to that same build commit.
 
 Suggested owner role: maintainer with focused open-source license-compliance review.
 
