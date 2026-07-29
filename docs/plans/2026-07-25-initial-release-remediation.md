@@ -437,12 +437,14 @@ does not create an initial release PR.
 Implementation approach:
 
 1. Reconfirm `origin/main`, `origin/cleanup`, and the reviewed candidate SHA.
-2. Complete P3 through P7 while version sources remain `0.0.0`.
-3. Finalize all version sources/changelog and remove temporary bootstrap fields on
+2. Complete P3 through P6 while version sources remain `0.0.0`.
+3. Align every version source and the changelog at `0.1.0rcN`, then rehearse and
+   accept the exact P7 release candidate.
+4. Finalize all version sources/changelog and remove temporary bootstrap fields on
    the release branch.
-4. Review and squash-merge once with a Conventional Commit title.
-5. Reconfirm the exact new `main` head.
-6. Dispatch the protected stable workflow with that immutable SHA and publish only
+5. Review and squash-merge once with a Conventional Commit title.
+6. Reconfirm the exact new `main` head.
+7. Dispatch the protected stable workflow with that immutable SHA and publish only
    after its complete draft asset proof passes.
 
 Verification:
