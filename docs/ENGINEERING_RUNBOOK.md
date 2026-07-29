@@ -128,6 +128,22 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/sign_update
 
 The Windows commands require a Windows host with PowerShell and the expected toolchain. In non-Windows environments, treat them as documented-only unless a compatible runner is available.
 
+Locked runtime dependency audit (PowerShell):
+
+```powershell
+$auditRequirements = Join-Path $env:TEMP "frame-compare-audit-requirements.txt"
+uv export --frozen --no-dev --all-extras --no-emit-project --format requirements.txt --output-file $auditRequirements
+uv run --no-sync pip-audit --strict --require-hashes --disable-pip --progress-spinner off --timeout 20 --vulnerability-service pypi --requirement $auditRequirements
+Remove-Item -LiteralPath $auditRequirements
+```
+
+Run the audit on both Windows and Linux before a release. The PyPA advisory
+database exposed by PyPI is the authority. Any known advisory or dependency
+collection failure blocks the release. An exception must be explicit and
+time-bounded in the active release plan with the advisory ID, affected package,
+owner, rationale, expiry, and removal condition; do not add an unrecorded
+`--ignore-vuln`.
+
 ## Verification Policy
 
 ### Fast Local Sanity

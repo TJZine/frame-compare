@@ -114,16 +114,21 @@ Current pre-RC evidence:
 - clean-profile and user-facing RC acceptance remain P7 and must use the versioned
   downloaded RC assets.
 
-The following are not Windows-only and must not be silently declared complete by
-this task:
+The following cross-route status is not established by the Windows artifact
+evidence alone:
 
-- P0 final version/changelog preparation and final squash boundary
-- remaining P4 CLI help polish
-- P6 vulnerability-audit authority, blocking severity, and exception policy
-- P6 Docker digest/snapshot decision
-- Apple Silicon default-Docker proof
-- optional Linux NVIDIA/X11 proof
-- final squash merge, official `v0.1.0` publication, production approval, and post-release observation
+- P0 final version/changelog preparation and final squash boundary remain open.
+- P4 public CLI help polish is complete with focused contract coverage.
+- P5 installation guidance is complete; Apple Silicon default-Docker and optional
+  Linux NVIDIA/X11 behavior remain documented-only until their separate P7 proof.
+- P6 is closed for pre-RC: locked `pip-audit==2.10.1` audits the hashed runtime
+  graph on Ubuntu and Windows against PyPA/PyPI; every advisory or collection
+  failure blocks and no exceptions are active.
+- P6 is closed for pre-RC: Docker base indexes are digest-pinned and weekly
+  Dependabot-owned; apt remains on current Debian repositories and requires a
+  fresh Docker integration proof rather than a frozen snapshot.
+- The final squash merge, official `v0.1.0` publication, production approval, and
+  post-release observation remain maintainer-only.
 
 ## Security boundary
 

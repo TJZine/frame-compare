@@ -773,6 +773,17 @@ Suggested owner role: CLI implementer with documentation review.
 
 Accepted finding IDs: F-07, F-10, and F-13.
 
+Status: complete. The route comparison, runtime/feature matrices, checksum
+instructions, host-dependent Docker qualifications, build-from-clone registry
+posture, and rendering-variability warning agree with the current Dockerfiles,
+Compose files, Windows manifest, and package metadata. The strict Zensical build
+and focused documentation/workflow tests pass. Desktop and 390-pixel mobile
+previews contain the wide tables without page overflow. Zensical emits the
+documented native Mermaid markup; the in-app browser could not execute Zensical's
+external Mermaid runtime on either this site or Zensical's own diagrams page, so
+live SVG rendering remains an explicitly unavailable preview proof rather than a
+repository-specific failure.
+
 Goal: give users one accurate installation decision surface without overstating
 experimental or cross-platform behavior.
 
@@ -831,8 +842,23 @@ Suggested owner role: documentation owner.
 
 Accepted finding IDs: F-11, F-12, and F-14.
 
-Status: the distribution build/install/inspection CI gate is complete. Dependency
-audit policy, the Windows bundle inventory, and the Docker pinning decision remain.
+Status: complete for pre-RC. The distribution build/install/inspection gate is
+active. CI exports the hashed all-extras runtime graph from `uv.lock` and runs the
+locked `pip-audit==2.10.1` tool on both Ubuntu and Windows with strict dependency
+collection. The PyPA advisory database exposed by PyPI is authoritative and every
+known advisory blocks; no exceptions are active. The first audit found fixed
+advisories in Pillow 12.2.0 and `pydantic-settings` 2.14.1, so the lock now uses
+Pillow 12.3.0 and `pydantic-settings` 2.14.2. The successful signed Windows build
+records an exact 57-distribution, 92-license, five-runtime-artifact inventory with
+corresponding-source proof.
+
+Docker's uv and Python multi-platform base indexes are pinned by digest and remain
+owned by weekly Dependabot Docker updates. Debian apt repositories are deliberately
+not snapshot-pinned for the initial release: the repository distributes a
+build-from-clone Docker route rather than an immutable image, and freezing the apt
+snapshot would retain known system vulnerabilities until manual refresh. The
+release proof therefore requires a fresh Docker integration build, while the image
+digests constrain the starting filesystem and Dependabot owns recurring refreshes.
 
 Goal: catch distribution and dependency problems before merge or release and record
 the remaining container pinning decision.
@@ -870,9 +896,14 @@ Implementation approach:
 
 1. Reproduce the already-passing clean archive build in CI.
 2. Validate artifact contents and fresh installation.
-3. Select an audit tool and severity/exception policy.
-4. Calibrate every result; record owner and expiry for accepted exceptions.
-5. Decide Docker digest/snapshot pinning separately from the build-gate change.
+3. Export the hashed all-extras runtime graph and audit it on Linux and Windows
+   with locked `pip-audit==2.10.1`, strict collection, and the PyPA/PyPI advisory
+   service.
+4. Block every advisory. Record advisory ID, package, owner, rationale, expiry,
+   and removal condition before adding any future exception.
+5. Keep base image indexes digest-pinned and weekly Dependabot-owned; keep apt
+   inputs on current Debian repositories and prove them through the fresh Docker
+   integration gate.
 
 Verification:
 
@@ -890,11 +921,8 @@ Dependencies: P2 informs bundle dependency policy; P5 captures current user clai
 Risks: digest/snapshot pinning increases maintenance and may reduce automated security
 updates unless paired with an update process.
 
-Open questions:
-
-- Which vulnerability database/tool is the release authority?
-- What severity blocks an alpha release?
-- Who owns recurring base image and system package refreshes?
+Open questions: none. PyPA/PyPI plus locked `pip-audit` is authoritative, every
+advisory blocks, and weekly Dependabot Docker updates are maintainer-owned.
 
 Suggested owner role: build/release engineer with security review.
 
