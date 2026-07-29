@@ -152,13 +152,19 @@ def test_guarded_release_workflow_fails_closed_on_collisions_and_permissions(
     assert workflow["jobs"]["publish"]["permissions"] == {"contents": "write"}
     assert source.count("Reject existing tag or release") == 1
     assert source.count("check_absent()") == 2
-    assert source.count("HTTP 404") == 2
+    assert source.count("HTTP 404") == 3
     assert "Unable to prove that $label is absent." in source
     assert "Unable to prove that $label remains absent." in source
     assert source.index("Reject existing tag or release") < source.index(
         "Build, sign, and verify Windows assets"
     )
     assert "Main advanced after preflight; refusing stable publication." in source
+    assert "Enforce initial stable release identity" in source
+    assert "Unable to determine whether the initial stable release exists." in source
+    assert (
+        "The first published stable release must be exactly version 0.1.0 and tag v0.1.0."
+        in source
+    )
     assert source.index("Recheck main, collisions, and create exact tag") < source.index(
         "Create a new draft release"
     )
@@ -204,6 +210,20 @@ def test_guarded_release_workflow_builds_before_draft_and_publishes_last(
     assert source.index("Publish verified release") < source.index(
         "Verify final publication state"
     )
+    named_steps = {step["name"]: step for step in publish["steps"] if "name" in step}
+    final_publish = named_steps["Publish verified release"]["run"]
+    assert "Main advanced before publication; refusing stable publication." in final_publish
+    assert "Release, tag, or draft target changed before publication." in final_publish
+    assert "Remote asset set changed before publication." in final_publish
+    assert "Remote asset changed before publication: $name" in final_publish
+    assert final_publish.index('release_json="$(gh api "$release_endpoint")"') < (
+        final_publish.index('gh api --method PATCH "$release_endpoint"')
+    )
+    final_proof = named_steps["Verify final publication state"]["run"]
+    assert "Main no longer points to the published stable commit." in final_proof
+    assert '"$target" != "$EXPECTED_SHA"' in final_proof
+    assert "Published release does not contain the exact mandatory asset set." in final_proof
+    assert "Published release asset digest mismatch: $name" in final_proof
 
 
 def test_guarded_release_workflow_requires_exact_four_signed_assets(repo_root: Path) -> None:
