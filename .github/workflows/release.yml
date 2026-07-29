@@ -83,6 +83,42 @@ jobs:
             --expected-sha "$EXPECTED_SHA" \
             --main-sha "$MAIN_SHA"
 
+      - name: Enforce initial stable release identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RELEASE_CHANNEL" != "stable" ]]; then
+            exit 0
+          fi
+          set +e
+          initial_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/v0.1.0" 2>&1)"
+          status=$?
+          set -e
+          initial_published="false"
+          if [[ "$status" -eq 0 ]]; then
+            draft="$(jq -r '.draft' <<<"$initial_json")"
+            prerelease="$(jq -r '.prerelease' <<<"$initial_json")"
+            tag_name="$(jq -r '.tag_name' <<<"$initial_json")"
+            if [[ "$draft" == "false" && "$prerelease" == "false" && "$tag_name" == "v0.1.0" ]]; then
+              initial_published="true"
+            fi
+          elif [[ "$initial_json" != *"HTTP 404"* ]]; then
+            echo "Unable to determine whether the initial stable release exists." >&2
+            exit 1
+          fi
+          if [[
+            "$initial_published" != "true" &&
+            ( "$RELEASE_VERSION" != "0.1.0" || "$RELEASE_TAG" != "v0.1.0" )
+          ]]; then
+            echo "The first published stable release must be exactly version 0.1.0 and tag v0.1.0." >&2
+            exit 1
+          fi
+
       - name: Reject existing tag or release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -372,14 +408,66 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_CHANNEL: ${{ inputs.channel }}
           RELEASE_ID: ${{ steps.create_release.outputs.release_id }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
         shell: bash
         run: |
           set -euo pipefail
+          release_endpoint="repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}"
           prerelease="false"
           if [[ "$RELEASE_CHANNEL" == "rc" ]]; then
             prerelease="true"
           fi
-          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+          if [[ "$RELEASE_CHANNEL" == "stable" ]]; then
+            current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+            if [[ "$current_main" != "$EXPECTED_SHA" ]]; then
+              echo "Main advanced before publication; refusing stable publication." >&2
+              exit 1
+            fi
+          fi
+          release_json="$(gh api "$release_endpoint")"
+          draft="$(jq -r '.draft' <<<"$release_json")"
+          remote_prerelease="$(jq -r '.prerelease' <<<"$release_json")"
+          target="$(jq -r '.target_commitish' <<<"$release_json")"
+          remote_tag="$(jq -r '.tag_name' <<<"$release_json")"
+          tag_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" --jq '.object.sha')"
+          if [[
+            "$draft" != "true" ||
+            "$remote_prerelease" != "$prerelease" ||
+            "$target" != "$EXPECTED_SHA" ||
+            "$remote_tag" != "$RELEASE_TAG" ||
+            "$tag_sha" != "$EXPECTED_SHA"
+          ]]; then
+            echo "Release, tag, or draft target changed before publication." >&2
+            exit 1
+          fi
+          expected=(
+            "frame-compare-portable-win-x64-${RELEASE_TAG}.zip"
+            "frame-compare-portable-win-x64-${RELEASE_TAG}.zip.sha256"
+            "frame-compare-update-win-x64-${RELEASE_TAG}.zip"
+            "frame-compare-update-win-x64-${RELEASE_TAG}.zip.sha256"
+          )
+          mapfile -t actual < <(jq -r '.assets[].name' <<<"$release_json" | sort)
+          mapfile -t wanted < <(printf '%s\n' "${expected[@]}" | sort)
+          if [[ "${actual[*]}" != "${wanted[*]}" ]]; then
+            echo "Remote asset set changed before publication." >&2
+            exit 1
+          fi
+          while IFS=$'\t' read -r name size digest; do
+            if [[ ! "$size" =~ ^[1-9][0-9]*$ ]]; then
+              echo "Remote asset is empty before publication: $name" >&2
+              exit 1
+            fi
+            local_hash="$(sha256sum "dist/release-assets/${name}" | cut -d' ' -f1)"
+            if [[ "$digest" != "sha256:${local_hash}" ]]; then
+              echo "Remote asset changed before publication: $name" >&2
+              exit 1
+            fi
+          done < <(
+            jq -r '.assets[] | [.name, (.size | tostring), (.digest // "")] | @tsv' \
+              <<<"$release_json"
+          )
+          gh api --method PATCH "$release_endpoint" \
             -F "draft=false" \
             -F "prerelease=${prerelease}" >/dev/null
 
@@ -394,20 +482,56 @@ jobs:
         run: |
           set -euo pipefail
           release_endpoint="repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}"
-          draft="$(gh api "$release_endpoint" --jq '.draft')"
-          prerelease="$(gh api "$release_endpoint" --jq '.prerelease')"
-          remote_tag="$(gh api "$release_endpoint" --jq '.tag_name')"
+          release_json="$(gh api "$release_endpoint")"
+          draft="$(jq -r '.draft' <<<"$release_json")"
+          prerelease="$(jq -r '.prerelease' <<<"$release_json")"
+          target="$(jq -r '.target_commitish' <<<"$release_json")"
+          remote_tag="$(jq -r '.tag_name' <<<"$release_json")"
           tag_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" --jq '.object.sha')"
           expected_prerelease="false"
           if [[ "$RELEASE_CHANNEL" == "rc" ]]; then
             expected_prerelease="true"
           fi
+          if [[ "$RELEASE_CHANNEL" == "stable" ]]; then
+            current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+            if [[ "$current_main" != "$EXPECTED_SHA" ]]; then
+              echo "Main no longer points to the published stable commit." >&2
+              exit 1
+            fi
+          fi
           if [[
             "$draft" != "false" ||
             "$prerelease" != "$expected_prerelease" ||
             "$remote_tag" != "$RELEASE_TAG" ||
+            "$target" != "$EXPECTED_SHA" ||
             "$tag_sha" != "$EXPECTED_SHA"
           ]]; then
             echo "Release did not reach the expected final publication state." >&2
             exit 1
           fi
+          expected=(
+            "frame-compare-portable-win-x64-${RELEASE_TAG}.zip"
+            "frame-compare-portable-win-x64-${RELEASE_TAG}.zip.sha256"
+            "frame-compare-update-win-x64-${RELEASE_TAG}.zip"
+            "frame-compare-update-win-x64-${RELEASE_TAG}.zip.sha256"
+          )
+          mapfile -t actual < <(jq -r '.assets[].name' <<<"$release_json" | sort)
+          mapfile -t wanted < <(printf '%s\n' "${expected[@]}" | sort)
+          if [[ "${actual[*]}" != "${wanted[*]}" ]]; then
+            echo "Published release does not contain the exact mandatory asset set." >&2
+            exit 1
+          fi
+          while IFS=$'\t' read -r name size digest; do
+            if [[ ! "$size" =~ ^[1-9][0-9]*$ ]]; then
+              echo "Published release asset is empty: $name" >&2
+              exit 1
+            fi
+            local_hash="$(sha256sum "dist/release-assets/${name}" | cut -d' ' -f1)"
+            if [[ "$digest" != "sha256:${local_hash}" ]]; then
+              echo "Published release asset digest mismatch: $name" >&2
+              exit 1
+            fi
+          done < <(
+            jq -r '.assets[] | [.name, (.size | tostring), (.digest // "")] | @tsv' \
+              <<<"$release_json"
+          )
