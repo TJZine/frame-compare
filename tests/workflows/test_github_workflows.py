@@ -255,6 +255,8 @@ def test_ci_requires_clean_distribution_build_and_install(repo_root: Path) -> No
     workflow_path = repo_root / ".github" / "workflows" / "ci.yml"
     workflow = _read_text_or_fail(workflow_path)
 
+    parsed = _load_workflow(workflow_path)
+    assert parsed["on"]["workflow_dispatch"] == ""
     assert "uv build --out-dir dist" in workflow
     assert ".dist-venv/bin/python scripts/verify_distribution.py dist" in workflow
     assert "uv pip install --python .dist-venv/bin/python dist/*.whl" in workflow
