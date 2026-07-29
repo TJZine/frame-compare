@@ -101,6 +101,81 @@ def test_run_help_shows_all_options():
     assert " -n " not in output
 
 
+@pytest.mark.parametrize(
+    ("args", "expected_fragments"),
+    [
+        (
+            ["--help"],
+            [
+                "Compare video sources and generate screenshots",
+                "Interactively configure input, reference, and frame selection.",
+                "Check required runtimes and optional integrations.",
+            ],
+        ),
+        (
+            ["run", "--help"],
+            [
+                "Compare video sources and generate screenshots and an optional report.",
+                "Workspace root containing config and output directories.",
+                "persists with --write-config",
+                "Require valid cached analysis",
+                "Plan without probing, rendering, writing outputs, or publishing.",
+                "Write the effective config, then exit without running.",
+                "Print resolved workspace paths as JSON, then exit.",
+            ],
+        ),
+        (
+            ["wizard", "--help"],
+            [
+                "Interactively configure input, reference, and frame selection.",
+                "Config file; relative paths resolve from --root.",
+            ],
+        ),
+        (
+            ["doctor", "--help"],
+            [
+                "Check required runtimes and optional integrations.",
+                "Emit the diagnostic report as JSON.",
+            ],
+        ),
+        (
+            ["history", "list", "--help"],
+            ["List recorded runs newest first.", "Emit the run list as JSON."],
+        ),
+        (
+            ["preset", "list", "--help"],
+            [
+                "List available configuration presets.",
+                "Accepted for consistency; preset list uses --root.",
+            ],
+        ),
+        (
+            ["preset", "apply", "--help"],
+            ["Apply a named preset to the selected config file."],
+        ),
+        (
+            ["preset", "save", "--help"],
+            ["Save the selected config as a named preset."],
+        ),
+    ],
+)
+def test_public_help_explains_commands_and_option_effects(
+    args: list[str], expected_fragments: list[str]
+) -> None:
+    result = runner.invoke(
+        app,
+        args,
+        color=False,
+        terminal_width=200,
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+    output = _normalize_cli_output(result.stdout)
+
+    assert result.exit_code == 0
+    for fragment in expected_fragments:
+        assert fragment in output
+
+
 def test_stabilize_typer_help_width_backfills_import_order_gap(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setenv("TERMINAL_WIDTH", "200")
     monkeypatch.setattr(typer_rich_utils, "MAX_WIDTH", None)

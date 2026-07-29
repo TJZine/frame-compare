@@ -701,8 +701,13 @@ Suggested owner role: release-workflow implementer.
 
 Accepted finding IDs: F-05, F-06, and F-08.
 
-Status: the doctor link and public-alpha changelog are complete; CLI command and
-option help remain.
+Status: complete for pre-RC preparation. Top-level commands, history and preset
+subcommands, every public `run` option, shared path options, JSON modes, and the
+Windows updater now expose concise semantic help. Focused CLI contract tests verify
+the descriptions without changing parsing, defaults, persistence, streams, or exit
+codes. The public-alpha changelog and canonical doctor link remain complete; the
+versioned `0.1.0rcN`/`0.1.0` heading is finalized only at the corresponding release
+preparation boundary.
 
 Goal: make the CLI self-explanatory and the first public changelog concise,
 user-oriented, and accurate.

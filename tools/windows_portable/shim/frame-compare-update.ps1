@@ -853,6 +853,12 @@ function Show-Help() {
   Write-Host "  frame-compare-update list-backups"
   Write-Host "  frame-compare-update purge-backups --keep <N>"
   Write-Host "  frame-compare-update --help"
+  Write-Host ""
+  Write-Host "Commands:"
+  Write-Host "  apply          Verify a signed code-only update, back up current code, and apply it."
+  Write-Host "  rollback       Restore application code from one exact backup ID."
+  Write-Host "  list-backups   List available backup IDs newest first."
+  Write-Host "  purge-backups  Retain only the newest N backups (default: 5)."
 }
 
 function Invoke-FrameCompareUpdate([object[]]$ArgsValues) {

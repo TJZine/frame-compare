@@ -85,6 +85,13 @@ Current user-facing command surface:
   - `frame-compare preset apply`
   - `frame-compare preset save`
 
+Generated help describes every top-level command and preset subcommand. `run --help`
+describes each public option's effect and identifies config-mapped overrides that
+persist only when combined with `--write-config`. Shared `--root` and `--config`
+help states their workspace-relative resolution, while runtime-only flags describe
+their one-run or early-exit behavior. These descriptions do not change option
+defaults, parsing, persistence, streams, or exit codes.
+
 ## Shared Path Resolution Rules
 
 These commands share the same root/config path resolution rules:

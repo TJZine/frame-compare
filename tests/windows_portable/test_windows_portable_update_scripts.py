@@ -391,6 +391,17 @@ def test_windows_portable_updater_compares_app_versions_as_versions(repo_root: P
     assert "System.Version" in updater
 
 
+def test_windows_portable_updater_help_describes_public_commands(repo_root: Path) -> None:
+    updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
+    updater = _read_text_or_fail(updater_path)
+    help_body = _extract_powershell_function(updater, "Show-Help")
+
+    assert "Verify a signed code-only update" in help_body
+    assert "Restore application code from one exact backup ID." in help_body
+    assert "List available backup IDs newest first." in help_body
+    assert "Retain only the newest N backups (default: 5)." in help_body
+
+
 def test_windows_portable_updater_handles_stale_update_locks(repo_root: Path) -> None:
     updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
     updater = _read_text_or_fail(updater_path)
@@ -725,7 +736,9 @@ def test_windows_portable_update_signature_uses_explicit_pkcs1_sha256(
     assert "function Sign-ManifestBytes" in sign_script
     assert "function Test-ManifestSignature" in sign_script
     assert "Signing key does not match the expected update public key." in sign_script
-    assert "Produced signature does not verify against the expected update public key." in sign_script
+    assert (
+        "Produced signature does not verify against the expected update public key." in sign_script
+    )
     assert "[System.Security.Cryptography.HashAlgorithmName]::SHA256" in sign_script
     assert "[System.Security.Cryptography.RSASignaturePadding]::Pkcs1" in sign_script
     assert "function Test-ManifestSignature" in updater

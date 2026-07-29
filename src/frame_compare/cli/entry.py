@@ -135,34 +135,110 @@ def version() -> None:
 
 @app.command()
 def run(
-    root: Path = _path_option(".", "--root", "-r"),
-    config: Path | None = _option(None, "--config", "-c"),
-    input_dir: Path | None = _option(None, "--input", "-i"),
-    no_cache: bool = _option(False, "--no-cache"),
-    from_cache_only: bool = _option(False, "--from-cache-only"),
-    no_upload: bool = _option(False, "--no-upload"),
-    tm_preset: str | None = _option(None, "--tm-preset"),
-    tm_target: int | None = _option(None, "--tm-target"),
-    tm_curve: str | None = _option(None, "--tm-curve"),
-    frames: str | None = _option(None, "--frames"),
-    random_frame_count: str | None = _option(None, "--random-frame-count"),
-    dark_frame_count: str | None = _option(None, "--dark-frame-count"),
-    bright_frame_count: str | None = _option(None, "--bright-frame-count"),
-    motion_frame_count: str | None = _option(None, "--motion-frame-count"),
+    root: Path = _path_option(
+        ".", "--root", "-r", help="Workspace root containing config and output directories."
+    ),
+    config: Path | None = _option(
+        None, "--config", "-c", help="Config file; relative paths resolve from --root."
+    ),
+    input_dir: Path | None = _option(
+        None,
+        "--input",
+        "-i",
+        help="Override the source-video directory; persists with --write-config.",
+    ),
+    no_cache: bool = _option(
+        False, "--no-cache", help="Disable analysis cache reads and writes for this run."
+    ),
+    from_cache_only: bool = _option(
+        False,
+        "--from-cache-only",
+        help="Require valid cached analysis; never recompute missing metrics.",
+    ),
+    no_upload: bool = _option(
+        False,
+        "--no-upload",
+        help="Disable slow.pics upload; persists with --write-config.",
+    ),
+    tm_preset: str | None = _option(
+        None, "--tm-preset", help="Override the tonemap preset; persists with --write-config."
+    ),
+    tm_target: int | None = _option(
+        None,
+        "--tm-target",
+        help="Override tonemap target nits; persists with --write-config.",
+    ),
+    tm_curve: str | None = _option(
+        None, "--tm-curve", help="Override the tonemap curve; persists with --write-config."
+    ),
+    frames: str | None = _option(
+        None,
+        "--frames",
+        help="Comma-separated reference source-frame numbers; persists with --write-config.",
+    ),
+    random_frame_count: str | None = _option(
+        None,
+        "--random-frame-count",
+        help="Override the random frame count; persists with --write-config.",
+    ),
+    dark_frame_count: str | None = _option(
+        None,
+        "--dark-frame-count",
+        help="Override the dark-frame count; requires analysis and persists.",
+    ),
+    bright_frame_count: str | None = _option(
+        None,
+        "--bright-frame-count",
+        help="Override the bright-frame count; requires analysis and persists.",
+    ),
+    motion_frame_count: str | None = _option(
+        None,
+        "--motion-frame-count",
+        help="Override the motion-frame count; requires analysis and persists.",
+    ),
     removed_frame_count: str | None = _option(None, "--frame-count", "-n", hidden=True),
-    seed: int | None = _option(None, "--seed"),
-    overlay: str | None = _option(None, "--overlay"),
-    skip_analysis: bool = _option(False, "--skip-analysis"),
-    skip_metadata: bool = _option(False, "--skip-metadata"),
-    force_interactive_alignment: bool = _option(False, "--force-interactive-alignment"),
-    json_output: bool = _option(False, "--json"),
-    no_color: bool = _option(False, "--no-color"),
-    dry_run: bool = _option(False, "--dry-run"),
-    write_config: bool = _option(False, "--write-config"),
-    diagnose_paths: bool = _option(False, "--diagnose-paths"),
-    quiet: bool = _option(False, "--quiet", "-q"),
-    verbose: bool = _option(False, "--verbose", "-v"),
+    seed: int | None = _option(
+        None, "--seed", help="Override the frame-selection seed; persists with --write-config."
+    ),
+    overlay: str | None = _option(
+        None, "--overlay", help="Override screenshot overlay mode; persists with --write-config."
+    ),
+    skip_analysis: bool = _option(
+        False,
+        "--skip-analysis",
+        help="Skip metric analysis; dark, bright, and motion counts must be zero.",
+    ),
+    skip_metadata: bool = _option(
+        False, "--skip-metadata", help="Skip TMDB metadata lookup for this run."
+    ),
+    force_interactive_alignment: bool = _option(
+        False,
+        "--force-interactive-alignment",
+        help="Force VSPreview alignment; persists with --write-config.",
+    ),
+    json_output: bool = _option(
+        False, "--json", help="Emit machine-readable JSON instead of human summaries."
+    ),
+    no_color: bool = _option(False, "--no-color", help="Disable colored output."),
+    dry_run: bool = _option(
+        False,
+        "--dry-run",
+        help="Plan without probing, rendering, writing outputs, or publishing.",
+    ),
+    write_config: bool = _option(
+        False, "--write-config", help="Write the effective config, then exit without running."
+    ),
+    diagnose_paths: bool = _option(
+        False, "--diagnose-paths", help="Print resolved workspace paths as JSON, then exit."
+    ),
+    quiet: bool = _option(
+        False, "--quiet", "-q", help="Suppress progress and detailed human summaries."
+    ),
+    verbose: bool = _option(
+        False, "--verbose", "-v", help="Enable debug logging and verbose error details."
+    ),
 ) -> None:
+    """Compare video sources and generate screenshots and an optional report."""
     resolved_root, config_path = _resolve_root_and_config(root, config)
     args = RunCliRawArgs(
         resolved_root=resolved_root,
@@ -213,9 +289,14 @@ def run(
 
 @app.command()
 def wizard(
-    root: Path = _path_option(".", "--root", "-r"),
-    config: Path | None = _option(None, "--config", "-c"),
+    root: Path = _path_option(
+        ".", "--root", "-r", help="Workspace root containing config and media paths."
+    ),
+    config: Path | None = _option(
+        None, "--config", "-c", help="Config file; relative paths resolve from --root."
+    ),
 ) -> None:
+    """Interactively configure input, reference, and frame selection."""
     resolved_root, config_path = _resolve_root_and_config(root, config)
     effective_no_color = no_color_requested()
     handle_wizard(
@@ -233,7 +314,10 @@ def wizard(
 
 
 @app.command()
-def doctor(json_output: bool = _option(False, "--json")) -> None:
+def doctor(
+    json_output: bool = _option(False, "--json", help="Emit the diagnostic report as JSON."),
+) -> None:
+    """Check required runtimes and optional integrations."""
     handle_doctor(
         json_output,
         run_doctor=run_doctor,
@@ -251,9 +335,11 @@ app.add_typer(history_app, name="history")
 
 @history_app.command("list")
 def history_list(
-    root: Path = _path_option(".", "--root", "-r"),
-    config: Path | None = _option(None, "--config", "-c"),
-    json_output: bool = _option(False, "--json"),
+    root: Path = _path_option(".", "--root", "-r", help="Workspace root containing recorded runs."),
+    config: Path | None = _option(
+        None, "--config", "-c", help="Config file; relative paths resolve from --root."
+    ),
+    json_output: bool = _option(False, "--json", help="Emit the run list as JSON."),
 ) -> None:
     """List recorded runs newest first."""
     resolved_root, config_path = _resolve_root_and_config(root, config)
@@ -269,8 +355,10 @@ def history_list(
 @history_app.command("open")
 def history_open(
     run_name: str,
-    root: Path = _path_option(".", "--root", "-r"),
-    config: Path | None = _option(None, "--config", "-c"),
+    root: Path = _path_option(".", "--root", "-r", help="Workspace root containing recorded runs."),
+    config: Path | None = _option(
+        None, "--config", "-c", help="Config file; relative paths resolve from --root."
+    ),
 ) -> None:
     """Open one exact-name recorded report."""
     resolved_root, config_path = _resolve_root_and_config(root, config)
@@ -286,9 +374,14 @@ def history_open(
 
 @preset_app.command("list")
 def preset_list(
-    root: Path = _path_option(".", "--root", "-r"),
-    config: Path | None = _option(None, "--config", "-c"),
+    root: Path = _path_option(
+        ".", "--root", "-r", help="Workspace root containing configuration presets."
+    ),
+    config: Path | None = _option(
+        None, "--config", "-c", help="Accepted for consistency; preset list uses --root."
+    ),
 ) -> None:
+    """List available configuration presets."""
     resolved_root, _ = _resolve_root_and_config(root, config)
     handle_preset_list(
         resolved_root,
@@ -301,9 +394,14 @@ def preset_list(
 @preset_app.command("apply")
 def preset_apply(
     name: str,
-    root: Path = _path_option(".", "--root", "-r"),
-    config: Path | None = _option(None, "--config", "-c"),
+    root: Path = _path_option(
+        ".", "--root", "-r", help="Workspace root containing config and presets."
+    ),
+    config: Path | None = _option(
+        None, "--config", "-c", help="Config file; relative paths resolve from --root."
+    ),
 ) -> None:
+    """Apply a named preset to the selected config file."""
     resolved_root, config_path = _resolve_root_and_config(root, config)
     handle_preset_apply(
         name,
@@ -320,9 +418,14 @@ def preset_apply(
 @preset_app.command("save")
 def preset_save(
     name: str,
-    root: Path = _path_option(".", "--root", "-r"),
-    config: Path | None = _option(None, "--config", "-c"),
+    root: Path = _path_option(
+        ".", "--root", "-r", help="Workspace root containing config and presets."
+    ),
+    config: Path | None = _option(
+        None, "--config", "-c", help="Config file; relative paths resolve from --root."
+    ),
 ) -> None:
+    """Save the selected config as a named preset."""
     resolved_root, config_path = _resolve_root_and_config(root, config)
     handle_preset_save(
         name,
