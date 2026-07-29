@@ -1115,7 +1115,7 @@ pull request. They have different reviewers, rollback strategies, and proof surf
 ## Pre-RC verification record
 
 The executable verification baseline is commit
-`eac76e64ebe5b68fece449ce2d6db54028500c55`; this record-only documentation
+`dbb1897d907b3ede7edd77ffe53957c65dfe1781`; this record-only documentation
 update does not change that proof surface.
 
 | Risk | Primary proof mode | Command or evidence | Expected outcome | Result / unavailable proof |
@@ -1127,6 +1127,25 @@ update does not change that proof surface.
 | Vulnerable or inconsistent Python distributions ship | Locked graph audit plus clean package reconstruction | Linux/Windows CI audit contract; Windows `pip-audit` against hashed all-extras export; detached clean worktree build, archive inspection, fresh install, version/help smoke | No advisory or collection failure; one wheel and sdist agree and exclude local/sensitive state | Windows audit passed with no known vulnerabilities after fixed lock updates; Ubuntu matrix proof awaits CI |
 | Mutable Docker bases or broken container integration | Digest contract and canonical Docker integration workflow | OCI index digest resolution; Dockerfile contract tests; `bash tools/verify_docker_integration.sh` | uv/Python bases resolve by digest and the canonical software-Vulkan route passes | Digest and contracts passed. Docker and executable Bash were unavailable locally; the candidate SHA must pass the GitHub Docker Integration workflow before RC dispatch |
 | Hidden local state affects results | Detached clean-worktree verification | Frozen sync followed by Pyright, Ruff, Bandit, full pytest, import-linter, docs, workflow, audit, and distribution gates | Tracked tree stays clean and all gates pass independently of the development checkout | Passed at the baseline commit; ignored outputs were confined to and removed with the disposable worktree |
+
+### Independent review disposition
+
+The independent high-risk review and focused closure review were read-only.
+
+- Accepted and closed: recheck current stable `main`, draft/tag target, exact
+  remote asset set, non-empty sizes, and remote/local digests immediately before
+  publication and again afterward.
+- Accepted and closed: until a published stable `v0.1.0` exists, permit stable
+  publication only for exact version `0.1.0` and tag `v0.1.0`, failing closed
+  when GitHub state cannot be determined.
+- Accepted and closed: correct the plan so `0.0.0` lasts through P3-P6 and the
+  agreeing `0.1.0rcN` state is prepared before P7.
+- Rejected as a repository defect but retained as unavailable live proof: Zensical
+  emits the configured Mermaid markup and its bundled loader dynamically fetches
+  and renders Mermaid; the in-app browser failed identically on Zensical's
+  official diagrams page. No unsupported runtime customization was added.
+
+The closure review found no remaining findings or regression.
 
 ## Review gates
 
