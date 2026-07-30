@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from frame_compare.config.overrides import CLI_OVERRIDE_MAP
@@ -41,9 +42,20 @@ def test_current_cli_contract_keeps_command_families_and_live_override_map() -> 
         "## Config-Only Analysis Surface",
         maxsplit=1,
     )[0]
-    for cli_name, config_path in CLI_OVERRIDE_MAP.items():
-        flag = f"--{cli_name.replace('_', '-')}"
-        assert f"| `{flag}` | `{config_path}` |" in mapping_section
+    row_pattern = re.compile(r"^\| `(?P<flag>--[^`]+)` \| `(?P<config_path>[^`]+)` \|")
+    row_lines = [line for line in mapping_section.splitlines() if line.startswith("| `--")]
+    documented_pairs: list[tuple[str, str]] = []
+    for row in row_lines:
+        match = row_pattern.match(row)
+        assert match is not None, f"Malformed CLI mapping row: {row}"
+        documented_pairs.append((match.group("flag"), match.group("config_path")))
+
+    expected_pairs = {
+        (f"--{cli_name.replace('_', '-')}", config_path)
+        for cli_name, config_path in CLI_OVERRIDE_MAP.items()
+    }
+    assert len(documented_pairs) == len(CLI_OVERRIDE_MAP)
+    assert set(documented_pairs) == expected_pairs
 
 
 def test_current_cli_contract_names_primary_executable_contract_checks() -> None:

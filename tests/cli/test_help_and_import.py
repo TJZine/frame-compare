@@ -181,14 +181,17 @@ def test_run_rejects_retired_frame_count_options(
     ],
 )
 def test_public_help_explains_commands_and_option_effects(
-    args: list[str], expected_fragments: list[str]
+    args: list[str],
+    expected_fragments: list[str],
+    monkeypatch: MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(typer_rich_utils, "MAX_WIDTH", None)
     result = runner.invoke(
         app,
         args,
         color=False,
         terminal_width=200,
-        env={"NO_COLOR": "1", "TERM": "dumb"},
+        env={"NO_COLOR": "1", "TERM": "dumb", "TERMINAL_WIDTH": "200"},
     )
     output = _normalize_cli_output(result.stdout)
 

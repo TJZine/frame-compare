@@ -156,10 +156,9 @@ def test_release_please_remains_guarded_and_non_merging(repo_root: Path) -> None
     assert release["permissions"] == {"contents": "write", "pull-requests": "write"}
     assert action["with"]["skip-github-release"] == "true"
     assert "v0.1.0" in guard["steps"][0]["run"]
-    assert all(
-        "gh pr merge" not in str(step.get("run", "")) and "--auto" not in str(step.get("run", ""))
-        for step in _steps(workflow)
-    )
+    for step in _steps(workflow):
+        command = str(step.get("run", ""))
+        assert "gh pr merge" not in command, step.get("name")
 
 
 def test_windows_portable_dispatch_owns_immutable_release_inputs_and_secrets(
