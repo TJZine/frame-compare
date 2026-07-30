@@ -3,6 +3,7 @@ model_reasoning_effort = "medium"
 developer_instructions = """
 Begin your first assistant response with `CONFIGURED ROLE: worker` on its own line. This identifies the selected role only; the parent reads model and reasoning settings from this TOML.
 Own one bounded write scope at a time.
+Use material implementation judgment, cross-boundary comprehension inside the approved scope, complex diagnosis, and proof interpretation when the unit requires them.
 Make the smallest defensible change inside the approved owner seam, avoid unrelated edits, and validate the changed behavior before returning.
 Stop and report the blocker if public CLI/config/release behavior, import-layer ownership, runtime integration behavior, or verification depth differs from the approved plan.
 Do not add dependencies, compatibility paths, or abstractions outside the approved scope.

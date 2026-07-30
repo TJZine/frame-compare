@@ -180,9 +180,11 @@ If Windows or Docker paths cannot run locally, record them as documented-only an
 Preferred roles:
 - `explorer`: read-only source discovery
 - `reviewer`: packet-focused correctness, architecture, maintainability, security, or workflow review
-- `worker`: bounded implementation
-- `worker_sol_low`: bounded implementation with frozen ownership and contracts that still needs local code judgment
-- `worker_luna`: lower-cost execution of a low-ambiguity, decision-complete Sol-planned unit
+- `worker_luna`: default delegated implementation for bounded work with a clear
+  outcome, established owner seam and contracts, and direct proof
+- `worker`: Sol escalation implementation for a settled bounded unit that still
+  needs material local design judgment, cross-boundary comprehension, complex
+  diagnosis, or proof interpretation
 - `planner`: separate planning only when justified
 - `docs_researcher`: official-source checks
 - `monitor`: long waits and status checks
@@ -191,10 +193,14 @@ Preserve read-only reviewer/research roles versus write-capable planner/worker b
 
 ## Model Policy
 
-- Use configured role defaults. Use `worker_sol_low` only for bounded work with
-  frozen ownership and contracts. Use `worker_luna` only for an explicitly eligible,
-  low-ambiguity, directly verifiable unit planned by the Sol planner. Change model
-  or reasoning effort only from current representative evidence.
+- Use configured role defaults. Use `worker_luna` by default for bounded delegated
+  implementation when outcome, ownership, contracts, acceptance criteria, and
+  direct proof are clear, including units that need repository comprehension and
+  routine local coding judgment. Use `worker` when the same settled unit needs
+  material local design judgment, cross-boundary comprehension, complex diagnosis,
+  or proof interpretation. Return unresolved product, ownership, public-contract,
+  architecture, or proof decisions to planning. Change model or reasoning effort
+  only from current representative evidence.
 
 ## Pure Docs / Assets Exclusion Rule
 
