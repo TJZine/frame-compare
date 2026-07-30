@@ -6,7 +6,7 @@ from typer.main import get_command
 
 from frame_compare.cli.entry import _stabilize_typer_help_width, app
 
-from .cli_helpers import _normalize_cli_output, runner
+from .cli_helpers import _normalize_cli_help, _normalize_cli_output, runner
 
 
 def test_app_help_lists_all_commands():
@@ -183,17 +183,15 @@ def test_run_rejects_retired_frame_count_options(
 def test_public_help_explains_commands_and_option_effects(
     args: list[str],
     expected_fragments: list[str],
-    monkeypatch: MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(typer_rich_utils, "MAX_WIDTH", None)
     result = runner.invoke(
         app,
         args,
         color=False,
         terminal_width=200,
-        env={"NO_COLOR": "1", "TERM": "dumb", "TERMINAL_WIDTH": "200"},
+        env={"NO_COLOR": "1", "TERM": "dumb"},
     )
-    output = _normalize_cli_output(result.stdout)
+    output = _normalize_cli_help(result.stdout)
 
     assert result.exit_code == 0
     for fragment in expected_fragments:
