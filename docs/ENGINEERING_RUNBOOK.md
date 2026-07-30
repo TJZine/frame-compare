@@ -382,13 +382,18 @@ Use the lightest workflow that still protects the outcome:
   evidence that another pass improves the result.
 
 Delegate independent read-heavy exploration, documentation research, log analysis,
-or long waits when useful. Parallel writes require disjoint files and an approved
-integration plan. A bounded unit with frozen ownership and contracts may use
-`worker_sol_low` when it still needs repository comprehension or local coding
-judgment. A Sol planner may hand an explicitly eligible, low-ambiguity,
-cheap-to-verify unit to `worker_luna`. Both packets must name exact files,
-invariants, verification, and stop conditions; the controller reviews and
-reverifies the result. Keep delegation depth shallow.
+or long waits when useful. Parallel writes require disjoint write boundaries and an
+approved integration plan; require exact file lists only when concurrent writers or
+sensitive shared surfaces need collision protection. Use `worker_luna` by default
+for bounded delegated implementation when the outcome, owner seam, contracts,
+acceptance criteria, and direct proof are clear, including work that needs
+repository comprehension, exact-file discovery, and routine local coding judgment.
+Use `worker` when the same settled bounded unit needs material local design
+judgment, cross-boundary comprehension, complex diagnosis, or proof interpretation.
+Return unresolved product, ownership, public-contract, architecture, or proof
+decisions to planning. Plans describe risk and constraints rather than permanently
+binding a model; the controller selects the current role at dispatch, reviews the
+diff, and reverifies the result. Keep delegation depth shallow.
 
 For genuinely large multi-unit work, explicitly use the
 `large-task-orchestration` skill. The main task remains the authoritative

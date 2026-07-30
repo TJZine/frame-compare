@@ -10,10 +10,11 @@ benefit exceeds coordination cost.
 
 - Read-heavy exploration, official-doc research, review, log analysis, and waits may
   run in parallel and should return concise evidence, not raw transcripts.
-- Write work requires an approved unit with exact files, invariants, verification,
-  stop conditions, and no overlap with another writer.
-- Route decision-complete implementation through `bounded-worker-execution` when
-  `worker_sol_low` or `worker_luna` is explicitly selected.
+- Write work requires an approved owner/write boundary, invariants, verification,
+  stop conditions, and no overlap with another writer. Require exact files only
+  when concurrent writers or sensitive shared surfaces need collision protection.
+- Route bounded implementation through `bounded-worker-execution`; use
+  `worker_luna` by default when outcome, ownership, contracts, and proof are clear.
 - The controller owns integration and reruns verification.
 
 Keep delegation shallow. Do not delegate an immediate critical-path task merely to
