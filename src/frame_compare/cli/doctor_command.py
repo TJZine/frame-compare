@@ -12,6 +12,8 @@ from rich.markup import escape
 from frame_compare.cli.errors import ExitCode, format_error_json, get_exit_code
 from frame_compare.errors import FrameCompareError, JSONValue
 
+from .cli_helpers import HandleErrorFn
+
 if TYPE_CHECKING:
     from frame_compare.orchestration.doctor import DoctorCheck, DoctorReport
     from frame_compare.utils.progress_protocol import ProgressReporter
@@ -31,17 +33,6 @@ class RunDoctorFn(Protocol):
         checks: list[DoctorCheck] | None = None,
         reporter: ProgressReporter | None = None,
     ) -> DoctorReport: ...
-
-
-class HandleErrorFn(Protocol):
-    def __call__(
-        self,
-        error: Exception,
-        *,
-        no_color: bool,
-        verbose: bool,
-        verbose_hint: str | None = "--verbose",
-    ) -> int: ...
 
 
 def handle_doctor(

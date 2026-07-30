@@ -1,49 +1,22 @@
 import io
 import json
-import re
 import sys
 
 import pytest
 import structlog
 from structlog.testing import ReturnLogger
 
-import frame_compare.utils.logging as logging_module
-from frame_compare.utils.logging import configure_logging, get_run_id, new_run_id
+from frame_compare.utils.logging import configure_logging
 
 
 @pytest.fixture(autouse=True)
 def reset_logging_state():
-    """Reset structlog config and module ContextVar before each test."""
+    """Reset structlog configuration and context before each test."""
     structlog.reset_defaults()
     structlog.contextvars.clear_contextvars()
-    logging_module._run_id.set("")  # pyright: ignore[reportPrivateUsage]
     yield
     structlog.reset_defaults()
     structlog.contextvars.clear_contextvars()
-    logging_module._run_id.set("")  # pyright: ignore[reportPrivateUsage]
-
-
-def test_new_run_id_returns_8_char_hex():
-    """Test that new_run_id returns an 8-character hex string."""
-    result = new_run_id()
-    assert re.fullmatch(r"[0-9a-f]{8}", result)
-
-
-def test_new_run_id_sets_context_var():
-    """Test that new_run_id sets the module-level ContextVar."""
-    run_id = new_run_id()
-    assert get_run_id() == run_id
-
-
-def test_new_run_id_binds_to_structlog_contextvars():
-    """Test that new_run_id binds the ID to structlog contextvars."""
-    run_id = new_run_id()
-    assert structlog.contextvars.get_contextvars()["run_id"] == run_id
-
-
-def test_get_run_id_default_unknown():
-    """Test that get_run_id returns 'unknown' if no ID is set."""
-    assert get_run_id() == "unknown"
 
 
 def test_configure_logging_json_format():

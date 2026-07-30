@@ -290,13 +290,9 @@ def _parse_cached_computed_result(
     correlation_score = computed.get("correlation_score")
     if not isinstance(frame_offset, int) or isinstance(frame_offset, bool):
         raise TypeError("computed_result.frame_offset must be int")
-    if not isinstance(time_offset_seconds, int | float) or isinstance(
-        time_offset_seconds, bool
-    ):
+    if not isinstance(time_offset_seconds, int | float) or isinstance(time_offset_seconds, bool):
         raise TypeError("computed_result.time_offset_seconds must be number")
-    if not isinstance(correlation_score, int | float) or isinstance(
-        correlation_score, bool
-    ):
+    if not isinstance(correlation_score, int | float) or isinstance(correlation_score, bool):
         raise TypeError("computed_result.correlation_score must be number")
     reference_clip = entry.get("reference_clip")
     comparison_clip = entry.get("comparison_clip")
@@ -371,18 +367,6 @@ def load_reusable_offset_entries(
             )
             return None
     return results
-
-
-def load_reusable_offsets(
-    request: AlignmentRequest,
-    *,
-    comparisons: list[AlignmentClipRequest] | None = None,
-) -> dict[str, AlignmentResult] | None:
-    """Load a complete reusable previous-offset source set, or return ``None``."""
-    entries = load_reusable_offset_entries(request, comparisons=comparisons)
-    if entries is None:
-        return None
-    return {comparison_key: entry.result for comparison_key, entry in entries.items()}
 
 
 def _origin_for_provenance(provenance: AlignmentProvenance) -> AlignmentReuseCacheOrigin | None:

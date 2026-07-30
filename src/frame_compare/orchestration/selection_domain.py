@@ -64,28 +64,6 @@ class SelectionDomainClips:
     fps_diagnostics: FpsMatchDiagnostics
 
 
-def build_selection_domain_clips(
-    *,
-    ordered_paths: list[Path],
-    snapshots_by_path: dict[Path, ClipProbeSnapshot],
-    overrides_by_path: dict[Path, SourceOverrideConfig],
-    labels_by_path: dict[Path, str],
-    match_fps: SourceMatchFpsMode = SourceMatchFpsMode.DISABLED,
-    active_rect_detection: ScreenshotActiveRectDetection = (
-        ScreenshotActiveRectDetection.ASPECT_RATIO
-    ),
-) -> list[ClipState]:
-    """Build prepared clip states for selection-domain and cache decisions."""
-    return build_selection_domain_clips_with_diagnostics(
-        ordered_paths=ordered_paths,
-        snapshots_by_path=snapshots_by_path,
-        overrides_by_path=overrides_by_path,
-        labels_by_path=labels_by_path,
-        match_fps=match_fps,
-        active_rect_detection=active_rect_detection,
-    ).clips
-
-
 def build_selection_domain_clips_with_diagnostics(
     *,
     ordered_paths: list[Path],

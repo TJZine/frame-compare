@@ -685,11 +685,6 @@ These `run` flags currently map into config values through `CLI_OVERRIDE_MAP`:
 `--no-upload` is the only slow.pics-specific `run` flag. No runtime-only
 slow.pics `run` flags exist.
 
-`--frame-count` and `-n` are removed. They may be parsed as hidden
-rejection-only traps so Frame Compare can return its standard typed error in
-human and JSON modes, but they are not supported aliases, do not appear in help,
-do not map to config, and do not persist through `--write-config`.
-
 ## Config-Only Analysis Surface
 
 The default `[analysis]` frame-selection and metric surface is:

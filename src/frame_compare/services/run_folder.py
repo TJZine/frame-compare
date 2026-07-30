@@ -157,31 +157,6 @@ def _append_collision_suffix(folder_name: str, suffix: str) -> str:
     return f"{trimmed}_{suffix}"
 
 
-def _resolve_existing_folder_collision(
-    base_name: str,
-    existing_folders: list[str] | None,
-    *,
-    initial_candidate: str | None = None,
-) -> str:
-    """Resolve a unique folder name against a caller-provided existing-folder snapshot."""
-    candidate = base_name if initial_candidate is None else initial_candidate
-    if not existing_folders:
-        return candidate
-
-    existing_lower = {folder.lower() for folder in existing_folders}
-    if candidate.lower() not in existing_lower:
-        return candidate
-
-    for attempt in range(2, _NUMERIC_COLLISION_ATTEMPTS + 2):
-        suffix = str(attempt)
-        candidate = _append_collision_suffix(base_name, suffix)
-        if candidate.lower() not in existing_lower:
-            return candidate
-
-    random_suffix = uuid.uuid4().hex[:8]
-    return _append_collision_suffix(base_name, random_suffix)
-
-
 def _derive_base_folder_name(
     filenames: list[str],
     tmdb_metadata: TmdbMetadata | None = None,
@@ -208,26 +183,6 @@ def _derive_base_folder_name(
     if combined == _UNNAMED_RUN_BASE:
         return combined, "unnamed"
     return combined, "filename_stems"
-
-
-def derive_run_folder_name(
-    filenames: list[str],
-    tmdb_metadata: TmdbMetadata | None = None,
-    existing_folders: list[str] | None = None,
-) -> str:
-    """Derive a filesystem-safe run folder name from video metadata."""
-    folder_name, _naming_source = _derive_base_folder_name(filenames, tmdb_metadata)
-    return _resolve_existing_folder_collision(folder_name, existing_folders)
-
-
-def get_existing_run_folders(input_dir: Path) -> list[str]:
-    """Get list of existing run folder names in input directory, filtering to only include directories."""
-    if not input_dir.exists():
-        return []
-    if not input_dir.is_dir():
-        return []
-
-    return [p.name for p in input_dir.iterdir() if p.is_dir()]
 
 
 def reserve_run_folder(

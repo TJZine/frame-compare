@@ -33,7 +33,7 @@ from frame_compare.orchestration.preflight import (
     validate_and_normalize_config_paths,
 )
 
-from .cli_helpers import format_enum_expected
+from .cli_helpers import HandleErrorFn, LoadConfigFn, WriteConfigFn, format_enum_expected
 
 if TYPE_CHECKING:
     from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, RunResult
@@ -81,29 +81,6 @@ class RunCommandDeps:
     stdout_is_tty: bool
     stdin_is_tty: bool
     no_color_env_present: bool
-
-
-class LoadConfigFn(Protocol):
-    def __call__(
-        self,
-        config_path: Path | None = None,
-        overrides: dict[str, object] | None = None,
-    ) -> ConfigSchema: ...
-
-
-class WriteConfigFn(Protocol):
-    def __call__(self, path: Path, config: ConfigSchema) -> None: ...
-
-
-class HandleErrorFn(Protocol):
-    def __call__(
-        self,
-        error: Exception,
-        *,
-        no_color: bool,
-        verbose: bool,
-        verbose_hint: str | None = "--verbose",
-    ) -> int: ...
 
 
 class OpenReportFn(Protocol):
@@ -223,7 +200,6 @@ class RunCliRawArgs:
     dark_frame_count: str | None
     bright_frame_count: str | None
     motion_frame_count: str | None
-    removed_frame_count: str | None
     seed: int | None
     overlay: str | None
     skip_analysis: bool
@@ -397,7 +373,6 @@ def parse_run_options(args: RunCliRawArgs, *, no_color: bool) -> RunCliOptions:
     parsed_tm_preset = coerce_cli_choice(args.tm_preset, TonemapPreset, ("color", "preset"))
     parsed_tm_curve = coerce_cli_choice(args.tm_curve, ToneCurve, ("color", "tone_curve"))
     parsed_overlay = coerce_cli_choice(args.overlay, OverlayMode, ("screenshots", "overlay_mode"))
-    reject_removed_frame_count(args.removed_frame_count)
 
     return RunCliOptions(
         root=args.resolved_root,
@@ -439,27 +414,6 @@ def parse_run_options(args: RunCliRawArgs, *, no_color: bool) -> RunCliOptions:
         no_color=no_color,
         quiet=args.quiet,
         verbose=args.verbose,
-    )
-
-
-def reject_removed_frame_count(value: str | None) -> None:
-    if value is None:
-        return
-    raise ConfigValidationError(
-        [
-            {
-                "type": "removed_option",
-                "loc": ["cli", "frame_count"],
-                "msg": (
-                    "--frame-count/-n has been removed; use --random-frame-count, "
-                    "--dark-frame-count, --bright-frame-count, --motion-frame-count, "
-                    "or --frames"
-                ),
-                "input": value,
-            }
-        ],
-        message="--frame-count/-n has been removed",
-        hint="Use explicit frame selection flags such as --random-frame-count or --frames",
     )
 
 

@@ -7,14 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.workflow_helpers import read_text_or_fail as _read_text_or_fail
-
 SCRIPT_SUBPROCESS_TIMEOUT_SECONDS = 20.0
 BASH_PROBE_TIMEOUT_SECONDS = 5.0
-
-
-def read_text_or_fail(path: Path) -> str:
-    return _read_text_or_fail(path)
 
 
 def write_bash_env(path: Path, *snippets: str) -> None:

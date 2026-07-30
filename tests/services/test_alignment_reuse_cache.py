@@ -17,7 +17,6 @@ from frame_compare.services.alignment_reuse_cache import (
     CACHE_VERSION,
     comparison_cache_key,
     load_reusable_offset_entries,
-    load_reusable_offsets,
     save_reusable_offsets,
     source_set_cache_key,
 )
@@ -164,13 +163,10 @@ def test_shared_reuse_cache_round_trips_computed_entry(tmp_path: Path) -> None:
     _write_computed(request)
 
     entries = load_reusable_offset_entries(request)
-    loaded = load_reusable_offsets(request)
-
     assert entries is not None
     entry = next(iter(entries.values()))
-    assert loaded is not None
-    assert len(loaded) == 1
-    result = next(iter(loaded.values()))
+    assert len(entries) == 1
+    result = entry.result
     assert entry.accepted_at == "2026-06-06T12:00:00Z"
     assert entry.origin == "computed"
     assert result.source == "cached"
@@ -226,12 +222,9 @@ def test_shared_reuse_cache_round_trips_vspreview_confirmed_entry_with_score_one
     )
 
     entries = load_reusable_offset_entries(request)
-    loaded = load_reusable_offsets(request)
-
     assert entries is not None
     entry = next(iter(entries.values()))
-    assert loaded is not None
-    result = next(iter(loaded.values()))
+    result = entry.result
     assert entry.accepted_at == "2026-06-06T12:00:00Z"
     assert entry.origin == "vspreview_confirmed"
     assert result.source == "cached"
@@ -290,7 +283,7 @@ def test_shared_reuse_cache_requires_complete_source_set(tmp_path: Path) -> None
         accepted_at="2026-06-06T12:00:00Z",
     )
 
-    assert load_reusable_offsets(complete_request) is None
+    assert load_reusable_offset_entries(complete_request) is None
 
 
 def test_shared_reuse_cache_can_load_requested_subset_from_full_source_set(
@@ -381,7 +374,7 @@ def test_shared_reuse_cache_identity_drift_is_miss(
     request = _request(tmp_path)
     _write_computed(request)
 
-    assert load_reusable_offsets(mutate(request, tmp_path)) is None
+    assert load_reusable_offset_entries(mutate(request, tmp_path)) is None
 
 
 @pytest.mark.parametrize(
@@ -422,7 +415,7 @@ def test_shared_reuse_cache_optional_fields_present_in_cache_but_absent_in_reque
     table[field_name] = field_value
     _persist_cache_data(base_request, data)
 
-    assert load_reusable_offsets(base_request) is None
+    assert load_reusable_offset_entries(base_request) is None
 
 
 @pytest.mark.parametrize(
@@ -457,7 +450,7 @@ def test_shared_reuse_cache_optional_fields_present_in_request_but_absent_in_cac
     table.pop(field_name, None)
     _persist_cache_data(base_request, data)
 
-    assert load_reusable_offsets(base_request) is None
+    assert load_reusable_offset_entries(base_request) is None
 
 
 def test_shared_reuse_cache_corrupt_data_warns_and_misses(
@@ -475,7 +468,7 @@ def test_shared_reuse_cache_corrupt_data_warns_and_misses(
 
     monkeypatch.setattr("frame_compare.services.alignment_reuse_cache.log.warning", _warning)
 
-    assert load_reusable_offsets(request) is None
+    assert load_reusable_offset_entries(request) is None
     assert warnings == ["alignment_reuse_cache_unreadable"]
 
 
@@ -494,7 +487,7 @@ def test_shared_reuse_cache_version_mismatch_warns_and_misses(
 
     monkeypatch.setattr("frame_compare.services.alignment_reuse_cache.log.warning", _warning)
 
-    assert load_reusable_offsets(request) is None
+    assert load_reusable_offset_entries(request) is None
     assert warnings == ["alignment_reuse_cache_version_mismatch"]
 
 
@@ -516,7 +509,7 @@ def test_shared_reuse_cache_malformed_source_sets_warns_and_misses(
 
     monkeypatch.setattr("frame_compare.services.alignment_reuse_cache.log.warning", _warning)
 
-    assert load_reusable_offsets(request) is None
+    assert load_reusable_offset_entries(request) is None
     assert warnings == ["alignment_reuse_cache_malformed_source_sets"]
 
 
@@ -535,7 +528,7 @@ def test_shared_reuse_cache_missing_source_sets_warns_and_misses(
 
     monkeypatch.setattr("frame_compare.services.alignment_reuse_cache.log.warning", _warning)
 
-    assert load_reusable_offsets(request) is None
+    assert load_reusable_offset_entries(request) is None
     assert warnings == ["alignment_reuse_cache_missing_source_sets"]
 
 
@@ -733,7 +726,7 @@ def test_shared_reuse_cache_invalid_entry_warns_and_misses(tmp_path: Path) -> No
     entry["origin"] = "manual"
     _persist_cache_data(request, data)
 
-    assert load_reusable_offsets(request) is None
+    assert load_reusable_offset_entries(request) is None
 
 
 @pytest.mark.parametrize(
@@ -763,7 +756,7 @@ def test_shared_reuse_cache_boolean_numeric_fields_warn_and_miss(
 
     monkeypatch.setattr("frame_compare.services.alignment_reuse_cache.log.warning", _warning)
 
-    assert load_reusable_offsets(request) is None
+    assert load_reusable_offset_entries(request) is None
     assert warnings == ["alignment_reuse_cache_invalid_entry"]
 
 
@@ -810,7 +803,7 @@ def test_shared_reuse_cache_boolean_identity_fields_warn_and_miss(
 
     monkeypatch.setattr("frame_compare.services.alignment_reuse_cache.log.warning", _warning)
 
-    assert load_reusable_offsets(request) is None
+    assert load_reusable_offset_entries(request) is None
     assert warnings == ["alignment_reuse_cache_invalid_entry"]
 
 
@@ -868,7 +861,7 @@ def test_shared_reuse_cache_ignores_unrelated_ineligible_provenance_items(
         accepted_at="2026-06-06T12:00:00Z",
     )
 
-    loaded = load_reusable_offsets(request)
+    loaded = load_reusable_offset_entries(request)
 
     assert loaded is not None
     assert len(loaded) == 1

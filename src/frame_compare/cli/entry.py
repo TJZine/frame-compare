@@ -196,7 +196,6 @@ def run(
         "--motion-frame-count",
         help="Override the motion-frame count; requires analysis and persists.",
     ),
-    removed_frame_count: str | None = _option(None, "--frame-count", "-n", hidden=True),
     seed: int | None = _option(
         None, "--seed", help="Override the frame-selection seed; persists with --write-config."
     ),
@@ -255,7 +254,6 @@ def run(
         dark_frame_count=dark_frame_count,
         bright_frame_count=bright_frame_count,
         motion_frame_count=motion_frame_count,
-        removed_frame_count=removed_frame_count,
         seed=seed,
         overlay=overlay,
         skip_analysis=skip_analysis,

@@ -2,7 +2,6 @@
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
 from typing import Literal, cast
 
 import httpx
@@ -11,12 +10,6 @@ from frame_compare.services.errors import TmdbError, TmdbRateLimitedError
 from frame_compare.services.types import MetadataConfig, ParsedMetadata, TmdbMetadata
 
 type _TmdbMediaType = Literal["movie", "tv"]
-
-
-@dataclass(frozen=True)
-class TmdbSearchHit:
-    metadata: TmdbMetadata
-    popularity: float
 
 
 TMDB_API_BASE_URL = "https://api.themoviedb.org/3"
@@ -94,20 +87,6 @@ def _tmdb_result_year(item: Mapping[str, object], media_type: _TmdbMediaType) ->
     return int(year_str) if year_str.isdigit() else 0
 
 
-def _tmdb_result_popularity(item: Mapping[str, object]) -> float:
-    popularity_raw = item.get("popularity")
-    if isinstance(popularity_raw, bool):
-        return 0.0
-    if isinstance(popularity_raw, int | float):
-        return float(popularity_raw)
-    if isinstance(popularity_raw, str):
-        try:
-            return float(popularity_raw)
-        except ValueError:
-            return 0.0
-    return 0.0
-
-
 def _normalize_media_type(value: object) -> _TmdbMediaType | None:
     if value == "movie":
         return "movie"
@@ -153,22 +132,11 @@ def _map_tmdb_result(
     )
 
 
-def _map_tmdb_hit(
-    item: Mapping[str, object],
-    *,
-    endpoint_media_type: _TmdbMediaType | None = None,
-) -> TmdbSearchHit | None:
-    metadata = _map_tmdb_result(item, endpoint_media_type)
-    if metadata is None:
-        return None
-    return TmdbSearchHit(metadata=metadata, popularity=_tmdb_result_popularity(item))
-
-
-def _map_tmdb_hits(
+def _map_tmdb_results(
     data: object,
     *,
     endpoint_media_type: _TmdbMediaType | None = None,
-) -> list[TmdbSearchHit]:
+) -> list[TmdbMetadata]:
     if not isinstance(data, dict):
         raise TmdbError("Malformed TMDB response")
 
@@ -177,14 +145,16 @@ def _map_tmdb_hits(
     if not isinstance(results_raw, list):
         raise TmdbError("Malformed TMDB response")
 
-    mapped_hits: list[TmdbSearchHit] = []
+    mapped_results: list[TmdbMetadata] = []
     for item in cast(list[object], results_raw):
         if not isinstance(item, dict):
             continue
-        hit = _map_tmdb_hit(cast(dict[str, object], item), endpoint_media_type=endpoint_media_type)
-        if hit is not None:
-            mapped_hits.append(hit)
-    return mapped_hits
+        metadata = _map_tmdb_result(
+            cast(dict[str, object], item), endpoint_media_type=endpoint_media_type
+        )
+        if metadata is not None:
+            mapped_results.append(metadata)
+    return mapped_results
 
 
 def _map_tmdb_alternative_titles(
@@ -258,24 +228,6 @@ async def _search_tmdb_endpoint(
     url: str,
     endpoint_media_type: _TmdbMediaType | None = None,
 ) -> list[TmdbMetadata]:
-    hits = await _search_tmdb_endpoint_hits(
-        parsed,
-        config,
-        client,
-        url=url,
-        endpoint_media_type=endpoint_media_type,
-    )
-    return [hit.metadata for hit in hits]
-
-
-async def _search_tmdb_endpoint_hits(
-    parsed: ParsedMetadata,
-    config: MetadataConfig,
-    client: httpx.AsyncClient,
-    *,
-    url: str,
-    endpoint_media_type: _TmdbMediaType | None = None,
-) -> list[TmdbSearchHit]:
     api_key = _validate_tmdb_api_key(config)
     if api_key is None:
         return []
@@ -283,7 +235,7 @@ async def _search_tmdb_endpoint_hits(
     year_param_name = "first_air_date_year" if endpoint_media_type == "tv" else "year"
     params = _build_search_params(parsed, api_key, year_param_name=year_param_name)
     data = await _request_tmdb_json(url, params, config, client)
-    return _map_tmdb_hits(data, endpoint_media_type=endpoint_media_type)
+    return _map_tmdb_results(data, endpoint_media_type=endpoint_media_type)
 
 
 async def search_tmdb(
@@ -292,19 +244,6 @@ async def search_tmdb(
     client: httpx.AsyncClient,
 ) -> list[TmdbMetadata]:
     return await _search_tmdb_endpoint(
-        parsed,
-        config,
-        client,
-        url=TMDB_MULTI_SEARCH_URL,
-    )
-
-
-async def search_tmdb_multi_hits(
-    parsed: ParsedMetadata,
-    config: MetadataConfig,
-    client: httpx.AsyncClient,
-) -> list[TmdbSearchHit]:
-    return await _search_tmdb_endpoint_hits(
         parsed,
         config,
         client,
@@ -326,40 +265,12 @@ async def search_tmdb_movie(
     )
 
 
-async def search_tmdb_movie_hits(
-    parsed: ParsedMetadata,
-    config: MetadataConfig,
-    client: httpx.AsyncClient,
-) -> list[TmdbSearchHit]:
-    return await _search_tmdb_endpoint_hits(
-        parsed,
-        config,
-        client,
-        url=TMDB_MOVIE_SEARCH_URL,
-        endpoint_media_type="movie",
-    )
-
-
 async def search_tmdb_tv(
     parsed: ParsedMetadata,
     config: MetadataConfig,
     client: httpx.AsyncClient,
 ) -> list[TmdbMetadata]:
     return await _search_tmdb_endpoint(
-        parsed,
-        config,
-        client,
-        url=TMDB_TV_SEARCH_URL,
-        endpoint_media_type="tv",
-    )
-
-
-async def search_tmdb_tv_hits(
-    parsed: ParsedMetadata,
-    config: MetadataConfig,
-    client: httpx.AsyncClient,
-) -> list[TmdbSearchHit]:
-    return await _search_tmdb_endpoint_hits(
         parsed,
         config,
         client,

@@ -1,6 +1,0 @@
-interface:
-  display_name: "Frame Compare Cleanup Review"
-  short_description: "Launch the cleanup/refactor review workflow"
-  default_prompt: "Use $frame-compare-cleanup-review for this task."
-policy:
-  allow_implicit_invocation: false

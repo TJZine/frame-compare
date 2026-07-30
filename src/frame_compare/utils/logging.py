@@ -1,12 +1,8 @@
 import logging
 import sys
-from contextvars import ContextVar
 from typing import Protocol, TextIO, cast
-from uuid import uuid4
 
 import structlog
-
-_run_id: ContextVar[str] = ContextVar("run_id", default="")
 
 
 class _WritableStream(Protocol):
@@ -51,23 +47,6 @@ class _StderrStream:
             stream.flush()
         except (ValueError, OSError):
             return
-
-
-def new_run_id() -> str:
-    """Generate and set a correlation ID for the current run.
-
-    Returns the generated ID (format: first 8 chars of UUID4).
-    Also binds the run_id into structlog contextvars so it appears in all logs.
-    """
-    run_id = uuid4().hex[:8]
-    _run_id.set(run_id)
-    structlog.contextvars.bind_contextvars(run_id=run_id)
-    return run_id
-
-
-def get_run_id() -> str:
-    """Get the current run's correlation ID."""
-    return _run_id.get() or "unknown"
 
 
 def configure_logging(

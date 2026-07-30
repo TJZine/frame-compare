@@ -5,11 +5,9 @@ from __future__ import annotations
 import contextlib
 import os
 import webbrowser
-from collections.abc import Mapping
-from datetime import date, datetime, time
 from enum import Enum
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, Protocol
 
 import tomli_w
 import typer
@@ -28,6 +26,29 @@ _DEFAULT_HELP_WIDTH = 200
 
 class TextWriter(Protocol):
     def __call__(self, path: Path, content: str, *, encoding: str) -> None: ...
+
+
+class LoadConfigFn(Protocol):
+    def __call__(
+        self,
+        config_path: Path | None = None,
+        overrides: dict[str, object] | None = None,
+    ) -> ConfigSchema: ...
+
+
+class WriteConfigFn(Protocol):
+    def __call__(self, path: Path, config: ConfigSchema) -> None: ...
+
+
+class HandleErrorFn(Protocol):
+    def __call__(
+        self,
+        error: Exception,
+        *,
+        no_color: bool,
+        verbose: bool,
+        verbose_hint: str | None = "--verbose",
+    ) -> int: ...
 
 
 def stabilize_typer_help_width() -> None:
@@ -121,54 +142,6 @@ def write_config_to(path: Path, config: ConfigSchema, *, text_writer: TextWriter
         text_writer(path, toml_text, encoding="utf-8")
     except OSError as exc:
         raise ConfigWriteError(path, label="configuration file", cause=exc) from exc
-
-
-def _is_toml_scalar(value: object) -> bool:
-    return isinstance(value, str | int | float | bool | datetime | date | time)
-
-
-def _to_toml_safe_value(value: object) -> object | None:
-    if value is None:
-        return None
-    if isinstance(value, Mapping):
-        cleaned: dict[str, object] = {}
-        mapping = cast(Mapping[object, object], value)
-        for key, nested_value in mapping.items():
-            cleaned_value = _to_toml_safe_value(nested_value)
-            if cleaned_value is not None:
-                cleaned[str(key)] = cleaned_value
-        return cleaned
-    if isinstance(value, list | tuple):
-        cleaned_list: list[object] = []
-        value_list = cast(list[object] | tuple[object, ...], value)
-        for nested_value in value_list:
-            cleaned_value = _to_toml_safe_value(nested_value)
-            if cleaned_value is not None:
-                cleaned_list.append(cleaned_value)
-        return cleaned_list
-    if _is_toml_scalar(value):
-        return value
-    return None
-
-
-def prepare_toml_payload(data: dict[str, object]) -> dict[str, object]:
-    """Prepare a TOML-safe payload while preserving unrelated sections."""
-    payload: dict[str, object] = {}
-    for key, value in data.items():
-        cleaned_value = _to_toml_safe_value(value)
-        if cleaned_value is None:
-            continue
-        if key == "tmdb":
-            if not isinstance(cleaned_value, dict):
-                continue
-            tmdb_section = dict(cast(dict[str, object], cleaned_value))
-            if tmdb_section.get("api_key") == "":
-                del tmdb_section["api_key"]
-            if tmdb_section:
-                payload[key] = tmdb_section
-            continue
-        payload[key] = cleaned_value
-    return payload
 
 
 def format_enum_expected(enum_type: type[Enum]) -> str:

@@ -4,9 +4,8 @@ import re
 from pathlib import Path
 
 from tests.workflow_helpers import load_workflow as _load_workflow
+from tests.workflow_helpers import read_text_or_fail
 from tests.workflow_helpers import step_by_name as _step_by_name
-
-from ._helpers import read_text_or_fail
 
 EXPECTED_PATHS = {
     "docs/**",

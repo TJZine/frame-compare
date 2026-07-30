@@ -167,6 +167,36 @@ def _mock_successful_browser_flow(respx_mock, *, rows: int = 2, cols: int = 2) -
             )
 
 
+def _mock_captured_browser_flow(
+    respx_mock,
+    *,
+    rows: int = 1,
+    cols: int = 1,
+    xsrf_token: str = "token",
+) -> list[httpx.Request]:
+    requests: list[httpx.Request] = []
+
+    def capture(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/comparison":
+            return httpx.Response(
+                200,
+                headers={"Set-Cookie": f"XSRF-TOKEN={xsrf_token}; Domain=.slow.pics; Path=/"},
+            )
+        if request.url.path == "/upload/comparison":
+            return httpx.Response(200, json=_metadata_payload(rows=rows, cols=cols))
+        return httpx.Response(200)
+
+    respx_mock.get("https://slow.pics/comparison").mock(side_effect=capture)
+    respx_mock.post("https://slow.pics/upload/comparison").mock(side_effect=capture)
+    for row in range(rows):
+        for col in range(cols):
+            respx_mock.post(f"https://slow.pics/upload/image/image-{row}-{col}-secret").mock(
+                side_effect=capture
+            )
+    return requests
+
+
 @pytest.mark.anyio
 async def test_publish_to_slowpics_success_returns_url(
     tmp_path: Path,
@@ -301,22 +331,7 @@ async def test_publish_to_slowpics_sends_decoded_xsrf_browser_id_headers_and_use
     respx_mock,
 ) -> None:
     upload_plan = _plan(tmp_path, rows=1, cols=1)
-    requests: list[httpx.Request] = []
-
-    def capture(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        if request.url.path == "/comparison":
-            return httpx.Response(
-                200,
-                headers={"Set-Cookie": "XSRF-TOKEN=token%2Bdecoded; Domain=.slow.pics; Path=/"},
-            )
-        if request.url.path == "/upload/comparison":
-            return httpx.Response(200, json=_metadata_payload(rows=1, cols=1))
-        return httpx.Response(200)
-
-    respx_mock.get("https://slow.pics/comparison").mock(side_effect=capture)
-    respx_mock.post("https://slow.pics/upload/comparison").mock(side_effect=capture)
-    respx_mock.post("https://slow.pics/upload/image/image-0-0-secret").mock(side_effect=capture)
+    requests = _mock_captured_browser_flow(respx_mock, xsrf_token="token%2Bdecoded")
 
     await publish_to_slowpics(
         _collection_metadata(), SlowpicsConfig(), async_client, upload_plan=upload_plan
@@ -356,22 +371,7 @@ async def test_publish_to_slowpics_reuses_existing_browser_id_cookie(
 ) -> None:
     upload_plan = _plan(tmp_path, rows=1, cols=1)
     async_client.cookies.set("BROWSER-ID", "existing-browser-id", domain="slow.pics", path="/")
-    requests: list[httpx.Request] = []
-
-    def capture(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        if request.url.path == "/comparison":
-            return httpx.Response(
-                200,
-                headers={"Set-Cookie": "XSRF-TOKEN=token; Domain=.slow.pics; Path=/"},
-            )
-        if request.url.path == "/upload/comparison":
-            return httpx.Response(200, json=_metadata_payload(rows=1, cols=1))
-        return httpx.Response(200)
-
-    respx_mock.get("https://slow.pics/comparison").mock(side_effect=capture)
-    respx_mock.post("https://slow.pics/upload/comparison").mock(side_effect=capture)
-    respx_mock.post("https://slow.pics/upload/image/image-0-0-secret").mock(side_effect=capture)
+    requests = _mock_captured_browser_flow(respx_mock)
 
     await publish_to_slowpics(
         _collection_metadata(), SlowpicsConfig(), async_client, upload_plan=upload_plan
@@ -394,22 +394,7 @@ async def test_publish_to_slowpics_replaces_sentinel_browser_id_cookie(
         domain="slow.pics",
         path="/",
     )
-    requests: list[httpx.Request] = []
-
-    def capture(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        if request.url.path == "/comparison":
-            return httpx.Response(
-                200,
-                headers={"Set-Cookie": "XSRF-TOKEN=token; Domain=.slow.pics; Path=/"},
-            )
-        if request.url.path == "/upload/comparison":
-            return httpx.Response(200, json=_metadata_payload(rows=1, cols=1))
-        return httpx.Response(200)
-
-    respx_mock.get("https://slow.pics/comparison").mock(side_effect=capture)
-    respx_mock.post("https://slow.pics/upload/comparison").mock(side_effect=capture)
-    respx_mock.post("https://slow.pics/upload/image/image-0-0-secret").mock(side_effect=capture)
+    requests = _mock_captured_browser_flow(respx_mock)
 
     await publish_to_slowpics(
         _collection_metadata(), SlowpicsConfig(), async_client, upload_plan=upload_plan
@@ -493,22 +478,7 @@ async def test_publish_to_slowpics_maps_unlisted_hentai_retention_and_tv_associa
     respx_mock,
 ) -> None:
     upload_plan = _plan(tmp_path, rows=1, cols=1)
-    requests: list[httpx.Request] = []
-
-    def capture(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        if request.url.path == "/comparison":
-            return httpx.Response(
-                200,
-                headers={"Set-Cookie": "XSRF-TOKEN=token; Domain=.slow.pics; Path=/"},
-            )
-        if request.url.path == "/upload/comparison":
-            return httpx.Response(200, json=_metadata_payload(rows=1, cols=1))
-        return httpx.Response(200)
-
-    respx_mock.get("https://slow.pics/comparison").mock(side_effect=capture)
-    respx_mock.post("https://slow.pics/upload/comparison").mock(side_effect=capture)
-    respx_mock.post("https://slow.pics/upload/image/image-0-0-secret").mock(side_effect=capture)
+    requests = _mock_captured_browser_flow(respx_mock)
 
     await publish_to_slowpics(
         _collection_metadata("Show", tmdb_id=22, tmdb_media_type="tv"),
@@ -606,22 +576,7 @@ async def test_publish_to_slowpics_uses_general_metadata_timeout_and_size_aware_
 ) -> None:
     upload_plan = _plan(tmp_path, rows=1, cols=1)
     upload_plan.file_paths[0].write_bytes(b"x" * file_size_bytes)
-    requests: list[httpx.Request] = []
-
-    def capture(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        if request.url.path == "/comparison":
-            return httpx.Response(
-                200,
-                headers={"Set-Cookie": "XSRF-TOKEN=token; Domain=.slow.pics; Path=/"},
-            )
-        if request.url.path == "/upload/comparison":
-            return httpx.Response(200, json=_metadata_payload(rows=1, cols=1))
-        return httpx.Response(200)
-
-    respx_mock.get("https://slow.pics/comparison").mock(side_effect=capture)
-    respx_mock.post("https://slow.pics/upload/comparison").mock(side_effect=capture)
-    respx_mock.post("https://slow.pics/upload/image/image-0-0-secret").mock(side_effect=capture)
+    requests = _mock_captured_browser_flow(respx_mock)
 
     await publish_to_slowpics(
         _collection_metadata(),

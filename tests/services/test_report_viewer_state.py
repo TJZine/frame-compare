@@ -60,6 +60,10 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
         "legacyInfoModalWins": True,
         "inspectorStillOpenAfterAlignmentEscape": True,
     }
+    assert summary["modalKeyboardAccessibility"] == {
+        "helpFocusTrappedAndRestored": True,
+        "infoFocusTrappedAndRestored": True,
+    }
     assert summary["inspectorSlowpics"]["safeLinkTag"] == "A"
     assert summary["inspectorSlowpics"]["unsafeAsText"] is True
     assert summary["inspectorSlowpics"]["missingStatus"] == "Not uploaded"

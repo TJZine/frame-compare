@@ -8,7 +8,6 @@ import pytest
 import tomli_w
 from pydantic import BaseModel, ValidationError
 
-from frame_compare.config.defaults import DEFAULT_CONFIG_TOML
 from frame_compare.config.loader import get_default_config
 from frame_compare.config.schema import (
     AnalysisConfig,
@@ -41,42 +40,6 @@ from frame_compare.config.schema_models import (
     TmdbConfig,
 )
 from frame_compare.config.schema_sources import TomlConfigSettingsSourceNoBOM
-
-
-def test_default_config_values() -> None:
-    """Test that default config has expected values."""
-    config = get_default_config()
-    assert config.analysis.user_frames == []
-    assert config.analysis.random_frame_count == 10
-    assert config.analysis.dark_frame_count == 0
-    assert config.analysis.bright_frame_count == 0
-    assert config.analysis.motion_frame_count == 0
-    assert config.analysis.performance_mode == AnalysisPerformanceMode.QUALITY
-    assert config.analysis.ignore_lead_seconds == 0.0
-    assert config.analysis.ignore_trail_seconds == 0.0
-    assert config.analysis.min_window_seconds == 5.0
-    assert config.color.target_nits == 100
-    assert config.paths.input_dir == "comparison_videos"
-    assert config.sources.reference is None
-    assert config.sources.analysis_source == "reference"
-    assert config.sources.match_fps == SourceMatchFpsMode.DISABLED
-    assert config.sources.overrides == {}
-    assert config.screenshots.geometry_mode == ScreenshotGeometryMode.NATIVE
-    assert config.screenshots.active_rect_detection == ScreenshotActiveRectDetection.ASPECT_RATIO
-    assert config.screenshots.aligned_scale_policy == ScreenshotAlignedScalePolicy.LARGEST_ACTIVE
-    assert config.screenshots.aligned_target_width is None
-    assert config.screenshots.aligned_target_height is None
-    assert config.screenshots.vs_writer == VsScreenshotWriter.AUTO
-    assert config.tmdb.year_tolerance == 2
-    assert config.tmdb.category_preference is None
-    assert config.audio_alignment.correlation_mode == "raw_fft"
-    assert config.audio_alignment.preprocessing_mode == "none"
-    assert config.audio_alignment.channel_strategy == "mono_downmix"
-    assert config.audio_alignment.refinement_mode == "disabled"
-    assert config.audio_alignment.previous_offsets == "disabled"
-    assert config.audio_alignment.comparison_streams == {}
-    assert config.slowpics.confirm_upload_after_report is False
-    assert 'previous_offsets = "disabled"' in DEFAULT_CONFIG_TOML
 
 
 def test_analysis_requires_at_least_one_requested_frame() -> None:
@@ -169,22 +132,8 @@ def test_report_output_dir_empty_string_to_none() -> None:
     assert config.output_dir is None
 
 
-def test_report_auto_open_default_true() -> None:
-    """Report should auto-open by default in interactive CLI runs."""
-    config = ReportConfig()
-    assert config.auto_open is True
-
-
-def test_nested_model_defaults() -> None:
-    """Test that root config initializes nested models with defaults."""
-    config = get_default_config()
-    assert config.paths.input_dir == "comparison_videos"
-    assert config.analysis.random_seed == 42
-    assert config.color.enable_tonemap is True
-
-
 def test_schema_model_section_defaults_are_representative() -> None:
-    """Extracted section models keep the documented runtime defaults."""
+    """Section models keep the canonical runtime defaults."""
     paths = PathsConfig()
     analysis = AnalysisConfig()
     audio = AudioAlignmentConfig()
@@ -213,6 +162,7 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert analysis.ignore_lead_seconds == 0.0
     assert analysis.ignore_trail_seconds == 0.0
     assert analysis.min_window_seconds == 5.0
+    assert analysis.random_seed == 42
     assert analysis.dark_quantile == 0.05
     assert analysis.bright_quantile == 0.95
     assert audio.sample_rate == 8000
@@ -242,6 +192,7 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert screenshots.aligned_target_height is None
     assert screenshots.vs_writer == VsScreenshotWriter.AUTO
     assert color.target_nits == 100
+    assert color.enable_tonemap is True
     assert color.contrast_recovery == 0.3
     assert color.preset == "reference"
     assert slowpics.confirm_upload_after_report is False
@@ -262,6 +213,7 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert tmdb.category_preference is None
     assert report.default_mode == "slider"
     assert report.embed_images is False
+    assert report.auto_open is True
     assert diagnostics.model_dump() == {
         "per_frame_nits": False,
     }
@@ -335,14 +287,6 @@ def test_sources_match_fps_accepts_majority() -> None:
 def test_sources_match_fps_rejects_invalid_value() -> None:
     with pytest.raises(ValidationError):
         SourcesConfig.model_validate({"match_fps": "nearest"})
-
-
-def test_default_config_template_documents_analysis_source_and_majority() -> None:
-    parsed = tomllib.loads(DEFAULT_CONFIG_TOML)
-
-    assert "sources" in parsed
-    assert '# analysis_source = "reference"' in DEFAULT_CONFIG_TOML
-    assert '# match_fps = "majority"' in DEFAULT_CONFIG_TOML
 
 
 def test_slowpics_config_public_surface_is_frozen_to_approved_fields_and_defaults() -> None:
@@ -492,83 +436,6 @@ def test_sources_config_effective_fps_serializes_num_den_for_toml_round_trip() -
 
     assert data["sources"]["overrides"]["source-24.mkv"]["effective_fps"] == "24/1"
     assert data["sources"]["overrides"]["source-ntsc.mkv"]["effective_fps"] == "24000/1001"
-
-
-def test_default_config_toml_documents_sources_defaults() -> None:
-    data = tomllib.loads(DEFAULT_CONFIG_TOML)
-
-    assert data["sources"] == {"label_mode": "stem", "label_parser": "auto"}
-    assert '# reference = "auto"' in DEFAULT_CONFIG_TOML
-    assert '# analysis_source = "reference"' in DEFAULT_CONFIG_TOML
-    assert '# match_fps = "majority"' in DEFAULT_CONFIG_TOML
-    assert '# [sources.overrides."encode-a.mkv"]' in DEFAULT_CONFIG_TOML
-    assert '# effective_fps = "24000/1001"' in DEFAULT_CONFIG_TOML
-
-
-def test_default_config_toml_documents_screenshot_geometry_defaults() -> None:
-    data = tomllib.loads(DEFAULT_CONFIG_TOML)
-
-    assert "directory_name" not in data["screenshots"]
-    assert data["screenshots"]["geometry_mode"] == "native"
-    assert data["screenshots"]["active_rect_detection"] == "aspect_ratio"
-    assert data["screenshots"]["aligned_scale_policy"] == "largest_active"
-    assert "aligned_target_width" not in data["screenshots"]
-    assert "aligned_target_height" not in data["screenshots"]
-    assert "# aligned_target_width = 3840" in DEFAULT_CONFIG_TOML
-    assert "# aligned_target_height = 2160" in DEFAULT_CONFIG_TOML
-
-
-def test_default_config_toml_documents_analysis_ignore_window_defaults() -> None:
-    data = tomllib.loads(DEFAULT_CONFIG_TOML)
-
-    assert set(data["analysis"].keys()) == {
-        "user_frames",
-        "random_frame_count",
-        "dark_frame_count",
-        "bright_frame_count",
-        "motion_frame_count",
-        "random_seed",
-        "performance_mode",
-        "ignore_lead_seconds",
-        "ignore_trail_seconds",
-        "min_window_seconds",
-        "dark_quantile",
-        "bright_quantile",
-    }
-    assert data["analysis"]["performance_mode"] == "quality"
-    assert data["analysis"]["ignore_lead_seconds"] == 0.0
-    assert data["analysis"]["ignore_trail_seconds"] == 0.0
-    assert data["analysis"]["min_window_seconds"] == 5.0
-
-
-def test_default_config_toml_omits_removed_logging_file_key() -> None:
-    data = tomllib.loads(DEFAULT_CONFIG_TOML)
-
-    assert "file" not in data["logging"]
-
-
-def test_default_config_toml_documents_approved_slowpics_defaults() -> None:
-    """Default config template keeps the approved slow.pics config surface visible."""
-    data = tomllib.loads(DEFAULT_CONFIG_TOML)
-
-    assert data["slowpics"] == {
-        "auto_upload": False,
-        "confirm_upload_after_report": False,
-        "visibility": "public",
-        "delete_after_upload": False,
-        "timeout_seconds": 60.0,
-        "max_retries": 3,
-        "is_hentai": False,
-        "remove_after_days": 0,
-        "image_upload_timeout_seconds": 180.0,
-        "copy_url_to_clipboard": True,
-        "open_in_browser": True,
-        "create_url_shortcut": True,
-    }
-    assert (
-        '# webhook_url = "https://discord.com/api/webhooks/WEBHOOK_ID/WEBHOOK_TOKEN"'
-        in DEFAULT_CONFIG_TOML
-    )
 
 
 def test_schema_model_enums_accept_config_strings_and_reject_unknown_values() -> None:

@@ -2,9 +2,7 @@ from pathlib import Path
 
 from frame_compare.cli.entry import handle_error
 from frame_compare.config.errors import ConfigNotFoundError
-from frame_compare.errors import (
-    GenericInternalError,
-)
+from frame_compare.errors import ErrorContext, FrameCompareError
 from frame_compare.orchestration.errors import NoVideosFoundError
 from frame_compare.render.errors import FrameExtractionError
 from frame_compare.services.errors import SlowpicsError
@@ -32,7 +30,10 @@ def test_handle_error_returns_exit_codes():
     assert handle_error(SlowpicsError("timeout"), no_color=True, verbose=False) == 6
 
     # Internal -> 1
-    assert handle_error(GenericInternalError("fail"), no_color=True, verbose=False) == 1
+    internal_error = FrameCompareError(
+        ErrorContext(code="FC-9000", name="INTERNAL", message="fail")
+    )
+    assert handle_error(internal_error, no_color=True, verbose=False) == 1
 
     # Non FrameCompareError -> 1
     assert handle_error(ValueError("nope"), no_color=True, verbose=False) == 1

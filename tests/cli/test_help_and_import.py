@@ -6,7 +6,7 @@ from typer.main import get_command
 
 from frame_compare.cli.entry import _stabilize_typer_help_width, app
 
-from .cli_helpers import _normalize_cli_output, runner
+from .cli_helpers import _normalize_cli_help, _normalize_cli_output, runner
 
 
 def test_app_help_lists_all_commands():
@@ -70,8 +70,8 @@ def test_run_help_shows_all_options():
     }
 
     assert set(REQUIRED_RUN_OPTIONS).issubset(declared_options)
-    assert "--frame-count" in declared_options
-    assert "-n" in declared_options
+    assert "--frame-count" not in declared_options
+    assert "-n" not in declared_options
 
     result = runner.invoke(
         app,
@@ -99,6 +99,27 @@ def test_run_help_shows_all_options():
         assert opt in output
     assert "--frame-count" not in output
     assert " -n " not in output
+
+
+@pytest.mark.parametrize("retired_option", ["--frame-count", "-n"])
+def test_run_rejects_retired_frame_count_options(
+    retired_option: str, monkeypatch: MonkeyPatch
+) -> None:
+    def _unexpected_run(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("run handler must not execute for an unknown option")
+
+    monkeypatch.setattr("frame_compare.cli.entry.handle_run", _unexpected_run)
+
+    result = runner.invoke(
+        app,
+        ["run", retired_option, "7"],
+        color=False,
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert f"No such option '{retired_option}'" in _normalize_cli_output(result.stderr)
 
 
 @pytest.mark.parametrize(
@@ -160,7 +181,8 @@ def test_run_help_shows_all_options():
     ],
 )
 def test_public_help_explains_commands_and_option_effects(
-    args: list[str], expected_fragments: list[str]
+    args: list[str],
+    expected_fragments: list[str],
 ) -> None:
     result = runner.invoke(
         app,
@@ -169,7 +191,7 @@ def test_public_help_explains_commands_and_option_effects(
         terminal_width=200,
         env={"NO_COLOR": "1", "TERM": "dumb"},
     )
-    output = _normalize_cli_output(result.stdout)
+    output = _normalize_cli_help(result.stdout)
 
     assert result.exit_code == 0
     for fragment in expected_fragments:

@@ -51,21 +51,6 @@ class PluginNotFoundError(DependencyError):
         )
 
 
-class LibplaceboError(DependencyError):
-    """vs-placebo specific error (FC-2004)."""
-
-    def __init__(self, details: str) -> None:
-        super().__init__(
-            ErrorContext(
-                code="FC-2004",
-                name="LIBPLACEBO_ERROR",
-                message=f"Libplacebo error: {details}",
-                hint="Check Vulkan drivers or shader support",
-                details={"libplacebo_error": details},
-            )
-        )
-
-
 class TonemapRequiresVapourSynthError(DependencyError):
     """HDR tonemapping requires VapourSynth rendering (FC-2009)."""
 

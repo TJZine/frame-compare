@@ -6,7 +6,6 @@ import json
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol
 
 import typer
 
@@ -25,16 +24,7 @@ from frame_compare.services.run_result_record import (
     resolve_history_report,
 )
 
-
-class HandleErrorFn(Protocol):
-    def __call__(
-        self,
-        error: Exception,
-        *,
-        no_color: bool,
-        verbose: bool,
-        verbose_hint: str | None = "--verbose",
-    ) -> int: ...
+from .cli_helpers import HandleErrorFn
 
 
 def _resolve_history_roots(root: Path, config_path: Path) -> tuple[Path, Path]:

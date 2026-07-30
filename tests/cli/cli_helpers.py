@@ -10,11 +10,18 @@ from frame_compare.cli.entry import app
 
 runner = CliRunner()
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+RICH_BOX_DRAWING_RE = re.compile(r"[\u2500-\u257f]")
 
 
 def _normalize_cli_output(text: str) -> str:
     """Normalize styled CLI output for stable assertions across platforms."""
     return ANSI_ESCAPE_RE.sub("", text)
+
+
+def _normalize_cli_help(text: str) -> str:
+    """Normalize Rich help into width-independent semantic text."""
+    output = _normalize_cli_output(text)
+    return " ".join(RICH_BOX_DRAWING_RE.sub(" ", output).split())
 
 
 MINIMAL_CONFIG = """\

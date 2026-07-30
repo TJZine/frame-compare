@@ -1,6 +1,0 @@
-interface:
-  display_name: "Frame Compare Workflow Harness Review"
-  short_description: "Launch the workflow/skills/control-plane review"
-  default_prompt: "Use $frame-compare-workflow-harness-review for this task."
-policy:
-  allow_implicit_invocation: false
