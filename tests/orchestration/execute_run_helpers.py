@@ -19,7 +19,6 @@ from frame_compare.analysis.sampling import plan_performance_bursts
 from frame_compare.analysis.types import (
     ClipIdentity,
     FrameMetrics,
-    MetricActiveRect,
     MetricCacheRequest,
     MetricsMetadata,
 )
@@ -211,19 +210,6 @@ def analysis_selection_domain_for_cache_inputs(
         config=config,
         selection_window=window,
     )
-
-
-def metric_active_rect_for_cache_inputs(
-    video_paths: list[Path],
-    config: ConfigSchema,
-    *,
-    analysis_source_path: Path | None = None,
-) -> MetricActiveRect | None:
-    return metric_cache_request_for_cache_inputs(
-        video_paths,
-        config,
-        analysis_source_path=analysis_source_path,
-    ).metric_active_rect
 
 
 def metric_cache_request_for_cache_inputs(

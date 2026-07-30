@@ -5,14 +5,9 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
-
-if TYPE_CHECKING:
-    from collections.abc import Generator
-
 
 _NON_UNIT_MARKERS = frozenset({"integration", "e2e", "vs_required", "slow", "network"})
 _NON_UNIT_NODEID_PREFIXES = ("tests/integration/", "tests/e2e/")
@@ -30,25 +25,6 @@ def _should_default_to_unit(item: pytest.Item) -> bool:
     return not nodeid.startswith(_NON_UNIT_NODEID_PREFIXES) and not nodeid.endswith(
         _NON_UNIT_NODEID_SUFFIXES
     )
-
-
-def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
-    """Best-effort cleanup of pytest temp cache dirs in the repo root.
-
-    Pytest's cache provider uses temporary directories named like
-    `pytest-cache-files-*` and normally deletes them. If a run is interrupted
-    or the OS denies cleanup, they can be left behind and clutter the repo.
-    """
-    root = Path(str(session.config.rootpath))
-    for path in root.glob("pytest-cache-files-*"):
-        try:
-            # shutil import is local to keep import-time overhead minimal.
-            import shutil
-
-            shutil.rmtree(path, ignore_errors=True)
-        except Exception:
-            # Never fail the test session because cleanup couldn't run.
-            pass
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
@@ -98,29 +74,3 @@ if _vs_needs_mock():
 def repo_root() -> Path:
     """Return repository root directory."""
     return Path(__file__).resolve().parents[1]
-
-
-@pytest.fixture
-def sample_video_path() -> Path:
-    """Path to test video file (placeholder)."""
-    return Path(__file__).parent / "fixtures" / "sample.mkv"
-
-
-@pytest.fixture
-def tmp_workspace(tmp_path: Path) -> Generator[Path]:
-    """Temporary workspace with standard structure."""
-    (tmp_path / "comparison_videos").mkdir()
-    (tmp_path / "config").mkdir()
-    (tmp_path / "generated").mkdir()
-    yield tmp_path
-
-
-# ─── VapourSynth Stubs ─────────────────────────────────────
-
-
-@pytest.fixture
-def mock_vs(mocker):
-    """Mock VapourSynth for unit tests."""
-    mock = mocker.MagicMock()
-    mocker.patch.dict("sys.modules", {"vapoursynth": mock})
-    return mock

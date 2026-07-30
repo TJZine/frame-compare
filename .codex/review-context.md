@@ -98,7 +98,6 @@ Trigger architecture/deep review:
 - `docker-compose.yml`
 - `tools/verify_docker_integration.sh`
 - `scripts/generate_api_docs.py`
-- `scripts/validate_traceability.py`
 - workflow/authority docs listed above
 
 ## High-Risk Domains

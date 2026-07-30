@@ -68,7 +68,6 @@ dev = [
     "nodejs-wheel-binaries>=24.16.0",
     "ruff>=0.14.10",
     "respx>=0.22.0",
-    "hypothesis>=6.148.0",
     "pip-audit==2.10.1",
 ]
 

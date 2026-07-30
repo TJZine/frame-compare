@@ -589,6 +589,55 @@ const summary = {};
 }
 
 {
+    const { viewer, document } = loadViewer({ clipCount: 4 });
+    const helpLast = fakeElement();
+    const infoLast = fakeElement();
+    viewer.dom.modal.querySelectorAll = () => [viewer.dom.btnCloseHelp, helpLast];
+    viewer.dom.infoModal.querySelectorAll = () => [viewer.dom.btnCloseInfo, infoLast];
+
+    document.activeElement = viewer.dom.btnHelp;
+    viewer.openHelpModal();
+    document.activeElement = helpLast;
+    const helpTab = keyboardEvent('Tab');
+    viewer.handleModalKey(helpTab);
+    assert.equal(document.activeElement, viewer.dom.btnCloseHelp);
+    const helpShiftTab = keyboardEvent('Tab');
+    helpShiftTab.shiftKey = true;
+    viewer.handleModalKey(helpShiftTab);
+    assert.equal(document.activeElement, helpLast);
+    const helpEscape = keyboardEvent('Escape');
+    viewer.handleModalKey(helpEscape);
+    assert.equal(document.activeElement, viewer.dom.btnHelp);
+
+    document.activeElement = viewer.dom.btnInfo;
+    viewer.openInfoModal();
+    document.activeElement = infoLast;
+    const infoTab = keyboardEvent('Tab');
+    viewer.handleInfoModalKey(infoTab);
+    assert.equal(document.activeElement, viewer.dom.btnCloseInfo);
+    const infoShiftTab = keyboardEvent('Tab');
+    infoShiftTab.shiftKey = true;
+    viewer.handleInfoModalKey(infoShiftTab);
+    assert.equal(document.activeElement, infoLast);
+    const infoEscape = keyboardEvent('Escape');
+    viewer.handleInfoModalKey(infoEscape);
+    assert.equal(document.activeElement, viewer.dom.btnInfo);
+
+    summary.modalKeyboardAccessibility = {
+        helpFocusTrappedAndRestored: (
+            helpTab.defaultPrevented
+            && helpShiftTab.defaultPrevented
+            && helpEscape.defaultPrevented
+        ),
+        infoFocusTrappedAndRestored: (
+            infoTab.defaultPrevented
+            && infoShiftTab.defaultPrevented
+            && infoEscape.defaultPrevented
+        ),
+    };
+}
+
+{
     const { viewer } = loadViewer({ clipCount: 4 });
 
     viewer.bindAlignmentEvents();

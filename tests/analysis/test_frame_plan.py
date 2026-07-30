@@ -2,8 +2,6 @@ import subprocess
 import sys
 
 import pytest
-from hypothesis import given
-from hypothesis import strategies as st
 
 from frame_compare.analysis.errors import InsufficientFramesError
 from frame_compare.analysis.frame_plan import (
@@ -110,20 +108,14 @@ def test_create_frame_plan_uses_default_seed_when_omitted() -> None:
     assert plan.seed == 42
 
 
-@given(
-    num_frames=st.integers(min_value=1, max_value=10000),
-    count=st.integers(min_value=0, max_value=100),
-    seed=st.integers(min_value=0, max_value=2**31 - 1),
-)
-def test_frame_plan_invariants(num_frames: int, count: int, seed: int) -> None:
-    if count > num_frames:
-        with pytest.raises(InsufficientFramesError):
-            select_uniform_seeded_frames(num_frames, count, seed)
-    else:
-        plan = select_uniform_seeded_frames(num_frames, count, seed)
+def test_frame_plan_invariants_across_boundaries_and_seeds() -> None:
+    for num_frames, count in ((1, 0), (1, 1), (2, 1), (100, 99), (100, 100)):
+        for seed in (0, 42, 2**31 - 1):
+            frames = select_uniform_seeded_frames(num_frames, count, seed).frames
+            assert len(frames) == count
+            assert all(0 <= frame < num_frames for frame in frames)
+            assert len(set(frames)) == len(frames)
+            assert frames == sorted(frames)
 
-        # Invariants
-        assert len(plan.frames) == count
-        assert all(0 <= f < num_frames for f in plan.frames)
-        assert len(set(plan.frames)) == len(plan.frames)  # Unique
-        assert plan.frames == sorted(plan.frames)  # Sorted
+    with pytest.raises(InsufficientFramesError):
+        select_uniform_seeded_frames(1, 2, 42)

@@ -377,36 +377,14 @@ def css_block(css: str, selector: str) -> str:
 
 def brace_block(source: str, opening_brace_index: int) -> str:
     depth = 0
-    for idx in range(opening_brace_index, len(source)):
-        char = source[idx]
-        if char == "{":
+    for index in range(opening_brace_index, len(source)):
+        if source[index] == "{":
             depth += 1
-        elif char == "}":
+        elif source[index] == "}":
             depth -= 1
             if depth == 0:
-                return source[opening_brace_index + 1 : idx]
+                return source[opening_brace_index + 1 : index]
     raise AssertionError("Unterminated block")
-
-
-def js_method_block(js: str, signature: str) -> str:
-    definition = f"\n    {signature} {{"
-    signature_start = js.find(definition)
-    if signature_start == -1:
-        inline_definition = f"    {signature} {{"
-        if js.startswith(inline_definition):
-            signature_start = 0
-            definition = inline_definition
-        else:
-            raise AssertionError(f"Method definition not found: {signature}")
-    return brace_block(js, signature_start + len(definition) - 1)
-
-
-def assert_in_order(text: str, snippets: list[str]) -> None:
-    position = -1
-    for snippet in snippets:
-        next_position = text.find(snippet, position + 1)
-        assert next_position != -1, f"missing snippet: {snippet!r}"
-        position = next_position
 
 
 def script_payload(html: str) -> ReportPayload:
