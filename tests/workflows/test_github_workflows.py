@@ -18,10 +18,16 @@ def _steps(workflow: dict[str, Any]) -> list[dict[str, Any]]:
 
 def test_workflows_pin_actions_to_full_commit_shas(repo_root: Path) -> None:
     for path in (repo_root / ".github" / "workflows").glob("*.yml"):
-        for step in _steps(_load_workflow(path)):
-            action = step.get("uses")
-            if isinstance(action, str) and not action.startswith("./"):
-                assert re.fullmatch(r"[^@]+@[0-9a-f]{40}", action), (path, action)
+        workflow = _load_workflow(path)
+        references = [job.get("uses") for job in workflow.get("jobs", {}).values()]
+        references.extend(step.get("uses") for step in _steps(workflow))
+
+        for reference in references:
+            if isinstance(reference, str) and not reference.startswith("./"):
+                assert re.fullmatch(r"[^@]+@[0-9a-f]{40}", reference), (
+                    path,
+                    reference,
+                )
 
 
 def test_release_workflows_preserve_triggers_permissions_and_windows_owner(
