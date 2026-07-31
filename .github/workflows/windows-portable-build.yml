@@ -385,8 +385,8 @@ jobs:
           }
 
           foreach ($checksumPath in @(
-            Join-Path $assetDir "frame-compare-portable-win-x64-$($env:RELEASE_TAG).zip.sha256",
-            Join-Path $assetDir "frame-compare-update-win-x64-$($env:RELEASE_TAG).zip.sha256"
+            (Join-Path -Path $assetDir -ChildPath "frame-compare-portable-win-x64-$($env:RELEASE_TAG).zip.sha256"),
+            (Join-Path -Path $assetDir -ChildPath "frame-compare-update-win-x64-$($env:RELEASE_TAG).zip.sha256")
           )) {
             $line = (Get-Content -LiteralPath $checksumPath -Raw).Trim()
             if ($line -notmatch '^([0-9a-f]{64})  ([^\\/]+\.zip)$') {
