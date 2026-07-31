@@ -300,6 +300,25 @@ Current CI ownership:
   verification fails. Every public Windows release includes the signed update zip
   and its checksum.
 
+### Staging and dependency-update flow
+
+- `.github/workflows/sync-staging.yml` runs after each `main` push and can also be
+  dispatched manually. It fast-forwards `staging` when possible, merges `main`
+  when the branches have diverged, and never force-pushes. A concurrent update or
+  merge conflict fails closed without changing the remote `staging` branch.
+- If a ruleset protects `staging`, it must allow this non-force update (or provide
+  an explicit bypass for the workflow actor); a required pull request or required
+  status check that blocks the bot will make the sync fail closed. Keep branch
+  deletion and force-push protections enabled.
+- Normal Dependabot version-update entries in `.github/dependabot.yml` target the
+  lowercase `staging` branch so dependency changes can be exercised before they
+  reach `main`. GitHub security-update PRs remain governed by GitHub's default
+  branch behavior and may still target `main`.
+- CI, documentation, Docker, Windows, and PR-title checks remain available for
+  `staging` pull requests. The sync job uses the repository token for its push;
+  GitHub does not start a second push-triggered workflow from that token, so run
+  the relevant checks manually on `staging` when validating an automatic sync.
+
 The first stable lifecycle is release-branch finalization, one squash merge into
 `main`, then an exact-SHA guarded dispatch. Do not use a Release Please-generated
 initial version-bump commit. Remove temporary `bootstrap-sha` and `release-as`
