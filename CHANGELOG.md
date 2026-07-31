@@ -5,7 +5,7 @@ All notable user-facing changes to Frame Compare are documented in this file.
 Frame Compare follows Conventional Commits, and Release Please turns the
 `Unreleased` section into versioned release notes.
 
-## Unreleased
+## [0.1.0rc1]
 
 This is the first public alpha release of Frame Compare.
 

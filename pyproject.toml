@@ -1,6 +1,6 @@
 [project]
 name = "frame-compare"
-version = "0.0.0"
+version = "0.1.0rc1"
 description = "Video frame comparison tool with tonemapping and slow.pics integration"
 readme = "README.md"
 license = "GPL-3.0-only"
