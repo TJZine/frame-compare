@@ -1,0 +1,473 @@
+"""Tests for execute_run phase planning and request override contracts."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from frame_compare.analysis.types import SelectionBreakdown, SelectionDetail
+from frame_compare.analysis.window import SelectionWindow
+from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
+from frame_compare.orchestration.context import RunContext
+from frame_compare.orchestration.coordinator import RunDependencies, RunRequest
+from frame_compare.orchestration.execution import (
+    build_execution_phase_plan,
+    build_phases_before_align,
+)
+from frame_compare.orchestration.execution_types import (
+    AlignPhaseOutput,
+    ConfirmSlowpicsUploadPhaseOutput,
+    ExecutionState,
+    FramePlanPhaseOutput,
+    MetadataPrefetch,
+    PrepState,
+    PublishPhaseOutput,
+    RenderArtifacts,
+    RenderPhaseOutput,
+    RunArtifacts,
+)
+from frame_compare.orchestration.phase_output_application import apply_phase_output
+from frame_compare.utils.post_upload_actions import PostUploadActionResult
+from frame_compare.utils.types import WorkspacePaths
+
+from .execute_run_helpers import FakeFFmpegRunner, FakeVSLoader, clip_state
+
+
+def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
+    tmp_path: Path,
+) -> None:
+    workspace = WorkspacePaths(
+        root=tmp_path,
+        input_dir=tmp_path / "comparison_videos",
+        run_dir=None,
+        screenshots_dir=tmp_path / "screenshots",
+        generated_dir=tmp_path / "generated",
+        config_dir=tmp_path / "config",
+        config_file=tmp_path / "config" / "config.toml",
+    )
+
+    config = ConfigSchema()
+    config.analysis = config.analysis.model_copy(
+        update={"random_frame_count": 0, "dark_frame_count": 1}
+    )
+    prep = PrepState(
+        workspace=workspace,
+        config=config,
+        input_videos=[
+            tmp_path / "ref.mkv",
+            tmp_path / "comp_a.mkv",
+            tmp_path / "comp_b.mkv",
+        ],
+        analysis_selection_domain="test-selection-domain",
+        clips=[
+            clip_state(tmp_path / "ref.mkv", label="Reference"),
+            clip_state(tmp_path / "comp_a.mkv", label="Encode 1"),
+            clip_state(tmp_path / "comp_b.mkv", label="Encode 2"),
+        ],
+        artifacts=RunArtifacts(),
+        metadata_prefetch=MetadataPrefetch(None, False),
+        preflight_warnings=[],
+        preflight_duration=0.0,
+        load_sources_start=0.0,
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+    )
+
+    plan = build_execution_phase_plan(
+        request=RunRequest(root=tmp_path),
+        deps=RunDependencies(ffmpeg_runner=FakeFFmpegRunner()),
+        prep=prep,
+        state=ExecutionState(artifacts=prep.artifacts),
+    )
+
+    assert [phase.name for phase in plan.before_align] == ["frame_plan", "analyze", "align"]
+    assert [phase.name for phase in plan.after_align] == [
+        "render",
+        "metadata",
+        "publish",
+        "report",
+        "post_report_cleanup",
+    ]
+
+    align_phase = next(phase for phase in plan.before_align if phase.name == "align")
+    assert align_phase.progress_total == 3
+
+
+def test_build_execution_phase_plan_moves_report_before_publish_for_confirmed_upload(
+    tmp_path: Path,
+) -> None:
+    workspace = WorkspacePaths(
+        root=tmp_path,
+        input_dir=tmp_path / "comparison_videos",
+        run_dir=None,
+        screenshots_dir=tmp_path / "screenshots",
+        generated_dir=tmp_path / "generated",
+        config_dir=tmp_path / "config",
+        config_file=tmp_path / "config" / "config.toml",
+    )
+    config = ConfigSchema()
+    config.slowpics.auto_upload = True
+    config.slowpics.confirm_upload_after_report = True
+
+    prep = PrepState(
+        workspace=workspace,
+        config=config,
+        input_videos=[tmp_path / "ref.mkv"],
+        analysis_selection_domain="test-selection-domain",
+        clips=[clip_state(tmp_path / "ref.mkv", label="Reference")],
+        artifacts=RunArtifacts(),
+        metadata_prefetch=MetadataPrefetch(None, False),
+        preflight_warnings=[],
+        preflight_duration=0.0,
+        load_sources_start=0.0,
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+    )
+
+    plan = build_execution_phase_plan(
+        request=RunRequest(root=tmp_path),
+        deps=RunDependencies(ffmpeg_runner=FakeFFmpegRunner()),
+        prep=prep,
+        state=ExecutionState(artifacts=prep.artifacts),
+    )
+
+    assert [phase.name for phase in plan.after_align] == [
+        "render",
+        "metadata",
+        "report",
+        "confirm_slowpics_upload",
+        "publish",
+        "post_report_cleanup",
+    ]
+
+
+def test_build_phases_before_align_skips_analyze_when_request_skips_analysis(
+    tmp_path: Path,
+) -> None:
+    workspace = WorkspacePaths(
+        root=tmp_path,
+        input_dir=tmp_path / "comparison_videos",
+        run_dir=None,
+        screenshots_dir=tmp_path / "screenshots",
+        generated_dir=tmp_path / "generated",
+        config_dir=tmp_path / "config",
+        config_file=tmp_path / "config" / "config.toml",
+    )
+    state = ExecutionState(artifacts=RunArtifacts())
+
+    phases = build_phases_before_align(
+        request=RunRequest(root=tmp_path, skip_analysis=True),
+        monotonic_timer=lambda: 0.0,
+        state=state,
+        input_videos=[tmp_path / "ref.mkv"],
+        workspace=workspace,
+        vs_loader=FakeVSLoader(),
+    )
+
+    analyze_phase = next(phase for phase in phases if phase.name == "analyze")
+    config = ConfigSchema()
+    config.analysis = config.analysis.model_copy(
+        update={"random_frame_count": 0, "dark_frame_count": 1}
+    )
+
+    assert analyze_phase.skip_condition is not None
+    assert analyze_phase.skip_condition(config) is True
+
+
+def test_run_request_cli_config_overrides_capture_runtime_override_contract(tmp_path: Path) -> None:
+    request = RunRequest(
+        root=tmp_path,
+        input_dir=tmp_path / "comparison_videos",
+        tm_preset=TonemapPreset.FILMIC,
+        tm_target_nits=203,
+        overlay_mode=OverlayMode.DIAGNOSTIC,
+        user_frames=[4, 8],
+        random_frame_count=12,
+        dark_frame_count=2,
+        bright_frame_count=3,
+        motion_frame_count=4,
+        seed=123,
+        no_upload=True,
+        force_interactive_alignment=True,
+    )
+
+    overrides = request.cli_config_overrides()
+
+    assert overrides.input_dir == tmp_path / "comparison_videos"
+    assert overrides.tm_preset == TonemapPreset.FILMIC
+    assert overrides.tm_target_nits == 203
+    assert overrides.tm_curve is None
+    assert overrides.user_frames == [4, 8]
+    assert overrides.random_frame_count == 12
+    assert overrides.dark_frame_count == 2
+    assert overrides.bright_frame_count == 3
+    assert overrides.motion_frame_count == 4
+    assert overrides.seed == 123
+    assert overrides.overlay_mode == OverlayMode.DIAGNOSTIC
+    assert overrides.no_upload is True
+    assert overrides.force_interactive_alignment is True
+
+
+def test_apply_phase_output_records_frame_plan_selection_labels(tmp_path: Path) -> None:
+    workspace = WorkspacePaths(
+        root=tmp_path,
+        input_dir=tmp_path / "comparison_videos",
+        run_dir=None,
+        screenshots_dir=tmp_path / "screenshots",
+        generated_dir=tmp_path / "generated",
+        config_dir=tmp_path / "config",
+        config_file=tmp_path / "config" / "config.toml",
+    )
+    reference = clip_state(tmp_path / "ref.mkv", label="Reference")
+    ctx = RunContext(
+        config=ConfigSchema(),
+        workspace=workspace,
+        reference=reference,
+        comparisons=[],
+        analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+    )
+    state = ExecutionState(artifacts=RunArtifacts())
+    breakdown = SelectionBreakdown(user=[0], random=[66])
+    details = {
+        0: SelectionDetail(frame_index=0, label="User", source="frame_plan"),
+        66: SelectionDetail(frame_index=66, label="Random", source="frame_plan"),
+    }
+
+    apply_phase_output(
+        ctx=ctx,
+        state=state,
+        output=FramePlanPhaseOutput(
+            selected_frames=[0, 66],
+            selection_breakdown=breakdown,
+            selection_details_by_source_frame=details,
+        ),
+    )
+
+    assert state.selected_frames == [0, 66]
+    assert ctx.selection_breakdown == breakdown
+    assert ctx.selection_details_by_source_frame == details
+
+
+def test_apply_phase_output_handles_report_output_explicitly(tmp_path: Path) -> None:
+    from frame_compare.orchestration.execution_types import ReportPhaseOutput
+
+    workspace = WorkspacePaths(
+        root=tmp_path,
+        input_dir=tmp_path / "comparison_videos",
+        run_dir=None,
+        screenshots_dir=tmp_path / "screenshots",
+        generated_dir=tmp_path / "generated",
+        config_dir=tmp_path / "config",
+        config_file=tmp_path / "config" / "config.toml",
+    )
+    reference = clip_state(tmp_path / "ref.mkv", label="Reference")
+    ctx = RunContext(
+        config=ConfigSchema(),
+        workspace=workspace,
+        reference=reference,
+        comparisons=[],
+        analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+    )
+    state = ExecutionState(artifacts=RunArtifacts())
+    report_path = tmp_path / "report.html"
+
+    apply_phase_output(
+        ctx=ctx,
+        state=state,
+        output=ReportPhaseOutput(report_path=report_path, report_succeeded=True),
+    )
+
+    assert state.artifacts.report_path == report_path
+    assert state.artifacts.report_succeeded is True
+
+
+def test_apply_phase_output_retains_publish_post_upload_actions(tmp_path: Path) -> None:
+    workspace = WorkspacePaths(
+        root=tmp_path,
+        input_dir=tmp_path / "comparison_videos",
+        run_dir=None,
+        screenshots_dir=tmp_path / "screenshots",
+        generated_dir=tmp_path / "generated",
+        config_dir=tmp_path / "config",
+        config_file=tmp_path / "config" / "config.toml",
+    )
+    reference = clip_state(tmp_path / "ref.mkv", label="Reference")
+    ctx = RunContext(
+        config=ConfigSchema(),
+        workspace=workspace,
+        reference=reference,
+        comparisons=[],
+        analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+    )
+    state = ExecutionState(artifacts=RunArtifacts())
+    uploaded = tmp_path / "screenshots" / "reference.png"
+    shortcut = PostUploadActionResult(
+        kind="shortcut",
+        success=True,
+        path=tmp_path / "Slowpics.url",
+        message="Shortcut written.",
+    )
+    webhook = PostUploadActionResult(
+        kind="webhook",
+        success=False,
+        warning="webhook: delivery failed",
+    )
+
+    apply_phase_output(
+        ctx=ctx,
+        state=state,
+        output=PublishPhaseOutput(
+            slowpics_url="https://slow.pics/c/example",
+            uploaded_file_paths=(uploaded,),
+            post_upload_actions=(shortcut, webhook),
+        ),
+    )
+
+    assert state.artifacts.slowpics_url == "https://slow.pics/c/example"
+    assert state.artifacts.uploaded_slowpics_file_paths == (uploaded,)
+    assert state.artifacts.post_upload_actions == (shortcut, webhook)
+
+
+def test_apply_phase_output_records_slowpics_confirmation_status_and_warnings(
+    tmp_path: Path,
+) -> None:
+    workspace = WorkspacePaths(
+        root=tmp_path,
+        input_dir=tmp_path / "comparison_videos",
+        run_dir=None,
+        screenshots_dir=tmp_path / "screenshots",
+        generated_dir=tmp_path / "generated",
+        config_dir=tmp_path / "config",
+        config_file=tmp_path / "config" / "config.toml",
+    )
+    reference = clip_state(tmp_path / "ref.mkv", label="Reference")
+    ctx = RunContext(
+        config=ConfigSchema(),
+        workspace=workspace,
+        reference=reference,
+        comparisons=[],
+        analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+    )
+    state = ExecutionState(artifacts=RunArtifacts())
+
+    apply_phase_output(
+        ctx=ctx,
+        state=state,
+        output=ConfirmSlowpicsUploadPhaseOutput(
+            status="report_unavailable",
+            warnings=["slow.pics upload skipped because report confirmation was unavailable"],
+        ),
+    )
+
+    assert state.artifacts.slowpics_upload_confirmation_status == "report_unavailable"
+    assert state.warnings == [
+        "slow.pics upload skipped because report confirmation was unavailable"
+    ]
+
+
+def test_apply_phase_output_extends_warnings_from_render_output(tmp_path: Path) -> None:
+    workspace = WorkspacePaths(
+        root=tmp_path,
+        input_dir=tmp_path / "comparison_videos",
+        run_dir=None,
+        screenshots_dir=tmp_path / "screenshots",
+        generated_dir=tmp_path / "generated",
+        config_dir=tmp_path / "config",
+        config_file=tmp_path / "config" / "config.toml",
+    )
+    reference = clip_state(tmp_path / "ref.mkv", label="Reference")
+    ctx = RunContext(
+        config=ConfigSchema(),
+        workspace=workspace,
+        reference=reference,
+        comparisons=[],
+        analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+    )
+    state = ExecutionState(artifacts=RunArtifacts(warnings=["pre-existing warning"]))
+    render = RenderArtifacts(
+        screenshots_by_label={"Reference": [tmp_path / "reference.png"]},
+        screenshot_dir=tmp_path / "screenshots",
+        warnings=["Screenshot geometry alignment skipped: using native geometry."],
+    )
+
+    apply_phase_output(ctx=ctx, state=state, output=RenderPhaseOutput(render=render))
+
+    assert state.artifacts.render is render
+    assert state.warnings == [
+        "pre-existing warning",
+        "Screenshot geometry alignment skipped: using native geometry.",
+    ]
+
+
+def test_apply_phase_output_extends_warnings_from_align_output(tmp_path: Path) -> None:
+    workspace = WorkspacePaths(
+        root=tmp_path,
+        input_dir=tmp_path / "comparison_videos",
+        run_dir=None,
+        screenshots_dir=tmp_path / "screenshots",
+        generated_dir=tmp_path / "generated",
+        config_dir=tmp_path / "config",
+        config_file=tmp_path / "config" / "config.toml",
+    )
+    reference = clip_state(tmp_path / "ref.mkv", label="Reference")
+    comparison = clip_state(tmp_path / "encode_b.mkv", label="Encode B")
+    ctx = RunContext(
+        config=ConfigSchema(),
+        workspace=workspace,
+        reference=reference,
+        comparisons=[comparison],
+        analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+    )
+    state = ExecutionState(artifacts=RunArtifacts(warnings=["pre-existing warning"]))
+
+    apply_phase_output(
+        ctx=ctx,
+        state=state,
+        output=AlignPhaseOutput(
+            reference=reference,
+            comparisons=[comparison],
+            selected_frames=[0, 2, 50],
+            warnings=["align: encode_b low confidence; left unapplied and untrimmed"],
+        ),
+    )
+
+    assert ctx.reference is reference
+    assert ctx.comparisons == [comparison]
+    assert state.selected_frames == [0, 2, 50]
+    assert state.warnings == [
+        "pre-existing warning",
+        "align: encode_b low confidence; left unapplied and untrimmed",
+    ]
+
+
+def test_apply_phase_output_rejects_unknown_output_type(tmp_path: Path) -> None:
+    import pytest
+
+    class UnknownPhaseOutput:
+        pass
+
+    workspace = WorkspacePaths(
+        root=tmp_path,
+        input_dir=tmp_path / "comparison_videos",
+        run_dir=None,
+        screenshots_dir=tmp_path / "screenshots",
+        generated_dir=tmp_path / "generated",
+        config_dir=tmp_path / "config",
+        config_file=tmp_path / "config" / "config.toml",
+    )
+    reference = clip_state(tmp_path / "ref.mkv", label="Reference")
+    ctx = RunContext(
+        config=ConfigSchema(),
+        workspace=workspace,
+        reference=reference,
+        comparisons=[],
+        analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+    )
+    state = ExecutionState(artifacts=RunArtifacts())
+
+    with pytest.raises(TypeError, match="UnknownPhaseOutput"):
+        apply_phase_output(ctx=ctx, state=state, output=UnknownPhaseOutput())  # type: ignore[arg-type]

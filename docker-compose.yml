@@ -1,0 +1,72 @@
+services:
+  # One-time interactive setup. Config is writable here because the wizard owns
+  # confirmed config creation and updates; media remains read-only.
+  frame-compare-wizard:
+    profiles:
+      - setup
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: frame-compare:dev
+    user: "${FRAME_COMPARE_HOST_UID:-1000}:${FRAME_COMPARE_HOST_GID:-1000}"
+    volumes:
+      - ./comparison_videos:/workspace/comparison_videos:ro
+      - ./config:/workspace/config
+    working_dir: /workspace
+    environment:
+      - HOME=/tmp/framecompare-home
+      - PYTHONUSERBASE=/home/framecompare/.local
+      - VAPOURSYNTH_EXTRA_PLUGIN_PATH=/opt/vapoursynth-extra-plugins
+    command: ["wizard", "--root", "/workspace"]
+    stdin_open: true
+    tty: true
+
+  frame-compare:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: frame-compare:dev
+    volumes:
+      - ./comparison_videos:/workspace/comparison_videos:ro
+      - ./config:/workspace/config:ro
+      - ./screenshots:/workspace/screenshots
+      - ./generated:/workspace/generated
+    working_dir: /workspace
+    environment:
+      - VAPOURSYNTH_EXTRA_PLUGIN_PATH=/opt/vapoursynth-extra-plugins
+    # Override entrypoint for interactive dev shell
+    entrypoint: ["/bin/bash"]
+    stdin_open: true
+    tty: true
+
+  # Test service that bind-mounts the repo so changes are picked up without rebuilds.
+  # Use this for integration tests that require real VS + FFmpeg deps.
+  frame-compare-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: frame-compare:dev
+    volumes:
+      - .:/home/framecompare/frame-compare
+    working_dir: /home/framecompare/frame-compare
+    environment:
+      - VAPOURSYNTH_EXTRA_PLUGIN_PATH=/opt/vapoursynth-extra-plugins
+    entrypoint: ["/bin/bash"]
+
+  # Production-like service (uses default ENTRYPOINT)
+  frame-compare-run:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: frame-compare:dev
+    user: "${FRAME_COMPARE_HOST_UID:-1000}:${FRAME_COMPARE_HOST_GID:-1000}"
+    volumes:
+      - ./comparison_videos:/workspace/comparison_videos:ro
+      - ./config:/workspace/config:ro
+      - ./screenshots:/workspace/screenshots
+      - ./generated:/workspace/generated
+    working_dir: /workspace
+    environment:
+      - HOME=/tmp/framecompare-home
+      - PYTHONUSERBASE=/home/framecompare/.local
+      - VAPOURSYNTH_EXTRA_PLUGIN_PATH=/opt/vapoursynth-extra-plugins

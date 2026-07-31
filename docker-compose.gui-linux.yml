@@ -1,0 +1,63 @@
+services:
+  frame-compare:
+    profiles:
+      - gui-linux
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: gui-linux
+    image: frame-compare:gui-linux
+    user: "${FRAME_COMPARE_HOST_UID:-1000}:${FRAME_COMPARE_HOST_GID:-1000}"
+    environment:
+      - DISPLAY=${DISPLAY:?Set DISPLAY for X11 forwarding}
+      - XAUTHORITY=/tmp/framecompare.Xauthority
+      - HOME=/tmp/framecompare-home
+      - PYTHONUSERBASE=/home/framecompare/.local
+      - XDG_RUNTIME_DIR=/tmp/framecompare-runtime
+    volumes:
+      # Minimal X11 contract: host DISPLAY, the X11 socket directory, and an
+      # optional Xauthority cookie file for hosts that require cookie auth.
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ${FRAME_COMPARE_XAUTHORITY_PATH:-/dev/null}:/tmp/framecompare.Xauthority:ro
+
+  frame-compare-test:
+    profiles:
+      - gui-linux
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: gui-linux
+    image: frame-compare:gui-linux
+    user: "${FRAME_COMPARE_HOST_UID:-1000}:${FRAME_COMPARE_HOST_GID:-1000}"
+    environment:
+      - DISPLAY=${DISPLAY:?Set DISPLAY for X11 forwarding}
+      - XAUTHORITY=/tmp/framecompare.Xauthority
+      - HOME=/tmp/framecompare-home
+      - PYTHONUSERBASE=/home/framecompare/.local
+      - XDG_RUNTIME_DIR=/tmp/framecompare-runtime
+    volumes:
+      # Minimal X11 contract: host DISPLAY, the X11 socket directory, and an
+      # optional Xauthority cookie file for hosts that require cookie auth.
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ${FRAME_COMPARE_XAUTHORITY_PATH:-/dev/null}:/tmp/framecompare.Xauthority:ro
+
+  frame-compare-run:
+    profiles:
+      - gui-linux
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: gui-linux
+    image: frame-compare:gui-linux
+    user: "${FRAME_COMPARE_HOST_UID:-1000}:${FRAME_COMPARE_HOST_GID:-1000}"
+    environment:
+      - DISPLAY=${DISPLAY:?Set DISPLAY for X11 forwarding}
+      - XAUTHORITY=/tmp/framecompare.Xauthority
+      - HOME=/tmp/framecompare-home
+      - PYTHONUSERBASE=/home/framecompare/.local
+      - XDG_RUNTIME_DIR=/tmp/framecompare-runtime
+    volumes:
+      # Minimal X11 contract: host DISPLAY, the X11 socket directory, and an
+      # optional Xauthority cookie file for hosts that require cookie auth.
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ${FRAME_COMPARE_XAUTHORITY_PATH:-/dev/null}:/tmp/framecompare.Xauthority:ro

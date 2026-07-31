@@ -1,0 +1,35 @@
+name: PR title (Conventional Commits)
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  pr_title:
+    name: Validate PR title
+    runs-on: ubuntu-latest
+    steps:
+      - name: Lint PR title
+        uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Keep this intentionally lenient to avoid “format churn” CI failures.
+          # Squash-merge should use the PR title as the final commit message.
+          types: |
+            feat
+            fix
+            docs
+            refactor
+            perf
+            test
+            build
+            ci
+            chore
+            revert
+          requireScope: false
+          wip: true
+          validateSingleCommit: false

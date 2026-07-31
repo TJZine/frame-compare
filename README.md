@@ -1,223 +1,122 @@
 # Frame Compare
-Deterministic video comparison pipeline: frame selection, HDR→SDR tonemapping, overlays/reports, and publishable outputs.
 
-> [!NOTE]
-> This repository contains Frame Compare’s ground-up rebuild. The legacy implementation lives separately as `frame-compare-legacy`.
+> Deterministic video comparison: frame selection, HDR→SDR tonemapping,
+> screenshots, offline reports, and optional publishable outputs.
 
-[![Python](https://img.shields.io/badge/python-3.13%2B-3776AB)](#requirements)
-[![Type Checked (Pyright)](https://img.shields.io/badge/type%20checked-pyright-1f6feb)](#quality--verification)
-[![Linted (Ruff)](https://img.shields.io/badge/linted-ruff-d7ff64)](#quality--verification)
-[![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196f)](#contributing)
-[![Release Please](https://img.shields.io/badge/releases-release--please-0b7285)](#releases--versioning)
+[![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-3776AB?logo=python&logoColor=white)](#requirements)
+[![License](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
+[![CI](https://github.com/TJZine/frame-compare/actions/workflows/ci.yml/badge.svg)](https://github.com/TJZine/frame-compare/actions/workflows/ci.yml)
 
----
+**[Read the documentation](docs/index.md)** to choose an installation route, run a
+first comparison, and find searchable task-oriented guidance.
 
-## Table of Contents
+## Capabilities
 
-- [What it does](#what-it-does)
-- [Key ideas](#key-ideas)
-- [Requirements](#requirements)
-- [Install](#install)
-- [Quick start](#quick-start)
-- [Documentation](#documentation)
-- [Quality & verification](#quality--verification)
-- [Releases & versioning](#releases--versioning)
-- [Contributing](#contributing)
-- [Security](#security)
-- [License](#license)
+- Deterministic random, dark, bright, and motion frame selection
+- HDR→SDR tonemapping and configurable screenshot overlays
+- Audio alignment with optional VSPreview interactive alignment
+- Static offline HTML reports with comparison and review tools
+- Deliberate slow.pics publishing and Discord-compatible webhook notification
+- Reproducible Docker Runtime for headless backend use
 
----
+## Pipeline overview
 
-## What it does
-
-Frame Compare helps you produce consistent, reviewable comparisons between encodes:
-
-- Selects representative frames deterministically (including seeded randomness where required).
-- Renders PNGs with overlays and stable naming.
-- Produces machine-readable outputs for automation (reports/metadata) and human-readable outputs for review.
-- Supports “offline-first” workflows, with optional publishing integrations.
-
-If you want the spec-driven rebuild plan and workflow, start here:
-- `docs/OPUS_REBUILD_FRAME_COMPARE/00-executive-summary.md`
-- `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`
-
----
-
-## Key ideas
-
-### Determinism by default
-
-Frame Compare is designed so the same inputs produce the same outputs:
-- Stable sorting rules and explicit seeds.
-- “No guessing” contracts for CLI/config where ambiguity would cause churn.
-- Reproducible verification gates.
-
-### Contract-first documentation
-
-Canonical truth is stored as YAML/JSON contracts, with generated derived views:
-- Canonical: `docs/OPUS_REBUILD_FRAME_COMPARE/contracts/`
-- Derived views generator: `scripts/generate_contract_views.py`
-- Readiness gate SSOT: `docs/OPUS_REBUILD_FRAME_COMPARE/contracts/readiness_gates.json`
-
-### Workflow discipline (optional, but supported)
-
-This repo includes an operator-minimal, file-based run system for phased implementation:
-- Run artifacts live under `.agent-workflow/runs/<RUN_ID>/`
-- Each artifact ends with a `## NEXT AGENT PROMPT (COPY/PASTE)` block for deterministic handoffs
-
-See: `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`
-
----
+```mermaid
+flowchart LR
+    A["🎬 Input Videos"] --> B["🎯 Frame Selection"]
+    B --> C["🎨 Tonemapping"]
+    C --> D["📸 Render + Overlay"]
+    D --> E["📄 HTML Report"]
+    D --> F["🌐 slow.pics"]
+```
 
 ## Requirements
 
-- Python 3.13+
-- `uv` (recommended) or `pip`
-- FFmpeg available on `PATH` (for probing and fallbacks)
-- Optional: VapourSynth runtime and plugins (for the primary renderer path)
+| Route | Recommended for | Requirements |
+| --- | --- | --- |
+| [Windows portable](docs/windows-portable.md) | Windows 10/11 x64 | PowerShell; the full bundle includes Python, FFmpeg, VapourSynth R76, plugins, VSPreview, and PyQt6 |
+| [Docker](docs/getting-started/docker.md) | macOS/Linux reproducible headless use | Docker Desktop or Docker Engine with Compose |
+| [Native source](docs/getting-started/native.md) | Advanced native setup | Python 3.13+, `uv` or pip, FFmpeg, VapourSynth R76, and L-SMASH-Works |
 
----
+VSPreview is optional for interactive manual alignment. VapourSynth is not optional
+for the default renderer: an FFmpeg-only route requires
+`screenshots.use_ffmpeg = true`, and HDR frames that need tonemapping still require
+VapourSynth.
 
-## Install
+### Windows portable orientation
 
-> [!TIP]
-> Prefer `uv` for reproducible environments.
-
-### With uv
-
-```bash
-uv sync --group dev --frozen
-```
-
-### With pip (virtualenv)
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -U pip
-python -m pip install -e ".[dev]"
-```
-
----
+The portable bundle is the most complete Windows distribution. Source builds create
+`dist/frame-compare-portable-win-x64`, not the repository root. The bundle provides
+the default `config/` and
+`comparison_videos/` directories in the bundle root, includes VSPreview + PyQt6, and
+supports `frame-compare-update apply`. Follow the
+[Windows Portable Guide](docs/windows-portable.md) for install and update commands.
 
 ## Quick start
 
-This README is a high-level overview. The authoritative runbook and CLI surface are documented in the OPUS rebuild docs.
+The complete explanations live in the [installation chooser](docs/getting-started/index.md)
+and [first-comparison guide](docs/guides/first-comparison.md). These compact command
+sequences preserve the safe setup order.
 
-- Start here: `docs/OPUS_REBUILD_FRAME_COMPARE/00-executive-summary.md`
-- Workflow and gates: `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`
+### Docker
 
-### Readiness gates (repo-level)
-
-```bash
-./scripts/check-all-gates.sh
-```
-
-Or, to rerun and sync gate timestamps in `AI_READINESS_ROADMAP.md`:
+From a clone, copy at least two clips into `comparison_videos/`, then run:
 
 ```bash
-bash scripts/reverify_ai_readiness.sh --update-roadmap
+export FRAME_COMPARE_HOST_UID="$(id -u)"
+export FRAME_COMPARE_HOST_GID="$(id -g)"
+mkdir -p config comparison_videos screenshots generated
+docker compose build frame-compare-run
+docker compose run --rm frame-compare-wizard
+docker compose run --rm frame-compare-run doctor
+docker compose run --rm frame-compare-run run --root /workspace --dry-run
+docker compose run --rm frame-compare-run run --root /workspace
 ```
 
----
-
-## Documentation
-
-### Rebuild plan + execution workflow
-
-- Executive overview: `docs/OPUS_REBUILD_FRAME_COMPARE/00-executive-summary.md`
-- Multi-agent workflow (SSOT): `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`
-- Master checklist: `docs/OPUS_REBUILD_FRAME_COMPARE/10-agent-master-checklist.md`
-
-### Contracts (SSOT)
-
-- `docs/OPUS_REBUILD_FRAME_COMPARE/contracts/README.md`
-- `docs/OPUS_REBUILD_FRAME_COMPARE/contracts/readiness_gates.json`
-
----
-
-## Quality & verification
-
-### Command canon (two-lane)
-
-This repo uses two lanes to keep commands deterministic:
-
-1) Repo scripts/validators: `uv run --no-sync` with workspace cache
+Open a generated Docker report from the host with its exact printed path:
 
 ```bash
-UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views.py --check
-UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_traceability.py --check
+python tools/open_docker_host_target.py "<report_path_from_run_output>"
 ```
 
-2) Tooling: prefer `.venv/bin/*`
+See the [Docker guide](docs/getting-started/docker.md) for directory ownership,
+outputs, and the [advanced environment guide](docs/docker-environments.md) for
+optional GPU/GUI profiles and their limits.
+
+### Native source
+
+After installing native FFmpeg, VapourSynth R76, and L-SMASH-Works:
 
 ```bash
-.venv/bin/pyright --warnings
-.venv/bin/ruff check .
-.venv/bin/pytest -q
+uv sync --no-dev --extra vspreview --frozen
+uv run --no-sync frame-compare wizard
+uv run --no-sync frame-compare doctor
+uv run --no-sync frame-compare run --root . --dry-run
+uv run --no-sync frame-compare run --root .
 ```
 
-### Run-directory hygiene (optional workflow enforcement)
+See the [native source guide](docs/getting-started/native.md) for `uv`, pip, and
+optional VSPreview details.
 
-```bash
-UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_run_id.py --check-exists <RUN_ID>
-UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_run_artifacts.py .agent-workflow/runs/<RUN_ID>
-```
+## Project resources
 
----
+- [Troubleshooting](docs/guides/troubleshooting.md)
+- [CLI and configuration contract](docs/current-cli-contract.md)
+- [GitHub Releases](https://github.com/TJZine/frame-compare/releases)
+- [Contributing](https://github.com/TJZine/frame-compare/blob/main/CONTRIBUTING.md)
+- [Security policy](https://github.com/TJZine/frame-compare/blob/main/SECURITY.md)
 
-## Releases & versioning
-
-### Versioning policy
-
-- Git tags follow SemVer with a `v` prefix (for example `v0.1.0`, `v1.0.0`).
-- During the rebuild, pre-1.0 tags are expected while the public surface stabilizes.
-
-### Release automation
-
-This repo is designed to support:
-- Conventional Commits (enforced via PR titles + squash merge).
-- Release automation from `main` (recommended: Release PR model via release-please).
-
----
-
-## Contributing
-
-### Workflow
-
-1) Create a branch for your change.
-2) Open a PR to `main`.
-3) Use a Conventional Commit-style PR title (this becomes the squash commit message):
-   - `feat(scope): add ...`
-   - `fix(scope): correct ...`
-   - `docs: clarify ...`
-   - `chore: ...`
-
-### Local checks
-
-```bash
-.venv/bin/pyright --warnings
-.venv/bin/ruff check .
-.venv/bin/pytest -q
-```
-
-### Project guardrails
-
-Read: `CODEX.md`
-
----
-
-## Security
-
-Security invariants are documented and tested in the scaffold and workflow:
-- Path traversal containment
-- Subprocess argument hardening
-- SSRF policy (where network features exist)
-
-See: `docs/OPUS_REBUILD_FRAME_COMPARE/08-quality-standards.md` and `docs/OPUS_REBUILD_FRAME_COMPARE/scaffold/`
-
----
+The verification command set and quality policy are maintained in the
+[Engineering Runbook](docs/ENGINEERING_RUNBOOK.md). Tags follow SemVer with a `v`
+prefix. The guarded exact-commit workflow publishes every release; Release Please
+handles normal version/changelog PRs after stable `v0.1.0` exists.
 
 ## License
 
-See `LICENSE` (to be added).
+Frame Compare is licensed under the
+[GNU General Public License v3.0 only](https://github.com/TJZine/frame-compare/blob/main/LICENSE)
+(`GPL-3.0-only`).
+
+```text
+Copyright 2025-2026 Tristan <zine96@proton.me>
+```

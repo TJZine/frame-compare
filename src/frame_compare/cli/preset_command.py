@@ -1,0 +1,120 @@
+"""Implementation for configuration preset CLI commands."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Protocol
+
+import typer
+
+from frame_compare.config.schema import ConfigSchema
+from frame_compare.errors import FrameCompareError
+from frame_compare.orchestration.preflight import (
+    resolve_selected_config_path,
+    validate_and_normalize_config_paths,
+)
+
+from .cli_helpers import HandleErrorFn, LoadConfigFn, WriteConfigFn
+
+
+class ListPresetsFn(Protocol):
+    def __call__(self, *, presets_dir: Path) -> list[str]: ...
+
+
+class ApplyPresetFn(Protocol):
+    def __call__(
+        self,
+        config: ConfigSchema,
+        preset_name: str,
+        presets_dir: Path | None = None,
+    ) -> ConfigSchema: ...
+
+
+class SavePresetFn(Protocol):
+    def __call__(
+        self,
+        name: str,
+        config: ConfigSchema,
+        presets_dir: Path | None = None,
+    ) -> Path: ...
+
+
+def handle_preset_list(
+    resolved_root: Path,
+    *,
+    list_presets: ListPresetsFn,
+    handle_error: HandleErrorFn,
+    no_color: bool,
+) -> None:
+    try:
+        presets_dir = resolved_root / "config" / "presets"
+        for name in list_presets(presets_dir=presets_dir):
+            typer.echo(name)
+    except FrameCompareError as error:
+        raise typer.Exit(
+            code=handle_error(
+                error,
+                no_color=no_color,
+                verbose=False,
+                verbose_hint=None,
+            )
+        ) from error
+
+
+def handle_preset_apply(
+    name: str,
+    resolved_root: Path,
+    config_path: Path,
+    *,
+    load_config: LoadConfigFn,
+    apply_preset: ApplyPresetFn,
+    write_config_to: WriteConfigFn,
+    handle_error: HandleErrorFn,
+    no_color: bool,
+) -> None:
+    try:
+        presets_dir = resolved_root / "config" / "presets"
+        resolve_selected_config_path(config_path, resolved_root)
+        config_data = load_config(config_path)
+        validate_and_normalize_config_paths(config_data, resolved_root)
+        updated = apply_preset(config_data, name, presets_dir=presets_dir)
+        validate_and_normalize_config_paths(updated, resolved_root)
+        write_config_to(config_path, updated)
+        typer.echo(f"Applied preset '{name}' to {config_path}", err=True)
+    except FrameCompareError as error:
+        raise typer.Exit(
+            code=handle_error(
+                error,
+                no_color=no_color,
+                verbose=False,
+                verbose_hint=None,
+            )
+        ) from error
+
+
+def handle_preset_save(
+    name: str,
+    resolved_root: Path,
+    config_path: Path,
+    *,
+    load_config: LoadConfigFn,
+    save_preset: SavePresetFn,
+    handle_error: HandleErrorFn,
+    no_color: bool,
+) -> None:
+    try:
+        presets_dir = resolved_root / "config" / "presets"
+        resolve_selected_config_path(config_path, resolved_root)
+        config_data = load_config(config_path)
+        validate_and_normalize_config_paths(config_data, resolved_root)
+        saved_path = save_preset(name, config_data, presets_dir=presets_dir)
+        typer.echo(f"Saved preset '{name}' to {saved_path}", err=True)
+    except FrameCompareError as error:
+        raise typer.Exit(
+            code=handle_error(
+                error,
+                no_color=no_color,
+                verbose=False,
+                verbose_hint=None,
+            )
+        ) from error

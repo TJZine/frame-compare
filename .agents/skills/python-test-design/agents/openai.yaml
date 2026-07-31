@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python Test Design"
+  short_description: "Guide isolated, behavior-focused pytest coverage"
+  default_prompt: "Use $python-test-design for this task."

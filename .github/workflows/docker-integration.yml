@@ -1,0 +1,33 @@
+name: Docker Integration (VS + FFmpeg)
+
+on:
+  pull_request:
+    branches: [main, cleanup]
+    paths:
+      - Dockerfile
+      - docker-compose*.yml
+      - pyproject.toml
+      - uv.lock
+      - tools/verify_docker_*.sh
+      - tests/workflows/**
+      - src/frame_compare/analysis/**
+      - src/frame_compare/render/**
+      - src/frame_compare/vs/**
+      - tests/integration/**
+      - tests/vs/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docker-integration:
+    name: Docker Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run canonical Docker verification
+        run: bash tools/verify_docker_integration.sh
