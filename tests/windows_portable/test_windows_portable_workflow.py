@@ -46,3 +46,20 @@ def test_windows_portable_workflow_signing_and_uploads_fail_closed(repo_root: Pa
     assert "Expected exactly one signed update zip" in prepare["run"]
     assert upload["if"] == "inputs.prepare_release_assets"
     assert upload["with"]["if-no-files-found"] == "error"
+
+
+def test_windows_portable_release_checksum_paths_are_individual_powershell_values(
+    repo_root: Path,
+) -> None:
+    source = (repo_root / ".github" / "workflows" / "windows-portable-build.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert (
+        '(Join-Path -Path $assetDir -ChildPath '
+        '"frame-compare-portable-win-x64-$($env:RELEASE_TAG).zip.sha256")'
+    ) in source
+    assert (
+        '(Join-Path -Path $assetDir -ChildPath '
+        '"frame-compare-update-win-x64-$($env:RELEASE_TAG).zip.sha256")'
+    ) in source
