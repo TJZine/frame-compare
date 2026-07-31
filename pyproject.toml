@@ -57,7 +57,7 @@ docs = [
     "zensical==0.0.51",
 ]
 dev = [
-    "anyio>=4.12.0",
+    "anyio>=4.14.2",
     "bandit[toml]>=1.8.0",
     "import-linter>=2.9",
     "pytest>=9.0.2",
