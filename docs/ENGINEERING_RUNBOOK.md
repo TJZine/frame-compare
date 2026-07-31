@@ -315,9 +315,17 @@ Current CI ownership:
   reach `main`. GitHub security-update PRs remain governed by GitHub's default
   branch behavior and may still target `main`.
 - CI, documentation, Docker, Windows, and PR-title checks remain available for
-  `staging` pull requests. The sync job uses the repository token for its push;
-  GitHub does not start a second push-triggered workflow from that token, so run
-  the relevant checks manually on `staging` when validating an automatic sync.
+  `staging` pull requests. Because a `GITHUB_TOKEN` push does not start another
+  push-triggered workflow, run the relevant checks manually on `staging` after
+  validating an automatic sync and record the results in the PR or handoff.
+- Changes to `.github/workflows/sync-staging.yml` require the Full Verification
+  commands above plus this integration gate. Record evidence for the active
+  `staging` ruleset's behavior for the bot's non-force update, a merge-conflict
+  run failing with remote `staging` unchanged, a stale-`main` run refusing to
+  push with `staging` unchanged, and a `GITHUB_TOKEN` push producing no second
+  push-triggered workflow. If GitHub-only behavior cannot be exercised locally,
+  mark it documented-only and require maintainer confirmation; this section is
+  the authoritative record.
 
 The first stable lifecycle is release-branch finalization, one squash merge into
 `main`, then an exact-SHA guarded dispatch. Do not use a Release Please-generated
