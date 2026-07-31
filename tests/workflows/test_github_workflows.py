@@ -135,7 +135,7 @@ def test_ci_and_docker_workflows_keep_required_triggers_and_permissions(
     assert ci["permissions"] == {"contents": "read"}
     assert {"pull_request", "workflow_dispatch"} <= set(docker["on"])
     assert docker["permissions"] == {"contents": "read"}
-    assert {"main", "cleanup"} <= set(docker["on"]["pull_request"]["branches"])
+    assert {"main", "cleanup", "staging"} <= set(docker["on"]["pull_request"]["branches"])
     workflow_paths = docker["on"]["pull_request"]["paths"]
     assert {
         "uv.lock",
@@ -147,6 +147,19 @@ def test_ci_and_docker_workflows_keep_required_triggers_and_permissions(
         "src/frame_compare/render/**",
         "src/frame_compare/vs/**",
     } <= set(workflow_paths)
+
+
+def test_pr_title_workflow_can_publish_its_configured_status(repo_root: Path) -> None:
+    workflow = _load_workflow(repo_root / ".github" / "workflows" / "pr-title.yml")
+    lint_job = workflow["jobs"]["pr_title"]
+    lint_step = lint_job["steps"][0]
+
+    assert workflow["permissions"] == {"pull-requests": "read"}
+    assert lint_job["permissions"] == {
+        "pull-requests": "read",
+        "statuses": "write",
+    }
+    assert lint_step["with"]["wip"] == "true"
 
 
 def test_release_please_remains_guarded_and_non_merging(repo_root: Path) -> None:

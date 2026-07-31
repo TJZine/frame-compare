@@ -1,0 +1,71 @@
+name: Sync staging from main
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-staging
+
+jobs:
+  sync:
+    name: Synchronize staging without overwriting staging-only work
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Fast-forward or merge main into staging
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch --no-tags origin main staging
+          main_sha="$(git rev-parse origin/main)"
+          staging_sha="$(git rev-parse origin/staging)"
+
+          if [[ "$EVENT_NAME" == "push" && "$EVENT_SHA" != "$main_sha" ]]; then
+            echo "main advanced while this sync was running; refusing a stale update." >&2
+            exit 1
+          fi
+
+          if [[ "$main_sha" == "$staging_sha" ]]; then
+            echo "staging already matches main."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch --detach "$staging_sha"
+
+          if git merge-base --is-ancestor "$staging_sha" "$main_sha"; then
+            git merge --ff-only "$main_sha"
+          elif git merge-base --is-ancestor "$main_sha" "$staging_sha"; then
+            echo "staging already contains main; preserving staging-only commits."
+            exit 0
+          else
+            git merge --no-ff --no-edit "$main_sha" \
+              -m "chore(staging): sync main into staging"
+          fi
+
+          git fetch --no-tags origin main
+          latest_main_sha="$(git rev-parse origin/main)"
+          if [[ "$latest_main_sha" != "$main_sha" || "$latest_main_sha" != "$EVENT_SHA" ]]; then
+            echo "main changed during the sync; refusing to push a stale update." >&2
+            exit 1
+          fi
+
+          # A normal push is intentionally used: concurrent staging changes make
+          # this fail rather than silently overwriting them.
+          git push origin "HEAD:refs/heads/staging"
