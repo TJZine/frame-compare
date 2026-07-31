@@ -40,8 +40,8 @@ def test_docs_workflow_events_and_paths_are_scoped(repo_root: Path) -> None:
     events = workflow["on"]
 
     assert set(events) == {"pull_request", "push", "workflow_dispatch"}
-    assert events["pull_request"]["branches"] == ["main", "cleanup"]
-    assert events["push"]["branches"] == ["main"]
+    assert events["pull_request"]["branches"] == ["main", "cleanup", "staging"]
+    assert events["push"]["branches"] == ["main", "staging"]
     assert set(events["pull_request"]["paths"]) == EXPECTED_PATHS
     assert set(events["push"]["paths"]) == EXPECTED_PATHS
 
