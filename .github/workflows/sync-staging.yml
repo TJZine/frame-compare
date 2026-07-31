@@ -10,7 +10,6 @@ permissions:
 
 concurrency:
   group: sync-staging
-  cancel-in-progress: false
 
 jobs:
   sync:
@@ -23,7 +22,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          persist-credentials: true
 
       - name: Fast-forward or merge main into staging
         env:

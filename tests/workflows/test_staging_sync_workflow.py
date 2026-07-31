@@ -24,16 +24,13 @@ def test_sync_staging_is_non_destructive_and_fail_closed(repo_root: Path) -> Non
     assert workflow["on"]["push"]["branches"] == ["main"]
     assert "workflow_dispatch" in workflow["on"]
     assert workflow["permissions"] == {"contents": "write"}
-    assert workflow["concurrency"] == {
-        "group": "sync-staging",
-        "cancel-in-progress": "false",
-    }
+    assert workflow["concurrency"] == {"group": "sync-staging"}
     job = workflow["jobs"]["sync"]
     assert job["if"] == "github.ref == 'refs/heads/main'"
     assert job["runs-on"] == "ubuntu-24.04"
     assert job["timeout-minutes"] == "10"
     checkout = job["steps"][0]
-    assert checkout["with"] == {"fetch-depth": "0", "persist-credentials": "true"}
+    assert checkout["with"] == {"fetch-depth": "0"}
 
     for required in (
         "git fetch --no-tags origin main staging",
