@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from ._helpers import powershell_exe as _powershell_exe
+from ._helpers import snapshot_bytes as _snapshot_bytes
 from ._helpers import write_valid_config_json as _write_valid_config_json
 
 _OLD_VERSION_CONTENT = '__version__ = "1.0.0"\n'
@@ -247,14 +248,6 @@ def _assert_update_applied(*, bundle_dir: Path, version_py: Path) -> None:
 def _snapshot_tree(path: Path) -> dict[str, str]:
     return {
         file.relative_to(path).as_posix(): hashlib.sha256(file.read_bytes()).hexdigest()
-        for file in sorted(path.rglob("*"))
-        if file.is_file()
-    }
-
-
-def _snapshot_bytes(path: Path) -> dict[str, bytes]:
-    return {
-        file.relative_to(path).as_posix(): file.read_bytes()
         for file in sorted(path.rglob("*"))
         if file.is_file()
     }

@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from ._helpers import powershell_exe as _powershell_exe
+from ._helpers import snapshot_bytes as _snapshot_bytes
 
 windows_install_uninstall_e2e = pytest.mark.skipif(
     sys.platform != "win32",
@@ -110,11 +111,7 @@ def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
     sentinel_run.joinpath("report.html").write_bytes(b"<html>sentinel</html>\x00")
     sentinel_screenshot.write_bytes(b"PNG-SENTINEL\x00")
     sentinel_cache.write_bytes(b"CACHE-SENTINEL\x00")
-    external_snapshot = {
-        path.relative_to(external_generated_root).as_posix(): path.read_bytes()
-        for path in sorted(external_generated_root.rglob("*"))
-        if path.is_file()
-    }
+    external_snapshot = _snapshot_bytes(external_generated_root)
 
     local_app_data = tmp_path / "local-app-data"
     env = os.environ.copy()
@@ -161,11 +158,7 @@ def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
             assert not (bin_dir / filename).exists()
         assert not (state_dir / "config.json").exists()
         assert _get_user_path(exe) == controlled_user_path
-        assert {
-            path.relative_to(external_generated_root).as_posix(): path.read_bytes()
-            for path in sorted(external_generated_root.rglob("*"))
-            if path.is_file()
-        } == external_snapshot
+        assert _snapshot_bytes(external_generated_root) == external_snapshot
 
         replacement_bundle = tmp_path / "bundle-replacement"
         shutil.copytree(bundle_dir, replacement_bundle)
@@ -190,10 +183,6 @@ def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
         ]
         config_json = json.loads((state_dir / "config.json").read_text(encoding="utf-8"))
         assert config_json["bundle_path"] == str(replacement_bundle)
-        assert {
-            path.relative_to(external_generated_root).as_posix(): path.read_bytes()
-            for path in sorted(external_generated_root.rglob("*"))
-            if path.is_file()
-        } == external_snapshot
+        assert _snapshot_bytes(external_generated_root) == external_snapshot
     finally:
         _set_user_path(exe, original_user_path)
