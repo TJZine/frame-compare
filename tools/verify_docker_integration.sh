@@ -302,6 +302,11 @@ done
 # The container runs the real CLI against two tiny FFmpeg-generated clips; no
 # handcrafted report, screenshot, or run-record files are accepted as proof.
 proof_dir="$(mktemp -d generated/.docker-integration-proof.XXXXXX)"
+# mktemp creates an owner-only directory, while the production-like service
+# intentionally runs as the image's non-root user. The directory is unique,
+# contains only generated proof fixtures, and is removed by the EXIT trap, so
+# grant that container identity access without changing the persistent root.
+chmod 0777 "$proof_dir"
 proof_name="$(basename "$proof_dir")"
 container_proof_cmd=$(cat <<'EOF'
 set -euo pipefail

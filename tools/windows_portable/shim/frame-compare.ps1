@@ -197,10 +197,13 @@ function Invoke-FrameCompareShim([object[]]$ArgsValues) {
   try {
     Push-Location $bundlePath
     $locationPushed = $true
+    $global:LASTEXITCODE = $null
     & $bundleLauncher @forwardArgs
-    if ($null -ne $LASTEXITCODE) {
-      $exitCode = $LASTEXITCODE
-    } elseif ($?) {
+    $launcherSucceeded = $?
+    $launcherExitCode = $global:LASTEXITCODE
+    if ($null -ne $launcherExitCode) {
+      $exitCode = $launcherExitCode
+    } elseif ($launcherSucceeded) {
       $exitCode = 0
     } else {
       $exitCode = 1
