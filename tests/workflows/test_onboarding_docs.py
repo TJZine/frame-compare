@@ -52,6 +52,7 @@ def test_docker_gate_proves_generated_artifacts_survive_container_removal(repo_r
 
     assert "docker compose run --rm --entrypoint /bin/bash frame-compare-run" in script
     assert 'chmod 0777 "$proof_dir"' in script
+    assert 'find "$generated_root" -mindepth 1 -exec chmod a+rwX {} +' in script
     assert "frame-compare run" in script
     assert "ffmpeg -hide_banner -loglevel error" in script
     assert 'generated_dir = "$generated_root"' in script

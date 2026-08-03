@@ -319,6 +319,12 @@ fi
 generated_root="/workspace/generated/PROOF_NAME"
 workspace_dir="$(mktemp -d /tmp/frame-compare-docker-proof.XXXXXX)"
 cleanup_workspace() {
+  # The host validates and removes these container-owned artifacts after this
+  # container exits. Restore host write access on descendants without changing
+  # the persistent generated root or relying on matching host/container UIDs.
+  if [[ -d "$generated_root" ]]; then
+    find "$generated_root" -mindepth 1 -exec chmod a+rwX {} +
+  fi
   rm -rf -- "$workspace_dir"
 }
 trap cleanup_workspace EXIT
