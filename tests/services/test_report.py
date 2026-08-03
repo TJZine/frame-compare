@@ -156,7 +156,11 @@ def test_generate_report_screenshot_not_found_raises(
     p = report_data.clips[0].screenshots[0]
     p.unlink()
     with pytest.raises(ReportError, match="screenshot not found"):
-        generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
+        generate_report(
+            report_data,
+            ReportConfig(),
+            output_path=tmp_path / "report.html",
+        )
 
 
 def test_generate_report_encode_failure_raises(
@@ -164,7 +168,11 @@ def test_generate_report_encode_failure_raises(
 ) -> None:
     mocker.patch.object(Path, "read_bytes", side_effect=OSError("Disk error"))
     with pytest.raises(ReportError, match="failed to encode image"):
-        generate_report(report_data, ReportConfig(embed_images=True, output_dir=str(tmp_path)))
+        generate_report(
+            report_data,
+            ReportConfig(embed_images=True),
+            output_path=tmp_path / "report.html",
+        )
 
 
 def test_generate_report_keeps_existing_output_when_atomic_replace_fails(
@@ -179,7 +187,11 @@ def test_generate_report_keeps_existing_output_when_atomic_replace_fails(
     monkeypatch.setattr("frame_compare.utils.atomic_write.os.replace", _boom)
 
     with pytest.raises(ReportError, match="failed to write report"):
-        generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
+        generate_report(
+            report_data,
+            ReportConfig(),
+            output_path=report_path,
+        )
 
     assert report_path.read_text(encoding="utf-8") == "old report"
     assert list(tmp_path.glob(".report.html.*")) == []
@@ -193,14 +205,18 @@ def test_generate_report_preserves_existing_report_permissions(
     report_path.chmod(0o640)
     expected_mode = report_path.stat().st_mode & 0o777
 
-    generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
+    generate_report(
+        report_data,
+        ReportConfig(),
+        output_path=report_path,
+    )
 
     assert (report_path.stat().st_mode & 0o777) == expected_mode
 
 
 def test_generate_report_embed_images_base64(report_data: ReportData, tmp_path: Path) -> None:
-    config = ReportConfig(embed_images=True, output_dir=str(tmp_path))
-    out_path = generate_report(report_data, config)
+    config = ReportConfig(embed_images=True)
+    out_path = generate_report(report_data, config, output_path=tmp_path / "report.html")
     content = out_path.read_text(encoding="utf-8")
     assert "data:image/png;base64," in content
     # Our fake data is b"fake_png_data"
@@ -211,8 +227,8 @@ def test_generate_report_embed_images_base64(report_data: ReportData, tmp_path: 
 def test_generate_report_relative_paths(report_data: ReportData, tmp_path: Path) -> None:
     # Set output dir near screenshots to ensure relative paths work
     output_dir = tmp_path / "screens"
-    config = ReportConfig(embed_images=False, output_dir=str(output_dir))
-    out_path = generate_report(report_data, config)
+    config = ReportConfig(embed_images=False)
+    out_path = generate_report(report_data, config, output_path=output_dir / "report.html")
     content = out_path.read_text(encoding="utf-8")
 
     # Clip1 is at tmp_path/screens/clip1/0.png
@@ -223,13 +239,21 @@ def test_generate_report_relative_paths(report_data: ReportData, tmp_path: Path)
 
 
 def test_generate_report_includes_metadata(report_data: ReportData, tmp_path: Path) -> None:
-    out_path = generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
+    out_path = generate_report(
+        report_data,
+        ReportConfig(),
+        output_path=tmp_path / "report.html",
+    )
     content = out_path.read_text(encoding="utf-8")
     assert "Test Movie" in content
 
 
 def test_generate_report_includes_slowpics_url(report_data: ReportData, tmp_path: Path) -> None:
-    out_path = generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
+    out_path = generate_report(
+        report_data,
+        ReportConfig(),
+        output_path=tmp_path / "report.html",
+    )
     content = out_path.read_text(encoding="utf-8")
     assert "https://slow.pics/c/12345" in content
 
@@ -244,7 +268,11 @@ def test_generate_report_without_slowpics_url_omits_external_link(
         slowpics_url=None,
     )
 
-    out_path = generate_report(data_without_upload, ReportConfig(output_dir=str(tmp_path)))
+    out_path = generate_report(
+        data_without_upload,
+        ReportConfig(),
+        output_path=tmp_path / "report.html",
+    )
     content = out_path.read_text(encoding="utf-8")
 
     assert "View on slow.pics" not in content
@@ -288,7 +316,11 @@ def test_generate_report_escapes_dynamic_html_and_hardens_json_script_tag(tmp_pa
         slowpics_url="https://slow.pics/c/12345",
     )
 
-    out_path = generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
+    out_path = generate_report(
+        report_data,
+        ReportConfig(),
+        output_path=tmp_path / "report.html",
+    )
     content = out_path.read_text(encoding="utf-8")
 
     # Title and labels should be escaped in HTML.
@@ -301,24 +333,92 @@ def test_generate_report_escapes_dynamic_html_and_hardens_json_script_tag(tmp_pa
     assert "\\u003c/script\\u003e\\u003cscript\\u003ealert(1)\\u003c/script\\u003e" in content
 
 
-def test_image_src_for_report_uses_file_uri_for_cross_drive_fallback(
+def test_image_src_for_report_rejects_cross_drive_fallback(
     tmp_path: Path, mocker: MockerFixture
 ) -> None:
     screenshot_path = tmp_path / "shot.png"
     screenshot_path.write_bytes(b"fake_png_data")
     mocker.patch("frame_compare.services.report.payload.os.path.relpath", side_effect=ValueError)
 
+    with pytest.raises(ReportError, match="cannot be made relative"):
+        image_src_for_report(
+            screenshot_path,
+            report_dir=tmp_path,
+            embed_images=False,
+        )
+
+
+@pytest.mark.parametrize("embed_images", [False, True])
+def test_image_src_for_report_accepts_contained_regular_sibling(
+    tmp_path: Path, embed_images: bool
+) -> None:
+    report_dir = tmp_path / "run"
+    screenshot_path = report_dir / "screenshots" / "safe.png"
+    screenshot_path.parent.mkdir(parents=True)
+    screenshot_path.write_bytes(b"fake_png_data")
+
     src = image_src_for_report(
         screenshot_path,
-        report_dir=tmp_path / "report",
-        embed_images=False,
+        report_dir=report_dir,
+        embed_images=embed_images,
     )
 
-    assert src == screenshot_path.resolve().as_uri()
+    if embed_images:
+        assert src == "data:image/png;base64,ZmFrZV9wbmdfZGF0YQ=="
+    else:
+        assert src == "screenshots/safe.png"
+
+
+@pytest.mark.parametrize("embed_images", [False, True])
+def test_image_src_for_report_rejects_symlink_escape(tmp_path: Path, embed_images: bool) -> None:
+    report_dir = tmp_path / "run"
+    screenshot_path = report_dir / "screenshots" / "escape.png"
+    screenshot_path.parent.mkdir(parents=True)
+    outside = tmp_path / "outside.png"
+    outside.write_bytes(b"outside")
+    try:
+        screenshot_path.symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are unavailable on this platform")
+
+    with pytest.raises(ReportError, match="outside the report directory"):
+        image_src_for_report(
+            screenshot_path,
+            report_dir=report_dir,
+            embed_images=embed_images,
+        )
+
+
+@pytest.mark.parametrize("embed_images", [False, True])
+def test_image_src_for_report_rejects_missing_or_nonregular_screenshot(
+    tmp_path: Path, embed_images: bool
+) -> None:
+    report_dir = tmp_path / "run"
+    report_dir.mkdir()
+    screenshot_path = report_dir / "screenshots"
+    screenshot_path.mkdir()
+
+    with pytest.raises(ReportError, match="regular file"):
+        image_src_for_report(
+            screenshot_path,
+            report_dir=report_dir,
+            embed_images=embed_images,
+        )
+
+    with pytest.raises(ReportError, match="not found"):
+        image_src_for_report(
+            report_dir / "missing.png",
+            report_dir=report_dir,
+            embed_images=embed_images,
+        )
 
 
 def test_generate_report_json_payload_structure(report_data: ReportData, tmp_path: Path) -> None:
-    out_path = generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
+    out_path = generate_report(
+        report_data,
+        ReportConfig(),
+        output_path=tmp_path / "report.html",
+    )
 
     data = _json_payload_from_report(out_path)
     assert data["version"] == "1.0"
@@ -368,9 +468,7 @@ def test_build_report_payload_preserves_four_clip_order_and_default_pair(
         )
     data = ReportData(clips=clips, frames=[10, 20])
 
-    payload = build_report_payload(
-        data, ReportConfig(output_dir=str(tmp_path)), report_dir=tmp_path
-    )
+    payload = build_report_payload(data, ReportConfig(), report_dir=tmp_path)
 
     assert payload["default_selection"] == {"left_clip_index": 0, "right_clip_index": 1}
     assert payload["stats"] == {"frame_count": 2, "clip_count": 4}
@@ -421,9 +519,7 @@ def test_build_report_payload_accepts_frame_display_metadata(
         ],
     )
 
-    payload = build_report_payload(
-        data, ReportConfig(output_dir=str(tmp_path)), report_dir=tmp_path
-    )
+    payload = build_report_payload(data, ReportConfig(), report_dir=tmp_path)
 
     assert payload["frames"][0]["label"] == "Opening comparison"
     assert payload["frames"][0]["detail"] == "Scene cut"
@@ -439,7 +535,7 @@ def test_build_report_payload_rejects_mismatched_frame_display_metadata(
     data = replace(report_data, frame_details=[FrameDetail(label="only one")])
 
     with pytest.raises(ReportError, match="frame detail count mismatch"):
-        build_report_payload(data, ReportConfig(output_dir=str(tmp_path)), report_dir=tmp_path)
+        build_report_payload(data, ReportConfig(), report_dir=tmp_path)
 
 
 def test_frame_detail_for_source_frame_uses_explicit_selection_detail() -> None:
@@ -565,23 +661,37 @@ def test_report_id_ignores_generated_at_source_paths_and_image_sources(
     ]
     stable_source_data = replace(report_data, clips=clips_with_source_identities)
 
-    config = ReportConfig(output_dir=str(tmp_path), embed_images=False)
+    def copy_screenshots(data: ReportData, root: Path) -> ReportData:
+        copied_clips: list[ClipInfo] = []
+        for clip in data.clips:
+            screenshots: list[Path] = []
+            for screenshot in clip.screenshots:
+                copied = root / "screens" / clip.name / screenshot.name
+                copied.parent.mkdir(parents=True, exist_ok=True)
+                copied.write_bytes(screenshot.read_bytes())
+                screenshots.append(copied)
+            copied_clips.append(replace(clip, screenshots=screenshots))
+        return replace(data, clips=copied_clips)
+
+    report_a_data = copy_screenshots(stable_source_data, tmp_path / "report-a")
+    report_b_root = tmp_path / "different" / "report-b"
+    report_b_data = copy_screenshots(stable_source_data, report_b_root)
+
+    config = ReportConfig(embed_images=False)
     monkeypatch.setattr("frame_compare.services.report.payload.datetime", FirstClock)
-    first_payload = build_report_payload(
-        stable_source_data, config, report_dir=tmp_path / "report-a"
-    )
+    first_payload = build_report_payload(report_a_data, config, report_dir=tmp_path / "report-a")
 
     clips_with_other_source_paths = [
         replace(clip, path=tmp_path / "different-root" / f"{clip.name}.mkv")
-        for clip in stable_source_data.clips
+        for clip in report_b_data.clips
     ]
-    same_report_local_data = replace(stable_source_data, clips=clips_with_other_source_paths)
+    same_report_local_data = replace(report_b_data, clips=clips_with_other_source_paths)
 
     monkeypatch.setattr("frame_compare.services.report.payload.datetime", SecondClock)
     second_payload = build_report_payload(
         same_report_local_data,
         config,
-        report_dir=tmp_path / "different" / "report-b",
+        report_dir=tmp_path / "different",
     )
 
     assert first_payload["generated_at"] != second_payload["generated_at"]
@@ -592,7 +702,7 @@ def test_report_id_ignores_generated_at_source_paths_and_image_sources(
 
     embedded_payload = build_report_payload(
         same_report_local_data,
-        ReportConfig(output_dir=str(tmp_path), embed_images=True),
+        ReportConfig(embed_images=True),
         report_dir=tmp_path,
     )
     assert embedded_payload["frames"][0]["images"][0]["src"].startswith("data:image/png;base64,")
@@ -685,7 +795,11 @@ def test_generate_report_slowpics_url_sanitization(report_data: ReportData, tmp_
         frames=report_data.frames,
         slowpics_url="https://slow.pics/c/123",
     )
-    out_path = generate_report(report_data_valid, ReportConfig(output_dir=str(tmp_path)))
+    out_path = generate_report(
+        report_data_valid,
+        ReportConfig(),
+        output_path=tmp_path / "report.html",
+    )
     content = out_path.read_text(encoding="utf-8")
     assert "https://slow.pics/c/123" in content
     assert "View on slow.pics" in content
@@ -696,6 +810,10 @@ def test_generate_report_slowpics_url_sanitization(report_data: ReportData, tmp_
         frames=report_data.frames,
         slowpics_url="javascript:alert(1)",
     )
-    out_path = generate_report(report_data_invalid, ReportConfig(output_dir=str(tmp_path)))
+    out_path = generate_report(
+        report_data_invalid,
+        ReportConfig(),
+        output_path=tmp_path / "report.html",
+    )
     content = out_path.read_text(encoding="utf-8")
     assert "View on slow.pics" not in content

@@ -3,6 +3,9 @@
 Frame Compare generates a static HTML report that works offline and needs no server.
 By default, the report references screenshots with relative paths; set
 `report.embed_images = true` when you need a single HTML file with the images inlined.
+Each report is the canonical `report.html` at the root of its reserved generated-data
+run folder, next to `screenshots/`. Keeping that folder together preserves offline
+viewing when it is moved or copied to another generated-data root.
 
 The viewer supports Single/overlay, slider, diff, pair blink, and grid views; frame
 and category navigation; pan and zoom; fit controls; a filmstrip; an inspector; and

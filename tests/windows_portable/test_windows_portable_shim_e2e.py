@@ -22,6 +22,56 @@ windows_portable_launcher_e2e = pytest.mark.skipif(
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize(
+    ("args", "expected_prefix"),
+    (
+        (("wizard",), ("wizard", "--config")),
+        (("run", "--diagnose-paths"), ("run", "--config")),
+        (("preset", "list"), ("preset", "list", "--config")),
+        (("history", "list"), ("history", "list", "--config")),
+    ),
+)
+def test_windows_portable_shim_routes_all_fallback_config_commands_to_one_file(
+    tmp_path: Path,
+    repo_root: Path,
+    args: tuple[str, ...],
+    expected_prefix: tuple[str, ...],
+) -> None:
+    exe = _powershell_exe()
+    if exe is None:
+        pytest.skip("pwsh/powershell not available")
+
+    _, shim_path, state_dir, bundle_dir = _setup_install_layout(
+        tmp_path=tmp_path, repo_root=repo_root
+    )
+    state_config_toml = state_dir / "config.toml"
+    state_config_toml.write_text(
+        '[paths]\ngenerated_dir = "external-generated"\n', encoding="utf-8"
+    )
+    _write_valid_config_json(state_dir=state_dir, bundle_dir=bundle_dir, schema_version=1)
+
+    args_file = tmp_path / "args.txt"
+    bundle_launcher = bundle_dir / "frame-compare.ps1"
+    bundle_launcher.write_text(
+        (
+            "Set-Content -LiteralPath $env:FC_TEST_ARGS_FILE "
+            "-Value ($args -join '|') -Encoding UTF8\n"
+        ),
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env["FC_TEST_ARGS_FILE"] = str(args_file)
+
+    completed = _run_shim(exe=exe, shim_path=shim_path, env=env, args=list(args))
+    assert completed.returncode == 0, f"stdout:\n{completed.stdout}\n\nstderr:\n{completed.stderr}"
+
+    forwarded = args_file.read_text(encoding="utf-8-sig").rstrip("\r\n").split("|")
+    assert tuple(forwarded[: len(expected_prefix)]) == expected_prefix
+    config_index = forwarded.index("--config")
+    assert forwarded[config_index + 1] == str(state_config_toml)
+
+
+@pytest.mark.integration
 def test_windows_portable_shim_preset_apply_injection_e2e(tmp_path: Path, repo_root: Path) -> None:
     exe = _powershell_exe()
     if exe is None:

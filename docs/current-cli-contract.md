@@ -109,15 +109,16 @@ For those commands:
 - `--config` selects the config file path. Relative paths resolve from `--root`.
 - If `--config` is omitted, the CLI resolves `config/config.toml` under `--root`.
 
-The selected config file and configured `paths.config_dir`,
-`paths.screenshots_dir`, `paths.generated_dir`, and non-null
-`report.output_dir` must resolve beneath the fully resolved workspace root.
-Containment follows symlinks and expands environment variables in config path
-values, so absolute paths, `..` traversal, or symlinks that escape the root fail
-with `PathEscapesRootError` / `FC-3009`. `run`, `wizard`, `preset apply`,
+The selected config file and configured `paths.config_dir` must resolve beneath the
+fully resolved workspace root. The sole `paths.generated_dir` value is resolved
+once and may name a normal external directory; empty or whitespace-only values,
+including values that become empty after environment expansion, are invalid. Its
+managed descendants remain contained beneath that resolved generated-data root.
+Containment follows symlinks and expands environment variables in config path values,
+so invalid config paths fail through the standard typed path error. `run`, `wizard`, `preset apply`,
 `preset save`, and both `history` subcommands validate their selected config
-destination before config reads or writes; `run` also validates configured
-contained paths before diagnostics, config writes, or runtime entry. `preset list`
+destination before config reads or writes; `run` also validates generated-data
+root structure before diagnostics, config writes, or runtime entry. `preset list`
 remains root-only and ignores its accepted `--config` value.
 
 Media input is a read boundary, not a write boundary. Configured
@@ -125,10 +126,12 @@ Media input is a read boundary, not a write boundary. Configured
 environment-expanded, or symlinked to a directory outside the workspace. This
 does not permit generated state to follow media outside the root.
 
-History commands resolve, load, and validate the selected config and contained
-configured `paths.generated_dir` using these same `--root/-r` and `--config/-c`
-rules, but they do not require the configured input directory or current video
-files to exist. This keeps recorded outcomes readable after media moves.
+History commands resolve, load, and validate the selected config and configured
+`paths.generated_dir` using these same `--root/-r` and `--config/-c` rules. The
+resolved generated-data root may be outside the workspace; history requires its
+managed run, record, and report descendants to remain beneath that resolved root.
+History does not require the configured input directory or current video files to
+exist, keeping recorded outcomes readable after media moves.
 
 For the installed Windows portable shim, the shim runs the bundle launcher from the
 bundle root and injects a default `--config` for `run`, `wizard`, supported
@@ -234,18 +237,22 @@ unchanged.
 - History is read-only. Stage 1 provides only `list`, `list --json`, and exact-name
   `open`; it does not migrate, replay, delete, rename, search, paginate, or fuzzy
   match runs.
-- Discovery inspects contained immediate child directories of the configured
-  workspace-level generated root. Symlinked run directories are ignored, and a
-  result or legacy identity file is trusted only when its final regular-file target
-  remains inside that run directory. The shared `cache` directory is not a run
-  entry.
+- Discovery inspects contained real immediate-child directories of the configured
+  generated-data root. Folders without a supported `run_result.toml` are omitted;
+  they are not interpreted through `run_info.toml` or reported as compatibility
+  history. Symlinked run directories are ignored, and a result record is trusted
+  only when its final regular-file target remains inside that run directory. The
+  shared `cache` directory is not a run entry.
 - Valid V1 `run_result.toml` entries report `completed`,
-  `completed_with_warnings`, or `failed`. Legacy folders without a result record
-  report `unknown` and are never modified. Malformed or unsupported records report
+  `completed_with_warnings`, or `failed`. Malformed or unsupported records report
   `unavailable`; each warning goes to stderr and does not hide other entries.
 - Entries sort newest first using persisted UTC completion/start time, with an
-  exact folder-name tie-break. Legacy entries use valid persisted
-  `run_info.toml` creation time when available.
+  exact folder-name tie-break. Unavailable records without valid lifecycle times
+  sort after valid records.
+- If the selected generated-data root is missing, disconnected, unreadable, or not
+  a directory, history fails with `FC-3016` and an actionable reconnect/permissions
+  hint. History does not create the root, return a JSON success document, or fall
+  back to the workspace or portable bundle.
 - Human `history list` output goes to stdout and exposes the exact run name,
   status, persisted time, and report availability. Diagnostics and warnings use
   stderr.
@@ -256,13 +263,11 @@ unchanged.
 - `history open RUN_NAME` accepts one exact child folder name only. Empty names,
   dot segments, separators, absolute/drive/UNC forms, traversal, missing or
   non-directory entries, and symlinked run directories fail through the typed CLI error
-  path. The command reads the report path only from a valid V1 record, resolves
-  its workspace-relative path, and requires the final existing file to remain
-  beneath the configured generated root after symlink resolution.
-- A configured report elsewhere beneath the workspace root may be recorded, but
-  history intentionally refuses to open it because it is outside the generated
-  history boundary. Browser refusal or browser integration failure is a typed
-  actionable failure and never produces a success claim.
+  path. The command reads run-relative artifact facts from a valid V1 record,
+  resolves the canonical `report.html` from that run folder, and requires the final
+  existing file to remain beneath the configured generated root after symlink
+  resolution. Browser refusal or browser integration failure is a typed actionable
+  failure and never produces a success claim.
 
 ## `version` Command Contract
 
@@ -315,8 +320,8 @@ unchanged.
   five `*_configured` action fields report effective configuration only; they do
   not claim that JSON, quiet, non-TTY, upload-result, or other runtime eligibility
   gates will permit the action. Runtime-only facts remain `unknown` with null
-  values until their existing runtime owners could determine them. When run folders
-  are disabled, `run_folder_name` is the one known null fact.
+  values until their existing runtime owners could determine them. The
+  `run_folder_name` fact is always unknown until reservation.
 - `--json` writes a single JSON object to stdout and suppresses human-readable summaries.
 - In that JSON object, `slowpics_url` is the only machine-readable slow.pics
   result field. No copy/open/shortcut/webhook result fields are emitted.
@@ -367,17 +372,16 @@ unchanged.
   native VapourSynth diagnostics, and plugin stderr may still use stderr.
 - When the at-a-glance summary reports optional VSPreview probe failures, it uses a
   sanitized summary rather than raw probe exception text.
-- The at-a-glance summary uses user-facing row labels such as `run folders`,
-  `FFmpeg audio`, `previous offsets`, `interactive alignment`,
-  `force interactive`, and `VSPreview` while preserving the same effective
+- The at-a-glance summary uses user-facing row labels such as `FFmpeg audio`,
+  `previous offsets`, `interactive alignment`, `force interactive`, and `VSPreview`
+  while preserving the same effective
   configuration facts. The `previous offsets` row reports only the effective
   config mode: `disabled`, `prompt`, or `always`.
 - The `analysis mode` row reports the effective `analysis.performance_mode`:
   `quality` or `performance`.
-- The at-a-glance workspace paths are resolved base paths. When
-  `paths.use_run_folders = true`, the `screenshots` and `generated` rows describe the
-  configured base paths rather than the fresh per-run subdirectories reserved later in
-  execution.
+- The at-a-glance workspace paths show `root`, `config`, `input`, and the resolved
+  `generated` data root. The constant run-folder policy and derived screenshot path
+  are not configuration rows.
 - Human Rich progress uses product phase labels: `PLAN`, `ANALYZE`, `ALIGN`,
   `RENDER`, `METADATA`, `PUBLISH`, `REPORT`, `CONFIRM`, and `CLEANUP`.
   Internal phase names in logs and `phase_timings` remain the runtime keys such
@@ -387,11 +391,11 @@ unchanged.
   ANSI styling for the previous-offset reuse table and prompt. Quiet and JSON
   modes still suppress Rich progress, and non-TTY runs still use log progress.
 - `--diagnose-paths` emits a pinned JSON object with keys `cache`, `config`, `input`,
-  `output`, and `root`, then exits without invoking the runtime pipeline.
-  The `cache` value is the resolved configured `paths.generated_dir`; the shared
-  analysis cache lives below it at `cache/analysis`, and shared alignment reuse
-  entries live below it at `cache/alignment`. `--diagnose-paths` does not report
-  the shared alignment cache path separately.
+  `output`, and `root`, then exits without invoking the runtime pipeline. The
+  `output` value is the resolved generated-data root and `cache` is its
+  `<root>/cache` directory; shared analysis and alignment reuse entries live below
+  that cache root. `--diagnose-paths` does not report the shared alignment cache
+  path separately.
 - `--write-config` writes the effective config to disk, then exits without invoking the
   runtime pipeline.
 
@@ -436,14 +440,14 @@ unchanged.
   Legacy run-folder `cache.compframes` files are not used as analysis cache hits.
 - Analysis is skipped automatically when `dark_frame_count`, `bright_frame_count`,
   and `motion_frame_count` are all `0`; `frame_plan` still selects configured
-  user/random frames. With `paths.use_run_folders = true`, runs that proceed reserve
-  a fresh run folder beneath the contained resolved `paths.generated_dir`, never
-  beneath `paths.input_dir`; existing run folders are not reused to satisfy analysis
-  cache hits. Screenshots, run-local generated state, and fallback reports remain
-  beneath that reserved folder even when media input is external.
-- In run-folder mode, folder names are capped at 64 characters and do not
-  include exact timestamps. The first successful reservation uses the title-first base
-  name, and collisions use compact numeric suffixes such as `_2` and `_3`.
+  user/random frames. Every run that proceeds reserves a fresh run folder beneath
+  the resolved `paths.generated_dir`, never beneath `paths.input_dir`; existing run
+  folders are not reused to satisfy analysis cache hits. Screenshots, run-local
+  generated state, and the canonical report remain beneath that reserved folder
+  even when media input is external.
+- Run-folder names are capped at 64 characters and do not include exact timestamps.
+  The first successful reservation uses the title-first base name, and collisions use
+  compact numeric suffixes such as `_2` and `_3`.
   Exact creation time and run identity are written to root-level
   `<run-folder>/run_info.toml` immediately after reservation and before probing
   or rendering. This file stores `version`, UTC `created_at` with a `Z` suffix,
@@ -453,6 +457,13 @@ unchanged.
   outcome manifest and does not include report URL, timings, or success/failure
   state. If `run_info.toml` cannot be written, the run fails immediately and
   best-effort cleanup removes the empty reserved run folder when possible.
+- If run-folder reservation cannot create or resolve a candidate beneath the
+  generated-data root, including permission errors or symlink-loop resolution
+  failures, the run fails with `FC-3018`. Reconnect the selected location, repair
+  its permissions or link/junction, or choose a different `paths.generated_dir`.
+  This reservation error is distinct from a later `run_info.toml` write failure;
+  reservation wraps the original cause, while the metadata write re-raises its
+  original error. Both attempt best-effort cleanup.
 - A separate atomically written `<run-folder>/run_result.toml` V1 record captures
   the final outcome without modifying `run_info.toml`. Successful records are
   written after all post-run phases settle and use `completed` or
@@ -611,13 +622,9 @@ opened. If it is not opened, the CLI prints the report path before prompting.
 - The shortcut is a Windows InternetShortcut-compatible `.url` file containing
   the uploaded slow.pics comparison URL.
 - The shortcut output directory is deterministic:
-  - the current run folder when run folders are enabled
-  - otherwise the safe common parent of the resolved screenshots and generated
-    output directories
-- Without a run folder, the common parent must be under the resolved workspace
-  root and must not be a drive root, filesystem anchor, UNC/share root, or the
-  user home directory. Paths on different drives or anchors have no safe common
-  parent.
+  - the current reserved run folder
+- A run-folder reservation is required before shortcut creation; escaped or
+  symlinked run aliases are rejected rather than redirected elsewhere.
 - The filename is derived from the same final collection title sent to
   slow.pics, with a stable fallback from the slow.pics URL key.
 - Repeated writes overwrite the same deterministic shortcut path.
@@ -971,8 +978,10 @@ now fail nested validation:
 
 - Remove `analysis.save_frames_data`; it never controlled persisted frame data
   and has no replacement.
-- Replace `screenshots.directory_name` with `paths.screenshots_dir`, which owns
-  the screenshot destination.
+- `screenshots.directory_name`, `paths.screenshots_dir`, `paths.use_run_folders`,
+  and `report.output_dir` are removed fields and fail ordinary nested-table
+  validation. Screenshots are derived from the reserved run folder and report
+  placement is always the canonical run-root `report.html`.
 - Remove `logging.file`; Frame Compare does not support config-driven file
   logging.
 
@@ -1011,9 +1020,8 @@ enabled.
   cache path, and each entry's persisted `accepted_at` timestamp. It does not
   derive freshness from file mtime or index mtime.
 - Shared previous-offset entries live under
-  `<resolved paths.generated_dir>/cache/alignment/`. This is shared
-  workspace-level cache state even when `paths.use_run_folders = true`; it does
-  not live inside a fresh run folder.
+  `<resolved paths.generated_dir>/cache/alignment/`. This is shared generated-data
+  cache state and does not live inside a fresh run folder.
 - `previous_offsets = "prompt"` and `previous_offsets = "always"` require
   `cache_results = true`. `previous_offsets = "disabled"` remains compatible
   with `cache_results = false`.
@@ -1054,10 +1062,10 @@ enabled.
 above. That means the flags in the previous section are persistent when combined with
 `--write-config`.
 
-Contained path values are validated before persistence. A non-null relative
-`report.output_dir` is normalized to an absolute workspace-root-based path for
-runtime use, while `run --write-config`, `preset apply`, and `preset save`
-persist the original relative value so saved configurations remain portable.
+Contained config paths and the generated-data root structure are validated before
+persistence. `run --write-config`, `preset apply`, and `preset save` preserve the
+authored relative or absolute `paths.generated_dir` string; runtime resolution does
+not rewrite the saved value.
 
 Before writing, `run --write-config` rejects effective configs that combine
 `audio_alignment.previous_offsets = "prompt"` or `"always"` with
@@ -1100,10 +1108,17 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 
 ## `wizard` Command Contract
 
-- `wizard` is an interactive, goal-oriented editor for input, reference, and frame
-  selection configuration. It does not run comparisons or probe media. It requires
-  both stdin and stdout to be TTYs; otherwise it fails through `FC-3017` with input
-  exit code 4 before reading config, prompting, or writing.
+- `wizard` is an interactive, goal-oriented editor for input, generated-data location,
+  reference, and frame selection configuration. It does not run comparisons or probe
+  media. It requires both stdin and stdout to be TTYs; otherwise it fails through
+  `FC-3017` with input exit code 4 before reading config, prompting, or writing.
+- After the input-directory prompt, the wizard asks for `Generated data location`
+  before reference or frame-selection prompts. It explains that this directory owns
+  durable comparison folders and reusable caches. The prompt defaults to the
+  authored `paths.generated_dir` value, or `generated` on first use, accepts relative,
+  environment-expanded, and normal absolute directory values, and persists the exact
+  authored string after confirmation. The wizard does not check availability,
+  writability, create, or probe this location while saving configuration.
 - Its goals are `Random spot check` (10 seeded random frames, no metrics scan),
   `Dark, bright, and motion coverage` (4 random plus 2 each dark, bright, and motion
   frames in full-resolution `quality` mode), and `Specific frame numbers` (1–100
@@ -1115,7 +1130,8 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   stems fail before the reference prompt; automatic reference removes an explicit
   reference key; explicit filename selection is canonically revalidated.
 - First use starts from schema defaults and writes only the confirmed partial payload,
-  including `slowpics.auto_upload = false`. Environment values still have higher
+  including the authored `paths.generated_dir` value and
+  `slowpics.auto_upload = false`. Environment values still have higher
   precedence during a later run, so the review states that the environment may
   override this file baseline.
 - Existing TOML is parsed and validated without environment precedence, then used as
@@ -1126,8 +1142,9 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   config-persistence policy; a true no-op leaves the original file byte-for-byte.
   Environment-only values are neither displayed nor persisted. Wizard validation
   errors redact every raw Pydantic input.
-- Before writing, the wizard validates the complete candidate and shows a semantic
-  review containing changed/new input, reference, and frame-selection facts, the
+- Before writing, the wizard validates the complete candidate through the shared
+  config/preflight path policy and shows a semantic review containing changed/new
+  input, generated-data location, reference, and frame-selection facts, the
   metrics-scan consequence, and privacy/preservation statements, including explicit
   notice when a persisted webhook URL will be removed. It never displays secret
   values or environment presence.

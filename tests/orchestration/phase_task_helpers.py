@@ -19,7 +19,6 @@ from frame_compare.utils.types import WorkspacePaths
 MINIMAL_CONFIG = """\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
 
@@ -64,7 +63,8 @@ def _workspace(tmp_path: Path) -> WorkspacePaths:
     return WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
-        run_dir=None,
+        generated_root=tmp_path / "generated",
+        run_dir=tmp_path / "run",
         screenshots_dir=tmp_path / "screenshots",
         generated_dir=tmp_path / "generated",
         config_dir=tmp_path / "config",

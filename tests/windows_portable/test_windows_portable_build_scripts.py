@@ -84,6 +84,38 @@ def test_windows_portable_build_creates_default_workspace_directories(repo_root:
     assert '$bundleInputDir = Join-Path $OutDir "comparison_videos"' in build_script
     assert "Ensure-Directory -Path $bundleConfigDir" in build_script
     assert "Ensure-Directory -Path $bundleInputDir" in build_script
+    assert 'Join-Path $OutDir "screenshots"' not in build_script
+
+
+def test_windows_portable_installed_default_config_uses_generated_root_only(
+    repo_root: Path,
+) -> None:
+    install_script = _read_text_or_fail(repo_root / "tools" / "windows_portable" / "install.ps1")
+    default_block_start = install_script.index('$defaultPortableConfigToml = @"')
+    default_block_end = install_script.index('"@', default_block_start)
+    default_config = install_script[default_block_start:default_block_end]
+
+    assert 'generated_dir = "generated"' in default_config
+    assert "screenshots_dir" not in default_config
+    assert "use_run_folders" not in default_config
+    assert "output_dir" not in default_config
+
+
+def test_windows_portable_lifecycle_does_not_manage_generated_data(repo_root: Path) -> None:
+    portable_root = repo_root / "tools" / "windows_portable"
+    lifecycle_sources = "\n".join(
+        (
+            (portable_root / "uninstall.ps1").read_text(encoding="utf-8"),
+            (portable_root / "shim" / "frame-compare-update.ps1").read_text(encoding="utf-8"),
+        )
+    )
+
+    # These scripts may preserve/configure the authored value, but they must not
+    # create, copy, move, back up, or delete generated output as install state.
+    assert "screenshots_dir" not in lifecycle_sources
+    assert "use_run_folders" not in lifecycle_sources
+    assert "output_dir" not in lifecycle_sources
+    assert ".update_backups" in lifecycle_sources
 
 
 def test_windows_portable_build_download_errors_name_manifest_remediation(repo_root: Path) -> None:

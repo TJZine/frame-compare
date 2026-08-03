@@ -20,10 +20,8 @@ runner = CliRunner()
 CONFIG = """\
 [paths]
 input_dir = "inputs-that-no-longer-exist"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
-use_run_folders = true
 
 [report]
 enable = true
@@ -33,34 +31,53 @@ enable = false
 """
 
 
-def _workspace(root: Path, run_dir: Path) -> WorkspacePaths:
+def _workspace(
+    root: Path,
+    run_dir: Path,
+    *,
+    generated_root: Path | None = None,
+) -> WorkspacePaths:
+    resolved_generated_root = generated_root or root / "generated"
     return WorkspacePaths(
         root=root,
         input_dir=root / "inputs-that-no-longer-exist",
+        generated_root=resolved_generated_root,
         run_dir=run_dir,
         screenshots_dir=run_dir / "screenshots",
         generated_dir=run_dir / "generated",
         config_dir=root / "config",
         config_file=root / "config" / "config.toml",
-        analysis_cache_dir=root / "generated" / "cache" / "analysis",
+        analysis_cache_dir=resolved_generated_root / "cache" / "analysis",
     )
 
 
-def _setup_config(root: Path) -> None:
+def _setup_config(root: Path, *, generated_root: Path | None = None) -> None:
     config = root / "config" / "config.toml"
     config.parent.mkdir(parents=True)
-    config.write_text(CONFIG, encoding="utf-8")
+    config_text = CONFIG
+    if generated_root is not None:
+        config_text = CONFIG.replace(
+            'generated_dir = "generated"',
+            f'generated_dir = "{generated_root.as_posix()}"',
+        )
+    config.write_text(config_text, encoding="utf-8")
 
 
-def _setup(root: Path, name: str = "Exact Run") -> Path:
-    _setup_config(root)
-    run_dir = root / "generated" / name
+def _setup(
+    root: Path,
+    name: str = "Exact Run",
+    *,
+    generated_root: Path | None = None,
+) -> Path:
+    _setup_config(root, generated_root=generated_root)
+    resolved_generated_root = generated_root or root / "generated"
+    run_dir = resolved_generated_root / name
     run_dir.mkdir(parents=True)
     report = run_dir / "report.html"
     report.write_text("report", encoding="utf-8")
     started = datetime(2026, 7, 14, 12, tzinfo=UTC)
     record = completed_record(
-        workspace=_workspace(root, run_dir),
+        workspace=_workspace(root, run_dir, generated_root=resolved_generated_root),
         facts=CompletedRunFacts(
             report_path=report,
             screenshot_dir=run_dir / "screenshots",
@@ -118,6 +135,21 @@ def test_history_list_json_is_exact_allowlisted_object_without_inputs(tmp_path: 
     }
 
 
+def test_history_list_json_uses_external_generated_root(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    generated_root = tmp_path / "persistent-generated"
+    _setup(root, generated_root=generated_root)
+
+    result = _invoke(root, ["list", "--json"])
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    payload = json.loads(result.stdout)
+    assert [entry["name"] for entry in payload["runs"]] == ["Exact Run"]
+    assert payload["runs"][0]["report_available"] is True
+    assert not (root / "generated").exists()
+
+
 def test_history_list_malformed_warning_uses_stderr_and_keeps_json_clean(
     tmp_path: Path,
 ) -> None:
@@ -136,6 +168,19 @@ def test_history_list_malformed_warning_uses_stderr_and_keeps_json_clean(
     assert "Warning" not in result.stdout
 
 
+def test_history_list_omits_recordless_folder(tmp_path: Path) -> None:
+    _setup(tmp_path)
+    recordless = tmp_path / "generated" / "Recordless"
+    recordless.mkdir()
+
+    result = _invoke(tmp_path, ["list", "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert [entry["name"] for entry in payload["runs"]] == ["Exact Run"]
+    assert "Recordless" not in result.stderr
+
+
 def test_history_list_human_exposes_concise_fields(tmp_path: Path) -> None:
     _setup(tmp_path)
 
@@ -146,8 +191,67 @@ def test_history_list_human_exposes_concise_fields(tmp_path: Path) -> None:
     assert result.stderr == ""
 
 
-def test_history_list_json_returns_empty_runs_without_history(tmp_path: Path) -> None:
+def test_history_list_json_rejects_missing_generated_root(tmp_path: Path) -> None:
     _setup_config(tmp_path)
+
+    result = _invoke(tmp_path, ["list", "--json"])
+
+    generated = (tmp_path / "generated").resolve()
+    stderr = result.stderr.replace("\n", "")
+    assert result.exit_code == 4
+    assert result.stdout == ""
+    assert "[FC-3016]" in stderr
+    assert str(generated) in stderr
+    assert "Reconnect" in stderr
+    assert "permissions" in stderr
+    assert not generated.exists()
+
+
+def test_history_list_json_external_missing_root_never_falls_back(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "workspace"
+    generated_root = tmp_path / "persistent-generated"
+    _setup_config(root, generated_root=generated_root)
+
+    result = _invoke(root, ["list", "--json"])
+
+    stderr = result.stderr.replace("\n", "")
+    assert result.exit_code == 4
+    assert result.stdout == ""
+    assert "[FC-3016]" in stderr
+    assert str(generated_root.resolve()) in stderr
+    assert "Reconnect" in stderr
+    assert "permissions" in stderr
+    assert not generated_root.exists()
+    assert not (root / "generated").exists()
+
+
+def test_history_list_json_inaccessible_root_is_typed_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _setup_config(tmp_path)
+    generated = tmp_path / "generated"
+    generated.mkdir()
+
+    def deny_listing(_path: Path):
+        raise PermissionError("history root unavailable")
+
+    monkeypatch.setattr(Path, "iterdir", deny_listing)
+
+    result = _invoke(tmp_path, ["list", "--json"])
+
+    stderr = result.stderr.replace("\n", "")
+    assert result.exit_code == 4
+    assert result.stdout == ""
+    assert "[FC-3016]" in stderr
+    assert str(generated.resolve()) in stderr
+    assert "Reconnect" in stderr
+
+
+def test_history_list_json_returns_empty_runs_for_existing_empty_root(tmp_path: Path) -> None:
+    _setup_config(tmp_path)
+    (tmp_path / "generated").mkdir()
 
     result = _invoke(tmp_path, ["list", "--json"])
 
@@ -171,6 +275,27 @@ def test_history_open_uses_exact_recorded_report(
     assert result.exit_code == 0
     assert opened == [report.resolve()]
     assert result.stdout == "Opened report for run 'Exact Run'.\n"
+
+
+def test_history_open_uses_external_generated_root_and_canonical_report(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "workspace"
+    generated_root = tmp_path / "persistent-generated"
+    report = _setup(root, generated_root=generated_root)
+    opened: list[Path] = []
+    monkeypatch.setattr(
+        "frame_compare.cli.entry._maybe_open_report",
+        lambda path: opened.append(path) is None or True,
+    )
+
+    result = _invoke(root, ["open", "Exact Run"])
+
+    assert result.exit_code == 0
+    assert opened == [report.resolve()]
+    assert opened[0] == generated_root / "Exact Run" / "report.html"
+    assert not (root / "generated").exists()
 
 
 @pytest.mark.parametrize("outcome", [False, RuntimeError("browser secret")])

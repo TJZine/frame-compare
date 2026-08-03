@@ -75,6 +75,18 @@ Source installs and portable bundle builds create empty `config/` and
 For the installed `frame-compare` command, a bundle-local `config/config.toml`
 takes precedence over the AppData fallback config.
 
+The default generated-data location is the bundle's `generated/` directory. In the
+wizard, set **Generated data location** to a normal folder outside the bundle when
+you want reports, screenshots, run state, and reusable caches to survive bundle
+replacement. The selected authored value is retained in the installed fallback
+`%LOCALAPPDATA%\Programs\FrameCompare\state\config.toml`; the shim injects that
+same file for `wizard`, `run`, `preset`, and `history` commands whenever the
+fallback is selected. A top-level bundle `screenshots/` directory is not a runtime
+output root.
+
+The same selected configuration drives `run --diagnose-paths`, run execution, and
+both history commands, so they agree on the external generated-data root.
+
 When using `.\tools\windows_portable\install-from-source.cmd`, the bundle root is
 `dist/frame-compare-portable-win-x64` (not the repository root). Put your config
 at `dist/frame-compare-portable-win-x64/config/config.toml` and videos under
@@ -142,6 +154,12 @@ directory by default. Inspect recorded runs with:
 frame-compare history list
 frame-compare history open <run-name>
 ```
+
+When the generated-data location is external, the same canonical run-folder layout
+is written there and the installed updater, rollback backups, reinstall flow, and
+uninstaller leave it untouched. A bundle move can change cache identity for source
+clips that moved with the bundle because their source paths changed; cache
+validation remains authoritative and no cache-hit guarantee is made.
 
 ---
 

@@ -11,7 +11,6 @@ from urllib.parse import urlparse
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SLOWPICS_COMPARISON_PATH_PATTERN = re.compile(r"^/c/[A-Za-z0-9_-]+/?$")
 ALLOWED_CONTAINER_ROOTS: tuple[tuple[PurePosixPath, str], ...] = (
-    (PurePosixPath("/workspace/screenshots"), "screenshots"),
     (PurePosixPath("/workspace/generated"), "generated"),
 )
 DISALLOWED_CONTAINER_ROOTS: tuple[PurePosixPath, ...] = (
@@ -29,10 +28,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "target",
-        help=(
-            "Container path under /workspace/screenshots or /workspace/generated, "
-            "or an https://slow.pics/... URL."
-        ),
+        help=("Container path under /workspace/generated, or an https://slow.pics/... URL."),
     )
     parser.add_argument(
         "--print-only",
@@ -89,8 +85,7 @@ def translate_container_path(target: str, *, repo_root: Path | None = None) -> P
         return translated
 
     raise ValueError(
-        "unsupported container path; only /workspace/screenshots and /workspace/generated "
-        "may be opened from the host"
+        "unsupported container path; only /workspace/generated may be opened from the host"
     )
 
 

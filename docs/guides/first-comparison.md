@@ -25,11 +25,13 @@ Publishing is off by default: first-use wizard output explicitly sets
 `slowpics.auto_upload = false`. Keep the first run local, inspect its report, and
 enable publishing later only if you want it.
 
-With the default run-folder policy, screenshots, run metadata, and `report.html` are
-grouped beneath `generated/<run>/`. Windows portable uses the bundle's `generated/`
-directory; a source build's bundle is `dist/frame-compare-portable-win-x64`, not the
-repository root. Docker persists the same output beneath the host's `generated/`
-directory and needs the [host report-opening helper](../getting-started/docker.md).
+Every run reserves a fresh folder beneath the configured `paths.generated_dir` root.
+With the default value, screenshots, run metadata, and the canonical
+`generated/<run>/report.html` are grouped together with sibling `screenshots/` and
+`generated/` directories. An authored absolute `paths.generated_dir` uses the same
+layout outside the workspace; route-specific Docker and Windows persistence details
+remain in their dedicated guides. The [reports guide](reports-and-overlays.md)
+covers the offline report and relative screenshot layout.
 
 If a stage fails, go to [Troubleshooting](troubleshooting.md). For exact command and
 configuration semantics, use the [CLI and configuration contract](../current-cli-contract.md).

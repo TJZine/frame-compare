@@ -9,12 +9,16 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from frame_compare.errors import PathEscapesRootError
+from frame_compare.services.errors import GeneratedDataReservationError
 from frame_compare.services.metadata import parse_filename
 from frame_compare.services.types import ParsedMetadata, TmdbMetadata
+from frame_compare.utils.paths import require_managed_immediate_child
 
 _UNNAMED_RUN_BASE = "unnamed_run"
 _MAX_FOLDER_NAME_LENGTH = 64
@@ -186,17 +190,18 @@ def _derive_base_folder_name(
 
 
 def reserve_run_folder(
-    input_dir: Path,
+    generated_root: Path,
     filenames: list[str],
     tmdb_metadata: TmdbMetadata | None = None,
 ) -> RunFolderReservation:
     """Derive and atomically reserve a unique run folder name by creating it.
 
-    It derives the base folder name, then claims input_dir / candidate
-    with mkdir(parents=True, exist_ok=False), retrying with numeric suffixes on collision.
+    It derives the base folder name, prepares the already-resolved generated-data
+    root, then atomically claims one immediate child. Numeric suffixes resolve
+    candidate collisions.
 
     Args:
-        input_dir: Directory where the run folder should be created
+        generated_root: Resolved generated-data root that owns run folders
         filenames: List of video filenames (not full paths)
         tmdb_metadata: Optional TMDB metadata from lookup
 
@@ -207,7 +212,7 @@ def reserve_run_folder(
 
     def _reservation(candidate_name: str) -> RunFolderReservation:
         return RunFolderReservation(
-            path=input_dir / candidate_name,
+            path=generated_root / candidate_name,
             folder_name=candidate_name,
             base_name=base_name,
             naming_source=naming_source,
@@ -217,7 +222,7 @@ def reserve_run_folder(
 
     # Try creating base folder name
     try:
-        reservation.path.mkdir(parents=True, exist_ok=False)
+        _reserve_candidate(generated_root, reservation.path)
         return reservation
     except FileExistsError:
         log.debug(
@@ -230,7 +235,7 @@ def reserve_run_folder(
         suffix_name = _append_collision_suffix(base_name, str(attempt))
         suffix_reservation = _reservation(suffix_name)
         try:
-            suffix_reservation.path.mkdir(parents=True, exist_ok=False)
+            _reserve_candidate(generated_root, suffix_reservation.path)
             return suffix_reservation
         except FileExistsError:
             continue
@@ -239,5 +244,52 @@ def reserve_run_folder(
     random_suffix = uuid.uuid4().hex[:8]
     fallback_name = _append_collision_suffix(base_name, random_suffix)
     fallback_reservation = _reservation(fallback_name)
-    fallback_reservation.path.mkdir(parents=True, exist_ok=False)
+    _reserve_candidate(generated_root, fallback_reservation.path)
     return fallback_reservation
+
+
+def _reserve_candidate(owner: Path, candidate: Path) -> None:
+    """Validate and atomically claim one immediate child of ``owner``."""
+    resolved_owner = _prepare_reservation_owner(owner)
+    try:
+        resolved_candidate = require_managed_immediate_child(resolved_owner, candidate)
+        resolved_candidate.mkdir(exist_ok=False)
+    except (FileExistsError, PathEscapesRootError):
+        raise
+    except (OSError, RuntimeError) as exc:
+        raise GeneratedDataReservationError(resolved_owner, exc) from exc
+
+
+def _prepare_reservation_owner(owner: Path) -> Path:
+    """Create and validate the real directory chain for a resolved owner path."""
+    try:
+        if not owner.is_absolute():
+            raise RuntimeError("generated-data root must be an absolute resolved path")
+        resolved_owner_before_create = owner.resolve(strict=False)
+        if resolved_owner_before_create != owner:
+            raise RuntimeError(
+                "generated-data root must be resolved before reservation: "
+                f"{owner} -> {resolved_owner_before_create}"
+            )
+
+        for directory in (*reversed(owner.parents), owner):
+            if directory.is_symlink() or directory.is_junction():
+                raise RuntimeError(f"generated-data root ancestor is redirected: {directory}")
+            if not directory.exists():
+                # A concurrent creator is acceptable only when it produced the
+                # same real directory validated immediately below.
+                with suppress(FileExistsError):
+                    directory.mkdir()
+            if directory.is_symlink() or directory.is_junction() or not directory.is_dir():
+                raise NotADirectoryError(
+                    f"generated-data root ancestor is not a real directory: {directory}"
+                )
+
+        resolved_owner = owner.resolve(strict=True)
+        if resolved_owner != owner:
+            raise RuntimeError(
+                f"generated-data root changed during reservation: {owner} -> {resolved_owner}"
+            )
+        return resolved_owner
+    except (OSError, RuntimeError) as exc:
+        raise GeneratedDataReservationError(owner, exc) from exc

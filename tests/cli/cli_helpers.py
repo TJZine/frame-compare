@@ -27,7 +27,6 @@ def _normalize_cli_help(text: str) -> str:
 MINIMAL_CONFIG = """\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
 """

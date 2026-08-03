@@ -70,7 +70,6 @@ if (!(Test-Path -LiteralPath $portableConfigToml)) {
     $defaultPortableConfigToml = @"
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
 "@

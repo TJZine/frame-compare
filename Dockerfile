@@ -203,6 +203,13 @@ COPY --chown=framecompare:framecompare . /home/framecompare/frame-compare/
 # Install the project itself without dependency resolution.
 RUN python -m pip install --no-cache-dir --user --no-deps -e .
 
+# Compose may run the image as the invoking host UID/GID so bind-mounted output
+# remains host-owned. Allow that numeric identity to traverse the image user's
+# home to the read-only installed CLI and dependencies without granting writes.
+USER root
+RUN chmod 0711 /home/framecompare
+USER framecompare
+
 # Add user bin to PATH
 ENV PATH="/home/framecompare/.local/bin:${PATH}"
 

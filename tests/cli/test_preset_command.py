@@ -191,14 +191,13 @@ def test_preset_config_writes_allow_exact_windows_portable_state_config(
 
 
 @pytest.mark.parametrize("operation", ["apply", "save"])
-def test_preset_config_writes_preserve_relative_report_output(operation: str) -> None:
+def test_preset_config_rejects_removed_report_output_directory(operation: str) -> None:
     with runner.isolated_filesystem():
         root = Path("workspace")
         config_path = root / "config" / "config.toml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(
-            MINIMAL_CONFIG + '\n[report]\noutput_dir = "reports/custom"\n',
-            encoding="utf-8",
+            MINIMAL_CONFIG + '\n[report]\noutput_dir = "reports/custom"\n', encoding="utf-8"
         )
         if operation == "apply":
             presets_dir = root / "config" / "presets"
@@ -221,16 +220,13 @@ def test_preset_config_writes_preserve_relative_report_output(operation: str) ->
             ],
         )
 
-        assert result.exit_code == 0
-        persisted_path = (
-            config_path if operation == "apply" else root / "config" / "presets" / "demo.toml"
-        )
-        persisted = tomllib.loads(persisted_path.read_text(encoding="utf-8"))
-        assert persisted["report"]["output_dir"] == "reports/custom"
+        assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+        assert result.stdout == ""
+        assert "Extra inputs are not permitted" in result.stderr
 
 
 @pytest.mark.parametrize("operation", ["apply", "save"])
-def test_preset_config_writes_reject_loaded_path_escape(operation: str) -> None:
+def test_preset_config_writes_preserve_external_generated_root(operation: str) -> None:
     with runner.isolated_filesystem():
         root = Path("workspace")
         config_path = root / "config" / "config.toml"
@@ -239,6 +235,12 @@ def test_preset_config_writes_reject_loaded_path_escape(operation: str) -> None:
             MINIMAL_CONFIG.replace('generated_dir = "generated"', 'generated_dir = "../../out"'),
             encoding="utf-8",
         )
+        if operation == "apply":
+            (root / "config" / "presets").mkdir(parents=True, exist_ok=True)
+            (root / "config" / "presets" / "demo.toml").write_text(
+                "[analysis]\nrandom_frame_count = 10\n",
+                encoding="utf-8",
+            )
         result = runner.invoke(
             app,
             [
@@ -252,16 +254,18 @@ def test_preset_config_writes_reject_loaded_path_escape(operation: str) -> None:
             ],
         )
 
-        assert result.exit_code == int(ExitCode.INPUT_ERROR)
-        assert "FC-3009" in result.stderr
-        assert not (root / "config" / "presets" / "demo.toml").exists()
+        assert result.exit_code == 0
+        persisted_path = (
+            config_path if operation == "apply" else root / "config" / "presets" / "demo.toml"
+        )
+        persisted = tomllib.loads(persisted_path.read_text(encoding="utf-8"))
+        assert persisted["paths"]["generated_dir"] == "../../out"
 
 
-def test_preset_apply_rejects_path_escape_added_by_preset_before_config_write() -> None:
+def test_preset_apply_preserves_external_generated_root_added_by_preset() -> None:
     with runner.isolated_filesystem():
         root = Path("workspace")
         config_path = _write_minimal_config(root)
-        original = config_path.read_text(encoding="utf-8")
         presets_dir = root / "config" / "presets"
         presets_dir.mkdir(parents=True, exist_ok=True)
         (presets_dir / "escape.toml").write_text(
@@ -282,9 +286,9 @@ def test_preset_apply_rejects_path_escape_added_by_preset_before_config_write() 
             ],
         )
 
-        assert result.exit_code == int(ExitCode.INPUT_ERROR)
-        assert "FC-3009" in result.stderr
-        assert config_path.read_text(encoding="utf-8") == original
+        assert result.exit_code == 0
+        persisted = tomllib.loads(config_path.read_text(encoding="utf-8"))
+        assert persisted["paths"]["generated_dir"] == "../../out"
 
 
 def test_preset_list_prints_names_sorted_case_insensitive() -> None:

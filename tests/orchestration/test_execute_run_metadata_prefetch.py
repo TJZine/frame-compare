@@ -155,11 +155,11 @@ def test_execute_run_from_cache_only_invalid_shared_cache_skips_metadata_prefetc
         )
 
     def _reserve_run_folder(
-        input_dir: Path,
+        generated_root: Path,
         filenames: list[str],
         tmdb_metadata: TmdbMetadata | None,
     ) -> RunFolderReservation:
-        del input_dir, tmdb_metadata
+        del generated_root, tmdb_metadata
         reserve_calls.append(filenames)
         return RunFolderReservation(
             path=Path("should-not-be-used"),
@@ -206,12 +206,12 @@ def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(
     resolve_calls: list[list[str]] = []
 
     def _capture_reserve_run_folder(
-        input_dir: Path, filenames: list[str], tmdb_metadata: TmdbMetadata | None
+        generated_root: Path, filenames: list[str], tmdb_metadata: TmdbMetadata | None
     ) -> RunFolderReservation:
         del filenames
         captured_tmdb_metadata.append(tmdb_metadata)
         return RunFolderReservation(
-            path=input_dir / "Fight Club (1999)",
+            path=generated_root / "Fight Club (1999)",
             folder_name="Fight Club (1999)",
             base_name="Fight Club (1999)",
             naming_source="tmdb",

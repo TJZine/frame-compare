@@ -51,10 +51,8 @@ def test_analysis_selection_domain_for_cache_inputs_applies_source_overrides(
         content="""\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
-use_run_folders = false
 
 [sources]
 reference = "b_comp.mkv"
@@ -106,10 +104,8 @@ def test_write_metrics_cache_uses_selected_reference_order_for_fingerprint(
         content="""\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
-use_run_folders = false
 
 [sources]
 reference = "b_comp.mkv"
@@ -157,10 +153,8 @@ def test_analysis_selection_domain_for_cache_inputs_resolves_nested_relative_sel
         content="""\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
-use_run_folders = false
 
 [sources]
 reference = "nested/b_comp.mkv"

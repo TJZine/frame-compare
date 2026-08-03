@@ -70,8 +70,9 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     assert str(_workspace_path("config", "config.toml")) in output
     assert "input" in output
     assert str(_workspace_path("comparison_videos")) in output
-    assert "run folders" in output
-    assert "base paths" in output
+    assert "generated" in output
+    assert "run folders" not in output
+    assert "screenshots" not in output
     assert "selection" in output
     assert "user=0, random=10, dark=0, bright=0, motion=0, seed=42" in output
     assert "analysis mode" in output
@@ -145,7 +146,6 @@ def test_at_a_glance_preserves_literal_brackets_in_dynamic_paths(
 ) -> None:
     config = _config()
     config.paths.input_dir = Path("[bold]input[end]")
-    config.paths.screenshots_dir = Path("[red]screens[end]")
     config.paths.generated_dir = Path("[cyan]generated[end]")
     console = _console()
 
@@ -164,7 +164,6 @@ def test_at_a_glance_preserves_literal_brackets_in_dynamic_paths(
     assert str(_workspace_path("[root]")) in output
     assert str(_workspace_path("config", "[file].toml")) in output
     assert "[bold]input[end]" in output
-    assert "[red]screens[end]" in output
     assert "[cyan]generated[end]" in output
 
 

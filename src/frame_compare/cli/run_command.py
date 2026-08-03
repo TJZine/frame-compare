@@ -1031,8 +1031,8 @@ def handle_diagnose_paths(resolved_root: Path, config_path: Path, config: Config
         "root": str(resolved_root),
         "config": str(config_path),
         "input": str(workspace.input_dir),
-        "output": str(workspace.screenshots_dir),
-        "cache": str(workspace.generated_dir),
+        "output": str(workspace.generated_root),
+        "cache": str(workspace.generated_root / "cache"),
     }
     typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
 

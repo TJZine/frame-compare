@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from ._helpers import powershell_exe as _powershell_exe
+from ._helpers import snapshot_bytes as _snapshot_bytes
 from ._helpers import write_valid_config_json as _write_valid_config_json
 
 _OLD_VERSION_CONTENT = '__version__ = "1.0.0"\n'
@@ -31,9 +32,7 @@ def _generate_rsa_keypair(
 ) -> tuple[Path, str]:
     private_key_path = tmp_path / "private_key.xml"
     public_key_path = tmp_path / "public_key.xml"
-    keygen_script = (
-        repo_root / "tools" / "windows_portable" / "generate_update_keypair.ps1"
-    )
+    keygen_script = repo_root / "tools" / "windows_portable" / "generate_update_keypair.ps1"
     proc = subprocess.run(
         [
             exe,
@@ -306,10 +305,24 @@ def test_windows_portable_update_apply_e2e(tmp_path: Path, repo_root: Path) -> N
         tmp_path=tmp_path,
     )
 
-    bundle_dir, shim_update_ps1, _state_dir = _setup_update_install(
+    bundle_dir, shim_update_ps1, state_dir = _setup_update_install(
         tmp_path=tmp_path,
         repo_root=repo_root,
         public_key_xml=public_key_xml,
+    )
+    external_generated_root = tmp_path / "external-generated-root"
+    sentinel_run = external_generated_root / "Movie (2026)"
+    (sentinel_run / "screenshots").mkdir(parents=True)
+    (external_generated_root / "cache" / "analysis").mkdir(parents=True)
+    (sentinel_run / "report.html").write_bytes(b"<html>update-sentinel</html>\x00")
+    (sentinel_run / "screenshots" / "frame.png").write_bytes(b"PNG-UPDATE-SENTINEL\x00")
+    (external_generated_root / "cache" / "analysis" / "clip.compframes").write_bytes(
+        b"CACHE-UPDATE-SENTINEL\x00"
+    )
+    external_snapshot = _snapshot_bytes(external_generated_root)
+    authored_generated = str(external_generated_root).replace("\\", "/")
+    (state_dir / "config.toml").write_text(
+        f'[paths]\ngenerated_dir = "{authored_generated}"\n', encoding="utf-8"
     )
     version_py = _write_mock_bundle(bundle_dir=bundle_dir)
     update_zip_path = _build_update_zip(tmp_path=tmp_path)
@@ -342,6 +355,7 @@ def test_windows_portable_update_apply_e2e(tmp_path: Path, repo_root: Path) -> N
     assert "Signature missing or invalid" in manifest_rejection.stderr
     assert _snapshot_tree(installed_tree) == original_snapshot
     assert not (bundle_dir / "app" / ".update_backups").exists()
+    assert _snapshot_bytes(external_generated_root) == external_snapshot
 
     payload_tampered_zip = tmp_path / "payload-tampered.zip"
     _rewrite_zip_entry(
@@ -361,6 +375,7 @@ def test_windows_portable_update_apply_e2e(tmp_path: Path, repo_root: Path) -> N
     assert "Payload hash mismatch" in payload_rejection.stderr
     assert _snapshot_tree(installed_tree) == original_snapshot
     assert not (bundle_dir / "app" / ".update_backups").exists()
+    assert _snapshot_bytes(external_generated_root) == external_snapshot
 
     apply_proc = _apply_update(
         exe=exe,
@@ -376,13 +391,13 @@ def test_windows_portable_update_apply_e2e(tmp_path: Path, repo_root: Path) -> N
     _assert_update_applied(bundle_dir=bundle_dir, version_py=version_py)
     backup_root = bundle_dir / "app" / ".update_backups"
     backup_id = next(backup_root.iterdir()).name
+    assert _snapshot_bytes(external_generated_root) == external_snapshot
     rollback = _run_update_command(
         exe=exe,
         env=env,
         shim_update_ps1=shim_update_ps1,
         args=["rollback", backup_id],
     )
-    assert rollback.returncode == 0, (
-        f"stdout:\n{rollback.stdout}\n\nstderr:\n{rollback.stderr}"
-    )
+    assert rollback.returncode == 0, f"stdout:\n{rollback.stdout}\n\nstderr:\n{rollback.stderr}"
     assert _snapshot_tree(installed_tree) == original_snapshot
+    assert _snapshot_bytes(external_generated_root) == external_snapshot

@@ -73,6 +73,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if ! cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."; then
+  echo "ERROR: unable to change to the Frame Compare repository root" >&2
+  exit 2
+fi
+
 if ! command -v docker >/dev/null 2>&1; then
   echo "ERROR: docker is not installed or not on PATH" >&2
   exit 127
@@ -87,6 +92,11 @@ if ! docker info >/dev/null 2>&1; then
   echo "ERROR: docker daemon is not running; start Docker Desktop or your Docker daemon and retry" >&2
   exit 127
 fi
+
+# Ensure the host bind-mount source exists before Compose creates any container.
+# This keeps the generated-data proof writable by the invoking host user on
+# Linux daemons that otherwise create a missing bind source as root.
+mkdir -p generated
 
 build_args=()
 if [[ "$no_cache" == "1" ]]; then
@@ -103,7 +113,13 @@ if [[ "$run_build" == "1" ]]; then
 fi
 
 tmp_log="$(mktemp)"
-cleanup() { rm -f "$tmp_log"; }
+proof_dir=""
+cleanup() {
+  rm -f "$tmp_log"
+  if [[ "$proof_dir" == generated/.docker-integration-proof.* && -d "$proof_dir" ]]; then
+    rm -rf -- "$proof_dir"
+  fi
+}
 trap cleanup EXIT
 
 docker_cmd=(
@@ -284,5 +300,254 @@ for proof_marker in "${required_proof_markers[@]}"; do
     exit 4
   fi
 done
+
+# Prove the default generated-data bind mount survives container removal.  The
+# unique host directory is created under the same generated root used by the
+# default Compose services, then removed by the EXIT trap after all assertions.
+# The container runs the real CLI against two tiny FFmpeg-generated clips; no
+# handcrafted report, screenshot, or run-record files are accepted as proof.
+proof_dir="$(mktemp -d generated/.docker-integration-proof.XXXXXX)"
+if ! host_uid="$(id -u)" || ! host_gid="$(id -g)"; then
+  echo "ERROR: unable to determine the invoking user's UID/GID for the Docker proof" >&2
+  exit 2
+fi
+readonly host_uid host_gid
+proof_name="$(basename "$proof_dir")"
+container_proof_cmd=$(cat <<'EOF'
+set -euo pipefail
+export LIBGL_ALWAYS_SOFTWARE=1
+export PATH="/home/framecompare/.local/bin:${PATH}"
+icd="$(ls /usr/share/vulkan/icd.d/lvp_icd.*.json 2>/dev/null | head -n 1 || true)"
+if [[ -n "$icd" ]]; then
+  export VK_ICD_FILENAMES="$icd"
+fi
+generated_root="/workspace/generated/PROOF_NAME"
+workspace_dir="$(mktemp -d /tmp/frame-compare-docker-proof.XXXXXX)"
+cleanup_workspace() {
+  rm -rf -- "$workspace_dir"
+}
+trap cleanup_workspace EXIT
+
+media_dir="$workspace_dir/comparison_videos"
+config_dir="$workspace_dir/config"
+mkdir -p "$media_dir" "$config_dir"
+cat > "$config_dir/config.toml" <<CONFIG
+[paths]
+input_dir = "comparison_videos"
+generated_dir = "$generated_root"
+config_dir = "config"
+
+[sources]
+reference = "reference.mp4"
+
+[analysis]
+user_frames = []
+random_frame_count = 0
+dark_frame_count = 1
+bright_frame_count = 0
+motion_frame_count = 0
+min_window_seconds = 0.0
+
+[audio_alignment]
+enable = false
+
+[screenshots]
+use_ffmpeg = true
+
+[color]
+enable_tonemap = false
+
+[slowpics]
+auto_upload = false
+
+[tmdb]
+enabled = false
+
+[report]
+enable = true
+auto_open = false
+CONFIG
+
+ffmpeg -hide_banner -loglevel error \
+  -f lavfi -i testsrc2=size=32x32:rate=2:duration=2 \
+  -frames:v 4 -c:v mpeg4 -pix_fmt yuv420p -y "$media_dir/reference.mp4"
+ffmpeg -hide_banner -loglevel error \
+  -f lavfi -i testsrc2=size=32x32:rate=2:duration=2 \
+  -vf hue=h=20 -frames:v 4 -c:v mpeg4 -pix_fmt yuv420p -y "$media_dir/comparison.mp4"
+
+frame-compare run \
+  --root "$workspace_dir" \
+  --config "$config_dir/config.toml" \
+  --input "$media_dir" \
+  --skip-metadata \
+  --no-upload \
+  --quiet
+
+# The application must not leave core output artifacts beside the ephemeral
+# fixture workspace. Any match here means generated_dir containment failed.
+unexpected_outputs="$(find "$workspace_dir" -type f \( \
+  -name 'report.html' -o -name 'run_info.toml' -o -name 'run_result.toml' -o -name '*.png' \
+\) -print)"
+if [[ -n "$unexpected_outputs" ]]; then
+  echo "ERROR: Frame Compare emitted core artifacts outside /workspace/generated:" >&2
+  printf '%s\n' "$unexpected_outputs" >&2
+  exit 7
+fi
+
+run_dirs=()
+while IFS= read -r -d '' run_dir; do
+  run_dirs+=("$run_dir")
+done < <(find "$generated_root" -mindepth 1 -maxdepth 1 -type d ! -name cache -print0)
+if [[ "${#run_dirs[@]}" != "1" ]]; then
+  echo "ERROR: expected one application-created run folder under $generated_root" >&2
+  exit 8
+fi
+run_root="${run_dirs[0]}"
+require_nonempty_file() {
+  local path="$1"
+  local label="$2"
+  if [[ ! -f "$path" || ! -s "$path" ]]; then
+    echo "ERROR: missing or empty $label: $path" >&2
+    exit 9
+  fi
+}
+
+require_nonempty_file "$run_root/report.html" "HTML report"
+require_nonempty_file "$run_root/run_info.toml" "run_info.toml"
+require_nonempty_file "$run_root/run_result.toml" "run_result.toml"
+require_nonempty_file "$generated_root/clip_probe.toml" "shared probe cache"
+require_nonempty_file "$run_root/generated/clip_probe.toml" "run-local probe state"
+
+if ! screenshot_path="$(
+  find "$run_root/screenshots" -type f -name '*.png' -size +0c -print -quit 2>/dev/null
+)" || [[ -z "$screenshot_path" ]]; then
+  echo "ERROR: no non-empty PNG screenshots found under $run_root/screenshots" >&2
+  exit 9
+fi
+if ! analysis_cache_path="$(
+  find "$generated_root/cache/analysis" -type f -name '*.compframes' -size +0c -print -quit 2>/dev/null
+)" || [[ -z "$analysis_cache_path" ]]; then
+  echo "ERROR: no non-empty shared analysis cache found under $generated_root/cache/analysis" >&2
+  exit 9
+fi
+echo "DOCKER_PROOF application_run=ok"
+EOF
+)
+container_proof_cmd="${container_proof_cmd//PROOF_NAME/$proof_name}"
+
+if ! env \
+  FRAME_COMPARE_HOST_UID="$host_uid" \
+  FRAME_COMPARE_HOST_GID="$host_gid" \
+  docker compose run --rm --entrypoint /bin/bash frame-compare-run -lc "$container_proof_cmd"; then
+  echo "ERROR: generated-data bind-mount proof failed" >&2
+  exit 5
+fi
+
+host_python=""
+if command -v python3 >/dev/null 2>&1; then
+  host_python="$(command -v python3)"
+elif command -v python >/dev/null 2>&1; then
+  host_python="$(command -v python)"
+fi
+if [[ -z "$host_python" ]]; then
+  echo "ERROR: host Python is required to parse Docker-generated TOML and PNG proof files" >&2
+  exit 127
+fi
+
+if ! "$host_python" - "$proof_dir" <<'PY'
+from __future__ import annotations
+
+import struct
+import sys
+import tomllib
+from pathlib import Path
+
+
+def fail(message: str) -> None:
+    raise SystemExit(f"ERROR: {message}")
+
+
+proof_dir = Path(sys.argv[1]).resolve()
+run_dirs = sorted(
+    path
+    for path in proof_dir.iterdir()
+    if path.is_dir() and not path.is_symlink() and path.name != "cache"
+)
+if len(run_dirs) != 1:
+    fail(f"expected one host run folder after container removal under {proof_dir}, found {run_dirs}")
+run_dir = run_dirs[0]
+generated_root = proof_dir
+
+
+def require_file(path: Path, label: str) -> Path:
+    if path.is_symlink() or not path.is_file() or path.stat().st_size == 0:
+        fail(f"generated-data bind-mount artifact missing after container removal: {label}: {path}")
+    return path
+
+
+report_path = require_file(run_dir / "report.html", "report.html")
+if "<html" not in report_path.read_text(encoding="utf-8").lower():
+    fail(f"application report is not HTML: {report_path}")
+
+run_info_path = require_file(run_dir / "run_info.toml", "run_info.toml")
+with run_info_path.open("rb") as handle:
+    run_info = tomllib.load(handle)
+if run_info.get("version") != 1:
+    fail(f"run_info.toml is not a parseable V1 record: {run_info_path}")
+
+run_result_path = require_file(run_dir / "run_result.toml", "run_result.toml")
+with run_result_path.open("rb") as handle:
+    run_result = tomllib.load(handle)
+if run_result.get("version") != 1 or run_result.get("status") not in {
+    "completed",
+    "completed_with_warnings",
+}:
+    fail(f"run_result.toml is not a completed parseable V1 record: {run_result_path}")
+if run_result.get("report_path") != "report.html":
+    fail(f"run_result.toml report_path is not canonical: {run_result_path}")
+if run_result.get("screenshot_dir") != "screenshots":
+    fail(f"run_result.toml screenshot_dir is not canonical: {run_result_path}")
+
+screenshot_dir = run_dir / "screenshots"
+screenshots = sorted(screenshot_dir.glob("*.png"))
+if not screenshots:
+    fail(f"application produced no PNG screenshots: {screenshot_dir}")
+for screenshot in screenshots:
+    payload = require_file(screenshot, "screenshots/*.png").read_bytes()
+    if payload[:8] != b"\x89PNG\r\n\x1a\n":
+        fail(f"application screenshot is not a PNG: {screenshot}")
+    if len(payload) < 24 or payload[12:16] != b"IHDR":
+        fail(f"application screenshot has no PNG IHDR: {screenshot}")
+    width, height = struct.unpack(">II", payload[16:24])
+    if width == 0 or height == 0:
+        fail(f"application screenshot has invalid dimensions: {screenshot}")
+
+root_probe_path = require_file(generated_root / "clip_probe.toml", "shared probe cache")
+with root_probe_path.open("rb") as handle:
+    root_probe = tomllib.load(handle)
+if root_probe.get("version") != "1":
+    fail(f"shared probe cache is not parseable: {root_probe_path}")
+
+run_probe_path = require_file(run_dir / "generated" / "clip_probe.toml", "run-local probe state")
+with run_probe_path.open("rb") as handle:
+    run_probe = tomllib.load(handle)
+if run_probe.get("version") != "1":
+    fail(f"run-local probe state is not parseable: {run_probe_path}")
+
+analysis_cache_dir = generated_root / "cache" / "analysis"
+analysis_caches = sorted(analysis_cache_dir.glob("*.compframes"))
+if not analysis_caches:
+    fail(f"application produced no shared analysis cache: {analysis_cache_dir}")
+for cache_path in analysis_caches:
+    require_file(cache_path, "shared analysis cache")
+
+print(
+    "DOCKER_PROOF generated_mount=ok "
+    "artifacts=report,screenshots,run_info,run_result,run_generated,analysis_cache,probe_cache"
+)
+PY
+then
+  exit 6
+fi
 
 echo "OK: docker runtime proof and integration tests passed with zero skips"

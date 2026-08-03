@@ -47,6 +47,7 @@ def _workspace(tmp_path: Path) -> WorkspacePaths:
     return WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
+        generated_root=tmp_path / "generated",
         run_dir=None,
         screenshots_dir=tmp_path / "screenshots",
         generated_dir=tmp_path / "generated",
@@ -80,7 +81,7 @@ def test_execute_run_returns_success_and_records_preflight_timing(
 
     assert result.success is True
     assert result.warnings == []
-    assert result.screenshot_dir == (tmp_path / "screenshots").resolve()
+    assert result.screenshot_dir == (tmp_path / "generated" / "source" / "screenshots").resolve()
     assert result.frame_count == 10
     assert result.clips_processed == 1
     assert result.duration_seconds >= 0.0
@@ -592,7 +593,6 @@ def test_execute_run_applies_cli_overrides_before_phase_execution(
     config_content = """\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
 
@@ -648,7 +648,6 @@ def test_execute_run_publish_skip_follows_effective_slowpics_config(
     config_content = """\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
 

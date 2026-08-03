@@ -174,14 +174,10 @@ def build_dry_run_plan(
         )
         if active
     )
-    run_folder_fact = (
-        DryRunRuntimeFact(
-            status="unknown",
-            value=None,
-            reason="resolved during run-folder reservation",
-        )
-        if config.paths.use_run_folders
-        else DryRunRuntimeFact(status="known", value=None, reason=None)
+    run_folder_fact = DryRunRuntimeFact(
+        status="unknown",
+        value=None,
+        reason="resolved during run-folder reservation",
     )
 
     return DryRunPlan(
@@ -206,7 +202,7 @@ def build_dry_run_plan(
         ),
         outputs=DryRunOutputs(
             screenshots=True,
-            run_folders=config.paths.use_run_folders,
+            run_folders=True,
             report=config.report.enable,
             report_auto_open_configured=config.report.auto_open,
         ),

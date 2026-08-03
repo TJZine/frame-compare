@@ -259,7 +259,7 @@ def test_execute_prep_from_cache_only_validates_metrics_cache_when_analysis_runs
 def test_execute_prep_cache_only_rejects_metadata_mismatch_before_run_folder_reservation(
     tmp_path: Path,
 ) -> None:
-    config_content = METRIC_CONFIG.replace("use_run_folders = false", "use_run_folders = true")
+    config_content = METRIC_CONFIG
     _create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"
     source_path = _create_video_files(input_dir, "source.mkv")[0]
@@ -375,10 +375,8 @@ def test_execute_prep_shared_analysis_cache_stays_outside_run_folder(
     config_content = """\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "custom_generated"
 config_dir = "config"
-use_run_folders = true
 
 [audio_alignment]
 enable = false

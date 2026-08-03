@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -92,11 +93,14 @@ def test_run_report_phase_builds_report_data_and_records_path(
         slowpics_url="https://slow.pics/c/example",
     )
     captured: dict[str, Any] = {}
-    expected_path = tmp_path / "report.html"
+    expected_path = tmp_path / "run" / "report.html"
 
-    def _fake_generate_report(report_data: object, report_config: object) -> Path:
+    def _fake_generate_report(
+        report_data: object, report_config: object, *, output_path: Path
+    ) -> Path:
         captured["report_data"] = report_data
         captured["report_config"] = report_config
+        captured["output_path"] = output_path
         return expected_path
 
     monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
@@ -111,6 +115,7 @@ def test_run_report_phase_builds_report_data_and_records_path(
 
     report_data = captured["report_data"]
     assert output.report_path == expected_path
+    assert captured["output_path"] == expected_path
     assert artifacts.report_path is None
     assert report_data.frames == [5]
     assert report_data.frame_details == []
@@ -122,6 +127,26 @@ def test_run_report_phase_builds_report_data_and_records_path(
         ("Encode 1", (1920, 1080), 24.0),
     ]
     assert captured["report_config"] == ctx.config.report
+
+
+def test_run_report_phase_requires_reserved_run_folder(tmp_path: Path) -> None:
+    ctx = _context(tmp_path)
+    ctx.workspace = replace(ctx.workspace, run_dir=None)
+    render = RenderArtifacts(
+        screenshots_by_label={
+            "Reference": [tmp_path / "screenshots" / "reference_1.png"],
+        },
+        screenshot_dir=tmp_path / "screenshots",
+    )
+
+    with pytest.raises(RuntimeError, match="reserved run folder"):
+        phase_post_render.run_report_phase(
+            ctx,
+            frames=[1],
+            render=render,
+            metadata=None,
+            slowpics_url=None,
+        )
 
 
 def test_run_report_phase_builds_four_clip_payload_inputs_in_clip_order(
@@ -143,10 +168,13 @@ def test_run_report_phase_builds_four_clip_payload_inputs_in_clip_order(
     )
     captured: dict[str, Any] = {}
 
-    def _fake_generate_report(report_data: object, report_config: object) -> Path:
+    def _fake_generate_report(
+        report_data: object, report_config: object, *, output_path: Path
+    ) -> Path:
         captured["report_data"] = report_data
         captured["report_config"] = report_config
-        return tmp_path / "report.html"
+        captured["output_path"] = output_path
+        return output_path
 
     monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
 
@@ -159,6 +187,7 @@ def test_run_report_phase_builds_four_clip_payload_inputs_in_clip_order(
     )
 
     report_data = captured["report_data"]
+    assert captured["output_path"] == tmp_path / "run" / "report.html"
     assert [clip.name for clip in report_data.clips] == [
         "Reference",
         "Encode 1",
@@ -206,11 +235,14 @@ def test_run_report_phase_passes_reference_source_frame_details(
         screenshot_dir=tmp_path / "screenshots",
     )
     captured: dict[str, Any] = {}
-    expected_path = tmp_path / "report.html"
+    expected_path = tmp_path / "run" / "report.html"
 
-    def _fake_generate_report(report_data: object, report_config: object) -> Path:
+    def _fake_generate_report(
+        report_data: object, report_config: object, *, output_path: Path
+    ) -> Path:
         captured["report_data"] = report_data
         captured["report_config"] = report_config
+        captured["output_path"] = output_path
         return expected_path
 
     monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
@@ -225,6 +257,7 @@ def test_run_report_phase_passes_reference_source_frame_details(
 
     report_data = captured["report_data"]
     assert output.report_path == expected_path
+    assert captured["output_path"] == expected_path
     assert report_data.frames == [1, 2]
     assert [
         (detail.label, detail.detail, detail.category) for detail in report_data.frame_details

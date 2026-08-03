@@ -182,14 +182,7 @@ def print_at_a_glance(
     _add_kv(table, "root", _styled_path(str(root)))
     _add_kv(table, "config", _styled_path(str(config_path)))
     _add_kv(table, "input", _styled_path(str(workspace.input_dir)))
-    _add_kv(table, "screenshots", _styled_path(str(workspace.screenshots_dir)))
-    _add_kv(table, "generated", _styled_path(str(workspace.generated_dir)))
-    run_folder_note = (
-        f"{_styled_value('enabled')} {_styled_unit('(screenshots/generated rows are base paths)')}"
-        if config.paths.use_run_folders
-        else _styled_value("disabled")
-    )
-    _add_kv(table, "run folders", run_folder_note)
+    _add_kv(table, "generated", _styled_path(str(workspace.generated_root)))
 
     # ── Analysis ──
     _add_separator(table)

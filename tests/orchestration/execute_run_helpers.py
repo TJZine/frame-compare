@@ -45,10 +45,8 @@ if TYPE_CHECKING:
 MINIMAL_CONFIG = """\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
-use_run_folders = false
 
 [audio_alignment]
 enable = false
@@ -63,10 +61,8 @@ enable = false
 RUN_FOLDERS_CONFIG = """\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
-use_run_folders = true
 
 [audio_alignment]
 enable = false

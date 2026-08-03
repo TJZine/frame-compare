@@ -27,6 +27,15 @@ def powershell_exe() -> str | None:
     return shutil.which("pwsh") or shutil.which("powershell")
 
 
+def snapshot_bytes(root: Path) -> dict[str, bytes]:
+    """Return a deterministic relative-path-to-bytes snapshot of a file tree."""
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
 def run_shim(
     *,
     exe: str,

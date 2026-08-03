@@ -74,16 +74,19 @@ def test_output_phases_use_reselected_metric_metadata_after_real_initial_selecti
 
     render_capture: dict[str, Any] = {}
     report_capture: dict[str, Any] = {}
-    expected_report_path = tmp_path / "report.html"
+    expected_report_path = tmp_path / "run" / "report.html"
 
     def _fake_render_screenshots_from_batch(**kwargs: object) -> dict[str, list[Path]]:
         render_capture.update(kwargs)
         return {"Reference": [tmp_path / "reference.png"]}
 
-    def _fake_generate_report(report_data: object, report_config: object) -> Path:
+    def _fake_generate_report(
+        report_data: object, report_config: object, *, output_path: Path
+    ) -> Path:
         report_capture["report_data"] = report_data
         report_capture["report_config"] = report_config
-        return expected_report_path
+        assert output_path == expected_report_path
+        return output_path
 
     monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
     monkeypatch.setattr(
@@ -164,10 +167,13 @@ async def test_unresolved_comparison_remains_in_render_report_and_slowpics_membe
         ]
         return screenshots_by_label
 
-    def _fake_generate_report(report_data: object, report_config: object) -> Path:
+    def _fake_generate_report(
+        report_data: object, report_config: object, *, output_path: Path
+    ) -> Path:
         captured["report_clip_names"] = [clip.name for clip in cast(Any, report_data).clips]
         captured["report_config"] = report_config
-        return tmp_path / "report.html"
+        assert output_path == tmp_path / "run" / "report.html"
+        return output_path
 
     async def _fake_publish_to_slowpics(**kwargs: object) -> PublishResult:
         upload_plan = cast(Any, kwargs["upload_plan"])
@@ -248,12 +254,15 @@ def test_run_report_phase_labels_skipped_analysis_alignment_fallback_random_fram
         ]
 
     captured: dict[str, Any] = {}
-    expected_path = tmp_path / "report.html"
+    expected_path = tmp_path / "run" / "report.html"
 
-    def _fake_generate_report(report_data: object, report_config: object) -> Path:
+    def _fake_generate_report(
+        report_data: object, report_config: object, *, output_path: Path
+    ) -> Path:
         captured["report_data"] = report_data
         captured["report_config"] = report_config
-        return expected_path
+        assert output_path == expected_path
+        return output_path
 
     monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
     monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)

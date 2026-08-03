@@ -68,6 +68,10 @@ class PromptInputDirFn(Protocol):
     def __call__(self, default: str, *, base_dir: Path) -> str: ...
 
 
+class PromptGeneratedDirFn(Protocol):
+    def __call__(self, default: str) -> str: ...
+
+
 class WriteWizardPayloadFn(Protocol):
     def __call__(self, config_path: Path, data: TomlPayload) -> None: ...
 
@@ -94,6 +98,7 @@ def handle_wizard(
     config_path: Path,
     *,
     prompt_input_dir: PromptInputDirFn,
+    prompt_generated_dir: PromptGeneratedDirFn,
     prompt: PromptFn,
     confirm: ConfirmFn,
     write_payload: WriteWizardPayloadFn,
@@ -123,6 +128,11 @@ def handle_wizard(
         input_changed = not existing or input_value != current_config.paths.input_dir
         if input_changed:
             set_table_values(candidate, "paths", {"input_dir": input_value})
+
+        generated_value = prompt_generated_dir(current_config.paths.generated_dir)
+        generated_changed = not existing or generated_value != current_config.paths.generated_dir
+        if generated_changed:
+            set_table_values(candidate, "paths", {"generated_dir": generated_value})
 
         input_dir = _resolve_input_dir(input_value, root)
         discovered = _discover_for_wizard(input_dir)
@@ -161,6 +171,7 @@ def handle_wizard(
             old_config=current_config,
             new_config=validated_candidate,
             input_changed=input_changed,
+            generated_changed=generated_changed,
             reference_change=reference_change,
             frame_changed=frame_changed,
             goal=goal,
@@ -194,6 +205,12 @@ def prompt_input_dir(default: str, *, base_dir: Path) -> str:
         if path.exists() and path.is_dir():
             return value
         typer.echo("Input directory does not exist or is not a directory.")
+
+
+def prompt_generated_dir(default: str) -> str:
+    """Prompt for the authored generated-data location without checking availability."""
+    typer.echo("Generated data location contains durable comparison folders and reusable caches.")
+    return str(typer.prompt("Generated data location", default=default))
 
 
 def _resolve_input_dir(value: str, root: Path) -> Path:
@@ -364,6 +381,7 @@ def _print_review(
     old_config: ConfigSchema,
     new_config: ConfigSchema,
     input_changed: bool,
+    generated_changed: bool,
     reference_change: tuple[str, str] | None,
     frame_changed: bool,
     goal: GoalChoice,
@@ -374,6 +392,12 @@ def _print_review(
     if input_changed:
         old_input = old_config.paths.input_dir if existing else "<not configured>"
         typer.echo(f"  Input directory: {old_input} -> {new_config.paths.input_dir}")
+    if generated_changed:
+        old_generated = old_config.paths.generated_dir if existing else "<not configured>"
+        typer.echo(
+            f"  Generated data location: {old_generated} -> {new_config.paths.generated_dir}"
+        )
+        typer.echo("  Stores durable comparison folders and reusable caches")
     if reference_change is not None:
         typer.echo(f"  Reference: {reference_change[0]} -> {reference_change[1]}")
     if frame_changed:

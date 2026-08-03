@@ -36,6 +36,7 @@ from frame_compare.cli.run_command import (
 )
 from frame_compare.cli.wizard_command import (
     handle_wizard,
+    prompt_generated_dir,
     prompt_input_dir,
     write_wizard_config_payload,
 )
@@ -86,6 +87,7 @@ _resolve_root_and_config = resolve_root_and_config
 _copy_text_to_clipboard = copy_text_to_clipboard
 _open_url_in_browser = open_url_in_browser
 _prompt_input_dir = prompt_input_dir
+_prompt_generated_dir = prompt_generated_dir
 
 
 def _sys_stream_isatty(name: str) -> bool:
@@ -301,6 +303,7 @@ def wizard(
         resolved_root,
         config_path,
         prompt_input_dir=_prompt_input_dir,
+        prompt_generated_dir=_prompt_generated_dir,
         prompt=_prompt_text,
         confirm=typer.confirm,
         write_payload=_write_wizard_config_payload,

@@ -76,6 +76,7 @@ def test_overlay_display_frame_number_matches_aligned_output_filename(
     workspace = WorkspacePaths(
         root=tmp_path.resolve(),
         input_dir=(tmp_path / "comparison_videos").resolve(),
+        generated_root=(tmp_path / "generated").resolve(),
         run_dir=None,
         screenshots_dir=(tmp_path / "screenshots").resolve(),
         generated_dir=(tmp_path / "generated").resolve(),
