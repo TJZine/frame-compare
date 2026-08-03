@@ -126,10 +126,12 @@ Media input is a read boundary, not a write boundary. Configured
 environment-expanded, or symlinked to a directory outside the workspace. This
 does not permit generated state to follow media outside the root.
 
-History commands resolve, load, and validate the selected config and contained
-configured `paths.generated_dir` using these same `--root/-r` and `--config/-c`
-rules, but they do not require the configured input directory or current video
-files to exist. This keeps recorded outcomes readable after media moves.
+History commands resolve, load, and validate the selected config and configured
+`paths.generated_dir` using these same `--root/-r` and `--config/-c` rules. The
+resolved generated-data root may be outside the workspace; history requires its
+managed run, record, and report descendants to remain beneath that resolved root.
+History does not require the configured input directory or current video files to
+exist, keeping recorded outcomes readable after media moves.
 
 For the installed Windows portable shim, the shim runs the bundle launcher from the
 bundle root and injects a default `--config` for `run`, `wizard`, supported

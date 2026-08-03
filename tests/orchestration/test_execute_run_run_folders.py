@@ -107,8 +107,8 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
     monkeypatch.setattr(
         preparation,
         "reserve_run_folder",
-        lambda input_dir, **_kwargs: RunFolderReservation(
-            path=input_dir / run_name,
+        lambda generated_root, **_kwargs: RunFolderReservation(
+            path=generated_root / run_name,
             folder_name=run_name,
             base_name=run_name,
             naming_source="parsed_metadata",
@@ -343,6 +343,45 @@ def test_execute_prep_external_generated_root_owns_run_and_shared_state(
     assert not (tmp_path / "generated").exists()
 
 
+def test_execute_prep_reserves_under_resolved_generated_root_symlink(
+    tmp_path: Path,
+) -> None:
+    external_generated_root = tmp_path / "external-generated-data"
+    external_generated_root.mkdir()
+    generated_root_link = tmp_path / "generated-link"
+    try:
+        generated_root_link.symlink_to(external_generated_root, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlink creation is unavailable on this platform")
+    create_config(
+        tmp_path,
+        content=RUN_FOLDERS_CONFIG.replace(
+            'generated_dir = "generated"',
+            f'generated_dir = "{generated_root_link.as_posix()}"',
+        ),
+    )
+    create_video_files(tmp_path / "comparison_videos", "source.mkv")
+
+    prep = asyncio.run(
+        preparation.execute_prep(
+            RunRequest(
+                root=tmp_path,
+                skip_analysis=True,
+                skip_metadata=True,
+                no_upload=True,
+            ),
+            deps=RunDependencies(vs_loader=FakeVSLoader()),
+        )
+    )
+
+    run_dir = prep.workspace.run_dir
+    assert run_dir is not None
+    assert prep.workspace.generated_root == external_generated_root.resolve()
+    assert run_dir.parent == external_generated_root.resolve()
+    assert run_dir.is_dir()
+    assert generated_root_link.is_symlink()
+
+
 def test_execute_prep_rejects_junctioned_reserved_run_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -353,8 +392,8 @@ def test_execute_prep_rejects_junctioned_reserved_run_directory(
     generated_root = tmp_path / "generated"
     run_dir = generated_root / "source"
 
-    def _reserve_junction(input_dir: Path, **_kwargs: object) -> RunFolderReservation:
-        reserved_path = input_dir / "source"
+    def _reserve_junction(generated_root: Path, **_kwargs: object) -> RunFolderReservation:
+        reserved_path = generated_root / "source"
         reserved_path.mkdir(parents=True)
         return RunFolderReservation(
             path=reserved_path,

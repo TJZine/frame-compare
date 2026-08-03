@@ -157,7 +157,7 @@ def test_reserve_run_folder_creates_non_colliding_dir(tmp_path: Path) -> None:
         media_type="movie",
     )
     result = reserve_run_folder(
-        input_dir=tmp_path,
+        generated_root=tmp_path,
         filenames=["random.filename.mkv"],
         tmdb_metadata=tmdb,
     )
@@ -182,7 +182,7 @@ def test_reserve_run_folder_handles_collisions_atomically(tmp_path: Path) -> Non
     )
 
     result = reserve_run_folder(
-        input_dir=tmp_path,
+        generated_root=tmp_path,
         filenames=["random.filename.mkv"],
         tmdb_metadata=tmdb,
     )
@@ -200,7 +200,7 @@ def test_reserve_run_folder_retries_numeric_collisions(tmp_path: Path) -> None:
     (tmp_path / "Fight Club (1999)_2").mkdir()
 
     result = reserve_run_folder(
-        input_dir=tmp_path,
+        generated_root=tmp_path,
         filenames=["Fight.Club.1999.mkv"],
         tmdb_metadata=None,
     )
@@ -221,7 +221,7 @@ def test_reserve_run_folder_collision_suffix_preserves_length_limit(tmp_path: Pa
     )
 
     result = reserve_run_folder(
-        input_dir=tmp_path,
+        generated_root=tmp_path,
         filenames=["source.mkv"],
         tmdb_metadata=tmdb,
     )
@@ -246,7 +246,7 @@ def test_reserve_run_folder_uses_uuid_after_numeric_window(tmp_path: Path, monke
     )
 
     result = reserve_run_folder(
-        input_dir=tmp_path,
+        generated_root=tmp_path,
         filenames=["Fight.Club.1999.mkv"],
         tmdb_metadata=None,
     )
@@ -257,7 +257,7 @@ def test_reserve_run_folder_uses_uuid_after_numeric_window(tmp_path: Path, monke
 
 def test_reserve_run_folder_empty_filenames_uses_canonical_fallback(tmp_path: Path) -> None:
     result = reserve_run_folder(
-        input_dir=tmp_path,
+        generated_root=tmp_path,
         filenames=[],
         tmdb_metadata=None,
     )
@@ -271,7 +271,7 @@ def test_reserve_run_folder_empty_filenames_uses_canonical_fallback(tmp_path: Pa
 
 def test_reserve_run_folder_reports_parsed_metadata_source(tmp_path: Path) -> None:
     result = reserve_run_folder(
-        input_dir=tmp_path,
+        generated_root=tmp_path,
         filenames=["Inception.2010.BluRay.1080p.mkv"],
         tmdb_metadata=None,
     )
@@ -282,7 +282,7 @@ def test_reserve_run_folder_reports_parsed_metadata_source(tmp_path: Path) -> No
 
 def test_reserve_run_folder_reports_filename_stems_source(tmp_path: Path) -> None:
     result = reserve_run_folder(
-        input_dir=tmp_path,
+        generated_root=tmp_path,
         filenames=["video1.mkv", "video2.mkv"],
         tmdb_metadata=None,
     )
@@ -310,6 +310,93 @@ def test_reserve_run_folder_maps_destination_failure_without_fallback(
     assert str(tmp_path) in str(exc_info.value)
     assert "permissions" in (exc_info.value.hint or "")
     assert not any(tmp_path.iterdir())
+
+
+def test_reserve_run_folder_creates_missing_real_owner_chain(tmp_path: Path) -> None:
+    generated_root = tmp_path / "missing" / "generated"
+
+    reservation = reserve_run_folder(generated_root, ["source.mkv"])
+
+    assert generated_root.is_dir()
+    assert reservation.path == generated_root / "source"
+    assert reservation.path.is_dir()
+
+
+def test_reserve_run_folder_rejects_unresolved_owner_before_creating_directories(
+    tmp_path: Path,
+) -> None:
+    unresolved_parent = tmp_path / "missing-parent"
+    resolved_generated_root = tmp_path / "generated"
+    generated_root = unresolved_parent / ".." / resolved_generated_root.name
+
+    with pytest.raises(GeneratedDataReservationError) as exc_info:
+        reserve_run_folder(generated_root, ["source.mkv"])
+
+    assert exc_info.value.code == "FC-3018"
+    assert not unresolved_parent.exists()
+    assert not resolved_generated_root.exists()
+
+
+def test_reserve_run_folder_maps_non_directory_owner_without_collision_retries(
+    tmp_path: Path,
+) -> None:
+    generated_root = tmp_path / "generated"
+    generated_root.write_text("not a directory", encoding="utf-8")
+
+    with pytest.raises(GeneratedDataReservationError) as exc_info:
+        reserve_run_folder(generated_root, ["source.mkv"])
+
+    assert exc_info.value.code == "FC-3018"
+    assert exc_info.value.context.details == {
+        "path": str(generated_root),
+        "error": f"generated-data root ancestor is not a real directory: {generated_root}",
+    }
+
+
+def test_reserve_run_folder_rejects_unresolved_symlink_owner_without_writing_target(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    generated_root = tmp_path / "generated-link"
+    generated_root.symlink_to(target, target_is_directory=True)
+
+    with pytest.raises(GeneratedDataReservationError) as exc_info:
+        reserve_run_folder(generated_root, ["source.mkv"])
+
+    assert exc_info.value.code == "FC-3018"
+    assert not (target / "source").exists()
+
+
+def test_reserve_run_folder_rejects_redirected_owner_ancestor_before_writing_target(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    linked_parent = tmp_path / "linked-parent"
+    linked_parent.symlink_to(target, target_is_directory=True)
+    generated_root = linked_parent / "generated"
+
+    with pytest.raises(GeneratedDataReservationError) as exc_info:
+        reserve_run_folder(generated_root, ["source.mkv"])
+
+    assert exc_info.value.code == "FC-3018"
+    assert not (target / "generated").exists()
+
+
+def test_reserve_run_folder_rejects_junctioned_owner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    generated_root = tmp_path / "generated"
+    generated_root.mkdir()
+    monkeypatch.setattr(Path, "is_junction", lambda path: path == generated_root)
+
+    with pytest.raises(GeneratedDataReservationError) as exc_info:
+        reserve_run_folder(generated_root, ["source.mkv"])
+
+    assert exc_info.value.code == "FC-3018"
+    assert not (generated_root / "source").exists()
 
 
 def test_reserve_run_folder_rejects_symlinked_candidate_escape(tmp_path: Path) -> None:

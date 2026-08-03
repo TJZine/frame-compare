@@ -97,6 +97,7 @@ def test_current_cli_contract_describes_generated_data_cutover() -> None:
     assert "`output` value is the resolved generated-data root" in cli_contract
     assert "The constant run-folder policy" in cli_contract
     assert "`FC-3018`" in cli_contract
+    assert "resolved generated-data root may be outside the workspace" in cli_contract
 
 
 def test_current_authorities_describe_run_relative_records_and_clean_history_cutover() -> None:
