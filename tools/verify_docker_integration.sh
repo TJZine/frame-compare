@@ -73,6 +73,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if ! cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."; then
+  echo "ERROR: unable to change to the Frame Compare repository root" >&2
+  exit 2
+fi
+
 if ! command -v docker >/dev/null 2>&1; then
   echo "ERROR: docker is not installed or not on PATH" >&2
   exit 127
@@ -302,11 +307,11 @@ done
 # The container runs the real CLI against two tiny FFmpeg-generated clips; no
 # handcrafted report, screenshot, or run-record files are accepted as proof.
 proof_dir="$(mktemp -d generated/.docker-integration-proof.XXXXXX)"
-# mktemp creates an owner-only directory, while the production-like service
-# intentionally runs as the image's non-root user. The directory is unique,
-# contains only generated proof fixtures, and is removed by the EXIT trap, so
-# grant that container identity access without changing the persistent root.
-chmod 0777 "$proof_dir"
+if ! host_uid="$(id -u)" || ! host_gid="$(id -g)"; then
+  echo "ERROR: unable to determine the invoking user's UID/GID for the Docker proof" >&2
+  exit 2
+fi
+readonly host_uid host_gid
 proof_name="$(basename "$proof_dir")"
 container_proof_cmd=$(cat <<'EOF'
 set -euo pipefail
@@ -319,12 +324,6 @@ fi
 generated_root="/workspace/generated/PROOF_NAME"
 workspace_dir="$(mktemp -d /tmp/frame-compare-docker-proof.XXXXXX)"
 cleanup_workspace() {
-  # The host validates and removes these container-owned artifacts after this
-  # container exits. Restore host write access on descendants without changing
-  # the persistent generated root or relying on matching host/container UIDs.
-  if [[ -d "$generated_root" ]]; then
-    find "$generated_root" -mindepth 1 -exec chmod a+rwX {} +
-  fi
   rm -rf -- "$workspace_dir"
 }
 trap cleanup_workspace EXIT
@@ -404,25 +403,42 @@ if [[ "${#run_dirs[@]}" != "1" ]]; then
   exit 8
 fi
 run_root="${run_dirs[0]}"
-[[ -s "$run_root/report.html" ]]
-[[ -s "$run_root/run_info.toml" ]]
-[[ -s "$run_root/run_result.toml" ]]
-[[ -n "$(find "$run_root/screenshots" -type f -name '*.png' -size +0c -print -quit)" ]]
-[[ -s "$generated_root/clip_probe.toml" ]]
-[[ -s "$run_root/generated/clip_probe.toml" ]]
-[[ -n "$(find "$generated_root/cache/analysis" -type f -name '*.compframes' -size +0c -print -quit)" ]]
-# The tiny deterministic fixture disables audio alignment, so supplement only
-# that non-natural shared-cache path; core run artifacts above remain real CLI
-# output and are never replaced by sentinels.
-mkdir -p "$generated_root/cache/alignment"
-printf '%s\n' 'supplemental docker proof alignment cache' > \
-  "$generated_root/cache/alignment/.docker-proof-supplemental-alignment"
+require_nonempty_file() {
+  local path="$1"
+  local label="$2"
+  if [[ ! -f "$path" || ! -s "$path" ]]; then
+    echo "ERROR: missing or empty $label: $path" >&2
+    exit 9
+  fi
+}
+
+require_nonempty_file "$run_root/report.html" "HTML report"
+require_nonempty_file "$run_root/run_info.toml" "run_info.toml"
+require_nonempty_file "$run_root/run_result.toml" "run_result.toml"
+require_nonempty_file "$generated_root/clip_probe.toml" "shared probe cache"
+require_nonempty_file "$run_root/generated/clip_probe.toml" "run-local probe state"
+
+if ! screenshot_path="$(
+  find "$run_root/screenshots" -type f -name '*.png' -size +0c -print -quit 2>/dev/null
+)" || [[ -z "$screenshot_path" ]]; then
+  echo "ERROR: no non-empty PNG screenshots found under $run_root/screenshots" >&2
+  exit 9
+fi
+if ! analysis_cache_path="$(
+  find "$generated_root/cache/analysis" -type f -name '*.compframes' -size +0c -print -quit 2>/dev/null
+)" || [[ -z "$analysis_cache_path" ]]; then
+  echo "ERROR: no non-empty shared analysis cache found under $generated_root/cache/analysis" >&2
+  exit 9
+fi
 echo "DOCKER_PROOF application_run=ok"
 EOF
 )
 container_proof_cmd="${container_proof_cmd//PROOF_NAME/$proof_name}"
 
-if ! docker compose run --rm --entrypoint /bin/bash frame-compare-run -lc "$container_proof_cmd"; then
+if ! env \
+  FRAME_COMPARE_HOST_UID="$host_uid" \
+  FRAME_COMPARE_HOST_GID="$host_gid" \
+  docker compose run --rm --entrypoint /bin/bash frame-compare-run -lc "$container_proof_cmd"; then
   echo "ERROR: generated-data bind-mount proof failed" >&2
   exit 5
 fi
@@ -525,16 +541,9 @@ if not analysis_caches:
 for cache_path in analysis_caches:
     require_file(cache_path, "shared analysis cache")
 
-alignment_supplement = require_file(
-    generated_root / "cache" / "alignment" / ".docker-proof-supplemental-alignment",
-    "supplemental shared alignment cache",
-)
-if alignment_supplement.read_text(encoding="utf-8").strip() != "supplemental docker proof alignment cache":
-    fail(f"supplemental alignment cache marker is invalid: {alignment_supplement}")
-
 print(
     "DOCKER_PROOF generated_mount=ok "
-    "artifacts=report,screenshots,run_info,run_result,run_generated,analysis_cache,alignment_cache,probe_cache"
+    "artifacts=report,screenshots,run_info,run_result,run_generated,analysis_cache,probe_cache"
 )
 PY
 then
