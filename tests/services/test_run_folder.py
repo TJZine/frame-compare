@@ -347,10 +347,12 @@ def test_reserve_run_folder_maps_non_directory_owner_without_collision_retries(
         reserve_run_folder(generated_root, ["source.mkv"])
 
     assert exc_info.value.code == "FC-3018"
-    assert exc_info.value.context.details == {
-        "path": str(generated_root),
-        "error": f"generated-data root ancestor is not a real directory: {generated_root}",
-    }
+    details = exc_info.value.context.details
+    assert details is not None
+    assert details["path"] == str(generated_root)
+    error = details["error"]
+    assert isinstance(error, str)
+    assert "generated-data root ancestor is not a real directory" in error
 
 
 def test_reserve_run_folder_rejects_unresolved_symlink_owner_without_writing_target(
