@@ -38,6 +38,7 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
     workspace = WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
+        generated_root=tmp_path / "generated",
         run_dir=None,
         screenshots_dir=tmp_path / "screenshots",
         generated_dir=tmp_path / "generated",
@@ -97,6 +98,7 @@ def test_build_execution_phase_plan_moves_report_before_publish_for_confirmed_up
     workspace = WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
+        generated_root=tmp_path / "generated",
         run_dir=None,
         screenshots_dir=tmp_path / "screenshots",
         generated_dir=tmp_path / "generated",
@@ -144,6 +146,7 @@ def test_build_phases_before_align_skips_analyze_when_request_skips_analysis(
     workspace = WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
+        generated_root=tmp_path / "generated",
         run_dir=None,
         screenshots_dir=tmp_path / "screenshots",
         generated_dir=tmp_path / "generated",
@@ -209,6 +212,7 @@ def test_apply_phase_output_records_frame_plan_selection_labels(tmp_path: Path) 
     workspace = WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
+        generated_root=tmp_path / "generated",
         run_dir=None,
         screenshots_dir=tmp_path / "screenshots",
         generated_dir=tmp_path / "generated",
@@ -252,6 +256,7 @@ def test_apply_phase_output_handles_report_output_explicitly(tmp_path: Path) -> 
     workspace = WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
+        generated_root=tmp_path / "generated",
         run_dir=None,
         screenshots_dir=tmp_path / "screenshots",
         generated_dir=tmp_path / "generated",
@@ -284,6 +289,7 @@ def test_apply_phase_output_retains_publish_post_upload_actions(tmp_path: Path) 
     workspace = WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
+        generated_root=tmp_path / "generated",
         run_dir=None,
         screenshots_dir=tmp_path / "screenshots",
         generated_dir=tmp_path / "generated",
@@ -334,6 +340,7 @@ def test_apply_phase_output_records_slowpics_confirmation_status_and_warnings(
     workspace = WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
+        generated_root=tmp_path / "generated",
         run_dir=None,
         screenshots_dir=tmp_path / "screenshots",
         generated_dir=tmp_path / "generated",
@@ -370,6 +377,7 @@ def test_apply_phase_output_extends_warnings_from_render_output(tmp_path: Path) 
     workspace = WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
+        generated_root=tmp_path / "generated",
         run_dir=None,
         screenshots_dir=tmp_path / "screenshots",
         generated_dir=tmp_path / "generated",
@@ -405,6 +413,7 @@ def test_apply_phase_output_extends_warnings_from_align_output(tmp_path: Path) -
     workspace = WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
+        generated_root=tmp_path / "generated",
         run_dir=None,
         screenshots_dir=tmp_path / "screenshots",
         generated_dir=tmp_path / "generated",
@@ -452,6 +461,7 @@ def test_apply_phase_output_rejects_unknown_output_type(tmp_path: Path) -> None:
     workspace = WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
+        generated_root=tmp_path / "generated",
         run_dir=None,
         screenshots_dir=tmp_path / "screenshots",
         generated_dir=tmp_path / "generated",

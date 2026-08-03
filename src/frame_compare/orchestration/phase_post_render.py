@@ -237,7 +237,13 @@ def run_report_phase(
         slowpics_url=slowpics_url,
         frame_details=report_frame_details_for_frames(ctx, frames=frames),
     )
-    report_path = generate_report(report_data, ctx.config.report)
+    if ctx.workspace.run_dir is None:
+        raise RuntimeError("report generation requires a reserved run folder")
+    report_path = generate_report(
+        report_data,
+        ctx.config.report,
+        output_path=ctx.workspace.run_dir / "report.html",
+    )
     return ReportPhaseOutput(report_path=report_path, report_succeeded=True)
 
 

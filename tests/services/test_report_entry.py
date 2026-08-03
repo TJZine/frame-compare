@@ -66,11 +66,11 @@ def test_generate_report_persists_to_explicit_output_path_over_config_dir(
     report_data: ReportData, tmp_path: Path
 ) -> None:
     configured_dir = tmp_path / "configured"
-    explicit_path = tmp_path / "explicit" / "nested" / "comparison.html"
+    explicit_path = tmp_path / "comparison.html"
 
     report_path = generate_report(
         report_data,
-        ReportConfig(output_dir=str(configured_dir), embed_images=False),
+        ReportConfig(embed_images=False),
         output_path=explicit_path,
     )
     html = report_path.read_text(encoding="utf-8")
@@ -82,24 +82,9 @@ def test_generate_report_persists_to_explicit_output_path_over_config_dir(
     assert '"frame_count": 2' in html
 
 
-def test_generate_report_uses_configured_report_path_when_no_explicit_path(
-    report_data: ReportData, tmp_path: Path
-) -> None:
-    configured_dir = tmp_path / "configured"
-
-    report_path = generate_report(report_data, ReportConfig(output_dir=str(configured_dir)))
-
-    assert report_path == configured_dir / "report.html"
-    assert report_path.exists()
-
-
-def test_generate_report_falls_back_to_first_clip_screenshot_directory(
-    report_data: ReportData,
-) -> None:
-    report_path = generate_report(report_data, ReportConfig(output_dir=None))
-
-    assert report_path == report_data.clips[0].screenshots[0].parent / "report.html"
-    assert report_path.exists()
+def test_generate_report_requires_explicit_output_path(report_data: ReportData) -> None:
+    with pytest.raises(ReportError, match="report output path is required"):
+        generate_report(report_data, ReportConfig())
 
 
 @pytest.mark.parametrize(
@@ -143,7 +128,11 @@ def test_generate_report_rejects_invalid_report_data_before_writing(
     message: str,
 ) -> None:
     with pytest.raises(ReportError, match=message):
-        generate_report(data_builder(report_data), ReportConfig(output_dir=str(tmp_path)))
+        generate_report(
+            data_builder(report_data),
+            ReportConfig(),
+            output_path=tmp_path / "report.html",
+        )
 
     assert not (tmp_path / "report.html").exists()
 
@@ -164,7 +153,11 @@ def test_generate_report_rejects_mismatched_screenshot_counts(report_data: Repor
         ReportError,
         match="screenshot count mismatch for reference: expected 2, got 1",
     ):
-        generate_report(mismatched_data, ReportConfig())
+        generate_report(
+            mismatched_data,
+            ReportConfig(),
+            output_path=report_data.clips[0].path.parent / "report.html",
+        )
 
 
 def test_generate_report_wraps_persistence_failures_as_report_error(
@@ -176,6 +169,10 @@ def test_generate_report_wraps_persistence_failures_as_report_error(
     monkeypatch.setattr("frame_compare.services.report.entry.write_text_atomic", fail_write)
 
     with pytest.raises(ReportError, match="failed to write report: disk full"):
-        generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
+        generate_report(
+            report_data,
+            ReportConfig(),
+            output_path=tmp_path / "report.html",
+        )
 
     assert not (tmp_path / "report.html").exists()

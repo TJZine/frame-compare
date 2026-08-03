@@ -185,13 +185,10 @@ def test_run_dry_run_human_and_quiet_follow_current_quiet_semantics() -> None:
     assert quiet.stderr == ""
 
 
-def test_run_dry_run_marks_disabled_run_folder_name_as_known_absence() -> None:
+def test_run_dry_run_always_reserves_a_run_folder_when_execution_proceeds() -> None:
     with runner.isolated_filesystem():
         root = Path("workspace")
-        config_path = _write_workspace(
-            root,
-            config_suffix="use_run_folders = false\n",
-        )
+        config_path = _write_workspace(root)
         input_dir = root / "comparison_videos"
         input_dir.mkdir()
         (input_dir / "source.mkv").write_bytes(b"")
@@ -200,8 +197,8 @@ def test_run_dry_run_marks_disabled_run_folder_name_as_known_absence() -> None:
 
     assert result.exit_code == 0
     assert json.loads(result.stdout)["runtime_facts"]["run_folder_name"] == {
-        "reason": None,
-        "status": "known",
+        "reason": "resolved during run-folder reservation",
+        "status": "unknown",
         "value": None,
     }
 

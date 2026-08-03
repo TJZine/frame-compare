@@ -16,26 +16,17 @@ def _load_helper_module(repo_root: Path):
     return module
 
 
-def test_translates_generated_and_screenshots_paths(repo_root: Path, tmp_path: Path) -> None:
+def test_translates_generated_paths(repo_root: Path, tmp_path: Path) -> None:
     helper = _load_helper_module(repo_root)
     fake_repo = tmp_path / "repo"
-    screenshot_report = fake_repo / "screenshots" / "run-001" / "report.html"
     generated_file = fake_repo / "generated" / "vspreview" / "session.py"
-    screenshot_report.parent.mkdir(parents=True)
     generated_file.parent.mkdir(parents=True)
     generated_file.write_text("print('ok')\n", encoding="utf-8")
-    screenshot_report.write_text("<html></html>", encoding="utf-8")
-
-    translated_report = helper.translate_container_path(
-        "/workspace/screenshots/run-001/report.html",
-        repo_root=fake_repo,
-    )
     translated_generated = helper.translate_container_path(
         "/workspace/generated/vspreview/session.py",
         repo_root=fake_repo,
     )
 
-    assert translated_report == screenshot_report.resolve()
     assert translated_generated == generated_file.resolve()
 
 
@@ -43,7 +34,6 @@ def test_rejects_disallowed_or_unknown_workspace_roots(repo_root: Path, tmp_path
     helper = _load_helper_module(repo_root)
     fake_repo = tmp_path / "repo"
     (fake_repo / "generated").mkdir(parents=True)
-    (fake_repo / "screenshots").mkdir(parents=True)
 
     with pytest.raises(ValueError, match="/workspace/config"):
         helper.translate_container_path("/workspace/config/config.toml", repo_root=fake_repo)
@@ -54,16 +44,23 @@ def test_rejects_disallowed_or_unknown_workspace_roots(repo_root: Path, tmp_path
         )
     with pytest.raises(
         ValueError,
-        match="only /workspace/screenshots and /workspace/generated",
+        match="only /workspace/generated",
     ):
         helper.translate_container_path("/workspace/other/output.html", repo_root=fake_repo)
+
+    with pytest.raises(
+        ValueError,
+        match="only /workspace/generated",
+    ):
+        helper.translate_container_path(
+            "/workspace/screenshots/run-001/report.html", repo_root=fake_repo
+        )
 
 
 def test_rejects_non_canonical_or_missing_targets(repo_root: Path, tmp_path: Path) -> None:
     helper = _load_helper_module(repo_root)
     fake_repo = tmp_path / "repo"
     (fake_repo / "generated").mkdir(parents=True)
-    (fake_repo / "screenshots").mkdir(parents=True)
 
     with pytest.raises(ValueError, match="absolute"):
         helper.translate_container_path("generated/report.html", repo_root=fake_repo)

@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from frame_compare.config.errors import ConfigNotFoundError
-from frame_compare.config.schema import ConfigSchema, PathsConfig, ReportConfig
+from frame_compare.config.errors import ConfigNotFoundError, ConfigValidationError
+from frame_compare.config.schema import ConfigSchema, PathsConfig
 from frame_compare.errors import PathEscapesRootError
 from frame_compare.orchestration.errors import (
     DirectoryNotFoundError,
@@ -28,7 +28,6 @@ from frame_compare.orchestration.preflight import (
 MINIMAL_CONFIG = """\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
 """
@@ -100,7 +99,6 @@ class TestResolvePaths:
         config = ConfigSchema(
             paths=PathsConfig(
                 input_dir="comparison_videos",
-                screenshots_dir="screenshots",
                 generated_dir="generated",
                 config_dir="config",
             )
@@ -110,7 +108,8 @@ class TestResolvePaths:
 
         assert result.root == tmp_path.resolve()
         assert result.input_dir == (tmp_path / "comparison_videos").resolve()
-        assert result.screenshots_dir == (tmp_path / "screenshots").resolve()
+        assert result.generated_root == (tmp_path / "generated").resolve()
+        assert result.screenshots_dir == (tmp_path / "generated" / "screenshots").resolve()
         assert result.generated_dir == (tmp_path / "generated").resolve()
         assert result.cache_dir == (tmp_path / "generated" / "cache" / "analysis").resolve()
         assert (
@@ -133,7 +132,6 @@ class TestResolvePaths:
         config = ConfigSchema(
             paths=PathsConfig(
                 input_dir="$TEST_ROOT/in",
-                screenshots_dir="screenshots",
                 generated_dir="generated",
                 config_dir="config",
             )
@@ -146,7 +144,7 @@ class TestResolvePaths:
 
     @pytest.mark.parametrize(
         "field_name",
-        ["config_dir", "screenshots_dir", "generated_dir", "report.output_dir"],
+        ["config_dir"],
     )
     @pytest.mark.parametrize("escape_kind", ["relative", "absolute", "symlink"])
     def test_contained_config_paths_reject_resolved_escapes(
@@ -167,13 +165,8 @@ class TestResolvePaths:
             (root / "linked-outside").symlink_to(external, target_is_directory=True)
             escaped_value = "linked-outside/output"
 
-        paths = PathsConfig()
-        report = ReportConfig()
-        if field_name == "report.output_dir":
-            report = report.model_copy(update={"output_dir": escaped_value})
-        else:
-            paths = paths.model_copy(update={field_name: escaped_value})
-        config = ConfigSchema(paths=paths, report=report)
+        paths = PathsConfig().model_copy(update={field_name: escaped_value})
+        config = ConfigSchema(paths=paths)
 
         with pytest.raises(PathEscapesRootError) as exc_info:
             resolve_paths(config, root)
@@ -197,7 +190,135 @@ class TestResolvePaths:
         result = resolve_paths(config, root)
 
         assert result.input_dir == external_input.resolve()
-        assert result.generated_dir.is_relative_to(root.resolve())
+        assert result.generated_root.is_relative_to(root.resolve())
+
+    def test_resolve_paths_allows_absolute_external_generated_root(self, tmp_path: Path) -> None:
+        root = tmp_path / "workspace"
+        external_generated = tmp_path / "generated-on-external-volume"
+        root.mkdir()
+        external_generated.mkdir()
+        config = ConfigSchema(paths=PathsConfig(generated_dir=str(external_generated)))
+
+        result = resolve_paths(config, root)
+
+        assert result.generated_root == external_generated.resolve()
+        assert result.generated_dir == external_generated.resolve()
+        assert not (root / "generated").exists()
+
+    def test_resolve_paths_expands_absolute_generated_root_environment_value(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        root = tmp_path / "workspace"
+        external_generated = tmp_path / "generated-from-env"
+        root.mkdir()
+        external_generated.mkdir()
+        monkeypatch.setenv("FRAME_COMPARE_GENERATED_ROOT", str(external_generated))
+        config = ConfigSchema(paths=PathsConfig(generated_dir="$FRAME_COMPARE_GENERATED_ROOT"))
+
+        result = resolve_paths(config, root)
+
+        assert result.generated_root == external_generated.resolve()
+        assert config.paths.generated_dir == "$FRAME_COMPARE_GENERATED_ROOT"
+
+    def test_resolve_paths_allows_generated_root_reached_through_symlink(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        root = tmp_path / "workspace"
+        external_generated = tmp_path / "external-generated"
+        root.mkdir()
+        external_generated.mkdir()
+        link = root / "generated-link"
+        link.symlink_to(external_generated, target_is_directory=True)
+        config = ConfigSchema(paths=PathsConfig(generated_dir=str(link)))
+
+        result = resolve_paths(config, root)
+
+        assert result.generated_root == external_generated.resolve()
+
+    def test_resolve_paths_maps_generated_root_resolve_failure(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        root = tmp_path / "workspace"
+        root.mkdir()
+        generated_loop = root / "generated-loop"
+        config = ConfigSchema(paths=PathsConfig(generated_dir="generated-loop"))
+        original_resolve = Path.resolve
+
+        def _fail_generated_resolve(path: Path, *args: object, **kwargs: object) -> Path:
+            if path == generated_loop:
+                raise RuntimeError("symlink loop")
+            return original_resolve(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "resolve", _fail_generated_resolve)
+
+        with pytest.raises(ConfigValidationError) as exc_info:
+            resolve_paths(config, root)
+
+        assert exc_info.value.code == "FC-1003"
+        assert "generated-loop" in str(exc_info.value)
+        assert "Reconnect" in (exc_info.value.hint or "")
+        assert not generated_loop.exists()
+
+    def test_resolve_paths_maps_managed_cache_resolve_failure(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        root = tmp_path / "workspace"
+        root.mkdir()
+        generated_root = root / "generated"
+        managed_loop = generated_root / "cache" / "analysis"
+        config = ConfigSchema(paths=PathsConfig(generated_dir="generated"))
+        original_resolve = Path.resolve
+
+        def _fail_managed_resolve(path: Path, *args: object, **kwargs: object) -> Path:
+            if path == managed_loop:
+                raise OSError("managed path unavailable")
+            return original_resolve(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "resolve", _fail_managed_resolve)
+
+        with pytest.raises(ConfigValidationError) as exc_info:
+            resolve_paths(config, root)
+
+        assert exc_info.value.code == "FC-1003"
+        assert "managed path unavailable" in str(exc_info.value)
+        assert "Reconnect" in (exc_info.value.hint or "")
+        assert not managed_loop.exists()
+
+    @pytest.mark.parametrize("generated_dir", ["/", "C:\\", "\\\\server\\share"])
+    def test_resolve_paths_rejects_filesystem_root_generated_directory(
+        self,
+        tmp_path: Path,
+        generated_dir: str,
+    ) -> None:
+        root = tmp_path / "workspace"
+        root.mkdir()
+        config = ConfigSchema(paths=PathsConfig(generated_dir=generated_dir))
+
+        with pytest.raises(ConfigValidationError) as exc_info:
+            resolve_paths(config, root)
+
+        assert exc_info.value.context.details is not None
+        assert exc_info.value.context.details["validation_errors"]
+        assert not (root / "generated").exists()
+
+    def test_resolve_paths_rejects_generated_root_symlink_to_filesystem_root(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        root = tmp_path / "workspace"
+        root.mkdir()
+        (root / "root-link").symlink_to(Path("/"), target_is_directory=True)
+        config = ConfigSchema(paths=PathsConfig(generated_dir="root-link"))
+
+        with pytest.raises(ConfigValidationError):
+            resolve_paths(config, root)
 
     def test_resolve_paths_allows_symlinked_external_input(self, tmp_path: Path) -> None:
         root = tmp_path / "workspace"
@@ -211,18 +332,20 @@ class TestResolvePaths:
 
         assert result.input_dir == external_input.resolve()
 
-    def test_relative_report_output_is_normalized_without_mutating_config(
+    def test_generated_root_accepts_external_absolute_directory_without_mutating_config(
         self,
         tmp_path: Path,
     ) -> None:
-        config = ConfigSchema(report=ReportConfig(output_dir="reports/custom"))
+        root = tmp_path / "workspace"
+        external = tmp_path / "external-generated"
+        root.mkdir()
+        config = ConfigSchema(paths=PathsConfig(generated_dir=str(external)))
 
-        normalized = validate_and_normalize_config_paths(config, tmp_path)
+        normalized = validate_and_normalize_config_paths(config, root)
 
-        assert normalized is not config
-        assert normalized.report is not config.report
-        assert normalized.report.output_dir == str((tmp_path / "reports" / "custom").resolve())
-        assert config.report.output_dir == "reports/custom"
+        assert normalized is config
+        assert config.paths.generated_dir == str(external)
+        assert resolve_paths(config, root).generated_root == external.resolve()
 
     def test_resolve_contained_path_expands_environment_variables(
         self,
@@ -473,6 +596,23 @@ class TestPreparePreflight:
 
         assert result.workspace.input_dir == external_input.resolve()
         assert result.workspace.generated_dir.is_relative_to(root.resolve())
+
+    def test_prepare_preflight_allows_external_generated_root(self, tmp_path: Path) -> None:
+        root = tmp_path / "workspace"
+        external_generated = tmp_path / "external-generated"
+        _create_config(
+            root,
+            MINIMAL_CONFIG.replace(
+                'generated_dir = "generated"',
+                f'generated_dir = "{external_generated.as_posix()}"',
+            ),
+        )
+        _create_video_files(root / "comparison_videos", "external.mkv")
+
+        result = prepare_preflight(root=root)
+
+        assert result.workspace.generated_root == external_generated.resolve()
+        assert not (root / "generated").exists()
 
     def test_prepare_preflight_allows_symlinked_external_input(self, tmp_path: Path) -> None:
         root = tmp_path / "workspace"

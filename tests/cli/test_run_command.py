@@ -20,7 +20,6 @@ from frame_compare.config.schema import (
     ConfigSchema,
     OverlayMode,
     PathsConfig,
-    ReportConfig,
     ToneCurve,
     TonemapPreset,
 )
@@ -98,7 +97,6 @@ def test_handle_diagnose_paths_outputs_pinned_json(capsys: pytest.CaptureFixture
         update={
             "paths": PathsConfig(
                 input_dir="inputs",
-                screenshots_dir="shots",
                 generated_dir="cache",
                 config_dir="config",
             )
@@ -108,10 +106,10 @@ def test_handle_diagnose_paths_outputs_pinned_json(capsys: pytest.CaptureFixture
     handle_diagnose_paths(Path("/workspace"), Path("/workspace/config/config.toml"), config)
 
     assert json.loads(capsys.readouterr().out) == {
-        "cache": str((Path("/workspace") / "cache").resolve()),
+        "cache": str((Path("/workspace") / "cache" / "cache").resolve()),
         "config": str(Path("/workspace/config/config.toml")),
         "input": str((Path("/workspace") / "inputs").resolve()),
-        "output": str((Path("/workspace") / "shots").resolve()),
+        "output": str((Path("/workspace") / "cache").resolve()),
         "root": str(Path("/workspace")),
     }
 
@@ -199,10 +197,14 @@ def test_handle_run_write_config_applies_cli_overrides_and_skips_runner() -> Non
     assert written_configs[0].slowpics.auto_upload is False
 
 
-def test_handle_run_write_config_preserves_relative_report_output_after_validation() -> None:
+def test_handle_run_write_config_preserves_authored_generated_directory() -> None:
     runner = RecordingRunner()
     config = get_default_config().model_copy(
-        update={"report": ReportConfig(output_dir="reports/custom")}
+        update={
+            "paths": get_default_config().paths.model_copy(
+                update={"generated_dir": "../external-generated"}
+            )
+        }
     )
     written: list[ConfigSchema] = []
 
@@ -219,7 +221,7 @@ def test_handle_run_write_config_preserves_relative_report_output_after_validati
 
     assert runner.requests == []
     assert written == [config]
-    assert written[0].report.output_dir == "reports/custom"
+    assert written[0].paths.generated_dir == "../external-generated"
 
 
 @pytest.mark.parametrize("mode", ["run", "diagnose", "write"])
@@ -263,9 +265,7 @@ def test_handle_run_rejects_external_config_before_load_or_side_effects(mode: st
 
 
 @pytest.mark.parametrize("mode", ["run", "diagnose", "write"])
-def test_handle_run_rejects_contained_config_value_escape_before_side_effects(
-    mode: str,
-) -> None:
+def test_handle_run_allows_external_generated_root(mode: str) -> None:
     runner = RecordingRunner()
     config = get_default_config().model_copy(
         update={
@@ -274,40 +274,25 @@ def test_handle_run_rejects_contained_config_value_escape_before_side_effects(
             )
         }
     )
-    handled: list[PathEscapesRootError] = []
+    written: list[ConfigSchema] = []
 
-    def _handle_path_error(
-        error: Exception,
-        *,
-        no_color: bool,
-        verbose: bool,
-        verbose_hint: str | None = "--verbose",
-    ) -> int:
-        del no_color, verbose, verbose_hint
-        assert isinstance(error, PathEscapesRootError)
-        handled.append(error)
-        return int(ExitCode.INPUT_ERROR)
+    handle_run(
+        replace(
+            _base_args(),
+            diagnose_paths=mode == "diagnose",
+            write_config=mode == "write",
+        ),
+        _deps(
+            DepsOptions(
+                runner=runner,
+                load_config=lambda *_args, **_kwargs: config,
+                write_config_to=lambda _path, value: written.append(value),
+            )
+        ),
+    )
 
-    with pytest.raises(typer.Exit) as exc_info:
-        handle_run(
-            replace(
-                _base_args(),
-                diagnose_paths=mode == "diagnose",
-                write_config=mode == "write",
-            ),
-            _deps(
-                DepsOptions(
-                    runner=runner,
-                    load_config=lambda *_args, **_kwargs: config,
-                    write_config_to=_raise_unexpected_write,
-                    handle_error=_handle_path_error,
-                )
-            ),
-        )
-
-    assert exc_info.value.exit_code == int(ExitCode.INPUT_ERROR)
-    assert runner.requests == []
-    assert len(handled) == 1
+    assert (len(runner.requests) == 1) is (mode == "run")
+    assert (len(written) == 1) is (mode == "write")
 
 
 def test_handle_run_allows_external_input_override() -> None:

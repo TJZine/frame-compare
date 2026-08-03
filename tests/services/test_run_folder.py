@@ -2,6 +2,10 @@
 
 from pathlib import Path
 
+import pytest
+
+from frame_compare.errors import PathEscapesRootError
+from frame_compare.services.errors import GeneratedDataReservationError
 from frame_compare.services.run_folder import (
     _combine_filename_stems,
     find_common_metadata,
@@ -284,3 +288,77 @@ def test_reserve_run_folder_reports_filename_stems_source(tmp_path: Path) -> Non
     )
 
     assert result.naming_source == "filename_stems"
+
+
+def test_reserve_run_folder_maps_destination_failure_without_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_mkdir = Path.mkdir
+
+    def _fail_reservation(path: Path, *args: object, **kwargs: object) -> None:
+        if path == tmp_path / "source":
+            raise PermissionError("destination is read-only")
+        original_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", _fail_reservation)
+
+    with pytest.raises(GeneratedDataReservationError) as exc_info:
+        reserve_run_folder(tmp_path, ["source.mkv"])
+
+    assert exc_info.value.code == "FC-3018"
+    assert str(tmp_path) in str(exc_info.value)
+    assert "permissions" in (exc_info.value.hint or "")
+    assert not any(tmp_path.iterdir())
+
+
+def test_reserve_run_folder_rejects_symlinked_candidate_escape(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (tmp_path / "source").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(PathEscapesRootError):
+        reserve_run_folder(tmp_path, ["source.mkv"])
+
+
+def test_reserve_run_folder_rejects_junctioned_candidate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = tmp_path / "Movie (2024)"
+    tmdb = TmdbMetadata(
+        tmdb_id=1,
+        title="Movie",
+        original_title="Movie",
+        year=2024,
+        media_type="movie",
+    )
+
+    monkeypatch.setattr(Path, "is_junction", lambda path: path == candidate)
+
+    with pytest.raises(PathEscapesRootError):
+        reserve_run_folder(tmp_path, ["source.mkv"], tmdb_metadata=tmdb)
+
+    assert not candidate.exists()
+
+
+def test_reserve_run_folder_maps_resolve_failure_without_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_resolve = Path.resolve
+
+    def _fail_owner_resolve(path: Path, *args: object, **kwargs: object) -> Path:
+        if path == tmp_path:
+            raise RuntimeError("symlink loop")
+        return original_resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", _fail_owner_resolve)
+
+    with pytest.raises(GeneratedDataReservationError) as exc_info:
+        reserve_run_folder(tmp_path, ["source.mkv"])
+
+    assert exc_info.value.code == "FC-3018"
+    assert str(tmp_path) in str(exc_info.value)
+    assert "symlink loop" in (exc_info.value.context.details or {}).get("error", "")
+    assert not any(tmp_path.iterdir())

@@ -52,6 +52,7 @@ def test_selection_labels_are_looked_up_in_reference_source_frame_domain_after_t
     workspace = WorkspacePaths(
         root=tmp_path.resolve(),
         input_dir=(tmp_path / "comparison_videos").resolve(),
+        generated_root=(tmp_path / "generated").resolve(),
         run_dir=None,
         screenshots_dir=(tmp_path / "screenshots").resolve(),
         generated_dir=(tmp_path / "generated").resolve(),
@@ -115,6 +116,7 @@ def test_selection_details_are_looked_up_in_reference_source_frame_domain_after_
     workspace = WorkspacePaths(
         root=tmp_path.resolve(),
         input_dir=(tmp_path / "comparison_videos").resolve(),
+        generated_root=(tmp_path / "generated").resolve(),
         run_dir=None,
         screenshots_dir=(tmp_path / "screenshots").resolve(),
         generated_dir=(tmp_path / "generated").resolve(),

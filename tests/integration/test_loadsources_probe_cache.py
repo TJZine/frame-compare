@@ -32,7 +32,6 @@ if not detect_plugins(_core).get("lsmas", False):
 
 _PROBE_CACHE_CONFIG = """\
 [paths]
-use_run_folders = false
 
 [analysis]
 random_frame_count = 1

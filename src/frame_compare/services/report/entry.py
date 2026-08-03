@@ -17,7 +17,12 @@ from frame_compare.utils.atomic_write import write_text_atomic
 def generate_report(
     data: ReportData, config: ReportConfig, output_path: Path | None = None
 ) -> Path:
-    """Generate HTML comparison report."""
+    """Generate HTML comparison report at the caller-owned output path.
+
+    Report placement is an orchestration/path-owner concern.  The report service
+    only validates payload data, renders HTML, and atomically writes the explicit
+    destination it receives.
+    """
     if len(data.clips) == 0:
         raise ReportError("no clips provided")
     if len(data.clips) < 2:
@@ -38,27 +43,16 @@ def generate_report(
                 f"expected {len(data.frames)}, got {len(clip.screenshots)}"
             )
 
-    final_output_path = _resolve_output_path(data, config, output_path)
-    embedded_data = build_report_payload(data, config, report_dir=final_output_path.parent)
+    if output_path is None:
+        raise ReportError("report output path is required")
+
+    embedded_data = build_report_payload(data, config, report_dir=output_path.parent)
 
     html_content = build_html(embedded_data, include_filmstrip=config.include_filmstrip)
 
     try:
-        write_text_atomic(final_output_path, html_content, encoding="utf-8")
+        write_text_atomic(output_path, html_content, encoding="utf-8")
     except OSError as e:
         raise ReportError(f"failed to write report: {e}") from e
 
-    return final_output_path
-
-
-def _resolve_output_path(data: ReportData, config: ReportConfig, output_path: Path | None) -> Path:
-    """Resolve the final report path after generate_report validation."""
-    if output_path is not None:
-        return output_path
-    if config.output_dir:
-        return Path(config.output_dir) / "report.html"
-
-    # Fallback: first clip, first frame's parent dir.
-    first_clip = data.clips[0]
-    first_screenshot = first_clip.screenshots[0]
-    return first_screenshot.parent / "report.html"
+    return output_path

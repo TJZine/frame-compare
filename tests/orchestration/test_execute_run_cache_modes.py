@@ -44,10 +44,8 @@ def test_execute_run_no_cache_deletes_only_matching_shared_metrics_cache(
         content="""\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
-use_run_folders = false
 
 [analysis]
 random_frame_count = 0
@@ -138,10 +136,8 @@ def test_execute_run_no_cache_deletes_only_current_performance_mode_metrics_cach
         content="""\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
-use_run_folders = false
 
 [analysis]
 random_frame_count = 0
@@ -236,10 +232,8 @@ def test_execute_run_from_cache_only_fails_when_metrics_cache_missing(
         content="""\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
-use_run_folders = false
 
 [analysis]
 random_frame_count = 0
@@ -279,10 +273,8 @@ def test_execute_run_from_cache_only_rejects_cache_for_other_performance_mode(
         content="""\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
-use_run_folders = false
 
 [analysis]
 random_frame_count = 0
@@ -335,10 +327,8 @@ def test_execute_run_from_cache_only_uses_cache_for_explicit_reference_effective
     config_content = """\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
-use_run_folders = false
 
 [sources.overrides."source.mkv"]
 effective_fps = "24/1"
@@ -388,10 +378,8 @@ def test_execute_run_from_cache_only_uses_cache_for_configured_analysis_source(
     config_content = """\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
-use_run_folders = false
 
 [sources]
 reference = "reference.mkv"
@@ -462,10 +450,8 @@ def test_execute_run_from_cache_only_rejects_full_frame_cache_for_active_rect_so
     config_content = """\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
-use_run_folders = false
 
 [sources.overrides."source.mkv"]
 active_rect = { x = 10, y = 20, width = 300, height = 200 }
@@ -522,10 +508,8 @@ def test_execute_run_from_cache_only_uses_active_rect_specific_cache(
     config_content = """\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
-use_run_folders = false
 
 [sources.overrides."source.mkv"]
 active_rect = { x = 10, y = 20, width = 300, height = 200 }
@@ -587,10 +571,8 @@ def test_execute_run_from_cache_only_fails_when_metrics_cache_invalid(
         content="""\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
-use_run_folders = false
 
 [analysis]
 random_frame_count = 0
@@ -645,10 +627,8 @@ def test_execute_run_from_cache_only_fails_when_metrics_cache_version_mismatch(
         content="""\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
-use_run_folders = false
 
 [analysis]
 random_frame_count = 0
@@ -721,7 +701,6 @@ def test_execute_run_from_cache_only_requires_probe_cache_before_alignment_when_
     config_content = """\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
 

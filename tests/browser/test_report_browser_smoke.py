@@ -27,6 +27,7 @@ _MAC_CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome
 class _InitializedViewerParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
+        self.document_attributes: dict[str, str | None] | None = None
         self.stage_attributes: dict[str, str | None] | None = None
         self.mode_attributes: dict[str, dict[str, str | None]] = {}
 
@@ -36,6 +37,8 @@ class _InitializedViewerParser(HTMLParser):
         attrs: list[tuple[str, str | None]],
     ) -> None:
         attributes = dict(attrs)
+        if tag == "html":
+            self.document_attributes = attributes
         classes = (attributes.get("class") or "").split()
         if tag == "div" and "rv-viewer-stage" in classes:
             self.stage_attributes = attributes
@@ -60,7 +63,7 @@ def _browser_executable() -> str | None:
 def _generated_report(tmp_path: Path) -> Path:
     clips: list[ClipInfo] = []
     for name, label in (("reference", "REF"), ("encode", "ENC")):
-        screenshot = tmp_path / name / "10.png"
+        screenshot = tmp_path / "screenshots" / name / "10.png"
         screenshot.parent.mkdir(parents=True)
         screenshot.write_bytes(_ONE_PIXEL_PNG)
         clips.append(
@@ -80,11 +83,34 @@ def _generated_report(tmp_path: Path) -> Path:
         ReportData(clips=[replace(clip) for clip in clips], frames=[10]),
         ReportConfig(
             default_mode=ViewerMode.DIFF,
-            embed_images=True,
+            embed_images=False,
             auto_open=False,
         ),
         output_path=tmp_path / "report.html",
     )
+
+
+def _append_screenshot_load_probe(report_path: Path) -> None:
+    """Add a test-only DOM marker that proves a sibling file actually loaded."""
+    html = report_path.read_text(encoding="utf-8")
+    probe = """
+<img id="sibling-screenshot-probe" src="screenshots/reference/10.png" alt="" hidden>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const mark = () => {
+        const image = document.getElementById('sibling-screenshot-probe');
+        const loaded = image && image.complete && image.naturalWidth > 0;
+        if (loaded || !document.documentElement.dataset.siblingScreenshotLoaded) {
+            document.documentElement.dataset.siblingScreenshotLoaded = loaded ? 'true' : 'false';
+        }
+    };
+    document.getElementById('sibling-screenshot-probe').addEventListener('load', mark);
+    const interval = window.setInterval(mark, 100);
+    window.setTimeout(() => window.clearInterval(interval), 5000);
+});
+</script>
+"""
+    report_path.write_text(html.replace("</body>", f"{probe}</body>"), encoding="utf-8")
 
 
 @pytest.mark.integration
@@ -94,6 +120,7 @@ def test_generated_report_initializes_observable_mode_and_aria_state(tmp_path: P
         pytest.skip("Chrome/Chromium is unavailable; CI preflight makes this a required proof")
 
     report_path = _generated_report(tmp_path)
+    _append_screenshot_load_probe(report_path)
     completed = subprocess.run(
         [
             browser,
@@ -102,6 +129,7 @@ def test_generated_report_initializes_observable_mode_and_aria_state(tmp_path: P
             "--disable-default-apps",
             "--disable-gpu",
             "--no-first-run",
+            "--virtual-time-budget=10000",
             "--dump-dom",
             report_path.as_uri(),
         ],
@@ -114,6 +142,9 @@ def test_generated_report_initializes_observable_mode_and_aria_state(tmp_path: P
     parser = _InitializedViewerParser()
     parser.feed(completed.stdout)
 
+    assert 'src="screenshots/reference/10.png"' in completed.stdout
+    assert parser.document_attributes is not None
+    assert parser.document_attributes["data-sibling-screenshot-loaded"] == "true"
     assert parser.stage_attributes is not None
     stage_classes = (parser.stage_attributes["class"] or "").split()
     assert "rv-mode-diff" in stage_classes

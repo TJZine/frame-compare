@@ -18,6 +18,7 @@ from frame_compare.config.effective import (
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 from frame_compare.config.schema_models import SourceOverrideConfig
+from frame_compare.errors import PathEscapesRootError
 from frame_compare.orchestration.active_rect import (
     metric_cache_request_for_clip,
     propagate_resolved_aspect_ratio_evidence,
@@ -71,6 +72,7 @@ from frame_compare.orchestration.types import (
     RunRequest,
 )
 from frame_compare.services.errors import (
+    GeneratedDataReservationError,
     MetadataError,
     TmdbError,
     TmdbRateLimitedError,
@@ -84,6 +86,7 @@ from frame_compare.services.run_info import (
 )
 from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
+from frame_compare.utils.paths import require_managed_descendant
 from frame_compare.utils.types import WorkspacePaths
 
 log = structlog.get_logger()
@@ -118,69 +121,89 @@ async def _resolve_run_directory(
 ) -> tuple[WorkspacePaths, MetadataPrefetch]:
     metadata = None
     was_attempted = False
-    if config.paths.use_run_folders:
-        tmdb_facts = _skipped_run_info_tmdb_prefetch_facts(
-            enabled=config.tmdb.enabled,
-            skip_metadata=request.skip_metadata,
-            has_http_client=deps.http_client is not None,
-        )
-        if deps.http_client is not None and config.tmdb.enabled and not request.skip_metadata:
-            try:
-                metadata = await resolve_run_metadata(
-                    filenames=[input_videos[0].name],
-                    config=config,
-                    client=deps.http_client,
-                )
-                was_attempted = True
-                tmdb_facts = _attempted_run_info_tmdb_prefetch_facts(metadata)
-            except (MetadataError, TmdbError, TmdbRateLimitedError) as exc:
-                tmdb_facts = RunInfoTmdbPrefetchFacts(
-                    enabled=config.tmdb.enabled,
-                    attempted=True,
-                    resolved=False,
-                    failed=True,
-                    error_type=type(exc).__name__,
-                )
-                log.warning(
-                    "metadata_prefetch_degraded",
-                    filenames=[input_videos[0].name],
-                    error_type=type(exc).__name__,
-                    error=str(exc),
-                    exc_info=exc,
-                )
-
-        filenames = [video.name for video in input_videos]
-        run_dir = reserve_run_folder(
-            input_dir=workspace.generated_dir,
-            filenames=filenames,
-            tmdb_metadata=metadata,
-        )
+    tmdb_facts = _skipped_run_info_tmdb_prefetch_facts(
+        enabled=config.tmdb.enabled,
+        skip_metadata=request.skip_metadata,
+        has_http_client=deps.http_client is not None,
+    )
+    if deps.http_client is not None and config.tmdb.enabled and not request.skip_metadata:
         try:
-            write_run_info(
-                run_dir.path / "run_info.toml",
-                RunInfo(
-                    created_at=deps.clock(),
-                    folder_name=run_dir.folder_name,
-                    naming_source=run_dir.naming_source,
-                    source_filenames=filenames,
-                    tmdb=tmdb_facts,
-                ),
+            metadata = await resolve_run_metadata(
+                filenames=[input_videos[0].name],
+                config=config,
+                client=deps.http_client,
             )
-        except OSError as exc:
-            _cleanup_empty_reserved_run_dir(run_dir.path, original_error=exc)
-            raise
-        new_workspace = workspace.with_run_dir(run_dir.path)
-        if deps.capture_reserved_run is not None:
-            deps.capture_reserved_run(
-                ReservedRunCapture(
-                    workspace=new_workspace,
-                    clip_count=len(input_videos),
-                    preflight_duration=preflight_duration,
-                    preflight_warnings=preflight_warnings,
-                )
+            was_attempted = True
+            tmdb_facts = _attempted_run_info_tmdb_prefetch_facts(metadata)
+        except (MetadataError, TmdbError, TmdbRateLimitedError) as exc:
+            tmdb_facts = RunInfoTmdbPrefetchFacts(
+                enabled=config.tmdb.enabled,
+                attempted=True,
+                resolved=False,
+                failed=True,
+                error_type=type(exc).__name__,
             )
-        return new_workspace, MetadataPrefetch(metadata=metadata, was_attempted=was_attempted)
-    return workspace, MetadataPrefetch(metadata=None, was_attempted=False)
+            log.warning(
+                "metadata_prefetch_degraded",
+                filenames=[input_videos[0].name],
+                error_type=type(exc).__name__,
+                error=str(exc),
+                exc_info=exc,
+            )
+
+    filenames = [video.name for video in input_videos]
+    run_dir = reserve_run_folder(
+        input_dir=workspace.generated_root,
+        filenames=filenames,
+        tmdb_metadata=metadata,
+    )
+    try:
+        resolved_run_dir = require_managed_descendant(workspace.generated_root, run_dir.path)
+        resolved_generated_root = workspace.generated_root.resolve()
+        if (
+            run_dir.path.is_symlink()
+            or run_dir.path.is_junction()
+            or resolved_run_dir.parent != resolved_generated_root
+        ):
+            raise PathEscapesRootError(resolved_run_dir, resolved_generated_root)
+        run_info_path = require_managed_descendant(
+            resolved_run_dir,
+            resolved_run_dir / "run_info.toml",
+        )
+    except PathEscapesRootError:
+        raise
+    except (OSError, RuntimeError) as exc:
+        raise GeneratedDataReservationError(workspace.generated_root, exc) from exc
+    try:
+        write_run_info(
+            run_info_path,
+            RunInfo(
+                created_at=deps.clock(),
+                folder_name=run_dir.folder_name,
+                naming_source=run_dir.naming_source,
+                source_filenames=filenames,
+                tmdb=tmdb_facts,
+            ),
+        )
+    except OSError as exc:
+        _cleanup_empty_reserved_run_dir(resolved_run_dir, original_error=exc)
+        raise
+    try:
+        new_workspace = workspace.with_run_dir(resolved_run_dir)
+    except PathEscapesRootError:
+        raise
+    except (OSError, RuntimeError) as exc:
+        raise GeneratedDataReservationError(workspace.generated_root, exc) from exc
+    if deps.capture_reserved_run is not None:
+        deps.capture_reserved_run(
+            ReservedRunCapture(
+                workspace=new_workspace,
+                clip_count=len(input_videos),
+                preflight_duration=preflight_duration,
+                preflight_warnings=preflight_warnings,
+            )
+        )
+    return new_workspace, MetadataPrefetch(metadata=metadata, was_attempted=was_attempted)
 
 
 def _skipped_run_info_tmdb_prefetch_facts(
@@ -319,7 +342,7 @@ def _cached_probe_snapshots_for_cache_only(
 
 
 def _shared_probe_cache_path(workspace: WorkspacePaths) -> Path:
-    return workspace.shared_analysis_cache_dir.parent.parent / "clip_probe.toml"
+    return workspace.generated_root / "clip_probe.toml"
 
 
 def _probe_cache_paths_for_run(workspace: WorkspacePaths) -> list[Path]:
@@ -350,14 +373,7 @@ def _persist_probe_snapshots_for_run(
     run_cache_path = workspace.generated_dir / "clip_probe.toml"
     shared_cache_path = _shared_probe_cache_path(workspace)
 
-    if shared_cache_path == run_cache_path:
-        # Non-run-folder / legacy layout: single file is both run-local and
-        # shared.  Merge current entries on top of existing shared entries so
-        # probes from earlier runs are preserved.
-        merge_shared_clip_probe_cache(shared_cache_path, current_entries)
-        return
-
-    # Run-folder layout: run-local cache gets only this run's entries.
+    # Run-local cache gets only this run's entries.
     save_clip_probe_cache(run_cache_path, current_entries)
 
     # Shared cache merges current entries on top of any existing entries.

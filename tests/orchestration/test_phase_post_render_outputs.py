@@ -92,11 +92,14 @@ def test_run_report_phase_builds_report_data_and_records_path(
         slowpics_url="https://slow.pics/c/example",
     )
     captured: dict[str, Any] = {}
-    expected_path = tmp_path / "report.html"
+    expected_path = tmp_path / "run" / "report.html"
 
-    def _fake_generate_report(report_data: object, report_config: object) -> Path:
+    def _fake_generate_report(
+        report_data: object, report_config: object, *, output_path: Path
+    ) -> Path:
         captured["report_data"] = report_data
         captured["report_config"] = report_config
+        captured["output_path"] = output_path
         return expected_path
 
     monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
@@ -111,6 +114,7 @@ def test_run_report_phase_builds_report_data_and_records_path(
 
     report_data = captured["report_data"]
     assert output.report_path == expected_path
+    assert captured["output_path"] == expected_path
     assert artifacts.report_path is None
     assert report_data.frames == [5]
     assert report_data.frame_details == []
@@ -143,10 +147,13 @@ def test_run_report_phase_builds_four_clip_payload_inputs_in_clip_order(
     )
     captured: dict[str, Any] = {}
 
-    def _fake_generate_report(report_data: object, report_config: object) -> Path:
+    def _fake_generate_report(
+        report_data: object, report_config: object, *, output_path: Path
+    ) -> Path:
         captured["report_data"] = report_data
         captured["report_config"] = report_config
-        return tmp_path / "report.html"
+        captured["output_path"] = output_path
+        return output_path
 
     monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
 
@@ -159,6 +166,7 @@ def test_run_report_phase_builds_four_clip_payload_inputs_in_clip_order(
     )
 
     report_data = captured["report_data"]
+    assert captured["output_path"] == tmp_path / "run" / "report.html"
     assert [clip.name for clip in report_data.clips] == [
         "Reference",
         "Encode 1",
@@ -206,11 +214,14 @@ def test_run_report_phase_passes_reference_source_frame_details(
         screenshot_dir=tmp_path / "screenshots",
     )
     captured: dict[str, Any] = {}
-    expected_path = tmp_path / "report.html"
+    expected_path = tmp_path / "run" / "report.html"
 
-    def _fake_generate_report(report_data: object, report_config: object) -> Path:
+    def _fake_generate_report(
+        report_data: object, report_config: object, *, output_path: Path
+    ) -> Path:
         captured["report_data"] = report_data
         captured["report_config"] = report_config
+        captured["output_path"] = output_path
         return expected_path
 
     monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
@@ -225,6 +236,7 @@ def test_run_report_phase_passes_reference_source_frame_details(
 
     report_data = captured["report_data"]
     assert output.report_path == expected_path
+    assert captured["output_path"] == expected_path
     assert report_data.frames == [1, 2]
     assert [
         (detail.label, detail.detail, detail.category) for detail in report_data.frame_details

@@ -452,5 +452,5 @@ def test_run_diagnose_paths_outputs_pinned_json_schema_and_does_not_invoke_runne
         assert payload["root"] == str(root.resolve())
         assert payload["config"] == str(config_path.resolve())
         assert payload["input"] == str((root / "inputs").resolve())
-        assert payload["output"] == str((root / "screenshots").resolve())
-        assert payload["cache"] == str((root / "generated").resolve())
+        assert payload["output"] == str((root / "generated").resolve())
+        assert payload["cache"] == str((root / "generated" / "cache").resolve())

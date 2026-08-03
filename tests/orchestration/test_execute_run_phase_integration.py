@@ -39,7 +39,8 @@ def _workspace(tmp_path: Path) -> WorkspacePaths:
     return WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
-        run_dir=None,
+        generated_root=tmp_path / "generated",
+        run_dir=tmp_path / "run",
         screenshots_dir=tmp_path / "screenshots",
         generated_dir=tmp_path / "generated",
         config_dir=tmp_path / "config",
@@ -53,7 +54,6 @@ def test_execute_run_align_applies_trim_first_frame_mapping(
     config_content = """\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
 
@@ -134,7 +134,6 @@ def test_execute_run_report_confirmed_decline_skips_publish(
     config_content = """\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
 
@@ -315,12 +314,13 @@ def test_run_report_phase_builds_report_from_current_clip_artifacts(
         slowpics_url="https://slow.pics/c/collateral",
     )
     captured: dict[str, Any] = {}
-    expected_report_path = tmp_path / "report.html"
+    expected_report_path = tmp_path / "run" / "report.html"
 
-    def _fake_generate_report(report_data, report_config):
+    def _fake_generate_report(report_data, report_config, *, output_path: Path):
         captured["report_data"] = report_data
         captured["report_config"] = report_config
-        return expected_report_path
+        assert output_path == expected_report_path
+        return output_path
 
     monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
 

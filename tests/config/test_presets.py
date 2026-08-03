@@ -96,7 +96,9 @@ def test_save_preset_omits_generated_secrets(tmp_path: Path) -> None:
     assert isinstance(slowpics, dict)
     assert slowpics["title"] == "Secret-safe preset"
     assert "webhook_url" not in slowpics
-    assert "api_key" not in data["tmdb"]
+    tmdb = data["tmdb"]
+    assert isinstance(tmdb, dict)
+    assert "api_key" not in tmdb
     preset_text = (tmp_path / "safe.toml").read_text(encoding="utf-8")
     assert "secret-token" not in preset_text
     assert "sentinel-tmdb-api-key" not in preset_text
@@ -221,3 +223,26 @@ def test_save_preset_deterministic_output(tmp_path: Path) -> None:
     path2 = save_preset("test2", config, presets_dir=tmp_path)
 
     assert path1.read_text(encoding="utf-8") == path2.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("generated_dir", ["generated", "/Volumes/review/generated"])
+def test_save_preset_preserves_authored_generated_directory(
+    tmp_path: Path,
+    generated_dir: str,
+) -> None:
+    from frame_compare.config.loader import get_default_config
+
+    config = get_default_config()
+    config.paths.generated_dir = generated_dir
+
+    save_preset("authored-generated", config, presets_dir=tmp_path)
+
+    persisted = load_preset("authored-generated", presets_dir=tmp_path)
+    paths = persisted["paths"]
+    assert isinstance(paths, dict)
+    assert paths["generated_dir"] == generated_dir
+    assert "screenshots_dir" not in paths
+    assert "use_run_folders" not in paths
+    report = persisted.get("report")
+    assert isinstance(report, dict)
+    assert "output_dir" not in report

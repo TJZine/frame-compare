@@ -13,8 +13,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from frame_compare.errors import PathEscapesRootError
+from frame_compare.services.errors import GeneratedDataReservationError
 from frame_compare.services.metadata import parse_filename
 from frame_compare.services.types import ParsedMetadata, TmdbMetadata
+from frame_compare.utils.paths import require_managed_descendant
 
 _UNNAMED_RUN_BASE = "unnamed_run"
 _MAX_FOLDER_NAME_LENGTH = 64
@@ -217,7 +220,7 @@ def reserve_run_folder(
 
     # Try creating base folder name
     try:
-        reservation.path.mkdir(parents=True, exist_ok=False)
+        _reserve_candidate(input_dir, reservation.path)
         return reservation
     except FileExistsError:
         log.debug(
@@ -230,7 +233,7 @@ def reserve_run_folder(
         suffix_name = _append_collision_suffix(base_name, str(attempt))
         suffix_reservation = _reservation(suffix_name)
         try:
-            suffix_reservation.path.mkdir(parents=True, exist_ok=False)
+            _reserve_candidate(input_dir, suffix_reservation.path)
             return suffix_reservation
         except FileExistsError:
             continue
@@ -239,5 +242,23 @@ def reserve_run_folder(
     random_suffix = uuid.uuid4().hex[:8]
     fallback_name = _append_collision_suffix(base_name, random_suffix)
     fallback_reservation = _reservation(fallback_name)
-    fallback_reservation.path.mkdir(parents=True, exist_ok=False)
+    _reserve_candidate(input_dir, fallback_reservation.path)
     return fallback_reservation
+
+
+def _reserve_candidate(owner: Path, candidate: Path) -> None:
+    """Validate and atomically claim one immediate child of ``owner``."""
+    try:
+        resolved_owner = owner.resolve()
+        resolved_candidate = require_managed_descendant(resolved_owner, candidate)
+        if (
+            candidate.is_symlink()
+            or candidate.is_junction()
+            or resolved_candidate.parent != resolved_owner
+        ):
+            raise PathEscapesRootError(resolved_candidate, resolved_owner)
+        candidate.mkdir(parents=True, exist_ok=False)
+    except (FileExistsError, PathEscapesRootError):
+        raise
+    except (OSError, RuntimeError) as exc:
+        raise GeneratedDataReservationError(owner, exc) from exc

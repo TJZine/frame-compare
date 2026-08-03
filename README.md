@@ -65,7 +65,7 @@ From a clone, copy at least two clips into `comparison_videos/`, then run:
 ```bash
 export FRAME_COMPARE_HOST_UID="$(id -u)"
 export FRAME_COMPARE_HOST_GID="$(id -g)"
-mkdir -p config comparison_videos screenshots generated
+mkdir -p config comparison_videos generated
 docker compose build frame-compare-run
 docker compose run --rm frame-compare-wizard
 docker compose run --rm frame-compare-run doctor

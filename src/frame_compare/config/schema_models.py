@@ -47,10 +47,8 @@ class PathsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     input_dir: str = "comparison_videos"
-    screenshots_dir: str = "screenshots"
     generated_dir: str = "generated"
     config_dir: str = "config"
-    use_run_folders: bool = True
 
 
 class AnalysisConfig(BaseModel):
@@ -329,19 +327,10 @@ class ReportConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enable: bool = True
-    output_dir: str | None = None
     default_mode: ViewerMode = ViewerMode.SLIDER
     include_filmstrip: bool = True
     embed_images: bool = False
     auto_open: bool = True
-
-    @field_validator("output_dir", mode="before")
-    @classmethod
-    def normalize_empty_string(cls, v: str | None) -> str | None:
-        """Convert empty string to None for output_dir."""
-        if v == "":
-            return None
-        return v
 
 
 class DiagnosticsConfig(BaseModel):

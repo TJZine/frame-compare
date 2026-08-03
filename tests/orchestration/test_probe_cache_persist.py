@@ -53,24 +53,20 @@ def _snapshot(
     )
 
 
-def _legacy_workspace(root: Path) -> WorkspacePaths:
-    """Build a workspace where shared_cache_path == run_cache_path (legacy mode)."""
+def _run_folder_workspace(root: Path) -> WorkspacePaths:
+    """Build a canonical workspace with shared and run-local cache paths."""
     return WorkspacePaths(
         root=root,
         input_dir=root / "input",
-        run_dir=None,
-        screenshots_dir=root / "screenshots",
-        generated_dir=root / "generated",
+        generated_root=root / "generated",
+        run_dir=root / "generated" / "run1",
+        screenshots_dir=root / "generated" / "run1" / "screenshots",
+        generated_dir=root / "generated" / "run1" / "generated",
         config_dir=root / "config",
         config_file=None,
+        analysis_cache_dir=root / "generated" / "cache" / "analysis",
+        alignment_cache_dir=root / "generated" / "cache" / "alignment",
     )
-
-
-def _run_folder_workspace(root: Path) -> WorkspacePaths:
-    """Build a workspace with a run folder (distinct shared vs run-local paths)."""
-    base = _legacy_workspace(root)
-    run_dir = root / "input" / "run1"
-    return base.with_run_dir(run_dir)
 
 
 def _merge_cache_in_child(
@@ -96,10 +92,10 @@ def _clean_up_process(process: multiprocessing.Process) -> None:
         process.join(timeout=_PROCESS_TIMEOUT_SECONDS)
 
 
-def test_same_path_preserves_existing_shared_entries(tmp_path: Path) -> None:
-    """In legacy layout, persisting new probes must not discard earlier shared entries."""
-    workspace = _legacy_workspace(tmp_path)
-    cache_path = workspace.generated_dir / "clip_probe.toml"
+def test_run_folder_preserves_existing_shared_entries(tmp_path: Path) -> None:
+    """Run-local writes must not discard earlier shared entries."""
+    workspace = _run_folder_workspace(tmp_path)
+    cache_path = workspace.shared_analysis_cache_dir.parent.parent / "clip_probe.toml"
 
     snap_a = _snapshot("video_a.mkv")
     key_a = compute_probe_cache_key(snap_a.fingerprint)
@@ -112,28 +108,8 @@ def test_same_path_preserves_existing_shared_entries(tmp_path: Path) -> None:
         snapshots_by_path={Path("video_b.mkv"): snap_b},
     )
 
-    result = load_clip_probe_cache(cache_path)
     key_b = compute_probe_cache_key(snap_b.fingerprint)
-    assert set(result) == {key_a, key_b}
-
-
-def test_run_folder_preserves_existing_shared_entries(tmp_path: Path) -> None:
-    """In run-folder layout, persisting new probes must not discard shared entries."""
-    workspace = _run_folder_workspace(tmp_path)
-    shared_path = workspace.shared_analysis_cache_dir.parent.parent / "clip_probe.toml"
-
-    snap_a = _snapshot("video_a.mkv")
-    key_a = compute_probe_cache_key(snap_a.fingerprint)
-    save_clip_probe_cache(shared_path, {key_a: snap_a})
-
-    snap_b = _snapshot("video_b.mkv", size=2048, mtime=9000)
-    _persist_probe_snapshots_for_run(
-        workspace=workspace,
-        snapshots_by_path={Path("video_b.mkv"): snap_b},
-    )
-
-    shared_result = load_clip_probe_cache(shared_path)
-    key_b = compute_probe_cache_key(snap_b.fingerprint)
+    shared_result = load_clip_probe_cache(cache_path)
     assert set(shared_result) == {key_a, key_b}
 
     run_path = workspace.generated_dir / "clip_probe.toml"
@@ -215,10 +191,10 @@ def test_shared_merge_keeps_load_and_save_inside_lock(
     assert events == ["lock_enter", "load", "save", "lock_exit"]
 
 
-def test_same_path_preserves_historical_fingerprint(tmp_path: Path) -> None:
+def test_run_folder_preserves_historical_fingerprint(tmp_path: Path) -> None:
     """A changed fingerprint is retained alongside the prior cache entry."""
-    workspace = _legacy_workspace(tmp_path)
-    cache_path = workspace.generated_dir / "clip_probe.toml"
+    workspace = _run_folder_workspace(tmp_path)
+    cache_path = workspace.shared_analysis_cache_dir.parent.parent / "clip_probe.toml"
 
     snap_old = _snapshot("video.mkv", size=1024, mtime=1000)
     key_old = compute_probe_cache_key(snap_old.fingerprint)
@@ -236,9 +212,9 @@ def test_same_path_preserves_historical_fingerprint(tmp_path: Path) -> None:
     assert set(result) == {key_old, key_new}
 
 
-def test_same_path_current_entry_wins_on_cache_key_conflict(tmp_path: Path) -> None:
-    workspace = _legacy_workspace(tmp_path)
-    cache_path = workspace.generated_dir / "clip_probe.toml"
+def test_run_folder_current_entry_wins_on_cache_key_conflict(tmp_path: Path) -> None:
+    workspace = _run_folder_workspace(tmp_path)
+    cache_path = workspace.shared_analysis_cache_dir.parent.parent / "clip_probe.toml"
     existing = _snapshot("video.mkv", width=1280)
     current = _snapshot("video.mkv", width=1920)
     cache_key = compute_probe_cache_key(current.fingerprint)

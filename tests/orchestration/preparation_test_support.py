@@ -7,10 +7,8 @@ from pathlib import Path
 MINIMAL_CONFIG = """\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
-use_run_folders = false
 
 [audio_alignment]
 enable = false
@@ -44,10 +42,8 @@ AUTO_MINIMAL_CONFIG = MINIMAL_CONFIG.replace(
 ALIGNMENT_CONFIG = """\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
-use_run_folders = false
 
 [audio_alignment]
 enable = true

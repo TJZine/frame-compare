@@ -12,6 +12,7 @@ services:
     volumes:
       - ./comparison_videos:/workspace/comparison_videos:ro
       - ./config:/workspace/config
+      - ./generated:/workspace/generated
     working_dir: /workspace
     environment:
       - HOME=/tmp/framecompare-home
@@ -29,7 +30,6 @@ services:
     volumes:
       - ./comparison_videos:/workspace/comparison_videos:ro
       - ./config:/workspace/config:ro
-      - ./screenshots:/workspace/screenshots
       - ./generated:/workspace/generated
     working_dir: /workspace
     environment:
@@ -48,6 +48,7 @@ services:
     image: frame-compare:dev
     volumes:
       - .:/home/framecompare/frame-compare
+      - ./generated:/workspace/generated
     working_dir: /home/framecompare/frame-compare
     environment:
       - VAPOURSYNTH_EXTRA_PLUGIN_PATH=/opt/vapoursynth-extra-plugins
@@ -63,7 +64,6 @@ services:
     volumes:
       - ./comparison_videos:/workspace/comparison_videos:ro
       - ./config:/workspace/config:ro
-      - ./screenshots:/workspace/screenshots
       - ./generated:/workspace/generated
     working_dir: /workspace
     environment:

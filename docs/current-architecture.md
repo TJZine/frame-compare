@@ -37,7 +37,7 @@ The main run path is:
    beneath the resolved workspace root while permitting external media reads.
 3. Discover input clips.
 4. Validate shared analysis cache mode flags when needed.
-5. Create a fresh run folder when configured.
+5. Create a fresh run folder for every run that proceeds to output reservation.
 6. Load or compute clip probe data.
 7. Execute orchestration phases in order:
    `frame_plan -> analyze -> align -> render -> metadata -> publish -> report -> post_report_cleanup`
@@ -165,7 +165,7 @@ Primary owned paths:
   are excluded from every generated TOML payload
 - `<resolved paths.generated_dir>/cache/analysis/<label>__<fingerprint>.compframes`:
   shared analysis metrics cache (defaults to `generated/cache/analysis/` under the
-  workspace root, but follows the configured `paths.generated_dir`). The full
+  workspace root, but follows the sole configured `paths.generated_dir`). The full
   fingerprint includes the selected reference identity plus an all-source
   selection-domain token. The token stores `analysis_source_path`,
   `reference_path`, source identities, source trims, effective FPS values,
@@ -208,42 +208,42 @@ Primary owned paths:
   shared clip probe cache used by `--from-cache-only` prevalidation before
   run-folder reservation
 - `<run-folder>/run_info.toml`: root-level run identity metadata written
-  immediately after run-folder reservation when run folders are enabled. It
+  immediately after every run-folder reservation. It
   stores creation time, final folder name, naming source, source filenames,
   Frame Compare version, and optional TMDB prefetch facts. It is user-facing
   creation-time identity, not an end-of-run outcome manifest.
 - `<run-folder>/run_result.toml`: versioned V1 run outcome owned by
   `frame_compare.services.run_result_record` and written atomically only after a
-  reserved run completes or fails. It stores sanitized workspace-relative output
+  reserved run completes or fails. It stores sanitized run-folder-relative output
   facts, UTC lifecycle timing, bounded warning summaries, cache/phase facts,
   slow.pics outcome, and a sanitized typed failure when applicable. The service
-  also owns strict TOML validation, immediate-child history discovery, legacy
-  `unknown` entries, malformed-record isolation, deterministic ordering, exact
-  run-name validation, record-file/run-directory containment, and report-path
-  containment. Symlinked run-directory aliases are not history entries. It never mutates
-  `run_info.toml` or migrates legacy folders.
-- `<run-folder>/generated/clip_probe.toml`: current-run clip probe cache when
-  run folders are enabled
-- `generated/manual_overrides.toml` or `<run-folder>/generated/manual_overrides.toml`:
-  persisted VSPreview-confirmed manual alignment overrides. These live in the
-  stable generated area when run folders are disabled and in the current run
-  folder when run folders are enabled.
+  also owns strict TOML validation, immediate-child history discovery that admits
+  only folders containing a supported result record, malformed-record isolation,
+  deterministic ordering, exact run-name validation, record-file/run-directory
+  containment, and report-path containment. Recordless folders and symlinked
+  run-directory aliases are not history entries. An unavailable selected generated
+  root raises a typed actionable history error; the service never creates a missing
+  root, falls back, or mutates `run_info.toml`.
+- `<run-folder>/generated/clip_probe.toml`: current-run clip probe cache
+- `<run-folder>/generated/manual_overrides.toml`: persisted VSPreview-confirmed
+  manual alignment overrides for the current run
 - generated VSPreview session files under the current generated/run area
 - screenshot output directories and generated HTML reports
 - Windows portable bundle outputs under `dist/frame-compare-portable-win-x64`
 
 `frame_compare.orchestration.preflight` owns hybrid path enforcement. The selected
-config file, configured config/screenshots/generated directories, and explicit report
-output resolve under the workspace root after environment expansion and symlink
-resolution; escaping paths raise `FC-3009` before config or output side effects.
+config file and configured `paths.config_dir` resolve under the workspace root after
+environment expansion and symlink resolution; escaping paths raise `FC-3009` before
+config or output side effects. The sole generated-data root is resolved once and may
+be external, while its managed descendants are checked before runtime use.
 Configured and CLI-overridden media inputs remain unrestricted read-only paths. The
 only selected-config exception is the installed Windows portable shim's exact resolved
-LocalAppData state `config.toml`; it does not extend to configured output paths or a
+LocalAppData state `config.toml`; it does not extend to generated-data paths or a
 symlinked config leaf that resolves elsewhere.
 
-`WorkspacePaths` resolves the runtime path set and can switch into run-folder mode so
-screenshots and generated files live inside a fresh directory beneath the contained
-resolved `paths.generated_dir`, never beneath an external media input. The
+`WorkspacePaths` resolves the runtime path set and switches into a reserved run folder
+so screenshots and generated files live inside a fresh directory beneath the resolved
+`paths.generated_dir`, never beneath an external media input. The
 analysis and shared alignment reuse caches are the exceptions:
 `WorkspacePaths.cache_dir` and `WorkspacePaths.shared_analysis_cache_dir` remain
 the shared workspace-level `<resolved paths.generated_dir>/cache/analysis` path,
@@ -252,16 +252,15 @@ workspace-level `<resolved paths.generated_dir>/cache/alignment` path, even afte
 `with_run_dir()` moves `generated_dir` and `screenshots_dir` into a fresh run
 folder.
 
-When `paths.use_run_folders = true`, normal runs and cache-only runs that proceed
-reserve a fresh run folder beneath the resolved `paths.generated_dir`. Existing run
-folders are not reused for analysis cache
+Normal runs and cache-only runs that proceed reserve a fresh run folder beneath the
+resolved `paths.generated_dir`. Existing run folders are not reused for analysis cache
 hits. Screenshots, slow.pics upload inputs, manual overrides, and VSPreview
 artifacts remain scoped to the current run folder. Probe snapshots
 are written to both the current run folder and the shared generated probe cache
 so future `--from-cache-only` runs can validate the exact all-source analysis
-selection domain before metadata prefetch or run-folder reservation. Configured
-`report.output_dir` continues to own report placement; only fallback report
-placement follows the screenshot/current run output location.
+selection domain before metadata prefetch or run-folder reservation. Report generation
+receives the explicit canonical `<run-folder>/report.html` path from post-render
+orchestration; no report-specific output directory or fallback placement exists.
 
 Run-folder names are title-first and capped at 64 characters for Windows path
 headroom. The base name comes from resolved TMDB title/year, common parsed
@@ -371,8 +370,8 @@ Current Docker owner seams for optional profiles remain explicit:
 
 - `docker-compose.yml`: default headless software-Vulkan services, including a
   configuration-writable `frame-compare-wizard` setup service and a
-  configuration-read-only `frame-compare-run` service with persistent screenshot
-  and generated-output mounts
+  configuration-read-only `frame-compare-run` service with the single persistent
+  generated-data mount
 - `docker-compose.gpu-nvidia.yml`: opt-in NVIDIA GPU override/profile only
 - `docker-compose.gui-linux.yml`: opt-in Linux X11/VSPreview override/profile only
 - `tools/verify_docker_integration.sh`: canonical default Docker gate
@@ -396,9 +395,9 @@ manual Linux desktop action outside the default Docker verification gate.
 The host open helper is also container-boundary aware rather than a CLI contract
 change. It does not alter in-container report auto-open or slow.pics browser
 behavior. Instead, it runs on the host, translates only the default compose
-mounts `/workspace/screenshots` -> `./screenshots` and `/workspace/generated` ->
-`./generated`, rejects `/workspace/config` and `/workspace/comparison_videos`,
-and allows remote opening only for explicit `https://slow.pics/...` URLs.
+mount `/workspace/generated` -> `./generated`, rejects `/workspace/config`,
+`/workspace/comparison_videos`, and the removed `/workspace/screenshots` output
+root, and allows remote opening only for explicit `https://slow.pics/...` URLs.
 
 slow.pics publishing is service-owned. `frame_compare.services.publishers` owns
 the browser-compatible slow.pics client flow: `GET /comparison`,
@@ -447,12 +446,10 @@ The existing non-confirmed rule remains: an attempted slow.pics browser open
 suppresses generated-report auto-open for that run.
 
 `frame_compare.services.slowpics_shortcut` owns deterministic `.url` output for
-successful slow.pics uploads. It selects the current run folder when present, or
-the safe common parent of the resolved screenshots/generated directories when
-run folders are disabled. The service rejects unsafe parent choices outside the
-workspace root, filesystem anchors, drive/share roots, and the user home
-directory; filename selection is deterministic and repeated writes overwrite the
-same path. Filename selection consumes the single final resolved upload title;
+successful slow.pics uploads. It selects the current reserved run folder and rejects
+missing or escaped run aliases before writing. Filename selection is deterministic
+and repeated writes overwrite the same path. Filename selection consumes the single
+final resolved upload title;
 it does not independently fall back through metadata or screenshot directories.
 
 `frame_compare.services.slowpics_webhook` owns isolated outbound webhook

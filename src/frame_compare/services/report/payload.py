@@ -13,8 +13,10 @@ from pathlib import Path
 from typing import Protocol, TypedDict
 
 from frame_compare.config.schema import ReportConfig
+from frame_compare.errors import PathEscapesRootError
 from frame_compare.services.errors import ReportError
 from frame_compare.services.types import TmdbMetadata
+from frame_compare.utils.paths import require_managed_descendant
 
 
 class ClipProbeProtocol(Protocol):
@@ -259,9 +261,6 @@ def build_frame_payloads(
         for clip in data.clips:
             screenshot_path = clip.screenshots[i]
 
-            if not screenshot_path.exists():
-                raise ReportError(f"screenshot not found: {screenshot_path}")
-
             frame_images.append(
                 {
                     "clip": clip.name,
@@ -361,7 +360,9 @@ def source_identity_from_fingerprint(fingerprint: ClipFingerprintProtocol) -> st
     return f"source_{digest[:32]}"
 
 
-def build_report_identity_frames(frames: list[ReportFramePayload]) -> list[ReportIdentityFramePayload]:
+def build_report_identity_frames(
+    frames: list[ReportFramePayload],
+) -> list[ReportIdentityFramePayload]:
     """Build frame identity entries without image src paths or embedded bytes."""
     identity_frames: list[ReportIdentityFramePayload] = []
     for frame in frames:
@@ -379,17 +380,37 @@ def build_report_identity_frames(frames: list[ReportFramePayload]) -> list[Repor
 
 def image_src_for_report(screenshot_path: Path, *, report_dir: Path, embed_images: bool) -> str:
     """Resolve an image src for the report payload."""
+    resolved_screenshot = _resolve_report_screenshot(screenshot_path, report_dir)
     if embed_images:
         try:
-            image_bytes = screenshot_path.read_bytes()
+            image_bytes = resolved_screenshot.read_bytes()
             b64_str = base64.b64encode(image_bytes).decode("ascii")
             return f"data:image/png;base64,{b64_str}"
         except OSError as e:
             raise ReportError(f"failed to encode image: {screenshot_path}") from e
 
     try:
-        # Use relative path for portability if possible.
-        return str(Path(os.path.relpath(screenshot_path, report_dir)).as_posix())
-    except ValueError:
-        # Use a browser-safe URI when Windows drives prevent a relative path.
-        return screenshot_path.resolve().as_uri()
+        relative_path = Path(os.path.relpath(resolved_screenshot, report_dir.resolve()))
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ReportError("screenshot path cannot be made relative to the report") from exc
+    if relative_path.is_absolute():
+        raise ReportError("screenshot path must be relative to the report")
+    return relative_path.as_posix()
+
+
+def _resolve_report_screenshot(screenshot_path: Path, report_dir: Path) -> Path:
+    """Resolve a report image and enforce run-folder containment."""
+    try:
+        resolved = require_managed_descendant(report_dir, screenshot_path)
+    except (OSError, RuntimeError, ValueError, PathEscapesRootError) as exc:
+        raise ReportError("screenshot path is outside the report directory") from exc
+
+    try:
+        is_regular_file = resolved.is_file()
+    except OSError as exc:
+        raise ReportError(f"failed to inspect screenshot: {screenshot_path}") from exc
+    if not is_regular_file:
+        if not resolved.exists():
+            raise ReportError(f"screenshot not found: {screenshot_path}")
+        raise ReportError(f"screenshot is not a regular file: {screenshot_path}")
+    return resolved
