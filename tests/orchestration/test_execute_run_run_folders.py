@@ -353,16 +353,17 @@ def test_execute_prep_rejects_junctioned_reserved_run_directory(
     generated_root = tmp_path / "generated"
     run_dir = generated_root / "source"
 
-    monkeypatch.setattr(
-        preparation,
-        "reserve_run_folder",
-        lambda input_dir, **_kwargs: RunFolderReservation(
-            path=input_dir / "source",
+    def _reserve_junction(input_dir: Path, **_kwargs: object) -> RunFolderReservation:
+        reserved_path = input_dir / "source"
+        reserved_path.mkdir(parents=True)
+        return RunFolderReservation(
+            path=reserved_path,
             folder_name="source",
             base_name="source",
             naming_source="filename_stems",
-        ),
-    )
+        )
+
+    monkeypatch.setattr(preparation, "reserve_run_folder", _reserve_junction)
     monkeypatch.setattr(Path, "is_junction", lambda path: path == run_dir)
 
     with pytest.raises(PathEscapesRootError):
@@ -378,7 +379,7 @@ def test_execute_prep_rejects_junctioned_reserved_run_directory(
             )
         )
 
-    assert not (run_dir / "run_info.toml").exists()
+    assert not run_dir.exists()
 
 
 def test_execute_run_custom_generated_dir_run_folders_saves_and_loads_shared_cache(

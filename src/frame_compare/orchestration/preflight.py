@@ -101,6 +101,21 @@ def _invalid_generated_root_error(path_value: str | Path) -> ConfigValidationErr
     )
 
 
+def _empty_generated_root_error(path_value: str | Path) -> ConfigValidationError:
+    return ConfigValidationError(
+        [
+            {
+                "type": "value_error",
+                "loc": ["paths", "generated_dir"],
+                "msg": "paths.generated_dir must not be empty or whitespace-only",
+                "input": str(path_value),
+            }
+        ],
+        message="Invalid generated-data location",
+        hint="Choose a non-empty directory for generated data",
+    )
+
+
 def _generated_root_resolution_error(
     path_value: str | Path,
     cause: OSError | RuntimeError,
@@ -125,6 +140,8 @@ def _generated_root_resolution_error(
 def _resolve_generated_root(path_value: str | Path, root: Path) -> Path:
     """Resolve and structurally validate the configured generated-data root."""
     expanded = os.path.expandvars(str(path_value))
+    if not expanded.strip():
+        raise _empty_generated_root_error(path_value)
     if _is_filesystem_root(expanded):
         raise _invalid_generated_root_error(path_value)
     candidate = Path(expanded)

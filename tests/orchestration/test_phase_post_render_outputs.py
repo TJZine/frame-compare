@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -126,6 +127,26 @@ def test_run_report_phase_builds_report_data_and_records_path(
         ("Encode 1", (1920, 1080), 24.0),
     ]
     assert captured["report_config"] == ctx.config.report
+
+
+def test_run_report_phase_requires_reserved_run_folder(tmp_path: Path) -> None:
+    ctx = _context(tmp_path)
+    ctx.workspace = replace(ctx.workspace, run_dir=None)
+    render = RenderArtifacts(
+        screenshots_by_label={
+            "Reference": [tmp_path / "screenshots" / "reference_1.png"],
+        },
+        screenshot_dir=tmp_path / "screenshots",
+    )
+
+    with pytest.raises(RuntimeError, match="reserved run folder"):
+        phase_post_render.run_report_phase(
+            ctx,
+            frames=[1],
+            render=render,
+            metadata=None,
+            slowpics_url=None,
+        )
 
 
 def test_run_report_phase_builds_four_clip_payload_inputs_in_clip_order(

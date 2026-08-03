@@ -267,10 +267,12 @@ headroom. The base name comes from resolved TMDB title/year, common parsed
 metadata, combined filename stems, or `unnamed_run`. Exact timestamps are not
 part of folder names; collisions use compact numeric suffixes such as `_2` and
 `_3`, then a short random suffix if bounded numeric claiming cannot reserve a
-directory. The exact creation time lives in `<run-folder>/run_info.toml`, which is
-written before probing, rendering, or other runtime-heavy work. If that write
-fails, the run fails immediately and cleanup attempts to remove the empty
-reserved directory as best effort.
+directory. Preparation validates the reserved immediate-child path and completes
+the `WorkspacePaths` transition before writing metadata. The exact creation time
+then lives in `<run-folder>/run_info.toml`, which is written before probing,
+rendering, or other runtime-heavy work. If reservation validation, the workspace
+transition, or the metadata write fails, the run fails immediately and cleanup
+attempts to remove the empty reserved directory as best effort.
 
 Preparation reports the reserved `WorkspacePaths` through an internal dependency
 capture immediately after `run_info.toml` succeeds, without changing the

@@ -7,8 +7,10 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
-from frame_compare.errors import PathEscapesRootError
-from frame_compare.utils.paths import require_managed_descendant
+from frame_compare.utils.paths import (
+    require_managed_descendant,
+    require_managed_immediate_child,
+)
 
 type AlignmentPreviousOffsetsPolicy = Literal["disabled", "prompt", "always"]
 type AlignmentSelectedReferenceRelationship = Literal["auto", "configured"]
@@ -102,14 +104,8 @@ class WorkspacePaths:
         Returns:
             New WorkspacePaths instance with run folder mode enabled
         """
-        resolved_run_dir = require_managed_descendant(self.generated_root, run_dir)
+        resolved_run_dir = require_managed_immediate_child(self.generated_root, run_dir)
         resolved_root = self.generated_root.resolve()
-        if (
-            run_dir.is_symlink()
-            or run_dir.is_junction()
-            or resolved_run_dir.parent != resolved_root
-        ):
-            raise PathEscapesRootError(resolved_run_dir, resolved_root)
         for managed_path in (
             resolved_run_dir / "screenshots",
             resolved_run_dir / "generated",

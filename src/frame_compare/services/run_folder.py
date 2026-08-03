@@ -17,7 +17,7 @@ from frame_compare.errors import PathEscapesRootError
 from frame_compare.services.errors import GeneratedDataReservationError
 from frame_compare.services.metadata import parse_filename
 from frame_compare.services.types import ParsedMetadata, TmdbMetadata
-from frame_compare.utils.paths import require_managed_descendant
+from frame_compare.utils.paths import require_managed_immediate_child
 
 _UNNAMED_RUN_BASE = "unnamed_run"
 _MAX_FOLDER_NAME_LENGTH = 64
@@ -249,14 +249,7 @@ def reserve_run_folder(
 def _reserve_candidate(owner: Path, candidate: Path) -> None:
     """Validate and atomically claim one immediate child of ``owner``."""
     try:
-        resolved_owner = owner.resolve()
-        resolved_candidate = require_managed_descendant(resolved_owner, candidate)
-        if (
-            candidate.is_symlink()
-            or candidate.is_junction()
-            or resolved_candidate.parent != resolved_owner
-        ):
-            raise PathEscapesRootError(resolved_candidate, resolved_owner)
+        require_managed_immediate_child(owner, candidate)
         candidate.mkdir(parents=True, exist_ok=False)
     except (FileExistsError, PathEscapesRootError):
         raise

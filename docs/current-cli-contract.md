@@ -111,10 +111,11 @@ For those commands:
 
 The selected config file and configured `paths.config_dir` must resolve beneath the
 fully resolved workspace root. The sole `paths.generated_dir` value is resolved
-once and may name a normal external directory; its managed descendants remain
-contained beneath that resolved generated-data root. Containment follows symlinks
-and expands environment variables in config path values, so invalid config paths
-fail through the standard typed path error. `run`, `wizard`, `preset apply`,
+once and may name a normal external directory; empty or whitespace-only values,
+including values that become empty after environment expansion, are invalid. Its
+managed descendants remain contained beneath that resolved generated-data root.
+Containment follows symlinks and expands environment variables in config path values,
+so invalid config paths fail through the standard typed path error. `run`, `wizard`, `preset apply`,
 `preset save`, and both `history` subcommands validate their selected config
 destination before config reads or writes; `run` also validates generated-data
 root structure before diagnostics, config writes, or runtime entry. `preset list`
@@ -454,6 +455,13 @@ unchanged.
   outcome manifest and does not include report URL, timings, or success/failure
   state. If `run_info.toml` cannot be written, the run fails immediately and
   best-effort cleanup removes the empty reserved run folder when possible.
+- If run-folder reservation cannot create or resolve a candidate beneath the
+  generated-data root, including permission errors or symlink-loop resolution
+  failures, the run fails with `FC-3018`. Reconnect the selected location, repair
+  its permissions or link/junction, or choose a different `paths.generated_dir`.
+  This reservation error is distinct from a later `run_info.toml` write failure;
+  reservation wraps the original cause, while the metadata write re-raises its
+  original error. Both attempt best-effort cleanup.
 - A separate atomically written `<run-folder>/run_result.toml` V1 record captures
   the final outcome without modifying `run_info.toml`. Successful records are
   written after all post-run phases settle and use `completed` or

@@ -86,7 +86,10 @@ from frame_compare.services.run_info import (
 )
 from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
-from frame_compare.utils.paths import require_managed_descendant
+from frame_compare.utils.paths import (
+    require_managed_descendant,
+    require_managed_immediate_child,
+)
 from frame_compare.utils.types import WorkspacePaths
 
 log = structlog.get_logger()
@@ -158,21 +161,20 @@ async def _resolve_run_directory(
         tmdb_metadata=metadata,
     )
     try:
-        resolved_run_dir = require_managed_descendant(workspace.generated_root, run_dir.path)
-        resolved_generated_root = workspace.generated_root.resolve()
-        if (
-            run_dir.path.is_symlink()
-            or run_dir.path.is_junction()
-            or resolved_run_dir.parent != resolved_generated_root
-        ):
-            raise PathEscapesRootError(resolved_run_dir, resolved_generated_root)
+        resolved_run_dir = require_managed_immediate_child(
+            workspace.generated_root,
+            run_dir.path,
+        )
         run_info_path = require_managed_descendant(
             resolved_run_dir,
             resolved_run_dir / "run_info.toml",
         )
-    except PathEscapesRootError:
+        new_workspace = workspace.with_run_dir(resolved_run_dir)
+    except PathEscapesRootError as exc:
+        _cleanup_empty_reserved_run_dir(run_dir.path, original_error=exc)
         raise
     except (OSError, RuntimeError) as exc:
+        _cleanup_empty_reserved_run_dir(run_dir.path, original_error=exc)
         raise GeneratedDataReservationError(workspace.generated_root, exc) from exc
     try:
         write_run_info(
@@ -188,12 +190,6 @@ async def _resolve_run_directory(
     except OSError as exc:
         _cleanup_empty_reserved_run_dir(resolved_run_dir, original_error=exc)
         raise
-    try:
-        new_workspace = workspace.with_run_dir(resolved_run_dir)
-    except PathEscapesRootError:
-        raise
-    except (OSError, RuntimeError) as exc:
-        raise GeneratedDataReservationError(workspace.generated_root, exc) from exc
     if deps.capture_reserved_run is not None:
         deps.capture_reserved_run(
             ReservedRunCapture(
@@ -250,12 +246,12 @@ def _attempted_run_info_tmdb_prefetch_facts(
     )
 
 
-def _cleanup_empty_reserved_run_dir(run_dir: Path, *, original_error: OSError) -> None:
+def _cleanup_empty_reserved_run_dir(run_dir: Path, *, original_error: Exception) -> None:
     try:
         run_dir.rmdir()
     except OSError as cleanup_error:
         log.warning(
-            "run_info_write_cleanup_degraded",
+            "reserved_run_cleanup_degraded",
             run_dir=str(run_dir),
             error_type=type(cleanup_error).__name__,
             error=str(cleanup_error),

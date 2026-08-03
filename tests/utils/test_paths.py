@@ -5,7 +5,10 @@ from pathlib import Path
 import pytest
 
 from frame_compare.errors import PathEscapesRootError
-from frame_compare.utils.paths import require_managed_descendant
+from frame_compare.utils.paths import (
+    require_managed_descendant,
+    require_managed_immediate_child,
+)
 from frame_compare.utils.types import WorkspacePaths
 
 
@@ -30,6 +33,49 @@ def test_require_managed_descendant_rejects_symlink_escape(tmp_path: Path) -> No
         "path": str((outside / "report.html").resolve()),
         "root": str(owner.resolve()),
     }
+
+
+def test_require_managed_immediate_child_returns_resolved_child(tmp_path: Path) -> None:
+    owner = tmp_path / "owner"
+    owner.mkdir()
+    child = owner / "run"
+
+    assert require_managed_immediate_child(owner, child) == child.resolve()
+
+
+def test_require_managed_immediate_child_rejects_nested_descendant(tmp_path: Path) -> None:
+    owner = tmp_path / "owner"
+    owner.mkdir()
+
+    with pytest.raises(PathEscapesRootError):
+        require_managed_immediate_child(owner, owner / "nested" / "run")
+
+
+def test_require_managed_immediate_child_rejects_symlink(
+    tmp_path: Path,
+) -> None:
+    owner = tmp_path / "owner"
+    target = owner / "target"
+    owner.mkdir()
+    target.mkdir()
+    child = owner / "run"
+    child.symlink_to(target, target_is_directory=True)
+
+    with pytest.raises(PathEscapesRootError):
+        require_managed_immediate_child(owner, child)
+
+
+def test_require_managed_immediate_child_rejects_junction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = tmp_path / "owner"
+    owner.mkdir()
+    child = owner / "run"
+    monkeypatch.setattr(Path, "is_junction", lambda path: path == child)
+
+    with pytest.raises(PathEscapesRootError):
+        require_managed_immediate_child(owner, child)
 
 
 def test_workspace_paths_rejects_junctioned_run_directory(

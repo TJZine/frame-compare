@@ -21,4 +21,13 @@ def require_managed_descendant(owner: Path, descendant: Path) -> Path:
     return resolved_descendant
 
 
-__all__ = ["require_managed_descendant"]
+def require_managed_immediate_child(owner: Path, child: Path) -> Path:
+    """Return a resolved real immediate child or reject a redirected path."""
+    resolved_owner = owner.resolve()
+    resolved_child = require_managed_descendant(resolved_owner, child)
+    if child.is_symlink() or child.is_junction() or resolved_child.parent != resolved_owner:
+        raise PathEscapesRootError(resolved_child, resolved_owner)
+    return resolved_child
+
+
+__all__ = ["require_managed_descendant", "require_managed_immediate_child"]

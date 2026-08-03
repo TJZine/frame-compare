@@ -291,6 +291,61 @@ class TestResolvePaths:
         assert "Reconnect" in (exc_info.value.hint or "")
         assert not managed_loop.exists()
 
+    def test_resolve_paths_rejects_shared_analysis_cache_symlink_escape(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        root = tmp_path / "workspace"
+        generated_root = root / "generated"
+        external_cache = tmp_path / "external-cache"
+        (generated_root / "cache").mkdir(parents=True)
+        external_cache.mkdir()
+        (generated_root / "cache" / "analysis").symlink_to(
+            external_cache,
+            target_is_directory=True,
+        )
+        config = ConfigSchema(paths=PathsConfig(generated_dir="generated"))
+
+        with pytest.raises(PathEscapesRootError) as exc_info:
+            resolve_paths(config, root)
+
+        assert exc_info.value.context.details == {
+            "path": str(external_cache.resolve()),
+            "root": str(generated_root.resolve()),
+        }
+
+    @pytest.mark.parametrize("generated_dir", ["", " ", "\t\n"])
+    def test_resolve_paths_rejects_empty_generated_directory(
+        self,
+        tmp_path: Path,
+        generated_dir: str,
+    ) -> None:
+        root = tmp_path / "workspace"
+        root.mkdir()
+        config = ConfigSchema(paths=PathsConfig(generated_dir=generated_dir))
+
+        with pytest.raises(ConfigValidationError) as exc_info:
+            resolve_paths(config, root)
+
+        assert exc_info.value.context.details is not None
+        assert exc_info.value.context.details["validation_errors"]
+        assert "non-empty" in (exc_info.value.hint or "")
+
+    def test_resolve_paths_rejects_environment_value_expanding_to_empty(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        root = tmp_path / "workspace"
+        root.mkdir()
+        monkeypatch.setenv("FRAME_COMPARE_EMPTY_GENERATED_ROOT", "")
+        config = ConfigSchema(
+            paths=PathsConfig(generated_dir="$FRAME_COMPARE_EMPTY_GENERATED_ROOT")
+        )
+
+        with pytest.raises(ConfigValidationError):
+            resolve_paths(config, root)
+
     @pytest.mark.parametrize("generated_dir", ["/", "C:\\", "\\\\server\\share"])
     def test_resolve_paths_rejects_filesystem_root_generated_directory(
         self,

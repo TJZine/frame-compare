@@ -89,12 +89,14 @@ def test_current_cli_contract_describes_generated_data_cutover() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
 
+    assert "`paths.generated_dir`" in cli_contract
     assert "`report.output_dir`" in cli_contract
     assert "`paths.screenshots_dir`" in cli_contract
     assert "`paths.use_run_folders`" in cli_contract
     assert "canonical run-root `report.html`" in cli_contract
     assert "`output` value is the resolved generated-data root" in cli_contract
     assert "The constant run-folder policy" in cli_contract
+    assert "`FC-3018`" in cli_contract
 
 
 def test_current_authorities_describe_run_relative_records_and_clean_history_cutover() -> None:

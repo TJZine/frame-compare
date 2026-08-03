@@ -9,6 +9,8 @@ import pytest
 
 from frame_compare.orchestration import preparation
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
+from frame_compare.services.errors import GeneratedDataReservationError
+from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.types import SourceInfo
 
 from .execute_run_helpers import (
@@ -52,6 +54,81 @@ def test_execute_run_run_info_write_failure_happens_before_probing_and_cleans_em
 
     with pytest.raises(OSError, match="disk full"):
         asyncio.run(execute_run(request, deps=deps))
+
+    assert generated_dir.is_dir()
+    assert not any(path.is_dir() for path in generated_dir.iterdir())
+
+
+def test_execute_run_containment_failure_cleans_reserved_run_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    input_dir = tmp_path / "comparison_videos"
+    create_video_files(input_dir, "source.mkv")
+    generated_dir = preparation.prepare_preflight(root=tmp_path).workspace.generated_dir
+
+    def _fail_containment(_owner: Path, _child: Path) -> Path:
+        raise RuntimeError("reserved path became unavailable")
+
+    monkeypatch.setattr(
+        preparation,
+        "require_managed_immediate_child",
+        _fail_containment,
+    )
+
+    with pytest.raises(GeneratedDataReservationError, match="Unable to reserve"):
+        asyncio.run(
+            execute_run(
+                RunRequest(
+                    root=tmp_path,
+                    skip_analysis=True,
+                    skip_metadata=True,
+                    no_upload=True,
+                ),
+                deps=RunDependencies(
+                    vs_loader=NoProbeVSLoader(),
+                    ffmpeg_runner=FakeFFmpegRunner(),
+                ),
+            )
+        )
+
+    assert generated_dir.is_dir()
+    assert not any(path.is_dir() for path in generated_dir.iterdir())
+
+
+def test_execute_run_workspace_transition_failure_cleans_reserved_run_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    input_dir = tmp_path / "comparison_videos"
+    create_video_files(input_dir, "source.mkv")
+    generated_dir = preparation.prepare_preflight(root=tmp_path).workspace.generated_dir
+
+    def _fail_workspace_transition(
+        _workspace: WorkspacePaths,
+        _run_dir: Path,
+    ) -> WorkspacePaths:
+        raise RuntimeError("workspace transition failed")
+
+    monkeypatch.setattr(WorkspacePaths, "with_run_dir", _fail_workspace_transition)
+
+    with pytest.raises(GeneratedDataReservationError, match="Unable to reserve"):
+        asyncio.run(
+            execute_run(
+                RunRequest(
+                    root=tmp_path,
+                    skip_analysis=True,
+                    skip_metadata=True,
+                    no_upload=True,
+                ),
+                deps=RunDependencies(
+                    vs_loader=NoProbeVSLoader(),
+                    ffmpeg_runner=FakeFFmpegRunner(),
+                ),
+            )
+        )
 
     assert generated_dir.is_dir()
     assert not any(path.is_dir() for path in generated_dir.iterdir())
