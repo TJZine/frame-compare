@@ -54,7 +54,7 @@ details. Use the same route and runtime when bit-for-bit comparison is important
 
 | Route | Python environment | FFmpeg | VapourSynth + loader plugins | VSPreview + PyQt6 | Installer/updater |
 | --- | --- | --- | --- | --- | --- |
-| Windows release ZIP | Included (Python 3.13.13 in the current bundle manifest) | Included, LGPL-only build | Included (VapourSynth R76, L-SMASH-Works, and vs-placebo) | Included | Included |
+| Windows release ZIP | Included (Python 3.13.14 in the current bundle manifest) | Included, LGPL-only build | Included (VapourSynth R76, L-SMASH-Works, and vs-placebo) | Included | Included |
 | Windows source build | Built into the resulting bundle | Downloaded by the builder | Downloaded/installed by the builder | Installed by the builder | Included |
 | Docker default | Included in image | Included | Included | Not in the default runtime target | Rebuild/pull the image |
 | Docker NVIDIA | Included in image | Included | Included | Not by the GPU profile alone | Rebuild/pull the image |

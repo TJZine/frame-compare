@@ -20,7 +20,7 @@ def test_generate_name_preserves_spaces():
 
 
 def test_generate_name_sanitizes_special_chars():
-    assert generate_screenshot_name('Bad:Name?.mkv', 10) == "10 - Bad_Name_.mkv.png"
+    assert generate_screenshot_name("Bad:Name?.mkv", 10) == "10 - Bad_Name_.mkv.png"
 
 
 def test_generate_name_collapses_underscores():

@@ -148,11 +148,11 @@ def test_windows_portable_manifest_tracks_r76_runtime_artifacts(repo_root: Path)
     artifacts = {artifact["id"]: artifact for artifact in manifest["artifacts"]}
 
     assert manifest["bundle"]["vs_ref"] == "R76"
-    assert manifest["bundle"]["python_version"].startswith("3.13.")
-    assert "3.14" not in manifest["bundle"]["python_version"]
+    expected_python_version = "3.13.14"
+    assert manifest["bundle"]["python_version"] == expected_python_version
 
     python = artifacts["python-embed-amd64"]
-    assert python["version"].startswith("3.13.")
+    assert python["version"] == expected_python_version
     assert python["url"].endswith(f"python-{python['version']}-embed-amd64.zip")
 
     vapoursynth = artifacts["vapoursynth-portable-r76"]

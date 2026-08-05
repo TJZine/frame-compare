@@ -1,12 +1,12 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 0: Pinned Python dependency tooling
 # ─────────────────────────────────────────────────────────────────────────────
-FROM ghcr.io/astral-sh/uv:0.11.31@sha256:ecd4de2f060c64bea0ff8ecb182ddf46ba3fcccdc8a60cfdbaf20d1a047d7437 AS uv
+FROM ghcr.io/astral-sh/uv:0.12.2@sha256:069a51314a7bb6031777a9273205fe1b0b19e914ef418207d1338b268df641dd AS uv
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 1: Build supplemental VapourSynth plugins
 # ─────────────────────────────────────────────────────────────────────────────
-FROM python:3.13.13-slim-trixie@sha256:aa938a849bcb82dce8f49480f056ab82bf5c1c3ebc294f0430f37b6820e7f286 AS builder
+FROM python:3.13.14-slim-trixie@sha256:bf503bb2243c5aad0aa951544dd60d165f992646441d35dea90893703fc26251 AS builder
 
 # Deterministic version pins (change these to update components)
 ARG VAPOURSYNTH_VERSION=76
@@ -145,7 +145,7 @@ RUN checkout_source_commit() { \
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2: Runtime
 # ─────────────────────────────────────────────────────────────────────────────
-FROM python:3.13.13-slim-trixie@sha256:aa938a849bcb82dce8f49480f056ab82bf5c1c3ebc294f0430f37b6820e7f286 AS runtime
+FROM python:3.13.14-slim-trixie@sha256:bf503bb2243c5aad0aa951544dd60d165f992646441d35dea90893703fc26251 AS runtime
 
 ARG VAPOURSYNTH_VERSION=76
 ARG VS_PLACEBO_VERSION=2.0.2

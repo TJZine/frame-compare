@@ -4,7 +4,7 @@
     "platform": "windows",
     "arch": "x64",
     "vs_ref": "R76",
-    "python_version": "3.13.13",
+    "python_version": "3.13.14",
     "ffmpeg_policy": "lgpl-only",
     "plugin_layout": "R74+ site-packages/vapoursynth/plugins plus VAPOURSYNTH_EXTRA_PLUGIN_PATH",
     "notes": "Baseline bundle pins for deterministic Windows portable distribution. Users may BYO newer deps best-effort. BtbN retains end-of-month builds for 2 years and daily builds for only 14 days; always pin FFmpeg to an end-of-month autobuild tag."
@@ -13,11 +13,11 @@
     {
       "id": "python-embed-amd64",
       "name": "Python embeddable package (amd64)",
-      "version": "3.13.13",
-      "url": "https://www.python.org/ftp/python/3.13.13/python-3.13.13-embed-amd64.zip",
-      "source_url": "https://www.python.org/ftp/python/3.13.13/Python-3.13.13.tgz",
-      "sha256": "8766a8775746235e23cf5aee5027ab1060bb981d93110577adcf3508aa0cbd55",
-      "bytes": 10950201,
+      "version": "3.13.14",
+      "url": "https://www.python.org/ftp/python/3.13.14/python-3.13.14-embed-amd64.zip",
+      "source_url": "https://www.python.org/ftp/python/3.13.14/Python-3.13.14.tgz",
+      "sha256": "90b4e5b9898b72d744650524bff92377c367f44bd5fbd09e3148656c080ad907",
+      "bytes": 10964839,
       "license": {
         "spdx": "Python-2.0",
         "url": "https://docs.python.org/3/license.html"
