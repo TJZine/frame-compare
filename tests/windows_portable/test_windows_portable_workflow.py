@@ -56,10 +56,10 @@ def test_windows_portable_release_checksum_paths_are_individual_powershell_value
     )
 
     assert (
-        '(Join-Path -Path $assetDir -ChildPath '
+        "(Join-Path -Path $assetDir -ChildPath "
         '"frame-compare-portable-win-x64-$($env:RELEASE_TAG).zip.sha256")'
     ) in source
     assert (
-        '(Join-Path -Path $assetDir -ChildPath '
+        "(Join-Path -Path $assetDir -ChildPath "
         '"frame-compare-update-win-x64-$($env:RELEASE_TAG).zip.sha256")'
     ) in source
