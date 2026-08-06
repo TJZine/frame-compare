@@ -13,19 +13,23 @@ from .cli_helpers import (
     MINIMAL_CONFIG,
     _invoke_run_with_minimal_workspace,
     _write_minimal_config,
+    isolated_cli_filesystem,
     runner,
 )
 
 
 def test_run_write_config_json_write_error_outputs_error_schema(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     def _write_text_atomic(_path: Path, _content: str, *, encoding: str = "utf-8") -> None:
         raise PermissionError("permission denied")
 
     monkeypatch.setattr("frame_compare.cli.entry.write_text_atomic", _write_text_atomic)
 
-    result = _invoke_run_with_minimal_workspace(["--write-config", "--json"])
+    result = _invoke_run_with_minimal_workspace(
+        ["--write-config", "--json"], tmp_path=tmp_path, monkeypatch=monkeypatch
+    )
 
     assert result.exit_code == int(ExitCode.CONFIG_ERROR)
     assert result.stderr == ""
@@ -40,6 +44,7 @@ def test_run_write_config_json_write_error_outputs_error_schema(
 
 def test_run_json_rejects_external_config_before_load_write_or_runner(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     def _unexpected(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("external config must be rejected before side effects")
@@ -48,7 +53,7 @@ def test_run_json_rejects_external_config_before_load_write_or_runner(
     monkeypatch.setattr("frame_compare.cli.entry.write_config_to", _unexpected)
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _unexpected)
 
-    with runner.isolated_filesystem():
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         root.mkdir()
         external_config = Path("outside") / "config.toml"
@@ -79,6 +84,7 @@ def test_run_json_rejects_external_config_before_load_write_or_runner(
 
 def test_run_json_outputs_pinned_success_schema_and_stdout_is_pure_json(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         return RunResult(
@@ -95,7 +101,9 @@ def test_run_json_outputs_pinned_success_schema_and_stdout_is_pure_json(
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
-    result = _invoke_run_with_minimal_workspace(["--json"])
+    result = _invoke_run_with_minimal_workspace(
+        ["--json"], tmp_path=tmp_path, monkeypatch=monkeypatch
+    )
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload == {
@@ -113,6 +121,7 @@ def test_run_json_outputs_pinned_success_schema_and_stdout_is_pure_json(
 
 def test_run_json_success_omits_warnings_from_stdout(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         return RunResult(
@@ -122,7 +131,9 @@ def test_run_json_success_omits_warnings_from_stdout(
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
-    result = _invoke_run_with_minimal_workspace(["--json"])
+    result = _invoke_run_with_minimal_workspace(
+        ["--json"], tmp_path=tmp_path, monkeypatch=monkeypatch
+    )
 
     assert result.exit_code == 0
     assert result.stderr == ""
@@ -133,13 +144,14 @@ def test_run_json_success_omits_warnings_from_stdout(
 
 def test_run_json_rejects_interactive_alignment_from_config_before_runner(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise AssertionError("runner.run should not be invoked for invalid CLI/config combinations")
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
-    with runner.isolated_filesystem():
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = _write_minimal_config(root)
         config_path.write_text(
@@ -176,13 +188,16 @@ def test_run_json_rejects_interactive_alignment_from_config_before_runner(
 
 def test_run_json_rejects_force_interactive_alignment_before_runner(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise AssertionError("runner.run should not be invoked for invalid CLI/config combinations")
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
-    result = _invoke_run_with_minimal_workspace(["--json", "--force-interactive-alignment"])
+    result = _invoke_run_with_minimal_workspace(
+        ["--json", "--force-interactive-alignment"], tmp_path=tmp_path, monkeypatch=monkeypatch
+    )
 
     assert result.exit_code == int(ExitCode.CONFIG_ERROR)
     assert result.stderr == ""
@@ -198,13 +213,14 @@ def test_run_json_rejects_force_interactive_alignment_before_runner(
 
 def test_run_json_aggregates_previous_offset_prompt_conflicts_before_runner(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise AssertionError("runner.run should not be invoked for invalid CLI/config combinations")
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
-    with runner.isolated_filesystem():
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = _write_minimal_config(root)
         config_path.write_text(
@@ -253,13 +269,14 @@ cache_results = false
 
 def test_run_json_rejects_report_confirmed_slowpics_before_runner(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise AssertionError("runner.run should not be invoked for invalid CLI/config combinations")
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
-    with runner.isolated_filesystem():
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = _write_minimal_config(root)
         config_path.write_text(
@@ -298,13 +315,14 @@ def test_run_json_rejects_report_confirmed_slowpics_before_runner(
 
 def test_run_json_report_confirmed_slowpics_message_uses_actual_failure(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise AssertionError("runner.run should not be invoked for invalid CLI/config combinations")
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
-    with runner.isolated_filesystem():
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = _write_minimal_config(root)
         config_path.write_text(
@@ -351,13 +369,16 @@ confirm_upload_after_report = true
 
 def test_run_json_outputs_error_schema_and_exit_code(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise ConfigNotFoundError(Path("missing.toml"))
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
-    result = _invoke_run_with_minimal_workspace(["--json"])
+    result = _invoke_run_with_minimal_workspace(
+        ["--json"], tmp_path=tmp_path, monkeypatch=monkeypatch
+    )
     assert result.exit_code == int(get_exit_code(ConfigNotFoundError(Path("missing.toml"))))
     assert result.stderr == ""
     payload = json.loads(result.stdout)
@@ -367,6 +388,7 @@ def test_run_json_outputs_error_schema_and_exit_code(
 
 def test_run_exit_code_maps_by_error_category_prefix_in_json_mode(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     error = FrameCompareError(
         ErrorContext(code="FC-3001", name="GENERIC_INPUT", message="bad input")
@@ -377,7 +399,9 @@ def test_run_exit_code_maps_by_error_category_prefix_in_json_mode(
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
-    result = _invoke_run_with_minimal_workspace(["--json"])
+    result = _invoke_run_with_minimal_workspace(
+        ["--json"], tmp_path=tmp_path, monkeypatch=monkeypatch
+    )
     assert result.exit_code == int(ExitCode.INPUT_ERROR)
     payload = json.loads(result.stdout)
     assert payload == format_error_json(error)
@@ -385,13 +409,16 @@ def test_run_exit_code_maps_by_error_category_prefix_in_json_mode(
 
 def test_run_json_invalid_tm_preset_outputs_config_error_schema(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise AssertionError("runner.run should not be invoked for invalid CLI choices")
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
-    result = _invoke_run_with_minimal_workspace(["--json", "--tm-preset", "invalid"])
+    result = _invoke_run_with_minimal_workspace(
+        ["--json", "--tm-preset", "invalid"], tmp_path=tmp_path, monkeypatch=monkeypatch
+    )
 
     assert result.exit_code == int(ExitCode.CONFIG_ERROR)
     assert result.stderr == ""
@@ -404,13 +431,16 @@ def test_run_json_invalid_tm_preset_outputs_config_error_schema(
 
 def test_run_json_invalid_overlay_outputs_config_error_schema(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise AssertionError("runner.run should not be invoked for invalid CLI choices")
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
-    result = _invoke_run_with_minimal_workspace(["--json", "--overlay", "invalid"])
+    result = _invoke_run_with_minimal_workspace(
+        ["--json", "--overlay", "invalid"], tmp_path=tmp_path, monkeypatch=monkeypatch
+    )
 
     assert result.exit_code == int(ExitCode.CONFIG_ERROR)
     assert result.stderr == ""
@@ -426,13 +456,16 @@ def test_run_json_invalid_overlay_outputs_config_error_schema(
 
 def test_run_json_invalid_frames_outputs_config_error_schema(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise AssertionError("runner.run should not be invoked for invalid frame selectors")
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
-    result = _invoke_run_with_minimal_workspace(["--json", "--frames", "abc"])
+    result = _invoke_run_with_minimal_workspace(
+        ["--json", "--frames", "abc"], tmp_path=tmp_path, monkeypatch=monkeypatch
+    )
 
     assert result.exit_code == int(ExitCode.CONFIG_ERROR)
     assert result.stderr == ""
@@ -446,6 +479,7 @@ def test_run_json_invalid_frames_outputs_config_error_schema(
 
 def test_run_json_skip_analysis_rejects_metric_frame_count_before_runner(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise AssertionError("runner.run should not be invoked for --skip-analysis conflict")
@@ -453,7 +487,9 @@ def test_run_json_skip_analysis_rejects_metric_frame_count_before_runner(
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
     result = _invoke_run_with_minimal_workspace(
-        ["--json", "--skip-analysis", "--dark-frame-count", "1"]
+        ["--json", "--skip-analysis", "--dark-frame-count", "1"],
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
     )
 
     assert result.exit_code == int(ExitCode.CONFIG_ERROR)
@@ -468,13 +504,14 @@ def test_run_json_skip_analysis_rejects_metric_frame_count_before_runner(
 
 def test_run_json_stale_analysis_config_keys_fail_before_runner(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise AssertionError("runner.run should not be invoked for stale analysis config")
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
-    with runner.isolated_filesystem():
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = _write_minimal_config(root)
         config_path.write_text(
@@ -504,25 +541,30 @@ def test_run_json_stale_analysis_config_keys_fail_before_runner(
     }
 
 
-def test_run_exit_code_is_130_on_keyboard_interrupt(monkeypatch: MonkeyPatch) -> None:
+def test_run_exit_code_is_130_on_keyboard_interrupt(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise KeyboardInterrupt()
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
-    result = _invoke_run_with_minimal_workspace([])
+    result = _invoke_run_with_minimal_workspace([], tmp_path=tmp_path, monkeypatch=monkeypatch)
     assert result.exit_code == int(ExitCode.INTERRUPTED)
 
 
 def test_run_no_color_error_output_has_no_rich_markup(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise ConfigNotFoundError(Path("missing.toml"))
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
-    result = _invoke_run_with_minimal_workspace(["--no-color"])
+    result = _invoke_run_with_minimal_workspace(
+        ["--no-color"], tmp_path=tmp_path, monkeypatch=monkeypatch
+    )
     assert result.exit_code == int(get_exit_code(ConfigNotFoundError(Path("missing.toml"))))
     assert "\x1b[" not in result.stderr
     assert "[red]" not in result.stderr
@@ -531,6 +573,7 @@ def test_run_no_color_error_output_has_no_rich_markup(
 
 def test_run_env_no_color_error_output_has_no_rich_markup(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise ConfigNotFoundError(Path("missing.toml"))
@@ -540,6 +583,8 @@ def test_run_env_no_color_error_output_has_no_rich_markup(
     result = _invoke_run_with_minimal_workspace(
         [],
         env={"NO_COLOR": "1", "TERM": "dumb"},
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
     )
     assert result.exit_code == int(get_exit_code(ConfigNotFoundError(Path("missing.toml"))))
     assert "\x1b[" not in result.stderr
@@ -549,6 +594,7 @@ def test_run_env_no_color_error_output_has_no_rich_markup(
 
 def test_run_no_color_error_output_preserves_literal_brackets(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     error = FrameCompareError(
         ErrorContext(
@@ -564,7 +610,9 @@ def test_run_no_color_error_output_preserves_literal_brackets(
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
-    result = _invoke_run_with_minimal_workspace(["--quiet", "--no-color"])
+    result = _invoke_run_with_minimal_workspace(
+        ["--quiet", "--no-color"], tmp_path=tmp_path, monkeypatch=monkeypatch
+    )
 
     assert result.exit_code == int(ExitCode.INPUT_ERROR)
     assert result.stdout == ""
