@@ -1,6 +1,5 @@
 import pytest
 import typer.rich_utils as typer_rich_utils
-from click import Group
 from pytest import MonkeyPatch
 from typer.main import get_command
 
@@ -61,8 +60,10 @@ def test_run_help_shows_all_options():
         "-v",
     ]
     command = get_command(app)
-    assert isinstance(command, Group)
-    run_command = command.commands["run"]
+    commands = getattr(command, "commands", None)
+    assert isinstance(commands, dict)
+    assert "run" in commands
+    run_command = commands["run"]
     declared_options = {
         opt
         for param in run_command.params
@@ -119,7 +120,9 @@ def test_run_rejects_retired_frame_count_options(
 
     assert result.exit_code == 2
     assert result.stdout == ""
-    assert f"No such option '{retired_option}'" in _normalize_cli_output(result.stderr)
+    error_output = _normalize_cli_output(result.stderr)
+    assert "No such option" in error_output
+    assert retired_option in error_output
 
 
 @pytest.mark.parametrize(
@@ -196,6 +199,30 @@ def test_public_help_explains_commands_and_option_effects(
     assert result.exit_code == 0
     for fragment in expected_fragments:
         assert fragment in output
+
+
+def test_root_generates_shell_completion_source() -> None:
+    result = runner.invoke(
+        app,
+        ["--show-completion"],
+        color=False,
+        env={
+            "SHELL": "/bin/bash",
+            "NO_COLOR": "1",
+            "TERM": "dumb",
+        },
+    )
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert "frame-compare" in result.stdout
+    supported_shell_markers = (
+        "complete -o default -F",
+        "compdef ",
+        "complete --no-files --command",
+        "Register-ArgumentCompleter -Native -CommandName",
+    )
+    assert any(marker in result.stdout for marker in supported_shell_markers)
 
 
 def test_stabilize_typer_help_width_backfills_import_order_gap(monkeypatch: MonkeyPatch) -> None:

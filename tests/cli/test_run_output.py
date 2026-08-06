@@ -15,11 +15,14 @@ from .cli_helpers import (
     _invoke_run_with_minimal_workspace,
     _normalize_cli_output,
     _write_minimal_config,
+    isolated_cli_filesystem,
     runner,
 )
 
 
-def test_run_respects_no_color_env_var_presence_even_if_empty(monkeypatch: MonkeyPatch) -> None:
+def test_run_respects_no_color_env_var_presence_even_if_empty(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
     captured: dict[str, object] = {}
 
     class FakeConsole:
@@ -43,6 +46,8 @@ def test_run_respects_no_color_env_var_presence_even_if_empty(monkeypatch: Monke
         color=False,
         terminal_width=200,
         env={"NO_COLOR": "", "TERM": "dumb"},
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
     )
 
     assert result.exit_code == 0
@@ -51,6 +56,7 @@ def test_run_respects_no_color_env_var_presence_even_if_empty(monkeypatch: Monke
 
 def test_run_human_output_routes_summaries_and_runtime_diagnostics(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         assert dependencies is None
@@ -64,7 +70,7 @@ def test_run_human_output_routes_summaries_and_runtime_diagnostics(
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
-    result = _invoke_run_with_minimal_workspace([])
+    result = _invoke_run_with_minimal_workspace([], tmp_path=tmp_path, monkeypatch=monkeypatch)
 
     assert result.exit_code == 0
     stdout = _normalize_cli_output(result.stdout)
@@ -83,6 +89,7 @@ def test_run_human_output_routes_summaries_and_runtime_diagnostics(
 
 def test_run_quiet_suppresses_at_a_glance_but_keeps_minimal_summary(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(
         "frame_compare.cli.entry.runner.run",
@@ -91,7 +98,9 @@ def test_run_quiet_suppresses_at_a_glance_but_keeps_minimal_summary(
         ),
     )
 
-    result = _invoke_run_with_minimal_workspace(["--quiet"])
+    result = _invoke_run_with_minimal_workspace(
+        ["--quiet"], tmp_path=tmp_path, monkeypatch=monkeypatch
+    )
 
     assert result.exit_code == 0
     output = _normalize_cli_output(result.stdout)
@@ -101,6 +110,7 @@ def test_run_quiet_suppresses_at_a_glance_but_keeps_minimal_summary(
 
 def test_run_json_is_machine_only_and_omits_post_upload_actions(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     warning = "slow.pics webhook: delivery failed"
 
@@ -123,7 +133,9 @@ def test_run_json_is_machine_only_and_omits_post_upload_actions(
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
-    result = _invoke_run_with_minimal_workspace(["--json"])
+    result = _invoke_run_with_minimal_workspace(
+        ["--json"], tmp_path=tmp_path, monkeypatch=monkeypatch
+    )
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
@@ -137,7 +149,7 @@ def test_run_json_is_machine_only_and_omits_post_upload_actions(
     assert result.stderr == ""
 
 
-def test_run_env_no_color_propagates_to_request(monkeypatch: MonkeyPatch) -> None:
+def test_run_env_no_color_propagates_to_request(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
     captured: dict[str, RunRequest] = {}
 
     def _run(request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
@@ -146,7 +158,9 @@ def test_run_env_no_color_propagates_to_request(monkeypatch: MonkeyPatch) -> Non
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
-    result = _invoke_run_with_minimal_workspace([], env={"NO_COLOR": "1", "TERM": "dumb"})
+    result = _invoke_run_with_minimal_workspace(
+        [], env={"NO_COLOR": "1", "TERM": "dumb"}, tmp_path=tmp_path, monkeypatch=monkeypatch
+    )
 
     assert result.exit_code == 0
     assert captured["request"].no_color is True
@@ -169,6 +183,7 @@ def test_run_logging_config_and_cli_precedence(
     args: list[str],
     expected_level: str,
     expected_format: str,
+    tmp_path: Path,
 ) -> None:
     captured: dict[str, str] = {}
 
@@ -182,7 +197,7 @@ def test_run_logging_config_and_cli_precedence(
         lambda _request, dependencies=None: RunResult(success=True),
     )
 
-    with runner.isolated_filesystem():
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = _write_minimal_config(root)
         with config_path.open("a", encoding="utf-8") as config_file:

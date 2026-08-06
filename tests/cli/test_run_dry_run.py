@@ -6,13 +6,13 @@ import sys
 from pathlib import Path
 
 import pytest
-from click.testing import Result
 from pytest import MonkeyPatch
+from typer.testing import Result
 
 from frame_compare.cli.entry import app
 from frame_compare.cli.errors import ExitCode
 
-from .cli_helpers import MINIMAL_CONFIG, runner
+from .cli_helpers import MINIMAL_CONFIG, isolated_cli_filesystem, runner
 
 
 def _write_workspace(root: Path, *, config_suffix: str = "") -> Path:
@@ -44,6 +44,7 @@ def _unexpected(*_args: object, **_kwargs: object) -> None:
 
 def test_run_dry_run_json_has_exact_allowlisted_shape_and_no_secrets(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(
         "frame_compare.cli.run_command.build_run_request_from_cli",
@@ -51,7 +52,7 @@ def test_run_dry_run_json_has_exact_allowlisted_shape_and_no_secrets(
     )
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _unexpected)
 
-    with runner.isolated_filesystem():
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = _write_workspace(
             root,
@@ -163,8 +164,10 @@ api_key = "sentinel-api-key"
     assert "secret.invalid" not in result.stdout
 
 
-def test_run_dry_run_human_and_quiet_follow_current_quiet_semantics() -> None:
-    with runner.isolated_filesystem():
+def test_run_dry_run_human_and_quiet_follow_current_quiet_semantics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = _write_workspace(root)
         input_dir = root / "comparison_videos"
@@ -185,8 +188,10 @@ def test_run_dry_run_human_and_quiet_follow_current_quiet_semantics() -> None:
     assert quiet.stderr == ""
 
 
-def test_run_dry_run_always_reserves_a_run_folder_when_execution_proceeds() -> None:
-    with runner.isolated_filesystem():
+def test_run_dry_run_always_reserves_a_run_folder_when_execution_proceeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = _write_workspace(root)
         input_dir = root / "comparison_videos"
@@ -203,8 +208,10 @@ def test_run_dry_run_always_reserves_a_run_folder_when_execution_proceeds() -> N
     }
 
 
-def test_run_dry_run_accepts_external_input_override_and_reports_only_that_absolute_path() -> None:
-    with runner.isolated_filesystem():
+def test_run_dry_run_accepts_external_input_override_and_reports_only_that_absolute_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = _write_workspace(root)
         external_input = Path("external-media").resolve()
@@ -231,8 +238,10 @@ def test_run_dry_run_accepts_external_input_override_and_reports_only_that_absol
 def test_run_dry_run_rejects_missing_or_empty_input(
     setup_input: bool,
     expected_code: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    with runner.isolated_filesystem():
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = _write_workspace(root)
         if setup_input:
@@ -247,8 +256,10 @@ def test_run_dry_run_rejects_missing_or_empty_input(
     assert json.loads(result.stdout)["error"]["code"] == expected_code
 
 
-def test_run_dry_run_validates_reference_selector_without_runtime() -> None:
-    with runner.isolated_filesystem():
+def test_run_dry_run_validates_reference_selector_without_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = _write_workspace(
             root,
@@ -271,9 +282,10 @@ def test_run_dry_run_validates_reference_selector_without_runtime() -> None:
 def test_run_dry_run_rejects_other_early_exit_modes(
     early_mode: str,
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _unexpected)
-    with runner.isolated_filesystem():
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = _write_workspace(root)
 
@@ -288,9 +300,10 @@ def test_run_dry_run_rejects_other_early_exit_modes(
 
 def test_run_dry_run_validates_existing_cache_and_interactive_contracts(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _unexpected)
-    with runner.isolated_filesystem():
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = _write_workspace(root)
 
@@ -318,8 +331,10 @@ def test_run_dry_run_validates_existing_cache_and_interactive_contracts(
     )
 
 
-def test_run_dry_run_preserves_fastest_analysis_cache_only_conflict() -> None:
-    with runner.isolated_filesystem():
+def test_run_dry_run_preserves_fastest_analysis_cache_only_conflict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = _write_workspace(
             root,
@@ -345,13 +360,14 @@ dark_frame_count = 1
 
 def test_run_dry_run_invalid_choice_uses_standard_json_error_and_skips_request(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(
         "frame_compare.cli.run_command.build_run_request_from_cli",
         _unexpected,
     )
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _unexpected)
-    with runner.isolated_filesystem():
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = _write_workspace(root)
 
@@ -379,8 +395,10 @@ def test_run_dry_run_rejects_invalid_config_and_frame_selectors(
     config_suffix: str,
     extra_args: tuple[str, ...],
     expected_loc: list[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    with runner.isolated_filesystem():
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = _write_workspace(root, config_suffix=config_suffix)
 

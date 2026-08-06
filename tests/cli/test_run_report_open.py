@@ -14,12 +14,14 @@ from .cli_helpers import (
     MINIMAL_CONFIG,
     _invoke_run_with_minimal_workspace,
     _write_minimal_config,
+    isolated_cli_filesystem,
     runner,
 )
 
 
 def test_run_opens_report_for_interactive_tty_when_auto_open_enabled(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     opened: list[Path] = []
 
@@ -36,7 +38,7 @@ def test_run_opens_report_for_interactive_tty_when_auto_open_enabled(
         lambda report_path: opened.append(report_path) is None,
     )
 
-    result = _invoke_run_with_minimal_workspace([])
+    result = _invoke_run_with_minimal_workspace([], tmp_path=tmp_path, monkeypatch=monkeypatch)
 
     assert result.exit_code == 0
     assert opened == [Path("report.html")]
@@ -44,10 +46,11 @@ def test_run_opens_report_for_interactive_tty_when_auto_open_enabled(
 
 def test_run_reloads_config_after_runner_and_respects_auto_open_change(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     opened: list[Path] = []
 
-    with runner.isolated_filesystem():
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = _write_minimal_config(root)
 
@@ -82,6 +85,7 @@ def test_run_reloads_config_after_runner_and_respects_auto_open_change(
 
 def test_run_confirmed_slowpics_opens_report_before_later_slowpics_browser(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     events: list[str] = []
     opened_reports: list[Path] = []
@@ -125,7 +129,7 @@ def test_run_confirmed_slowpics_opens_report_before_later_slowpics_browser(
         lambda report_path: opened_reports.append(report_path) is None,
     )
 
-    with runner.isolated_filesystem():
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = _write_minimal_config(root)
         config_path.write_text(
