@@ -2,6 +2,7 @@
 
 import subprocess
 
+import frame_compare.vs.tonemap_runtime as tonemap_runtime_module
 from frame_compare.vs.tonemap_runtime import (
     LibplaceboRuntimeState,
     libplacebo_runtime_override,
@@ -123,7 +124,7 @@ def test_libplacebo_probe_uses_current_vapoursynth_range_property(monkeypatch) -
         captured["script"] = argv[2]
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    monkeypatch.setattr("frame_compare.vs.tonemap_runtime.subprocess.run", fake_run)
+    monkeypatch.setattr(tonemap_runtime_module.subprocess, "run", fake_run)
 
     assert probe_libplacebo_runtime() is True
     assert "_Range=0" in captured["script"]
