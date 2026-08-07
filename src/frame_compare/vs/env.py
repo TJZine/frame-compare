@@ -44,7 +44,12 @@ class PluginPathCandidate:
 
 
 def _iter_windows_dll_candidates() -> list[str]:
-    """Return candidate DLL directories in bundle-search order."""
+    """Return deterministic DLL directories in bundle-search order.
+
+    The portable runtime never recursively probes directories and deliberately
+    excludes the standalone FFmpeg distribution. Native plugin dependencies must
+    resolve from their explicit package or plugin directories.
+    """
     candidates: list[str] = []
     env_home = os.environ.get("VAPOURSYNTH_HOME")
     if env_home:
@@ -52,19 +57,19 @@ def _iter_windows_dll_candidates() -> list[str]:
 
     python_dir = os.path.dirname(sys.executable)
     bundle_root = os.path.dirname(python_dir)
-    vs_core = os.path.join(bundle_root, "vs", "core")
-    if os.path.isdir(vs_core):
-        candidates.append(vs_core)
-        for root, dirs, _ in os.walk(vs_core):
-            for dirname in dirs:
-                candidates.append(os.path.join(root, dirname))
-
     app_site_packages = os.path.join(bundle_root, "app", "site-packages")
-    nested_site_packages = os.path.join(app_site_packages, "Lib", "site-packages")
-    for site_dir in (app_site_packages, nested_site_packages):
-        if os.path.isdir(site_dir):
-            candidates.append(site_dir)
-
+    candidates.extend(
+        [
+            os.path.join(bundle_root, "vs", "core"),
+            app_site_packages,
+            os.path.join(app_site_packages, "vapoursynth"),
+            os.path.join(app_site_packages, "vapoursynth.libs"),
+            os.path.join(app_site_packages, "vs_placebo"),
+            os.path.join(app_site_packages, "vs_placebo.libs"),
+            os.path.join(bundle_root, "vs", "extra-plugins", "lsmas"),
+            os.path.join(app_site_packages, "PyQt6", "Qt6", "bin"),
+        ]
+    )
     return candidates
 
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol
@@ -172,7 +171,15 @@ def print_at_a_glance(
         else:
             vspreview_status = "false"
 
-    ffmpeg_available = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
+    from frame_compare.utils.subproc import resolve_executable
+
+    try:
+        resolve_executable("ffmpeg")
+        resolve_executable("ffprobe")
+    except FileNotFoundError:
+        ffmpeg_available = False
+    else:
+        ffmpeg_available = True
     tonemap_settings = _resolve_preview_tonemap_settings(config, request)
 
     table = _group_table()

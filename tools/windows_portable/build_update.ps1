@@ -41,21 +41,55 @@ function Get-FromVersionMin([string]$VersionText) {
   return "{0}.{1}.0" -f $match.Groups[1].Value, $match.Groups[2].Value
 }
 
-function Get-ExpectedRequirementsFingerprint([string]$ResolvedBundleDir) {
+function Get-BundleCompatibilityContract([string]$ResolvedBundleDir) {
   $bundleInfoPath = Join-Path $ResolvedBundleDir "bundle_info.json"
-  if (Test-Path -LiteralPath $bundleInfoPath) {
+  if (!(Test-Path -LiteralPath $bundleInfoPath -PathType Leaf)) {
+    throw "Code-only updates require bundle_info.json from a complete portable bundle: $bundleInfoPath"
+  }
+
+  try {
     $bundleInfo = Get-Content -LiteralPath $bundleInfoPath -Raw | ConvertFrom-Json
-    $fingerprintProp = $bundleInfo.PSObject.Properties["requirements_lock_sha256"]
-    if ($null -ne $fingerprintProp -and $null -ne $fingerprintProp.Value) {
-      return [string]$fingerprintProp.Value
+  } catch {
+    throw "Invalid bundle_info.json; rebuild the complete portable bundle before creating an update: $bundleInfoPath"
+  }
+
+  $schemaProp = $bundleInfo.PSObject.Properties["schema_version"]
+  $schemaVersion = 0
+  if (
+    $null -eq $schemaProp -or
+    $null -eq $schemaProp.Value -or
+    -not [int]::TryParse([string]$schemaProp.Value, [ref]$schemaVersion) -or
+    $schemaVersion -ne 2
+  ) {
+    throw "Code-only updates require bundle_info schema_version 2; rebuild the complete portable bundle."
+  }
+
+  foreach ($requiredValue in @(
+    @{ Name = "bundle_kind"; Expected = "full" },
+    @{ Name = "platform"; Expected = "windows-x64" }
+  )) {
+    $prop = $bundleInfo.PSObject.Properties[[string]$requiredValue.Name]
+    $actual = if ($null -eq $prop -or $null -eq $prop.Value) { "" } else { [string]$prop.Value }
+    if ($actual -ne [string]$requiredValue.Expected) {
+      throw "bundle_info.$($requiredValue.Name) must be '$($requiredValue.Expected)', got '$actual'."
     }
   }
 
-  $requirementsLock = Join-Path $ResolvedBundleDir "requirements.lock.txt"
-  if (!(Test-Path -LiteralPath $requirementsLock)) {
-    throw "Could not find requirements fingerprint source under bundle: $ResolvedBundleDir"
+  $requirementsProp = $bundleInfo.PSObject.Properties["requirements_lock_sha256"]
+  $runtimeProp = $bundleInfo.PSObject.Properties["media_runtime_fingerprint"]
+  $requirementsFingerprint = if ($null -eq $requirementsProp -or $null -eq $requirementsProp.Value) { "" } else { [string]$requirementsProp.Value }
+  $runtimeFingerprint = if ($null -eq $runtimeProp -or $null -eq $runtimeProp.Value) { "" } else { [string]$runtimeProp.Value }
+  if ($requirementsFingerprint -notmatch '^[a-f0-9]{64}$') {
+    throw "bundle_info.requirements_lock_sha256 is missing or invalid."
   }
-  return (Get-FileHash -LiteralPath $requirementsLock -Algorithm SHA256).Hash.ToLowerInvariant()
+  if ($runtimeFingerprint -notmatch '^[a-f0-9]{64}$') {
+    throw "bundle_info.media_runtime_fingerprint is missing or invalid; rebuild the complete portable bundle."
+  }
+
+  return [ordered]@{
+    requirements_lock_sha256 = $requirementsFingerprint
+    media_runtime_fingerprint = $runtimeFingerprint
+  }
 }
 
 function New-ManifestFiles([string]$SourceRoot, [string]$PayloadRoot) {
@@ -144,15 +178,16 @@ try {
 
   $toAppVersion = Get-AppVersionFromSource -RepoRootPath $resolvedRepoRoot
   $fromAppVersionMin = Get-FromVersionMin -VersionText $toAppVersion
-  $requirementsFingerprint = Get-ExpectedRequirementsFingerprint -ResolvedBundleDir $resolvedBundleDir
+  $compatibility = Get-BundleCompatibilityContract -ResolvedBundleDir $resolvedBundleDir
 
   $manifest = [ordered]@{
-    schema_version = 1
+    schema_version = 2
     target_platform = "windows-x64"
     to_app_version = $toAppVersion
     from_app_version_min = $fromAppVersionMin
     from_app_version_max = $null
-    expected_requirements_lock_sha256 = $requirementsFingerprint
+    expected_requirements_lock_sha256 = $compatibility["requirements_lock_sha256"]
+    expected_media_runtime_fingerprint = $compatibility["media_runtime_fingerprint"]
     signature_algorithm = "rsa-sha256-pkcs1"
     signature_file = "update-manifest.sig"
     payload_root = "payload"

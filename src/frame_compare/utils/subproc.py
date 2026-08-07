@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
 from pathlib import Path
 from shutil import which
 from subprocess import CompletedProcess, run
+
+_MEDIA_EXECUTABLE_ENV = {
+    "ffmpeg": "FRAME_COMPARE_FFMPEG_EXECUTABLE",
+    "ffprobe": "FRAME_COMPARE_FFPROBE_EXECUTABLE",
+}
 
 
 def _resolve_cwd(cwd: Path | None) -> Path | None:
@@ -17,9 +23,23 @@ def _resolve_cwd(cwd: Path | None) -> Path | None:
     return resolved
 
 
-def _resolve_executable(executable: str, cwd: Path | None) -> str:
+def resolve_executable(executable: str, cwd: Path | None = None) -> str:
+    """Resolve an executable, honoring fail-closed bundled media overrides.
+
+    The Windows portable launcher sets absolute FFmpeg/ffprobe paths rather than
+    adding the standalone FFmpeg DLL directory to ``PATH``. This prevents native
+    VapourSynth plugins from accidentally resolving FFmpeg libraries from the
+    standalone command-line distribution.
+    """
     if not executable:
         raise ValueError("argv[0] must be a non-empty executable name")
+
+    override_name = _MEDIA_EXECUTABLE_ENV.get(executable.casefold())
+    if override_name is not None and (override := os.environ.get(override_name)):
+        override_path = Path(override)
+        if not override_path.is_absolute() or not override_path.is_file():
+            raise FileNotFoundError(override)
+        return str(override_path)
 
     executable_path = Path(executable)
     if executable_path.is_absolute():
@@ -45,7 +65,7 @@ def _normalize_argv(argv: Sequence[str], cwd: Path | None) -> list[str]:
         raise ValueError("argv must contain at least one element")
 
     normalized = [str(part) for part in argv]
-    normalized[0] = _resolve_executable(normalized[0], cwd)
+    normalized[0] = resolve_executable(normalized[0], cwd)
     return normalized
 
 
@@ -75,3 +95,6 @@ def run_subprocess(
         check=check,
         shell=False,
     )
+
+
+__all__ = ["resolve_executable", "run_subprocess"]

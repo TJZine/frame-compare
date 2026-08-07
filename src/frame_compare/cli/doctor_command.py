@@ -11,6 +11,11 @@ from rich.markup import escape
 
 from frame_compare.cli.errors import ExitCode, format_error_json, get_exit_code
 from frame_compare.errors import FrameCompareError, JSONValue
+from frame_compare.vs.runtime_contract import (
+    VAPOURSYNTH_RELEASE,
+    runtime_environment_report,
+    supported_media_runtime_report,
+)
 
 from .cli_helpers import HandleErrorFn
 
@@ -85,7 +90,9 @@ def doctor_report_json(report: DoctorReport) -> dict[str, JSONValue]:
         checks_payload.append(entry)
 
     doctor_payload: dict[str, JSONValue] = {
-        "baseline_version": "R76",
+        "baseline_version": VAPOURSYNTH_RELEASE,
+        "media_runtime": supported_media_runtime_report(),
+        "runtime_environment": runtime_environment_report(),
         "checks": checks_payload,
     }
     payload: dict[str, JSONValue] = {
@@ -161,6 +168,4 @@ def _is_optional_unavailable_status(
 ) -> bool:
     if category != "optional":
         return False
-    if check_name != "vspreview":
-        return False
-    return available is not True
+    return available is False
