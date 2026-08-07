@@ -512,6 +512,10 @@ def test_windows_portable_generated_bundle_launcher_restores_environment(
     python_dir.mkdir(parents=True)
     cli_dir.mkdir(parents=True)
     (bundle_dir / "app" / "site-packages").mkdir(parents=True)
+    (bundle_dir / "bundle_info.json").write_text(
+        '{"media_runtime_fingerprint":"fixture-runtime-fingerprint"}\n',
+        encoding="utf-8",
+    )
     base_python = Path(getattr(sys, "_base_executable", sys.executable))
     shutil.copy2(base_python, python_dir / "python.exe")
     for dll_path in base_python.parent.glob("python*.dll"):
@@ -527,9 +531,15 @@ def test_windows_portable_generated_bundle_launcher_restores_environment(
                 "import sys",
                 'os.environ["PATH"] = "bundle-python;" + os.environ.get("PATH", "")',
                 'os.environ["PYTHONUTF8"] = "inner-utf8"',
+                'os.environ["PYTHONDONTWRITEBYTECODE"] = "inner-dontwrite"',
                 'os.environ["PYTHONPATH"] = "inner-pythonpath"',
                 'os.environ["VAPOURSYNTH_EXTRA_PLUGIN_PATH"] = "inner-extra-plugins"',
                 'os.environ.pop("VAPOURSYNTH_PLUGIN_PATH", None)',
+                'os.environ["FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT"] = "inner-fingerprint"',
+                'os.environ["FRAME_COMPARE_RUNTIME_KIND"] = "inner-kind"',
+                'os.environ["FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED"] = "inner-ffms2"',
+                'os.environ["FRAME_COMPARE_FFMPEG_EXECUTABLE"] = "inner-ffmpeg"',
+                'os.environ["FRAME_COMPARE_FFPROBE_EXECUTABLE"] = "inner-ffprobe"',
                 'print("fake entry ran")',
                 "sys.exit(0)",
             ]

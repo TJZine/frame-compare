@@ -11,12 +11,6 @@ from rich.markup import escape
 
 from frame_compare.cli.errors import ExitCode, format_error_json, get_exit_code
 from frame_compare.errors import FrameCompareError, JSONValue
-from frame_compare.vs.runtime_contract import (
-    VAPOURSYNTH_RELEASE,
-    runtime_environment_report,
-    supported_media_runtime_report,
-)
-
 from .cli_helpers import HandleErrorFn
 
 if TYPE_CHECKING:
@@ -75,6 +69,14 @@ def handle_doctor(
 
 def doctor_report_json(report: DoctorReport) -> dict[str, JSONValue]:
     """Convert DoctorReport to JSON payload per schema."""
+    # Keep media-runtime imports on the doctor execution path. Importing the
+    # root CLI must remain side-effect-free for dry-run and help commands.
+    from frame_compare.vs.runtime_contract import (
+        VAPOURSYNTH_RELEASE,
+        runtime_environment_report,
+        supported_media_runtime_report,
+    )
+
     checks_payload: list[JSONValue] = []
     for check, result in report.checks:
         entry: dict[str, JSONValue] = {

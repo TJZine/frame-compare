@@ -115,6 +115,8 @@ class TestCollectChecks:
             "python_version",
             "vapoursynth",
             "lsmas",
+            "vs_placebo",
+            "ffms2",
             "ffmpeg",
             "vspreview",
             "slowpics",
