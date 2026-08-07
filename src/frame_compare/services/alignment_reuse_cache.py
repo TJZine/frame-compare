@@ -20,6 +20,7 @@ from frame_compare.services.types import (
 from frame_compare.utils.atomic_write import write_bytes_atomic
 from frame_compare.utils.file_lock import exclusive_file_lock
 from frame_compare.utils.types import AlignmentClipRequest, AlignmentRequest
+from frame_compare.vs.runtime_contract import media_runtime_fingerprint
 
 CACHE_VERSION = "1"
 CACHE_FILE_NAME = "alignment_reuse.toml"
@@ -89,6 +90,7 @@ def _source_set_identity(request: AlignmentRequest) -> dict[str, object]:
         "reference": _clip_identity_dict(request.reference),
         "comparisons": [_comparison_identity_dict(clip) for clip in request.comparisons],
         "settings": _settings_identity_dict(request),
+        "media_runtime_fingerprint": media_runtime_fingerprint("alignment"),
     }
 
 

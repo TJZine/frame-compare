@@ -17,6 +17,7 @@ import tomli_w
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot
 from frame_compare.utils.atomic_write import write_bytes_atomic
 from frame_compare.utils.file_lock import exclusive_file_lock
+from frame_compare.vs.runtime_contract import media_runtime_fingerprint
 from frame_compare.vs.types import HDRMetadata
 
 log = structlog.get_logger()
@@ -179,8 +180,9 @@ def _load_cache_entry(entry_raw: object) -> _CacheEntryLoadOutcome:
 def compute_probe_cache_key(fingerprint: ClipFingerprint) -> str:
     """Return a stable key for clip probe cache entries.
 
-    The key is derived solely from the ClipFingerprint (path, size, mtime)
-    and a schema version. It is independent of trim state.
+    The key is derived from the ClipFingerprint (path, size, mtime), the
+    probe-key schema, and the supported decoder runtime identity. It is
+    independent of trim state.
 
     Serialization uses canonical JSON settings (sorted keys, no spaces)
     to ensure cross-platform determinism.
@@ -189,7 +191,8 @@ def compute_probe_cache_key(fingerprint: ClipFingerprint) -> str:
         "path": str(fingerprint.path),
         "size_bytes": fingerprint.size_bytes,
         "mtime_ns": fingerprint.mtime_ns,
-        "schema_version": 1,
+        "schema_version": 2,
+        "media_runtime_fingerprint": media_runtime_fingerprint("probe"),
     }
 
     serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
