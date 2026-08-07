@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import frame_compare.orchestration.probing.probe_cache as probe_cache
 from frame_compare.orchestration.context import ClipFingerprint
 from frame_compare.orchestration.probing.probe_cache import (
     compute_probe_cache_key,
@@ -37,3 +38,16 @@ def test_compute_probe_cache_key_stable_for_same_fingerprint():
     assert key1 == key2
     assert isinstance(key1, str)
     assert len(key1) > 0
+
+
+def test_probe_cache_invalidates_on_media_runtime_change(monkeypatch) -> None:
+    fingerprint = ClipFingerprint(Path("video.mkv"), 1024, 5000)
+    original = compute_probe_cache_key(fingerprint)
+
+    monkeypatch.setattr(
+        probe_cache,
+        "media_runtime_fingerprint",
+        lambda _scope: "f" * 64,
+    )
+
+    assert compute_probe_cache_key(fingerprint) != original

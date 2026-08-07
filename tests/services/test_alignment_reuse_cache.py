@@ -158,6 +158,22 @@ def _first_entry(data: dict[str, object]) -> dict[str, object]:
     return entry
 
 
+def test_source_set_cache_key_changes_with_media_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _request(tmp_path)
+    original = source_set_cache_key(request)
+
+    monkeypatch.setattr(
+        reuse_cache,
+        "media_runtime_fingerprint",
+        lambda _scope: "a" * 64,
+    )
+
+    assert source_set_cache_key(request) != original
+
+
 def test_shared_reuse_cache_round_trips_computed_entry(tmp_path: Path) -> None:
     request = _request(tmp_path)
     _write_computed(request)

@@ -44,6 +44,10 @@ def _request(*, no_upload: bool = False) -> RunRequest:
     return RunRequest(root=_workspace_path(), no_upload=no_upload)
 
 
+def _missing_executable(_name: str) -> str:
+    raise FileNotFoundError(_name)
+
+
 def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: MonkeyPatch) -> None:
     def _which(command: str) -> str | None:
         return f"/usr/bin/{command}" if command in {"ffmpeg", "ffprobe"} else None
@@ -52,7 +56,7 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     config.screenshots.use_ffmpeg = True
     console = _console()
 
-    monkeypatch.setattr("frame_compare.cli.output.shutil.which", _which)
+    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _which)
 
     print_at_a_glance(
         console,
@@ -99,7 +103,7 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
 def test_at_a_glance_prints_previous_offsets_effective_mode(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("frame_compare.cli.output.shutil.which", lambda _command: None)
+    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
     modes: tuple[Literal["disabled", "prompt", "always"], ...] = ("disabled", "prompt", "always")
 
     for mode in modes:
@@ -127,7 +131,7 @@ def test_at_a_glance_prints_effective_analysis_performance_mode(
     config.analysis.performance_mode = AnalysisPerformanceMode.PERFORMANCE
     console = _console()
 
-    monkeypatch.setattr("frame_compare.cli.output.shutil.which", lambda _command: None)
+    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
 
     print_at_a_glance(
         console,
@@ -149,7 +153,7 @@ def test_at_a_glance_preserves_literal_brackets_in_dynamic_paths(
     config.paths.generated_dir = Path("[cyan]generated[end]")
     console = _console()
 
-    monkeypatch.setattr("frame_compare.cli.output.shutil.which", lambda _command: None)
+    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
 
     print_at_a_glance(
         console,
@@ -176,7 +180,7 @@ def test_at_a_glance_prints_vspreview_availability_when_probe_succeeds(
     config.audio_alignment.use_vspreview = True
     console = _console()
 
-    monkeypatch.setattr("frame_compare.cli.output.shutil.which", lambda _command: None)
+    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
     monkeypatch.setattr(
         "frame_compare.vspreview.adapter.check_vspreview_availability",
         lambda: VSPreviewAvailability(
@@ -206,7 +210,7 @@ def test_at_a_glance_prints_vspreview_probe_failure(monkeypatch: MonkeyPatch) ->
     config.audio_alignment.force_interactive = True
     console = _console()
 
-    monkeypatch.setattr("frame_compare.cli.output.shutil.which", lambda _command: None)
+    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
     monkeypatch.setattr(
         "frame_compare.vspreview.adapter.check_vspreview_availability",
         lambda: VSPreviewAvailability(

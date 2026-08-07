@@ -5,7 +5,7 @@ import sys
 
 import pytest
 
-from frame_compare.utils.subproc import run_subprocess
+from frame_compare.utils.subproc import resolve_executable, run_subprocess
 
 
 def test_run_subprocess_check_true():
@@ -59,3 +59,25 @@ def test_run_subprocess_inside_running_event_loop() -> None:
     assert isinstance(result, subprocess.CompletedProcess)
     assert result.stdout == f"from-loop{os.linesep}".encode()
     assert result.stderr == b""
+
+
+def test_resolve_executable_prefers_absolute_media_override(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    ffmpeg = tmp_path / "ffmpeg.exe"
+    ffmpeg.write_bytes(b"")
+    monkeypatch.setenv("FRAME_COMPARE_FFMPEG_EXECUTABLE", str(ffmpeg.resolve()))
+
+    assert resolve_executable("ffmpeg") == str(ffmpeg.resolve())
+
+
+def test_resolve_executable_fails_closed_for_invalid_media_override(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    missing = tmp_path / "missing-ffmpeg.exe"
+    monkeypatch.setenv("FRAME_COMPARE_FFMPEG_EXECUTABLE", str(missing.resolve()))
+
+    with pytest.raises(FileNotFoundError, match="missing-ffmpeg"):
+        resolve_executable("ffmpeg")

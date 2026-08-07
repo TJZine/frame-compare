@@ -65,11 +65,17 @@ def test_serialize_run_info_writes_resolved_tmdb_facts_without_nulls() -> None:
     )
 
     parsed = _parsed_toml(content)
-    assert parsed["version"] == 1
+    assert parsed["version"] == 2
     assert parsed["folder_name"] == "Fight Club (1999)"
     assert parsed["naming_source"] == "tmdb"
     assert parsed["source_filenames"] == ["source.mkv"]
     assert parsed["frame_compare_version"]
+    media_runtime = parsed["media_runtime"]
+    assert isinstance(media_runtime, dict)
+    assert media_runtime["contract_version"] == 1
+    fingerprints = media_runtime["fingerprints"]
+    assert isinstance(fingerprints, dict)
+    assert set(fingerprints) == {"analysis", "probe", "alignment", "index", "full"}
     assert parsed["tmdb"] == {
         "enabled": True,
         "attempted": True,

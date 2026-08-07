@@ -5,6 +5,7 @@ from fractions import Fraction
 from pathlib import Path
 
 from frame_compare.analysis.cache_io import compute_cache_key, metrics_cache_filename
+import frame_compare.analysis.metric_identity as metric_identity
 from frame_compare.analysis.metric_identity import stable_metric_algorithm_identity_json
 from frame_compare.analysis.types import MetricActiveRect, MetricCacheRequest, MetricFrameRange
 from frame_compare.config.schema import AnalysisConfig
@@ -195,6 +196,25 @@ def test_compute_cache_key_ignores_selection_counts_within_performance_mode(
     )
 
     assert key1 == key2
+
+
+def test_metric_algorithm_identity_changes_with_media_runtime(
+    monkeypatch,
+) -> None:
+    config = AnalysisConfig(performance_mode="quality")
+    original = stable_metric_algorithm_identity_json(config)
+
+    monkeypatch.setattr(
+        metric_identity,
+        "media_runtime_identity",
+        lambda _scope: {"contract_version": 999, "scope": "analysis"},
+    )
+
+    changed = stable_metric_algorithm_identity_json(config)
+
+    assert changed != original
+    assert '"algorithm_version":"analysis_metrics_v7"' in original
+    assert '"media_runtime"' in original
 
 
 def test_metric_algorithm_identity_serialization_is_deterministic() -> None:

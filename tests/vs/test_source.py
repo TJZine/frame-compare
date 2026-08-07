@@ -7,7 +7,12 @@ from typing import Literal, cast
 import pytest
 
 from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError
-from frame_compare.vs.source import LWLibavSourceOptions, apply_trim, load_source
+from frame_compare.vs.source import (
+    LWLibavSourceOptions,
+    apply_trim,
+    load_source,
+    source_index_path,
+)
 from frame_compare.vs.types import SourceInfo
 
 
@@ -59,7 +64,7 @@ def make_mock_core(
     """
     core = SimpleNamespace()
 
-    def mock_loader(path: str):
+    def mock_loader(path: str, **_kwargs: object):
         if fail_load:
             raise Exception("File corrupt")
         return MockClip()
@@ -73,6 +78,10 @@ def make_mock_core(
             core.lsmas = loader
             # Detect plugins checks both, so if we put it in lsmas, we're good.
     return core
+
+
+def _index_kwargs(path: str | Path) -> dict[str, object]:
+    return {"cachefile": str(source_index_path(Path(path)))}
 
 
 def test_load_source_returns_source_info():
@@ -114,7 +123,7 @@ def test_load_source_default_does_not_forward_decoder_kwargs():
 
     load_source("video.mkv", core)  # type: ignore[arg-type]
 
-    assert calls == [("video.mkv", {})]
+    assert calls == [("video.mkv", _index_kwargs("video.mkv"))]
 
 
 def test_load_source_forwards_explicit_decoder_options():
@@ -139,7 +148,12 @@ def test_load_source_forwards_explicit_decoder_options():
     assert calls == [
         (
             "video.mkv",
-            {"threads": 12, "ff_options": "skip_loop_filter=all", "prefer_hw": 1},
+            {
+                **_index_kwargs("video.mkv"),
+                "threads": 12,
+                "ff_options": "skip_loop_filter=all",
+                "prefer_hw": 1,
+            },
         )
     ]
 
@@ -194,12 +208,12 @@ def test_load_source_file_error_raises_source_load_error(tmp_path: Path) -> None
         load_source(tmp_path / "video.mkv", core)  # type: ignore[arg-type]
 
     assert exc.value.code == "FC-4015"
-    assert calls == [{}]
+    assert calls == [_index_kwargs(tmp_path / "video.mkv")]
 
 
-def test_load_source_retries_without_cache_after_adjacent_index_failure(tmp_path: Path) -> None:
+def test_load_source_recovers_by_rebuilding_owned_index(tmp_path: Path) -> None:
     video_path = tmp_path / "video.mkv"
-    index_path = Path(f"{video_path}.lwi")
+    index_path = source_index_path(video_path)
     index_path.write_bytes(b"unusable index")
     calls: list[dict[str, object]] = []
 
@@ -222,23 +236,21 @@ def test_load_source_retries_without_cache_after_adjacent_index_failure(tmp_path
     )
 
     assert source.num_frames == 1000
-    assert calls == [
-        {"threads": 12, "ff_options": "skip_loop_filter=all", "prefer_hw": 1},
-        {
-            "cache": 0,
-            "threads": 12,
-            "ff_options": "skip_loop_filter=all",
-            "prefer_hw": 1,
-        },
-    ]
-    assert index_path.read_bytes() == b"unusable index"
+    expected = {
+        **_index_kwargs(video_path),
+        "threads": 12,
+        "ff_options": "skip_loop_filter=all",
+        "prefer_hw": 1,
+    }
+    assert calls == [expected, expected]
+    assert not index_path.exists()
 
 
 def test_load_source_does_not_retry_unrelated_loader_failure_with_adjacent_index(
     tmp_path: Path,
 ) -> None:
     video_path = tmp_path / "video.mkv"
-    Path(f"{video_path}.lwi").write_bytes(b"existing index")
+    source_index_path(video_path).write_bytes(b"existing index")
     calls: list[dict[str, object]] = []
 
     def loader(_path: str, **kwargs: object) -> MockClip:
@@ -250,12 +262,12 @@ def test_load_source_does_not_retry_unrelated_loader_failure_with_adjacent_index
     with pytest.raises(SourceLoadError, match="decoder initialization failed"):
         load_source(video_path, core)  # type: ignore[arg-type]
 
-    assert calls == [{}]
+    assert calls == [_index_kwargs(video_path)]
 
 
 def test_load_source_preserves_original_error_when_index_retry_fails(tmp_path: Path) -> None:
     video_path = tmp_path / "video.mkv"
-    Path(f"{video_path}.lwi").write_bytes(b"unusable index")
+    source_index_path(video_path).write_bytes(b"unusable index")
     calls: list[dict[str, object]] = []
 
     def loader(_path: str, **kwargs: object) -> MockClip:
@@ -274,12 +286,12 @@ def test_load_source_preserves_original_error_when_index_retry_fails(tmp_path: P
     assert "failed to construct index" in str(original_error)
     assert isinstance(original_error.__cause__, RuntimeError)
     assert str(original_error.__cause__) == "cache-free retry also failed"
-    assert calls == [{}, {"cache": 0}]
+    assert calls == [_index_kwargs(video_path), _index_kwargs(video_path), {"cache": 0}]
 
 
 def test_load_source_does_not_retry_frame_read_failure(tmp_path: Path) -> None:
     video_path = tmp_path / "video.mkv"
-    Path(f"{video_path}.lwi").write_bytes(b"existing index")
+    source_index_path(video_path).write_bytes(b"existing index")
     calls: list[dict[str, object]] = []
 
     class FrameReadFailureClip(MockClip):
@@ -296,7 +308,24 @@ def test_load_source_does_not_retry_frame_read_failure(tmp_path: Path) -> None:
         load_source(video_path, core)  # type: ignore[arg-type]
 
     assert exc.value.code == "FC-4015"
-    assert calls == [{}]
+    assert calls == [_index_kwargs(video_path)]
+
+
+def test_load_source_ignores_legacy_unversioned_index(tmp_path: Path) -> None:
+    video_path = tmp_path / "video.mkv"
+    legacy_index = Path(f"{video_path}.lwi")
+    legacy_index.write_bytes(b"legacy")
+    calls: list[dict[str, object]] = []
+
+    def loader(_path: str, **kwargs: object) -> MockClip:
+        calls.append(kwargs)
+        return MockClip()
+
+    core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
+    load_source(video_path, core)  # type: ignore[arg-type]
+
+    assert calls == [_index_kwargs(video_path)]
+    assert legacy_index.read_bytes() == b"legacy"
 
 
 # HDR Detection Tests
@@ -306,7 +335,7 @@ def test_detect_hdr_pq_bt2020_returns_true():
     props = {"_Transfer": 16, "_Primaries": 9}
     core = SimpleNamespace(
         lsmas=SimpleNamespace(
-            LWLibavSource=lambda p: MockClip(frame_props=props)  # type: ignore
+            LWLibavSource=lambda p, **_kwargs: MockClip(frame_props=props)  # type: ignore
         )
     )
     source = load_source("video.mkv", core)  # type: ignore
@@ -320,7 +349,7 @@ def test_detect_hdr_hlg_bt2020_returns_true():
     props = {"_Transfer": 18, "_Primaries": 9}
     core = SimpleNamespace(
         lsmas=SimpleNamespace(
-            LWLibavSource=lambda p: MockClip(frame_props=props)  # type: ignore
+            LWLibavSource=lambda p, **_kwargs: MockClip(frame_props=props)  # type: ignore
         )
     )
     source = load_source("video.mkv", core)  # type: ignore
@@ -331,7 +360,7 @@ def test_detect_hdr_pq_bt709_returns_false():
     props = {"_Transfer": 16, "_Primaries": 1}
     core = SimpleNamespace(
         lsmas=SimpleNamespace(
-            LWLibavSource=lambda p: MockClip(frame_props=props)  # type: ignore
+            LWLibavSource=lambda p, **_kwargs: MockClip(frame_props=props)  # type: ignore
         )
     )
     source = load_source("video.mkv", core)  # type: ignore
@@ -343,7 +372,7 @@ def test_detect_hdr_sdr_returns_false():
     props = {"_Transfer": 1, "_Primaries": 1}
     core = SimpleNamespace(
         lsmas=SimpleNamespace(
-            LWLibavSource=lambda p: MockClip(frame_props=props)  # type: ignore
+            LWLibavSource=lambda p, **_kwargs: MockClip(frame_props=props)  # type: ignore
         )
     )
     source = load_source("video.mkv", core)  # type: ignore
@@ -361,7 +390,7 @@ def test_detect_hdr_extracts_metadata_fields():
     }
     core = SimpleNamespace(
         lsmas=SimpleNamespace(
-            LWLibavSource=lambda p: MockClip(frame_props=props)  # type: ignore
+            LWLibavSource=lambda p, **_kwargs: MockClip(frame_props=props)  # type: ignore
         )
     )
     source = load_source("video.mkv", core)  # type: ignore
@@ -378,7 +407,7 @@ def test_detect_hdr_empty_props_returns_false_and_none():
     props = {}
     core = SimpleNamespace(
         lsmas=SimpleNamespace(
-            LWLibavSource=lambda p: MockClip(frame_props=props)  # type: ignore
+            LWLibavSource=lambda p, **_kwargs: MockClip(frame_props=props)  # type: ignore
         )
     )
     source = load_source("video.mkv", core)  # type: ignore
@@ -390,7 +419,7 @@ def test_detect_hdr_defaults_matrix_when_missing():
     props = {"_Transfer": 16, "_Primaries": 9}
     core = SimpleNamespace(
         lsmas=SimpleNamespace(
-            LWLibavSource=lambda p: MockClip(frame_props=props)  # type: ignore
+            LWLibavSource=lambda p, **_kwargs: MockClip(frame_props=props)  # type: ignore
         )
     )
     source = load_source("video.mkv", core)  # type: ignore

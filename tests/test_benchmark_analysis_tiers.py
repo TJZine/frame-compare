@@ -295,16 +295,34 @@ def test_frame_type_probe_bounds_window_when_fps_is_known() -> None:
     assert scope["end_frame_exclusive"] == 2640
 
 
-def test_source_index_detection_finds_adjacent_lwi(tmp_path: Path) -> None:
+def test_source_index_detection_finds_runtime_owned_lwi(tmp_path: Path) -> None:
     script = _load_script()
     video = tmp_path / "clip.mkv"
     video.write_bytes(b"video")
-    Path(f"{video}.lwi").write_bytes(b"index")
+    expected = script.source_index_path(video)
+    expected.write_bytes(b"index")
 
     result = script._source_index_facts([video])[video.as_posix()]
 
     assert result["detected"] is True
+    assert result["expected_path"] == expected.as_posix()
+    assert result["paths"] == [expected.as_posix()]
     assert result["sizes_bytes"] == [5]
+    assert result["legacy_paths_ignored"] == []
+
+
+def test_source_index_detection_ignores_legacy_adjacent_lwi(tmp_path: Path) -> None:
+    script = _load_script()
+    video = tmp_path / "clip.mkv"
+    video.write_bytes(b"video")
+    legacy = Path(f"{video}.lwi")
+    legacy.write_bytes(b"legacy")
+
+    result = script._source_index_facts([video])[video.as_posix()]
+
+    assert result["detected"] is False
+    assert result["paths"] == []
+    assert result["legacy_paths_ignored"] == [legacy.as_posix()]
 
 
 def test_nondefault_domain_requires_explicit_selection_token(tmp_path: Path) -> None:

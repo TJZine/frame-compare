@@ -43,6 +43,28 @@ class TestCheckLsmas:
         assert result.passed is True
         assert "L-SMASH-Works" in result.message
 
+    def test_check_lsmas_plugin_requires_both_source_functions(self) -> None:
+        plugin = SimpleNamespace(
+            LWLibavSource=lambda *_args, **_kwargs: object(),
+            functions=lambda: [SimpleNamespace(name="LWLibavSource")],
+        )
+        mock_vs = SimpleNamespace(core=SimpleNamespace(lsmas=plugin))
+        check = next(candidate for candidate in collect_checks() if candidate.name == "lsmas")
+
+        with patch(
+            "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
+            return_value=mock_vs,
+        ):
+            result = check.check_fn()
+
+        assert result.passed is False
+        assert result.available is True
+        assert "missing required source functions" in result.message
+        assert result.details["required_functions"] == [
+            "LibavSMASHSource",
+            "LWLibavSource",
+        ]
+
     def test_check_lsmas_plugin_fails_when_missing(self) -> None:
         """Mock missing plugin → check fails."""
         mock_core = object()
@@ -239,24 +261,86 @@ class TestCheckPythonVersion:
 class TestCheckVapoursynth:
     """Tests for vapoursynth check via run_doctor."""
 
-    def test_check_vapoursynth_passes_when_available(self) -> None:
-        """Mock successful VS import → check passes."""
+    def test_check_vapoursynth_reports_public_release_and_api(self) -> None:
         checks = collect_checks()
         vs_check = next(c for c in checks if c.name == "vapoursynth")
+        version = SimpleNamespace(release_major=78, release_minor=0)
+        api_version = SimpleNamespace(api_major=4, api_minor=2)
+        mock_vs = SimpleNamespace(__version__=version, __api_version__=api_version)
 
-        mock_vs = MagicMock()
-        with patch.dict(sys.modules, {"vapoursynth": mock_vs}):
+        with patch(
+            "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
+            return_value=mock_vs,
+        ):
             result = vs_check.check_fn()
 
         assert result.passed is True
-        assert "VapourSynth available" in result.message
+        assert result.details == {
+            "expected_release": "R78",
+            "expected_api_major": 4,
+            "observed_version": str(version),
+            "observed_api_version": str(api_version),
+            "release_major": 78,
+            "release_minor": 0,
+            "api_major": 4,
+            "api_minor": 2,
+            "observed_release": "R78",
+            "expected_release_match": True,
+            "expected_api_match": True,
+        }
+
+    @pytest.mark.parametrize(
+        ("release_major", "api_major"),
+        [(76, 4), (78, 3)],
+    )
+    def test_check_vapoursynth_fails_on_runtime_identity_mismatch(
+        self,
+        release_major: int,
+        api_major: int,
+    ) -> None:
+        checks = collect_checks()
+        vs_check = next(c for c in checks if c.name == "vapoursynth")
+        version = SimpleNamespace(release_major=release_major, release_minor=0)
+        api_version = SimpleNamespace(api_major=api_major, api_minor=2)
+
+        with patch(
+            "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
+            return_value=SimpleNamespace(
+                __version__=version,
+                __api_version__=api_version,
+            ),
+        ):
+            result = vs_check.check_fn()
+
+        assert result.passed is False
+        assert result.available is True
+        assert result.details["expected_release_match"] is (release_major == 78)
+        assert result.details["expected_api_match"] is (api_major == 4)
+        assert "complete supported media runtime" in str(result.hint)
+
+    def test_check_vapoursynth_fails_when_version_identity_is_unavailable(self) -> None:
+        checks = collect_checks()
+        vs_check = next(c for c in checks if c.name == "vapoursynth")
+
+        with patch(
+            "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
+            return_value=SimpleNamespace(),
+        ):
+            result = vs_check.check_fn()
+
+        assert result.passed is False
+        assert result.available is True
+        assert result.details["observed_release"] is None
 
     def test_check_vapoursynth_fails_when_missing(self) -> None:
         """Mock ImportError on VS import → check fails."""
         checks = collect_checks()
         vs_check = next(c for c in checks if c.name == "vapoursynth")
 
-        with patch("builtins.__import__", side_effect=ImportError("No module")):
+        with patch(
+            "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
+            side_effect=ImportError("No module"),
+        ):
             result = vs_check.check_fn()
 
         assert result.passed is False
@@ -273,6 +357,8 @@ class TestCheckVapoursynth:
 
         original_import = __import__
         mock_vs = MagicMock()
+        mock_vs.__version__ = SimpleNamespace(release_major=78, release_minor=0)
+        mock_vs.__api_version__ = SimpleNamespace(api_major=4, api_minor=2)
         vs_attempts = {"count": 0}
 
         def _fake_import(name: str, *args: object, **kwargs: object) -> object:
@@ -294,35 +380,258 @@ class TestCheckVapoursynth:
         assert result.passed is True
 
 
-class TestCheckFFmpeg:
-    """Tests for ffmpeg check via run_doctor."""
+class TestCheckVsPlacebo:
+    def test_check_vs_placebo_reports_distribution_and_filter(self) -> None:
+        checks = collect_checks()
+        check = next(candidate for candidate in checks if candidate.name == "vs_placebo")
+        plugin = SimpleNamespace(
+            Tonemap=object(),
+            functions=lambda: [SimpleNamespace(name="Tonemap")],
+        )
+        mock_vs = SimpleNamespace(core=SimpleNamespace(placebo=plugin))
 
-    def test_check_ffmpeg_passes_when_in_path(self) -> None:
-        """Mock shutil.which("ffmpeg") returns path → check passes."""
+        with (
+            patch(
+                "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
+                return_value=mock_vs,
+            ),
+            patch(
+                "frame_compare.orchestration.doctor_checks.importlib.metadata.version",
+                return_value="2.0.4",
+            ),
+        ):
+            result = check.check_fn()
+
+        assert result.passed is True
+        assert result.available is True
+        assert result.details["observed_distribution_version"] == "2.0.4"
+        assert result.details["expected_distribution_match"] is True
+        assert result.details["functions"] == ["Tonemap"]
+
+    def test_check_vs_placebo_version_mismatch_is_reported(self) -> None:
+        checks = collect_checks()
+        check = next(candidate for candidate in checks if candidate.name == "vs_placebo")
+        plugin = SimpleNamespace(Tonemap=object(), functions=lambda: [])
+        mock_vs = SimpleNamespace(core=SimpleNamespace(placebo=plugin))
+
+        with (
+            patch(
+                "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
+                return_value=mock_vs,
+            ),
+            patch(
+                "frame_compare.orchestration.doctor_checks.importlib.metadata.version",
+                return_value="2.0.2",
+            ),
+        ):
+            result = check.check_fn()
+
+        assert result.passed is False
+        assert result.available is True
+        assert result.details["expected_distribution_match"] is False
+        assert "does not match 2.0.4" in result.message
+
+    def test_check_vs_placebo_missing_is_optional_failure(self) -> None:
+        checks = collect_checks()
+        check = next(candidate for candidate in checks if candidate.name == "vs_placebo")
+        mock_vs = SimpleNamespace(core=SimpleNamespace())
+
+        with (
+            patch(
+                "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
+                return_value=mock_vs,
+            ),
+            patch(
+                "frame_compare.orchestration.doctor_checks.importlib.metadata.version",
+                side_effect=__import__("importlib").metadata.PackageNotFoundError,
+            ),
+        ):
+            result = check.check_fn()
+
+        assert result.passed is False
+        assert result.available is False
+        assert result.details["observed_available"] is False
+        assert result.details["observed_distribution_version"] is None
+
+
+class TestCheckFFMS2:
+    def test_check_ffms2_missing_is_expected_for_windows_baseline(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "windows-portable")
+        monkeypatch.setenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "0")
+        checks = collect_checks()
+        check = next(candidate for candidate in checks if candidate.name == "ffms2")
+
+        with patch(
+            "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
+            return_value=SimpleNamespace(core=SimpleNamespace()),
+        ):
+            result = check.check_fn()
+
+        assert result.passed is True
+        assert result.available is False
+        assert result.details["windows_baseline"] == "excluded"
+        assert result.details["required_in_current_runtime"] is False
+
+    def test_check_ffms2_missing_fails_declared_docker_policy(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "docker")
+        monkeypatch.setenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "1")
+        checks = collect_checks()
+        check = next(candidate for candidate in checks if candidate.name == "ffms2")
+
+        with patch(
+            "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
+            return_value=SimpleNamespace(core=SimpleNamespace()),
+        ):
+            result = check.check_fn()
+
+        assert result.passed is False
+        assert result.available is False
+        assert "required by this Docker runtime" in result.message
+        assert result.hint == "Repair the complete Docker media runtime, then rerun doctor"
+
+    def test_check_ffms2_reports_registered_source_function(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "1")
+        plugin = SimpleNamespace(
+            Source=lambda *_args, **_kwargs: object(),
+            Version=lambda: {"version": "5.0.0.0"},
+            functions=lambda: [
+                SimpleNamespace(name="Source"),
+                SimpleNamespace(name="Version"),
+            ],
+        )
+        checks = collect_checks()
+        check = next(candidate for candidate in checks if candidate.name == "ffms2")
+
+        with patch(
+            "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
+            return_value=SimpleNamespace(core=SimpleNamespace(ffms2=plugin)),
+        ):
+            result = check.check_fn()
+
+        assert result.passed is True
+        assert result.available is True
+        assert result.details["functions"] == ["Source", "Version"]
+        assert result.details["observed_runtime_version"] == "5.0.0.0"
+        assert result.details["expected_runtime_version_match"] is True
+
+
+    def test_check_ffms2_rejects_wrong_runtime_version(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "1")
+        plugin = SimpleNamespace(
+            Source=lambda *_args, **_kwargs: object(),
+            Version=lambda: {"version": "4.0.0.0"},
+            functions=lambda: [
+                SimpleNamespace(name="Source"),
+                SimpleNamespace(name="Version"),
+            ],
+        )
+        check = next(candidate for candidate in collect_checks() if candidate.name == "ffms2")
+
+        with patch(
+            "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
+            return_value=SimpleNamespace(core=SimpleNamespace(ffms2=plugin)),
+        ):
+            result = check.check_fn()
+
+        assert result.passed is False
+        assert result.available is True
+        assert result.details["observed_runtime_version"] == "4.0.0.0"
+        assert result.details["expected_runtime_version_match"] is False
+
+
+class TestCheckFFmpeg:
+    """Tests for FFmpeg/ffprobe diagnostics."""
+
+    def test_check_ffmpeg_reports_both_executable_versions(self) -> None:
         checks = collect_checks()
         ffmpeg_check = next(c for c in checks if c.name == "ffmpeg")
 
-        with patch("shutil.which", return_value="/usr/bin/ffmpeg"):
+        def _resolve(name: str) -> str:
+            return f"/runtime/{name}"
+
+        with (
+            patch(
+                "frame_compare.orchestration.doctor_checks.resolve_executable",
+                side_effect=_resolve,
+            ),
+            patch(
+                "frame_compare.orchestration.doctor_checks.subprocess.check_output",
+                side_effect=[
+                    "ffmpeg version n8.1.2-34-g9b6c8969e0\n",
+                    "ffprobe version n8.1.2-34-g9b6c8969e0\n",
+                ],
+            ),
+        ):
             result = ffmpeg_check.check_fn()
 
         assert result.passed is True
-        assert "/usr/bin/ffmpeg" in result.message
+        assert result.message == "ffmpeg version n8.1.2-34-g9b6c8969e0"
+        assert result.details["ffmpeg_path"] == "/runtime/ffmpeg"
+        assert result.details["ffprobe_path"] == "/runtime/ffprobe"
+        assert result.details["ffprobe_version_line"] == (
+            "ffprobe version n8.1.2-34-g9b6c8969e0"
+        )
+        assert result.details["windows_license_profile"] == "LGPL-only"
 
-    def test_check_ffmpeg_fails_when_missing(self) -> None:
-        """Mock shutil.which("ffmpeg") returns None → check fails."""
+    def test_check_ffmpeg_fails_when_ffprobe_is_missing(self) -> None:
         checks = collect_checks()
         ffmpeg_check = next(c for c in checks if c.name == "ffmpeg")
 
-        with patch("shutil.which", return_value=None):
+        with patch(
+            "frame_compare.orchestration.doctor_checks.resolve_executable",
+            side_effect=["/runtime/ffmpeg", FileNotFoundError("ffprobe")],
+        ):
             result = ffmpeg_check.check_fn()
 
         assert result.passed is False
-        assert "not found" in result.message
+        assert "ffprobe not found" in result.message
         assert result.hint == (
-            "Provide an FFmpeg executable on PATH; see "
+            "Provide FFmpeg and ffprobe executables; see "
             "https://github.com/TJZine/frame-compare#requirements"
         )
         assert all(
             command not in result.hint.lower()
             for command in ("apt ", "brew ", "choco ", "pip ", "winget ")
         )
+
+    def test_check_ffmpeg_sanitizes_version_probe_failure(self) -> None:
+        checks = collect_checks()
+        ffmpeg_check = next(c for c in checks if c.name == "ffmpeg")
+
+        with (
+            patch(
+                "frame_compare.orchestration.doctor_checks.resolve_executable",
+                side_effect=lambda name: f"/runtime/{name}",
+            ),
+            patch(
+                "frame_compare.orchestration.doctor_checks.subprocess.check_output",
+                side_effect=OSError("secret path"),
+            ),
+        ):
+            result = ffmpeg_check.check_fn()
+
+        assert result.passed is False
+        assert result.details["exception_type"] == "OSError"
+        assert "secret path" not in str(result.details)
+
+
+def test_collect_checks_has_canonical_media_runtime_order() -> None:
+    assert [check.name for check in collect_checks()] == [
+        "python_version",
+        "vapoursynth",
+        "lsmas",
+        "vs_placebo",
+        "ffms2",
+        "ffmpeg",
+        "vspreview",
+        "slowpics",
+        "tmdb_api_key",
+    ]

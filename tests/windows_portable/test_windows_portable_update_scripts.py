@@ -384,6 +384,70 @@ def test_windows_portable_update_manifest_schema_disallows_empty_from_app_versio
     )
 
 
+def test_windows_portable_update_contract_requires_media_runtime_identity(
+    repo_root: Path,
+) -> None:
+    update_schema = json.loads(
+        _read_text_or_fail(
+            repo_root / "tools" / "windows_portable" / "update_manifest.schema.json"
+        )
+    )
+    bundle_schema = json.loads(
+        _read_text_or_fail(repo_root / "tools" / "windows_portable" / "bundle_info.schema.json")
+    )
+
+    assert update_schema["properties"]["schema_version"]["const"] == 2
+    assert "expected_media_runtime_fingerprint" in update_schema["required"]
+    assert update_schema["properties"]["signature_algorithm"]["const"] == (
+        "rsa-sha256-pkcs1"
+    )
+    file_schema = update_schema["properties"]["files"]["items"]
+    assert "bytes" in file_schema["required"]
+
+    assert bundle_schema["properties"]["schema_version"]["const"] == 2
+    assert bundle_schema["properties"]["bundle_kind"]["const"] == "full"
+    assert bundle_schema["properties"]["manifest_version"]["const"] == 2
+    assert "media_runtime_fingerprint" in bundle_schema["required"]
+    assert "media_runtime_fingerprints" in bundle_schema["required"]
+
+
+def test_windows_portable_build_update_copies_runtime_compatibility_contract(
+    repo_root: Path,
+) -> None:
+    build_path = repo_root / "tools" / "windows_portable" / "build_update.ps1"
+    build_script = _read_text_or_fail(build_path)
+    contract = _extract_powershell_function(build_script, "Get-BundleCompatibilityContract")
+
+    assert "$schemaVersion -ne 2" in contract
+    assert '@{ Name = "bundle_kind"; Expected = "full" }' in contract
+    assert '@{ Name = "platform"; Expected = "windows-x64" }' in contract
+    assert 'PSObject.Properties["media_runtime_fingerprint"]' in contract
+    assert "expected_media_runtime_fingerprint" in build_script
+    assert 'signature_algorithm = "rsa-sha256-pkcs1"' in build_script
+    assert "bytes = [int64]$destInfo.Length" in build_script
+
+
+def test_windows_portable_updater_fails_closed_across_native_runtime_boundary(
+    repo_root: Path,
+) -> None:
+    updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
+    updater = _read_text_or_fail(updater_path)
+    installed_contract = _extract_powershell_function(
+        updater, "Get-InstalledBundleCompatibilityContract"
+    )
+
+    assert "$schemaVersion -ne 2" in installed_contract
+    assert '$bundleKind -ne "full"' in installed_contract
+    assert 'Get-RequiredStringProperty -Object $bundleInfo -Name "media_runtime_fingerprint"' in installed_contract
+
+    runtime_failure = updater.index("Media runtime fingerprint mismatch")
+    dependency_prompt = updater.index("Dependency fingerprint mismatch detected.")
+    assert runtime_failure < dependency_prompt
+    runtime_block = updater[runtime_failure - 700 : runtime_failure + 700]
+    assert "complete portable bundle" in runtime_block
+    assert "Confirm-Token" not in runtime_block
+
+
 def test_windows_portable_updater_compares_app_versions_as_versions(repo_root: Path) -> None:
     updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
     updater = _read_text_or_fail(updater_path)
@@ -551,7 +615,24 @@ def test_windows_portable_build_update_preserves_relative_paths_and_excludes_cac
     bundle = tmp_path / "bundle"
     bundle.mkdir()
     (bundle / "bundle_info.json").write_text(
-        json.dumps({"requirements_lock_sha256": "a" * 64}),
+        json.dumps(
+            {
+                "schema_version": 2,
+                "bundle_kind": "full",
+                "app_version": "1.2.3",
+                "requirements_lock_sha256": "a" * 64,
+                "manifest_version": 2,
+                "platform": "windows-x64",
+                "media_runtime_fingerprint": "b" * 64,
+                "media_runtime_fingerprints": {
+                    "analysis": "c" * 64,
+                    "probe": "d" * 64,
+                    "alignment": "e" * 64,
+                    "index": "f" * 64,
+                    "full": "b" * 64,
+                },
+            }
+        ),
         encoding="utf-8",
     )
     update_zip = tmp_path / "update.zip"
@@ -590,6 +671,11 @@ def test_windows_portable_build_update_preserves_relative_paths_and_excludes_cac
         "app/src/frame_compare/__init__.py",
         "app/src/frame_compare/render/module.py",
     ]
+    assert manifest["schema_version"] == 2
+    assert manifest["expected_requirements_lock_sha256"] == "a" * 64
+    assert manifest["expected_media_runtime_fingerprint"] == "b" * 64
+    assert manifest["signature_algorithm"] == "rsa-sha256-pkcs1"
+    assert all(entry["bytes"] > 0 for entry in manifest["files"])
 
 
 def test_windows_portable_sign_update_avoids_private_key_path_cli_argument(repo_root: Path) -> None:

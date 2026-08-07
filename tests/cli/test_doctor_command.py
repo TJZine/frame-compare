@@ -8,6 +8,7 @@ from frame_compare.cli.errors import ExitCode, format_error_json
 from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.orchestration.doctor import CheckResult, DoctorCheck, DoctorReport
 from frame_compare.utils.progress_protocol import ProgressReporter
+from frame_compare.vs.runtime_contract import media_runtime_fingerprint
 
 from .cli_helpers import runner
 
@@ -30,9 +31,13 @@ _AUDITED_HINTS = (
         "https://github.com/TJZine/frame-compare#quick-start"
     ),
     (
-        "Provide an FFmpeg executable on PATH; see "
+        "Provide FFmpeg and ffprobe executables; see "
         "https://github.com/TJZine/frame-compare#requirements"
     ),
+    "Install the supported vs-placebo wheel or use a complete Frame Compare runtime",
+    "Repair the supported media runtime, then rerun doctor",
+    "Repair the complete Docker media runtime, then rerun doctor",
+    "Repair or replace the FFmpeg runtime, then rerun doctor",
     ("Provide VSPreview; see https://tjzine.github.io/frame-compare/getting-started/native/"),
     (
         "Provide a supported Qt backend for VSPreview; see "
@@ -63,6 +68,12 @@ def _doctor_check_entry(payload: dict[str, object], check_id: str) -> dict[str, 
 
 
 def test_doctor_json_conforms_to_schema_shape(monkeypatch: MonkeyPatch) -> None:
+    expected_runtime_fingerprint = media_runtime_fingerprint("full")
+    monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "test-runtime")
+    monkeypatch.setenv(
+        "FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT", expected_runtime_fingerprint
+    )
+    monkeypatch.setenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "1")
     checks = [
         DoctorCheck(
             name="python_version",
@@ -100,7 +111,19 @@ def test_doctor_json_conforms_to_schema_shape(monkeypatch: MonkeyPatch) -> None:
 
     payload = json.loads(result.stdout)
     assert payload["success"] is True
-    assert payload["doctor"]["baseline_version"] == "R76"
+    assert payload["doctor"]["baseline_version"] == "R78"
+    media_runtime = payload["doctor"]["media_runtime"]
+    assert media_runtime["components"]["decoder"]["vapoursynth"]["release"] == "R78"
+    assert media_runtime["fingerprints"]["full"] == expected_runtime_fingerprint
+    runtime_environment = payload["doctor"]["runtime_environment"]
+    assert runtime_environment == {
+        "runtime_kind": "test-runtime",
+        "expected_full_fingerprint": expected_runtime_fingerprint,
+        "declared_full_fingerprint": expected_runtime_fingerprint,
+        "declared_full_fingerprint_valid": True,
+        "declared_full_fingerprint_match": True,
+        "ffms2_required": True,
+    }
     assert len(payload["doctor"]["checks"]) == 2
     first = payload["doctor"]["checks"][0]
     second = payload["doctor"]["checks"][1]
