@@ -113,6 +113,12 @@ Human-readable exact source pointers are also included at
 dedicated `licenses/PyQt6/`, `licenses/PyQt6-sip/`, and `licenses/Qt/`
 directories in addition to the complete Python distribution license inventory.
 
+The current native component matrix, immutable hashes, source revisions, and
+license profile are maintained in [Supported Media Runtime](supported-media-runtime.md).
+`bundle_info.json` and `bundle_inventory.json` also record the full coordinated
+media-runtime fingerprint used by diagnostics and code-only update compatibility
+checks.
+
 ---
 
 ## First Comparison
@@ -186,9 +192,22 @@ Apply a code-only update zip:
 frame-compare-update apply .\frame-compare-update-win-x64-<tag>.zip
 ```
 
-The updater is offline-first and verifies signature + file hashes before applying
-changes. If dependency fingerprints do not match, the default action is cancel;
-unsafe apply requires explicit confirmation.
+The updater is offline-first and verifies the signature and every payload hash
+before applying changes. A code-only ZIP replaces application files only; it does
+**not** replace VapourSynth, L-SMASH-Works, vs-placebo, FFmpeg, runtime manifests,
+or native license payloads.
+
+The signed update manifest therefore declares the full media-runtime fingerprint
+it requires. The installed full bundle must expose the same valid fingerprint in
+`bundle_info.json`. A missing, legacy, malformed, or different runtime identity
+fails closed before any dependency-compatibility override path. Install the
+complete portable ZIP for that release when the fingerprint differs.
+
+The R78 / L-SMASH-Works 1296 / vs-placebo 2.0.4 refresh is a native-runtime
+boundary. Existing R76 bundles require a full portable reinstall; applying only
+the code-only ZIP is deliberately refused. Keep `paths.generated_dir` outside the
+bundle when reports, screenshots, history, and reusable data must survive bundle
+replacement.
 
 Every published Windows release must contain exactly these mandatory assets, using
 the release tag verbatim (for example `v0.1.0` or `v0.1.0-rc.1`):

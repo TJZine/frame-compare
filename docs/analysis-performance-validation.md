@@ -118,8 +118,10 @@ $AnimeComparison = (Resolve-Path -LiteralPath `
   'comparison_videos\DAN.DA.DAN.S02E01.Like.This.Is.the.Legend.of.the.Giant.Snake.REPACK.1080p.CR.WEB-DL.DUAL.DDP2.0.H.264-Kitsune.mkv').Path
 ```
 
-Prepare probe data and warm the adjacent L-SMASH `.lwi` source indexes through a
-normal application run before timing. Point `--input` at a directory containing
+Prepare probe data and warm Frame Compare-owned, runtime-versioned L-SMASH-Works
+`.lwi` source indexes through a normal application run before timing. The current
+filename suffix is `.frame-compare-lsw1296-e3c074652ffb.lwi`; an unrelated legacy
+adjacent `<media>.lwi` is intentionally not a warm-cache input. Point `--input` at a directory containing
 only the fixed case under test:
 
 ```powershell

@@ -54,7 +54,7 @@ details. Use the same route and runtime when bit-for-bit comparison is important
 
 | Route | Python environment | FFmpeg | VapourSynth + loader plugins | VSPreview + PyQt6 | Installer/updater |
 | --- | --- | --- | --- | --- | --- |
-| Windows release ZIP | Included (Python 3.13.14 in the current bundle manifest) | Included, LGPL-only build | Included (VapourSynth R76, L-SMASH-Works, and vs-placebo) | Included | Included |
+| Windows release ZIP | Included (Python 3.13.14 in the current bundle manifest) | Included, LGPL-only build | Included (VapourSynth R78, L-SMASH-Works 1296, and vs-placebo 2.0.4) | Included | Included |
 | Windows source build | Built into the resulting bundle | Downloaded by the builder | Downloaded/installed by the builder | Installed by the builder | Included |
 | Docker default | Included in image | Included | Included | Not in the default runtime target | Rebuild/pull the image |
 | Docker NVIDIA | Included in image | Included | Included | Not by the GPU profile alone | Rebuild/pull the image |
@@ -65,6 +65,10 @@ details. Use the same route and runtime when bit-for-bit comparison is important
 The repository currently documents Docker as a build-from-clone route; it does not
 promise a prebuilt public container image. The pip route is also install-from-clone,
 not a promise that a package has been published to PyPI.
+
+See [Supported Media Runtime](../supported-media-runtime.md) for the coordinated
+VapourSynth, source-plugin, tone-mapping, FFmpeg, cache/index, and licensing
+contract used by the bundled routes.
 
 ### Feature availability
 
@@ -154,7 +158,7 @@ on your host. See
 
 Choose this when you want native host behavior and can install the media toolchain.
 `uv` reproduces the repository's locked Python dependency graph; you still provide
-FFmpeg, VapourSynth R76, L-SMASH-Works, compatible Vulkan support, and optionally
+FFmpeg, VapourSynth R78, L-SMASH-Works 1296, compatible Vulkan support, and optionally
 VSPreview.
 
 This is the preferred native-source route because its Python environment is locked.
