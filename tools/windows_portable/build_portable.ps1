@@ -24,6 +24,13 @@ $PSNativeCommandUseErrorActionPreference = $true
 $DownloadMaxAttempts = 4
 $DownloadRetryDelaySeconds = 5
 
+# Convert caller-supplied relative paths once, before they are embedded in
+# runtime environment variables or passed across process working directories.
+$ManifestPath = [System.IO.Path]::GetFullPath($ManifestPath)
+$OutDir = [System.IO.Path]::GetFullPath($OutDir)
+$CacheDir = [System.IO.Path]::GetFullPath($CacheDir)
+$RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
+
 function Ensure-Directory([string]$Path) {
   if (!(Test-Path -LiteralPath $Path)) {
     New-Item -ItemType Directory -Path $Path | Out-Null
@@ -876,6 +883,12 @@ def prove_placebo_tonemap_api() -> None:
 
 
 def prove_placebo_tonemap_frame() -> None:
+    from frame_compare.vs.tonemap_runtime import probe_libplacebo_runtime
+
+    if not probe_libplacebo_runtime():
+        proof("placebo_direct_frame=skipped reason=vulkan_runtime_unavailable")
+        return
+
     direct_out, _tonemap_clip = build_placebo_clip()
     direct_frame = direct_out.get_frame(0)
     assert_true(direct_frame.width == 16 and direct_frame.height == 16, "placebo direct frame render failed")

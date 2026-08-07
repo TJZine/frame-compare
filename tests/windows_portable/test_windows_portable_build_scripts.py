@@ -77,6 +77,18 @@ def test_windows_portable_generated_cmd_launchers_have_absolute_powershell_fallb
     assert '"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File' in build_script
 
 
+def test_windows_portable_build_canonicalizes_paths_before_runtime_use(
+    repo_root: Path,
+) -> None:
+    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    build_script = _read_text_or_fail(build_path)
+
+    for variable in ("ManifestPath", "OutDir", "CacheDir", "RepoRoot"):
+        assert (
+            f"${variable} = [System.IO.Path]::GetFullPath(${variable})" in build_script
+        )
+
+
 def test_windows_portable_build_creates_default_workspace_directories(repo_root: Path) -> None:
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     build_script = _read_text_or_fail(build_path)
@@ -247,6 +259,22 @@ def test_windows_portable_runtime_reads_release_and_api_identities_separately(
     assert 'api_version = getattr(vs, "__api_version__", None)' in build_script
     assert 'api_major = getattr(api_version, "api_major", None)' in build_script
     assert 'api_major = getattr(version, "api_major", None)' not in build_script
+
+
+def test_windows_portable_direct_placebo_smoke_respects_runtime_probe(
+    repo_root: Path,
+) -> None:
+    build_script = _read_text_or_fail(
+        repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    )
+
+    direct_smoke = build_script[
+        build_script.index("def prove_placebo_tonemap_frame()") :
+        build_script.index("def prove_apply_tonemap_frame()")
+    ]
+    assert "probe_libplacebo_runtime" in direct_smoke
+    assert "placebo_direct_frame=skipped reason=vulkan_runtime_unavailable" in direct_smoke
+    assert "direct_out.get_frame(0)" in direct_smoke
 
 
 def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: Path) -> None:

@@ -1,9 +1,12 @@
 """Tests for libplacebo runtime probe policy."""
 
+import subprocess
+
 from frame_compare.vs.tonemap_runtime import (
     LibplaceboRuntimeState,
     libplacebo_runtime_override,
     libplacebo_runtime_usable,
+    probe_libplacebo_runtime,
 )
 
 
@@ -108,3 +111,20 @@ def test_libplacebo_runtime_override_reads_current_environment(monkeypatch) -> N
 
     monkeypatch.setenv("FRAME_COMPARE_REQUIRE_LIBPLACEBO", "1")
     assert libplacebo_runtime_override() is True
+
+
+def test_libplacebo_probe_uses_current_vapoursynth_range_property(monkeypatch) -> None:
+    captured: dict[str, str] = {}
+
+    def fake_run(
+        argv: list[str],
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        captured["script"] = argv[2]
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr("frame_compare.vs.tonemap_runtime.subprocess.run", fake_run)
+
+    assert probe_libplacebo_runtime() is True
+    assert "_Range=0" in captured["script"]
+    assert "_ColorRange" not in captured["script"]
