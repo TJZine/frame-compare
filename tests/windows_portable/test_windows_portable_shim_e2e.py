@@ -343,9 +343,15 @@ def test_windows_portable_shim_restores_environment_after_bundle_exit(
             [
                 '$env:PATH = "bundle-path;" + $env:PATH',
                 '$env:PYTHONUTF8 = "bundle-utf8"',
+                '$env:PYTHONDONTWRITEBYTECODE = "bundle-dontwrite"',
                 '$env:PYTHONPATH = "bundle-pythonpath"',
                 '$env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = "bundle-extra-plugins"',
                 "Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue",
+                '$env:FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT = "bundle-fingerprint"',
+                '$env:FRAME_COMPARE_RUNTIME_KIND = "bundle-kind"',
+                '$env:FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED = "bundle-ffms2"',
+                '$env:FRAME_COMPARE_FFMPEG_EXECUTABLE = "bundle-ffmpeg"',
+                '$env:FRAME_COMPARE_FFPROBE_EXECUTABLE = "bundle-ffprobe"',
                 "exit 0",
             ]
         ),

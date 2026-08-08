@@ -424,6 +424,8 @@ def test_main_writes_atomic_production_report(
     reference.write_bytes(b"source")
     expected_index = script.source_index_path(reference)
     expected_index.write_bytes(b"index")
+    legacy_index = Path(f"{reference}.lwi")
+    legacy_index.write_bytes(b"legacy")
     config_path = tmp_path / "config.toml"
     config_path.write_text("", encoding="utf-8")
     output = tmp_path / "report.json"
@@ -504,7 +506,7 @@ def test_main_writes_atomic_production_report(
     assert index_facts == {
         "detected": True,
         "expected_path": expected_index.as_posix(),
-        "legacy_paths_ignored": [],
+        "legacy_paths_ignored": [legacy_index.as_posix()],
         "paths": [expected_index.as_posix()],
         "sizes_bytes": [5],
     }

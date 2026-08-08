@@ -246,10 +246,8 @@ def _manifest_inventory(manifest: JsonObject) -> tuple[list[JsonObject], list[Js
             value = _optional_str(source.get(field))
             if value is not None:
                 record[field] = value
-        if source.get("sha256") is not None:
-            record["sha256"] = _require_sha256(source.get("sha256"), f"source[{index}].sha256")
-        if source.get("bytes") is not None:
-            record["bytes"] = _require_int(source.get("bytes"), f"source[{index}].bytes")
+        record["sha256"] = _require_sha256(source.get("sha256"), f"source[{index}].sha256")
+        record["bytes"] = _require_int(source.get("bytes"), f"source[{index}].bytes")
         corresponding_sources.append(record)
     corresponding_sources.sort(key=lambda item: (str(item["name"]), str(item["version"])))
     return artifacts, corresponding_sources

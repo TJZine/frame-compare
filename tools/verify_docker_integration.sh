@@ -593,7 +593,7 @@ tonemap_input = core.std.BlankClip(
     format=vs.RGB48,
     length=1,
     color=[32768, 32768, 32768],
-).std.SetFrameProps(_Matrix=0, _ColorRange=0, _Transfer=16, _Primaries=9)
+).std.SetFrameProps(_Matrix=0, _Range=1, _Transfer=16, _Primaries=9)
 tonemap_output = core.placebo.Tonemap(
     tonemap_input,
     src_max=1000,

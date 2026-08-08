@@ -429,6 +429,14 @@ def _check_ffms2() -> CheckResult:
     details["observed_available"] = available
     if functions:
         details["functions"] = cast(JSONValue, functions)
+    if plugin is not None and selected_runtime_kind == "windows-portable":
+        return CheckResult(
+            passed=False,
+            available=available,
+            message="FFMS2 is loaded, but the Windows portable baseline excludes it",
+            hint="Reinstall the complete supported Windows portable runtime, then rerun doctor",
+            details=details,
+        )
     if not available:
         return CheckResult(
             passed=not required,
@@ -442,15 +450,6 @@ def _check_ffms2() -> CheckResult:
             hint=(
                 "Repair the complete Docker media runtime, then rerun doctor" if required else None
             ),
-            details=details,
-        )
-
-    if selected_runtime_kind == "windows-portable":
-        return CheckResult(
-            passed=False,
-            available=True,
-            message="FFMS2 is loaded, but the Windows portable baseline excludes it",
-            hint="Reinstall the complete supported Windows portable runtime, then rerun doctor",
             details=details,
         )
 
@@ -524,7 +523,8 @@ def _check_ffmpeg() -> CheckResult:
     if selected_runtime_kind in {"windows", "windows-portable"}:
         expected_fragment = WINDOWS_FFMPEG_RELEASE
     elif selected_runtime_kind == "docker":
-        expected_fragment = DEBIAN_FFMPEG_PACKAGE_VERSION.partition(":")[2]
+        _, separator, remainder = DEBIAN_FFMPEG_PACKAGE_VERSION.partition(":")
+        expected_fragment = remainder if separator and remainder else DEBIAN_FFMPEG_PACKAGE_VERSION
     details["current_runtime_kind"] = selected_runtime_kind
     details["expected_version_fragment"] = expected_fragment
     if expected_fragment is not None:

@@ -235,7 +235,9 @@
         "name",
         "version",
         "license",
-        "source_url"
+        "source_url",
+        "sha256",
+        "bytes"
       ],
       "properties": {
         "name": {

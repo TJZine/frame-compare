@@ -46,7 +46,10 @@ exact SHA recorded in the pull request. Do not test an older cached checkout.
 git fetch --all --prune
 git switch deps/media-runtime-refresh
 git pull --ff-only
-git status --short
+$WorkingTree = git status --porcelain
+if ($WorkingTree) {
+  throw 'Validation requires a clean worktree.'
+}
 $ExpectedPrHeadSha = '<recorded 40-character PR head SHA>'
 if ($ExpectedPrHeadSha -notmatch '^[a-f0-9]{40}$') {
   throw 'Expected PR head must be a complete lowercase 40-character SHA.'

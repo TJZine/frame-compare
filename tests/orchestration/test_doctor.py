@@ -554,6 +554,7 @@ class TestCheckFFMS2:
     def test_check_ffms2_reports_registered_source_function(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        monkeypatch.delenv("FRAME_COMPARE_RUNTIME_KIND", raising=False)
         monkeypatch.setenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "1")
         plugin = SimpleNamespace(
             Source=lambda *_args, **_kwargs: object(),
@@ -581,6 +582,7 @@ class TestCheckFFMS2:
     def test_check_ffms2_rejects_wrong_runtime_version(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        monkeypatch.delenv("FRAME_COMPARE_RUNTIME_KIND", raising=False)
         monkeypatch.setenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "1")
         plugin = SimpleNamespace(
             Source=lambda *_args, **_kwargs: object(),
@@ -626,11 +628,37 @@ class TestCheckFFMS2:
         assert "Windows portable baseline excludes it" in result.message
         assert result.details["current_runtime_kind"] == "windows-portable"
 
+    def test_check_ffms2_rejects_partial_plugin_in_windows_portable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "windows-portable")
+        monkeypatch.setenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "0")
+        plugin = SimpleNamespace(
+            Source=lambda *_args, **_kwargs: object(),
+            functions=lambda: [SimpleNamespace(name="Source")],
+        )
+        check = next(candidate for candidate in collect_checks() if candidate.name == "ffms2")
+
+        with patch(
+            "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
+            return_value=SimpleNamespace(core=SimpleNamespace(ffms2=plugin)),
+        ):
+            result = check.check_fn()
+
+        assert result.passed is False
+        assert result.available is False
+        assert result.details["observed_available"] is False
+        assert result.details["functions"] == ["Source"]
+        assert "Windows portable baseline excludes it" in result.message
+
 
 class TestCheckFFmpeg:
     """Tests for FFmpeg/ffprobe diagnostics."""
 
-    def test_check_ffmpeg_reports_both_executable_versions(self) -> None:
+    def test_check_ffmpeg_reports_both_executable_versions(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("FRAME_COMPARE_RUNTIME_KIND", raising=False)
         checks = collect_checks()
         ffmpeg_check = next(c for c in checks if c.name == "ffmpeg")
 
@@ -693,6 +721,33 @@ class TestCheckFFmpeg:
 
         assert result.passed is True
         assert result.details["expected_version_fragment"] == version_fragment
+        assert result.details["expected_version_match"] is True
+
+    def test_check_ffmpeg_accepts_epoch_free_debian_version_constant(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        version = "7.1.5-0+deb13u1"
+        monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "docker")
+        monkeypatch.setattr(
+            "frame_compare.orchestration.doctor_checks.DEBIAN_FFMPEG_PACKAGE_VERSION",
+            version,
+        )
+        check = next(candidate for candidate in collect_checks() if candidate.name == "ffmpeg")
+
+        with (
+            patch(
+                "frame_compare.orchestration.doctor_checks.resolve_executable",
+                side_effect=lambda name: f"/runtime/{name}",
+            ),
+            patch(
+                "frame_compare.orchestration.doctor_checks.subprocess.check_output",
+                side_effect=[f"ffmpeg version {version}\n", f"ffprobe version {version}\n"],
+            ),
+        ):
+            result = check.check_fn()
+
+        assert result.passed is True
+        assert result.details["expected_version_fragment"] == version
         assert result.details["expected_version_match"] is True
 
     def test_check_ffmpeg_rejects_managed_runtime_identity_mismatch(

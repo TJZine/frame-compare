@@ -49,14 +49,16 @@ def _missing_executable(_name: str) -> str:
 
 
 def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: MonkeyPatch) -> None:
-    def _which(command: str) -> str | None:
-        return f"/usr/bin/{command}" if command in {"ffmpeg", "ffprobe"} else None
+    def _resolve(command: str) -> str:
+        if command not in {"ffmpeg", "ffprobe"}:
+            raise FileNotFoundError(command)
+        return f"/usr/bin/{command}"
 
     config = _config()
     config.screenshots.use_ffmpeg = True
     console = _console()
 
-    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _which)
+    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _resolve)
 
     print_at_a_glance(
         console,

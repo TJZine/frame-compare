@@ -672,6 +672,10 @@ def test_windows_portable_bundle_inventory_is_sorted_exact_and_path_safe(
         and "/6.10/6.10.2/" in source["source_url"]
         for source in inventory["corresponding_sources"]
     )
+    assert all(
+        re.fullmatch(r"[a-f0-9]{64}", source["sha256"]) and source["bytes"] > 0
+        for source in inventory["corresponding_sources"]
+    )
     assert inventory["source_build_install_scripts"] == sorted(
         inventory["source_build_install_scripts"]
     )
@@ -798,7 +802,15 @@ def test_windows_portable_bundle_inventory_rejects_prohibited_local_and_generate
 def test_windows_portable_manifest_records_exact_source_locations(repo_root: Path) -> None:
     manifest_path = repo_root / "tools" / "windows_portable" / "manifest.windows-x64.json"
     manifest = json.loads(_read_text_or_fail(manifest_path))
+    schema = json.loads(
+        _read_text_or_fail(repo_root / "tools" / "windows_portable" / "manifest.schema.json")
+    )
+    assert {"sha256", "bytes"} <= set(schema["$defs"]["corresponding_source"]["required"])
     assert manifest["corresponding_sources"]
+    assert all(
+        re.fullmatch(r"[a-f0-9]{64}", source["sha256"]) and source["bytes"] > 0
+        for source in manifest["corresponding_sources"]
+    )
     for artifact in manifest["artifacts"]:
         assert artifact["source_url"].startswith("https://")
         assert artifact["version"].split()[0].lower().replace("r", "") in (
@@ -810,6 +822,34 @@ def test_windows_portable_manifest_records_exact_source_locations(repo_root: Pat
     )
     assert qt_source["version"] == "6.10.2"
     assert "/6.10/6.10.2/" in qt_source["source_url"]
+    assert qt_source["sha256"] == (
+        "c3df0f0e421130cc52ed81cb712358804471ce9bd2a41d97828f9f5b1bf7fed2"
+    )
+    assert qt_source["bytes"] == 1315359412
+
+
+@pytest.mark.parametrize("field", ["sha256", "bytes"])
+def test_windows_portable_bundle_inventory_rejects_missing_corresponding_source_integrity(
+    tmp_path: Path,
+    repo_root: Path,
+    field: str,
+) -> None:
+    bundle = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
+    manifest = json.loads(
+        (repo_root / "tools/windows_portable/manifest.windows-x64.json").read_text(encoding="utf-8")
+    )
+    manifest["corresponding_sources"][0].pop(field)
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    result = _run_bundle_inventory(
+        bundle=bundle,
+        repo_root=repo_root,
+        manifest=manifest_path,
+    )
+
+    assert result.returncode != 0
+    assert f"source[0].{field}" in result.stderr
 
 
 def test_windows_portable_builder_writes_inventory_and_cleans_runtime_index(

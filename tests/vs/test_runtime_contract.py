@@ -142,6 +142,16 @@ def test_authority_docs_use_tokens_calculated_by_runtime_contract(repo_root: Pat
         assert windows in content
         assert linux in content
 
+    analysis_validation = (repo_root / "docs/analysis-performance-validation.md").read_text(
+        encoding="utf-8"
+    )
+    assert windows in analysis_validation
+
+    validation = (repo_root / "docs/media-runtime-windows-validation.md").read_text(
+        encoding="utf-8"
+    )
+    assert media_runtime_fingerprint("full", profile="windows-x64") in validation
+
 
 def test_windows_manifest_fingerprints_match_code_contract(repo_root: Path) -> None:
     manifest = json.loads(

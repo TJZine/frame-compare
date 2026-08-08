@@ -153,7 +153,6 @@ def _doctor_status_icon(
     if check_name in critical_failures:
         return _STATUS_ICONS[False]
     if _is_optional_unavailable_status(
-        check_name=check_name,
         category=category,
         available=available,
     ):
@@ -165,7 +164,6 @@ def _doctor_status_icon(
 
 def _is_optional_unavailable_status(
     *,
-    check_name: str,
     category: str,
     available: bool | None,
 ) -> bool:

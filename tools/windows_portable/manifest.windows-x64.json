@@ -347,7 +347,9 @@
       "selection_kind": "release",
       "source_ref": "6.10.2",
       "license": "LGPL-3.0-only",
-      "source_url": "https://download.qt.io/official_releases/qt/6.10/6.10.2/single/qt-everywhere-src-6.10.2.tar.xz"
+      "source_url": "https://download.qt.io/official_releases/qt/6.10/6.10.2/single/qt-everywhere-src-6.10.2.tar.xz",
+      "sha256": "c3df0f0e421130cc52ed81cb712358804471ce9bd2a41d97828f9f5b1bf7fed2",
+      "bytes": 1315359412
     },
     {
       "name": "xxHash",
