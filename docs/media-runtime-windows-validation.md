@@ -138,7 +138,16 @@ $CandidateLauncher = Join-Path $ExtractedBundle 'frame-compare.ps1'
 Get-Command -CommandType ExternalScript $CandidateLauncher | Format-List Source,Path
 & $CandidateLauncher --help
 & $CandidateLauncher version
-& $CandidateLauncher doctor --json | Tee-Object -FilePath .\doctor-candidate.json
+$DoctorStdout = '.\doctor-candidate.json'
+$DoctorStderr = '.\doctor-candidate.stderr.log'
+& $CandidateLauncher doctor --json 1> $DoctorStdout 2> $DoctorStderr
+if ($LASTEXITCODE -ne 0) {
+  throw "Candidate doctor check failed with exit code $LASTEXITCODE. See $DoctorStderr."
+}
+$DoctorPayload = Get-Content -Raw $DoctorStdout | ConvertFrom-Json -NoEnumerate -ErrorAction Stop
+if ($DoctorPayload -isnot [pscustomobject]) {
+  throw 'Candidate doctor output must be exactly one JSON object.'
+}
 ```
 
 Inspect `doctor-candidate.json`. Required results:

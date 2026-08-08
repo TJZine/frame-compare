@@ -35,8 +35,10 @@ _AUDITED_HINTS = (
         "https://github.com/TJZine/frame-compare#requirements"
     ),
     "Install the supported vs-placebo wheel or use a complete Frame Compare runtime",
+    "Install or reinstall the complete supported media runtime, then rerun doctor",
     "Repair the supported media runtime, then rerun doctor",
     "Repair the complete Docker media runtime, then rerun doctor",
+    "Repair or reinstall the complete supported media runtime, then rerun doctor",
     "Repair or replace the FFmpeg runtime, then rerun doctor",
     ("Provide VSPreview; see https://tjzine.github.io/frame-compare/getting-started/native/"),
     (

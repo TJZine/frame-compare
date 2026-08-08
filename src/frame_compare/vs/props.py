@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from enum import Enum
+from typing import cast
 
 from frame_compare.vs.types import HDRMetadata
 
@@ -19,7 +20,7 @@ def get_int_prop(props: Mapping[str, object], key: str, default: int) -> int:
     if val is None:
         return default
     if isinstance(val, Enum):
-        val = val.value
+        val = cast(object, val.value)
     if isinstance(val, (int, float)):
         return int(val)
     if isinstance(val, (bytes, str)):
@@ -36,7 +37,7 @@ def get_optional_int_prop(props: Mapping[str, object], key: str) -> int | None:
     if val is None:
         return None
     if isinstance(val, Enum):
-        val = val.value
+        val = cast(object, val.value)
     if isinstance(val, (int, float)):
         return int(val)
     if isinstance(val, (bytes, str)):

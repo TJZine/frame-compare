@@ -606,7 +606,7 @@ class TestCheckFFMS2:
     def test_check_ffms2_rejects_loaded_plugin_in_windows_portable(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "windows-portable")
+        monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "WINDOWS-PORTABLE")
         monkeypatch.setenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "0")
         plugin = SimpleNamespace(
             Source=lambda *_args, **_kwargs: object(),
@@ -624,6 +624,7 @@ class TestCheckFFMS2:
         assert result.passed is False
         assert result.available is True
         assert "Windows portable baseline excludes it" in result.message
+        assert result.details["current_runtime_kind"] == "windows-portable"
 
 
 class TestCheckFFmpeg:

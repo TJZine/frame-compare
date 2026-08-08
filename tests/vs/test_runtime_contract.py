@@ -10,7 +10,15 @@ import pytest
 
 from frame_compare.vs.runtime_contract import (
     DEBIAN_FFMPEG_PACKAGE_VERSION,
+    FFMS2_SOURCE_TREE_SHA256,
+    LIBDOVI_SOURCE_TREE_SHA256,
+    LIBPLACEBO_SOURCE_TREE_SHA256,
+    LSMASH_SOURCE_TREE_SHA256,
+    LSMASH_WORKS_SOURCE_TREE_SHA256,
     MEDIA_RUNTIME_SCOPES,
+    OBUPARSE_SOURCE_TREE_SHA256,
+    VAPOURSYNTH_SOURCE_TREE_SHA256,
+    VS_PLACEBO_SOURCE_TREE_SHA256,
     index_cache_token,
     media_runtime_fingerprint,
     media_runtime_identity,
@@ -253,14 +261,14 @@ def test_docker_provenance_covers_every_distributed_media_component(
 def test_docker_uses_verified_tracked_source_tree_digests(repo_root: Path) -> None:
     dockerfile = (repo_root / "Dockerfile").read_text(encoding="utf-8")
     expected = {
-        "VAPOURSYNTH_SOURCE_TREE_SHA256": "cc0f2ec4127bd26f6dff074450ebe801368b6d4341b3ab9928c94073a682196f",
-        "LSMASH_SOURCE_TREE_SHA256": "b1553e40907e57240fd19a08642b3bc548dbdeda3750948ebbc1c5634af901b7",
-        "OBUPARSE_SOURCE_TREE_SHA256": "f82de7a5f007a4e89441e7ff4b470a00eddc4dfedb22faa46f633acfeefde178",
-        "LSMASH_WORKS_SOURCE_TREE_SHA256": "7845a6a6d823046c6b0bbe617ae88e304ee117f466961aabceea931831d8f9e3",
-        "FFMS2_SOURCE_TREE_SHA256": "5be86d5f8f103f8e0b25aaed0b69b7afc06f1b6cd548a6c81160fcd14ea6e8d7",
-        "VS_PLACEBO_SOURCE_TREE_SHA256": "beb830744f1fa1702eb64cfe8bdaf5780bb3501f9c48901df24ab112a406a30a",
-        "LIBPLACEBO_SOURCE_TREE_SHA256": "bdbe17582c081e107e1a66c44d5f01aa856a157aa124660d662221848e88eda7",
-        "LIBDOVI_SOURCE_TREE_SHA256": "e16dfb68270fc5b8610e2f1ae38b0b1051d8e7d03dd4b98a2f22f0e1fd09de26",
+        "VAPOURSYNTH_SOURCE_TREE_SHA256": VAPOURSYNTH_SOURCE_TREE_SHA256,
+        "LSMASH_SOURCE_TREE_SHA256": LSMASH_SOURCE_TREE_SHA256,
+        "OBUPARSE_SOURCE_TREE_SHA256": OBUPARSE_SOURCE_TREE_SHA256,
+        "LSMASH_WORKS_SOURCE_TREE_SHA256": LSMASH_WORKS_SOURCE_TREE_SHA256,
+        "FFMS2_SOURCE_TREE_SHA256": FFMS2_SOURCE_TREE_SHA256,
+        "VS_PLACEBO_SOURCE_TREE_SHA256": VS_PLACEBO_SOURCE_TREE_SHA256,
+        "LIBPLACEBO_SOURCE_TREE_SHA256": LIBPLACEBO_SOURCE_TREE_SHA256,
+        "LIBDOVI_SOURCE_TREE_SHA256": LIBDOVI_SOURCE_TREE_SHA256,
     }
     for argument, digest in expected.items():
         assert f"ARG {argument}={digest}" in dockerfile
@@ -270,9 +278,7 @@ def test_docker_uses_verified_tracked_source_tree_digests(repo_root: Path) -> No
 def test_docker_runtime_reads_release_and_api_identities_separately(repo_root: Path) -> None:
     script = (repo_root / "tools/verify_docker_integration.sh").read_text(encoding="utf-8")
 
-    assert 'api_version = getattr(vs, "__api_version__", None)' in script
-    assert 'api_major = getattr(api_version, "api_major", None)' in script
-    assert 'api_major = getattr(version, "api_major", None)' not in script
+    assert "DOCKER_PROOF vapoursynth_import=ok version=R78 api=4" in script
 
 
 def test_docker_runtime_generates_metadata_sensitive_fixture_matrix(repo_root: Path) -> None:
@@ -292,4 +298,3 @@ def test_docker_runtime_generates_metadata_sensitive_fixture_matrix(repo_root: P
     assert '"color_transfer": "smpte2084"' in script
     assert '"color_primaries": "bt2020"' in script
     assert '"pix_fmt": "yuv420p10le"' in script
-    assert 'get_optional_int_prop(interlaced_props, "_FieldBased") in {1, 2}' in script

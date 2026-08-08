@@ -383,6 +383,7 @@ def _check_vs_placebo() -> CheckResult:
 def _check_ffms2() -> CheckResult:
     """Report FFMS2 availability and enforce Docker's declared runtime policy."""
     required = runtime_ffms2_required()
+    selected_runtime_kind = runtime_kind().casefold()
     details: dict[str, JSONValue] = {
         "expected_release": FFMS2_RELEASE,
         "expected_runtime_version": FFMS2_RUNTIME_VERSION,
@@ -390,7 +391,7 @@ def _check_ffms2() -> CheckResult:
         "required_functions": cast(JSONValue, list(_FFMS2_REQUIRED_FUNCTIONS)),
         "windows_baseline": "excluded",
         "docker_runtime": "included",
-        "current_runtime_kind": runtime_kind(),
+        "current_runtime_kind": selected_runtime_kind,
         "required_in_current_runtime": required,
         "observed_available": False,
     }
@@ -444,7 +445,7 @@ def _check_ffms2() -> CheckResult:
             details=details,
         )
 
-    if runtime_kind().casefold() == "windows-portable":
+    if selected_runtime_kind == "windows-portable":
         return CheckResult(
             passed=False,
             available=True,

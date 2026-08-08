@@ -316,7 +316,8 @@ def index_cache_token(*, profile: MediaRuntimeProfile | None = None) -> str:
     """Return the compact owner token embedded in Frame Compare ``.lwi`` paths."""
 
     fingerprint = media_runtime_fingerprint("index", profile=profile)
-    return f"lsw1296-{fingerprint[:12]}"
+    release_major = LSMASH_WORKS_RELEASE.partition(".")[0]
+    return f"lsw{release_major}-{fingerprint[:12]}"
 
 
 def supported_media_runtime_report(
@@ -387,13 +388,18 @@ __all__ = [
     "FFMS2_RELEASE",
     "FFMS2_RUNTIME_VERSION",
     "FFMS2_SOURCE_COMMIT",
+    "FFMS2_SOURCE_TREE_SHA256",
     "LIBDOVI_RELEASE",
     "LIBDOVI_SOURCE_COMMIT",
+    "LIBDOVI_SOURCE_TREE_SHA256",
     "LIBPLACEBO_SOURCE_COMMIT",
+    "LIBPLACEBO_SOURCE_TREE_SHA256",
     "LSMASH_SOURCE_COMMIT",
+    "LSMASH_SOURCE_TREE_SHA256",
     "LSMASH_WORKS_PYPI_RELEASE",
     "LSMASH_WORKS_RELEASE",
     "LSMASH_WORKS_SOURCE_COMMIT",
+    "LSMASH_WORKS_SOURCE_TREE_SHA256",
     "MEDIA_RUNTIME_CONTRACT_VERSION",
     "MEDIA_RUNTIME_SCOPES",
     "MediaRuntimeFingerprints",
@@ -401,11 +407,14 @@ __all__ = [
     "MediaRuntimeReport",
     "MediaRuntimeScope",
     "OBUPARSE_SOURCE_COMMIT",
+    "OBUPARSE_SOURCE_TREE_SHA256",
     "VAPOURSYNTH_API_MAJOR",
     "VAPOURSYNTH_RELEASE",
     "VAPOURSYNTH_SOURCE_COMMIT",
+    "VAPOURSYNTH_SOURCE_TREE_SHA256",
     "VS_PLACEBO_RELEASE",
     "VS_PLACEBO_SOURCE_COMMIT",
+    "VS_PLACEBO_SOURCE_TREE_SHA256",
     "WINDOWS_FFMPEG_ARTIFACT_ID",
     "WINDOWS_FFMPEG_BUILD_SOURCE_COMMIT",
     "WINDOWS_FFMPEG_RELEASE",
