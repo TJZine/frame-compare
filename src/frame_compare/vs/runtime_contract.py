@@ -19,7 +19,11 @@ from frame_compare.errors import JSONValue
 
 type MediaRuntimeScope = Literal["analysis", "probe", "alignment", "index", "full"]
 type MediaRuntimeProfile = Literal[
-    "windows-x64", "debian-trixie", "unmanaged-linux", "native-macos"
+    "windows-x64",
+    "debian-trixie",
+    "unmanaged-windows",
+    "unmanaged-linux",
+    "native-macos",
 ]
 
 
@@ -115,10 +119,18 @@ def media_runtime_profile() -> MediaRuntimeProfile:
     if selected_runtime_kind == "docker":
         return "debian-trixie"
     if sys.platform == "win32":
-        return "windows-x64"
+        return "unmanaged-windows"
     if sys.platform == "darwin":
         return "native-macos"
     return "unmanaged-linux"
+
+
+def _unmanaged_platform(profile: MediaRuntimeProfile) -> Literal["windows", "linux", "macos"]:
+    if profile == "unmanaged-windows":
+        return "windows"
+    if profile == "unmanaged-linux":
+        return "linux"
+    return "macos"
 
 
 def _vapoursynth_identity() -> dict[str, JSONValue]:
@@ -172,7 +184,7 @@ def _lsmash_works_identity(profile: MediaRuntimeProfile) -> dict[str, JSONValue]
         identity.update(
             {
                 "build": "unmanaged-native",
-                "platform": "linux" if profile == "unmanaged-linux" else "macos",
+                "platform": _unmanaged_platform(profile),
                 "decoder_ffmpeg": {"selection_kind": "unmanaged-native"},
             }
         )
@@ -215,7 +227,7 @@ def _standalone_ffmpeg_identity(profile: MediaRuntimeProfile) -> dict[str, JSONV
         }
     return {
         "selection_kind": "unmanaged-native",
-        "platform": "linux" if profile == "unmanaged-linux" else "macos",
+        "platform": _unmanaged_platform(profile),
     }
 
 

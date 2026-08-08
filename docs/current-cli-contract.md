@@ -420,8 +420,8 @@ unchanged.
   Different selected references, selected analysis sources, selection domains,
   performance modes, metric algorithm identities, scoped media-runtime analysis
   fingerprints, or active-rect metric domains from the same input set do not
-  satisfy each other. Decoder and tone-mapping changes therefore invalidate
-  metric arrays; standalone FFmpeg-only changes do not. When
+  satisfy each other. Decoder changes therefore invalidate metric arrays;
+  tone-mapping-only and standalone FFmpeg-only changes do not. When
   `sources.analysis_source = "reference"`, `analysis_source_path` is the selected
   reference path. Prepared full-frame active rectangles represent no crop;
   explicit, metadata, dimension-derived, aspect-ratio-derived, or

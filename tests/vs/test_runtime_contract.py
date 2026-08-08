@@ -54,6 +54,29 @@ def test_unmanaged_macos_has_its_own_native_profile(monkeypatch: pytest.MonkeyPa
     }
 
 
+def test_unmanaged_windows_does_not_inherit_portable_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("FRAME_COMPARE_RUNTIME_KIND", raising=False)
+    monkeypatch.setattr("frame_compare.vs.runtime_contract.sys.platform", "win32")
+
+    assert media_runtime_profile() == "unmanaged-windows"
+    identity = media_runtime_identity("full", profile="unmanaged-windows")
+    components = identity["components"]
+    assert components["decoder"]["l_smash_works"]["build"] == "unmanaged-native"
+    assert components["standalone_ffmpeg"] == {
+        "selection_kind": "unmanaged-native",
+        "platform": "windows",
+    }
+    for scope in MEDIA_RUNTIME_SCOPES:
+        assert media_runtime_fingerprint(
+            scope, profile="unmanaged-windows"
+        ) != media_runtime_fingerprint(scope, profile="windows-x64")
+    assert index_cache_token(profile="unmanaged-windows") != index_cache_token(
+        profile="windows-x64"
+    )
+
+
 def test_unmanaged_linux_does_not_inherit_debian_package_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

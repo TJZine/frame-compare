@@ -174,8 +174,8 @@ Primary owned paths:
   Cache schema v8 stores `analysis_source_path`, `performance_mode`,
   `algorithm_id`, `metric_backend`, stable `algorithm_identity_json`, and
   the scoped media-runtime analysis fingerprint through that algorithm identity. A
-  decoder or tone-mapping lineage change cannot satisfy the previous metric cache,
-  while unrelated standalone FFmpeg changes do not invalidate metric arrays. It also stores
+  decoder lineage change cannot satisfy the previous metric cache, while tone-mapping-only
+  and standalone FFmpeg changes do not invalidate metric arrays. It also stores
   `metric_active_rect`, active-rect source, detection mode, and active-rect
   resolver algorithm ID in `MetricsMetadata`. It also stores the original source
   frame count and exact inclusive/exclusive selectable metric range. Performance

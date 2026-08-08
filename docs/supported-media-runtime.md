@@ -30,15 +30,16 @@ SHA-256. Both surfaces record source revisions and license metadata.
 
 ## Runtime profiles
 
-Frame Compare owns two deterministic deployment profiles. Unmanaged Linux and native
-macOS are reported as separate `unmanaged-linux` and `native-macos` profiles so neither
-can inherit Debian package identity or reuse Debian decoder caches; they are not
-packaged support profiles. Their fingerprints identify the selected Frame Compare
-runtime contract and operating-system class, not independently verified installed
-native binaries. Persistent cache compatibility is guaranteed only while an unmanaged
-installation continues to satisfy that selected contract; replacing native decoder or
-FFmpeg binaries outside the supported deployment profiles requires clearing generated
-caches and Frame Compare-owned indexes before reuse.
+Frame Compare owns two deterministic packaged deployment profiles. Unmanaged Windows,
+Linux, and native macOS are reported as separate `unmanaged-windows`,
+`unmanaged-linux`, and `native-macos` profiles so they cannot inherit portable Windows
+or Debian package identity or reuse those decoder caches; they are not packaged support
+profiles. Their fingerprints identify the selected Frame Compare runtime contract and
+operating-system class, not independently verified installed native binaries.
+Persistent cache compatibility is guaranteed only while an unmanaged installation
+continues to satisfy that selected contract; replacing native decoder or FFmpeg
+binaries outside the supported deployment profiles requires clearing generated caches
+and Frame Compare-owned indexes before reuse.
 
 ### Windows x64 portable
 

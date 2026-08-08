@@ -19,7 +19,10 @@ The supported reference stack, exact source revisions, and platform policies are
 listed in [Supported Media Runtime](../supported-media-runtime.md). Native installs
 may resolve distribution-managed FFmpeg and Vulkan components differently, so
 `frame-compare doctor --json` and a generated-fixture smoke test are required after
-any runtime change.
+any runtime change. Unmanaged Windows, Linux, and macOS use OS-scoped selected-contract
+identities rather than verified native binary hashes. After replacing native FFmpeg,
+VapourSynth, or source-plugin binaries, clear generated caches and Frame Compare-owned
+indexes before reuse.
 
 ## Install with uv
 
