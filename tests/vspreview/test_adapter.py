@@ -185,9 +185,10 @@ def test_launch_alignment_verification_session_waits_for_vspreview_completion(
     assert "timeout" not in kwargs
     assert kwargs["stdin"] is None
     assert kwargs["stdout"] is None
-    assert kwargs["stderr"] is subprocess.PIPE
-    assert kwargs["text"] is True
-    assert kwargs["errors"] == "replace"
+    assert kwargs["stderr"] is None
+    assert "text" not in kwargs
+    assert "errors" not in kwargs
+    assert "bufsize" not in kwargs
 
 
 def test_launch_alignment_verification_session_writes_launch_telemetry_to_stderr(

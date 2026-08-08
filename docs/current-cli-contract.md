@@ -217,7 +217,10 @@ work. Derived collisions are qualified deterministically with source stems and
 then stable source order. Resolved labels drive overlays, progress, reports,
 alignment display, render artifact keys, and slow.pics column names, but do not
 change source/cache/alignment identity or physical PNG filenames. Orchestrated
-rendering continues to use the source stem as `filename_label`.
+rendering continues to use the source stem as `filename_label`. When the resulting
+absolute screenshot path would exceed the legacy Windows browser-safe boundary, the
+physical filename retains a readable source-stem prefix and adds a deterministic
+digest suffix so local `file://` reports remain loadable without identity collisions.
 
 When analysis is skipped because effective `[analysis]` requests only
 `user_frames` and/or `random_frame_count`, `sources.analysis_source` is not
@@ -883,8 +886,9 @@ toggles or tags.
 VSPreview parent telemetry, generated Frame Compare session diagnostics,
 preview assumptions, ready text, and terminal confirmation prompts use stderr as
 the single human diagnostic stream. The VSPreview child process is launched with
-inherited stdout, and its stderr is passed through. Frame Compare-owned generated
-script diagnostics are written to stderr.
+inherited stdout and stderr so native carriage-return progress (including L-SMASH
+index creation) refreshes in place. Frame Compare-owned generated script diagnostics
+are written to stderr.
 
 When interactive alignment launches a generated VSPreview session, the
 diagnostic order is:

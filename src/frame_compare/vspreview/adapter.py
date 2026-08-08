@@ -230,16 +230,9 @@ def _run_vspreview_command(command: list[str], *, env: dict[str, str]) -> int:
         command,
         stdin=None,
         stdout=None,
-        stderr=subprocess.PIPE,
-        text=True,
-        errors="replace",
+        stderr=None,
         env=env,
-        bufsize=1,
     ) as process:
-        assert process.stderr is not None
-        for line in process.stderr:
-            sys.stderr.write(line)
-        sys.stderr.flush()
         return process.wait()
 
 

@@ -104,8 +104,10 @@ selector/override resolution and before probing or run-folder reservation.
 `selection_domain` receives the resolved per-path map when constructing
 `ClipState`; it does not own parsing or collision policy. Labels propagate
 through presentation surfaces while source paths, fingerprints,
-cache/alignment identity, and stem-based physical PNG filenames remain
-unchanged.
+cache/alignment identity, and stem-based physical PNG filename ownership remain
+unchanged. `frame_compare.render.naming` bounds overlong absolute screenshot paths
+for legacy Windows browser compatibility by retaining a readable stem prefix and a
+deterministic digest suffix.
 
 ## Module Boundaries
 

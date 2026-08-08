@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from frame_compare.render.naming import generate_screenshot_name, generate_screenshot_path
@@ -63,3 +65,18 @@ def test_generate_path_simple(tmp_path):
 
 def test_generate_path_sanitizes(tmp_path):
     assert generate_screenshot_path(tmp_path, "Bad:Name", 1) == tmp_path / "1 - Bad_Name.png"
+
+
+def test_generate_path_bounds_long_browser_file_paths(tmp_path):
+    output_dir = tmp_path / ("nested-" * 15) / "screenshots"
+    common_prefix = "Very.Long.Release.Name." * 8
+
+    first = generate_screenshot_path(output_dir, f"{common_prefix}source-a", 42)
+    second = generate_screenshot_path(output_dir, f"{common_prefix}source-b", 42)
+
+    assert len(os.path.abspath(first)) <= 259
+    assert len(os.path.abspath(second)) <= 259
+    assert first != second
+    assert first == generate_screenshot_path(output_dir, f"{common_prefix}source-a", 42)
+    assert first.name.startswith("42 - Very.Long.Release.Name.")
+    assert first.suffix == ".png"

@@ -1,10 +1,13 @@
 """Screenshot file naming utilities."""
 
+import hashlib
 import os
 import re
 from pathlib import Path
 
 INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_MAX_LEGACY_WINDOWS_PATH_CHARS = 259
+_SHORT_NAME_DIGEST_CHARS = 12
 
 
 def sanitize_filename_stem(label: str) -> str:
@@ -30,4 +33,22 @@ def generate_screenshot_name(filename_label: str, frame_number: int, extension: 
 
 def generate_screenshot_path(output_dir: Path, filename_label: str, frame_number: int) -> Path:
     filename = generate_screenshot_name(filename_label, frame_number)
-    return output_dir / filename
+    output_path = output_dir / filename
+    if len(os.path.abspath(output_path)) <= _MAX_LEGACY_WINDOWS_PATH_CHARS:
+        return output_path
+
+    sanitized = sanitize_filename_stem(filename_label)
+    digest = hashlib.sha256(sanitized.encode("utf-8")).hexdigest()[:_SHORT_NAME_DIGEST_CHARS]
+    prefix = f"{frame_number} - "
+    suffix = f"~{digest}.png"
+    available_label_chars = (
+        _MAX_LEGACY_WINDOWS_PATH_CHARS
+        - len(os.path.abspath(output_dir))
+        - 1
+        - len(prefix)
+        - len(suffix)
+    )
+    shortened_label = sanitized[:available_label_chars].rstrip(" .")
+    if available_label_chars < 1 or not shortened_label:
+        raise ValueError("screenshot output directory is too long for a browser-safe filename")
+    return output_dir / f"{prefix}{shortened_label}{suffix}"
