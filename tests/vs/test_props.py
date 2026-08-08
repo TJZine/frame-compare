@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from enum import Enum
+
 from frame_compare.vs.props import (
     detect_hdr,
     get_int_prop,
@@ -11,6 +13,10 @@ from frame_compare.vs.props import (
     props_indicate_limited_range,
     range_label_from_props,
 )
+
+
+class _ExampleEnum(Enum):
+    VALUE = 9
 
 
 def test_get_int_prop():
@@ -29,6 +35,7 @@ def test_get_int_prop():
     assert get_int_prop(props, "bytes_val", 0) == 200
     assert get_int_prop(props, "invalid_str", 5) == 5
     assert get_int_prop(props, "missing", 10) == 10
+    assert get_int_prop({"enum_val": _ExampleEnum.VALUE}, "enum_val", 0) == 9
 
 
 def test_get_optional_int_prop():
@@ -47,6 +54,7 @@ def test_get_optional_int_prop():
     assert get_optional_int_prop(props, "bytes_val") == 200
     assert get_optional_int_prop(props, "invalid_str") is None
     assert get_optional_int_prop(props, "missing") is None
+    assert get_optional_int_prop({"enum_val": _ExampleEnum.VALUE}, "enum_val") == 9
 
 
 def test_get_str_prop():

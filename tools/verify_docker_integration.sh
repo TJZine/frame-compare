@@ -221,7 +221,7 @@ from pathlib import Path
 
 import vapoursynth as vs
 
-from frame_compare.vs.props import props_indicate_limited_range
+from frame_compare.vs.props import get_optional_int_prop, props_indicate_limited_range
 from frame_compare.vs.runtime_contract import (
     DEBIAN_FFMPEG_PACKAGE_VERSION,
     FFMS2_RELEASE,
@@ -516,9 +516,18 @@ with tempfile.TemporaryDirectory(prefix="frame-compare-media-fixtures-") as fixt
         assert_true(hdr_lsw.clip.format.bits_per_sample >= 10, "LWLibavSource lost HDR precision")
         assert_true(hdr_ffms.format.bits_per_sample >= 10, "FFMS2 lost HDR precision")
         for props, loader_name in ((hdr_props, "LWLibavSource"), (hdr_ffms_props, "FFMS2")):
-            assert_true(props.get("_Primaries") == 9, f"{loader_name} lost BT.2020 primaries")
-            assert_true(props.get("_Transfer") == 16, f"{loader_name} lost PQ transfer")
-            assert_true(props.get("_Matrix") == 9, f"{loader_name} lost BT.2020 matrix")
+            assert_true(
+                get_optional_int_prop(props, "_Primaries") == 9,
+                f"{loader_name} lost BT.2020 primaries: {props!r}",
+            )
+            assert_true(
+                get_optional_int_prop(props, "_Transfer") == 16,
+                f"{loader_name} lost PQ transfer: {props!r}",
+            )
+            assert_true(
+                get_optional_int_prop(props, "_Matrix") == 9,
+                f"{loader_name} lost BT.2020 matrix: {props!r}",
+            )
             assert_true(
                 props_indicate_limited_range(props) is True,
                 f"{loader_name} lost limited range: {props!r}",
