@@ -153,8 +153,8 @@ container_cmd=$(
 set -euo pipefail
 export LIBGL_ALWAYS_SOFTWARE=1
 export PATH="/home/framecompare/.local/bin:${PATH}"
-icd="$(ls /usr/share/vulkan/icd.d/lvp_icd.*.json 2>/dev/null | head -n 1 || true)"
-if [[ -n "$icd" ]]; then
+icd="/usr/share/vulkan/icd.d/lvp_icd.json"
+if [[ -f "$icd" ]]; then
   export VK_ICD_FILENAMES="$icd"
 fi
 pytest_cache_dir=""
@@ -179,7 +179,7 @@ ffmpeg -hide_banner -loglevel error \
   -color_range tv -color_primaries bt709 -color_trc bt709 -colorspace bt709 \
   -y "$media_path"
 
-if [[ -n "$icd" ]]; then
+if [[ -f "$icd" ]]; then
   vulkaninfo --summary >/tmp/frame-compare-vulkan-summary.txt
 else
   echo "ERROR: Mesa software Vulkan ICD is missing from the Docker runtime" >&2
@@ -678,8 +678,8 @@ container_proof_cmd=$(cat <<'EOF'
 set -euo pipefail
 export LIBGL_ALWAYS_SOFTWARE=1
 export PATH="/home/framecompare/.local/bin:${PATH}"
-icd="$(ls /usr/share/vulkan/icd.d/lvp_icd.*.json 2>/dev/null | head -n 1 || true)"
-if [[ -n "$icd" ]]; then
+icd="/usr/share/vulkan/icd.d/lvp_icd.json"
+if [[ -f "$icd" ]]; then
   export VK_ICD_FILENAMES="$icd"
 fi
 generated_root="/workspace/generated/PROOF_NAME"
