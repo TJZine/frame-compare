@@ -60,6 +60,7 @@ def test_docker_gate_proves_generated_artifacts_survive_container_removal(repo_r
     assert 'build_services+=("frame-compare-run")' in script
     assert 'docker compose build "${build_args[@]}" "${build_services[@]}"' in script
     assert "DOCKER_PROOF production_tooling_absent=ok" in script
+    assert 'grep -Fq "DOCKER_PROOF production_tooling_absent=ok" "$production_log"' in script
     assert "uv build tooling leaked into the production image" in script
     assert "pytest test tooling leaked into the production image" in script
     assert "docker compose run --rm --entrypoint /bin/bash frame-compare-run" in script

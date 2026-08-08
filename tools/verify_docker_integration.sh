@@ -117,9 +117,10 @@ if [[ "$run_build" == "1" ]]; then
 fi
 
 tmp_log="$(mktemp)"
+production_log="$(mktemp)"
 proof_dir=""
 cleanup() {
-  rm -f "$tmp_log"
+  rm -f "$tmp_log" "$production_log"
   if [[ "$proof_dir" == generated/.docker-integration-proof.* && -d "$proof_dir" ]]; then
     rm -rf -- "$proof_dir"
   fi
@@ -737,7 +738,6 @@ required_proof_markers=(
   "DOCKER_PROOF obuparse=ok linkage=shared soname=libobuparse.so.2 provenance=verified"
   "DOCKER_PROOF source_provenance=ok strategy=git-commit-tracked-tree-sha256"
   "DOCKER_PROOF doctor_json=ok"
-  "DOCKER_PROOF production_tooling_absent=ok"
   "DOCKER_PROOF generated_fixture_matrix=ok fixtures=h264_limited"
   "DOCKER_PROOF real_frame_render=ok frames=lwlibavsource,ffms2,placebo"
 )
@@ -895,9 +895,14 @@ container_proof_cmd="${container_proof_cmd//PROOF_NAME/$proof_name}"
 if ! env \
   FRAME_COMPARE_HOST_UID="$host_uid" \
   FRAME_COMPARE_HOST_GID="$host_gid" \
-  docker compose run --rm --entrypoint /bin/bash frame-compare-run -lc "$container_proof_cmd"; then
+  docker compose run --rm --entrypoint /bin/bash frame-compare-run -lc "$container_proof_cmd" \
+    | tee "$production_log"; then
   echo "ERROR: generated-data bind-mount proof failed" >&2
   exit 5
+fi
+if ! grep -Fq "DOCKER_PROOF production_tooling_absent=ok" "$production_log"; then
+  echo "ERROR: production-image tooling proof marker missing" >&2
+  exit 6
 fi
 
 host_python=""
