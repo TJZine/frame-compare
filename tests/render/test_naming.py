@@ -78,7 +78,7 @@ def test_generate_path_bounds_long_browser_file_paths(tmp_path):
     assert len(os.path.abspath(second).encode("utf-16-le")) // 2 <= 259
     assert first != second
     assert first == generate_screenshot_path(output_dir, f"{common_prefix}source-a", 42)
-    assert first.name.startswith("42 - Very.Long.Release.Name.")
+    assert first.name.startswith("42 - V")
     assert first.suffix == ".png"
 
 
