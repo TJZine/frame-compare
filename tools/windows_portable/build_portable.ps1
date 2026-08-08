@@ -316,8 +316,7 @@ try {
     (Join-Path $sitePackages "vapoursynth.libs"),
     (Join-Path $sitePackages "vs_placebo"),
     (Join-Path $sitePackages "vs_placebo.libs"),
-    (Join-Path $bundleRoot "vs\extra-plugins\lsmas"),
-    (Join-Path $sitePackages "PyQt6\Qt6\bin")
+    (Join-Path $bundleRoot "vs\extra-plugins\lsmas")
   )
   $existingPathEntries = @(
     $pathEntries |
@@ -608,8 +607,7 @@ function Set-BundleRuntimeEnvironment([string]$BundleRoot) {
     (Join-Path $sitePackages "vapoursynth.libs"),
     (Join-Path $sitePackages "vs_placebo"),
     (Join-Path $sitePackages "vs_placebo.libs"),
-    (Join-Path $BundleRoot "vs\extra-plugins\lsmas"),
-    (Join-Path $sitePackages "PyQt6\Qt6\bin")
+    (Join-Path $BundleRoot "vs\extra-plugins\lsmas")
   )
   $existingEntries = @(
     $pathEntries |

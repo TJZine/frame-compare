@@ -130,10 +130,10 @@ def test_register_windows_dll_dirs_is_idempotent_per_process(monkeypatch, tmp_pa
         str(vs_placebo_package),
         str(vs_placebo_libs),
         str(lsmas_dir),
-        str(qt_bin),
     ]
     assert calls == expected_calls
     assert str(ffmpeg_bin) not in calls
+    assert str(qt_bin) not in calls
 
 
 def test_import_vapoursynth_module_registers_runtime_dirs_before_retry(

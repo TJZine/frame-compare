@@ -47,8 +47,9 @@ def _iter_windows_dll_candidates() -> list[str]:
     """Return deterministic DLL directories in bundle-search order.
 
     The portable runtime never recursively probes directories and deliberately
-    excludes the standalone FFmpeg distribution. Native plugin dependencies must
-    resolve from their explicit package or plugin directories.
+    excludes the standalone FFmpeg distribution and PyQt's Qt binary directory.
+    PyQt registers its own DLLs when imported; process-wide registration would let
+    its private MSVC runtime preempt native media plugin dependencies.
     """
     candidates: list[str] = []
     env_home = os.environ.get("VAPOURSYNTH_HOME")
@@ -68,7 +69,6 @@ def _iter_windows_dll_candidates() -> list[str]:
             os.path.join(app_site_packages, "vs_placebo"),
             os.path.join(app_site_packages, "vs_placebo.libs"),
             os.path.join(bundle_root, "vs", "extra-plugins", "lsmas"),
-            os.path.join(app_site_packages, "PyQt6", "Qt6", "bin"),
         ]
     )
     return candidates

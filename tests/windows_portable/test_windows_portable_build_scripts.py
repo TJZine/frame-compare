@@ -271,6 +271,7 @@ def test_windows_portable_build_uses_r74_plus_plugin_layout(repo_root: Path) -> 
     assert "tar extract" in build_script
     assert "VAPOURSYNTH_PLUGIN_PATH =" not in build_script
     assert "Consolidate-VapourSynthPlugins" not in build_script
+    assert "PyQt6\\Qt6\\bin" not in build_script
     assert 'Get-ChildItem -LiteralPath $sitePackages -Filter "*.dll" -File -Recurse' not in (
         build_script
     )
