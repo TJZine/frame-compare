@@ -74,9 +74,18 @@ def test_generate_path_bounds_long_browser_file_paths(tmp_path):
     first = generate_screenshot_path(output_dir, f"{common_prefix}source-a", 42)
     second = generate_screenshot_path(output_dir, f"{common_prefix}source-b", 42)
 
-    assert len(os.path.abspath(first)) <= 259
-    assert len(os.path.abspath(second)) <= 259
+    assert len(os.path.abspath(first).encode("utf-16-le")) // 2 <= 259
+    assert len(os.path.abspath(second).encode("utf-16-le")) // 2 <= 259
     assert first != second
     assert first == generate_screenshot_path(output_dir, f"{common_prefix}source-a", 42)
     assert first.name.startswith("42 - Very.Long.Release.Name.")
     assert first.suffix == ".png"
+
+
+def test_generate_path_counts_non_bmp_characters_as_two_windows_units(tmp_path):
+    output_dir = tmp_path / "screenshots"
+
+    path = generate_screenshot_path(output_dir, "😀" * 200, 42)
+
+    assert len(os.path.abspath(path).encode("utf-16-le")) // 2 <= 259
+    assert path.suffix == ".png"
