@@ -524,7 +524,8 @@ with tempfile.TemporaryDirectory(prefix="frame-compare-media-fixtures-") as fixt
             "-preset", "ultrafast",
             "-x265-params",
             "repeat-headers=1:hdr10=1:master-display=G(13250,34500)B(7500,3000)"
-            "R(34000,16000)WP(15635,16450)L(10000000,1):max-cll=1000,400:range=limited",
+            "R(34000,16000)WP(15635,16450)L(10000000,1):max-cll=1000,400:range=limited:"
+            "colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc",
             "-pix_fmt", "yuv420p10le", "-color_primaries", "bt2020",
             "-color_trc", "smpte2084", "-colorspace", "bt2020nc",
             "-color_range", "tv", "-y", str(hdr_path),
