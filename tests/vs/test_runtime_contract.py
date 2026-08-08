@@ -268,4 +268,4 @@ def test_docker_runtime_generates_metadata_sensitive_fixture_matrix(repo_root: P
     assert "props_indicate_limited_range" in script
     assert "invalid full-range fixture" in script
     assert 'get_optional_int_prop(props, "_Transfer") == 16' in script
-    assert 'props.get("_FieldBased") in {1, 2}' in script
+    assert 'get_optional_int_prop(interlaced_props, "_FieldBased") in {1, 2}' in script

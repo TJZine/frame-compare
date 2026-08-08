@@ -494,8 +494,14 @@ with tempfile.TemporaryDirectory(prefix="frame-compare-media-fixtures-") as fixt
     _int_lsw, _int_ffms, interlaced_props, interlaced_ffms_props = open_with_source_loaders(
         interlaced_path
     )
-    assert_true(interlaced_props.get("_FieldBased") in {1, 2}, "LWLibavSource lost field order")
-    assert_true(interlaced_ffms_props.get("_FieldBased") in {1, 2}, "FFMS2 lost field order")
+    assert_true(
+        get_optional_int_prop(interlaced_props, "_FieldBased") in {1, 2},
+        f"LWLibavSource lost field order: {interlaced_props!r}",
+    )
+    assert_true(
+        get_optional_int_prop(interlaced_ffms_props, "_FieldBased") in {1, 2},
+        f"FFMS2 lost field order: {interlaced_ffms_props!r}",
+    )
     fixture_results.append("h264_interlaced")
 
     if ffmpeg_has_encoder("libx265"):
