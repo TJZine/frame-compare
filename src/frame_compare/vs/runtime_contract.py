@@ -110,7 +110,7 @@ def media_runtime_profile() -> MediaRuntimeProfile:
     The deployment kind selects the authoritative packaged profile.  Unmanaged
     hosts fall back by operating system so cache identities still separate the
     Windows bundled decoder lineage, managed Debian lineage, and unmanaged
-    Linux and native macOS environments.
+    Windows, Linux, and native macOS environments.
     """
 
     selected_runtime_kind = runtime_kind().casefold()

@@ -141,11 +141,12 @@ Frame Compare-owned L-SMASH-Works indexes use a profile-scoped filename:
 <media>.frame-compare-lsw1296-<12-hex-index-fingerprint>.lwi
 ```
 
-The current Windows token is `lsw1296-e3c074652ffb`; the current Debian/Docker token
-is `lsw1296-4ea22a0b0598`. Legacy adjacent `<media>.lwi` files are ignored rather
-than deleted. A corrupt Frame Compare-owned index is removed and rebuilt once, with a
-warning when removal or rebuilding fails and a cache-free source open as the last
-recovery path for an unusable index location.
+The current managed/portable Windows token is `lsw1296-e3c074652ffb`; the unmanaged
+Windows token is `lsw1296-6b9e50219ad0`; and the Debian/Docker token is
+`lsw1296-4ea22a0b0598`. Legacy adjacent `<media>.lwi` files are ignored rather than
+deleted. A corrupt Frame Compare-owned index is removed and rebuilt once, with a warning
+when removal or rebuilding fails and a cache-free source open as the last recovery path
+for an unusable index location.
 
 ## Portable update boundary
 

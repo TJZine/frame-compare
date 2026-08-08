@@ -448,9 +448,10 @@ unchanged.
   under the previous tool build.
 - Frame Compare-owned L-SMASH-Works indexes use
   `<media>.frame-compare-lsw1296-<12-hex-index-fingerprint>.lwi`. The token is
-  profile scoped (currently `lsw1296-e3c074652ffb` on Windows and
-  `lsw1296-4ea22a0b0598` on Debian/Docker). Legacy adjacent `<media>.lwi`
-  files are ignored rather than deleted. A corrupt owned index is
+  profile scoped (currently `lsw1296-e3c074652ffb` on managed/portable Windows,
+  `lsw1296-6b9e50219ad0` on unmanaged Windows, and `lsw1296-4ea22a0b0598`
+  on Debian/Docker). Legacy adjacent `<media>.lwi` files are ignored rather than
+  deleted. A corrupt owned index is
   removed and rebuilt once; removal/rebuild failure produces a warning and an
   unusable index location retries source loading without an index.
 - Analysis is skipped automatically when `dark_frame_count`, `bright_frame_count`,

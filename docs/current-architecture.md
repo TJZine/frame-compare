@@ -217,8 +217,9 @@ Primary owned paths:
   decoder-lineage change misses without invalidating unrelated file-format data.
 - `<media>.frame-compare-lsw1296-<12-hex-index-fingerprint>.lwi`: Frame
   Compare-owned L-SMASH-Works index. The token is profile scoped (currently
-  `lsw1296-e3c074652ffb` on Windows and `lsw1296-4ea22a0b0598` on
-  Debian/Docker), so indexes cannot cross decoder ABIs. Legacy adjacent
+  `lsw1296-e3c074652ffb` on managed/portable Windows,
+  `lsw1296-6b9e50219ad0` on unmanaged Windows, and `lsw1296-4ea22a0b0598`
+  on Debian/Docker), so indexes cannot cross decoder ABIs. Legacy adjacent
   `<media>.lwi` files are ignored,
   not deleted. A corrupt owned index is removed and rebuilt once; removal/rebuild
   failure is warned and an unusable index location falls back to a cache-free source

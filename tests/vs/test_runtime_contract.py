@@ -154,6 +154,7 @@ def test_index_token_is_profile_scoped() -> None:
 
 def test_authority_docs_use_tokens_calculated_by_runtime_contract(repo_root: Path) -> None:
     windows = index_cache_token(profile="windows-x64")
+    unmanaged_windows = index_cache_token(profile="unmanaged-windows")
     linux = index_cache_token(profile="debian-trixie")
 
     for relative_path in (
@@ -163,6 +164,7 @@ def test_authority_docs_use_tokens_calculated_by_runtime_contract(repo_root: Pat
     ):
         content = (repo_root / relative_path).read_text(encoding="utf-8")
         assert windows in content
+        assert unmanaged_windows in content
         assert linux in content
 
     analysis_validation = (repo_root / "docs/analysis-performance-validation.md").read_text(
