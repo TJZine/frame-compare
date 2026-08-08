@@ -175,7 +175,7 @@ frame-compare version >/tmp/frame-compare-version.txt
 frame-compare doctor --json >"$doctor_path"
 ffmpeg -hide_banner -loglevel error \
   -f lavfi -i testsrc2=size=64x48:rate=24000/1001 \
-  -frames:v 12 -pix_fmt yuv420p -c:v libx264 \
+  -frames:v 12 -pix_fmt yuv420p -c:v libx264 -x264-params range=tv \
   -color_range tv -color_primaries bt709 -color_trc bt709 -colorspace bt709 \
   -y "$media_path"
 
@@ -388,6 +388,18 @@ def ffmpeg_has_encoder(name: str) -> bool:
     return any(line.split()[1:2] == [name] for line in output.splitlines())
 
 
+def probe_stream_color_range(path: Path) -> str:
+    return subprocess.check_output(
+        [
+            "/usr/bin/ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=color_range", "-of",
+            "default=noprint_wrappers=1:nokey=1", str(path),
+        ],
+        text=True,
+        timeout=15,
+    ).strip()
+
+
 def open_with_source_loaders(path: Path) -> tuple[object, object, dict[str, object], dict[str, object]]:
     lsw_source = load_source(path, core=core)
     lsw_frame = lsw_source.clip.get_frame(0)
@@ -408,6 +420,7 @@ with tempfile.TemporaryDirectory(prefix="frame-compare-media-fixtures-") as fixt
     limited_source, limited_ffms, limited_props, limited_ffms_props = open_with_source_loaders(
         media_path
     )
+    assert_true(probe_stream_color_range(media_path) == "tv", "invalid limited-range fixture")
     assert_true(limited_props.get("_ColorRange") == 1, "LWLibavSource lost limited-range metadata")
     assert_true(limited_ffms_props.get("_ColorRange") == 1, "FFMS2 lost limited-range metadata")
     fixture_results.append(
@@ -418,11 +431,13 @@ with tempfile.TemporaryDirectory(prefix="frame-compare-media-fixtures-") as fixt
     run_ffmpeg(
         "-f", "lavfi", "-i", "testsrc2=size=64x48:rate=4:duration=1",
         "-vf", "scale=in_range=tv:out_range=pc",
-        "-frames:v", "4", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        "-frames:v", "4", "-c:v", "libx264", "-x264-params", "range=pc",
+        "-pix_fmt", "yuv420p",
         "-color_range", "pc", "-color_primaries", "bt709",
         "-color_trc", "bt709", "-colorspace", "bt709", "-y", str(full_range),
     )
     _full_lsw, _full_ffms, full_props, full_ffms_props = open_with_source_loaders(full_range)
+    assert_true(probe_stream_color_range(full_range) == "pc", "invalid full-range fixture")
     assert_true(full_props.get("_ColorRange") == 0, "LWLibavSource lost full-range metadata")
     assert_true(full_ffms_props.get("_ColorRange") == 0, "FFMS2 lost full-range metadata")
     fixture_results.append("h264_full_range")
@@ -478,12 +493,13 @@ with tempfile.TemporaryDirectory(prefix="frame-compare-media-fixtures-") as fixt
             "-preset", "ultrafast",
             "-x265-params",
             "repeat-headers=1:hdr10=1:master-display=G(13250,34500)B(7500,3000)"
-            "R(34000,16000)WP(15635,16450)L(10000000,1):max-cll=1000,400",
+            "R(34000,16000)WP(15635,16450)L(10000000,1):max-cll=1000,400:range=limited",
             "-pix_fmt", "yuv420p10le", "-color_primaries", "bt2020",
             "-color_trc", "smpte2084", "-colorspace", "bt2020nc",
             "-color_range", "tv", "-y", str(hdr_path),
         )
         hdr_lsw, hdr_ffms, hdr_props, hdr_ffms_props = open_with_source_loaders(hdr_path)
+        assert_true(probe_stream_color_range(hdr_path) == "tv", "invalid HDR range fixture")
         assert_true(hdr_lsw.clip.format.bits_per_sample >= 10, "LWLibavSource lost HDR precision")
         assert_true(hdr_ffms.format.bits_per_sample >= 10, "FFMS2 lost HDR precision")
         for props, loader_name in ((hdr_props, "LWLibavSource"), (hdr_ffms_props, "FFMS2")):
