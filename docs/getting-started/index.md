@@ -158,8 +158,8 @@ on your host. See
 
 Choose this when you want native host behavior and can install the media toolchain.
 `uv` reproduces the repository's locked Python dependency graph; you still provide
-FFmpeg, VapourSynth R78, L-SMASH-Works 1296, compatible Vulkan support, and optionally
-VSPreview.
+FFmpeg, VapourSynth R78, L-SMASH-Works 1296, vs-placebo 2.0.4, compatible Vulkan
+support, and optionally VSPreview.
 
 This is the preferred native-source route because its Python environment is locked.
 Follow [Install with uv](native.md#install-with-uv).

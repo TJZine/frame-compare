@@ -543,7 +543,7 @@ def _check_ffmpeg() -> CheckResult:
     details["expected_version_fragment"] = expected_fragment
     if expected_fragment is not None:
         version_matches = all(
-            expected_fragment in str(details[f"{executable}_version_line"])
+            expected_fragment in str(details[f"{executable}_version_line"]).split()
             for executable in ("ffmpeg", "ffprobe")
         )
         details["expected_version_match"] = version_matches

@@ -84,6 +84,7 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           $out = "dist/frame-compare-portable-win-x64"
           $proofLog = "dist/windows-bundle-runtime-proof.log"
+          New-Item -ItemType Directory -Force -Path "dist" | Out-Null
           $buildArgs = @(
             "-NoProfile",
             "-ExecutionPolicy",

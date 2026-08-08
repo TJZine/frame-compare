@@ -802,10 +802,20 @@ class TestCheckFFmpeg:
         assert result.details["expected_version_fragment"] == version
         assert result.details["expected_version_match"] is True
 
+    @pytest.mark.parametrize(
+        ("runtime_kind_value", "observed_version"),
+        [
+            ("windows-portable", "stale"),
+            ("docker", "7.1.5-0+deb13u10"),
+        ],
+    )
     def test_check_ffmpeg_rejects_managed_runtime_identity_mismatch(
-        self, monkeypatch: pytest.MonkeyPatch
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        runtime_kind_value: str,
+        observed_version: str,
     ) -> None:
-        monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "windows-portable")
+        monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", runtime_kind_value)
         check = next(candidate for candidate in collect_checks() if candidate.name == "ffmpeg")
 
         with (
@@ -816,8 +826,8 @@ class TestCheckFFmpeg:
             patch(
                 "frame_compare.orchestration.doctor_checks.run_subprocess",
                 side_effect=[
-                    _completed_process("ffmpeg version stale\n"),
-                    _completed_process("ffprobe version stale\n"),
+                    _completed_process(f"ffmpeg version {observed_version}\n"),
+                    _completed_process(f"ffprobe version {observed_version}\n"),
                 ],
             ),
         ):

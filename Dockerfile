@@ -57,7 +57,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libavutil-dev \
         libswscale-dev \
         libswresample-dev; do \
-        test "$(dpkg-query -W -f='${Version}' "$package")" = "${DEBIAN_FFMPEG_PACKAGE_VERSION}"; \
+        test "$(dpkg-query -W -f='${Version}' "$package")" = "${DEBIAN_FFMPEG_PACKAGE_VERSION}" \
+            || { echo "unexpected $package version" >&2; exit 1; }; \
     done \
     && rm -rf /var/lib/apt/lists/*
 
