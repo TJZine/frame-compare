@@ -13,6 +13,7 @@ from frame_compare.vs.source import (
     apply_trim,
     load_source,
     source_index_path,
+    validate_source_index,
 )
 from frame_compare.vs.types import SourceInfo
 
@@ -125,6 +126,39 @@ def test_load_source_default_does_not_forward_decoder_kwargs():
     load_source("video.mkv", core)  # type: ignore[arg-type]
 
     assert calls == [("video.mkv", _index_kwargs("video.mkv"))]
+
+
+def test_validate_source_index_opens_existing_index_without_mutating_it(tmp_path: Path) -> None:
+    video = tmp_path / "video.mkv"
+    index = source_index_path(video)
+    index.write_bytes(b"ready index")
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def loader(path: str, **kwargs: object) -> MockClip:
+        calls.append((path, kwargs))
+        return MockClip()
+
+    core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
+
+    validate_source_index(video, core)  # type: ignore[arg-type]
+
+    assert calls == [(str(video), {"cachefile": str(index)})]
+    assert index.read_bytes() == b"ready index"
+
+
+def test_validate_source_index_rejects_index_rebuilt_during_probe(tmp_path: Path) -> None:
+    video = tmp_path / "video.mkv"
+    index = source_index_path(video)
+    index.write_bytes(b"rejected index")
+
+    def loader(_path: str, **_kwargs: object) -> MockClip:
+        index.write_bytes(b"rebuilt index")
+        return MockClip()
+
+    core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
+
+    with pytest.raises(SourceLoadError, match="changed during validation"):
+        validate_source_index(video, core)  # type: ignore[arg-type]
 
 
 def test_load_source_forwards_explicit_decoder_options():

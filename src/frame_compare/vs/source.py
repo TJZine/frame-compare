@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from fractions import Fraction
+from hashlib import file_digest
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
@@ -77,13 +78,7 @@ def load_source(
         # Propagates PluginNotFoundError (FC-2003) if lsmas missing
         require_plugin(core, "lsmas")
 
-        # Loader selection:
-        # Check for LWLibavSource on the namespace, not just namespace existence
-        if hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource"):
-            loader = cast(_LWLibavSourcePlugin, core.lsmas)
-        else:
-            # require_plugin passed, so core.lw.LWLibavSource must exist
-            loader = cast(_LWLibavSourcePlugin, core.lw)
+        loader = _resolve_lwlibav_loader(core)
 
         loader_kwargs: dict[str, int | str] = {}
         if decoder_options is not None:
@@ -123,6 +118,49 @@ def load_source(
 def source_index_path(path: Path) -> Path:
     """Return the Frame Compare-owned L-SMASH-Works index path for ``path``."""
     return Path(f"{path}.frame-compare-{index_cache_token()}.lwi")
+
+
+def validate_source_index(path: Path, core: vs.Core | None = None) -> None:
+    """Fail unless the existing owned index opens the source without being rebuilt."""
+    source_path = Path(path)
+    index_path = source_index_path(source_path)
+    try:
+        before = _file_sha256(index_path)
+    except OSError as error:
+        raise SourceLoadError(source_path, f"Warm source index is unavailable: {error}") from error
+
+    if core is None:
+        core = ensure_vs_environment()
+
+    try:
+        require_plugin(core, "lsmas")
+        loader = _resolve_lwlibav_loader(core)
+        clip = loader.LWLibavSource(str(source_path), cachefile=str(index_path))
+        clip.get_frame(0)
+        after = _file_sha256(index_path)
+    except PluginNotFoundError:
+        raise
+    except Exception as error:
+        raise SourceLoadError(
+            source_path, f"Warm source index validation failed: {error}"
+        ) from error
+
+    if after != before:
+        raise SourceLoadError(
+            source_path,
+            "Warm source index changed during validation; regenerate it before benchmarking",
+        )
+
+
+def _resolve_lwlibav_loader(core: vs.Core) -> _LWLibavSourcePlugin:
+    if hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource"):
+        return cast(_LWLibavSourcePlugin, core.lsmas)
+    return cast(_LWLibavSourcePlugin, core.lw)
+
+
+def _file_sha256(path: Path) -> str:
+    with path.open("rb") as file:
+        return file_digest(file, "sha256").hexdigest()
 
 
 def _load_lwlibav_source(

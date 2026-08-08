@@ -133,8 +133,8 @@ uv run --no-sync frame-compare run `
 ```
 
 The cold benchmark policy removes only the exact analysis metric cache entry. It
-does not delete source indexes. `--require-warm-source-index` fails early when
-the selected analysis source is not ready.
+does not delete source indexes. `--require-warm-source-index` fails early unless
+the selected Frame Compare-owned index opens the source without being rebuilt.
 
 ## Primary cold benchmarks
 

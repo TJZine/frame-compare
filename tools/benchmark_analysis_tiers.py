@@ -77,8 +77,9 @@ from frame_compare.orchestration.source_selection import (
     resolve_source_selector,
 )
 from frame_compare.utils.atomic_write import write_text_atomic
+from frame_compare.vs.errors import SourceLoadError
 from frame_compare.vs.loader import DefaultVSLoader
-from frame_compare.vs.source import source_index_path
+from frame_compare.vs.source import source_index_path, validate_source_index
 
 type JsonObject = dict[str, Any]
 type MetricCachePolicy = Literal["cold", "reuse"]
@@ -167,12 +168,17 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     source_indexes = _source_index_facts(analysis_source.ordered_paths)
     selected_index = source_indexes[analysis_source.path.as_posix()]
-    if args.require_warm_source_index and not selected_index["detected"]:
-        raise SystemExit(
-            "A warm source index was required but no Frame Compare-owned, "
-            "runtime-versioned L-SMASH-Works index was detected for "
-            f"{analysis_source.path.as_posix()}"
-        )
+    if args.require_warm_source_index:
+        if not selected_index["detected"]:
+            raise SystemExit(
+                "A warm source index was required but no Frame Compare-owned, "
+                "runtime-versioned L-SMASH-Works index was detected for "
+                f"{analysis_source.path.as_posix()}"
+            )
+        try:
+            validate_source_index(analysis_source.path)
+        except SourceLoadError as error:
+            raise SystemExit(f"The required warm source index is not ready: {error}") from error
 
     metric_range = MetricFrameRange(
         source_frame_count=analysis_source.source_frame_count,

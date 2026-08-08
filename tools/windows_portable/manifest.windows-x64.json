@@ -149,7 +149,7 @@
           },
           {
             "path": "licenses/lsmash-works/dependencies/nv-codec-headers-MIT-notice.txt",
-            "sha256": "dd5df92f19a4f19b13482330d791f3dae8f5157517e48a39189c9e70ce18ebcb",
+            "sha256": "72b60be67644d841bfd54a042875b5846294d357040dd7ac8e38bde20d9e8f97",
             "source_url": "https://raw.githubusercontent.com/FFmpeg/nv-codec-headers/n13.0.19.0/include/ffnvcodec/nvEncodeAPI.h"
           },
           {

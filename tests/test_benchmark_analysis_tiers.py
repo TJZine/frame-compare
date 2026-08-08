@@ -342,6 +342,54 @@ def test_main_rejects_legacy_indexes_for_warm_requirement(
         )
 
 
+def test_main_rejects_unusable_owned_index(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    script = _load_script()
+    video = tmp_path / "clip.mkv"
+    video.write_bytes(b"video")
+    script.source_index_path(video).write_bytes(b"corrupt index")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("", encoding="utf-8")
+    source = script.BenchmarkAnalysisSource(
+        path=video,
+        ordered_paths=(video,),
+        effective_fps=None,
+        active_rect=script.BenchmarkActiveRect(
+            rect=None,
+            source="full-frame",
+            detection_mode="aspect_ratio",
+        ),
+        overrides_by_path={},
+        source_frame_count=20,
+        source_fps=Fraction(24),
+    )
+
+    def reject_index(_path: Path) -> None:
+        raise script.SourceLoadError(video, "Warm source index validation failed")
+
+    monkeypatch.setattr(script, "load_config", lambda _path: ConfigSchema())
+    monkeypatch.setattr(script, "_resolve_benchmark_analysis_source", lambda **_kwargs: source)
+    monkeypatch.setattr(script, "validate_source_index", reject_index)
+
+    with pytest.raises(SystemExit, match="required warm source index is not ready"):
+        script.main(
+            [
+                "--root",
+                str(tmp_path),
+                "--config",
+                str(config_path),
+                "--output",
+                str(tmp_path / "report.json"),
+                "--window-end-exclusive",
+                "20",
+                "--require-warm-source-index",
+                str(video),
+            ]
+        )
+
+
 def test_nondefault_domain_requires_explicit_selection_token(tmp_path: Path) -> None:
     script = _load_script()
     video = tmp_path / "clip.mkv"
@@ -421,6 +469,7 @@ def test_main_writes_atomic_production_report(
     performance_selection = _selection(dark=[1], bright=[11], motion=[11])
     monkeypatch.setattr(script, "load_config", lambda _path: config)
     monkeypatch.setattr(script, "_resolve_benchmark_analysis_source", lambda **_kwargs: source)
+    monkeypatch.setattr(script, "validate_source_index", lambda _path: None)
     monkeypatch.setattr(
         script,
         "_run_benchmark",
