@@ -436,7 +436,7 @@ class TestCheckVsPlacebo:
     def test_check_vs_placebo_version_mismatch_is_reported(self) -> None:
         checks = collect_checks()
         check = next(candidate for candidate in checks if candidate.name == "vs_placebo")
-        plugin = SimpleNamespace(Tonemap=object(), functions=lambda: [])
+        plugin = SimpleNamespace(Tonemap=lambda: object(), functions=lambda: [])
         mock_vs = SimpleNamespace(core=SimpleNamespace(placebo=plugin))
 
         with (
@@ -455,6 +455,28 @@ class TestCheckVsPlacebo:
         assert result.available is True
         assert result.details["expected_distribution_match"] is False
         assert "does not match 2.0.4" in result.message
+
+    def test_check_vs_placebo_reports_missing_tonemap_function(self) -> None:
+        check = next(candidate for candidate in collect_checks() if candidate.name == "vs_placebo")
+        plugin = SimpleNamespace(functions=lambda: [])
+        mock_vs = SimpleNamespace(core=SimpleNamespace(placebo=plugin))
+
+        with (
+            patch(
+                "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
+                return_value=mock_vs,
+            ),
+            patch(
+                "frame_compare.orchestration.doctor_checks.importlib.metadata.version",
+                return_value="2.0.4",
+            ),
+        ):
+            result = check.check_fn()
+
+        assert result.passed is False
+        assert result.available is False
+        assert result.details["missing_functions"] == ["Tonemap"]
+        assert result.message == "vs-placebo plugin is missing placebo.Tonemap"
 
     def test_check_vs_placebo_missing_is_optional_failure(self) -> None:
         checks = collect_checks()
@@ -603,6 +625,28 @@ class TestCheckFFMS2:
         assert result.passed is False
         assert result.available is True
         assert result.details["observed_runtime_version"] == "4.0.0.0"
+        assert result.details["expected_runtime_version_match"] is False
+
+    def test_check_ffms2_allows_optional_runtime_version_mismatch(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("FRAME_COMPARE_RUNTIME_KIND", raising=False)
+        monkeypatch.setenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "0")
+        plugin = SimpleNamespace(
+            Source=lambda *_args, **_kwargs: object(),
+            Version=lambda: {"version": "4.0.0.0"},
+        )
+        check = next(candidate for candidate in collect_checks() if candidate.name == "ffms2")
+
+        with patch(
+            "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
+            return_value=SimpleNamespace(core=SimpleNamespace(ffms2=plugin)),
+        ):
+            result = check.check_fn()
+
+        assert result.passed is True
+        assert result.available is True
+        assert result.hint is None
         assert result.details["expected_runtime_version_match"] is False
 
     def test_check_ffms2_rejects_loaded_plugin_in_windows_portable(
@@ -773,18 +817,26 @@ class TestCheckFFmpeg:
         assert result.details["expected_version_match"] is False
         assert "selected managed runtime version" in result.message
 
-    def test_check_ffmpeg_fails_when_ffprobe_is_missing(self) -> None:
+    @pytest.mark.parametrize("missing_executable", ["ffmpeg", "ffprobe"])
+    def test_check_ffmpeg_fails_when_required_executable_is_missing(
+        self, missing_executable: str
+    ) -> None:
         checks = collect_checks()
         ffmpeg_check = next(c for c in checks if c.name == "ffmpeg")
 
+        def _resolve(name: str) -> str:
+            if name == missing_executable:
+                raise FileNotFoundError(name)
+            return f"/runtime/{name}"
+
         with patch(
             "frame_compare.orchestration.doctor_checks.resolve_executable",
-            side_effect=["/runtime/ffmpeg", FileNotFoundError("ffprobe")],
+            side_effect=_resolve,
         ):
             result = ffmpeg_check.check_fn()
 
         assert result.passed is False
-        assert "ffprobe not found" in result.message
+        assert f"{missing_executable} not found" in result.message
         assert result.hint == (
             "Provide FFmpeg and ffprobe executables; see "
             "https://github.com/TJZine/frame-compare#requirements"

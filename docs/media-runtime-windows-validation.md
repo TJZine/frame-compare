@@ -94,14 +94,21 @@ for migration testing. Build into a fresh directory:
 $Repo = (Resolve-Path .).Path
 $Candidate = Join-Path $Repo 'dist\frame-compare-portable-win-x64'
 $Cache = Join-Path $Repo '.portable_cache'
+$Manifest = Join-Path $Repo 'tools\windows_portable\manifest.windows-x64.json'
 
 Remove-Item -LiteralPath $Candidate -Recurse -Force -ErrorAction SilentlyContinue
 pwsh -NoProfile -ExecutionPolicy Bypass -File `
   tools\windows_portable\build_portable.ps1 `
+  -ManifestPath $Manifest `
   -RepoRoot $Repo `
   -OutDir $Candidate `
   -CacheDir $Cache
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 ```
+
+This is the canonical manifest-based build command. For a release run, add
+`-RequireReleasePublicKey` to this same invocation; do not rebuild a second candidate.
+All evidence, packaging, and digest verification must use this exact `$Candidate`.
 
 Required evidence:
 
@@ -118,14 +125,7 @@ Required evidence:
 - Native plugins do not depend on unbundled DLLs outside the documented Windows/UCRT
   system surface.
 
-Build the portable bundle with the canonical command used by the GitHub-hosted workflow:
-
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/build_portable.ps1 -ManifestPath tools/windows_portable/manifest.windows-x64.json -OutDir dist/frame-compare-portable-win-x64 -CacheDir .portable_cache
-```
-
-For a release run, also pass `-RequireReleasePublicKey`. Package
-`dist/frame-compare-portable-win-x64` as
+Package `dist/frame-compare-portable-win-x64` as
 `dist/frame-compare-portable-win-x64.zip`, record its SHA-256, verify that digest, and
 verify the ZIP layout before extraction.
 
@@ -135,14 +135,60 @@ Extract the candidate ZIP into a new path that is not the repository checkout an
 not the previous installation. Run commands through the bundle's own shim/runtime,
 not a globally installed Frame Compare environment.
 
+Use the same paths and checks as the hosted workflow's `Verify zip layout`,
+`Verify extracted zip workspace directories`, and `Smoke: extracted install shim`
+steps. Every candidate command below must exit `0`; a thrown assertion is a failed
+check.
+
 ```powershell
-$ExtractedBundle = (Resolve-Path '.\frame-compare-portable-win-x64').Path
+$Zip = (Resolve-Path 'dist\frame-compare-portable-win-x64.zip').Path
+$ExtractRoot = Join-Path (Resolve-Path 'dist').Path 'zip_extract_check'
+Remove-Item -LiteralPath $ExtractRoot -Recurse -Force -ErrorAction SilentlyContinue
+
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$Archive = [System.IO.Compression.ZipFile]::OpenRead($Zip)
+try {
+  $Entries = @($Archive.Entries | ForEach-Object { $_.FullName })
+} finally {
+  $Archive.Dispose()
+}
+$RequiredEntries = @(
+  'frame-compare-portable-win-x64/install.cmd',
+  'frame-compare-portable-win-x64/install.ps1',
+  'frame-compare-portable-win-x64/frame-compare.ps1',
+  'frame-compare-portable-win-x64/frame-compare-update.cmd',
+  'frame-compare-portable-win-x64/frame-compare-update.ps1',
+  'frame-compare-portable-win-x64/shim/frame-compare.cmd',
+  'frame-compare-portable-win-x64/shim/frame-compare-update.cmd',
+  'frame-compare-portable-win-x64/shim/frame-compare-update.ps1'
+)
+foreach ($Entry in $RequiredEntries) {
+  if ($Entries -notcontains $Entry) { throw "Missing ZIP entry: $Entry" }
+}
+foreach ($Entry in $Entries) {
+  if (-not $Entry.StartsWith('frame-compare-portable-win-x64/')) {
+    throw "Non-folder-contained ZIP entry: $Entry"
+  }
+}
+
+Expand-Archive -LiteralPath $Zip -DestinationPath $ExtractRoot -Force
+$ExtractedBundle = (Resolve-Path `
+  (Join-Path $ExtractRoot 'frame-compare-portable-win-x64')).Path
+foreach ($Directory in @('config', 'comparison_videos')) {
+  $Path = Join-Path $ExtractedBundle $Directory
+  if (!(Test-Path -LiteralPath $Path -PathType Container)) {
+    throw "Missing extracted workspace directory: $Path"
+  }
+}
+
 $CandidateLauncher = Join-Path $ExtractedBundle 'frame-compare.ps1'
 Get-Command -CommandType ExternalScript $CandidateLauncher | Format-List Source,Path
 & $CandidateLauncher --help
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $CandidateLauncher version
-$DoctorStdout = '.\doctor-candidate.json'
-$DoctorStderr = '.\doctor-candidate.stderr.log'
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$DoctorStdout = Join-Path $ExtractRoot 'doctor-candidate.json'
+$DoctorStderr = Join-Path $ExtractRoot 'doctor-candidate.stderr.log'
 & $CandidateLauncher doctor --json 1> $DoctorStdout 2> $DoctorStderr
 if ($LASTEXITCODE -ne 0) {
   throw "Candidate doctor check failed with exit code $LASTEXITCODE. See $DoctorStderr."
@@ -151,6 +197,20 @@ $DoctorPayload = Get-Content -Raw $DoctorStdout | ConvertFrom-Json -NoEnumerate 
 if ($DoctorPayload -isnot [pscustomobject]) {
   throw 'Candidate doctor output must be exactly one JSON object.'
 }
+if ($DoctorPayload.success -ne $true) {
+  throw 'Candidate doctor JSON must report success.'
+}
+
+& (Join-Path $ExtractedBundle 'install.cmd')
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$InstalledShim = Join-Path $env:LOCALAPPDATA 'Programs\FrameCompare\bin\frame-compare.cmd'
+if (!(Test-Path -LiteralPath $InstalledShim -PathType Leaf)) {
+  throw "Installed shim not found: $InstalledShim"
+}
+& $InstalledShim version
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $InstalledShim --help
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 ```
 
 Inspect `doctor-candidate.json`. Required results:
@@ -165,8 +225,8 @@ Inspect `doctor-candidate.json`. Required results:
 - No plugin DLL is loaded from the standalone FFmpeg directory.
 - No missing shared-library or recursive DLL-probing warning appears.
 
-Also run the build script's installed/extracted smoke and ZIP-layout tests exactly as
-the hosted Windows workflow does.
+Record the resolved `$CandidateLauncher` and `$InstalledShim`, the ZIP and digest
+artifact paths, each command's exit code, and the hosted workflow step names above.
 
 ## 4. Deterministic generated fixtures
 

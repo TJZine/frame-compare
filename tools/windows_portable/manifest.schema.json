@@ -227,6 +227,52 @@
           "pattern": "^[a-f0-9]{40}$"
         }
       },
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": [
+                  "source_sha256"
+                ]
+              },
+              {
+                "required": [
+                  "source_bytes"
+                ]
+              }
+            ]
+          },
+          "then": {
+            "required": [
+              "source_sha256",
+              "source_bytes"
+            ]
+          }
+        },
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": [
+                  "build_source_sha256"
+                ]
+              },
+              {
+                "required": [
+                  "build_source_bytes"
+                ]
+              }
+            ]
+          },
+          "then": {
+            "required": [
+              "build_source_sha256",
+              "build_source_bytes"
+            ]
+          }
+        }
+      ],
       "additionalProperties": false
     },
     "corresponding_source": {

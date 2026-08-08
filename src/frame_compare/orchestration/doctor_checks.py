@@ -58,6 +58,7 @@ _CHECK_ORDER: list[tuple[str, str]] = [
 SLOWPICS_HEALTHCHECK_URL = "https://slow.pics/"
 _LSMAS_REQUIRED_FUNCTIONS = ("LibavSMASHSource", "LWLibavSource")
 _FFMS2_REQUIRED_FUNCTIONS = ("Source", "Version")
+_VS_PLACEBO_REQUIRED_FUNCTIONS = ("Tonemap",)
 
 
 def _check_python_version() -> CheckResult:
@@ -211,16 +212,9 @@ def _check_lsmas() -> CheckResult:
             namespace=namespace,
             plugin_path=loaded_path,
         )
-        if not _plugin_has_required_functions(plugin, _LSMAS_REQUIRED_FUNCTIONS):
-            discovered = set(_plugin_function_names(plugin))
-            details["missing_functions"] = cast(
-                JSONValue,
-                [
-                    name
-                    for name in _LSMAS_REQUIRED_FUNCTIONS
-                    if name not in discovered and not callable(getattr(plugin, name, None))
-                ],
-            )
+        missing_functions = _plugin_missing_functions(plugin, _LSMAS_REQUIRED_FUNCTIONS)
+        if missing_functions:
+            details["missing_functions"] = cast(JSONValue, missing_functions)
             return CheckResult(
                 passed=False,
                 available=True,
@@ -258,9 +252,13 @@ def _plugin_function_names(plugin: object) -> list[str]:
     )
 
 
-def _plugin_has_required_functions(plugin: object, required: tuple[str, ...]) -> bool:
+def _plugin_missing_functions(plugin: object, required: tuple[str, ...]) -> list[str]:
     discovered = set(_plugin_function_names(plugin))
-    return all(name in discovered or callable(getattr(plugin, name, None)) for name in required)
+    return [
+        name
+        for name in required
+        if name not in discovered and not callable(getattr(plugin, name, None))
+    ]
 
 
 def _plugin_version_string(plugin: object) -> str | None:
@@ -330,7 +328,12 @@ def _check_vs_placebo() -> CheckResult:
     try:
         vs = import_vapoursynth_module()
         plugin = getattr(vs.core, "placebo", None)
-        available = plugin is not None and hasattr(plugin, "Tonemap")
+        missing_functions = (
+            _plugin_missing_functions(plugin, _VS_PLACEBO_REQUIRED_FUNCTIONS)
+            if plugin is not None
+            else list(_VS_PLACEBO_REQUIRED_FUNCTIONS)
+        )
+        available = plugin is not None and not missing_functions
         functions = _plugin_function_names(plugin) if plugin is not None else []
     except ImportError:
         return CheckResult(
@@ -352,11 +355,17 @@ def _check_vs_placebo() -> CheckResult:
     details["observed_available"] = available
     if functions:
         details["functions"] = cast(JSONValue, functions)
+    if plugin is not None and missing_functions:
+        details["missing_functions"] = cast(JSONValue, missing_functions)
     if not available:
         return CheckResult(
             passed=False,
             available=False,
-            message="vs-placebo plugin not available",
+            message=(
+                "vs-placebo plugin is missing placebo.Tonemap"
+                if plugin is not None
+                else "vs-placebo plugin not available"
+            ),
             hint="Install the supported vs-placebo wheel or use a complete Frame Compare runtime",
             details=details,
         )
@@ -422,13 +431,18 @@ def _check_ffms2() -> CheckResult:
             details=details,
         )
 
-    available = plugin is not None and _plugin_has_required_functions(
-        plugin, _FFMS2_REQUIRED_FUNCTIONS
+    missing_functions = (
+        _plugin_missing_functions(plugin, _FFMS2_REQUIRED_FUNCTIONS)
+        if plugin is not None
+        else list(_FFMS2_REQUIRED_FUNCTIONS)
     )
+    available = plugin is not None and not missing_functions
     functions = _plugin_function_names(plugin) if plugin is not None else []
     details["observed_available"] = available
     if functions:
         details["functions"] = cast(JSONValue, functions)
+    if plugin is not None and missing_functions:
+        details["missing_functions"] = cast(JSONValue, missing_functions)
     if plugin is not None and selected_runtime_kind == "windows-portable":
         return CheckResult(
             passed=False,
@@ -458,13 +472,15 @@ def _check_ffms2() -> CheckResult:
     details["expected_runtime_version_match"] = observed_version == FFMS2_RUNTIME_VERSION
     if observed_version != FFMS2_RUNTIME_VERSION:
         return CheckResult(
-            passed=False,
+            passed=not required,
             available=True,
             message=(
                 "FFMS2 plugin available, but runtime version "
                 f"{observed_version or 'unavailable'} does not match {FFMS2_RUNTIME_VERSION}"
             ),
-            hint="Repair the complete Docker media runtime, then rerun doctor",
+            hint=(
+                "Repair the complete Docker media runtime, then rerun doctor" if required else None
+            ),
             details=details,
         )
     return CheckResult(

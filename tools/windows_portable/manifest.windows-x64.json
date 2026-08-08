@@ -166,6 +166,11 @@
             "path": "licenses/lsmash-works/dependencies/libvpx-LICENSE.txt",
             "sha256": "8267348d5af1262c11d1a08de2f5afc77457755f1ac658627dd9acf71011d615",
             "source_url": "https://chromium.googlesource.com/webm/libvpx/+/refs/tags/v1.16.0/LICENSE"
+          },
+          {
+            "path": "licenses/lsmash-works/dependencies/libvpx-PATENTS.txt",
+            "sha256": "cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c",
+            "source_url": "https://raw.githubusercontent.com/webmproject/libvpx/v1.16.0/PATENTS"
           }
         ],
         "notes": "The upstream 1296 Windows DLL statically incorporates the release-declared media libraries below. The bundle preserves each corresponding source and license notice; PE import validation permits only Windows/MSVC runtime DLL dependencies."

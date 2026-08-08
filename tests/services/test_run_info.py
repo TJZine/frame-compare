@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import tomllib
+from dataclasses import fields
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -15,6 +16,10 @@ from frame_compare.services.run_info import (
 
 def _parsed_toml(content: str) -> dict[str, object]:
     return tomllib.loads(content)
+
+
+def test_run_info_schema_version_is_not_caller_configurable() -> None:
+    assert "version" not in {field.name for field in fields(RunInfo)}
 
 
 def test_serialize_run_info_uses_utc_z_created_at() -> None:

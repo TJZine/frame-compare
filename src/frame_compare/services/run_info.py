@@ -68,7 +68,6 @@ class RunInfo:
     source_filenames: list[str]
     tmdb: RunInfoTmdbPrefetchFacts | None = None
     frame_compare_version: str = __version__
-    version: int = RUN_INFO_SCHEMA_VERSION
 
 
 def _format_created_at(created_at: datetime) -> str:
@@ -105,7 +104,7 @@ def _tmdb_table(facts: RunInfoTmdbPrefetchFacts) -> RunInfoTmdbPayload:
 def serialize_run_info(info: RunInfo) -> str:
     """Serialize run identity as deterministic TOML without null placeholders."""
     payload: RunInfoPayload = {
-        "version": info.version,
+        "version": RUN_INFO_SCHEMA_VERSION,
         "created_at": _format_created_at(info.created_at),
         "folder_name": info.folder_name,
         "naming_source": info.naming_source,

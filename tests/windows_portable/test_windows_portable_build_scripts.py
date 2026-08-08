@@ -494,8 +494,14 @@ def test_windows_portable_build_uses_vendored_manifest_license_files(repo_root: 
 def test_windows_portable_manifest_schema_models_current_install_shapes(repo_root: Path) -> None:
     schema_path = repo_root / "tools" / "windows_portable" / "manifest.schema.json"
     schema = json.loads(_read_text_or_fail(schema_path))
+    artifact_def = schema["$defs"]["artifact"]
     install_def = schema["$defs"]["install"]
-    assert "install" in schema["$defs"]["artifact"]["required"]
+    assert "install" in artifact_def["required"]
+    paired_required_fields = {frozenset(rule["then"]["required"]) for rule in artifact_def["allOf"]}
+    assert paired_required_fields == {
+        frozenset({"source_sha256", "source_bytes"}),
+        frozenset({"build_source_sha256", "build_source_bytes"}),
+    }
     assert "oneOf" in install_def
 
     variants = {variant["properties"]["type"]["const"]: variant for variant in install_def["oneOf"]}
