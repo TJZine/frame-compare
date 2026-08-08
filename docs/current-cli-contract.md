@@ -471,7 +471,10 @@ unchanged.
   contract and scoped fingerprints, and optional `[tmdb]` prefetch facts with absent
   optional values omitted rather than serialized as null. It is not a final
   outcome manifest and does not include report URL, timings, or success/failure
-  state. If `run_info.toml` cannot be written, the run fails immediately and
+  state. Version 1 is intentionally unsupported: `run_info.toml` is write-only
+  provenance rather than an input or migration surface, and V1 predates the
+  coordinated media-runtime identity. If `run_info.toml` cannot be written, the run
+  fails immediately and
   best-effort cleanup removes the empty reserved run folder when possible.
 - If run-folder reservation cannot create or resolve a candidate beneath the
   generated-data root, including permission errors or symlink-loop resolution
@@ -1191,11 +1194,13 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   deployment kind, expected and declared full fingerprints, declaration syntax,
   match state, and whether the current runtime declares FFMS2 mandatory.
 - Media checks report public observable state only: VapourSynth release/API fields;
-  L-SMASH-Works namespace, functions, and expected 1296 revision; vs-placebo
+  L-SMASH-Works namespace and required functions (its native version is not exposed
+  by the plugin API and is reported as unverifiable at runtime); vs-placebo
   distribution version and `placebo.Tonemap`; FFMS2 policy and `ffms2.Source`; and
-  resolved FFmpeg/ffprobe paths plus their first `-version` lines. The Windows
-  baseline may omit FFMS2, while Docker declares it required and fails that check
-  when the plugin is absent.
+  resolved FFmpeg/ffprobe paths plus their first `-version` lines. Managed Windows
+  portable and Docker runtimes require both FFmpeg tools to match the selected
+  runtime identity. FFMS2 must be absent from Windows portable and present at the
+  selected version in Docker; either policy violation fails the check.
 - If the `doctor` command hits a typed top-level failure before it can produce a
   `DoctorReport`, it uses the standard CLI error contract. In `--json` mode that means
   the standard error payload is written to stdout.

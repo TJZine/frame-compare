@@ -4,6 +4,8 @@ import os
 from fractions import Fraction
 from pathlib import Path
 
+import pytest
+
 import frame_compare.analysis.metric_identity as metric_identity
 from frame_compare.analysis.cache_io import compute_cache_key, metrics_cache_filename
 from frame_compare.analysis.metric_identity import stable_metric_algorithm_identity_json
@@ -199,22 +201,27 @@ def test_compute_cache_key_ignores_selection_counts_within_performance_mode(
 
 
 def test_metric_algorithm_identity_changes_with_media_runtime(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = AnalysisConfig(performance_mode="quality")
     original = stable_metric_algorithm_identity_json(config)
+    captured_scopes: list[str] = []
 
-    monkeypatch.setattr(
-        metric_identity,
-        "media_runtime_identity",
-        lambda _scope: {"contract_version": 999, "scope": "analysis"},
-    )
+    def changed_runtime_identity(scope: str) -> dict[str, object]:
+        captured_scopes.append(scope)
+        return {"contract_version": 999, "scope": scope, "profile": "test-runtime"}
+
+    monkeypatch.setattr(metric_identity, "media_runtime_identity", changed_runtime_identity)
 
     changed = stable_metric_algorithm_identity_json(config)
 
     assert changed != original
+    assert captured_scopes == ["analysis"]
     assert '"algorithm_version":"analysis_metrics_v7"' in original
     assert '"media_runtime"' in original
+    assert '"contract_version":999' in changed
+    assert '"profile":"test-runtime"' in changed
+    assert '"scope":"analysis"' in changed
 
 
 def test_metric_algorithm_identity_serialization_is_deterministic() -> None:

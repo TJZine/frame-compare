@@ -737,6 +737,33 @@ def test_windows_portable_bundle_inventory_rejects_malformed_fingerprints(
     assert "must be a lowercase SHA-256 digest" in result.stderr
 
 
+def test_windows_portable_bundle_inventory_rejects_matching_stale_runtime_fingerprints(
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    bundle = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
+    stale_fingerprints = dict.fromkeys(
+        ("analysis", "probe", "alignment", "index", "full"), "0" * 64
+    )
+    bundle_info_path = bundle / "bundle_info.json"
+    bundle_info = json.loads(bundle_info_path.read_text(encoding="utf-8"))
+    bundle_info["media_runtime_fingerprint"] = stale_fingerprints["full"]
+    bundle_info["media_runtime_fingerprints"] = stale_fingerprints
+    bundle_info_path.write_text(json.dumps(bundle_info), encoding="utf-8")
+
+    manifest = json.loads(
+        (repo_root / "tools/windows_portable/manifest.windows-x64.json").read_text(encoding="utf-8")
+    )
+    manifest["bundle"]["runtime_fingerprints"] = stale_fingerprints
+    manifest_path = tmp_path / "stale-manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    result = _run_bundle_inventory(bundle=bundle, repo_root=repo_root, manifest=manifest_path)
+
+    assert result.returncode != 0
+    assert "do not match the canonical windows-x64 contract" in result.stderr
+
+
 @pytest.mark.parametrize(
     "relative_path",
     [

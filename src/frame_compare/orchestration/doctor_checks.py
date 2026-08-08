@@ -24,6 +24,7 @@ from frame_compare.vs.env import (
     try_load_lsmas_plugin,
 )
 from frame_compare.vs.runtime_contract import (
+    DEBIAN_FFMPEG_PACKAGE_VERSION,
     FFMS2_RELEASE,
     FFMS2_RUNTIME_VERSION,
     FFMS2_SOURCE_COMMIT,
@@ -230,7 +231,10 @@ def _check_lsmas() -> CheckResult:
         return CheckResult(
             passed=True,
             available=True,
-            message=f"L-SMASH-Works {LSMASH_WORKS_RELEASE} available ({namespace})",
+            message=(
+                "L-SMASH-Works required source functions available "
+                f"({namespace}; native version is not observable)"
+            ),
             details=details,
         )
     except Exception as error:
@@ -295,6 +299,7 @@ def _lsmas_runtime_details(
         "expected_windows_distribution_version": LSMASH_WORKS_PYPI_RELEASE,
         "expected_source_commit": LSMASH_WORKS_SOURCE_COMMIT,
         "runtime_version_observable": False,
+        "runtime_identity_status": "unverifiable",
         "required_functions": cast(JSONValue, list(_LSMAS_REQUIRED_FUNCTIONS)),
     }
     plugin = getattr(core, namespace, None)
@@ -439,6 +444,15 @@ def _check_ffms2() -> CheckResult:
             details=details,
         )
 
+    if runtime_kind().casefold() == "windows-portable":
+        return CheckResult(
+            passed=False,
+            available=True,
+            message="FFMS2 is loaded, but the Windows portable baseline excludes it",
+            hint="Reinstall the complete supported Windows portable runtime, then rerun doctor",
+            details=details,
+        )
+
     observed_version = _plugin_version_string(plugin)
     details["observed_runtime_version"] = observed_version
     details["expected_runtime_version_match"] = observed_version == FFMS2_RUNTIME_VERSION
@@ -504,6 +518,31 @@ def _check_ffmpeg() -> CheckResult:
         details[f"{executable}_version_line"] = lines[0] if lines else ""
 
     ffmpeg_version_line = str(details["ffmpeg_version_line"])
+    selected_runtime_kind = runtime_kind().casefold()
+    expected_fragment: str | None = None
+    if selected_runtime_kind in {"windows", "windows-portable"}:
+        expected_fragment = WINDOWS_FFMPEG_RELEASE
+    elif selected_runtime_kind == "docker":
+        expected_fragment = DEBIAN_FFMPEG_PACKAGE_VERSION.partition(":")[2]
+    details["current_runtime_kind"] = selected_runtime_kind
+    details["expected_version_fragment"] = expected_fragment
+    if expected_fragment is not None:
+        version_matches = all(
+            expected_fragment in str(details[f"{executable}_version_line"])
+            for executable in ("ffmpeg", "ffprobe")
+        )
+        details["expected_version_match"] = version_matches
+        if not version_matches:
+            return CheckResult(
+                passed=False,
+                available=True,
+                message=(
+                    "FFmpeg executables do not match the selected managed runtime "
+                    f"version {expected_fragment}"
+                ),
+                hint="Repair or reinstall the complete supported media runtime, then rerun doctor",
+                details=details,
+            )
     return CheckResult(
         passed=True,
         message=ffmpeg_version_line or f"FFmpeg found at {resolved['ffmpeg']}",

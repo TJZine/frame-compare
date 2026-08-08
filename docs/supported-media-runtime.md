@@ -30,9 +30,10 @@ SHA-256. Both surfaces record source revisions and license metadata.
 
 ## Runtime profiles
 
-Frame Compare owns two deterministic deployment profiles. Unmanaged native macOS is
-reported as the separate `native-macos` profile so it cannot inherit Debian package
-identity or reuse Debian decoder caches; it is not a packaged support profile.
+Frame Compare owns two deterministic deployment profiles. Unmanaged Linux and native
+macOS are reported as separate `unmanaged-linux` and `native-macos` profiles so neither
+can inherit Debian package identity or reuse Debian decoder caches; they are not
+packaged support profiles.
 
 ### Windows x64 portable
 

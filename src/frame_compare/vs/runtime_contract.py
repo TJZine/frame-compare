@@ -18,7 +18,9 @@ from typing import Final, Literal, TypedDict
 from frame_compare.errors import JSONValue
 
 type MediaRuntimeScope = Literal["analysis", "probe", "alignment", "index", "full"]
-type MediaRuntimeProfile = Literal["windows-x64", "debian-trixie", "native-macos"]
+type MediaRuntimeProfile = Literal[
+    "windows-x64", "debian-trixie", "unmanaged-linux", "native-macos"
+]
 
 
 class MediaRuntimeFingerprints(TypedDict):
@@ -103,8 +105,8 @@ def media_runtime_profile() -> MediaRuntimeProfile:
 
     The deployment kind selects the authoritative packaged profile.  Unmanaged
     hosts fall back by operating system so cache identities still separate the
-    Windows bundled decoder lineage, Debian-linked Linux lineage, and unmanaged
-    native macOS environment.
+    Windows bundled decoder lineage, managed Debian lineage, and unmanaged
+    Linux and native macOS environments.
     """
 
     selected_runtime_kind = runtime_kind().casefold()
@@ -116,7 +118,7 @@ def media_runtime_profile() -> MediaRuntimeProfile:
         return "windows-x64"
     if sys.platform == "darwin":
         return "native-macos"
-    return "debian-trixie"
+    return "unmanaged-linux"
 
 
 def _vapoursynth_identity() -> dict[str, JSONValue]:
@@ -170,7 +172,7 @@ def _lsmash_works_identity(profile: MediaRuntimeProfile) -> dict[str, JSONValue]
         identity.update(
             {
                 "build": "unmanaged-native",
-                "platform": "macos",
+                "platform": "linux" if profile == "unmanaged-linux" else "macos",
                 "decoder_ffmpeg": {"selection_kind": "unmanaged-native"},
             }
         )
@@ -213,7 +215,7 @@ def _standalone_ffmpeg_identity(profile: MediaRuntimeProfile) -> dict[str, JSONV
         }
     return {
         "selection_kind": "unmanaged-native",
-        "platform": "macos",
+        "platform": "linux" if profile == "unmanaged-linux" else "macos",
     }
 
 

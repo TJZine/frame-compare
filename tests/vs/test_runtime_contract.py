@@ -46,6 +46,26 @@ def test_unmanaged_macos_has_its_own_native_profile(monkeypatch: pytest.MonkeyPa
     }
 
 
+def test_unmanaged_linux_does_not_inherit_debian_package_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("FRAME_COMPARE_RUNTIME_KIND", raising=False)
+    monkeypatch.setattr("frame_compare.vs.runtime_contract.sys.platform", "linux")
+
+    assert media_runtime_profile() == "unmanaged-linux"
+    identity = media_runtime_identity("full", profile="unmanaged-linux")
+    components = identity["components"]
+    assert components["decoder"]["l_smash_works"]["build"] == "unmanaged-native"
+    assert components["standalone_ffmpeg"] == {
+        "selection_kind": "unmanaged-native",
+        "platform": "linux",
+    }
+    for scope in MEDIA_RUNTIME_SCOPES:
+        assert media_runtime_fingerprint(
+            scope, profile="unmanaged-linux"
+        ) != media_runtime_fingerprint(scope, profile="debian-trixie")
+
+
 def test_all_scope_fingerprints_are_deterministic_and_distinct() -> None:
     first = {
         scope: media_runtime_fingerprint(scope, profile="windows-x64")
@@ -215,6 +235,8 @@ def test_docker_provenance_covers_every_distributed_media_component(
         '"name":"libdovi"',
     ):
         assert component in dockerfile or component.replace('"', '\\"') in dockerfile
+    assert '\\"version\\":\\"${DEBIAN_FFMPEG_PACKAGE_VERSION}\\"' in dockerfile
+    assert '"version":"7:7.1.5-0+deb13u1"' not in dockerfile
     for license_name in (
         "VapourSynth-LGPL-2.1.txt",
         "OBUParse-LICENSE.txt",

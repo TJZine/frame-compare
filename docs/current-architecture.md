@@ -223,7 +223,7 @@ Primary owned paths:
   not deleted. A corrupt owned index is removed and rebuilt once; removal/rebuild
   failure is warned and an unusable index location falls back to a cache-free source
   open.
-- `<run-folder>/run_info.toml`: root-level run identity metadata version 2 written
+- `<run-folder>/run_info.toml`: root-level, write-only run identity metadata version 2 written
   immediately after every run-folder reservation. It stores creation time, final
   folder name, naming source, source filenames, Frame Compare version, the full
   supported media-runtime contract/fingerprints, and optional TMDB prefetch facts.

@@ -155,18 +155,30 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $launcher version | Out-Host
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $output = & $launcher doctor --json 2>&1
+          $doctorStdout = Join-Path $env:RUNNER_TEMP "bundle-doctor.json"
+          $doctorStderr = Join-Path $env:RUNNER_TEMP "bundle-doctor.stderr.txt"
+          & $launcher doctor --json 1> $doctorStdout 2> $doctorStderr
           $exitCode = $LASTEXITCODE
           $knownNoise = "Core plugin autoloading failed. Installation is broken!"
-          foreach ($line in $output) {
+          foreach ($line in Get-Content -LiteralPath $doctorStderr) {
             if ($line -eq $knownNoise) {
               continue
             }
-            Write-Host $line
+            Write-Warning $line
           }
           if ($exitCode -ne 0) {
             exit $exitCode
           }
+          $doctorJson = Get-Content -LiteralPath $doctorStdout -Raw
+          try {
+            $doctorPayload = $doctorJson | ConvertFrom-Json -ErrorAction Stop
+          } catch {
+            throw "Candidate doctor stdout is not exactly one valid JSON document: $($_.Exception.Message)"
+          }
+          if ($doctorPayload -isnot [PSCustomObject] -or $doctorPayload.success -ne $true) {
+            throw "Candidate doctor JSON is not a successful object"
+          }
+          Write-Host $doctorJson
 
       - name: Package zip
         shell: pwsh
@@ -241,8 +253,24 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $candidateLauncher version | Out-Host
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & $candidateLauncher doctor --json | Out-Host
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $doctorStdout = Join-Path $env:RUNNER_TEMP "extracted-doctor.json"
+          $doctorStderr = Join-Path $env:RUNNER_TEMP "extracted-doctor.stderr.txt"
+          & $candidateLauncher doctor --json 1> $doctorStdout 2> $doctorStderr
+          $doctorExitCode = $LASTEXITCODE
+          foreach ($line in Get-Content -LiteralPath $doctorStderr) {
+            Write-Warning $line
+          }
+          if ($doctorExitCode -ne 0) { exit $doctorExitCode }
+          $doctorJson = Get-Content -LiteralPath $doctorStdout -Raw
+          try {
+            $doctorPayload = $doctorJson | ConvertFrom-Json -ErrorAction Stop
+          } catch {
+            throw "Extracted candidate doctor stdout is not exactly one valid JSON document: $($_.Exception.Message)"
+          }
+          if ($doctorPayload -isnot [PSCustomObject] -or $doctorPayload.success -ne $true) {
+            throw "Extracted candidate doctor JSON is not a successful object"
+          }
+          Write-Host $doctorJson
 
           & "$bundle/install.cmd"
           if ($LASTEXITCODE -ne 0) {

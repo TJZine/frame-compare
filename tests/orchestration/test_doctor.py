@@ -18,6 +18,8 @@ from frame_compare.orchestration.doctor import (
 )
 from frame_compare.vs.env import PluginPathCandidate
 
+pytestmark = pytest.mark.unit
+
 
 def _clear_tmdb_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("TMDB_API_KEY", raising=False)
@@ -43,6 +45,8 @@ class TestCheckLsmas:
 
         assert result.passed is True
         assert "L-SMASH-Works" in result.message
+        assert "native version is not observable" in result.message
+        assert result.details["runtime_identity_status"] == "unverifiable"
 
     @pytest.mark.parametrize("missing_function", ["LibavSMASHSource", "LWLibavSource"])
     def test_check_lsmas_plugin_requires_both_source_functions(self, missing_function: str) -> None:
@@ -599,6 +603,28 @@ class TestCheckFFMS2:
         assert result.details["observed_runtime_version"] == "4.0.0.0"
         assert result.details["expected_runtime_version_match"] is False
 
+    def test_check_ffms2_rejects_loaded_plugin_in_windows_portable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "windows-portable")
+        monkeypatch.setenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "0")
+        plugin = SimpleNamespace(
+            Source=lambda *_args, **_kwargs: object(),
+            Version=lambda: {"version": "5.0.0.0"},
+            functions=lambda: [SimpleNamespace(name="Source"), SimpleNamespace(name="Version")],
+        )
+        check = next(candidate for candidate in collect_checks() if candidate.name == "ffms2")
+
+        with patch(
+            "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
+            return_value=SimpleNamespace(core=SimpleNamespace(ffms2=plugin)),
+        ):
+            result = check.check_fn()
+
+        assert result.passed is False
+        assert result.available is True
+        assert "Windows portable baseline excludes it" in result.message
+
 
 class TestCheckFFmpeg:
     """Tests for FFmpeg/ffprobe diagnostics."""
@@ -631,6 +657,65 @@ class TestCheckFFmpeg:
         assert result.details["ffprobe_path"] == "/runtime/ffprobe"
         assert result.details["ffprobe_version_line"] == ("ffprobe version n8.1.2-34-g9b6c8969e0")
         assert result.details["windows_license_profile"] == "LGPL-only"
+        assert result.details["expected_version_fragment"] is None
+
+    @pytest.mark.parametrize(
+        ("runtime_kind_value", "version_fragment"),
+        [
+            ("windows-portable", "n8.1.2-34-g9b6c8969e0"),
+            ("docker", "7.1.5-0+deb13u1"),
+        ],
+    )
+    def test_check_ffmpeg_enforces_managed_runtime_identity(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        runtime_kind_value: str,
+        version_fragment: str,
+    ) -> None:
+        monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", runtime_kind_value)
+        check = next(candidate for candidate in collect_checks() if candidate.name == "ffmpeg")
+
+        with (
+            patch(
+                "frame_compare.orchestration.doctor_checks.resolve_executable",
+                side_effect=lambda name: f"/runtime/{name}",
+            ),
+            patch(
+                "frame_compare.orchestration.doctor_checks.subprocess.check_output",
+                side_effect=[
+                    f"ffmpeg version {version_fragment}\n",
+                    f"ffprobe version {version_fragment}\n",
+                ],
+            ),
+        ):
+            result = check.check_fn()
+
+        assert result.passed is True
+        assert result.details["expected_version_fragment"] == version_fragment
+        assert result.details["expected_version_match"] is True
+
+    def test_check_ffmpeg_rejects_managed_runtime_identity_mismatch(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "windows-portable")
+        check = next(candidate for candidate in collect_checks() if candidate.name == "ffmpeg")
+
+        with (
+            patch(
+                "frame_compare.orchestration.doctor_checks.resolve_executable",
+                side_effect=lambda name: f"/runtime/{name}",
+            ),
+            patch(
+                "frame_compare.orchestration.doctor_checks.subprocess.check_output",
+                side_effect=["ffmpeg version stale\n", "ffprobe version stale\n"],
+            ),
+        ):
+            result = check.check_fn()
+
+        assert result.passed is False
+        assert result.available is True
+        assert result.details["expected_version_match"] is False
+        assert "selected managed runtime version" in result.message
 
     def test_check_ffmpeg_fails_when_ffprobe_is_missing(self) -> None:
         checks = collect_checks()

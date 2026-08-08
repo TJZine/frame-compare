@@ -6,6 +6,7 @@ import importlib.metadata
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import cast
 
@@ -31,6 +32,7 @@ SOURCE_SCRIPTS = (
     "tools/windows_portable/install.cmd",
     "tools/windows_portable/install.ps1",
     "tools/windows_portable/manifest.windows-x64.json",
+    "tools/windows_portable/manifest.schema.json",
     "tools/windows_portable/sign_update.ps1",
     "tools/windows_portable/update_manifest.schema.json",
     "tools/windows_portable/shim/frame-compare-update.ps1",
@@ -375,6 +377,13 @@ def main() -> int:
     manifest_path = args.manifest.resolve(strict=True)
     repo_root = args.repo_root.resolve(strict=True)
     output_path = args.output.resolve(strict=False)
+    sys.path.insert(0, str(repo_root / "src"))
+    from frame_compare.vs.runtime_contract import (  # noqa: PLC0415
+        MEDIA_RUNTIME_SCOPES,
+    )
+    from frame_compare.vs.runtime_contract import (
+        media_runtime_fingerprint as canonical_media_runtime_fingerprint,
+    )
 
     commit_sha = _run_git(repo_root, "rev-parse", "HEAD")
     if not re.fullmatch(r"[a-f0-9]{40}", commit_sha):
@@ -410,7 +419,7 @@ def main() -> int:
         bundle_info.get("media_runtime_fingerprints"),
         "bundle_info.media_runtime_fingerprints",
     )
-    expected_scopes = {"analysis", "probe", "alignment", "index", "full"}
+    expected_scopes = set(MEDIA_RUNTIME_SCOPES)
     if set(media_runtime_fingerprints) != expected_scopes:
         raise ValueError(
             "bundle_info.media_runtime_fingerprints must contain the exact supported scopes"
@@ -441,6 +450,14 @@ def main() -> int:
     }
     if validated_manifest_fingerprints != validated_media_runtime_fingerprints:
         raise ValueError("bundle_info media-runtime fingerprints do not match manifest.json")
+    canonical_fingerprints = {
+        scope: canonical_media_runtime_fingerprint(scope, profile="windows-x64")
+        for scope in MEDIA_RUNTIME_SCOPES
+    }
+    if validated_manifest_fingerprints != canonical_fingerprints:
+        raise ValueError(
+            "portable media-runtime fingerprints do not match the canonical windows-x64 contract"
+        )
 
     _assert_safe_bundle(bundle_root)
     distributions = _python_distributions(bundle_root / "app" / "site-packages")

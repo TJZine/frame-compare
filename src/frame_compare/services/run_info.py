@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, NotRequired, TypedDict
+from typing import Final, Literal, NotRequired, TypedDict
 
 import tomli_w
 
@@ -15,6 +15,11 @@ from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.vs.runtime_contract import MediaRuntimeReport, supported_media_runtime_report
 
 type RunInfoTmdbSkipReason = Literal["disabled", "skip_metadata", "no_http_client"]
+
+# run_info.toml is a write-only provenance artifact. Version 1 predates the
+# coordinated media-runtime identity and is intentionally unsupported rather
+# than migrated or interpreted as current evidence.
+RUN_INFO_SCHEMA_VERSION: Final = 2
 
 
 class RunInfoTmdbPayload(TypedDict):
@@ -63,7 +68,7 @@ class RunInfo:
     source_filenames: list[str]
     tmdb: RunInfoTmdbPrefetchFacts | None = None
     frame_compare_version: str = __version__
-    version: int = 2
+    version: int = RUN_INFO_SCHEMA_VERSION
 
 
 def _format_created_at(created_at: datetime) -> str:
