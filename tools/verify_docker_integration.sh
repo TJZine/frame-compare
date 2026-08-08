@@ -221,6 +221,7 @@ from pathlib import Path
 
 import vapoursynth as vs
 
+from frame_compare.vs.props import props_indicate_limited_range
 from frame_compare.vs.runtime_contract import (
     DEBIAN_FFMPEG_PACKAGE_VERSION,
     FFMS2_RELEASE,
@@ -421,8 +422,14 @@ with tempfile.TemporaryDirectory(prefix="frame-compare-media-fixtures-") as fixt
         media_path
     )
     assert_true(probe_stream_color_range(media_path) == "tv", "invalid limited-range fixture")
-    assert_true(limited_props.get("_ColorRange") == 1, "LWLibavSource lost limited-range metadata")
-    assert_true(limited_ffms_props.get("_ColorRange") == 1, "FFMS2 lost limited-range metadata")
+    assert_true(
+        props_indicate_limited_range(limited_props) is True,
+        f"LWLibavSource lost limited-range metadata: {limited_props!r}",
+    )
+    assert_true(
+        props_indicate_limited_range(limited_ffms_props) is True,
+        f"FFMS2 lost limited-range metadata: {limited_ffms_props!r}",
+    )
     fixture_results.append(
         f"h264_limited:{limited_source.num_frames}:{limited_ffms.num_frames}"
     )
@@ -438,8 +445,14 @@ with tempfile.TemporaryDirectory(prefix="frame-compare-media-fixtures-") as fixt
     )
     _full_lsw, _full_ffms, full_props, full_ffms_props = open_with_source_loaders(full_range)
     assert_true(probe_stream_color_range(full_range) == "pc", "invalid full-range fixture")
-    assert_true(full_props.get("_ColorRange") == 0, "LWLibavSource lost full-range metadata")
-    assert_true(full_ffms_props.get("_ColorRange") == 0, "FFMS2 lost full-range metadata")
+    assert_true(
+        props_indicate_limited_range(full_props) is False,
+        f"LWLibavSource lost full-range metadata: {full_props!r}",
+    )
+    assert_true(
+        props_indicate_limited_range(full_ffms_props) is False,
+        f"FFMS2 lost full-range metadata: {full_ffms_props!r}",
+    )
     fixture_results.append("h264_full_range")
 
     vfr_path = fixture_root / "vfr.mkv"
@@ -506,7 +519,10 @@ with tempfile.TemporaryDirectory(prefix="frame-compare-media-fixtures-") as fixt
             assert_true(props.get("_Primaries") == 9, f"{loader_name} lost BT.2020 primaries")
             assert_true(props.get("_Transfer") == 16, f"{loader_name} lost PQ transfer")
             assert_true(props.get("_Matrix") == 9, f"{loader_name} lost BT.2020 matrix")
-            assert_true(props.get("_ColorRange") == 1, f"{loader_name} lost limited range")
+            assert_true(
+                props_indicate_limited_range(props) is True,
+                f"{loader_name} lost limited range: {props!r}",
+            )
         fixture_results.append("hevc10_hdr10")
     else:
         fixture_results.append("hevc10_hdr10:encoder-unavailable")

@@ -87,6 +87,10 @@ handling. Both supported functions must register under `lsmas`:
 - `LibavSMASHSource`
 - `LWLibavSource`
 
+Range validation follows VapourSynth's current H.273 `_Range` property and normalizes
+the deprecated, inverse-numbered `_ColorRange` property through the application-owned
+frame-property helper before comparing loader results.
+
 A changed frame count, duration, or frame property is not automatically treated as a
 Frame Compare regression; it must be classified against the upstream correction and
 the media specification.
