@@ -68,8 +68,8 @@ def _doctor_check_entry(payload: dict[str, object], check_id: str) -> dict[str, 
 
 
 def test_doctor_json_conforms_to_schema_shape(monkeypatch: MonkeyPatch) -> None:
-    expected_runtime_fingerprint = media_runtime_fingerprint("full")
     monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "test-runtime")
+    expected_runtime_fingerprint = media_runtime_fingerprint("full")
     monkeypatch.setenv("FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT", expected_runtime_fingerprint)
     monkeypatch.setenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "1")
     checks = [

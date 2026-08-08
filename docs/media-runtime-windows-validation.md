@@ -115,9 +115,16 @@ Required evidence:
 - Native plugins do not depend on unbundled DLLs outside the documented Windows/UCRT
   system surface.
 
-Create the portable ZIP using the repository's current packaging command or the same
-workflow entry point used by `.github/workflows/windows-portable-build.yml`. Verify the
-ZIP layout and SHA-256 before extraction.
+Build the portable bundle with the canonical command used by the GitHub-hosted workflow:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/build_portable.ps1 -ManifestPath tools/windows_portable/manifest.windows-x64.json -OutDir dist/frame-compare-portable-win-x64 -CacheDir .portable_cache
+```
+
+For a release run, also pass `-RequireReleasePublicKey`. Package
+`dist/frame-compare-portable-win-x64` as
+`dist/frame-compare-portable-win-x64.zip`, record its SHA-256, verify that digest, and
+verify the ZIP layout before extraction.
 
 ## 3. Extracted-bundle smoke tests
 

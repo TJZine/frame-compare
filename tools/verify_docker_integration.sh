@@ -226,10 +226,25 @@ from frame_compare.vs.runtime_contract import (
     DEBIAN_FFMPEG_PACKAGE_VERSION,
     FFMS2_RELEASE,
     FFMS2_RUNTIME_VERSION,
+    FFMS2_SOURCE_COMMIT,
+    FFMS2_SOURCE_TREE_SHA256,
+    LIBDOVI_SOURCE_COMMIT,
+    LIBDOVI_SOURCE_TREE_SHA256,
+    LIBPLACEBO_SOURCE_COMMIT,
+    LIBPLACEBO_SOURCE_TREE_SHA256,
+    LSMASH_SOURCE_COMMIT,
+    LSMASH_SOURCE_TREE_SHA256,
     LSMASH_WORKS_RELEASE,
+    LSMASH_WORKS_SOURCE_COMMIT,
+    LSMASH_WORKS_SOURCE_TREE_SHA256,
     OBUPARSE_SOURCE_COMMIT,
+    OBUPARSE_SOURCE_TREE_SHA256,
     VAPOURSYNTH_RELEASE,
+    VAPOURSYNTH_SOURCE_COMMIT,
+    VAPOURSYNTH_SOURCE_TREE_SHA256,
     VS_PLACEBO_RELEASE,
+    VS_PLACEBO_SOURCE_COMMIT,
+    VS_PLACEBO_SOURCE_TREE_SHA256,
     index_cache_token,
     media_runtime_fingerprint,
 )
@@ -277,14 +292,14 @@ provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
 assert_true(provenance.get("schema_version") == 2, "runtime provenance schema mismatch")
 components = {component["name"]: component for component in provenance["components"]}
 expected_source_trees = {
-    "VapourSynth": ("c2f5751a412347f306eb7f6a5985dd9a719f3896", "cc0f2ec4127bd26f6dff074450ebe801368b6d4341b3ab9928c94073a682196f"),
-    "OBUParse": (OBUPARSE_SOURCE_COMMIT, "f82de7a5f007a4e89441e7ff4b470a00eddc4dfedb22faa46f633acfeefde178"),
-    "L-SMASH": ("84740c5d960ab622f4c08b971dc59192bc27ef74", "b1553e40907e57240fd19a08642b3bc548dbdeda3750948ebbc1c5634af901b7"),
-    "L-SMASH-Works": ("a83318210c183c8ebbe703d975ffc76fb499ef07", "7845a6a6d823046c6b0bbe617ae88e304ee117f466961aabceea931831d8f9e3"),
-    "FFMS2": ("7ed5e4d039ca9a6236bd2ebdfdd656c4304fbe04", "5be86d5f8f103f8e0b25aaed0b69b7afc06f1b6cd548a6c81160fcd14ea6e8d7"),
-    "vs-placebo": ("3cfd23f257ecb62b0cbd81eaaca092e18ae8e579", "beb830744f1fa1702eb64cfe8bdaf5780bb3501f9c48901df24ab112a406a30a"),
-    "libplacebo": ("a7a18af88ff0a17c04840dcb3246047bb6b46df3", "bdbe17582c081e107e1a66c44d5f01aa856a157aa124660d662221848e88eda7"),
-    "libdovi": ("4fd2b2235c9f93582dd4a00e65ee34a07800afd7", "e16dfb68270fc5b8610e2f1ae38b0b1051d8e7d03dd4b98a2f22f0e1fd09de26"),
+    "VapourSynth": (VAPOURSYNTH_SOURCE_COMMIT, VAPOURSYNTH_SOURCE_TREE_SHA256),
+    "OBUParse": (OBUPARSE_SOURCE_COMMIT, OBUPARSE_SOURCE_TREE_SHA256),
+    "L-SMASH": (LSMASH_SOURCE_COMMIT, LSMASH_SOURCE_TREE_SHA256),
+    "L-SMASH-Works": (LSMASH_WORKS_SOURCE_COMMIT, LSMASH_WORKS_SOURCE_TREE_SHA256),
+    "FFMS2": (FFMS2_SOURCE_COMMIT, FFMS2_SOURCE_TREE_SHA256),
+    "vs-placebo": (VS_PLACEBO_SOURCE_COMMIT, VS_PLACEBO_SOURCE_TREE_SHA256),
+    "libplacebo": (LIBPLACEBO_SOURCE_COMMIT, LIBPLACEBO_SOURCE_TREE_SHA256),
+    "libdovi": (LIBDOVI_SOURCE_COMMIT, LIBDOVI_SOURCE_TREE_SHA256),
 }
 for name, (commit, tree_sha256) in expected_source_trees.items():
     component = components.get(name, {})
@@ -671,7 +686,10 @@ print("DOCKER_PROOF doctor_json=ok")
 print(f"DOCKER_PROOF generated_fixture_matrix=ok fixtures={';'.join(fixture_results)}")
 print("DOCKER_PROOF real_frame_render=ok frames=lwlibavsource,ffms2,placebo")
 PY
-python -c "import pytest, pytest_mock" >/dev/null 2>&1 || python -m pip install --user -q pytest pytest-mock
+python -c "import pytest, pytest_mock" >/dev/null 2>&1 || {
+  echo "ERROR: pytest and pytest-mock are missing from the Docker runtime image" >&2
+  exit 13
+}
 pytest_cache_dir="$(mktemp -d /tmp/frame-compare-pytest-cache.XXXXXX)"
 EOF
 )

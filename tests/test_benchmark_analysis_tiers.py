@@ -295,34 +295,51 @@ def test_frame_type_probe_bounds_window_when_fps_is_known() -> None:
     assert scope["end_frame_exclusive"] == 2640
 
 
-def test_source_index_detection_finds_runtime_owned_lwi(tmp_path: Path) -> None:
+@pytest.mark.parametrize("legacy_name", ["appended", "replaced"])
+def test_main_rejects_legacy_indexes_for_warm_requirement(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    legacy_name: str,
+) -> None:
     script = _load_script()
     video = tmp_path / "clip.mkv"
     video.write_bytes(b"video")
-    expected = script.source_index_path(video)
-    expected.write_bytes(b"index")
-
-    result = script._source_index_facts([video])[video.as_posix()]
-
-    assert result["detected"] is True
-    assert result["expected_path"] == expected.as_posix()
-    assert result["paths"] == [expected.as_posix()]
-    assert result["sizes_bytes"] == [5]
-    assert result["legacy_paths_ignored"] == []
-
-
-def test_source_index_detection_ignores_legacy_adjacent_lwi(tmp_path: Path) -> None:
-    script = _load_script()
-    video = tmp_path / "clip.mkv"
-    video.write_bytes(b"video")
-    legacy = Path(f"{video}.lwi")
+    legacy = Path(f"{video}.lwi") if legacy_name == "appended" else video.with_suffix(".lwi")
     legacy.write_bytes(b"legacy")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("", encoding="utf-8")
+    config = ConfigSchema()
+    source = script.BenchmarkAnalysisSource(
+        path=video,
+        ordered_paths=(video,),
+        effective_fps=None,
+        active_rect=script.BenchmarkActiveRect(
+            rect=None,
+            source="full-frame",
+            detection_mode="aspect_ratio",
+        ),
+        overrides_by_path={},
+        source_frame_count=20,
+        source_fps=Fraction(24),
+    )
+    monkeypatch.setattr(script, "load_config", lambda _path: config)
+    monkeypatch.setattr(script, "_resolve_benchmark_analysis_source", lambda **_kwargs: source)
 
-    result = script._source_index_facts([video])[video.as_posix()]
-
-    assert result["detected"] is False
-    assert result["paths"] == []
-    assert result["legacy_paths_ignored"] == [legacy.as_posix()]
+    with pytest.raises(SystemExit, match="warm source index was required"):
+        script.main(
+            [
+                "--root",
+                str(tmp_path),
+                "--config",
+                str(config_path),
+                "--output",
+                str(tmp_path / "report.json"),
+                "--window-end-exclusive",
+                "20",
+                "--require-warm-source-index",
+                str(video),
+            ]
+        )
 
 
 def test_nondefault_domain_requires_explicit_selection_token(tmp_path: Path) -> None:
@@ -357,6 +374,8 @@ def test_main_writes_atomic_production_report(
     script = _load_script()
     reference = tmp_path / "reference.mkv"
     reference.write_bytes(b"source")
+    expected_index = script.source_index_path(reference)
+    expected_index.write_bytes(b"index")
     config_path = tmp_path / "config.toml"
     config_path.write_text("", encoding="utf-8")
     output = tmp_path / "report.json"
@@ -403,9 +422,6 @@ def test_main_writes_atomic_production_report(
     monkeypatch.setattr(script, "load_config", lambda _path: config)
     monkeypatch.setattr(script, "_resolve_benchmark_analysis_source", lambda **_kwargs: source)
     monkeypatch.setattr(
-        script, "_source_index_facts", lambda _paths: {reference.as_posix(): {"detected": True}}
-    )
-    monkeypatch.setattr(
         script,
         "_run_benchmark",
         lambda **_kwargs: (
@@ -426,6 +442,7 @@ def test_main_writes_atomic_production_report(
             str(output),
             "--window-end-exclusive",
             "20",
+            "--require-warm-source-index",
             "--skip-decode-baseline",
             str(reference),
         ]
@@ -434,6 +451,14 @@ def test_main_writes_atomic_production_report(
     assert result == 0
     report = json.loads(output.read_text(encoding="utf-8"))
     assert report["schema_version"] == 2
+    index_facts = report["source"]["indexes"][reference.as_posix()]
+    assert index_facts == {
+        "detected": True,
+        "expected_path": expected_index.as_posix(),
+        "legacy_paths_ignored": [],
+        "paths": [expected_index.as_posix()],
+        "sizes_bytes": [5],
+    }
     assert set(report["comparisons"]) == {"performance"}
     comparison = report["comparisons"]["performance"]
     assert comparison["sampling"]["sample_count"] == 5

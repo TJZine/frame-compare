@@ -65,7 +65,9 @@ though upstream marks Meson deprecated. The upstream CMake build enables several
 optional dependencies by default; selecting it without an explicit option audit would
 silently expand the runtime and licensing surface. This exception should be revisited
 when upstream removes the Meson path or provides an equivalently narrow documented
-CMake configuration.
+CMake configuration. The Frame Compare maintainer owns this exception. Its stable
+verification evidence is the exact-head, no-cache Docker integration workflow linked
+from the active pull request and the corresponding `SOURCES.json` provenance artifact.
 
 ## Relevant compatibility changes
 

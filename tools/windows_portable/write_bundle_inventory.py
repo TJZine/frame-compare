@@ -20,6 +20,7 @@ REQUIRED_DISTRIBUTIONS = {
     "vspreview",
 }
 SOURCE_SCRIPTS = (
+    ".github/workflows/windows-portable-build.yml",
     ".github/workflows/windows-portable.yml",
     "tools/windows_portable/build_portable.ps1",
     "tools/windows_portable/build_update.ps1",

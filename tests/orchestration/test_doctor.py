@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from importlib.metadata import PackageNotFoundError
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -335,6 +336,20 @@ class TestCheckVapoursynth:
 
         assert result.passed is False
         assert result.available is True
+        assert result.details["observed_version"] is None
+        assert result.details["observed_release"] is None
+
+    def test_check_vapoursynth_keeps_raw_partial_version_separate_from_release(self) -> None:
+        check = next(candidate for candidate in collect_checks() if candidate.name == "vapoursynth")
+        version = SimpleNamespace(release_major=78, release_minor=0)
+
+        with patch(
+            "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
+            return_value=SimpleNamespace(__version__=version),
+        ):
+            result = check.check_fn()
+
+        assert result.details["observed_version"] == str(version)
         assert result.details["observed_release"] is None
 
     def test_check_vapoursynth_fails_when_missing(self) -> None:
@@ -449,7 +464,7 @@ class TestCheckVsPlacebo:
             ),
             patch(
                 "frame_compare.orchestration.doctor_checks.importlib.metadata.version",
-                side_effect=__import__("importlib").metadata.PackageNotFoundError,
+                side_effect=PackageNotFoundError,
             ),
         ):
             result = check.check_fn()
@@ -461,6 +476,39 @@ class TestCheckVsPlacebo:
 
 
 class TestCheckFFMS2:
+    @pytest.mark.parametrize(
+        ("required", "expected_passed", "expected_hint"),
+        [
+            pytest.param(False, True, None, id="optional-windows-runtime"),
+            pytest.param(
+                True,
+                False,
+                "Repair the supported media runtime, then rerun doctor",
+                id="required-docker-runtime",
+            ),
+        ],
+    )
+    def test_check_ffms2_exception_honors_runtime_policy(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        required: bool,
+        expected_passed: bool,
+        expected_hint: str | None,
+    ) -> None:
+        monkeypatch.setenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "1" if required else "0")
+        check = next(candidate for candidate in collect_checks() if candidate.name == "ffms2")
+
+        with patch(
+            "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
+            side_effect=RuntimeError("runtime failure"),
+        ):
+            result = check.check_fn()
+
+        assert result.passed is expected_passed
+        assert result.available is False
+        assert result.hint == expected_hint
+        assert result.details["exception_type"] == "RuntimeError"
+
     def test_check_ffms2_missing_is_expected_for_windows_baseline(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -201,15 +201,15 @@ RUN bash /usr/local/bin/checkout_source_commit.sh \
         '{' \
         '  "schema_version": 2,' \
         '  "components": [' \
-        '    {"name":"VapourSynth","version":"R78","source_commit":"c2f5751a412347f306eb7f6a5985dd9a719f3896","source_url":"https://github.com/vapoursynth/vapoursynth.git","source_tree_sha256":"cc0f2ec4127bd26f6dff074450ebe801368b6d4341b3ab9928c94073a682196f","license":"LGPL-2.1-or-later"},' \
-        '    {"name":"OBUParse","version":"commit a67fcab9cd9d56c866a7a860f8c4aeb91b8817e8","source_commit":"a67fcab9cd9d56c866a7a860f8c4aeb91b8817e8","source_url":"https://github.com/HomeOfAviSynthPlusEvolution/obuparse.git","source_tree_sha256":"f82de7a5f007a4e89441e7ff4b470a00eddc4dfedb22faa46f633acfeefde178","license":"ISC","selection_kind":"commit","linkage":"shared","soname":"libobuparse.so.2"},' \
-        '    {"name":"L-SMASH","version":"commit 84740c5d960ab622f4c08b971dc59192bc27ef74","source_commit":"84740c5d960ab622f4c08b971dc59192bc27ef74","source_url":"https://github.com/l-smash/l-smash.git","source_tree_sha256":"b1553e40907e57240fd19a08642b3bc548dbdeda3750948ebbc1c5634af901b7","license":"ISC","selection_kind":"commit"},' \
-        '    {"name":"L-SMASH-Works","version":"1296.0.0.0","source_commit":"a83318210c183c8ebbe703d975ffc76fb499ef07","source_url":"https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works.git","source_tree_sha256":"7845a6a6d823046c6b0bbe617ae88e304ee117f466961aabceea931831d8f9e3","license":"ISC AND LGPL-2.1-or-later"},' \
-        '    {"name":"FFMS2","version":"5.0","source_commit":"7ed5e4d039ca9a6236bd2ebdfdd656c4304fbe04","source_url":"https://github.com/FFMS/ffms2.git","source_tree_sha256":"5be86d5f8f103f8e0b25aaed0b69b7afc06f1b6cd548a6c81160fcd14ea6e8d7","license":"MIT"},' \
+        "    {\"name\":\"VapourSynth\",\"version\":\"R78\",\"source_commit\":\"${VAPOURSYNTH_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/vapoursynth/vapoursynth.git\",\"source_tree_sha256\":\"${VAPOURSYNTH_SOURCE_TREE_SHA256}\",\"license\":\"LGPL-2.1-or-later\"}," \
+        "    {\"name\":\"OBUParse\",\"version\":\"commit ${OBUPARSE_COMMIT}\",\"source_commit\":\"${OBUPARSE_COMMIT}\",\"source_url\":\"https://github.com/HomeOfAviSynthPlusEvolution/obuparse.git\",\"source_tree_sha256\":\"${OBUPARSE_SOURCE_TREE_SHA256}\",\"license\":\"ISC\",\"selection_kind\":\"commit\",\"linkage\":\"shared\",\"soname\":\"libobuparse.so.2\"}," \
+        "    {\"name\":\"L-SMASH\",\"version\":\"commit ${LSMASH_COMMIT}\",\"source_commit\":\"${LSMASH_COMMIT}\",\"source_url\":\"https://github.com/l-smash/l-smash.git\",\"source_tree_sha256\":\"${LSMASH_SOURCE_TREE_SHA256}\",\"license\":\"ISC\",\"selection_kind\":\"commit\"}," \
+        "    {\"name\":\"L-SMASH-Works\",\"version\":\"1296.0.0.0\",\"source_commit\":\"${LSMASH_WORKS_COMMIT}\",\"source_url\":\"https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works.git\",\"source_tree_sha256\":\"${LSMASH_WORKS_SOURCE_TREE_SHA256}\",\"license\":\"ISC AND LGPL-2.1-or-later\"}," \
+        "    {\"name\":\"FFMS2\",\"version\":\"5.0\",\"source_commit\":\"${FFMS2_COMMIT}\",\"source_url\":\"https://github.com/FFMS/ffms2.git\",\"source_tree_sha256\":\"${FFMS2_SOURCE_TREE_SHA256}\",\"license\":\"MIT\"}," \
         '    {"name":"Debian FFmpeg","version":"7:7.1.5-0+deb13u1","distribution":"trixie","selection_kind":"debian-package","license":"Debian-supported"},' \
-        '    {"name":"vs-placebo","version":"2.0.4","source_ref":"2.0.4","source_commit":"3cfd23f257ecb62b0cbd81eaaca092e18ae8e579","source_url":"https://github.com/Lypheo/vs-placebo.git","source_tree_sha256":"beb830744f1fa1702eb64cfe8bdaf5780bb3501f9c48901df24ab112a406a30a","license":"LGPL-2.1-only","selection_kind":"tag"},' \
-        '    {"name":"libplacebo","version":"commit a7a18af88ff0a17c04840dcb3246047bb6b46df3","source_commit":"a7a18af88ff0a17c04840dcb3246047bb6b46df3","source_url":"https://github.com/haasn/libplacebo.git","source_tree_sha256":"bdbe17582c081e107e1a66c44d5f01aa856a157aa124660d662221848e88eda7","license":"LGPL-2.1-or-later","selection_kind":"commit"},' \
-        '    {"name":"libdovi","version":"3.3.2","source_ref":"libdovi-3.3.2","source_commit":"4fd2b2235c9f93582dd4a00e65ee34a07800afd7","source_url":"https://github.com/quietvoid/dovi_tool.git","source_tree_sha256":"e16dfb68270fc5b8610e2f1ae38b0b1051d8e7d03dd4b98a2f22f0e1fd09de26","license":"MIT","selection_kind":"tag"}' \
+        "    {\"name\":\"vs-placebo\",\"version\":\"2.0.4\",\"source_ref\":\"2.0.4\",\"source_commit\":\"${VS_PLACEBO_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/Lypheo/vs-placebo.git\",\"source_tree_sha256\":\"${VS_PLACEBO_SOURCE_TREE_SHA256}\",\"license\":\"LGPL-2.1-only\",\"selection_kind\":\"tag\"}," \
+        "    {\"name\":\"libplacebo\",\"version\":\"commit ${LIBPLACEBO_SOURCE_COMMIT}\",\"source_commit\":\"${LIBPLACEBO_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/haasn/libplacebo.git\",\"source_tree_sha256\":\"${LIBPLACEBO_SOURCE_TREE_SHA256}\",\"license\":\"LGPL-2.1-or-later\",\"selection_kind\":\"commit\"}," \
+        "    {\"name\":\"libdovi\",\"version\":\"3.3.2\",\"source_ref\":\"libdovi-3.3.2\",\"source_commit\":\"${LIBDOVI_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/quietvoid/dovi_tool.git\",\"source_tree_sha256\":\"${LIBDOVI_SOURCE_TREE_SHA256}\",\"license\":\"MIT\",\"selection_kind\":\"tag\"}" \
         '  ]' \
         '}' \
         > /opt/media-runtime-provenance/SOURCES.json && \
@@ -311,7 +311,16 @@ ENTRYPOINT ["frame-compare"]
 CMD ["--help"]
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 3: Development container
+# Stage 3: Hash-locked integration-test runner
+FROM runtime AS test-runtime
+
+RUN uv export --frozen --only-group docker-test --no-emit-project --format requirements.txt \
+        --output-file /tmp/requirements.docker-test.lock.txt && \
+    python -m pip install --no-cache-dir --user --require-hashes \
+        -r /tmp/requirements.docker-test.lock.txt
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stage 4: Development container
 FROM runtime AS devcontainer
 
 USER root
@@ -320,7 +329,7 @@ USER framecompare
 WORKDIR /workspace/frame-compare
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 4: Optional Linux X11/VSPreview GUI runtime
+# Stage 5: Optional Linux X11/VSPreview GUI runtime
 # ─────────────────────────────────────────────────────────────────────────────
 FROM runtime AS gui-linux
 

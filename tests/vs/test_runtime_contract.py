@@ -214,7 +214,7 @@ def test_docker_provenance_covers_every_distributed_media_component(
         '"name":"libplacebo"',
         '"name":"libdovi"',
     ):
-        assert component in dockerfile
+        assert component in dockerfile or component.replace('"', '\\"') in dockerfile
     for license_name in (
         "VapourSynth-LGPL-2.1.txt",
         "OBUParse-LICENSE.txt",
@@ -242,7 +242,7 @@ def test_docker_uses_verified_tracked_source_tree_digests(repo_root: Path) -> No
     }
     for argument, digest in expected.items():
         assert f"ARG {argument}={digest}" in dockerfile
-        assert f'"source_tree_sha256":"{digest}"' in dockerfile
+        assert f'\\"source_tree_sha256\\":\\"${{{argument}}}\\"' in dockerfile
 
 
 def test_docker_runtime_reads_release_and_api_identities_separately(repo_root: Path) -> None:

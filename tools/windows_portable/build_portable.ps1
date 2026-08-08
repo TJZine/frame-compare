@@ -716,7 +716,6 @@ function Assert-BundleRuntime([string]$BundleRoot) {
   $ffmpeg = Join-Path $BundleRoot "ffmpeg\bin\ffmpeg.exe"
   $mediaPath = Join-Path $BundleRoot "runtime-smoke.mp4"
   $legacyMediaIndexPath = "$mediaPath.lwi"
-  $mediaIndexPattern = "$mediaPath.frame-compare-*.lwi"
   $smokePath = Join-Path $BundleRoot "runtime-smoke.py"
   try {
     Set-BundleRuntimeEnvironment -BundleRoot $BundleRoot
@@ -963,7 +962,8 @@ else:
     Remove-Item -Force -LiteralPath $smokePath -ErrorAction SilentlyContinue
     Remove-Item -Force -LiteralPath $mediaPath -ErrorAction SilentlyContinue
     Remove-Item -Force -LiteralPath $legacyMediaIndexPath -ErrorAction SilentlyContinue
-    Get-ChildItem -Path $mediaIndexPattern -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -LiteralPath $BundleRoot -Filter "runtime-smoke.mp4.frame-compare-*.lwi" -File -ErrorAction SilentlyContinue |
+      Remove-Item -Force -ErrorAction SilentlyContinue
     Restore-ProcessEnvironmentValue -Name "PATH" -Value $originalPath
     Restore-ProcessEnvironmentValue -Name "PYTHONUTF8" -Value $originalPythonUtf8
     Restore-ProcessEnvironmentValue -Name "PYTHONDONTWRITEBYTECODE" -Value $originalPythonDontWriteBytecode

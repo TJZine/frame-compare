@@ -44,10 +44,13 @@ def test_probe_cache_invalidates_on_media_runtime_change(monkeypatch) -> None:
     fingerprint = ClipFingerprint(Path("video.mkv"), 1024, 5000)
     original = compute_probe_cache_key(fingerprint)
 
-    monkeypatch.setattr(
-        probe_cache,
-        "media_runtime_fingerprint",
-        lambda _scope: "f" * 64,
-    )
+    observed_scopes: list[str] = []
+
+    def _fingerprint(scope: str) -> str:
+        observed_scopes.append(scope)
+        return "f" * 64
+
+    monkeypatch.setattr(probe_cache, "media_runtime_fingerprint", _fingerprint)
 
     assert compute_probe_cache_key(fingerprint) != original
+    assert observed_scopes == ["probe"]

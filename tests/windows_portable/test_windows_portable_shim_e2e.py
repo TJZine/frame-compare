@@ -359,6 +359,10 @@ def test_windows_portable_shim_restores_environment_after_bundle_exit(
                 '$ErrorActionPreference = "Stop"',
                 '[Environment]::SetEnvironmentVariable("PATH", "outer-path", "Process")',
                 '[Environment]::SetEnvironmentVariable("PYTHONUTF8", "outer-utf8", "Process")',
+                (
+                    '[Environment]::SetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", '
+                    '"outer-dontwrite", "Process")'
+                ),
                 '[Environment]::SetEnvironmentVariable("PYTHONPATH", "outer-pythonpath", "Process")',
                 (
                     '[Environment]::SetEnvironmentVariable("VAPOURSYNTH_EXTRA_PLUGIN_PATH", '
@@ -368,14 +372,52 @@ def test_windows_portable_shim_restores_environment_after_bundle_exit(
                     '[Environment]::SetEnvironmentVariable("VAPOURSYNTH_PLUGIN_PATH", '
                     '"outer-legacy-plugins", "Process")'
                 ),
+                (
+                    "[Environment]::SetEnvironmentVariable("
+                    '"FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT", "outer-fingerprint", "Process")'
+                ),
+                (
+                    "[Environment]::SetEnvironmentVariable("
+                    '"FRAME_COMPARE_RUNTIME_KIND", "outer-kind", "Process")'
+                ),
+                (
+                    "[Environment]::SetEnvironmentVariable("
+                    '"FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "outer-ffms2", "Process")'
+                ),
+                (
+                    "[Environment]::SetEnvironmentVariable("
+                    '"FRAME_COMPARE_FFMPEG_EXECUTABLE", "outer-ffmpeg", "Process")'
+                ),
+                (
+                    "[Environment]::SetEnvironmentVariable("
+                    '"FRAME_COMPARE_FFPROBE_EXECUTABLE", "outer-ffprobe", "Process")'
+                ),
                 f". '{shim_path}'",
                 'Invoke-FrameCompareShim -ArgsValues @("version")',
                 'Write-Output "EXIT=$script:FrameCompareShimExitCode"',
                 'Write-Output "PATH=$env:PATH"',
                 'Write-Output "PYTHONUTF8=$env:PYTHONUTF8"',
+                'Write-Output "PYTHONDONTWRITEBYTECODE=$env:PYTHONDONTWRITEBYTECODE"',
                 'Write-Output "PYTHONPATH=$env:PYTHONPATH"',
                 'Write-Output "VAPOURSYNTH_EXTRA_PLUGIN_PATH=$env:VAPOURSYNTH_EXTRA_PLUGIN_PATH"',
                 'Write-Output "VAPOURSYNTH_PLUGIN_PATH=$env:VAPOURSYNTH_PLUGIN_PATH"',
+                (
+                    'Write-Output "FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT='
+                    '$env:FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT"'
+                ),
+                'Write-Output "FRAME_COMPARE_RUNTIME_KIND=$env:FRAME_COMPARE_RUNTIME_KIND"',
+                (
+                    'Write-Output "FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED='
+                    '$env:FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED"'
+                ),
+                (
+                    'Write-Output "FRAME_COMPARE_FFMPEG_EXECUTABLE='
+                    '$env:FRAME_COMPARE_FFMPEG_EXECUTABLE"'
+                ),
+                (
+                    'Write-Output "FRAME_COMPARE_FFPROBE_EXECUTABLE='
+                    '$env:FRAME_COMPARE_FFPROBE_EXECUTABLE"'
+                ),
             ]
         ),
         encoding="utf-8",
@@ -393,9 +435,15 @@ def test_windows_portable_shim_restores_environment_after_bundle_exit(
     assert output["EXIT"] == "0"
     assert output["PATH"] == "outer-path"
     assert output["PYTHONUTF8"] == "outer-utf8"
+    assert output["PYTHONDONTWRITEBYTECODE"] == "outer-dontwrite"
     assert output["PYTHONPATH"] == "outer-pythonpath"
     assert output["VAPOURSYNTH_EXTRA_PLUGIN_PATH"] == "outer-extra-plugins"
     assert output["VAPOURSYNTH_PLUGIN_PATH"] == "outer-legacy-plugins"
+    assert output["FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT"] == "outer-fingerprint"
+    assert output["FRAME_COMPARE_RUNTIME_KIND"] == "outer-kind"
+    assert output["FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED"] == "outer-ffms2"
+    assert output["FRAME_COMPARE_FFMPEG_EXECUTABLE"] == "outer-ffmpeg"
+    assert output["FRAME_COMPARE_FFPROBE_EXECUTABLE"] == "outer-ffprobe"
 
 
 @pytest.mark.integration
@@ -556,6 +604,10 @@ def test_windows_portable_generated_bundle_launcher_restores_environment(
                 '$ErrorActionPreference = "Stop"',
                 '[Environment]::SetEnvironmentVariable("PATH", "outer-path", "Process")',
                 '[Environment]::SetEnvironmentVariable("PYTHONUTF8", "outer-utf8", "Process")',
+                (
+                    '[Environment]::SetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", '
+                    '"outer-dontwrite", "Process")'
+                ),
                 '[Environment]::SetEnvironmentVariable("PYTHONPATH", "outer-pythonpath", "Process")',
                 (
                     '[Environment]::SetEnvironmentVariable("VAPOURSYNTH_EXTRA_PLUGIN_PATH", '
@@ -565,13 +617,51 @@ def test_windows_portable_generated_bundle_launcher_restores_environment(
                     '[Environment]::SetEnvironmentVariable("VAPOURSYNTH_PLUGIN_PATH", '
                     '"outer-legacy-plugins", "Process")'
                 ),
+                (
+                    "[Environment]::SetEnvironmentVariable("
+                    '"FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT", "outer-fingerprint", "Process")'
+                ),
+                (
+                    "[Environment]::SetEnvironmentVariable("
+                    '"FRAME_COMPARE_RUNTIME_KIND", "outer-kind", "Process")'
+                ),
+                (
+                    "[Environment]::SetEnvironmentVariable("
+                    '"FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "outer-ffms2", "Process")'
+                ),
+                (
+                    "[Environment]::SetEnvironmentVariable("
+                    '"FRAME_COMPARE_FFMPEG_EXECUTABLE", "outer-ffmpeg", "Process")'
+                ),
+                (
+                    "[Environment]::SetEnvironmentVariable("
+                    '"FRAME_COMPARE_FFPROBE_EXECUTABLE", "outer-ffprobe", "Process")'
+                ),
                 f"& '{launcher_path}' version",
                 'Write-Output "EXIT=$LASTEXITCODE"',
                 'Write-Output "PATH=$env:PATH"',
                 'Write-Output "PYTHONUTF8=$env:PYTHONUTF8"',
+                'Write-Output "PYTHONDONTWRITEBYTECODE=$env:PYTHONDONTWRITEBYTECODE"',
                 'Write-Output "PYTHONPATH=$env:PYTHONPATH"',
                 'Write-Output "VAPOURSYNTH_EXTRA_PLUGIN_PATH=$env:VAPOURSYNTH_EXTRA_PLUGIN_PATH"',
                 'Write-Output "VAPOURSYNTH_PLUGIN_PATH=$env:VAPOURSYNTH_PLUGIN_PATH"',
+                (
+                    'Write-Output "FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT='
+                    '$env:FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT"'
+                ),
+                'Write-Output "FRAME_COMPARE_RUNTIME_KIND=$env:FRAME_COMPARE_RUNTIME_KIND"',
+                (
+                    'Write-Output "FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED='
+                    '$env:FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED"'
+                ),
+                (
+                    'Write-Output "FRAME_COMPARE_FFMPEG_EXECUTABLE='
+                    '$env:FRAME_COMPARE_FFMPEG_EXECUTABLE"'
+                ),
+                (
+                    'Write-Output "FRAME_COMPARE_FFPROBE_EXECUTABLE='
+                    '$env:FRAME_COMPARE_FFPROBE_EXECUTABLE"'
+                ),
             ]
         ),
         encoding="utf-8",
@@ -589,9 +679,15 @@ def test_windows_portable_generated_bundle_launcher_restores_environment(
     assert output["EXIT"] == "0"
     assert output["PATH"] == "outer-path"
     assert output["PYTHONUTF8"] == "outer-utf8"
+    assert output["PYTHONDONTWRITEBYTECODE"] == "outer-dontwrite"
     assert output["PYTHONPATH"] == "outer-pythonpath"
     assert output["VAPOURSYNTH_EXTRA_PLUGIN_PATH"] == "outer-extra-plugins"
     assert output["VAPOURSYNTH_PLUGIN_PATH"] == "outer-legacy-plugins"
+    assert output["FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT"] == "outer-fingerprint"
+    assert output["FRAME_COMPARE_RUNTIME_KIND"] == "outer-kind"
+    assert output["FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED"] == "outer-ffms2"
+    assert output["FRAME_COMPARE_FFMPEG_EXECUTABLE"] == "outer-ffmpeg"
+    assert output["FRAME_COMPARE_FFPROBE_EXECUTABLE"] == "outer-ffprobe"
 
 
 def _parse_key_value_output(stdout: str) -> dict[str, str]:

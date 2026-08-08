@@ -248,18 +248,6 @@ def test_windows_portable_build_uses_r74_plus_plugin_layout(repo_root: Path) -> 
     assert "ffmpeg\\\\bin" not in runtime_function.split("$pathEntries = @(", 1)[1]
 
 
-def test_windows_portable_runtime_reads_release_and_api_identities_separately(
-    repo_root: Path,
-) -> None:
-    build_script = _read_text_or_fail(
-        repo_root / "tools" / "windows_portable" / "build_portable.ps1"
-    )
-
-    assert 'api_version = getattr(vs, "__api_version__", None)' in build_script
-    assert 'api_major = getattr(api_version, "api_major", None)' in build_script
-    assert 'api_major = getattr(version, "api_major", None)' not in build_script
-
-
 def test_windows_portable_direct_placebo_smoke_respects_runtime_probe(
     repo_root: Path,
 ) -> None:
@@ -808,7 +796,10 @@ def test_windows_portable_builder_writes_inventory_and_cleans_runtime_index(
     assert "bundle_inventory.json" in build_script
     assert "--require-clean-repo" in build_script
     assert "Remove-Item -Force -LiteralPath $legacyMediaIndexPath" in build_script
-    assert "Get-ChildItem -Path $mediaIndexPattern" in build_script
+    assert (
+        "Get-ChildItem -LiteralPath $BundleRoot -Filter "
+        '"runtime-smoke.mp4.frame-compare-*.lwi"' in build_script
+    )
     assert "function Copy-RequiredQtLicenseDirectories" in build_script
     assert 'Join-Path $licenseOwners[0].FullName "LICENSE"' in build_script
     assert 'Join-Path $licenseOwners[0].FullName "licenses\\\\LICENSE"' in build_script

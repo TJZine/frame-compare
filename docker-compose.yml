@@ -45,6 +45,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: test-runtime
     image: frame-compare:dev
     volumes:
       - .:/home/framecompare/frame-compare

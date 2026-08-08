@@ -102,7 +102,8 @@ def _check_vapoursynth() -> CheckResult:
         "expected_api_major": expected_api_major,
     }
     if version is None or api_version is None:
-        details["observed_release"] = None if version is None else str(version)
+        details["observed_version"] = None if version is None else str(version)
+        details["observed_release"] = None
         details["observed_api_version"] = None if api_version is None else str(api_version)
         return CheckResult(
             passed=False,
@@ -408,10 +409,10 @@ def _check_ffms2() -> CheckResult:
     except Exception as error:
         details["exception_type"] = type(error).__name__
         return CheckResult(
-            passed=False,
+            passed=not required,
             available=False,
             message="FFMS2 check failed",
-            hint="Repair the supported media runtime, then rerun doctor",
+            hint="Repair the supported media runtime, then rerun doctor" if required else None,
             details=details,
         )
 
