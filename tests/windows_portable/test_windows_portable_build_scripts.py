@@ -544,6 +544,24 @@ def test_windows_portable_manifest_vendored_license_files_exist_and_match_hashes
             assert license_file["source_url"].startswith("https://")
 
 
+def _write_packaged_runtime_contract(*, bundle: Path, fingerprints: dict[str, str]) -> None:
+    contract_root = bundle / "app" / "src" / "frame_compare" / "vs"
+    contract_root.mkdir(parents=True, exist_ok=True)
+    (contract_root.parent / "__init__.py").write_text("", encoding="utf-8")
+    (contract_root / "__init__.py").write_text("", encoding="utf-8")
+    (contract_root / "runtime_contract.py").write_text(
+        (
+            f"MEDIA_RUNTIME_SCOPES = {tuple(fingerprints)!r}\n"
+            f"_FINGERPRINTS = {fingerprints!r}\n"
+            "def media_runtime_fingerprint(scope, *, profile=None):\n"
+            "    if profile != 'windows-x64':\n"
+            "        raise ValueError(profile)\n"
+            "    return _FINGERPRINTS[scope]\n"
+        ),
+        encoding="utf-8",
+    )
+
+
 def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
     bundle = tmp_path / "bundle"
     site_packages = bundle / "app" / "site-packages"
@@ -589,6 +607,7 @@ def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
         )
     )
     runtime_fingerprints = manifest["bundle"]["runtime_fingerprints"]
+    _write_packaged_runtime_contract(bundle=bundle, fingerprints=runtime_fingerprints)
     (bundle / "bundle_info.json").write_text(
         json.dumps(
             {
@@ -772,6 +791,42 @@ def test_windows_portable_bundle_inventory_rejects_matching_stale_runtime_finger
 
     assert result.returncode != 0
     assert "do not match the canonical windows-x64 contract" in result.stderr
+
+
+def test_windows_portable_bundle_inventory_uses_packaged_runtime_contract(
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    bundle = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
+    packaged_fingerprints = {
+        scope: str(index) * 64
+        for index, scope in enumerate(("analysis", "probe", "alignment", "index", "full"), start=1)
+    }
+    _write_packaged_runtime_contract(bundle=bundle, fingerprints=packaged_fingerprints)
+
+    bundle_info_path = bundle / "bundle_info.json"
+    bundle_info = json.loads(bundle_info_path.read_text(encoding="utf-8"))
+    bundle_info["media_runtime_fingerprint"] = packaged_fingerprints["full"]
+    bundle_info["media_runtime_fingerprints"] = packaged_fingerprints
+    bundle_info_path.write_text(json.dumps(bundle_info), encoding="utf-8")
+
+    manifest = json.loads(
+        (repo_root / "tools/windows_portable/manifest.windows-x64.json").read_text(encoding="utf-8")
+    )
+    assert manifest["bundle"]["runtime_fingerprints"] != packaged_fingerprints
+    manifest["bundle"]["runtime_fingerprints"] = packaged_fingerprints
+    manifest_path = tmp_path / "packaged-contract-manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    result = _run_bundle_inventory(
+        bundle=bundle,
+        repo_root=repo_root,
+        manifest=manifest_path,
+    )
+
+    assert result.returncode == 0, f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
+    inventory = json.loads((bundle / "bundle_inventory.json").read_text(encoding="utf-8"))
+    assert inventory["bundle"]["media_runtime_fingerprints"] == packaged_fingerprints
 
 
 @pytest.mark.parametrize(

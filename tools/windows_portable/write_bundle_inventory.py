@@ -375,7 +375,11 @@ def main() -> int:
     manifest_path = args.manifest.resolve(strict=True)
     repo_root = args.repo_root.resolve(strict=True)
     output_path = args.output.resolve(strict=False)
-    sys.path.insert(0, str(repo_root / "src"))
+    packaged_src = (bundle_root / "app" / "src").resolve(strict=True)
+    if not packaged_src.is_dir():
+        raise NotADirectoryError(packaged_src)
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, str(packaged_src))
     from frame_compare.vs.runtime_contract import (  # noqa: PLC0415
         MEDIA_RUNTIME_SCOPES,
     )
