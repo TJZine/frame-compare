@@ -859,7 +859,7 @@ def build_placebo_clip():
     assert_true(hasattr(core.placebo, "Tonemap"), "core.placebo.Tonemap missing")
 
     tonemap_clip = core.std.BlankClip(width=16, height=16, format=vs.RGB48, length=1, color=[32768, 32768, 32768])
-    tonemap_clip = tonemap_clip.std.SetFrameProps(_Matrix=0, _Range=0, _Transfer=16, _Primaries=9)
+    tonemap_clip = tonemap_clip.std.SetFrameProps(_Matrix=0, _Range=1, _Transfer=16, _Primaries=9)
     return core.placebo.Tonemap(
         tonemap_clip,
         src_max=1000,
@@ -903,7 +903,7 @@ def prove_apply_tonemap_frame() -> None:
 
     core = vs.core
     tonemap_clip = core.std.BlankClip(width=16, height=16, format=vs.RGB48, length=1, color=[32768, 32768, 32768])
-    tonemap_clip = tonemap_clip.std.SetFrameProps(_Matrix=0, _Range=0, _Transfer=16, _Primaries=9)
+    tonemap_clip = tonemap_clip.std.SetFrameProps(_Matrix=0, _Range=1, _Transfer=16, _Primaries=9)
 
     libplacebo_runtime_usable = _libplacebo_runtime_usable()
     app_out = apply_tonemap(tonemap_clip, TonemapSettings(enabled=True))

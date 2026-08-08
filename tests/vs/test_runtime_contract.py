@@ -14,6 +14,7 @@ from frame_compare.vs.runtime_contract import (
     LIBDOVI_SOURCE_TREE_SHA256,
     LIBPLACEBO_SOURCE_TREE_SHA256,
     LSMASH_SOURCE_TREE_SHA256,
+    LSMASH_WORKS_RELEASE,
     LSMASH_WORKS_SOURCE_TREE_SHA256,
     MEDIA_RUNTIME_SCOPES,
     OBUPARSE_SOURCE_TREE_SHA256,
@@ -36,7 +37,7 @@ def test_runtime_profile_uses_explicit_deployment_kind(
     monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "windows-portable")
     assert media_runtime_profile() == "windows-x64"
 
-    monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "docker")
+    monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "DOCKER")
     assert media_runtime_profile() == "debian-trixie"
 
 
@@ -147,8 +148,10 @@ def test_index_token_is_profile_scoped() -> None:
     windows = index_cache_token(profile="windows-x64")
     linux = index_cache_token(profile="debian-trixie")
 
-    assert re.fullmatch(r"lsw1296-[0-9a-f]{12}", windows)
-    assert re.fullmatch(r"lsw1296-[0-9a-f]{12}", linux)
+    release_major = LSMASH_WORKS_RELEASE.partition(".")[0]
+    token_pattern = rf"lsw{release_major}-[0-9a-f]{{12}}"
+    assert re.fullmatch(token_pattern, windows)
+    assert re.fullmatch(token_pattern, linux)
     assert windows != linux
 
 
@@ -206,7 +209,7 @@ def test_supported_report_contains_observable_component_contract() -> None:
 def test_runtime_environment_report_fails_closed_on_invalid_declaration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "docker")
+    monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "DOCKER")
     monkeypatch.setenv("FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT", "not-a-fingerprint")
     monkeypatch.setenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "1")
 

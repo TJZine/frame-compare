@@ -342,10 +342,10 @@ def test_load_source_warns_when_rejected_index_cannot_be_removed(
 
     original_unlink = Path.unlink
 
-    def fail_owned_index_unlink(self: Path, *args: object, **kwargs: object) -> None:
+    def fail_owned_index_unlink(self: Path, missing_ok: bool = False) -> None:
         if self == index_path:
             raise PermissionError("index is locked")
-        original_unlink(self, *args, **kwargs)
+        original_unlink(self, missing_ok=missing_ok)
 
     monkeypatch.setattr(Path, "unlink", fail_owned_index_unlink)
     core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))

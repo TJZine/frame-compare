@@ -201,11 +201,13 @@ before applying changes. A code-only ZIP replaces application files only; it doe
 **not** replace VapourSynth, L-SMASH-Works, vs-placebo, FFmpeg, runtime manifests,
 or native license payloads.
 
-The signed update manifest therefore declares the full media-runtime fingerprint
-it requires. The installed full bundle must expose the same valid fingerprint in
-`bundle_info.json`. A missing, legacy, malformed, or different runtime identity
-fails closed before any dependency-compatibility override path. Install the
-complete portable ZIP for that release when the fingerprint differs.
+The signed update manifest uses schema version 2 and requires the lowercase
+64-character SHA-256 `expected_media_runtime_fingerprint` for the full runtime
+scope. The installed full bundle must expose the same valid fingerprint in
+`bundle_info.json`. A legacy schema-version-1 manifest, missing or malformed
+fingerprint, or different runtime identity fails closed before any
+dependency-compatibility override path. Install the complete portable ZIP for that
+release when the fingerprint differs.
 
 The R78 / L-SMASH-Works 1296 / vs-placebo 2.0.4 refresh is a native-runtime
 boundary. Existing R76 bundles require a full portable reinstall; applying only

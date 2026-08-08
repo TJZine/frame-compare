@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from importlib.metadata import PackageNotFoundError
 from types import SimpleNamespace
@@ -19,6 +20,10 @@ from frame_compare.orchestration.doctor import (
 from frame_compare.vs.env import PluginPathCandidate
 
 pytestmark = pytest.mark.unit
+
+
+def _completed_process(stdout: str) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.CompletedProcess([], 0, stdout.encode(), b"")
 
 
 def _clear_tmdb_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -715,10 +720,10 @@ class TestCheckFFmpeg:
                 side_effect=_resolve,
             ),
             patch(
-                "frame_compare.orchestration.doctor_checks.subprocess.check_output",
+                "frame_compare.orchestration.doctor_checks.run_subprocess",
                 side_effect=[
-                    "ffmpeg version n8.1.2-34-g9b6c8969e0\n",
-                    "ffprobe version n8.1.2-34-g9b6c8969e0\n",
+                    _completed_process("ffmpeg version n8.1.2-34-g9b6c8969e0\n"),
+                    _completed_process("ffprobe version n8.1.2-34-g9b6c8969e0\n"),
                 ],
             ),
         ):
@@ -754,10 +759,10 @@ class TestCheckFFmpeg:
                 side_effect=lambda name: f"/runtime/{name}",
             ),
             patch(
-                "frame_compare.orchestration.doctor_checks.subprocess.check_output",
+                "frame_compare.orchestration.doctor_checks.run_subprocess",
                 side_effect=[
-                    f"ffmpeg version {version_fragment}\n",
-                    f"ffprobe version {version_fragment}\n",
+                    _completed_process(f"ffmpeg version {version_fragment}\n"),
+                    _completed_process(f"ffprobe version {version_fragment}\n"),
                 ],
             ),
         ):
@@ -784,8 +789,11 @@ class TestCheckFFmpeg:
                 side_effect=lambda name: f"/runtime/{name}",
             ),
             patch(
-                "frame_compare.orchestration.doctor_checks.subprocess.check_output",
-                side_effect=[f"ffmpeg version {version}\n", f"ffprobe version {version}\n"],
+                "frame_compare.orchestration.doctor_checks.run_subprocess",
+                side_effect=[
+                    _completed_process(f"ffmpeg version {version}\n"),
+                    _completed_process(f"ffprobe version {version}\n"),
+                ],
             ),
         ):
             result = check.check_fn()
@@ -806,8 +814,11 @@ class TestCheckFFmpeg:
                 side_effect=lambda name: f"/runtime/{name}",
             ),
             patch(
-                "frame_compare.orchestration.doctor_checks.subprocess.check_output",
-                side_effect=["ffmpeg version stale\n", "ffprobe version stale\n"],
+                "frame_compare.orchestration.doctor_checks.run_subprocess",
+                side_effect=[
+                    _completed_process("ffmpeg version stale\n"),
+                    _completed_process("ffprobe version stale\n"),
+                ],
             ),
         ):
             result = check.check_fn()
@@ -856,7 +867,7 @@ class TestCheckFFmpeg:
                 side_effect=lambda name: f"/runtime/{name}",
             ),
             patch(
-                "frame_compare.orchestration.doctor_checks.subprocess.check_output",
+                "frame_compare.orchestration.doctor_checks.run_subprocess",
                 side_effect=OSError("secret path"),
             ),
         ):

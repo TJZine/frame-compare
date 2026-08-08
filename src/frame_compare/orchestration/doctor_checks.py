@@ -17,7 +17,7 @@ from frame_compare.errors import JSONValue
 from frame_compare.orchestration.doctor_types import CheckResult, DoctorCheck
 from frame_compare.orchestration.preflight import resolve_workspace
 from frame_compare.services.metadata import is_valid_tmdb_api_key
-from frame_compare.utils.subproc import resolve_executable
+from frame_compare.utils.subproc import resolve_executable, run_subprocess
 from frame_compare.vs.env import (
     candidate_lsmas_plugin_path_details,
     import_vapoursynth_module,
@@ -516,11 +516,9 @@ def _check_ffmpeg() -> CheckResult:
     for executable, executable_path in resolved.items():
         details[f"{executable}_path"] = executable_path
         try:
-            output = subprocess.check_output(
+            completed = run_subprocess(
                 [executable_path, "-version"],
-                text=True,
-                stderr=subprocess.STDOUT,
-                timeout=5.0,
+                timeout_seconds=5.0,
             )
         except (OSError, subprocess.SubprocessError) as error:
             details["exception_type"] = type(error).__name__
@@ -530,7 +528,7 @@ def _check_ffmpeg() -> CheckResult:
                 hint="Repair or replace the FFmpeg runtime, then rerun doctor",
                 details=details,
             )
-        lines = output.splitlines()
+        lines = completed.stdout.decode("utf-8", errors="replace").splitlines()
         details[f"{executable}_version_line"] = lines[0] if lines else ""
 
     ffmpeg_version_line = str(details["ffmpeg_version_line"])

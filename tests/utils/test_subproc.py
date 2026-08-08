@@ -61,25 +61,44 @@ def test_run_subprocess_inside_running_event_loop() -> None:
     assert result.stderr == b""
 
 
-@pytest.mark.parametrize("requested", ["ffmpeg", "FFMPEG.EXE"])
+@pytest.mark.parametrize(
+    ("executable", "environment", "requested"),
+    [
+        ("ffmpeg.exe", "FRAME_COMPARE_FFMPEG_EXECUTABLE", "ffmpeg"),
+        ("ffmpeg.exe", "FRAME_COMPARE_FFMPEG_EXECUTABLE", "FFMPEG.EXE"),
+        ("ffprobe.exe", "FRAME_COMPARE_FFPROBE_EXECUTABLE", "ffprobe"),
+        ("ffprobe.exe", "FRAME_COMPARE_FFPROBE_EXECUTABLE", "FFPROBE.EXE"),
+    ],
+)
 def test_resolve_executable_prefers_absolute_media_override(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
+    executable: str,
+    environment: str,
     requested: str,
 ) -> None:
-    ffmpeg = tmp_path / "ffmpeg.exe"
-    ffmpeg.write_bytes(b"")
-    monkeypatch.setenv("FRAME_COMPARE_FFMPEG_EXECUTABLE", str(ffmpeg.resolve()))
+    binary = tmp_path / executable
+    binary.write_bytes(b"")
+    monkeypatch.setenv(environment, str(binary.resolve()))
 
-    assert resolve_executable(requested) == str(ffmpeg.resolve())
+    assert resolve_executable(requested) == str(binary.resolve())
 
 
+@pytest.mark.parametrize(
+    ("executable", "environment"),
+    [
+        ("ffmpeg", "FRAME_COMPARE_FFMPEG_EXECUTABLE"),
+        ("ffprobe", "FRAME_COMPARE_FFPROBE_EXECUTABLE"),
+    ],
+)
 def test_resolve_executable_fails_closed_for_invalid_media_override(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
+    executable: str,
+    environment: str,
 ) -> None:
-    missing = tmp_path / "missing-ffmpeg.exe"
-    monkeypatch.setenv("FRAME_COMPARE_FFMPEG_EXECUTABLE", str(missing.resolve()))
+    missing = tmp_path / f"missing-{executable}.exe"
+    monkeypatch.setenv(environment, str(missing.resolve()))
 
-    with pytest.raises(FileNotFoundError, match="missing-ffmpeg"):
-        resolve_executable("ffmpeg")
+    with pytest.raises(FileNotFoundError, match=f"missing-{executable}"):
+        resolve_executable(executable)

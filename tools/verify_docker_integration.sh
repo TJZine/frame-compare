@@ -567,7 +567,7 @@ with tempfile.TemporaryDirectory(prefix="frame-compare-media-fixtures-") as fixt
             )
         fixture_results.append("hevc10_hdr10")
     else:
-        fixture_results.append("hevc10_hdr10:encoder-unavailable")
+        raise SystemExit("required libx265 encoder is unavailable")
 
     if ffmpeg_has_encoder("libaom-av1"):
         av1_path = fixture_root / "av1.mkv"
@@ -581,7 +581,7 @@ with tempfile.TemporaryDirectory(prefix="frame-compare-media-fixtures-") as fixt
         assert_true(av1_ffms.num_frames == 4, "FFMS2 AV1 frame count mismatch")
         fixture_results.append("av1")
     else:
-        fixture_results.append("av1:encoder-unavailable")
+        raise SystemExit("required libaom-av1 encoder is unavailable")
 
 assert_true(importlib.metadata.version("vs-placebo") == VS_PLACEBO_RELEASE, "vs-placebo mismatch")
 assert_true(hasattr(core, "placebo"), "core.placebo namespace missing")

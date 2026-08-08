@@ -142,8 +142,8 @@ check.
 
 ```powershell
 $Zip = (Resolve-Path 'dist\frame-compare-portable-win-x64.zip').Path
-$ExtractRoot = Join-Path (Resolve-Path 'dist').Path 'zip_extract_check'
-Remove-Item -LiteralPath $ExtractRoot -Recurse -Force -ErrorAction SilentlyContinue
+$ExtractRoot = Join-Path $env:TEMP `
+  ("frame-compare-pr58-zip-{0}" -f [guid]::NewGuid().ToString('N'))
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $Archive = [System.IO.Compression.ZipFile]::OpenRead($Zip)

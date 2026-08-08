@@ -143,5 +143,5 @@ def test_libplacebo_probe_uses_current_vapoursynth_range_property(
     monkeypatch.setattr(tonemap_runtime_module.subprocess, "run", fake_run)
 
     assert probe_libplacebo_runtime() is True
-    assert "_Range=0" in captured["script"]
+    assert "_Range=1" in captured["script"]
     assert "_ColorRange" not in captured["script"]

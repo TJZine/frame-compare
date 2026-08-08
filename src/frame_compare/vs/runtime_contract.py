@@ -381,7 +381,7 @@ def runtime_environment_report() -> dict[str, JSONValue]:
     """Compare deployment-declared identity with the code-owned expectation."""
 
     expected = media_runtime_fingerprint("full")
-    selected_runtime_kind = runtime_kind()
+    selected_runtime_kind = runtime_kind().casefold()
     declared_raw = os.environ.get("FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT", "").strip()
     declared = declared_raw or None
     valid = declared is not None and _FINGERPRINT_RE.fullmatch(declared) is not None
