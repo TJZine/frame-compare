@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
+import pytest
 from _pytest.monkeypatch import MonkeyPatch
 from rich.console import Console
 
@@ -100,6 +101,28 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     assert "upload" in output
     assert "disabled" in output
     assert "VSPreview" not in output
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows does not expose POSIX execute bits")
+def test_at_a_glance_reports_non_executable_ffmpeg_override_as_unavailable(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    binary = tmp_path / "ffmpeg"
+    binary.write_bytes(b"")
+    binary.chmod(0o644)
+    monkeypatch.setenv("FRAME_COMPARE_FFMPEG_EXECUTABLE", str(binary.resolve()))
+    console = _console()
+
+    print_at_a_glance(
+        console,
+        request=_request(),
+        config=_config(),
+        root=_workspace_path(),
+        config_path=_workspace_path("config", "config.toml"),
+    )
+
+    assert "false" in _rendered_row_value(_render(console), "FFmpeg audio")
 
 
 def test_at_a_glance_prints_previous_offsets_effective_mode(

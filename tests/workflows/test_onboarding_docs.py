@@ -47,6 +47,12 @@ def test_default_compose_uses_one_generated_output_mount(repo_root: Path) -> Non
         assert not any("/workspace/screenshots" in volume for volume in volumes)
 
 
+def test_default_compose_keeps_test_runtime_image_separate(repo_root: Path) -> None:
+    compose = yaml.safe_load(_read_text_or_fail(repo_root / "docker-compose.yml"))
+
+    assert compose["services"]["frame-compare-test"]["image"] == "frame-compare:test"
+
+
 def test_docker_gate_proves_generated_artifacts_survive_container_removal(repo_root: Path) -> None:
     script = _read_text_or_fail(repo_root / "tools" / "verify_docker_integration.sh")
 

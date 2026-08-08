@@ -102,3 +102,35 @@ def test_resolve_executable_fails_closed_for_invalid_media_override(
 
     with pytest.raises(FileNotFoundError, match=f"missing-{executable}"):
         resolve_executable(executable)
+
+
+@pytest.mark.parametrize(
+    ("executable", "environment"),
+    [
+        ("ffmpeg", "FRAME_COMPARE_FFMPEG_EXECUTABLE"),
+        ("ffprobe", "FRAME_COMPARE_FFPROBE_EXECUTABLE"),
+    ],
+)
+def test_resolve_executable_fails_closed_for_empty_media_override(
+    monkeypatch: pytest.MonkeyPatch,
+    executable: str,
+    environment: str,
+) -> None:
+    monkeypatch.setenv(environment, "")
+
+    with pytest.raises(FileNotFoundError, match=f"{environment} is empty"):
+        resolve_executable(executable)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows does not expose POSIX execute bits")
+def test_resolve_executable_rejects_non_executable_media_override(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    binary = tmp_path / "ffmpeg"
+    binary.write_bytes(b"")
+    binary.chmod(0o644)
+    monkeypatch.setenv("FRAME_COMPARE_FFMPEG_EXECUTABLE", str(binary.resolve()))
+
+    with pytest.raises(FileNotFoundError, match="ffmpeg"):
+        resolve_executable("ffmpeg")

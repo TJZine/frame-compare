@@ -14,6 +14,10 @@ _MEDIA_EXECUTABLE_ENV = {
 }
 
 
+def _is_executable_file(path: Path) -> bool:
+    return path.is_file() and os.access(path, os.X_OK)
+
+
 def _resolve_cwd(cwd: Path | None) -> Path | None:
     if cwd is None:
         return None
@@ -38,22 +42,22 @@ def resolve_executable(executable: str, cwd: Path | None = None) -> str:
     if executable_name.endswith(".exe"):
         executable_name = executable_name[:-4]
     override_name = _MEDIA_EXECUTABLE_ENV.get(executable_name)
-    if override_name is not None and (override := os.environ.get(override_name)):
+    if override_name is not None and (override := os.environ.get(override_name)) is not None:
         override_path = Path(override)
-        if not override_path.is_absolute() or not override_path.is_file():
-            raise FileNotFoundError(override)
+        if not override_path.is_absolute() or not _is_executable_file(override_path):
+            raise FileNotFoundError(override or f"{override_name} is empty")
         return str(override_path)
 
     executable_path = Path(executable)
     if executable_path.is_absolute():
-        if not executable_path.is_file():
+        if not _is_executable_file(executable_path):
             raise FileNotFoundError(executable)
         return str(executable_path)
 
     if executable_path.parent != Path():
         base_dir = cwd if cwd is not None else Path.cwd()
         candidate = (base_dir / executable_path).resolve(strict=True)
-        if not candidate.is_file():
+        if not _is_executable_file(candidate):
             raise FileNotFoundError(executable)
         return str(candidate)
 

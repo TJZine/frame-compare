@@ -118,6 +118,13 @@ jobs:
               throw "Required portable runtime proof phase missing: $phase"
             }
           }
+          if ($proof -match "WINDOWS_BUNDLE_PROOF placebo_direct_frame=ok ") {
+            Write-Host "Direct placebo frame proof completed."
+          } elseif ($proof -match "WINDOWS_BUNDLE_PROOF placebo_direct_frame=skipped reason=vulkan_runtime_unavailable") {
+            Write-Warning "Hosted runner lacks a usable Vulkan runtime; direct placebo frame proof remains required in Phase 2."
+          } else {
+            throw "Direct placebo frame proof did not report a recognized result."
+          }
 
       - name: Verify bundle workspace directories
         shell: pwsh

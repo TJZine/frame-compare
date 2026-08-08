@@ -46,7 +46,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: test-runtime
-    image: frame-compare:dev
+    image: frame-compare:test
     volumes:
       - .:/home/framecompare/frame-compare
       - ./generated:/workspace/generated

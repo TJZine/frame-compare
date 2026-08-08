@@ -26,10 +26,11 @@ $DownloadRetryDelaySeconds = 5
 
 # Convert caller-supplied relative paths once, before they are embedded in
 # runtime environment variables or passed across process working directories.
-$ManifestPath = [System.IO.Path]::GetFullPath($ManifestPath)
-$OutDir = [System.IO.Path]::GetFullPath($OutDir)
-$CacheDir = [System.IO.Path]::GetFullPath($CacheDir)
-$RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
+$currentLocation = $PWD.ProviderPath
+$ManifestPath = [System.IO.Path]::GetFullPath($ManifestPath, $currentLocation)
+$OutDir = [System.IO.Path]::GetFullPath($OutDir, $currentLocation)
+$CacheDir = [System.IO.Path]::GetFullPath($CacheDir, $currentLocation)
+$RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot, $currentLocation)
 
 function Ensure-Directory([string]$Path) {
   if (!(Test-Path -LiteralPath $Path)) {

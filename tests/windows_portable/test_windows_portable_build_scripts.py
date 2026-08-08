@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -77,14 +78,51 @@ def test_windows_portable_generated_cmd_launchers_have_absolute_powershell_fallb
     assert '"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File' in build_script
 
 
-def test_windows_portable_build_canonicalizes_paths_before_runtime_use(
+def test_windows_portable_build_resolves_relative_paths_from_provider_location(
     repo_root: Path,
+    tmp_path: Path,
 ) -> None:
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
-    build_script = _read_text_or_fail(build_path)
+    pwsh = shutil.which("pwsh")
+    if pwsh is None:
+        pytest.skip("PowerShell 7 is required for the portable build regression")
 
-    for variable in ("ManifestPath", "OutDir", "CacheDir", "RepoRoot"):
-        assert f"${variable} = [System.IO.Path]::GetFullPath(${variable})" in build_script
+    provider_root = tmp_path / "provider-root"
+    process_root = tmp_path / "process-root"
+    provider_root.mkdir()
+    process_root.mkdir()
+    environment = os.environ | {
+        "FRAME_COMPARE_TEST_BUILD_SCRIPT": str(build_path),
+        "FRAME_COMPARE_TEST_PROVIDER_ROOT": str(provider_root),
+    }
+    command = """
+Set-Location -LiteralPath $env:FRAME_COMPARE_TEST_PROVIDER_ROOT
+& $env:FRAME_COMPARE_TEST_BUILD_SCRIPT `
+  -ManifestPath manifest.json `
+  -OutDir relative-out `
+  -CacheDir relative-cache `
+  -RepoRoot relative-repo
+"""
+
+    result = subprocess.run(
+        [pwsh, "-NoProfile", "-Command", command],
+        cwd=process_root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert str(provider_root / "manifest.json") in output
+    assert (provider_root / "relative-out").is_dir()
+    assert (provider_root / "relative-cache").is_dir()
+    assert not (process_root / "relative-out").exists()
+    assert not (process_root / "relative-cache").exists()
+    build_script = _read_text_or_fail(build_path)
+    assert "$RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot, $currentLocation)" in build_script
 
 
 def test_windows_portable_build_creates_default_workspace_directories(repo_root: Path) -> None:
@@ -263,6 +301,18 @@ def test_windows_portable_direct_placebo_smoke_respects_runtime_probe(
     assert "probe_libplacebo_runtime" in direct_smoke
     assert "placebo_direct_frame=skipped reason=vulkan_runtime_unavailable" in direct_smoke
     assert "direct_out.get_frame(0)" in direct_smoke
+
+
+def test_windows_portable_workflow_surfaces_direct_placebo_result(repo_root: Path) -> None:
+    workflow = _read_text_or_fail(
+        repo_root / ".github" / "workflows" / "windows-portable-build.yml"
+    )
+
+    assert "WINDOWS_BUNDLE_PROOF placebo_direct_frame=ok " in workflow
+    assert (
+        "WINDOWS_BUNDLE_PROOF placebo_direct_frame=skipped reason=vulkan_runtime_unavailable"
+    ) in workflow
+    assert "direct placebo frame proof remains required in Phase 2" in workflow
 
 
 def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: Path) -> None:
