@@ -32,6 +32,7 @@ from frame_compare.cli.preset_command import (
 from frame_compare.cli.run_command import (
     RunCliRawArgs,
     RunCommandDeps,
+    confirm_full_window_retry_on_stderr,
     handle_run,
 )
 from frame_compare.cli.wizard_command import (
@@ -280,6 +281,7 @@ def run(
         copy_to_clipboard=_copy_text_to_clipboard,
         open_url=_open_url_in_browser,
         confirm_upload=typer.confirm,
+        confirm_full_window_retry=confirm_full_window_retry_on_stderr,
         stdout_is_tty=_sys_stream_isatty("stdout"),
         stdin_is_tty=_sys_stream_isatty("stdin"),
         no_color_env_present=no_color_requested(),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -38,6 +39,9 @@ from .cli_helpers import HandleErrorFn, LoadConfigFn, WriteConfigFn, format_enum
 if TYPE_CHECKING:
     from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, RunResult
     from frame_compare.orchestration.types import (
+        FullWindowRetryConfirmationDecision,
+        FullWindowRetryConfirmationFn,
+        FullWindowRetryConfirmationRequest,
         SlowpicsUploadConfirmationDecision,
         SlowpicsUploadConfirmationFn,
         SlowpicsUploadConfirmationRequest,
@@ -78,6 +82,7 @@ class RunCommandDeps:
     copy_to_clipboard: CopyToClipboardFn
     open_url: OpenUrlFn
     confirm_upload: ConfirmUploadPromptFn
+    confirm_full_window_retry: ConfirmFullWindowRetryPromptFn
     stdout_is_tty: bool
     stdin_is_tty: bool
     no_color_env_present: bool
@@ -97,6 +102,22 @@ class OpenUrlFn(Protocol):
 
 class ConfirmUploadPromptFn(Protocol):
     def __call__(self, text: str, *, default: bool) -> bool: ...
+
+
+class ConfirmFullWindowRetryPromptFn(Protocol):
+    def __call__(self, text: str) -> bool: ...
+
+
+def confirm_full_window_retry_on_stderr(text: str) -> bool:
+    """Read one default-No response without allowing Click to reprompt."""
+    typer.echo(text, nl=False, err=True)
+    try:
+        response = sys.stdin.readline()
+    except KeyboardInterrupt:
+        raise typer.Abort() from None
+    if response == "":
+        raise typer.Abort()
+    return response.strip().lower() in {"y", "yes"}
 
 
 def coerce_cli_choice[CliChoiceT: Enum](
@@ -322,23 +343,68 @@ def build_runner_dependencies(
     console: Console,
     resolve_effective_config: EffectiveConfigLoader,
 ) -> RunDependencies | None:
-    if not report_confirmed_slowpics_enabled(config):
-        return None
-
-    from frame_compare.orchestration.coordinator import RunDependencies
-
-    return RunDependencies(
-        confirm_slowpics_upload=build_confirm_slowpics_upload_callback(
+    confirm_slowpics_upload = (
+        build_confirm_slowpics_upload_callback(
             args=args,
             deps=deps,
             console=console,
             resolve_effective_config=resolve_effective_config,
         )
+        if report_confirmed_slowpics_enabled(config)
+        else None
+    )
+    confirm_full_window_retry = (
+        build_confirm_full_window_retry_callback(deps=deps)
+        if full_window_retry_prompt_is_legal(args=args, deps=deps, config=config)
+        else None
+    )
+    if confirm_slowpics_upload is None and confirm_full_window_retry is None:
+        return None
+
+    from frame_compare.orchestration.coordinator import RunDependencies
+
+    return RunDependencies(
+        confirm_slowpics_upload=confirm_slowpics_upload,
+        confirm_full_window_retry=confirm_full_window_retry,
     )
 
 
 def report_confirmed_slowpics_enabled(config: ConfigSchema) -> bool:
     return config.slowpics.auto_upload and config.slowpics.confirm_upload_after_report
+
+
+def full_window_retry_prompt_is_legal(
+    *,
+    args: RunCliRawArgs,
+    deps: RunCommandDeps,
+    config: ConfigSchema,
+) -> bool:
+    analysis = config.analysis
+    return (
+        (analysis.ignore_lead_seconds > 0.0 or analysis.ignore_trail_seconds > 0.0)
+        and not args.json_output
+        and not args.quiet
+        and deps.stdin_is_tty
+        and not args.from_cache_only
+        and not args.skip_analysis
+    )
+
+
+def build_confirm_full_window_retry_callback(
+    *,
+    deps: RunCommandDeps,
+) -> FullWindowRetryConfirmationFn:
+    def _confirm_full_window_retry(
+        request: FullWindowRetryConfirmationRequest,
+    ) -> FullWindowRetryConfirmationDecision:
+        del request
+        confirmed = deps.confirm_full_window_retry(
+            "Configured lead/trail exclusions leave too little media to satisfy the\n"
+            "requested frame selection. Analyze the full shared clip for this run? [y/N] "
+        )
+        return "confirmed" if confirmed else "declined"
+
+    return _confirm_full_window_retry
 
 
 def build_confirm_slowpics_upload_callback(

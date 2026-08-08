@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from structlog.testing import capture_logs
 
+from frame_compare.analysis.errors import ExclusionRecoverySelectionError
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import (
@@ -237,6 +238,41 @@ def test_execute_phases_warn_only_failure_marks_warned_and_continues(
     assert executed == ["warn", "after"]
     assert phases[0].status is PhaseStatus.WARNED
     assert phases[1].status is PhaseStatus.COMPLETED
+
+
+def test_execute_phases_fatal_exclusion_recovery_stops_warn_only_pipeline(
+    tmp_path: Path,
+) -> None:
+    context = _make_context(tmp_path)
+    executed: list[str] = []
+
+    async def phase_recovery_failure(_: RunContext) -> None:
+        executed.append("analyze")
+        raise ExclusionRecoverySelectionError(
+            "configured exclusions leave too little media for frame selection",
+            requested=8,
+            found=4,
+        )
+
+    async def downstream_side_effect(_: RunContext) -> None:
+        executed.append("render")
+
+    phases = [
+        Phase(
+            name="analyze",
+            execute=phase_recovery_failure,
+            warn_only=True,
+            fatal_exceptions=(ExclusionRecoverySelectionError,),
+        ),
+        Phase(name="render", execute=downstream_side_effect),
+    ]
+
+    with pytest.raises(ExclusionRecoverySelectionError):
+        asyncio.run(execute_phases(phases, context, NullProgressReporter()))
+
+    assert executed == ["analyze"]
+    assert phases[0].status is PhaseStatus.FAILED
+    assert phases[1].status is PhaseStatus.PENDING
 
 
 def test_execute_phases_warn_only_failure_reports_warned_progress_status(

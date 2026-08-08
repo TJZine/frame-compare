@@ -5,11 +5,15 @@ from pathlib import Path
 import pytest
 import typer
 from rich.console import Console
+from typer.testing import CliRunner
 
 from frame_compare.cli.errors import ExitCode
 from frame_compare.cli.run_command import (
+    build_confirm_full_window_retry_callback,
     build_confirm_slowpics_upload_callback,
+    build_runner_dependencies,
     collect_interactive_slowpics_actions,
+    confirm_full_window_retry_on_stderr,
     handle_run,
     maybe_open_run_report,
     slowpics_browser_open_attempted,
@@ -21,7 +25,10 @@ from frame_compare.config.schema import (
     ReportConfig,
 )
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
-from frame_compare.orchestration.types import SlowpicsUploadConfirmationRequest
+from frame_compare.orchestration.types import (
+    FullWindowRetryConfirmationRequest,
+    SlowpicsUploadConfirmationRequest,
+)
 
 from .run_command_test_support import (
     DepsOptions,
@@ -202,6 +209,121 @@ def test_confirmation_callback_opens_report_before_prompt_and_defaults_decline()
     assert callback(SlowpicsUploadConfirmationRequest(report_path=Path("report.html"))) == (
         "confirmed"
     )
+
+
+def test_full_window_retry_callback_uses_exact_default_no_stderr_prompt() -> None:
+    calls: list[str] = []
+
+    def _confirm(text: str) -> bool:
+        calls.append(text)
+        return True
+
+    callback = build_confirm_full_window_retry_callback(
+        deps=_deps(DepsOptions(confirm_full_window_retry=_confirm))
+    )
+
+    decision = callback(
+        FullWindowRetryConfirmationRequest(
+            requested_frame_count=8,
+            eligible_frame_count=4,
+            ignore_lead_seconds=240.0,
+            ignore_trail_seconds=240.0,
+        )
+    )
+
+    assert decision == "confirmed"
+    assert calls == [
+        "Configured lead/trail exclusions leave too little media to satisfy the\n"
+        "requested frame selection. Analyze the full shared clip for this run? [y/N] "
+    ]
+
+
+@pytest.mark.parametrize(
+    ("prompt_input", "expected_exit_code", "stderr_suffix"),
+    [("\n", 0, " "), ("maybe\nn\n", 0, " "), ("", 1, " Aborted.\n")],
+)
+def test_full_window_retry_prompt_keeps_visible_text_on_stderr(
+    prompt_input: str,
+    expected_exit_code: int,
+    stderr_suffix: str,
+) -> None:
+    app = typer.Typer()
+
+    @app.command()
+    def confirm() -> None:
+        callback = build_confirm_full_window_retry_callback(
+            deps=_deps(DepsOptions(confirm_full_window_retry=confirm_full_window_retry_on_stderr))
+        )
+        callback(
+            FullWindowRetryConfirmationRequest(
+                requested_frame_count=8,
+                eligible_frame_count=4,
+                ignore_lead_seconds=240.0,
+                ignore_trail_seconds=240.0,
+            )
+        )
+
+    result = CliRunner().invoke(app, input=prompt_input)
+
+    expected_prompt = (
+        "Configured lead/trail exclusions leave too little media to satisfy the\n"
+        "requested frame selection. Analyze the full shared clip for this run? [y/N]"
+    )
+    assert result.exit_code == expected_exit_code
+    assert result.stdout == ""
+    assert result.stderr == expected_prompt + stderr_suffix
+
+
+@pytest.mark.parametrize(
+    "args_update,deps_update",
+    [
+        ({"json_output": True}, {"stdin_is_tty": True}),
+        ({"quiet": True}, {"stdin_is_tty": True}),
+        ({"quiet": False}, {"stdin_is_tty": False}),
+        ({"quiet": False, "from_cache_only": True}, {"stdin_is_tty": True}),
+        ({"quiet": False, "skip_analysis": True}, {"stdin_is_tty": True}),
+    ],
+)
+def test_full_window_retry_confirmation_is_not_injected_for_unattended_modes(
+    args_update: dict[str, object],
+    deps_update: dict[str, object],
+) -> None:
+    config = get_default_config()
+    config.analysis.ignore_lead_seconds = 240.0
+    dependencies = build_runner_dependencies(
+        args=replace(_base_args(), **args_update),
+        deps=_deps(DepsOptions(**deps_update)),
+        config=config,
+        console=Console(file=StringIO(), no_color=True),
+        resolve_effective_config=lambda: config,
+    )
+
+    assert dependencies is None
+
+
+def test_full_window_retry_confirmation_is_injected_only_for_nonzero_interactive_config() -> None:
+    interactive_deps = _deps(DepsOptions(stdin_is_tty=True))
+    config = get_default_config()
+    config.analysis.ignore_trail_seconds = 240.0
+
+    dependencies = build_runner_dependencies(
+        args=replace(_base_args(), quiet=False),
+        deps=interactive_deps,
+        config=config,
+        console=Console(file=StringIO(), no_color=True),
+        resolve_effective_config=lambda: config,
+    )
+    zero_margin_dependencies = build_runner_dependencies(
+        args=replace(_base_args(), quiet=False),
+        deps=interactive_deps,
+        config=get_default_config(),
+        console=Console(file=StringIO(), no_color=True),
+        resolve_effective_config=get_default_config,
+    )
+
+    assert dependencies is not None
+    assert dependencies.confirm_full_window_retry is not None
+    assert zero_margin_dependencies is None
 
 
 def test_confirmation_callback_prints_report_path_when_auto_open_disabled() -> None:

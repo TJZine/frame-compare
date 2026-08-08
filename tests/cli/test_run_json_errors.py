@@ -3,6 +3,7 @@ from pathlib import Path
 
 from pytest import MonkeyPatch
 
+from frame_compare.analysis.errors import ExclusionRecoverySelectionError
 from frame_compare.cli.entry import app
 from frame_compare.cli.errors import ExitCode, format_error_json, get_exit_code
 from frame_compare.config.errors import ConfigNotFoundError
@@ -384,6 +385,89 @@ def test_run_json_outputs_error_schema_and_exit_code(
     payload = json.loads(result.stdout)
     expected = format_error_json(ConfigNotFoundError(Path("missing.toml")))
     assert payload == expected
+
+
+def test_run_json_exclusion_recovery_fails_closed_without_confirmation_dependency(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    error = ExclusionRecoverySelectionError(
+        "configured exclusions leave too little media for frame selection",
+        requested=8,
+        found=4,
+        hint="Reduce exclusions or use a clip-specific config",
+    )
+
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        assert dependencies is None
+        raise error
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
+        root = Path("workspace")
+        config_path = _write_minimal_config(root)
+        config_path.write_text(
+            MINIMAL_CONFIG + "\n[analysis]\nignore_lead_seconds = 240.0\n",
+            encoding="utf-8",
+        )
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--root",
+                str(root),
+                "--config",
+                str(config_path.relative_to(root)),
+                "--json",
+            ],
+        )
+
+    assert result.exit_code == int(ExitCode.PROCESSING_ERROR)
+    assert result.stderr == ""
+    assert json.loads(result.stdout) == format_error_json(error)
+
+
+def test_run_quiet_exclusion_recovery_fails_closed_on_stderr_without_prompt(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    error = ExclusionRecoverySelectionError(
+        "configured exclusions leave too little media for frame selection",
+        requested=8,
+        found=4,
+        hint="Reduce exclusions or use a clip-specific config",
+    )
+
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        assert dependencies is None
+        raise error
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
+        root = Path("workspace")
+        config_path = _write_minimal_config(root)
+        config_path.write_text(
+            MINIMAL_CONFIG + "\n[analysis]\nignore_trail_seconds = 240.0\n",
+            encoding="utf-8",
+        )
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--root",
+                str(root),
+                "--config",
+                str(config_path.relative_to(root)),
+                "--quiet",
+            ],
+        )
+
+    assert result.exit_code == int(ExitCode.PROCESSING_ERROR)
+    assert result.stdout == ""
+    assert "[FC-4012]" in result.stderr
+    assert "Analyze the full shared clip" not in result.stderr
 
 
 def test_run_exit_code_maps_by_error_category_prefix_in_json_mode(

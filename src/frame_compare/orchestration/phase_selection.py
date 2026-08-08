@@ -26,6 +26,10 @@ from frame_compare.orchestration.context import (
     RunContext,
 )
 from frame_compare.orchestration.execution_types import AnalyzePhaseOutput, FramePlanPhaseOutput
+from frame_compare.orchestration.full_window_retry import (
+    raise_if_full_window_retry_runtime_failed,
+    recover_from_exclusion_selection_failure,
+)
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 from frame_compare.utils.types import WorkspacePaths
@@ -51,13 +55,39 @@ __all__ = [
 ]
 
 
-def select_initial_frame_plan(ctx: RunContext) -> FramePlanPhaseOutput:
+def select_initial_frame_plan(
+    ctx: RunContext,
+    *,
+    vs_loader: VSLoader | None = None,
+) -> FramePlanPhaseOutput:
+    """Select the initial plan, with one consent-gated exclusion recovery attempt."""
+    try:
+        return _select_initial_frame_plan_once(ctx)
+    except SelectionError as error:
+        recovery_warnings = recover_from_exclusion_selection_failure(
+            ctx,
+            error,
+            vs_loader=vs_loader,
+        )
+    try:
+        output = _select_initial_frame_plan_once(ctx)
+    except SelectionError as error:
+        recover_from_exclusion_selection_failure(ctx, error, vs_loader=vs_loader)
+        raise AssertionError("full-window retry failure must raise") from error
+    return FramePlanPhaseOutput(
+        selected_frames=output.selected_frames,
+        selection_breakdown=output.selection_breakdown,
+        selection_details_by_source_frame=output.selection_details_by_source_frame,
+        warnings=[*output.warnings, *recovery_warnings],
+    )
+
+
+def _select_initial_frame_plan_once(ctx: RunContext) -> FramePlanPhaseOutput:
     window_start, frame_count = _selection_window_for_context(ctx)
     user_frames = _user_frames_in_window(
         ctx.config.analysis, ctx.reference, window_start, frame_count
     )
     user_frame_set = set(user_frames)
-    dropped_user_frames = sorted(set(ctx.config.analysis.user_frames) - set(user_frames))
     source_offset = ctx.reference.trim.trim_start_frames + window_start
     selectable_random_indices = [
         frame_index
@@ -95,13 +125,11 @@ def select_initial_frame_plan(ctx: RunContext) -> FramePlanPhaseOutput:
             requested=requested_initial_count,
             found=0,
         )
-    warnings = (
-        [
-            "frame selection: dropped user frame(s) outside trims/windowing: "
-            + ", ".join(str(frame) for frame in dropped_user_frames)
-        ]
-        if dropped_user_frames
-        else []
+    warnings = _dropped_user_frame_warnings(
+        config=ctx.config.analysis,
+        reference=ctx.reference,
+        window_start=window_start,
+        frame_count=frame_count,
     )
     return FramePlanPhaseOutput(
         selected_frames=selected_frames,
@@ -157,6 +185,23 @@ def _user_frames_in_window(
     return sorted({frame for frame in config.user_frames if source_start <= frame < source_end})
 
 
+def _dropped_user_frame_warnings(
+    *,
+    config: AnalysisConfig,
+    reference: ClipState,
+    window_start: int,
+    frame_count: int,
+) -> list[str]:
+    retained = _user_frames_in_window(config, reference, window_start, frame_count)
+    dropped = sorted(set(config.user_frames) - set(retained))
+    if not dropped:
+        return []
+    return [
+        "frame selection: dropped user frame(s) outside trims/windowing: "
+        + ", ".join(str(frame) for frame in dropped)
+    ]
+
+
 def _selection_window_for_context(ctx: RunContext) -> tuple[int, int]:
     window = ctx.selection_window
     if window.frame_count > 0:
@@ -178,6 +223,66 @@ def _source_offset_for_reference_window(reference: ClipState, window_start: int)
 
 
 def run_analyze_phase(
+    ctx: RunContext,
+    *,
+    input_videos: list[Path],
+    workspace: WorkspacePaths,
+    require_cache_only: bool = False,
+    vs_loader: VSLoader | None = None,
+) -> AnalyzePhaseOutput:
+    """Analyze and select, with one consent-gated exclusion recovery attempt."""
+    try:
+        return _run_analyze_phase_once(
+            ctx,
+            input_videos=input_videos,
+            workspace=workspace,
+            require_cache_only=require_cache_only,
+            vs_loader=vs_loader,
+        )
+    except SelectionError as error:
+        recovery_warnings = recover_from_exclusion_selection_failure(
+            ctx,
+            error,
+            vs_loader=vs_loader,
+        )
+    except Exception as error:
+        raise_if_full_window_retry_runtime_failed(ctx, error)
+        raise
+    try:
+        output = _run_analyze_phase_once(
+            ctx,
+            input_videos=input_videos,
+            workspace=workspace,
+            require_cache_only=require_cache_only,
+            vs_loader=vs_loader,
+        )
+    except SelectionError as error:
+        recover_from_exclusion_selection_failure(ctx, error, vs_loader=vs_loader)
+        raise AssertionError("full-window retry failure must raise") from error
+    except Exception as error:
+        raise_if_full_window_retry_runtime_failed(ctx, error)
+        raise
+    return AnalyzePhaseOutput(
+        selected_frames=output.selected_frames,
+        selection_breakdown=output.selection_breakdown,
+        metrics_cache_hit=output.metrics_cache_hit,
+        analysis_metrics=output.analysis_metrics,
+        selection_details_by_source_frame=output.selection_details_by_source_frame,
+        warnings=[
+            *output.warnings,
+            *_dropped_user_frame_warnings(
+                config=ctx.config.analysis,
+                reference=ctx.reference,
+                window_start=ctx.selection_window.start_frame,
+                frame_count=ctx.selection_window.frame_count,
+            ),
+            *recovery_warnings,
+        ],
+        replaces_frame_plan_selection=True,
+    )
+
+
+def _run_analyze_phase_once(
     ctx: RunContext,
     *,
     input_videos: list[Path],

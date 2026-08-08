@@ -9,11 +9,12 @@ from typing import Any
 
 import pytest
 
-from frame_compare.analysis.errors import SelectionError
+from frame_compare.analysis.errors import ExclusionRecoverySelectionError, SelectionError
 from frame_compare.analysis.metrics import slice_frame_metrics
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.orchestration import phase_selection, phase_tasks
+from frame_compare.orchestration.full_window_retry import FullWindowRetryOverride
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentResult
 from tests.orchestration.phase_task_helpers import (
@@ -262,6 +263,39 @@ def test_run_align_phase_labels_skipped_analysis_fallback_random_frame(
     assert output.warnings == [
         "frame selection: dropped user frame(s) outside aligned renderable range: 0"
     ]
+
+
+def test_run_align_phase_does_not_substitute_after_full_window_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
+    ctx = _context(tmp_path, comparisons=[comparison])
+    ctx.config.analysis = ctx.config.analysis.model_copy(
+        update={"user_frames": [0], "random_frame_count": 1, "random_seed": 42}
+    )
+    ctx.full_window_retry_override = FullWindowRetryOverride(
+        ignore_lead_seconds=2.0,
+        ignore_trail_seconds=2.0,
+    )
+
+    monkeypatch.setattr(
+        phase_tasks,
+        "align_clips_from_request",
+        lambda *_args, **_kwargs: [
+            AlignmentResult(
+                reference_clip="reference.mkv",
+                comparison_clip="encode.mkv",
+                frame_offset=80,
+                time_offset_seconds=3.33,
+                correlation_score=0.9,
+                algorithm="cross_correlation",
+                source="computed",
+            )
+        ],
+    )
+
+    with pytest.raises(ExclusionRecoverySelectionError, match="full-window retry"):
+        phase_tasks.run_align_phase(ctx, selected_frames=[0, 66])
 
 
 def test_run_align_phase_reselects_trimmed_overlap_when_fallback_plan_would_drop_labels(

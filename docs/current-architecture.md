@@ -67,6 +67,10 @@ monotonic total rather than wall-clock subtraction.
 Current phase-family owners are intentionally explicit:
 
 - `frame_compare.orchestration.phase_selection`: frame-plan and analyze phase bodies plus shared selection/frame-translation helpers
+- `frame_compare.orchestration.full_window_retry`: the run-scoped effective-config,
+  confirmation-result, authoritative window/domain recomputation, and fatal
+  retry-once boundary for exclusion-constrained selection failures; the CLI owns
+  the injected stderr confirmation callback
 - `frame_compare.orchestration.phase_tasks`: align and render phase bodies plus alignment/render-specific helpers
 - `frame_compare.orchestration.phase_post_render`: metadata, publish, report, confirmation, and cleanup phase bodies
 

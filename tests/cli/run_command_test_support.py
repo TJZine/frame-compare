@@ -106,6 +106,7 @@ class DepsOptions:
     copy_to_clipboard: Callable[[str], None] | None = None
     open_url: Callable[[str], bool] | None = None
     confirm_upload: Callable[..., bool] | None = None
+    confirm_full_window_retry: Callable[[str], bool] | None = None
 
 
 def _deps(options: DepsOptions | None = None, opened: list[Path] | None = None) -> RunCommandDeps:
@@ -127,6 +128,7 @@ def _deps(options: DepsOptions | None = None, opened: list[Path] | None = None) 
         copy_to_clipboard=opts.copy_to_clipboard or (lambda _text: None),
         open_url=opts.open_url or (lambda _url: True),
         confirm_upload=opts.confirm_upload or (lambda _text, *, default: default),
+        confirm_full_window_retry=opts.confirm_full_window_retry or (lambda _text: False),
         stdout_is_tty=opts.stdout_is_tty,
         stdin_is_tty=opts.stdin_is_tty,
         no_color_env_present=opts.no_color_env_present,
