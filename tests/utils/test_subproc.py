@@ -61,15 +61,17 @@ def test_run_subprocess_inside_running_event_loop() -> None:
     assert result.stderr == b""
 
 
+@pytest.mark.parametrize("requested", ["ffmpeg", "FFMPEG.EXE"])
 def test_resolve_executable_prefers_absolute_media_override(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
+    requested: str,
 ) -> None:
     ffmpeg = tmp_path / "ffmpeg.exe"
     ffmpeg.write_bytes(b"")
     monkeypatch.setenv("FRAME_COMPARE_FFMPEG_EXECUTABLE", str(ffmpeg.resolve()))
 
-    assert resolve_executable("ffmpeg") == str(ffmpeg.resolve())
+    assert resolve_executable(requested) == str(ffmpeg.resolve())
 
 
 def test_resolve_executable_fails_closed_for_invalid_media_override(

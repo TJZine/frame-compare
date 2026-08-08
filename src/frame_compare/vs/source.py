@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
@@ -17,12 +18,19 @@ if TYPE_CHECKING:
     import vapoursynth as vs
 
 
+log = logging.getLogger(__name__)
+
+
 class _LWLibavSourcePlugin(Protocol):
     def LWLibavSource(
         self,
         path: str,
         **kwargs: int | str,
     ) -> vs.VideoNode: ...
+
+
+class _VideoNodeWithFps(Protocol):
+    fps: Fraction
 
 
 _INDEX_CONSTRUCTION_FAILURE_MARKER = "failed to construct index"
@@ -91,7 +99,8 @@ def load_source(
             loader_kwargs=loader_kwargs,
         )
         frame = clip.get_frame(0)
-        fps = Fraction(clip.fps.numerator, clip.fps.denominator)
+        clip_fps = cast(_VideoNodeWithFps, clip).fps
+        fps = Fraction(clip_fps.numerator, clip_fps.denominator)
         is_hdr, hdr_metadata = detect_hdr(dict(frame.props))
     except PluginNotFoundError:
         raise
@@ -136,15 +145,28 @@ def _load_lwlibav_source(
         if index_path.is_file():
             try:
                 index_path.unlink()
-            except OSError:
-                pass
+            except OSError as error:
+                log.warning(
+                    "Could not remove rejected L-SMASH index %s; retrying without an index cache: %s",
+                    index_path,
+                    error,
+                )
             else:
                 try:
                     return loader.LWLibavSource(str(path), **indexed_kwargs)
-                except Exception:
+                except Exception as retry_error:
                     # A cache-free retry remains the last recovery path for an
                     # unwritable or runtime-rejected index location.
-                    pass
+                    log.warning(
+                        "L-SMASH index rebuild failed for %s; retrying without an index cache: %s",
+                        path,
+                        retry_error,
+                    )
+
+        log.warning(
+            "Loading %s without an L-SMASH index cache after index construction failed",
+            path,
+        )
 
         try:
             return loader.LWLibavSource(str(path), cache=0, **loader_kwargs)

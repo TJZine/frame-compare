@@ -41,7 +41,10 @@ flowchart LR
 VSPreview is optional for interactive manual alignment. VapourSynth is not optional
 for the default renderer: an FFmpeg-only route requires
 `screenshots.use_ffmpeg = true`, and HDR frames that need tonemapping still require
-VapourSynth.
+VapourSynth, the selected `vs-placebo` plugin, and a working Vulkan loader/driver.
+The Windows portable and Docker profiles bundle or install the selected plugin and
+validate Vulkan separately; native installs must provide a compatible Vulkan runtime
+for the active GPU in addition to matching the documented media-component versions.
 
 ### Windows portable orientation
 

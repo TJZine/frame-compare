@@ -4,8 +4,8 @@ import os
 from fractions import Fraction
 from pathlib import Path
 
-from frame_compare.analysis.cache_io import compute_cache_key, metrics_cache_filename
 import frame_compare.analysis.metric_identity as metric_identity
+from frame_compare.analysis.cache_io import compute_cache_key, metrics_cache_filename
 from frame_compare.analysis.metric_identity import stable_metric_algorithm_identity_json
 from frame_compare.analysis.types import MetricActiveRect, MetricCacheRequest, MetricFrameRange
 from frame_compare.config.schema import AnalysisConfig

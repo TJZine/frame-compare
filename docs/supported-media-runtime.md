@@ -13,6 +13,7 @@ A version shown here is supported only as part of the complete profile described
 | L-SMASH-Works | 1282.0.0.0 | **1296.0.0.0**, commit `a83318210c183c8ebbe703d975ffc76fb499ef07` | 2026-07-07 | Formal native release | Latest stable native release and first selected lineage using the VapourSynth API 4 implementation. |
 | Windows L-SMASH-Works package | 1282 lineage | **vapoursynth-lsmas 1296.0.0.1** | 2026-07-08 | Non-yanked official PyPI wheel | Packaging follow-up for the 1296 native lineage. Its plugin DLL does not require a separately bundled MSVC redistributable DLL, unlike the release archive DLL inspected during this refresh. |
 | L-SMASH | v2.14.5 | commit **`84740c5d960ab622f4c08b971dc59192bc27ef74`** | 2025-07-05 | Pinned commit, not a release | Exact L-SMASH revision selected and tested by L-SMASH-Works 1296. No newer appropriate formal stable tag supersedes it. |
+| OBUParse (Docker) | Not present | commit **`a67fcab9cd9d56c866a7a860f8c4aeb91b8817e8`** | 2026-06-22 | Pinned commit, shared library | Required directly by the selected L-SMASH revision (`obuparse.h` and `-lobuparse`). Docker builds the shared target and preserves `libobuparse.so.2` plus its unversioned symlink. |
 | FFMS2 | 5.0 | **5.0**, commit `7ed5e4d039ca9a6236bd2ebdfdd656c4304fbe04` | 2024-05-28 | Formal stable release | 5.0 remains the latest formal stable release. It is rebuilt for Docker against the selected VapourSynth and Debian FFmpeg stack and remains excluded from Windows. |
 | vs-placebo | 2.0.2 | **2.0.4**, commit `3cfd23f257ecb62b0cbd81eaaca092e18ae8e579` | 2026-07-14 | Non-yanked stable release | Latest non-yanked stable wheel; 2.0.3 is yanked. Requires Python 3.12+ and VapourSynth R74+. |
 | libplacebo used by vs-placebo | older 2.0.2 lineage | commit **`a7a18af88ff0a17c04840dcb3246047bb6b46df3`** | 2026-07-08 | Upstream-pinned commit | Revision selected by the vs-placebo 2.0.4 wheel build. It includes a correction for luminance clipping when no tone mapping is needed. |
@@ -20,13 +21,18 @@ A version shown here is supported only as part of the complete profile described
 | Windows FFmpeg | earlier retained 8.1 build | **`n8.1.2-34-g9b6c8969e0`**, BtbN build `autobuild-2026-07-31-14-10` | 2026-07-31 | Immutable retained release artifact | Newest selected end-of-month Windows x64 LGPL-only artifact from the stable FFmpeg 8.1 branch. It is not a master snapshot. |
 | Linux FFmpeg | Debian Trixie packages | **`7:7.1.5-0+deb13u1`** | Resolved during validation | Debian-supported package | Runtime and development packages remain aligned to Debian Trixie. Frame Compare does not replace them with a custom upstream FFmpeg build. |
 
-Primary upstream evidence is recorded through the immutable source and artifact URLs in
-`Dockerfile` and `tools/windows_portable/manifest.windows-x64.json`. Those files also
-record SHA-256 hashes, exact byte sizes, source revisions, and license metadata.
+Primary upstream evidence is recorded in `Dockerfile` and
+`tools/windows_portable/manifest.windows-x64.json`. Docker fetches each exact
+40-character Git commit and verifies a deterministic SHA-256 over the complete tracked
+tree; it does not rely on GitHub-generated archive bytes as an immutable boundary.
+Windows binary/source artifacts remain fail-closed on exact downloaded byte size and
+SHA-256. Both surfaces record source revisions and license metadata.
 
 ## Runtime profiles
 
-Frame Compare owns two deterministic media-runtime profiles:
+Frame Compare owns two deterministic deployment profiles. Unmanaged native macOS is
+reported as the separate `native-macos` profile so it cannot inherit Debian package
+identity or reuse Debian decoder caches; it is not a packaged support profile.
 
 ### Windows x64 portable
 
@@ -46,6 +52,9 @@ Frame Compare owns two deterministic media-runtime profiles:
 - VapourSynth R78 manylinux wheel.
 - L-SMASH-Works 1296 built from source against VapourSynth API 4 and the Debian
   FFmpeg development ABI.
+- OBUParse built as `libobuparse.so.2` from the pinned commit required by the
+  selected L-SMASH source; the runtime image preserves the SONAME/symlink and
+  verifies actual L-SMASH linkage.
 - FFMS2 5.0 built from source against the same VapourSynth and Debian FFmpeg stack.
 - vs-placebo 2.0.4 manylinux wheel.
 - Debian Trixie FFmpeg runtime package `7:7.1.5-0+deb13u1`.
@@ -103,10 +112,10 @@ fingerprints for:
 
 | Scope | Included runtime surface | Intentionally excluded |
 | --- | --- | --- |
-| `analysis` | VapourSynth and the profile-specific L-SMASH-Works decoder lineage | vs-placebo and standalone FFmpeg |
-| `probe` | VapourSynth and the profile-specific L-SMASH-Works decoder lineage | vs-placebo and standalone FFmpeg |
+| `analysis` | VapourSynth and the profile-specific L-SMASH-Works decoder lineage, including OBUParse on Docker | vs-placebo and standalone FFmpeg |
+| `probe` | VapourSynth and the profile-specific L-SMASH-Works decoder lineage, including OBUParse on Docker | vs-placebo and standalone FFmpeg |
 | `alignment` | Profile-specific standalone FFmpeg lineage | VapourSynth and tone mapping |
-| `index` | L-SMASH-Works, L-SMASH, profile-specific decoder FFmpeg, and index policy | standalone FFmpeg and tone mapping |
+| `index` | L-SMASH-Works, L-SMASH, profile-specific decoder FFmpeg, Docker OBUParse, and index policy | standalone FFmpeg and tone mapping |
 | `full` | Complete supported deployment profile | None |
 
 This avoids both unsafe reuse and unnecessary invalidation. A tone-mapping-only update
@@ -120,9 +129,10 @@ Frame Compare-owned L-SMASH-Works indexes use a profile-scoped filename:
 ```
 
 The current Windows token is `lsw1296-e3c074652ffb`; the current Debian/Docker token
-is `lsw1296-c16b7b65ae60`. Legacy adjacent `<media>.lwi` files are ignored rather
+is `lsw1296-4ea22a0b0598`. Legacy adjacent `<media>.lwi` files are ignored rather
 than deleted. A corrupt Frame Compare-owned index is removed and rebuilt once, with a
-cache-free source open as the last recovery path for an unusable index location.
+warning when removal or rebuilding fails and a cache-free source open as the last
+recovery path for an unusable index location.
 
 ## Portable update boundary
 
@@ -145,6 +155,7 @@ The baseline remains free of GPL/nonfree FFmpeg artifacts:
 | VapourSynth | LGPL-2.1-or-later |
 | L-SMASH-Works source | ISC; distributed plugin binary also carries linked-library obligations |
 | L-SMASH | ISC |
+| OBUParse | ISC |
 | FFMS2 | MIT |
 | vs-placebo | LGPL-2.1-only |
 | libplacebo | LGPL-2.1-or-later |

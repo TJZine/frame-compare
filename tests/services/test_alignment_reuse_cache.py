@@ -165,13 +165,20 @@ def test_source_set_cache_key_changes_with_media_runtime(
     request = _request(tmp_path)
     original = source_set_cache_key(request)
 
+    observed_scopes: list[str] = []
+
+    def fingerprint(scope: str) -> str:
+        observed_scopes.append(scope)
+        return "a" * 64
+
     monkeypatch.setattr(
         reuse_cache,
         "media_runtime_fingerprint",
-        lambda _scope: "a" * 64,
+        fingerprint,
     )
 
     assert source_set_cache_key(request) != original
+    assert observed_scopes == ["alignment"]
 
 
 def test_shared_reuse_cache_round_trips_computed_entry(tmp_path: Path) -> None:

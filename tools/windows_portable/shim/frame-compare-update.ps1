@@ -322,10 +322,10 @@ function Get-InstalledBundleCompatibilityContract([string]$BundlePath) {
 
   $requirementsFingerprint = Get-RequiredStringProperty -Object $bundleInfo -Name "requirements_lock_sha256" -Context "bundle_info"
   $runtimeFingerprint = Get-RequiredStringProperty -Object $bundleInfo -Name "media_runtime_fingerprint" -Context "bundle_info"
-  if ($requirementsFingerprint -notmatch '^[a-f0-9]{64}$') {
+  if ($requirementsFingerprint -cnotmatch '^[a-f0-9]{64}$') {
     throw "Installed requirements fingerprint is invalid in bundle_info.json."
   }
-  if ($runtimeFingerprint -notmatch '^[a-f0-9]{64}$') {
+  if ($runtimeFingerprint -cnotmatch '^[a-f0-9]{64}$') {
     throw "Installed media-runtime fingerprint is invalid. A complete portable reinstall is required."
   }
 
@@ -600,7 +600,7 @@ function Invoke-ApplyUpdate([string]$BundlePath, [string]$UpdateZipPath) {
     }
 
     $expectedRuntimeFingerprint = Get-RequiredStringProperty -Object $manifest -Name "expected_media_runtime_fingerprint" -Context "manifest"
-    if ($expectedRuntimeFingerprint -notmatch '^[a-f0-9]{64}$') {
+    if ($expectedRuntimeFingerprint -cnotmatch '^[a-f0-9]{64}$') {
       throw "Manifest expected_media_runtime_fingerprint is invalid."
     }
     $installedCompatibility = Get-InstalledBundleCompatibilityContract -BundlePath $BundlePath

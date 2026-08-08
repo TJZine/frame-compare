@@ -10,10 +10,9 @@ from typing import Literal, NotRequired, TypedDict
 import tomli_w
 
 from frame_compare import __version__
-from frame_compare.errors import JSONValue
 from frame_compare.services.run_folder import RunFolderNamingSource
 from frame_compare.utils.atomic_write import write_text_atomic
-from frame_compare.vs.runtime_contract import supported_media_runtime_report
+from frame_compare.vs.runtime_contract import MediaRuntimeReport, supported_media_runtime_report
 
 type RunInfoTmdbSkipReason = Literal["disabled", "skip_metadata", "no_http_client"]
 
@@ -38,7 +37,7 @@ class RunInfoPayload(TypedDict):
     naming_source: RunFolderNamingSource
     source_filenames: list[str]
     frame_compare_version: str
-    media_runtime: dict[str, JSONValue]
+    media_runtime: MediaRuntimeReport
     tmdb: NotRequired[RunInfoTmdbPayload]
 
 

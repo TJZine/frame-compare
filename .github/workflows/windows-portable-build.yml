@@ -80,7 +80,10 @@ jobs:
       - name: Build portable bundle
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
           $out = "dist/frame-compare-portable-win-x64"
+          $proofLog = "dist/windows-bundle-runtime-proof.log"
           $buildArgs = @(
             "-NoProfile",
             "-ExecutionPolicy",
@@ -97,7 +100,24 @@ jobs:
           if ($env:REQUIRE_SIGNING -eq "true") {
             $buildArgs += "-RequireReleasePublicKey"
           }
-          pwsh @buildArgs
+          pwsh @buildArgs 2>&1 | Tee-Object -FilePath $proofLog
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+          $proof = Get-Content -LiteralPath $proofLog -Raw
+          foreach ($phase in @(
+            "package_imports",
+            "runtime_contract",
+            "vapoursynth_environment",
+            "lwlibavsource_frame",
+            "placebo_tonemap_api",
+            "apply_tonemap_frame",
+            "placebo_tonemap_frame"
+          )) {
+            if ($proof -notmatch "WINDOWS_BUNDLE_PROOF phase=$phase ok") {
+              throw "Required portable runtime proof phase missing: $phase"
+            }
+          }
 
       - name: Verify bundle workspace directories
         shell: pwsh
@@ -125,11 +145,17 @@ jobs:
             throw "Missing L-SMASH manifest: $lsmasManifest"
           }
 
-      - name: "Smoke: doctor --json"
+      - name: "Smoke: absolute candidate launcher"
         shell: pwsh
         run: |
           $bundle = (Resolve-Path "dist/frame-compare-portable-win-x64").Path
-          $output = & "$bundle/frame-compare.ps1" doctor --json 2>&1
+          $launcher = Join-Path $bundle "frame-compare.ps1"
+          Get-Command -CommandType ExternalScript $launcher | Format-List Source,Path
+          & $launcher --help | Out-Host
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $launcher version | Out-Host
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $output = & $launcher doctor --json 2>&1
           $exitCode = $LASTEXITCODE
           $knownNoise = "Core plugin autoloading failed. Installation is broken!"
           foreach ($line in $output) {
@@ -209,6 +235,15 @@ jobs:
         shell: pwsh
         run: |
           $bundle = (Resolve-Path "dist/zip_extract_check/frame-compare-portable-win-x64").Path
+          $candidateLauncher = Join-Path $bundle "frame-compare.ps1"
+          Get-Command -CommandType ExternalScript $candidateLauncher | Format-List Source,Path
+          & $candidateLauncher --help | Out-Host
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $candidateLauncher version | Out-Host
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $candidateLauncher doctor --json | Out-Host
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
           & "$bundle/install.cmd"
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
@@ -324,6 +359,13 @@ jobs:
           if ($env:REQUIRE_SIGNED_UPDATE -eq "true" -and $entries -notcontains "update-manifest.sig") {
             throw "Signed update zip is missing update-manifest.sig."
           }
+
+      - name: Portable updater process-boundary proof
+        shell: pwsh
+        run: |
+          uv run --no-sync pytest -q `
+            tests/windows_portable/test_windows_portable_update_apply_e2e.py `
+            tests/windows_portable/test_windows_portable_update_scripts.py
 
       - name: Prepare exact orchestrated release assets
         if: inputs.prepare_release_assets

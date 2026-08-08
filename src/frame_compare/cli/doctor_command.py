@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, cast
 
 import typer
 from rich.console import Console
@@ -11,6 +11,7 @@ from rich.markup import escape
 
 from frame_compare.cli.errors import ExitCode, format_error_json, get_exit_code
 from frame_compare.errors import FrameCompareError, JSONValue
+
 from .cli_helpers import HandleErrorFn
 
 if TYPE_CHECKING:
@@ -93,7 +94,7 @@ def doctor_report_json(report: DoctorReport) -> dict[str, JSONValue]:
 
     doctor_payload: dict[str, JSONValue] = {
         "baseline_version": VAPOURSYNTH_RELEASE,
-        "media_runtime": supported_media_runtime_report(),
+        "media_runtime": cast(JSONValue, supported_media_runtime_report()),
         "runtime_environment": runtime_environment_report(),
         "checks": checks_payload,
     }

@@ -8,31 +8,27 @@ FROM ghcr.io/astral-sh/uv:0.12.2@sha256:069a51314a7bb6031777a9273205fe1b0b19e914
 # ─────────────────────────────────────────────────────────────────────────────
 FROM python:3.13.14-slim-trixie@sha256:bf503bb2243c5aad0aa951544dd60d165f992646441d35dea90893703fc26251 AS builder
 
-# Deterministic media-runtime pins. Every source archive is immutable and verified.
+# Deterministic media-runtime pins. Every Git checkout verifies both the exact
+# commit and a content-derived digest of the complete tracked source tree.
 ARG VAPOURSYNTH_VERSION=78
 ARG VAPOURSYNTH_SOURCE_COMMIT=c2f5751a412347f306eb7f6a5985dd9a719f3896
-ARG VAPOURSYNTH_SOURCE_SHA256=fbf7986d96495abd106c714b01768671a8cab1d0c6a48feba0aa127bf5672753
-ARG VAPOURSYNTH_SOURCE_BYTES=637989
+ARG VAPOURSYNTH_SOURCE_TREE_SHA256=cc0f2ec4127bd26f6dff074450ebe801368b6d4341b3ab9928c94073a682196f
 ARG VAPOURSYNTH_X86_64_WHEEL_SHA256=8e70b98c40ac69477a15f8ae0c551c2a4e182281986b5996853c7a01477ed477
 ARG VAPOURSYNTH_AARCH64_WHEEL_SHA256=5368661393622fe9fa267409a5fbf7143d561b55dafdf6a500ef0fe38b285386
 ARG LSMASH_COMMIT=84740c5d960ab622f4c08b971dc59192bc27ef74
-ARG LSMASH_SHA256=003d20595a3e66220a906c6bb351b8de973f2141fc24613db7701191f7219d5b
-ARG LSMASH_BYTES=503390
+ARG LSMASH_SOURCE_TREE_SHA256=b1553e40907e57240fd19a08642b3bc548dbdeda3750948ebbc1c5634af901b7
+ARG OBUPARSE_COMMIT=a67fcab9cd9d56c866a7a860f8c4aeb91b8817e8
+ARG OBUPARSE_SOURCE_TREE_SHA256=f82de7a5f007a4e89441e7ff4b470a00eddc4dfedb22faa46f633acfeefde178
 ARG LSMASH_WORKS_COMMIT=a83318210c183c8ebbe703d975ffc76fb499ef07
-ARG LSMASH_WORKS_SHA256=6a135d7258376b461fdcabf5573c3a09eda5e3784f55fd0e8a1c3fac37a2a819
-ARG LSMASH_WORKS_BYTES=308701
+ARG LSMASH_WORKS_SOURCE_TREE_SHA256=7845a6a6d823046c6b0bbe617ae88e304ee117f466961aabceea931831d8f9e3
 ARG FFMS2_COMMIT=7ed5e4d039ca9a6236bd2ebdfdd656c4304fbe04
-ARG FFMS2_SHA256=711e2330163700739c954c4f300d0dbbaed0c2360e0dc6debb29757640454d02
-ARG FFMS2_BYTES=168105
+ARG FFMS2_SOURCE_TREE_SHA256=5be86d5f8f103f8e0b25aaed0b69b7afc06f1b6cd548a6c81160fcd14ea6e8d7
 ARG VS_PLACEBO_SOURCE_COMMIT=3cfd23f257ecb62b0cbd81eaaca092e18ae8e579
-ARG VS_PLACEBO_SOURCE_SHA256=b1c3e6eab7e7c722aa1e5706aef70b5365f4a4c881b4573a6121e4c9572a8fbe
-ARG VS_PLACEBO_SOURCE_BYTES=37902
+ARG VS_PLACEBO_SOURCE_TREE_SHA256=beb830744f1fa1702eb64cfe8bdaf5780bb3501f9c48901df24ab112a406a30a
 ARG LIBPLACEBO_SOURCE_COMMIT=a7a18af88ff0a17c04840dcb3246047bb6b46df3
-ARG LIBPLACEBO_SOURCE_SHA256=ba0c8c011c19cb74bcee26646d2d6070447151da89a9abdd01c9034e768de8b2
-ARG LIBPLACEBO_SOURCE_BYTES=873993
+ARG LIBPLACEBO_SOURCE_TREE_SHA256=bdbe17582c081e107e1a66c44d5f01aa856a157aa124660d662221848e88eda7
 ARG LIBDOVI_SOURCE_COMMIT=4fd2b2235c9f93582dd4a00e65ee34a07800afd7
-ARG LIBDOVI_SOURCE_SHA256=8ccb1922d7dbb57bc4f2c15c10b90c462f7a5f292efe317c116db923728dd3f1
-ARG LIBDOVI_SOURCE_BYTES=489628
+ARG LIBDOVI_SOURCE_TREE_SHA256=e16dfb68270fc5b8610e2f1ae38b0b1051d8e7d03dd4b98a2f22f0e1fd09de26
 ARG DEBIAN_FFMPEG_PACKAGE_VERSION=7:7.1.5-0+deb13u1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -40,7 +36,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     automake \
     build-essential \
     ca-certificates \
-    curl \
     git \
     libtool \
     liblzma-dev \
@@ -66,45 +61,63 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     done \
     && rm -rf /var/lib/apt/lists/*
 
+COPY tools/checkout_source_commit.sh /usr/local/bin/checkout_source_commit.sh
+
 RUN printf '%s\n' \
         "vapoursynth==${VAPOURSYNTH_VERSION} --hash=sha256:${VAPOURSYNTH_X86_64_WHEEL_SHA256} --hash=sha256:${VAPOURSYNTH_AARCH64_WHEEL_SHA256}" \
         > /tmp/vapoursynth-wheel-requirements.txt && \
     python -m pip install --no-cache-dir --require-hashes --only-binary=:all: \
         -r /tmp/vapoursynth-wheel-requirements.txt && \
-    curl -fsSL \
-        "https://codeload.github.com/vapoursynth/vapoursynth/tar.gz/${VAPOURSYNTH_SOURCE_COMMIT}" \
-        -o /tmp/vapoursynth-src.tar.gz && \
-    test "$(wc -c < /tmp/vapoursynth-src.tar.gz | tr -d ' ')" = "${VAPOURSYNTH_SOURCE_BYTES}" && \
-    echo "${VAPOURSYNTH_SOURCE_SHA256}  /tmp/vapoursynth-src.tar.gz" | sha256sum -c - && \
-    tar -xzf /tmp/vapoursynth-src.tar.gz -C /tmp && \
+    bash /usr/local/bin/checkout_source_commit.sh \
+        https://github.com/vapoursynth/vapoursynth.git \
+        "${VAPOURSYNTH_SOURCE_COMMIT}" \
+        "${VAPOURSYNTH_SOURCE_TREE_SHA256}" \
+        /tmp/vapoursynth-src && \
     vs_include_dir="$(python -c 'import vapoursynth; print(vapoursynth.get_include())')" && \
-    test -f "/tmp/vapoursynth-${VAPOURSYNTH_SOURCE_COMMIT}/include/VapourSynth.h" && \
-    test -f "/tmp/vapoursynth-${VAPOURSYNTH_SOURCE_COMMIT}/include/VSHelper.h" && \
-    test -f "/tmp/vapoursynth-${VAPOURSYNTH_SOURCE_COMMIT}/include/VapourSynth4.h" && \
-    test -f "/tmp/vapoursynth-${VAPOURSYNTH_SOURCE_COMMIT}/include/VSHelper4.h" && \
-    cp "/tmp/vapoursynth-${VAPOURSYNTH_SOURCE_COMMIT}/include/VapourSynth.h" "${vs_include_dir}/" && \
-    cp "/tmp/vapoursynth-${VAPOURSYNTH_SOURCE_COMMIT}/include/VSHelper.h" "${vs_include_dir}/" && \
-    cp "/tmp/vapoursynth-${VAPOURSYNTH_SOURCE_COMMIT}/include/VapourSynth4.h" "${vs_include_dir}/" && \
-    cp "/tmp/vapoursynth-${VAPOURSYNTH_SOURCE_COMMIT}/include/VSHelper4.h" "${vs_include_dir}/" && \
+    test -f /tmp/vapoursynth-src/include/VapourSynth.h && \
+    test -f /tmp/vapoursynth-src/include/VSHelper.h && \
+    test -f /tmp/vapoursynth-src/include/VapourSynth4.h && \
+    test -f /tmp/vapoursynth-src/include/VSHelper4.h && \
+    cp /tmp/vapoursynth-src/include/VapourSynth.h "${vs_include_dir}/" && \
+    cp /tmp/vapoursynth-src/include/VSHelper.h "${vs_include_dir}/" && \
+    cp /tmp/vapoursynth-src/include/VapourSynth4.h "${vs_include_dir}/" && \
+    cp /tmp/vapoursynth-src/include/VSHelper4.h "${vs_include_dir}/" && \
     mkdir -p /opt/media-runtime-licenses && \
-    cp "/tmp/vapoursynth-${VAPOURSYNTH_SOURCE_COMMIT}/COPYING.LESSER" \
+    cp /tmp/vapoursynth-src/COPYING.LESSER \
         /opt/media-runtime-licenses/VapourSynth-LGPL-2.1.txt && \
-    rm -rf "/tmp/vapoursynth-${VAPOURSYNTH_SOURCE_COMMIT}" /tmp/vapoursynth-src.tar.gz
+    rm -rf /tmp/vapoursynth-src
 
 ENV PKG_CONFIG_PATH=/usr/local/lib/python3.13/site-packages/vapoursynth/pkgconfig
 ENV LD_LIBRARY_PATH=/usr/local/lib/python3.13/site-packages/vapoursynth
 
 WORKDIR /build
 
+# The selected L-SMASH commit includes obuparse.h and links -lobuparse. Build
+# only OBUParse's shared library so the runtime carries its SONAME and symlink,
+# without an unused static archive.
+RUN bash /usr/local/bin/checkout_source_commit.sh \
+        https://github.com/HomeOfAviSynthPlusEvolution/obuparse.git \
+        "${OBUPARSE_COMMIT}" \
+        "${OBUPARSE_SOURCE_TREE_SHA256}" \
+        /build/obuparse && \
+    cd /build/obuparse && \
+    make -j"$(nproc)" libobuparse.so && \
+    make install-shared && \
+    test -f /usr/local/lib/libobuparse.so.2 && \
+    test -L /usr/local/lib/libobuparse.so && \
+    cp LICENSE /opt/media-runtime-licenses/OBUParse-LICENSE.txt && \
+    ldconfig && \
+    cd /build && \
+    rm -rf /build/obuparse
+
 # Build the exact L-SMASH commit tested by L-SMASH-Works 1296.
 # This commit is intentionally not described as a formal L-SMASH release.
-RUN curl -fsSL \
-        "https://codeload.github.com/l-smash/l-smash/tar.gz/${LSMASH_COMMIT}" \
-        -o l-smash.tar.gz && \
-    test "$(wc -c < l-smash.tar.gz | tr -d ' ')" = "${LSMASH_BYTES}" && \
-    echo "${LSMASH_SHA256}  l-smash.tar.gz" | sha256sum -c - && \
-    tar -xzf l-smash.tar.gz && \
-    cd "l-smash-${LSMASH_COMMIT}" && \
+RUN bash /usr/local/bin/checkout_source_commit.sh \
+        https://github.com/l-smash/l-smash.git \
+        "${LSMASH_COMMIT}" \
+        "${LSMASH_SOURCE_TREE_SHA256}" \
+        /build/l-smash && \
+    cd /build/l-smash && \
     ./configure --prefix=/usr/local --disable-static && \
     make -j"$(nproc)" && \
     make install && \
@@ -112,19 +125,18 @@ RUN curl -fsSL \
     cp LICENSE /opt/media-runtime-licenses/L-SMASH-LICENSE.txt && \
     ldconfig && \
     cd /build && \
-    rm -rf "l-smash-${LSMASH_COMMIT}" l-smash.tar.gz
+    rm -rf /build/l-smash
 
 # Build L-SMASH-Works 1296 against the R78 API 4 wheel headers and
 # Debian Trixie's runtime-matched FFmpeg development libraries. Upstream's
 # Meson path is deprecated, but remains the narrow VapourSynth-only build and
 # avoids pulling unrelated optional dependencies into the runtime baseline.
-RUN curl -fsSL \
-        "https://codeload.github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/tar.gz/${LSMASH_WORKS_COMMIT}" \
-        -o l-smash-works.tar.gz && \
-    test "$(wc -c < l-smash-works.tar.gz | tr -d ' ')" = "${LSMASH_WORKS_BYTES}" && \
-    echo "${LSMASH_WORKS_SHA256}  l-smash-works.tar.gz" | sha256sum -c - && \
-    tar -xzf l-smash-works.tar.gz && \
-    cd "L-SMASH-Works-${LSMASH_WORKS_COMMIT}/VapourSynth" && \
+RUN bash /usr/local/bin/checkout_source_commit.sh \
+        https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works.git \
+        "${LSMASH_WORKS_COMMIT}" \
+        "${LSMASH_WORKS_SOURCE_TREE_SHA256}" \
+        /build/l-smash-works && \
+    cd /build/l-smash-works/VapourSynth && \
     perl -0pi -e "s/  install: true,\n  install_dir: join_paths\(vapoursynth_dep\.get_pkgconfig_variable\('libdir'\), 'vapoursynth'\),\n/  install: false,\n/" meson.build && \
     meson setup build --buildtype=release && \
     ninja -C build && \
@@ -134,17 +146,16 @@ RUN curl -fsSL \
         > /opt/vapoursynth-extra-plugins/lsmas/manifest.vs && \
     cp LICENSE /opt/media-runtime-licenses/L-SMASH-Works-VapourSynth-LICENSE.txt && \
     cd /build && \
-    rm -rf "L-SMASH-Works-${LSMASH_WORKS_COMMIT}" l-smash-works.tar.gz
+    rm -rf /build/l-smash-works
 
 # Rebuild the latest stable FFMS2 release against the selected VapourSynth
 # headers and the same Debian FFmpeg ABI used by the runtime image.
-RUN curl -fsSL \
-        "https://codeload.github.com/FFMS/ffms2/tar.gz/${FFMS2_COMMIT}" \
-        -o ffms2.tar.gz && \
-    test "$(wc -c < ffms2.tar.gz | tr -d ' ')" = "${FFMS2_BYTES}" && \
-    echo "${FFMS2_SHA256}  ffms2.tar.gz" | sha256sum -c - && \
-    tar -xzf ffms2.tar.gz && \
-    cd "ffms2-${FFMS2_COMMIT}" && \
+RUN bash /usr/local/bin/checkout_source_commit.sh \
+        https://github.com/FFMS/ffms2.git \
+        "${FFMS2_COMMIT}" \
+        "${FFMS2_SOURCE_TREE_SHA256}" \
+        /build/ffms2 && \
+    cd /build/ffms2 && \
     ./autogen.sh && \
     ./configure --prefix=/usr/local && \
     make -j"$(nproc)" && \
@@ -156,68 +167,56 @@ RUN curl -fsSL \
         > /opt/vapoursynth-extra-plugins/ffms2/manifest.vs && \
     cp COPYING /opt/media-runtime-licenses/FFMS2-COPYING.txt && \
     cd /build && \
-    rm -rf "ffms2-${FFMS2_COMMIT}" ffms2.tar.gz
+    rm -rf /build/ffms2
 
 # Preserve corresponding-source and license provenance for wheel-bundled
-# vs-placebo dependencies. These archives are not used to build the wheels;
-# they document the immutable sources selected by the upstream 2.0.4 release.
-RUN fetch_source() { \
-        name="$1"; \
-        url="$2"; \
-        expected_bytes="$3"; \
-        expected_sha256="$4"; \
-        archive="/tmp/${name}.tar.gz"; \
-        curl -fsSL "$url" -o "$archive"; \
-        test "$(wc -c < "$archive" | tr -d ' ')" = "$expected_bytes"; \
-        echo "${expected_sha256}  ${archive}" | sha256sum -c -; \
-        tar -xzf "$archive" -C /tmp; \
-    }; \
-    fetch_source \
-        vs-placebo \
-        "https://codeload.github.com/Lypheo/vs-placebo/tar.gz/${VS_PLACEBO_SOURCE_COMMIT}" \
-        "${VS_PLACEBO_SOURCE_BYTES}" \
-        "${VS_PLACEBO_SOURCE_SHA256}" && \
-    fetch_source \
-        libplacebo \
-        "https://codeload.github.com/haasn/libplacebo/tar.gz/${LIBPLACEBO_SOURCE_COMMIT}" \
-        "${LIBPLACEBO_SOURCE_BYTES}" \
-        "${LIBPLACEBO_SOURCE_SHA256}" && \
-    fetch_source \
-        libdovi \
-        "https://codeload.github.com/quietvoid/dovi_tool/tar.gz/refs/tags/libdovi-3.3.2" \
-        "${LIBDOVI_SOURCE_BYTES}" \
-        "${LIBDOVI_SOURCE_SHA256}" && \
-    cp "/tmp/vs-placebo-${VS_PLACEBO_SOURCE_COMMIT}/COPYING" \
+# vs-placebo dependencies. These trees are not used to build the wheels; they
+# document the exact tracked sources selected by the upstream 2.0.4 release.
+RUN bash /usr/local/bin/checkout_source_commit.sh \
+        https://github.com/Lypheo/vs-placebo.git \
+        "${VS_PLACEBO_SOURCE_COMMIT}" \
+        "${VS_PLACEBO_SOURCE_TREE_SHA256}" \
+        /tmp/vs-placebo-src && \
+    bash /usr/local/bin/checkout_source_commit.sh \
+        https://github.com/haasn/libplacebo.git \
+        "${LIBPLACEBO_SOURCE_COMMIT}" \
+        "${LIBPLACEBO_SOURCE_TREE_SHA256}" \
+        /tmp/libplacebo-src && \
+    bash /usr/local/bin/checkout_source_commit.sh \
+        https://github.com/quietvoid/dovi_tool.git \
+        "${LIBDOVI_SOURCE_COMMIT}" \
+        "${LIBDOVI_SOURCE_TREE_SHA256}" \
+        /tmp/libdovi-src && \
+    cp /tmp/vs-placebo-src/COPYING \
         /opt/media-runtime-licenses/vs-placebo-LGPL-2.1.txt && \
-    cp "/tmp/libplacebo-${LIBPLACEBO_SOURCE_COMMIT}/LICENSE" \
+    cp /tmp/libplacebo-src/LICENSE \
         /opt/media-runtime-licenses/libplacebo-LGPL-2.1.txt && \
-    cp "/tmp/dovi_tool-libdovi-3.3.2/LICENSE" \
+    cp /tmp/libdovi-src/LICENSE \
         /opt/media-runtime-licenses/libdovi-MIT.txt && \
     mkdir -p /opt/media-runtime-libs /opt/media-runtime-provenance && \
+    cp -a /usr/local/lib/libobuparse.so* /opt/media-runtime-libs/ && \
     cp -a /usr/local/lib/liblsmash.so* /opt/media-runtime-libs/ && \
     cp -a /usr/local/lib/libffms2.so* /opt/media-runtime-libs/ && \
     printf '%s\n' \
         '{' \
-        '  "schema_version": 1,' \
+        '  "schema_version": 2,' \
         '  "components": [' \
-        '    {"name":"VapourSynth","version":"R78","source_commit":"c2f5751a412347f306eb7f6a5985dd9a719f3896","source_url":"https://codeload.github.com/vapoursynth/vapoursynth/tar.gz/c2f5751a412347f306eb7f6a5985dd9a719f3896","source_sha256":"fbf7986d96495abd106c714b01768671a8cab1d0c6a48feba0aa127bf5672753","source_bytes":637989,"license":"LGPL-2.1-or-later"},' \
-        '    {"name":"L-SMASH","version":"commit 84740c5d960ab622f4c08b971dc59192bc27ef74","source_commit":"84740c5d960ab622f4c08b971dc59192bc27ef74","source_url":"https://codeload.github.com/l-smash/l-smash/tar.gz/84740c5d960ab622f4c08b971dc59192bc27ef74","source_sha256":"003d20595a3e66220a906c6bb351b8de973f2141fc24613db7701191f7219d5b","source_bytes":503390,"license":"ISC","selection_kind":"commit"},' \
-        '    {"name":"L-SMASH-Works","version":"1296.0.0.0","source_commit":"a83318210c183c8ebbe703d975ffc76fb499ef07","source_url":"https://codeload.github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/tar.gz/a83318210c183c8ebbe703d975ffc76fb499ef07","source_sha256":"6a135d7258376b461fdcabf5573c3a09eda5e3784f55fd0e8a1c3fac37a2a819","source_bytes":308701,"license":"ISC AND LGPL-2.1-or-later"},' \
-        '    {"name":"FFMS2","version":"5.0","source_commit":"7ed5e4d039ca9a6236bd2ebdfdd656c4304fbe04","source_url":"https://codeload.github.com/FFMS/ffms2/tar.gz/7ed5e4d039ca9a6236bd2ebdfdd656c4304fbe04","source_sha256":"711e2330163700739c954c4f300d0dbbaed0c2360e0dc6debb29757640454d02","source_bytes":168105,"license":"MIT"},' \
+        '    {"name":"VapourSynth","version":"R78","source_commit":"c2f5751a412347f306eb7f6a5985dd9a719f3896","source_url":"https://github.com/vapoursynth/vapoursynth.git","source_tree_sha256":"cc0f2ec4127bd26f6dff074450ebe801368b6d4341b3ab9928c94073a682196f","license":"LGPL-2.1-or-later"},' \
+        '    {"name":"OBUParse","version":"commit a67fcab9cd9d56c866a7a860f8c4aeb91b8817e8","source_commit":"a67fcab9cd9d56c866a7a860f8c4aeb91b8817e8","source_url":"https://github.com/HomeOfAviSynthPlusEvolution/obuparse.git","source_tree_sha256":"f82de7a5f007a4e89441e7ff4b470a00eddc4dfedb22faa46f633acfeefde178","license":"ISC","selection_kind":"commit","linkage":"shared","soname":"libobuparse.so.2"},' \
+        '    {"name":"L-SMASH","version":"commit 84740c5d960ab622f4c08b971dc59192bc27ef74","source_commit":"84740c5d960ab622f4c08b971dc59192bc27ef74","source_url":"https://github.com/l-smash/l-smash.git","source_tree_sha256":"b1553e40907e57240fd19a08642b3bc548dbdeda3750948ebbc1c5634af901b7","license":"ISC","selection_kind":"commit"},' \
+        '    {"name":"L-SMASH-Works","version":"1296.0.0.0","source_commit":"a83318210c183c8ebbe703d975ffc76fb499ef07","source_url":"https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works.git","source_tree_sha256":"7845a6a6d823046c6b0bbe617ae88e304ee117f466961aabceea931831d8f9e3","license":"ISC AND LGPL-2.1-or-later"},' \
+        '    {"name":"FFMS2","version":"5.0","source_commit":"7ed5e4d039ca9a6236bd2ebdfdd656c4304fbe04","source_url":"https://github.com/FFMS/ffms2.git","source_tree_sha256":"5be86d5f8f103f8e0b25aaed0b69b7afc06f1b6cd548a6c81160fcd14ea6e8d7","license":"MIT"},' \
         '    {"name":"Debian FFmpeg","version":"7:7.1.5-0+deb13u1","distribution":"trixie","selection_kind":"debian-package","license":"Debian-supported"},' \
-        '    {"name":"vs-placebo","version":"2.0.4","source_ref":"2.0.4","source_commit":"3cfd23f257ecb62b0cbd81eaaca092e18ae8e579","source_url":"https://codeload.github.com/Lypheo/vs-placebo/tar.gz/3cfd23f257ecb62b0cbd81eaaca092e18ae8e579","source_sha256":"b1c3e6eab7e7c722aa1e5706aef70b5365f4a4c881b4573a6121e4c9572a8fbe","source_bytes":37902,"license":"LGPL-2.1-only","selection_kind":"tag"},' \
-        '    {"name":"libplacebo","version":"commit a7a18af88ff0a17c04840dcb3246047bb6b46df3","source_commit":"a7a18af88ff0a17c04840dcb3246047bb6b46df3","source_url":"https://codeload.github.com/haasn/libplacebo/tar.gz/a7a18af88ff0a17c04840dcb3246047bb6b46df3","source_sha256":"ba0c8c011c19cb74bcee26646d2d6070447151da89a9abdd01c9034e768de8b2","source_bytes":873993,"license":"LGPL-2.1-or-later","selection_kind":"commit"},' \
-        '    {"name":"libdovi","version":"3.3.2","source_ref":"libdovi-3.3.2","source_commit":"4fd2b2235c9f93582dd4a00e65ee34a07800afd7","source_url":"https://codeload.github.com/quietvoid/dovi_tool/tar.gz/refs/tags/libdovi-3.3.2","source_sha256":"8ccb1922d7dbb57bc4f2c15c10b90c462f7a5f292efe317c116db923728dd3f1","source_bytes":489628,"license":"MIT","selection_kind":"tag"}' \
+        '    {"name":"vs-placebo","version":"2.0.4","source_ref":"2.0.4","source_commit":"3cfd23f257ecb62b0cbd81eaaca092e18ae8e579","source_url":"https://github.com/Lypheo/vs-placebo.git","source_tree_sha256":"beb830744f1fa1702eb64cfe8bdaf5780bb3501f9c48901df24ab112a406a30a","license":"LGPL-2.1-only","selection_kind":"tag"},' \
+        '    {"name":"libplacebo","version":"commit a7a18af88ff0a17c04840dcb3246047bb6b46df3","source_commit":"a7a18af88ff0a17c04840dcb3246047bb6b46df3","source_url":"https://github.com/haasn/libplacebo.git","source_tree_sha256":"bdbe17582c081e107e1a66c44d5f01aa856a157aa124660d662221848e88eda7","license":"LGPL-2.1-or-later","selection_kind":"commit"},' \
+        '    {"name":"libdovi","version":"3.3.2","source_ref":"libdovi-3.3.2","source_commit":"4fd2b2235c9f93582dd4a00e65ee34a07800afd7","source_url":"https://github.com/quietvoid/dovi_tool.git","source_tree_sha256":"e16dfb68270fc5b8610e2f1ae38b0b1051d8e7d03dd4b98a2f22f0e1fd09de26","license":"MIT","selection_kind":"tag"}' \
         '  ]' \
         '}' \
         > /opt/media-runtime-provenance/SOURCES.json && \
     rm -rf \
-        "/tmp/vs-placebo-${VS_PLACEBO_SOURCE_COMMIT}" \
-        "/tmp/libplacebo-${LIBPLACEBO_SOURCE_COMMIT}" \
-        /tmp/dovi_tool-libdovi-3.3.2 \
-        /tmp/vs-placebo.tar.gz \
-        /tmp/libplacebo.tar.gz \
-        /tmp/libdovi.tar.gz
+        /tmp/vs-placebo-src \
+        /tmp/libplacebo-src \
+        /tmp/libdovi-src
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2: Runtime
@@ -259,13 +258,16 @@ COPY --from=builder /opt/media-runtime-licenses/ /usr/local/share/licenses/frame
 COPY --from=builder /opt/media-runtime-provenance/ /usr/local/share/frame-compare/media-runtime/
 
 RUN ldconfig && \
+    test -L /usr/local/lib/libobuparse.so && \
+    test -f /usr/local/lib/libobuparse.so.2 && \
     test -L /usr/local/lib/liblsmash.so && \
     test -L /usr/local/lib/libffms2.so && \
     python -m json.tool /usr/local/share/frame-compare/media-runtime/SOURCES.json >/dev/null
 
 ENV VAPOURSYNTH_EXTRA_PLUGIN_PATH=/opt/vapoursynth-extra-plugins \
+    LD_LIBRARY_PATH=/home/framecompare/.local/lib/python3.13/site-packages/vapoursynth:/usr/local/lib \
     LIBGL_ALWAYS_SOFTWARE=1 \
-    FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT=18458c0987b2235d5db32638fb8ecebd0de7e050f0300636e3324b0eb7ac3dac \
+    FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT=7d25cccf972c591f3d52ccaaa2156f7e3ab73e5bf540bf6696116fd5bd78826b \
     FRAME_COMPARE_RUNTIME_KIND=docker \
     FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED=1 \
     FRAME_COMPARE_FFMPEG_EXECUTABLE=/usr/bin/ffmpeg \

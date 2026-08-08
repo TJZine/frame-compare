@@ -43,10 +43,14 @@ class TestCheckLsmas:
         assert result.passed is True
         assert "L-SMASH-Works" in result.message
 
-    def test_check_lsmas_plugin_requires_both_source_functions(self) -> None:
+    @pytest.mark.parametrize("missing_function", ["LibavSMASHSource", "LWLibavSource"])
+    def test_check_lsmas_plugin_requires_both_source_functions(self, missing_function: str) -> None:
+        available_function = (
+            "LWLibavSource" if missing_function == "LibavSMASHSource" else "LibavSMASHSource"
+        )
         plugin = SimpleNamespace(
-            LWLibavSource=lambda *_args, **_kwargs: object(),
-            functions=lambda: [SimpleNamespace(name="LWLibavSource")],
+            **{available_function: lambda *_args, **_kwargs: object()},
+            functions=lambda: [SimpleNamespace(name=available_function)],
         )
         mock_vs = SimpleNamespace(core=SimpleNamespace(lsmas=plugin))
         check = next(candidate for candidate in collect_checks() if candidate.name == "lsmas")
@@ -64,6 +68,7 @@ class TestCheckLsmas:
             "LibavSMASHSource",
             "LWLibavSource",
         ]
+        assert result.details["missing_functions"] == [missing_function]
 
     def test_check_lsmas_plugin_fails_when_missing(self) -> None:
         """Mock missing plugin → check fails."""
@@ -407,6 +412,7 @@ class TestCheckVsPlacebo:
         assert result.details["observed_distribution_version"] == "2.0.4"
         assert result.details["expected_distribution_match"] is True
         assert result.details["functions"] == ["Tonemap"]
+        assert result.message == "vs-placebo 2.0.4 available (placebo.Tonemap)"
 
     def test_check_vs_placebo_version_mismatch_is_reported(self) -> None:
         checks = collect_checks()
@@ -520,7 +526,6 @@ class TestCheckFFMS2:
         assert result.details["observed_runtime_version"] == "5.0.0.0"
         assert result.details["expected_runtime_version_match"] is True
 
-
     def test_check_ffms2_rejects_wrong_runtime_version(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -576,9 +581,7 @@ class TestCheckFFmpeg:
         assert result.message == "ffmpeg version n8.1.2-34-g9b6c8969e0"
         assert result.details["ffmpeg_path"] == "/runtime/ffmpeg"
         assert result.details["ffprobe_path"] == "/runtime/ffprobe"
-        assert result.details["ffprobe_version_line"] == (
-            "ffprobe version n8.1.2-34-g9b6c8969e0"
-        )
+        assert result.details["ffprobe_version_line"] == ("ffprobe version n8.1.2-34-g9b6c8969e0")
         assert result.details["windows_license_profile"] == "LGPL-only"
 
     def test_check_ffmpeg_fails_when_ffprobe_is_missing(self) -> None:

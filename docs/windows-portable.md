@@ -113,8 +113,12 @@ Human-readable exact source pointers are also included at
 dedicated `licenses/PyQt6/`, `licenses/PyQt6-sip/`, and `licenses/Qt/`
 directories in addition to the complete Python distribution license inventory.
 
-The current native component matrix, immutable hashes, source revisions, and
-license profile are maintained in [Supported Media Runtime](supported-media-runtime.md).
+The selected component profile and compatibility policy are maintained in
+[Supported Media Runtime](supported-media-runtime.md) and calculated by
+`frame_compare.vs.runtime_contract`. Immutable artifact bytes, SHA-256 values,
+source revisions, source-tree digests, and license evidence remain authoritative in
+the build manifest, `Dockerfile`, and generated bundle inventory; the selected
+profile does not substitute for that artifact-level evidence.
 `bundle_info.json` and `bundle_inventory.json` also record the full coordinated
 media-runtime fingerprint used by diagnostics and code-only update compatibility
 checks.

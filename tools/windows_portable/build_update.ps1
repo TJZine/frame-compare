@@ -79,10 +79,10 @@ function Get-BundleCompatibilityContract([string]$ResolvedBundleDir) {
   $runtimeProp = $bundleInfo.PSObject.Properties["media_runtime_fingerprint"]
   $requirementsFingerprint = if ($null -eq $requirementsProp -or $null -eq $requirementsProp.Value) { "" } else { [string]$requirementsProp.Value }
   $runtimeFingerprint = if ($null -eq $runtimeProp -or $null -eq $runtimeProp.Value) { "" } else { [string]$runtimeProp.Value }
-  if ($requirementsFingerprint -notmatch '^[a-f0-9]{64}$') {
+  if ($requirementsFingerprint -cnotmatch '^[a-f0-9]{64}$') {
     throw "bundle_info.requirements_lock_sha256 is missing or invalid."
   }
-  if ($runtimeFingerprint -notmatch '^[a-f0-9]{64}$') {
+  if ($runtimeFingerprint -cnotmatch '^[a-f0-9]{64}$') {
     throw "bundle_info.media_runtime_fingerprint is missing or invalid; rebuild the complete portable bundle."
   }
 

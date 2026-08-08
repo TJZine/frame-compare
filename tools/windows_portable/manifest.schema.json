@@ -119,7 +119,8 @@
         "source_url",
         "sha256",
         "bytes",
-        "license"
+        "license",
+        "install"
       ],
       "properties": {
         "id": {

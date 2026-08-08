@@ -89,6 +89,8 @@ def _require_sha256(value: object, context: str) -> str:
 def _require_int(value: object, context: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool):
         raise ValueError(f"{context} must be an integer")
+    if value < 0:
+        raise ValueError(f"{context} must be non-negative")
     return value
 
 
@@ -189,9 +191,7 @@ def _manifest_inventory(manifest: JsonObject) -> tuple[list[JsonObject], list[Js
             "binary_sha256": _require_sha256(artifact.get("sha256"), f"{artifact_id}.sha256"),
             "binary_url": _require_str(artifact.get("url"), f"{artifact_id}.url"),
             "id": artifact_id,
-            "license_spdx": _require_str(
-                license_info.get("spdx"), f"{artifact_id}.license.spdx"
-            ),
+            "license_spdx": _require_str(license_info.get("spdx"), f"{artifact_id}.license.spdx"),
             "license_url": _require_str(license_info.get("url"), f"{artifact_id}.license.url"),
             "name": _require_str(artifact.get("name"), f"{artifact_id}.name"),
             "source_url": _require_str(artifact.get("source_url"), f"{artifact_id}.source_url"),
@@ -244,9 +244,7 @@ def _manifest_inventory(manifest: JsonObject) -> tuple[list[JsonObject], list[Js
             if value is not None:
                 record[field] = value
         if source.get("sha256") is not None:
-            record["sha256"] = _require_sha256(
-                source.get("sha256"), f"source[{index}].sha256"
-            )
+            record["sha256"] = _require_sha256(source.get("sha256"), f"source[{index}].sha256")
         if source.get("bytes") is not None:
             record["bytes"] = _require_int(source.get("bytes"), f"source[{index}].bytes")
         corresponding_sources.append(record)
@@ -318,9 +316,7 @@ def _write_source_urls(
         "Manifest-provided runtime sources:",
     ]
     for artifact in artifacts:
-        lines.append(
-            f"- {artifact['name']} {artifact['version']}: {artifact['source_url']}"
-        )
+        lines.append(f"- {artifact['name']} {artifact['version']}: {artifact['source_url']}")
         build_source_url = artifact.get("build_source_url")
         if build_source_url is not None:
             lines.append(
@@ -361,8 +357,7 @@ def _write_notices(
     )
     lines.extend(("", "Additional corresponding sources:"))
     lines.extend(
-        f"- {item['name']} {item['version']} ({item['license']})"
-        for item in corresponding_sources
+        f"- {item['name']} {item['version']} ({item['license']})" for item in corresponding_sources
     )
     lines.extend(("", "Installed Python distributions:"))
     lines.extend(f"- {item['name']} {item['version']}" for item in distributions)
@@ -402,11 +397,11 @@ def main() -> int:
     if schema_version != 2:
         raise ValueError(f"unsupported bundle_info schema_version: {schema_version}")
     app_version = _require_str(bundle_info.get("app_version"), "bundle_info.app_version")
-    requirements_sha = _require_str(
+    requirements_sha = _require_sha256(
         bundle_info.get("requirements_lock_sha256"),
         "bundle_info.requirements_lock_sha256",
     )
-    media_runtime_fingerprint = _require_str(
+    media_runtime_fingerprint = _require_sha256(
         bundle_info.get("media_runtime_fingerprint"),
         "bundle_info.media_runtime_fingerprint",
     )
@@ -419,7 +414,14 @@ def main() -> int:
         raise ValueError(
             "bundle_info.media_runtime_fingerprints must contain the exact supported scopes"
         )
-    if media_runtime_fingerprints["full"] != media_runtime_fingerprint:
+    validated_media_runtime_fingerprints = {
+        scope: _require_sha256(
+            media_runtime_fingerprints[scope],
+            f"bundle_info.media_runtime_fingerprints.{scope}",
+        )
+        for scope in sorted(expected_scopes)
+    }
+    if validated_media_runtime_fingerprints["full"] != media_runtime_fingerprint:
         raise ValueError(
             "bundle_info full media-runtime fingerprint does not match the primary fingerprint"
         )
@@ -427,7 +429,16 @@ def main() -> int:
     manifest_fingerprints = _require_dict(
         manifest_bundle.get("runtime_fingerprints"), "manifest.bundle.runtime_fingerprints"
     )
-    if manifest_fingerprints != media_runtime_fingerprints:
+    if set(manifest_fingerprints) != expected_scopes:
+        raise ValueError("manifest runtime fingerprints must contain the exact supported scopes")
+    validated_manifest_fingerprints = {
+        scope: _require_sha256(
+            manifest_fingerprints.get(scope),
+            f"manifest.bundle.runtime_fingerprints.{scope}",
+        )
+        for scope in sorted(expected_scopes)
+    }
+    if validated_manifest_fingerprints != validated_media_runtime_fingerprints:
         raise ValueError("bundle_info media-runtime fingerprints do not match manifest.json")
 
     _assert_safe_bundle(bundle_root)
@@ -457,7 +468,7 @@ def main() -> int:
             "platform": "windows-x64",
             "requirements_lock_sha256": requirements_sha,
             "media_runtime_fingerprint": media_runtime_fingerprint,
-            "media_runtime_fingerprints": media_runtime_fingerprints,
+            "media_runtime_fingerprints": validated_media_runtime_fingerprints,
             "source_archive_url": (
                 f"https://github.com/TJZine/frame-compare/archive/{commit_sha}.tar.gz"
             ),

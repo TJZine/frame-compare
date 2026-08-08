@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import tomllib
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
@@ -76,6 +77,10 @@ def test_serialize_run_info_writes_resolved_tmdb_facts_without_nulls() -> None:
     fingerprints = media_runtime["fingerprints"]
     assert isinstance(fingerprints, dict)
     assert set(fingerprints) == {"analysis", "probe", "alignment", "index", "full"}
+    assert all(
+        isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value)
+        for value in fingerprints.values()
+    )
     assert parsed["tmdb"] == {
         "enabled": True,
         "attempted": True,

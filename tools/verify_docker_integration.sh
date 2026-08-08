@@ -190,6 +190,7 @@ native_ldd_log="$(mktemp /tmp/frame-compare-native-ldd.XXXXXX.txt)"
 for library in \
   /opt/vapoursynth-extra-plugins/lsmas/libvslsmashsource.so \
   /opt/vapoursynth-extra-plugins/ffms2/libffms2.so \
+  /usr/local/lib/libobuparse.so.2 \
   /usr/local/lib/liblsmash.so \
   /usr/local/lib/libffms2.so; do
   test -e "$library"
@@ -200,6 +201,11 @@ if grep -Fq 'not found' "$native_ldd_log"; then
   cat "$native_ldd_log" >&2
   echo "ERROR: native media runtime has unresolved shared-library dependencies" >&2
   exit 11
+fi
+if ! grep -Eq 'libobuparse\.so\.2 => /usr/local/lib/libobuparse\.so\.2' "$native_ldd_log"; then
+  cat "$native_ldd_log" >&2
+  echo "ERROR: selected L-SMASH runtime is not linked to staged OBUParse SONAME" >&2
+  exit 12
 fi
 
 python - "$media_path" "$doctor_path" "$ffindex_path" <<'PY'
@@ -220,6 +226,7 @@ from frame_compare.vs.runtime_contract import (
     FFMS2_RELEASE,
     FFMS2_RUNTIME_VERSION,
     LSMASH_WORKS_RELEASE,
+    OBUPARSE_SOURCE_COMMIT,
     VAPOURSYNTH_RELEASE,
     VS_PLACEBO_RELEASE,
     index_cache_token,
@@ -257,6 +264,48 @@ assert_true(
     os.environ.get("FRAME_COMPARE_FFPROBE_EXECUTABLE") == "/usr/bin/ffprobe",
     "Docker ffprobe executable override mismatch",
 )
+loader_paths = os.environ.get("LD_LIBRARY_PATH", "").split(os.pathsep)
+assert_true(
+    "/home/framecompare/.local/lib/python3.13/site-packages/vapoursynth" in loader_paths,
+    "VapourSynth R78 wheel native-library path missing from LD_LIBRARY_PATH",
+)
+assert_true("/usr/local/lib" in loader_paths, "/usr/local/lib missing from LD_LIBRARY_PATH")
+
+provenance_path = Path("/usr/local/share/frame-compare/media-runtime/SOURCES.json")
+provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+assert_true(provenance.get("schema_version") == 2, "runtime provenance schema mismatch")
+components = {component["name"]: component for component in provenance["components"]}
+expected_source_trees = {
+    "VapourSynth": ("c2f5751a412347f306eb7f6a5985dd9a719f3896", "cc0f2ec4127bd26f6dff074450ebe801368b6d4341b3ab9928c94073a682196f"),
+    "OBUParse": (OBUPARSE_SOURCE_COMMIT, "f82de7a5f007a4e89441e7ff4b470a00eddc4dfedb22faa46f633acfeefde178"),
+    "L-SMASH": ("84740c5d960ab622f4c08b971dc59192bc27ef74", "b1553e40907e57240fd19a08642b3bc548dbdeda3750948ebbc1c5634af901b7"),
+    "L-SMASH-Works": ("a83318210c183c8ebbe703d975ffc76fb499ef07", "7845a6a6d823046c6b0bbe617ae88e304ee117f466961aabceea931831d8f9e3"),
+    "FFMS2": ("7ed5e4d039ca9a6236bd2ebdfdd656c4304fbe04", "5be86d5f8f103f8e0b25aaed0b69b7afc06f1b6cd548a6c81160fcd14ea6e8d7"),
+    "vs-placebo": ("3cfd23f257ecb62b0cbd81eaaca092e18ae8e579", "beb830744f1fa1702eb64cfe8bdaf5780bb3501f9c48901df24ab112a406a30a"),
+    "libplacebo": ("a7a18af88ff0a17c04840dcb3246047bb6b46df3", "bdbe17582c081e107e1a66c44d5f01aa856a157aa124660d662221848e88eda7"),
+    "libdovi": ("4fd2b2235c9f93582dd4a00e65ee34a07800afd7", "e16dfb68270fc5b8610e2f1ae38b0b1051d8e7d03dd4b98a2f22f0e1fd09de26"),
+}
+for name, (commit, tree_sha256) in expected_source_trees.items():
+    component = components.get(name, {})
+    assert_true(component.get("source_commit") == commit, f"{name} source commit mismatch")
+    assert_true(
+        component.get("source_tree_sha256") == tree_sha256,
+        f"{name} source-tree digest mismatch",
+    )
+assert_true(components["OBUParse"].get("linkage") == "shared", "OBUParse linkage mismatch")
+assert_true(components["OBUParse"].get("soname") == "libobuparse.so.2", "OBUParse SONAME mismatch")
+license_root = Path("/usr/local/share/licenses/frame-compare-media-runtime")
+for license_name in (
+    "VapourSynth-LGPL-2.1.txt",
+    "OBUParse-LICENSE.txt",
+    "L-SMASH-LICENSE.txt",
+    "L-SMASH-Works-VapourSynth-LICENSE.txt",
+    "FFMS2-COPYING.txt",
+    "vs-placebo-LGPL-2.1.txt",
+    "libplacebo-LGPL-2.1.txt",
+    "libdovi-MIT.txt",
+):
+    assert_true((license_root / license_name).is_file(), f"runtime license missing: {license_name}")
 
 core = vs.core
 version = getattr(vs, "__version__", None)
@@ -557,6 +606,8 @@ print(f"DOCKER_PROOF ffmpeg_version={ffmpeg_version_line}")
 print(f"DOCKER_PROOF ffprobe_version={ffprobe_version_line}")
 print("DOCKER_PROOF software_vulkan=ok")
 print("DOCKER_PROOF native_shared_libraries=ok")
+print("DOCKER_PROOF obuparse=ok linkage=shared soname=libobuparse.so.2 provenance=verified")
+print("DOCKER_PROOF source_provenance=ok strategy=git-commit-tracked-tree-sha256")
 print("DOCKER_PROOF doctor_json=ok")
 print(f"DOCKER_PROOF generated_fixture_matrix=ok fixtures={';'.join(fixture_results)}")
 print("DOCKER_PROOF real_frame_render=ok frames=lwlibavsource,ffms2,placebo")
@@ -597,6 +648,8 @@ required_proof_markers=(
   "DOCKER_PROOF ffprobe_version="
   "DOCKER_PROOF software_vulkan=ok"
   "DOCKER_PROOF native_shared_libraries=ok"
+  "DOCKER_PROOF obuparse=ok linkage=shared soname=libobuparse.so.2 provenance=verified"
+  "DOCKER_PROOF source_provenance=ok strategy=git-commit-tracked-tree-sha256"
   "DOCKER_PROOF doctor_json=ok"
   "DOCKER_PROOF generated_fixture_matrix=ok fixtures=h264_limited"
   "DOCKER_PROOF real_frame_render=ok frames=lwlibavsource,ffms2,placebo"
@@ -762,6 +815,7 @@ if [[ -z "$host_python" ]]; then
   exit 127
 fi
 
+export PYTHONPATH="${PWD}/src${PYTHONPATH:+:${PYTHONPATH}}"
 if ! "$host_python" - "$proof_dir" <<'PY'
 from __future__ import annotations
 
@@ -769,6 +823,8 @@ import struct
 import sys
 import tomllib
 from pathlib import Path
+
+from frame_compare.vs.runtime_contract import media_runtime_fingerprint
 
 
 def fail(message: str) -> None:
@@ -808,7 +864,7 @@ if not isinstance(media_runtime, dict):
 fingerprints = media_runtime.get("fingerprints")
 if not isinstance(fingerprints, dict):
     fail(f"run_info.toml has no media runtime fingerprints: {run_info_path}")
-if fingerprints.get("full") != "18458c0987b2235d5db32638fb8ecebd0de7e050f0300636e3324b0eb7ac3dac":
+if fingerprints.get("full") != media_runtime_fingerprint("full", profile="debian-trixie"):
     fail(f"run_info.toml media runtime fingerprint mismatch: {run_info_path}")
 
 run_result_path = require_file(run_dir / "run_result.toml", "run_result.toml")

@@ -16,6 +16,8 @@ from frame_compare.vs.runtime_contract import (
     media_runtime_identity,
     media_runtime_profile,
     runtime_environment_report,
+    runtime_ffms2_required,
+    runtime_kind,
     supported_media_runtime_report,
 )
 
@@ -28,6 +30,20 @@ def test_runtime_profile_uses_explicit_deployment_kind(
 
     monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "docker")
     assert media_runtime_profile() == "debian-trixie"
+
+
+def test_unmanaged_macos_has_its_own_native_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("FRAME_COMPARE_RUNTIME_KIND", raising=False)
+    monkeypatch.setattr("frame_compare.vs.runtime_contract.sys.platform", "darwin")
+
+    assert media_runtime_profile() == "native-macos"
+    identity = media_runtime_identity("full", profile="native-macos")
+    components = identity["components"]
+    assert components["decoder"]["l_smash_works"]["build"] == "unmanaged-native"
+    assert components["standalone_ffmpeg"] == {
+        "selection_kind": "unmanaged-native",
+        "platform": "macos",
+    }
 
 
 def test_all_scope_fingerprints_are_deterministic_and_distinct() -> None:
@@ -47,9 +63,9 @@ def test_all_scope_fingerprints_are_deterministic_and_distinct() -> None:
 
 def test_windows_and_debian_decoder_profiles_do_not_share_cache_identity() -> None:
     for scope in ("analysis", "probe", "index", "full"):
-        assert media_runtime_fingerprint(
-            scope, profile="windows-x64"
-        ) != media_runtime_fingerprint(scope, profile="debian-trixie")
+        assert media_runtime_fingerprint(scope, profile="windows-x64") != media_runtime_fingerprint(
+            scope, profile="debian-trixie"
+        )
 
     windows = media_runtime_identity("analysis", profile="windows-x64")
     linux = media_runtime_identity("analysis", profile="debian-trixie")
@@ -85,11 +101,23 @@ def test_index_token_is_profile_scoped() -> None:
     assert windows != linux
 
 
+def test_authority_docs_use_tokens_calculated_by_runtime_contract(repo_root: Path) -> None:
+    windows = index_cache_token(profile="windows-x64")
+    linux = index_cache_token(profile="debian-trixie")
+
+    for relative_path in (
+        "docs/current-architecture.md",
+        "docs/current-cli-contract.md",
+        "docs/supported-media-runtime.md",
+    ):
+        content = (repo_root / relative_path).read_text(encoding="utf-8")
+        assert windows in content
+        assert linux in content
+
+
 def test_windows_manifest_fingerprints_match_code_contract(repo_root: Path) -> None:
     manifest = json.loads(
-        (repo_root / "tools/windows_portable/manifest.windows-x64.json").read_text(
-            encoding="utf-8"
-        )
+        (repo_root / "tools/windows_portable/manifest.windows-x64.json").read_text(encoding="utf-8")
     )
     expected = {
         scope: media_runtime_fingerprint(scope, profile="windows-x64")
@@ -103,9 +131,8 @@ def test_supported_report_contains_observable_component_contract() -> None:
     report = supported_media_runtime_report(profile="debian-trixie")
 
     assert report["components"]["decoder"]["vapoursynth"]["release"] == "R78"
-    assert report["components"]["decoder"]["l_smash_works"]["native_release"] == (
-        "1296.0.0.0"
-    )
+    assert report["components"]["decoder"]["l_smash_works"]["native_release"] == ("1296.0.0.0")
+    assert report["components"]["decoder"]["obuparse"]["soname"] == "libobuparse.so.2"
     assert report["components"]["ffms2"]["included"] is True
     assert report["components"]["tone_mapping"]["vs_placebo"]["release"] == "2.0.4"
     assert report["fingerprints"]["full"] == media_runtime_fingerprint(
@@ -129,6 +156,16 @@ def test_runtime_environment_report_fails_closed_on_invalid_declaration(
     assert report["ffms2_required"] is True
 
 
+def test_runtime_environment_interpretation_is_centralized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", " windows-portable ")
+    monkeypatch.setenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "yes")
+
+    assert runtime_kind() == "windows-portable"
+    assert runtime_ffms2_required() is True
+
+
 def test_docker_contract_matches_debian_profile(repo_root: Path) -> None:
     dockerfile = (repo_root / "Dockerfile").read_text(encoding="utf-8")
 
@@ -147,16 +184,18 @@ def test_docker_contract_matches_debian_profile(repo_root: Path) -> None:
         assert package in dockerfile
     assert "dpkg-query -W -f='${Version}'" in dockerfile
     for source_url in (
-        "https://codeload.github.com/vapoursynth/vapoursynth/tar.gz/",
-        "https://codeload.github.com/l-smash/l-smash/tar.gz/",
-        "https://codeload.github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/tar.gz/",
-        "https://codeload.github.com/FFMS/ffms2/tar.gz/",
-        "https://codeload.github.com/Lypheo/vs-placebo/tar.gz/",
-        "https://codeload.github.com/haasn/libplacebo/tar.gz/",
-        "https://codeload.github.com/quietvoid/dovi_tool/tar.gz/",
+        "https://github.com/vapoursynth/vapoursynth.git",
+        "https://github.com/HomeOfAviSynthPlusEvolution/obuparse.git",
+        "https://github.com/l-smash/l-smash.git",
+        "https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works.git",
+        "https://github.com/FFMS/ffms2.git",
+        "https://github.com/Lypheo/vs-placebo.git",
+        "https://github.com/haasn/libplacebo.git",
+        "https://github.com/quietvoid/dovi_tool.git",
     ):
         assert source_url in dockerfile
-    assert "https://github.com/vapoursynth/vapoursynth/archive/" not in dockerfile
+    assert "codeload.github.com" not in dockerfile
+    assert "checkout_source_commit.sh" in dockerfile
 
 
 def test_docker_provenance_covers_every_distributed_media_component(
@@ -166,6 +205,7 @@ def test_docker_provenance_covers_every_distributed_media_component(
 
     for component in (
         '"name":"VapourSynth"',
+        '"name":"OBUParse"',
         '"name":"L-SMASH"',
         '"name":"L-SMASH-Works"',
         '"name":"FFMS2"',
@@ -177,6 +217,7 @@ def test_docker_provenance_covers_every_distributed_media_component(
         assert component in dockerfile
     for license_name in (
         "VapourSynth-LGPL-2.1.txt",
+        "OBUParse-LICENSE.txt",
         "L-SMASH-LICENSE.txt",
         "L-SMASH-Works-VapourSynth-LICENSE.txt",
         "FFMS2-COPYING.txt",
@@ -187,31 +228,21 @@ def test_docker_provenance_covers_every_distributed_media_component(
         assert license_name in dockerfile
 
 
-def test_verified_immutable_source_hashes_are_consistent(repo_root: Path) -> None:
+def test_docker_uses_verified_tracked_source_tree_digests(repo_root: Path) -> None:
     dockerfile = (repo_root / "Dockerfile").read_text(encoding="utf-8")
-    manifest = json.loads(
-        (repo_root / "tools/windows_portable/manifest.windows-x64.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    corresponding = {entry["name"]: entry for entry in manifest["corresponding_sources"]}
-
     expected = {
-        "libplacebo": (
-            "ba0c8c011c19cb74bcee26646d2d6070447151da89a9abdd01c9034e768de8b2",
-            873993,
-        ),
-        "libdovi": (
-            "8ccb1922d7dbb57bc4f2c15c10b90c462f7a5f292efe317c116db923728dd3f1",
-            489628,
-        ),
+        "VAPOURSYNTH_SOURCE_TREE_SHA256": "cc0f2ec4127bd26f6dff074450ebe801368b6d4341b3ab9928c94073a682196f",
+        "LSMASH_SOURCE_TREE_SHA256": "b1553e40907e57240fd19a08642b3bc548dbdeda3750948ebbc1c5634af901b7",
+        "OBUPARSE_SOURCE_TREE_SHA256": "f82de7a5f007a4e89441e7ff4b470a00eddc4dfedb22faa46f633acfeefde178",
+        "LSMASH_WORKS_SOURCE_TREE_SHA256": "7845a6a6d823046c6b0bbe617ae88e304ee117f466961aabceea931831d8f9e3",
+        "FFMS2_SOURCE_TREE_SHA256": "5be86d5f8f103f8e0b25aaed0b69b7afc06f1b6cd548a6c81160fcd14ea6e8d7",
+        "VS_PLACEBO_SOURCE_TREE_SHA256": "beb830744f1fa1702eb64cfe8bdaf5780bb3501f9c48901df24ab112a406a30a",
+        "LIBPLACEBO_SOURCE_TREE_SHA256": "bdbe17582c081e107e1a66c44d5f01aa856a157aa124660d662221848e88eda7",
+        "LIBDOVI_SOURCE_TREE_SHA256": "e16dfb68270fc5b8610e2f1ae38b0b1051d8e7d03dd4b98a2f22f0e1fd09de26",
     }
-    for component, (sha256, size) in expected.items():
-        entry = corresponding[component]
-        assert entry["sha256"] == sha256
-        assert entry["bytes"] == size
-        assert sha256 in dockerfile
-        assert str(size) in dockerfile
+    for argument, digest in expected.items():
+        assert f"ARG {argument}={digest}" in dockerfile
+        assert f'"source_tree_sha256":"{digest}"' in dockerfile
 
 
 def test_docker_runtime_reads_release_and_api_identities_separately(repo_root: Path) -> None:

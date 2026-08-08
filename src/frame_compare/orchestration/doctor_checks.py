@@ -34,6 +34,8 @@ from frame_compare.vs.runtime_contract import (
     VAPOURSYNTH_RELEASE,
     VS_PLACEBO_RELEASE,
     WINDOWS_FFMPEG_RELEASE,
+    runtime_ffms2_required,
+    runtime_kind,
 )
 
 __all__ = ["SLOWPICS_HEALTHCHECK_URL", "collect_checks"]
@@ -124,9 +126,7 @@ def _check_vapoursynth() -> CheckResult:
     api_major = details.get("api_major")
     release_matches = isinstance(release_major, int) and release_major == expected_major
     api_matches = isinstance(api_major, int) and api_major == expected_api_major
-    details["observed_release"] = (
-        f"R{release_major}" if isinstance(release_major, int) else None
-    )
+    details["observed_release"] = f"R{release_major}" if isinstance(release_major, int) else None
     details["expected_release_match"] = release_matches
     details["expected_api_match"] = api_matches
     if not release_matches or not api_matches:
@@ -190,13 +190,7 @@ def _check_lsmas() -> CheckResult:
         loaded_path: str | None = None
         if namespace is None:
             loaded_path = try_load_lsmas_plugin(core)
-            namespace = (
-                "lsmas"
-                if hasattr(core, "lsmas")
-                else "lw"
-                if hasattr(core, "lw")
-                else None
-            )
+            namespace = "lsmas" if hasattr(core, "lsmas") else "lw" if hasattr(core, "lw") else None
 
         if namespace is None:
             return CheckResult(
@@ -216,6 +210,15 @@ def _check_lsmas() -> CheckResult:
             plugin_path=loaded_path,
         )
         if not _plugin_has_required_functions(plugin, _LSMAS_REQUIRED_FUNCTIONS):
+            discovered = set(_plugin_function_names(plugin))
+            details["missing_functions"] = cast(
+                JSONValue,
+                [
+                    name
+                    for name in _LSMAS_REQUIRED_FUNCTIONS
+                    if name not in discovered and not callable(getattr(plugin, name, None))
+                ],
+            )
             return CheckResult(
                 passed=False,
                 available=True,
@@ -302,11 +305,6 @@ def _lsmas_runtime_details(
     return details
 
 
-def _runtime_ffms2_required() -> bool:
-    value = os.environ.get("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "").strip().casefold()
-    return value in {"1", "true", "yes", "on"}
-
-
 def _check_vs_placebo() -> CheckResult:
     """Report the vs-placebo distribution and registered plugin surface."""
     details: dict[str, JSONValue] = {
@@ -371,14 +369,14 @@ def _check_vs_placebo() -> CheckResult:
     return CheckResult(
         passed=True,
         available=True,
-        message="vs-placebo 2.0.4 available (placebo.Tonemap)",
+        message=f"vs-placebo {VS_PLACEBO_RELEASE} available (placebo.Tonemap)",
         details=details,
     )
 
 
 def _check_ffms2() -> CheckResult:
     """Report FFMS2 availability and enforce Docker's declared runtime policy."""
-    required = _runtime_ffms2_required()
+    required = runtime_ffms2_required()
     details: dict[str, JSONValue] = {
         "expected_release": FFMS2_RELEASE,
         "expected_runtime_version": FFMS2_RUNTIME_VERSION,
@@ -386,8 +384,7 @@ def _check_ffms2() -> CheckResult:
         "required_functions": cast(JSONValue, list(_FFMS2_REQUIRED_FUNCTIONS)),
         "windows_baseline": "excluded",
         "docker_runtime": "included",
-        "current_runtime_kind": os.environ.get("FRAME_COMPARE_RUNTIME_KIND", "").strip()
-        or "unmanaged",
+        "current_runtime_kind": runtime_kind(),
         "required_in_current_runtime": required,
         "observed_available": False,
     }
@@ -404,9 +401,7 @@ def _check_ffms2() -> CheckResult:
                 else "FFMS2 not checked (VapourSynth unavailable; optional on Windows)"
             ),
             hint=(
-                "Repair the complete Docker media runtime, then rerun doctor"
-                if required
-                else None
+                "Repair the complete Docker media runtime, then rerun doctor" if required else None
             ),
             details=details,
         )
@@ -438,9 +433,7 @@ def _check_ffms2() -> CheckResult:
                 else "FFMS2 not loaded (expected for the Windows baseline; required in Docker)"
             ),
             hint=(
-                "Repair the complete Docker media runtime, then rerun doctor"
-                if required
-                else None
+                "Repair the complete Docker media runtime, then rerun doctor" if required else None
             ),
             details=details,
         )

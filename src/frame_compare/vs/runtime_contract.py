@@ -13,12 +13,29 @@ import json
 import os
 import re
 import sys
-from typing import Final, Literal
+from typing import Final, Literal, TypedDict
 
 from frame_compare.errors import JSONValue
 
 type MediaRuntimeScope = Literal["analysis", "probe", "alignment", "index", "full"]
-type MediaRuntimeProfile = Literal["windows-x64", "debian-trixie"]
+type MediaRuntimeProfile = Literal["windows-x64", "debian-trixie", "native-macos"]
+
+
+class MediaRuntimeFingerprints(TypedDict):
+    analysis: str
+    probe: str
+    alignment: str
+    index: str
+    full: str
+
+
+class MediaRuntimeReport(TypedDict):
+    contract_version: int
+    profile: MediaRuntimeProfile
+    components: dict[str, JSONValue]
+    fingerprints: MediaRuntimeFingerprints
+    index_cache_token: str
+
 
 MEDIA_RUNTIME_CONTRACT_VERSION: Final = 1
 MEDIA_RUNTIME_SCOPES: Final[tuple[MediaRuntimeScope, ...]] = (
@@ -34,6 +51,7 @@ VAPOURSYNTH_API_MAJOR: Final = 4
 VAPOURSYNTH_SOURCE_COMMIT: Final = "c2f5751a412347f306eb7f6a5985dd9a719f3896"
 
 LSMASH_SOURCE_COMMIT: Final = "84740c5d960ab622f4c08b971dc59192bc27ef74"
+OBUPARSE_SOURCE_COMMIT: Final = "a67fcab9cd9d56c866a7a860f8c4aeb91b8817e8"
 LSMASH_WORKS_RELEASE: Final = "1296.0.0.0"
 LSMASH_WORKS_PYPI_RELEASE: Final = "1296.0.0.1"
 LSMASH_WORKS_SOURCE_COMMIT: Final = "a83318210c183c8ebbe703d975ffc76fb499ef07"
@@ -63,15 +81,20 @@ def media_runtime_profile() -> MediaRuntimeProfile:
 
     The deployment kind selects the authoritative packaged profile.  Unmanaged
     hosts fall back by operating system so cache identities still separate the
-    Windows bundled decoder lineage from the Debian-linked Linux lineage.
+    Windows bundled decoder lineage, Debian-linked Linux lineage, and unmanaged
+    native macOS environment.
     """
 
-    runtime_kind = os.environ.get("FRAME_COMPARE_RUNTIME_KIND", "").strip().casefold()
-    if runtime_kind in {"windows", "windows-portable"}:
+    selected_runtime_kind = runtime_kind().casefold()
+    if selected_runtime_kind in {"windows", "windows-portable"}:
         return "windows-x64"
-    if runtime_kind == "docker":
+    if selected_runtime_kind == "docker":
         return "debian-trixie"
-    return "windows-x64" if sys.platform == "win32" else "debian-trixie"
+    if sys.platform == "win32":
+        return "windows-x64"
+    if sys.platform == "darwin":
+        return "native-macos"
+    return "debian-trixie"
 
 
 def _vapoursynth_identity() -> dict[str, JSONValue]:
@@ -110,7 +133,7 @@ def _lsmash_works_identity(profile: MediaRuntimeProfile) -> dict[str, JSONValue]
                 },
             }
         )
-    else:
+    elif profile == "debian-trixie":
         identity.update(
             {
                 "build": "source-meson-vapoursynth-only",
@@ -121,15 +144,31 @@ def _lsmash_works_identity(profile: MediaRuntimeProfile) -> dict[str, JSONValue]
                 },
             }
         )
+    else:
+        identity.update(
+            {
+                "build": "unmanaged-native",
+                "platform": "macos",
+                "decoder_ffmpeg": {"selection_kind": "unmanaged-native"},
+            }
+        )
     return identity
 
 
 def _decoder_identity(profile: MediaRuntimeProfile) -> dict[str, JSONValue]:
-    return {
+    identity: dict[str, JSONValue] = {
         "vapoursynth": _vapoursynth_identity(),
         "l_smash": _lsmash_identity(),
         "l_smash_works": _lsmash_works_identity(profile),
     }
+    if profile == "debian-trixie":
+        identity["obuparse"] = {
+            "selection_kind": "commit",
+            "source_commit": OBUPARSE_SOURCE_COMMIT,
+            "linkage": "shared",
+            "soname": "libobuparse.so.2",
+        }
+    return identity
 
 
 def _standalone_ffmpeg_identity(profile: MediaRuntimeProfile) -> dict[str, JSONValue]:
@@ -143,11 +182,16 @@ def _standalone_ffmpeg_identity(profile: MediaRuntimeProfile) -> dict[str, JSONV
             "branch": "8.1",
             "license_profile": "LGPL-only",
         }
+    if profile == "debian-trixie":
+        return {
+            "selection_kind": "debian-package",
+            "distribution": "trixie",
+            "package_version": DEBIAN_FFMPEG_PACKAGE_VERSION,
+            "license_profile": "Debian-supported",
+        }
     return {
-        "selection_kind": "debian-package",
-        "distribution": "trixie",
-        "package_version": DEBIAN_FFMPEG_PACKAGE_VERSION,
-        "license_profile": "Debian-supported",
+        "selection_kind": "unmanaged-native",
+        "platform": "macos",
     }
 
 
@@ -254,13 +298,17 @@ def index_cache_token(*, profile: MediaRuntimeProfile | None = None) -> str:
 def supported_media_runtime_report(
     *,
     profile: MediaRuntimeProfile | None = None,
-) -> dict[str, JSONValue]:
+) -> MediaRuntimeReport:
     """Return the user-facing supported media-runtime matrix and fingerprints."""
 
     selected_profile = profile or media_runtime_profile()
-    fingerprints: dict[str, JSONValue] = {}
-    for scope in MEDIA_RUNTIME_SCOPES:
-        fingerprints[scope] = media_runtime_fingerprint(scope, profile=selected_profile)
+    fingerprints = MediaRuntimeFingerprints(
+        analysis=media_runtime_fingerprint("analysis", profile=selected_profile),
+        probe=media_runtime_fingerprint("probe", profile=selected_profile),
+        alignment=media_runtime_fingerprint("alignment", profile=selected_profile),
+        index=media_runtime_fingerprint("index", profile=selected_profile),
+        full=media_runtime_fingerprint("full", profile=selected_profile),
+    )
     return {
         "contract_version": MEDIA_RUNTIME_CONTRACT_VERSION,
         "profile": selected_profile,
@@ -280,21 +328,33 @@ def _env_flag(name: str) -> bool:
     return value in {"1", "true", "yes", "on"}
 
 
+def runtime_kind() -> str:
+    """Return the deployment-declared runtime kind or ``unmanaged``."""
+
+    return os.environ.get("FRAME_COMPARE_RUNTIME_KIND", "").strip() or "unmanaged"
+
+
+def runtime_ffms2_required() -> bool:
+    """Return whether deployment policy requires the FFMS2 runtime plugin."""
+
+    return _env_flag("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED")
+
+
 def runtime_environment_report() -> dict[str, JSONValue]:
     """Compare deployment-declared identity with the code-owned expectation."""
 
     expected = media_runtime_fingerprint("full")
-    runtime_kind = os.environ.get("FRAME_COMPARE_RUNTIME_KIND", "").strip() or "unmanaged"
+    selected_runtime_kind = runtime_kind()
     declared_raw = os.environ.get("FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT", "").strip()
     declared = declared_raw or None
     valid = declared is not None and _FINGERPRINT_RE.fullmatch(declared) is not None
     return {
-        "runtime_kind": runtime_kind,
+        "runtime_kind": selected_runtime_kind,
         "expected_full_fingerprint": expected,
         "declared_full_fingerprint": declared,
         "declared_full_fingerprint_valid": valid,
         "declared_full_fingerprint_match": valid and declared == expected,
-        "ffms2_required": _env_flag("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED"),
+        "ffms2_required": runtime_ffms2_required(),
     }
 
 
@@ -312,8 +372,11 @@ __all__ = [
     "LSMASH_WORKS_SOURCE_COMMIT",
     "MEDIA_RUNTIME_CONTRACT_VERSION",
     "MEDIA_RUNTIME_SCOPES",
+    "MediaRuntimeFingerprints",
     "MediaRuntimeProfile",
+    "MediaRuntimeReport",
     "MediaRuntimeScope",
+    "OBUPARSE_SOURCE_COMMIT",
     "VAPOURSYNTH_API_MAJOR",
     "VAPOURSYNTH_RELEASE",
     "VAPOURSYNTH_SOURCE_COMMIT",
@@ -328,5 +391,7 @@ __all__ = [
     "media_runtime_identity",
     "media_runtime_profile",
     "runtime_environment_report",
+    "runtime_ffms2_required",
+    "runtime_kind",
     "supported_media_runtime_report",
 ]

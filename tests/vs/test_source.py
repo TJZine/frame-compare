@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Mapping
 from fractions import Fraction
 from pathlib import Path
@@ -287,6 +288,41 @@ def test_load_source_preserves_original_error_when_index_retry_fails(tmp_path: P
     assert isinstance(original_error.__cause__, RuntimeError)
     assert str(original_error.__cause__) == "cache-free retry also failed"
     assert calls == [_index_kwargs(video_path), _index_kwargs(video_path), {"cache": 0}]
+
+
+def test_load_source_warns_when_rejected_index_cannot_be_removed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    video_path = tmp_path / "video.mkv"
+    index_path = source_index_path(video_path)
+    index_path.write_bytes(b"unusable index")
+    calls: list[dict[str, object]] = []
+
+    def loader(_path: str, **kwargs: object) -> MockClip:
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise RuntimeError("lsmas: failed to construct index for video.mkv")
+        return MockClip()
+
+    original_unlink = Path.unlink
+
+    def fail_owned_index_unlink(self: Path, *args: object, **kwargs: object) -> None:
+        if self == index_path:
+            raise PermissionError("index is locked")
+        original_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_owned_index_unlink)
+    core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
+
+    with caplog.at_level(logging.WARNING, logger="frame_compare.vs.source"):
+        source = load_source(video_path, core)  # type: ignore[arg-type]
+
+    assert source.num_frames == 1000
+    assert calls == [_index_kwargs(video_path), {"cache": 0}]
+    assert "Could not remove rejected L-SMASH index" in caplog.text
+    assert "retrying without an index cache" in caplog.text
 
 
 def test_load_source_does_not_retry_frame_read_failure(tmp_path: Path) -> None:

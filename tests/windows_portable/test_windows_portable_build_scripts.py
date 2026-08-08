@@ -84,9 +84,7 @@ def test_windows_portable_build_canonicalizes_paths_before_runtime_use(
     build_script = _read_text_or_fail(build_path)
 
     for variable in ("ManifestPath", "OutDir", "CacheDir", "RepoRoot"):
-        assert (
-            f"${variable} = [System.IO.Path]::GetFullPath(${variable})" in build_script
-        )
+        assert f"${variable} = [System.IO.Path]::GetFullPath(${variable})" in build_script
 
 
 def test_windows_portable_build_creates_default_workspace_directories(repo_root: Path) -> None:
@@ -243,8 +241,9 @@ def test_windows_portable_build_uses_r74_plus_plugin_layout(repo_root: Path) -> 
         in build_script
     )
     runtime_function = build_script[
-        build_script.index("function Set-BundleRuntimeEnvironment") :
-        build_script.index("function Get-ProcessEnvironmentValue")
+        build_script.index("function Set-BundleRuntimeEnvironment") : build_script.index(
+            "function Get-ProcessEnvironmentValue"
+        )
     ]
     assert "ffmpeg\\\\bin" not in runtime_function.split("$pathEntries = @(", 1)[1]
 
@@ -269,8 +268,9 @@ def test_windows_portable_direct_placebo_smoke_respects_runtime_probe(
     )
 
     direct_smoke = build_script[
-        build_script.index("def prove_placebo_tonemap_frame()") :
-        build_script.index("def prove_apply_tonemap_frame()")
+        build_script.index("def prove_placebo_tonemap_frame()") : build_script.index(
+            "def prove_apply_tonemap_frame()"
+        )
     ]
     assert "probe_libplacebo_runtime" in direct_smoke
     assert "placebo_direct_frame=skipped reason=vulkan_runtime_unavailable" in direct_smoke
@@ -507,6 +507,7 @@ def test_windows_portable_manifest_schema_models_current_install_shapes(repo_roo
     schema_path = repo_root / "tools" / "windows_portable" / "manifest.schema.json"
     schema = json.loads(_read_text_or_fail(schema_path))
     install_def = schema["$defs"]["install"]
+    assert "install" in schema["$defs"]["artifact"]["required"]
     assert "oneOf" in install_def
 
     variants = {variant["properties"]["type"]["const"]: variant for variant in install_def["oneOf"]}
@@ -589,12 +590,9 @@ def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
         shim / "update_public_key.xml",
     )
     manifest = json.loads(
-        (
-            repo_root
-            / "tools"
-            / "windows_portable"
-            / "manifest.windows-x64.json"
-        ).read_text(encoding="utf-8")
+        (repo_root / "tools" / "windows_portable" / "manifest.windows-x64.json").read_text(
+            encoding="utf-8"
+        )
     )
     runtime_fingerprints = manifest["bundle"]["runtime_fingerprints"]
     (bundle / "bundle_info.json").write_text(
@@ -619,6 +617,7 @@ def _run_bundle_inventory(
     *,
     bundle: Path,
     repo_root: Path,
+    manifest: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
@@ -627,7 +626,7 @@ def _run_bundle_inventory(
             "--bundle-root",
             str(bundle),
             "--manifest",
-            str(repo_root / "tools" / "windows_portable" / "manifest.windows-x64.json"),
+            str(manifest or repo_root / "tools" / "windows_portable" / "manifest.windows-x64.json"),
             "--repo-root",
             str(repo_root),
             "--output",
@@ -696,6 +695,58 @@ def test_windows_portable_bundle_inventory_is_sorted_exact_and_path_safe(
     assert inventory["bundle"]["commit_sha"] in source_urls
     assert "qt-everywhere-src-6.10.2.tar.xz" in source_urls
     assert (bundle / "licenses" / "THIRD_PARTY_NOTICES.txt").is_file()
+
+
+@pytest.mark.parametrize("field", ["bytes", "source_bytes", "build_source_bytes"])
+def test_windows_portable_bundle_inventory_rejects_negative_artifact_sizes(
+    tmp_path: Path,
+    repo_root: Path,
+    field: str,
+) -> None:
+    bundle = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
+    manifest = json.loads(
+        (repo_root / "tools/windows_portable/manifest.windows-x64.json").read_text(encoding="utf-8")
+    )
+    manifest["artifacts"][0][field] = -1
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    result = _run_bundle_inventory(
+        bundle=bundle,
+        repo_root=repo_root,
+        manifest=manifest_path,
+    )
+
+    assert result.returncode != 0
+    assert "must be non-negative" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "field_path",
+    [
+        ("requirements_lock_sha256",),
+        ("media_runtime_fingerprint",),
+        ("media_runtime_fingerprints", "analysis"),
+    ],
+)
+def test_windows_portable_bundle_inventory_rejects_malformed_fingerprints(
+    tmp_path: Path,
+    repo_root: Path,
+    field_path: tuple[str, ...],
+) -> None:
+    bundle = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
+    bundle_info_path = bundle / "bundle_info.json"
+    bundle_info = json.loads(bundle_info_path.read_text(encoding="utf-8"))
+    target = bundle_info
+    for segment in field_path[:-1]:
+        target = target[segment]
+    target[field_path[-1]] = "NOT-A-SHA256"
+    bundle_info_path.write_text(json.dumps(bundle_info), encoding="utf-8")
+
+    result = _run_bundle_inventory(bundle=bundle, repo_root=repo_root)
+
+    assert result.returncode != 0
+    assert "must be a lowercase SHA-256 digest" in result.stderr
 
 
 @pytest.mark.parametrize(

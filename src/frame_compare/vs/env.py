@@ -60,6 +60,7 @@ def _iter_windows_dll_candidates() -> list[str]:
     app_site_packages = os.path.join(bundle_root, "app", "site-packages")
     candidates.extend(
         [
+            python_dir,
             os.path.join(bundle_root, "vs", "core"),
             app_site_packages,
             os.path.join(app_site_packages, "vapoursynth"),

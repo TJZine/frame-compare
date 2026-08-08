@@ -122,6 +122,7 @@ def test_register_windows_dll_dirs_is_idempotent_per_process(monkeypatch, tmp_pa
 
     expected_calls = [
         str(env_home),
+        str(python_dir),
         str(vs_core),
         str(app_site_packages),
         str(vapoursynth_package),

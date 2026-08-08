@@ -47,7 +47,15 @@ git fetch --all --prune
 git switch deps/media-runtime-refresh
 git pull --ff-only
 git status --short
-git rev-parse HEAD
+$ExpectedPrHeadSha = '<recorded 40-character PR head SHA>'
+if ($ExpectedPrHeadSha -notmatch '^[a-f0-9]{40}$') {
+  throw 'Expected PR head must be a complete lowercase 40-character SHA.'
+}
+$ActualHeadSha = (git rev-parse HEAD).Trim()
+$RemoteHeadSha = (git ls-remote origin refs/heads/deps/media-runtime-refresh).Split("`t")[0]
+if ($ActualHeadSha -ne $ExpectedPrHeadSha -or $RemoteHeadSha -ne $ExpectedPrHeadSha) {
+  throw "Candidate moved: expected=$ExpectedPrHeadSha local=$ActualHeadSha remote=$RemoteHeadSha"
+}
 ```
 
 `git status --short` must be empty. Then run the repository-standard validation using
@@ -69,6 +77,10 @@ uv build
 
 Record every command, exit code, and any skip reason. Do not weaken an assertion only
 to make the candidate green.
+
+For every failed, deferred, skipped, or unavailable item, record the owner, reason,
+supporting command/log/artifact evidence, why it is non-blocking where applicable,
+and the concrete event that requires revisiting or removing the exception.
 
 ## 2. Build the full portable bundle
 
@@ -114,9 +126,12 @@ not the previous installation. Run commands through the bundle's own shim/runtim
 not a globally installed Frame Compare environment.
 
 ```powershell
-frame-compare --help
-frame-compare version
-frame-compare doctor --json | Tee-Object -FilePath .\doctor-candidate.json
+$ExtractedBundle = (Resolve-Path '.\frame-compare-portable-win-x64').Path
+$CandidateLauncher = Join-Path $ExtractedBundle 'frame-compare.ps1'
+Get-Command -CommandType ExternalScript $CandidateLauncher | Format-List Source,Path
+& $CandidateLauncher --help
+& $CandidateLauncher version
+& $CandidateLauncher doctor --json | Tee-Object -FilePath .\doctor-candidate.json
 ```
 
 Inspect `doctor-candidate.json`. Required results:
@@ -292,6 +307,8 @@ Summarize the physical pass in the pull request with:
 - Cache/index and updater migration results.
 - HDR/Dolby Vision objective and perceptual findings.
 - Residual risks or platform-specific limitations.
+- Independent final reviewer identity/session, reviewed commit SHA, verdict, and any
+  findings or accepted counter-evidence.
 - A clear merge recommendation.
 
 Do not mark the pull request ready or merge it while a production-significant failure
