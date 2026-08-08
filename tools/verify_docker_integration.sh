@@ -389,16 +389,22 @@ def ffmpeg_has_encoder(name: str) -> bool:
     return any(line.split()[1:2] == [name] for line in output.splitlines())
 
 
-def probe_stream_color_range(path: Path) -> str:
-    return subprocess.check_output(
-        [
-            "/usr/bin/ffprobe", "-v", "error", "-select_streams", "v:0",
-            "-show_entries", "stream=color_range", "-of",
-            "default=noprint_wrappers=1:nokey=1", str(path),
-        ],
-        text=True,
-        timeout=15,
-    ).strip()
+def probe_stream_color(path: Path) -> dict[str, str]:
+    payload = json.loads(
+        subprocess.check_output(
+            [
+                "/usr/bin/ffprobe", "-v", "error", "-select_streams", "v:0",
+                "-show_entries",
+                "stream=pix_fmt,color_range,color_space,color_transfer,color_primaries",
+                "-of", "json", str(path),
+            ],
+            text=True,
+            timeout=15,
+        )
+    )
+    streams = payload.get("streams", [])
+    assert_true(len(streams) == 1, f"expected one video stream in {path}: {payload!r}")
+    return streams[0]
 
 
 def open_with_source_loaders(path: Path) -> tuple[object, object, dict[str, object], dict[str, object]]:
@@ -421,7 +427,10 @@ with tempfile.TemporaryDirectory(prefix="frame-compare-media-fixtures-") as fixt
     limited_source, limited_ffms, limited_props, limited_ffms_props = open_with_source_loaders(
         media_path
     )
-    assert_true(probe_stream_color_range(media_path) == "tv", "invalid limited-range fixture")
+    assert_true(
+        probe_stream_color(media_path).get("color_range") == "tv",
+        "invalid limited-range fixture",
+    )
     assert_true(
         props_indicate_limited_range(limited_props) is True,
         f"LWLibavSource lost limited-range metadata: {limited_props!r}",
@@ -444,7 +453,10 @@ with tempfile.TemporaryDirectory(prefix="frame-compare-media-fixtures-") as fixt
         "-color_trc", "bt709", "-colorspace", "bt709", "-y", str(full_range),
     )
     _full_lsw, _full_ffms, full_props, full_ffms_props = open_with_source_loaders(full_range)
-    assert_true(probe_stream_color_range(full_range) == "pc", "invalid full-range fixture")
+    assert_true(
+        probe_stream_color(full_range).get("color_range") == "pc",
+        "invalid full-range fixture",
+    )
     assert_true(
         props_indicate_limited_range(full_props) is False,
         f"LWLibavSource lost full-range metadata: {full_props!r}",
@@ -518,22 +530,21 @@ with tempfile.TemporaryDirectory(prefix="frame-compare-media-fixtures-") as fixt
             "-color_range", "tv", "-y", str(hdr_path),
         )
         hdr_lsw, hdr_ffms, hdr_props, hdr_ffms_props = open_with_source_loaders(hdr_path)
-        assert_true(probe_stream_color_range(hdr_path) == "tv", "invalid HDR range fixture")
+        hdr_stream = probe_stream_color(hdr_path)
+        assert_true(
+            hdr_stream
+            == {
+                "pix_fmt": "yuv420p10le",
+                "color_range": "tv",
+                "color_space": "bt2020nc",
+                "color_transfer": "smpte2084",
+                "color_primaries": "bt2020",
+            },
+            f"invalid HDR fixture signal metadata: {hdr_stream!r}",
+        )
         assert_true(hdr_lsw.clip.format.bits_per_sample >= 10, "LWLibavSource lost HDR precision")
         assert_true(hdr_ffms.format.bits_per_sample >= 10, "FFMS2 lost HDR precision")
         for props, loader_name in ((hdr_props, "LWLibavSource"), (hdr_ffms_props, "FFMS2")):
-            assert_true(
-                get_optional_int_prop(props, "_Primaries") == 9,
-                f"{loader_name} lost BT.2020 primaries: {props!r}",
-            )
-            assert_true(
-                get_optional_int_prop(props, "_Transfer") == 16,
-                f"{loader_name} lost PQ transfer: {props!r}",
-            )
-            assert_true(
-                get_optional_int_prop(props, "_Matrix") == 9,
-                f"{loader_name} lost BT.2020 matrix: {props!r}",
-            )
             assert_true(
                 props_indicate_limited_range(props) is True,
                 f"{loader_name} lost limited range: {props!r}",

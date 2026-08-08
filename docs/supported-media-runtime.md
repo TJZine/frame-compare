@@ -176,7 +176,10 @@ paths, and hashes.
 
 GitHub-hosted Linux, Docker, and Windows validation proves packaging, plugin loading,
 generated fixtures, runtime identities, updater compatibility, and deterministic
-layout. It does not replace final validation on the supported physical Windows system.
+layout. For generated HDR fixtures, `ffprobe` is the encoded stream-signal authority;
+the Docker gate separately proves that both source plugins retain at least 10-bit
+decoded precision because L-SMASH-Works does not expose every stream color tag as a
+frame property. It does not replace final validation on the supported physical Windows system.
 Before merge, that pass must still cover the RTX/Vulkan path, HDR10 and Dolby Vision
 real media, perceptual comparisons, timing/VFR/interlacing/repeated-field cases, alpha
 where available, audio synchronization, old/new index behavior, and an actual
