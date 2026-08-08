@@ -593,23 +593,29 @@ def test_windows_portable_build_update_validates_runtime_metadata_at_process_bou
     if runtime_fingerprint is not None:
         bundle_info["media_runtime_fingerprint"] = runtime_fingerprint
     (bundle / "bundle_info.json").write_text(json.dumps(bundle_info), encoding="utf-8")
-    update_zip = tmp_path / "update.zip"
+    provider_root = tmp_path / "provider-root"
+    process_root = tmp_path / "process-root"
+    provider_root.mkdir()
+    process_root.mkdir()
+    update_zip = provider_root / "update.zip"
     build_script = repo_root / "tools" / "windows_portable" / "build_update.ps1"
+    environment = os.environ | {
+        "FRAME_COMPARE_TEST_BUILD_UPDATE": str(build_script),
+        "FRAME_COMPARE_TEST_BUNDLE": str(bundle),
+        "FRAME_COMPARE_TEST_PROVIDER_ROOT": str(provider_root),
+        "FRAME_COMPARE_TEST_REPO": str(fake_repo),
+    }
+    command = """
+Set-Location -LiteralPath $env:FRAME_COMPARE_TEST_PROVIDER_ROOT
+& $env:FRAME_COMPARE_TEST_BUILD_UPDATE `
+  -BundleDir $env:FRAME_COMPARE_TEST_BUNDLE `
+  -RepoRoot $env:FRAME_COMPARE_TEST_REPO `
+  -OutFile update.zip
+"""
     result = subprocess.run(
-        [
-            exe,
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(build_script),
-            "-BundleDir",
-            str(bundle),
-            "-RepoRoot",
-            str(fake_repo),
-            "-OutFile",
-            str(update_zip),
-        ],
+        [exe, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+        cwd=process_root,
+        env=environment,
         check=False,
         capture_output=True,
         text=True,

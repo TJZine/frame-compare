@@ -153,7 +153,7 @@ function Add-FileToZip(
 
 $resolvedBundleDir = (Resolve-Path -LiteralPath $BundleDir).Path
 $resolvedRepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
-$outFilePath = [System.IO.Path]::GetFullPath($OutFile)
+$outFilePath = [System.IO.Path]::GetFullPath($OutFile, $PWD.ProviderPath)
 $outDir = Split-Path -Parent $outFilePath
 if (![string]::IsNullOrWhiteSpace($outDir)) {
   Ensure-Directory -Path $outDir

@@ -24,7 +24,7 @@ if ! REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; then
   exit 2
 fi
 readonly REPO_ROOT
-readonly DEFAULT_IMAGE="frame-compare:dev"
+readonly DEFAULT_IMAGE="frame-compare:test"
 readonly CONTAINER_WORKDIR="/home/framecompare/frame-compare"
 readonly DEFAULT_DRIVER_CAPABILITIES="compute,utility,graphics"
 

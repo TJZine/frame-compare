@@ -102,13 +102,17 @@ build_args=()
 if [[ "$no_cache" == "1" ]]; then
   build_args+=(--no-cache)
 fi
+build_services=("$service")
+if [[ "$service" != "frame-compare-run" ]]; then
+  build_services+=("frame-compare-run")
+fi
 
 if [[ "$run_build" == "1" ]]; then
   # bash 3.2 + `set -u` can treat empty `${array[@]}` expansions as unbound.
   if [[ "${#build_args[@]}" -gt 0 ]]; then
-    docker compose build "${build_args[@]}" "$service"
+    docker compose build "${build_args[@]}" "${build_services[@]}"
   else
-    docker compose build "$service"
+    docker compose build "${build_services[@]}"
   fi
 fi
 
@@ -310,8 +314,13 @@ for name, (commit, tree_sha256) in expected_source_trees.items():
     )
 assert_true(components["OBUParse"].get("linkage") == "shared", "OBUParse linkage mismatch")
 assert_true(components["OBUParse"].get("soname") == "libobuparse.so.2", "OBUParse SONAME mismatch")
+assert_true(
+    components["Debian FFmpeg"].get("license") == "GPL-2.0-or-later",
+    "Debian FFmpeg license profile mismatch",
+)
 license_root = Path("/usr/local/share/licenses/frame-compare-media-runtime")
 for license_name in (
+    "Debian-FFmpeg-copyright",
     "VapourSynth-LGPL-2.1.txt",
     "OBUParse-LICENSE.txt",
     "L-SMASH-LICENSE.txt",
@@ -728,6 +737,7 @@ required_proof_markers=(
   "DOCKER_PROOF obuparse=ok linkage=shared soname=libobuparse.so.2 provenance=verified"
   "DOCKER_PROOF source_provenance=ok strategy=git-commit-tracked-tree-sha256"
   "DOCKER_PROOF doctor_json=ok"
+  "DOCKER_PROOF production_tooling_absent=ok"
   "DOCKER_PROOF generated_fixture_matrix=ok fixtures=h264_limited"
   "DOCKER_PROOF real_frame_render=ok frames=lwlibavsource,ffms2,placebo"
 )
@@ -755,6 +765,15 @@ container_proof_cmd=$(cat <<'EOF'
 set -euo pipefail
 export LIBGL_ALWAYS_SOFTWARE=1
 export PATH="/home/framecompare/.local/bin:${PATH}"
+if command -v uv >/dev/null 2>&1 || command -v uvx >/dev/null 2>&1; then
+  echo "ERROR: uv build tooling leaked into the production image" >&2
+  exit 6
+fi
+if python -c 'import pytest' >/dev/null 2>&1; then
+  echo "ERROR: pytest test tooling leaked into the production image" >&2
+  exit 6
+fi
+echo "DOCKER_PROOF production_tooling_absent=ok"
 icd="/usr/share/vulkan/icd.d/lvp_icd.json"
 if [[ -f "$icd" ]]; then
   export VK_ICD_FILENAMES="$icd"

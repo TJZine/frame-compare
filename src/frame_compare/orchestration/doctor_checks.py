@@ -534,7 +534,7 @@ def _check_ffmpeg() -> CheckResult:
     ffmpeg_version_line = str(details["ffmpeg_version_line"])
     selected_runtime_kind = runtime_kind().casefold()
     expected_fragment: str | None = None
-    if selected_runtime_kind in {"windows", "windows-portable"}:
+    if selected_runtime_kind == "windows-portable":
         expected_fragment = WINDOWS_FFMPEG_RELEASE
     elif selected_runtime_kind == "docker":
         _, separator, remainder = DEBIAN_FFMPEG_PACKAGE_VERSION.partition(":")

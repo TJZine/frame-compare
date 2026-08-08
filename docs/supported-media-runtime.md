@@ -19,7 +19,7 @@ A version shown here is supported only as part of the complete profile described
 | libplacebo used by vs-placebo | older 2.0.2 lineage | commit **`a7a18af88ff0a17c04840dcb3246047bb6b46df3`** | 2026-07-08 | Upstream-pinned commit | Revision selected by the vs-placebo 2.0.4 wheel build. It includes a correction for luminance clipping when no tone mapping is needed. |
 | libdovi used by vs-placebo | older wheel lineage | **3.3.2**, commit `4fd2b2235c9f93582dd4a00e65ee34a07800afd7` | 2025-06-04 | Upstream-pinned tag | Tag selected by the vs-placebo 2.0.4 wheel build for Dolby Vision metadata handling. |
 | Windows FFmpeg | earlier retained 8.1 build | **`n8.1.2-34-g9b6c8969e0`**, BtbN build `autobuild-2026-07-31-14-10` | 2026-07-31 | Immutable retained release artifact | Newest selected end-of-month Windows x64 LGPL-only artifact from the stable FFmpeg 8.1 branch. It is not a master snapshot. |
-| Linux FFmpeg | Debian Trixie packages | **`7:7.1.5-0+deb13u1`** | Resolved during validation | Debian-supported package | Runtime and development packages remain aligned to Debian Trixie. Frame Compare does not replace them with a custom upstream FFmpeg build. |
+| Linux FFmpeg | Debian Trixie packages | **`7:7.1.5-0+deb13u1`** | Resolved during validation | GPL-enabled Debian package | Runtime and development packages remain aligned to Debian Trixie. Required Docker fixtures use the packaged `libx264` and `libx265` encoders; Frame Compare does not replace Debian FFmpeg with a custom upstream build. |
 
 Primary upstream evidence is recorded in `Dockerfile` and
 `tools/windows_portable/manifest.windows-x64.json`. Docker fetches each exact
@@ -162,7 +162,10 @@ when it must survive replacement.
 
 ## Licensing and corresponding source
 
-The baseline remains free of GPL/nonfree FFmpeg artifacts:
+The Windows portable runtime remains free of GPL/nonfree FFmpeg artifacts. The
+Docker runtime instead uses Debian's GPL-enabled FFmpeg package because its required
+integration fixtures use `libx264` and `libx265`. Neither runtime selects nonfree
+FFmpeg components.
 
 | Component | License profile |
 | --- | --- |
@@ -175,12 +178,16 @@ The baseline remains free of GPL/nonfree FFmpeg artifacts:
 | libplacebo | LGPL-2.1-or-later |
 | libdovi | MIT |
 | Windows BtbN FFmpeg | LGPL-only |
+| Docker Debian FFmpeg | GPL-2.0-or-later |
 
 The Windows manifest vendors exact notices for the selected binaries and records the
 corresponding source of statically bundled L-SMASH-Works dependencies. Build scripts
 verify every artifact's exact byte size and SHA-256 and stop on mismatch. The bundle
 inventory records installed distributions, native artifacts, source URLs, license
-paths, and hashes.
+paths, and hashes. The Docker image also retains Debian FFmpeg's package copyright
+file and records its GPL-2.0-or-later profile in runtime provenance.
+This classification follows [FFmpeg's GPL configuration rule](https://ffmpeg.org/doxygen/7.1/md_LICENSE.html)
+and the exact [Debian Trixie package copyright record](https://sources.debian.org/copyright/license/ffmpeg/7%3A7.1.5-0%2Bdeb13u1/).
 
 ## Validation boundary
 

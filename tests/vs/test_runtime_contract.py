@@ -40,6 +40,10 @@ def test_runtime_profile_uses_explicit_deployment_kind(
     monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "DOCKER")
     assert media_runtime_profile() == "debian-trixie"
 
+    monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "windows")
+    monkeypatch.setattr("frame_compare.vs.runtime_contract.sys.platform", "win32")
+    assert media_runtime_profile() == "unmanaged-windows"
+
 
 def test_unmanaged_macos_has_its_own_native_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("FRAME_COMPARE_RUNTIME_KIND", raising=False)
@@ -142,6 +146,12 @@ def test_alignment_identity_is_owned_by_standalone_ffmpeg() -> None:
 
     assert set(identity["components"]) == {"standalone_ffmpeg"}
     assert identity["components"]["standalone_ffmpeg"]["license_profile"] == "LGPL-only"
+
+
+def test_debian_ffmpeg_identity_records_gpl_enabled_license_profile() -> None:
+    identity = media_runtime_identity("alignment", profile="debian-trixie")
+
+    assert identity["components"]["standalone_ffmpeg"]["license_profile"] == ("GPL-2.0-or-later")
 
 
 def test_index_token_is_profile_scoped() -> None:
@@ -282,8 +292,11 @@ def test_docker_provenance_covers_every_distributed_media_component(
     ):
         assert component in dockerfile or component.replace('"', '\\"') in dockerfile
     assert '\\"version\\":\\"${DEBIAN_FFMPEG_PACKAGE_VERSION}\\"' in dockerfile
+    assert '\\"license\\":\\"GPL-2.0-or-later\\"' in dockerfile
+    assert "Debian-FFmpeg-copyright" in dockerfile
     assert '"version":"7:7.1.5-0+deb13u1"' not in dockerfile
     for license_name in (
+        "Debian-FFmpeg-copyright",
         "VapourSynth-LGPL-2.1.txt",
         "OBUParse-LICENSE.txt",
         "L-SMASH-LICENSE.txt",

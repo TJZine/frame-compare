@@ -206,7 +206,7 @@ RUN bash /usr/local/bin/checkout_source_commit.sh \
         "    {\"name\":\"L-SMASH\",\"version\":\"commit ${LSMASH_COMMIT}\",\"source_commit\":\"${LSMASH_COMMIT}\",\"source_url\":\"https://github.com/l-smash/l-smash.git\",\"source_tree_sha256\":\"${LSMASH_SOURCE_TREE_SHA256}\",\"license\":\"ISC\",\"selection_kind\":\"commit\"}," \
         "    {\"name\":\"L-SMASH-Works\",\"version\":\"1296.0.0.0\",\"source_commit\":\"${LSMASH_WORKS_COMMIT}\",\"source_url\":\"https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works.git\",\"source_tree_sha256\":\"${LSMASH_WORKS_SOURCE_TREE_SHA256}\",\"license\":\"ISC AND LGPL-2.1-or-later\"}," \
         "    {\"name\":\"FFMS2\",\"version\":\"5.0\",\"source_commit\":\"${FFMS2_COMMIT}\",\"source_url\":\"https://github.com/FFMS/ffms2.git\",\"source_tree_sha256\":\"${FFMS2_SOURCE_TREE_SHA256}\",\"license\":\"MIT\"}," \
-        "    {\"name\":\"Debian FFmpeg\",\"version\":\"${DEBIAN_FFMPEG_PACKAGE_VERSION}\",\"distribution\":\"trixie\",\"selection_kind\":\"debian-package\",\"license\":\"Debian-supported\"}," \
+        "    {\"name\":\"Debian FFmpeg\",\"version\":\"${DEBIAN_FFMPEG_PACKAGE_VERSION}\",\"distribution\":\"trixie\",\"selection_kind\":\"debian-package\",\"license\":\"GPL-2.0-or-later\",\"license_path\":\"/usr/local/share/licenses/frame-compare-media-runtime/Debian-FFmpeg-copyright\"}," \
         "    {\"name\":\"vs-placebo\",\"version\":\"2.0.4\",\"source_ref\":\"2.0.4\",\"source_commit\":\"${VS_PLACEBO_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/Lypheo/vs-placebo.git\",\"source_tree_sha256\":\"${VS_PLACEBO_SOURCE_TREE_SHA256}\",\"license\":\"LGPL-2.1-only\",\"selection_kind\":\"tag\"}," \
         "    {\"name\":\"libplacebo\",\"version\":\"commit ${LIBPLACEBO_SOURCE_COMMIT}\",\"source_commit\":\"${LIBPLACEBO_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/haasn/libplacebo.git\",\"source_tree_sha256\":\"${LIBPLACEBO_SOURCE_TREE_SHA256}\",\"license\":\"LGPL-2.1-or-later\",\"selection_kind\":\"commit\"}," \
         "    {\"name\":\"libdovi\",\"version\":\"3.3.2\",\"source_ref\":\"libdovi-3.3.2\",\"source_commit\":\"${LIBDOVI_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/quietvoid/dovi_tool.git\",\"source_tree_sha256\":\"${LIBDOVI_SOURCE_TREE_SHA256}\",\"license\":\"MIT\",\"selection_kind\":\"tag\"}" \
@@ -247,6 +247,9 @@ RUN apt-get update && \
         which \
         && \
     test "$(dpkg-query -W -f='${Version}' ffmpeg)" = "${DEBIAN_FFMPEG_PACKAGE_VERSION}" && \
+    mkdir -p /usr/local/share/licenses/frame-compare-media-runtime && \
+    cp /usr/share/doc/ffmpeg/copyright \
+        /usr/local/share/licenses/frame-compare-media-runtime/Debian-FFmpeg-copyright && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy staged native libraries as one directory so symbolic-link identity is
@@ -267,7 +270,7 @@ RUN ldconfig && \
 ENV VAPOURSYNTH_EXTRA_PLUGIN_PATH=/opt/vapoursynth-extra-plugins \
     LD_LIBRARY_PATH=/home/framecompare/.local/lib/python3.13/site-packages/vapoursynth:/usr/local/lib \
     LIBGL_ALWAYS_SOFTWARE=1 \
-    FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT=7d25cccf972c591f3d52ccaaa2156f7e3ab73e5bf540bf6696116fd5bd78826b \
+    FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT=040a36a000309a49c9f8ff62eb3e864acb2d7cc2d35ad50630d651a0117622f8 \
     FRAME_COMPARE_RUNTIME_KIND=docker \
     FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED=1 \
     FRAME_COMPARE_FFMPEG_EXECUTABLE=/usr/bin/ffmpeg \
@@ -360,7 +363,15 @@ RUN uv export --frozen --no-dev --extra vspreview --no-emit-project --format req
     python -m pip install --no-cache-dir --user --require-hashes \
         -r /tmp/requirements.vspreview.lock.txt
 
+USER root
+RUN rm -f /usr/local/bin/uv /usr/local/bin/uvx
+USER framecompare
+
 # Keep the default image target headless and CI-safe. The gui-linux target above is
 # opt-in via docker-compose.gui-linux.yml and should not become the implicit result
 # of `docker build .` or default compose builds.
 FROM runtime AS default-runtime
+
+USER root
+RUN rm -f /usr/local/bin/uv /usr/local/bin/uvx
+USER framecompare

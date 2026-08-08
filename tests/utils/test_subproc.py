@@ -79,6 +79,7 @@ def test_resolve_executable_prefers_absolute_media_override(
 ) -> None:
     binary = tmp_path / executable
     binary.write_bytes(b"")
+    binary.chmod(0o755)
     monkeypatch.setenv(environment, str(binary.resolve()))
 
     assert resolve_executable(requested) == str(binary.resolve())

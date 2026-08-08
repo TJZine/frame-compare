@@ -114,7 +114,7 @@ def media_runtime_profile() -> MediaRuntimeProfile:
     """
 
     selected_runtime_kind = runtime_kind().casefold()
-    if selected_runtime_kind in {"windows", "windows-portable"}:
+    if selected_runtime_kind == "windows-portable":
         return "windows-x64"
     if selected_runtime_kind == "docker":
         return "debian-trixie"
@@ -223,7 +223,7 @@ def _standalone_ffmpeg_identity(profile: MediaRuntimeProfile) -> dict[str, JSONV
             "selection_kind": "debian-package",
             "distribution": "trixie",
             "package_version": DEBIAN_FFMPEG_PACKAGE_VERSION,
-            "license_profile": "Debian-supported",
+            "license_profile": "GPL-2.0-or-later",
         }
     return {
         "selection_kind": "unmanaged-native",

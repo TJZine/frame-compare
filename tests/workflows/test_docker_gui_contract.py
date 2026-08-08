@@ -20,6 +20,7 @@ def test_dockerfile_gui_target_uses_lock_derived_vspreview_install(repo_root: Pa
 
     assert "FROM runtime AS gui-linux" in dockerfile
     assert stage_names[-1] == "default-runtime"
+    assert dockerfile.count("rm -f /usr/local/bin/uv /usr/local/bin/uvx") == 2
     assert (
         "uv export --frozen --no-dev --extra vspreview --no-emit-project --format requirements.txt"
         in dockerfile

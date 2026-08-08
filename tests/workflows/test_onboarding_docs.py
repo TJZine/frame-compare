@@ -56,6 +56,12 @@ def test_default_compose_keeps_test_runtime_image_separate(repo_root: Path) -> N
 def test_docker_gate_proves_generated_artifacts_survive_container_removal(repo_root: Path) -> None:
     script = _read_text_or_fail(repo_root / "tools" / "verify_docker_integration.sh")
 
+    assert 'build_services=("$service")' in script
+    assert 'build_services+=("frame-compare-run")' in script
+    assert 'docker compose build "${build_args[@]}" "${build_services[@]}"' in script
+    assert "DOCKER_PROOF production_tooling_absent=ok" in script
+    assert "uv build tooling leaked into the production image" in script
+    assert "pytest test tooling leaked into the production image" in script
     assert "docker compose run --rm --entrypoint /bin/bash frame-compare-run" in script
     assert "frame-compare run" in script
     assert 'generated_dir = "$generated_root"' in script
