@@ -19,6 +19,7 @@ from frame_compare.vspreview.adapter import (
     VSPreviewAvailabilityStatus,
     VSPreviewConfig,
     VSPreviewSessionRequest,
+    _resolve_launch_command,
     check_vspreview_availability,
     launch_alignment_verification_session,
 )
@@ -42,6 +43,25 @@ class _FakeVSPreviewProcess:
 
     def wait(self) -> int:
         return self._returncode
+
+
+def test_portable_windows_launch_preloads_media_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("frame_compare.vspreview.adapter.runtime_kind", lambda: "windows-portable")
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.shutil.which",
+        lambda _command: pytest.fail("portable launch must not select an external executable"),
+    )
+
+    script_path = Path("generated/session.py")
+
+    assert _resolve_launch_command(script_path) == [
+        sys.executable,
+        "-m",
+        "frame_compare.vspreview.launcher",
+        str(script_path),
+    ]
 
 
 def _execute_generated_script(

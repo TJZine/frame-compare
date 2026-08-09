@@ -644,7 +644,7 @@ Runtime ownership matrix:
 | Audio correlation, preprocessing, and refinement estimation | `frame_compare.services.alignment_correlation` |
 | Audio alignment window collection, weak-window rejection, consensus selection, and ambiguity gating | `frame_compare.services.alignment_consensus` |
 | Alignment-specific VSPreview verification display and override policy | `frame_compare.services.alignment_vspreview` |
-| VSPreview availability and launch adapter | `frame_compare.vspreview.adapter` |
+| VSPreview availability, launch adapter, and managed-Windows media-runtime preload | `frame_compare.vspreview.adapter`, `frame_compare.vspreview.launcher` |
 | VapourSynth import, Windows DLL registration, plugin detection/loading helpers | `frame_compare.vs.env` |
 | Coordinated media component identity, scoped cache/index fingerprints, and deployment runtime comparison | `frame_compare.vs.runtime_contract` |
 | Doctor execution and diagnostic result mapping | `frame_compare.orchestration.doctor` |

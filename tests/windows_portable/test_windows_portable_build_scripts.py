@@ -502,19 +502,24 @@ def test_windows_portable_build_runtime_validation_checks_qt_stack(repo_root: Pa
         build_script.index("def prove_qt_media_runtime") : build_script.index("phase = sys.argv[1]")
     ]
     for required_proof in (
+        "preload_vapoursynth_runtime()",
         "prove_runtime_contract()",
         "prove_vapoursynth_environment()",
         "prove_lwlibavsource(media_path)",
         "prove_placebo_tonemap_api()",
-        "assert_true(\n        prove_placebo_tonemap_frame(),",
+        "prove_apply_tonemap_frame()",
+        "prove_placebo_tonemap_frame()",
     ):
         assert required_proof in combined_proof
+    assert combined_proof.index("preload_vapoursynth_runtime()") < combined_proof.index(
+        "import PyQt6"
+    )
     assert combined_proof.index("import PyQt6") < combined_proof.index("import vspreview")
     assert combined_proof.index("import vspreview") < combined_proof.index(
         "prove_vapoursynth_environment()"
     )
+    assert "qt_media_runtime_preload=ok" in combined_proof
     assert "qt_media_runtime=ok" in combined_proof
-    assert "combined Qt media runtime requires a rendered direct placebo frame" in (combined_proof)
     assert 'Phase "qt_media_runtime" -MediaPath $mediaPath -Required $true' in build_script
     assert "vspreview_pyqt6_import" not in build_script
 

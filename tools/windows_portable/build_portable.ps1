@@ -922,6 +922,11 @@ def prove_apply_tonemap_frame() -> None:
 
 
 def prove_qt_media_runtime(media_path: Path) -> None:
+    from frame_compare.vspreview.launcher import preload_vapoursynth_runtime
+
+    preload_vapoursynth_runtime()
+    proof("qt_media_runtime_preload=ok")
+
     import PyQt6  # noqa: F401
 
     proof("pyqt6_import=ok")
@@ -933,10 +938,8 @@ def prove_qt_media_runtime(media_path: Path) -> None:
     prove_vapoursynth_environment()
     prove_lwlibavsource(media_path)
     prove_placebo_tonemap_api()
-    assert_true(
-        prove_placebo_tonemap_frame(),
-        "combined Qt media runtime requires a rendered direct placebo frame",
-    )
+    prove_apply_tonemap_frame()
+    prove_placebo_tonemap_frame()
     proof("qt_media_runtime=ok")
 
 
