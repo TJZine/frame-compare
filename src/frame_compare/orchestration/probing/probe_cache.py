@@ -182,7 +182,7 @@ def compute_probe_cache_key(fingerprint: ClipFingerprint) -> str:
 
     The key is derived from the ClipFingerprint (path, size, mtime), the
     probe-key schema, and the supported decoder runtime identity. It is
-    independent of trim state.
+    independent of trim state and intentionally does not hash media contents.
 
     Serialization uses canonical JSON settings (sorted keys, no spaces)
     to ensure cross-platform determinism.

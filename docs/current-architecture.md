@@ -168,6 +168,14 @@ The repo uses filesystem persistence, not a database.
 
 Primary owned paths:
 
+Source freshness for the analysis, probe, and alignment reuse caches follows one
+performance-first policy: source identity uses path, byte size, and modification
+time (nanosecond precision where available), and does not hash media contents.
+Reading multi-gigabyte sources solely for cache lookup would defeat the cache's
+purpose. A replacement that preserves all three identity fields is intentionally
+treated as the same source and can reuse cached data; workflows that replace media
+while preserving size and mtime must advance the mtime or remove the relevant cache.
+
 - `config/config.toml` and `config/presets/*.toml`: config owners
 - `frame_compare.config.persistence`: secret-safe serialization shared by generated
   config and preset writes; runtime `slowpics.webhook_url` and `tmdb.api_key` values

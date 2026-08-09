@@ -446,6 +446,13 @@ unchanged.
 
 ### Cache Mode Semantics
 
+- Analysis, probe, and alignment reuse caches use a performance-first source
+  freshness policy: path, byte size, and modification time identify source content;
+  media bytes are not hashed. A same-path, same-size, same-mtime replacement is
+  intentionally eligible to reuse cached data. Workflows that replace media while
+  preserving those fields must advance the mtime or remove the relevant shared
+  cache entry. This bounded stale-data risk is accepted to avoid reading potentially
+  multi-gigabyte media solely for cache lookup.
 - Analysis cache entries live under `<resolved paths.generated_dir>/cache/analysis`
   using labeled full-fingerprint filenames:
   `<safe-human-label>__<full-fingerprint>.compframes`.

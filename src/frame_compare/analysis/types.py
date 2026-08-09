@@ -41,7 +41,8 @@ class ClipIdentity:
         path: Original input path
         size: File size in bytes
         mtime: Modification time
-        sha1: Optional full or partial file hash
+        sha1: Legacy optional serialized diagnostic. Current analysis key generation
+            neither populates nor consults this field.
     """
 
     path: str

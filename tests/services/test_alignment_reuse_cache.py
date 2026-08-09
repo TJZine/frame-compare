@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import tomllib
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -179,6 +180,32 @@ def test_source_set_cache_key_changes_with_media_runtime(
 
     assert source_set_cache_key(request) != original
     assert observed_scopes == ["alignment"]
+
+
+def test_alignment_cache_keys_intentionally_reuse_same_stat_identity(tmp_path: Path) -> None:
+    """Content hashing is deliberately excluded from performance-first keys."""
+    request = _request(tmp_path)
+    original_source_set_key = source_set_cache_key(request)
+    original_comparison_key = comparison_cache_key(request.comparisons[0])
+
+    reference_path = request.reference.path
+    reference_mtime_ns = request.reference.identity.mtime_ns
+    reference_path.write_bytes(b"replaceme")
+    os.utime(reference_path, ns=(reference_mtime_ns, reference_mtime_ns))
+
+    comparison_path = request.comparisons[0].path
+    comparison_mtime_ns = request.comparisons[0].identity.mtime_ns
+    comparison_path.write_bytes(b"substitute")
+    os.utime(comparison_path, ns=(comparison_mtime_ns, comparison_mtime_ns))
+
+    replaced = replace(
+        request,
+        reference=_clip(reference_path, label="Reference", stream=0),
+        comparisons=[_clip(comparison_path, label="Encode", stream=1)],
+    )
+
+    assert source_set_cache_key(replaced) == original_source_set_key
+    assert comparison_cache_key(replaced.comparisons[0]) == original_comparison_key
 
 
 def test_shared_reuse_cache_round_trips_computed_entry(tmp_path: Path) -> None:

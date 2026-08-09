@@ -81,6 +81,19 @@ def test_save_and_load_round_trip(tmp_path: Path) -> None:
     assert result.metrics.metadata.active_rect_algorithm_id == "active_rect_resolution_v2"
 
 
+def test_analysis_cache_key_intentionally_reuses_same_stat_identity(tmp_path: Path) -> None:
+    """Content hashing is deliberately excluded from the performance-first key."""
+    video = create_video_file(tmp_path, content=b"first")
+    config = AnalysisConfig()
+    original = compute_cache_key([video], config)
+
+    replaced = create_video_file(tmp_path, content=b"other")
+
+    assert replaced == video
+    assert replaced.read_bytes() != b"first"
+    assert compute_cache_key([replaced], config) == original
+
+
 def test_save_rejects_stale_nested_metadata_version(tmp_path: Path) -> None:
     metadata = metrics_metadata(
         frame_count=1,
