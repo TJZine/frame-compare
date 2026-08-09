@@ -71,7 +71,10 @@ Current phase-family owners are intentionally explicit:
   confirmation-result, authoritative window/domain recomputation, and fatal
   retry-once boundary for exclusion-constrained selection failures; the CLI owns
   the injected stderr confirmation callback
-- `frame_compare.orchestration.phase_tasks`: align and render phase bodies plus alignment/render-specific helpers
+- `frame_compare.orchestration.phase_alignment`: audio-alignment phase execution,
+  alignment request mapping, trim application, and aligned-frame normalization
+- `frame_compare.orchestration.phase_render`: screenshot-render phase execution and
+  overlay diagnostic metadata mapping
 - `frame_compare.orchestration.phase_post_render`: metadata, publish, report, confirmation, and cleanup phase bodies
 
 Analysis metric algorithm identity is analysis-owned. `frame_compare.analysis.metric_identity`
@@ -313,7 +316,7 @@ exception unchanged. Completed-run record failures add a stable warning and do
 not change successful media work into failure.
 
 The align phase uses a typed orchestration-to-services request seam:
-`frame_compare.orchestration.phase_tasks.run_align_phase()` builds a
+`frame_compare.orchestration.phase_alignment.run_align_phase()` builds a
 `frame_compare.utils.types.AlignmentRequest` for
 `frame_compare.services.alignment`. The request carries current-run generated
 state, the workspace-level shared alignment cache path, reference/comparison
@@ -499,12 +502,14 @@ Webhook failures are warning-only and redact configured URL details. Typed safe
 failure categories and optional HTTP status codes feed structured diagnostics without
 retaining the configured endpoint.
 
-`frame_compare.cli.entry` and its run-command helper own interactive-only
-slow.pics URL copy/browser actions and the precedence rule between slow.pics
-browser opening and generated-report auto-open. Those actions run only for
-human, non-quiet, TTY stdout runs; JSON stdout stays a single object.
-The same CLI owner presents the local report and asks for confirmation in the
-report-confirmed workflow before post-upload URL actions are considered.
+`frame_compare.cli.entry` and `frame_compare.cli.run_command` own run-command
+coordination, interactive-only slow.pics URL copy/browser actions, and the
+precedence rule between slow.pics browser opening and generated-report auto-open.
+Those actions run only for human, non-quiet, TTY stdout runs; JSON stdout stays a
+single object. The same CLI owner presents the local report and asks for
+confirmation in the report-confirmed workflow before post-upload URL actions are
+considered. `frame_compare.cli.run_contracts` owns validation policy for public
+run-mode combinations before orchestration begins.
 
 `frame_compare.cli.wizard_command` owns the interactive goal-oriented config editor,
 while `frame_compare.cli.wizard_policy` owns its typed code-defined frame-selection
