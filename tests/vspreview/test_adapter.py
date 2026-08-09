@@ -5,7 +5,6 @@ These tests do NOT require VSPreview, VapourSynth, FFmpeg, or any display.
 
 from __future__ import annotations
 
-import io
 import json
 import subprocess
 import sys
@@ -32,8 +31,7 @@ from frame_compare.vspreview.session_script import (
 
 
 class _FakeVSPreviewProcess:
-    def __init__(self, stderr: str = "", returncode: int = 0) -> None:
-        self.stderr = io.StringIO(stderr)
+    def __init__(self, returncode: int = 0) -> None:
         self._returncode = returncode
 
     def __enter__(self) -> _FakeVSPreviewProcess:
