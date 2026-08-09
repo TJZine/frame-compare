@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 from frame_compare.config.schema import OverlayMode
@@ -32,15 +33,11 @@ def _normalize_preserved_prop_key(key: str) -> str:
 def _coerce_float(value: str | int | float) -> float | None:
     if isinstance(value, bool):
         return None
-    if isinstance(value, int | float):
-        return float(value)
-    text = value.strip()
-    if not text:
-        return None
     try:
-        return float(text)
-    except ValueError:
+        number = float(value)
+    except (OverflowError, ValueError):
         return None
+    return number if math.isfinite(number) else None
 
 
 def _coerce_int(value: str | int | float) -> int | None:

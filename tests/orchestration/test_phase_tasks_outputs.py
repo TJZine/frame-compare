@@ -382,6 +382,50 @@ def test_run_render_phase_prefers_typed_selection_details_in_reference_source_do
     assert requests[1].diagnostic_metadata[0].color_range == "full"
 
 
+@pytest.mark.parametrize(
+    "malformed_value",
+    [float("nan"), float("inf"), float("-inf"), "nan", "inf", "-inf", 10**400],
+)
+def test_run_render_phase_ignores_non_finite_preserved_frame_properties(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    malformed_value: str | int | float,
+) -> None:
+    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
+    ctx = _context(tmp_path, comparisons=[comparison])
+    ctx.config.screenshots.overlay_mode = OverlayMode.DIAGNOSTIC
+    ctx.reference = replace(
+        ctx.reference,
+        probe=replace(
+            ctx.reference.probe,
+            preserved_frame_props={
+                "_Range": malformed_value,
+                "DolbyVision_L1_Average": malformed_value,
+                "DolbyVision_L5_Left": malformed_value,
+            },
+        ),
+    )
+    captured: dict[str, Any] = {}
+
+    def _fake_render_screenshots_from_batch(**kwargs: object) -> dict[str, list[Path]]:
+        captured.update(kwargs)
+        return {"Reference": [tmp_path / "reference.png"]}
+
+    monkeypatch.setattr(
+        "frame_compare.render.batch.orchestrator.render_screenshots_from_batch",
+        _fake_render_screenshots_from_batch,
+    )
+
+    phase_render.run_render_phase(
+        ctx,
+        frames=[1],
+        runner=cast(Any, _RenderRunner()),
+    )
+
+    requests = captured["batch_requests"]
+    assert requests[0].diagnostic_metadata == [None]
+
+
 def test_run_render_phase_uses_alignment_reselected_source_domain_labels(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
