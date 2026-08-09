@@ -629,6 +629,13 @@ def _run_extracted_bundle_verifier(
     environment = os.environ | {"LOCALAPPDATA": str(local_app_data)}
     doctor_stdout = extract_root.parent / f"{extract_root.name}-doctor.json"
     doctor_stderr = extract_root.parent / f"{extract_root.name}-doctor.stderr.txt"
+    expected_commit_sha = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    ).stdout.strip()
     return subprocess.run(
         [
             pwsh,
@@ -645,6 +652,8 @@ def _run_extracted_bundle_verifier(
             str(doctor_stdout),
             "-DoctorStderrPath",
             str(doctor_stderr),
+            "-ExpectedCommitSha",
+            expected_commit_sha,
         ],
         capture_output=True,
         text=True,
@@ -656,6 +665,7 @@ def _run_extracted_bundle_verifier(
 
 def _write_extracted_verifier_fixture(
     *,
+    repo_root: Path,
     tmp_path: Path,
     candidate_launcher: str,
     installer: str = "exit 0\n",
@@ -680,9 +690,6 @@ def _write_extracted_verifier_fixture(
     ):
         path = bundle / relative_path
         path.write_text("", encoding="utf-8")
-    for relative_path in ("bundle_info.json", "manifest.json"):
-        (bundle / relative_path).write_text("{}\n", encoding="utf-8")
-
     license_records: list[dict[str, str]] = []
     for name, content in (
         ("SOURCE_URLS.txt", b"Sources\n"),
@@ -696,12 +703,138 @@ def _write_extracted_verifier_fixture(
                 "sha256": hashlib.sha256(content).hexdigest(),
             }
         )
-    (bundle / "bundle_inventory.json").write_text(
-        json.dumps({"licenses": license_records}),
+    commit_sha = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    ).stdout.strip()
+    fingerprints = {
+        scope: hashlib.sha256(scope.encode()).hexdigest()
+        for scope in ("analysis", "probe", "alignment", "index", "full")
+    }
+    requirements_sha = hashlib.sha256(b"requirements").hexdigest()
+    artifact = {
+        "id": "fixture-runtime",
+        "name": "Fixture Runtime",
+        "version": "1.0",
+        "url": "https://example.invalid/runtime.zip",
+        "source_url": "https://example.invalid/runtime-source.tar.gz",
+        "sha256": hashlib.sha256(b"runtime").hexdigest(),
+        "bytes": 7,
+        "license": {
+            "spdx": "MIT",
+            "url": "https://example.invalid/license",
+        },
+    }
+    corresponding_source = {
+        "name": "Fixture Source",
+        "version": "1.0",
+        "source_url": "https://example.invalid/source.tar.gz",
+        "license": "MIT",
+        "sha256": hashlib.sha256(b"source").hexdigest(),
+        "bytes": 6,
+    }
+    manifest = {
+        "manifest_version": 2,
+        "bundle": {
+            "platform": "windows",
+            "arch": "x64",
+            "runtime_fingerprints": fingerprints,
+        },
+        "artifacts": [artifact],
+        "corresponding_sources": [corresponding_source],
+    }
+    (bundle / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (bundle / "bundle_info.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "bundle_kind": "full",
+                "app_version": "1.2.3",
+                "requirements_lock_sha256": requirements_sha,
+                "manifest_version": 2,
+                "platform": "windows-x64",
+                "media_runtime_fingerprint": fingerprints["full"],
+                "media_runtime_fingerprints": fingerprints,
+            }
+        ),
         encoding="utf-8",
     )
+    inventory = {
+        "bundle": {
+            "commit_sha": commit_sha,
+            "frame_compare_license": "GPL-3.0-only",
+            "name": "Frame Compare",
+            "platform": "windows-x64",
+            "requirements_lock_sha256": requirements_sha,
+            "media_runtime_fingerprint": fingerprints["full"],
+            "media_runtime_fingerprints": fingerprints,
+            "source_archive_url": (
+                f"https://github.com/TJZine/frame-compare/archive/{commit_sha}.tar.gz"
+            ),
+            "version": "1.2.3",
+        },
+        "corresponding_sources": [corresponding_source],
+        "licenses": license_records,
+        "manifest_artifacts": [
+            {
+                "binary_bytes": artifact["bytes"],
+                "binary_sha256": artifact["sha256"],
+                "binary_url": artifact["url"],
+                "id": artifact["id"],
+                "license_spdx": artifact["license"]["spdx"],
+                "license_url": artifact["license"]["url"],
+                "name": artifact["name"],
+                "source_url": artifact["source_url"],
+                "version": artifact["version"],
+            }
+        ],
+        "python_distributions": [
+            {
+                "declared_license": "MIT",
+                "license_classifiers": [],
+                "license_expression": [],
+                "name": "fixture-package",
+                "project_urls": [],
+                "source_url": "https://pypi.org/project/fixture-package/1.0/",
+                "version": "1.0",
+            }
+        ],
+        "schema_version": 2,
+        "source_build_install_scripts": [
+            ".github/workflows/windows-portable-build.yml",
+            ".github/workflows/windows-portable.yml",
+            "tools/windows_portable/build_portable.ps1",
+            "tools/windows_portable/build_update.ps1",
+            "tools/windows_portable/bundle_info.schema.json",
+            "tools/windows_portable/generate_update_keypair.ps1",
+            "tools/windows_portable/install-from-source.cmd",
+            "tools/windows_portable/install-from-source.ps1",
+            "tools/windows_portable/install.cmd",
+            "tools/windows_portable/install.ps1",
+            "tools/windows_portable/manifest.windows-x64.json",
+            "tools/windows_portable/manifest.schema.json",
+            "tools/windows_portable/sign_update.ps1",
+            "tools/windows_portable/update_manifest.schema.json",
+            "tools/windows_portable/shim/frame-compare-update.ps1",
+            "tools/windows_portable/validate_update_public_key.ps1",
+            "tools/windows_portable/write_bundle_inventory.py",
+        ],
+    }
+    (bundle / "bundle_inventory.json").write_text(json.dumps(inventory), encoding="utf-8")
 
     zip_path = tmp_path / "fixture.zip"
+    with zipfile.ZipFile(zip_path, "w") as archive:
+        for path in sorted(bundle.rglob("*")):
+            archive.write(path, path.relative_to(bundle.parent).as_posix())
+    return zip_path
+
+
+def _rewrite_extracted_verifier_fixture_zip(tmp_path: Path, name: str) -> Path:
+    bundle = tmp_path / "fixture" / "frame-compare-portable-win-x64"
+    zip_path = tmp_path / name
     with zipfile.ZipFile(zip_path, "w") as archive:
         for path in sorted(bundle.rglob("*")):
             archive.write(path, path.relative_to(bundle.parent).as_posix())
@@ -715,9 +848,11 @@ def test_extracted_bundle_verifier_refuses_existing_root_without_mutation(
 ) -> None:
     if shutil.which("pwsh") is None:
         pytest.skip("PowerShell 7 is required")
-    zip_path = tmp_path / "empty.zip"
-    with zipfile.ZipFile(zip_path, "w"):
-        pass
+    zip_path = _write_extracted_verifier_fixture(
+        repo_root=repo_root,
+        tmp_path=tmp_path,
+        candidate_launcher="exit 0\n",
+    )
     extract_root = tmp_path / "existing"
     extract_root.mkdir()
     marker = extract_root / "must-survive.txt"
@@ -736,7 +871,10 @@ def test_extracted_bundle_verifier_refuses_existing_root_without_mutation(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell process semantics required")
-@pytest.mark.parametrize("unsafe_kind", ["traversal", "case_collision"])
+@pytest.mark.parametrize(
+    "unsafe_kind",
+    ["traversal", "case_collision", "parent_case_collision", "file_directory_conflict"],
+)
 def test_extracted_bundle_verifier_rejects_unsafe_zip_entries(
     repo_root: Path,
     tmp_path: Path,
@@ -749,8 +887,15 @@ def test_extracted_bundle_verifier_rejects_unsafe_zip_entries(
         if unsafe_kind == "traversal":
             archive.writestr("frame-compare-portable-win-x64/../escape.txt", "unsafe")
         else:
-            archive.writestr("frame-compare-portable-win-x64/install.cmd", "")
-            archive.writestr("FRAME-COMPARE-PORTABLE-WIN-X64/INSTALL.CMD", "")
+            if unsafe_kind == "case_collision":
+                archive.writestr("frame-compare-portable-win-x64/install.cmd", "")
+                archive.writestr("FRAME-COMPARE-PORTABLE-WIN-X64/INSTALL.CMD", "")
+            elif unsafe_kind == "parent_case_collision":
+                archive.writestr("frame-compare-portable-win-x64/Dir/one.txt", "")
+                archive.writestr("frame-compare-portable-win-x64/dir/two.txt", "")
+            else:
+                archive.writestr("frame-compare-portable-win-x64/conflict", "")
+                archive.writestr("frame-compare-portable-win-x64/conflict/child.txt", "")
 
     result = _run_extracted_bundle_verifier(
         repo_root=repo_root,
@@ -761,9 +906,77 @@ def test_extracted_bundle_verifier_rejects_unsafe_zip_entries(
 
     assert result.returncode != 0
     output = result.stdout + result.stderr
-    expected = "Unsafe ZIP entry path" if unsafe_kind == "traversal" else "case-colliding"
+    expected = {
+        "traversal": "Unsafe ZIP entry path",
+        "case_collision": "case-colliding",
+        "parent_case_collision": "case-colliding",
+        "file_directory_conflict": "Conflicting ZIP file and directory path",
+    }[unsafe_kind]
     assert expected in output
     assert not (tmp_path / "escape.txt").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell process semantics required")
+@pytest.mark.parametrize(
+    ("mutation", "expected_error"),
+    [
+        ("partial_licenses", "cover every extracted license file exactly once"),
+        ("duplicate_license", "Duplicate or case-colliding inventoried license path"),
+        ("case_colliding_license", "Duplicate or case-colliding inventoried license path"),
+        ("wrong_commit", "commit does not match expected checkout"),
+        ("runtime_mismatch", "Media-runtime fingerprint mismatch"),
+        ("missing_source_provenance", "missing required provenance entry"),
+    ],
+)
+def test_extracted_bundle_verifier_rejects_incomplete_or_mismatched_provenance(
+    repo_root: Path,
+    tmp_path: Path,
+    mutation: str,
+    expected_error: str,
+) -> None:
+    if shutil.which("pwsh") is None:
+        pytest.skip("PowerShell 7 is required")
+    _write_extracted_verifier_fixture(
+        repo_root=repo_root,
+        tmp_path=tmp_path,
+        candidate_launcher="exit 0\n",
+    )
+    bundle = tmp_path / "fixture" / "frame-compare-portable-win-x64"
+    inventory_path = bundle / "bundle_inventory.json"
+    inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+    if mutation == "partial_licenses":
+        inventory["licenses"] = inventory["licenses"][:-1]
+    elif mutation == "duplicate_license":
+        inventory["licenses"].append(dict(inventory["licenses"][0]))
+    elif mutation == "case_colliding_license":
+        duplicate = dict(inventory["licenses"][0])
+        duplicate["path"] = "licenses/" + duplicate["path"].removeprefix("licenses/").upper()
+        inventory["licenses"].append(duplicate)
+    elif mutation == "wrong_commit":
+        inventory["bundle"]["commit_sha"] = "0" * 40
+    elif mutation == "runtime_mismatch":
+        bundle_info_path = bundle / "bundle_info.json"
+        bundle_info = json.loads(bundle_info_path.read_text(encoding="utf-8"))
+        bundle_info["media_runtime_fingerprints"]["analysis"] = "f" * 64
+        bundle_info_path.write_text(json.dumps(bundle_info), encoding="utf-8")
+    elif mutation == "missing_source_provenance":
+        inventory["source_build_install_scripts"].remove(
+            "tools/windows_portable/build_portable.ps1"
+        )
+    else:
+        raise AssertionError(mutation)
+    inventory_path.write_text(json.dumps(inventory), encoding="utf-8")
+    zip_path = _rewrite_extracted_verifier_fixture_zip(tmp_path, f"{mutation}.zip")
+
+    result = _run_extracted_bundle_verifier(
+        repo_root=repo_root,
+        zip_path=zip_path,
+        extract_root=tmp_path / f"{mutation}-extract",
+        local_app_data=tmp_path / "local-app-data",
+    )
+
+    assert result.returncode != 0
+    assert expected_error in result.stdout + result.stderr
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell process semantics required")
@@ -791,6 +1004,7 @@ def test_extracted_bundle_verifier_propagates_launcher_failures(
     if shutil.which("pwsh") is None:
         pytest.skip("PowerShell 7 is required")
     zip_path = _write_extracted_verifier_fixture(
+        repo_root=repo_root,
         tmp_path=tmp_path,
         candidate_launcher=candidate_launcher,
     )
@@ -804,6 +1018,9 @@ def test_extracted_bundle_verifier_propagates_launcher_failures(
 
     assert result.returncode != 0
     assert expected_error in result.stdout + result.stderr
+    assert (
+        tmp_path / "fresh-extract/frame-compare-portable-win-x64/bundle_inventory.json"
+    ).is_file()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell process semantics required")
@@ -837,6 +1054,7 @@ Set-Content -LiteralPath (Join-Path $binDir "frame-compare.cmd") `
 exit 0
 """
     zip_path = _write_extracted_verifier_fixture(
+        repo_root=repo_root,
         tmp_path=tmp_path,
         candidate_launcher=candidate_launcher,
         installer=installer,
@@ -885,6 +1103,7 @@ Set-Content -LiteralPath (Join-Path $binDir "frame-compare.cmd") `
 exit 0
 """
     zip_path = _write_extracted_verifier_fixture(
+        repo_root=repo_root,
         tmp_path=tmp_path,
         candidate_launcher=candidate_launcher,
         installer=installer,
@@ -942,19 +1161,31 @@ def test_windows_portable_extracted_bundle_verifier_owns_hosted_and_manual_parit
         "& $installedShim --help",
     ):
         assert selector in verifier
-    assert 'throw "Unsafe ZIP entry path: $entry"' in verifier
+    assert 'throw "Unsafe ZIP entry path: $EntryName"' in verifier
     assert "ExtractRoot must name a dedicated verification directory" in verifier
     assert "ExtractRoot must not already exist" in verifier
+    assert "FrameCompareNativeDirectory" in verifier
+    assert "[System.IO.FileMode]::CreateNew" in verifier
+    assert "$validatedEntry.Entry.Open()" in verifier
+    assert "[Collections.Generic.List[PSCustomObject]]::new()" in verifier
+    assert "$validatedEntries.Add(" in verifier
+    assert "$validatedEntries +=" not in verifier
+    assert "Expand-Archive" not in verifier
     assert "WINDOWS_EXTRACTED_PROOF license_inventory=ok" in verifier
+    assert "Bundle inventory must cover every extracted license file exactly once" in verifier
+    assert "Bundle inventory commit does not match expected checkout" in verifier
+    assert "Media-runtime fingerprint mismatch for scope" in verifier
     assert "Installed state points to the wrong bundle" in verifier
     assert "Installed shim version output does not match the candidate launcher" in verifier
 
     invocation = "tools/windows_portable/verify_extracted_bundle.ps1"
     assert workflow.count(invocation) == 1
+    assert "-ExpectedCommitSha ${{ inputs.expected_sha }}" in workflow
     assert "Verify extracted portable bundle" in workflow
     assert "Verify zip layout" not in workflow
     assert "Smoke: extracted install shim" not in workflow
     assert "tools\\windows_portable\\verify_extracted_bundle.ps1" in physical_checklist
+    assert "-ExpectedCommitSha $ExpectedPrHeadSha" in physical_checklist
     assert "[guid]::NewGuid()" in physical_checklist
 
 

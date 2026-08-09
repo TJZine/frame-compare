@@ -210,7 +210,8 @@ jobs:
             -ZipPath dist/frame-compare-portable-win-x64.zip `
             -ExtractRoot dist/zip_extract_check `
             -DoctorStdoutPath (Join-Path $env:RUNNER_TEMP "extracted-doctor.json") `
-            -DoctorStderrPath (Join-Path $env:RUNNER_TEMP "extracted-doctor.stderr.txt")
+            -DoctorStderrPath (Join-Path $env:RUNNER_TEMP "extracted-doctor.stderr.txt") `
+            -ExpectedCommitSha ${{ inputs.expected_sha }}
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build code-only update zip

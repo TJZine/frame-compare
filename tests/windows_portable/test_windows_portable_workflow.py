@@ -23,6 +23,7 @@ def test_windows_portable_workflow_delegates_extracted_bundle_verification(
     assert "tools/windows_portable/verify_extracted_bundle.ps1" in verify_step["run"]
     assert "-ZipPath dist/frame-compare-portable-win-x64.zip" in verify_step["run"]
     assert "-ExtractRoot dist/zip_extract_check" in verify_step["run"]
+    assert "-ExpectedCommitSha ${{ inputs.expected_sha }}" in verify_step["run"]
     for required_path in (
         "frame-compare-portable-win-x64/install.cmd",
         "frame-compare-portable-win-x64/install.ps1",

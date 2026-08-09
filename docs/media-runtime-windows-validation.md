@@ -158,7 +158,10 @@ The focused verifier below is also invoked by the hosted workflow's
 `Verify extracted portable bundle` step. It owns ZIP containment/layout, extraction,
 default workspace directories, candidate launcher and doctor checks, installation,
 and installed-shim parity. Every command it reports must exit `0`; a thrown assertion
-is a failed check.
+is a failed check. The verifier atomically reserves the fresh extraction root, writes
+without overwrite, and retains extracted evidence after any later failure. Its
+expected commit argument must be the recorded detached pull-request head used to build
+the candidate.
 
 ```powershell
 $Zip = (Resolve-Path 'dist\frame-compare-portable-win-x64.zip').Path
@@ -172,7 +175,8 @@ pwsh -NoProfile -ExecutionPolicy Bypass `
   -ZipPath $Zip `
   -ExtractRoot $ExtractRoot `
   -DoctorStdoutPath $DoctorStdout `
-  -DoctorStderrPath $DoctorStderr
+  -DoctorStderrPath $DoctorStderr `
+  -ExpectedCommitSha $ExpectedPrHeadSha
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 ```
 
