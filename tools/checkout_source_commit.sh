@@ -56,6 +56,58 @@ run_bounded() {
   exit 2
 }
 
+destination_created=0
+destination_identity=""
+
+directory_identity() {
+  # The builder image uses GNU coreutils, while local validation may run on
+  # macOS. Keep the ownership check portable without weakening the atomic
+  # `mkdir` boundary.
+  stat -c '%d:%i' -- "$1" 2>/dev/null || stat -f '%d:%i' -- "$1" 2>/dev/null
+}
+
+cleanup_destination() {
+  local status=$?
+  trap - EXIT
+
+  if (( status != 0 && destination_created == 1 )); then
+    local current_identity=""
+    current_identity=$(directory_identity "$destination" || true)
+    if [[ -n $destination_identity && $current_identity == "$destination_identity" ]]; then
+      if ! rm -rf -- "$destination"; then
+        echo "failed to clean up source destination after error: $destination" >&2
+      fi
+    elif [[ -z $destination_identity && -d $destination ]]; then
+      # If the identity lookup itself failed immediately after mkdir, only
+      # remove an empty directory. Never recursively delete an unverified path.
+      if ! rmdir -- "$destination"; then
+        echo "source destination could not be safely cleaned up: $destination" >&2
+      fi
+    elif [[ -e $destination ]]; then
+      echo "source destination changed during validation; refusing cleanup: $destination" >&2
+    fi
+  fi
+
+  exit "$status"
+}
+
+# `mkdir` is the ownership boundary: it succeeds only when the destination was
+# absent at that instant. This avoids deleting a path that pre-existed or was
+# created by a concurrent caller if a later Git operation fails.
+if mkdir -- "$destination"; then
+  destination_created=1
+else
+  status=$?
+  if [[ -e $destination ]]; then
+    echo "source destination already exists: $destination" >&2
+  else
+    echo "failed to create source destination: $destination" >&2
+  fi
+  exit "$status"
+fi
+trap cleanup_destination EXIT
+destination_identity=$(directory_identity "$destination")
+
 run_bounded "git init" git init --quiet "$destination"
 run_bounded "git remote add" git -C "$destination" remote add origin "$repository_url"
 run_bounded "git fetch" git -C "$destination" fetch --quiet --depth=1 --no-tags origin "$expected_commit"
@@ -74,8 +126,11 @@ import hashlib
 import subprocess
 import sys
 from pathlib import Path
+from typing import BinaryIO
 
 GIT_SUBPROCESS_TIMEOUT_SECONDS = 300.0
+BATCH_READ_SIZE = 1024 * 1024
+BATCH_HEADER_MAX_BYTES = 256
 
 root = Path(sys.argv[1])
 
@@ -99,24 +154,147 @@ def add_field(value: bytes) -> None:
     result.update(value)
 
 
-for record in records.split(b"\0"):
-    if not record:
-        continue
-    metadata, path = record.split(b"\t", 1)
-    mode, object_type, object_id = metadata.split(b" ", 2)
-    add_field(mode)
-    add_field(object_type)
-    add_field(path)
-    if object_type == b"blob":
-        content = git_output(
-            ["git", "-C", str(root), "cat-file", "blob", object_id.decode("ascii")]
+def read_blob_payload(stream: BinaryIO, size: int, object_id: bytes) -> bytes:
+    digest = hashlib.sha256()
+    remaining = size
+    while remaining:
+        chunk = stream.read(min(remaining, BATCH_READ_SIZE))
+        if not chunk:
+            raise RuntimeError(
+                f"git cat-file --batch returned {size - remaining} bytes for "
+                f"{object_id.decode('ascii')} but declared {size}"
+            )
+        digest.update(chunk)
+        remaining -= len(chunk)
+
+    delimiter = stream.read(1)
+    if delimiter != b"\n":
+        raise RuntimeError(
+            f"git cat-file --batch response for {object_id.decode('ascii')} "
+            "is missing its record delimiter"
         )
-        add_field(str(len(content)).encode("ascii"))
-        add_field(hashlib.sha256(content).digest())
-    elif object_type == b"commit":
-        add_field(object_id)
-    else:
-        raise RuntimeError(f"unsupported git tree object type: {object_type!r}")
+    return digest.digest()
+
+
+def read_blob_response(
+    process: subprocess.Popen[bytes], object_id: bytes
+) -> tuple[bytes, bytes]:
+    stream = process.stdout
+    if stream is None:
+        raise RuntimeError("git cat-file --batch stdout is unavailable")
+
+    header = stream.readline(BATCH_HEADER_MAX_BYTES)
+    if not header.endswith(b"\n"):
+        raise RuntimeError("git cat-file --batch returned an incomplete response header")
+    fields = header[:-1].split(b" ")
+    if len(fields) != 3:
+        raise RuntimeError(
+            f"malformed git cat-file --batch response header: {header.rstrip()!r}"
+        )
+
+    returned_id, object_type, size_raw = fields
+    if returned_id != object_id:
+        raise RuntimeError(
+            "git cat-file --batch returned an unexpected object id: "
+            f"expected={object_id.decode('ascii')} actual={returned_id!r}"
+        )
+    if object_type != b"blob":
+        raise RuntimeError(
+            f"git cat-file --batch returned unexpected object type: {object_type!r}"
+        )
+    if not size_raw or not size_raw.isdigit():
+        raise RuntimeError(
+            f"git cat-file --batch returned an invalid blob size: {size_raw!r}"
+        )
+
+    size = int(size_raw)
+    digest = read_blob_payload(stream, size, object_id)
+    return str(size).encode("ascii"), digest
+
+
+def finish_batch(process: subprocess.Popen[bytes]) -> None:
+    try:
+        extra_stdout, stderr = process.communicate(
+            timeout=GIT_SUBPROCESS_TIMEOUT_SECONDS
+        )
+    except subprocess.TimeoutExpired as exc:
+        process.kill()
+        process.communicate()
+        raise RuntimeError(
+            "git cat-file --batch timed out after "
+            f"{GIT_SUBPROCESS_TIMEOUT_SECONDS:g}s"
+        ) from exc
+
+    if process.returncode != 0:
+        detail = stderr.decode("utf-8", errors="replace").strip()
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(
+            f"git cat-file --batch failed with exit status {process.returncode}{suffix}"
+        )
+    if extra_stdout:
+        raise RuntimeError(
+            "git cat-file --batch returned unexpected trailing output: "
+            f"{extra_stdout[:80]!r}"
+        )
+
+
+def abort_batch(process: subprocess.Popen[bytes]) -> None:
+    try:
+        if process.poll() is None:
+            process.kill()
+        process.communicate(timeout=GIT_SUBPROCESS_TIMEOUT_SECONDS)
+    except BaseException:
+        # Preserve the protocol or digest error that caused the abort. The
+        # outer `timeout` boundary still bounds the complete helper.
+        try:
+            process.kill()
+        except BaseException:
+            pass
+
+
+blob_results: dict[bytes, tuple[bytes, bytes]] = {}
+batch_process: subprocess.Popen[bytes] | None = None
+
+try:
+    for record in records.split(b"\0"):
+        if not record:
+            continue
+        metadata, path = record.split(b"\t", 1)
+        mode, object_type, object_id = metadata.split(b" ", 2)
+        add_field(mode)
+        add_field(object_type)
+        add_field(path)
+        if object_type == b"blob":
+            blob_result = blob_results.get(object_id)
+            if blob_result is None:
+                if batch_process is None:
+                    batch_process = subprocess.Popen(
+                        ["git", "-C", str(root), "cat-file", "--batch"],
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                    )
+                if batch_process.stdin is None:
+                    raise RuntimeError("git cat-file --batch stdin is unavailable")
+                batch_process.stdin.write(object_id + b"\n")
+                batch_process.stdin.flush()
+                blob_result = read_blob_response(batch_process, object_id)
+                blob_results[object_id] = blob_result
+            blob_length, blob_digest = blob_result
+            add_field(blob_length)
+            add_field(blob_digest)
+        elif object_type == b"commit":
+            add_field(object_id)
+        else:
+            raise RuntimeError(f"unsupported git tree object type: {object_type!r}")
+
+    if batch_process is not None:
+        finish_batch(batch_process)
+        batch_process = None
+except BaseException:
+    if batch_process is not None:
+        abort_batch(batch_process)
+    raise
 
 print(result.hexdigest())
 PY
