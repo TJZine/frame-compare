@@ -33,8 +33,10 @@ run_bounded() {
     status=$?
   fi
 
-  if [[ $status -eq 124 || $status -eq 137 ]]; then
+  if [[ $status -eq 124 ]]; then
     echo "${description} timed out after ${GIT_COMMAND_TIMEOUT_SECONDS}s" >&2
+  elif [[ $status -eq 137 ]]; then
+    echo "${description} timed out or was killed after ${GIT_COMMAND_TIMEOUT_SECONDS}s (exit status 137)" >&2
   else
     echo "${description} failed with exit status ${status}" >&2
   fi

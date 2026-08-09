@@ -12,6 +12,10 @@ def test_source_checkout_bounds_every_git_boundary(repo_root: Path) -> None:
 
     assert "readonly GIT_COMMAND_TIMEOUT_SECONDS=300" in script
     assert "readonly GIT_COMMAND_KILL_AFTER_SECONDS=10" in script
+    assert 'timed out after ${GIT_COMMAND_TIMEOUT_SECONDS}s"' in script
+    assert (
+        "timed out or was killed after ${GIT_COMMAND_TIMEOUT_SECONDS}s (exit status 137)" in script
+    )
     assert (
         '    --kill-after="${GIT_COMMAND_KILL_AFTER_SECONDS}s" \\\n'
         '    "${GIT_COMMAND_TIMEOUT_SECONDS}s" \\\n'
