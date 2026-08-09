@@ -51,75 +51,154 @@ run_bounded() {
   echo "invalid source-tree SHA-256: $expected_tree_sha256" >&2
   exit 2
 }
-[[ ! -e $destination ]] || {
+[[ ! -e $destination && ! -L $destination ]] || {
   echo "source destination already exists: $destination" >&2
   exit 2
 }
 
-destination_created=0
-destination_identity=""
+destination_for_staging=$destination
+while [[ $destination_for_staging == */ && $destination_for_staging != "/" ]]; do
+  destination_for_staging=${destination_for_staging%/}
+done
+destination_parent=${destination_for_staging%/*}
+if [[ $destination_parent == "$destination_for_staging" ]]; then
+  destination_parent=.
+fi
+if [[ -z $destination_parent ]]; then
+  if [[ $destination_for_staging == /* ]]; then
+    destination_parent=/
+  else
+    destination_parent=.
+  fi
+fi
+destination_name=${destination_for_staging##*/}
+if [[ -z $destination_name ]]; then
+  echo "invalid source destination: $destination" >&2
+  exit 2
+fi
 
-directory_identity() {
-  # The builder image uses GNU coreutils, while local validation may run on
-  # macOS. Keep the ownership check portable without weakening the atomic
-  # `mkdir` boundary.
-  stat -c '%d:%i' -- "$1" 2>/dev/null || stat -f '%d:%i' -- "$1" 2>/dev/null
-}
+# Keep all mutable checkout state in a private sibling. The final destination
+# stays absent until every Git, digest, and .git-removal step has succeeded.
+# Sibling placement keeps publication on one filesystem, so the no-clobber
+# rename below is atomic on both the Debian builder and macOS validation hosts.
+staging_directory=""
+if [[ $destination_parent == "/" ]]; then
+  staging_template="/.${destination_name}.staging.XXXXXXXX"
+else
+  staging_template="${destination_parent}/.${destination_name}.staging.XXXXXXXX"
+fi
+if staging_directory=$(mktemp -d -- "$staging_template"); then
+  :
+else
+  status=$?
+  echo "failed to create private source staging directory near destination: $destination" >&2
+  exit "$status"
+fi
 
-cleanup_destination() {
+cleanup_staging() {
   local status=$?
   trap - EXIT
 
-  if (( status != 0 && destination_created == 1 )); then
-    local current_identity=""
-    current_identity=$(directory_identity "$destination" || true)
-    if [[ -n $destination_identity && $current_identity == "$destination_identity" ]]; then
-      if ! rm -rf -- "$destination"; then
-        echo "failed to clean up source destination after error: $destination" >&2
-      fi
-    elif [[ -z $destination_identity && -d $destination ]]; then
-      # If the identity lookup itself failed immediately after mkdir, only
-      # remove an empty directory. Never recursively delete an unverified path.
-      if ! rmdir -- "$destination"; then
-        echo "source destination could not be safely cleaned up: $destination" >&2
-      fi
-    elif [[ -e $destination ]]; then
-      echo "source destination changed during validation; refusing cleanup: $destination" >&2
+  if (( status != 0 )) && [[ -n $staging_directory ]]; then
+    # Only this unpredictable, script-created path is recursively removed.
+    # The caller-controlled final destination is never cleanup input.
+    if ! rm -rf -- "$staging_directory"; then
+      echo "failed to clean up private source staging directory after error: $destination" >&2
     fi
   fi
 
   exit "$status"
 }
+trap cleanup_staging EXIT
 
-# `mkdir` is the ownership boundary: it succeeds only when the destination was
-# absent at that instant. This avoids deleting a path that pre-existed or was
-# created by a concurrent caller if a later Git operation fails.
-if mkdir -- "$destination"; then
-  destination_created=1
-else
-  status=$?
-  if [[ -e $destination ]]; then
-    echo "source destination already exists: $destination" >&2
-  else
-    echo "failed to create source destination: $destination" >&2
-  fi
-  exit "$status"
-fi
-trap cleanup_destination EXIT
-destination_identity=$(directory_identity "$destination")
+publish_staging_directory() {
+  python - "$1" "$2" <<'PY'
+from __future__ import annotations
 
-run_bounded "git init" git init --quiet "$destination"
-run_bounded "git remote add" git -C "$destination" remote add origin "$repository_url"
-run_bounded "git fetch" git -C "$destination" fetch --quiet --depth=1 --no-tags origin "$expected_commit"
-run_bounded "git checkout" git -C "$destination" -c advice.detachedHead=false checkout --quiet --detach FETCH_HEAD
+import ctypes
+import errno
+import os
+import sys
 
-actual_commit=$(run_bounded "git rev-parse" git -C "$destination" rev-parse HEAD)
+
+source = os.fsencode(sys.argv[1])
+destination = os.fsencode(sys.argv[2])
+try:
+    libc = ctypes.CDLL(None, use_errno=True)
+except OSError as exc:
+    print(f"failed to publish source destination {sys.argv[2]}: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+try:
+    if sys.platform == "darwin":
+        # macOS exposes the atomic no-replace primitive as renameatx_np with
+        # RENAME_EXCL. AT_FDCWD is -2 on Darwin.
+        rename_no_replace = libc.renameatx_np
+        rename_no_replace.argtypes = [
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        ]
+        rename_no_replace.restype = ctypes.c_int
+        old_directory_fd = new_directory_fd = -2
+        no_replace_flag = 0x00000004
+    elif sys.platform == "linux":
+        # Debian's glibc provides renameat2 with RENAME_NOREPLACE. AT_FDCWD is
+        # -100 on Linux. Fail closed rather than falling back to a check-then-move
+        # sequence if a runtime libc does not expose the primitive.
+        rename_no_replace = libc.renameat2
+        rename_no_replace.argtypes = [
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        ]
+        rename_no_replace.restype = ctypes.c_int
+        old_directory_fd = new_directory_fd = -100
+        no_replace_flag = 0x00000001
+    else:
+        raise RuntimeError(
+            f"atomic no-clobber publication is unsupported on {sys.platform}"
+        )
+except (AttributeError, OSError, RuntimeError) as exc:
+    print(f"failed to publish source destination {sys.argv[2]}: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+if rename_no_replace(
+    old_directory_fd,
+    source,
+    new_directory_fd,
+    destination,
+    no_replace_flag,
+) != 0:
+    error_number = ctypes.get_errno()
+    if error_number in (errno.EEXIST, errno.ENOTEMPTY):
+        print(f"source destination already exists: {sys.argv[2]}", file=sys.stderr)
+        raise SystemExit(2)
+    detail = os.strerror(error_number)
+    print(
+        f"failed to publish source destination {sys.argv[2]}: {detail}",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+PY
+}
+
+run_bounded "git init" git init --quiet "$staging_directory"
+run_bounded "git remote add" git -C "$staging_directory" remote add origin "$repository_url"
+run_bounded "git fetch" git -C "$staging_directory" fetch --quiet --depth=1 --no-tags origin "$expected_commit"
+run_bounded "git checkout" git -C "$staging_directory" -c advice.detachedHead=false checkout --quiet --detach FETCH_HEAD
+
+actual_commit=$(run_bounded "git rev-parse" git -C "$staging_directory" rev-parse HEAD)
 [[ $actual_commit == "$expected_commit" ]] || {
   echo "source commit mismatch: expected=$expected_commit actual=$actual_commit" >&2
   exit 1
 }
 
-actual_tree_sha256=$(run_bounded "source-tree digest" python - "$destination" <<'PY'
+actual_tree_sha256=$(run_bounded "source-tree digest" python - "$staging_directory" <<'PY'
 from __future__ import annotations
 
 import hashlib
@@ -305,6 +384,14 @@ PY
   exit 1
 }
 
-rm -rf "$destination/.git"
+rm -rf -- "$staging_directory/.git"
+if publish_staging_directory "$staging_directory" "$destination"; then
+  # The no-replace rename consumed the private staging directory. Clearing the
+  # cleanup input prevents a later shell failure from touching the final tree.
+  staging_directory=""
+else
+  status=$?
+  exit "$status"
+fi
 printf 'verified_source_tree=%s commit=%s sha256=%s\n' \
   "$repository_url" "$actual_commit" "$actual_tree_sha256"

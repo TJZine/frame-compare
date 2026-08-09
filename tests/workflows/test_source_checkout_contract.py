@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import ast
 import hashlib
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -13,17 +13,7 @@ import pytest
 
 
 def _embedded_python_source(script: str) -> str:
-    return script.split("python - \"$destination\" <<'PY'\n", 1)[1].split("\nPY\n", 1)[0]
-
-
-def _list_string_constants(node: ast.AST) -> set[str]:
-    if not isinstance(node, ast.List):
-        return set()
-    return {
-        element.value
-        for element in node.elts
-        if isinstance(element, ast.Constant) and isinstance(element.value, str)
-    }
+    return script.split("python - \"$staging_directory\" <<'PY'\n", 1)[1].split("\nPY\n", 1)[0]
 
 
 def _run(
@@ -139,6 +129,37 @@ def _timeout_shim(tmp_path: Path) -> Path:
     return shim
 
 
+def _race_git_shim(tmp_path: Path) -> Path:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    shim = bin_dir / "git"
+    real_git = shutil.which("git")
+    assert real_git is not None
+    shim.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "-C" ] && [ "$3" = "fetch" ]; then\n'
+        '  mkdir "$FC_RACE_DESTINATION"\n'
+        '  printf "caller-owned\\n" > "$FC_RACE_DESTINATION/marker"\n'
+        "fi\n"
+        'exec "$FC_REAL_GIT" "$@"\n',
+        encoding="utf-8",
+    )
+    shim.chmod(0o755)
+    return shim
+
+
+def _recording_mktemp_shim(tmp_path: Path) -> Path:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    shim = bin_dir / "mktemp"
+    shim.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$3" > "$FC_MKTEMP_RECORD"\nexit 1\n',
+        encoding="utf-8",
+    )
+    shim.chmod(0o755)
+    return shim
+
+
 def _run_checkout(
     repo_root: Path,
     script: Path,
@@ -147,9 +168,12 @@ def _run_checkout(
     commit: str,
     tree_digest: str,
     destination: Path,
+    extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
     environment["PATH"] = f"{timeout_command.parent}{os.pathsep}{environment['PATH']}"
+    if extra_env is not None:
+        environment.update(extra_env)
     return subprocess.run(
         [
             "bash",
@@ -191,51 +215,51 @@ def test_source_checkout_bounds_every_git_boundary(repo_root: Path) -> None:
     ):
         assert re.search(rf'run_bounded "{re.escape(description)}" git(?: |$)', script)
 
-    assert 'run_bounded "source-tree digest" python - "$destination"' in script
+    assert 'run_bounded "source-tree digest" python - "$staging_directory"' in script
+    assert 'rm -rf -- "$destination"' not in script
+    assert "renameat2" in script
+    assert "renameatx_np" in script
 
     shell_source = script.split("actual_tree_sha256=$(run_bounded", 1)[0]
     assert not re.search(r"^\s*git(?:\s|-C)", shell_source, re.MULTILINE)
 
-    module = ast.parse(_embedded_python_source(script))
-    calls = [node for node in ast.walk(module) if isinstance(node, ast.Call)]
-    check_output_calls = [
-        node
-        for node in calls
-        if isinstance(node.func, ast.Attribute) and node.func.attr == "check_output"
-    ]
-    assert len(check_output_calls) == 1
-    timeout_keywords = [
-        keyword for keyword in check_output_calls[0].keywords if keyword.arg == "timeout"
-    ]
-    assert len(timeout_keywords) == 1
-    assert isinstance(timeout_keywords[0].value, ast.Name)
-    assert timeout_keywords[0].value.id == "GIT_SUBPROCESS_TIMEOUT_SECONDS"
-
-    git_output_ls_tree_calls = [
-        node
-        for node in calls
-        if isinstance(node.func, ast.Name)
-        and node.func.id == "git_output"
-        and node.args
-        and {"ls-tree", "-rz", "--full-tree"} <= _list_string_constants(node.args[0])
-    ]
-    assert len(git_output_ls_tree_calls) == 1
-
-    popen_batch_calls = [
-        node
-        for node in calls
-        if isinstance(node.func, ast.Attribute)
-        and node.func.attr == "Popen"
-        and node.args
-        and {"cat-file", "--batch"} <= _list_string_constants(node.args[0])
-    ]
-    assert len(popen_batch_calls) == 1
-    assert any(
-        isinstance(node.func, ast.Attribute)
-        and node.func.attr == "communicate"
-        and any(keyword.arg == "timeout" for keyword in node.keywords)
-        for node in calls
+    embedded_source = _embedded_python_source(script)
+    assert (
+        'records = git_output(["git", "-C", str(root), "ls-tree", "-rz", "--full-tree", "HEAD"])'
+        in embedded_source
     )
+    assert (
+        "subprocess.check_output(command, timeout=GIT_SUBPROCESS_TIMEOUT_SECONDS)"
+        in embedded_source
+    )
+    assert embedded_source.count('"cat-file", "--batch"') == 1
+    assert re.search(
+        r"process\.communicate\(\s*timeout=GIT_SUBPROCESS_TIMEOUT_SECONDS", embedded_source
+    )
+
+
+def test_source_checkout_uses_root_as_absolute_staging_parent(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    timeout_shim = _timeout_shim(tmp_path)
+    _recording_mktemp_shim(tmp_path)
+    record_path = tmp_path / "mktemp-template"
+    destination = Path("/") / f"frame-compare-root-edge-{tmp_path.name}"
+    assert not destination.exists()
+
+    completed = _run_checkout(
+        repo_root,
+        repo_root / "tools/checkout_source_commit.sh",
+        timeout_shim,
+        Path("/nonexistent-source-repository"),
+        "0" * 40,
+        "0" * 64,
+        destination,
+        extra_env={"FC_MKTEMP_RECORD": str(record_path)},
+    )
+
+    assert completed.returncode == 1
+    assert record_path.read_text(encoding="utf-8") == (f"/.{destination.name}.staging.XXXXXXXX\n")
 
 
 def test_source_checkout_verifies_digest_and_preserves_commit_records(
@@ -310,3 +334,63 @@ def test_source_checkout_refuses_pre_existing_destination(repo_root: Path, tmp_p
     assert completed.returncode == 2
     assert completed.stderr == f"source destination already exists: {destination}\n"
     assert marker.read_text(encoding="utf-8") == "caller-owned\n"
+
+
+def test_source_checkout_never_cleans_replaced_final_destination(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    repository, commit, _tree_digest = _create_source_repo(tmp_path)
+    destination = tmp_path / "replaced-destination"
+    timeout_shim = _timeout_shim(tmp_path)
+    _race_git_shim(tmp_path)
+    real_git = shutil.which("git")
+    assert real_git is not None
+
+    completed = _run_checkout(
+        repo_root,
+        repo_root / "tools/checkout_source_commit.sh",
+        timeout_shim,
+        repository,
+        commit,
+        "f" * 64,
+        destination,
+        extra_env={
+            "FC_RACE_DESTINATION": str(destination),
+            "FC_REAL_GIT": real_git,
+        },
+    )
+
+    assert completed.returncode != 0
+    assert destination.is_dir()
+    assert (destination / "marker").read_text(encoding="utf-8") == "caller-owned\n"
+    assert not list(tmp_path.glob(".replaced-destination.staging.*"))
+
+
+def test_source_checkout_publishes_without_clobbering_late_destination(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    repository, commit, tree_digest = _create_source_repo(tmp_path)
+    destination = tmp_path / "late-destination"
+    timeout_shim = _timeout_shim(tmp_path)
+    _race_git_shim(tmp_path)
+    real_git = shutil.which("git")
+    assert real_git is not None
+
+    completed = _run_checkout(
+        repo_root,
+        repo_root / "tools/checkout_source_commit.sh",
+        timeout_shim,
+        repository,
+        commit,
+        tree_digest,
+        destination,
+        extra_env={
+            "FC_RACE_DESTINATION": str(destination),
+            "FC_REAL_GIT": real_git,
+        },
+    )
+
+    assert completed.returncode == 2
+    assert completed.stderr == f"source destination already exists: {destination}\n"
+    assert (destination / "marker").read_text(encoding="utf-8") == "caller-owned\n"
+    assert not list(tmp_path.glob(".late-destination.staging.*"))
