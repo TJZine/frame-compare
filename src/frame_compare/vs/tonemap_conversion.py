@@ -138,7 +138,12 @@ def convert_non_rgb_with_matrix_hint(
     return clip.resize.Bicubic(**kwargs)  # type: ignore[attr-defined]
 
 
-def to_rgbs(clip: vs.VideoNode) -> vs.VideoNode:
+def to_rgbs(
+    clip: vs.VideoNode,
+    *,
+    props: dict[str, object] | None = None,
+    detected_is_hdr: bool | None = None,
+) -> vs.VideoNode:
     """Convert clip to RGBS if needed."""
     import vapoursynth as vs
 
@@ -147,7 +152,12 @@ def to_rgbs(clip: vs.VideoNode) -> vs.VideoNode:
             if clip.format.color_family == vs.RGB:
                 return clip.resize.Bicubic(format=vs.RGBS)
             rgbs_format = vs.RGBS
-            return convert_non_rgb_with_matrix_hint(clip, target_format=rgbs_format)
+            return convert_non_rgb_with_matrix_hint(
+                clip,
+                target_format=rgbs_format,
+                props=props,
+                detected_is_hdr=detected_is_hdr,
+            )
         return clip
     except Exception as e:
         raise TonemapError(
@@ -174,22 +184,25 @@ def resolve_hdr_tonemap_inputs(
     clip: vs.VideoNode,
     hdr_metadata: HDRMetadata | None,
 ) -> HdrTonemapInputs:
-    props: dict[str, object] | None = None
-    detected_is_hdr: bool | None = None
+    props = dict(clip.get_frame(0).props)
     if hdr_metadata is None:
-        props = dict(clip.get_frame(0).props)
         detected_is_hdr, hdr_metadata = detect_hdr(props)
+    else:
+        _set_unspecified_signal(props, _FRAME_PROP_MATRIX, hdr_metadata.matrix)
+        _set_unspecified_signal(props, _FRAME_PROP_TRANSFER, hdr_metadata.transfer)
+        _set_unspecified_signal(props, _FRAME_PROP_PRIMARIES, hdr_metadata.color_primaries)
+        detected_is_hdr, _ = detect_hdr(props)
 
-    transfer_raw: object | None = (
-        getattr(hdr_metadata, "transfer", None) if hdr_metadata is not None else None
-    )
-    primaries_raw: object | None = (
-        getattr(hdr_metadata, "color_primaries", None) if hdr_metadata is not None else None
-    )
     return HdrTonemapInputs(
         hdr_metadata=hdr_metadata,
-        transfer=transfer_raw if isinstance(transfer_raw, int) else None,
-        primaries=primaries_raw if isinstance(primaries_raw, int) else None,
+        transfer=_specified_int_prop(props, _FRAME_PROP_TRANSFER),
+        primaries=_specified_int_prop(props, _FRAME_PROP_PRIMARIES),
         props=props,
         detected_is_hdr=detected_is_hdr,
     )
+
+
+def _set_unspecified_signal(props: dict[str, object], key: str, value: object) -> None:
+    """Fill one missing color signal without overriding explicit frame metadata."""
+    if _specified_int_prop(props, key) is None and isinstance(value, int):
+        props[key] = value

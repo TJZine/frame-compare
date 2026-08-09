@@ -5,9 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from frame_compare.vs.errors import TonemapError
-from frame_compare.vs.props import detect_hdr
 from frame_compare.vs.tonemap_conversion import (
     apply_post_processing,
+    resolve_hdr_tonemap_inputs,
     to_rgbs,
     validate_target_nits,
 )
@@ -24,11 +24,13 @@ def fallback_tonemap(
 ) -> vs.VideoNode:
     """Fallback tonemapping using a scaled Reinhard-style curve via std.Expr."""
     target_nits = validate_target_nits(settings)
-    clip = to_rgbs(clip)
-
-    if hdr_metadata is None:
-        props = dict(clip.get_frame(0).props)
-        _, hdr_metadata = detect_hdr(props)
+    inputs = resolve_hdr_tonemap_inputs(clip, hdr_metadata)
+    clip = to_rgbs(
+        clip,
+        props=inputs.props,
+        detected_is_hdr=inputs.detected_is_hdr,
+    )
+    hdr_metadata = inputs.hdr_metadata
 
     peak = settings.source_peak
     if peak is None:

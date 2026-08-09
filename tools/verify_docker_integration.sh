@@ -254,6 +254,8 @@ from frame_compare.vs.runtime_contract import (
     media_runtime_fingerprint,
 )
 from frame_compare.vs.source import load_source, source_index_path
+from frame_compare.vs.tonemap import apply_tonemap
+from frame_compare.vs.types import TonemapSettings
 
 
 def assert_true(condition: object, message: str) -> None:
@@ -577,12 +579,25 @@ with tempfile.TemporaryDirectory(prefix="frame-compare-media-fixtures-") as fixt
             hdr_lsw.hdr_metadata.color_primaries == 9,
             "production source loader lost BT.2020 primaries",
         )
+        untagged_hdr_clip = hdr_lsw.clip.std.RemoveFrameProps(
+            props=["_Matrix", "_Transfer", "_Primaries"]
+        )
+        tonemapped_hdr = apply_tonemap(
+            untagged_hdr_clip,
+            TonemapSettings(target_nits=203),
+            hdr_lsw.hdr_metadata,
+        )
+        tonemapped_hdr_frame = tonemapped_hdr.get_frame(0)
+        assert_true(
+            tonemapped_hdr_frame.props.get("_Tonemapped") == 1,
+            "production tonemap did not render the classified untagged HDR source",
+        )
         for props, loader_name in ((hdr_props, "LWLibavSource"), (hdr_ffms_props, "FFMS2")):
             assert_true(
                 props_indicate_limited_range(props) is True,
                 f"{loader_name} lost limited range: {props!r}",
             )
-        fixture_results.append("hevc10_hdr10")
+        fixture_results.append("hevc10_hdr10_tonemap")
     else:
         raise SystemExit("required libx265 encoder is unavailable")
 

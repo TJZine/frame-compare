@@ -352,3 +352,5 @@ def test_docker_runtime_generates_metadata_sensitive_fixture_matrix(repo_root: P
     assert "hdr_lsw.is_hdr is True" in script
     assert "hdr_lsw.hdr_metadata.transfer == 16" in script
     assert "hdr_lsw.hdr_metadata.color_primaries == 9" in script
+    assert "RemoveFrameProps" in script
+    assert 'tonemapped_hdr_frame.props.get("_Tonemapped") == 1' in script
