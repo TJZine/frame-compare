@@ -25,6 +25,13 @@ def test_generate_name_sanitizes_special_chars():
     assert generate_screenshot_name("Bad:Name?.mkv", 10) == "10 - Bad_Name_.mkv.png"
 
 
+def test_generate_name_sanitizes_surrogate_escape():
+    name = generate_screenshot_name("Source\udcff", 10)
+
+    assert name == "10 - Source_.png"
+    assert not any("\ud800" <= character <= "\udfff" for character in name)
+
+
 def test_generate_name_collapses_underscores():
     assert generate_screenshot_name("A:::B", 1) == "1 - A___B.png"
 
@@ -89,3 +96,22 @@ def test_generate_path_counts_non_bmp_characters_as_two_windows_units(tmp_path):
 
     assert len(os.path.abspath(path).encode("utf-16-le")) // 2 <= 259
     assert path.suffix == ".png"
+
+
+def test_generate_path_sanitizes_surrogate_escape_in_long_label(tmp_path):
+    output_dir = tmp_path / "screenshots"
+
+    path = generate_screenshot_path(output_dir, ("Source\udcff" * 200), 42)
+
+    assert len(os.path.abspath(path).encode("utf-16-le")) // 2 <= 259
+    assert path.name.startswith("42 - Source_")
+    assert path.suffix == ".png"
+    assert not any("\ud800" <= character <= "\udfff" for character in path.name)
+
+
+def test_generate_path_counts_surrogate_escaped_output_dir(tmp_path):
+    output_dir = tmp_path / "screenshots\udcff"
+
+    path = generate_screenshot_path(output_dir, "Ref", 42)
+
+    assert path == output_dir / "42 - Ref.png"

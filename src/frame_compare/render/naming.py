@@ -5,13 +5,13 @@ import os
 import re
 from pathlib import Path
 
-INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f\ud800-\udfff]')
 _MAX_LEGACY_WINDOWS_PATH_CHARS = 259
 _SHORT_NAME_DIGEST_CHARS = 12
 
 
 def _windows_path_units(path: Path) -> int:
-    return len(os.path.abspath(path).encode("utf-16-le")) // 2
+    return len(os.path.abspath(path).encode("utf-16-le", errors="surrogatepass")) // 2
 
 
 def sanitize_filename_stem(label: str) -> str:
@@ -55,7 +55,7 @@ def generate_screenshot_path(output_dir: Path, filename_label: str, frame_number
     shortened: list[str] = []
     used_units = 0
     for character in sanitized:
-        character_units = len(character.encode("utf-16-le")) // 2
+        character_units = len(character.encode("utf-16-le", errors="surrogatepass")) // 2
         if used_units + character_units > available_label_units:
             break
         shortened.append(character)
