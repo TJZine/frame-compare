@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Literal
 
@@ -111,6 +112,9 @@ def test_at_a_glance_reports_non_executable_ffmpeg_override_as_unavailable(
     binary = tmp_path / "ffmpeg"
     binary.write_bytes(b"")
     binary.chmod(0o644)
+    # Keep this test focused on the invalid FFmpeg override. The executable
+    # environment-variable mapping is covered in tests/utils/test_subproc.py.
+    monkeypatch.setenv("FRAME_COMPARE_FFPROBE_EXECUTABLE", sys.executable)
     monkeypatch.setenv("FRAME_COMPARE_FFMPEG_EXECUTABLE", str(binary.resolve()))
     console = _console()
 

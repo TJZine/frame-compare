@@ -340,6 +340,12 @@ def test_launch_alignment_verification_session_reports_nonzero_exit(
         "frame_compare.vspreview.adapter._resolve_launch_command",
         lambda script_path: ["vspreview", str(script_path)],
     )
+    warnings: list[tuple[str, dict[str, object]]] = []
+
+    def _capture_warning(event: str, **kwargs: object) -> None:
+        warnings.append((event, kwargs))
+
+    monkeypatch.setattr("frame_compare.vspreview.adapter.log.warning", _capture_warning)
     monkeypatch.setattr(
         "frame_compare.vspreview.adapter.subprocess.Popen",
         lambda _command, **_kwargs: _FakeVSPreviewProcess(returncode=7),
@@ -355,6 +361,17 @@ def test_launch_alignment_verification_session_reports_nonzero_exit(
             ),
             config=VSPreviewConfig(enabled=True),
         )
+
+    assert warnings == [
+        (
+            "vspreview_launch_failed",
+            {
+                "reason": "launch exited with code 7",
+                "returncode": 7,
+                "hint": "Inspect the VSPreview output displayed above",
+            },
+        )
+    ]
 
 
 def test_build_script_content_escapes_path_literals() -> None:

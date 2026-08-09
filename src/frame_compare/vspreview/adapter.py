@@ -218,7 +218,7 @@ def launch_alignment_verification_session(
             "vspreview_launch_failed",
             reason=public_reason,
             returncode=returncode,
-            hint="Re-run with verbose mode to inspect VSPreview output",
+            hint="Inspect the VSPreview output displayed above",
         )
         raise VSPreviewError(public_reason)
 

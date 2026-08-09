@@ -106,9 +106,11 @@ the media specification.
 
 ### FFMS2 5.0
 
-Docker requires the `ffms2` namespace, `Source`, and `Version`. The runtime version
-must report `5.0.0.0`. Windows continues to use L-SMASH-Works only; FFMS2 is not added
-for artificial cross-platform symmetry.
+Docker requires the `ffms2` namespace, `Source`, and `Version`. In the pinned FFMS2
+source, the C++ callback is named `GetVersion` internally, but its registered
+VapourSynth function is `Version`; the runtime version must report `5.0.0.0`.
+Windows continues to use L-SMASH-Works only; FFMS2 is not added for artificial
+cross-platform symmetry.
 
 ### vs-placebo 2.0.4
 

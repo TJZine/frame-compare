@@ -57,6 +57,8 @@ _CHECK_ORDER: list[tuple[str, str]] = [
 
 SLOWPICS_HEALTHCHECK_URL = "https://slow.pics/"
 _LSMAS_REQUIRED_FUNCTIONS = ("LibavSMASHSource", "LWLibavSource")
+# FFMS2's pinned C++ callback is named GetVersion internally, but VapourSynth
+# registers the public function as Version. Keep the registered name here.
 _FFMS2_REQUIRED_FUNCTIONS = ("Source", "Version")
 _VS_PLACEBO_REQUIRED_FUNCTIONS = ("Tonemap",)
 
