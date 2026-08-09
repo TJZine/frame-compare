@@ -202,110 +202,16 @@ jobs:
           $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
           Set-Content -Path "$zip.sha256" -Value "$hash  $(Split-Path -Leaf $zip)" -Encoding ASCII
 
-      - name: Verify zip layout
+      - name: Verify extracted portable bundle
         shell: pwsh
         run: |
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $zipPath = (Resolve-Path "dist/frame-compare-portable-win-x64.zip").Path
-          $zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
-          try {
-            $entries = @($zip.Entries | ForEach-Object { $_.FullName })
-          } finally {
-            $zip.Dispose()
-          }
-
-          $required = @(
-            "frame-compare-portable-win-x64/install.cmd",
-            "frame-compare-portable-win-x64/install.ps1",
-            "frame-compare-portable-win-x64/frame-compare.ps1",
-            "frame-compare-portable-win-x64/frame-compare-update.cmd",
-            "frame-compare-portable-win-x64/frame-compare-update.ps1",
-            "frame-compare-portable-win-x64/shim/frame-compare.cmd",
-            "frame-compare-portable-win-x64/shim/frame-compare-update.cmd",
-            "frame-compare-portable-win-x64/shim/frame-compare-update.ps1"
-          )
-          foreach ($r in $required) {
-            if ($entries -notcontains $r) {
-              throw "Missing zip entry: $r"
-            }
-          }
-          foreach ($e in $entries) {
-            if (-not $e.StartsWith("frame-compare-portable-win-x64/")) {
-              throw "Non-folder-contained entry: $e"
-            }
-          }
-
-      - name: Verify extracted zip workspace directories
-        shell: pwsh
-        run: |
-          $zip = (Resolve-Path "dist/frame-compare-portable-win-x64.zip").Path
-          $extractRoot = Join-Path "dist" "zip_extract_check"
-          if (Test-Path -LiteralPath $extractRoot) {
-            Remove-Item -Recurse -Force -LiteralPath $extractRoot
-          }
-          Expand-Archive -LiteralPath $zip -DestinationPath $extractRoot -Force
-
-          $bundle = Join-Path $extractRoot "frame-compare-portable-win-x64"
-          $bundleConfigDir = Join-Path $bundle "config"
-          $bundleInputDir = Join-Path $bundle "comparison_videos"
-          if (!(Test-Path -LiteralPath $bundleConfigDir -PathType Container)) {
-            throw "Missing default workspace directory in extracted zip: $bundleConfigDir"
-          }
-          if (!(Test-Path -LiteralPath $bundleInputDir -PathType Container)) {
-            throw "Missing default workspace directory in extracted zip: $bundleInputDir"
-          }
-
-      - name: "Smoke: extracted install shim"
-        shell: pwsh
-        run: |
-          $bundle = (Resolve-Path "dist/zip_extract_check/frame-compare-portable-win-x64").Path
-          $candidateLauncher = Join-Path $bundle "frame-compare.ps1"
-          Get-Command -CommandType ExternalScript $candidateLauncher | Format-List Source,Path
-          & $candidateLauncher --help | Out-Host
+          pwsh -NoProfile -ExecutionPolicy Bypass `
+            -File tools/windows_portable/verify_extracted_bundle.ps1 `
+            -ZipPath dist/frame-compare-portable-win-x64.zip `
+            -ExtractRoot dist/zip_extract_check `
+            -DoctorStdoutPath (Join-Path $env:RUNNER_TEMP "extracted-doctor.json") `
+            -DoctorStderrPath (Join-Path $env:RUNNER_TEMP "extracted-doctor.stderr.txt")
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & $candidateLauncher version | Out-Host
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $doctorStdout = Join-Path $env:RUNNER_TEMP "extracted-doctor.json"
-          $doctorStderr = Join-Path $env:RUNNER_TEMP "extracted-doctor.stderr.txt"
-          & $candidateLauncher doctor --json 1> $doctorStdout 2> $doctorStderr
-          $doctorExitCode = $LASTEXITCODE
-          foreach ($line in Get-Content -LiteralPath $doctorStderr) {
-            Write-Warning $line
-          }
-          if ($doctorExitCode -ne 0) { exit $doctorExitCode }
-          $doctorJson = Get-Content -LiteralPath $doctorStdout -Raw
-          try {
-            $doctorPayload = $doctorJson | ConvertFrom-Json -ErrorAction Stop
-          } catch {
-            throw "Extracted candidate doctor stdout is not exactly one valid JSON document: $($_.Exception.Message)"
-          }
-          if ($doctorPayload -isnot [PSCustomObject] -or $doctorPayload.success -ne $true) {
-            throw "Extracted candidate doctor JSON is not a successful object"
-          }
-          Write-Host $doctorJson
-
-          & "$bundle/install.cmd"
-          if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
-          }
-
-          $shim = Join-Path $env:LOCALAPPDATA "Programs/FrameCompare/bin/frame-compare.cmd"
-          if (!(Test-Path -LiteralPath $shim -PathType Leaf)) {
-            throw "Installed shim not found: $shim"
-          }
-
-          $versionOutput = & $shim version
-          if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
-          }
-          if ($versionOutput -notmatch "^frame-compare \d+\.\d+\.\d+") {
-            throw "Unexpected version output from installed shim: $versionOutput"
-          }
-
-          & $shim --help | Out-Host
-          if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
-          }
 
       - name: Build code-only update zip
         shell: pwsh

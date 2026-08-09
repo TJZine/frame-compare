@@ -19,7 +19,8 @@ Record these facts before changing the machine or installing the candidate bundl
 - GPU model, driver package/version/date, and Vulkan runtime/loader version.
 - PowerShell version and execution policy.
 - Git version.
-- Checked-out pull-request branch and exact 40-character commit SHA.
+- Pull-request number, fetched pull-request head ref, and detached exact
+  40-character commit SHA.
 - Python and `uv` versions used for repository validation.
 - Previous portable bundle version/runtime fingerprint used for migration testing.
 - Real-media case identifiers without publishing private filenames when inappropriate.
@@ -43,21 +44,39 @@ From a clean clone or worktree, fetch the pull request and verify that `HEAD` is
 exact SHA recorded in the pull request. Do not test an older cached checkout.
 
 ```powershell
-git fetch --all --prune
-git switch deps/media-runtime-refresh
-git pull --ff-only
+$PrNumber = '<pull-request-number>'
+$ExpectedPrHeadSha = '<recorded lowercase 40-character PR head SHA>'
+if ($PrNumber -notmatch '^[1-9][0-9]*$') {
+  throw 'Pull-request number must be a positive integer.'
+}
+if ($ExpectedPrHeadSha -notmatch '^[a-f0-9]{40}$') {
+  throw 'Expected PR head must be a complete lowercase 40-character SHA.'
+}
+
 $WorkingTree = git status --porcelain
 if ($WorkingTree) {
   throw 'Validation requires a clean worktree.'
 }
-$ExpectedPrHeadSha = '<recorded 40-character PR head SHA>'
-if ($ExpectedPrHeadSha -notmatch '^[a-f0-9]{40}$') {
-  throw 'Expected PR head must be a complete lowercase 40-character SHA.'
+
+$PrHeadRef = "refs/pull/$PrNumber/head"
+$LocalPrHeadRef = "refs/remotes/origin/pr/$PrNumber/head"
+git fetch --no-tags origin "+${PrHeadRef}:${LocalPrHeadRef}"
+if ($LASTEXITCODE -ne 0) {
+  throw "Failed to fetch pull-request head ref: $PrHeadRef"
 }
-$ActualHeadSha = (git rev-parse HEAD).Trim()
-$RemoteHeadSha = (git ls-remote origin refs/heads/deps/media-runtime-refresh).Split("`t")[0]
-if ($ActualHeadSha -ne $ExpectedPrHeadSha -or $RemoteHeadSha -ne $ExpectedPrHeadSha) {
-  throw "Candidate moved: expected=$ExpectedPrHeadSha local=$ActualHeadSha remote=$RemoteHeadSha"
+
+$ResolvedPrHeadSha = (git rev-parse --verify "${LocalPrHeadRef}^{commit}").Trim()
+if ($LASTEXITCODE -ne 0 -or $ResolvedPrHeadSha -ne $ExpectedPrHeadSha) {
+  throw "Candidate moved: expected=$ExpectedPrHeadSha resolved=$ResolvedPrHeadSha"
+}
+
+git switch --detach $ExpectedPrHeadSha
+if ($LASTEXITCODE -ne 0) {
+  throw "Failed to switch to the recorded pull-request head: $ExpectedPrHeadSha"
+}
+$ActualHeadSha = (git rev-parse --verify HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $ActualHeadSha -ne $ExpectedPrHeadSha) {
+  throw "Detached checkout mismatch: expected=$ExpectedPrHeadSha actual=$ActualHeadSha"
 }
 ```
 
@@ -135,81 +154,25 @@ Extract the candidate ZIP into a new path that is not the repository checkout an
 not the previous installation. Run commands through the bundle's own shim/runtime,
 not a globally installed Frame Compare environment.
 
-Use the same paths and checks as the hosted workflow's `Verify zip layout`,
-`Verify extracted zip workspace directories`, and `Smoke: extracted install shim`
-steps. Every candidate command below must exit `0`; a thrown assertion is a failed
-check.
+The focused verifier below is also invoked by the hosted workflow's
+`Verify extracted portable bundle` step. It owns ZIP containment/layout, extraction,
+default workspace directories, candidate launcher and doctor checks, installation,
+and installed-shim parity. Every command it reports must exit `0`; a thrown assertion
+is a failed check.
 
 ```powershell
 $Zip = (Resolve-Path 'dist\frame-compare-portable-win-x64.zip').Path
 $ExtractRoot = Join-Path $env:TEMP `
-  ("frame-compare-pr58-zip-{0}" -f [guid]::NewGuid().ToString('N'))
-
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-$Archive = [System.IO.Compression.ZipFile]::OpenRead($Zip)
-try {
-  $Entries = @($Archive.Entries | ForEach-Object { $_.FullName })
-} finally {
-  $Archive.Dispose()
-}
-$RequiredEntries = @(
-  'frame-compare-portable-win-x64/install.cmd',
-  'frame-compare-portable-win-x64/install.ps1',
-  'frame-compare-portable-win-x64/frame-compare.ps1',
-  'frame-compare-portable-win-x64/frame-compare-update.cmd',
-  'frame-compare-portable-win-x64/frame-compare-update.ps1',
-  'frame-compare-portable-win-x64/shim/frame-compare.cmd',
-  'frame-compare-portable-win-x64/shim/frame-compare-update.cmd',
-  'frame-compare-portable-win-x64/shim/frame-compare-update.ps1'
-)
-foreach ($Entry in $RequiredEntries) {
-  if ($Entries -notcontains $Entry) { throw "Missing ZIP entry: $Entry" }
-}
-foreach ($Entry in $Entries) {
-  if (-not $Entry.StartsWith('frame-compare-portable-win-x64/')) {
-    throw "Non-folder-contained ZIP entry: $Entry"
-  }
-}
-
-Expand-Archive -LiteralPath $Zip -DestinationPath $ExtractRoot -Force
-$ExtractedBundle = (Resolve-Path `
-  (Join-Path $ExtractRoot 'frame-compare-portable-win-x64')).Path
-foreach ($Directory in @('config', 'comparison_videos')) {
-  $Path = Join-Path $ExtractedBundle $Directory
-  if (!(Test-Path -LiteralPath $Path -PathType Container)) {
-    throw "Missing extracted workspace directory: $Path"
-  }
-}
-
-$CandidateLauncher = Join-Path $ExtractedBundle 'frame-compare.ps1'
-Get-Command -CommandType ExternalScript $CandidateLauncher | Format-List Source,Path
-& $CandidateLauncher --help
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& $CandidateLauncher version
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  ("frame-compare-pr{0}-zip-{1}" -f $PrNumber, [guid]::NewGuid().ToString('N'))
 $DoctorStdout = Join-Path $ExtractRoot 'doctor-candidate.json'
 $DoctorStderr = Join-Path $ExtractRoot 'doctor-candidate.stderr.log'
-& $CandidateLauncher doctor --json 1> $DoctorStdout 2> $DoctorStderr
-if ($LASTEXITCODE -ne 0) {
-  throw "Candidate doctor check failed with exit code $LASTEXITCODE. See $DoctorStderr."
-}
-$DoctorPayload = Get-Content -Raw $DoctorStdout | ConvertFrom-Json -NoEnumerate -ErrorAction Stop
-if ($DoctorPayload -isnot [pscustomobject]) {
-  throw 'Candidate doctor output must be exactly one JSON object.'
-}
-if ($DoctorPayload.success -ne $true) {
-  throw 'Candidate doctor JSON must report success.'
-}
 
-& (Join-Path $ExtractedBundle 'install.cmd')
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-$InstalledShim = Join-Path $env:LOCALAPPDATA 'Programs\FrameCompare\bin\frame-compare.cmd'
-if (!(Test-Path -LiteralPath $InstalledShim -PathType Leaf)) {
-  throw "Installed shim not found: $InstalledShim"
-}
-& $InstalledShim version
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& $InstalledShim --help
+pwsh -NoProfile -ExecutionPolicy Bypass `
+  -File tools\windows_portable\verify_extracted_bundle.ps1 `
+  -ZipPath $Zip `
+  -ExtractRoot $ExtractRoot `
+  -DoctorStdoutPath $DoctorStdout `
+  -DoctorStderrPath $DoctorStderr
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 ```
 
@@ -225,8 +188,9 @@ Inspect `doctor-candidate.json`. Required results:
 - No plugin DLL is loaded from the standalone FFmpeg directory.
 - No missing shared-library or recursive DLL-probing warning appears.
 
-Record the resolved `$CandidateLauncher` and `$InstalledShim`, the ZIP and digest
-artifact paths, each command's exit code, and the hosted workflow step names above.
+Retain the verifier's `WINDOWS_EXTRACTED_PROOF` lines. Record its resolved candidate
+launcher, installed shim, doctor stdout/stderr, ZIP and digest artifact paths, every
+reported command exit code, and the hosted `Verify extracted portable bundle` step.
 
 ## 4. Deterministic generated fixtures
 

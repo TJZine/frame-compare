@@ -289,7 +289,18 @@ try {
   if (!(Test-Path -LiteralPath $bundleInfoPath -PathType Leaf)) {
     throw "Bundle runtime identity not found: $bundleInfoPath"
   }
-  $bundleInfo = Get-Content -LiteralPath $bundleInfoPath -Raw | ConvertFrom-Json
+  try {
+    $bundleInfo = Get-Content -LiteralPath $bundleInfoPath -Raw |
+      ConvertFrom-Json -ErrorAction Stop
+    if ($bundleInfo -isnot [PSCustomObject]) {
+      throw "bundle_info.json must contain one JSON object"
+    }
+  } catch {
+    throw (
+      "The portable bundle is corrupt because bundle_info.json is invalid. " +
+      "Rebuild or reinstall the complete portable bundle."
+    )
+  }
   $runtimeFingerprintProperty = $bundleInfo.PSObject.Properties["media_runtime_fingerprint"]
   if ($null -eq $runtimeFingerprintProperty -or [string]::IsNullOrWhiteSpace([string]$runtimeFingerprintProperty.Value)) {
     throw "Bundle runtime identity is missing media_runtime_fingerprint: $bundleInfoPath"
