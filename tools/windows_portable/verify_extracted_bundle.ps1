@@ -697,7 +697,11 @@ foreach ($licenseRecord in $licenseRecords) {
 }
 $actualLicensePaths = @(
   Get-ChildItem -LiteralPath $licensesRoot -Recurse -File | ForEach-Object {
-    "licenses/" + ([System.IO.Path]::GetRelativePath($licensesRoot, $_.FullName) -replace "\", "/")
+    $relativeLicensePath = [System.IO.Path]::GetRelativePath($licensesRoot, $_.FullName)
+    "licenses/" + $relativeLicensePath.Replace(
+      [System.IO.Path]::DirectorySeparatorChar,
+      [System.IO.Path]::AltDirectorySeparatorChar
+    )
   }
 )
 if ($actualLicensePaths.Count -ne $inventoryLicenses.Count) {

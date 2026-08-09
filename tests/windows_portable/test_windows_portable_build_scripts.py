@@ -31,6 +31,11 @@ def _generated_portable_launcher(build_script: str) -> str:
     return match.group("launcher")
 
 
+def _normalized_process_output(result: subprocess.CompletedProcess[str]) -> str:
+    output = re.sub(r"\r?\n\s*\|\s?", " ", f"{result.stdout}\n{result.stderr}")
+    return " ".join(output.split())
+
+
 def test_windows_portable_bundle_launcher_sets_cwd_to_bundle_root(repo_root: Path) -> None:
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     build_script = _read_text_or_fail(build_path)
@@ -105,6 +110,8 @@ def test_windows_portable_build_resolves_relative_paths_from_provider_location(
     environment = os.environ | {
         "FRAME_COMPARE_TEST_BUILD_SCRIPT": str(build_path),
         "FRAME_COMPARE_TEST_PROVIDER_ROOT": str(provider_root),
+        "NO_COLOR": "1",
+        "TERM": "dumb",
     }
     command = """
 Set-Location -LiteralPath $env:FRAME_COMPARE_TEST_PROVIDER_ROOT
@@ -125,7 +132,7 @@ Set-Location -LiteralPath $env:FRAME_COMPARE_TEST_PROVIDER_ROOT
         check=False,
     )
 
-    output = result.stdout + result.stderr
+    output = _normalized_process_output(result)
     assert result.returncode != 0
     assert str(provider_root / "manifest.json") in output
     assert (provider_root / "relative-out").is_dir()
@@ -611,7 +618,7 @@ def test_windows_portable_generated_launcher_rejects_malformed_bundle_info_in_pr
         env=os.environ | {"NO_COLOR": "1", "TERM": "dumb"},
     )
 
-    output = result.stdout + result.stderr
+    output = _normalized_process_output(result)
     assert result.returncode != 0
     assert "bundle_info.json is invalid" in output
     assert "Rebuild or reinstall the complete portable bundle." in output
@@ -871,7 +878,7 @@ def test_extracted_bundle_verifier_refuses_existing_root_without_mutation(
     )
 
     assert result.returncode != 0
-    assert "ExtractRoot must not already exist" in result.stdout + result.stderr
+    assert "ExtractRoot must not already exist" in _normalized_process_output(result)
     assert marker.read_text(encoding="utf-8") == "preserve"
 
 
@@ -910,7 +917,7 @@ def test_extracted_bundle_verifier_rejects_unsafe_zip_entries(
     )
 
     assert result.returncode != 0
-    output = result.stdout + result.stderr
+    output = _normalized_process_output(result)
     expected = {
         "traversal": "Unsafe ZIP entry path",
         "case_collision": "case-colliding",
@@ -981,7 +988,7 @@ def test_extracted_bundle_verifier_rejects_incomplete_or_mismatched_provenance(
     )
 
     assert result.returncode != 0
-    assert expected_error in result.stdout + result.stderr
+    assert expected_error in _normalized_process_output(result)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell process semantics required")
@@ -1022,7 +1029,7 @@ def test_extracted_bundle_verifier_propagates_launcher_failures(
     )
 
     assert result.returncode != 0
-    assert expected_error in result.stdout + result.stderr
+    assert expected_error in _normalized_process_output(result)
     assert (
         tmp_path / "fresh-extract/frame-compare-portable-win-x64/bundle_inventory.json"
     ).is_file()
@@ -1073,7 +1080,7 @@ exit 0
     )
 
     assert result.returncode != 0
-    assert "Installed state points to the wrong bundle" in result.stdout + result.stderr
+    assert "Installed state points to the wrong bundle" in _normalized_process_output(result)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell process semantics required")
@@ -1124,7 +1131,7 @@ exit 0
     assert result.returncode != 0
     assert (
         "Installed shim version output does not match the candidate launcher"
-        in result.stdout + result.stderr
+        in _normalized_process_output(result)
     )
 
 
