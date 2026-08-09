@@ -4,9 +4,11 @@ from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Literal, cast
+from unittest.mock import MagicMock
 
 import pytest
 
+import frame_compare.vs.source as source_module
 from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError
 from frame_compare.vs.source import (
     LWLibavSourceOptions,
@@ -16,6 +18,11 @@ from frame_compare.vs.source import (
     validate_source_index,
 )
 from frame_compare.vs.types import SourceInfo
+
+
+@pytest.fixture(autouse=True)
+def _stub_hdr_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(source_module, "probe_hdr_metadata", lambda _path: None)
 
 
 class MockClip:
@@ -483,6 +490,87 @@ def test_detect_hdr_empty_props_returns_false_and_none():
     source = load_source("video.mkv", core)  # type: ignore
     assert source.is_hdr is False
     assert source.hdr_metadata is None
+
+
+def test_load_source_falls_back_to_ffprobe_for_absent_hdr_props(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from frame_compare.vs.types import HDRMetadata
+
+    probe_hdr_metadata = MagicMock(
+        return_value=HDRMetadata(
+            mastering_display=None,
+            max_cll=None,
+            max_fall=None,
+            color_primaries=9,
+            transfer=16,
+            matrix=9,
+        )
+    )
+    monkeypatch.setattr(source_module, "probe_hdr_metadata", probe_hdr_metadata)
+
+    source = load_source("video.mkv", make_mock_core())  # type: ignore[arg-type]
+
+    assert source.is_hdr is True
+    assert source.hdr_metadata is not None
+    assert source.hdr_metadata.transfer == 16
+    assert source.hdr_metadata.color_primaries == 9
+    probe_hdr_metadata.assert_called_once_with(Path("video.mkv"))
+
+
+def test_load_source_falls_back_to_ffprobe_for_unspecified_hdr_props(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from frame_compare.vs.types import HDRMetadata
+
+    props = {"_Transfer": 2, "_Primaries": 2}
+    core = SimpleNamespace(
+        lsmas=SimpleNamespace(LWLibavSource=lambda _p, **_kwargs: MockClip(frame_props=props))
+    )
+    monkeypatch.setattr(
+        source_module,
+        "probe_hdr_metadata",
+        lambda _path: HDRMetadata(None, None, None, 9, 18, 9),
+    )
+
+    source = load_source("video.mkv", core)  # type: ignore[arg-type]
+
+    assert source.is_hdr is True
+    assert source.hdr_metadata is not None
+    assert source.hdr_metadata.transfer == 18
+
+
+def test_load_source_keeps_explicit_sdr_without_ffprobe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    props = {"_Transfer": 1, "_Primaries": 1}
+    core = SimpleNamespace(
+        lsmas=SimpleNamespace(LWLibavSource=lambda _p, **_kwargs: MockClip(frame_props=props))
+    )
+    probe_hdr_metadata = MagicMock()
+    monkeypatch.setattr(source_module, "probe_hdr_metadata", probe_hdr_metadata)
+
+    source = load_source("video.mkv", core)  # type: ignore[arg-type]
+
+    assert source.is_hdr is False
+    assert source.hdr_metadata is None
+    probe_hdr_metadata.assert_not_called()
+
+
+def test_load_source_wraps_malformed_ffprobe_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from frame_compare.utils.ffmpeg_errors import FFmpegError
+
+    def fail_probe(_path: Path) -> None:
+        raise FFmpegError("ffprobe returned invalid json", 0)
+
+    monkeypatch.setattr(source_module, "probe_hdr_metadata", fail_probe)
+
+    with pytest.raises(SourceLoadError) as exc_info:
+        load_source("video.mkv", make_mock_core())  # type: ignore[arg-type]
+
+    assert exc_info.value.code == "FC-4015"
 
 
 def test_detect_hdr_defaults_matrix_when_missing():

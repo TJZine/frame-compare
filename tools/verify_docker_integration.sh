@@ -570,6 +570,13 @@ with tempfile.TemporaryDirectory(prefix="frame-compare-media-fixtures-") as fixt
         )
         assert_true(hdr_lsw.clip.format.bits_per_sample >= 10, "LWLibavSource lost HDR precision")
         assert_true(hdr_ffms.format.bits_per_sample >= 10, "FFMS2 lost HDR precision")
+        assert_true(hdr_lsw.is_hdr is True, "production source loader did not classify HDR")
+        assert_true(hdr_lsw.hdr_metadata is not None, "production source loader lost HDR metadata")
+        assert_true(hdr_lsw.hdr_metadata.transfer == 16, "production source loader lost PQ")
+        assert_true(
+            hdr_lsw.hdr_metadata.color_primaries == 9,
+            "production source loader lost BT.2020 primaries",
+        )
         for props, loader_name in ((hdr_props, "LWLibavSource"), (hdr_ffms_props, "FFMS2")):
             assert_true(
                 props_indicate_limited_range(props) is True,

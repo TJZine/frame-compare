@@ -349,3 +349,6 @@ def test_docker_runtime_generates_metadata_sensitive_fixture_matrix(repo_root: P
     assert '"color_transfer": "smpte2084"' in script
     assert '"color_primaries": "bt2020"' in script
     assert '"pix_fmt": "yuv420p10le"' in script
+    assert "hdr_lsw.is_hdr is True" in script
+    assert "hdr_lsw.hdr_metadata.transfer == 16" in script
+    assert "hdr_lsw.hdr_metadata.color_primaries == 9" in script

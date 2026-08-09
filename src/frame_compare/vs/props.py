@@ -16,19 +16,8 @@ _COLOR_RANGE_LIMITED = 1
 
 def get_int_prop(props: Mapping[str, object], key: str, default: int) -> int:
     """Safely extract an integer property from frame properties with fallback."""
-    val = props.get(key)
-    if val is None:
-        return default
-    if isinstance(val, Enum):
-        val = cast(object, val.value)
-    if isinstance(val, (int, float)):
-        return int(val)
-    if isinstance(val, (bytes, str)):
-        try:
-            return int(val)
-        except ValueError:
-            return default
-    return default
+    value = get_optional_int_prop(props, key)
+    return default if value is None else value
 
 
 def get_optional_int_prop(props: Mapping[str, object], key: str) -> int | None:
@@ -134,3 +123,10 @@ def detect_hdr(frame_props: Mapping[str, object]) -> tuple[bool, HDRMetadata | N
             matrix=get_int_prop(frame_props, "_Matrix", 2),
         ),
     )
+
+
+def hdr_signal_is_unspecified(frame_props: Mapping[str, object]) -> bool:
+    """Return whether frame props lack a usable transfer or primaries signal."""
+    transfer = get_int_prop(frame_props, "_Transfer", 2)
+    primaries = get_int_prop(frame_props, "_Primaries", 2)
+    return transfer == 2 or primaries == 2

@@ -168,7 +168,7 @@ def test_default_ffmpeg_runner_probe_hdr_keeps_fixed_timeout(
             stderr=b"",
         )
     )
-    monkeypatch.setattr("frame_compare.render.backend.ffmpeg.run_subprocess", run_subprocess)
+    monkeypatch.setattr("frame_compare.vs.hdr_probe.run_subprocess", run_subprocess)
 
     runner = DefaultFFmpegRunner(extraction_timeout_seconds=47.0)
     assert runner.probe_hdr(Path("clip.mkv")) is None

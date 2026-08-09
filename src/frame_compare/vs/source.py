@@ -11,7 +11,8 @@ from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from frame_compare.vs.env import ensure_vs_environment, require_plugin
 from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError
-from frame_compare.vs.props import detect_hdr
+from frame_compare.vs.hdr_probe import probe_hdr_metadata
+from frame_compare.vs.props import detect_hdr, hdr_signal_is_unspecified
 from frame_compare.vs.runtime_contract import index_cache_token
 from frame_compare.vs.types import SourceInfo
 
@@ -96,7 +97,15 @@ def load_source(
         frame = clip.get_frame(0)
         clip_fps = cast(_VideoNodeWithFps, clip).fps
         fps = Fraction(clip_fps.numerator, clip_fps.denominator)
-        is_hdr, hdr_metadata = detect_hdr(dict(frame.props))
+        frame_props = dict(frame.props)
+        is_hdr, hdr_metadata = detect_hdr(frame_props)
+        if hdr_signal_is_unspecified(frame_props):
+            probed_metadata = probe_hdr_metadata(Path(path))
+            if probed_metadata is not None:
+                is_hdr = (
+                    probed_metadata.transfer in {16, 18} and probed_metadata.color_primaries == 9
+                )
+                hdr_metadata = probed_metadata if is_hdr else None
     except PluginNotFoundError:
         raise
     except Exception as e:
@@ -109,7 +118,7 @@ def load_source(
         num_frames=clip.num_frames,
         fps=fps,
         format=clip.format,
-        frame_props=dict(frame.props),
+        frame_props=frame_props,
         is_hdr=is_hdr,
         hdr_metadata=hdr_metadata,
     )
