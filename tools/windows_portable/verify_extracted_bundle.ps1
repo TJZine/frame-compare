@@ -290,11 +290,15 @@ function Get-RequiredObject([PSCustomObject]$Object, [string]$Name, [string]$Con
 }
 
 function Get-RequiredArray([PSCustomObject]$Object, [string]$Name, [string]$Context) {
-  $value = Get-RequiredProperty -Object $Object -Name $Name -Context $Context
+  $property = $Object.PSObject.Properties[$Name]
+  if ($null -eq $property -or $null -eq $property.Value) {
+    throw "$Context is missing required property '$Name'."
+  }
+  $value = $property.Value
   if ($value -isnot [System.Array]) {
     throw "$Context.$Name must be an array."
   }
-  return @($value)
+  return ,$value
 }
 
 function Assert-ExactProperties(

@@ -608,6 +608,7 @@ def test_windows_portable_generated_launcher_rejects_malformed_bundle_info_in_pr
         text=True,
         timeout=30,
         check=False,
+        env=os.environ | {"NO_COLOR": "1", "TERM": "dumb"},
     )
 
     output = result.stdout + result.stderr
@@ -626,7 +627,11 @@ def _run_extracted_bundle_verifier(
 ) -> subprocess.CompletedProcess[str]:
     pwsh = shutil.which("pwsh")
     assert pwsh is not None
-    environment = os.environ | {"LOCALAPPDATA": str(local_app_data)}
+    environment = os.environ | {
+        "LOCALAPPDATA": str(local_app_data),
+        "NO_COLOR": "1",
+        "TERM": "dumb",
+    }
     doctor_stdout = extract_root.parent / f"{extract_root.name}-doctor.json"
     doctor_stderr = extract_root.parent / f"{extract_root.name}-doctor.stderr.txt"
     expected_commit_sha = subprocess.run(

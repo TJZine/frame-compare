@@ -170,6 +170,8 @@ def _run_checkout(
     destination: Path,
     extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    if os.name == "nt":
+        pytest.skip("source checkout process proof requires POSIX atomic rename semantics")
     environment = os.environ.copy()
     environment["PATH"] = f"{timeout_command.parent}{os.pathsep}{environment['PATH']}"
     if extra_env is not None:
