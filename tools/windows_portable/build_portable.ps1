@@ -716,8 +716,11 @@ function Assert-BundleRuntime([string]$BundleRoot) {
   $mediaPath = Join-Path $BundleRoot "runtime-smoke.mp4"
   $legacyMediaIndexPath = "$mediaPath.lwi"
   $smokePath = Join-Path $BundleRoot "runtime-smoke.py"
+  $locationPushed = $false
   try {
     Set-BundleRuntimeEnvironment -BundleRoot $BundleRoot
+    Push-Location $BundleRoot
+    $locationPushed = $true
 
     if (!(Test-Path -LiteralPath $ffmpeg -PathType Leaf)) {
       throw "Bundled FFmpeg executable not found: $ffmpeg"
@@ -880,18 +883,19 @@ def prove_placebo_tonemap_api() -> None:
     proof(f"placebo_tonemap_api=ok namespace=placebo functions={','.join(sorted(functions))}")
 
 
-def prove_placebo_tonemap_frame() -> None:
+def prove_placebo_tonemap_frame() -> bool:
     from frame_compare.vs.tonemap_runtime import probe_libplacebo_runtime
 
     if not probe_libplacebo_runtime():
         proof("placebo_direct_frame=skipped reason=vulkan_runtime_unavailable")
-        return
+        return False
 
     direct_out, _tonemap_clip = build_placebo_clip()
     direct_frame = direct_out.get_frame(0)
     assert_true(direct_frame.width == 16 and direct_frame.height == 16, "placebo direct frame render failed")
     assert_true(direct_frame.format.bits_per_sample >= 10, "placebo unexpectedly reduced output below 10-bit")
     proof(f"placebo_direct_frame=ok format={direct_frame.format.name} bits={direct_frame.format.bits_per_sample}")
+    return True
 
 
 def prove_apply_tonemap_frame() -> None:
@@ -917,7 +921,7 @@ def prove_apply_tonemap_frame() -> None:
     )
 
 
-def prove_vspreview_pyqt6() -> None:
+def prove_qt_media_runtime(media_path: Path) -> None:
     import PyQt6  # noqa: F401
 
     proof("pyqt6_import=ok")
@@ -925,6 +929,15 @@ def prove_vspreview_pyqt6() -> None:
     import vspreview  # noqa: F401
 
     proof("vspreview_pyqt6=ok")
+    prove_runtime_contract()
+    prove_vapoursynth_environment()
+    prove_lwlibavsource(media_path)
+    prove_placebo_tonemap_api()
+    assert_true(
+        prove_placebo_tonemap_frame(),
+        "combined Qt media runtime requires a rendered direct placebo frame",
+    )
+    proof("qt_media_runtime=ok")
 
 
 phase = sys.argv[1]
@@ -943,8 +956,8 @@ elif phase == "apply_tonemap_frame":
     prove_apply_tonemap_frame()
 elif phase == "placebo_tonemap_frame":
     prove_placebo_tonemap_frame()
-elif phase == "vspreview_pyqt6_import":
-    prove_vspreview_pyqt6()
+elif phase == "qt_media_runtime":
+    prove_qt_media_runtime(media_path)
 else:
     raise AssertionError(f"unknown runtime proof phase: {phase}")
 '@
@@ -956,13 +969,16 @@ else:
     Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "placebo_tonemap_api" -MediaPath $mediaPath -Required $true
     Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "apply_tonemap_frame" -MediaPath $mediaPath -Required $true
     Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "placebo_tonemap_frame" -MediaPath $mediaPath -Required $true
-    Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "vspreview_pyqt6_import" -MediaPath $mediaPath -Required $false
+    Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "qt_media_runtime" -MediaPath $mediaPath -Required $true
   } finally {
     Remove-Item -Force -LiteralPath $smokePath -ErrorAction SilentlyContinue
     Remove-Item -Force -LiteralPath $mediaPath -ErrorAction SilentlyContinue
     Remove-Item -Force -LiteralPath $legacyMediaIndexPath -ErrorAction SilentlyContinue
     Get-ChildItem -LiteralPath $BundleRoot -Filter "runtime-smoke.mp4.frame-compare-*.lwi" -File -ErrorAction SilentlyContinue |
       Remove-Item -Force -ErrorAction SilentlyContinue
+    if ($locationPushed) {
+      Pop-Location
+    }
     Restore-ProcessEnvironmentValue -Name "PATH" -Value $originalPath
     Restore-ProcessEnvironmentValue -Name "PYTHONUTF8" -Value $originalPythonUtf8
     Restore-ProcessEnvironmentValue -Name "PYTHONDONTWRITEBYTECODE" -Value $originalPythonDontWriteBytecode

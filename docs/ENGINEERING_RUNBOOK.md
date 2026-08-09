@@ -298,7 +298,11 @@ Canonical verification path:
    plugin manifests, license inventory, source provenance, and runtime fingerprint.
 4. Run the extracted bundle's `--help`, `version`, and `doctor --json` smoke checks;
    verify R78, L-SMASH-Works 1296, vs-placebo 2.0.4, and the selected LGPL-only
-   FFmpeg artifact. FFMS2 must remain absent from the Windows baseline.
+   FFmpeg artifact. FFMS2 must remain absent from the Windows baseline. In one
+   required bundled Python process, import PyQt6 and VSPreview before initializing
+   VapourSynth, opening the generated media through L-SMASH, and invoking the direct
+   vs-placebo frame proof. That combined phase requires a rendered placebo frame;
+   the pre-Qt diagnostic phase may still report unavailable Vulkan separately.
 5. Build the code-only update ZIP when updater logic changes and prove both a
    matching-runtime apply/rollback and a mismatched-runtime fail-closed refusal.
 6. Sign the update ZIP when updater or release-package logic changes.

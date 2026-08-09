@@ -301,7 +301,9 @@ def test_windows_portable_direct_placebo_smoke_respects_runtime_probe(
     ]
     assert "probe_libplacebo_runtime" in direct_smoke
     assert "placebo_direct_frame=skipped reason=vulkan_runtime_unavailable" in direct_smoke
+    assert "return False" in direct_smoke
     assert "direct_out.get_frame(0)" in direct_smoke
+    assert "return True" in direct_smoke
 
 
 def test_windows_portable_workflow_surfaces_direct_placebo_result(repo_root: Path) -> None:
@@ -347,14 +349,14 @@ def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: 
         "placebo_tonemap_api",
         "apply_tonemap_frame",
         "placebo_tonemap_frame",
-        "vspreview_pyqt6_import",
+        "qt_media_runtime",
     ):
         assert phase in build_script
 
     assert (
         "bundle runtime validation phase '$Phase' failed with exit code $exitCode" in build_script
     )
-    assert 'Phase "vspreview_pyqt6_import" -MediaPath $mediaPath -Required $false' in build_script
+    assert 'Phase "qt_media_runtime" -MediaPath $mediaPath -Required $true' in build_script
     assert 'Phase "lwlibavsource_frame" -MediaPath $mediaPath -Required $true' in build_script
     assert 'Phase "placebo_tonemap_api" -MediaPath $mediaPath -Required $true' in build_script
     assert 'Phase "apply_tonemap_frame" -MediaPath $mediaPath -Required $true' in build_script
@@ -406,6 +408,8 @@ def test_windows_portable_build_runtime_validation_restores_process_environment(
     assert runtime_validation.index("Set-BundleRuntimeEnvironment -BundleRoot $BundleRoot") < (
         runtime_validation.index("} finally {")
     )
+    assert "Push-Location $BundleRoot" in runtime_validation
+    assert "Pop-Location" in runtime_validation
 
 
 def test_pyproject_defines_vspreview_optional_dependency(repo_root: Path) -> None:
@@ -494,7 +498,42 @@ def test_windows_portable_build_runtime_validation_checks_qt_stack(repo_root: Pa
     assert "import PyQt6" in build_script
     assert "pyqt6_import=ok" in build_script
     assert "vspreview_pyqt6=ok" in build_script
-    assert 'Phase "vspreview_pyqt6_import" -MediaPath $mediaPath -Required $false' in build_script
+    combined_proof = build_script[
+        build_script.index("def prove_qt_media_runtime") : build_script.index("phase = sys.argv[1]")
+    ]
+    for required_proof in (
+        "prove_runtime_contract()",
+        "prove_vapoursynth_environment()",
+        "prove_lwlibavsource(media_path)",
+        "prove_placebo_tonemap_api()",
+        "assert_true(\n        prove_placebo_tonemap_frame(),",
+    ):
+        assert required_proof in combined_proof
+    assert combined_proof.index("import PyQt6") < combined_proof.index("import vspreview")
+    assert combined_proof.index("import vspreview") < combined_proof.index(
+        "prove_vapoursynth_environment()"
+    )
+    assert "qt_media_runtime=ok" in combined_proof
+    assert "combined Qt media runtime requires a rendered direct placebo frame" in (combined_proof)
+    assert 'Phase "qt_media_runtime" -MediaPath $mediaPath -Required $true' in build_script
+    assert "vspreview_pyqt6_import" not in build_script
+
+
+def test_windows_portable_workflow_requires_combined_qt_media_proof(
+    repo_root: Path,
+) -> None:
+    workflow = _read_text_or_fail(
+        repo_root / ".github" / "workflows" / "windows-portable-build.yml"
+    )
+
+    required_phases = workflow[
+        workflow.index("foreach ($phase in @(") : workflow.index(
+            'if ($proof -match "WINDOWS_BUNDLE_PROOF placebo_direct_frame=ok ")'
+        )
+    ]
+    assert '"qt_media_runtime"' in required_phases
+    assert "WINDOWS_BUNDLE_PROOF qt_media_runtime=ok" in required_phases
+    assert "Required combined Qt media runtime proof marker missing." in required_phases
 
 
 def test_windows_portable_build_writes_bundle_info_file(repo_root: Path) -> None:
