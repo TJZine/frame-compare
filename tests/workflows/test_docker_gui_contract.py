@@ -20,7 +20,6 @@ def test_dockerfile_gui_target_uses_lock_derived_vspreview_install(repo_root: Pa
 
     assert "FROM runtime AS gui-linux" in dockerfile
     assert stage_names[-1] == "default-runtime"
-    assert dockerfile.count("rm -f /usr/local/bin/uv /usr/local/bin/uvx") == 2
     assert (
         "uv export --frozen --no-dev --extra vspreview --no-emit-project --format requirements.txt"
         in dockerfile
@@ -86,6 +85,96 @@ def test_verify_docker_gui_script_documents_narrow_x11_permissions(repo_root: Pa
     assert "Manual GUI launch example:" in script
     assert "frame-compare-run" in script
     assert "--inside-container" in script
+
+
+def test_verify_docker_gui_inside_container_proves_production_tooling_absence(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    bash = _bash_executable_or_skip()
+    bash_env = tmp_path / "gui-production-proof.env"
+    _write_bash_env(
+        bash_env,
+        r"""
+python() {
+  if [[ "${1:-}" == "-c" ]]; then
+    return 1
+  fi
+  if [[ "${1:-}" == "-" && "$#" -eq 2 ]]; then
+    printf '/tmp/framecompare-fake-session.py\n' > "$2"
+  fi
+  return 0
+}
+
+frame-compare() {
+  if [[ "${1:-}" == "doctor" ]]; then
+    printf '{"doctor":{"checks":[{"id":"vspreview","status":"pass","message":"VSPreview is available for interactive alignment"}]}}\n'
+  fi
+}
+""",
+    )
+
+    result = subprocess.run(
+        [bash, "tools/verify_docker_gui.sh", "--inside-container"],
+        cwd=repo_root,
+        env=_with_bash_env(
+            {
+                "PATH": "/usr/bin:/bin",
+                "HOME": str(tmp_path),
+                "XDG_RUNTIME_DIR": str(tmp_path / "runtime"),
+            },
+            bash_env,
+        ),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=SCRIPT_SUBPROCESS_TIMEOUT_SECONDS,
+    )
+
+    combined = result.stdout + result.stderr
+    assert result.returncode == 0
+    assert "DOCKER_GUI_PROOF production_tooling_absent=ok" in combined
+
+
+def test_verify_docker_gui_inside_container_rejects_uv_tooling(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    bash = _bash_executable_or_skip()
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_uv = fake_bin / "uv"
+    fake_uv.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_uv.chmod(0o755)
+
+    bash_env = tmp_path / "gui-production-tooling.env"
+    _write_bash_env(
+        bash_env,
+        """
+python() {
+  return 1
+}
+""",
+    )
+
+    result = subprocess.run(
+        [bash, "tools/verify_docker_gui.sh", "--inside-container"],
+        cwd=repo_root,
+        env=_with_bash_env(
+            {
+                "PATH": f"{fake_bin}:/usr/bin:/bin",
+                "HOME": str(tmp_path),
+                "XDG_RUNTIME_DIR": str(tmp_path / "runtime"),
+            },
+            bash_env,
+        ),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=SCRIPT_SUBPROCESS_TIMEOUT_SECONDS,
+    )
+
+    combined = result.stdout + result.stderr
+    assert result.returncode == 6
+    assert "uv build tooling leaked into the GUI production image" in combined
 
 
 def test_verify_docker_gui_script_requires_linux_x11_host(repo_root: Path, tmp_path: Path) -> None:

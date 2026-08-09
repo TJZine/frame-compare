@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -309,6 +312,60 @@ def test_docker_provenance_covers_every_distributed_media_component(
         assert license_name in dockerfile
 
 
+def test_docker_provenance_derives_vapoursynth_release_from_build_arg(
+    repo_root: Path,
+) -> None:
+    dockerfile = (repo_root / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "ARG VAPOURSYNTH_VERSION=78" in dockerfile
+    assert '\\"version\\":\\"R${VAPOURSYNTH_VERSION}\\"' in dockerfile
+    assert '\\"version\\":\\"R78\\"' not in dockerfile
+
+
+def test_docker_lsmash_works_meson_rewrite_fails_closed(repo_root: Path, tmp_path: Path) -> None:
+    dockerfile = (repo_root / "Dockerfile").read_text(encoding="utf-8")
+
+    perl = shutil.which("perl")
+    if perl is None:
+        pytest.skip("Perl is required to execute the Dockerfile Meson rewrite proof")
+
+    rewrite_match = re.search(
+        r"perl -0pi -e '(?P<program>.*?)' meson\.build", dockerfile, re.DOTALL
+    )
+    assert rewrite_match is not None, "Dockerfile must own the L-SMASH-Works rewrite"
+    # Dockerfile line continuations are removed before /bin/sh receives this
+    # program. Normalize those continuations so the exact owned Perl program
+    # can be exercised without building an image.
+    perl_program = rewrite_match.group("program").replace("\\\n", "")
+    meson_block = (
+        "  install: true,\n"
+        "  install_dir: join_paths(vapoursynth_dep.get_pkgconfig_variable('libdir'), 'vapoursynth'),\n"
+    )
+
+    def run_rewrite(content: str) -> subprocess.CompletedProcess[str]:
+        meson_path = tmp_path / "meson.build"
+        meson_path.write_text(content, encoding="utf-8")
+        return subprocess.run(
+            [perl, "-0pi", "-e", perl_program, str(meson_path)],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+
+    matched = run_rewrite(meson_block)
+    assert matched.returncode == 0, matched.stderr
+    assert (tmp_path / "meson.build").read_text(encoding="utf-8") == "  install: false,\n"
+
+    missing = run_rewrite("project('unrelated')\n")
+    assert missing.returncode != 0
+    assert "exactly once" in missing.stderr
+
+    duplicate = run_rewrite(meson_block + meson_block)
+    assert duplicate.returncode != 0
+    assert "exactly once" in duplicate.stderr
+
+
 def test_docker_uses_verified_tracked_source_tree_digests(repo_root: Path) -> None:
     dockerfile = (repo_root / "Dockerfile").read_text(encoding="utf-8")
     expected = {
@@ -330,6 +387,66 @@ def test_docker_runtime_reads_release_and_api_identities_separately(repo_root: P
     script = (repo_root / "tools/verify_docker_integration.sh").read_text(encoding="utf-8")
 
     assert "DOCKER_PROOF vapoursynth_import=ok version=R78 api=4" in script
+
+
+def test_docker_doctor_gate_reports_missing_required_check_id(repo_root: Path) -> None:
+    script = (repo_root / "tools/verify_docker_integration.sh").read_text(encoding="utf-8")
+
+    python_blocks = re.findall(r"<<'PY'\n(.*?)\nPY", script, re.DOTALL)
+    module = next(
+        candidate
+        for candidate in (ast.parse(block) for block in python_blocks)
+        if any(
+            isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "checks" for target in node.targets
+            )
+            for node in candidate.body
+        )
+        and any(
+            isinstance(node, ast.For)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "required_check"
+            for node in candidate.body
+        )
+    )
+    checks_assignment = next(
+        index
+        for index, node in enumerate(module.body)
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "checks" for target in node.targets)
+    )
+    required_checks_loop = next(
+        index
+        for index, node in enumerate(module.body)
+        if isinstance(node, ast.For)
+        and isinstance(node.target, ast.Name)
+        and node.target.id == "required_check"
+    )
+    validation_module = ast.Module(
+        body=module.body[checks_assignment : required_checks_loop + 1],
+        type_ignores=[],
+    )
+    ast.fix_missing_locations(validation_module)
+    validation_code = compile(
+        validation_module,
+        "verify_docker_integration.sh:doctor-check-validation",
+        "exec",
+    )
+
+    def run_validation(check_ids: set[str]) -> None:
+        checks = [{"id": check_id, "status": "pass"} for check_id in sorted(check_ids)]
+
+        def assert_true(condition: object, message: str) -> None:
+            if not condition:
+                raise AssertionError(message)
+
+        exec(validation_code, {"doctor": {"checks": checks}, "assert_true": assert_true})
+
+    required_ids = {"python_version", "vapoursynth", "lsmas", "vs_placebo", "ffms2", "ffmpeg"}
+    run_validation(required_ids)
+    with pytest.raises(AssertionError, match="doctor required check missing: ffms2"):
+        run_validation(required_ids - {"ffms2"})
 
 
 def test_docker_runtime_generates_metadata_sensitive_fixture_matrix(repo_root: Path) -> None:

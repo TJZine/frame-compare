@@ -668,9 +668,17 @@ runtime_environment = doctor["runtime_environment"]
 assert_true(runtime_environment["runtime_kind"] == "docker", "doctor runtime kind mismatch")
 assert_true(runtime_environment["declared_full_fingerprint_match"] is True, "doctor fingerprint mismatch")
 assert_true(runtime_environment["ffms2_required"] is True, "doctor FFMS2 policy mismatch")
-checks = {entry["id"]: entry for entry in doctor["checks"]}
+checks = {
+    entry.get("id"): entry
+    for entry in doctor["checks"]
+    if isinstance(entry, dict) and isinstance(entry.get("id"), str)
+}
 for required_check in ("python_version", "vapoursynth", "lsmas", "vs_placebo", "ffms2", "ffmpeg"):
-    assert_true(checks[required_check]["status"] == "pass", f"doctor check failed: {required_check}")
+    assert_true(required_check in checks, f"doctor required check missing: {required_check}")
+    assert_true(
+        checks[required_check]["status"] == "pass",
+        f"doctor check failed: {required_check}",
+    )
 assert_true(checks["vapoursynth"]["details"]["observed_release"] == "R78", "doctor VS release")
 assert_true(checks["vapoursynth"]["details"]["api_major"] == 4, "doctor VS API")
 assert_true(

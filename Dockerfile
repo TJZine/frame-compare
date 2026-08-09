@@ -138,7 +138,10 @@ RUN bash /usr/local/bin/checkout_source_commit.sh \
         "${LSMASH_WORKS_SOURCE_TREE_SHA256}" \
         /build/l-smash-works && \
     cd /build/l-smash-works/VapourSynth && \
-    perl -0pi -e "s/  install: true,\n  install_dir: join_paths\(vapoursynth_dep\.get_pkgconfig_variable\('libdir'\), 'vapoursynth'\),\n/  install: false,\n/" meson.build && \
+    perl -0pi -e '\
+        my $count = s/  install: true,\n  install_dir: join_paths\(vapoursynth_dep\.get_pkgconfig_variable\(\x27libdir\x27\), \x27vapoursynth\x27\),\n/  install: false,\n/g; \
+        die "expected L-SMASH-Works Meson install block exactly once\\n" unless $count == 1; \
+    ' meson.build && \
     meson setup build --buildtype=release && \
     ninja -C build && \
     mkdir -p /opt/vapoursynth-extra-plugins/lsmas && \
@@ -202,7 +205,7 @@ RUN bash /usr/local/bin/checkout_source_commit.sh \
         '{' \
         '  "schema_version": 2,' \
         '  "components": [' \
-        "    {\"name\":\"VapourSynth\",\"version\":\"R78\",\"source_commit\":\"${VAPOURSYNTH_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/vapoursynth/vapoursynth.git\",\"source_tree_sha256\":\"${VAPOURSYNTH_SOURCE_TREE_SHA256}\",\"license\":\"LGPL-2.1-or-later\"}," \
+        "    {\"name\":\"VapourSynth\",\"version\":\"R${VAPOURSYNTH_VERSION}\",\"source_commit\":\"${VAPOURSYNTH_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/vapoursynth/vapoursynth.git\",\"source_tree_sha256\":\"${VAPOURSYNTH_SOURCE_TREE_SHA256}\",\"license\":\"LGPL-2.1-or-later\"}," \
         "    {\"name\":\"OBUParse\",\"version\":\"commit ${OBUPARSE_COMMIT}\",\"source_commit\":\"${OBUPARSE_COMMIT}\",\"source_url\":\"https://github.com/HomeOfAviSynthPlusEvolution/obuparse.git\",\"source_tree_sha256\":\"${OBUPARSE_SOURCE_TREE_SHA256}\",\"license\":\"ISC\",\"selection_kind\":\"commit\",\"linkage\":\"shared\",\"soname\":\"libobuparse.so.2\"}," \
         "    {\"name\":\"L-SMASH\",\"version\":\"commit ${LSMASH_COMMIT}\",\"source_commit\":\"${LSMASH_COMMIT}\",\"source_url\":\"https://github.com/l-smash/l-smash.git\",\"source_tree_sha256\":\"${LSMASH_SOURCE_TREE_SHA256}\",\"license\":\"ISC\",\"selection_kind\":\"commit\"}," \
         "    {\"name\":\"L-SMASH-Works\",\"version\":\"1296.0.0.0\",\"source_commit\":\"${LSMASH_WORKS_COMMIT}\",\"source_url\":\"https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works.git\",\"source_tree_sha256\":\"${LSMASH_WORKS_SOURCE_TREE_SHA256}\",\"license\":\"ISC AND LGPL-2.1-or-later\"}," \

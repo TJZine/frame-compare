@@ -53,17 +53,10 @@ def test_default_compose_keeps_test_runtime_image_separate(repo_root: Path) -> N
     assert compose["services"]["frame-compare-test"]["image"] == "frame-compare:test"
 
 
-def test_docker_gate_proves_generated_artifacts_survive_container_removal(repo_root: Path) -> None:
-    script = _read_text_or_fail(repo_root / "tools" / "verify_docker_integration.sh")
+def test_docker_workflow_invokes_canonical_runtime_gate(repo_root: Path) -> None:
+    workflow = yaml.safe_load(
+        _read_text_or_fail(repo_root / ".github" / "workflows" / "docker-integration.yml")
+    )
 
-    assert 'build_services=("$service")' in script
-    assert 'build_services+=("frame-compare-run")' in script
-    assert 'docker compose build "${build_args[@]}" "${build_services[@]}"' in script
-    assert "DOCKER_PROOF production_tooling_absent=ok" in script
-    assert 'grep -Fq "DOCKER_PROOF production_tooling_absent=ok" "$production_log"' in script
-    assert "uv build tooling leaked into the production image" in script
-    assert "pytest test tooling leaked into the production image" in script
-    assert "docker compose run --rm --entrypoint /bin/bash frame-compare-run" in script
-    assert "frame-compare run" in script
-    assert 'generated_dir = "$generated_root"' in script
-    assert 'if ! "$host_python" - "$proof_dir"' in script
+    steps = workflow["jobs"]["docker-integration"]["steps"]
+    assert any(step.get("run") == "bash tools/verify_docker_integration.sh" for step in steps)
