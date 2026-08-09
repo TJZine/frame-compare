@@ -24,7 +24,7 @@ class HdrTonemapInputs:
     hdr_metadata: HDRMetadata | None
     transfer: int | None
     primaries: int | None
-    props: dict[str, object] | None
+    props: dict[str, object]
     detected_is_hdr: bool | None
 
 
