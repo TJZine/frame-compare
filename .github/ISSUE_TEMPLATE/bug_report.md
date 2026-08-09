@@ -17,7 +17,7 @@ A clear and concise description of the bug.
 - **Frame Compare Version**: [e.g., 0.1.0]
 - **Installation Method**: [Windows portable / Docker / native uv / native pip]
 - **VapourSynth Version** (if applicable): [e.g., R78]
-- **Runtime identity**: [paste the complete output of `frame-compare doctor --json`]
+- **Runtime identity**: [paste the output of `frame-compare doctor --json` after redacting local filesystem paths]
 
 ## Steps to Reproduce
 
