@@ -164,8 +164,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev --frozen
 
-      - name: Run pytest
-        run: uv run --no-sync pytest -q
+      - name: Run pytest with coverage enforcement
+        run: uv run --no-sync pytest -q --cov=src/frame_compare --cov-report=term-missing
 
   import-lints:
     name: Import Contracts
