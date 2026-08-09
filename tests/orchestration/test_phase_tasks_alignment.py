@@ -11,6 +11,7 @@ import pytest
 
 from frame_compare.analysis.errors import ExclusionRecoverySelectionError, SelectionError
 from frame_compare.analysis.metrics import slice_frame_metrics
+from frame_compare.analysis.selection import select_frames
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.orchestration import phase_alignment, phase_selection
@@ -339,7 +340,7 @@ def test_run_align_phase_reselects_trimmed_overlap_when_fallback_plan_would_drop
     overlap_start = output.reference.trim.trim_start_frames
     overlap_length = output.reference.effective_num_frames()
 
-    expected_selection = phase_alignment.select_frames(
+    expected_selection = select_frames(
         metrics=slice_frame_metrics(
             ctx.analysis_metrics,
             start_index=overlap_start,
@@ -528,7 +529,7 @@ def test_run_align_phase_replaces_stale_analysis_metadata_after_tiny_overlap_fal
             clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
         ),
     )
-    initial_selection = phase_alignment.select_frames(
+    initial_selection = select_frames(
         metrics=ctx.analysis_metrics,
         config=ctx.config.analysis,
     )

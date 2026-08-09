@@ -11,6 +11,45 @@ from pathlib import Path
 
 import pytest
 
+_POSIX_PROCESS_PROOF = pytest.mark.skipif(
+    os.name == "nt",
+    reason="source checkout process proof requires POSIX process and rename semantics",
+)
+
+_GIT_REPOSITORY_ENVIRONMENT = (
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CONFIG",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_GRAFT_FILE",
+    "GIT_INDEX_FILE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_PREFIX",
+    "GIT_SHALLOW_FILE",
+    "GIT_COMMON_DIR",
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_git_configuration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for variable in _GIT_REPOSITORY_ENVIRONMENT:
+        monkeypatch.delenv(variable, raising=False)
+
+    global_config = tmp_path / "gitconfig-global"
+    system_config = tmp_path / "gitconfig-system"
+    global_config.touch()
+    system_config.touch()
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(system_config))
+
 
 def _embedded_python_source(script: str) -> str:
     return script.split("python - \"$staging_directory\" <<'PY'\n", 1)[1].split("\nPY\n", 1)[0]
@@ -170,8 +209,6 @@ def _run_checkout(
     destination: Path,
     extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    if os.name == "nt":
-        pytest.skip("source checkout process proof requires POSIX atomic rename semantics")
     environment = os.environ.copy()
     environment["PATH"] = f"{timeout_command.parent}{os.pathsep}{environment['PATH']}"
     if extra_env is not None:
@@ -240,6 +277,7 @@ def test_source_checkout_bounds_every_git_boundary(repo_root: Path) -> None:
     )
 
 
+@_POSIX_PROCESS_PROOF
 def test_source_checkout_uses_root_as_absolute_staging_parent(
     repo_root: Path, tmp_path: Path
 ) -> None:
@@ -264,6 +302,7 @@ def test_source_checkout_uses_root_as_absolute_staging_parent(
     assert record_path.read_text(encoding="utf-8") == (f"/.{destination.name}.staging.XXXXXXXX\n")
 
 
+@_POSIX_PROCESS_PROOF
 def test_source_checkout_verifies_digest_and_preserves_commit_records(
     repo_root: Path, tmp_path: Path
 ) -> None:
@@ -290,6 +329,7 @@ def test_source_checkout_verifies_digest_and_preserves_commit_records(
 
 
 @pytest.mark.parametrize("failure", ["fetch", "tree"])
+@_POSIX_PROCESS_PROOF
 def test_source_checkout_cleans_owned_destination_on_failure(
     repo_root: Path, tmp_path: Path, failure: str
 ) -> None:
@@ -316,6 +356,7 @@ def test_source_checkout_cleans_owned_destination_on_failure(
         assert "git fetch failed" in completed.stderr
 
 
+@_POSIX_PROCESS_PROOF
 def test_source_checkout_refuses_pre_existing_destination(repo_root: Path, tmp_path: Path) -> None:
     repository, commit, tree_digest = _create_source_repo(tmp_path)
     destination = tmp_path / "pre-existing"
@@ -338,6 +379,7 @@ def test_source_checkout_refuses_pre_existing_destination(repo_root: Path, tmp_p
     assert marker.read_text(encoding="utf-8") == "caller-owned\n"
 
 
+@_POSIX_PROCESS_PROOF
 def test_source_checkout_never_cleans_replaced_final_destination(
     repo_root: Path, tmp_path: Path
 ) -> None:
@@ -368,6 +410,7 @@ def test_source_checkout_never_cleans_replaced_final_destination(
     assert not list(tmp_path.glob(".replaced-destination.staging.*"))
 
 
+@_POSIX_PROCESS_PROOF
 def test_source_checkout_publishes_without_clobbering_late_destination(
     repo_root: Path, tmp_path: Path
 ) -> None:

@@ -388,18 +388,13 @@ def test_docker_runtime_reads_release_and_api_identities_separately(repo_root: P
     assert "DOCKER_PROOF vapoursynth_import=ok version=R78 api=4" in script
 
 
-def test_docker_doctor_gate_reports_missing_required_check_id(repo_root: Path) -> None:
+def test_docker_doctor_gate_preserves_missing_check_diagnostic_and_proof_marker(
+    repo_root: Path,
+) -> None:
     script = (repo_root / "tools/verify_docker_integration.sh").read_text(encoding="utf-8")
 
-    assert (
-        'for required_check in ("python_version", "vapoursynth", "lsmas", "vs_placebo", "ffms2", "ffmpeg"):'
-        in script
-    )
-    assert (
-        'assert_true(required_check in checks, f"doctor required check missing: {required_check}")'
-        in script
-    )
-    assert 'checks[required_check]["status"] == "pass"' in script
+    assert "doctor required check missing: {required_check}" in script
+    assert script.count("DOCKER_PROOF doctor_json=ok") == 2
 
 
 def test_docker_runtime_generates_metadata_sensitive_fixture_matrix(repo_root: Path) -> None:

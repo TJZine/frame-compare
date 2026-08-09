@@ -209,6 +209,7 @@ def test_ci_keeps_coverage_test_audit_browser_and_distribution_gates(
     assert "--cov=src/frame_compare" in test_run
     assert "--cov-report=term-missing" in test_run
     project = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
+    assert project["tool"]["coverage"]["run"]["branch"] is True
     assert project["tool"]["coverage"]["report"]["fail_under"] == 80
     browser_runs = [str(step.get("run", "")) for step in jobs["report-browser"]["steps"]]
     assert any("command -v google-chrome" in run for run in browser_runs)
