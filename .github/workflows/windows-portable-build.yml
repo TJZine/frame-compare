@@ -204,6 +204,8 @@ jobs:
 
       - name: Verify extracted portable bundle
         shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
         run: |
           pwsh -NoProfile -ExecutionPolicy Bypass `
             -File tools/windows_portable/verify_extracted_bundle.ps1 `
@@ -211,7 +213,7 @@ jobs:
             -ExtractRoot dist/zip_extract_check `
             -DoctorStdoutPath (Join-Path $env:RUNNER_TEMP "extracted-doctor.json") `
             -DoctorStderrPath (Join-Path $env:RUNNER_TEMP "extracted-doctor.stderr.txt") `
-            -ExpectedCommitSha ${{ inputs.expected_sha }}
+            -ExpectedCommitSha "$env:EXPECTED_SHA"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build code-only update zip

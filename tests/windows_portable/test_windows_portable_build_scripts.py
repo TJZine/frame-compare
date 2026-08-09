@@ -895,9 +895,11 @@ def test_extracted_bundle_verifier_rejects_unsafe_zip_entries(
     if shutil.which("pwsh") is None:
         pytest.skip("PowerShell 7 is required")
     zip_path = tmp_path / "unsafe.zip"
+    extract_root = tmp_path / "fresh-extract"
+    escape_target = extract_root.parent / "escape.txt"
     with zipfile.ZipFile(zip_path, "w") as archive:
         if unsafe_kind == "traversal":
-            archive.writestr("frame-compare-portable-win-x64/../escape.txt", "unsafe")
+            archive.writestr("frame-compare-portable-win-x64/../../escape.txt", "unsafe")
         else:
             if unsafe_kind == "case_collision":
                 archive.writestr("frame-compare-portable-win-x64/install.cmd", "")
@@ -912,7 +914,7 @@ def test_extracted_bundle_verifier_rejects_unsafe_zip_entries(
     result = _run_extracted_bundle_verifier(
         repo_root=repo_root,
         zip_path=zip_path,
-        extract_root=tmp_path / "fresh-extract",
+        extract_root=extract_root,
         local_app_data=tmp_path / "local-app-data",
     )
 
@@ -925,7 +927,7 @@ def test_extracted_bundle_verifier_rejects_unsafe_zip_entries(
         "file_directory_conflict": "Conflicting ZIP file and directory path",
     }[unsafe_kind]
     assert expected in output
-    assert not (tmp_path / "escape.txt").exists()
+    assert not escape_target.exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell process semantics required")
@@ -1192,7 +1194,9 @@ def test_windows_portable_extracted_bundle_verifier_owns_hosted_and_manual_parit
 
     invocation = "tools/windows_portable/verify_extracted_bundle.ps1"
     assert workflow.count(invocation) == 1
-    assert "-ExpectedCommitSha ${{ inputs.expected_sha }}" in workflow
+    assert "EXPECTED_SHA: ${{ inputs.expected_sha }}" in workflow
+    assert '-ExpectedCommitSha "$env:EXPECTED_SHA"' in workflow
+    assert "-ExpectedCommitSha ${{ inputs.expected_sha }}" not in workflow
     assert "Verify extracted portable bundle" in workflow
     assert "Verify zip layout" not in workflow
     assert "Smoke: extracted install shim" not in workflow
