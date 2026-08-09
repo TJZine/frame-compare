@@ -390,9 +390,12 @@ def _check_vs_placebo() -> CheckResult:
 
 
 def _check_ffms2() -> CheckResult:
-    """Report FFMS2 availability and enforce Docker's declared runtime policy."""
-    required = runtime_ffms2_required()
+    """Report FFMS2 availability and enforce the active runtime policy."""
     selected_runtime_kind = runtime_kind().casefold()
+    # Docker's supported media stack always includes FFMS2.  Keep the
+    # deployment-kind policy authoritative so an absent, false, or malformed
+    # requirement declaration cannot make a partial Docker runtime look valid.
+    required = selected_runtime_kind == "docker" or runtime_ffms2_required()
     details: dict[str, JSONValue] = {
         "expected_release": FFMS2_RELEASE,
         "expected_runtime_version": FFMS2_RUNTIME_VERSION,

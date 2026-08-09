@@ -559,11 +559,22 @@ class TestCheckFFMS2:
         assert result.details["windows_baseline"] == "excluded"
         assert result.details["required_in_current_runtime"] is False
 
-    def test_check_ffms2_missing_fails_declared_docker_policy(
-        self, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize(
+        "required_value",
+        [
+            pytest.param(None, id="requirement-missing"),
+            pytest.param("0", id="requirement-false"),
+            pytest.param("not-a-flag", id="requirement-malformed"),
+        ],
+    )
+    def test_check_ffms2_missing_fails_closed_for_docker_policy(
+        self, monkeypatch: pytest.MonkeyPatch, required_value: str | None
     ) -> None:
-        monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "docker")
-        monkeypatch.setenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "1")
+        monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", " Docker ")
+        if required_value is None:
+            monkeypatch.delenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", raising=False)
+        else:
+            monkeypatch.setenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", required_value)
         checks = collect_checks()
         check = next(candidate for candidate in checks if candidate.name == "ffms2")
 
@@ -577,6 +588,8 @@ class TestCheckFFMS2:
         assert result.available is False
         assert "required by this Docker runtime" in result.message
         assert result.hint == "Repair the complete Docker media runtime, then rerun doctor"
+        assert result.details["current_runtime_kind"] == "docker"
+        assert result.details["required_in_current_runtime"] is True
 
     def test_check_ffms2_reports_registered_source_function(
         self, monkeypatch: pytest.MonkeyPatch
