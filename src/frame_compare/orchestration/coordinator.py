@@ -84,13 +84,15 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
     selected_frame_count = 0
     artifacts: RunArtifacts | None = None
     preflight_warnings: tuple[str, ...] = ()
+    current_preflight_warnings: list[str] | None = None
 
     def _capture_reserved_run(capture: ReservedRunCapture) -> None:
-        nonlocal clip_count, phase_timings, preflight_warnings, reserved_workspace
+        nonlocal artifacts, clip_count, phase_timings, preflight_warnings, reserved_workspace
         reserved_workspace = capture.workspace
         clip_count = capture.clip_count
         phase_timings = {"preflight": capture.preflight_duration}
         preflight_warnings = capture.preflight_warnings
+        artifacts = RunArtifacts(warnings=capture.run_warnings)
 
     if deps is None:
         local_deps = RunDependencies()
@@ -101,11 +103,15 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             http_client=deps.http_client,
             progress=deps.progress,
             confirm_slowpics_upload=deps.confirm_slowpics_upload,
+            confirm_full_window_retry=deps.confirm_full_window_retry,
             clock=deps.clock,
             monotonic_timer=deps.monotonic_timer,
         )
 
     local_deps.capture_reserved_run = _capture_reserved_run
+
+    if request.json_output or request.quiet or request.from_cache_only or request.skip_analysis:
+        local_deps.confirm_full_window_retry = None
 
     if local_deps.vs_loader is None:
         local_deps.vs_loader = DefaultVSLoader()
@@ -119,6 +125,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
 
     async def _execute_with_deps() -> RunResult:
         nonlocal artifacts, clip_count, phase_timings, preflight_warnings, run_start
+        nonlocal current_preflight_warnings
         nonlocal run_timer_start
         nonlocal selected_frame_count
         run_start = local_deps.clock()
@@ -137,6 +144,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         phase_timings = state.phase_timings
         clip_count = len(prep.clips)
         preflight_warnings = tuple(prep.preflight_warnings)
+        current_preflight_warnings = prep.preflight_warnings
 
         state.phase_timings["preflight"] = prep.preflight_duration
 
@@ -152,6 +160,10 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             analysis_clip=prep.analysis_clip,
             selection_window=prep.selection_window,
             reporter=reporter,
+            confirm_full_window_retry=local_deps.confirm_full_window_retry,
+            full_window_retry_override=prep.full_window_retry_override,
+            run_warnings=state.warnings,
+            preflight_warnings=prep.preflight_warnings,
             no_color=request.no_color,
         )
         emit_consolidated_fps_report(
@@ -256,7 +268,11 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                 clip_count=clip_count,
                 selected_frame_count=selected_frame_count,
                 phase_timings=phase_timings,
-                warnings=preflight_warnings,
+                warnings=(
+                    preflight_warnings
+                    if current_preflight_warnings is None
+                    else tuple(current_preflight_warnings)
+                ),
             )
             raise
 

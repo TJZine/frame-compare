@@ -30,6 +30,7 @@ from frame_compare.orchestration.execution_types import (
     RenderArtifacts,
     RenderPhaseOutput,
 )
+from frame_compare.orchestration.full_window_retry import raise_if_full_window_retry_failed
 from frame_compare.orchestration.phase_selection import (
     build_initial_selection_details_by_source_frame,
     generated_frame_count,
@@ -383,16 +384,24 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
         reference=ctx.reference,
         selected_frames=selected_frames,
     )
-    normalized_selection = _normalize_selected_frames_for_trimmed_domain(
-        selected_frames=selected_source_frames,
-        user_source_frames=set(ctx.config.analysis.user_frames),
-        reference=reference,
-        comparisons=comparisons,
-        selection_source_window=selection_source_window,
-        generated_requested_count=generated_frame_count(ctx.config.analysis),
-        seed=ctx.config.analysis.random_seed,
-        allow_fallback=generated_frame_count(ctx.config.analysis) > 0,
-    )
+    try:
+        normalized_selection = _normalize_selected_frames_for_trimmed_domain(
+            selected_frames=selected_source_frames,
+            user_source_frames=set(ctx.config.analysis.user_frames),
+            reference=reference,
+            comparisons=comparisons,
+            selection_source_window=selection_source_window,
+            generated_requested_count=generated_frame_count(ctx.config.analysis),
+            seed=ctx.config.analysis.random_seed,
+            allow_fallback=(
+                generated_frame_count(ctx.config.analysis) > 0
+                and ctx.full_window_retry_override is None
+            ),
+            require_full_generated_selection=ctx.full_window_retry_override is not None,
+        )
+    except SelectionError as error:
+        raise_if_full_window_retry_failed(ctx, error)
+        raise
     normalized_selected_frames = normalized_selection.selected_frames
     if normalized_selection.dropped_user_source_frames:
         warnings.append(
@@ -408,16 +417,20 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
             for frame in normalized_selected_frames
             if frame + reference.trim.trim_start_frames in configured_user_source_frames
         ]
-        trimmed_selection = _reselect_frames_for_trimmed_overlap(
-            metrics=ctx.analysis_metrics,
-            reference=reference,
-            comparisons=comparisons,
-            selection_source_window=selection_source_window,
-            config=ctx.config.analysis,
-            accepted_user_source_frames={
-                frame + reference.trim.trim_start_frames for frame in normalized_user_frames
-            },
-        )
+        try:
+            trimmed_selection = _reselect_frames_for_trimmed_overlap(
+                metrics=ctx.analysis_metrics,
+                reference=reference,
+                comparisons=comparisons,
+                selection_source_window=selection_source_window,
+                config=ctx.config.analysis,
+                accepted_user_source_frames={
+                    frame + reference.trim.trim_start_frames for frame in normalized_user_frames
+                },
+            )
+        except SelectionError as error:
+            raise_if_full_window_retry_failed(ctx, error)
+            raise
         if trimmed_selection is not None:
             normalized_selected_frames = sorted(
                 {*normalized_user_frames, *trimmed_selection.selected_frames}
@@ -780,6 +793,7 @@ def _normalize_selected_frames_for_trimmed_domain(
     generated_requested_count: int,
     seed: int,
     allow_fallback: bool = True,
+    require_full_generated_selection: bool = False,
 ) -> _NormalizedFrameSelection:
     selectable_start, selectable_length = _selectable_aligned_source_window(
         reference=reference,
@@ -820,6 +834,15 @@ def _normalize_selected_frames_for_trimmed_domain(
             found=generated_capacity,
         )
     generated_target_count = generated_requested_count
+    if (
+        require_full_generated_selection
+        and len(normalized_generated_frames) < generated_target_count
+    ):
+        raise SelectionError(
+            "insufficient generated frames after full-window retry alignment",
+            requested=generated_target_count,
+            found=len(normalized_generated_frames),
+        )
     normalized_frames = sorted(
         {*normalized_user_frames, *normalized_generated_frames[:generated_target_count]}
     )

@@ -402,6 +402,48 @@ unchanged.
 - `--write-config` writes the effective config to disk, then exits without invoking the
   runtime pipeline.
 
+### Run-Only Full-Window Selection Recovery
+
+- Recovery is eligible only when effective `analysis.ignore_lead_seconds` or
+  `analysis.ignore_trail_seconds` is nonzero and the existing frame-selection owner
+  raises its typed insufficient-candidates outcome from the exclusion-constrained
+  shared domain. Valid selection windows, zero-margin configurations, skipped
+  analysis, and unrelated metric/runtime failures retain their existing behavior.
+- In an interactive human run, the CLI asks exactly once on stderr, defaulting to No:
+
+  ```text
+  Configured lead/trail exclusions leave too little media to satisfy the
+  requested frame selection. Analyze the full shared clip for this run? [y/N]
+  ```
+
+- Yes creates a run-scoped effective config copy with only the effective lead and
+  trail exclusions set to `0.0`. It recomputes the normal shared selection window,
+  analysis domain, metric range, cache lookup/write identity, selection metadata,
+  and downstream normalization inputs while retaining source trims, alignment
+  limits, and all other shared-window semantics. The excluded-window and full-window
+  metric requests cannot satisfy each other's cache identity.
+- The authored config object and selected TOML file are not mutated or rewritten.
+  The accepted override is recorded as a run warning, including the human success
+  warning surface and the existing `run_result.toml` warning metadata. A report is
+  not enabled or created solely to record this recovery.
+- The retry runs at most once. If the full-window attempt cannot satisfy selection
+  or otherwise fails, the run exits through typed `FC-4012` selection failure with
+  guidance to reduce selector counts, use a longer clip, or reduce exclusions. It
+  does not prompt again, substitute the deterministic uniform fallback, render,
+  report success, publish, or upload.
+- No, default No, EOF, interruption, and prompt failure all fail through typed
+  `FC-4012` without retry or downstream success side effects. The hint directs users
+  to reduce `analysis.ignore_lead_seconds` / `analysis.ignore_trail_seconds` or use a
+  clip-specific config.
+- `--json`, `--quiet`, redirected/non-TTY stdin, `--from-cache-only`, and
+  `--skip-analysis` never receive this confirmation callback. If the constrained
+  selection fails, they fail closed through the same typed error: no automatic
+  relaxation, no retry, and no uniform substitution. JSON stdout remains the single
+  standard structured error object; human diagnostics remain on stderr.
+- Persistent short-clip behavior requires a separate config with
+  `ignore_lead_seconds = 0.0` and `ignore_trail_seconds = 0.0`, selected explicitly
+  with `frame-compare run --config <clip-config>`.
+
 ### Cache Mode Semantics
 
 - Analysis cache entries live under `<resolved paths.generated_dir>/cache/analysis`

@@ -107,18 +107,37 @@ def refine_auto_content_active_rects_for_clips(
     detection: ScreenshotActiveRectDetection,
     sampler: ActiveRectFrameSampler | None,
     fail_closed: bool,
+    recompute_content_derived: bool = False,
 ) -> tuple[list[ClipState], list[str]]:
     """Refine unresolved full-frame active rects when opt-in auto detection is enabled."""
     if detection != ScreenshotActiveRectDetection.AUTO:
         return list(clips), []
 
-    refinable = [clip for clip in clips if _clip_has_full_frame_static_rect(clip)]
+    baseline_clips = [
+        replace(
+            clip,
+            active_rect=ClipActiveRect(
+                x=0,
+                y=0,
+                width=clip.probe.width,
+                height=clip.probe.height,
+                source="full-frame",
+                detection_mode="auto",
+            ),
+        )
+        if recompute_content_derived
+        and clip.active_rect is not None
+        and clip.active_rect.source in ("content-derived", "aspect-ratio-derived")
+        else clip
+        for clip in clips
+    ]
+    refinable = [clip for clip in baseline_clips if _clip_has_full_frame_static_rect(clip)]
     if not refinable:
-        return list(clips), []
+        return baseline_clips, []
 
     if sampler is None:
         return _handle_detection_error(
-            clips,
+            baseline_clips,
             fail_closed=fail_closed,
             message="active-rect auto detection could not run because no VS loader is available",
         )
@@ -150,7 +169,7 @@ def refine_auto_content_active_rects_for_clips(
             )
             if fail_closed:
                 return _handle_detection_error(
-                    clips,
+                    baseline_clips,
                     fail_closed=fail_closed,
                     message=message,
                 )
@@ -170,10 +189,10 @@ def refine_auto_content_active_rects_for_clips(
         )
 
     if not refined_by_path:
-        return list(clips), warnings
+        return baseline_clips, warnings
     return [
         replace(clip, active_rect=refined_by_path.get(clip.path, clip.active_rect))
-        for clip in clips
+        for clip in baseline_clips
     ], warnings
 
 

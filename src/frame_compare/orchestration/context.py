@@ -18,6 +18,8 @@ from frame_compare.vs.types import HDRMetadata
 if TYPE_CHECKING:
     from frame_compare.analysis.types import FrameMetrics, SelectionBreakdown, SelectionDetail
     from frame_compare.config.schema import ConfigSchema
+    from frame_compare.orchestration.full_window_retry import FullWindowRetryOverride
+    from frame_compare.orchestration.types import FullWindowRetryConfirmationFn
     from frame_compare.utils.progress_protocol import ProgressReporter
     from frame_compare.utils.types import WorkspacePaths
 
@@ -175,4 +177,8 @@ class RunContext:
     selection_breakdown: SelectionBreakdown | None = None
     selection_details_by_source_frame: dict[int, SelectionDetail] | None = None
     analysis_metrics: FrameMetrics | None = None
+    confirm_full_window_retry: FullWindowRetryConfirmationFn | None = None
+    full_window_retry_override: FullWindowRetryOverride | None = None
+    run_warnings: list[str] | None = None
+    preflight_warnings: list[str] | None = None
     no_color: bool = False

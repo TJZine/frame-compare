@@ -26,8 +26,14 @@ def apply_phase_output(*, ctx: RunContext, state: ExecutionState, output: PhaseO
             state.selected_frames[:] = phase_output.selected_frames
             ctx.selection_breakdown = phase_output.selection_breakdown
             ctx.selection_details_by_source_frame = phase_output.selection_details_by_source_frame
+            state.frame_plan_warnings[:] = phase_output.warnings
             state.warnings.extend(phase_output.warnings)
         case AnalyzePhaseOutput() as phase_output:
+            if phase_output.replaces_frame_plan_selection:
+                for warning in state.frame_plan_warnings:
+                    if warning in state.warnings:
+                        state.warnings.remove(warning)
+                state.frame_plan_warnings.clear()
             state.selected_frames[:] = phase_output.selected_frames
             state.artifacts.metrics_cache_hit = phase_output.metrics_cache_hit
             state.artifacts.metrics_cache_status = (
@@ -36,6 +42,7 @@ def apply_phase_output(*, ctx: RunContext, state: ExecutionState, output: PhaseO
             ctx.selection_breakdown = phase_output.selection_breakdown
             ctx.selection_details_by_source_frame = phase_output.selection_details_by_source_frame
             ctx.analysis_metrics = phase_output.analysis_metrics
+            state.warnings.extend(phase_output.warnings)
         case AlignPhaseOutput() as phase_output:
             ctx.reference = phase_output.reference
             ctx.comparisons = phase_output.comparisons

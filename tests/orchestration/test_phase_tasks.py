@@ -6,12 +6,16 @@ import asyncio
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import pytest
 
-from frame_compare.analysis.errors import MetricsCalculationError, SelectionError
+from frame_compare.analysis.errors import (
+    ExclusionRecoverySelectionError,
+    MetricsCalculationError,
+    SelectionError,
+)
 from frame_compare.analysis.types import (
     CacheLoadResult,
     FrameMetrics,
@@ -24,13 +28,20 @@ from frame_compare.analysis.types import (
 )
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.errors import ConfigValidationError
+from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 from frame_compare.orchestration import phase_post_render, phase_selection
 from frame_compare.orchestration.context import ClipActiveRect
 from frame_compare.orchestration.execution_types import (
     RenderArtifacts,
     RunArtifacts,
 )
+from frame_compare.orchestration.full_window_retry import (
+    compute_selection_window_with_recovery,
+    recover_from_exclusion_selection_failure,
+)
 from frame_compare.orchestration.types import (
+    FullWindowRetryConfirmationDecision,
+    FullWindowRetryConfirmationRequest,
     SlowpicsUploadConfirmationDecision,
     SlowpicsUploadConfirmationRequest,
 )
@@ -41,6 +52,26 @@ from tests.orchestration.phase_task_helpers import (
     _context,
     _create_config,
 )
+
+if TYPE_CHECKING:
+    from frame_compare.utils.progress_protocol import ProgressReporter
+    from frame_compare.vs.loader import VSLoader
+
+
+class ConfirmationProgressSpy:
+    def __init__(self, *, fail_at: str | None = None) -> None:
+        self.events: list[str] = []
+        self.fail_at = fail_at
+
+    def suspend(self) -> None:
+        self.events.append("suspend")
+        if self.fail_at == "suspend":
+            raise RuntimeError("suspend failed")
+
+    def resume(self) -> None:
+        self.events.append("resume")
+        if self.fail_at == "resume":
+            raise RuntimeError("resume failed")
 
 
 def test_run_analyze_phase_records_cache_hit_and_selection_breakdown(
@@ -114,6 +145,465 @@ def test_run_analyze_phase_records_cache_hit_and_selection_breakdown(
     assert calls["calculate"]["video_paths"] == input_videos
     assert calls["calculate"]["cache_dir"] == ctx.workspace.cache_dir
     assert calls["select"] == {"metrics": metrics, "config": ctx.config.analysis}
+
+
+def _metrics_for_range(*, start: int, end: int, source_frame_count: int = 100) -> FrameMetrics:
+    frame_count = end - start
+    return FrameMetrics(
+        luminance=[index / max(1, frame_count) for index in range(frame_count)],
+        motion=[float((index * 17) % max(1, frame_count)) for index in range(frame_count)],
+        metadata=MetricsMetadata(
+            frame_count=frame_count,
+            fps=Fraction(24, 1),
+            config_fingerprint=f"metrics-{start}-{end}",
+            clips=[],
+            source_frame_count=source_frame_count,
+            metric_source_start=start,
+            metric_source_end_exclusive=end,
+        ),
+    )
+
+
+def test_run_analyze_phase_confirmed_full_window_retry_recomputes_cache_domain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _context(tmp_path)
+    authored_config = ctx.config
+    config_path = tmp_path / "config" / "config.toml"
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace(
+            "random_seed = 7",
+            "random_seed = 7\nignore_lead_seconds = 1.6666666667\n"
+            "ignore_trail_seconds = 1.6666666667",
+        ),
+        encoding="utf-8",
+    )
+    authored_bytes = config_path.read_bytes()
+    ctx.config = ctx.config.model_copy(
+        update={
+            "analysis": ctx.config.analysis.model_copy(
+                update={
+                    "user_frames": [10, 120],
+                    "random_frame_count": 4,
+                    "motion_frame_count": 4,
+                    "ignore_lead_seconds": 40 / 24,
+                    "ignore_trail_seconds": 40 / 24,
+                    "min_window_seconds": 0.0,
+                }
+            )
+        }
+    )
+    constrained_config = ctx.config
+    ctx.selection_window = SelectionWindow(start_frame=40, end_frame_exclusive=60)
+    ctx.preflight_warnings = [
+        "active-rect auto detection skipped reference.mkv: constrained attempt",
+        "probe warning",
+    ]
+    constrained_metrics = _metrics_for_range(start=40, end=60)
+    full_metrics = _metrics_for_range(start=0, end=100)
+    cache_keys: list[str] = []
+    calculate_ranges: list[tuple[int, int]] = []
+    confirmation_requests: list[FullWindowRetryConfirmationRequest] = []
+    progress = ConfirmationProgressSpy()
+
+    def _load_cache(*_args: object, **kwargs: Any) -> CacheLoadResult:
+        cache_keys.append(str(_args[1]))
+        if len(cache_keys) == 1:
+            return CacheLoadResult(success=True, metrics=constrained_metrics)
+        return CacheLoadResult(success=False, reason="not_found")
+
+    def _calculate_metrics(**kwargs: Any) -> FrameMetrics:
+        frame_range = kwargs["metric_frame_range"]
+        calculate_ranges.append((frame_range.start, frame_range.end_exclusive))
+        return constrained_metrics if frame_range.start == 40 else full_metrics
+
+    def _confirm(
+        request: FullWindowRetryConfirmationRequest,
+    ) -> FullWindowRetryConfirmationDecision:
+        confirmation_requests.append(request)
+        return "confirmed"
+
+    ctx.confirm_full_window_retry = _confirm
+    ctx.reporter = cast("ProgressReporter", progress)
+    monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics_for_request", _load_cache)
+    monkeypatch.setattr(phase_selection, "calculate_metrics", _calculate_metrics)
+
+    output = phase_selection.run_analyze_phase(
+        ctx,
+        input_videos=[ctx.reference.path],
+        workspace=ctx.workspace,
+    )
+
+    assert len(confirmation_requests) == 1
+    assert progress.events == ["suspend", "resume"]
+    assert confirmation_requests[0].eligible_frame_count == 20
+    assert ctx.config is not constrained_config
+    assert ctx.config.analysis.ignore_lead_seconds == 0.0
+    assert ctx.config.analysis.ignore_trail_seconds == 0.0
+    assert ctx.selection_window == SelectionWindow(start_frame=0, end_frame_exclusive=100)
+    assert cache_keys[0] != cache_keys[1]
+    assert calculate_ranges == [(40, 60), (0, 100)]
+    assert len(output.selected_frames) == 9
+    assert output.selection_breakdown.user == [10]
+    assert len(output.selection_breakdown.motion) == 4
+    assert len(output.selection_breakdown.random) == 4
+    assert {detail.label for detail in output.selection_details_by_source_frame.values()} == {
+        "User",
+        "Motion",
+        "Random",
+    }
+    assert any("disabled for this run only" in warning for warning in output.warnings)
+    assert any(warning.endswith(": 120") for warning in output.warnings)
+    assert not any(warning.endswith(": 10") for warning in output.warnings)
+    assert ctx.preflight_warnings == ["probe warning"]
+    assert output.replaces_frame_plan_selection is True
+    assert authored_config.analysis.ignore_lead_seconds == 0.0
+    assert config_path.read_bytes() == authored_bytes
+
+
+@pytest.mark.parametrize("margin_seconds", [0.0, 40 / 24])
+def test_run_analyze_phase_satisfied_selection_never_prompts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    margin_seconds: float,
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.config = ctx.config.model_copy(
+        update={
+            "analysis": ctx.config.analysis.model_copy(
+                update={
+                    "random_frame_count": 1,
+                    "motion_frame_count": 0,
+                    "ignore_lead_seconds": margin_seconds,
+                    "ignore_trail_seconds": margin_seconds,
+                    "min_window_seconds": 0.0,
+                }
+            )
+        }
+    )
+    ctx.selection_window = SelectionWindow(start_frame=40, end_frame_exclusive=60)
+    ctx.confirm_full_window_retry = lambda _request: (_ for _ in ()).throw(
+        AssertionError("valid selection must not prompt")
+    )
+    monkeypatch.setattr(
+        phase_selection.cache_io,
+        "load_cached_metrics_for_request",
+        lambda *_args, **_kwargs: CacheLoadResult(success=False, reason="not_found"),
+    )
+    monkeypatch.setattr(
+        phase_selection,
+        "calculate_metrics",
+        lambda **_kwargs: _metrics_for_range(start=40, end=60),
+    )
+
+    output = phase_selection.run_analyze_phase(
+        ctx,
+        input_videos=[ctx.reference.path],
+        workspace=ctx.workspace,
+    )
+
+    assert len(output.selected_frames) == 1
+    assert ctx.full_window_retry_override is None
+
+
+@pytest.mark.parametrize(
+    "decision",
+    [
+        "declined",
+        pytest.param(EOFError("stdin closed"), id="eof"),
+        pytest.param(KeyboardInterrupt(), id="interrupt"),
+        pytest.param(RuntimeError("prompt failed"), id="prompt-failure"),
+    ],
+)
+def test_run_analyze_phase_refused_or_failed_prompt_is_fatal_without_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    decision: str | BaseException,
+) -> None:
+    ctx = _context(tmp_path)
+    config_path = tmp_path / "config" / "config.toml"
+    authored_bytes = config_path.read_bytes()
+    ctx.config = ctx.config.model_copy(
+        update={
+            "analysis": ctx.config.analysis.model_copy(
+                update={
+                    "random_frame_count": 4,
+                    "motion_frame_count": 4,
+                    "ignore_lead_seconds": 40 / 24,
+                    "ignore_trail_seconds": 40 / 24,
+                    "min_window_seconds": 0.0,
+                }
+            )
+        }
+    )
+    ctx.selection_window = SelectionWindow(start_frame=40, end_frame_exclusive=60)
+    calls = 0
+    prompt_calls = 0
+    progress = ConfirmationProgressSpy()
+
+    def _load_cache(*_args: object, **_kwargs: object) -> CacheLoadResult:
+        nonlocal calls
+        calls += 1
+        return CacheLoadResult(success=True, metrics=_metrics_for_range(start=40, end=60))
+
+    def _confirm(
+        _request: FullWindowRetryConfirmationRequest,
+    ) -> FullWindowRetryConfirmationDecision:
+        nonlocal prompt_calls
+        prompt_calls += 1
+        if isinstance(decision, BaseException):
+            raise decision
+        return "declined"
+
+    ctx.confirm_full_window_retry = _confirm
+    ctx.reporter = cast("ProgressReporter", progress)
+    monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics_for_request", _load_cache)
+    monkeypatch.setattr(
+        phase_selection,
+        "calculate_metrics",
+        lambda **_kwargs: _metrics_for_range(start=40, end=60),
+    )
+
+    with pytest.raises(ExclusionRecoverySelectionError) as exc_info:
+        phase_selection.run_analyze_phase(
+            ctx,
+            input_videos=[ctx.reference.path],
+            workspace=ctx.workspace,
+        )
+
+    assert prompt_calls == 1
+    assert progress.events == ["suspend", "resume"]
+    assert calls == 1
+    assert "clip-specific config" in exc_info.value.hint
+    assert config_path.read_bytes() == authored_bytes
+
+
+def test_run_analyze_phase_full_window_retry_failure_does_not_prompt_twice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.config = ctx.config.model_copy(
+        update={
+            "analysis": ctx.config.analysis.model_copy(
+                update={
+                    "random_frame_count": 10,
+                    "motion_frame_count": 10,
+                    "ignore_lead_seconds": 40 / 24,
+                    "ignore_trail_seconds": 40 / 24,
+                    "min_window_seconds": 0.0,
+                }
+            )
+        }
+    )
+    ctx.selection_window = SelectionWindow(start_frame=40, end_frame_exclusive=60)
+    ctx.run_warnings = []
+    prompt_calls = 0
+
+    def _load_cache(*_args: object, **kwargs: Any) -> CacheLoadResult:
+        frame_range = kwargs["request"].metric_frame_range
+        return CacheLoadResult(
+            success=True,
+            metrics=_metrics_for_range(start=frame_range.start, end=frame_range.end_exclusive),
+        )
+
+    def _confirm(
+        _request: FullWindowRetryConfirmationRequest,
+    ) -> FullWindowRetryConfirmationDecision:
+        nonlocal prompt_calls
+        prompt_calls += 1
+        return "confirmed"
+
+    ctx.confirm_full_window_retry = _confirm
+    monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics_for_request", _load_cache)
+    monkeypatch.setattr(
+        phase_selection,
+        "calculate_metrics",
+        lambda **kwargs: _metrics_for_range(
+            start=kwargs["metric_frame_range"].start,
+            end=kwargs["metric_frame_range"].end_exclusive,
+        ),
+    )
+
+    with pytest.raises(ExclusionRecoverySelectionError, match="full-window retry"):
+        phase_selection.run_analyze_phase(
+            ctx,
+            input_videos=[ctx.reference.path],
+            workspace=ctx.workspace,
+        )
+
+    assert prompt_calls == 1
+    assert len(ctx.run_warnings) == 1
+    assert "configured lead=1.66667s" in ctx.run_warnings[0]
+    assert "effective lead=0s" in ctx.run_warnings[0]
+
+
+@pytest.mark.parametrize(
+    ("fail_at", "expected_prompt_calls", "expected_events"),
+    [("suspend", 0, ["suspend"]), ("resume", 1, ["suspend", "resume"])],
+)
+def test_full_window_retry_progress_failure_is_fatal_before_override(
+    tmp_path: Path,
+    fail_at: str,
+    expected_prompt_calls: int,
+    expected_events: list[str],
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.config = ctx.config.model_copy(
+        update={
+            "analysis": ctx.config.analysis.model_copy(
+                update={"ignore_lead_seconds": 1.0, "ignore_trail_seconds": 1.0}
+            )
+        }
+    )
+    progress = ConfirmationProgressSpy(fail_at=fail_at)
+    prompt_calls = 0
+
+    def _confirm(
+        _request: FullWindowRetryConfirmationRequest,
+    ) -> FullWindowRetryConfirmationDecision:
+        nonlocal prompt_calls
+        prompt_calls += 1
+        return "confirmed"
+
+    ctx.confirm_full_window_retry = _confirm
+    ctx.reporter = cast("ProgressReporter", progress)
+
+    with pytest.raises(ExclusionRecoverySelectionError) as exc_info:
+        recover_from_exclusion_selection_failure(
+            ctx,
+            SelectionError("insufficient_candidates", requested=8, found=4),
+            vs_loader=None,
+        )
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert prompt_calls == expected_prompt_calls
+    assert progress.events == expected_events
+    assert ctx.full_window_retry_override is None
+
+
+def test_full_window_retry_active_rect_sampling_failure_is_fatal(
+    tmp_path: Path,
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.reference = replace(
+        ctx.reference,
+        active_rect=ClipActiveRect(0, 10, 1920, 1060, "content-derived", "auto"),
+    )
+    ctx.analysis_clip = ctx.reference
+    ctx.config = ctx.config.model_copy(
+        update={
+            "analysis": ctx.config.analysis.model_copy(
+                update={"ignore_lead_seconds": 1.0, "ignore_trail_seconds": 1.0}
+            ),
+            "screenshots": ctx.config.screenshots.model_copy(
+                update={"active_rect_detection": ScreenshotActiveRectDetection.AUTO}
+            ),
+        }
+    )
+    prompt_calls = 0
+
+    def _confirm(
+        _request: FullWindowRetryConfirmationRequest,
+    ) -> FullWindowRetryConfirmationDecision:
+        nonlocal prompt_calls
+        prompt_calls += 1
+        return "confirmed"
+
+    class FailingLoader:
+        def load(self, _path: Path) -> object:
+            raise RuntimeError("sample boom")
+
+    ctx.confirm_full_window_retry = _confirm
+    ctx.run_warnings = []
+
+    with pytest.raises(ExclusionRecoverySelectionError) as exc_info:
+        recover_from_exclusion_selection_failure(
+            ctx,
+            SelectionError("insufficient_candidates", requested=8, found=4),
+            vs_loader=cast("VSLoader", FailingLoader()),
+        )
+
+    assert prompt_calls == 1
+    assert isinstance(exc_info.value.__cause__, MetricsCalculationError)
+    assert ctx.full_window_retry_override is None
+    assert len(ctx.run_warnings) == 1
+    assert "configured lead=1s, trail=1s" in ctx.run_warnings[0]
+
+
+def test_run_analyze_phase_cache_only_exclusion_failure_does_not_offer_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.config = ctx.config.model_copy(
+        update={
+            "analysis": ctx.config.analysis.model_copy(
+                update={
+                    "random_frame_count": 4,
+                    "motion_frame_count": 4,
+                    "ignore_lead_seconds": 40 / 24,
+                    "ignore_trail_seconds": 40 / 24,
+                    "min_window_seconds": 0.0,
+                }
+            )
+        }
+    )
+    ctx.selection_window = SelectionWindow(start_frame=40, end_frame_exclusive=60)
+    cache_calls = 0
+
+    def _load_cache(*_args: object, **_kwargs: object) -> CacheLoadResult:
+        nonlocal cache_calls
+        cache_calls += 1
+        return CacheLoadResult(success=True, metrics=_metrics_for_range(start=40, end=60))
+
+    monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics_for_request", _load_cache)
+
+    with pytest.raises(ExclusionRecoverySelectionError):
+        phase_selection.run_analyze_phase(
+            ctx,
+            input_videos=[ctx.reference.path],
+            workspace=ctx.workspace,
+            require_cache_only=True,
+        )
+
+    assert ctx.confirm_full_window_retry is None
+    assert cache_calls == 1
+
+
+def test_empty_exclusion_window_uses_authoritative_window_recovery_once(tmp_path: Path) -> None:
+    ctx = _context(tmp_path)
+    short_clip = _clip(ctx.reference.path, label="Reference", num_frames=10)
+    config = ctx.config.model_copy(
+        update={
+            "analysis": ctx.config.analysis.model_copy(
+                update={
+                    "ignore_lead_seconds": 1.0,
+                    "ignore_trail_seconds": 1.0,
+                    "min_window_seconds": 0.0,
+                }
+            )
+        }
+    )
+    requests: list[FullWindowRetryConfirmationRequest] = []
+
+    def _confirm(
+        request: FullWindowRetryConfirmationRequest,
+    ) -> FullWindowRetryConfirmationDecision:
+        requests.append(request)
+        return "confirmed"
+
+    state = compute_selection_window_with_recovery(
+        clips=[short_clip],
+        config=config,
+        confirm=_confirm,
+    )
+
+    assert len(requests) == 1
+    assert state.selection_window == SelectionWindow(start_frame=0, end_frame_exclusive=10)
+    assert state.config is not config
+    assert state.config.analysis.ignore_lead_seconds == 0.0
+    assert state.config.analysis.ignore_trail_seconds == 0.0
+    assert config.analysis.ignore_lead_seconds == 1.0
+    assert state.override is not None
 
 
 @pytest.mark.unit
