@@ -142,23 +142,6 @@ def validate_skip_analysis_frame_selection_contract(
     )
 
 
-def validate_json_interactive_alignment_contract(
-    args: RunCliRawArgs,
-    config: ConfigSchema,
-) -> None:
-    validation_errors = json_interactive_alignment_contract_errors(args, config)
-    if not validation_errors:
-        return
-    raise ConfigValidationError(
-        validation_errors,
-        message="Interactive alignment is not supported with --json",
-        hint=(
-            "Disable audio_alignment.use_vspreview and "
-            "audio_alignment.force_interactive, or run without --json"
-        ),
-    )
-
-
 def json_interactive_alignment_contract_errors(
     args: RunCliRawArgs,
     config: ConfigSchema,
@@ -259,25 +242,6 @@ def previous_offset_reuse_persisted_contract_errors(
             ]
         )
     return validation_errors
-
-
-def validate_report_confirmed_slowpics_contract(
-    args: RunCliRawArgs,
-    deps: RunCommandDeps,
-    config: ConfigSchema,
-) -> None:
-    validation_errors = report_confirmed_slowpics_contract_errors(args, deps, config)
-    if not validation_errors:
-        return
-
-    raise ConfigValidationError(
-        validation_errors,
-        message="Report-confirmed slow.pics upload requires an interactive report-enabled run",
-        hint=(
-            "Disable slowpics.confirm_upload_after_report, disable slowpics.auto_upload, "
-            "enable reports, or run from an interactive terminal without --json/--quiet"
-        ),
-    )
 
 
 def report_confirmed_slowpics_contract_errors(
