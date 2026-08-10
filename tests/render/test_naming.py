@@ -115,3 +115,21 @@ def test_generate_path_counts_surrogate_escaped_output_dir(tmp_path):
     path = generate_screenshot_path(output_dir, "Ref", 42)
 
     assert path == output_dir / "42 - Ref.png"
+
+
+def test_generate_path_bounds_multibyte_component_for_large_frame(tmp_path):
+    output_dir = tmp_path / "screenshots"
+    source_stem = "界" * 82
+    first = generate_screenshot_path(output_dir, source_stem, 100000)
+    second = generate_screenshot_path(output_dir, f"{source_stem}a", 100000)
+
+    try:
+        component_limit = int(os.pathconf(tmp_path, "PC_NAME_MAX"))
+    except (AttributeError, OSError, ValueError):
+        component_limit = 255
+
+    assert len(os.fsencode(first.name)) <= component_limit
+    assert len(os.fsencode(second.name)) <= component_limit
+    assert len(os.path.abspath(first).encode("utf-16-le")) // 2 <= 259
+    assert first != second
+    assert first == generate_screenshot_path(output_dir, source_stem, 100000)
