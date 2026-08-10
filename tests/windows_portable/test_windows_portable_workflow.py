@@ -33,15 +33,17 @@ def test_windows_portable_workflow_delegates_extracted_bundle_verification(
         "frame-compare-portable-win-x64/frame-compare-update.ps1",
     ):
         assert required_path in verifier_source
-    for selector in (
-        "& $candidateLauncher --help",
-        "& $candidateLauncher version",
-        "& $candidateLauncher doctor --json",
-        "& $installer",
-        "& $installedShim version",
-        "& $installedShim --help",
+    for label in (
+        "candidate_launcher_--help",
+        "candidate_launcher_version",
+        "candidate_launcher_doctor_--json",
+        "candidate_install",
+        "installed_shim_version",
+        "installed_shim_--help",
     ):
-        assert selector in verifier_source
+        assert verifier_source.count(f'-Label "{label}"') == 1
+    assert "-CommandTimeoutSeconds 300" in verify_step["run"]
+    assert "$process.Kill($true)" in verifier_source
     assert "Candidate doctor FFmpeg check did not pass exactly once" in source
     assert "Extracted candidate doctor FFmpeg check did not pass exactly once" in verifier_source
     assert "dist/frame-compare-portable-win-x64" in source

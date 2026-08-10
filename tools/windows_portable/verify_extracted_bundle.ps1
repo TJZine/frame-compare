@@ -12,7 +12,10 @@ Param(
   [string]$DoctorStderrPath,
 
   [Parameter(Mandatory = $true)]
-  [string]$ExpectedCommitSha
+  [string]$ExpectedCommitSha,
+
+  [ValidateRange(1, 3600)]
+  [int]$CommandTimeoutSeconds = 300
 )
 
 $ErrorActionPreference = "Stop"
@@ -58,13 +61,6 @@ foreach ($doctorPath in @($DoctorStdoutPath, $DoctorStderrPath)) {
     throw "Doctor output must not overwrite the portable bundle ZIP: $doctorPath"
   }
 }
-function Assert-CommandSucceeded([string]$Label, [int]$ExitCode) {
-  Write-Host "WINDOWS_EXTRACTED_PROOF command=$Label exit_code=$ExitCode"
-  if ($ExitCode -ne 0) {
-    throw "$Label failed with exit code $ExitCode"
-  }
-}
-
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 Add-Type @"
 using System;
@@ -715,33 +711,154 @@ foreach ($relativeLicensePath in $actualLicensePaths) {
 Write-Host "WINDOWS_EXTRACTED_PROOF metadata_provenance=ok commit=$inventoryCommit version=$appVersion"
 Write-Host "WINDOWS_EXTRACTED_PROOF license_inventory=ok count=$($licenseRecords.Count)"
 
+$commandEvidenceDirectory = Join-Path $ExtractRoot "command-evidence"
+New-Item -ItemType Directory -Path $commandEvidenceDirectory -Force | Out-Null
+
+function Invoke-BoundedCommand(
+  [string]$Label,
+  [string]$FilePath,
+  [string[]]$ArgumentList = @(),
+  [string]$StdoutPath = (Join-Path $commandEvidenceDirectory "$Label.stdout.txt"),
+  [string]$StderrPath = (Join-Path $commandEvidenceDirectory "$Label.stderr.txt")
+) {
+  foreach ($outputPath in @($StdoutPath, $StderrPath)) {
+    New-Item -ItemType Directory -Path (Split-Path -Parent $outputPath) -Force | Out-Null
+    [System.IO.File]::WriteAllText($outputPath, "", [System.Text.UTF8Encoding]::new($false))
+  }
+
+  $commandPayload = @{
+    Path = $FilePath
+    Arguments = @($ArgumentList)
+  } | ConvertTo-Json -Compress
+  $payloadBase64 = [Convert]::ToBase64String(
+    [System.Text.Encoding]::UTF8.GetBytes($commandPayload)
+  )
+  $commandText = @"
+`$payloadJson = [System.Text.Encoding]::UTF8.GetString(
+  [Convert]::FromBase64String("$payloadBase64")
+)
+`$payload = `$payloadJson | ConvertFrom-Json
+& `$payload.Path @(`$payload.Arguments)
+if (`$null -eq `$LASTEXITCODE) { exit 1 }
+exit `$LASTEXITCODE
+"@
+  $encodedCommand = [Convert]::ToBase64String(
+    [System.Text.Encoding]::Unicode.GetBytes($commandText)
+  )
+  $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+  $startInfo.FileName = Join-Path $PSHOME "pwsh.exe"
+  $startInfo.UseShellExecute = $false
+  $startInfo.CreateNoWindow = $true
+  $startInfo.RedirectStandardOutput = $true
+  $startInfo.RedirectStandardError = $true
+  foreach ($processArgument in @(
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-EncodedCommand",
+      $encodedCommand
+    )) {
+    $startInfo.ArgumentList.Add($processArgument)
+  }
+  $process = [System.Diagnostics.Process]::new()
+  $process.StartInfo = $startInfo
+  if (-not $process.Start()) {
+    $process.Dispose()
+    throw "$Label could not be started: $FilePath"
+  }
+  $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+  $stderrTask = $process.StandardError.ReadToEndAsync()
+  $streamTasks = [System.Threading.Tasks.Task[]]@($stdoutTask, $stderrTask)
+  $timedOut = -not $process.WaitForExit($CommandTimeoutSeconds * 1000)
+  if ($timedOut) {
+    $cleanupError = $null
+    try {
+      $process.Kill($true)
+    } catch [System.InvalidOperationException] {
+      # The command exited between the deadline check and the termination request.
+    } catch {
+      $cleanupError = $_.Exception.Message
+    }
+    $processExited = $process.WaitForExit(10000)
+    $streamsClosed = $processExited -and [System.Threading.Tasks.Task]::WaitAll(
+      $streamTasks,
+      10000
+    )
+    $cleanedUp = $processExited -and $streamsClosed
+    Write-Host "WINDOWS_EXTRACTED_PROOF command=$Label timed_out=true timeout_seconds=$CommandTimeoutSeconds cleanup_complete=$cleanedUp"
+    if ($streamsClosed) {
+      $stdout = $stdoutTask.GetAwaiter().GetResult()
+      $stderr = $stderrTask.GetAwaiter().GetResult()
+      [System.IO.File]::WriteAllText($StdoutPath, $stdout, [System.Text.UTF8Encoding]::new($false))
+      [System.IO.File]::WriteAllText($StderrPath, $stderr, [System.Text.UTF8Encoding]::new($false))
+      if (-not [string]::IsNullOrEmpty($stdout)) {
+        [Console]::Out.Write($stdout)
+      }
+      if (-not [string]::IsNullOrEmpty($stderr)) {
+        [Console]::Error.Write($stderr)
+      }
+    }
+    $process.Dispose()
+    if (-not $cleanedUp -or $null -ne $cleanupError) {
+      throw "$Label timed out after $CommandTimeoutSeconds seconds and its process tree could not be terminated within 10 seconds: cleanup_error=$cleanupError stdout=$StdoutPath stderr=$StderrPath"
+    }
+    throw "$Label timed out after $CommandTimeoutSeconds seconds; its process tree was terminated: stdout=$StdoutPath stderr=$StderrPath"
+  }
+
+  $exitCode = $process.ExitCode
+  if (-not [System.Threading.Tasks.Task]::WaitAll($streamTasks, 10000)) {
+    $process.Dispose()
+    throw "$Label exited but its output streams did not close within 10 seconds: stdout=$StdoutPath stderr=$StderrPath"
+  }
+  $stdout = $stdoutTask.GetAwaiter().GetResult()
+  $stderr = $stderrTask.GetAwaiter().GetResult()
+  $process.Dispose()
+  [System.IO.File]::WriteAllText($StdoutPath, $stdout, [System.Text.UTF8Encoding]::new($false))
+  [System.IO.File]::WriteAllText($StderrPath, $stderr, [System.Text.UTF8Encoding]::new($false))
+  if (-not [string]::IsNullOrEmpty($stdout)) {
+    [Console]::Out.Write($stdout)
+  }
+  if (-not [string]::IsNullOrEmpty($stderr)) {
+    [Console]::Error.Write($stderr)
+  }
+  Write-Host "WINDOWS_EXTRACTED_PROOF command=$Label exit_code=$exitCode"
+  if ($exitCode -ne 0) {
+    throw "$Label failed with exit code $exitCode"
+  }
+  return [PSCustomObject]@{
+    Stdout = $stdout.TrimEnd("`r", "`n")
+    Stderr = $stderr.TrimEnd("`r", "`n")
+  }
+}
+
 $candidateLauncher = Join-Path $bundle "frame-compare.ps1"
 Get-Command -CommandType ExternalScript $candidateLauncher | Format-List Source,Path
 
-& $candidateLauncher --help | Out-Host
-Assert-CommandSucceeded -Label "candidate_launcher_--help" -ExitCode $LASTEXITCODE
+$null = Invoke-BoundedCommand `
+  -Label "candidate_launcher_--help" `
+  -FilePath $candidateLauncher `
+  -ArgumentList @("--help")
 
-$candidateVersionOutput = [string]::Join(
-  [Environment]::NewLine,
-  @(& $candidateLauncher version)
-)
-Assert-CommandSucceeded -Label "candidate_launcher_version" -ExitCode $LASTEXITCODE
+$candidateVersion = Invoke-BoundedCommand `
+  -Label "candidate_launcher_version" `
+  -FilePath $candidateLauncher `
+  -ArgumentList @("version")
+$candidateVersionOutput = $candidateVersion.Stdout
 if ($candidateVersionOutput -cne "frame-compare $appVersion") {
   throw "Candidate launcher version does not match bundle inventory: expected=$appVersion actual=$candidateVersionOutput"
 }
-Write-Host $candidateVersionOutput
 
 $doctorOutputDirectory = Split-Path -Parent $DoctorStdoutPath
 $doctorErrorDirectory = Split-Path -Parent $DoctorStderrPath
 New-Item -ItemType Directory -Path $doctorOutputDirectory -Force | Out-Null
 New-Item -ItemType Directory -Path $doctorErrorDirectory -Force | Out-Null
 
-& $candidateLauncher doctor --json 1> $DoctorStdoutPath 2> $DoctorStderrPath
-$doctorExitCode = $LASTEXITCODE
-foreach ($line in Get-Content -LiteralPath $DoctorStderrPath) {
-  Write-Warning $line
-}
-Assert-CommandSucceeded -Label "candidate_launcher_doctor_--json" -ExitCode $doctorExitCode
+$null = Invoke-BoundedCommand `
+  -Label "candidate_launcher_doctor_--json" `
+  -FilePath $candidateLauncher `
+  -ArgumentList @("doctor", "--json") `
+  -StdoutPath $DoctorStdoutPath `
+  -StderrPath $DoctorStderrPath
 
 $doctorJson = Get-Content -LiteralPath $DoctorStdoutPath -Raw
 try {
@@ -759,11 +876,8 @@ $ffmpegChecks = @(
 if ($ffmpegChecks.Count -ne 1 -or $ffmpegChecks[0].status -cne "pass") {
   throw "Extracted candidate doctor FFmpeg check did not pass exactly once"
 }
-Write-Host $doctorJson
-
 $installer = Join-Path $bundle "install.cmd"
-& $installer
-Assert-CommandSucceeded -Label "candidate_install" -ExitCode $LASTEXITCODE
+$null = Invoke-BoundedCommand -Label "candidate_install" -FilePath $installer
 
 $installedShim = Join-Path $env:LOCALAPPDATA "Programs/FrameCompare/bin/frame-compare.cmd"
 if (!(Test-Path -LiteralPath $installedShim -PathType Leaf)) {
@@ -785,18 +899,21 @@ if (-not $installedBundlePath.Equals($bundle, [System.StringComparison]::Ordinal
   throw "Installed state points to the wrong bundle: expected=$bundle actual=$installedBundlePath"
 }
 
-$versionOutput = [string]::Join([Environment]::NewLine, @(& $installedShim version))
-Assert-CommandSucceeded -Label "installed_shim_version" -ExitCode $LASTEXITCODE
+$installedVersion = Invoke-BoundedCommand `
+  -Label "installed_shim_version" `
+  -FilePath $installedShim `
+  -ArgumentList @("version")
+$versionOutput = $installedVersion.Stdout
 if ($versionOutput -notmatch "^frame-compare \d+\.\d+\.\d+") {
   throw "Unexpected version output from installed shim: $versionOutput"
 }
 if ($versionOutput -ne $candidateVersionOutput) {
   throw "Installed shim version output does not match the candidate launcher."
 }
-Write-Host $versionOutput
-
-& $installedShim --help | Out-Host
-Assert-CommandSucceeded -Label "installed_shim_--help" -ExitCode $LASTEXITCODE
+$null = Invoke-BoundedCommand `
+  -Label "installed_shim_--help" `
+  -FilePath $installedShim `
+  -ArgumentList @("--help")
 
 Write-Host "WINDOWS_EXTRACTED_PROOF result=ok"
 Write-Host "WINDOWS_EXTRACTED_PROOF candidate_launcher=$candidateLauncher"

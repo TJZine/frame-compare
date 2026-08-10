@@ -161,7 +161,10 @@ and installed-shim parity. Every command it reports must exit `0`; a thrown asse
 is a failed check. The verifier atomically reserves the fresh extraction root, writes
 without overwrite, and retains extracted evidence after any later failure. Its
 expected commit argument must be the recorded detached pull-request head used to build
-the candidate.
+the candidate. Each external command has a five-minute deadline; a timeout terminates
+the command's process tree, fails the verifier, and retains stdout/stderr under the
+extraction root's `command-evidence` directory (with doctor output kept at the exact
+paths supplied below).
 
 ```powershell
 $Zip = (Resolve-Path 'dist\frame-compare-portable-win-x64.zip').Path
@@ -176,7 +179,8 @@ pwsh -NoProfile -ExecutionPolicy Bypass `
   -ExtractRoot $ExtractRoot `
   -DoctorStdoutPath $DoctorStdout `
   -DoctorStderrPath $DoctorStderr `
-  -ExpectedCommitSha $ExpectedPrHeadSha
+  -ExpectedCommitSha $ExpectedPrHeadSha `
+  -CommandTimeoutSeconds 300
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 ```
 

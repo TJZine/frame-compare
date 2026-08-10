@@ -220,7 +220,8 @@ jobs:
             -ExtractRoot dist/zip_extract_check `
             -DoctorStdoutPath (Join-Path $env:RUNNER_TEMP "extracted-doctor.json") `
             -DoctorStderrPath (Join-Path $env:RUNNER_TEMP "extracted-doctor.stderr.txt") `
-            -ExpectedCommitSha "$env:EXPECTED_SHA"
+            -ExpectedCommitSha "$env:EXPECTED_SHA" `
+            -CommandTimeoutSeconds 300
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build code-only update zip

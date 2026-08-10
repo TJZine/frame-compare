@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import zipfile
 from pathlib import Path
 
@@ -635,6 +636,7 @@ def _run_extracted_bundle_verifier(
     zip_path: Path,
     extract_root: Path,
     local_app_data: Path,
+    command_timeout_seconds: int = 300,
 ) -> subprocess.CompletedProcess[str]:
     pwsh = shutil.which("pwsh")
     assert pwsh is not None
@@ -670,6 +672,8 @@ def _run_extracted_bundle_verifier(
             str(doctor_stderr),
             "-ExpectedCommitSha",
             expected_commit_sha,
+            "-CommandTimeoutSeconds",
+            str(command_timeout_seconds),
         ],
         capture_output=True,
         text=True,
@@ -1041,6 +1045,53 @@ def test_extracted_bundle_verifier_propagates_launcher_failures(
     ).is_file()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows process-tree semantics required")
+def test_extracted_bundle_verifier_times_out_and_terminates_descendants(
+    repo_root: Path,
+    tmp_path: Path,
+) -> None:
+    if shutil.which("pwsh") is None:
+        pytest.skip("PowerShell 7 is required")
+    descendant_started = tmp_path / "descendant-started.txt"
+    descendant_sentinel = tmp_path / "descendant-survived.txt"
+    escaped_started = str(descendant_started).replace("'", "''")
+    escaped_sentinel = str(descendant_sentinel).replace("'", "''")
+    candidate_launcher = f"""
+if ($args[0] -eq "--help") {{
+  Start-Process -FilePath (Join-Path $PSHOME "pwsh.exe") -ArgumentList @(
+    "-NoProfile",
+    "-Command",
+    "Set-Content -LiteralPath '{escaped_started}' -Value started; Start-Sleep -Seconds 6; Set-Content -LiteralPath '{escaped_sentinel}' -Value survived"
+  ) | Out-Null
+  Start-Sleep -Seconds 30
+}}
+exit 1
+"""
+    zip_path = _write_extracted_verifier_fixture(
+        repo_root=repo_root,
+        tmp_path=tmp_path,
+        candidate_launcher=candidate_launcher,
+    )
+
+    result = _run_extracted_bundle_verifier(
+        repo_root=repo_root,
+        zip_path=zip_path,
+        extract_root=tmp_path / "fresh-extract",
+        local_app_data=tmp_path / "local-app-data",
+        command_timeout_seconds=3,
+    )
+
+    assert result.returncode != 0
+    output = _normalized_process_output(result)
+    assert "command=candidate_launcher_--help timed_out=true" in output
+    assert "cleanup_complete=True" in output
+    assert "candidate_launcher_--help timed out after 3 seconds" in output
+    assert "its process tree was terminated" in output
+    assert descendant_started.is_file()
+    time.sleep(7)
+    assert not descendant_sentinel.exists()
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell process semantics required")
 def test_extracted_bundle_verifier_rejects_stale_installed_state(
     repo_root: Path,
@@ -1170,15 +1221,22 @@ def test_windows_portable_extracted_bundle_verifier_owns_hosted_and_manual_parit
     ):
         assert required_entry in verifier
 
-    for selector in (
-        "& $candidateLauncher --help",
-        "& $candidateLauncher version",
-        "& $candidateLauncher doctor --json",
-        "& $installer",
-        "& $installedShim version",
-        "& $installedShim --help",
+    for label in (
+        "candidate_launcher_--help",
+        "candidate_launcher_version",
+        "candidate_launcher_doctor_--json",
+        "candidate_install",
+        "installed_shim_version",
+        "installed_shim_--help",
     ):
-        assert selector in verifier
+        assert verifier.count(f'-Label "{label}"') == 1
+    assert "function Invoke-BoundedCommand" in verifier
+    assert '"-EncodedCommand"' in verifier
+    assert "$startInfo.ArgumentList.Add($processArgument)" in verifier
+    assert "$process.WaitForExit($CommandTimeoutSeconds * 1000)" in verifier
+    assert "$process.Kill($true)" in verifier
+    assert "$process.WaitForExit(10000)" in verifier
+    assert "its process tree was terminated" in verifier
     assert 'throw "Unsafe ZIP entry path: $EntryName"' in verifier
     assert "ExtractRoot must name a dedicated verification directory" in verifier
     assert "ExtractRoot must not already exist" in verifier
