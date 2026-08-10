@@ -66,7 +66,10 @@ Add-Type @"
 using System;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
 
 public static class FrameCompareNativeDirectory {
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -184,6 +187,82 @@ public sealed class FrameCompareProcessJob : IDisposable {
             CloseHandle(handle);
             handle = IntPtr.Zero;
         }
+    }
+}
+
+public sealed class FrameCompareCappedFileStream : Stream {
+    private readonly FileStream stream;
+    private readonly long limitBytes;
+    private readonly string streamName;
+    private readonly TaskCompletionSource<string> overflow = new TaskCompletionSource<string>(
+        TaskCreationOptions.RunContinuationsAsynchronously
+    );
+    private long writtenBytes;
+
+    public FrameCompareCappedFileStream(string path, long limitBytes, string streamName) {
+        stream = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
+        this.limitBytes = limitBytes;
+        this.streamName = streamName;
+    }
+
+    public Task<string> OverflowTask { get { return overflow.Task; } }
+    public override bool CanRead { get { return false; } }
+    public override bool CanSeek { get { return false; } }
+    public override bool CanWrite { get { return true; } }
+    public override long Length { get { return writtenBytes; } }
+    public override long Position {
+        get { return writtenBytes; }
+        set { throw new NotSupportedException(); }
+    }
+
+    public override void Flush() { stream.Flush(); }
+    public override long Seek(long offset, SeekOrigin origin) { throw new NotSupportedException(); }
+    public override void SetLength(long value) { throw new NotSupportedException(); }
+    public override int Read(byte[] buffer, int offset, int count) {
+        throw new NotSupportedException();
+    }
+
+    public override void Write(byte[] buffer, int offset, int count) {
+        WriteCapped(buffer, offset, count);
+    }
+
+    public override Task WriteAsync(
+        byte[] buffer,
+        int offset,
+        int count,
+        CancellationToken cancellationToken
+    ) {
+        if (cancellationToken.IsCancellationRequested) {
+            return Task.FromCanceled(cancellationToken);
+        }
+        try {
+            WriteCapped(buffer, offset, count);
+            return Task.CompletedTask;
+        } catch (Exception error) {
+            return Task.FromException(error);
+        }
+    }
+
+    private void WriteCapped(byte[] buffer, int offset, int count) {
+        long remaining = limitBytes - writtenBytes;
+        int accepted = (int)Math.Min((long)count, Math.Max(remaining, 0));
+        if (accepted > 0) {
+            stream.Write(buffer, offset, accepted);
+            writtenBytes += accepted;
+        }
+        if (accepted != count) {
+            overflow.TrySetResult(streamName);
+            throw new IOException(
+                streamName + " evidence exceeded its " + limitBytes + "-byte limit."
+            );
+        }
+    }
+
+    protected override void Dispose(bool disposing) {
+        if (disposing) {
+            stream.Dispose();
+        }
+        base.Dispose(disposing);
     }
 }
 "@
@@ -835,6 +914,10 @@ function Invoke-BoundedCommand(
   [string[]]$ArgumentList = @(),
   [string]$StdoutPath = (Join-Path $commandEvidenceDirectory "$Label.stdout.txt"),
   [string]$StderrPath = (Join-Path $commandEvidenceDirectory "$Label.stderr.txt"),
+  [ValidateRange(1, 16777216)]
+  [int]$StdoutEvidenceLimitBytes = 16777216,
+  [ValidateRange(1, 16777216)]
+  [int]$StderrEvidenceLimitBytes = 16777216,
   [ValidateRange(0, 16777216)]
   [int]$StdoutReadLimitBytes = 0
 ) {
@@ -899,17 +982,15 @@ exit `$LASTEXITCODE
       [System.Threading.EventResetMode]::ManualReset,
       $gateName
     )
-    $stdoutStream = [System.IO.FileStream]::new(
+    $stdoutStream = [FrameCompareCappedFileStream]::new(
       $StdoutPath,
-      [System.IO.FileMode]::Open,
-      [System.IO.FileAccess]::Write,
-      [System.IO.FileShare]::ReadWrite
+      $StdoutEvidenceLimitBytes,
+      "stdout"
     )
-    $stderrStream = [System.IO.FileStream]::new(
+    $stderrStream = [FrameCompareCappedFileStream]::new(
       $StderrPath,
-      [System.IO.FileMode]::Open,
-      [System.IO.FileAccess]::Write,
-      [System.IO.FileShare]::ReadWrite
+      $StderrEvidenceLimitBytes,
+      "stderr"
     )
     if (-not $process.Start()) {
       throw "$Label could not be started: $FilePath"
@@ -922,20 +1003,112 @@ exit `$LASTEXITCODE
     $assigned = $true
     $startGate.Set() | Out-Null
 
-    $timedOut = -not $process.WaitForExit($CommandTimeoutSeconds * 1000)
-    $exitCode = if ($timedOut) { $null } else { $process.ExitCode }
-    if ($timedOut) {
+    $processExitTask = $process.WaitForExitAsync()
+    $timeoutTask = [System.Threading.Tasks.Task]::Delay($CommandTimeoutSeconds * 1000)
+    $overflowStream = $null
+    $streamFailure = $null
+    $timedOut = $false
+    while ($true) {
+      if ($stdoutStream.OverflowTask.IsCompletedSuccessfully) {
+        $overflowStream = "stdout"
+        break
+      }
+      if ($stderrStream.OverflowTask.IsCompletedSuccessfully) {
+        $overflowStream = "stderr"
+        break
+      }
+      if ($stdoutTask.IsFaulted) {
+        $streamFailure = "stdout"
+        break
+      }
+      if ($stderrTask.IsFaulted) {
+        $streamFailure = "stderr"
+        break
+      }
+      if ($processExitTask.IsCompleted) { break }
+      if ($timeoutTask.IsCompleted) {
+        $timedOut = $true
+        break
+      }
+      $waitTasks = [Collections.Generic.List[System.Threading.Tasks.Task]]::new()
+      $waitTasks.Add($processExitTask)
+      $waitTasks.Add($stdoutStream.OverflowTask)
+      $waitTasks.Add($stderrStream.OverflowTask)
+      $waitTasks.Add($timeoutTask)
+      if (-not $stdoutTask.IsCompleted) { $waitTasks.Add($stdoutTask) }
+      if (-not $stderrTask.IsCompleted) { $waitTasks.Add($stderrTask) }
+      [System.Threading.Tasks.Task]::WhenAny($waitTasks.ToArray()).GetAwaiter().GetResult() |
+        Out-Null
+    }
+    # Prefer output failures that become observable concurrently with process exit.
+    if ($stdoutStream.OverflowTask.IsCompletedSuccessfully) {
+      $overflowStream = "stdout"
+      $streamFailure = $null
+    } elseif ($stderrStream.OverflowTask.IsCompletedSuccessfully) {
+      $overflowStream = "stderr"
+      $streamFailure = $null
+    } elseif ($stdoutTask.IsFaulted) {
+      $streamFailure = "stdout"
+    } elseif ($stderrTask.IsFaulted) {
+      $streamFailure = "stderr"
+    }
+    $exitCode = if (
+      $null -eq $overflowStream -and
+      $null -eq $streamFailure -and
+      -not $timedOut
+    ) { $process.ExitCode } else { $null }
+    if ($null -ne $overflowStream) {
+      $job.Terminate(125)
+    } elseif ($null -ne $streamFailure) {
+      $job.Terminate(126)
+    } elseif ($timedOut) {
       $job.Terminate(124)
     }
     $job.Dispose()
     $processExited = $process.WaitForExit(10000)
-    $streamsClosed = $processExited -and [System.Threading.Tasks.Task]::WaitAll(
-      $streamTasks,
-      10000
-    )
+    try {
+      [System.Threading.Tasks.Task]::WaitAll($streamTasks, 10000) | Out-Null
+    } catch [System.AggregateException] {
+      # A capped stream faults CopyToAsync after preserving its exact prefix.
+    }
+    $streamsClosed = $processExited -and @(
+      $streamTasks | Where-Object { -not $_.IsCompleted }
+    ).Count -eq 0
     $stdoutStream.Flush()
     $stderrStream.Flush()
 
+    # Copy completion can race process exit; cap overflow must still win.
+    if ($stdoutStream.OverflowTask.IsCompletedSuccessfully) {
+      $overflowStream = "stdout"
+      $streamFailure = $null
+    } elseif ($stderrStream.OverflowTask.IsCompletedSuccessfully) {
+      $overflowStream = "stderr"
+      $streamFailure = $null
+    } elseif ($stdoutTask.IsFaulted) {
+      $streamFailure = "stdout"
+    } elseif ($stderrTask.IsFaulted) {
+      $streamFailure = "stderr"
+    }
+    if ($null -ne $overflowStream) {
+      $overflowLimitBytes = if ($overflowStream -eq "stdout") {
+        $StdoutEvidenceLimitBytes
+      } else {
+        $StderrEvidenceLimitBytes
+      }
+      $cleanedUp = $processExited -and $streamsClosed
+      Write-Host "WINDOWS_EXTRACTED_PROOF command=$Label evidence_overflow=true stream=$overflowStream limit_bytes=$overflowLimitBytes cleanup_complete=$cleanedUp"
+      if (-not $cleanedUp) {
+        throw "$Label $overflowStream evidence exceeded the $overflowLimitBytes-byte limit and its process job did not close within 10 seconds: stdout=$StdoutPath stderr=$StderrPath"
+      }
+      throw "$Label $overflowStream evidence exceeded the $overflowLimitBytes-byte limit; its process job was terminated: stdout=$StdoutPath stderr=$StderrPath"
+    }
+    if ($null -ne $streamFailure) {
+      $failedTask = if ($streamFailure -eq "stdout") { $stdoutTask } else { $stderrTask }
+      $failureMessage = $failedTask.Exception.GetBaseException().Message
+      $cleanedUp = $processExited -and $streamsClosed
+      Write-Host "WINDOWS_EXTRACTED_PROOF command=$Label evidence_write_failed=true stream=$streamFailure cleanup_complete=$cleanedUp"
+      throw "$Label $streamFailure evidence write failed: $failureMessage stdout=$StdoutPath stderr=$StderrPath"
+    }
     if ($timedOut) {
       $cleanedUp = $processExited -and $streamsClosed
       Write-Host "WINDOWS_EXTRACTED_PROOF command=$Label timed_out=true timeout_seconds=$CommandTimeoutSeconds cleanup_complete=$cleanedUp"
@@ -990,6 +1163,7 @@ $candidateVersion = Invoke-BoundedCommand `
   -Label "candidate_launcher_version" `
   -FilePath $candidateLauncher `
   -ArgumentList @("version") `
+  -StdoutEvidenceLimitBytes 65536 `
   -StdoutReadLimitBytes 65536
 $candidateVersionOutput = $candidateVersion.Stdout
 if ($candidateVersionOutput -cne "frame-compare $appVersion") {
@@ -1007,6 +1181,7 @@ $candidateDoctor = Invoke-BoundedCommand `
   -ArgumentList @("doctor", "--json") `
   -StdoutPath $DoctorStdoutPath `
   -StderrPath $DoctorStderrPath `
+  -StdoutEvidenceLimitBytes 4194304 `
   -StdoutReadLimitBytes 4194304
 
 $doctorJson = $candidateDoctor.Stdout
@@ -1052,6 +1227,7 @@ $installedVersion = Invoke-BoundedCommand `
   -Label "installed_shim_version" `
   -FilePath $installedShim `
   -ArgumentList @("version") `
+  -StdoutEvidenceLimitBytes 65536 `
   -StdoutReadLimitBytes 65536
 $versionOutput = $installedVersion.Stdout
 if ($versionOutput -notmatch "^frame-compare \d+\.\d+\.\d+") {

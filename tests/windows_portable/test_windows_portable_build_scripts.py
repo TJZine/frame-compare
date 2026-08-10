@@ -1045,22 +1045,33 @@ def test_extracted_bundle_verifier_propagates_launcher_failures(
     ).is_file()
 
 
+@pytest.mark.parametrize("flood_stream", ["stdout", "stderr"])
 @pytest.mark.skipif(os.name != "nt", reason="Windows process-tree semantics required")
-def test_extracted_bundle_verifier_streams_flood_evidence_before_timeout(
+def test_extracted_bundle_verifier_caps_flood_evidence_before_timeout(
     repo_root: Path,
     tmp_path: Path,
+    flood_stream: str,
 ) -> None:
     if shutil.which("pwsh") is None:
         pytest.skip("PowerShell 7 is required")
-    candidate_launcher = """
-if ($args[0] -eq "--help") {
+    descendant_started = tmp_path / "flood-descendant-started.txt"
+    descendant_sentinel = tmp_path / "flood-descendant-survived.txt"
+    escaped_started = str(descendant_started).replace("'", "''")
+    escaped_sentinel = str(descendant_sentinel).replace("'", "''")
+    console_stream = "Out" if flood_stream == "stdout" else "Error"
+    candidate_launcher = f"""
+if ($args[0] -eq "--help") {{
+  Start-Process -FilePath (Join-Path $PSHOME "pwsh.exe") -ArgumentList @(
+    "-NoProfile",
+    "-Command",
+    "Set-Content -LiteralPath '{escaped_started}' -Value started; Start-Sleep -Seconds 6; Set-Content -LiteralPath '{escaped_sentinel}' -Value survived"
+  ) | Out-Null
+  while (-not (Test-Path -LiteralPath '{escaped_started}')) {{ Start-Sleep -Milliseconds 10 }}
   $line = "x" * 1024
-  for ($index = 0; $index -lt 20000; $index++) {
-    [Console]::Out.WriteLine("stdout-$index-$line")
-    [Console]::Error.WriteLine("stderr-$index-$line")
-  }
-  Start-Sleep -Seconds 30
-}
+  for ($index = 0; $index -lt 20000; $index++) {{
+    [Console]::{console_stream}.WriteLine("{flood_stream}-$index-$line")
+  }}
+}}
 exit 1
 """
     zip_path = _write_extracted_verifier_fixture(
@@ -1069,23 +1080,38 @@ exit 1
         candidate_launcher=candidate_launcher,
     )
 
+    started_at = time.monotonic()
     result = _run_extracted_bundle_verifier(
         repo_root=repo_root,
         zip_path=zip_path,
         extract_root=tmp_path / "fresh-extract",
         local_app_data=tmp_path / "local-app-data",
-        command_timeout_seconds=3,
+        command_timeout_seconds=20,
     )
+    elapsed_seconds = time.monotonic() - started_at
 
     assert result.returncode != 0
     output = _normalized_process_output(result)
-    assert "command=candidate_launcher_--help timed_out=true" in output
+    assert "timed_out=true" not in output
+    assert (
+        "command=candidate_launcher_--help evidence_overflow=true "
+        f"stream={flood_stream} limit_bytes=16777216 cleanup_complete=True"
+    ) in output
     assert "cleanup_complete=True" in output
-    assert "candidate_launcher_--help timed out after 3 seconds" in output
+    assert (
+        f"candidate_launcher_--help {flood_stream} evidence exceeded the 16777216-byte limit"
+    ) in output
     assert "its process job was terminated" in output
+    assert elapsed_seconds < 10
     evidence = tmp_path / "fresh-extract/command-evidence"
-    assert (evidence / "candidate_launcher_--help.stdout.txt").stat().st_size > 0
-    assert (evidence / "candidate_launcher_--help.stderr.txt").stat().st_size > 0
+    stdout_size = (evidence / "candidate_launcher_--help.stdout.txt").stat().st_size
+    stderr_size = (evidence / "candidate_launcher_--help.stderr.txt").stat().st_size
+    assert {"stdout": stdout_size, "stderr": stderr_size}[flood_stream] == 16777216
+    assert stdout_size <= 16777216
+    assert stderr_size <= 16777216
+    assert descendant_started.is_file()
+    time.sleep(7)
+    assert not descendant_sentinel.exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows process-tree semantics required")
@@ -1273,7 +1299,8 @@ def test_windows_portable_extracted_bundle_verifier_owns_hosted_and_manual_parit
     assert "function Invoke-BoundedCommand" in verifier
     assert '"-EncodedCommand"' in verifier
     assert "$startInfo.ArgumentList.Add($processArgument)" in verifier
-    assert "$process.WaitForExit($CommandTimeoutSeconds * 1000)" in verifier
+    assert "$process.WaitForExitAsync()" in verifier
+    assert "[System.Threading.Tasks.Task]::WhenAny(" in verifier
     assert "JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE" in verifier
     assert "AssignProcessToJobObject" in verifier
     assert "TerminateJobObject" in verifier
@@ -1285,6 +1312,13 @@ def test_windows_portable_extracted_bundle_verifier_owns_hosted_and_manual_parit
     assert "its process job was terminated" in verifier
     assert ".BaseStream.CopyToAsync(" in verifier
     assert "ReadToEndAsync" not in verifier
+    assert "FrameCompareCappedFileStream" in verifier
+    assert "TaskCompletionSource<string>" in verifier
+    assert "[int]$StdoutEvidenceLimitBytes = 16777216" in verifier
+    assert "[int]$StderrEvidenceLimitBytes = 16777216" in verifier
+    assert "evidence_overflow=true stream=$overflowStream" in verifier
+    assert "StdoutEvidenceLimitBytes 65536" in verifier
+    assert "StdoutEvidenceLimitBytes 4194304" in verifier
     assert "StdoutReadLimitBytes 65536" in verifier
     assert "StdoutReadLimitBytes 4194304" in verifier
     assert 'throw "Unsafe ZIP entry path: $EntryName"' in verifier
@@ -1315,6 +1349,8 @@ def test_windows_portable_extracted_bundle_verifier_owns_hosted_and_manual_parit
     assert "tools\\windows_portable\\verify_extracted_bundle.ps1" in physical_checklist
     assert "-ExpectedCommitSha $ExpectedPrHeadSha" in physical_checklist
     assert "[guid]::NewGuid()" in physical_checklist
+    assert "every other stdout or stderr evidence file is capped at 16 MiB" in physical_checklist
+    assert "reports the overflowing stream and byte limit" in physical_checklist
 
 
 def test_physical_windows_validation_fetches_and_checks_out_exact_pr_head(

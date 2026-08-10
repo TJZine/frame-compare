@@ -162,12 +162,16 @@ is a failed check. The verifier atomically reserves the fresh extraction root, w
 without overwrite, and retains extracted evidence after any later failure. Its
 expected commit argument must be the recorded detached pull-request head used to build
 the candidate. Each external command is assigned to a kill-on-close Windows Job Object
-before its gated payload starts. Its stdout/stderr streams are copied incrementally to
-files with bounded buffers rather than retained in verifier memory. Each command has a
-five-minute deadline; a timeout terminates the complete job, fails the verifier, and
-retains the output written so far under the extraction root's `command-evidence`
-directory (with doctor output kept at the exact paths supplied below). Version stdout
-is reread only after success with a 64 KiB limit, and doctor JSON with a 4 MiB limit.
+before its gated payload starts. Its stdout and stderr streams are independently copied
+to capped evidence files rather than retained in verifier memory. Version stdout is
+capped at 64 KiB and doctor JSON at 4 MiB so successful output cannot exceed its reread
+limit; every other stdout or stderr evidence file is capped at 16 MiB. Exceeding either
+cap preserves that stream's exact capped prefix, immediately terminates the complete
+job, reports the overflowing stream and byte limit, and fails without waiting for the
+command deadline. Each command also has a five-minute deadline; a timeout terminates
+the complete job, fails the verifier, and retains the capped output written so far
+under the extraction root's `command-evidence` directory (with doctor output kept at
+the exact paths supplied below).
 
 ```powershell
 $Zip = (Resolve-Path 'dist\frame-compare-portable-win-x64.zip').Path

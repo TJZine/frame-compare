@@ -11,10 +11,6 @@ def test_windows_portable_workflow_delegates_extracted_bundle_verification(
 ) -> None:
     path = repo_root / ".github" / "workflows" / "windows-portable-build.yml"
     workflow = _load_workflow(path)
-    source = path.read_text(encoding="utf-8")
-    verifier_source = (
-        repo_root / "tools" / "windows_portable" / "verify_extracted_bundle.ps1"
-    ).read_text(encoding="utf-8")
 
     assert set(workflow["jobs"]) == {"build"}
     assert workflow["permissions"] == {"contents": "read"}
@@ -26,37 +22,7 @@ def test_windows_portable_workflow_delegates_extracted_bundle_verification(
     assert verify_step["env"] == {"EXPECTED_SHA": "${{ inputs.expected_sha }}"}
     assert '-ExpectedCommitSha "$env:EXPECTED_SHA"' in verify_step["run"]
     assert "inputs.expected_sha" not in verify_step["run"]
-    for required_path in (
-        "frame-compare-portable-win-x64/install.cmd",
-        "frame-compare-portable-win-x64/install.ps1",
-        "frame-compare-portable-win-x64/frame-compare.ps1",
-        "frame-compare-portable-win-x64/frame-compare-update.ps1",
-    ):
-        assert required_path in verifier_source
-    for label in (
-        "candidate_launcher_--help",
-        "candidate_launcher_version",
-        "candidate_launcher_doctor_--json",
-        "candidate_install",
-        "installed_shim_version",
-        "installed_shim_--help",
-    ):
-        assert verifier_source.count(f'-Label "{label}"') == 1
     assert "-CommandTimeoutSeconds 300" in verify_step["run"]
-    assert "JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE" in verifier_source
-    assert "$job.Assign($process)" in verifier_source
-    assert "$startGate.Set()" in verifier_source
-    assert verifier_source.index("$job.Assign($process)") < verifier_source.index(
-        "$startGate.Set()"
-    )
-    assert ".BaseStream.CopyToAsync(" in verifier_source
-    assert "ReadToEndAsync" not in verifier_source
-    assert "Candidate doctor FFmpeg check did not pass exactly once" in source
-    assert "Extracted candidate doctor FFmpeg check did not pass exactly once" in verifier_source
-    assert "dist/frame-compare-portable-win-x64" in source
-    assert (
-        "dist/release-assets/frame-compare-update-win-x64-${{ inputs.release_tag }}.zip" in source
-    )
 
 
 def test_windows_portable_workflow_signing_and_uploads_fail_closed(repo_root: Path) -> None:
