@@ -13,6 +13,7 @@ import json
 import os
 import re
 import sys
+from datetime import date
 from typing import Final, Literal, TypedDict
 
 from frame_compare.errors import JSONValue
@@ -97,6 +98,16 @@ LIBDOVI_SOURCE_TREE_SHA256: Final = (
 
 WINDOWS_FFMPEG_RELEASE: Final = "n8.1.2-34-g9b6c8969e0"
 WINDOWS_FFMPEG_ARTIFACT_ID: Final = "ffmpeg-btbn-win64-lgpl-8.1-2026-07-31"
+_WINDOWS_FFMPEG_ARTIFACT_MATCH = re.fullmatch(
+    r"ffmpeg-btbn-win64-lgpl-\d+\.\d+-(?P<build_date>\d{4}-\d{2}-\d{2})",
+    WINDOWS_FFMPEG_ARTIFACT_ID,
+)
+if _WINDOWS_FFMPEG_ARTIFACT_MATCH is None:
+    raise ValueError(f"Malformed BtbN FFmpeg artifact ID: {WINDOWS_FFMPEG_ARTIFACT_ID}")
+WINDOWS_FFMPEG_EXECUTABLE_TOKEN: Final = (
+    f"{WINDOWS_FFMPEG_RELEASE}-"
+    f"{date.fromisoformat(_WINDOWS_FFMPEG_ARTIFACT_MATCH.group('build_date')):%Y%m%d}"
+)
 WINDOWS_FFMPEG_SOURCE_COMMIT: Final = "9b6c8969e05b4f0b29f0f85cd501be6b3e582e6b"
 WINDOWS_FFMPEG_BUILD_SOURCE_COMMIT: Final = "a99e8230eae00d1cee38f23076a7a1f55cd984e2"
 DEBIAN_FFMPEG_PACKAGE_VERSION: Final = "7:7.1.5-0+deb13u1"
@@ -429,6 +440,7 @@ __all__ = [
     "VS_PLACEBO_SOURCE_TREE_SHA256",
     "WINDOWS_FFMPEG_ARTIFACT_ID",
     "WINDOWS_FFMPEG_BUILD_SOURCE_COMMIT",
+    "WINDOWS_FFMPEG_EXECUTABLE_TOKEN",
     "WINDOWS_FFMPEG_RELEASE",
     "WINDOWS_FFMPEG_SOURCE_COMMIT",
     "index_cache_token",

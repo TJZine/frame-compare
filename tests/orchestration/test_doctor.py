@@ -18,6 +18,7 @@ from frame_compare.orchestration.doctor import (
     run_doctor,
 )
 from frame_compare.vs.env import PluginPathCandidate
+from frame_compare.vs.runtime_contract import WINDOWS_FFMPEG_EXECUTABLE_TOKEN
 
 pytestmark = pytest.mark.unit
 
@@ -753,7 +754,7 @@ class TestCheckFFmpeg:
     @pytest.mark.parametrize(
         ("runtime_kind_value", "version_fragment"),
         [
-            ("windows-portable", "n8.1.2-34-g9b6c8969e0"),
+            ("windows-portable", WINDOWS_FFMPEG_EXECUTABLE_TOKEN),
             ("docker", "7.1.5-0+deb13u1"),
         ],
     )
@@ -850,6 +851,39 @@ class TestCheckFFmpeg:
         assert result.available is True
         assert result.details["expected_version_match"] is False
         assert "selected managed runtime version" in result.message
+
+    @pytest.mark.parametrize("mismatched_executable", ["ffmpeg", "ffprobe"])
+    def test_check_ffmpeg_rejects_windows_executable_token_near_match(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        mismatched_executable: str,
+    ) -> None:
+        monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "windows-portable")
+        check = next(candidate for candidate in collect_checks() if candidate.name == "ffmpeg")
+        versions: dict[str, str] = dict.fromkeys(
+            ("ffmpeg", "ffprobe"), WINDOWS_FFMPEG_EXECUTABLE_TOKEN
+        )
+        versions[mismatched_executable] = f"{WINDOWS_FFMPEG_EXECUTABLE_TOKEN}0"
+
+        with (
+            patch(
+                "frame_compare.orchestration.doctor_checks.resolve_executable",
+                side_effect=lambda name: f"/runtime/{name}",
+            ),
+            patch(
+                "frame_compare.orchestration.doctor_checks.run_subprocess",
+                side_effect=[
+                    _completed_process(f"ffmpeg version {versions['ffmpeg']}\n"),
+                    _completed_process(f"ffprobe version {versions['ffprobe']}\n"),
+                ],
+            ),
+        ):
+            result = check.check_fn()
+
+        assert result.passed is False
+        assert result.available is True
+        assert result.details["expected_version_fragment"] == WINDOWS_FFMPEG_EXECUTABLE_TOKEN
+        assert result.details["expected_version_match"] is False
 
     @pytest.mark.parametrize("missing_executable", ["ffmpeg", "ffprobe"])
     def test_check_ffmpeg_fails_when_required_executable_is_missing(

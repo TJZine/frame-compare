@@ -34,6 +34,7 @@ from frame_compare.vs.runtime_contract import (
     VAPOURSYNTH_API_MAJOR,
     VAPOURSYNTH_RELEASE,
     VS_PLACEBO_RELEASE,
+    WINDOWS_FFMPEG_EXECUTABLE_TOKEN,
     WINDOWS_FFMPEG_RELEASE,
     runtime_ffms2_required,
     runtime_kind,
@@ -540,7 +541,7 @@ def _check_ffmpeg() -> CheckResult:
     selected_runtime_kind = runtime_kind().casefold()
     expected_fragment: str | None = None
     if selected_runtime_kind == "windows-portable":
-        expected_fragment = WINDOWS_FFMPEG_RELEASE
+        expected_fragment = WINDOWS_FFMPEG_EXECUTABLE_TOKEN
     elif selected_runtime_kind == "docker":
         _, separator, remainder = DEBIAN_FFMPEG_PACKAGE_VERSION.partition(":")
         expected_fragment = remainder if separator and remainder else DEBIAN_FFMPEG_PACKAGE_VERSION

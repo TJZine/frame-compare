@@ -771,7 +771,7 @@ def prove_runtime_contract() -> None:
     from frame_compare.utils.subproc import resolve_executable
     from frame_compare.vs.runtime_contract import (
         VS_PLACEBO_RELEASE,
-        WINDOWS_FFMPEG_RELEASE,
+        WINDOWS_FFMPEG_EXECUTABLE_TOKEN,
         media_runtime_fingerprint,
         supported_media_runtime_report,
     )
@@ -796,11 +796,21 @@ def prove_runtime_contract() -> None:
     ffprobe = Path(resolve_executable("ffprobe")).resolve()
     assert_true(ffmpeg == (bundle_root / "ffmpeg" / "bin" / "ffmpeg.exe").resolve(), f"unexpected FFmpeg path: {ffmpeg}")
     assert_true(ffprobe == (bundle_root / "ffmpeg" / "bin" / "ffprobe.exe").resolve(), f"unexpected ffprobe path: {ffprobe}")
-    version_line = subprocess.check_output([str(ffmpeg), "-version"], text=True, timeout=15).splitlines()[0]
-    assert_true(WINDOWS_FFMPEG_RELEASE in version_line, f"unexpected FFmpeg version: {version_line}")
+    version_lines = {
+        name: subprocess.check_output([str(executable), "-version"], text=True, timeout=15).splitlines()[0]
+        for name, executable in (("ffmpeg", ffmpeg), ("ffprobe", ffprobe))
+    }
+    for name, version_line in version_lines.items():
+        assert_true(
+            WINDOWS_FFMPEG_EXECUTABLE_TOKEN in version_line.split(),
+            f"unexpected {name} version: {version_line}",
+        )
     report = supported_media_runtime_report()
     assert_true(report["fingerprints"]["full"] == expected, "runtime report fingerprint mismatch")
-    proof(f"runtime_contract=ok fingerprint={expected} ffmpeg={version_line}")
+    proof(
+        f"runtime_contract=ok fingerprint={expected} "
+        f"ffmpeg={version_lines['ffmpeg']} ffprobe={version_lines['ffprobe']}"
+    )
 
 
 def prove_vapoursynth_environment() -> None:

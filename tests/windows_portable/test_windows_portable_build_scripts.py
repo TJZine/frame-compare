@@ -354,6 +354,10 @@ def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: 
         "WINDOWS_BUNDLE_PROOF",
         "ffmpeg tiny media generation",
         "runtime_contract=ok",
+        "WINDOWS_FFMPEG_EXECUTABLE_TOKEN",
+        '(("ffmpeg", ffmpeg), ("ffprobe", ffprobe))',
+        "in version_line.split()",
+        "ffprobe={version_lines['ffprobe']}",
         "FFMS2 must remain excluded",
         "standalone FFmpeg directory leaked onto PATH",
     ):

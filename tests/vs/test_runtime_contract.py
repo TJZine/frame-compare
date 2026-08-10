@@ -22,6 +22,9 @@ from frame_compare.vs.runtime_contract import (
     OBUPARSE_SOURCE_TREE_SHA256,
     VAPOURSYNTH_SOURCE_TREE_SHA256,
     VS_PLACEBO_SOURCE_TREE_SHA256,
+    WINDOWS_FFMPEG_ARTIFACT_ID,
+    WINDOWS_FFMPEG_EXECUTABLE_TOKEN,
+    WINDOWS_FFMPEG_RELEASE,
     index_cache_token,
     media_runtime_fingerprint,
     media_runtime_identity,
@@ -203,6 +206,22 @@ def test_windows_manifest_fingerprints_match_code_contract(repo_root: Path) -> N
     }
 
     assert manifest["bundle"]["runtime_fingerprints"] == expected
+
+
+def test_windows_ffmpeg_executable_token_matches_selected_artifact(repo_root: Path) -> None:
+    manifest = json.loads(
+        (repo_root / "tools/windows_portable/manifest.windows-x64.json").read_text(encoding="utf-8")
+    )
+    ffmpeg = next(
+        artifact
+        for artifact in manifest["artifacts"]
+        if artifact["id"] == WINDOWS_FFMPEG_ARTIFACT_ID
+    )
+
+    assert ffmpeg["version"].startswith(WINDOWS_FFMPEG_RELEASE)
+    assert (
+        f"{WINDOWS_FFMPEG_RELEASE}-{ffmpeg['release_date'].replace('-', '')}"
+    ) == WINDOWS_FFMPEG_EXECUTABLE_TOKEN
 
 
 def test_supported_report_contains_observable_component_contract() -> None:

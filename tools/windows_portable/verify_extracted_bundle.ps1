@@ -752,6 +752,13 @@ try {
 if ($doctorPayload -isnot [PSCustomObject] -or $doctorPayload.success -ne $true) {
   throw "Extracted candidate doctor JSON is not a successful object"
 }
+$ffmpegChecks = @(
+  $doctorPayload.doctor.checks |
+    Where-Object { $_.id -ceq "ffmpeg" }
+)
+if ($ffmpegChecks.Count -ne 1 -or $ffmpegChecks[0].status -cne "pass") {
+  throw "Extracted candidate doctor FFmpeg check did not pass exactly once"
+}
 Write-Host $doctorJson
 
 $installer = Join-Path $bundle "install.cmd"

@@ -42,6 +42,8 @@ def test_windows_portable_workflow_delegates_extracted_bundle_verification(
         "& $installedShim --help",
     ):
         assert selector in verifier_source
+    assert "Candidate doctor FFmpeg check did not pass exactly once" in source
+    assert "Extracted candidate doctor FFmpeg check did not pass exactly once" in verifier_source
     assert "dist/frame-compare-portable-win-x64" in source
     assert (
         "dist/release-assets/frame-compare-update-win-x64-${{ inputs.release_tag }}.zip" in source
