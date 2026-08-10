@@ -98,14 +98,10 @@ def load_source(
         clip_fps = cast(_VideoNodeWithFps, clip).fps
         fps = Fraction(clip_fps.numerator, clip_fps.denominator)
         frame_props = dict(frame.props)
-        is_hdr, hdr_metadata = detect_hdr(frame_props)
+        probed_metadata = None
         if hdr_signal_is_unspecified(frame_props):
             probed_metadata = probe_hdr_metadata(Path(path))
-            if probed_metadata is not None:
-                is_hdr = (
-                    probed_metadata.transfer in {16, 18} and probed_metadata.color_primaries == 9
-                )
-                hdr_metadata = probed_metadata if is_hdr else None
+        is_hdr, hdr_metadata = detect_hdr(frame_props, probed_metadata)
     except PluginNotFoundError:
         raise
     except Exception as e:

@@ -12,6 +12,7 @@ _RANGE_LIMITED = 0
 _RANGE_FULL = 1
 _COLOR_RANGE_FULL = 0
 _COLOR_RANGE_LIMITED = 1
+_UNSPECIFIED_COLOR_PROP = 2
 
 
 def get_int_prop(props: Mapping[str, object], key: str, default: int) -> int:
@@ -87,7 +88,51 @@ def range_label_from_props(props: Mapping[str, object]) -> str | None:
     return "limited" if limited else "full"
 
 
-def detect_hdr(frame_props: Mapping[str, object]) -> tuple[bool, HDRMetadata | None]:
+def merge_hdr_metadata(
+    frame_props: Mapping[str, object],
+    fallback: HDRMetadata | None,
+) -> HDRMetadata:
+    """Merge frame HDR metadata with a field-wise fallback.
+
+    Usable frame color signals take precedence. Missing, malformed, and H.273
+    unspecified values are backfilled independently, while static metadata is
+    kept from the frame whenever it is available.
+    """
+    mastering_display = get_str_prop(frame_props, "MasteringDisplayPrimaries")
+    max_cll = get_optional_int_prop(frame_props, "ContentLightLevelMax")
+    max_fall = get_optional_int_prop(frame_props, "ContentLightLevelAverage")
+
+    return HDRMetadata(
+        mastering_display=mastering_display
+        or (fallback.mastering_display if fallback is not None else None),
+        max_cll=max_cll
+        if max_cll is not None
+        else (fallback.max_cll if fallback is not None else None),
+        max_fall=max_fall
+        if max_fall is not None
+        else (fallback.max_fall if fallback is not None else None),
+        color_primaries=_merged_color_signal(
+            frame_props,
+            "_Primaries",
+            fallback.color_primaries if fallback is not None else None,
+        ),
+        transfer=_merged_color_signal(
+            frame_props,
+            "_Transfer",
+            fallback.transfer if fallback is not None else None,
+        ),
+        matrix=_merged_color_signal(
+            frame_props,
+            "_Matrix",
+            fallback.matrix if fallback is not None else None,
+        ),
+    )
+
+
+def detect_hdr(
+    frame_props: Mapping[str, object],
+    fallback: HDRMetadata | None = None,
+) -> tuple[bool, HDRMetadata | None]:
     """Detect HDR from frame properties.
 
     HDR Detection:
@@ -104,8 +149,9 @@ def detect_hdr(frame_props: Mapping[str, object]) -> tuple[bool, HDRMetadata | N
     Returns:
         A tuple of (is_hdr, HDRMetadata)
     """
-    transfer = get_int_prop(frame_props, "_Transfer", 2)
-    primaries = get_int_prop(frame_props, "_Primaries", 2)
+    metadata = merge_hdr_metadata(frame_props, fallback)
+    transfer = metadata.transfer
+    primaries = metadata.color_primaries
 
     is_hdr = transfer in (16, 18) and primaries == 9
 
@@ -114,19 +160,33 @@ def detect_hdr(frame_props: Mapping[str, object]) -> tuple[bool, HDRMetadata | N
 
     return (
         True,
-        HDRMetadata(
-            mastering_display=get_str_prop(frame_props, "MasteringDisplayPrimaries"),
-            max_cll=get_optional_int_prop(frame_props, "ContentLightLevelMax"),
-            max_fall=get_optional_int_prop(frame_props, "ContentLightLevelAverage"),
-            color_primaries=primaries,
-            transfer=transfer,
-            matrix=get_int_prop(frame_props, "_Matrix", 2),
-        ),
+        metadata,
     )
 
 
 def hdr_signal_is_unspecified(frame_props: Mapping[str, object]) -> bool:
-    """Return whether frame props lack a usable transfer or primaries signal."""
-    transfer = get_int_prop(frame_props, "_Transfer", 2)
-    primaries = get_int_prop(frame_props, "_Primaries", 2)
-    return transfer == 2 or primaries == 2
+    """Return whether any frame color signal needs metadata backfill."""
+    return any(
+        _specified_color_signal(frame_props, key) is None
+        for key in ("_Transfer", "_Primaries", "_Matrix")
+    )
+
+
+def _specified_color_signal(frame_props: Mapping[str, object], key: str) -> int | None:
+    value = get_optional_int_prop(frame_props, key)
+    if value is None or value == _UNSPECIFIED_COLOR_PROP:
+        return None
+    return value
+
+
+def _merged_color_signal(
+    frame_props: Mapping[str, object],
+    key: str,
+    fallback_value: int | None,
+) -> int:
+    explicit = _specified_color_signal(frame_props, key)
+    if explicit is not None:
+        return explicit
+    if fallback_value is None or fallback_value == _UNSPECIFIED_COLOR_PROP:
+        return _UNSPECIFIED_COLOR_PROP
+    return fallback_value

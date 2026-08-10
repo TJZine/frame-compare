@@ -10,9 +10,11 @@ from frame_compare.vs.props import (
     get_optional_int_prop,
     get_optional_range_prop,
     get_str_prop,
+    merge_hdr_metadata,
     props_indicate_limited_range,
     range_label_from_props,
 )
+from frame_compare.vs.types import HDRMetadata
 
 
 class _ExampleEnum(Enum):
@@ -168,3 +170,43 @@ def test_detect_hdr_pq_without_bt2020():
 
     assert is_hdr_detected is False
     assert metadata is None
+
+
+def test_merge_hdr_metadata_preserves_usable_frame_signal_and_metadata() -> None:
+    fallback = HDRMetadata("probe mastering", 900, 350, 9, 1, 1)
+    props = {
+        "_Transfer": b"16",
+        "_Primaries": 2,
+        "_Matrix": _ExampleEnum.VALUE,
+        "MasteringDisplayPrimaries": "frame mastering",
+        "ContentLightLevelMax": "1000",
+        "ContentLightLevelAverage": b"400",
+    }
+
+    merged = merge_hdr_metadata(props, fallback)
+
+    assert merged == HDRMetadata("frame mastering", 1000, 400, 9, 16, 9)
+
+
+def test_merge_hdr_metadata_backfills_only_unusable_frame_signal() -> None:
+    fallback = HDRMetadata(None, None, None, 9, 18, 9)
+    props = {
+        "_Transfer": "malformed",
+        "_Primaries": "1",
+        "_Matrix": b"malformed",
+    }
+
+    merged = merge_hdr_metadata(props, fallback)
+
+    assert merged == HDRMetadata(None, None, None, 1, 18, 9)
+
+
+def test_merge_hdr_metadata_keeps_unspecified_when_both_sources_are_unusable() -> None:
+    fallback = HDRMetadata(None, None, None, 2, 2, 2)
+
+    merged = merge_hdr_metadata(
+        {"_Transfer": object(), "_Primaries": b"bad", "_Matrix": "bad"},
+        fallback,
+    )
+
+    assert merged == HDRMetadata(None, None, None, 2, 2, 2)

@@ -540,10 +540,57 @@ def test_load_source_falls_back_to_ffprobe_for_unspecified_hdr_props(
     assert source.hdr_metadata.transfer == 18
 
 
+def test_load_source_merges_partial_frame_signal_before_hdr_classification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from frame_compare.vs.types import HDRMetadata
+
+    props = {
+        "_Transfer": 16,
+        "_Primaries": 2,
+        "_Matrix": 9,
+        "MasteringDisplayPrimaries": "frame mastering",
+        "ContentLightLevelMax": 1000,
+        "ContentLightLevelAverage": 400,
+    }
+    core = SimpleNamespace(
+        lsmas=SimpleNamespace(LWLibavSource=lambda _p, **_kwargs: MockClip(frame_props=props))
+    )
+    monkeypatch.setattr(
+        source_module,
+        "probe_hdr_metadata",
+        lambda _path: HDRMetadata("probe mastering", 900, 350, 9, 1, 1),
+    )
+
+    source = load_source("video.mkv", core)  # type: ignore[arg-type]
+
+    assert source.is_hdr is True
+    assert source.hdr_metadata == HDRMetadata("frame mastering", 1000, 400, 9, 16, 9)
+
+
+def test_load_source_backfills_malformed_matrix_without_overriding_explicit_signal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from frame_compare.vs.types import HDRMetadata
+
+    props = {"_Transfer": b"16", "_Primaries": "9", "_Matrix": "malformed"}
+    core = SimpleNamespace(
+        lsmas=SimpleNamespace(LWLibavSource=lambda _p, **_kwargs: MockClip(frame_props=props))
+    )
+    probe = MagicMock(return_value=HDRMetadata(None, None, None, 1, 1, 9))
+    monkeypatch.setattr(source_module, "probe_hdr_metadata", probe)
+
+    source = load_source("video.mkv", core)  # type: ignore[arg-type]
+
+    assert source.is_hdr is True
+    assert source.hdr_metadata == HDRMetadata(None, None, None, 9, 16, 9)
+    probe.assert_called_once_with(Path("video.mkv"))
+
+
 def test_load_source_keeps_explicit_sdr_without_ffprobe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    props = {"_Transfer": 1, "_Primaries": 1}
+    props = {"_Transfer": 1, "_Primaries": 1, "_Matrix": 1}
     core = SimpleNamespace(
         lsmas=SimpleNamespace(LWLibavSource=lambda _p, **_kwargs: MockClip(frame_props=props))
     )
