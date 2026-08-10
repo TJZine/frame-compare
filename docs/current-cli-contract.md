@@ -503,9 +503,10 @@ recovery requirement.
 - The full fingerprint remains inside the cache payload and is validated on load.
   Legacy run-folder `cache.compframes` files are not used as analysis cache hits.
 - Probe-cache files remain on-disk format version 1, but key schema 2 includes the
-  scoped decoder/runtime fingerprint. In the managed Windows portable and
-  Debian/Docker profiles, a cache created by another selected decoder lineage is a
-  normal miss, including under `--from-cache-only` validation.
+  scoped decoder and standalone FFmpeg/ffprobe runtime fingerprint. In the managed
+  Windows portable and Debian/Docker profiles, a cache created by another selected
+  decoder or FFmpeg/ffprobe lineage is a normal miss, including under
+  `--from-cache-only` validation.
 - Shared alignment reuse source-set identity includes the scoped standalone-FFmpeg
   fingerprint. In the managed Windows portable and Debian/Docker profiles, a
   selected supported FFmpeg lineage change cannot reuse an offset computed under the

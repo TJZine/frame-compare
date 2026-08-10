@@ -10,7 +10,7 @@
     "notes": "Deterministic Windows media runtime contract. Native media components are not present in code-only update ZIPs; installations crossing this runtime fingerprint require a complete portable bundle refresh. BtbN FFmpeg remains an immutable retained end-of-month LGPL-only release-branch artifact.",
     "runtime_fingerprints": {
       "analysis": "e24a1e094d16c3bed112cfb5e5c5b98fa2b6fed44f87b9917d8ed342540384ff",
-      "probe": "73b7fd16189928d3ef3d1ca96c8363a723ac440cb999e74546871c089c547bb6",
+      "probe": "60ad4cbe75ca453c9d590e8daedfbaab4b77c1a707b368bbc0d005407c933f80",
       "alignment": "9b678d58d2f9c339f3044c11c98591f6b09ad81d0769ad7853fd3da35e429d36",
       "index": "e3c074652ffbbc2fce5cab088d4b4fd16b050a9676d387dbd3f3f4075746cbe6",
       "full": "35d58736c651f4d8e52bd4d8e6750ebede4c4bc9676e4c9db7dfebaeadab018c"

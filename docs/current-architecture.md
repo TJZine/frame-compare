@@ -243,8 +243,9 @@ recovery requirement.
   shared clip probe cache used by `--from-cache-only` prevalidation before
   run-folder reservation. The file format remains version 1, while each probe key
   uses key schema 2 and includes the scoped media-runtime probe fingerprint so a
-  selected decoder-lineage change in the managed Windows portable or Debian/Docker
-  profiles misses without invalidating unrelated file-format data.
+  selected decoder or standalone FFmpeg/ffprobe lineage change in the managed Windows
+  portable or Debian/Docker profiles misses without invalidating unrelated file-format
+  data.
 - `<media>.frame-compare-lsw1296-<12-hex-index-fingerprint>.lwi`: Frame
   Compare-owned L-SMASH-Works index. The token is profile scoped (currently
   `lsw1296-e3c074652ffb` on managed/portable Windows,

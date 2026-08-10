@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+import frame_compare.vs.runtime_contract as runtime_contract
 from frame_compare.vs.runtime_contract import (
     DEBIAN_FFMPEG_PACKAGE_VERSION,
     FFMS2_SOURCE_TREE_SHA256,
@@ -144,6 +145,31 @@ def test_analysis_identity_excludes_tone_mapping_components() -> None:
     assert "libplacebo" not in serialized
     assert "libdovi" not in serialized
     assert "l_smash_works" in serialized
+
+
+@pytest.mark.parametrize(
+    ("profile", "lineage_constant", "replacement", "analysis_changes"),
+    [
+        ("windows-x64", "WINDOWS_FFMPEG_SOURCE_COMMIT", "f" * 40, False),
+        ("debian-trixie", "DEBIAN_FFMPEG_PACKAGE_VERSION", "7:7.1.6-test", True),
+    ],
+)
+def test_probe_fingerprint_tracks_standalone_ffmpeg_lineage(
+    monkeypatch: pytest.MonkeyPatch,
+    profile: runtime_contract.MediaRuntimeProfile,
+    lineage_constant: str,
+    replacement: str,
+    analysis_changes: bool,
+) -> None:
+    original_probe = media_runtime_fingerprint("probe", profile=profile)
+    original_analysis = media_runtime_fingerprint("analysis", profile=profile)
+
+    monkeypatch.setattr(runtime_contract, lineage_constant, replacement)
+
+    assert media_runtime_fingerprint("probe", profile=profile) != original_probe
+    assert (
+        media_runtime_fingerprint("analysis", profile=profile) != original_analysis
+    ) is analysis_changes
 
 
 def test_alignment_identity_is_owned_by_standalone_ffmpeg() -> None:

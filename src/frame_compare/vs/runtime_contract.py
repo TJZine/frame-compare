@@ -277,8 +277,13 @@ def _scope_components(
     scope: MediaRuntimeScope,
     profile: MediaRuntimeProfile,
 ) -> dict[str, JSONValue]:
-    if scope in {"analysis", "probe"}:
+    if scope == "analysis":
         return {"decoder": _decoder_identity(profile)}
+    if scope == "probe":
+        return {
+            "decoder": _decoder_identity(profile),
+            "standalone_ffmpeg": _standalone_ffmpeg_identity(profile),
+        }
     if scope == "alignment":
         return {"standalone_ffmpeg": _standalone_ffmpeg_identity(profile)}
     if scope == "index":

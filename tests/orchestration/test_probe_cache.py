@@ -64,7 +64,7 @@ def test_probe_cache_key_intentionally_reuses_same_stat_identity(tmp_path: Path)
     )
 
 
-def test_probe_cache_invalidates_on_media_runtime_change(monkeypatch) -> None:
+def test_probe_cache_key_changes_with_scoped_runtime_fingerprint(monkeypatch) -> None:
     fingerprint = ClipFingerprint(Path("video.mkv"), 1024, 5000)
     original = compute_probe_cache_key(fingerprint)
 
