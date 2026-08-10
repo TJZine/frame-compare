@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from dataclasses import replace
 from importlib.metadata import PackageNotFoundError
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -583,14 +584,16 @@ class TestCheckFFMS2:
             "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
             return_value=SimpleNamespace(core=SimpleNamespace()),
         ):
-            result = check.check_fn()
+            report = run_doctor(checks=[check])
 
+        result = report.checks[0][1]
         assert result.passed is False
         assert result.available is False
         assert "required by this Docker runtime" in result.message
         assert result.hint == "Repair the complete Docker media runtime, then rerun doctor"
         assert result.details["current_runtime_kind"] == "docker"
         assert result.details["required_in_current_runtime"] is True
+        assert report.critical_failures == ["ffms2"]
 
     def test_check_ffms2_reports_registered_source_function(
         self, monkeypatch: pytest.MonkeyPatch
@@ -623,7 +626,7 @@ class TestCheckFFMS2:
     def test_check_ffms2_rejects_wrong_runtime_version(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.delenv("FRAME_COMPARE_RUNTIME_KIND", raising=False)
+        monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "docker")
         monkeypatch.setenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "1")
         plugin = SimpleNamespace(
             Source=lambda *_args, **_kwargs: object(),
@@ -639,12 +642,14 @@ class TestCheckFFMS2:
             "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
             return_value=SimpleNamespace(core=SimpleNamespace(ffms2=plugin)),
         ):
-            result = check.check_fn()
+            report = run_doctor(checks=[check])
 
+        result = report.checks[0][1]
         assert result.passed is False
         assert result.available is True
         assert result.details["observed_runtime_version"] == "4.0.0.0"
         assert result.details["expected_runtime_version_match"] is False
+        assert report.critical_failures == ["ffms2"]
 
     def test_check_ffms2_allows_optional_runtime_version_mismatch(
         self, monkeypatch: pytest.MonkeyPatch
@@ -684,12 +689,14 @@ class TestCheckFFMS2:
             "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
             return_value=SimpleNamespace(core=SimpleNamespace(ffms2=plugin)),
         ):
-            result = check.check_fn()
+            report = run_doctor(checks=[check])
 
+        result = report.checks[0][1]
         assert result.passed is False
         assert result.available is True
         assert "Windows portable baseline excludes it" in result.message
         assert result.details["current_runtime_kind"] == "windows-portable"
+        assert report.critical_failures == ["ffms2"]
 
     def test_check_ffms2_rejects_partial_plugin_in_windows_portable(
         self, monkeypatch: pytest.MonkeyPatch
@@ -845,12 +852,33 @@ class TestCheckFFmpeg:
                 ],
             ),
         ):
-            result = check.check_fn()
+            report = run_doctor(checks=[check])
 
+        result = report.checks[0][1]
         assert result.passed is False
         assert result.available is True
         assert result.details["expected_version_match"] is False
         assert "selected managed runtime version" in result.message
+        assert report.critical_failures == ["ffmpeg"]
+
+    def test_unmanaged_ffmpeg_and_ffms2_failures_remain_noncritical(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "unmanaged-linux")
+        checks = [
+            replace(
+                check,
+                check_fn=lambda: CheckResult(passed=False, message="optional failure"),
+            )
+            for check in collect_checks()
+            if check.name in {"ffms2", "ffmpeg"}
+        ]
+
+        report = run_doctor(checks=checks)
+
+        assert [check.name for check, _result in report.checks] == ["ffms2", "ffmpeg"]
+        assert report.all_passed is False
+        assert report.critical_failures == []
 
     @pytest.mark.parametrize("mismatched_executable", ["ffmpeg", "ffprobe"])
     def test_check_ffmpeg_rejects_windows_executable_token_near_match(

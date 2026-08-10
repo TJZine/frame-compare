@@ -6,7 +6,7 @@ from pytest import MonkeyPatch
 from frame_compare.cli.entry import app
 from frame_compare.cli.errors import ExitCode, format_error_json
 from frame_compare.config.errors import ConfigNotFoundError
-from frame_compare.orchestration.doctor import CheckResult, DoctorCheck, DoctorReport
+from frame_compare.orchestration.doctor import CheckResult, DoctorCheck, DoctorReport, run_doctor
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
 
@@ -162,6 +162,47 @@ def test_doctor_exit_code_is_3_on_core_failure(monkeypatch: MonkeyPatch) -> None
     assert result.exit_code == 3
     assert "\u274c vapoursynth" in result.stdout
     assert "Core runtime is not ready; resolve required checks above." in result.stdout
+
+
+def test_doctor_managed_optional_policy_failure_blocks_human_and_json_output(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "docker")
+    monkeypatch.setenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "1")
+    check = DoctorCheck(
+        name="ffmpeg",
+        category="optional",
+        check_fn=lambda: CheckResult(
+            passed=False,
+            available=True,
+            message="FFmpeg executables do not match the selected managed runtime version",
+        ),
+        critical_if_failed=True,
+    )
+    report = run_doctor(checks=[check])
+
+    def _run_doctor(
+        checks: list[DoctorCheck] | None = None,
+        reporter: ProgressReporter | None = None,
+    ) -> DoctorReport:
+        return report
+
+    monkeypatch.setattr("frame_compare.cli.entry.run_doctor", _run_doctor)
+
+    human_result = runner.invoke(app, ["doctor"])
+    assert human_result.exit_code == int(ExitCode.DEPENDENCY_ERROR)
+    assert human_result.stderr == ""
+    assert "\u274c ffmpeg" in human_result.stdout
+    assert "Core runtime is not ready; resolve required checks above." in human_result.stdout
+
+    json_result = runner.invoke(app, ["doctor", "--json"])
+    assert json_result.exit_code == int(ExitCode.DEPENDENCY_ERROR)
+    assert json_result.stderr == ""
+    payload = json.loads(json_result.stdout)
+    assert payload["success"] is False
+    check_entry = _doctor_check_entry(payload, "ffmpeg")
+    assert check_entry["category"] == "optional"
+    assert check_entry["status"] == "fail"
 
 
 def _run_doctor_optional_failure_and_assert(monkeypatch: MonkeyPatch) -> None:

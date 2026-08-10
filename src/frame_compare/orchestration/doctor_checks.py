@@ -753,8 +753,14 @@ def collect_checks() -> list[DoctorCheck]:
         "slowpics": _check_slowpics,
         "tmdb_api_key": _check_tmdb_api_key,
     }
+    managed_runtime = runtime_kind().casefold() in {"docker", "windows-portable"}
 
     return [
-        DoctorCheck(name=name, category=category, check_fn=check_fns[name])
+        DoctorCheck(
+            name=name,
+            category=category,
+            check_fn=check_fns[name],
+            critical_if_failed=managed_runtime and name in {"ffms2", "ffmpeg"},
+        )
         for name, category in _CHECK_ORDER
     ]
