@@ -413,6 +413,7 @@ def test_docker_doctor_gate_preserves_missing_check_diagnostic_and_proof_marker(
     script = (repo_root / "tools/verify_docker_integration.sh").read_text(encoding="utf-8")
 
     assert "doctor required check missing: {required_check}" in script
+    assert 'checks[required_check]["status"] == "pass"' in script
     assert script.count("DOCKER_PROOF doctor_json=ok") == 2
 
 
