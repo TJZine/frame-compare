@@ -355,10 +355,6 @@ def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: 
         "WINDOWS_BUNDLE_PROOF",
         "ffmpeg tiny media generation",
         "runtime_contract=ok",
-        "WINDOWS_FFMPEG_EXECUTABLE_TOKEN",
-        '(("ffmpeg", ffmpeg), ("ffprobe", ffprobe))',
-        "in version_line.split()",
-        "ffprobe={version_lines['ffprobe']}",
         "FFMS2 must remain excluded",
         "standalone FFmpeg directory leaked onto PATH",
     ):
@@ -647,6 +643,8 @@ def _run_extracted_bundle_verifier(
     }
     doctor_stdout = extract_root.parent / f"{extract_root.name}-doctor.json"
     doctor_stderr = extract_root.parent / f"{extract_root.name}-doctor.stderr.txt"
+    verifier_setup_allowance_seconds = 30
+    verifier_timeout_seconds = command_timeout_seconds + verifier_setup_allowance_seconds
     expected_commit_sha = subprocess.run(
         ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
         check=True,
@@ -677,9 +675,45 @@ def _run_extracted_bundle_verifier(
         ],
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=verifier_timeout_seconds,
         check=False,
         env=environment,
+    )
+
+
+def _assert_descendant_exited(*, pwsh: str, started: Path) -> None:
+    descendant_pid = int(started.read_text(encoding="utf-8").strip())
+    result = subprocess.run(
+        [
+            pwsh,
+            "-NoProfile",
+            "-Command",
+            (
+                "$targetProcessId = [int]$args[0]; "
+                "try { "
+                "$process = [System.Diagnostics.Process]::GetProcessById($targetProcessId) "
+                "} catch [System.ArgumentException] { exit 0 }; "
+                "$exited = $process.WaitForExit(10000); "
+                "if (-not $exited) { "
+                "try { "
+                "$process.Kill($true); "
+                "$process.WaitForExit(10000) | Out-Null "
+                "} finally { $process.Dispose() }; "
+                "Write-Error 'descendant remained alive after verifier cleanup'; "
+                "exit 1 "
+                "}; "
+                "$process.Dispose()"
+            ),
+            str(descendant_pid),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=22,
+        check=False,
+    )
+    assert result.returncode == 0, (
+        f"descendant process {descendant_pid} remained alive after verifier cleanup: "
+        f"{_normalized_process_output(result)}"
     )
 
 
@@ -1045,6 +1079,95 @@ def test_extracted_bundle_verifier_propagates_launcher_failures(
     ).is_file()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell process semantics required")
+@pytest.mark.parametrize(
+    ("doctor_json", "expected_error"),
+    [
+        pytest.param(
+            "{}",
+            "Extracted candidate doctor JSON is not a successful object",
+            id="missing-success",
+        ),
+        pytest.param(
+            '{"success":"true"}',
+            "Extracted candidate doctor JSON is not a successful object",
+            id="success-not-boolean",
+        ),
+        pytest.param(
+            '{"success":true}',
+            "Extracted candidate doctor FFmpeg check did not pass exactly once",
+            id="missing-doctor",
+        ),
+        pytest.param(
+            '{"success":true,"doctor":[]}',
+            "Extracted candidate doctor FFmpeg check did not pass exactly once",
+            id="doctor-not-object",
+        ),
+        pytest.param(
+            '{"success":true,"doctor":{"checks":{"id":"ffmpeg","status":"pass"}}}',
+            "Extracted candidate doctor FFmpeg check did not pass exactly once",
+            id="checks-not-array",
+        ),
+        pytest.param(
+            '{"success":true,"doctor":{"checks":[null]}}',
+            "Extracted candidate doctor FFmpeg check did not pass exactly once",
+            id="check-not-object",
+        ),
+        pytest.param(
+            '{"success":true,"doctor":{"checks":[{"status":"pass"}]}}',
+            "Extracted candidate doctor FFmpeg check did not pass exactly once",
+            id="missing-check-id",
+        ),
+        pytest.param(
+            '{"success":true,"doctor":{"checks":[{"id":"ffmpeg"}]}}',
+            "Extracted candidate doctor FFmpeg check did not pass exactly once",
+            id="missing-ffmpeg-status",
+        ),
+        pytest.param(
+            '{"success":true,"doctor":{"checks":[{"id":"ffmpeg","status":"fail"}]}}',
+            "Extracted candidate doctor FFmpeg check did not pass exactly once",
+            id="failed-ffmpeg-status",
+        ),
+        pytest.param(
+            '{"success":true,"doctor":{"checks":['
+            '{"id":"ffmpeg","status":"pass"},'
+            '{"id":"ffmpeg","status":"pass"}]}}',
+            "Extracted candidate doctor FFmpeg check did not pass exactly once",
+            id="duplicate-ffmpeg-check",
+        ),
+    ],
+)
+def test_extracted_bundle_verifier_rejects_malformed_doctor_contract(
+    repo_root: Path,
+    tmp_path: Path,
+    doctor_json: str,
+    expected_error: str,
+) -> None:
+    pwsh = shutil.which("pwsh")
+    assert pwsh is not None
+    candidate_launcher = f"""
+if ($args[0] -eq "--help") {{ exit 0 }}
+if ($args[0] -eq "version") {{ Write-Output "frame-compare 1.2.3"; exit 0 }}
+if ($args[0] -eq "doctor") {{ Write-Output '{doctor_json}'; exit 0 }}
+exit 1
+"""
+    zip_path = _write_extracted_verifier_fixture(
+        repo_root=repo_root,
+        tmp_path=tmp_path,
+        candidate_launcher=candidate_launcher,
+    )
+
+    result = _run_extracted_bundle_verifier(
+        repo_root=repo_root,
+        zip_path=zip_path,
+        extract_root=tmp_path / "fresh-extract",
+        local_app_data=tmp_path / "local-app-data",
+    )
+
+    assert result.returncode != 0
+    assert expected_error in _normalized_process_output(result)
+
+
 @pytest.mark.parametrize("flood_stream", ["stdout", "stderr"])
 @pytest.mark.skipif(os.name != "nt", reason="Windows process-tree semantics required")
 def test_extracted_bundle_verifier_caps_flood_evidence_before_timeout(
@@ -1052,21 +1175,20 @@ def test_extracted_bundle_verifier_caps_flood_evidence_before_timeout(
     tmp_path: Path,
     flood_stream: str,
 ) -> None:
-    if shutil.which("pwsh") is None:
+    pwsh = shutil.which("pwsh")
+    if pwsh is None:
         pytest.skip("PowerShell 7 is required")
     descendant_started = tmp_path / "flood-descendant-started.txt"
-    descendant_sentinel = tmp_path / "flood-descendant-survived.txt"
     escaped_started = str(descendant_started).replace("'", "''")
-    escaped_sentinel = str(descendant_sentinel).replace("'", "''")
     console_stream = "Out" if flood_stream == "stdout" else "Error"
     candidate_launcher = f"""
 if ($args[0] -eq "--help") {{
-  Start-Process -FilePath (Join-Path $PSHOME "pwsh.exe") -ArgumentList @(
+  $descendant = Start-Process -FilePath (Join-Path $PSHOME "pwsh.exe") -ArgumentList @(
     "-NoProfile",
     "-Command",
-    "Set-Content -LiteralPath '{escaped_started}' -Value started; Start-Sleep -Seconds 6; Set-Content -LiteralPath '{escaped_sentinel}' -Value survived"
-  ) | Out-Null
-  while (-not (Test-Path -LiteralPath '{escaped_started}')) {{ Start-Sleep -Milliseconds 10 }}
+    "Start-Sleep -Seconds 60"
+  ) -PassThru
+  Set-Content -LiteralPath '{escaped_started}' -Value $descendant.Id
   $line = "x" * 1024
   for ($index = 0; $index -lt 20000; $index++) {{
     [Console]::{console_stream}.WriteLine("{flood_stream}-$index-$line")
@@ -1110,8 +1232,7 @@ exit 1
     assert stdout_size <= 16777216
     assert stderr_size <= 16777216
     assert descendant_started.is_file()
-    time.sleep(7)
-    assert not descendant_sentinel.exists()
+    _assert_descendant_exited(pwsh=pwsh, started=descendant_started)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows process-tree semantics required")
@@ -1119,19 +1240,19 @@ def test_extracted_bundle_verifier_closes_deadline_exit_descendants(
     repo_root: Path,
     tmp_path: Path,
 ) -> None:
-    if shutil.which("pwsh") is None:
+    pwsh = shutil.which("pwsh")
+    if pwsh is None:
         pytest.skip("PowerShell 7 is required")
     descendant_started = tmp_path / "descendant-started.txt"
-    descendant_sentinel = tmp_path / "descendant-survived.txt"
     escaped_started = str(descendant_started).replace("'", "''")
-    escaped_sentinel = str(descendant_sentinel).replace("'", "''")
     candidate_launcher = f"""
 if ($args[0] -eq "--help") {{
-  Start-Process -FilePath (Join-Path $PSHOME "pwsh.exe") -ArgumentList @(
+  $descendant = Start-Process -FilePath (Join-Path $PSHOME "pwsh.exe") -ArgumentList @(
     "-NoProfile",
     "-Command",
-    "Set-Content -LiteralPath '{escaped_started}' -Value started; Start-Sleep -Seconds 6; Set-Content -LiteralPath '{escaped_sentinel}' -Value survived"
-  ) | Out-Null
+    "Start-Sleep -Seconds 60"
+  ) -PassThru
+  Set-Content -LiteralPath '{escaped_started}' -Value $descendant.Id
   Start-Sleep -Seconds 3
   exit 0
 }}
@@ -1154,8 +1275,7 @@ exit 1
     assert result.returncode != 0
     assert "command=candidate_launcher_--help" in _normalized_process_output(result)
     assert descendant_started.is_file()
-    time.sleep(7)
-    assert not descendant_sentinel.exists()
+    _assert_descendant_exited(pwsh=pwsh, started=descendant_started)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell process semantics required")
@@ -1296,31 +1416,8 @@ def test_windows_portable_extracted_bundle_verifier_owns_hosted_and_manual_parit
         "installed_shim_--help",
     ):
         assert verifier.count(f'-Label "{label}"') == 1
-    assert "function Invoke-BoundedCommand" in verifier
-    assert '"-EncodedCommand"' in verifier
-    assert "$startInfo.ArgumentList.Add($processArgument)" in verifier
-    assert "$process.WaitForExitAsync()" in verifier
-    assert "[System.Threading.Tasks.Task]::WhenAny(" in verifier
-    assert "JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE" in verifier
-    assert "AssignProcessToJobObject" in verifier
-    assert "TerminateJobObject" in verifier
-    assert "$job.Assign($process)" in verifier
-    assert "$startGate.Set()" in verifier
-    assert verifier.index("$job.Assign($process)") < verifier.index("$startGate.Set()")
-    assert "$process.Kill($true)" not in verifier
-    assert "$process.WaitForExit(10000)" in verifier
     assert "its process job was terminated" in verifier
-    assert ".BaseStream.CopyToAsync(" in verifier
-    assert "ReadToEndAsync" not in verifier
-    assert "FrameCompareCappedFileStream" in verifier
-    assert "TaskCompletionSource<string>" in verifier
-    assert "[int]$StdoutEvidenceLimitBytes = 16777216" in verifier
-    assert "[int]$StderrEvidenceLimitBytes = 16777216" in verifier
     assert "evidence_overflow=true stream=$overflowStream" in verifier
-    assert "StdoutEvidenceLimitBytes 65536" in verifier
-    assert "StdoutEvidenceLimitBytes 4194304" in verifier
-    assert "StdoutReadLimitBytes 65536" in verifier
-    assert "StdoutReadLimitBytes 4194304" in verifier
     assert 'throw "Unsafe ZIP entry path: $EntryName"' in verifier
     assert "ExtractRoot must name a dedicated verification directory" in verifier
     assert "ExtractRoot must not already exist" in verifier

@@ -1190,15 +1190,44 @@ try {
 } catch {
   throw "Extracted candidate doctor stdout is not exactly one valid JSON document: $($_.Exception.Message)"
 }
-if ($doctorPayload -isnot [PSCustomObject] -or $doctorPayload.success -ne $true) {
+if ($doctorPayload -isnot [PSCustomObject]) {
   throw "Extracted candidate doctor JSON is not a successful object"
 }
+$successProperty = $doctorPayload.PSObject.Properties["success"]
+if (
+  $null -eq $successProperty -or
+  $successProperty.Value -isnot [bool] -or
+  $successProperty.Value -ne $true
+) {
+  throw "Extracted candidate doctor JSON is not a successful object"
+}
+$ffmpegCheckFailure = "Extracted candidate doctor FFmpeg check did not pass exactly once"
+try {
+  $doctorObject = Get-RequiredObject $doctorPayload "doctor" "doctor payload"
+  $doctorChecks = Get-RequiredArray $doctorObject "checks" "doctor payload.doctor"
+  foreach ($doctorCheck in $doctorChecks) {
+    if ($doctorCheck -isnot [PSCustomObject]) {
+      throw "doctor payload.doctor.checks entries must be objects."
+    }
+    Get-RequiredString $doctorCheck "id" "doctor check" | Out-Null
+  }
+} catch {
+  throw "${ffmpegCheckFailure}: $($_.Exception.Message)"
+}
 $ffmpegChecks = @(
-  $doctorPayload.doctor.checks |
+  $doctorChecks |
     Where-Object { $_.id -ceq "ffmpeg" }
 )
-if ($ffmpegChecks.Count -ne 1 -or $ffmpegChecks[0].status -cne "pass") {
-  throw "Extracted candidate doctor FFmpeg check did not pass exactly once"
+if ($ffmpegChecks.Count -ne 1) {
+  throw $ffmpegCheckFailure
+}
+try {
+  $ffmpegStatus = Get-RequiredString $ffmpegChecks[0] "status" "doctor FFmpeg check"
+} catch {
+  throw "${ffmpegCheckFailure}: $($_.Exception.Message)"
+}
+if ($ffmpegStatus -cne "pass") {
+  throw $ffmpegCheckFailure
 }
 $installer = Join-Path $bundle "install.cmd"
 $null = Invoke-BoundedCommand -Label "candidate_install" -FilePath $installer
