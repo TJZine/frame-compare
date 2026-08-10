@@ -1268,7 +1268,11 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   resolved FFmpeg/ffprobe paths plus their first `-version` lines. Managed Windows
   portable and Docker runtimes require both FFmpeg tools to match the selected
   runtime identity. FFMS2 must be absent from Windows portable and present at the
-  selected version in Docker; either policy violation fails the check.
+  selected version in Docker; either policy violation fails the check. On those
+  managed profiles, failed FFMS2 or FFmpeg policy checks are critical failures even
+  though their JSON `category` remains `optional`: `success` is false and `doctor`
+  exits with the dependency error code. On unmanaged profiles, FFMS2 and FFmpeg
+  availability failures remain noncritical.
 - If the `doctor` command hits a typed top-level failure before it can produce a
   `DoctorReport`, it uses the standard CLI error contract. In `--json` mode that means
   the standard error payload is written to stdout.
@@ -1279,11 +1283,11 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   VSPreview, so optional availability gaps are visually distinct from critical
   dependency failures. This does not change `doctor --json` status values.
 - Human output uses a warning marker, rather than the critical-failure marker, for
-  failed non-core checks such as network reachability or missing optional integration
-  configuration. It ends with a deterministic readiness summary that distinguishes a
-  blocked core runtime, a ready core runtime with noncritical warnings, and a fully
-  passing check set. These presentation changes do not alter JSON fields, JSON status
-  values, or exit-code behavior.
+  failed noncritical checks such as network reachability or missing optional
+  integration configuration. It ends with a deterministic readiness summary that
+  distinguishes a blocked core runtime, a ready core runtime with noncritical
+  warnings, and a fully passing check set. These presentation changes do not alter
+  JSON fields, JSON status values, or exit-code behavior.
 - Failed checks and optional-unavailable warnings include a short deterministic next
   action when the check can prove one. `doctor --json` exposes the same text as
   `install_hint`. Hints distinguish missing executables, unavailable runtimes/plugins,
