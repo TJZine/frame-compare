@@ -1168,7 +1168,7 @@ def test_extracted_bundle_verifier_rejects_stale_installed_state(
     candidate_launcher = """
 if ($args[0] -eq "--help") { exit 0 }
 if ($args[0] -eq "version") { Write-Output "frame-compare 1.2.3"; exit 0 }
-if ($args[0] -eq "doctor") { Write-Output '{"success":true}'; exit 0 }
+if ($args[0] -eq "doctor") { Write-Output '{"success":true,"doctor":{"checks":[{"id":"ffmpeg","status":"pass"}]}}'; exit 0 }
 exit 1
 """
     installer = r"""
@@ -1216,7 +1216,7 @@ def test_extracted_bundle_verifier_rejects_installed_version_mismatch(
     candidate_launcher = """
 if ($args[0] -eq "--help") { exit 0 }
 if ($args[0] -eq "version") { Write-Output "frame-compare 1.2.3"; exit 0 }
-if ($args[0] -eq "doctor") { Write-Output '{"success":true}'; exit 0 }
+if ($args[0] -eq "doctor") { Write-Output '{"success":true,"doctor":{"checks":[{"id":"ffmpeg","status":"pass"}]}}'; exit 0 }
 exit 1
 """
     installer = r"""
