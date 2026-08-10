@@ -453,6 +453,15 @@ unchanged.
   preserving those fields must advance the mtime or remove the relevant shared
   cache entry. This bounded stale-data risk is accepted to avoid reading potentially
   multi-gigabyte media solely for cache lookup.
+- Automatic decoder/tool cache invalidation and decoder-ABI index isolation are
+  guaranteed for the managed Windows portable and Debian/Docker profiles, whose
+  identities include their selected packaged runtime lineages. Unmanaged Windows,
+  Linux, and native macOS fingerprints intentionally encode only the selected Frame
+Compare contract and operating-system class; replacing native decoder or FFmpeg
+binaries outside those packaged profiles requires clearing generated caches and
+Frame Compare-owned indexes before reuse. See
+[Supported Media Runtime](supported-media-runtime.md) for the profile boundary and
+recovery requirement.
 - Analysis cache entries live under `<resolved paths.generated_dir>/cache/analysis`
   using labeled full-fingerprint filenames:
   `<safe-human-label>__<full-fingerprint>.compframes`.
@@ -472,8 +481,9 @@ unchanged.
   Different selected references, selected analysis sources, selection domains,
   performance modes, metric algorithm identities, scoped media-runtime analysis
   fingerprints, or active-rect metric domains from the same input set do not
-  satisfy each other. Decoder changes therefore invalidate metric arrays;
-  tone-mapping-only and standalone FFmpeg-only changes do not. When
+  satisfy each other. For the managed Windows portable and Debian/Docker profiles,
+  selected decoder changes therefore invalidate metric arrays; tone-mapping-only
+  and standalone FFmpeg-only changes do not. When
   `sources.analysis_source = "reference"`, `analysis_source_path` is the selected
   reference path. Prepared full-frame active rectangles represent no crop;
   explicit, metadata, dimension-derived, aspect-ratio-derived, or
@@ -493,19 +503,22 @@ unchanged.
 - The full fingerprint remains inside the cache payload and is validated on load.
   Legacy run-folder `cache.compframes` files are not used as analysis cache hits.
 - Probe-cache files remain on-disk format version 1, but key schema 2 includes the
-  scoped decoder/runtime fingerprint. A cache created by another decoder lineage
-  is a normal miss, including under `--from-cache-only` validation.
+  scoped decoder/runtime fingerprint. In the managed Windows portable and
+  Debian/Docker profiles, a cache created by another selected decoder lineage is a
+  normal miss, including under `--from-cache-only` validation.
 - Shared alignment reuse source-set identity includes the scoped standalone-FFmpeg
-  fingerprint. A supported FFmpeg lineage change cannot reuse an offset computed
-  under the previous tool build.
+  fingerprint. In the managed Windows portable and Debian/Docker profiles, a
+  selected supported FFmpeg lineage change cannot reuse an offset computed under the
+  previous tool build.
 - Frame Compare-owned L-SMASH-Works indexes use
   `<media>.frame-compare-lsw1296-<12-hex-index-fingerprint>.lwi`. The token is
   profile scoped (currently `lsw1296-e3c074652ffb` on managed/portable Windows,
   `lsw1296-6b9e50219ad0` on unmanaged Windows, and `lsw1296-4ea22a0b0598`
-  on Debian/Docker). Legacy adjacent `<media>.lwi` files are ignored rather than
-  deleted. A corrupt owned index is
-  removed and rebuilt once; removal/rebuild failure produces a warning and an
-  unusable index location retries source loading without an index.
+  on Debian/Docker). Managed Windows portable and Debian/Docker tokens isolate
+  their packaged decoder ABIs; unmanaged profile tokens do not verify native ABI
+  changes. Legacy adjacent `<media>.lwi` files are ignored rather than deleted. A
+  corrupt owned index is removed and rebuilt once; removal/rebuild failure produces
+  a warning and an unusable index location retries source loading without an index.
 - Analysis is skipped automatically when `dark_frame_count`, `bright_frame_count`,
   and `motion_frame_count` are all `0`; `frame_plan` still selects configured
   user/random frames. Every run that proceeds reserves a fresh run folder beneath

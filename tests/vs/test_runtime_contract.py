@@ -196,6 +196,21 @@ def test_authority_docs_use_tokens_calculated_by_runtime_contract(repo_root: Pat
     assert media_runtime_fingerprint("full", profile="windows-x64") in validation
 
 
+def test_authority_cache_docs_scope_managed_invalidation_and_unmanaged_clear(
+    repo_root: Path,
+) -> None:
+    for relative_path in (
+        "docs/current-architecture.md",
+        "docs/current-cli-contract.md",
+    ):
+        content = (repo_root / relative_path).read_text(encoding="utf-8")
+        assert "managed Windows portable and Debian/Docker profiles" in content
+        assert "unmanaged Windows" in content
+        assert "clearing generated caches and" in content
+        assert "Frame Compare-owned indexes before reuse" in content
+        assert "[Supported Media Runtime](supported-media-runtime.md)" in content
+
+
 def test_windows_manifest_fingerprints_match_code_contract(repo_root: Path) -> None:
     manifest = json.loads(
         (repo_root / "tools/windows_portable/manifest.windows-x64.json").read_text(encoding="utf-8")

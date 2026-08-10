@@ -176,6 +176,16 @@ purpose. A replacement that preserves all three identity fields is intentionally
 treated as the same source and can reuse cached data; workflows that replace media
 while preserving size and mtime must advance the mtime or remove the relevant cache.
 
+Automatic decoder/tool cache invalidation and decoder-ABI index isolation are
+guaranteed for the managed Windows portable and Debian/Docker profiles, whose
+identities include their selected packaged runtime lineages. Unmanaged Windows,
+Linux, and native macOS fingerprints intentionally encode only the selected Frame
+Compare contract and operating-system class; replacing native decoder or FFmpeg
+binaries outside those packaged profiles requires clearing generated caches and
+Frame Compare-owned indexes before reuse. See
+[Supported Media Runtime](supported-media-runtime.md) for the profile boundary and
+recovery requirement.
+
 - `config/config.toml` and `config/presets/*.toml`: config owners
 - `frame_compare.config.persistence`: secret-safe serialization shared by generated
   config and preset writes; runtime `slowpics.webhook_url` and `tmdb.api_key` values
@@ -191,7 +201,8 @@ while preserving size and mtime must advance the mtime or remove the relevant ca
   Cache schema v8 stores `analysis_source_path`, `performance_mode`,
   `algorithm_id`, `metric_backend`, stable `algorithm_identity_json`, and
   the scoped media-runtime analysis fingerprint through that algorithm identity. A
-  decoder lineage change cannot satisfy the previous metric cache, while tone-mapping-only
+  For the managed Windows portable and Debian/Docker profiles, a selected decoder
+  lineage change cannot satisfy the previous metric cache, while tone-mapping-only
   and standalone FFmpeg changes do not invalidate metric arrays. It also stores
   `metric_active_rect`, active-rect source, detection mode, and active-rect
   resolver algorithm ID in `MetricsMetadata`. It also stores the original source
@@ -216,9 +227,10 @@ while preserving size and mtime must advance the mtime or remove the relevant ca
   VSPreview-confirmed offsets keyed by a typed source-set identity, source
   fingerprints, source trims, effective FPS values, selected reference
   relationship, selected audio streams, alignment settings that affect
-  computed offsets, and the scoped media-runtime alignment fingerprint. A change
-  to the supported standalone FFmpeg lineage therefore misses cleanly rather than
-  reusing offsets computed by a different decoder/tool build. VSPreview-confirmed
+  computed offsets, and the scoped media-runtime alignment fingerprint. For the
+  managed Windows portable and Debian/Docker profiles, a selected standalone FFmpeg
+  lineage change therefore misses cleanly rather than reusing offsets computed by a
+  different decoder/tool build. VSPreview-confirmed
   entries may also retain the computed
   audio alignment result that produced the preview suggestion so a later run can
   decline the human-confirmed offset without rerunning deterministic audio
@@ -231,13 +243,15 @@ while preserving size and mtime must advance the mtime or remove the relevant ca
   shared clip probe cache used by `--from-cache-only` prevalidation before
   run-folder reservation. The file format remains version 1, while each probe key
   uses key schema 2 and includes the scoped media-runtime probe fingerprint so a
-  decoder-lineage change misses without invalidating unrelated file-format data.
+  selected decoder-lineage change in the managed Windows portable or Debian/Docker
+  profiles misses without invalidating unrelated file-format data.
 - `<media>.frame-compare-lsw1296-<12-hex-index-fingerprint>.lwi`: Frame
   Compare-owned L-SMASH-Works index. The token is profile scoped (currently
   `lsw1296-e3c074652ffb` on managed/portable Windows,
   `lsw1296-6b9e50219ad0` on unmanaged Windows, and `lsw1296-4ea22a0b0598`
-  on Debian/Docker), so indexes cannot cross decoder ABIs. Legacy adjacent
-  `<media>.lwi` files are ignored,
+  on Debian/Docker). Managed Windows portable and Debian/Docker tokens isolate
+  their packaged decoder ABIs; unmanaged profile tokens do not verify native ABI
+  changes. Legacy adjacent `<media>.lwi` files are ignored,
   not deleted. A corrupt owned index is removed and rebuilt once; removal/rebuild
   failure is warned and an unusable index location falls back to a cache-free source
   open.
