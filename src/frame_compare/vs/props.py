@@ -29,7 +29,10 @@ def get_optional_int_prop(props: Mapping[str, object], key: str) -> int | None:
     if isinstance(val, Enum):
         val = cast(object, val.value)
     if isinstance(val, (int, float)):
-        return int(val)
+        try:
+            return int(val)
+        except (ValueError, OverflowError):
+            return None
     if isinstance(val, (bytes, str)):
         try:
             return int(val)
@@ -165,11 +168,17 @@ def detect_hdr(
 
 
 def hdr_signal_is_unspecified(frame_props: Mapping[str, object]) -> bool:
-    """Return whether any frame color signal needs metadata backfill."""
-    return any(
-        _specified_color_signal(frame_props, key) is None
-        for key in ("_Transfer", "_Primaries", "_Matrix")
-    )
+    """Return whether probing can affect HDR classification or complete HDR metadata."""
+    transfer = _specified_color_signal(frame_props, "_Transfer")
+    primaries = _specified_color_signal(frame_props, "_Primaries")
+
+    if transfer is None:
+        return primaries is None or primaries == 9
+    if primaries is None:
+        return transfer in {16, 18}
+
+    is_hdr = transfer in {16, 18} and primaries == 9
+    return is_hdr and _specified_color_signal(frame_props, "_Matrix") is None
 
 
 def _specified_color_signal(frame_props: Mapping[str, object], key: str) -> int | None:

@@ -63,15 +63,8 @@ def test_probe_hdr_metadata_preserves_explicit_sdr(monkeypatch: pytest.MonkeyPat
     assert metadata.matrix == 1
 
 
-@pytest.mark.parametrize(
-    "payload",
-    [
-        b'{"streams":[]}',
-        b'{"streams":[{}]}',
-        b'{"streams":[{"color_transfer":"unknown","color_primaries":"bt2020"}]}',
-    ],
-)
-def test_probe_hdr_metadata_returns_none_for_missing_or_unknown_signal(
+@pytest.mark.parametrize("payload", [b'{"streams":[]}', b'{"streams":[{}]}'])
+def test_probe_hdr_metadata_returns_none_without_recognized_signal(
     monkeypatch: pytest.MonkeyPatch,
     payload: bytes,
 ) -> None:
@@ -81,6 +74,40 @@ def test_probe_hdr_metadata_returns_none_for_missing_or_unknown_signal(
     )
 
     assert probe_hdr_metadata(Path("unknown.mkv")) is None
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_transfer", "expected_primaries"),
+    [
+        (
+            b'{"streams":[{"color_transfer":"unknown","color_primaries":"bt2020"}]}',
+            2,
+            9,
+        ),
+        (
+            b'{"streams":[{"color_transfer":"smpte2084","color_primaries":"unknown"}]}',
+            16,
+            2,
+        ),
+    ],
+)
+def test_probe_hdr_metadata_preserves_recognized_partial_signal(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: bytes,
+    expected_transfer: int,
+    expected_primaries: int,
+) -> None:
+    monkeypatch.setattr(
+        "frame_compare.vs.hdr_probe.run_subprocess",
+        lambda _argv, *, timeout_seconds: _completed(payload),
+    )
+
+    metadata = probe_hdr_metadata(Path("partial.mkv"))
+
+    assert metadata is not None
+    assert metadata.transfer == expected_transfer
+    assert metadata.color_primaries == expected_primaries
+    assert metadata.matrix == 2
 
 
 @pytest.mark.parametrize("payload", [b"not-json", b"[]"])

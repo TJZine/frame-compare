@@ -62,8 +62,9 @@ def probe_hdr_metadata(video: Path) -> HDRMetadata | None:
     matrix_raw = _normalized_string(stream.get("color_space"))
     color_primaries = _PRIMARIES_BY_NAME.get(primaries_raw, 2)
     transfer = _TRANSFER_BY_NAME.get(transfer_raw, 2)
+    matrix = _MATRIX_BY_NAME.get(matrix_raw, 2)
 
-    if color_primaries == 2 or transfer == 2:
+    if color_primaries == 2 and transfer == 2 and matrix == 2:
         return None
 
     return HDRMetadata(
@@ -72,7 +73,7 @@ def probe_hdr_metadata(video: Path) -> HDRMetadata | None:
         max_fall=None,
         color_primaries=color_primaries,
         transfer=transfer,
-        matrix=_MATRIX_BY_NAME.get(matrix_raw, 2),
+        matrix=matrix,
     )
 
 

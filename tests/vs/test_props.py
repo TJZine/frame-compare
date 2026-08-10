@@ -59,6 +59,11 @@ def test_get_optional_int_prop():
     assert get_optional_int_prop({"enum_val": _ExampleEnum.VALUE}, "enum_val") == 9
 
 
+def test_get_optional_int_prop_treats_non_finite_numbers_as_unavailable() -> None:
+    for value in (float("nan"), float("inf"), float("-inf")):
+        assert get_optional_int_prop({"value": value}, "value") is None
+
+
 def test_get_str_prop():
     """Verify get_str_prop behaves correctly with different types."""
     props = {

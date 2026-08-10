@@ -568,6 +568,42 @@ def test_load_source_merges_partial_frame_signal_before_hdr_classification(
     assert source.hdr_metadata == HDRMetadata("frame mastering", 1000, 400, 9, 16, 9)
 
 
+@pytest.mark.parametrize(
+    ("props", "probed_metadata"),
+    [
+        (
+            {"_Transfer": 16, "_Primaries": 2, "_Matrix": 9},
+            (9, 2, 2),
+        ),
+        (
+            {"_Transfer": 2, "_Primaries": 9, "_Matrix": 9},
+            (2, 16, 2),
+        ),
+    ],
+)
+def test_load_source_combines_partial_frame_and_probe_signal_for_hdr(
+    monkeypatch: pytest.MonkeyPatch,
+    props: dict[str, object],
+    probed_metadata: tuple[int, int, int],
+) -> None:
+    from frame_compare.vs.types import HDRMetadata
+
+    core = SimpleNamespace(
+        lsmas=SimpleNamespace(LWLibavSource=lambda _p, **_kwargs: MockClip(frame_props=props))
+    )
+    primaries, transfer, matrix = probed_metadata
+    monkeypatch.setattr(
+        source_module,
+        "probe_hdr_metadata",
+        lambda _path: HDRMetadata(None, None, None, primaries, transfer, matrix),
+    )
+
+    source = load_source("video.mkv", core)  # type: ignore[arg-type]
+
+    assert source.is_hdr is True
+    assert source.hdr_metadata == HDRMetadata(None, None, None, 9, 16, 9)
+
+
 def test_load_source_backfills_malformed_matrix_without_overriding_explicit_signal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -587,14 +623,18 @@ def test_load_source_backfills_malformed_matrix_without_overriding_explicit_sign
     probe.assert_called_once_with(Path("video.mkv"))
 
 
+@pytest.mark.parametrize("matrix", [None, "malformed"])
 def test_load_source_keeps_explicit_sdr_without_ffprobe(
     monkeypatch: pytest.MonkeyPatch,
+    matrix: object,
 ) -> None:
-    props = {"_Transfer": 1, "_Primaries": 1, "_Matrix": 1}
+    props: dict[str, object] = {"_Transfer": 1, "_Primaries": 1}
+    if matrix is not None:
+        props["_Matrix"] = matrix
     core = SimpleNamespace(
         lsmas=SimpleNamespace(LWLibavSource=lambda _p, **_kwargs: MockClip(frame_props=props))
     )
-    probe_hdr_metadata = MagicMock()
+    probe_hdr_metadata = MagicMock(side_effect=RuntimeError("ffprobe failed"))
     monkeypatch.setattr(source_module, "probe_hdr_metadata", probe_hdr_metadata)
 
     source = load_source("video.mkv", core)  # type: ignore[arg-type]
