@@ -1046,25 +1046,21 @@ def test_extracted_bundle_verifier_propagates_launcher_failures(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows process-tree semantics required")
-def test_extracted_bundle_verifier_times_out_and_terminates_descendants(
+def test_extracted_bundle_verifier_streams_flood_evidence_before_timeout(
     repo_root: Path,
     tmp_path: Path,
 ) -> None:
     if shutil.which("pwsh") is None:
         pytest.skip("PowerShell 7 is required")
-    descendant_started = tmp_path / "descendant-started.txt"
-    descendant_sentinel = tmp_path / "descendant-survived.txt"
-    escaped_started = str(descendant_started).replace("'", "''")
-    escaped_sentinel = str(descendant_sentinel).replace("'", "''")
-    candidate_launcher = f"""
-if ($args[0] -eq "--help") {{
-  Start-Process -FilePath (Join-Path $PSHOME "pwsh.exe") -ArgumentList @(
-    "-NoProfile",
-    "-Command",
-    "Set-Content -LiteralPath '{escaped_started}' -Value started; Start-Sleep -Seconds 6; Set-Content -LiteralPath '{escaped_sentinel}' -Value survived"
-  ) | Out-Null
+    candidate_launcher = """
+if ($args[0] -eq "--help") {
+  $line = "x" * 1024
+  for ($index = 0; $index -lt 20000; $index++) {
+    [Console]::Out.WriteLine("stdout-$index-$line")
+    [Console]::Error.WriteLine("stderr-$index-$line")
+  }
   Start-Sleep -Seconds 30
-}}
+}
 exit 1
 """
     zip_path = _write_extracted_verifier_fixture(
@@ -1086,7 +1082,51 @@ exit 1
     assert "command=candidate_launcher_--help timed_out=true" in output
     assert "cleanup_complete=True" in output
     assert "candidate_launcher_--help timed out after 3 seconds" in output
-    assert "its process tree was terminated" in output
+    assert "its process job was terminated" in output
+    evidence = tmp_path / "fresh-extract/command-evidence"
+    assert (evidence / "candidate_launcher_--help.stdout.txt").stat().st_size > 0
+    assert (evidence / "candidate_launcher_--help.stderr.txt").stat().st_size > 0
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows process-tree semantics required")
+def test_extracted_bundle_verifier_closes_deadline_exit_descendants(
+    repo_root: Path,
+    tmp_path: Path,
+) -> None:
+    if shutil.which("pwsh") is None:
+        pytest.skip("PowerShell 7 is required")
+    descendant_started = tmp_path / "descendant-started.txt"
+    descendant_sentinel = tmp_path / "descendant-survived.txt"
+    escaped_started = str(descendant_started).replace("'", "''")
+    escaped_sentinel = str(descendant_sentinel).replace("'", "''")
+    candidate_launcher = f"""
+if ($args[0] -eq "--help") {{
+  Start-Process -FilePath (Join-Path $PSHOME "pwsh.exe") -ArgumentList @(
+    "-NoProfile",
+    "-Command",
+    "Set-Content -LiteralPath '{escaped_started}' -Value started; Start-Sleep -Seconds 6; Set-Content -LiteralPath '{escaped_sentinel}' -Value survived"
+  ) | Out-Null
+  Start-Sleep -Seconds 3
+  exit 0
+}}
+exit 1
+"""
+    zip_path = _write_extracted_verifier_fixture(
+        repo_root=repo_root,
+        tmp_path=tmp_path,
+        candidate_launcher=candidate_launcher,
+    )
+
+    result = _run_extracted_bundle_verifier(
+        repo_root=repo_root,
+        zip_path=zip_path,
+        extract_root=tmp_path / "fresh-extract",
+        local_app_data=tmp_path / "local-app-data",
+        command_timeout_seconds=3,
+    )
+
+    assert result.returncode != 0
+    assert "command=candidate_launcher_--help" in _normalized_process_output(result)
     assert descendant_started.is_file()
     time.sleep(7)
     assert not descendant_sentinel.exists()
@@ -1234,9 +1274,19 @@ def test_windows_portable_extracted_bundle_verifier_owns_hosted_and_manual_parit
     assert '"-EncodedCommand"' in verifier
     assert "$startInfo.ArgumentList.Add($processArgument)" in verifier
     assert "$process.WaitForExit($CommandTimeoutSeconds * 1000)" in verifier
-    assert "$process.Kill($true)" in verifier
+    assert "JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE" in verifier
+    assert "AssignProcessToJobObject" in verifier
+    assert "TerminateJobObject" in verifier
+    assert "$job.Assign($process)" in verifier
+    assert "$startGate.Set()" in verifier
+    assert verifier.index("$job.Assign($process)") < verifier.index("$startGate.Set()")
+    assert "$process.Kill($true)" not in verifier
     assert "$process.WaitForExit(10000)" in verifier
-    assert "its process tree was terminated" in verifier
+    assert "its process job was terminated" in verifier
+    assert ".BaseStream.CopyToAsync(" in verifier
+    assert "ReadToEndAsync" not in verifier
+    assert "StdoutReadLimitBytes 65536" in verifier
+    assert "StdoutReadLimitBytes 4194304" in verifier
     assert 'throw "Unsafe ZIP entry path: $EntryName"' in verifier
     assert "ExtractRoot must name a dedicated verification directory" in verifier
     assert "ExtractRoot must not already exist" in verifier

@@ -43,7 +43,14 @@ def test_windows_portable_workflow_delegates_extracted_bundle_verification(
     ):
         assert verifier_source.count(f'-Label "{label}"') == 1
     assert "-CommandTimeoutSeconds 300" in verify_step["run"]
-    assert "$process.Kill($true)" in verifier_source
+    assert "JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE" in verifier_source
+    assert "$job.Assign($process)" in verifier_source
+    assert "$startGate.Set()" in verifier_source
+    assert verifier_source.index("$job.Assign($process)") < verifier_source.index(
+        "$startGate.Set()"
+    )
+    assert ".BaseStream.CopyToAsync(" in verifier_source
+    assert "ReadToEndAsync" not in verifier_source
     assert "Candidate doctor FFmpeg check did not pass exactly once" in source
     assert "Extracted candidate doctor FFmpeg check did not pass exactly once" in verifier_source
     assert "dist/frame-compare-portable-win-x64" in source

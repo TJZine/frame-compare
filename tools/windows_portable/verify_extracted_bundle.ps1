@@ -64,12 +64,127 @@ foreach ($doctorPath in @($DoctorStdoutPath, $DoctorStderrPath)) {
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 Add-Type @"
 using System;
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 public static class FrameCompareNativeDirectory {
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool CreateDirectory(string path, IntPtr securityAttributes);
+}
+
+public sealed class FrameCompareProcessJob : IDisposable {
+    private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
+    private IntPtr handle;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IoCounters {
+        public ulong ReadOperationCount;
+        public ulong WriteOperationCount;
+        public ulong OtherOperationCount;
+        public ulong ReadTransferCount;
+        public ulong WriteTransferCount;
+        public ulong OtherTransferCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BasicLimitInformation {
+        public long PerProcessUserTimeLimit;
+        public long PerJobUserTimeLimit;
+        public uint LimitFlags;
+        public UIntPtr MinimumWorkingSetSize;
+        public UIntPtr MaximumWorkingSetSize;
+        public uint ActiveProcessLimit;
+        public UIntPtr Affinity;
+        public uint PriorityClass;
+        public uint SchedulingClass;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ExtendedLimitInformation {
+        public BasicLimitInformation BasicLimitInformation;
+        public IoCounters IoInfo;
+        public UIntPtr ProcessMemoryLimit;
+        public UIntPtr JobMemoryLimit;
+        public UIntPtr PeakProcessMemoryUsed;
+        public UIntPtr PeakJobMemoryUsed;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateJobObject(IntPtr securityAttributes, string name);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetInformationJobObject(
+        IntPtr job,
+        int informationClass,
+        IntPtr information,
+        uint informationLength
+    );
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool TerminateJobObject(IntPtr job, uint exitCode);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    public FrameCompareProcessJob() {
+        handle = CreateJobObject(IntPtr.Zero, null);
+        if (handle == IntPtr.Zero) {
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not create command job object.");
+        }
+
+        var limits = new ExtendedLimitInformation();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        int size = Marshal.SizeOf(limits);
+        IntPtr buffer = Marshal.AllocHGlobal(size);
+        try {
+            Marshal.StructureToPtr(limits, buffer, false);
+            if (!SetInformationJobObject(handle, 9, buffer, (uint)size)) {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    "Could not configure command job object."
+                );
+            }
+        } catch {
+            Dispose();
+            throw;
+        } finally {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    public void Assign(Process process) {
+        if (!AssignProcessToJobObject(handle, process.Handle)) {
+            throw new Win32Exception(
+                Marshal.GetLastWin32Error(),
+                "Could not assign command process to its job object."
+            );
+        }
+    }
+
+    public void Terminate(uint exitCode) {
+        if (!TerminateJobObject(handle, exitCode)) {
+            throw new Win32Exception(
+                Marshal.GetLastWin32Error(),
+                "Could not terminate command job object."
+            );
+        }
+    }
+
+    public void Dispose() {
+        if (handle != IntPtr.Zero) {
+            CloseHandle(handle);
+            handle = IntPtr.Zero;
+        }
+    }
 }
 "@
 
@@ -719,7 +834,9 @@ function Invoke-BoundedCommand(
   [string]$FilePath,
   [string[]]$ArgumentList = @(),
   [string]$StdoutPath = (Join-Path $commandEvidenceDirectory "$Label.stdout.txt"),
-  [string]$StderrPath = (Join-Path $commandEvidenceDirectory "$Label.stderr.txt")
+  [string]$StderrPath = (Join-Path $commandEvidenceDirectory "$Label.stderr.txt"),
+  [ValidateRange(0, 16777216)]
+  [int]$StdoutReadLimitBytes = 0
 ) {
   foreach ($outputPath in @($StdoutPath, $StderrPath)) {
     New-Item -ItemType Directory -Path (Split-Path -Parent $outputPath) -Force | Out-Null
@@ -733,7 +850,14 @@ function Invoke-BoundedCommand(
   $payloadBase64 = [Convert]::ToBase64String(
     [System.Text.Encoding]::UTF8.GetBytes($commandPayload)
   )
+  $gateName = "Local\FrameCompareVerifier-$([guid]::NewGuid().ToString('N'))"
   $commandText = @"
+`$startGate = [System.Threading.EventWaitHandle]::OpenExisting("$gateName")
+try {
+  `$startGate.WaitOne() | Out-Null
+} finally {
+  `$startGate.Dispose()
+}
 `$payloadJson = [System.Text.Encoding]::UTF8.GetString(
   [Convert]::FromBase64String("$payloadBase64")
 )
@@ -762,72 +886,95 @@ exit `$LASTEXITCODE
   }
   $process = [System.Diagnostics.Process]::new()
   $process.StartInfo = $startInfo
-  if (-not $process.Start()) {
-    $process.Dispose()
-    throw "$Label could not be started: $FilePath"
-  }
-  $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-  $stderrTask = $process.StandardError.ReadToEndAsync()
-  $streamTasks = [System.Threading.Tasks.Task[]]@($stdoutTask, $stderrTask)
-  $timedOut = -not $process.WaitForExit($CommandTimeoutSeconds * 1000)
-  if ($timedOut) {
-    $cleanupError = $null
-    try {
-      $process.Kill($true)
-    } catch [System.InvalidOperationException] {
-      # The command exited between the deadline check and the termination request.
-    } catch {
-      $cleanupError = $_.Exception.Message
+  $job = $null
+  $startGate = $null
+  $stdoutStream = $null
+  $stderrStream = $null
+  $started = $false
+  $assigned = $false
+  try {
+    $job = [FrameCompareProcessJob]::new()
+    $startGate = [System.Threading.EventWaitHandle]::new(
+      $false,
+      [System.Threading.EventResetMode]::ManualReset,
+      $gateName
+    )
+    $stdoutStream = [System.IO.FileStream]::new(
+      $StdoutPath,
+      [System.IO.FileMode]::Open,
+      [System.IO.FileAccess]::Write,
+      [System.IO.FileShare]::ReadWrite
+    )
+    $stderrStream = [System.IO.FileStream]::new(
+      $StderrPath,
+      [System.IO.FileMode]::Open,
+      [System.IO.FileAccess]::Write,
+      [System.IO.FileShare]::ReadWrite
+    )
+    if (-not $process.Start()) {
+      throw "$Label could not be started: $FilePath"
     }
+    $started = $true
+    $stdoutTask = $process.StandardOutput.BaseStream.CopyToAsync($stdoutStream, 65536)
+    $stderrTask = $process.StandardError.BaseStream.CopyToAsync($stderrStream, 65536)
+    $streamTasks = [System.Threading.Tasks.Task[]]@($stdoutTask, $stderrTask)
+    $job.Assign($process)
+    $assigned = $true
+    $startGate.Set() | Out-Null
+
+    $timedOut = -not $process.WaitForExit($CommandTimeoutSeconds * 1000)
+    $exitCode = if ($timedOut) { $null } else { $process.ExitCode }
+    if ($timedOut) {
+      $job.Terminate(124)
+    }
+    $job.Dispose()
     $processExited = $process.WaitForExit(10000)
     $streamsClosed = $processExited -and [System.Threading.Tasks.Task]::WaitAll(
       $streamTasks,
       10000
     )
-    $cleanedUp = $processExited -and $streamsClosed
-    Write-Host "WINDOWS_EXTRACTED_PROOF command=$Label timed_out=true timeout_seconds=$CommandTimeoutSeconds cleanup_complete=$cleanedUp"
-    if ($streamsClosed) {
-      $stdout = $stdoutTask.GetAwaiter().GetResult()
-      $stderr = $stderrTask.GetAwaiter().GetResult()
-      [System.IO.File]::WriteAllText($StdoutPath, $stdout, [System.Text.UTF8Encoding]::new($false))
-      [System.IO.File]::WriteAllText($StderrPath, $stderr, [System.Text.UTF8Encoding]::new($false))
-      if (-not [string]::IsNullOrEmpty($stdout)) {
-        [Console]::Out.Write($stdout)
+    $stdoutStream.Flush()
+    $stderrStream.Flush()
+
+    if ($timedOut) {
+      $cleanedUp = $processExited -and $streamsClosed
+      Write-Host "WINDOWS_EXTRACTED_PROOF command=$Label timed_out=true timeout_seconds=$CommandTimeoutSeconds cleanup_complete=$cleanedUp"
+      if (-not $cleanedUp) {
+        throw "$Label timed out after $CommandTimeoutSeconds seconds and its process job did not close within 10 seconds: stdout=$StdoutPath stderr=$StderrPath"
       }
-      if (-not [string]::IsNullOrEmpty($stderr)) {
-        [Console]::Error.Write($stderr)
-      }
+      throw "$Label timed out after $CommandTimeoutSeconds seconds; its process job was terminated: stdout=$StdoutPath stderr=$StderrPath"
     }
+    if (-not $streamsClosed) {
+      throw "$Label exited but its output streams did not close within 10 seconds: stdout=$StdoutPath stderr=$StderrPath"
+    }
+  } finally {
+    if ($started -and -not $assigned -and -not $process.HasExited) {
+      $process.Kill()
+      $process.WaitForExit(10000) | Out-Null
+    }
+    if ($null -ne $startGate) { $startGate.Dispose() }
+    if ($null -ne $job) { $job.Dispose() }
+    if ($null -ne $stdoutStream) { $stdoutStream.Dispose() }
+    if ($null -ne $stderrStream) { $stderrStream.Dispose() }
     $process.Dispose()
-    if (-not $cleanedUp -or $null -ne $cleanupError) {
-      throw "$Label timed out after $CommandTimeoutSeconds seconds and its process tree could not be terminated within 10 seconds: cleanup_error=$cleanupError stdout=$StdoutPath stderr=$StderrPath"
-    }
-    throw "$Label timed out after $CommandTimeoutSeconds seconds; its process tree was terminated: stdout=$StdoutPath stderr=$StderrPath"
   }
 
-  $exitCode = $process.ExitCode
-  if (-not [System.Threading.Tasks.Task]::WaitAll($streamTasks, 10000)) {
-    $process.Dispose()
-    throw "$Label exited but its output streams did not close within 10 seconds: stdout=$StdoutPath stderr=$StderrPath"
-  }
-  $stdout = $stdoutTask.GetAwaiter().GetResult()
-  $stderr = $stderrTask.GetAwaiter().GetResult()
-  $process.Dispose()
-  [System.IO.File]::WriteAllText($StdoutPath, $stdout, [System.Text.UTF8Encoding]::new($false))
-  [System.IO.File]::WriteAllText($StderrPath, $stderr, [System.Text.UTF8Encoding]::new($false))
-  if (-not [string]::IsNullOrEmpty($stdout)) {
-    [Console]::Out.Write($stdout)
-  }
-  if (-not [string]::IsNullOrEmpty($stderr)) {
-    [Console]::Error.Write($stderr)
-  }
   Write-Host "WINDOWS_EXTRACTED_PROOF command=$Label exit_code=$exitCode"
   if ($exitCode -ne 0) {
-    throw "$Label failed with exit code $exitCode"
+    throw "$Label failed with exit code ${exitCode}: stdout=$StdoutPath stderr=$StderrPath"
+  }
+  $stdout = $null
+  if ($StdoutReadLimitBytes -gt 0) {
+    $stdoutLength = (Get-Item -LiteralPath $StdoutPath).Length
+    if ($stdoutLength -gt $StdoutReadLimitBytes) {
+      throw "$Label stdout exceeds the $StdoutReadLimitBytes-byte read limit: $StdoutPath"
+    }
+    $stdout = [System.IO.File]::ReadAllText($StdoutPath, [System.Text.Encoding]::UTF8)
   }
   return [PSCustomObject]@{
-    Stdout = $stdout.TrimEnd("`r", "`n")
-    Stderr = $stderr.TrimEnd("`r", "`n")
+    Stdout = if ($null -eq $stdout) { $null } else { $stdout.TrimEnd("`r", "`n") }
+    StdoutPath = $StdoutPath
+    StderrPath = $StderrPath
   }
 }
 
@@ -842,7 +989,8 @@ $null = Invoke-BoundedCommand `
 $candidateVersion = Invoke-BoundedCommand `
   -Label "candidate_launcher_version" `
   -FilePath $candidateLauncher `
-  -ArgumentList @("version")
+  -ArgumentList @("version") `
+  -StdoutReadLimitBytes 65536
 $candidateVersionOutput = $candidateVersion.Stdout
 if ($candidateVersionOutput -cne "frame-compare $appVersion") {
   throw "Candidate launcher version does not match bundle inventory: expected=$appVersion actual=$candidateVersionOutput"
@@ -853,14 +1001,15 @@ $doctorErrorDirectory = Split-Path -Parent $DoctorStderrPath
 New-Item -ItemType Directory -Path $doctorOutputDirectory -Force | Out-Null
 New-Item -ItemType Directory -Path $doctorErrorDirectory -Force | Out-Null
 
-$null = Invoke-BoundedCommand `
+$candidateDoctor = Invoke-BoundedCommand `
   -Label "candidate_launcher_doctor_--json" `
   -FilePath $candidateLauncher `
   -ArgumentList @("doctor", "--json") `
   -StdoutPath $DoctorStdoutPath `
-  -StderrPath $DoctorStderrPath
+  -StderrPath $DoctorStderrPath `
+  -StdoutReadLimitBytes 4194304
 
-$doctorJson = Get-Content -LiteralPath $DoctorStdoutPath -Raw
+$doctorJson = $candidateDoctor.Stdout
 try {
   $doctorPayload = $doctorJson | ConvertFrom-Json -NoEnumerate -ErrorAction Stop
 } catch {
@@ -902,7 +1051,8 @@ if (-not $installedBundlePath.Equals($bundle, [System.StringComparison]::Ordinal
 $installedVersion = Invoke-BoundedCommand `
   -Label "installed_shim_version" `
   -FilePath $installedShim `
-  -ArgumentList @("version")
+  -ArgumentList @("version") `
+  -StdoutReadLimitBytes 65536
 $versionOutput = $installedVersion.Stdout
 if ($versionOutput -notmatch "^frame-compare \d+\.\d+\.\d+") {
   throw "Unexpected version output from installed shim: $versionOutput"

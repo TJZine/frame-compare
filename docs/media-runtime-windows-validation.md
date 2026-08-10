@@ -161,10 +161,13 @@ and installed-shim parity. Every command it reports must exit `0`; a thrown asse
 is a failed check. The verifier atomically reserves the fresh extraction root, writes
 without overwrite, and retains extracted evidence after any later failure. Its
 expected commit argument must be the recorded detached pull-request head used to build
-the candidate. Each external command has a five-minute deadline; a timeout terminates
-the command's process tree, fails the verifier, and retains stdout/stderr under the
-extraction root's `command-evidence` directory (with doctor output kept at the exact
-paths supplied below).
+the candidate. Each external command is assigned to a kill-on-close Windows Job Object
+before its gated payload starts. Its stdout/stderr streams are copied incrementally to
+files with bounded buffers rather than retained in verifier memory. Each command has a
+five-minute deadline; a timeout terminates the complete job, fails the verifier, and
+retains the output written so far under the extraction root's `command-evidence`
+directory (with doctor output kept at the exact paths supplied below). Version stdout
+is reread only after success with a 64 KiB limit, and doctor JSON with a 4 MiB limit.
 
 ```powershell
 $Zip = (Resolve-Path 'dist\frame-compare-portable-win-x64.zip').Path
