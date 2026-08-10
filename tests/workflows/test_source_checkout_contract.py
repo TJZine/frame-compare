@@ -168,6 +168,29 @@ def _timeout_shim(tmp_path: Path) -> Path:
     return shim
 
 
+def _timeout_exit_shim(tmp_path: Path, status: int) -> Path:
+    if status not in (124, 137):
+        raise ValueError(f"unsupported timeout status for test shim: {status}")
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    shim = bin_dir / "timeout"
+    shim.write_text(
+        "#!/bin/sh\n"
+        'while [ "$#" -gt 0 ]; do\n'
+        '  case "$1" in\n'
+        "    --signal=*|--kill-after=*) shift ;;\n"
+        "    *) break ;;\n"
+        "  esac\n"
+        "done\n"
+        "shift\n"
+        f"exit {status}\n",
+        encoding="utf-8",
+    )
+    shim.chmod(0o755)
+    return shim
+
+
 def _race_git_shim(tmp_path: Path) -> Path:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
@@ -354,6 +377,38 @@ def test_source_checkout_cleans_owned_destination_on_failure(
         assert f"source-tree mismatch: expected={requested_tree}" in completed.stderr
     else:
         assert "git fetch failed" in completed.stderr
+
+
+@pytest.mark.parametrize(
+    ("timeout_status", "expected_message"),
+    [
+        (124, "git init timed out after 300s"),
+        (137, "git init timed out or was killed after 300s (exit status 137)"),
+    ],
+)
+@_POSIX_PROCESS_PROOF
+def test_source_checkout_maps_timeout_status_and_cleans_staging(
+    repo_root: Path,
+    tmp_path: Path,
+    timeout_status: int,
+    expected_message: str,
+) -> None:
+    destination = tmp_path / f"timed-out-{timeout_status}"
+    completed = _run_checkout(
+        repo_root,
+        repo_root / "tools/checkout_source_commit.sh",
+        _timeout_exit_shim(tmp_path, timeout_status),
+        Path("/nonexistent-source-repository"),
+        "0" * 40,
+        "0" * 64,
+        destination,
+    )
+
+    assert completed.returncode == timeout_status
+    assert completed.stdout == ""
+    assert completed.stderr == f"{expected_message}\n"
+    assert not destination.exists()
+    assert not list(tmp_path.glob(f".{destination.name}.staging.*"))
 
 
 @_POSIX_PROCESS_PROOF
