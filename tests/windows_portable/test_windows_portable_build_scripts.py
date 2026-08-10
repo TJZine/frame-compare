@@ -689,7 +689,7 @@ def _assert_descendant_exited(*, pwsh: str, started: Path) -> None:
             "-NoProfile",
             "-Command",
             (
-                "$targetProcessId = [int]$args[0]; "
+                "$targetProcessId = [int]$env:FRAME_COMPARE_TEST_DESCENDANT_PID; "
                 "try { "
                 "$process = [System.Diagnostics.Process]::GetProcessById($targetProcessId) "
                 "} catch [System.ArgumentException] { exit 0 }; "
@@ -704,12 +704,12 @@ def _assert_descendant_exited(*, pwsh: str, started: Path) -> None:
                 "}; "
                 "$process.Dispose()"
             ),
-            str(descendant_pid),
         ],
         capture_output=True,
         text=True,
         timeout=22,
         check=False,
+        env=os.environ | {"FRAME_COMPARE_TEST_DESCENDANT_PID": str(descendant_pid)},
     )
     assert result.returncode == 0, (
         f"descendant process {descendant_pid} remained alive after verifier cleanup: "
