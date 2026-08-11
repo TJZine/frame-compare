@@ -5,7 +5,6 @@ These tests do NOT require VSPreview, VapourSynth, FFmpeg, or any display.
 
 from __future__ import annotations
 
-import io
 import json
 import subprocess
 import sys
@@ -20,6 +19,7 @@ from frame_compare.vspreview.adapter import (
     VSPreviewAvailabilityStatus,
     VSPreviewConfig,
     VSPreviewSessionRequest,
+    _resolve_launch_command,
     check_vspreview_availability,
     launch_alignment_verification_session,
 )
@@ -32,8 +32,7 @@ from frame_compare.vspreview.session_script import (
 
 
 class _FakeVSPreviewProcess:
-    def __init__(self, stderr: str = "", returncode: int = 0) -> None:
-        self.stderr = io.StringIO(stderr)
+    def __init__(self, returncode: int = 0) -> None:
         self._returncode = returncode
 
     def __enter__(self) -> _FakeVSPreviewProcess:
@@ -44,6 +43,25 @@ class _FakeVSPreviewProcess:
 
     def wait(self) -> int:
         return self._returncode
+
+
+def test_portable_windows_launch_preloads_media_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("frame_compare.vspreview.adapter.runtime_kind", lambda: "windows-portable")
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.shutil.which",
+        lambda _command: pytest.fail("portable launch must not select an external executable"),
+    )
+
+    script_path = Path("generated/session.py")
+
+    assert _resolve_launch_command(script_path) == [
+        sys.executable,
+        "-m",
+        "frame_compare.vspreview.launcher",
+        str(script_path),
+    ]
 
 
 def _execute_generated_script(
@@ -185,9 +203,10 @@ def test_launch_alignment_verification_session_waits_for_vspreview_completion(
     assert "timeout" not in kwargs
     assert kwargs["stdin"] is None
     assert kwargs["stdout"] is None
-    assert kwargs["stderr"] is subprocess.PIPE
-    assert kwargs["text"] is True
-    assert kwargs["errors"] == "replace"
+    assert kwargs["stderr"] is None
+    assert "text" not in kwargs
+    assert "errors" not in kwargs
+    assert "bufsize" not in kwargs
 
 
 def test_launch_alignment_verification_session_writes_launch_telemetry_to_stderr(
@@ -321,6 +340,12 @@ def test_launch_alignment_verification_session_reports_nonzero_exit(
         "frame_compare.vspreview.adapter._resolve_launch_command",
         lambda script_path: ["vspreview", str(script_path)],
     )
+    warnings: list[tuple[str, dict[str, object]]] = []
+
+    def _capture_warning(event: str, **kwargs: object) -> None:
+        warnings.append((event, kwargs))
+
+    monkeypatch.setattr("frame_compare.vspreview.adapter.log.warning", _capture_warning)
     monkeypatch.setattr(
         "frame_compare.vspreview.adapter.subprocess.Popen",
         lambda _command, **_kwargs: _FakeVSPreviewProcess(returncode=7),
@@ -336,6 +361,17 @@ def test_launch_alignment_verification_session_reports_nonzero_exit(
             ),
             config=VSPreviewConfig(enabled=True),
         )
+
+    assert warnings == [
+        (
+            "vspreview_launch_failed",
+            {
+                "reason": "launch exited with code 7",
+                "returncode": 7,
+                "hint": "Inspect the VSPreview output displayed above",
+            },
+        )
+    ]
 
 
 def test_build_script_content_escapes_path_literals() -> None:

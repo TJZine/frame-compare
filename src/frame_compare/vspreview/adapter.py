@@ -19,6 +19,7 @@ from pathlib import Path
 
 import structlog
 
+from frame_compare.vs.runtime_contract import runtime_kind
 from frame_compare.vspreview.errors import VSPreviewError, VSPreviewNotFoundError
 from frame_compare.vspreview.output import print_vspreview_session
 from frame_compare.vspreview.session_script import write_vspreview_session_script
@@ -217,7 +218,7 @@ def launch_alignment_verification_session(
             "vspreview_launch_failed",
             reason=public_reason,
             returncode=returncode,
-            hint="Re-run with verbose mode to inspect VSPreview output",
+            hint="Inspect the VSPreview output displayed above",
         )
         raise VSPreviewError(public_reason)
 
@@ -230,16 +231,9 @@ def _run_vspreview_command(command: list[str], *, env: dict[str, str]) -> int:
         command,
         stdin=None,
         stdout=None,
-        stderr=subprocess.PIPE,
-        text=True,
-        errors="replace",
+        stderr=None,
         env=env,
-        bufsize=1,
     ) as process:
-        assert process.stderr is not None
-        for line in process.stderr:
-            sys.stderr.write(line)
-        sys.stderr.flush()
         return process.wait()
 
 
@@ -256,10 +250,18 @@ def _write_vspreview_session_script(request: VSPreviewSessionRequest) -> Path:
 def _resolve_launch_command(script_path: Path) -> list[str]:
     """Resolve the launch command for VSPreview.
 
-    Priority per vspreview spec §6.3:
-    1. If `vspreview` executable exists in PATH: `vspreview {script_path}`
-    2. Else: `{sys.executable} -m vspreview {script_path}`
+    The managed Windows runtime preloads VapourSynth before Qt can register its
+    private native runtime. Other environments retain the normal executable-first
+    resolution from the VSPreview integration contract.
     """
+    if runtime_kind().casefold() == "windows-portable":
+        return [
+            sys.executable,
+            "-m",
+            "frame_compare.vspreview.launcher",
+            str(script_path),
+        ]
+
     vspreview_path = shutil.which("vspreview")
     if vspreview_path is not None:
         return [vspreview_path, str(script_path)]

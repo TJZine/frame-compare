@@ -201,13 +201,13 @@ def test_public_help_explains_commands_and_option_effects(
         assert fragment in output
 
 
-def test_root_generates_shell_completion_source() -> None:
+def test_root_generates_shell_completion_source(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("_TYPER_COMPLETE_TEST_DISABLE_SHELL_DETECTION", "True")
     result = runner.invoke(
         app,
-        ["--show-completion"],
+        ["--show-completion", "bash"],
         color=False,
         env={
-            "SHELL": "/bin/bash",
             "NO_COLOR": "1",
             "TERM": "dumb",
         },
@@ -216,13 +216,7 @@ def test_root_generates_shell_completion_source() -> None:
     assert result.exit_code == 0
     assert result.stderr == ""
     assert "frame-compare" in result.stdout
-    supported_shell_markers = (
-        "complete -o default -F",
-        "compdef ",
-        "complete --no-files --command",
-        "Register-ArgumentCompleter -Native -CommandName",
-    )
-    assert any(marker in result.stdout for marker in supported_shell_markers)
+    assert "complete -o default -F" in result.stdout
 
 
 def test_stabilize_typer_help_width_backfills_import_order_gap(monkeypatch: MonkeyPatch) -> None:

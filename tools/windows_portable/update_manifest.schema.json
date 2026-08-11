@@ -11,6 +11,7 @@
     "from_app_version_min",
     "from_app_version_max",
     "expected_requirements_lock_sha256",
+    "expected_media_runtime_fingerprint",
     "signature_algorithm",
     "signature_file",
     "payload_root",
@@ -19,7 +20,7 @@
   "properties": {
     "schema_version": {
       "type": "integer",
-      "const": 1
+      "const": 2
     },
     "target_platform": {
       "type": "string",
@@ -45,6 +46,10 @@
       ]
     },
     "expected_requirements_lock_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "expected_media_runtime_fingerprint": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
     },

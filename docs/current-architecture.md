@@ -71,7 +71,10 @@ Current phase-family owners are intentionally explicit:
   confirmation-result, authoritative window/domain recomputation, and fatal
   retry-once boundary for exclusion-constrained selection failures; the CLI owns
   the injected stderr confirmation callback
-- `frame_compare.orchestration.phase_tasks`: align and render phase bodies plus alignment/render-specific helpers
+- `frame_compare.orchestration.phase_alignment`: audio-alignment phase execution,
+  alignment request mapping, trim application, and aligned-frame normalization
+- `frame_compare.orchestration.phase_render`: screenshot-render phase execution and
+  overlay diagnostic metadata mapping
 - `frame_compare.orchestration.phase_post_render`: metadata, publish, report, confirmation, and cleanup phase bodies
 
 Analysis metric algorithm identity is analysis-owned. `frame_compare.analysis.metric_identity`
@@ -108,8 +111,10 @@ selector/override resolution and before probing or run-folder reservation.
 `selection_domain` receives the resolved per-path map when constructing
 `ClipState`; it does not own parsing or collision policy. Labels propagate
 through presentation surfaces while source paths, fingerprints,
-cache/alignment identity, and stem-based physical PNG filenames remain
-unchanged.
+cache/alignment identity, and stem-based physical PNG filename ownership remain
+unchanged. `frame_compare.render.naming` bounds overlong absolute screenshot paths
+for legacy Windows browser compatibility by retaining a readable stem prefix and a
+deterministic digest suffix.
 
 ## Module Boundaries
 
@@ -163,6 +168,24 @@ The repo uses filesystem persistence, not a database.
 
 Primary owned paths:
 
+Source freshness for the analysis, probe, and alignment reuse caches follows one
+performance-first policy: source identity uses path, byte size, and modification
+time (nanosecond precision where available), and does not hash media contents.
+Reading multi-gigabyte sources solely for cache lookup would defeat the cache's
+purpose. A replacement that preserves all three identity fields is intentionally
+treated as the same source and can reuse cached data; workflows that replace media
+while preserving size and mtime must advance the mtime or remove the relevant cache.
+
+Automatic decoder/tool cache invalidation and decoder-ABI index isolation are
+guaranteed for the managed Windows portable and Debian/Docker profiles, whose
+identities include their selected packaged runtime lineages. Unmanaged Windows,
+Linux, and native macOS fingerprints intentionally encode only the selected Frame
+Compare contract and operating-system class; replacing native decoder or FFmpeg
+binaries outside those packaged profiles requires clearing generated caches and
+Frame Compare-owned indexes before reuse. See
+[Supported Media Runtime](supported-media-runtime.md) for the profile boundary and
+recovery requirement.
+
 - `config/config.toml` and `config/presets/*.toml`: config owners
 - `frame_compare.config.persistence`: secret-safe serialization shared by generated
   config and preset writes; runtime `slowpics.webhook_url` and `tmdb.api_key` values
@@ -177,6 +200,10 @@ Primary owned paths:
   resolved active rectangle, and the final shared selectable window.
   Cache schema v8 stores `analysis_source_path`, `performance_mode`,
   `algorithm_id`, `metric_backend`, stable `algorithm_identity_json`, and
+  the scoped media-runtime analysis fingerprint through that algorithm identity. A
+  For the managed Windows portable and Debian/Docker profiles, a selected decoder
+  lineage change cannot satisfy the previous metric cache, while tone-mapping-only
+  and standalone FFmpeg changes do not invalidate metric arrays. It also stores
   `metric_active_rect`, active-rect source, detection mode, and active-rect
   resolver algorithm ID in `MetricsMetadata`. It also stores the original source
   frame count and exact inclusive/exclusive selectable metric range. Performance
@@ -199,8 +226,12 @@ Primary owned paths:
   `frame_compare.services.alignment_reuse_cache`. It stores accepted computed or
   VSPreview-confirmed offsets keyed by a typed source-set identity, source
   fingerprints, source trims, effective FPS values, selected reference
-  relationship, selected audio streams, and alignment settings that affect
-  computed offsets. VSPreview-confirmed entries may also retain the computed
+  relationship, selected audio streams, alignment settings that affect
+  computed offsets, and the scoped media-runtime alignment fingerprint. For the
+  managed Windows portable and Debian/Docker profiles, a selected standalone FFmpeg
+  lineage change therefore misses cleanly rather than reusing offsets computed by a
+  different decoder/tool build. VSPreview-confirmed
+  entries may also retain the computed
   audio alignment result that produced the preview suggestion so a later run can
   decline the human-confirmed offset without rerunning deterministic audio
   alignment. Unreadable, corrupt, unsupported-version, malformed source-table, or
@@ -210,12 +241,26 @@ Primary owned paths:
   path.
 - `generated/clip_probe.toml` or `<resolved paths.generated_dir>/clip_probe.toml`:
   shared clip probe cache used by `--from-cache-only` prevalidation before
-  run-folder reservation
-- `<run-folder>/run_info.toml`: root-level run identity metadata written
-  immediately after every run-folder reservation. It
-  stores creation time, final folder name, naming source, source filenames,
-  Frame Compare version, and optional TMDB prefetch facts. It is user-facing
-  creation-time identity, not an end-of-run outcome manifest.
+  run-folder reservation. The file format remains version 1, while each probe key
+  uses key schema 2 and includes the scoped media-runtime probe fingerprint so a
+  selected decoder or standalone FFmpeg/ffprobe lineage change in the managed Windows
+  portable or Debian/Docker profiles misses without invalidating unrelated file-format
+  data.
+- `<media>.frame-compare-lsw1296-<12-hex-index-fingerprint>.lwi`: Frame
+  Compare-owned L-SMASH-Works index. The token is profile scoped (currently
+  `lsw1296-e3c074652ffb` on managed/portable Windows,
+  `lsw1296-6b9e50219ad0` on unmanaged Windows, and `lsw1296-4ea22a0b0598`
+  on Debian/Docker). Managed Windows portable and Debian/Docker tokens isolate
+  their packaged decoder ABIs; unmanaged profile tokens do not verify native ABI
+  changes. Legacy adjacent `<media>.lwi` files are ignored,
+  not deleted. A corrupt owned index is removed and rebuilt once; removal/rebuild
+  failure is warned and an unusable index location falls back to a cache-free source
+  open.
+- `<run-folder>/run_info.toml`: root-level, write-only run identity metadata version 2 written
+  immediately after every run-folder reservation. It stores creation time, final
+  folder name, naming source, source filenames, Frame Compare version, the full
+  supported media-runtime contract/fingerprints, and optional TMDB prefetch facts.
+  It is user-facing creation-time identity, not an end-of-run outcome manifest.
 - `<run-folder>/run_result.toml`: versioned V1 run outcome owned by
   `frame_compare.services.run_result_record` and written atomically only after a
   reserved run completes or fails. It stores sanitized run-folder-relative output
@@ -234,6 +279,13 @@ Primary owned paths:
 - generated VSPreview session files under the current generated/run area
 - screenshot output directories and generated HTML reports
 - Windows portable bundle outputs under `dist/frame-compare-portable-win-x64`
+
+`frame_compare.vs.runtime_contract` is the sole component-identity owner for the
+coordinated media stack. It emits narrow analysis, probe, alignment, and index
+fingerprints plus the full deployment fingerprint. Docker and Windows portable
+declare the full fingerprint through deployment metadata; `doctor --json` compares
+the declaration with the code-owned expectation without trusting the environment
+value as authority. See [Supported Media Runtime](supported-media-runtime.md).
 
 `frame_compare.orchestration.preflight` owns hybrid path enforcement. The selected
 config file and configured `paths.config_dir` resolve under the workspace root after
@@ -287,7 +339,7 @@ exception unchanged. Completed-run record failures add a stable warning and do
 not change successful media work into failure.
 
 The align phase uses a typed orchestration-to-services request seam:
-`frame_compare.orchestration.phase_tasks.run_align_phase()` builds a
+`frame_compare.orchestration.phase_alignment.run_align_phase()` builds a
 `frame_compare.utils.types.AlignmentRequest` for
 `frame_compare.services.alignment`. The request carries current-run generated
 state, the workspace-level shared alignment cache path, reference/comparison
@@ -360,8 +412,8 @@ Keep these integrations at their current owners:
 - isolated slow.pics post-upload webhook delivery:
   `frame_compare.services.slowpics_webhook`
 - HTML report generation: `frame_compare.services.report`
-- VS loading, non-destructive adjacent L-SMASH index recovery, and HDR/tonemap
-  logic: `frame_compare.vs.*`
+- VS loading, runtime-versioned Frame Compare-owned L-SMASH-Works index recovery,
+  and HDR/tonemap logic: `frame_compare.vs.*`
 - packaging/install/update flow: `tools/windows_portable/**`
 
 The default Docker behavior is intentionally narrower than the native Windows
@@ -473,12 +525,14 @@ Webhook failures are warning-only and redact configured URL details. Typed safe
 failure categories and optional HTTP status codes feed structured diagnostics without
 retaining the configured endpoint.
 
-`frame_compare.cli.entry` and its run-command helper own interactive-only
-slow.pics URL copy/browser actions and the precedence rule between slow.pics
-browser opening and generated-report auto-open. Those actions run only for
-human, non-quiet, TTY stdout runs; JSON stdout stays a single object.
-The same CLI owner presents the local report and asks for confirmation in the
-report-confirmed workflow before post-upload URL actions are considered.
+`frame_compare.cli.entry` and `frame_compare.cli.run_command` own run-command
+coordination, interactive-only slow.pics URL copy/browser actions, and the
+precedence rule between slow.pics browser opening and generated-report auto-open.
+Those actions run only for human, non-quiet, TTY stdout runs; JSON stdout stays a
+single object. The same CLI owner presents the local report and asks for
+confirmation in the report-confirmed workflow before post-upload URL actions are
+considered. `frame_compare.cli.run_contracts` owns validation policy for public
+run-mode combinations before orchestration begins.
 
 `frame_compare.cli.wizard_command` owns the interactive goal-oriented config editor,
 while `frame_compare.cli.wizard_policy` owns its typed code-defined frame-selection
@@ -618,8 +672,9 @@ Runtime ownership matrix:
 | Audio correlation, preprocessing, and refinement estimation | `frame_compare.services.alignment_correlation` |
 | Audio alignment window collection, weak-window rejection, consensus selection, and ambiguity gating | `frame_compare.services.alignment_consensus` |
 | Alignment-specific VSPreview verification display and override policy | `frame_compare.services.alignment_vspreview` |
-| VSPreview availability and launch adapter | `frame_compare.vspreview.adapter` |
+| VSPreview availability, launch adapter, and managed-Windows media-runtime preload | `frame_compare.vspreview.adapter`, `frame_compare.vspreview.launcher` |
 | VapourSynth import, Windows DLL registration, plugin detection/loading helpers | `frame_compare.vs.env` |
+| Coordinated media component identity, scoped cache/index fingerprints, and deployment runtime comparison | `frame_compare.vs.runtime_contract` |
 | Doctor execution and diagnostic result mapping | `frame_compare.orchestration.doctor` |
 | Doctor check ordering, categories, and check implementations | `frame_compare.orchestration.doctor_checks` |
 | Doctor diagnostic DTOs | `frame_compare.orchestration.doctor_types` |

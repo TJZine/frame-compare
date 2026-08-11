@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 import tomllib
+from dataclasses import fields
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -14,6 +16,10 @@ from frame_compare.services.run_info import (
 
 def _parsed_toml(content: str) -> dict[str, object]:
     return tomllib.loads(content)
+
+
+def test_run_info_schema_version_is_not_caller_configurable() -> None:
+    assert "version" not in {field.name for field in fields(RunInfo)}
 
 
 def test_serialize_run_info_uses_utc_z_created_at() -> None:
@@ -65,11 +71,21 @@ def test_serialize_run_info_writes_resolved_tmdb_facts_without_nulls() -> None:
     )
 
     parsed = _parsed_toml(content)
-    assert parsed["version"] == 1
+    assert parsed["version"] == 2
     assert parsed["folder_name"] == "Fight Club (1999)"
     assert parsed["naming_source"] == "tmdb"
     assert parsed["source_filenames"] == ["source.mkv"]
     assert parsed["frame_compare_version"]
+    media_runtime = parsed["media_runtime"]
+    assert isinstance(media_runtime, dict)
+    assert media_runtime["contract_version"] == 1
+    fingerprints = media_runtime["fingerprints"]
+    assert isinstance(fingerprints, dict)
+    assert set(fingerprints) == {"analysis", "probe", "alignment", "index", "full"}
+    assert all(
+        isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value)
+        for value in fingerprints.values()
+    )
     assert parsed["tmdb"] == {
         "enabled": True,
         "attempted": True,

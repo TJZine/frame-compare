@@ -30,6 +30,7 @@ If a task needs a broader compatibility promise, the maintainer must confirm it 
 - `docs/ENGINEERING_RUNBOOK.md`: workflow, verification, planning, review, handoff
 - `docs/current-architecture.md`: present-day architecture truth
 - `docs/current-cli-contract.md`: present-day CLI command, flag, and persistence contract
+- `docs/supported-media-runtime.md`: supported media component matrix, provenance, licensing, and native-runtime update boundary
 - `docs/DECISIONS.md`: decision log and historical exceptions
 - `docs/api.md`: generated reference, not a stability promise by itself
 - `.codex/review-context.md`: repo review profile for `suggestion-review`
@@ -107,6 +108,12 @@ Default Docker posture:
   deterministic.
 - The canonical default Docker verification path uses software Vulkan and CI-safe
   backend rendering rather than GPU passthrough or desktop GUI assumptions.
+- The proof must report the exact Debian FFmpeg package and both executable version
+  lines; import VapourSynth and verify the expected release/API; register
+  L-SMASH-Works, FFMS2, and vs-placebo through deterministic plugin manifests;
+  open a generated fixture through both source loaders; invoke `placebo.Tonemap`
+  without reducing the result to 8-bit; run `doctor --json`; inspect native
+  linkage for missing shared libraries; and execute as a non-root user.
 - Optional Docker GPU or GUI profiles require compatible host setup and separate
   verification; do not treat them as covered by the default gate unless the task
   explicitly adds and proves them.
@@ -126,7 +133,14 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/build_updat
 pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/sign_update.ps1 -UpdateZip .\dist\frame-compare-update-win-x64-<version>.zip -ExpectedPublicKeyPath .\tools\windows_portable\update_public_key.xml
 ```
 
-The Windows commands require a Windows host with PowerShell and the expected toolchain. In non-Windows environments, treat them as documented-only unless a compatible runner is available.
+The Windows commands require a Windows host with PowerShell and the expected
+toolchain. In non-Windows environments, treat them as documented-only unless a
+compatible runner is available. A code-only update does not carry native media
+artifacts. `build_update.ps1` must copy the complete bundle's required
+media-runtime fingerprint into the signed update manifest, and the installed
+updater must refuse a missing, legacy, malformed, or different fingerprint before
+any unsafe dependency override. Crossing a media-runtime fingerprint requires a
+complete portable bundle reinstall.
 
 Locked runtime dependency audit (PowerShell):
 
@@ -202,7 +216,16 @@ Canonical command:
 bash tools/verify_docker_integration.sh
 ```
 
-If this path cannot be run locally, record it as documented-only and rely on `.github/workflows/docker-integration.yml`.
+If this path cannot be run locally, record it as documented-only and rely on
+`.github/workflows/docker-integration.yml`.
+
+For a coordinated media-runtime change, the gate additionally owns immutable
+source/wheel hashes and byte sizes, native SONAME/symlink preservation,
+`manifest.vs` layout, source-index creation, generated SDR/HDR fixture coverage
+where codecs are available, software-Vulkan initialization, vs-placebo filter
+execution, runtime fingerprint agreement, and absence of build tooling from the
+runtime stage. Do not replace Debian FFmpeg with a custom build without an
+explicit security, ABI, licensing, image-size, and multiarchitecture decision.
 
 Current capability contract:
 
@@ -269,12 +292,23 @@ Required when changing:
 
 Canonical verification path:
 
-1. Validate the update public key.
-2. Build the portable bundle.
-3. Run bundle smoke checks.
-4. Build the code-only update zip when updater logic changes.
-5. Sign the update zip when updater or release-package logic changes.
-6. Confirm the GitHub Actions Windows workflow still matches the documented local path.
+1. Validate the update public key and manifest schemas.
+2. Download every artifact with exact byte-size and SHA-256 verification.
+3. Build the portable bundle and validate its deterministic ZIP layout, native
+   plugin manifests, license inventory, source provenance, and runtime fingerprint.
+4. Run the extracted bundle's `--help`, `version`, and `doctor --json` smoke checks;
+   verify R78, L-SMASH-Works 1296, vs-placebo 2.0.4, and the selected LGPL-only
+   FFmpeg artifact. FFMS2 must remain absent from the Windows baseline. In one
+   required bundled Python process, preload the managed VapourSynth runtime before
+   importing PyQt6 and VSPreview, then recheck the plugin environment, open the
+   generated media through L-SMASH, and invoke the application tonemap path. Run the
+   direct vs-placebo frame proof after Qt when Vulkan is usable; an exact
+   `vulkan_runtime_unavailable` skip is permitted only on hosts without that runtime
+   and does not replace the separate physical-Windows GPU proof.
+5. Build the code-only update ZIP when updater logic changes and prove both a
+   matching-runtime apply/rollback and a mismatched-runtime fail-closed refusal.
+6. Sign the update ZIP when updater or release-package logic changes.
+7. Confirm the GitHub Actions Windows workflow still matches the documented local path.
 
 Current CI ownership:
 
@@ -299,6 +333,14 @@ Current CI ownership:
   the secret is absent, does not match the committed public key, or signing
   verification fails. Every public Windows release includes the signed update zip
   and its checksum.
+
+GitHub-hosted Windows proves packaging and generated-fixture behavior, not a
+physical release workstation. A media-runtime refresh remains unmergeable until
+the separate physical-Windows handoff records real GPU Vulkan initialization,
+HDR10/Dolby Vision output, range/bit-depth preservation, real-media timing and
+frame properties, old/new index and cache behavior, updater migration from the
+previous bundle, and objective plus perceptual comparison evidence. Never describe
+that handoff as complete based only on hosted CI.
 
 ### Staging and dependency-update flow
 

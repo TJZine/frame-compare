@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from frame_compare.render.naming import generate_screenshot_name, generate_screenshot_path
@@ -21,6 +23,13 @@ def test_generate_name_preserves_spaces():
 
 def test_generate_name_sanitizes_special_chars():
     assert generate_screenshot_name("Bad:Name?.mkv", 10) == "10 - Bad_Name_.mkv.png"
+
+
+def test_generate_name_sanitizes_surrogate_escape():
+    name = generate_screenshot_name("Source\udcff", 10)
+
+    assert name == "10 - Source_.png"
+    assert not any("\ud800" <= character <= "\udfff" for character in name)
 
 
 def test_generate_name_collapses_underscores():
@@ -63,3 +72,64 @@ def test_generate_path_simple(tmp_path):
 
 def test_generate_path_sanitizes(tmp_path):
     assert generate_screenshot_path(tmp_path, "Bad:Name", 1) == tmp_path / "1 - Bad_Name.png"
+
+
+def test_generate_path_bounds_long_browser_file_paths(tmp_path):
+    output_dir = tmp_path / ("nested-" * 15) / "screenshots"
+    common_prefix = "Very.Long.Release.Name." * 8
+
+    first = generate_screenshot_path(output_dir, f"{common_prefix}source-a", 42)
+    second = generate_screenshot_path(output_dir, f"{common_prefix}source-b", 42)
+
+    assert len(os.path.abspath(first).encode("utf-16-le")) // 2 <= 259
+    assert len(os.path.abspath(second).encode("utf-16-le")) // 2 <= 259
+    assert first != second
+    assert first == generate_screenshot_path(output_dir, f"{common_prefix}source-a", 42)
+    assert first.name.startswith("42 - V")
+    assert first.suffix == ".png"
+
+
+def test_generate_path_counts_non_bmp_characters_as_two_windows_units(tmp_path):
+    output_dir = tmp_path / "screenshots"
+
+    path = generate_screenshot_path(output_dir, "😀" * 200, 42)
+
+    assert len(os.path.abspath(path).encode("utf-16-le")) // 2 <= 259
+    assert path.suffix == ".png"
+
+
+def test_generate_path_sanitizes_surrogate_escape_in_long_label(tmp_path):
+    output_dir = tmp_path / "screenshots"
+
+    path = generate_screenshot_path(output_dir, ("Source\udcff" * 200), 42)
+
+    assert len(os.path.abspath(path).encode("utf-16-le")) // 2 <= 259
+    assert path.name.startswith("42 - Source_")
+    assert path.suffix == ".png"
+    assert not any("\ud800" <= character <= "\udfff" for character in path.name)
+
+
+def test_generate_path_counts_surrogate_escaped_output_dir(tmp_path):
+    output_dir = tmp_path / "screenshots\udcff"
+
+    path = generate_screenshot_path(output_dir, "Ref", 42)
+
+    assert path == output_dir / "42 - Ref.png"
+
+
+def test_generate_path_bounds_multibyte_component_for_large_frame(tmp_path):
+    output_dir = tmp_path / "screenshots"
+    source_stem = "界" * 82
+    first = generate_screenshot_path(output_dir, source_stem, 100000)
+    second = generate_screenshot_path(output_dir, f"{source_stem}a", 100000)
+
+    try:
+        component_limit = int(os.pathconf(tmp_path, "PC_NAME_MAX"))
+    except (AttributeError, OSError, ValueError):
+        component_limit = 255
+
+    assert len(os.fsencode(first.name)) <= component_limit
+    assert len(os.fsencode(second.name)) <= component_limit
+    assert len(os.path.abspath(first).encode("utf-16-le")) // 2 <= 259
+    assert first != second
+    assert first == generate_screenshot_path(output_dir, source_stem, 100000)

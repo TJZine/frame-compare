@@ -24,6 +24,8 @@ nav = [
   ] },
   { "Reference" = [
     { "CLI and Configuration Contract" = "current-cli-contract.md" },
+    { "Supported Media Runtime" = "supported-media-runtime.md" },
+    { "Physical Windows Runtime Validation" = "media-runtime-windows-validation.md" },
     { "API Reference" = "api.md" },
   ] },
   { "Development" = [

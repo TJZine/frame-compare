@@ -10,7 +10,7 @@ import pytest
 
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.loader import load_config
-from frame_compare.orchestration import phase_post_render, phase_tasks
+from frame_compare.orchestration import phase_alignment, phase_post_render
 from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.orchestration.execution_types import (
@@ -103,7 +103,7 @@ enable = false
             ),
         ]
 
-    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
+    monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
     ffmpeg = FakeFFmpegRunner()
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=ffmpeg)

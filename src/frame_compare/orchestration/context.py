@@ -41,7 +41,9 @@ ACTIVE_RECT_RESOLUTION_ALGORITHM: ClipActiveRectAlgorithmId = "active_rect_resol
 class ClipFingerprint:
     """Stable fingerprint for cache invalidation.
 
-    This is intentionally simple to compute without opening VS.
+    This is intentionally simple to compute without opening VS or hashing media
+    contents. Same-path, same-size, same-mtime replacements retain identity by the
+    repository's performance-first cache policy.
     """
 
     path: Path

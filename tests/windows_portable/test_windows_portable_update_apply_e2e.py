@@ -19,6 +19,7 @@ from ._helpers import write_valid_config_json as _write_valid_config_json
 _OLD_VERSION_CONTENT = '__version__ = "1.0.0"\n'
 _NEW_VERSION_CONTENT = '__version__ = "1.0.1"\n'
 _REQ_HASH = "3a0058b73f8a4872c3d0b27b99c017d9a8c087cf283d5f9923b0df35b44bfd82"
+_RUNTIME_HASH = "35d58736c651f4d8e52bd4d8e6750ebede4c4bc9676e4c9db7dfebaeadab018c"
 _POWERSHELL_KEYGEN_TIMEOUT_SECONDS = 30.0
 _POWERSHELL_SIGN_TIMEOUT_SECONDS = 30.0
 _POWERSHELL_APPLY_TIMEOUT_SECONDS = 30.0
@@ -104,10 +105,20 @@ def _write_mock_bundle(*, bundle_dir: Path) -> Path:
     bundle_info.write_text(
         json.dumps(
             {
-                "schema_version": 1,
-                "bundle_kind": "portable_bundle",
-                "platform": "windows-x64",
+                "schema_version": 2,
+                "bundle_kind": "full",
+                "app_version": "1.0.0",
                 "requirements_lock_sha256": _REQ_HASH,
+                "manifest_version": 2,
+                "platform": "windows-x64",
+                "media_runtime_fingerprint": _RUNTIME_HASH,
+                "media_runtime_fingerprints": {
+                    "analysis": "e24a1e094d16c3bed112cfb5e5c5b98fa2b6fed44f87b9917d8ed342540384ff",
+                    "probe": "73b7fd16189928d3ef3d1ca96c8363a723ac440cb999e74546871c089c547bb6",
+                    "alignment": "9b678d58d2f9c339f3044c11c98591f6b09ad81d0769ad7853fd3da35e429d36",
+                    "index": "e3c074652ffbbc2fce5cab088d4b4fd16b050a9676d387dbd3f3f4075746cbe6",
+                    "full": _RUNTIME_HASH,
+                },
             }
         ),
         encoding="utf-8",
@@ -137,8 +148,13 @@ def _write_mock_bundle(*, bundle_dir: Path) -> Path:
     return version_py
 
 
-def _build_update_zip(*, tmp_path: Path) -> Path:
-    update_staging = tmp_path / "update_staging"
+def _build_update_zip(
+    *,
+    tmp_path: Path,
+    runtime_fingerprint: str = _RUNTIME_HASH,
+    archive_name: str = "update.zip",
+) -> Path:
+    update_staging = tmp_path / f"{Path(archive_name).stem}_staging"
     update_staging.mkdir()
 
     new_version_py_rel = "app/src/frame_compare/version.py"
@@ -148,25 +164,28 @@ def _build_update_zip(*, tmp_path: Path) -> Path:
 
     file_sha256 = hashlib.sha256(payload_version_py.read_bytes()).hexdigest()
     manifest_data = {
-        "schema_version": 1,
+        "schema_version": 2,
         "target_platform": "windows-x64",
         "to_app_version": "1.0.1",
         "from_app_version_min": "1.0.0",
         "from_app_version_max": "1.1.0",
-        "payload_root": "payload",
-        "signature_file": "update-manifest.sig",
         "expected_requirements_lock_sha256": _REQ_HASH,
+        "expected_media_runtime_fingerprint": runtime_fingerprint,
+        "signature_algorithm": "rsa-sha256-pkcs1",
+        "signature_file": "update-manifest.sig",
+        "payload_root": "payload",
         "files": [
             {
                 "path": new_version_py_rel,
                 "sha256": file_sha256,
+                "bytes": payload_version_py.stat().st_size,
             }
         ],
     }
     manifest_path = update_staging / "update-manifest.json"
     manifest_path.write_text(json.dumps(manifest_data, indent=2), encoding="utf-8")
 
-    update_zip_path = tmp_path / "update.zip"
+    update_zip_path = tmp_path / archive_name
     with zipfile.ZipFile(update_zip_path, mode="w") as archive:
         archive.write(manifest_path, arcname="update-manifest.json")
         archive.write(payload_version_py, arcname="payload/" + new_version_py_rel)
@@ -337,6 +356,33 @@ def test_windows_portable_update_apply_e2e(tmp_path: Path, repo_root: Path) -> N
     installed_tree = bundle_dir / "app" / "src" / "frame_compare"
     original_snapshot = _snapshot_tree(installed_tree)
 
+    runtime_mismatch_zip = _build_update_zip(
+        tmp_path=tmp_path,
+        runtime_fingerprint="f" * 64,
+        archive_name="runtime-mismatch.zip",
+    )
+    _sign_update_zip(
+        exe=exe,
+        repo_root=repo_root,
+        update_zip_path=runtime_mismatch_zip,
+        private_key_path=private_key_path,
+        expected_public_key_path=shim_update_ps1.parent / "update_public_key.xml",
+    )
+    runtime_rejection = _apply_update(
+        exe=exe,
+        env=env,
+        bundle_dir=bundle_dir,
+        shim_update_ps1=shim_update_ps1,
+        update_zip_path=runtime_mismatch_zip,
+    )
+    assert runtime_rejection.returncode != 0
+    runtime_output = runtime_rejection.stdout + runtime_rejection.stderr
+    assert "Media runtime fingerprint mismatch" in runtime_output
+    assert "complete portable bundle" in runtime_output
+    assert _snapshot_tree(installed_tree) == original_snapshot
+    assert not (bundle_dir / "app" / ".update_backups").exists()
+    assert _snapshot_bytes(external_generated_root) == external_snapshot
+
     manifest_tampered_zip = tmp_path / "manifest-tampered.zip"
     _rewrite_zip_entry(
         source_zip=update_zip_path,
@@ -401,3 +447,58 @@ def test_windows_portable_update_apply_e2e(tmp_path: Path, repo_root: Path) -> N
     assert rollback.returncode == 0, f"stdout:\n{rollback.stdout}\n\nstderr:\n{rollback.stderr}"
     assert _snapshot_tree(installed_tree) == original_snapshot
     assert _snapshot_bytes(external_generated_root) == external_snapshot
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("invalid_value", [None, "not-a-sha256", "A" * 64])
+def test_windows_portable_update_refuses_invalid_installed_runtime_identity(
+    tmp_path: Path,
+    repo_root: Path,
+    invalid_value: str | None,
+) -> None:
+    exe = _powershell_exe()
+    if exe is None:
+        pytest.skip("pwsh/powershell not available")
+
+    private_key_path, public_key_xml = _generate_rsa_keypair(
+        exe=exe,
+        repo_root=repo_root,
+        tmp_path=tmp_path,
+    )
+    bundle_dir, shim_update_ps1, _state_dir = _setup_update_install(
+        tmp_path=tmp_path,
+        repo_root=repo_root,
+        public_key_xml=public_key_xml,
+    )
+    version_py = _write_mock_bundle(bundle_dir=bundle_dir)
+    bundle_info_path = bundle_dir / "bundle_info.json"
+    bundle_info = json.loads(bundle_info_path.read_text(encoding="utf-8"))
+    if invalid_value is None:
+        del bundle_info["media_runtime_fingerprint"]
+    else:
+        bundle_info["media_runtime_fingerprint"] = invalid_value
+    bundle_info_path.write_text(json.dumps(bundle_info), encoding="utf-8")
+
+    update_zip_path = _build_update_zip(tmp_path=tmp_path)
+    env = _sign_update_zip(
+        exe=exe,
+        repo_root=repo_root,
+        update_zip_path=update_zip_path,
+        private_key_path=private_key_path,
+        expected_public_key_path=shim_update_ps1.parent / "update_public_key.xml",
+    )
+    original_content = version_py.read_bytes()
+
+    result = _apply_update(
+        exe=exe,
+        env=env,
+        bundle_dir=bundle_dir,
+        shim_update_ps1=shim_update_ps1,
+        update_zip_path=update_zip_path,
+    )
+
+    assert result.returncode != 0
+    normalized_output = (result.stdout + result.stderr).lower().replace("_", " ").replace("-", " ")
+    assert "media runtime fingerprint" in normalized_output
+    assert version_py.read_bytes() == original_content
+    assert not (bundle_dir / "app" / ".update_backups").exists()

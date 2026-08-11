@@ -24,6 +24,14 @@ $PSNativeCommandUseErrorActionPreference = $true
 $DownloadMaxAttempts = 4
 $DownloadRetryDelaySeconds = 5
 
+# Convert caller-supplied relative paths once, before they are embedded in
+# runtime environment variables or passed across process working directories.
+$currentLocation = $PWD.ProviderPath
+$ManifestPath = [System.IO.Path]::GetFullPath($ManifestPath, $currentLocation)
+$OutDir = [System.IO.Path]::GetFullPath($OutDir, $currentLocation)
+$CacheDir = [System.IO.Path]::GetFullPath($CacheDir, $currentLocation)
+$RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot, $currentLocation)
+
 function Ensure-Directory([string]$Path) {
   if (!(Test-Path -LiteralPath $Path)) {
     New-Item -ItemType Directory -Path $Path | Out-Null
@@ -91,6 +99,13 @@ function Assert-Sha256([string]$FilePath, [string]$ExpectedHex) {
   }
 }
 
+function Assert-FileSize([string]$FilePath, [int64]$ExpectedBytes) {
+  $actualBytes = (Get-Item -LiteralPath $FilePath).Length
+  if ($actualBytes -ne $ExpectedBytes) {
+    throw "Byte-size mismatch for $FilePath`nExpected: $ExpectedBytes`nActual:   $actualBytes"
+  }
+}
+
 function Assert-LastExitCode([string]$CommandLabel) {
   if ($LASTEXITCODE -ne 0) {
     throw "$CommandLabel failed with exit code $LASTEXITCODE"
@@ -107,11 +122,13 @@ function Download-Artifact([pscustomobject]$Artifact) {
   $id = Get-RequiredStringProperty -Object $Artifact -Name "id" -Context "artifact"
   $url = Get-RequiredStringProperty -Object $Artifact -Name "url" -Context "artifact '$id'"
   $sha256 = Get-RequiredStringProperty -Object $Artifact -Name "sha256" -Context "artifact '$id'"
+  $expectedBytes = [int64](Get-RequiredProperty -Object $Artifact -Name "bytes" -Context "artifact '$id'")
 
   $fileName = Split-Path -Leaf $url
   $dest = Join-Path $CacheDir $fileName
 
   if (Test-Path -LiteralPath $dest) {
+    Assert-FileSize -FilePath $dest -ExpectedBytes $expectedBytes
     Assert-Sha256 -FilePath $dest -ExpectedHex $sha256
     return $dest
   }
@@ -121,6 +138,7 @@ function Download-Artifact([pscustomobject]$Artifact) {
   for ($attempt = 1; $attempt -le $DownloadMaxAttempts; $attempt++) {
     try {
       Invoke-WebRequest -Uri $url -OutFile $dest | Out-Null
+      Assert-FileSize -FilePath $dest -ExpectedBytes $expectedBytes
       Assert-Sha256 -FilePath $dest -ExpectedHex $sha256
       return $dest
     } catch {
@@ -258,49 +276,65 @@ $originalPythonDontWriteBytecode = Get-FrameCompareLauncherEnvironmentValue -Nam
 $originalPythonPath = Get-FrameCompareLauncherEnvironmentValue -Name "PYTHONPATH"
 $originalVsExtraPluginPath = Get-FrameCompareLauncherEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH"
 $originalVsPluginPath = Get-FrameCompareLauncherEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH"
+$originalMediaRuntimeFingerprint = Get-FrameCompareLauncherEnvironmentValue -Name "FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT"
+$originalRuntimeKind = Get-FrameCompareLauncherEnvironmentValue -Name "FRAME_COMPARE_RUNTIME_KIND"
+$originalRuntimeFfms2Required = Get-FrameCompareLauncherEnvironmentValue -Name "FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED"
+$originalFfmpegExecutable = Get-FrameCompareLauncherEnvironmentValue -Name "FRAME_COMPARE_FFMPEG_EXECUTABLE"
+$originalFfprobeExecutable = Get-FrameCompareLauncherEnvironmentValue -Name "FRAME_COMPARE_FFPROBE_EXECUTABLE"
 
 $exitCode = 1
 $locationPushed = $false
 try {
+  $bundleInfoPath = Join-Path $bundleRoot "bundle_info.json"
+  if (!(Test-Path -LiteralPath $bundleInfoPath -PathType Leaf)) {
+    throw "Bundle runtime identity not found: $bundleInfoPath"
+  }
+  try {
+    $bundleInfo = Get-Content -LiteralPath $bundleInfoPath -Raw |
+      ConvertFrom-Json -ErrorAction Stop
+    if ($bundleInfo -isnot [PSCustomObject]) {
+      throw "bundle_info.json must contain one JSON object"
+    }
+  } catch {
+    throw (
+      "The portable bundle is corrupt because bundle_info.json is invalid. " +
+      "Rebuild or reinstall the complete portable bundle."
+    )
+  }
+  $runtimeFingerprintProperty = $bundleInfo.PSObject.Properties["media_runtime_fingerprint"]
+  if ($null -eq $runtimeFingerprintProperty -or [string]::IsNullOrWhiteSpace([string]$runtimeFingerprintProperty.Value)) {
+    throw "Bundle runtime identity is missing media_runtime_fingerprint: $bundleInfoPath"
+  }
+
   $env:PYTHONUTF8 = "1"
   $env:PYTHONDONTWRITEBYTECODE = "1"
-  $env:PYTHONPATH = "$bundleRoot\\app\\src;$bundleRoot\\app\\site-packages"
-  $env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = "$bundleRoot\\vs\\extra-plugins"
+  $env:PYTHONPATH = "$bundleRoot\app\src;$bundleRoot\app\site-packages"
+  $env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = "$bundleRoot\vs\extra-plugins"
   Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue
-  $sitePackages = Join-Path $bundleRoot "app\\site-packages"
+  $env:FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT = [string]$runtimeFingerprintProperty.Value
+  $env:FRAME_COMPARE_RUNTIME_KIND = "windows-portable"
+  $env:FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED = "0"
+  $env:FRAME_COMPARE_FFMPEG_EXECUTABLE = "$bundleRoot\ffmpeg\bin\ffmpeg.exe"
+  $env:FRAME_COMPARE_FFPROBE_EXECUTABLE = "$bundleRoot\ffmpeg\bin\ffprobe.exe"
+
+  $sitePackages = Join-Path $bundleRoot "app\site-packages"
   $vsPackage = Join-Path $sitePackages "vapoursynth"
-  $vsPluginDir = Join-Path $vsPackage "plugins"
-  $extraPluginRoot = Join-Path $bundleRoot "vs\\extra-plugins"
-  $ffmpegRoot = Join-Path $bundleRoot "ffmpeg"
-  $ffmpegBin = Join-Path $ffmpegRoot "bin"
-  $qtBin = Join-Path $bundleRoot "app\\site-packages\\PyQt6\\Qt6\\bin"
   $pathEntries = @(
     (Join-Path $bundleRoot "python"),
+    $sitePackages,
     $vsPackage,
-    $vsPluginDir,
-    $extraPluginRoot,
-    $ffmpegBin,
-    $ffmpegRoot
+    (Join-Path $vsPackage "plugins"),
+    (Join-Path $sitePackages "vapoursynth.libs"),
+    (Join-Path $sitePackages "vs_placebo"),
+    (Join-Path $sitePackages "vs_placebo.libs"),
+    (Join-Path $bundleRoot "vs\extra-plugins\lsmas")
   )
-  if (Test-Path -LiteralPath $qtBin) {
-    $pathEntries = @($qtBin) + $pathEntries
-  }
-  foreach ($runtimeRoot in @($vsPackage, $extraPluginRoot, $ffmpegRoot)) {
-    if (Test-Path -LiteralPath $runtimeRoot) {
-      Get-ChildItem -LiteralPath $runtimeRoot -Directory -Recurse | ForEach-Object {
-        $pathEntries += $_.FullName
-      }
-    }
-  }
-  if (Test-Path -LiteralPath $sitePackages) {
-    Get-ChildItem -LiteralPath $sitePackages -Filter "*.dll" -File -Recurse | ForEach-Object {
-      $runtimeDir = Split-Path -Parent $_.FullName
-      if ($pathEntries -notcontains $runtimeDir) {
-        $pathEntries += $runtimeDir
-      }
-    }
-  }
-  $env:PATH = (($pathEntries | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique) -join ";") + ";" + $env:PATH
+  $existingPathEntries = @(
+    $pathEntries |
+      Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) } |
+      Select-Object -Unique
+  )
+  $env:PATH = (($existingPathEntries -join ";") + ";" + $env:PATH)
 
   Push-Location $bundleRoot
   $locationPushed = $true
@@ -320,6 +354,11 @@ try {
   Restore-FrameCompareLauncherEnvironmentValue -Name "PYTHONPATH" -Value $originalPythonPath
   Restore-FrameCompareLauncherEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH" -Value $originalVsExtraPluginPath
   Restore-FrameCompareLauncherEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH" -Value $originalVsPluginPath
+  Restore-FrameCompareLauncherEnvironmentValue -Name "FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT" -Value $originalMediaRuntimeFingerprint
+  Restore-FrameCompareLauncherEnvironmentValue -Name "FRAME_COMPARE_RUNTIME_KIND" -Value $originalRuntimeKind
+  Restore-FrameCompareLauncherEnvironmentValue -Name "FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED" -Value $originalRuntimeFfms2Required
+  Restore-FrameCompareLauncherEnvironmentValue -Name "FRAME_COMPARE_FFMPEG_EXECUTABLE" -Value $originalFfmpegExecutable
+  Restore-FrameCompareLauncherEnvironmentValue -Name "FRAME_COMPARE_FFPROBE_EXECUTABLE" -Value $originalFfprobeExecutable
 }
 exit $exitCode
 '@
@@ -516,11 +555,11 @@ function Install-PythonDeps([string]$BundleRoot, [string]$VsCoreRoot) {
   uv pip install --no-deps --only-binary :all: --target $sitePackages $vsWheel
   Assert-LastExitCode -CommandLabel "uv pip install vapoursynth wheel"
 
-  # R76 wheels carry the runtime DLL inside the vapoursynth package directory.
+  # R78 wheels carry the runtime DLL inside the vapoursynth package directory.
   # The launcher and validation PATH include this directory for Windows DLL lookup.
   $vsDllPackage = Join-Path $sitePackages "vapoursynth\\libvapoursynth.dll"
   if (!(Test-Path -LiteralPath $vsDllPackage)) {
-    throw "libvapoursynth.dll not found after wheel install in expected R76 package layout: $vsDllPackage"
+    throw "libvapoursynth.dll not found after wheel install in expected R78 package layout: $vsDllPackage"
   }
 }
 
@@ -539,6 +578,8 @@ function Install-PythonWheelArtifacts([string]$BundleRoot, [pscustomobject[]]$Ar
       throw "Python wheel artifact was not downloaded: $artifactId"
     }
     $sha256 = Get-RequiredStringProperty -Object $artifact -Name "sha256" -Context "artifact '$artifactId'"
+    $expectedBytes = [int64](Get-RequiredProperty -Object $artifact -Name "bytes" -Context "artifact '$artifactId'")
+    Assert-FileSize -FilePath $wheelPath -ExpectedBytes $expectedBytes
     Assert-Sha256 -FilePath $wheelPath -ExpectedHex $sha256
     uv pip install --reinstall --strict --no-deps --target $sitePackages $wheelPath
     Assert-LastExitCode -CommandLabel "uv pip install $artifactId"
@@ -546,47 +587,44 @@ function Install-PythonWheelArtifacts([string]$BundleRoot, [pscustomobject[]]$Ar
 }
 
 function Set-BundleRuntimeEnvironment([string]$BundleRoot) {
+  $bundleInfoPath = Join-Path $BundleRoot "bundle_info.json"
+  if (!(Test-Path -LiteralPath $bundleInfoPath -PathType Leaf)) {
+    throw "Bundle runtime identity not found: $bundleInfoPath"
+  }
+  $bundleInfo = Get-Content -LiteralPath $bundleInfoPath -Raw | ConvertFrom-Json
+  $runtimeFingerprintProperty = $bundleInfo.PSObject.Properties["media_runtime_fingerprint"]
+  if ($null -eq $runtimeFingerprintProperty -or [string]::IsNullOrWhiteSpace([string]$runtimeFingerprintProperty.Value)) {
+    throw "Bundle runtime identity is missing media_runtime_fingerprint: $bundleInfoPath"
+  }
+
   $env:PYTHONUTF8 = "1"
   $env:PYTHONDONTWRITEBYTECODE = "1"
-  $env:PYTHONPATH = "$BundleRoot\\app\\src;$BundleRoot\\app\\site-packages"
-  $env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = "$BundleRoot\\vs\\extra-plugins"
+  $env:PYTHONPATH = "$BundleRoot\app\src;$BundleRoot\app\site-packages"
+  $env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = "$BundleRoot\vs\extra-plugins"
   Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue
+  $env:FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT = [string]$runtimeFingerprintProperty.Value
+  $env:FRAME_COMPARE_RUNTIME_KIND = "windows-portable"
+  $env:FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED = "0"
+  $env:FRAME_COMPARE_FFMPEG_EXECUTABLE = "$BundleRoot\ffmpeg\bin\ffmpeg.exe"
+  $env:FRAME_COMPARE_FFPROBE_EXECUTABLE = "$BundleRoot\ffmpeg\bin\ffprobe.exe"
 
-  $sitePackages = Join-Path $BundleRoot "app\\site-packages"
+  $sitePackages = Join-Path $BundleRoot "app\site-packages"
   $vsPackage = Join-Path $sitePackages "vapoursynth"
-  $vsPluginDir = Join-Path $vsPackage "plugins"
-  $extraPluginRoot = Join-Path $BundleRoot "vs\\extra-plugins"
-  $ffmpegRoot = Join-Path $BundleRoot "ffmpeg"
-  $ffmpegBin = Join-Path $ffmpegRoot "bin"
-  $qtBin = Join-Path $BundleRoot "app\\site-packages\\PyQt6\\Qt6\\bin"
-
   $pathEntries = @(
     (Join-Path $BundleRoot "python"),
+    $sitePackages,
     $vsPackage,
-    $vsPluginDir,
-    $extraPluginRoot,
-    $ffmpegBin,
-    $ffmpegRoot
+    (Join-Path $vsPackage "plugins"),
+    (Join-Path $sitePackages "vapoursynth.libs"),
+    (Join-Path $sitePackages "vs_placebo"),
+    (Join-Path $sitePackages "vs_placebo.libs"),
+    (Join-Path $BundleRoot "vs\extra-plugins\lsmas")
   )
-  if (Test-Path -LiteralPath $qtBin) {
-    $pathEntries = @($qtBin) + $pathEntries
-  }
-  foreach ($runtimeRoot in @($vsPackage, $extraPluginRoot, $ffmpegRoot)) {
-    if (Test-Path -LiteralPath $runtimeRoot) {
-      Get-ChildItem -LiteralPath $runtimeRoot -Directory -Recurse | ForEach-Object {
-        $pathEntries += $_.FullName
-      }
-    }
-  }
-  if (Test-Path -LiteralPath $sitePackages) {
-    Get-ChildItem -LiteralPath $sitePackages -Filter "*.dll" -File -Recurse | ForEach-Object {
-      $runtimeDir = Split-Path -Parent $_.FullName
-      if ($pathEntries -notcontains $runtimeDir) {
-        $pathEntries += $runtimeDir
-      }
-    }
-  }
-  $existingEntries = $pathEntries | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
+  $existingEntries = @(
+    $pathEntries |
+      Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) } |
+      Select-Object -Unique
+  )
   $env:PATH = (($existingEntries -join ";") + ";" + $env:PATH)
 }
 
@@ -608,17 +646,31 @@ function Write-BundleInfo([string]$BundleRoot, [string]$AppVersion) {
     throw "requirements.lock.txt not found for bundle info: $requirementsLockPath"
   }
 
+  $manifest = Get-Manifest
+  $manifestVersion = [int](Get-RequiredProperty -Object $manifest -Name "manifest_version" -Context "manifest")
+  if ($manifestVersion -ne 2) {
+    throw "Unsupported portable manifest version '$manifestVersion' (expected 2)."
+  }
+  $bundleContract = Get-RequiredProperty -Object $manifest -Name "bundle" -Context "manifest"
+  $manifestFingerprints = Get-RequiredProperty -Object $bundleContract -Name "runtime_fingerprints" -Context "manifest.bundle"
+  $runtimeFingerprints = [ordered]@{}
+  foreach ($scope in @("analysis", "probe", "alignment", "index", "full")) {
+    $runtimeFingerprints[$scope] = Get-RequiredStringProperty -Object $manifestFingerprints -Name $scope -Context "manifest.bundle.runtime_fingerprints"
+  }
+
   $requirementsLockSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $requirementsLockPath).Hash.ToLowerInvariant()
   $bundleInfo = [ordered]@{
-    schema_version = 1
+    schema_version = 2
     bundle_kind = "full"
     app_version = $AppVersion
     requirements_lock_sha256 = $requirementsLockSha256
-    manifest_version = 1
+    manifest_version = $manifestVersion
     platform = "windows-x64"
+    media_runtime_fingerprint = $runtimeFingerprints["full"]
+    media_runtime_fingerprints = $runtimeFingerprints
   }
   $bundleInfoPath = Join-Path $BundleRoot "bundle_info.json"
-  $bundleInfoJson = $bundleInfo | ConvertTo-Json
+  $bundleInfoJson = $bundleInfo | ConvertTo-Json -Depth 4
   $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
   [System.IO.File]::WriteAllText($bundleInfoPath, ($bundleInfoJson + "`n"), $utf8NoBom)
 }
@@ -654,7 +706,7 @@ function Invoke-BundleRuntimeProof(
 }
 
 function Assert-BundleRuntime([string]$BundleRoot) {
-  $python = Join-Path $BundleRoot "python\\python.exe"
+  $python = Join-Path $BundleRoot "python\python.exe"
   if (!(Test-Path -LiteralPath $python)) {
     throw "Embedded python not found for runtime validation: $python"
   }
@@ -665,23 +717,34 @@ function Assert-BundleRuntime([string]$BundleRoot) {
   $originalPythonPath = Get-ProcessEnvironmentValue -Name "PYTHONPATH"
   $originalVsExtraPluginPath = Get-ProcessEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH"
   $originalVsPluginPath = Get-ProcessEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH"
+  $originalMediaRuntimeFingerprint = Get-ProcessEnvironmentValue -Name "FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT"
+  $originalRuntimeKind = Get-ProcessEnvironmentValue -Name "FRAME_COMPARE_RUNTIME_KIND"
+  $originalRuntimeFfms2Required = Get-ProcessEnvironmentValue -Name "FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED"
+  $originalFfmpegExecutable = Get-ProcessEnvironmentValue -Name "FRAME_COMPARE_FFMPEG_EXECUTABLE"
+  $originalFfprobeExecutable = Get-ProcessEnvironmentValue -Name "FRAME_COMPARE_FFPROBE_EXECUTABLE"
 
-  $ffmpeg = Join-Path $BundleRoot "ffmpeg\\bin\\ffmpeg.exe"
+  $ffmpeg = Join-Path $BundleRoot "ffmpeg\bin\ffmpeg.exe"
   $mediaPath = Join-Path $BundleRoot "runtime-smoke.mp4"
-  $mediaIndexPath = "$mediaPath.lwi"
+  $legacyMediaIndexPath = "$mediaPath.lwi"
   $smokePath = Join-Path $BundleRoot "runtime-smoke.py"
+  $locationPushed = $false
   try {
     Set-BundleRuntimeEnvironment -BundleRoot $BundleRoot
+    Push-Location $BundleRoot
+    $locationPushed = $true
 
-    if (Test-Path -LiteralPath $ffmpeg) {
-      & $ffmpeg -hide_banner -loglevel error -f lavfi -i "testsrc2=size=32x32:rate=1:duration=1" -frames:v 1 -pix_fmt yuv420p -y $mediaPath
-      Assert-LastExitCode -CommandLabel "ffmpeg tiny media generation"
+    if (!(Test-Path -LiteralPath $ffmpeg -PathType Leaf)) {
+      throw "Bundled FFmpeg executable not found: $ffmpeg"
     }
+    & $ffmpeg -hide_banner -loglevel error -f lavfi -i "testsrc2=size=32x32:rate=1:duration=1" -frames:v 1 -pix_fmt yuv420p -y $mediaPath
+    Assert-LastExitCode -CommandLabel "ffmpeg tiny media generation"
 
     $smokeScript = @'
 from __future__ import annotations
 
+import importlib.metadata
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -704,26 +767,77 @@ def prove_package_imports() -> None:
     proof("package_imports=ok modules=frame_compare,rich,tomli_w,typer")
 
 
+def prove_runtime_contract() -> None:
+    from frame_compare.utils.subproc import resolve_executable
+    from frame_compare.vs.runtime_contract import (
+        VS_PLACEBO_RELEASE,
+        WINDOWS_FFMPEG_EXECUTABLE_TOKEN,
+        media_runtime_fingerprint,
+        supported_media_runtime_report,
+    )
+
+    expected = media_runtime_fingerprint("full")
+    observed = os.environ.get("FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT", "")
+    assert_true(observed == expected, f"runtime fingerprint mismatch: expected={expected} observed={observed}")
+    assert_true(os.environ.get("FRAME_COMPARE_RUNTIME_KIND") == "windows-portable", "runtime kind mismatch")
+    assert_true(os.environ.get("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED") == "0", "Windows FFMS2 policy mismatch")
+    assert_true(importlib.metadata.version("vs-placebo") == VS_PLACEBO_RELEASE, "vs-placebo distribution mismatch")
+
+    bundle_root = Path(sys.executable).resolve().parent.parent
+    bundled_ffmpeg_bin = os.path.normcase(os.path.normpath(str(bundle_root / "ffmpeg" / "bin")))
+    path_entries = {
+        os.path.normcase(os.path.normpath(entry))
+        for entry in os.environ.get("PATH", "").split(os.pathsep)
+        if entry
+    }
+    assert_true(bundled_ffmpeg_bin not in path_entries, "standalone FFmpeg directory leaked onto PATH")
+
+    ffmpeg = Path(resolve_executable("ffmpeg")).resolve()
+    ffprobe = Path(resolve_executable("ffprobe")).resolve()
+    assert_true(ffmpeg == (bundle_root / "ffmpeg" / "bin" / "ffmpeg.exe").resolve(), f"unexpected FFmpeg path: {ffmpeg}")
+    assert_true(ffprobe == (bundle_root / "ffmpeg" / "bin" / "ffprobe.exe").resolve(), f"unexpected ffprobe path: {ffprobe}")
+    version_lines = {
+        name: subprocess.check_output([str(executable), "-version"], text=True, timeout=15).splitlines()[0]
+        for name, executable in (("ffmpeg", ffmpeg), ("ffprobe", ffprobe))
+    }
+    for name, version_line in version_lines.items():
+        assert_true(
+            WINDOWS_FFMPEG_EXECUTABLE_TOKEN in version_line.split(),
+            f"unexpected {name} version: {version_line}",
+        )
+    report = supported_media_runtime_report()
+    assert_true(report["fingerprints"]["full"] == expected, "runtime report fingerprint mismatch")
+    proof(
+        f"runtime_contract=ok fingerprint={expected} "
+        f"ffmpeg={version_lines['ffmpeg']} ffprobe={version_lines['ffprobe']}"
+    )
+
+
 def prove_vapoursynth_environment() -> None:
     import vapoursynth as vs
 
     core = vs.core
     version = getattr(vs, "__version__", None)
+    api_version = getattr(vs, "__api_version__", None)
     version_major = getattr(version, "release_major", None)
     version_minor = getattr(version, "release_minor", None)
+    api_major = getattr(api_version, "api_major", None)
     plugin_dir = Path(vs.get_plugin_dir())
     extra_plugin_path = os.environ.get("VAPOURSYNTH_EXTRA_PLUGIN_PATH", "")
     plugins = list(core.plugins())
     plugin_namespaces = sorted(plugin.namespace for plugin in plugins)
 
-    assert_true(version_major == 76 and version_minor == 0, f"expected VapourSynth R76, got {version!r}")
+    assert_true(version_major == 78 and version_minor == 0, f"expected VapourSynth R78, got {version!r}")
+    assert_true(api_major == 4, f"expected VapourSynth API 4, got {api_version!r}")
     assert_true(plugin_dir.is_dir(), f"vapoursynth.get_plugin_dir() is not a directory: {plugin_dir}")
     assert_true("vapoursynth" in str(plugin_dir).replace("\\", "/"), f"unexpected plugin dir: {plugin_dir}")
     assert_true(extra_plugin_path, "VAPOURSYNTH_EXTRA_PLUGIN_PATH is not set")
     assert_true("VAPOURSYNTH_PLUGIN_PATH" not in os.environ, "legacy VAPOURSYNTH_PLUGIN_PATH should not be set")
-    assert_true(plugin_namespaces, "core.plugins() returned no plugins")
+    assert_true("lsmas" in plugin_namespaces, f"lsmas plugin missing: {plugin_namespaces}")
+    assert_true("placebo" in plugin_namespaces, f"placebo plugin missing: {plugin_namespaces}")
+    assert_true("ffms2" not in plugin_namespaces, "FFMS2 must remain excluded from the Windows baseline")
 
-    proof(f"vapoursynth_import=ok version=R{version_major}")
+    proof(f"vapoursynth_import=ok version=R{version_major} api={api_major}")
     proof(f"plugin_dir={plugin_dir}")
     proof(f"extra_plugin_path={extra_plugin_path}")
     proof(f"core_plugins={','.join(plugin_namespaces)}")
@@ -733,6 +847,7 @@ def prove_lwlibavsource(media_path: Path) -> None:
     import vapoursynth as vs
 
     from frame_compare.vs.env import candidate_lsmas_plugin_path_details, try_load_lsmas_plugin
+    from frame_compare.vs.source import load_source, source_index_path
 
     core = vs.core
     lsmas_loaded_path = None
@@ -740,17 +855,23 @@ def prove_lwlibavsource(media_path: Path) -> None:
         lsmas_loaded_path = try_load_lsmas_plugin(core)
 
     assert_true(hasattr(core, "lsmas"), "core.lsmas namespace missing")
-    assert_true(hasattr(core.lsmas, "LWLibavSource"), "core.lsmas.LWLibavSource missing")
+    functions = {function.name for function in core.lsmas.functions()}
+    assert_true("LWLibavSource" in functions, f"LWLibavSource missing: {sorted(functions)}")
+    assert_true("LibavSMASHSource" in functions, f"LibavSMASHSource missing: {sorted(functions)}")
 
     if media_path.is_file():
-        clip = core.lsmas.LWLibavSource(str(media_path))
-        frame = clip.get_frame(0)
+        source = load_source(media_path, core=core)
+        frame = source.clip.get_frame(0)
         assert_true(frame.width == 32 and frame.height == 32, "LWLibavSource frame render failed")
+        assert_true(source.num_frames == 1, f"unexpected source frame count: {source.num_frames}")
+        owned_index = source_index_path(media_path)
+        assert_true(owned_index.is_file(), f"runtime-specific source index missing: {owned_index}")
+        assert_true(not Path(f"{media_path}.lwi").exists(), "legacy unversioned source index was created")
     else:
         candidates = [{"source": candidate.source, "path": candidate.path} for candidate in candidate_lsmas_plugin_path_details()]
         raise AssertionError(f"tiny media proof missing: {media_path}; candidates={candidates}")
 
-    proof(f"lwlibavsource=ok namespace=lsmas loaded_path={lsmas_loaded_path}")
+    proof(f"lwlibavsource=ok namespace=lsmas loaded_path={lsmas_loaded_path} functions={','.join(sorted(functions))}")
 
 
 def build_placebo_clip():
@@ -761,7 +882,7 @@ def build_placebo_clip():
     assert_true(hasattr(core.placebo, "Tonemap"), "core.placebo.Tonemap missing")
 
     tonemap_clip = core.std.BlankClip(width=16, height=16, format=vs.RGB48, length=1, color=[32768, 32768, 32768])
-    tonemap_clip = tonemap_clip.std.SetFrameProps(_Matrix=0, _Range=0, _Transfer=16, _Primaries=9)
+    tonemap_clip = tonemap_clip.std.SetFrameProps(_Matrix=0, _Range=1, _Transfer=16, _Primaries=9)
     return core.placebo.Tonemap(
         tonemap_clip,
         src_max=1000,
@@ -778,15 +899,24 @@ def prove_placebo_tonemap_api() -> None:
 
     core = vs.core
     assert_true(hasattr(core, "placebo"), "core.placebo namespace missing")
-    assert_true(hasattr(core.placebo, "Tonemap"), "core.placebo.Tonemap missing")
-    proof("placebo_tonemap_api=ok namespace=placebo function=Tonemap")
+    functions = {function.name for function in core.placebo.functions()}
+    assert_true("Tonemap" in functions, f"core.placebo.Tonemap missing: {sorted(functions)}")
+    proof(f"placebo_tonemap_api=ok namespace=placebo functions={','.join(sorted(functions))}")
 
 
-def prove_placebo_tonemap_frame() -> None:
+def prove_placebo_tonemap_frame() -> bool:
+    from frame_compare.vs.tonemap_runtime import probe_libplacebo_runtime
+
+    if not probe_libplacebo_runtime():
+        proof("placebo_direct_frame=skipped reason=vulkan_runtime_unavailable")
+        return False
+
     direct_out, _tonemap_clip = build_placebo_clip()
     direct_frame = direct_out.get_frame(0)
     assert_true(direct_frame.width == 16 and direct_frame.height == 16, "placebo direct frame render failed")
-    proof("placebo_direct_frame=ok")
+    assert_true(direct_frame.format.bits_per_sample >= 10, "placebo unexpectedly reduced output below 10-bit")
+    proof(f"placebo_direct_frame=ok format={direct_frame.format.name} bits={direct_frame.format.bits_per_sample}")
+    return True
 
 
 def prove_apply_tonemap_frame() -> None:
@@ -797,17 +927,27 @@ def prove_apply_tonemap_frame() -> None:
 
     core = vs.core
     tonemap_clip = core.std.BlankClip(width=16, height=16, format=vs.RGB48, length=1, color=[32768, 32768, 32768])
-    tonemap_clip = tonemap_clip.std.SetFrameProps(_Matrix=0, _Range=0, _Transfer=16, _Primaries=9)
+    tonemap_clip = tonemap_clip.std.SetFrameProps(_Matrix=0, _Range=1, _Transfer=16, _Primaries=9)
 
     libplacebo_runtime_usable = _libplacebo_runtime_usable()
     app_out = apply_tonemap(tonemap_clip, TonemapSettings(enabled=True))
     app_frame = app_out.get_frame(0)
     assert_true(app_frame.width == 16 and app_frame.height == 16, "apply_tonemap frame render failed")
+    assert_true(app_frame.format.bits_per_sample >= 10, "apply_tonemap unexpectedly reduced output below 10-bit")
 
-    proof(f"apply_tonemap=ok frame=rendered fallback_aware=true libplacebo_runtime_usable={str(libplacebo_runtime_usable).lower()}")
+    proof(
+        "apply_tonemap=ok "
+        f"format={app_frame.format.name} bits={app_frame.format.bits_per_sample} "
+        f"fallback_aware=true libplacebo_runtime_usable={str(libplacebo_runtime_usable).lower()}"
+    )
 
 
-def prove_vspreview_pyqt6() -> None:
+def prove_qt_media_runtime(media_path: Path) -> None:
+    from frame_compare.vspreview.launcher import preload_vapoursynth_runtime
+
+    preload_vapoursynth_runtime()
+    proof("qt_media_runtime_preload=ok")
+
     import PyQt6  # noqa: F401
 
     proof("pyqt6_import=ok")
@@ -815,12 +955,21 @@ def prove_vspreview_pyqt6() -> None:
     import vspreview  # noqa: F401
 
     proof("vspreview_pyqt6=ok")
+    prove_runtime_contract()
+    prove_vapoursynth_environment()
+    prove_lwlibavsource(media_path)
+    prove_placebo_tonemap_api()
+    prove_apply_tonemap_frame()
+    prove_placebo_tonemap_frame()
+    proof("qt_media_runtime=ok")
 
 
 phase = sys.argv[1]
 media_path = Path(sys.argv[2])
 if phase == "package_imports":
     prove_package_imports()
+elif phase == "runtime_contract":
+    prove_runtime_contract()
 elif phase == "vapoursynth_environment":
     prove_vapoursynth_environment()
 elif phase == "lwlibavsource_frame":
@@ -831,29 +980,40 @@ elif phase == "apply_tonemap_frame":
     prove_apply_tonemap_frame()
 elif phase == "placebo_tonemap_frame":
     prove_placebo_tonemap_frame()
-elif phase == "vspreview_pyqt6_import":
-    prove_vspreview_pyqt6()
+elif phase == "qt_media_runtime":
+    prove_qt_media_runtime(media_path)
 else:
     raise AssertionError(f"unknown runtime proof phase: {phase}")
 '@
     Set-Content -LiteralPath $smokePath -Value $smokeScript -Encoding UTF8
     Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "package_imports" -MediaPath $mediaPath -Required $true
+    Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "runtime_contract" -MediaPath $mediaPath -Required $true
     Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "vapoursynth_environment" -MediaPath $mediaPath -Required $true
     Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "lwlibavsource_frame" -MediaPath $mediaPath -Required $true
     Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "placebo_tonemap_api" -MediaPath $mediaPath -Required $true
     Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "apply_tonemap_frame" -MediaPath $mediaPath -Required $true
-    Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "placebo_tonemap_frame" -MediaPath $mediaPath -Required $false
-    Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "vspreview_pyqt6_import" -MediaPath $mediaPath -Required $false
+    Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "placebo_tonemap_frame" -MediaPath $mediaPath -Required $true
+    Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "qt_media_runtime" -MediaPath $mediaPath -Required $true
   } finally {
     Remove-Item -Force -LiteralPath $smokePath -ErrorAction SilentlyContinue
     Remove-Item -Force -LiteralPath $mediaPath -ErrorAction SilentlyContinue
-    Remove-Item -Force -LiteralPath $mediaIndexPath -ErrorAction SilentlyContinue
+    Remove-Item -Force -LiteralPath $legacyMediaIndexPath -ErrorAction SilentlyContinue
+    Get-ChildItem -LiteralPath $BundleRoot -Filter "runtime-smoke.mp4.frame-compare-*.lwi" -File -ErrorAction SilentlyContinue |
+      Remove-Item -Force -ErrorAction SilentlyContinue
+    if ($locationPushed) {
+      Pop-Location
+    }
     Restore-ProcessEnvironmentValue -Name "PATH" -Value $originalPath
     Restore-ProcessEnvironmentValue -Name "PYTHONUTF8" -Value $originalPythonUtf8
     Restore-ProcessEnvironmentValue -Name "PYTHONDONTWRITEBYTECODE" -Value $originalPythonDontWriteBytecode
     Restore-ProcessEnvironmentValue -Name "PYTHONPATH" -Value $originalPythonPath
     Restore-ProcessEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH" -Value $originalVsExtraPluginPath
     Restore-ProcessEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH" -Value $originalVsPluginPath
+    Restore-ProcessEnvironmentValue -Name "FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT" -Value $originalMediaRuntimeFingerprint
+    Restore-ProcessEnvironmentValue -Name "FRAME_COMPARE_RUNTIME_KIND" -Value $originalRuntimeKind
+    Restore-ProcessEnvironmentValue -Name "FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED" -Value $originalRuntimeFfms2Required
+    Restore-ProcessEnvironmentValue -Name "FRAME_COMPARE_FFMPEG_EXECUTABLE" -Value $originalFfmpegExecutable
+    Restore-ProcessEnvironmentValue -Name "FRAME_COMPARE_FFPROBE_EXECUTABLE" -Value $originalFfprobeExecutable
   }
 }
 

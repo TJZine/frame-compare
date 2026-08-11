@@ -34,14 +34,17 @@ flowchart LR
 
 | Route | Recommended for | Requirements |
 | --- | --- | --- |
-| [Windows portable](docs/windows-portable.md) | Windows 10/11 x64 | PowerShell; the full bundle includes Python, FFmpeg, VapourSynth R76, plugins, VSPreview, and PyQt6 |
+| [Windows portable](docs/windows-portable.md) | Windows 10/11 x64 | PowerShell; the full bundle includes Python, FFmpeg, VapourSynth R78, plugins, VSPreview, and PyQt6 |
 | [Docker](docs/getting-started/docker.md) | macOS/Linux reproducible headless use | Docker Desktop or Docker Engine with Compose |
-| [Native source](docs/getting-started/native.md) | Advanced native setup | Python 3.13+, `uv` or pip, FFmpeg, VapourSynth R76, and L-SMASH-Works |
+| [Native source](docs/getting-started/native.md) | Advanced native setup | Python 3.13+, `uv` or pip, FFmpeg, VapourSynth R78, and L-SMASH-Works 1296 |
 
 VSPreview is optional for interactive manual alignment. VapourSynth is not optional
 for the default renderer: an FFmpeg-only route requires
 `screenshots.use_ffmpeg = true`, and HDR frames that need tonemapping still require
-VapourSynth.
+VapourSynth, the selected `vs-placebo` plugin, and a working Vulkan loader/driver.
+The Windows portable and Docker profiles bundle or install the selected plugin and
+validate Vulkan separately; native installs must provide a compatible Vulkan runtime
+for the active GPU in addition to matching the documented media-component versions.
 
 ### Windows portable orientation
 
@@ -85,7 +88,7 @@ optional GPU/GUI profiles and their limits.
 
 ### Native source
 
-After installing native FFmpeg, VapourSynth R76, and L-SMASH-Works:
+After installing native FFmpeg, VapourSynth R78, and L-SMASH-Works 1296:
 
 ```bash
 uv sync --no-dev --extra vspreview --frozen
@@ -102,6 +105,7 @@ optional VSPreview details.
 
 - [Troubleshooting](docs/guides/troubleshooting.md)
 - [CLI and configuration contract](docs/current-cli-contract.md)
+- [Supported media runtime](docs/supported-media-runtime.md)
 - [GitHub Releases](https://github.com/TJZine/frame-compare/releases)
 - [Contributing](https://github.com/TJZine/frame-compare/blob/main/CONTRIBUTING.md)
 - [Security policy](https://github.com/TJZine/frame-compare/blob/main/SECURITY.md)

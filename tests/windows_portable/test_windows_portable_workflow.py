@@ -6,25 +6,23 @@ from tests.workflow_helpers import load_workflow as _load_workflow
 from tests.workflow_helpers import step_by_name as _step_by_name
 
 
-def test_windows_portable_workflow_owns_bundle_and_artifact_paths(repo_root: Path) -> None:
+def test_windows_portable_workflow_delegates_extracted_bundle_verification(
+    repo_root: Path,
+) -> None:
     path = repo_root / ".github" / "workflows" / "windows-portable-build.yml"
     workflow = _load_workflow(path)
-    source = path.read_text(encoding="utf-8")
 
     assert set(workflow["jobs"]) == {"build"}
     assert workflow["permissions"] == {"contents": "read"}
     assert workflow["jobs"]["build"]["permissions"] == {"contents": "read"}
-    for required_path in (
-        "frame-compare-portable-win-x64/install.cmd",
-        "frame-compare-portable-win-x64/install.ps1",
-        "frame-compare-portable-win-x64/frame-compare.ps1",
-        "frame-compare-portable-win-x64/frame-compare-update.ps1",
-    ):
-        assert required_path in source
-    assert "dist/frame-compare-portable-win-x64" in source
-    assert (
-        "dist/release-assets/frame-compare-update-win-x64-${{ inputs.release_tag }}.zip" in source
-    )
+    verify_step = _step_by_name(workflow["jobs"]["build"], "Verify extracted portable bundle")
+    assert "tools/windows_portable/verify_extracted_bundle.ps1" in verify_step["run"]
+    assert "-ZipPath dist/frame-compare-portable-win-x64.zip" in verify_step["run"]
+    assert "-ExtractRoot dist/zip_extract_check" in verify_step["run"]
+    assert verify_step["env"] == {"EXPECTED_SHA": "${{ inputs.expected_sha }}"}
+    assert '-ExpectedCommitSha "$env:EXPECTED_SHA"' in verify_step["run"]
+    assert "inputs.expected_sha" not in verify_step["run"]
+    assert "-CommandTimeoutSeconds 300" in verify_step["run"]
 
 
 def test_windows_portable_workflow_signing_and_uploads_fail_closed(repo_root: Path) -> None:

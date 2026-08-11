@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -197,13 +198,19 @@ def test_windows_portable_dispatch_owns_immutable_release_inputs_and_secrets(
     assert set(jobs["release"]["secrets"]) == {"WINDOWS_UPDATE_SIGNING_KEY_XML"}
 
 
-def test_ci_keeps_executable_test_audit_browser_and_distribution_gates(
+def test_ci_keeps_coverage_test_audit_browser_and_distribution_gates(
     repo_root: Path,
 ) -> None:
     workflow = _load_workflow(repo_root / ".github" / "workflows" / "ci.yml")
     jobs = workflow["jobs"]
 
-    assert any("pytest -q" in str(step.get("run", "")) for step in jobs["test"]["steps"])
+    test_run = "\n".join(str(step.get("run", "")) for step in jobs["test"]["steps"])
+    assert "pytest -q" in test_run
+    assert "--cov=src/frame_compare" in test_run
+    assert "--cov-report=term-missing" in test_run
+    project = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
+    assert project["tool"]["coverage"]["run"]["branch"] is True
+    assert project["tool"]["coverage"]["report"]["fail_under"] == 80
     browser_runs = [str(step.get("run", "")) for step in jobs["report-browser"]["steps"]]
     assert any("command -v google-chrome" in run for run in browser_runs)
     assert any("tests/browser/test_report_browser_smoke.py" in run for run in browser_runs)

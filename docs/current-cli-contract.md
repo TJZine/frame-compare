@@ -217,7 +217,10 @@ work. Derived collisions are qualified deterministically with source stems and
 then stable source order. Resolved labels drive overlays, progress, reports,
 alignment display, render artifact keys, and slow.pics column names, but do not
 change source/cache/alignment identity or physical PNG filenames. Orchestrated
-rendering continues to use the source stem as `filename_label`.
+rendering continues to use the source stem as `filename_label`. When the resulting
+absolute screenshot path would exceed the legacy Windows browser-safe boundary, the
+physical filename retains a readable source-stem prefix and adds a deterministic
+digest suffix so local `file://` reports remain loadable without identity collisions.
 
 When analysis is skipped because effective `[analysis]` requests only
 `user_frames` and/or `random_frame_count`, `sources.analysis_source` is not
@@ -443,6 +446,22 @@ unchanged.
 
 ### Cache Mode Semantics
 
+- Analysis, probe, and alignment reuse caches use a performance-first source
+  freshness policy: path, byte size, and modification time identify source content;
+  media bytes are not hashed. A same-path, same-size, same-mtime replacement is
+  intentionally eligible to reuse cached data. Workflows that replace media while
+  preserving those fields must advance the mtime or remove the relevant shared
+  cache entry. This bounded stale-data risk is accepted to avoid reading potentially
+  multi-gigabyte media solely for cache lookup.
+- Automatic decoder/tool cache invalidation and decoder-ABI index isolation are
+  guaranteed for the managed Windows portable and Debian/Docker profiles, whose
+  identities include their selected packaged runtime lineages. Unmanaged Windows,
+  Linux, and native macOS fingerprints intentionally encode only the selected Frame
+Compare contract and operating-system class; replacing native decoder or FFmpeg
+binaries outside those packaged profiles requires clearing generated caches and
+Frame Compare-owned indexes before reuse. See
+[Supported Media Runtime](supported-media-runtime.md) for the profile boundary and
+recovery requirement.
 - Analysis cache entries live under `<resolved paths.generated_dir>/cache/analysis`
   using labeled full-fingerprint filenames:
   `<safe-human-label>__<full-fingerprint>.compframes`.
@@ -460,8 +479,11 @@ unchanged.
   with the compact luminance and motion arrays. Quality uses the implicit
   contiguous range; performance records its deterministic sparse samples.
   Different selected references, selected analysis sources, selection domains,
-  performance modes, metric algorithm identities, or active-rect metric domains
-  from the same input set do not satisfy each other. When
+  performance modes, metric algorithm identities, scoped media-runtime analysis
+  fingerprints, or active-rect metric domains from the same input set do not
+  satisfy each other. For the managed Windows portable and Debian/Docker profiles,
+  selected decoder changes therefore invalidate metric arrays; tone-mapping-only
+  and standalone FFmpeg-only changes do not. When
   `sources.analysis_source = "reference"`, `analysis_source_path` is the selected
   reference path. Prepared full-frame active rectangles represent no crop;
   explicit, metadata, dimension-derived, aspect-ratio-derived, or
@@ -480,6 +502,24 @@ unchanged.
   rather than silently validating a full-frame cache identity.
 - The full fingerprint remains inside the cache payload and is validated on load.
   Legacy run-folder `cache.compframes` files are not used as analysis cache hits.
+- Probe-cache files remain on-disk format version 1, but key schema 2 includes the
+  scoped decoder and standalone FFmpeg/ffprobe runtime fingerprint. In the managed
+  Windows portable and Debian/Docker profiles, a cache created by another selected
+  decoder or FFmpeg/ffprobe lineage is a normal miss, including under
+  `--from-cache-only` validation.
+- Shared alignment reuse source-set identity includes the scoped standalone-FFmpeg
+  fingerprint. In the managed Windows portable and Debian/Docker profiles, a
+  selected supported FFmpeg lineage change cannot reuse an offset computed under the
+  previous tool build.
+- Frame Compare-owned L-SMASH-Works indexes use
+  `<media>.frame-compare-lsw1296-<12-hex-index-fingerprint>.lwi`. The token is
+  profile scoped (currently `lsw1296-e3c074652ffb` on managed/portable Windows,
+  `lsw1296-6b9e50219ad0` on unmanaged Windows, and `lsw1296-4ea22a0b0598`
+  on Debian/Docker). Managed Windows portable and Debian/Docker tokens isolate
+  their packaged decoder ABIs; unmanaged profile tokens do not verify native ABI
+  changes. Legacy adjacent `<media>.lwi` files are ignored rather than deleted. A
+  corrupt owned index is removed and rebuilt once; removal/rebuild failure produces
+  a warning and an unusable index location retries source loading without an index.
 - Analysis is skipped automatically when `dark_frame_count`, `bright_frame_count`,
   and `motion_frame_count` are all `0`; `frame_plan` still selects configured
   user/random frames. Every run that proceeds reserves a fresh run folder beneath
@@ -492,12 +532,16 @@ unchanged.
   compact numeric suffixes such as `_2` and `_3`.
   Exact creation time and run identity are written to root-level
   `<run-folder>/run_info.toml` immediately after reservation and before probing
-  or rendering. This file stores `version`, UTC `created_at` with a `Z` suffix,
+  or rendering. Version 2 stores `version`, UTC `created_at` with a `Z` suffix,
   final `folder_name`, `naming_source`, `source_filenames`,
-  `frame_compare_version`, and optional `[tmdb]` prefetch facts with absent
+  `frame_compare_version`, the complete `[media_runtime]` supported component
+  contract and scoped fingerprints, and optional `[tmdb]` prefetch facts with absent
   optional values omitted rather than serialized as null. It is not a final
   outcome manifest and does not include report URL, timings, or success/failure
-  state. If `run_info.toml` cannot be written, the run fails immediately and
+  state. Version 1 is intentionally unsupported: `run_info.toml` is write-only
+  provenance rather than an input or migration surface, and V1 predates the
+  coordinated media-runtime identity. If `run_info.toml` cannot be written, the run
+  fails immediately and
   best-effort cleanup removes the empty reserved run folder when possible.
 - If run-folder reservation cannot create or resolve a candidate beneath the
   generated-data root, including permission errors or symlink-loop resolution
@@ -905,8 +949,9 @@ toggles or tags.
 VSPreview parent telemetry, generated Frame Compare session diagnostics,
 preview assumptions, ready text, and terminal confirmation prompts use stderr as
 the single human diagnostic stream. The VSPreview child process is launched with
-inherited stdout, and its stderr is passed through. Frame Compare-owned generated
-script diagnostics are written to stderr.
+inherited stdout and stderr so native carriage-return progress (including L-SMASH
+index creation) refreshes in place. Frame Compare-owned generated script diagnostics
+are written to stderr.
 
 When interactive alignment launches a generated VSPreview session, the
 diagnostic order is:
@@ -1211,6 +1256,23 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 
 - `doctor` runs dependency diagnostics through `run_doctor`.
 - `doctor --json` writes a single JSON object to stdout through the doctor command owner.
+- `doctor.baseline_version` is the supported VapourSynth release (`R78`).
+  `doctor.media_runtime` contains the code-owned component contract, scoped
+  fingerprints, and index token. `doctor.runtime_environment` reports the
+  deployment kind, expected and declared full fingerprints, declaration syntax,
+  match state, and whether the current runtime declares FFMS2 mandatory.
+- Media checks report public observable state only: VapourSynth release/API fields;
+  L-SMASH-Works namespace and required functions (its native version is not exposed
+  by the plugin API and is reported as unverifiable at runtime); vs-placebo
+  distribution version and `placebo.Tonemap`; FFMS2 policy and `ffms2.Source`; and
+  resolved FFmpeg/ffprobe paths plus their first `-version` lines. Managed Windows
+  portable and Docker runtimes require both FFmpeg tools to match the selected
+  runtime identity. FFMS2 must be absent from Windows portable and present at the
+  selected version in Docker; either policy violation fails the check. On those
+  managed profiles, failed FFMS2 or FFmpeg policy checks are critical failures even
+  though their JSON `category` remains `optional`: `success` is false and `doctor`
+  exits with the dependency error code. On unmanaged profiles, FFMS2 and FFmpeg
+  availability failures remain noncritical.
 - If the `doctor` command hits a typed top-level failure before it can produce a
   `DoctorReport`, it uses the standard CLI error contract. In `--json` mode that means
   the standard error payload is written to stdout.
@@ -1221,11 +1283,11 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   VSPreview, so optional availability gaps are visually distinct from critical
   dependency failures. This does not change `doctor --json` status values.
 - Human output uses a warning marker, rather than the critical-failure marker, for
-  failed non-core checks such as network reachability or missing optional integration
-  configuration. It ends with a deterministic readiness summary that distinguishes a
-  blocked core runtime, a ready core runtime with noncritical warnings, and a fully
-  passing check set. These presentation changes do not alter JSON fields, JSON status
-  values, or exit-code behavior.
+  failed noncritical checks such as network reachability or missing optional
+  integration configuration. It ends with a deterministic readiness summary that
+  distinguishes a blocked core runtime, a ready core runtime with noncritical
+  warnings, and a fully passing check set. These presentation changes do not alter
+  JSON fields, JSON status values, or exit-code behavior.
 - Failed checks and optional-unavailable warnings include a short deterministic next
   action when the check can prove one. `doctor --json` exposes the same text as
   `install_hint`. Hints distinguish missing executables, unavailable runtimes/plugins,

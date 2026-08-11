@@ -118,7 +118,7 @@ Default VapourSynth loader implementation using LWLibavSource.
 
 ### detect_hdr
 
-`detect_hdr(frame_props: Mapping[str, object]) -> tuple[bool, HDRMetadata | None]`
+`detect_hdr(frame_props: Mapping[str, object], fallback: HDRMetadata | None = None) -> tuple[bool, HDRMetadata | None]`
 
 Detect HDR from frame properties.
 

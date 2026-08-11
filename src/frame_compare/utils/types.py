@@ -129,7 +129,11 @@ class WorkspacePaths:
 
 @dataclass(frozen=True, slots=True)
 class AlignmentClipIdentity:
-    """Layer-neutral source identity facts for alignment cache validation."""
+    """Layer-neutral stat identity for performance-first cache validation.
+
+    Media contents are intentionally not hashed, so a same-path, same-size,
+    same-mtime replacement retains identity.
+    """
 
     path: Path
     size_bytes: int

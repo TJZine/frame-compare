@@ -77,7 +77,9 @@ from frame_compare.orchestration.source_selection import (
     resolve_source_selector,
 )
 from frame_compare.utils.atomic_write import write_text_atomic
+from frame_compare.vs.errors import SourceLoadError
 from frame_compare.vs.loader import DefaultVSLoader
+from frame_compare.vs.source import source_index_path, validate_source_index
 
 type JsonObject = dict[str, Any]
 type MetricCachePolicy = Literal["cold", "reuse"]
@@ -166,11 +168,17 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     source_indexes = _source_index_facts(analysis_source.ordered_paths)
     selected_index = source_indexes[analysis_source.path.as_posix()]
-    if args.require_warm_source_index and not selected_index["detected"]:
-        raise SystemExit(
-            "A warm source index was required but no adjacent L-SMASH index was detected "
-            f"for {analysis_source.path.as_posix()}"
-        )
+    if args.require_warm_source_index:
+        if not selected_index["detected"]:
+            raise SystemExit(
+                "A warm source index was required but no Frame Compare-owned, "
+                "runtime-versioned L-SMASH-Works index was detected for "
+                f"{analysis_source.path.as_posix()}"
+            )
+        try:
+            validate_source_index(analysis_source.path)
+        except SourceLoadError as error:
+            raise SystemExit(f"The required warm source index is not ready: {error}") from error
 
     metric_range = MetricFrameRange(
         source_frame_count=analysis_source.source_frame_count,
@@ -1023,7 +1031,8 @@ def _command_version(command: str) -> str | None:
 def _source_index_facts(paths: Sequence[Path]) -> dict[str, JsonObject]:
     facts: dict[str, JsonObject] = {}
     for path in paths:
-        candidates = list(
+        owned_index = source_index_path(path)
+        legacy_candidates = list(
             dict.fromkeys(
                 (
                     Path(f"{path}.lwi"),
@@ -1032,11 +1041,18 @@ def _source_index_facts(paths: Sequence[Path]) -> dict[str, JsonObject]:
                 )
             )
         )
-        existing = [candidate for candidate in candidates if candidate.is_file()]
+        legacy_existing = [
+            candidate
+            for candidate in legacy_candidates
+            if candidate != owned_index and candidate.is_file()
+        ]
+        owned_exists = owned_index.is_file()
         facts[path.as_posix()] = {
-            "detected": bool(existing),
-            "paths": [candidate.as_posix() for candidate in existing],
-            "sizes_bytes": [candidate.stat().st_size for candidate in existing],
+            "detected": owned_exists,
+            "expected_path": owned_index.as_posix(),
+            "paths": [owned_index.as_posix()] if owned_exists else [],
+            "sizes_bytes": [owned_index.stat().st_size] if owned_exists else [],
+            "legacy_paths_ignored": [candidate.as_posix() for candidate in legacy_existing],
         }
     return facts
 

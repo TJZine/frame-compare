@@ -80,12 +80,25 @@ def test_register_windows_dll_dirs_is_idempotent_per_process(monkeypatch, tmp_pa
     env_home.mkdir()
     vs_core = bundle_root / "vs" / "core"
     vs_core.mkdir(parents=True)
-    plugin_dir = vs_core / "plugins"
-    plugin_dir.mkdir()
     app_site_packages = bundle_root / "app" / "site-packages"
     app_site_packages.mkdir(parents=True)
-    nested_site_packages = app_site_packages / "Lib" / "site-packages"
-    nested_site_packages.mkdir(parents=True)
+    vapoursynth_package = app_site_packages / "vapoursynth"
+    vapoursynth_libs = app_site_packages / "vapoursynth.libs"
+    vs_placebo_package = app_site_packages / "vs_placebo"
+    vs_placebo_libs = app_site_packages / "vs_placebo.libs"
+    lsmas_dir = bundle_root / "vs" / "extra-plugins" / "lsmas"
+    qt_bin = app_site_packages / "PyQt6" / "Qt6" / "bin"
+    for directory in (
+        vapoursynth_package,
+        vapoursynth_libs,
+        vs_placebo_package,
+        vs_placebo_libs,
+        lsmas_dir,
+        qt_bin,
+    ):
+        directory.mkdir(parents=True)
+    ffmpeg_bin = bundle_root / "ffmpeg" / "bin"
+    ffmpeg_bin.mkdir(parents=True)
 
     monkeypatch.setattr(env_module.os, "name", "nt", raising=False)
     monkeypatch.setattr(env_module.sys, "executable", str(executable))
@@ -109,12 +122,18 @@ def test_register_windows_dll_dirs_is_idempotent_per_process(monkeypatch, tmp_pa
 
     expected_calls = [
         str(env_home),
+        str(python_dir),
         str(vs_core),
-        str(plugin_dir),
         str(app_site_packages),
-        str(nested_site_packages),
+        str(vapoursynth_package),
+        str(vapoursynth_libs),
+        str(vs_placebo_package),
+        str(vs_placebo_libs),
+        str(lsmas_dir),
     ]
     assert calls == expected_calls
+    assert str(ffmpeg_bin) not in calls
+    assert str(qt_bin) not in calls
 
 
 def test_import_vapoursynth_module_registers_runtime_dirs_before_retry(

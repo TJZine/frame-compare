@@ -423,6 +423,10 @@ dev = [
     { name = "respx" },
     { name = "ruff" },
 ]
+docker-test = [
+    { name = "pytest" },
+    { name = "pytest-mock" },
+]
 docs = [
     { name = "zensical" },
 ]
@@ -459,6 +463,10 @@ dev = [
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "respx", specifier = ">=0.22.0" },
     { name = "ruff", specifier = ">=0.16.1" },
+]
+docker-test = [
+    { name = "pytest", specifier = "==9.1.1" },
+    { name = "pytest-mock", specifier = "==3.15.1" },
 ]
 docs = [{ name = "zensical", specifier = "==0.0.51" }]
 

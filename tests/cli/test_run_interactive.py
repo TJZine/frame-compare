@@ -30,6 +30,7 @@ from frame_compare.orchestration.types import (
     SlowpicsUploadConfirmationRequest,
 )
 
+from .cli_helpers import _normalize_cli_output
 from .run_command_test_support import (
     DepsOptions,
     RecordingRunner,
@@ -271,7 +272,7 @@ def test_full_window_retry_prompt_keeps_visible_text_on_stderr(
     )
     assert result.exit_code == expected_exit_code
     assert result.stdout == ""
-    assert result.stderr == expected_prompt + stderr_suffix
+    assert _normalize_cli_output(result.stderr) == expected_prompt + stderr_suffix
 
 
 @pytest.mark.parametrize(

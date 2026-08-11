@@ -60,7 +60,7 @@ def convert_for_libplacebo(clip: vs.VideoNode, inputs: HdrTonemapInputs) -> vs.V
         if clip.format.color_family == vs.RGB:
             return clip.resize.Bicubic(format=vs.RGB48)
 
-        props = inputs.props if inputs.props is not None else dict(clip.get_frame(0).props)
+        props = inputs.props
         detected_is_hdr = inputs.detected_is_hdr
         if detected_is_hdr is None:
             detected_is_hdr, _ = detect_hdr(props)
