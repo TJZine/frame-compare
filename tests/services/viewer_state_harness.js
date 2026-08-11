@@ -740,28 +740,21 @@ const summary = {};
 }
 
 {
-    const { viewer } = loadViewer({ clipCount: 4 });
-    viewer.state.mode = 'slider';
-    viewer.state.zoom = 2;
-    viewer.state.revealPercent = 25;
-    viewer.dom.canvas.offsetWidth = 0;
-    viewer.dom.canvas.clientWidth = 0;
-    viewer.dom.canvas.getBoundingClientRect = () => ({ width: 800 });
-    viewer.dom.labelLeft.offsetWidth = 90;
-    viewer.dom.labelRight.offsetWidth = 80;
-
-    assert.equal(viewer.untransformedCanvasWidth(), 400);
-    const positions = viewer.smartLabelPositions(400, 90, 80);
-    assert.equal(positions.leftX, 290);
-    assert.equal(positions.rightX, 310);
-    viewer.updateSmartStageLabels();
-    assert.equal(viewer.dom.canvas.style.values['--label-left-x'], '290px');
-    assert.equal(viewer.dom.canvas.style.values['--label-right-x'], '310px');
-    summary.smartLabelGeometry = {
-        untransformedWidth: viewer.untransformedCanvasWidth(),
-        labelLeftX: viewer.dom.canvas.style.values['--label-left-x'],
-        labelRightX: viewer.dom.canvas.style.values['--label-right-x'],
+    const { viewer } = loadViewer({ clipCount: 2 });
+    const clip = {
+        label: 'Title.2160p.WEB-DL.Service-GROUP',
+        resolution: [3840, 2160],
+        hdr: true,
     };
+    assert.equal(
+        viewer.clipOverlayLabel(clip),
+        'Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR',
+    );
+    assert.equal(
+        viewer.diffOverlayLabel(clip, { label: 'Encode', resolution: [1920, 1080], hdr: false }),
+        'Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR (Base) ↔ Encode • 1920×1080 • SDR (Compare)',
+    );
+    summary.sourceOverlayLabel = viewer.clipOverlayLabel(clip);
 }
 
 {
@@ -774,8 +767,8 @@ const summary = {};
 
     viewer.state.activeClipIdx = viewer.state.rightClipIdx;
     const rightActiveLabels = viewer.blinkStageLabels('Clip 1', 'Clip 2');
-    assert.equal(rightActiveLabels.left, '');
-    assert.equal(rightActiveLabels.right, 'Clip 2');
+    assert.equal(rightActiveLabels.left, 'Clip 2');
+    assert.equal(rightActiveLabels.right, '');
     summary.blinkLabels = {
         leftActive: leftActiveLabels,
         rightActive: rightActiveLabels,

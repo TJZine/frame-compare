@@ -129,6 +129,18 @@ def test_build_html_exposes_viewer_only_grid_controls_and_empty_mount(
     assert html.count('id="viewer-live"') == 1
 
 
+def test_build_html_mounts_source_hud_outside_transformed_canvas(
+    report_payload: ReportPayload,
+) -> None:
+    document = parse_elements(build_html(report_payload))
+    stage = require_first(document, tag="div", class_name="rv-viewer-stage")
+    canvas = require_first(stage, tag="div", class_name="rv-canvas")
+    stage_labels = require_first(stage, tag="div", class_name="rv-stage-labels")
+
+    assert stage_labels in stage.children
+    assert stage_labels not in canvas.children
+
+
 def test_build_html_keeps_ten_plus_long_label_clips_reachable_and_mobile_safe(
     report_payload: ReportPayload,
 ) -> None:

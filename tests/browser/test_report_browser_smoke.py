@@ -62,7 +62,10 @@ def _browser_executable() -> str | None:
 
 def _generated_report(tmp_path: Path) -> Path:
     clips: list[ClipInfo] = []
-    for name, label in (("reference", "REF"), ("encode", "ENC")):
+    for name, label in (
+        ("reference", "Movie.Title.2026.2160p.WEB-DL.Service-GROUP"),
+        ("encode", "Movie.Title.2026.1080p.WEB-DL.Service-ENCODE"),
+    ):
         screenshot = tmp_path / "screenshots" / name / "10.png"
         screenshot.parent.mkdir(parents=True)
         screenshot.write_bytes(_ONE_PIXEL_PNG)
@@ -97,6 +100,65 @@ def _append_screenshot_load_probe(report_path: Path) -> None:
 <img id="sibling-screenshot-probe" src="screenshots/reference/10.png" alt="" hidden>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+    const probeHud = () => {
+        const frameHud = document.querySelector('.rv-stage-overlay-info');
+        const label = document.getElementById('label-left');
+        const rectanglesIntersect = (first, second) => !(
+            first.right <= second.left
+            || second.right <= first.left
+            || first.bottom <= second.top
+            || second.bottom <= first.top
+        );
+        label.textContent = ReportViewer.diffOverlayLabel(
+            ReportViewer.state.data.clips[0],
+            ReportViewer.state.data.clips[1]
+        );
+        document.documentElement.dataset.diffSourceHudVisible = String(
+            window.getComputedStyle(label).display !== 'none'
+            && label.textContent.includes('Base')
+            && label.textContent.includes('Compare')
+        );
+        document.documentElement.dataset.diffHudsSeparate = String(
+            !rectanglesIntersect(label.getBoundingClientRect(), frameHud.getBoundingClientRect())
+        );
+        ReportViewer.setOverlaysHidden(true, { save: false });
+        document.documentElement.dataset.hudToggleHidesBoth = String(
+            ReportViewer.dom.stage.classList.contains('rv-overlays-hidden')
+            && frameHud !== null
+        );
+        ReportViewer.setOverlaysHidden(false, { save: false });
+
+        ReportViewer.setMode('slider');
+        const sliderLabelsSeparate = [0, 100].every(revealPercent => {
+            ReportViewer.state.revealPercent = revealPercent;
+            ReportViewer.updateSlider();
+            ReportViewer.dom.canvas.style.setProperty('--zoom-level', '2');
+            ReportViewer.dom.canvas.style.setProperty('--pan-x', '120px');
+            ReportViewer.dom.canvas.style.setProperty('--pan-y', '80px');
+            const leftSliderLabel = document.getElementById('label-left').getBoundingClientRect();
+            const rightSliderLabel = document.getElementById('label-right').getBoundingClientRect();
+            return !rectanglesIntersect(leftSliderLabel, rightSliderLabel);
+        });
+        document.documentElement.dataset.sliderLabelsSeparate = String(sliderLabelsSeparate);
+
+        ReportViewer.setMode('overlay');
+        const before = label.getBoundingClientRect();
+        ReportViewer.dom.canvas.style.setProperty('--zoom-level', '2');
+        ReportViewer.dom.canvas.style.setProperty('--pan-x', '120px');
+        ReportViewer.dom.canvas.style.setProperty('--pan-y', '80px');
+        const after = label.getBoundingClientRect();
+        document.documentElement.dataset.sourceHudViewportStable = String(
+            before.left === after.left && before.top === after.top
+        );
+        document.documentElement.dataset.sourceHudText = label.textContent;
+        const sourceHudStyle = window.getComputedStyle(label);
+        document.documentElement.dataset.sourceHudWraps = String(
+            sourceHudStyle.whiteSpace === 'normal'
+            && sourceHudStyle.textOverflow !== 'ellipsis'
+        );
+        ReportViewer.setMode('diff');
+    };
+    probeHud();
     const mark = () => {
         const image = document.getElementById('sibling-screenshot-probe');
         const loaded = image && image.complete && image.naturalWidth > 0;
@@ -130,6 +192,7 @@ def test_generated_report_initializes_observable_mode_and_aria_state(tmp_path: P
             "--disable-gpu",
             "--no-first-run",
             "--virtual-time-budget=10000",
+            "--window-size=375,800",
             "--dump-dom",
             report_path.as_uri(),
         ],
@@ -145,6 +208,15 @@ def test_generated_report_initializes_observable_mode_and_aria_state(tmp_path: P
     assert 'src="screenshots/reference/10.png"' in completed.stdout
     assert parser.document_attributes is not None
     assert parser.document_attributes["data-sibling-screenshot-loaded"] == "true"
+    assert parser.document_attributes["data-source-hud-viewport-stable"] == "true"
+    assert parser.document_attributes["data-source-hud-wraps"] == "true"
+    assert parser.document_attributes["data-diff-source-hud-visible"] == "true"
+    assert parser.document_attributes["data-diff-huds-separate"] == "true"
+    assert parser.document_attributes["data-hud-toggle-hides-both"] == "true"
+    assert parser.document_attributes["data-slider-labels-separate"] == "true"
+    assert parser.document_attributes["data-source-hud-text"] == (
+        "Movie.Title.2026.2160p.WEB-DL.Service-GROUP • 1×1 • SDR"
+    )
     assert parser.stage_attributes is not None
     stage_classes = (parser.stage_attributes["class"] or "").split()
     assert "rv-mode-diff" in stage_classes

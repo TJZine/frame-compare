@@ -517,10 +517,10 @@ def _render_stage() -> str:
                 <img src="" alt="" class="rv-image">
             </div>
             <div class="rv-divider"><div class="rv-divider-handle"></div></div>
-            <div class="rv-stage-labels" aria-hidden="true">
-                <div id="label-left" class="rv-overlay-label"></div>
-                <div id="label-right" class="rv-overlay-label right"></div>
-            </div>
+        </div>
+        <div class="rv-stage-labels" aria-hidden="true">
+            <div id="label-left" class="rv-overlay-label"></div>
+            <div id="label-right" class="rv-overlay-label right"></div>
         </div>
         <span id="rv-lens-target" class="rv-lens-target" aria-hidden="true" hidden><i></i><i></i><i></i><i></i></span>
         <section id="rv-grid" class="rv-grid" aria-label="Grid comparison" hidden>
