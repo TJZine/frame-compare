@@ -682,7 +682,10 @@ def _run_extracted_bundle_verifier(
 
 
 def _assert_descendant_exited(*, pwsh: str, started: Path) -> None:
-    descendant_pid = int(started.read_text(encoding="utf-8").strip())
+    descendant_pid, descendant_start_time_utc_ticks = map(
+        int,
+        started.read_text(encoding="utf-8").splitlines(),
+    )
     result = subprocess.run(
         [
             pwsh,
@@ -690,31 +693,73 @@ def _assert_descendant_exited(*, pwsh: str, started: Path) -> None:
             "-Command",
             (
                 "$targetProcessId = [int]$env:FRAME_COMPARE_TEST_DESCENDANT_PID; "
+                "$expectedStartTimeUtcTicks = "
+                "[long]$env:FRAME_COMPARE_TEST_DESCENDANT_START_TIME_UTC_TICKS; "
                 "try { "
                 "$process = [System.Diagnostics.Process]::GetProcessById($targetProcessId) "
                 "} catch [System.ArgumentException] { exit 0 }; "
+                "try { "
+                "try { "
+                "$actualStartTimeUtcTicks = $process.StartTime.ToUniversalTime().Ticks "
+                "} catch { "
+                "Write-Error ('descendant process identity could not be confirmed for PID "
+                "{0}: {1}' -f $targetProcessId, $_.Exception.Message); "
+                "exit 1 "
+                "}; "
+                "if ($actualStartTimeUtcTicks -ne $expectedStartTimeUtcTicks) { "
+                "Write-Error ('descendant process identity mismatch for PID {0}: expected "
+                "start time {1}, resolved {2}' -f $targetProcessId, "
+                "$expectedStartTimeUtcTicks, $actualStartTimeUtcTicks); "
+                "exit 1 "
+                "}; "
                 "$exited = $process.WaitForExit(10000); "
                 "if (-not $exited) { "
-                "try { "
                 "$process.Kill($true); "
-                "$process.WaitForExit(10000) | Out-Null "
-                "} finally { $process.Dispose() }; "
+                "$process.WaitForExit(10000) | Out-Null; "
                 "Write-Error 'descendant remained alive after verifier cleanup'; "
                 "exit 1 "
                 "}; "
-                "$process.Dispose()"
+                "} finally { $process.Dispose() }"
             ),
         ],
         capture_output=True,
         text=True,
         timeout=22,
         check=False,
-        env=os.environ | {"FRAME_COMPARE_TEST_DESCENDANT_PID": str(descendant_pid)},
+        env=os.environ
+        | {
+            "FRAME_COMPARE_TEST_DESCENDANT_PID": str(descendant_pid),
+            "FRAME_COMPARE_TEST_DESCENDANT_START_TIME_UTC_TICKS": str(
+                descendant_start_time_utc_ticks
+            ),
+        },
     )
     assert result.returncode == 0, (
         f"descendant process {descendant_pid} remained alive after verifier cleanup: "
         f"{_normalized_process_output(result)}"
     )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows process identity semantics required")
+def test_assert_descendant_exited_does_not_kill_identity_mismatch(tmp_path: Path) -> None:
+    pwsh = shutil.which("pwsh")
+    if pwsh is None:
+        pytest.skip("PowerShell 7 is required")
+    descendant = subprocess.Popen([pwsh, "-NoProfile", "-Command", "Start-Sleep -Seconds 60"])
+    started = tmp_path / "descendant-started.txt"
+    started.write_text(f"{descendant.pid}\n0\n", encoding="utf-8")
+
+    try:
+        with pytest.raises(AssertionError, match="identity mismatch"):
+            _assert_descendant_exited(pwsh=pwsh, started=started)
+        assert descendant.poll() is None
+    finally:
+        descendant.terminate()
+        try:
+            descendant.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            descendant.kill()
+            descendant.wait(timeout=10)
 
 
 def _write_extracted_verifier_fixture(
@@ -1188,7 +1233,10 @@ if ($args[0] -eq "--help") {{
     "-Command",
     "Start-Sleep -Seconds 60"
   ) -PassThru
-  Set-Content -LiteralPath '{escaped_started}' -Value $descendant.Id
+  Set-Content -LiteralPath '{escaped_started}' -Value @(
+    $descendant.Id,
+    $descendant.StartTime.ToUniversalTime().Ticks
+  )
   $line = "x" * 1024
   for ($index = 0; $index -lt 20000; $index++) {{
     [Console]::{console_stream}.WriteLine("{flood_stream}-$index-$line")
@@ -1252,7 +1300,10 @@ if ($args[0] -eq "--help") {{
     "-Command",
     "Start-Sleep -Seconds 60"
   ) -PassThru
-  Set-Content -LiteralPath '{escaped_started}' -Value $descendant.Id
+  Set-Content -LiteralPath '{escaped_started}' -Value @(
+    $descendant.Id,
+    $descendant.StartTime.ToUniversalTime().Ticks
+  )
   Start-Sleep -Seconds 3
   exit 0
 }}
