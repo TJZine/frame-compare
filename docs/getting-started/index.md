@@ -59,7 +59,7 @@ details. Use the same route and runtime when bit-for-bit comparison is important
 | Docker default | Included in image | Included | Included | Not in the default runtime target | Rebuild/pull the image |
 | Docker NVIDIA | Included in image | Included | Included | Not by the GPU profile alone | Rebuild/pull the image |
 | Docker X11 GUI | Included in GUI image target | Included | Included | Included in the optional GUI target | Rebuild/pull the image |
-| Native source with `uv` | Created from `uv.lock` | Host-provided | Host-provided; `vspreview` extra supplies related Python packages | Optional extra | None |
+| Native source with `uv` | Created from `uv.lock` | Host-provided | R78 from the `vspreview` extra; on Windows the extra also installs L-SMASH-Works 1296 and vs-placebo 2.0.4, while Linux/macOS plugins remain host-provided | Optional extra | None |
 | Native source with pip | Created/selected by you | Host-provided | Host-provided | Optional extra | None |
 
 The repository currently documents Docker as a build-from-clone route; it does not

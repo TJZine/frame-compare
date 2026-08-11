@@ -38,6 +38,9 @@ dependencies = [
 
 [project.optional-dependencies]
 vspreview = [
+    "vapoursynth==78",
+    "vapoursynth-lsmas==1296.0.0.1; sys_platform == 'win32'",
+    "vs-placebo==2.0.4; sys_platform == 'win32'",
     "vspreview",
 ]
 

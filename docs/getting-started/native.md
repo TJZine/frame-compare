@@ -32,10 +32,17 @@ From a clone of the repository:
 uv sync --no-dev --extra vspreview --frozen
 ```
 
-The `vspreview` extra supplies the repository-managed VapourSynth Python and
-VSPreview dependencies. It does not install the native L-SMASH-Works plugin for you.
-If you do not need VSPreview, omit `--extra vspreview` while retaining the required
-native renderer dependencies.
+The `vspreview` extra pins the repository-managed VapourSynth Python package to R78.
+On Windows it also installs the selected `vapoursynth-lsmas 1296.0.0.1` and
+`vs-placebo 2.0.4` plugin wheels so the locked environment matches the supported
+native media stack. Linux and macOS still require host-managed L-SMASH-Works and
+vs-placebo installations. If you do not need VSPreview, omit `--extra vspreview`
+while retaining the required native renderer dependencies.
+
+When upgrading an existing Windows checkout from the R76 stack, recreate `.venv`
+before syncing if its VapourSynth plugin directory contains manually installed or
+untracked DLLs. An old `libvslsmashsource.dll` can otherwise load before the selected
+wheel-owned `LSMASHSource.dll` and produce the deprecated API3 warning.
 
 Use the managed entry point for every command:
 

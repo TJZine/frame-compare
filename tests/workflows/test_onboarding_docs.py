@@ -1,10 +1,27 @@
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 import yaml
 
 from tests.workflow_helpers import read_text_or_fail as _read_text_or_fail
+
+
+def test_vspreview_extra_pins_supported_native_windows_media_stack(repo_root: Path) -> None:
+    with (repo_root / "pyproject.toml").open("rb") as pyproject_file:
+        project = tomllib.load(pyproject_file)["project"]
+
+    dependencies = set(project["optional-dependencies"]["vspreview"])
+
+    assert "vapoursynth==78" in dependencies
+    assert "vapoursynth-lsmas==1296.0.0.1; sys_platform == 'win32'" in dependencies
+    assert "vs-placebo==2.0.4; sys_platform == 'win32'" in dependencies
+
+    native_install = _read_text_or_fail(repo_root / "docs" / "getting-started" / "native.md")
+    assert "pins the repository-managed VapourSynth Python package to R78" in native_install
+    assert "`vapoursynth-lsmas 1296.0.0.1`" in native_install
+    assert "`vs-placebo 2.0.4`" in native_install
 
 
 def test_default_compose_separates_wizard_config_writes_from_normal_runs(
