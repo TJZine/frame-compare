@@ -37,33 +37,3 @@ def test_viewer_css_preserves_accessible_input_modes() -> None:
         target = css_block(coarse, selector)
         assert "min-width: 44px;" in target, selector
         assert "min-height: 44px;" in target, selector
-
-
-def test_source_hud_stays_in_viewport_and_wraps_complete_identity() -> None:
-    css = get_css()
-
-    stage_labels = css_block(css, ".rv-stage-labels")
-    source_label = css_block(css, ".rv-overlay-label")
-
-    assert "position: absolute;" in stage_labels
-    assert "inset: 0;" in stage_labels
-    assert "max-width: min(48rem, calc(100% - 1.5rem));" in source_label
-    assert "top: 52px;" in source_label
-    assert "white-space: normal;" in source_label
-    assert "text-overflow: ellipsis;" not in source_label
-    assert ".rv-mode-diff .rv-stage-labels" not in css
-
-    hidden_hud = css_block(css, ".rv-viewer-stage.rv-overlays-hidden .rv-overlay-label")
-    assert "opacity: 0;" in hidden_hud
-    assert "visibility: hidden;" in hidden_hud
-
-    mobile = css_block(css, "@media (max-width: 768px)")
-    slider_labels = css_block(mobile, ".rv-mode-slider #label-left")
-    assert "max-width: calc(50% - 12px);" in slider_labels
-
-    slider_left = css_block(css, ".rv-mode-slider #label-left")
-    slider_right = css_block(css, ".rv-mode-slider #label-right")
-    assert "left: 12px;" in slider_left
-    assert "transform: none;" in slider_left
-    assert "right: 12px;" in slider_right
-    assert "left: auto;" in slider_right

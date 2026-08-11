@@ -2634,17 +2634,7 @@ const ReportViewer = {
     },
 
     clipOverlayLabel(clip, role = '') {
-        const label = clip?.label || clip?.name || 'Clip';
-        const resolution = Array.isArray(clip?.resolution)
-            && clip.resolution.length >= 2
-            && Number.isFinite(Number(clip.resolution[0]))
-            && Number.isFinite(Number(clip.resolution[1]))
-            ? `${clip.resolution[0]}×${clip.resolution[1]}`
-            : '';
-        const dynamicRange = typeof clip?.hdr === 'boolean'
-            ? (clip.hdr ? 'HDR' : 'SDR')
-            : '';
-        const identity = [label, resolution, dynamicRange].filter(Boolean).join(' • ');
+        const identity = `${clip.label} • ${clip.resolution[0]}×${clip.resolution[1]} • ${clip.hdr ? 'HDR' : 'SDR'}`;
         return role ? `${identity} (${role})` : identity;
     },
 
