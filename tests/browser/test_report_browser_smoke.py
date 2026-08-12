@@ -121,6 +121,12 @@ document.addEventListener('DOMContentLoaded', () => {
         document.documentElement.dataset.diffHudsSeparate = String(
             !rectanglesIntersect(label.getBoundingClientRect(), frameHud.getBoundingClientRect())
         );
+        const sourceHudStyle = window.getComputedStyle(label);
+        const frameHudStyle = window.getComputedStyle(frameHud);
+        document.documentElement.dataset.hudStylesAligned = String(
+            label.getBoundingClientRect().top === frameHud.getBoundingClientRect().top
+            && sourceHudStyle.borderRadius === frameHudStyle.borderRadius
+        );
         ReportViewer.setOverlaysHidden(true, { save: false });
         document.documentElement.dataset.hudToggleHidesBoth = String(
             ReportViewer.dom.stage.classList.contains('rv-overlays-hidden')
@@ -151,7 +157,6 @@ document.addEventListener('DOMContentLoaded', () => {
             before.left === after.left && before.top === after.top
         );
         document.documentElement.dataset.sourceHudText = label.textContent;
-        const sourceHudStyle = window.getComputedStyle(label);
         document.documentElement.dataset.sourceHudWraps = String(
             sourceHudStyle.whiteSpace === 'normal'
             && sourceHudStyle.textOverflow !== 'ellipsis'
@@ -212,6 +217,7 @@ def test_generated_report_initializes_observable_mode_and_aria_state(tmp_path: P
     assert parser.document_attributes["data-source-hud-wraps"] == "true"
     assert parser.document_attributes["data-diff-source-hud-visible"] == "true"
     assert parser.document_attributes["data-diff-huds-separate"] == "true"
+    assert parser.document_attributes["data-hud-styles-aligned"] == "true"
     assert parser.document_attributes["data-hud-toggle-hides-both"] == "true"
     assert parser.document_attributes["data-slider-labels-separate"] == "true"
     assert parser.document_attributes["data-source-hud-text"] == (
