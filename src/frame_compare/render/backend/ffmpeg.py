@@ -16,6 +16,9 @@ if TYPE_CHECKING:
     from frame_compare.render.geometry import RenderGeometryPlan
 
 
+_H273_UNSPECIFIED = 2
+
+
 class FFmpegRunner(Protocol):
     """Protocol for FFmpeg-based frame extraction and probing."""
 
@@ -76,4 +79,11 @@ class DefaultFFmpegRunner:
             raise FFmpegError(exc.stderr.decode(errors="replace"), exc.returncode) from exc
 
     def probe_hdr(self, video: Path) -> HDRMetadata | None:
-        return probe_hdr_metadata(video)
+        metadata = probe_hdr_metadata(video)
+        if (
+            metadata is None
+            or metadata.transfer == _H273_UNSPECIFIED
+            or metadata.color_primaries == _H273_UNSPECIFIED
+        ):
+            return None
+        return metadata
