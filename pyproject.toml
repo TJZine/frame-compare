@@ -24,10 +24,10 @@ classifiers = [
 dependencies = [
     "typer>=0.27.1",
     "rich>=14.2.0",
-    "numpy>=2.5.1",
+    "numpy>=2.5.2",
     "httpx>=0.28.1",
     "pydantic>=2.12.5",
-    "pydantic-settings>=2.12.0",
+    "pydantic-settings>=2.15.0",
     "structlog>=26.1.0",
     "tomli-w>=1.2.0",
     "pillow>=12.2.0",
@@ -57,7 +57,7 @@ packages = ["src/frame_compare"]
 # ─── Dependency Groups (PEP 735) ───────────────────────────────────────────────
 [dependency-groups]
 docs = [
-    "zensical==0.0.51",
+    "zensical==0.0.53",
 ]
 docker-test = [
     "pytest==9.1.1",
@@ -73,7 +73,7 @@ dev = [
     "pyyaml>=6.0.3",
     "pyright>=1.1.411",
     "nodejs-wheel-binaries>=24.16.0",
-    "ruff>=0.16.1",
+    "ruff>=0.16.2",
     "respx>=0.22.0",
     "pip-audit==2.10.1",
 ]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tomllib
+from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +17,7 @@ class TomlConfigSettingsSourceNoBOM(TomlConfigSettingsSource):
     (common on Windows). We decode with 'utf-8-sig' and parse via `tomllib.loads()`.
     """
 
-    def _read_file(self, file_path: Path) -> dict[str, Any]:
+    def _read_file(self, file_path: Path | Traversable) -> dict[str, Any]:
         raw = file_path.read_bytes()
         text = raw.decode("utf-8-sig")
         return tomllib.loads(text)
