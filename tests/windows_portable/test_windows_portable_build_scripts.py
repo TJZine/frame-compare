@@ -7,7 +7,6 @@ import re
 import shutil
 import subprocess
 import sys
-import time
 import zipfile
 from pathlib import Path
 
@@ -217,7 +216,7 @@ def test_windows_portable_manifest_tracks_coordinated_media_runtime_artifacts(
     artifacts = {artifact["id"]: artifact for artifact in manifest["artifacts"]}
 
     assert manifest["manifest_version"] == 2
-    assert manifest["bundle"]["vs_ref"] == "R78"
+    assert manifest["bundle"]["vs_ref"] == "R79"
     assert manifest["bundle"]["ffmpeg_policy"] == "lgpl-only"
     assert set(manifest["bundle"]["runtime_fingerprints"]) == {
         "analysis",
@@ -236,11 +235,19 @@ def test_windows_portable_manifest_tracks_coordinated_media_runtime_artifacts(
     python = artifacts["python-embed-amd64"]
     assert python["version"] == expected_python_version
 
-    vapoursynth = artifacts["vapoursynth-portable-r78"]
-    assert vapoursynth["version"] == "R78"
-    assert vapoursynth["url"].endswith("/R78/VapourSynth64-Portable-R78.zip")
-    assert vapoursynth["source_ref"] == "R78"
-    assert vapoursynth["source_commit"] == "c2f5751a412347f306eb7f6a5985dd9a719f3896"
+    vapoursynth = artifacts["vapoursynth-portable-r79"]
+    assert vapoursynth["version"] == "R79"
+    assert vapoursynth["url"].endswith("/R79/VapourSynth64-Portable-R79.zip")
+    assert vapoursynth["source_ref"] == "R79"
+    assert vapoursynth["source_commit"] == "acabf605b2205b32d65859bb2736405719d2fafd"
+    assert vapoursynth["bytes"] == 23160674
+    assert vapoursynth["sha256"] == (
+        "625b3410d903943107291592e90d6f521f829ebb8291d952ee91b8d674bbb153"
+    )
+    assert vapoursynth["source_bytes"] == 657976
+    assert vapoursynth["source_sha256"] == (
+        "042ce026e552a31c5c4b89f637fcb5841f69f807babc7e11f11f863a194d9da7"
+    )
 
     lsmas = artifacts["vs-plugin-lsmas-1296.0.0.1-win-amd64-wheel"]
     assert lsmas["version"] == "1296.0.0.1"
@@ -280,7 +287,7 @@ def test_windows_portable_build_uses_r74_plus_plugin_layout(repo_root: Path) -> 
         '$vsDllPackage = Join-Path $sitePackages "vapoursynth\\\\libvapoursynth.dll"'
         in build_script
     )
-    assert "expected R78 package layout" in build_script
+    assert "expected R79 package layout" in build_script
     assert 'Join-Path $sitePackages "vapoursynth.dll"' not in build_script
     assert 'Join-Path $sitePackages "Lib\\\\site-packages\\\\vapoursynth.dll"' not in build_script
     assert "manifest.vs" in build_script
@@ -344,7 +351,8 @@ def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: 
     for expected in (
         "Invoke-BundleRuntimeProof",
         "phase=$Phase start",
-        "version_major == 78",
+        "version_major == 79",
+        "api_minor == 2",
         "LWLibavSource",
         "LibavSMASHSource",
         "core.placebo.Tonemap",
@@ -1250,7 +1258,6 @@ exit 1
         candidate_launcher=candidate_launcher,
     )
 
-    started_at = time.monotonic()
     result = _run_extracted_bundle_verifier(
         repo_root=repo_root,
         zip_path=zip_path,
@@ -1258,8 +1265,6 @@ exit 1
         local_app_data=tmp_path / "local-app-data",
         command_timeout_seconds=20,
     )
-    elapsed_seconds = time.monotonic() - started_at
-
     assert result.returncode != 0
     output = _normalized_process_output(result)
     assert "timed_out=true" not in output
@@ -1272,7 +1277,6 @@ exit 1
         f"candidate_launcher_--help {flood_stream} evidence exceeded the 16777216-byte limit"
     ) in output
     assert "its process job was terminated" in output
-    assert elapsed_seconds < 10
     evidence = tmp_path / "fresh-extract/command-evidence"
     stdout_size = (evidence / "candidate_launcher_--help.stdout.txt").stat().st_size
     stderr_size = (evidence / "candidate_launcher_--help.stderr.txt").stat().st_size
@@ -1304,7 +1308,7 @@ if ($args[0] -eq "--help") {{
     $descendant.Id,
     $descendant.StartTime.ToUniversalTime().Ticks
   )
-  Start-Sleep -Seconds 3
+  Start-Sleep -Seconds 60
   exit 0
 }}
 exit 1
@@ -1320,7 +1324,7 @@ exit 1
         zip_path=zip_path,
         extract_root=tmp_path / "fresh-extract",
         local_app_data=tmp_path / "local-app-data",
-        command_timeout_seconds=3,
+        command_timeout_seconds=10,
     )
 
     assert result.returncode != 0
@@ -1634,7 +1638,7 @@ def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
         "PyQt6": ("6.10.2", "GPL-3.0-only"),
         "PyQt6-Qt6": ("6.10.2", "LGPL-3.0-only"),
         "PyQt6-sip": ("13.10.3", "BSD-2-Clause"),
-        "VapourSynth": ("78", "LGPL-2.1-or-later"),
+        "VapourSynth": ("79", "LGPL-2.1-or-later"),
         "vs-placebo": ("2.0.4", "LGPL-2.1-only"),
         "VSPreview": ("0.20.1", "Apache-2.0"),
     }

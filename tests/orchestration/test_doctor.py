@@ -281,7 +281,7 @@ class TestCheckVapoursynth:
     def test_check_vapoursynth_reports_public_release_and_api(self) -> None:
         checks = collect_checks()
         vs_check = next(c for c in checks if c.name == "vapoursynth")
-        version = SimpleNamespace(release_major=78, release_minor=0)
+        version = SimpleNamespace(release_major=79, release_minor=0)
         api_version = SimpleNamespace(api_major=4, api_minor=2)
         mock_vs = SimpleNamespace(__version__=version, __api_version__=api_version)
 
@@ -293,22 +293,22 @@ class TestCheckVapoursynth:
 
         assert result.passed is True
         assert result.details == {
-            "expected_release": "R78",
+            "expected_release": "R79",
             "expected_api_major": 4,
             "observed_version": str(version),
             "observed_api_version": str(api_version),
-            "release_major": 78,
+            "release_major": 79,
             "release_minor": 0,
             "api_major": 4,
             "api_minor": 2,
-            "observed_release": "R78",
+            "observed_release": "R79",
             "expected_release_match": True,
             "expected_api_match": True,
         }
 
     @pytest.mark.parametrize(
         ("release_major", "api_major"),
-        [(76, 4), (78, 3)],
+        [(78, 4), (79, 3)],
     )
     def test_check_vapoursynth_fails_on_runtime_identity_mismatch(
         self,
@@ -331,7 +331,7 @@ class TestCheckVapoursynth:
 
         assert result.passed is False
         assert result.available is True
-        assert result.details["expected_release_match"] is (release_major == 78)
+        assert result.details["expected_release_match"] is (release_major == 79)
         assert result.details["expected_api_match"] is (api_major == 4)
         assert "complete supported media runtime" in str(result.hint)
 
@@ -352,7 +352,7 @@ class TestCheckVapoursynth:
 
     def test_check_vapoursynth_keeps_raw_partial_version_separate_from_release(self) -> None:
         check = next(candidate for candidate in collect_checks() if candidate.name == "vapoursynth")
-        version = SimpleNamespace(release_major=78, release_minor=0)
+        version = SimpleNamespace(release_major=79, release_minor=0)
 
         with patch(
             "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
@@ -388,7 +388,7 @@ class TestCheckVapoursynth:
 
         original_import = __import__
         mock_vs = MagicMock()
-        mock_vs.__version__ = SimpleNamespace(release_major=78, release_minor=0)
+        mock_vs.__version__ = SimpleNamespace(release_major=79, release_minor=0)
         mock_vs.__api_version__ = SimpleNamespace(api_major=4, api_minor=2)
         vs_attempts = {"count": 0}
 

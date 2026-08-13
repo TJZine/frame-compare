@@ -14,12 +14,12 @@ def test_vspreview_extra_pins_supported_native_windows_media_stack(repo_root: Pa
 
     dependencies = set(project["optional-dependencies"]["vspreview"])
 
-    assert "vapoursynth==78" in dependencies
+    assert "vapoursynth==79" in dependencies
     assert "vapoursynth-lsmas==1296.0.0.1; sys_platform == 'win32'" in dependencies
     assert "vs-placebo==2.0.4; sys_platform == 'win32'" in dependencies
 
     native_install = _read_text_or_fail(repo_root / "docs" / "getting-started" / "native.md")
-    assert "pins the repository-managed VapourSynth Python package to R78" in native_install
+    assert "pins the repository-managed VapourSynth Python package to R79" in native_install
     assert "`vapoursynth-lsmas 1296.0.0.1`" in native_install
     assert "`vs-placebo 2.0.4`" in native_install
 

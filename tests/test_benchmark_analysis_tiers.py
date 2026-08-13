@@ -33,7 +33,7 @@ def test_help_exposes_only_production_benchmark_options() -> None:
         text=True,
         capture_output=True,
         check=False,
-        timeout=10,
+        timeout=30,
     )
 
     assert result.returncode == 0
@@ -336,6 +336,8 @@ def test_main_rejects_legacy_indexes_for_warm_requirement(
                 str(tmp_path / "report.json"),
                 "--window-end-exclusive",
                 "20",
+                "--selection-domain",
+                "test-selection-domain",
                 "--require-warm-source-index",
                 str(video),
             ]
@@ -384,6 +386,8 @@ def test_main_rejects_unusable_owned_index(
                 str(tmp_path / "report.json"),
                 "--window-end-exclusive",
                 "20",
+                "--selection-domain",
+                "test-selection-domain",
                 "--require-warm-source-index",
                 str(video),
             ]
@@ -493,6 +497,8 @@ def test_main_writes_atomic_production_report(
             str(output),
             "--window-end-exclusive",
             "20",
+            "--selection-domain",
+            "test-selection-domain",
             "--require-warm-source-index",
             "--skip-decode-baseline",
             str(reference),

@@ -54,6 +54,7 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
     )
 
     config = ConfigSchema()
+    config.slowpics.confirm_upload_after_report = False
     config.analysis = config.analysis.model_copy(
         update={"random_frame_count": 0, "dark_frame_count": 1}
     )
