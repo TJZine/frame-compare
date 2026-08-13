@@ -555,11 +555,11 @@ function Install-PythonDeps([string]$BundleRoot, [string]$VsCoreRoot) {
   uv pip install --no-deps --only-binary :all: --target $sitePackages $vsWheel
   Assert-LastExitCode -CommandLabel "uv pip install vapoursynth wheel"
 
-  # R78 wheels carry the runtime DLL inside the vapoursynth package directory.
+  # R79 wheels carry the runtime DLL inside the vapoursynth package directory.
   # The launcher and validation PATH include this directory for Windows DLL lookup.
   $vsDllPackage = Join-Path $sitePackages "vapoursynth\\libvapoursynth.dll"
   if (!(Test-Path -LiteralPath $vsDllPackage)) {
-    throw "libvapoursynth.dll not found after wheel install in expected R78 package layout: $vsDllPackage"
+    throw "libvapoursynth.dll not found after wheel install in expected R79 package layout: $vsDllPackage"
   }
 }
 
@@ -822,13 +822,15 @@ def prove_vapoursynth_environment() -> None:
     version_major = getattr(version, "release_major", None)
     version_minor = getattr(version, "release_minor", None)
     api_major = getattr(api_version, "api_major", None)
+    api_minor = getattr(api_version, "api_minor", None)
     plugin_dir = Path(vs.get_plugin_dir())
     extra_plugin_path = os.environ.get("VAPOURSYNTH_EXTRA_PLUGIN_PATH", "")
     plugins = list(core.plugins())
     plugin_namespaces = sorted(plugin.namespace for plugin in plugins)
 
-    assert_true(version_major == 78 and version_minor == 0, f"expected VapourSynth R78, got {version!r}")
+    assert_true(version_major == 79 and version_minor == 0, f"expected VapourSynth R79, got {version!r}")
     assert_true(api_major == 4, f"expected VapourSynth API 4, got {api_version!r}")
+    assert_true(api_minor == 2, f"expected VapourSynth API minor 2, got {api_version!r}")
     assert_true(plugin_dir.is_dir(), f"vapoursynth.get_plugin_dir() is not a directory: {plugin_dir}")
     assert_true("vapoursynth" in str(plugin_dir).replace("\\", "/"), f"unexpected plugin dir: {plugin_dir}")
     assert_true(extra_plugin_path, "VAPOURSYNTH_EXTRA_PLUGIN_PATH is not set")
@@ -837,7 +839,7 @@ def prove_vapoursynth_environment() -> None:
     assert_true("placebo" in plugin_namespaces, f"placebo plugin missing: {plugin_namespaces}")
     assert_true("ffms2" not in plugin_namespaces, "FFMS2 must remain excluded from the Windows baseline")
 
-    proof(f"vapoursynth_import=ok version=R{version_major} api={api_major}")
+    proof(f"vapoursynth_import=ok version=R{version_major} api={api_major}.{api_minor}")
     proof(f"plugin_dir={plugin_dir}")
     proof(f"extra_plugin_path={extra_plugin_path}")
     proof(f"core_plugins={','.join(plugin_namespaces)}")

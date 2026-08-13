@@ -513,8 +513,8 @@ recovery requirement.
   previous tool build.
 - Frame Compare-owned L-SMASH-Works indexes use
   `<media>.frame-compare-lsw1296-<12-hex-index-fingerprint>.lwi`. The token is
-  profile scoped (currently `lsw1296-e3c074652ffb` on managed/portable Windows,
-  `lsw1296-6b9e50219ad0` on unmanaged Windows, and `lsw1296-4ea22a0b0598`
+  profile scoped (currently `lsw1296-72386a70c626` on managed/portable Windows,
+  `lsw1296-57e30773738f` on unmanaged Windows, and `lsw1296-597792352e35`
   on Debian/Docker). Managed Windows portable and Debian/Docker tokens isolate
   their packaged decoder ABIs; unmanaged profile tokens do not verify native ABI
   changes. Legacy adjacent `<media>.lwi` files are ignored rather than deleted. A
@@ -1256,7 +1256,7 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 
 - `doctor` runs dependency diagnostics through `run_doctor`.
 - `doctor --json` writes a single JSON object to stdout through the doctor command owner.
-- `doctor.baseline_version` is the supported VapourSynth release (`R78`).
+- `doctor.baseline_version` is the supported VapourSynth release (`R79`).
   `doctor.media_runtime` contains the code-owned component contract, scoped
   fingerprints, and index token. `doctor.runtime_environment` reports the
   deployment kind, expected and declared full fingerprints, declaration syntax,

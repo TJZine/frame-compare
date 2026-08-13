@@ -5,7 +5,7 @@ Install these host prerequisites first:
 
 - Python 3.13 or newer;
 - FFmpeg available on `PATH`;
-- VapourSynth R78;
+- VapourSynth R79;
 - L-SMASH-Works 1296 available to the VapourSynth runtime;
 - vs-placebo 2.0.4 and a compatible Vulkan implementation for HDR tonemapping;
 - `uv` (recommended for the repository's locked environment) or pip;
@@ -32,14 +32,14 @@ From a clone of the repository:
 uv sync --no-dev --extra vspreview --frozen
 ```
 
-The `vspreview` extra pins the repository-managed VapourSynth Python package to R78.
+The `vspreview` extra pins the repository-managed VapourSynth Python package to R79.
 On Windows it also installs the selected `vapoursynth-lsmas 1296.0.0.1` and
 `vs-placebo 2.0.4` plugin wheels so the locked environment matches the supported
 native media stack. Linux and macOS still require host-managed L-SMASH-Works and
 vs-placebo installations. If you do not need VSPreview, omit `--extra vspreview`
 while retaining the required native renderer dependencies.
 
-When upgrading an existing Windows checkout from the R76 stack, recreate `.venv`
+When upgrading an existing Windows checkout from an older stack, recreate `.venv`
 before syncing if its VapourSynth plugin directory contains manually installed or
 untracked DLLs. An old `libvslsmashsource.dll` can otherwise load before the selected
 wheel-owned `LSMASHSource.dll` and produce the deprecated API3 warning.
@@ -63,7 +63,7 @@ python -m pip install ".[vspreview]"
 
 For a pip-managed installation, run `frame-compare wizard`, `doctor`, and `run`
 directly, without the `uv run --no-sync` prefix. The pip installation still relies
-on your native FFmpeg, VapourSynth R78, and L-SMASH-Works 1296 setup.
+on your native FFmpeg, VapourSynth R79, and L-SMASH-Works 1296 setup.
 
 Put at least two supported clips in `comparison_videos/`, then follow
 [Your First Comparison](../guides/first-comparison.md).

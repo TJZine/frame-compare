@@ -34,9 +34,9 @@ flowchart LR
 
 | Route | Recommended for | Requirements |
 | --- | --- | --- |
-| [Windows portable](docs/windows-portable.md) | Windows 10/11 x64 | PowerShell; the full bundle includes Python, FFmpeg, VapourSynth R78, plugins, VSPreview, and PyQt6 |
+| [Windows portable](docs/windows-portable.md) | Windows 10/11 x64 | PowerShell; the full bundle includes Python, FFmpeg, VapourSynth R79, plugins, VSPreview, and PyQt6 |
 | [Docker](docs/getting-started/docker.md) | macOS/Linux reproducible headless use | Docker Desktop or Docker Engine with Compose |
-| [Native source](docs/getting-started/native.md) | Advanced native setup | Python 3.13+, `uv` or pip, FFmpeg, VapourSynth R78, and L-SMASH-Works 1296 |
+| [Native source](docs/getting-started/native.md) | Advanced native setup | Python 3.13+, `uv` or pip, FFmpeg, VapourSynth R79, and L-SMASH-Works 1296 |
 
 VSPreview is optional for interactive manual alignment. VapourSynth is not optional
 for the default renderer: an FFmpeg-only route requires
@@ -88,7 +88,7 @@ optional GPU/GUI profiles and their limits.
 
 ### Native source
 
-After installing native FFmpeg, VapourSynth R78, and L-SMASH-Works 1296:
+After installing native FFmpeg, VapourSynth R79, and L-SMASH-Works 1296:
 
 ```bash
 uv sync --no-dev --extra vspreview --frozen

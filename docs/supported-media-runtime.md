@@ -9,7 +9,7 @@ A version shown here is supported only as part of the complete profile described
 
 | Component | Previous baseline | Selected component | Upstream date | Selection kind | Why this selection |
 | --- | --- | --- | --- | --- | --- |
-| VapourSynth | R76 | **R78**, commit `c2f5751a412347f306eb7f6a5985dd9a719f3896` | 2026-07-24 | Formal stable release | Latest non-prerelease release. It supplies CPython 3.13-compatible ABI3 wheels, uses VapourSynth API 4, and moves native builds to C++20. |
+| VapourSynth | R78 | **R79**, commit `acabf605b2205b32d65859bb2736405719d2fafd` | 2026-08-07 | Formal stable release | Latest non-prerelease release. It supplies CPython 3.13-compatible ABI3 wheels, keeps API R4.2, and improves cache cycling, `vspipe` MKV output, and zimg API validation. |
 | L-SMASH-Works | 1282.0.0.0 | **1296.0.0.0**, commit `a83318210c183c8ebbe703d975ffc76fb499ef07` | 2026-07-07 | Formal native release | Latest stable native release and first selected lineage using the VapourSynth API 4 implementation. |
 | Windows L-SMASH-Works package | 1282 lineage | **vapoursynth-lsmas 1296.0.0.1** | 2026-07-08 | Non-yanked official PyPI wheel | Packaging follow-up for the 1296 native lineage. Its plugin DLL does not require a separately bundled MSVC redistributable DLL, unlike the release archive DLL inspected during this refresh. |
 | L-SMASH | v2.14.5 | commit **`84740c5d960ab622f4c08b971dc59192bc27ef74`** | 2025-07-05 | Pinned commit, not a release | Exact L-SMASH revision selected and tested by L-SMASH-Works 1296. No newer appropriate formal stable tag supersedes it. |
@@ -43,7 +43,7 @@ and Frame Compare-owned indexes before reuse.
 
 ### Windows x64 portable
 
-- VapourSynth R78 portable runtime and CPython 3.13 wheel layout.
+- VapourSynth R79 portable runtime and CPython 3.13 wheel layout.
 - L-SMASH-Works 1296 through the official `vapoursynth-lsmas 1296.0.0.1`
   Windows wheel.
 - vs-placebo 2.0.4 Windows wheel with its selected libplacebo and libdovi
@@ -56,7 +56,7 @@ and Frame Compare-owned indexes before reuse.
 
 ### Debian Trixie / Docker
 
-- VapourSynth R78 manylinux wheel.
+- VapourSynth R79 manylinux wheel.
 - L-SMASH-Works 1296 built from source against VapourSynth API 4 and the Debian
   FFmpeg development ABI.
 - OBUParse built as `libobuparse.so.2` from the pinned commit required by the
@@ -78,13 +78,13 @@ from the active pull request and the corresponding `SOURCES.json` provenance art
 
 ## Relevant compatibility changes
 
-### VapourSynth R78
+### VapourSynth R79
 
-The refresh reviews changes since R76 that affect plugin/API validation, frame-property
-validation, chroma-location handling, cache/threading behavior, Python object lifetime,
-half-float formats, and native compiler requirements. Runtime diagnostics read the
-public release identity from `vapoursynth.__version__` and the API identity separately
-from `vapoursynth.__api_version__`.
+R79 keeps API R4.2 and adds cache-cycle improvements, Matroska output support in
+`vspipe`, and a fix for the zimg API check. The refresh also preserves the R78-era
+CPython 3.13-compatible ABI3 wheel and C++20 native-build requirements. Runtime
+diagnostics read the public release identity from `vapoursynth.__version__` and the
+API identity separately from `vapoursynth.__api_version__`.
 
 ### L-SMASH-Works 1296
 
@@ -143,9 +143,9 @@ Frame Compare-owned L-SMASH-Works indexes use a profile-scoped filename:
 <media>.frame-compare-lsw1296-<12-hex-index-fingerprint>.lwi
 ```
 
-The current managed/portable Windows token is `lsw1296-e3c074652ffb`; the unmanaged
-Windows token is `lsw1296-6b9e50219ad0`; and the Debian/Docker token is
-`lsw1296-4ea22a0b0598`. Legacy `<media>.lwi` files adjacent to the media file
+The current managed/portable Windows token is `lsw1296-72386a70c626`; the unmanaged
+Windows token is `lsw1296-57e30773738f`; and the Debian/Docker token is
+`lsw1296-597792352e35`. Legacy `<media>.lwi` files adjacent to the media file
 are ignored rather than deleted. A corrupt Frame Compare-owned index is removed and
 rebuilt once, with a warning when removal or rebuilding fails and a cache-free source
 open as the last recovery path for an unusable index location.
@@ -158,9 +158,9 @@ installed bundle's full runtime fingerprint with the signed update manifest befo
 changing files. A missing, legacy, malformed, or different fingerprint fails closed,
 even when an unsafe Python-dependency override was requested.
 
-Crossing from the older R76/1282/2.0.2 runtime to this R78/1296/2.0.4 runtime requires
-a complete portable bundle reinstall. Generated data should remain outside the bundle
-when it must survive replacement.
+Crossing from R78 to the selected R79/1296/2.0.4 runtime requires a complete portable
+bundle reinstall because the runtime fingerprints and Frame Compare-owned index tokens
+change. Generated data should remain outside the bundle when it must survive replacement.
 
 ## Licensing and corresponding source
 

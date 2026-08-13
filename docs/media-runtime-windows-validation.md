@@ -30,13 +30,13 @@ The expected candidate profile is:
 | Component | Expected Windows identity |
 | --- | --- |
 | Python | 3.13.14 |
-| VapourSynth | R78, API 4 |
+| VapourSynth | R79, API R4.2 |
 | L-SMASH-Works | `vapoursynth-lsmas` 1296.0.0.1 / native lineage 1296.0.0.0 |
 | FFMS2 | Absent from the Windows baseline |
 | vs-placebo | 2.0.4 |
 | FFmpeg | `n8.1.2-34-g9b6c8969e0`, BtbN win64 LGPL 8.1 build |
-| Full runtime fingerprint | `35d58736c651f4d8e52bd4d8e6750ebede4c4bc9676e4c9db7dfebaeadab018c` |
-| L-SMASH index token | `lsw1296-e3c074652ffb` |
+| Full runtime fingerprint | `69daa87bf14d03c479b7bfe0413060e2488699e0ee9cad89e55b6e33be888bd1` |
+| L-SMASH index token | `lsw1296-72386a70c626` |
 
 ## 1. Exact source and repository gates
 
@@ -194,7 +194,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Inspect `doctor-candidate.json`. Required results:
 
 - The observed and expected media-runtime fingerprints match.
-- VapourSynth reports R78 independently from API 4.
+- VapourSynth reports R79 independently from API R4.2.
 - `lsmas` registers both `LibavSMASHSource` and `LWLibavSource`.
 - `placebo` registers `Tonemap`.
 - FFMS2 is reported as intentionally absent on Windows, not as a missing requirement.
@@ -295,7 +295,7 @@ Verify all of the following:
 
 - A legacy adjacent `<media>.lwi` is ignored and not deleted.
 - The candidate creates
-  `<media>.frame-compare-lsw1296-e3c074652ffb.lwi`.
+  `<media>.frame-compare-lsw1296-72386a70c626.lwi`.
 - A second run reuses the candidate-owned index.
 - A corrupt candidate-owned index is removed and regenerated once.
 - A missing index is created normally.

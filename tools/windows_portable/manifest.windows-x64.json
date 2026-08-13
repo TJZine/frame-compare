@@ -3,17 +3,17 @@
   "bundle": {
     "platform": "windows",
     "arch": "x64",
-    "vs_ref": "R78",
+    "vs_ref": "R79",
     "python_version": "3.13.14",
     "ffmpeg_policy": "lgpl-only",
     "plugin_layout": "R74+ site-packages/vapoursynth/plugins plus VAPOURSYNTH_EXTRA_PLUGIN_PATH",
     "notes": "Deterministic Windows media runtime contract. Native media components are not present in code-only update ZIPs; installations crossing this runtime fingerprint require a complete portable bundle refresh. BtbN FFmpeg remains an immutable retained end-of-month LGPL-only release-branch artifact.",
     "runtime_fingerprints": {
-      "analysis": "e24a1e094d16c3bed112cfb5e5c5b98fa2b6fed44f87b9917d8ed342540384ff",
-      "probe": "60ad4cbe75ca453c9d590e8daedfbaab4b77c1a707b368bbc0d005407c933f80",
+      "analysis": "05914e21e9556349f513778322fac5e68ad4208b5e75230ca3de3dd2233fa1d7",
+      "probe": "00507a4c0c4321b71fbbcee8367be25d304bba32e3fb51c5110a4329708462b2",
       "alignment": "9b678d58d2f9c339f3044c11c98591f6b09ad81d0769ad7853fd3da35e429d36",
-      "index": "e3c074652ffbbc2fce5cab088d4b4fd16b050a9676d387dbd3f3f4075746cbe6",
-      "full": "35d58736c651f4d8e52bd4d8e6750ebede4c4bc9676e4c9db7dfebaeadab018c"
+      "index": "72386a70c62620674b09d56e202400004fcdba3b317094a650909d63d7225afd",
+      "full": "69daa87bf14d03c479b7bfe0413060e2488699e0ee9cad89e55b6e33be888bd1"
     }
   },
   "artifacts": [
@@ -65,21 +65,21 @@
       }
     },
     {
-      "id": "vapoursynth-portable-r78",
+      "id": "vapoursynth-portable-r79",
       "name": "VapourSynth 64-bit portable",
-      "version": "R78",
-      "url": "https://github.com/vapoursynth/vapoursynth/releases/download/R78/VapourSynth64-Portable-R78.zip",
-      "source_url": "https://codeload.github.com/vapoursynth/vapoursynth/tar.gz/c2f5751a412347f306eb7f6a5985dd9a719f3896",
-      "sha256": "8f12c2436aba6f596cde88d779f923a0bd454899b4bde1dd111b7ebbd8d7c3e3",
-      "bytes": 23064773,
+      "version": "R79",
+      "url": "https://github.com/vapoursynth/vapoursynth/releases/download/R79/VapourSynth64-Portable-R79.zip",
+      "source_url": "https://codeload.github.com/vapoursynth/vapoursynth/tar.gz/acabf605b2205b32d65859bb2736405719d2fafd",
+      "sha256": "625b3410d903943107291592e90d6f521f829ebb8291d952ee91b8d674bbb153",
+      "bytes": 23160674,
       "license": {
         "spdx": "LGPL-2.1-or-later",
-        "url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/c2f5751a412347f306eb7f6a5985dd9a719f3896/COPYING.LESSER",
+        "url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/acabf605b2205b32d65859bb2736405719d2fafd/COPYING.LESSER",
         "files": [
           {
             "path": "licenses/common/LGPL-2.1.txt",
             "sha256": "b634ab5640e258563c536e658cad87080553df6f34f62269a21d554844e58bfe",
-            "source_url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/c2f5751a412347f306eb7f6a5985dd9a719f3896/COPYING.LESSER"
+            "source_url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/acabf605b2205b32d65859bb2736405719d2fafd/COPYING.LESSER"
           }
         ]
       },
@@ -87,13 +87,13 @@
         "type": "extract",
         "destination": "vs/core"
       },
-      "notes": "R78 stable portable runtime. The selected Python wheel remains CPython 3.12 ABI3 and supports CPython 3.13; R78 native builds require a C++20 compiler.",
-      "release_date": "2026-07-24",
+      "notes": "R79 stable portable runtime with cache-cycle improvements, vspipe MKV output, and the zimg API-check fix. The selected Python wheel remains CPython 3.12 ABI3 and supports CPython 3.13; native builds require a C++20 compiler.",
+      "release_date": "2026-08-07",
       "source_kind": "release",
-      "source_ref": "R78",
-      "source_sha256": "fbf7986d96495abd106c714b01768671a8cab1d0c6a48feba0aa127bf5672753",
-      "source_bytes": 637989,
-      "source_commit": "c2f5751a412347f306eb7f6a5985dd9a719f3896"
+      "source_ref": "R79",
+      "source_sha256": "042ce026e552a31c5c4b89f637fcb5841f69f807babc7e11f11f863a194d9da7",
+      "source_bytes": 657976,
+      "source_commit": "acabf605b2205b32d65859bb2736405719d2fafd"
     },
     {
       "id": "vs-plugin-lsmas-1296.0.0.1-win-amd64-wheel",
@@ -115,7 +115,7 @@
           {
             "path": "licenses/common/LGPL-2.1.txt",
             "sha256": "b634ab5640e258563c536e658cad87080553df6f34f62269a21d554844e58bfe",
-            "source_url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/c2f5751a412347f306eb7f6a5985dd9a719f3896/COPYING.LESSER"
+            "source_url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/acabf605b2205b32d65859bb2736405719d2fafd/COPYING.LESSER"
           },
           {
             "path": "licenses/lsmash-works/dependencies/FFmpeg-COPYING.LGPLv2.1.txt",
