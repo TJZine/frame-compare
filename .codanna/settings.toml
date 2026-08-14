@@ -1,0 +1,39 @@
+# Codanna project configuration: https://docs.codanna.sh
+version = 1
+index_path = ".codanna/index"
+
+# Codanna 0.13.2 compares configured roots with canonical index metadata during
+# startup sync. Keep these absolute to prevent a relative root duplicating rows.
+workspace_root = "/Users/tristan/Software/frame-compare"
+
+[indexing]
+parallelism = 10
+tantivy_heap_mb = 50
+indexed_paths = ["/Users/tristan/Software/frame-compare"]
+
+[languages.python]
+config_files = ["pyproject.toml"]
+
+[semantic_search]
+enabled = true
+model = "JinaEmbeddingsV2BaseCode"
+threshold = 0.45
+# Balance interactive throughput with running one shared server per repository.
+embedding_threads = 2
+
+[file_watch]
+enabled = true
+debounce_ms = 1000
+
+[server]
+mode = "http"
+bind = "127.0.0.1:8081"
+watch_interval = 5
+
+[guidance]
+enabled = true
+
+[documents]
+# Codanna 0.13.2 `documents index` hard-codes a 384-dimensional model while the
+# configured Jina model is 768-dimensional. Use direct reads/rg until fixed.
+enabled = false

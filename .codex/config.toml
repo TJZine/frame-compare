@@ -29,3 +29,10 @@ config_file = "agents/worker-luna.toml"
 [agents.monitor]
 description = "Long-running command and polling role for status checks, verification waits, and runtime/release gate monitoring."
 config_file = "agents/monitor.toml"
+
+[mcp_servers.codanna]
+url = "http://127.0.0.1:8081/mcp"
+http_headers = { Authorization = "Bearer mcp-access-token-dummy" }
+enabled = true
+required = false
+default_tools_approval_mode = "approve"

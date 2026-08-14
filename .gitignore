@@ -1,6 +1,7 @@
 .DS_Store
 # Local tool caches / indexes
-.codanna/
+.codanna/*
+!.codanna/settings.toml
 .mcp_sequential_thinking/
 .fastembed_cache
 .codex/schemas/
