@@ -15,6 +15,7 @@ from frame_compare.render.geometry import (
     SourceGeometry,
 )
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
+from frame_compare.vs.types import HDRMetadata
 
 
 def test_build_extract_frame_argv_supports_optional_overwrite() -> None:
@@ -168,12 +169,85 @@ def test_default_ffmpeg_runner_probe_hdr_keeps_fixed_timeout(
             stderr=b"",
         )
     )
-    monkeypatch.setattr("frame_compare.render.backend.ffmpeg.run_subprocess", run_subprocess)
+    monkeypatch.setattr("frame_compare.vs.hdr_probe.run_subprocess", run_subprocess)
 
     runner = DefaultFFmpegRunner(extraction_timeout_seconds=47.0)
     assert runner.probe_hdr(Path("clip.mkv")) is None
 
     assert run_subprocess.call_args.kwargs["timeout_seconds"] == 15.0
+
+
+@pytest.mark.parametrize(
+    ("color_primaries", "transfer", "matrix"),
+    [
+        pytest.param(2, 2, 1, id="matrix-only"),
+        pytest.param(2, 16, 2, id="transfer-only"),
+        pytest.param(9, 2, 2, id="primaries-only"),
+    ],
+)
+def test_default_ffmpeg_runner_probe_hdr_treats_partial_color_signals_as_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+    color_primaries: int,
+    transfer: int,
+    matrix: int,
+) -> None:
+    metadata = HDRMetadata(
+        mastering_display=None,
+        max_cll=None,
+        max_fall=None,
+        color_primaries=color_primaries,
+        transfer=transfer,
+        matrix=matrix,
+    )
+    probe_hdr_metadata = MagicMock(return_value=metadata)
+    monkeypatch.setattr(
+        "frame_compare.render.backend.ffmpeg.probe_hdr_metadata",
+        probe_hdr_metadata,
+    )
+
+    assert DefaultFFmpegRunner().probe_hdr(Path("clip.mkv")) is None
+    probe_hdr_metadata.assert_called_once_with(Path("clip.mkv"))
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        pytest.param(
+            HDRMetadata(
+                mastering_display=None,
+                max_cll=None,
+                max_fall=None,
+                color_primaries=1,
+                transfer=1,
+                matrix=1,
+            ),
+            id="sdr",
+        ),
+        pytest.param(
+            HDRMetadata(
+                mastering_display=None,
+                max_cll=None,
+                max_fall=None,
+                color_primaries=9,
+                transfer=16,
+                matrix=9,
+            ),
+            id="hdr",
+        ),
+    ],
+)
+def test_default_ffmpeg_runner_probe_hdr_preserves_complete_color_signals(
+    monkeypatch: pytest.MonkeyPatch,
+    metadata: HDRMetadata,
+) -> None:
+    probe_hdr_metadata = MagicMock(return_value=metadata)
+    monkeypatch.setattr(
+        "frame_compare.render.backend.ffmpeg.probe_hdr_metadata",
+        probe_hdr_metadata,
+    )
+
+    assert DefaultFFmpegRunner().probe_hdr(Path("clip.mkv")) is metadata
+    probe_hdr_metadata.assert_called_once_with(Path("clip.mkv"))
 
 
 def test_default_ffmpeg_runner_extract_frame_wraps_missing_binary(

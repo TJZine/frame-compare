@@ -8,3 +8,4 @@ tools/windows_portable/shim/*.ps1 text eol=crlf
 
 # Vendored license files are byte-hashed in the Windows portable manifest.
 tools/windows_portable/licenses/**/*.txt text eol=lf
+tools/windows_portable/licenses/**/*.txt whitespace=-blank-at-eof

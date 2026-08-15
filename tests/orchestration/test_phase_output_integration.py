@@ -8,11 +8,12 @@ from typing import Any, cast
 import httpx
 import pytest
 
+from frame_compare.analysis.selection import select_frames
 from frame_compare.analysis.types import (
     FrameMetrics,
     MetricsMetadata,
 )
-from frame_compare.orchestration import phase_post_render, phase_tasks
+from frame_compare.orchestration import phase_alignment, phase_post_render, phase_render
 from frame_compare.orchestration.execution_types import (
     RenderArtifacts,
 )
@@ -52,7 +53,7 @@ def test_output_phases_use_reselected_metric_metadata_after_real_initial_selecti
             clips=[],
         ),
     )
-    initial_selection = phase_tasks.select_frames(
+    initial_selection = select_frames(
         metrics=ctx.analysis_metrics,
         config=ctx.config.analysis,
     )
@@ -88,14 +89,14 @@ def test_output_phases_use_reselected_metric_metadata_after_real_initial_selecti
         assert output_path == expected_report_path
         return output_path
 
-    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
+    monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
     monkeypatch.setattr(
         "frame_compare.render.batch.orchestrator.render_screenshots_from_batch",
         _fake_render_screenshots_from_batch,
     )
     monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
 
-    align_output = phase_tasks.run_align_phase(
+    align_output = phase_alignment.run_align_phase(
         ctx,
         selected_frames=list(initial_selection.frames),
     )
@@ -104,7 +105,7 @@ def test_output_phases_use_reselected_metric_metadata_after_real_initial_selecti
     ctx.selection_breakdown = align_output.selection_breakdown
     ctx.selection_details_by_source_frame = align_output.selection_details_by_source_frame
 
-    phase_tasks.run_render_phase(
+    phase_render.run_render_phase(
         ctx,
         frames=align_output.selected_frames,
         runner=cast(Any, _RenderRunner()),
@@ -204,7 +205,7 @@ async def test_unresolved_comparison_remains_in_render_report_and_slowpics_membe
         _no_post_upload_actions,
     )
 
-    render_output = phase_tasks.run_render_phase(
+    render_output = phase_render.run_render_phase(
         ctx,
         frames=frames,
         runner=cast(Any, _RenderRunner()),
@@ -264,10 +265,10 @@ def test_run_report_phase_labels_skipped_analysis_alignment_fallback_random_fram
         assert output_path == expected_path
         return output_path
 
-    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
+    monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
     monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
 
-    align_output = phase_tasks.run_align_phase(ctx, selected_frames=[0, 66])
+    align_output = phase_alignment.run_align_phase(ctx, selected_frames=[0, 66])
     ctx.reference = align_output.reference
     ctx.comparisons = align_output.comparisons
     ctx.selection_breakdown = align_output.selection_breakdown

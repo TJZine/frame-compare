@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Literal
 
+import pytest
 from _pytest.monkeypatch import MonkeyPatch
 from rich.console import Console
 
@@ -44,15 +46,21 @@ def _request(*, no_upload: bool = False) -> RunRequest:
     return RunRequest(root=_workspace_path(), no_upload=no_upload)
 
 
+def _missing_executable(_name: str) -> str:
+    raise FileNotFoundError(_name)
+
+
 def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: MonkeyPatch) -> None:
-    def _which(command: str) -> str | None:
-        return f"/usr/bin/{command}" if command in {"ffmpeg", "ffprobe"} else None
+    def _resolve(command: str) -> str:
+        if command not in {"ffmpeg", "ffprobe"}:
+            raise FileNotFoundError(command)
+        return f"/usr/bin/{command}"
 
     config = _config()
     config.screenshots.use_ffmpeg = True
     console = _console()
 
-    monkeypatch.setattr("frame_compare.cli.output.shutil.which", _which)
+    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _resolve)
 
     print_at_a_glance(
         console,
@@ -96,10 +104,35 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     assert "VSPreview" not in output
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows does not expose POSIX execute bits")
+def test_at_a_glance_reports_non_executable_ffmpeg_override_as_unavailable(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    binary = tmp_path / "ffmpeg"
+    binary.write_bytes(b"")
+    binary.chmod(0o644)
+    # Keep this test focused on the invalid FFmpeg override. The executable
+    # environment-variable mapping is covered in tests/utils/test_subproc.py.
+    monkeypatch.setenv("FRAME_COMPARE_FFPROBE_EXECUTABLE", sys.executable)
+    monkeypatch.setenv("FRAME_COMPARE_FFMPEG_EXECUTABLE", str(binary.resolve()))
+    console = _console()
+
+    print_at_a_glance(
+        console,
+        request=_request(),
+        config=_config(),
+        root=_workspace_path(),
+        config_path=_workspace_path("config", "config.toml"),
+    )
+
+    assert "false" in _rendered_row_value(_render(console), "FFmpeg audio")
+
+
 def test_at_a_glance_prints_previous_offsets_effective_mode(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("frame_compare.cli.output.shutil.which", lambda _command: None)
+    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
     modes: tuple[Literal["disabled", "prompt", "always"], ...] = ("disabled", "prompt", "always")
 
     for mode in modes:
@@ -127,7 +160,7 @@ def test_at_a_glance_prints_effective_analysis_performance_mode(
     config.analysis.performance_mode = AnalysisPerformanceMode.PERFORMANCE
     console = _console()
 
-    monkeypatch.setattr("frame_compare.cli.output.shutil.which", lambda _command: None)
+    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
 
     print_at_a_glance(
         console,
@@ -149,7 +182,7 @@ def test_at_a_glance_preserves_literal_brackets_in_dynamic_paths(
     config.paths.generated_dir = Path("[cyan]generated[end]")
     console = _console()
 
-    monkeypatch.setattr("frame_compare.cli.output.shutil.which", lambda _command: None)
+    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
 
     print_at_a_glance(
         console,
@@ -176,7 +209,7 @@ def test_at_a_glance_prints_vspreview_availability_when_probe_succeeds(
     config.audio_alignment.use_vspreview = True
     console = _console()
 
-    monkeypatch.setattr("frame_compare.cli.output.shutil.which", lambda _command: None)
+    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
     monkeypatch.setattr(
         "frame_compare.vspreview.adapter.check_vspreview_availability",
         lambda: VSPreviewAvailability(
@@ -206,7 +239,7 @@ def test_at_a_glance_prints_vspreview_probe_failure(monkeypatch: MonkeyPatch) ->
     config.audio_alignment.force_interactive = True
     console = _console()
 
-    monkeypatch.setattr("frame_compare.cli.output.shutil.which", lambda _command: None)
+    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
     monkeypatch.setattr(
         "frame_compare.vspreview.adapter.check_vspreview_availability",
         lambda: VSPreviewAvailability(

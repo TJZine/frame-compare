@@ -118,8 +118,10 @@ $AnimeComparison = (Resolve-Path -LiteralPath `
   'comparison_videos\DAN.DA.DAN.S02E01.Like.This.Is.the.Legend.of.the.Giant.Snake.REPACK.1080p.CR.WEB-DL.DUAL.DDP2.0.H.264-Kitsune.mkv').Path
 ```
 
-Prepare probe data and warm the adjacent L-SMASH `.lwi` source indexes through a
-normal application run before timing. Point `--input` at a directory containing
+Prepare probe data and warm Frame Compare-owned, runtime-versioned L-SMASH-Works
+`.lwi` source indexes through a normal application run before timing. The current
+filename suffix is `.frame-compare-lsw1296-72386a70c626.lwi`; an unrelated legacy
+adjacent `<media>.lwi` is intentionally not a warm-cache input. Point `--input` at a directory containing
 only the fixed case under test:
 
 ```powershell
@@ -131,8 +133,8 @@ uv run --no-sync frame-compare run `
 ```
 
 The cold benchmark policy removes only the exact analysis metric cache entry. It
-does not delete source indexes. `--require-warm-source-index` fails early when
-the selected analysis source is not ready.
+does not delete source indexes. `--require-warm-source-index` fails early unless
+the selected Frame Compare-owned index opens the source without being rebuilt.
 
 ## Primary cold benchmarks
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import UTC
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,12 +14,17 @@ from frame_compare.orchestration.coordinator import (
     RunDependencies,
     execute_run,
 )
+from frame_compare.orchestration.execution_types import RunArtifacts
 from frame_compare.orchestration.types import (
+    FullWindowRetryConfirmationDecision,
+    FullWindowRetryConfirmationRequest,
+    ReservedRunCapture,
     RunRequest,
     SlowpicsUploadConfirmationDecision,
     SlowpicsUploadConfirmationRequest,
 )
 from frame_compare.utils.progress import NullProgressReporter
+from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.types import HDRMetadata
 
 
@@ -186,3 +192,95 @@ def test_execute_run_preserves_slowpics_confirmation_callback_when_cloning_deps(
 
     assert captured_local_deps is not None
     assert captured_local_deps.confirm_slowpics_upload is _confirm
+
+
+@pytest.mark.parametrize(
+    "run_request",
+    [
+        RunRequest(root=Path("."), json_output=True),
+        RunRequest(root=Path("."), quiet=True),
+        RunRequest(root=Path("."), from_cache_only=True),
+        RunRequest(root=Path("."), skip_analysis=True),
+    ],
+)
+def test_execute_run_removes_full_window_confirmation_in_unattended_modes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    run_request: RunRequest,
+) -> None:
+    from frame_compare.orchestration import coordinator
+
+    captured_local_deps: RunDependencies | None = None
+
+    def _confirm(
+        _request: FullWindowRetryConfirmationRequest,
+    ) -> FullWindowRetryConfirmationDecision:
+        raise AssertionError("unattended mode must not confirm")
+
+    async def fake_execute_prep(_request: RunRequest, local_deps: RunDependencies):
+        nonlocal captured_local_deps
+        captured_local_deps = local_deps
+        raise StopAfterDependencyInit
+
+    monkeypatch.setattr(coordinator, "execute_prep", fake_execute_prep)
+    deps = RunDependencies(confirm_full_window_retry=_confirm)
+
+    with pytest.raises(StopAfterDependencyInit):
+        asyncio.run(execute_run(replace(run_request, root=tmp_path), deps=deps))
+
+    assert captured_local_deps is not None
+    assert captured_local_deps.confirm_full_window_retry is None
+    assert deps.confirm_full_window_retry is _confirm
+
+
+def test_reserved_warning_sink_survives_prep_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from frame_compare.orchestration import coordinator
+
+    captured_artifacts: RunArtifacts | None = None
+    workspace = WorkspacePaths(
+        root=tmp_path,
+        input_dir=tmp_path / "comparison_videos",
+        generated_root=tmp_path / "generated",
+        run_dir=tmp_path / "generated" / "run",
+        screenshots_dir=tmp_path / "generated" / "run" / "screenshots",
+        generated_dir=tmp_path / "generated",
+        config_dir=tmp_path / "config",
+        config_file=tmp_path / "config" / "config.toml",
+    )
+
+    async def fake_execute_prep(_request: RunRequest, local_deps: RunDependencies):
+        assert local_deps.capture_reserved_run is not None
+        warnings: list[str] = []
+        local_deps.capture_reserved_run(
+            ReservedRunCapture(
+                workspace=workspace,
+                clip_count=2,
+                preflight_duration=0.1,
+                preflight_warnings=(),
+                run_warnings=warnings,
+            )
+        )
+        warnings.append("accepted full-window override")
+        raise StopAfterDependencyInit
+
+    def fake_record_failed_run_best_effort(
+        *, artifacts: RunArtifacts | None, **_kwargs: object
+    ) -> None:
+        nonlocal captured_artifacts
+        captured_artifacts = artifacts
+
+    monkeypatch.setattr(coordinator, "execute_prep", fake_execute_prep)
+    monkeypatch.setattr(
+        coordinator,
+        "record_failed_run_best_effort",
+        fake_record_failed_run_best_effort,
+    )
+
+    with pytest.raises(StopAfterDependencyInit):
+        asyncio.run(execute_run(RunRequest(root=tmp_path), deps=RunDependencies()))
+
+    assert captured_artifacts is not None
+    assert captured_artifacts.warnings == ["accepted full-window override"]

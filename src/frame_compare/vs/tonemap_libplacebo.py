@@ -60,7 +60,7 @@ def convert_for_libplacebo(clip: vs.VideoNode, inputs: HdrTonemapInputs) -> vs.V
         if clip.format.color_family == vs.RGB:
             return clip.resize.Bicubic(format=vs.RGB48)
 
-        props = inputs.props if inputs.props is not None else dict(clip.get_frame(0).props)
+        props = inputs.props
         detected_is_hdr = inputs.detected_is_hdr
         if detected_is_hdr is None:
             detected_is_hdr, _ = detect_hdr(props)
@@ -161,9 +161,7 @@ def call_libplacebo_with_compat_retry(
     except TypeError as e:
         rejected = _parse_rejected_tonemap_kwargs(str(e))
         if rejected:
-            minimal_kwargs = {
-                key: value for key, value in tm_kwargs.items() if key not in rejected
-            }
+            minimal_kwargs = {key: value for key, value in tm_kwargs.items() if key not in rejected}
             if "tone_mapping_function_s" in rejected:
                 _add_numeric_tone_curve_fallback(tm_kwargs)
                 if "tone_mapping_function" in tm_kwargs:

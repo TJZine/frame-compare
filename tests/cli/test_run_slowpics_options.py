@@ -1,4 +1,3 @@
-from click import Group
 from typer.main import get_command
 
 from frame_compare.cli.entry import app
@@ -30,8 +29,10 @@ UNSUPPORTED_SLOWPICS_RUN_FLAGS = (
 
 def _declared_run_options() -> set[str]:
     command = get_command(app)
-    assert isinstance(command, Group)
-    run_command = command.commands["run"]
+    commands = getattr(command, "commands", None)
+    assert isinstance(commands, dict)
+    assert "run" in commands
+    run_command = commands["run"]
     return {
         opt
         for param in run_command.params

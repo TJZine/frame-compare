@@ -197,16 +197,11 @@ def _candidate_offsets(
     step = 1.0 / ratio
     count_each_side = int(round(radius / step))
     candidates = [
-        coarse_offset + (index * step)
-        for index in range(-count_each_side, count_each_side + 1)
+        coarse_offset + (index * step) for index in range(-count_each_side, count_each_side + 1)
     ]
     lower_bound = -max_offset_samples
     upper_bound = max_offset_samples
-    return [
-        candidate
-        for candidate in candidates
-        if lower_bound <= candidate <= upper_bound
-    ]
+    return [candidate for candidate in candidates if lower_bound <= candidate <= upper_bound]
 
 
 def _sample_positions(start: float, stop: float) -> FloatArray:
@@ -292,7 +287,9 @@ def estimate_alignment_offset(
     if config.refinement_mode == "disabled":
         return estimate
     if config.refinement_mode != "local":
-        raise AudioAlignmentError(f"unsupported alignment refinement mode: {config.refinement_mode}")
+        raise AudioAlignmentError(
+            f"unsupported alignment refinement mode: {config.refinement_mode}"
+        )
 
     reference_signal = _preprocess_signal(
         _as_finite_signal(reference, name="reference"),

@@ -26,6 +26,7 @@ class DoctorCheck:
     name: str
     category: str
     check_fn: Callable[[], CheckResult]
+    critical_if_failed: bool = False
 
 
 @dataclass(frozen=True, slots=True)

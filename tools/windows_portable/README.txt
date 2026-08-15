@@ -114,6 +114,9 @@ RELEASE SIGNING (Maintainers):
         WINDOWS_UPDATE_SIGNING_KEY_XML repository secret contains the private key XML.
 
   Unsigned zips are for local/dev only and require unsafe confirmation in the updater.
+  That confirmation never bypasses the media-runtime fingerprint boundary: a
+  code-only update with a missing, legacy, malformed, or different native runtime
+  fingerprint is refused and requires a complete portable bundle reinstall.
 
 THIRD-PARTY LICENSES / SOURCE AVAILABILITY:
   - The build outputs:

@@ -2198,7 +2198,6 @@ const ReportViewer = {
         this.dom.canvas.style.setProperty('--zoom-level', this.state.zoom);
         this.gridView?.syncViewport();
         if (options.clampPan !== false) this.clampPan();
-        this.updateSmartStageLabels();
         this.lens?.refresh();
     },
 
@@ -2298,7 +2297,6 @@ const ReportViewer = {
         this.dom.canvas.style.setProperty('--pan-x', `${this.state.panX}px`);
         this.dom.canvas.style.setProperty('--pan-y', `${this.state.panY}px`);
         this.gridView?.syncViewport();
-        this.updateSmartStageLabels();
         this.lens?.refresh();
     },
 
@@ -2620,7 +2618,6 @@ const ReportViewer = {
         this.dom.leftLayer.style.setProperty('--reveal-percent', this.state.revealPercent + '%');
         this.dom.divider.style.setProperty('--reveal-percent', this.state.revealPercent + '%');
         this.dom.canvas.style.setProperty('--reveal-percent', this.state.revealPercent + '%');
-        this.updateSmartStageLabels();
     },
 
     isShortcutEditableTarget(target) {
@@ -2636,53 +2633,13 @@ const ReportViewer = {
         return Boolean(closestEditable);
     },
 
-    untransformedCanvasWidth() {
-        const offsetWidth = this.dom.canvas.offsetWidth;
-        if (Number.isFinite(offsetWidth) && offsetWidth > 0) return offsetWidth;
-
-        const clientWidth = this.dom.canvas.clientWidth;
-        if (Number.isFinite(clientWidth) && clientWidth > 0) return clientWidth;
-
-        const rectWidth = this.dom.canvas.getBoundingClientRect().width;
-        if (rectWidth <= 0) return 0;
-        return rectWidth / this.clampZoom(this.state.zoom);
+    clipOverlayLabel(clip, role = '') {
+        const identity = `${clip.label} • ${clip.resolution[0]}×${clip.resolution[1]} • ${clip.hdr ? 'HDR' : 'SDR'}`;
+        return role ? `${identity} (${role})` : identity;
     },
 
-    smartLabelPositions(canvasWidth, leftLabelWidth, rightLabelWidth) {
-        if (canvasWidth <= 0) return null;
-
-        const edgePadding = 8;
-        const dividerX = canvasWidth * (1 - (this.state.revealPercent / 100));
-        const leftX = Math.max(
-            edgePadding + leftLabelWidth,
-            Math.min(canvasWidth - edgePadding, dividerX - 10)
-        );
-        const rightX = Math.max(
-            edgePadding,
-            Math.min(canvasWidth - rightLabelWidth - edgePadding, dividerX + 10)
-        );
-
-        return { leftX, rightX };
-    },
-
-    updateSmartStageLabels() {
-        if (!this.dom.canvas || !this.dom.labelLeft || !this.dom.labelRight) return;
-
-        if (this.state.mode !== 'slider') {
-            this.dom.canvas.style.removeProperty('--label-left-x');
-            this.dom.canvas.style.removeProperty('--label-right-x');
-            return;
-        }
-
-        const positions = this.smartLabelPositions(
-            this.untransformedCanvasWidth(),
-            this.dom.labelLeft.offsetWidth || 0,
-            this.dom.labelRight.offsetWidth || 0,
-        );
-        if (!positions) return;
-
-        this.dom.canvas.style.setProperty('--label-left-x', `${positions.leftX}px`);
-        this.dom.canvas.style.setProperty('--label-right-x', `${positions.rightX}px`);
+    diffOverlayLabel(baseClip, compareClip) {
+        return `${this.clipOverlayLabel(baseClip, 'Base')} ↔ ${this.clipOverlayLabel(compareClip, 'Compare')}`;
     },
 
     humanizeCategory(cat) {
@@ -2727,14 +2684,10 @@ const ReportViewer = {
     },
 
     blinkStageLabels(leftClipLabel, rightClipLabel) {
-        if (this.state.activeClipIdx === this.state.rightClipIdx) {
-            return {
-                left: '',
-                right: rightClipLabel,
-            };
-        }
         return {
-            left: leftClipLabel,
+            left: this.state.activeClipIdx === this.state.rightClipIdx
+                ? rightClipLabel
+                : leftClipLabel,
             right: '',
         };
     },
@@ -2798,7 +2751,6 @@ const ReportViewer = {
         this.dom.rightImg.alt = rightAlt;
         this.dom.labelLeft.textContent = leftLabelTxt;
         this.dom.labelRight.textContent = rightLabelTxt;
-        this.updateSmartStageLabels();
         this.updateCurrentFrameMetadata(frameData);
 
         this.dom.leftLayer.classList.toggle(
@@ -2853,12 +2805,18 @@ const ReportViewer = {
             rightSrc = rightImage.src;
 
             if (this.state.mode === 'blink') {
-                const blinkLabels = this.blinkStageLabels(leftClip.label, rightClip.label);
+                const blinkLabels = this.blinkStageLabels(
+                    this.clipOverlayLabel(leftClip),
+                    this.clipOverlayLabel(rightClip),
+                );
                 leftLabelTxt = blinkLabels.left;
                 rightLabelTxt = blinkLabels.right;
+            } else if (this.state.mode === 'diff') {
+                leftLabelTxt = this.diffOverlayLabel(leftClip, rightClip);
+                rightLabelTxt = '';
             } else {
-                leftLabelTxt = `${leftClip.label} (Left)`;
-                rightLabelTxt = `${rightClip.label} (Right)`;
+                leftLabelTxt = this.clipOverlayLabel(leftClip, 'Left');
+                rightLabelTxt = this.clipOverlayLabel(rightClip, 'Right');
             }
             leftAlt = `${leftClip.label} - Frame ${frameData.number}`;
             rightAlt = `${rightClip.label} - Frame ${frameData.number}`;
@@ -2882,7 +2840,7 @@ const ReportViewer = {
             // Right layer remains hidden; keep its source tied to the comparison pair.
             rightSrc = rightImage.src;
 
-            leftLabelTxt = activeClip.label;
+            leftLabelTxt = this.clipOverlayLabel(activeClip);
             rightLabelTxt = "";
             leftAlt = `${activeClip.label} - Frame ${frameData.number}`;
             rightAlt = `${rightClip.label} - Frame ${frameData.number}`;

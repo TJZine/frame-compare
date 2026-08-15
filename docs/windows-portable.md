@@ -113,6 +113,16 @@ Human-readable exact source pointers are also included at
 dedicated `licenses/PyQt6/`, `licenses/PyQt6-sip/`, and `licenses/Qt/`
 directories in addition to the complete Python distribution license inventory.
 
+The selected component profile and compatibility policy are maintained in
+[Supported Media Runtime](supported-media-runtime.md) and calculated by
+`frame_compare.vs.runtime_contract`. Immutable artifact bytes, SHA-256 values,
+source revisions, source-tree digests, and license evidence remain authoritative in
+the build manifest, `Dockerfile`, and generated bundle inventory; the selected
+profile does not substitute for that artifact-level evidence.
+`bundle_info.json` and `bundle_inventory.json` also record the full coordinated
+media-runtime fingerprint used by diagnostics and code-only update compatibility
+checks.
+
 ---
 
 ## First Comparison
@@ -186,9 +196,25 @@ Apply a code-only update zip:
 frame-compare-update apply .\frame-compare-update-win-x64-<tag>.zip
 ```
 
-The updater is offline-first and verifies signature + file hashes before applying
-changes. If dependency fingerprints do not match, the default action is cancel;
-unsafe apply requires explicit confirmation.
+The updater is offline-first and verifies the signature and every payload hash
+before applying changes. A code-only ZIP replaces application files only; it does
+**not** replace VapourSynth, L-SMASH-Works, vs-placebo, FFmpeg, runtime manifests,
+or native license payloads.
+
+The signed update manifest uses schema version 2 and requires the lowercase
+64-character SHA-256 `expected_media_runtime_fingerprint` for the full runtime
+scope. The installed full bundle must expose the same valid fingerprint in
+`bundle_info.json`. A legacy schema-version-1 manifest, missing or malformed
+fingerprint, or different runtime identity fails closed before any
+dependency-compatibility override path. Install the complete portable ZIP for that
+release when the fingerprint differs.
+
+The R78-to-R79 / L-SMASH-Works 1296 / vs-placebo 2.0.4 / Akarin 1.4.1 / VSZip
+22.1.0 refresh is a native-runtime boundary. Existing R78 bundles require a full
+portable reinstall because the runtime fingerprints change; applying only the
+code-only ZIP is deliberately refused. Keep `paths.generated_dir` outside the bundle
+when reports, screenshots, history, and reusable data must survive bundle
+replacement.
 
 Every published Windows release must contain exactly these mandatory assets, using
 the release tag verbatim (for example `v0.1.0` or `v0.1.0-rc.1`):

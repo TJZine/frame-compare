@@ -47,6 +47,7 @@ from frame_compare.orchestration.execution_types import (
     PrepState,
     RunArtifacts,
 )
+from frame_compare.orchestration.full_window_retry import compute_selection_window_with_recovery
 from frame_compare.orchestration.phase_post_render import resolve_run_metadata
 from frame_compare.orchestration.preflight import discover_inputs, prepare_preflight
 from frame_compare.orchestration.probing.probe_cache import (
@@ -62,7 +63,6 @@ from frame_compare.orchestration.probing.probe_props import (
 from frame_compare.orchestration.selection_domain import (
     build_analysis_selection_domain_token,
     build_selection_domain_clips_with_diagnostics,
-    compute_selection_window_for_clips,
 )
 from frame_compare.orchestration.source_labels import resolve_source_labels
 from frame_compare.orchestration.source_selection import resolve_source_selection
@@ -121,6 +121,7 @@ async def _resolve_run_directory(
     deps: RunDependencies,
     preflight_duration: float,
     preflight_warnings: tuple[str, ...],
+    run_warnings: list[str],
 ) -> tuple[WorkspacePaths, MetadataPrefetch]:
     metadata = None
     was_attempted = False
@@ -197,6 +198,7 @@ async def _resolve_run_directory(
                 clip_count=len(input_videos),
                 preflight_duration=preflight_duration,
                 preflight_warnings=preflight_warnings,
+                run_warnings=run_warnings,
             )
         )
     return new_workspace, MetadataPrefetch(metadata=metadata, was_attempted=was_attempted)
@@ -558,6 +560,7 @@ async def execute_prep(
     prevalidated_selection_window: SelectionWindow | None = None
     prevalidated_selection_domain: str | None = None
     prevalidated_snapshots_by_path: dict[Path, ClipProbeSnapshot] | None = None
+    full_window_retry_override = None
     load_source_diagnostics: list[str] = []
     source_warnings: list[str] = []
 
@@ -578,10 +581,15 @@ async def execute_prep(
             snapshots_by_path=prevalidated_snapshots_by_path,
         )
         _validate_source_fps_compatibility(prevalidated_clips)
-        prevalidated_selection_window = compute_selection_window_for_clips(
+        prevalidated_window_state = compute_selection_window_with_recovery(
             clips=prevalidated_clips,
             config=config,
+            confirm=None,
         )
+        config = prevalidated_window_state.config
+        prevalidated_selection_window = prevalidated_window_state.selection_window
+        full_window_retry_override = prevalidated_window_state.override
+        artifacts.warnings.extend(prevalidated_window_state.warnings)
         prevalidated_clips, auto_warnings = _refine_auto_active_rects_after_selection_window(
             clips=prevalidated_clips,
             selection_window=prevalidated_selection_window,
@@ -626,6 +634,7 @@ async def execute_prep(
         deps=deps,
         preflight_duration=preflight_duration,
         preflight_warnings=tuple(preflight.warnings),
+        run_warnings=artifacts.warnings,
     )
 
     if prevalidated_clips is not None:
@@ -653,7 +662,16 @@ async def execute_prep(
             labels_by_path=labels_by_path,
         )
         _validate_source_fps_compatibility(clips)
-        selection_window = compute_selection_window_for_clips(clips=clips, config=config)
+        window_state = compute_selection_window_with_recovery(
+            clips=clips,
+            config=config,
+            confirm=deps.confirm_full_window_retry,
+            warning_sink=artifacts.warnings,
+        )
+        config = window_state.config
+        selection_window = window_state.selection_window
+        full_window_retry_override = window_state.override
+        artifacts.warnings.extend(window_state.warnings)
         clips, auto_warnings = _refine_auto_active_rects_after_selection_window(
             clips=clips,
             selection_window=selection_window,
@@ -701,6 +719,7 @@ async def execute_prep(
         input_videos=input_videos,
         analysis_selection_domain=selection_domain,
         analysis_clip=analysis_clip,
+        full_window_retry_override=full_window_retry_override,
         selection_window=selection_window,
         clips=clips,
         artifacts=artifacts,

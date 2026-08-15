@@ -92,6 +92,7 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
     }
     assert summary["activeFilterBadge"]["badgeHiddenByDefault"] is True
     assert summary["activeFilterBadge"]["badgeClearedToHidden"] is True
+    assert summary["sourceOverlayLabel"] == ("Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR")
     assert summary["lensPanIndependence"] == {
         "panAppliedWithoutInspectorGestureGate": True,
         "panMovedRecorded": True,

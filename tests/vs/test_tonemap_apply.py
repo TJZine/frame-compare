@@ -11,7 +11,7 @@ from frame_compare.vs.tonemap import apply_tonemap  # noqa: E402, I001
 from frame_compare.vs.types import HDRMetadata, TonemapSettings  # noqa: E402, I001
 
 
-@patch("frame_compare.vs.tonemap_fallback.detect_hdr")
+@patch("frame_compare.vs.tonemap_conversion.detect_hdr")
 @patch("frame_compare.vs.tonemap.detect_plugins")
 def test_apply_tonemap_detects_metadata_when_missing_fallback(mock_detect, mock_detect_hdr):
     """Verify metadata extraction is attempted in fallback path if missing."""

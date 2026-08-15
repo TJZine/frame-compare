@@ -23,6 +23,7 @@ from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.types import WorkspacePaths
 
 if TYPE_CHECKING:
+    from frame_compare.orchestration.full_window_retry import FullWindowRetryOverride
     from frame_compare.orchestration.phases import Phase
 
 
@@ -68,6 +69,8 @@ class AnalyzePhaseOutput:
     selection_details_by_source_frame: SelectionDetailsByFrame = field(
         default_factory=_empty_selection_details_by_source_frame
     )
+    warnings: list[str] = field(default_factory=_empty_str_list)
+    replaces_frame_plan_selection: bool = False
 
 
 @dataclass(frozen=True)
@@ -177,6 +180,7 @@ class ExecutionState:
 
     artifacts: RunArtifacts = field(default_factory=RunArtifacts)
     selected_frames: list[int] = field(default_factory=_empty_frame_list)
+    frame_plan_warnings: list[str] = field(default_factory=_empty_str_list)
     phase_timings: dict[str, float] = field(default_factory=_empty_phase_timings)
 
     @property
@@ -204,6 +208,7 @@ class PrepState:
     analysis_selection_domain: str
     selection_window: SelectionWindow
     analysis_clip: ClipState | None = None
+    full_window_retry_override: FullWindowRetryOverride | None = None
     load_source_diagnostics: list[str] = field(default_factory=_empty_str_list)
 
 

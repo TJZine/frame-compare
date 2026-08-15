@@ -165,6 +165,7 @@ def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
 ) -> None:
     config = ConfigSchema()
     config.slowpics.auto_upload = True
+    config.slowpics.confirm_upload_after_report = False
     config.slowpics.delete_after_upload = True
     config.report.enable = False
     uploaded = tmp_path / "screenshots" / "planned.png"
@@ -252,6 +253,7 @@ def test_execute_run_webhook_action_warning_is_warning_only(
 ) -> None:
     config = ConfigSchema()
     config.slowpics.auto_upload = True
+    config.slowpics.confirm_upload_after_report = False
     config.report.enable = False
     webhook_warning = "slow.pics webhook: delivery failed"
     render = RenderArtifacts(
@@ -328,6 +330,7 @@ def test_execute_run_report_warning_blocks_delete_after_upload_cleanup(
 ) -> None:
     config = ConfigSchema()
     config.slowpics.auto_upload = True
+    config.slowpics.confirm_upload_after_report = False
     config.slowpics.delete_after_upload = True
     config.report.enable = True
     config.report.embed_images = True

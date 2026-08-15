@@ -54,17 +54,21 @@ details. Use the same route and runtime when bit-for-bit comparison is important
 
 | Route | Python environment | FFmpeg | VapourSynth + loader plugins | VSPreview + PyQt6 | Installer/updater |
 | --- | --- | --- | --- | --- | --- |
-| Windows release ZIP | Included (Python 3.13.13 in the current bundle manifest) | Included, LGPL-only build | Included (VapourSynth R76, L-SMASH-Works, and vs-placebo) | Included | Included |
+| Windows release ZIP | Included (Python 3.13.15 in the current bundle manifest) | Included, LGPL-only build | Included (VapourSynth R79, L-SMASH-Works 1296, vs-placebo 2.0.4, Akarin 1.4.1, and VSZip 22.1.0) | Included | Included |
 | Windows source build | Built into the resulting bundle | Downloaded by the builder | Downloaded/installed by the builder | Installed by the builder | Included |
 | Docker default | Included in image | Included | Included | Not in the default runtime target | Rebuild/pull the image |
 | Docker NVIDIA | Included in image | Included | Included | Not by the GPU profile alone | Rebuild/pull the image |
 | Docker X11 GUI | Included in GUI image target | Included | Included | Included in the optional GUI target | Rebuild/pull the image |
-| Native source with `uv` | Created from `uv.lock` | Host-provided | Host-provided; `vspreview` extra supplies related Python packages | Optional extra | None |
+| Native source with `uv` | Created from `uv.lock` | Host-provided | R79 from the `vspreview` extra; it resolves VSJetEngine 1.5.1, VSJetPack 2.2.1, Akarin 1.4.1, VSZip 22.1.0, psutil 7.2.2, and jetpytools 3.1.1. On Windows it also installs L-SMASH-Works 1296 and vs-placebo 2.0.4; Linux/macOS require those two plugins from the host | Optional extra | None |
 | Native source with pip | Created/selected by you | Host-provided | Host-provided | Optional extra | None |
 
 The repository currently documents Docker as a build-from-clone route; it does not
 promise a prebuilt public container image. The pip route is also install-from-clone,
 not a promise that a package has been published to PyPI.
+
+See [Supported Media Runtime](../supported-media-runtime.md) for the coordinated
+VapourSynth, source-plugin, tone-mapping, FFmpeg, cache/index, and licensing
+contract used by the bundled routes.
 
 ### Feature availability
 
@@ -154,8 +158,8 @@ on your host. See
 
 Choose this when you want native host behavior and can install the media toolchain.
 `uv` reproduces the repository's locked Python dependency graph; you still provide
-FFmpeg, VapourSynth R76, L-SMASH-Works, compatible Vulkan support, and optionally
-VSPreview.
+FFmpeg, VapourSynth R79, L-SMASH-Works 1296, vs-placebo 2.0.4, compatible Vulkan
+support, and optionally VSPreview.
 
 This is the preferred native-source route because its Python environment is locked.
 Follow [Install with uv](native.md#install-with-uv).

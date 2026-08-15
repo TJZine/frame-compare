@@ -55,8 +55,9 @@ def run_doctor(
             )
         results.append((check, result))
 
-        # Track core category failures as critical.
-        if not result.passed and check.category == "core":
+        # Core checks are always critical. Managed runtimes may also promote a
+        # profile-specific policy check without changing its public category.
+        if not result.passed and (check.category == "core" or check.critical_if_failed):
             critical_failures.append(check.name)
 
         if reporter is not None:

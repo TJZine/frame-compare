@@ -93,7 +93,9 @@ def validate_release_contract(
 ) -> None:
     repo_root = repo_root.resolve()
     if SHA_RE.fullmatch(expected_sha) is None:
-        raise ReleaseContractError("Expected SHA must be exactly 40 lowercase hexadecimal characters.")
+        raise ReleaseContractError(
+            "Expected SHA must be exactly 40 lowercase hexadecimal characters."
+        )
 
     head = _git_head(repo_root)
     if head != expected_sha:
@@ -103,13 +105,13 @@ def validate_release_contract(
 
     expected_tag = _expected_tag(channel, version)
     if tag != expected_tag:
-        raise ReleaseContractError(
-            f"{channel} tag must be exactly {expected_tag}; received {tag}."
-        )
+        raise ReleaseContractError(f"{channel} tag must be exactly {expected_tag}; received {tag}.")
 
     if channel == "stable":
         if main_sha is None or SHA_RE.fullmatch(main_sha) is None:
-            raise ReleaseContractError("Stable publication requires an exact 40-character main SHA.")
+            raise ReleaseContractError(
+                "Stable publication requires an exact 40-character main SHA."
+            )
         if main_sha != expected_sha:
             raise ReleaseContractError(
                 f"Stable expected SHA {expected_sha} is not current main head {main_sha}."
@@ -120,12 +122,8 @@ def validate_release_contract(
     project_version = project["version"]
 
     package_name = str(project["name"]).replace("-", "_")
-    package_version = _read_package_version(
-        repo_root / "src" / package_name / "__init__.py"
-    )
-    manifest = json.loads(
-        (repo_root / ".release-please-manifest.json").read_text(encoding="utf-8")
-    )
+    package_version = _read_package_version(repo_root / "src" / package_name / "__init__.py")
+    manifest = json.loads((repo_root / ".release-please-manifest.json").read_text(encoding="utf-8"))
     release_config = json.loads(
         (repo_root / "release-please-config.json").read_text(encoding="utf-8")
     )

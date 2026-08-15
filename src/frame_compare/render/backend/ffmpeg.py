@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from subprocess import CalledProcessError, TimeoutExpired
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Protocol
 
 from frame_compare.render.backend._ffmpeg_frame import build_extract_frame_argv
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 from frame_compare.utils.subproc import run_subprocess
+from frame_compare.vs.hdr_probe import probe_hdr_metadata
 from frame_compare.vs.types import HDRMetadata
 
 if TYPE_CHECKING:
     from frame_compare.render.geometry import RenderGeometryPlan
+
+
+_H273_UNSPECIFIED = 2
 
 
 class FFmpegRunner(Protocol):
@@ -45,7 +48,6 @@ class FFmpegRunner(Protocol):
 class DefaultFFmpegRunner:
     """Default FFmpeg runner for dependency injection in orchestration."""
 
-    _FFPROBE_TIMEOUT_SECONDS = 15.0
     _FFMPEG_TIMEOUT_SECONDS = 30.0
 
     def __init__(self, extraction_timeout_seconds: float = _FFMPEG_TIMEOUT_SECONDS) -> None:
@@ -77,62 +79,11 @@ class DefaultFFmpegRunner:
             raise FFmpegError(exc.stderr.decode(errors="replace"), exc.returncode) from exc
 
     def probe_hdr(self, video: Path) -> HDRMetadata | None:
-        argv = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=color_transfer,color_primaries,color_space",
-            "-of",
-            "json",
-            str(video),
-        ]
-        try:
-            proc = run_subprocess(argv, timeout_seconds=self._FFPROBE_TIMEOUT_SECONDS)
-        except FileNotFoundError as exc:
-            raise FFmpegNotFoundError() from exc
-        except TimeoutExpired as exc:
-            raise FFmpegError("ffprobe timed out while probing hdr", 124) from exc
-        except CalledProcessError as exc:
-            raise FFmpegError(exc.stderr.decode(errors="replace"), exc.returncode) from exc
-
-        try:
-            payload = cast(
-                dict[str, object], json.loads(proc.stdout.decode("utf-8", errors="replace"))
-            )
-        except json.JSONDecodeError as exc:
-            raise FFmpegError("ffprobe returned invalid json", proc.returncode) from exc
-
-        streams_obj = payload.get("streams")
-        if not isinstance(streams_obj, list) or not streams_obj:
+        metadata = probe_hdr_metadata(video)
+        if (
+            metadata is None
+            or metadata.transfer == _H273_UNSPECIFIED
+            or metadata.color_primaries == _H273_UNSPECIFIED
+        ):
             return None
-        streams = cast(list[object], streams_obj)
-        stream_obj = streams[0]
-        if not isinstance(stream_obj, dict):
-            return None
-        stream = cast(dict[str, object], stream_obj)
-
-        transfer_raw = str(stream.get("color_transfer", "")).lower().strip()
-        primaries_raw = str(stream.get("color_primaries", "")).lower().strip()
-        matrix_raw = str(stream.get("color_space", "")).lower().strip()
-        primaries_map = {"bt709": 1, "bt2020": 9}
-        transfer_map = {"bt709": 1, "smpte2084": 16, "arib-std-b67": 18}
-        matrix_map = {"bt709": 1, "bt2020nc": 9, "bt2020c": 10}
-
-        color_primaries = primaries_map.get(primaries_raw, 2)
-        transfer = transfer_map.get(transfer_raw, 2)
-        matrix = matrix_map.get(matrix_raw, 2)
-
-        if not transfer_raw or not primaries_raw or color_primaries == 2 or transfer == 2:
-            return None
-
-        return HDRMetadata(
-            mastering_display=None,
-            max_cll=None,
-            max_fall=None,
-            color_primaries=color_primaries,
-            transfer=transfer,
-            matrix=matrix,
-        )
+        return metadata

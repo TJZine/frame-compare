@@ -45,7 +45,7 @@ def probe_libplacebo_runtime() -> bool:
         )
         clip = clip.std.SetFrameProps(
             _Matrix=0,
-            _ColorRange=0,
+            _Range=1,
             _Transfer=16,
             _Primaries=9,
         )

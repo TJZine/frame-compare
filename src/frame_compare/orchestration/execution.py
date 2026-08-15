@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 import httpx
 
+from frame_compare.analysis.errors import ExclusionRecoverySelectionError
 from frame_compare.analysis.metrics import ANALYZE_PROGRESS_TOTAL
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.analysis_policy import needs_analysis
@@ -28,6 +29,7 @@ from frame_compare.orchestration.execution_types import (
     PublishPhaseOutput,
     ReportPhaseOutput,
 )
+from frame_compare.orchestration.phase_alignment import run_align_phase
 from frame_compare.orchestration.phase_output_application import apply_phase_output
 from frame_compare.orchestration.phase_post_render import (
     run_confirm_slowpics_upload_phase,
@@ -36,14 +38,11 @@ from frame_compare.orchestration.phase_post_render import (
     run_publish_phase,
     run_report_phase,
 )
+from frame_compare.orchestration.phase_render import run_render_phase
 from frame_compare.orchestration.phase_selection import (
     run_analyze_phase,
     select_initial_frame_plan,
     selection_label_for_frame,
-)
-from frame_compare.orchestration.phase_tasks import (
-    run_align_phase,
-    run_render_phase,
 )
 from frame_compare.orchestration.phases import Phase
 from frame_compare.orchestration.types import (
@@ -74,6 +73,7 @@ def _create_timed_phase(
     warnings: list[str],
     *,
     warn_only: bool = False,
+    fatal_exceptions: tuple[type[BaseException], ...] = (),
     progress_total: int = 1,
 ) -> Phase:
     async def _execute(ctx: RunContext) -> None:
@@ -99,6 +99,7 @@ def _create_timed_phase(
         skip_condition=skip_condition,
         progress_total=progress_total,
         warn_only=warn_only,
+        fatal_exceptions=fatal_exceptions,
     )
 
 
@@ -116,7 +117,7 @@ def build_phases_before_align(
             "frame_plan",
             "frame_plan",
             None,
-            select_initial_frame_plan,
+            partial(select_initial_frame_plan, vs_loader=vs_loader),
             state=state,
             monotonic_timer=monotonic_timer,
             phase_timings=state.phase_timings,
@@ -138,6 +139,7 @@ def build_phases_before_align(
             phase_timings=state.phase_timings,
             warnings=state.warnings,
             warn_only=True,
+            fatal_exceptions=(ExclusionRecoverySelectionError,),
             progress_total=ANALYZE_PROGRESS_TOTAL,
         ),
         _create_timed_phase(
@@ -150,6 +152,7 @@ def build_phases_before_align(
             phase_timings=state.phase_timings,
             warnings=state.warnings,
             warn_only=True,
+            fatal_exceptions=(ExclusionRecoverySelectionError,),
             progress_total=max(1, len(input_videos)),
         ),
     ]

@@ -53,15 +53,15 @@ jobs:
             throw "Reusable Windows workflow checked out $actualSha instead of expected SHA."
           }
 
-      - name: Setup Python 3.13.13
+      - name: Setup Python 3.13.15
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.13.13"
+          python-version: "3.13.15"
 
       - name: Setup uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
-          version: "0.11.31"
+          version: "0.12.2"
           enable-cache: ${{ inputs.require_signing }}
 
       - name: Install dev dependencies (frozen)
@@ -80,7 +80,11 @@ jobs:
       - name: Build portable bundle
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
           $out = "dist/frame-compare-portable-win-x64"
+          $proofLog = "dist/windows-bundle-runtime-proof.log"
+          New-Item -ItemType Directory -Force -Path "dist" | Out-Null
           $buildArgs = @(
             "-NoProfile",
             "-ExecutionPolicy",
@@ -97,7 +101,38 @@ jobs:
           if ($env:REQUIRE_SIGNING -eq "true") {
             $buildArgs += "-RequireReleasePublicKey"
           }
-          pwsh @buildArgs
+          pwsh @buildArgs 2>&1 | Tee-Object -FilePath $proofLog
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+          $proof = Get-Content -LiteralPath $proofLog -Raw
+          foreach ($phase in @(
+            "package_imports",
+            "runtime_contract",
+            "vapoursynth_environment",
+            "lwlibavsource_frame",
+            "placebo_tonemap_api",
+            "apply_tonemap_frame",
+            "placebo_tonemap_frame",
+            "qt_media_runtime"
+          )) {
+            if ($proof -notmatch "WINDOWS_BUNDLE_PROOF phase=$phase ok") {
+              throw "Required portable runtime proof phase missing: $phase"
+            }
+          }
+          if ($proof -notmatch "WINDOWS_BUNDLE_PROOF qt_media_runtime=ok") {
+            throw "Required combined Qt media runtime proof marker missing."
+          }
+          if ($proof -notmatch "WINDOWS_BUNDLE_PROOF bundled_native_plugins=ok akarin=.+ zstd=1\.5\.7-2 vszip=.+") {
+            throw "Required Akarin/VSZip plugin-loading proof marker missing."
+          }
+          if ($proof -match "WINDOWS_BUNDLE_PROOF placebo_direct_frame=ok ") {
+            Write-Host "Direct placebo frame proof completed."
+          } elseif ($proof -match "WINDOWS_BUNDLE_PROOF placebo_direct_frame=skipped reason=vulkan_runtime_unavailable") {
+            Write-Warning "Hosted runner lacks a usable Vulkan runtime; direct placebo frame proof remains required in Phase 2."
+          } else {
+            throw "Direct placebo frame proof did not report a recognized result."
+          }
 
       - name: Verify bundle workspace directories
         shell: pwsh
@@ -106,6 +141,9 @@ jobs:
           $bundleConfigDir = Join-Path $bundle "config"
           $bundleInputDir = Join-Path $bundle "comparison_videos"
           $vsPackagePlugins = Join-Path $bundle "app/site-packages/vapoursynth/plugins"
+          $akarinPlugin = Join-Path $vsPackagePlugins "akarin/libakarin.dll"
+          $akarinZstd = Join-Path $vsPackagePlugins "akarin/libzstd.dll"
+          $vszipManifest = Join-Path $vsPackagePlugins "vszip/manifest.vs"
           $extraPluginRoot = Join-Path $bundle "vs/extra-plugins"
           $lsmasManifest = Join-Path $extraPluginRoot "lsmas/manifest.vs"
 
@@ -118,6 +156,15 @@ jobs:
           if (!(Test-Path -LiteralPath $vsPackagePlugins -PathType Container)) {
             throw "Missing R74+ VapourSynth package plugin directory: $vsPackagePlugins"
           }
+          if (!(Test-Path -LiteralPath $akarinPlugin -PathType Leaf)) {
+            throw "Missing bundled Akarin plugin: $akarinPlugin"
+          }
+          if (!(Test-Path -LiteralPath $akarinZstd -PathType Leaf)) {
+            throw "Missing bundled Akarin zstd runtime: $akarinZstd"
+          }
+          if (!(Test-Path -LiteralPath $vszipManifest -PathType Leaf)) {
+            throw "Missing bundled VSZip plugin manifest: $vszipManifest"
+          }
           if (!(Test-Path -LiteralPath $extraPluginRoot -PathType Container)) {
             throw "Missing extra VapourSynth plugin directory: $extraPluginRoot"
           }
@@ -125,22 +172,47 @@ jobs:
             throw "Missing L-SMASH manifest: $lsmasManifest"
           }
 
-      - name: "Smoke: doctor --json"
+      - name: "Smoke: absolute candidate launcher"
         shell: pwsh
         run: |
           $bundle = (Resolve-Path "dist/frame-compare-portable-win-x64").Path
-          $output = & "$bundle/frame-compare.ps1" doctor --json 2>&1
+          $launcher = Join-Path $bundle "frame-compare.ps1"
+          Get-Command -CommandType ExternalScript $launcher | Format-List Source,Path
+          & $launcher --help | Out-Host
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $launcher version | Out-Host
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $doctorStdout = Join-Path $env:RUNNER_TEMP "bundle-doctor.json"
+          $doctorStderr = Join-Path $env:RUNNER_TEMP "bundle-doctor.stderr.txt"
+          & $launcher doctor --json 1> $doctorStdout 2> $doctorStderr
           $exitCode = $LASTEXITCODE
           $knownNoise = "Core plugin autoloading failed. Installation is broken!"
-          foreach ($line in $output) {
+          foreach ($line in Get-Content -LiteralPath $doctorStderr) {
             if ($line -eq $knownNoise) {
               continue
             }
-            Write-Host $line
+            Write-Warning $line
           }
           if ($exitCode -ne 0) {
             exit $exitCode
           }
+          $doctorJson = Get-Content -LiteralPath $doctorStdout -Raw
+          try {
+            $doctorPayload = $doctorJson | ConvertFrom-Json -ErrorAction Stop
+          } catch {
+            throw "Candidate doctor stdout is not exactly one valid JSON document: $($_.Exception.Message)"
+          }
+          if ($doctorPayload -isnot [PSCustomObject] -or $doctorPayload.success -ne $true) {
+            throw "Candidate doctor JSON is not a successful object"
+          }
+          $ffmpegChecks = @(
+            $doctorPayload.doctor.checks |
+              Where-Object { $_.id -ceq "ffmpeg" }
+          )
+          if ($ffmpegChecks.Count -ne 1 -or $ffmpegChecks[0].status -cne "pass") {
+            throw "Candidate doctor FFmpeg check did not pass exactly once"
+          }
+          Write-Host $doctorJson
 
       - name: Package zip
         shell: pwsh
@@ -152,85 +224,20 @@ jobs:
           $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
           Set-Content -Path "$zip.sha256" -Value "$hash  $(Split-Path -Leaf $zip)" -Encoding ASCII
 
-      - name: Verify zip layout
+      - name: Verify extracted portable bundle
         shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
         run: |
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $zipPath = (Resolve-Path "dist/frame-compare-portable-win-x64.zip").Path
-          $zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
-          try {
-            $entries = @($zip.Entries | ForEach-Object { $_.FullName })
-          } finally {
-            $zip.Dispose()
-          }
-
-          $required = @(
-            "frame-compare-portable-win-x64/install.cmd",
-            "frame-compare-portable-win-x64/install.ps1",
-            "frame-compare-portable-win-x64/frame-compare.ps1",
-            "frame-compare-portable-win-x64/frame-compare-update.cmd",
-            "frame-compare-portable-win-x64/frame-compare-update.ps1",
-            "frame-compare-portable-win-x64/shim/frame-compare.cmd",
-            "frame-compare-portable-win-x64/shim/frame-compare-update.cmd",
-            "frame-compare-portable-win-x64/shim/frame-compare-update.ps1"
-          )
-          foreach ($r in $required) {
-            if ($entries -notcontains $r) {
-              throw "Missing zip entry: $r"
-            }
-          }
-          foreach ($e in $entries) {
-            if (-not $e.StartsWith("frame-compare-portable-win-x64/")) {
-              throw "Non-folder-contained entry: $e"
-            }
-          }
-
-      - name: Verify extracted zip workspace directories
-        shell: pwsh
-        run: |
-          $zip = (Resolve-Path "dist/frame-compare-portable-win-x64.zip").Path
-          $extractRoot = Join-Path "dist" "zip_extract_check"
-          if (Test-Path -LiteralPath $extractRoot) {
-            Remove-Item -Recurse -Force -LiteralPath $extractRoot
-          }
-          Expand-Archive -LiteralPath $zip -DestinationPath $extractRoot -Force
-
-          $bundle = Join-Path $extractRoot "frame-compare-portable-win-x64"
-          $bundleConfigDir = Join-Path $bundle "config"
-          $bundleInputDir = Join-Path $bundle "comparison_videos"
-          if (!(Test-Path -LiteralPath $bundleConfigDir -PathType Container)) {
-            throw "Missing default workspace directory in extracted zip: $bundleConfigDir"
-          }
-          if (!(Test-Path -LiteralPath $bundleInputDir -PathType Container)) {
-            throw "Missing default workspace directory in extracted zip: $bundleInputDir"
-          }
-
-      - name: "Smoke: extracted install shim"
-        shell: pwsh
-        run: |
-          $bundle = (Resolve-Path "dist/zip_extract_check/frame-compare-portable-win-x64").Path
-          & "$bundle/install.cmd"
-          if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
-          }
-
-          $shim = Join-Path $env:LOCALAPPDATA "Programs/FrameCompare/bin/frame-compare.cmd"
-          if (!(Test-Path -LiteralPath $shim -PathType Leaf)) {
-            throw "Installed shim not found: $shim"
-          }
-
-          $versionOutput = & $shim version
-          if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
-          }
-          if ($versionOutput -notmatch "^frame-compare \d+\.\d+\.\d+") {
-            throw "Unexpected version output from installed shim: $versionOutput"
-          }
-
-          & $shim --help | Out-Host
-          if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
-          }
+          pwsh -NoProfile -ExecutionPolicy Bypass `
+            -File tools/windows_portable/verify_extracted_bundle.ps1 `
+            -ZipPath dist/frame-compare-portable-win-x64.zip `
+            -ExtractRoot dist/zip_extract_check `
+            -DoctorStdoutPath (Join-Path $env:RUNNER_TEMP "extracted-doctor.json") `
+            -DoctorStderrPath (Join-Path $env:RUNNER_TEMP "extracted-doctor.stderr.txt") `
+            -ExpectedCommitSha "$env:EXPECTED_SHA" `
+            -CommandTimeoutSeconds 300
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build code-only update zip
         shell: pwsh
@@ -324,6 +331,13 @@ jobs:
           if ($env:REQUIRE_SIGNED_UPDATE -eq "true" -and $entries -notcontains "update-manifest.sig") {
             throw "Signed update zip is missing update-manifest.sig."
           }
+
+      - name: Portable updater process-boundary proof
+        shell: pwsh
+        run: |
+          uv run --no-sync pytest -q `
+            tests/windows_portable/test_windows_portable_update_apply_e2e.py `
+            tests/windows_portable/test_windows_portable_update_scripts.py
 
       - name: Prepare exact orchestrated release assets
         if: inputs.prepare_release_assets

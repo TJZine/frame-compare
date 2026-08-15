@@ -46,6 +46,7 @@ class Phase:
     display_label: str | None = None
     status: PhaseStatus = PhaseStatus.PENDING
     warn_only: bool = False
+    fatal_exceptions: tuple[type[BaseException], ...] = ()
 
     @property
     def progress_label(self) -> str:
@@ -89,7 +90,7 @@ async def execute_phases(
         try:
             await phase.execute(context)
         except Exception as exc:
-            if not phase.warn_only:
+            if not phase.warn_only or isinstance(exc, phase.fatal_exceptions):
                 phase.status = PhaseStatus.FAILED
                 phase_progress_status = ProgressPhaseStatus.FAILED
                 raise

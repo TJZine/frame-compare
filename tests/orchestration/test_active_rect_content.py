@@ -335,6 +335,74 @@ def test_normal_auto_refinement_keeps_successful_clip_when_later_clip_sampling_f
     assert "active-rect auto detection failed for failed.mkv" in warnings[0]
 
 
+def test_full_window_retry_can_recompute_content_derived_rect() -> None:
+    clip = replace(
+        _clip(),
+        active_rect=ClipActiveRect(0, 10, 100, 60, "content-derived", "auto"),
+    )
+
+    class FullWindowSampler:
+        def sample_luma_frames(
+            self,
+            _clip: ClipState,
+            indices: list[int],
+        ) -> list[np.ndarray[tuple[int, int], np.dtype[np.float32]]]:
+            return [_pillarbox_frame(left=12, right=12) for _index in indices]
+
+    refined, warnings = refine_auto_content_active_rects_for_clips(
+        clips=[clip],
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+        detection=ScreenshotActiveRectDetection.AUTO,
+        sampler=FullWindowSampler(),
+        fail_closed=False,
+        recompute_content_derived=True,
+    )
+
+    assert refined[0].active_rect == ClipActiveRect(12, 0, 76, 80, "content-derived", "auto")
+    assert warnings == []
+
+
+def test_full_window_retry_clears_stale_content_rect_when_full_window_has_no_crop() -> None:
+    clips = [
+        replace(
+            _clip(name="content-a.mkv"),
+            active_rect=ClipActiveRect(0, 10, 100, 60, "content-derived", "auto"),
+        ),
+        replace(
+            _clip(name="content-b.mkv"),
+            active_rect=ClipActiveRect(0, 10, 100, 60, "content-derived", "auto"),
+        ),
+        replace(
+            _clip(name="ratio-propagated.mkv"),
+            active_rect=ClipActiveRect(0, 10, 100, 60, "aspect-ratio-derived", "auto"),
+        ),
+    ]
+
+    class NoCropSampler:
+        def sample_luma_frames(
+            self,
+            _clip: ClipState,
+            indices: list[int],
+        ) -> list[np.ndarray[tuple[int, int], np.dtype[np.float32]]]:
+            return [_content_pattern(80, 100) for _index in indices]
+
+    refined, warnings = refine_auto_content_active_rects_for_clips(
+        clips=clips,
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+        detection=ScreenshotActiveRectDetection.AUTO,
+        sampler=NoCropSampler(),
+        fail_closed=True,
+        recompute_content_derived=True,
+    )
+
+    assert [clip.active_rect for clip in refined] == [
+        ClipActiveRect(0, 0, 100, 80, "full-frame", "auto"),
+        ClipActiveRect(0, 0, 100, 80, "full-frame", "auto"),
+        ClipActiveRect(0, 0, 100, 80, "full-frame", "auto"),
+    ]
+    assert warnings == []
+
+
 def test_auto_refinement_maps_failure_raised_during_iterator_consumption() -> None:
     clip = replace(
         _clip(name="failed-during-iteration.mkv"),

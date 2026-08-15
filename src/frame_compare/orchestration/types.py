@@ -81,6 +81,7 @@ def _utc_now() -> datetime:
 
 
 type SlowpicsUploadConfirmationDecision = Literal["confirmed", "declined"]
+type FullWindowRetryConfirmationDecision = Literal["confirmed", "declined"]
 type MetricsCacheStatus = Literal["skipped", "hit", "miss"]
 type SlowpicsUploadConfirmationStatus = Literal[
     "not_applicable",
@@ -107,6 +108,25 @@ class SlowpicsUploadConfirmationFn(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class FullWindowRetryConfirmationRequest:
+    """Bounded facts passed to the CLI-owned full-window retry confirmation."""
+
+    requested_frame_count: int
+    eligible_frame_count: int
+    ignore_lead_seconds: float
+    ignore_trail_seconds: float
+
+
+class FullWindowRetryConfirmationFn(Protocol):
+    """CLI-owned callback for a run-only full-window retry decision."""
+
+    def __call__(
+        self,
+        request: FullWindowRetryConfirmationRequest,
+    ) -> FullWindowRetryConfirmationDecision: ...
+
+
+@dataclass(frozen=True, slots=True)
 class ReservedRunCapture:
     """Facts known immediately after a run folder's identity is durable."""
 
@@ -114,6 +134,7 @@ class ReservedRunCapture:
     clip_count: int
     preflight_duration: float
     preflight_warnings: tuple[str, ...]
+    run_warnings: list[str]
 
 
 @dataclass(frozen=True)
@@ -150,6 +171,7 @@ class RunDependencies:
     http_client: httpx.AsyncClient | None = None
     progress: ProgressReporter | None = None
     confirm_slowpics_upload: SlowpicsUploadConfirmationFn | None = None
+    confirm_full_window_retry: FullWindowRetryConfirmationFn | None = None
     clock: Callable[[], datetime] = field(default=_utc_now)
     monotonic_timer: Callable[[], float] = field(default=monotonic)
     capture_reserved_run: Callable[[ReservedRunCapture], None] | None = field(

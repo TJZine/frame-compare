@@ -89,6 +89,7 @@ docker() {
     assert "Docker Compose 2.30.0 or later is required" in combined
     assert "DOCKER_GPU_FALLBACK command_begin" in combined
     assert "docker run --rm --gpus all" in combined
+    assert "--entrypoint /bin/bash frame-compare:test" in combined
     assert "NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics" in combined
     assert "bash tools/verify_docker_gpu.sh --inside-container" in combined
 

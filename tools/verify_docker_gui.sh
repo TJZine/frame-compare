@@ -82,6 +82,16 @@ EOF
 run_container_proof() {
   mkdir -p "${HOME:-/tmp/framecompare-home}" "${XDG_RUNTIME_DIR:-/tmp/framecompare-runtime}"
 
+  if command -v uv >/dev/null 2>&1 || command -v uvx >/dev/null 2>&1; then
+    echo "ERROR: uv build tooling leaked into the GUI production image" >&2
+    return 6
+  fi
+  if python -c 'import pytest' >/dev/null 2>&1; then
+    echo "ERROR: pytest test tooling leaked into the GUI production image" >&2
+    return 6
+  fi
+  echo "DOCKER_GUI_PROOF production_tooling_absent=ok"
+
   python -m vspreview --help >/tmp/framecompare-vspreview-help.txt
   echo "DOCKER_GUI_PROOF vspreview_help=ok"
 

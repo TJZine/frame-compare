@@ -16,7 +16,7 @@ from frame_compare.analysis.types import (
     SelectionDetail,
 )
 from frame_compare.config.schema import OverlayMode
-from frame_compare.orchestration import phase_tasks
+from frame_compare.orchestration import phase_alignment, phase_render
 from frame_compare.orchestration.context import ClipActiveRect
 from frame_compare.orchestration.execution_types import (
     RenderArtifacts,
@@ -53,7 +53,7 @@ def test_run_render_phase_maps_aligned_frames_to_source_frames(
     )
 
     runner = cast(Any, _RenderRunner())
-    output = phase_tasks.run_render_phase(
+    output = phase_render.run_render_phase(
         ctx,
         frames=[1],
         runner=runner,
@@ -106,7 +106,7 @@ def test_run_render_phase_maps_three_clip_aligned_frames_to_source_frames(
         _fake_render_screenshots_from_batch,
     )
 
-    phase_tasks.run_render_phase(
+    phase_render.run_render_phase(
         ctx,
         frames=[1, 2],
         runner=cast(Any, _RenderRunner()),
@@ -178,8 +178,8 @@ def test_run_align_then_render_phase_maps_four_clip_aligned_frames_in_clip_order
             ),
         ]
 
-    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
-    align_output = phase_tasks.run_align_phase(ctx, selected_frames=[10, 57, 81])
+    monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
+    align_output = phase_alignment.run_align_phase(ctx, selected_frames=[10, 57, 81])
     ctx.reference = align_output.reference
     ctx.comparisons = align_output.comparisons
     ctx.selection_breakdown = SelectionBreakdown(
@@ -203,7 +203,7 @@ def test_run_align_then_render_phase_maps_four_clip_aligned_frames_in_clip_order
         _fake_render_screenshots_from_batch,
     )
 
-    phase_tasks.run_render_phase(
+    phase_render.run_render_phase(
         ctx,
         frames=align_output.selected_frames,
         runner=cast(Any, _RenderRunner()),
@@ -254,7 +254,7 @@ def test_run_render_phase_passes_clip_active_rect_to_batch_request(
         _fake_render_screenshots_from_batch,
     )
 
-    phase_tasks.run_render_phase(
+    phase_render.run_render_phase(
         ctx,
         frames=[1],
         runner=cast(Any, _RenderRunner()),
@@ -355,7 +355,7 @@ def test_run_render_phase_prefers_typed_selection_details_in_reference_source_do
     )
 
     runner = cast(Any, _RenderRunner())
-    phase_tasks.run_render_phase(
+    phase_render.run_render_phase(
         ctx,
         frames=[1],
         runner=runner,
@@ -380,6 +380,50 @@ def test_run_render_phase_prefers_typed_selection_details_in_reference_source_do
     assert requests[1].diagnostic_metadata[0] is not None
     assert requests[1].diagnostic_metadata[0].max_cll == 600
     assert requests[1].diagnostic_metadata[0].color_range == "full"
+
+
+@pytest.mark.parametrize(
+    "malformed_value",
+    [float("nan"), float("inf"), float("-inf"), "nan", "inf", "-inf", 10**400],
+)
+def test_run_render_phase_ignores_non_finite_preserved_frame_properties(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    malformed_value: str | int | float,
+) -> None:
+    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
+    ctx = _context(tmp_path, comparisons=[comparison])
+    ctx.config.screenshots.overlay_mode = OverlayMode.DIAGNOSTIC
+    ctx.reference = replace(
+        ctx.reference,
+        probe=replace(
+            ctx.reference.probe,
+            preserved_frame_props={
+                "_Range": malformed_value,
+                "DolbyVision_L1_Average": malformed_value,
+                "DolbyVision_L5_Left": malformed_value,
+            },
+        ),
+    )
+    captured: dict[str, Any] = {}
+
+    def _fake_render_screenshots_from_batch(**kwargs: object) -> dict[str, list[Path]]:
+        captured.update(kwargs)
+        return {"Reference": [tmp_path / "reference.png"]}
+
+    monkeypatch.setattr(
+        "frame_compare.render.batch.orchestrator.render_screenshots_from_batch",
+        _fake_render_screenshots_from_batch,
+    )
+
+    phase_render.run_render_phase(
+        ctx,
+        frames=[1],
+        runner=cast(Any, _RenderRunner()),
+    )
+
+    requests = captured["batch_requests"]
+    assert requests[0].diagnostic_metadata == [None]
 
 
 def test_run_render_phase_uses_alignment_reselected_source_domain_labels(
@@ -421,7 +465,7 @@ def test_run_render_phase_uses_alignment_reselected_source_domain_labels(
         _fake_render_screenshots_from_batch,
     )
 
-    phase_tasks.run_render_phase(
+    phase_render.run_render_phase(
         ctx,
         frames=[0, 159],
         runner=cast(Any, _RenderRunner()),
@@ -466,19 +510,19 @@ def test_run_render_phase_labels_skipped_analysis_alignment_fallback_random_fram
         captured.update(kwargs)
         return {"Reference": [tmp_path / "reference.png"]}
 
-    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
+    monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
     monkeypatch.setattr(
         "frame_compare.render.batch.orchestrator.render_screenshots_from_batch",
         _fake_render_screenshots_from_batch,
     )
 
-    align_output = phase_tasks.run_align_phase(ctx, selected_frames=[0, 66])
+    align_output = phase_alignment.run_align_phase(ctx, selected_frames=[0, 66])
     ctx.reference = align_output.reference
     ctx.comparisons = align_output.comparisons
     ctx.selection_breakdown = align_output.selection_breakdown
     ctx.selection_details_by_source_frame = align_output.selection_details_by_source_frame
 
-    phase_tasks.run_render_phase(
+    phase_render.run_render_phase(
         ctx,
         frames=align_output.selected_frames,
         runner=cast(Any, _RenderRunner()),
@@ -525,10 +569,10 @@ def test_run_render_phase_rejects_analysis_fallback_when_overlap_is_smaller_than
             )
         ]
 
-    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
+    monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
     with pytest.raises(SelectionError) as exc_info:
-        phase_tasks.run_align_phase(ctx, selected_frames=[0, 1, 2, 3])
+        phase_alignment.run_align_phase(ctx, selected_frames=[0, 1, 2, 3])
 
     assert exc_info.value.context.details == {
         "reason": "insufficient generated candidates after alignment",

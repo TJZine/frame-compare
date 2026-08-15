@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, cast
 
 import typer
 from rich.console import Console
@@ -70,6 +70,14 @@ def handle_doctor(
 
 def doctor_report_json(report: DoctorReport) -> dict[str, JSONValue]:
     """Convert DoctorReport to JSON payload per schema."""
+    # Keep media-runtime imports on the doctor execution path. Importing the
+    # root CLI must remain side-effect-free for dry-run and help commands.
+    from frame_compare.vs.runtime_contract import (
+        VAPOURSYNTH_RELEASE,
+        runtime_environment_report,
+        supported_media_runtime_report,
+    )
+
     checks_payload: list[JSONValue] = []
     for check, result in report.checks:
         entry: dict[str, JSONValue] = {
@@ -85,7 +93,9 @@ def doctor_report_json(report: DoctorReport) -> dict[str, JSONValue]:
         checks_payload.append(entry)
 
     doctor_payload: dict[str, JSONValue] = {
-        "baseline_version": "R76",
+        "baseline_version": VAPOURSYNTH_RELEASE,
+        "media_runtime": cast(JSONValue, supported_media_runtime_report()),
+        "runtime_environment": runtime_environment_report(),
         "checks": checks_payload,
     }
     payload: dict[str, JSONValue] = {
@@ -143,7 +153,6 @@ def _doctor_status_icon(
     if check_name in critical_failures:
         return _STATUS_ICONS[False]
     if _is_optional_unavailable_status(
-        check_name=check_name,
         category=category,
         available=available,
     ):
@@ -155,12 +164,9 @@ def _doctor_status_icon(
 
 def _is_optional_unavailable_status(
     *,
-    check_name: str,
     category: str,
     available: bool | None,
 ) -> bool:
     if category != "optional":
         return False
-    if check_name != "vspreview":
-        return False
-    return available is not True
+    return available is False

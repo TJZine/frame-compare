@@ -119,9 +119,7 @@ def _validate_unique_clip_labels(clips: list[SlowpicsUploadClip]) -> None:
 def _validate_image_names(clips: list[SlowpicsUploadClip]) -> None:
     for clip in clips:
         if not clip.image_name.strip():
-            raise SlowpicsError(
-                f"Empty slow.pics image display name for clip label {clip.label!r}"
-            )
+            raise SlowpicsError(f"Empty slow.pics image display name for clip label {clip.label!r}")
 
 
 def _screenshots_for_clip(

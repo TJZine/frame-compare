@@ -6,6 +6,7 @@ import importlib.metadata
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import cast
 
@@ -16,18 +17,26 @@ REQUIRED_DISTRIBUTIONS = {
     "pyqt6-qt6",
     "pyqt6-sip",
     "vapoursynth",
+    "vapoursynth-akarin",
+    "vapoursynth-vszip",
+    "vs-placebo",
     "vspreview",
 }
 SOURCE_SCRIPTS = (
+    ".github/workflows/windows-portable-build.yml",
     ".github/workflows/windows-portable.yml",
     "tools/windows_portable/build_portable.ps1",
+    "tools/windows_portable/build_update.ps1",
+    "tools/windows_portable/bundle_info.schema.json",
     "tools/windows_portable/generate_update_keypair.ps1",
     "tools/windows_portable/install-from-source.cmd",
     "tools/windows_portable/install-from-source.ps1",
     "tools/windows_portable/install.cmd",
     "tools/windows_portable/install.ps1",
     "tools/windows_portable/manifest.windows-x64.json",
+    "tools/windows_portable/manifest.schema.json",
     "tools/windows_portable/sign_update.ps1",
+    "tools/windows_portable/update_manifest.schema.json",
     "tools/windows_portable/shim/frame-compare-update.ps1",
     "tools/windows_portable/validate_update_public_key.ps1",
     "tools/windows_portable/write_bundle_inventory.py",
@@ -72,6 +81,21 @@ def _require_list(value: object, context: str) -> list[object]:
 def _require_str(value: object, context: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{context} must be a non-empty string")
+    return value
+
+
+def _require_sha256(value: object, context: str) -> str:
+    digest = _require_str(value, context)
+    if re.fullmatch(r"[a-f0-9]{64}", digest) is None:
+        raise ValueError(f"{context} must be a lowercase SHA-256 digest")
+    return digest
+
+
+def _require_int(value: object, context: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError(f"{context} must be an integer")
+    if value < 0:
+        raise ValueError(f"{context} must be non-negative")
     return value
 
 
@@ -167,24 +191,37 @@ def _manifest_inventory(manifest: JsonObject) -> tuple[list[JsonObject], list[Js
             artifact.get("license"),
             f"manifest artifact {artifact_id} license",
         )
-        source_urls = [_require_str(artifact.get("source_url"), f"{artifact_id}.source_url")]
-        build_source_url = _optional_str(artifact.get("build_source_url"))
-        if build_source_url is not None:
-            source_urls.append(build_source_url)
-        artifacts.append(
-            {
-                "binary_sha256": _require_str(artifact.get("sha256"), f"{artifact_id}.sha256"),
-                "binary_url": _require_str(artifact.get("url"), f"{artifact_id}.url"),
-                "id": artifact_id,
-                "license_spdx": _require_str(
-                    license_info.get("spdx"), f"{artifact_id}.license.spdx"
-                ),
-                "license_url": _require_str(license_info.get("url"), f"{artifact_id}.license.url"),
-                "name": _require_str(artifact.get("name"), f"{artifact_id}.name"),
-                "source_urls": sorted(source_urls),
-                "version": _require_str(artifact.get("version"), f"{artifact_id}.version"),
-            }
-        )
+        record: JsonObject = {
+            "binary_bytes": _require_int(artifact.get("bytes"), f"{artifact_id}.bytes"),
+            "binary_sha256": _require_sha256(artifact.get("sha256"), f"{artifact_id}.sha256"),
+            "binary_url": _require_str(artifact.get("url"), f"{artifact_id}.url"),
+            "id": artifact_id,
+            "license_spdx": _require_str(license_info.get("spdx"), f"{artifact_id}.license.spdx"),
+            "license_url": _require_str(license_info.get("url"), f"{artifact_id}.license.url"),
+            "name": _require_str(artifact.get("name"), f"{artifact_id}.name"),
+            "source_url": _require_str(artifact.get("source_url"), f"{artifact_id}.source_url"),
+            "version": _require_str(artifact.get("version"), f"{artifact_id}.version"),
+        }
+        for field in (
+            "release_date",
+            "source_kind",
+            "source_ref",
+            "source_commit",
+            "build_source_url",
+            "build_source_commit",
+        ):
+            value = _optional_str(artifact.get(field))
+            if value is not None:
+                record[field] = value
+        for field in ("source_sha256", "build_source_sha256"):
+            value = artifact.get(field)
+            if value is not None:
+                record[field] = _require_sha256(value, f"{artifact_id}.{field}")
+        for field in ("source_bytes", "build_source_bytes"):
+            value = artifact.get(field)
+            if value is not None:
+                record[field] = _require_int(value, f"{artifact_id}.{field}")
+        artifacts.append(record)
     artifacts.sort(key=lambda item: str(item["id"]))
 
     corresponding_sources: list[JsonObject] = []
@@ -195,14 +232,25 @@ def _manifest_inventory(manifest: JsonObject) -> tuple[list[JsonObject], list[Js
         )
     ):
         source = _require_dict(raw_source, f"manifest.corresponding_sources[{index}]")
-        corresponding_sources.append(
-            {
-                "license": _require_str(source.get("license"), f"source[{index}].license"),
-                "name": _require_str(source.get("name"), f"source[{index}].name"),
-                "source_url": _require_str(source.get("source_url"), f"source[{index}].source_url"),
-                "version": _require_str(source.get("version"), f"source[{index}].version"),
-            }
-        )
+        source_record: JsonObject = {
+            "license": _require_str(source.get("license"), f"source[{index}].license"),
+            "name": _require_str(source.get("name"), f"source[{index}].name"),
+            "source_url": _require_str(source.get("source_url"), f"source[{index}].source_url"),
+            "version": _require_str(source.get("version"), f"source[{index}].version"),
+        }
+        for field in (
+            "selection_kind",
+            "source_ref",
+            "source_commit",
+            "release_date",
+            "notes",
+        ):
+            value = _optional_str(source.get(field))
+            if value is not None:
+                source_record[field] = value
+        source_record["sha256"] = _require_sha256(source.get("sha256"), f"source[{index}].sha256")
+        source_record["bytes"] = _require_int(source.get("bytes"), f"source[{index}].bytes")
+        corresponding_sources.append(source_record)
     corresponding_sources.sort(key=lambda item: (str(item["name"]), str(item["version"])))
     return artifacts, corresponding_sources
 
@@ -271,8 +319,12 @@ def _write_source_urls(
         "Manifest-provided runtime sources:",
     ]
     for artifact in artifacts:
-        for source_url in cast(list[str], artifact["source_urls"]):
-            lines.append(f"- {artifact['name']} {artifact['version']}: {source_url}")
+        lines.append(f"- {artifact['name']} {artifact['version']}: {artifact['source_url']}")
+        build_source_url = artifact.get("build_source_url")
+        if build_source_url is not None:
+            lines.append(
+                f"- {artifact['name']} build source {artifact['version']}: {build_source_url}"
+            )
     lines.extend(("", "Additional corresponding sources:"))
     for source in corresponding_sources:
         lines.append(f"- {source['name']} {source['version']}: {source['source_url']}")
@@ -292,6 +344,7 @@ def _write_notices(
     *,
     bundle_root: Path,
     artifacts: list[JsonObject],
+    corresponding_sources: list[JsonObject],
     distributions: list[JsonObject],
 ) -> None:
     lines = [
@@ -304,6 +357,10 @@ def _write_notices(
     ]
     lines.extend(
         f"- {item['name']} {item['version']} ({item['license_spdx']})" for item in artifacts
+    )
+    lines.extend(("", "Additional corresponding sources:"))
+    lines.extend(
+        f"- {item['name']} {item['version']} ({item['license']})" for item in corresponding_sources
     )
     lines.extend(("", "Installed Python distributions:"))
     lines.extend(f"- {item['name']} {item['version']}" for item in distributions)
@@ -320,6 +377,17 @@ def main() -> int:
     manifest_path = args.manifest.resolve(strict=True)
     repo_root = args.repo_root.resolve(strict=True)
     output_path = args.output.resolve(strict=False)
+    packaged_src = (bundle_root / "app" / "src").resolve(strict=True)
+    if not packaged_src.is_dir():
+        raise NotADirectoryError(packaged_src)
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, str(packaged_src))
+    from frame_compare.vs.runtime_contract import (  # noqa: PLC0415
+        MEDIA_RUNTIME_SCOPES,
+    )
+    from frame_compare.vs.runtime_contract import (
+        media_runtime_fingerprint as canonical_media_runtime_fingerprint,
+    )
 
     commit_sha = _run_git(repo_root, "rev-parse", "HEAD")
     if not re.fullmatch(r"[a-f0-9]{40}", commit_sha):
@@ -339,11 +407,61 @@ def main() -> int:
         json.loads((bundle_root / "bundle_info.json").read_text(encoding="utf-8")),
         "bundle_info",
     )
+    schema_version = _require_int(bundle_info.get("schema_version"), "bundle_info.schema_version")
+    if schema_version != 2:
+        raise ValueError(f"unsupported bundle_info schema_version: {schema_version}")
     app_version = _require_str(bundle_info.get("app_version"), "bundle_info.app_version")
-    requirements_sha = _require_str(
+    requirements_sha = _require_sha256(
         bundle_info.get("requirements_lock_sha256"),
         "bundle_info.requirements_lock_sha256",
     )
+    media_runtime_fingerprint = _require_sha256(
+        bundle_info.get("media_runtime_fingerprint"),
+        "bundle_info.media_runtime_fingerprint",
+    )
+    media_runtime_fingerprints = _require_dict(
+        bundle_info.get("media_runtime_fingerprints"),
+        "bundle_info.media_runtime_fingerprints",
+    )
+    expected_scopes = set(MEDIA_RUNTIME_SCOPES)
+    if set(media_runtime_fingerprints) != expected_scopes:
+        raise ValueError(
+            "bundle_info.media_runtime_fingerprints must contain the exact supported scopes"
+        )
+    validated_media_runtime_fingerprints = {
+        scope: _require_sha256(
+            media_runtime_fingerprints[scope],
+            f"bundle_info.media_runtime_fingerprints.{scope}",
+        )
+        for scope in sorted(expected_scopes)
+    }
+    if validated_media_runtime_fingerprints["full"] != media_runtime_fingerprint:
+        raise ValueError(
+            "bundle_info full media-runtime fingerprint does not match the primary fingerprint"
+        )
+    manifest_bundle = _require_dict(manifest.get("bundle"), "manifest.bundle")
+    manifest_fingerprints = _require_dict(
+        manifest_bundle.get("runtime_fingerprints"), "manifest.bundle.runtime_fingerprints"
+    )
+    if set(manifest_fingerprints) != expected_scopes:
+        raise ValueError("manifest runtime fingerprints must contain the exact supported scopes")
+    validated_manifest_fingerprints = {
+        scope: _require_sha256(
+            manifest_fingerprints.get(scope),
+            f"manifest.bundle.runtime_fingerprints.{scope}",
+        )
+        for scope in sorted(expected_scopes)
+    }
+    if validated_manifest_fingerprints != validated_media_runtime_fingerprints:
+        raise ValueError("bundle_info media-runtime fingerprints do not match manifest.json")
+    canonical_fingerprints = {
+        scope: canonical_media_runtime_fingerprint(scope, profile="windows-x64")
+        for scope in MEDIA_RUNTIME_SCOPES
+    }
+    if validated_manifest_fingerprints != canonical_fingerprints:
+        raise ValueError(
+            "portable media-runtime fingerprints do not match the canonical windows-x64 contract"
+        )
 
     _assert_safe_bundle(bundle_root)
     distributions = _python_distributions(bundle_root / "app" / "site-packages")
@@ -359,6 +477,7 @@ def main() -> int:
     _write_notices(
         bundle_root=bundle_root,
         artifacts=artifacts,
+        corresponding_sources=corresponding_sources,
         distributions=distributions,
     )
     licenses = _license_inventory(bundle_root)
@@ -370,6 +489,8 @@ def main() -> int:
             "name": "Frame Compare",
             "platform": "windows-x64",
             "requirements_lock_sha256": requirements_sha,
+            "media_runtime_fingerprint": media_runtime_fingerprint,
+            "media_runtime_fingerprints": validated_media_runtime_fingerprints,
             "source_archive_url": (
                 f"https://github.com/TJZine/frame-compare/archive/{commit_sha}.tar.gz"
             ),
@@ -379,7 +500,7 @@ def main() -> int:
         "licenses": licenses,
         "manifest_artifacts": artifacts,
         "python_distributions": distributions,
-        "schema_version": 1,
+        "schema_version": 2,
         "source_build_install_scripts": sorted(SOURCE_SCRIPTS),
     }
     output_path.write_text(
