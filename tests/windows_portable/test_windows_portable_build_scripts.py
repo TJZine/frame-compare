@@ -403,10 +403,19 @@ def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: 
         "Akarin artifact must declare exactly one bundled zstd dependency",
         "VSZip loaded without functions",
         "bundled_native_plugins=ok",
-        "AKARIN_WINDOWS_ZSTD_RELEASE",
         "standalone FFmpeg directory leaked onto PATH",
     ):
         assert expected in build_script
+
+    vapoursynth_proof = build_script[
+        build_script.index("def prove_vapoursynth_environment") : build_script.index(
+            "def prove_lwlibavsource"
+        )
+    ]
+    assert (
+        "from frame_compare.vs.runtime_contract import AKARIN_WINDOWS_ZSTD_RELEASE"
+        in vapoursynth_proof
+    )
 
     for phase in (
         "package_imports",

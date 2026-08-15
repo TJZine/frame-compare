@@ -784,7 +784,6 @@ def prove_runtime_contract() -> None:
     from frame_compare.utils.subproc import resolve_executable
     from frame_compare.vs.runtime_contract import (
         AKARIN_RELEASE,
-        AKARIN_WINDOWS_ZSTD_RELEASE,
         VS_PLACEBO_RELEASE,
         VSZIP_RELEASE,
         WINDOWS_FFMPEG_EXECUTABLE_TOKEN,
@@ -833,6 +832,8 @@ def prove_runtime_contract() -> None:
 
 def prove_vapoursynth_environment() -> None:
     import vapoursynth as vs
+
+    from frame_compare.vs.runtime_contract import AKARIN_WINDOWS_ZSTD_RELEASE
 
     core = vs.core
     version = getattr(vs, "__version__", None)
