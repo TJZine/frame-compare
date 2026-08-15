@@ -297,8 +297,9 @@ Canonical verification path:
 3. Build the portable bundle and validate its deterministic ZIP layout, native
    plugin manifests, license inventory, source provenance, and runtime fingerprint.
 4. Run the extracted bundle's `--help`, `version`, and `doctor --json` smoke checks;
-   verify R79/API R4.2, L-SMASH-Works 1296, vs-placebo 2.0.4, and the selected LGPL-only
-   FFmpeg artifact. FFMS2 must remain absent from the Windows baseline. In one
+   verify R79/API R4.2, L-SMASH-Works 1296, vs-placebo 2.0.4, Akarin 1.4.1, VSZip 22.1.0,
+   and the selected LGPL-only FFmpeg artifact. FFMS2 must remain absent from the
+   Windows baseline. In one
    required bundled Python process, preload the managed VapourSynth runtime before
    importing PyQt6 and VSPreview, then recheck the plugin environment, open the
    generated media through L-SMASH, and invoke the application tonemap path. Run the

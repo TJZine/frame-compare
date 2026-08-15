@@ -10,6 +10,12 @@ A version shown here is supported only as part of the complete profile described
 | Component | Previous baseline | Selected component | Upstream date | Selection kind | Why this selection |
 | --- | --- | --- | --- | --- | --- |
 | VapourSynth | R78 | **R79**, commit `acabf605b2205b32d65859bb2736405719d2fafd` | 2026-08-07 | Formal stable release | Latest non-prerelease release. It supplies CPython 3.13-compatible ABI3 wheels, keeps API R4.2, and improves cache cycling, `vspipe` MKV output, and zimg API validation. |
+| VSPreview | 0.20.1 | **0.20.1** | 2026-07-17 | Stable Python release | The UI release is unchanged; its current dependency resolution is validated with the newer VSJetEngine and VSJetPack graph below. |
+| VSJetEngine | 1.2.0 | **1.5.1** | 2026-07-13 | Stable Python release | Current VSPreview-compatible resolution. |
+| VSJetPack | 1.5.0 | **2.2.1** | 2026-08-14 | Stable Python release | Current VSPreview-compatible resolution; introduces Akarin and VSZip as required native plugin distributions. |
+| Akarin | Not bundled | **vapoursynth-akarin 1.4.1**, commit `0b4a71d30572aa04b56686d4deff8c9c3fd9e6cc` | 2026-05-12 | Official PyPI wheels and upstream tag | Bundled native plugin surface with Windows x64 and Linux x86_64/aarch64 wheels. The Windows wheel's zstd DLL matches MSYS2 CLANG64 zstd 1.5.7-2 exactly; Linux wheel SBOMs identify Ubuntu libzstd1 1.4.8+dfsg-3build1. Namespace loading, source provenance, and the combined LGPL-3.0-only/BSD-3-Clause license surface are verified. |
+| VSZip | Not bundled | **vapoursynth-vszip 22.1.0**, commit `beb7a0ab0e4166580b76560ae3f7c7f5e376ac90` | 2026-07-16 | Official PyPI wheels and upstream tag | Bundled native plugin surface with Windows x64 and Linux x86_64/aarch64 wheels. Its build manifest pins statically compiled vapoursynth-zig commit `b87ff61ce680fa5a4cf7d44a9cb4b605c5037432` and zigimg commit `0bbe201a5591219177f2444371c2897746b47774`; loading, provenance, and the combined MIT/LGPL-2.1-only license surface are verified. |
+| VSJetPack support graph | jetpytools 2.2.7; psutil absent | **jetpytools 3.1.1; psutil 7.2.2** | Resolved 2026-08-15 | Locked Python resolution | Accepted current dependency graph; these versions are hash-locked on every supported Python platform. |
 | L-SMASH-Works | 1282.0.0.0 | **1296.0.0.0**, commit `a83318210c183c8ebbe703d975ffc76fb499ef07` | 2026-07-07 | Formal native release | Latest stable native release and first selected lineage using the VapourSynth API 4 implementation. |
 | Windows L-SMASH-Works package | 1282 lineage | **vapoursynth-lsmas 1296.0.0.1** | 2026-07-08 | Non-yanked official PyPI wheel | Packaging follow-up for the 1296 native lineage. Its plugin DLL does not require a separately bundled MSVC redistributable DLL, unlike the release archive DLL inspected during this refresh. |
 | L-SMASH | v2.14.5 | commit **`84740c5d960ab622f4c08b971dc59192bc27ef74`** | 2025-07-05 | Pinned commit, not a release | Exact L-SMASH revision selected and tested by L-SMASH-Works 1296. No newer appropriate formal stable tag supersedes it. |
@@ -48,6 +54,9 @@ and Frame Compare-owned indexes before reuse.
   Windows wheel.
 - vs-placebo 2.0.4 Windows wheel with its selected libplacebo and libdovi
   lineages.
+- Akarin 1.4.1 and VSZip 22.1.0 Windows wheels, including their native plugin
+  payloads, bundled zstd/vapoursynth-zig/zigimg lineages, license files, and
+  upstream source provenance.
 - Retained BtbN FFmpeg 8.1-branch Windows x64 LGPL-only artifact.
 - FFMS2 intentionally excluded.
 - Plugins load from deterministic VapourSynth package and extra-plugin paths with
@@ -64,6 +73,9 @@ and Frame Compare-owned indexes before reuse.
   verifies actual L-SMASH linkage.
 - FFMS2 5.0 built from source against the same VapourSynth and Debian FFmpeg stack.
 - vs-placebo 2.0.4 manylinux wheel.
+- Akarin 1.4.1 and VSZip 22.1.0 manylinux wheels, loaded and inspected through
+  their VapourSynth namespaces by the Docker integration gate; the gate also
+  verifies Akarin's auditwheel zstd SBOM and the statically compiled VSZip inputs.
 - Debian Trixie FFmpeg runtime package `7:7.1.5-0+deb13u1`.
 - Software Vulkan through Mesa is the canonical headless validation path.
 
@@ -127,8 +139,8 @@ fingerprints for:
 
 | Scope | Included runtime surface | Intentionally excluded |
 | --- | --- | --- |
-| `analysis` | VapourSynth and the profile-specific L-SMASH-Works decoder lineage, including OBUParse on Docker | vs-placebo and standalone FFmpeg |
-| `probe` | VapourSynth and the profile-specific L-SMASH-Works decoder lineage, including OBUParse on Docker, plus profile-specific standalone FFmpeg/ffprobe | vs-placebo |
+| `analysis` | VapourSynth and the profile-specific L-SMASH-Works decoder lineage, including OBUParse on Docker | vs-placebo, Akarin, VSZip, and standalone FFmpeg |
+| `probe` | VapourSynth and the profile-specific L-SMASH-Works decoder lineage, including OBUParse on Docker, plus profile-specific standalone FFmpeg/ffprobe | vs-placebo, Akarin, and VSZip |
 | `alignment` | Profile-specific standalone FFmpeg lineage | VapourSynth and tone mapping |
 | `index` | L-SMASH-Works, L-SMASH, profile-specific decoder FFmpeg, Docker OBUParse, and index policy | standalone FFmpeg and tone mapping |
 | `full` | Complete supported deployment profile | None |
@@ -158,9 +170,10 @@ installed bundle's full runtime fingerprint with the signed update manifest befo
 changing files. A missing, legacy, malformed, or different fingerprint fails closed,
 even when an unsafe Python-dependency override was requested.
 
-Crossing from R78 to the selected R79/1296/2.0.4 runtime requires a complete portable
-bundle reinstall because the runtime fingerprints and Frame Compare-owned index tokens
-change. Generated data should remain outside the bundle when it must survive replacement.
+Crossing from R78 to the selected R79/1296/2.0.4/Akarin/VSZip runtime requires a
+complete portable bundle reinstall because the runtime fingerprints and Frame
+Compare-owned index tokens change. Generated data should remain outside the bundle
+when it must survive replacement.
 
 ## Licensing and corresponding source
 
@@ -179,6 +192,11 @@ FFmpeg components.
 | vs-placebo | LGPL-2.1-only |
 | libplacebo | LGPL-2.1-or-later |
 | libdovi | MIT |
+| Akarin | LGPL-3.0-only |
+| Akarin-bundled zstd | BSD-3-Clause |
+| VSZip | MIT |
+| VSZip-bundled vapoursynth-zig | LGPL-2.1-only |
+| VSZip-bundled zigimg | MIT |
 | Windows BtbN FFmpeg | LGPL-only |
 | Docker Debian FFmpeg | GPL-2.0-or-later |
 

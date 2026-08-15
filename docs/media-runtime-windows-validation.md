@@ -29,13 +29,15 @@ The expected candidate profile is:
 
 | Component | Expected Windows identity |
 | --- | --- |
-| Python | 3.13.14 |
+| Python | 3.13.15 |
 | VapourSynth | R79, API R4.2 |
 | L-SMASH-Works | `vapoursynth-lsmas` 1296.0.0.1 / native lineage 1296.0.0.0 |
 | FFMS2 | Absent from the Windows baseline |
 | vs-placebo | 2.0.4 |
+| Akarin | 1.4.1, `akarin` namespace loaded |
+| VSZip | 22.1.0, `vszip` namespace loaded |
 | FFmpeg | `n8.1.2-34-g9b6c8969e0`, BtbN win64 LGPL 8.1 build |
-| Full runtime fingerprint | `69daa87bf14d03c479b7bfe0413060e2488699e0ee9cad89e55b6e33be888bd1` |
+| Full runtime fingerprint | `59c875f1d2a3eb3df541ed6c7a434eea6ebe40473666920699b698e8738840dd` |
 | L-SMASH index token | `lsw1296-72386a70c626` |
 
 ## 1. Exact source and repository gates
@@ -317,7 +319,7 @@ Verify with old and newly generated data:
 
 ## 8. Portable update boundary
 
-Keep one untouched installation of the previous R76/1282/2.0.2 bundle.
+Keep one untouched installation of the previous R78 bundle.
 
 Required cases:
 

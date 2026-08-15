@@ -12,6 +12,8 @@ import pytest
 
 import frame_compare.vs.runtime_contract as runtime_contract
 from frame_compare.vs.runtime_contract import (
+    AKARIN_DEBIAN_ZSTD_SOURCE_TREE_SHA256,
+    AKARIN_SOURCE_TREE_SHA256,
     DEBIAN_FFMPEG_PACKAGE_VERSION,
     FFMS2_SOURCE_TREE_SHA256,
     LIBDOVI_SOURCE_TREE_SHA256,
@@ -22,10 +24,13 @@ from frame_compare.vs.runtime_contract import (
     MEDIA_RUNTIME_SCOPES,
     OBUPARSE_SOURCE_TREE_SHA256,
     VAPOURSYNTH_SOURCE_TREE_SHA256,
+    VAPOURSYNTH_ZIG_SOURCE_TREE_SHA256,
     VS_PLACEBO_SOURCE_TREE_SHA256,
+    VSZIP_SOURCE_TREE_SHA256,
     WINDOWS_FFMPEG_ARTIFACT_ID,
     WINDOWS_FFMPEG_EXECUTABLE_TOKEN,
     WINDOWS_FFMPEG_RELEASE,
+    ZIGIMG_SOURCE_TREE_SHA256,
     index_cache_token,
     media_runtime_fingerprint,
     media_runtime_identity,
@@ -144,6 +149,8 @@ def test_analysis_identity_excludes_tone_mapping_components() -> None:
     assert "vs_placebo" not in serialized
     assert "libplacebo" not in serialized
     assert "libdovi" not in serialized
+    assert "akarin" not in serialized
+    assert "vszip" not in serialized
     assert "l_smash_works" in serialized
 
 
@@ -273,6 +280,14 @@ def test_supported_report_contains_observable_component_contract() -> None:
     assert report["components"]["decoder"]["obuparse"]["soname"] == "libobuparse.so.2"
     assert report["components"]["ffms2"]["included"] is True
     assert report["components"]["tone_mapping"]["vs_placebo"]["release"] == "2.0.4"
+    assert report["components"]["bundled_native_plugins"]["akarin"]["release"] == "1.4.1"
+    assert report["components"]["bundled_native_plugins"]["vszip"]["release"] == "22.1.0"
+    assert (
+        report["components"]["bundled_native_plugins"]["akarin"]["bundled_dependencies"]["zstd"][
+            "release"
+        ]
+        == "1.4.8+dfsg-3build1"
+    )
     assert report["fingerprints"]["full"] == media_runtime_fingerprint(
         "full", profile="debian-trixie"
     )
@@ -330,6 +345,11 @@ def test_docker_contract_matches_debian_profile(repo_root: Path) -> None:
         "https://github.com/Lypheo/vs-placebo.git",
         "https://github.com/haasn/libplacebo.git",
         "https://github.com/quietvoid/dovi_tool.git",
+        "https://github.com/Jaded-Encoding-Thaumaturgy/akarin-vapoursynth-plugin.git",
+        "https://github.com/facebook/zstd.git",
+        "https://github.com/dnjulek/vapoursynth-zip.git",
+        "https://github.com/dnjulek/vapoursynth-zig.git",
+        "https://github.com/zigimg/zigimg.git",
     ):
         assert source_url in dockerfile
     assert "codeload.github.com" not in dockerfile
@@ -351,6 +371,11 @@ def test_docker_provenance_covers_every_distributed_media_component(
         '"name":"vs-placebo"',
         '"name":"libplacebo"',
         '"name":"libdovi"',
+        '"name":"Akarin"',
+        '"name":"Akarin zstd"',
+        '"name":"VSZip"',
+        '"name":"vapoursynth-zig"',
+        '"name":"zigimg"',
     ):
         assert component in dockerfile or component.replace('"', '\\"') in dockerfile
     assert '\\"version\\":\\"${DEBIAN_FFMPEG_PACKAGE_VERSION}\\"' in dockerfile
@@ -367,6 +392,11 @@ def test_docker_provenance_covers_every_distributed_media_component(
         "vs-placebo-LGPL-2.1.txt",
         "libplacebo-LGPL-2.1.txt",
         "libdovi-MIT.txt",
+        "Akarin-LGPL-3.0.txt",
+        "Akarin-zstd-BSD-3-Clause.txt",
+        "VSZip-MIT.txt",
+        "VSZip-vapoursynth-zig-LGPL-2.1.txt",
+        "VSZip-zigimg-MIT.txt",
     ):
         assert license_name in dockerfile
 
@@ -436,6 +466,11 @@ def test_docker_uses_verified_tracked_source_tree_digests(repo_root: Path) -> No
         "VS_PLACEBO_SOURCE_TREE_SHA256": VS_PLACEBO_SOURCE_TREE_SHA256,
         "LIBPLACEBO_SOURCE_TREE_SHA256": LIBPLACEBO_SOURCE_TREE_SHA256,
         "LIBDOVI_SOURCE_TREE_SHA256": LIBDOVI_SOURCE_TREE_SHA256,
+        "AKARIN_SOURCE_TREE_SHA256": AKARIN_SOURCE_TREE_SHA256,
+        "AKARIN_ZSTD_SOURCE_TREE_SHA256": AKARIN_DEBIAN_ZSTD_SOURCE_TREE_SHA256,
+        "VSZIP_SOURCE_TREE_SHA256": VSZIP_SOURCE_TREE_SHA256,
+        "VAPOURSYNTH_ZIG_SOURCE_TREE_SHA256": VAPOURSYNTH_ZIG_SOURCE_TREE_SHA256,
+        "ZIGIMG_SOURCE_TREE_SHA256": ZIGIMG_SOURCE_TREE_SHA256,
     }
     for argument, digest in expected.items():
         assert f"ARG {argument}={digest}" in dockerfile

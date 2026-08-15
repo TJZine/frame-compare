@@ -228,6 +228,12 @@ import vapoursynth as vs
 
 from frame_compare.vs.props import get_optional_int_prop, props_indicate_limited_range
 from frame_compare.vs.runtime_contract import (
+    AKARIN_DEBIAN_ZSTD_RELEASE,
+    AKARIN_DEBIAN_ZSTD_SOURCE_COMMIT,
+    AKARIN_DEBIAN_ZSTD_SOURCE_TREE_SHA256,
+    AKARIN_RELEASE,
+    AKARIN_SOURCE_COMMIT,
+    AKARIN_SOURCE_TREE_SHA256,
     DEBIAN_FFMPEG_PACKAGE_VERSION,
     FFMS2_RELEASE,
     FFMS2_RUNTIME_VERSION,
@@ -247,9 +253,16 @@ from frame_compare.vs.runtime_contract import (
     VAPOURSYNTH_RELEASE,
     VAPOURSYNTH_SOURCE_COMMIT,
     VAPOURSYNTH_SOURCE_TREE_SHA256,
+    VAPOURSYNTH_ZIG_SOURCE_COMMIT,
+    VAPOURSYNTH_ZIG_SOURCE_TREE_SHA256,
     VS_PLACEBO_RELEASE,
     VS_PLACEBO_SOURCE_COMMIT,
     VS_PLACEBO_SOURCE_TREE_SHA256,
+    VSZIP_RELEASE,
+    VSZIP_SOURCE_COMMIT,
+    VSZIP_SOURCE_TREE_SHA256,
+    ZIGIMG_SOURCE_COMMIT,
+    ZIGIMG_SOURCE_TREE_SHA256,
     index_cache_token,
     media_runtime_fingerprint,
 )
@@ -307,6 +320,14 @@ expected_source_trees = {
     "vs-placebo": (VS_PLACEBO_SOURCE_COMMIT, VS_PLACEBO_SOURCE_TREE_SHA256),
     "libplacebo": (LIBPLACEBO_SOURCE_COMMIT, LIBPLACEBO_SOURCE_TREE_SHA256),
     "libdovi": (LIBDOVI_SOURCE_COMMIT, LIBDOVI_SOURCE_TREE_SHA256),
+    "Akarin": (AKARIN_SOURCE_COMMIT, AKARIN_SOURCE_TREE_SHA256),
+    "Akarin zstd": (
+        AKARIN_DEBIAN_ZSTD_SOURCE_COMMIT,
+        AKARIN_DEBIAN_ZSTD_SOURCE_TREE_SHA256,
+    ),
+    "VSZip": (VSZIP_SOURCE_COMMIT, VSZIP_SOURCE_TREE_SHA256),
+    "vapoursynth-zig": (VAPOURSYNTH_ZIG_SOURCE_COMMIT, VAPOURSYNTH_ZIG_SOURCE_TREE_SHA256),
+    "zigimg": (ZIGIMG_SOURCE_COMMIT, ZIGIMG_SOURCE_TREE_SHA256),
 }
 for name, (commit, tree_sha256) in expected_source_trees.items():
     component = components.get(name, {})
@@ -332,6 +353,11 @@ for license_name in (
     "vs-placebo-LGPL-2.1.txt",
     "libplacebo-LGPL-2.1.txt",
     "libdovi-MIT.txt",
+    "Akarin-LGPL-3.0.txt",
+    "Akarin-zstd-BSD-3-Clause.txt",
+    "VSZip-MIT.txt",
+    "VSZip-vapoursynth-zig-LGPL-2.1.txt",
+    "VSZip-zigimg-MIT.txt",
 ):
     assert_true((license_root / license_name).is_file(), f"runtime license missing: {license_name}")
 
@@ -357,6 +383,32 @@ assert_true(api_minor == 2, f"expected VapourSynth API minor 2, got {api_minor!r
 assert_true(plugin_dir.is_dir(), f"VapourSynth plugin directory missing: {plugin_dir}")
 assert_true(extra_plugin_path == "/opt/vapoursynth-extra-plugins", "extra plugin path mismatch")
 assert_true(plugin_namespaces, "core.plugins() returned no plugins")
+assert_true(importlib.metadata.version("vapoursynth-akarin") == AKARIN_RELEASE, "Akarin mismatch")
+assert_true(importlib.metadata.version("vapoursynth-vszip") == VSZIP_RELEASE, "VSZip mismatch")
+
+assert_true(hasattr(core, "akarin"), "core.akarin namespace missing")
+akarin_functions = sorted(function.name for function in core.akarin.functions())
+assert_true(akarin_functions, "Akarin loaded without functions")
+akarin_distribution = importlib.metadata.distribution("vapoursynth-akarin")
+akarin_sbom_files = [
+    file
+    for file in akarin_distribution.files or ()
+    if file.as_posix().endswith("sboms/auditwheel.cdx.json")
+]
+assert_true(len(akarin_sbom_files) == 1, "Akarin auditwheel SBOM missing")
+akarin_sbom = json.loads(
+    Path(akarin_distribution.locate_file(akarin_sbom_files[0])).read_text(encoding="utf-8")
+)
+zstd_components = [
+    component for component in akarin_sbom["components"] if component.get("name") == "libzstd1"
+]
+assert_true(
+    len(zstd_components) == 1 and zstd_components[0].get("version") == AKARIN_DEBIAN_ZSTD_RELEASE,
+    f"Akarin bundled zstd mismatch: {zstd_components}",
+)
+assert_true(hasattr(core, "vszip"), "core.vszip namespace missing")
+vszip_functions = sorted(function.name for function in core.vszip.functions())
+assert_true(vszip_functions, "VSZip loaded without functions")
 
 assert_true(hasattr(core, "lsmas"), "core.lsmas namespace missing")
 lsmas_functions = sorted(function.name for function in core.lsmas.functions())
@@ -704,6 +756,12 @@ print(f"DOCKER_PROOF plugin_dir={plugin_dir}")
 print(f"DOCKER_PROOF extra_plugin_path={extra_plugin_path}")
 print(f"DOCKER_PROOF core_plugins={','.join(plugin_namespaces)}")
 print(
+    "DOCKER_PROOF bundled_native_plugins=ok "
+    f"akarin={AKARIN_RELEASE}:{','.join(akarin_functions)} "
+    f"zstd={AKARIN_DEBIAN_ZSTD_RELEASE} "
+    f"vszip={VSZIP_RELEASE}:{','.join(vszip_functions)}"
+)
+print(
     "DOCKER_PROOF lsmash_works=ok "
     f"release={LSMASH_WORKS_RELEASE} functions={','.join(lsmas_functions)} index={expected_index.name}"
 )
@@ -759,6 +817,9 @@ required_proof_markers=(
   "DOCKER_PROOF plugin_dir="
   "DOCKER_PROOF extra_plugin_path=/opt/vapoursynth-extra-plugins"
   "DOCKER_PROOF core_plugins="
+  "DOCKER_PROOF bundled_native_plugins=ok akarin=1.4.1:"
+  "zstd=1.4.8+dfsg-3build1"
+  "vszip=22.1.0:"
   "DOCKER_PROOF lsmash_works=ok release=1296.0.0.0"
   "DOCKER_PROOF ffms2=ok release=5.0"
   "DOCKER_PROOF vs_placebo=ok version=2.0.4"

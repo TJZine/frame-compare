@@ -60,6 +60,30 @@ VAPOURSYNTH_SOURCE_TREE_SHA256: Final = (
     "f7c7081a875dbb07487ed94a819385228794ef106d042949313a9ed71a655527"
 )
 
+AKARIN_RELEASE: Final = "1.4.1"
+AKARIN_SOURCE_COMMIT: Final = "0b4a71d30572aa04b56686d4deff8c9c3fd9e6cc"
+AKARIN_SOURCE_TREE_SHA256: Final = (
+    "981232f33e332c1557cc8eeda362234b61f387f8b451a679d16dc07b2b53d1e6"
+)
+AKARIN_WINDOWS_ZSTD_RELEASE: Final = "1.5.7-2"
+AKARIN_WINDOWS_ZSTD_SOURCE_COMMIT: Final = "f8745da6ff1ad1e7bab384bd1f9d742439278e99"
+AKARIN_DEBIAN_ZSTD_RELEASE: Final = "1.4.8+dfsg-3build1"
+AKARIN_DEBIAN_ZSTD_SOURCE_COMMIT: Final = "97a3da1df009d4dc67251de0c4b1c9d7fe286fc1"
+AKARIN_DEBIAN_ZSTD_SOURCE_TREE_SHA256: Final = (
+    "2093b98cdd49f10e86fd493c6ba822109965ebe40c6e69d42cfa5c358e074a68"
+)
+VSZIP_RELEASE: Final = "22.1.0"
+VSZIP_SOURCE_COMMIT: Final = "beb7a0ab0e4166580b76560ae3f7c7f5e376ac90"
+VSZIP_SOURCE_TREE_SHA256: Final = "ca74f1042fb73e081301341218664a6b5fcf70331f64db3c13e6c4313fa06f4a"
+VAPOURSYNTH_ZIG_SOURCE_COMMIT: Final = "b87ff61ce680fa5a4cf7d44a9cb4b605c5037432"
+VAPOURSYNTH_ZIG_SOURCE_TREE_SHA256: Final = (
+    "d54db13419ef61e5f9a7ef3d357c41972bdf59e71536f2787fdddc38736c3f50"
+)
+ZIGIMG_SOURCE_COMMIT: Final = "0bbe201a5591219177f2444371c2897746b47774"
+ZIGIMG_SOURCE_TREE_SHA256: Final = (
+    "5e6162fe73af4df0e1faba425dd7ff7e15a3ffe5449aebea63c45723899f034a"
+)
+
 LSMASH_SOURCE_COMMIT: Final = "84740c5d960ab622f4c08b971dc59192bc27ef74"
 LSMASH_SOURCE_TREE_SHA256: Final = (
     "b1553e40907e57240fd19a08642b3bc548dbdeda3750948ebbc1c5634af901b7"
@@ -273,6 +297,42 @@ def _tone_mapping_identity() -> dict[str, JSONValue]:
     }
 
 
+def _bundled_native_plugins_identity(profile: MediaRuntimeProfile) -> dict[str, JSONValue]:
+    if profile in {"windows-x64", "unmanaged-windows"}:
+        zstd: dict[str, JSONValue] = {
+            "selection_kind": "msys2-clang64-package",
+            "release": AKARIN_WINDOWS_ZSTD_RELEASE,
+            "source_commit": AKARIN_WINDOWS_ZSTD_SOURCE_COMMIT,
+        }
+    elif profile == "debian-trixie":
+        zstd = {
+            "selection_kind": "auditwheel-sbom-package",
+            "release": AKARIN_DEBIAN_ZSTD_RELEASE,
+            "source_commit": AKARIN_DEBIAN_ZSTD_SOURCE_COMMIT,
+        }
+    else:
+        zstd = {"selection_kind": "wheel-platform-specific"}
+    return {
+        "akarin": {
+            "distribution": "vapoursynth-akarin",
+            "release": AKARIN_RELEASE,
+            "source_commit": AKARIN_SOURCE_COMMIT,
+            "plugin_namespace": "akarin",
+            "bundled_dependencies": {"zstd": zstd},
+        },
+        "vszip": {
+            "distribution": "vapoursynth-vszip",
+            "release": VSZIP_RELEASE,
+            "source_commit": VSZIP_SOURCE_COMMIT,
+            "plugin_namespace": "vszip",
+            "bundled_dependencies": {
+                "vapoursynth-zig": {"source_commit": VAPOURSYNTH_ZIG_SOURCE_COMMIT},
+                "zigimg": {"source_commit": ZIGIMG_SOURCE_COMMIT},
+            },
+        },
+    }
+
+
 def _scope_components(
     scope: MediaRuntimeScope,
     profile: MediaRuntimeProfile,
@@ -301,6 +361,7 @@ def _scope_components(
         "standalone_ffmpeg": _standalone_ffmpeg_identity(profile),
         "ffms2": _ffms2_identity(profile),
         "tone_mapping": _tone_mapping_identity(),
+        "bundled_native_plugins": _bundled_native_plugins_identity(profile),
         "plugin_layout": {
             "vapoursynth": "site-packages/vapoursynth/plugins",
             "extra": "VAPOURSYNTH_EXTRA_PLUGIN_PATH",
@@ -370,6 +431,7 @@ def supported_media_runtime_report(
             "standalone_ffmpeg": _standalone_ffmpeg_identity(selected_profile),
             "ffms2": _ffms2_identity(selected_profile),
             "tone_mapping": _tone_mapping_identity(),
+            "bundled_native_plugins": _bundled_native_plugins_identity(selected_profile),
         },
         "fingerprints": fingerprints,
         "index_cache_token": index_cache_token(profile=selected_profile),
@@ -412,6 +474,14 @@ def runtime_environment_report() -> dict[str, JSONValue]:
 
 
 __all__ = [
+    "AKARIN_RELEASE",
+    "AKARIN_DEBIAN_ZSTD_RELEASE",
+    "AKARIN_DEBIAN_ZSTD_SOURCE_COMMIT",
+    "AKARIN_DEBIAN_ZSTD_SOURCE_TREE_SHA256",
+    "AKARIN_SOURCE_COMMIT",
+    "AKARIN_SOURCE_TREE_SHA256",
+    "AKARIN_WINDOWS_ZSTD_RELEASE",
+    "AKARIN_WINDOWS_ZSTD_SOURCE_COMMIT",
     "DEBIAN_FFMPEG_PACKAGE_VERSION",
     "FFMS2_RELEASE",
     "FFMS2_RUNTIME_VERSION",
@@ -440,9 +510,16 @@ __all__ = [
     "VAPOURSYNTH_RELEASE",
     "VAPOURSYNTH_SOURCE_COMMIT",
     "VAPOURSYNTH_SOURCE_TREE_SHA256",
+    "VAPOURSYNTH_ZIG_SOURCE_COMMIT",
+    "VAPOURSYNTH_ZIG_SOURCE_TREE_SHA256",
     "VS_PLACEBO_RELEASE",
     "VS_PLACEBO_SOURCE_COMMIT",
     "VS_PLACEBO_SOURCE_TREE_SHA256",
+    "VSZIP_RELEASE",
+    "VSZIP_SOURCE_COMMIT",
+    "VSZIP_SOURCE_TREE_SHA256",
+    "ZIGIMG_SOURCE_COMMIT",
+    "ZIGIMG_SOURCE_TREE_SHA256",
     "WINDOWS_FFMPEG_ARTIFACT_ID",
     "WINDOWS_FFMPEG_BUILD_SOURCE_COMMIT",
     "WINDOWS_FFMPEG_EXECUTABLE_TOKEN",

@@ -17,6 +17,8 @@ REQUIRED_DISTRIBUTIONS = {
     "pyqt6-qt6",
     "pyqt6-sip",
     "vapoursynth",
+    "vapoursynth-akarin",
+    "vapoursynth-vszip",
     "vs-placebo",
     "vspreview",
 }

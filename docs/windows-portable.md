@@ -209,11 +209,11 @@ fingerprint, or different runtime identity fails closed before any
 dependency-compatibility override path. Install the complete portable ZIP for that
 release when the fingerprint differs.
 
-The R78-to-R79 / L-SMASH-Works 1296 / vs-placebo 2.0.4 refresh is a native-runtime
-boundary. Existing R78 bundles require a full portable reinstall because the runtime
-fingerprints change; applying only the code-only ZIP is deliberately refused. Keep
-`paths.generated_dir` outside the bundle when reports, screenshots, history, and
-reusable data must survive bundle
+The R78-to-R79 / L-SMASH-Works 1296 / vs-placebo 2.0.4 / Akarin 1.4.1 / VSZip
+22.1.0 refresh is a native-runtime boundary. Existing R78 bundles require a full
+portable reinstall because the runtime fingerprints change; applying only the
+code-only ZIP is deliberately refused. Keep `paths.generated_dir` outside the bundle
+when reports, screenshots, history, and reusable data must survive bundle
 replacement.
 
 Every published Windows release must contain exactly these mandatory assets, using

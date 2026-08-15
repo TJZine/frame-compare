@@ -230,10 +230,12 @@ def test_windows_portable_manifest_tracks_coordinated_media_runtime_artifacts(
         for fingerprint in manifest["bundle"]["runtime_fingerprints"].values()
     )
 
-    expected_python_version = "3.13.14"
+    expected_python_version = "3.13.15"
     assert manifest["bundle"]["python_version"] == expected_python_version
     python = artifacts["python-embed-amd64"]
     assert python["version"] == expected_python_version
+    assert python["source_ref"] == expected_python_version
+    assert python["release_date"] == "2026-08-05"
 
     vapoursynth = artifacts["vapoursynth-portable-r79"]
     assert vapoursynth["version"] == "R79"
@@ -262,12 +264,45 @@ def test_windows_portable_manifest_tracks_coordinated_media_runtime_artifacts(
     assert placebo["install"]["type"] == "python_wheel"
     assert placebo["url"].endswith("-win_amd64.whl")
 
+    akarin = artifacts["vs-plugin-akarin-1.4.1-win-amd64-wheel"]
+    assert akarin["version"] == "1.4.1"
+    assert akarin["license"]["spdx"] == "LGPL-3.0-only AND BSD-3-Clause"
+    assert akarin["install"]["type"] == "python_wheel"
+    assert akarin["url"].endswith("vapoursynth_akarin-1.4.1-py3-none-win_amd64.whl")
+    assert akarin["bundled_dependencies"] == [
+        {
+            "name": "zstd",
+            "version": "1.5.7-2",
+            "selection_kind": "MSYS2 CLANG64 package",
+            "package_url": "https://repo.msys2.org/mingw/clang64/mingw-w64-clang-x86_64-zstd-1.5.7-2-any.pkg.tar.zst",
+            "package_sha256": "2d75c4ddf8f4f7b76fe33e3f1eea16450f9b3aede14285c886462d72f0ffd87d",
+            "package_bytes": 597342,
+            "binary_path": "vapoursynth/plugins/akarin/libzstd.dll",
+            "binary_sha256": "a4a29141c6dc489c59c260b5d4f781c195cea11ed231ee0cbfc6d3803b0708b7",
+            "binary_bytes": 1030144,
+            "source_ref": "v1.5.7",
+            "source_commit": "f8745da6ff1ad1e7bab384bd1f9d742439278e99",
+            "source_tree_sha256": "a6c6917af705c7273f41a2842ace369ba411cc800950e042cd24471f80f49a2a",
+            "license": "BSD-3-Clause",
+        }
+    ]
+
+    vszip = artifacts["vs-plugin-vszip-22.1.0-win-amd64-wheel"]
+    assert vszip["version"] == "22.1.0"
+    assert vszip["license"]["spdx"] == "MIT AND LGPL-2.1-only"
+    assert vszip["install"]["type"] == "python_wheel"
+    assert vszip["url"].endswith("vapoursynth_vszip-22.1.0-py3-none-win_amd64.whl")
+    assert [dependency["name"] for dependency in vszip["bundled_dependencies"]] == [
+        "vapoursynth-zig",
+        "zigimg",
+    ]
+
     ffmpeg = artifacts["ffmpeg-btbn-win64-lgpl-8.1-2026-07-31"]
     assert ffmpeg["version"].startswith("n8.1.2-34-g9b6c8969e0")
     assert ffmpeg["license"]["spdx"] == "LGPL-2.1-or-later"
     assert not any(artifact_id.startswith("ffms2") for artifact_id in artifacts)
 
-    for artifact in (vapoursynth, lsmas, placebo, ffmpeg):
+    for artifact in (python, vapoursynth, lsmas, placebo, akarin, vszip, ffmpeg):
         assert artifact["bytes"] > 0
         assert re.fullmatch(r"[a-f0-9]{64}", artifact["sha256"])
         assert artifact["source_bytes"] > 0
@@ -364,6 +399,11 @@ def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: 
         "ffmpeg tiny media generation",
         "runtime_contract=ok",
         "FFMS2 must remain excluded",
+        "Akarin loaded without functions",
+        "Akarin artifact must declare exactly one bundled zstd dependency",
+        "VSZip loaded without functions",
+        "bundled_native_plugins=ok",
+        "AKARIN_WINDOWS_ZSTD_RELEASE",
         "standalone FFmpeg directory leaked onto PATH",
     ):
         assert expected in build_script
@@ -1560,6 +1600,9 @@ def test_windows_portable_manifest_schema_models_current_install_shapes(repo_roo
     artifact_def = schema["$defs"]["artifact"]
     install_def = schema["$defs"]["install"]
     assert "install" in artifact_def["required"]
+    assert artifact_def["properties"]["bundled_dependencies"]["items"] == {
+        "$ref": "#/$defs/bundled_dependency"
+    }
     paired_required_fields = {frozenset(rule["then"]["required"]) for rule in artifact_def["allOf"]}
     assert paired_required_fields == {
         frozenset({"source_sha256", "source_bytes"}),
@@ -1639,6 +1682,8 @@ def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
         "PyQt6-Qt6": ("6.10.2", "LGPL-3.0-only"),
         "PyQt6-sip": ("13.10.3", "BSD-2-Clause"),
         "VapourSynth": ("79", "LGPL-2.1-or-later"),
+        "vapoursynth-akarin": ("1.4.1", "LGPL-3.0-only"),
+        "vapoursynth-vszip": ("22.1.0", "MIT"),
         "vs-placebo": ("2.0.4", "LGPL-2.1-only"),
         "VSPreview": ("0.20.1", "Apache-2.0"),
     }
@@ -1742,6 +1787,8 @@ def test_windows_portable_bundle_inventory_is_sorted_exact_and_path_safe(
         "pyqt6-qt6",
         "pyqt6-sip",
         "vapoursynth",
+        "vapoursynth-akarin",
+        "vapoursynth-vszip",
         "vs-placebo",
         "vspreview",
     } <= {name.lower() for name in distribution_names}

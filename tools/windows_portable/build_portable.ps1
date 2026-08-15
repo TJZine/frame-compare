@@ -584,6 +584,19 @@ function Install-PythonWheelArtifacts([string]$BundleRoot, [pscustomobject[]]$Ar
     uv pip install --reinstall --strict --no-deps --target $sitePackages $wheelPath
     Assert-LastExitCode -CommandLabel "uv pip install $artifactId"
   }
+
+  $akarinArtifact = $Artifacts | Where-Object { $_.id -eq "vs-plugin-akarin-1.4.1-win-amd64-wheel" }
+  $zstd = @(Get-RequiredProperty -Object $akarinArtifact -Name "bundled_dependencies" -Context "Akarin artifact") |
+    Where-Object { $_.name -eq "zstd" }
+  if ($zstd.Count -ne 1) {
+    throw "Akarin artifact must declare exactly one bundled zstd dependency."
+  }
+  $zstdRelativePath = Get-RequiredStringProperty -Object $zstd -Name "binary_path" -Context "Akarin zstd dependency"
+  $zstdPath = Join-Path $sitePackages $zstdRelativePath
+  $zstdBytes = [int64](Get-RequiredProperty -Object $zstd -Name "binary_bytes" -Context "Akarin zstd dependency")
+  $zstdSha256 = Get-RequiredStringProperty -Object $zstd -Name "binary_sha256" -Context "Akarin zstd dependency"
+  Assert-FileSize -FilePath $zstdPath -ExpectedBytes $zstdBytes
+  Assert-Sha256 -FilePath $zstdPath -ExpectedHex $zstdSha256
 }
 
 function Set-BundleRuntimeEnvironment([string]$BundleRoot) {
@@ -770,7 +783,10 @@ def prove_package_imports() -> None:
 def prove_runtime_contract() -> None:
     from frame_compare.utils.subproc import resolve_executable
     from frame_compare.vs.runtime_contract import (
+        AKARIN_RELEASE,
+        AKARIN_WINDOWS_ZSTD_RELEASE,
         VS_PLACEBO_RELEASE,
+        VSZIP_RELEASE,
         WINDOWS_FFMPEG_EXECUTABLE_TOKEN,
         media_runtime_fingerprint,
         supported_media_runtime_report,
@@ -782,6 +798,8 @@ def prove_runtime_contract() -> None:
     assert_true(os.environ.get("FRAME_COMPARE_RUNTIME_KIND") == "windows-portable", "runtime kind mismatch")
     assert_true(os.environ.get("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED") == "0", "Windows FFMS2 policy mismatch")
     assert_true(importlib.metadata.version("vs-placebo") == VS_PLACEBO_RELEASE, "vs-placebo distribution mismatch")
+    assert_true(importlib.metadata.version("vapoursynth-akarin") == AKARIN_RELEASE, "Akarin distribution mismatch")
+    assert_true(importlib.metadata.version("vapoursynth-vszip") == VSZIP_RELEASE, "VSZip distribution mismatch")
 
     bundle_root = Path(sys.executable).resolve().parent.parent
     bundled_ffmpeg_bin = os.path.normcase(os.path.normpath(str(bundle_root / "ffmpeg" / "bin")))
@@ -837,12 +855,23 @@ def prove_vapoursynth_environment() -> None:
     assert_true("VAPOURSYNTH_PLUGIN_PATH" not in os.environ, "legacy VAPOURSYNTH_PLUGIN_PATH should not be set")
     assert_true("lsmas" in plugin_namespaces, f"lsmas plugin missing: {plugin_namespaces}")
     assert_true("placebo" in plugin_namespaces, f"placebo plugin missing: {plugin_namespaces}")
+    assert_true("akarin" in plugin_namespaces, f"Akarin plugin missing: {plugin_namespaces}")
+    assert_true("vszip" in plugin_namespaces, f"VSZip plugin missing: {plugin_namespaces}")
     assert_true("ffms2" not in plugin_namespaces, "FFMS2 must remain excluded from the Windows baseline")
+
+    akarin_functions = sorted(function.name for function in core.akarin.functions())
+    vszip_functions = sorted(function.name for function in core.vszip.functions())
+    assert_true(akarin_functions, "Akarin loaded without functions")
+    assert_true(vszip_functions, "VSZip loaded without functions")
 
     proof(f"vapoursynth_import=ok version=R{version_major} api={api_major}.{api_minor}")
     proof(f"plugin_dir={plugin_dir}")
     proof(f"extra_plugin_path={extra_plugin_path}")
     proof(f"core_plugins={','.join(plugin_namespaces)}")
+    proof(
+        f"bundled_native_plugins=ok akarin={','.join(akarin_functions)} "
+        f"zstd={AKARIN_WINDOWS_ZSTD_RELEASE} vszip={','.join(vszip_functions)}"
+    )
 
 
 def prove_lwlibavsource(media_path: Path) -> None:
@@ -1103,7 +1132,12 @@ function Copy-Licenses([string]$BundleRoot, [pscustomobject[]]$Artifacts) {
     "FFmpeg source: https://ffmpeg.org/download.html",
     "VapourSynth source: https://github.com/vapoursynth/vapoursynth",
     "L-SMASH-Works source: https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works",
-    "vs-placebo source: https://github.com/Lypheo/vs-placebo"
+    "vs-placebo source: https://github.com/Lypheo/vs-placebo",
+    "Akarin source: https://github.com/Jaded-Encoding-Thaumaturgy/akarin-vapoursynth-plugin",
+    "Akarin zstd source: https://github.com/facebook/zstd",
+    "VSZip source: https://github.com/dnjulek/vapoursynth-zip",
+    "vapoursynth-zig source: https://github.com/dnjulek/vapoursynth-zig",
+    "zigimg source: https://github.com/zigimg/zigimg"
   )
   Set-Content -LiteralPath (Join-Path $licensesDir "SOURCE_URLS.txt") -Value ($sourceUrls -join "`r`n") -Encoding ASCII
 

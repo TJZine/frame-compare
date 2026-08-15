@@ -33,13 +33,15 @@ uv sync --no-dev --extra vspreview --frozen
 ```
 
 The `vspreview` extra pins the repository-managed VapourSynth Python package to R79.
-On Windows it also installs the selected `vapoursynth-lsmas 1296.0.0.1` and
-`vs-placebo 2.0.4` plugin wheels so the locked environment matches the supported
-native media stack. Linux and macOS still require host-managed L-SMASH-Works and
-vs-placebo installations. If you do not need VSPreview, omit `--extra vspreview`
-while retaining the required native renderer dependencies.
+Its current resolution includes VSJetEngine 1.5.1, VSJetPack 2.2.1, Akarin 1.4.1,
+VSZip 22.1.0, psutil 7.2.2, and jetpytools 3.1.1. On Windows it also installs the
+selected `vapoursynth-lsmas 1296.0.0.1` and `vs-placebo 2.0.4` plugin wheels so the
+locked environment matches the supported native media stack. Linux and macOS still
+require host-managed L-SMASH-Works and vs-placebo installations. If you do not need
+VSPreview, omit `--extra vspreview` while retaining the required native renderer
+dependencies.
 
-When upgrading an existing Windows checkout from an older stack, recreate `.venv`
+When upgrading an existing Windows checkout from the R78 stack, recreate `.venv`
 before syncing if its VapourSynth plugin directory contains manually installed or
 untracked DLLs. An old `libvslsmashsource.dll` can otherwise load before the selected
 wheel-owned `LSMASHSource.dll` and produce the deprecated API3 warning.
