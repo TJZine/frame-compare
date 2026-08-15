@@ -10,6 +10,7 @@
 .tmp/
 .uv_cache/
 .venv/
+.venv-*/
 .agent/
 .hypothesis/
 AGENTS.md
