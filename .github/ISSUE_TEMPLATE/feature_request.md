@@ -1,36 +1,43 @@
 ---
-name: 💡 Feature Request
-about: Suggest a new feature or enhancement
+name: Feature request
+about: Propose a user problem or bounded enhancement
 title: "[Feature]: "
 labels: ["enhancement"]
 assignees: ''
 ---
 
-## Problem Statement
+## Problem
 
-A clear description of the problem this feature would solve.
+Describe the user or operator problem. Explain the current limitation rather than only
+naming a preferred implementation.
 
-<!-- Example: "I'm always frustrated when..." -->
+## Desired outcome
 
-## Proposed Solution
+Describe the observable behavior that would solve the problem.
 
-Describe how you'd like this to work.
+## Workflow and examples
 
-## Alternatives Considered
+Provide a concrete Frame Compare workflow, representative inputs, and expected output.
+Screenshots or small publication-safe examples are welcome when they add clarity.
 
-Any alternative solutions or features you've considered.
+## Alternatives considered
 
-## Use Case
+Describe current workarounds and credible alternatives. Explain why they are
+insufficient.
 
-Describe your use case and how this feature would help.
+## Scope and compatibility
 
-## Additional Context
+Note any expected effect on CLI commands, configuration, reports, caches, media runtime,
+packaging, or automation. Do not assume backward compatibility is required unless an
+existing public contract makes it necessary.
 
-- Screenshots, mockups, or examples
-- Links to related issues or discussions
-- Any other relevant information
+## Additional context
+
+Link related issues, specifications, external standards, or prior art.
 
 ## Checklist
 
-- [ ] I have searched existing issues to ensure this is not a duplicate
-- [ ] This feature aligns with the project's scope (video frame comparison)
+- [ ] I searched existing issues and documentation.
+- [ ] The request addresses video comparison, review, alignment, rendering, or delivery.
+- [ ] I described the problem independently of one implementation.
+- [ ] I identified important platform or media-runtime constraints.

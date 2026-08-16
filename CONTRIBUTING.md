@@ -1,100 +1,138 @@
 # Contributing to Frame Compare
 
-Thank you for your interest in contributing! This guide will help you get started.
-
----
-
-## 📋 Table of Contents
-
-- [Prerequisites](#prerequisites)
-- [Development Setup](#development-setup)
-- [Making Changes](#making-changes)
-- [Contribution licensing](#contribution-licensing)
-- [Documentation Development](#documentation-development)
-- [Pull Request Workflow](#pull-request-workflow)
-- [Code Style](#code-style)
-- [Testing Requirements](#testing-requirements)
-- [Releases](#releases)
-
----
+Thank you for improving Frame Compare. This guide covers contributor setup and pull
+request mechanics. The [Engineering Runbook](docs/ENGINEERING_RUNBOOK.md) is the
+canonical source for risk classification, verification, release gates, and handoff
+requirements.
 
 ## Prerequisites
 
-Before contributing, ensure you have:
+| Tool | Requirement | Purpose |
+| --- | --- | --- |
+| Python | 3.13 or newer | Application and test runtime |
+| `uv` | Repository-selected compatible version | Locked dependency and command execution |
+| Git | Recent release | Version control |
+| Docker | Optional for ordinary work; required for Docker/runtime changes | Integration proof |
+| PowerShell on Windows | Required for portable packaging changes | Windows build, install, update, and verification paths |
 
-| Tool | Version | Purpose |
-| ---- | ------- | ------- |
-| Python | 3.13+ | Runtime |
-| uv | Latest | Package management (recommended) |
-| Git | Any recent | Version control |
-| Docker | Latest | Integration testing (optional) |
+## Development setup
 
----
-
-## Development Setup
-
-### 1. Clone the repository
+Clone the repository and install the canonical frozen contributor environment:
 
 ```bash
 git clone https://github.com/TJZine/frame-compare.git
 cd frame-compare
-```
-
-### 2. Install dependencies
-
-Use the repository's canonical frozen uv environment:
-
-```bash
 uv sync --group dev --frozen
 ```
 
-The project uses uv dependency groups and its lockfile for the complete contributor
-toolchain. A pip-only editable install can run the application, but it is not a
-substitute for the canonical environment and cannot be assumed to reproduce the
-full local or CI gates.
+A pip-only editable installation can run the application, but it does not reproduce the
+complete contributor or CI toolchain.
 
-### 3. Verify your setup
+Use the runbook command canon to confirm the environment is healthy before changing
+code.
 
-Use the [Engineering Runbook](docs/ENGINEERING_RUNBOOK.md) command canon to verify that
-the local environment is healthy.
+## Branch and pull request workflow
 
----
+1. Start from the base branch named in the issue, handoff, or maintainer request.
+   Otherwise target `main`.
+2. Create a focused branch:
 
-## Making Changes
+   ```bash
+   git switch -c feat/your-change
+   ```
 
-### 1. Create a feature branch
+3. Keep the change bounded to one coherent outcome.
+4. Add or update tests and documentation for public behavior.
+5. Run risk-matched verification from the runbook.
+6. Open a pull request against the intended integration branch.
 
-```bash
-git checkout -b feat/your-feature-name
+Do not assume `main`, `staging`, `cleanup`, or a version-development branch is the
+correct target when the task names another base explicitly.
+
+## Pull request titles
+
+Use Conventional Commit format because the squash title becomes release history:
+
+| Type | Use |
+| --- | --- |
+| `feat:` | New user-visible behavior |
+| `fix:` | Bug fix |
+| `docs:` | Documentation-only change |
+| `refactor:` | Internal restructuring without a behavior change |
+| `perf:` | Performance improvement |
+| `test:` | Test-only change |
+| `build:` | Build system or dependency change |
+| `ci:` | Workflow change |
+| `chore:` | Maintenance outside production and test behavior |
+| `revert:` | Revert of an earlier change |
+
+Scopes are optional:
+
+```text
+feat(cli): add structured history filtering
+fix(render): preserve range metadata during tonemapping
+docs: restructure the user guide
 ```
 
-### 2. Make your changes
+## Code style
 
-- Follow the [Code Style](#code-style) guidelines
-- Add tests for new functionality
-- Update documentation as needed
+### Python
 
-### 3. Run local checks
+- Use Python 3.13+ syntax and complete type annotations.
+- Prefer `pathlib.Path` for filesystem paths.
+- Keep public behavior at explicit owner boundaries.
+- Add docstrings to public functions.
+- Preserve the repository’s 100-character formatting target.
 
-Use the [Engineering Runbook](docs/ENGINEERING_RUNBOOK.md) to choose and run the
-required verification for the current change.
+### Formatting and linting
 
----
+```bash
+uv run --no-sync ruff check .
+uv run --no-sync ruff check --fix .
+uv run --no-sync ruff format .
+```
 
-## Contribution licensing
+### Type checking
 
-Submitted contributions are licensed under `GPL-3.0-only`, and contributors affirm
-that they have the right to submit them under those terms.
+```bash
+uv run --no-sync pyright --warnings
+```
 
----
+All production code must pass the configured strict Pyright policy.
 
-## Documentation Development
+## Tests and verification
 
-Authored documentation lives under `docs/`. The root `zensical.toml` owns the public
-site navigation and built-in presentation features; do not duplicate documentation in
-a separate site project. Generated output belongs in the ignored `site/` directory.
+Test markers include:
 
-Install the locked documentation toolchain and run a strict build:
+| Marker | Meaning |
+| --- | --- |
+| `unit` | Fast isolated coverage |
+| `integration` | Module interaction |
+| `e2e` | End-to-end CLI behavior |
+| `vs_required` | Requires a VapourSynth runtime |
+| `slow` | Long-running proof |
+| `network` | Requires external network access |
+| `tier_a` | Contract/security tests without VS or network |
+
+Examples:
+
+```bash
+uv run --no-sync pytest -q
+uv run --no-sync pytest -m unit
+uv run --no-sync pytest -m "not vs_required"
+uv run --no-sync pytest --cov=src/frame_compare --cov-report=term-missing
+```
+
+These examples do not replace the runbook. Changes to CLI/config contracts, runtime
+owners, Docker, Windows portable packaging, release workflows, or architectural
+boundaries require their documented full proof paths.
+
+## Documentation development
+
+Authored documentation lives under `docs/`. `zensical.toml` owns site navigation and
+presentation settings. Generated site output belongs in the ignored `site/` directory.
+
+Install the locked documentation environment and run a strict build:
 
 ```bash
 uv sync --only-group docs --locked
@@ -102,204 +140,53 @@ uv run --no-sync python scripts/generate_api_docs.py --check
 uv run --no-sync zensical build --clean --strict
 ```
 
-For a local preview, run:
+Preview locally:
 
 ```bash
 uv run --no-sync zensical serve
 ```
 
-A docs-only sync replaces the normal contributor environment. Restore both groups
-before running development checks while continuing documentation work:
+A docs-only sync replaces the ordinary contributor environment. Restore both groups
+before continuing application checks:
 
 ```bash
 uv sync --group dev --group docs --locked
 ```
 
-Keep `docs/api.md` generated through `scripts/generate_api_docs.py`. Changes to the
-generator or its source definitions must pass the drift check above.
+`docs/api.md` is generated by `scripts/generate_api_docs.py`. Update the generator or
+its source definitions rather than editing generated output manually.
 
----
+Documentation expectations:
 
-## Pull Request Workflow
+- Begin with user goals and observable outcomes.
+- Keep task guides separate from maintainer contracts.
+- Use screenshots only when they add information that text cannot convey efficiently.
+- Include useful alt text and redact private paths, source names, and secrets.
+- Avoid decorative emoji, marketing filler, and diagrams that merely restate a sentence.
+- Update the authoritative contract in the same change when public behavior changes.
 
-### 1. Open a PR to `main`
+## Architecture and public contracts
 
-### 2. Use Conventional Commit format for the PR title
+Consult the relevant authority before changing a boundary:
 
-This becomes the squash commit message. Use one of:
+- [Current Architecture](docs/current-architecture.md)
+- [CLI Behavioral Contract](docs/current-cli-contract.md)
+- [Supported Media Runtime](docs/supported-media-runtime.md)
+- [Import contracts](importlinter.ini)
 
-| Type | Description |
-| ---- | ----------- |
-| `feat:` | New feature |
-| `fix:` | Bug fix |
-| `docs:` | Documentation only |
-| `refactor:` | Code change that neither fixes a bug nor adds a feature |
-| `perf:` | Performance improvement |
-| `test:` | Adding or updating tests |
-| `build:` | Changes to build system or dependencies |
-| `ci:` | CI/CD changes |
-| `chore:` | Other changes that don't modify src or test files |
-| `revert:` | Reverts a previous commit |
+Do not create a second architecture summary, runbook, or current CLI contract.
 
-**Scopes are allowed but optional:**
+## Contribution licensing
 
-```text
-feat(cli): add --json output flag
-fix(render): correct overlay positioning
-docs: update installation guide
-```
-
-### 3. Ensure CI passes
-
-Ensure the required GitHub Actions checks pass before merge. Treat the
-[Engineering Runbook](docs/ENGINEERING_RUNBOOK.md) and the workflow files under
-`.github/workflows/` as the current source of truth for required verification.
-
----
-
-## Code Style
-
-### Python
-
-- **Type hints**: Required on all function parameters and return types
-- **Docstrings**: Required for public functions
-- **Line length**: 100 characters max
-
-### Formatting
-
-We use [Ruff](https://docs.astral.sh/ruff/) for linting and formatting:
-
-```bash
-# Check for issues
-uv run --no-sync ruff check .
-
-# Auto-fix safe issues
-uv run --no-sync ruff check --fix .
-
-# Format code
-uv run --no-sync ruff format .
-```
-
-### Type Checking
-
-We use [Pyright](https://microsoft.github.io/pyright/) in strict mode:
-
-```bash
-uv run --no-sync pyright --warnings
-```
-
-> [!IMPORTANT]
-> All new code must pass Pyright strict mode with zero errors.
-
----
-
-## Testing Requirements
-
-### Test Categories
-
-| Marker | Description | Requirements |
-| ------ | ----------- | ------------ |
-| `unit` | Fast isolated tests | None |
-| `integration` | Module interaction tests | None |
-| `e2e` | End-to-end CLI tests | None |
-| `vs_required` | VapourSynth tests | VapourSynth runtime |
-| `slow` | Long-running tests | Extra runtime |
-| `network` | Network tests | Internet access |
-| `tier_a` | Contract/security tests | No VS, no network |
-
-### Running Tests
-
-Examples only. Merge and release gates still come from the
-[Engineering Runbook](docs/ENGINEERING_RUNBOOK.md).
-
-Fast isolated tests default into the `unit` bucket during collection. Use explicit
-markers for heavier routes such as `integration`, `e2e`, `vs_required`, `slow`, or
-`network`.
-
-```bash
-# All unit tests
-uv run --no-sync pytest -q
-
-# Specific markers
-uv run --no-sync pytest -m unit
-uv run --no-sync pytest -m "not vs_required"
-
-# With coverage
-uv run --no-sync pytest --cov=src/frame_compare --cov-report=term-missing
-```
-
-### Docker Integration Tests
-
-For Docker-based verification requirements, use the
-[Engineering Runbook](docs/ENGINEERING_RUNBOOK.md).
-
----
+Submitted contributions are licensed under `GPL-3.0-only`. Contributors affirm that
+they have the right to submit the work under those terms.
 
 ## Releases
 
-Release Please owns reviewed version/changelog PRs after initialization. The
-guarded Windows workflow owns every public release so mandatory assets always
-exist before publication.
+Release Please owns reviewed version and changelog pull requests after project
+initialization. The guarded Windows release workflow owns exact-commit publication,
+mandatory assets, checksums, update signing, and final release creation.
 
-### Initial `v0.1.0`
-
-- Prepare and accept a disposable RC on `cleanup` or an approved release branch.
-- After RC acceptance, align every version source and `CHANGELOG.md` at `0.1.0`
-  and remove temporary `bootstrap-sha`/`release-as` settings on that branch.
-- Squash-merge once into `main`. That exact squash commit is the source for
-  `v0.1.0`; there is no generated initial version-bump commit.
-- A maintainer dispatches **Windows portable** from `main` with operation
-  `release`, channel `stable`, version `0.1.0`, tag `v0.1.0`, and the exact
-  40-character `main` SHA.
-- The workflow rejects a moved `main`, existing tag/release, version disagreement,
-  RC syntax, missing changelog entry, incomplete assets, or unsigned update. It
-  creates and verifies a complete draft first, then publishes as its final step.
-- Stable publication uses the protected GitHub `production` environment and
-  requires maintainer approval.
-
-Do not create or move the tag manually. Live RC/stable dispatches, environment
-approval, release/tag cleanup, and the final squash are maintainer-only operations.
-
-### Later releases
-
-After the published stable `v0.1.0` release exists, [Release
-Please](https://github.com/googleapis/release-please) resumes version-PR behavior
-on pushes to `main`:
-
-- it opens or updates a human-reviewed release PR;
-- it never auto-merges that PR;
-- it does not create a tag or GitHub release;
-- after merging the approved release PR, a maintainer publishes its exact `main`
-  commit through **Windows portable** with operation `release`, the final version
-  and tag, and the exact SHA.
-
-Configure `RELEASE_PLEASE_TOKEN` as a narrowly scoped fine-grained PAT or GitHub
-App token when release-created pull requests must trigger the normal CI suite.
-Restrict it to this repository, use a bounded lifetime, and grant only the
-contents and pull-request permissions required by the pinned action.
-
-Repository maintainers must also create a `production` Actions environment,
-configure required reviewers, prevent self-review where supported, and restrict
-deployment branches/tags to the approved stable policy. The environment protects
-every stable publication job; repository secrets remain configured under Actions
-without exposing their values.
-
----
-
-## Project Guardrails
-
-Repo-wide workflow policy lives in the [Engineering Runbook](docs/ENGINEERING_RUNBOOK.md).
-
-Supporting pointers:
-
-- [AGENTS.md](AGENTS.md) — short agent entrypoint map
-- [Current Architecture](docs/current-architecture.md) — present-day runtime and boundary map
-- [CODEX.md](CODEX.md) — thin Codex pointer only
-
----
-
-## Questions?
-
-- Check the [documentation](docs/)
-- Open a [discussion](https://github.com/TJZine/frame-compare/discussions)
-- Review existing [issues](https://github.com/TJZine/frame-compare/issues)
+Maintainer procedure and current branch policy live exclusively in the
+[Engineering Runbook](docs/ENGINEERING_RUNBOOK.md). Historical initial-release steps
+belong in release evidence, not this contributor onboarding guide.

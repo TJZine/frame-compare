@@ -1,49 +1,132 @@
-# Frame Compare
+<div class="fc-hero" markdown>
 
-Frame Compare is a deterministic video-comparison pipeline that selects frames,
-tonemaps HDR sources when needed, renders labeled screenshots, and produces an
-offline HTML comparison report. Publishing to slow.pics is available as an explicit
-opt-in.
+<p class="fc-kicker">Deterministic video comparison</p>
 
-**[Get started](getting-started/index.md)** ·
-[Run a first comparison](guides/first-comparison.md)
+# Compare sources, not guesswork
 
-## Choose a route
+Frame Compare selects representative frames, aligns source timing, renders HDR-aware
+screenshots, and produces a static review report for local encodes, remasters, and
+archival quality-control workflows.
 
-- **Windows portable** — the most complete Windows distribution, including
-  VSPreview, PyQt6, and the native updater. [Install on Windows](windows-portable.md).
-- **Docker** — the recommended reproducible, headless backend route for macOS and
-  Linux. [Start with Docker](getting-started/docker.md).
-- **Native source** — the advanced route for users who already manage Python,
-  FFmpeg, VapourSynth, and L-SMASH-Works. [Install from source](getting-started/native.md).
+<div class="fc-actions" markdown>
 
-## What it does
+[Choose an installation](getting-started/index.md){ .md-button .md-button--primary }
+[Run a first comparison](guides/first-comparison.md){ .md-button }
+[Explore the report viewer](guides/reports-and-overlays.md){ .md-button }
 
-- Selects reproducible random frames or quality-oriented dark, bright, and motion
-  frames.
-- Aligns comparison clips using audio correlation, with optional interactive
-  alignment where VSPreview is available.
-- Tonemaps HDR sources and renders configurable screenshot overlays.
-- Builds a static report that works offline, with slider, diff, blink, grid,
-  navigation, zoom, and review tools.
-- Can publish a completed comparison to slow.pics and notify a Discord-compatible
-  webhook when you deliberately enable those integrations.
+</div>
 
-## How it works
+</div>
 
-```mermaid
-flowchart LR
-    A["Input videos"] --> B["Frame selection"]
-    B --> C["Tonemapping"]
-    C --> D["Render and overlay"]
-    D --> E["Offline HTML report"]
-    D --> F["Optional slow.pics upload"]
-```
+<!-- SCREENSHOT_SLOT: report-viewer-overview
+Target file: images/report-viewer-overview.webp
+Place a full-width figure here after capture. It should show a completed three-source
+report in slider mode with the filmstrip, source labels, frame/category context, and
+main controls visible. Reuse the same source asset as the README hero when practical.
+Suggested alt text: "Frame Compare offline report displaying a three-source video
+comparison in slider mode."
+-->
 
-## Find help
+## Start with the route that fits your system
 
-- Follow the [first-comparison guide](guides/first-comparison.md).
-- Diagnose a problem with [Troubleshooting](guides/troubleshooting.md).
-- Look up exact flags, configuration, and persistence behavior in the
-  [CLI and configuration contract](current-cli-contract.md).
-- Download published builds from [GitHub Releases](https://github.com/TJZine/frame-compare/releases).
+<div class="fc-card-grid" markdown>
+
+<div class="fc-card" markdown>
+
+### Windows portable
+
+The complete Windows 10/11 x64 distribution. It includes the supported Python and
+media runtime, VSPreview, installer, updater, and rollback tooling.
+
+[Install on Windows](windows-portable.md)
+
+</div>
+
+<div class="fc-card" markdown>
+
+### Docker
+
+The recommended reproducible, headless route for macOS and Linux. It isolates the
+media toolchain and writes reports and cache data to explicit host mounts.
+
+[Start with Docker](getting-started/docker.md)
+
+</div>
+
+<div class="fc-card" markdown>
+
+### Native source
+
+For advanced users who already manage FFmpeg, VapourSynth, source plugins, and a
+compatible Vulkan implementation on the host.
+
+[Install from source](getting-started/native.md)
+
+</div>
+
+</div>
+
+[Compare route capabilities and support posture](getting-started/route-comparison.md)
+
+## What a comparison includes
+
+- Reproducible user, random, dark, bright, and motion frame selection.
+- Shared-window and active-picture-aware analysis across the selected sources.
+- Automatic audio alignment with optional prior-offset reuse and VSPreview review.
+- HDR-to-SDR tonemapping when required, plus minimal, standard, or diagnostic overlays.
+- A self-contained browsing experience with slider, overlay, diff, blink, grid,
+  filmstrip, zoom, inspection, and review tools.
+- Optional slow.pics publication and Discord-compatible webhook notification after a
+  local result has been reviewed.
+
+## Follow a workflow
+
+<div class="fc-card-grid" markdown>
+
+<div class="fc-card" markdown>
+
+### Understand the pipeline
+
+See where probing, frame selection, alignment, rendering, caches, and optional network
+outputs fit together.
+
+[How Frame Compare works](guides/how-it-works.md)
+
+</div>
+
+<div class="fc-card" markdown>
+
+### Control the comparison
+
+Choose the reference, label sources, handle trims or FPS metadata, and configure frame
+selection without reading the full behavioral contract.
+
+[Sources and labels](guides/sources-and-labels.md) ·
+[Frame selection](guides/analysis-modes.md)
+
+</div>
+
+<div class="fc-card" markdown>
+
+### Review the result
+
+Learn the viewer modes, keyboard-oriented review workflow, metadata inspector, and
+portable report layout.
+
+[Reports and overlays](guides/reports-and-overlays.md)
+
+</div>
+
+</div>
+
+## Find an answer
+
+- Use [Configuration Recipes](guides/configuration-recipes.md) for common outcomes.
+- Start with [Troubleshooting](guides/troubleshooting.md) when a run fails.
+- Use [Commands and Configuration](reference/commands-and-configuration.md) for
+  command discovery and reference links.
+- Consult the [CLI Behavioral Contract](current-cli-contract.md) only when exact
+  precedence, persistence, JSON, stream, or exit behavior matters.
+- Contributors and maintainers should begin with
+  [Contributing](https://github.com/TJZine/frame-compare/blob/main/CONTRIBUTING.md)
+  and the [Engineering Runbook](ENGINEERING_RUNBOOK.md).
