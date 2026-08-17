@@ -39,12 +39,18 @@ def test_release_workflows_preserve_triggers_permissions_and_windows_owner(
 
     assert set(release["on"]) == {"workflow_call"}
     assert release["permissions"] == {}
+    attestation_permissions = {
+        "attestations": "write",
+        "contents": "read",
+        "id-token": "write",
+    }
     assert release["jobs"]["preflight"]["permissions"] == {"contents": "read"}
+    assert release["jobs"]["windows"]["permissions"] == attestation_permissions
     assert release["jobs"]["publish"]["permissions"] == {"contents": "write"}
     assert release["jobs"]["windows"]["uses"].endswith("windows-portable-build.yml")
     assert portable["on"]["workflow_call"] is not None
-    assert portable["permissions"] == {"contents": "read"}
-    assert portable["jobs"]["build"]["permissions"] == {"contents": "read"}
+    assert portable["permissions"] == attestation_permissions
+    assert portable["jobs"]["build"]["permissions"] == attestation_permissions
 
 
 def test_release_workflow_keeps_fail_closed_asset_contract(repo_root: Path) -> None:
@@ -195,6 +201,11 @@ def test_windows_portable_dispatch_owns_immutable_release_inputs_and_secrets(
     assert "secrets" not in jobs["verify_pull_request"]
     assert jobs["verify_manual"]["with"]["require_signing"] == "true"
     assert set(jobs["verify_manual"]["secrets"]) == {"WINDOWS_UPDATE_SIGNING_KEY_XML"}
+    assert jobs["release"]["permissions"] == {
+        "attestations": "write",
+        "contents": "write",
+        "id-token": "write",
+    }
     assert set(jobs["release"]["secrets"]) == {"WINDOWS_UPDATE_SIGNING_KEY_XML"}
 
 

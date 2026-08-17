@@ -13,7 +13,21 @@ frame-compare-portable-win-x64-<tag>.zip
 frame-compare-portable-win-x64-<tag>.zip.sha256
 ```
 
-Verify the ZIP before extracting it:
+Authenticate the ZIP's release provenance before extracting it. On an internet-connected
+machine with the GitHub CLI installed, verify the release artifact against this
+repository and the dedicated Windows build workflow:
+
+```powershell
+$zip = ".\frame-compare-portable-win-x64-<tag>.zip"
+gh attestation verify $zip `
+  --repo TJZine/frame-compare `
+  --signer-workflow TJZine/frame-compare/.github/workflows/windows-portable-build.yml
+if ($LASTEXITCODE -ne 0) {
+    throw "Release provenance verification failed. Do not install this download."
+}
+```
+
+Then verify the ZIP checksum before extracting it:
 
 ```powershell
 $zip = ".\frame-compare-portable-win-x64-<tag>.zip"

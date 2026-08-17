@@ -13,8 +13,13 @@ def test_windows_portable_workflow_delegates_extracted_bundle_verification(
     workflow = _load_workflow(path)
 
     assert set(workflow["jobs"]) == {"build"}
-    assert workflow["permissions"] == {"contents": "read"}
-    assert workflow["jobs"]["build"]["permissions"] == {"contents": "read"}
+    expected_permissions = {
+        "attestations": "write",
+        "contents": "read",
+        "id-token": "write",
+    }
+    assert workflow["permissions"] == expected_permissions
+    assert workflow["jobs"]["build"]["permissions"] == expected_permissions
     verify_step = _step_by_name(workflow["jobs"]["build"], "Verify extracted portable bundle")
     assert "tools/windows_portable/verify_extracted_bundle.ps1" in verify_step["run"]
     assert "-ZipPath dist/frame-compare-portable-win-x64.zip" in verify_step["run"]
@@ -31,6 +36,7 @@ def test_windows_portable_workflow_signing_and_uploads_fail_closed(repo_root: Pa
     sign = _step_by_name(build, "Sign code-only update zip")
     verify = _step_by_name(build, "Verify code-only update zip layout")
     prepare = _step_by_name(build, "Prepare exact orchestrated release assets")
+    attest = _step_by_name(build, "Attest release ZIP provenance")
     upload = _step_by_name(build, "Upload exact orchestrated release assets")
 
     assert sign["if"] == "env.REQUIRE_SIGNING == 'true'"
@@ -42,6 +48,12 @@ def test_windows_portable_workflow_signing_and_uploads_fail_closed(repo_root: Pa
     assert "update-manifest.sig" in verify["run"]
     assert prepare["if"] == "inputs.prepare_release_assets"
     assert "Expected exactly one signed update zip" in prepare["run"]
+    assert attest["if"] == "inputs.prepare_release_assets"
+    assert attest["uses"] == "actions/attest@a1948c3f048ba23858d222213b7c278aabede763"
+    assert attest["with"]["subject-path"] == (
+        "dist/release-assets/frame-compare-portable-win-x64-${{ inputs.release_tag }}.zip\n"
+        "dist/release-assets/frame-compare-update-win-x64-${{ inputs.release_tag }}.zip\n"
+    )
     assert upload["if"] == "inputs.prepare_release_assets"
     assert upload["with"]["if-no-files-found"] == "error"
 
