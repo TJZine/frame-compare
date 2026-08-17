@@ -60,8 +60,8 @@ def test_build_html_renders_frame_and_clip_selectors(report_payload: ReportPaylo
 
     assert parser.selects["frame-select"].attrs["aria-label"] == "Select frame"
     assert [option.text for option in parser.selects["frame-select"].options] == [
-        "Frame 10",
-        "Frame 20",
+        "Frame 10 • Selected",
+        "Frame 20 • Scene Cuts",
     ]
     assert parser.selects["left-select"].attrs["aria-label"] == "Left clip"
     reference = next(

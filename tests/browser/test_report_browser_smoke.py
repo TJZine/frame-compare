@@ -22,6 +22,8 @@ _ONE_PIXEL_PNG = base64.b64decode(
 )
 _BROWSER_NAMES = ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser")
 _MAC_CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+_REFERENCE_LABEL = "Movie.Title.2026.2160p.WEB-DL.Service-GROUP.with-an-extremely-long-source-name-that-must-stay-on-the-left"
+_COMPARISON_LABEL = "Movie.Title.2026.1080p.WEB-DL.Service-ENCODE.with-an-equally-long-source-name-that-must-stay-on-the-right"
 
 
 class _InitializedViewerParser(HTMLParser):
@@ -63,8 +65,8 @@ def _browser_executable() -> str | None:
 def _generated_report(tmp_path: Path) -> Path:
     clips: list[ClipInfo] = []
     for name, label in (
-        ("reference", "Movie.Title.2026.2160p.WEB-DL.Service-GROUP"),
-        ("encode", "Movie.Title.2026.1080p.WEB-DL.Service-ENCODE"),
+        ("reference", _REFERENCE_LABEL),
+        ("encode", _COMPARISON_LABEL),
     ):
         screenshot = tmp_path / "screenshots" / name / "10.png"
         screenshot.parent.mkdir(parents=True)
@@ -112,9 +114,8 @@ document.addEventListener('DOMContentLoaded', () => {
             || first.bottom <= second.top
             || second.bottom <= first.top
         );
+        ReportViewer.setMode('slider');
         ReportViewer.setMode('diff');
-        label.textContent = ReportViewer.clipOverlayLabel(ReportViewer.state.data.clips[0], 'Base');
-        rightLabel.textContent = ReportViewer.clipOverlayLabel(ReportViewer.state.data.clips[1], 'Compare');
         document.documentElement.dataset.diffSourceHudVisible = String(
             window.getComputedStyle(label).display !== 'none'
             && window.getComputedStyle(rightLabel).display !== 'none'
@@ -137,7 +138,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ReportViewer.setOverlaysHidden(false, { save: false });
 
         ReportViewer.setMode('slider');
-        const sliderLabelsSeparate = [0, 100].every(revealPercent => {
+        const sliderLabelsSeparate = [0, 50, 100].every(revealPercent => {
             ReportViewer.state.revealPercent = revealPercent;
             ReportViewer.updateSlider();
             ReportViewer.dom.canvas.style.setProperty('--zoom-level', '2');
@@ -152,7 +153,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const paletteRect = palette.getBoundingClientRect();
         const leftSliderLabel = document.getElementById('label-left').getBoundingClientRect();
         const rightSliderLabel = document.getElementById('label-right').getBoundingClientRect();
-        const paletteInset = window.innerWidth <= 768 ? 8 : 16;
+        const paletteInset = window.innerWidth <= 768 ? 8 : (window.innerWidth <= 992 ? 12 : 16);
         const labelInset = window.innerWidth <= 768 ? 8 : 12;
         const approximately = (first, second) => Math.abs(first - second) <= 1;
         document.documentElement.dataset.paletteBottomAnchored = String(
@@ -169,6 +170,12 @@ document.addEventListener('DOMContentLoaded', () => {
             && approximately(rightSliderLabel.top, stageRect.top + labelInset)
             && approximately(leftSliderLabel.left, stageRect.left + labelInset)
             && approximately(rightSliderLabel.right, stageRect.right - labelInset)
+        );
+        document.documentElement.dataset.sliderLabelsContained = String(
+            leftSliderLabel.left >= stageRect.left
+            && leftSliderLabel.right <= stageRect.left + (stageRect.width / 2)
+            && rightSliderLabel.left >= stageRect.left + (stageRect.width / 2)
+            && rightSliderLabel.right <= stageRect.right
         );
         document.documentElement.dataset.sliderLabelGeometry = JSON.stringify({
             stage: stageRect.toJSON(),
@@ -189,11 +196,39 @@ document.addEventListener('DOMContentLoaded', () => {
         );
         ReportViewer.setInspectorOpen(false, { focus: false, save: false });
 
+        const filmstripAnchored = [false, true].every(collapsed => {
+            ReportViewer.setFilmstripCollapsed(collapsed, { save: false });
+            const currentStageRect = stage.getBoundingClientRect();
+            const currentPaletteRect = palette.getBoundingClientRect();
+            return currentStageRect.height > 0
+                && approximately(currentPaletteRect.bottom, currentStageRect.bottom - paletteInset);
+        });
+        ReportViewer.setFilmstripCollapsed(false, { save: false });
+        document.documentElement.dataset.filmstripHudAnchored = String(filmstripAnchored);
+
+        ReportViewer.setPaletteOrientation('vertical', { save: false });
+        const firstPaletteGroup = palette.querySelector('.rv-palette-group');
+        const zoomRange = document.getElementById('zoom-range');
+        document.documentElement.dataset.narrowPaletteHorizontal = String(
+            window.innerWidth > 768
+            || (
+                window.getComputedStyle(palette).flexDirection === 'row'
+                && window.getComputedStyle(firstPaletteGroup).flexDirection === 'row'
+                && window.getComputedStyle(zoomRange).writingMode === 'horizontal-tb'
+                && window.getComputedStyle(document.getElementById('btn-palette-orientation')).display === 'none'
+            )
+        );
+        ReportViewer.setPaletteOrientation('horizontal', { save: false });
+
         ReportViewer.setMode('grid');
         const gridStageRect = stage.getBoundingClientRect();
         const gridPaletteRect = palette.getBoundingClientRect();
+        const gridLabels = Array.from(document.querySelectorAll('.rv-grid-label-text'));
+        const expectedGridLabelCount = window.matchMedia('(max-width: 767px)').matches ? 1 : 2;
         document.documentElement.dataset.gridHudAnchored = String(
             window.getComputedStyle(document.querySelector('.rv-stage-labels')).display === 'none'
+            && gridLabels.length === expectedGridLabelCount
+            && gridLabels.every(gridLabel => gridLabel.textContent.trim().length > 0)
             && approximately(gridPaletteRect.bottom, gridStageRect.bottom - paletteInset)
         );
 
@@ -231,7 +266,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize(("width", "height"), [(375, 800), (1280, 720), (1920, 1080)])
+@pytest.mark.parametrize(
+    ("width", "height"),
+    [(375, 800), (768, 720), (900, 720), (1280, 720), (1366, 768), (1920, 1080)],
+)
 def test_generated_report_initializes_observable_mode_and_aria_state(
     tmp_path: Path,
     width: int,
@@ -281,10 +319,13 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     assert parser.document_attributes["data-slider-labels-top-anchored"] == "true", (
         parser.document_attributes["data-slider-label-geometry"]
     )
+    assert parser.document_attributes["data-slider-labels-contained"] == "true"
     assert parser.document_attributes["data-inspector-hud-anchored"] == "true"
+    assert parser.document_attributes["data-filmstrip-hud-anchored"] == "true"
+    assert parser.document_attributes["data-narrow-palette-horizontal"] == "true"
     assert parser.document_attributes["data-grid-hud-anchored"] == "true"
     assert parser.document_attributes["data-source-hud-text"] == (
-        "Movie.Title.2026.2160p.WEB-DL.Service-GROUP • 1×1 • SDR"
+        f"{_REFERENCE_LABEL} • 1×1 • SDR"
     )
     assert parser.stage_attributes is not None
     stage_classes = (parser.stage_attributes["class"] or "").split()

@@ -63,7 +63,7 @@ def _render_frame_options(
         f'<option value="{_esc_attr(i)}" '
         f'data-category-key="{_esc_attr(category_filter_keys[frame["category"]])}" '
         f'data-category="{_esc_attr(frame["category"])}">'
-        f"{_esc_text(frame['label'])}</option>"
+        f"{_esc_text(_frame_filmstrip_label(frame))}</option>"
         for i, frame in enumerate(frames)
     )
 

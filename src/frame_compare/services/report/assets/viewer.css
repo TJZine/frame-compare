@@ -2187,6 +2187,10 @@ body.rv-inspector-open .rv-viewer-stage {
         justify-content: flex-end;
     }
 
+    .rv-stage-overlay-info {
+        display: none;
+    }
+
     .rv-bottom-panel-bar {
         padding-inline: 0.75rem;
     }
@@ -2222,10 +2226,6 @@ body.rv-inspector-open .rv-viewer-stage {
     .rv-control-group {
         width: 100%;
         flex-wrap: wrap;
-    }
-
-    .rv-stage-overlay-info {
-        display: none;
     }
 
     .rv-overlay-label {
@@ -2276,6 +2276,27 @@ body.rv-inspector-open .rv-viewer-stage {
 
     .rv-viewport-palette .rv-lens-palette-controls {
         flex-flow: row wrap !important;
+    }
+
+    .rv-viewport-palette[data-orientation="vertical"] .rv-palette-group {
+        flex-direction: row;
+    }
+
+    .rv-viewport-palette[data-orientation="vertical"] .rv-palette-group + .rv-palette-group {
+        padding-top: 0;
+        border-top: none;
+    }
+
+    .rv-viewport-palette[data-orientation="vertical"] #zoom-range {
+        writing-mode: horizontal-tb;
+        direction: ltr;
+        width: 76px;
+        height: 20px;
+    }
+
+    .rv-viewport-palette[data-orientation="vertical"] .rv-align-popover {
+        right: 0;
+        bottom: calc(100% + 8px);
     }
 
     #btn-palette-orientation {
