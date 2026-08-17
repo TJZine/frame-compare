@@ -125,7 +125,7 @@ uv run --no-sync pytest --cov=src/frame_compare --cov-report=term-missing
 
 These examples do not replace the runbook. Changes to CLI/config contracts, runtime
 owners, Docker, Windows portable packaging, release workflows, or architectural
-boundaries require their documented full proof paths.
+boundaries require their documented complete verification paths.
 
 ## Documentation development
 

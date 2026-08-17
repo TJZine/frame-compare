@@ -117,6 +117,7 @@ Each executed run gets a reserved directory beneath `paths.generated_dir`:
 ```text
 generated/
 ├── cache/
+├── clip_probe.toml
 └── <run-name>/
     ├── report.html
     ├── screenshots/

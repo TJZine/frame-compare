@@ -71,6 +71,7 @@ Complete this table during each capture pass:
 | Browser and version | Codex In-app Browser (IAB production build; exact embedded engine version is not surfaced by the connector) |
 | Display scaling and browser zoom | Windows 100%; browser zoom 100%; report capture viewport 1683×1080 (exact visible IAB surface, 1080p height) |
 | Report theme | Dark |
+| HDR diagnostic transform | `bt2390` preset; target luminance `100 nits` |
 | Capture date | 2026-08-17 |
 | Captured by | Codex capture pass; maintainer review pending |
 

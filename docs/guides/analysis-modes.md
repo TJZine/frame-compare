@@ -32,16 +32,17 @@ performance_mode = "quality"
 | Mode | Metric coverage | Use it when |
 | --- | --- | --- |
 | `quality` (default) | Every eligible frame | You want the highest-confidence automatic dark, bright, and motion selection |
-| `performance` | A deterministic 25% sample distributed across as many as eight contiguous bursts | Faster analysis matters and approximate automatic selections are acceptable |
+| `performance` | A deterministic sample of `ceil(window_length / 4)` frames, distributed across as many as eight contiguous bursts | Faster analysis matters and approximate automatic selections are acceptable |
 
 Both modes use full-resolution luma PlaneStats on the prepared active picture, respect
 source trims and the shared leading/trailing exclusion window, and leave user and random
 frames eligible across the full selectable window.
 
 !!! warning "Performance mode is approximate"
-    It can miss brief events between sampled bursts and is not expected to match
-    `quality` frame-for-frame. It remains deterministic for the same inputs, runtime,
-    configuration, and selectable window.
+    It samples about 25% of the window; when the window length is not a multiple of
+    four, rounding up can exceed exactly 25%. It can miss brief events between sampled
+    bursts and is not expected to match `quality` frame-for-frame. It remains
+    deterministic for the same inputs, runtime, configuration, and selectable window.
 
 ## A practical starting point
 
