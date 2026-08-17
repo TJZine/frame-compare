@@ -103,29 +103,31 @@ document.addEventListener('DOMContentLoaded', () => {
     const probeHud = () => {
         const frameHud = document.querySelector('.rv-stage-overlay-info');
         const label = document.getElementById('label-left');
+        const rightLabel = document.getElementById('label-right');
+        const stage = document.querySelector('.rv-viewer-stage');
+        const palette = document.querySelector('.rv-viewport-palette');
         const rectanglesIntersect = (first, second) => !(
             first.right <= second.left
             || second.right <= first.left
             || first.bottom <= second.top
             || second.bottom <= first.top
         );
-        label.textContent = ReportViewer.diffOverlayLabel(
-            ReportViewer.state.data.clips[0],
-            ReportViewer.state.data.clips[1]
-        );
+        ReportViewer.setMode('diff');
+        label.textContent = ReportViewer.clipOverlayLabel(ReportViewer.state.data.clips[0], 'Base');
+        rightLabel.textContent = ReportViewer.clipOverlayLabel(ReportViewer.state.data.clips[1], 'Compare');
         document.documentElement.dataset.diffSourceHudVisible = String(
             window.getComputedStyle(label).display !== 'none'
-            && label.textContent.includes('Base')
-            && label.textContent.includes('Compare')
+            && window.getComputedStyle(rightLabel).display !== 'none'
+            && label.textContent.startsWith('BASE:')
+            && rightLabel.textContent.startsWith('COMPARE:')
         );
         document.documentElement.dataset.diffHudsSeparate = String(
             !rectanglesIntersect(label.getBoundingClientRect(), frameHud.getBoundingClientRect())
         );
         const sourceHudStyle = window.getComputedStyle(label);
-        const frameHudStyle = window.getComputedStyle(frameHud);
         document.documentElement.dataset.hudStylesAligned = String(
-            label.getBoundingClientRect().top === frameHud.getBoundingClientRect().top
-            && sourceHudStyle.borderRadius === frameHudStyle.borderRadius
+            label.getBoundingClientRect().top === rightLabel.getBoundingClientRect().top
+            && sourceHudStyle.borderRadius === window.getComputedStyle(rightLabel).borderRadius
         );
         ReportViewer.setOverlaysHidden(true, { save: false });
         document.documentElement.dataset.hudToggleHidesBoth = String(
@@ -146,6 +148,54 @@ document.addEventListener('DOMContentLoaded', () => {
             return !rectanglesIntersect(leftSliderLabel, rightSliderLabel);
         });
         document.documentElement.dataset.sliderLabelsSeparate = String(sliderLabelsSeparate);
+        const stageRect = stage.getBoundingClientRect();
+        const paletteRect = palette.getBoundingClientRect();
+        const leftSliderLabel = document.getElementById('label-left').getBoundingClientRect();
+        const rightSliderLabel = document.getElementById('label-right').getBoundingClientRect();
+        const paletteInset = window.innerWidth <= 768 ? 8 : 16;
+        const labelInset = window.innerWidth <= 768 ? 8 : 12;
+        const approximately = (first, second) => Math.abs(first - second) <= 1;
+        document.documentElement.dataset.paletteBottomAnchored = String(
+            stageRect.height > 0
+            && paletteRect.top >= stageRect.top
+            && approximately(paletteRect.bottom, stageRect.bottom - paletteInset)
+        );
+        document.documentElement.dataset.bottomHudsSeparate = String(
+            window.getComputedStyle(frameHud).display === 'none'
+            || !rectanglesIntersect(paletteRect, frameHud.getBoundingClientRect())
+        );
+        document.documentElement.dataset.sliderLabelsTopAnchored = String(
+            approximately(leftSliderLabel.top, stageRect.top + labelInset)
+            && approximately(rightSliderLabel.top, stageRect.top + labelInset)
+            && approximately(leftSliderLabel.left, stageRect.left + labelInset)
+            && approximately(rightSliderLabel.right, stageRect.right - labelInset)
+        );
+        document.documentElement.dataset.sliderLabelGeometry = JSON.stringify({
+            stage: stageRect.toJSON(),
+            left: leftSliderLabel.toJSON(),
+            right: rightSliderLabel.toJSON(),
+            labelInset,
+        });
+
+        stage.style.transition = 'none';
+        ReportViewer.setInspectorOpen(true, { focus: false, save: false });
+        const inspectorStageRect = stage.getBoundingClientRect();
+        const inspectorPaletteRect = palette.getBoundingClientRect();
+        document.documentElement.dataset.inspectorHudAnchored = String(
+            inspectorStageRect.height > 0
+            && inspectorPaletteRect.top >= inspectorStageRect.top
+            && approximately(inspectorPaletteRect.bottom, inspectorStageRect.bottom - paletteInset)
+            && approximately(inspectorPaletteRect.right, inspectorStageRect.right - paletteInset)
+        );
+        ReportViewer.setInspectorOpen(false, { focus: false, save: false });
+
+        ReportViewer.setMode('grid');
+        const gridStageRect = stage.getBoundingClientRect();
+        const gridPaletteRect = palette.getBoundingClientRect();
+        document.documentElement.dataset.gridHudAnchored = String(
+            window.getComputedStyle(document.querySelector('.rv-stage-labels')).display === 'none'
+            && approximately(gridPaletteRect.bottom, gridStageRect.bottom - paletteInset)
+        );
 
         ReportViewer.setMode('overlay');
         const before = label.getBoundingClientRect();
@@ -181,7 +231,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 @pytest.mark.integration
-def test_generated_report_initializes_observable_mode_and_aria_state(tmp_path: Path) -> None:
+@pytest.mark.parametrize(("width", "height"), [(375, 800), (1280, 720), (1920, 1080)])
+def test_generated_report_initializes_observable_mode_and_aria_state(
+    tmp_path: Path,
+    width: int,
+    height: int,
+) -> None:
     browser = _browser_executable()
     if browser is None:
         pytest.skip("Chrome/Chromium is unavailable; CI preflight makes this a required proof")
@@ -197,13 +252,14 @@ def test_generated_report_initializes_observable_mode_and_aria_state(tmp_path: P
             "--disable-gpu",
             "--no-first-run",
             "--virtual-time-budget=10000",
-            "--window-size=375,800",
+            f"--window-size={width},{height}",
             "--dump-dom",
             report_path.as_uri(),
         ],
         check=True,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=30,
     )
 
@@ -220,6 +276,13 @@ def test_generated_report_initializes_observable_mode_and_aria_state(tmp_path: P
     assert parser.document_attributes["data-hud-styles-aligned"] == "true"
     assert parser.document_attributes["data-hud-toggle-hides-both"] == "true"
     assert parser.document_attributes["data-slider-labels-separate"] == "true"
+    assert parser.document_attributes["data-palette-bottom-anchored"] == "true"
+    assert parser.document_attributes["data-bottom-huds-separate"] == "true"
+    assert parser.document_attributes["data-slider-labels-top-anchored"] == "true", (
+        parser.document_attributes["data-slider-label-geometry"]
+    )
+    assert parser.document_attributes["data-inspector-hud-anchored"] == "true"
+    assert parser.document_attributes["data-grid-hud-anchored"] == "true"
     assert parser.document_attributes["data-source-hud-text"] == (
         "Movie.Title.2026.2160p.WEB-DL.Service-GROUP • 1×1 • SDR"
     )

@@ -751,27 +751,36 @@ const summary = {};
         'Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR',
     );
     assert.equal(
-        viewer.diffOverlayLabel(clip, { label: 'Encode', resolution: [1920, 1080], hdr: false }),
-        'Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR (Base) ↔ Encode • 1920×1080 • SDR (Compare)',
+        viewer.clipOverlayLabel(clip, 'Left'),
+        'LEFT: Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR',
     );
-    summary.sourceOverlayLabel = viewer.clipOverlayLabel(clip);
+    summary.sourceOverlayLabels = {
+        single: viewer.clipOverlayLabel(clip),
+        slider: viewer.clipOverlayLabel(clip, 'Left'),
+        diff: viewer.clipOverlayLabel(clip, 'Base'),
+    };
 }
 
 {
     const { viewer } = loadViewer({ clipCount: 4 });
 
-    viewer.state.activeClipIdx = viewer.state.leftClipIdx;
-    const leftActiveLabels = viewer.blinkStageLabels('Clip 1', 'Clip 2');
-    assert.equal(leftActiveLabels.left, 'Clip 1');
-    assert.equal(leftActiveLabels.right, '');
+    const labels = viewer.blinkStageLabels('Clip 1', 'Clip 2');
+    assert.equal(labels.left, 'FIRST: Clip 1');
+    assert.equal(labels.right, 'SECOND: Clip 2');
 
+    viewer.state.mode = 'blink';
+    viewer.state.activeClipIdx = viewer.state.leftClipIdx;
+    viewer.updateImages();
+    assert.equal(viewer.dom.labelLeft.classList.contains('rv-overlay-label--active'), true);
+    assert.equal(viewer.dom.labelRight.classList.contains('rv-overlay-label--active'), false);
     viewer.state.activeClipIdx = viewer.state.rightClipIdx;
-    const rightActiveLabels = viewer.blinkStageLabels('Clip 1', 'Clip 2');
-    assert.equal(rightActiveLabels.left, 'Clip 2');
-    assert.equal(rightActiveLabels.right, '');
+    viewer.updateImages();
+    assert.equal(viewer.dom.labelLeft.classList.contains('rv-overlay-label--active'), false);
+    assert.equal(viewer.dom.labelRight.classList.contains('rv-overlay-label--active'), true);
     summary.blinkLabels = {
-        leftActive: leftActiveLabels,
-        rightActive: rightActiveLabels,
+        labels,
+        activeLabelMoved: false,
+        activeStateMoved: true,
     };
 }
 

@@ -93,6 +93,17 @@ def test_build_html_renders_mode_aware_clip_controls(report_payload: ReportPaylo
     active_controls = require_first(
         document, tag="div", attr_name="data-control-scope", attr_value="active"
     )
+    mode_controls = require_first(document, tag="div", class_name="rv-mode-controls")
+    mode_buttons = find_children(mode_controls, tag="button")
+    assert [button.attrs["data-mode"] for button in mode_buttons] == [
+        "slider",
+        "overlay",
+        "diff",
+        "blink",
+        "grid",
+    ]
+    assert "rv-context-controls" in pair_controls.classes
+    assert "rv-context-controls" in active_controls.classes
     assert pair_controls.attrs["aria-label"] == "Comparison pair"
     assert active_controls.attrs["aria-label"] == "Single clip"
     assert "hidden" in active_controls.attrs
@@ -167,8 +178,10 @@ def test_build_html_keeps_ten_plus_long_label_clips_reachable_and_mobile_safe(
 
     assert "text-overflow: ellipsis;" in css
     assert "flex-wrap: wrap;" in css
-    assert ".rv-mode-slider #label-left" in css
-    assert ".rv-mode-slider #label-right" in css
+    assert ".rv-overlay-label" in css
+    assert ".rv-overlay-label.right" in css
+    assert ".rv-mode-slider #label-left" not in css
+    assert ".rv-mode-slider #label-right" not in css
 
 
 def test_build_html_renders_frame_metadata_and_category_filters(

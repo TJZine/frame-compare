@@ -358,7 +358,7 @@ def _render_controls(
             <span id="active-filter-badge" class="rv-active-filter-badge" hidden></span>
         </div>
 
-        <div class="rv-control-group" role="radiogroup" aria-label="View mode">
+        <div class="rv-control-group rv-mode-controls" role="radiogroup" aria-label="View mode">
             <button data-mode="slider" class="active" role="radio" aria-checked="true" aria-label="Slider mode" title="Slider (S)">Slider</button>
             <button data-mode="overlay" role="radio" aria-checked="false" aria-label="Single clip view" title="Single clip view (O)">Single</button>
             <button data-mode="diff" role="radio" aria-checked="false" aria-label="Difference mode" title="Difference (D)">Diff</button>
@@ -366,13 +366,13 @@ def _render_controls(
             <button data-mode="grid" role="radio" aria-checked="false" aria-label="Grid mode" title="Grid comparison">Grid</button>
         </div>
 
-        <div class="rv-control-group rv-grid-controls" data-control-scope="grid" aria-label="Grid clips" hidden>
+        <div class="rv-control-group rv-grid-controls rv-context-controls" data-control-scope="grid" aria-label="Grid clips" hidden>
             <button id="btn-grid-prev" type="button" aria-label="Previous grid clips">←</button>
             <span class="rv-grid-position" data-grid-position aria-live="off"></span>
             <button id="btn-grid-next" type="button" aria-label="Next grid clips">→</button>
         </div>
 
-        <div class="rv-control-group" data-control-scope="pair" aria-label="Comparison pair">
+        <div class="rv-control-group rv-context-controls" data-control-scope="pair" aria-label="Comparison pair">
             <span class="rv-clip-prefix left">L:</span>
             <select id="left-select" aria-label="Left clip">
                 {left_clip_options}
@@ -385,7 +385,7 @@ def _render_controls(
             </select>
         </div>
 
-        <div class="rv-control-group" data-control-scope="active" aria-label="Single clip" hidden>
+        <div class="rv-control-group rv-context-controls" data-control-scope="active" aria-label="Single clip" hidden>
             <span class="rv-clip-prefix active">Clip:</span>
             <select id="active-select" aria-label="Single clip">
                 {active_clip_options}

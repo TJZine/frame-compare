@@ -2635,11 +2635,7 @@ const ReportViewer = {
 
     clipOverlayLabel(clip, role = '') {
         const identity = `${clip.label} • ${clip.resolution[0]}×${clip.resolution[1]} • ${clip.hdr ? 'HDR' : 'SDR'}`;
-        return role ? `${identity} (${role})` : identity;
-    },
-
-    diffOverlayLabel(baseClip, compareClip) {
-        return `${this.clipOverlayLabel(baseClip, 'Base')} ↔ ${this.clipOverlayLabel(compareClip, 'Compare')}`;
+        return role ? `${role.toUpperCase()}: ${identity}` : identity;
     },
 
     humanizeCategory(cat) {
@@ -2685,10 +2681,8 @@ const ReportViewer = {
 
     blinkStageLabels(leftClipLabel, rightClipLabel) {
         return {
-            left: this.state.activeClipIdx === this.state.rightClipIdx
-                ? rightClipLabel
-                : leftClipLabel,
-            right: '',
+            left: `FIRST: ${leftClipLabel}`,
+            right: `SECOND: ${rightClipLabel}`,
         };
     },
 
@@ -2751,6 +2745,14 @@ const ReportViewer = {
         this.dom.rightImg.alt = rightAlt;
         this.dom.labelLeft.textContent = leftLabelTxt;
         this.dom.labelRight.textContent = rightLabelTxt;
+        this.dom.labelLeft.classList.toggle(
+            'rv-overlay-label--active',
+            isBlink && this.state.activeClipIdx === this.state.leftClipIdx,
+        );
+        this.dom.labelRight.classList.toggle(
+            'rv-overlay-label--active',
+            isBlink && this.state.activeClipIdx === this.state.rightClipIdx,
+        );
         this.updateCurrentFrameMetadata(frameData);
 
         this.dom.leftLayer.classList.toggle(
@@ -2812,8 +2814,8 @@ const ReportViewer = {
                 leftLabelTxt = blinkLabels.left;
                 rightLabelTxt = blinkLabels.right;
             } else if (this.state.mode === 'diff') {
-                leftLabelTxt = this.diffOverlayLabel(leftClip, rightClip);
-                rightLabelTxt = '';
+                leftLabelTxt = this.clipOverlayLabel(leftClip, 'Base');
+                rightLabelTxt = this.clipOverlayLabel(rightClip, 'Compare');
             } else {
                 leftLabelTxt = this.clipOverlayLabel(leftClip, 'Left');
                 rightLabelTxt = this.clipOverlayLabel(rightClip, 'Right');

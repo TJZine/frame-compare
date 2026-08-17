@@ -37,3 +37,24 @@ def test_viewer_css_preserves_accessible_input_modes() -> None:
         target = css_block(coarse, selector)
         assert "min-width: 44px;" in target, selector
         assert "min-height: 44px;" in target, selector
+
+
+def test_viewer_css_keeps_hud_on_stage_edges() -> None:
+    css = get_css()
+
+    stage = css_block(css, ".rv-viewer-stage")
+    assert "flex: 1 1 0;" in stage
+    assert "min-height: 0;" in stage
+    fullscreen_stage = css_block(css, ".rv-viewer-stage:fullscreen")
+    assert "width: 100vw;" in fullscreen_stage
+    assert "height: 100vh;" in fullscreen_stage
+
+    source_label = css_block(css, ".rv-overlay-label")
+    assert "top: 12px;" in source_label
+    assert "left: 12px;" in source_label
+    assert ".rv-mode-slider #label-left" not in css
+    assert ".rv-mode-slider #label-right" not in css
+
+    palette = css_block(css, "\n.rv-viewport-palette {")
+    assert "right: 16px;" in palette
+    assert "bottom: 16px;" in palette
