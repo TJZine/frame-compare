@@ -29,12 +29,20 @@ from frame_compare.orchestration.types import (
     SlowpicsUploadConfirmationDecision,
     SlowpicsUploadConfirmationRequest,
 )
+from frame_compare.render.types import RenderedClipFacts
 from frame_compare.services.errors import SlowpicsError
 from frame_compare.services.publishers import PublishResult
 from frame_compare.services.slowpics_post_upload import (
     SlowpicsPostUploadRequest,
 )
 from frame_compare.services.types import TmdbMetadata
+from frame_compare.utils.media_facts import (
+    ActivePictureFacts,
+    PresentationState,
+    RenderedFrameFacts,
+    RenderedGeometryFacts,
+    SourceSignalFacts,
+)
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.progress import NullProgressReporter
 from tests.orchestration.phase_task_helpers import (
@@ -42,6 +50,45 @@ from tests.orchestration.phase_task_helpers import (
     _context,
     _RenderRunner,
 )
+
+
+def _render_artifacts(
+    *,
+    screenshots_by_label: dict[str, list[Path]],
+    screenshot_dir: Path | None,
+    source_frames_by_label: dict[str, list[int]] | None = None,
+) -> RenderArtifacts:
+    geometry = RenderedGeometryFacts(
+        source_size=(1920, 1080),
+        active_picture=ActivePictureFacts(0, 0, 1920, 1080, "full_frame", True),
+        cropped_size=(1920, 1080),
+        scaled_size=(1920, 1080),
+        final_canvas_size=(1920, 1080),
+        is_noop=True,
+    )
+    frames = source_frames_by_label or {
+        label: list(range(len(paths))) for label, paths in screenshots_by_label.items()
+    }
+    return RenderArtifacts(
+        screenshots_by_label=screenshots_by_label,
+        frame_facts_by_label={
+            label: [RenderedFrameFacts(source_frame=frame, picture_type="I") for frame in values]
+            for label, values in frames.items()
+        },
+        clip_facts_by_label={
+            label: RenderedClipFacts(
+                size_bytes=0,
+                source_resolution=(1920, 1080),
+                source_total_frames=100,
+                signal=SourceSignalFacts(is_hdr=False),
+                presentation_state=PresentationState.SDR,
+                tonemap_settings=None,
+                geometry=geometry,
+            )
+            for label in screenshots_by_label
+        },
+        screenshot_dir=screenshot_dir,
+    )
 
 
 async def test_run_metadata_phase_resolves_when_enabled_and_client_present(
@@ -81,12 +128,13 @@ def test_run_report_phase_builds_report_data_and_records_path(
 ) -> None:
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
     ctx = _context(tmp_path, comparisons=[comparison])
-    render = RenderArtifacts(
+    render = _render_artifacts(
         screenshots_by_label={
             "Reference": [tmp_path / "screenshots" / "reference_1.png"],
             "Encode 1": [tmp_path / "screenshots" / "encode_1.png"],
         },
         screenshot_dir=tmp_path / "screenshots",
+        source_frames_by_label={"Reference": [5], "Encode 1": [5]},
     )
     artifacts = RunArtifacts(
         render=render,
@@ -119,8 +167,12 @@ def test_run_report_phase_builds_report_data_and_records_path(
     assert artifacts.report_path is None
     assert report_data.frames == [5]
     assert report_data.frame_details == []
-    assert report_data.clips[0].screenshots == render.screenshots_by_label["Reference"]
-    assert report_data.clips[1].screenshots == render.screenshots_by_label["Encode 1"]
+    assert [image.path for image in report_data.clips[0].images] == render.screenshots_by_label[
+        "Reference"
+    ]
+    assert [image.path for image in report_data.clips[1].images] == render.screenshots_by_label[
+        "Encode 1"
+    ]
     assert report_data.slowpics_url == "https://slow.pics/c/example"
     assert [(clip.name, clip.resolution, clip.fps) for clip in report_data.clips] == [
         ("Reference", (1920, 1080), 24.0),
@@ -132,11 +184,12 @@ def test_run_report_phase_builds_report_data_and_records_path(
 def test_run_report_phase_requires_reserved_run_folder(tmp_path: Path) -> None:
     ctx = _context(tmp_path)
     ctx.workspace = replace(ctx.workspace, run_dir=None)
-    render = RenderArtifacts(
+    render = _render_artifacts(
         screenshots_by_label={
             "Reference": [tmp_path / "screenshots" / "reference_1.png"],
         },
         screenshot_dir=tmp_path / "screenshots",
+        source_frames_by_label={"Reference": [1]},
     )
 
     with pytest.raises(RuntimeError, match="reserved run folder"):
@@ -162,9 +215,10 @@ def test_run_report_phase_builds_four_clip_payload_inputs_in_clip_order(
         "Encode 2": [tmp_path / "screenshots" / "encode_b_1.png"],
         "Encode 3": [tmp_path / "screenshots" / "encode_c_1.png"],
     }
-    render = RenderArtifacts(
+    render = _render_artifacts(
         screenshots_by_label=screenshots_by_label,
         screenshot_dir=tmp_path / "screenshots",
+        source_frames_by_label={label: [12] for label in screenshots_by_label},
     )
     captured: dict[str, Any] = {}
 
@@ -194,7 +248,7 @@ def test_run_report_phase_builds_four_clip_payload_inputs_in_clip_order(
         "Encode 2",
         "Encode 3",
     ]
-    assert [clip.screenshots for clip in report_data.clips] == [
+    assert [[image.path for image in clip.images] for clip in report_data.clips] == [
         screenshots_by_label["Reference"],
         screenshots_by_label["Encode 1"],
         screenshots_by_label["Encode 2"],
@@ -221,7 +275,7 @@ def test_run_report_phase_passes_reference_source_frame_details(
             notes="user_override",
         )
     }
-    render = RenderArtifacts(
+    render = _render_artifacts(
         screenshots_by_label={
             "Reference": [
                 tmp_path / "screenshots" / "reference_1.png",
@@ -233,6 +287,7 @@ def test_run_report_phase_passes_reference_source_frame_details(
             ],
         },
         screenshot_dir=tmp_path / "screenshots",
+        source_frames_by_label={"Reference": [4, 5], "Encode 1": [1, 2]},
     )
     captured: dict[str, Any] = {}
     expected_path = tmp_path / "run" / "report.html"
@@ -262,8 +317,8 @@ def test_run_report_phase_passes_reference_source_frame_details(
     assert [
         (detail.label, detail.detail, detail.category) for detail in report_data.frame_details
     ] == [
-        ("User", "Source frame 4", "user_override"),
-        ("Frame 5", "Source frame 5", "quantile_bright"),
+        ("User", "Selected comparison frame", "user_override"),
+        ("Frame 2", "Selected comparison frame", "quantile_bright"),
     ]
     assert captured["report_config"] == ctx.config.report
 
@@ -289,7 +344,7 @@ async def test_run_publish_phase_sets_url_from_publish_result_and_delegates_post
     stale = screenshot_dir / "stale.png"
     for screenshot in (ref_10, enc_10, ref_20, enc_20, stale):
         screenshot.write_bytes(b"\x89PNG\r\n\x1a\n")
-    render = RenderArtifacts(
+    render = _render_artifacts(
         screenshots_by_label={
             "Reference": [ref_10, ref_20],
             "Encode 1": [enc_10, enc_20],
@@ -372,7 +427,7 @@ async def test_run_publish_phase_rejects_duplicate_clip_labels_at_translation_se
     screenshot_dir.mkdir()
     screenshot = screenshot_dir / "10 - reference.png"
     screenshot.write_bytes(b"\x89PNG\r\n\x1a\n")
-    render = RenderArtifacts(
+    render = _render_artifacts(
         screenshots_by_label={"Reference": [screenshot]},
         screenshot_dir=screenshot_dir,
     )
@@ -397,7 +452,7 @@ async def test_run_publish_phase_skips_shortcut_when_config_disabled(
     screenshot_dir.mkdir()
     screenshot = screenshot_dir / "10 - reference.png"
     screenshot.write_bytes(b"\x89PNG\r\n\x1a\n")
-    render = RenderArtifacts(
+    render = _render_artifacts(
         screenshots_by_label={"Reference": [screenshot]},
         screenshot_dir=screenshot_dir,
     )
@@ -812,7 +867,7 @@ async def test_warn_only_publish_phase_keeps_sanitized_service_error_in_warning_
 
     state = ExecutionState(
         artifacts=RunArtifacts(
-            render=RenderArtifacts(
+            render=_render_artifacts(
                 screenshots_by_label={
                     "Reference": [tmp_path / "screenshots" / "reference.png"],
                     "Encode 1": [tmp_path / "screenshots" / "encode.png"],
