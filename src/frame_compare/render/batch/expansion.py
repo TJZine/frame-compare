@@ -1,15 +1,13 @@
+"""Expand clip-level screenshot requests into exact frame render jobs."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-import structlog
-
+from frame_compare.config.schema import ConfigSchema, OverlayMode
 from frame_compare.config.schema_enums import ScreenshotAlignedScalePolicy, ScreenshotGeometryMode
 from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner, FFmpegRunner
 from frame_compare.render.geometry import (
-    ActiveRectDetectionMode,
     ActiveRectSource,
     GeometryRect,
     RenderGeometryOptions,
@@ -18,67 +16,22 @@ from frame_compare.render.geometry import (
     plan_render_geometry,
 )
 from frame_compare.render.naming import generate_screenshot_name, generate_screenshot_path
-from frame_compare.render.prepare import prepare_clip_for_render, resolve_tonemap_settings
+from frame_compare.render.prepare import prepare_clip_for_render
 from frame_compare.render.types import (
     EncoderSettings,
     OverlayConfig,
-    OverlayDiagnosticMetadata,
-    OverlayMode,
-    OverlaySelectionDetail,
+    PreparedRenderSource,
+    RenderedClipFacts,
     Renderer,
     RenderRequest,
     ScreenshotBatchRequest,
 )
-from frame_compare.vs.errors import TonemapRequiresVapourSynthError
-
-if TYPE_CHECKING:
-    import vapoursynth as vs
-
-    from frame_compare.config.schema import ConfigSchema
-
-log = structlog.get_logger()
-
-
-@dataclass(frozen=True, slots=True)
-class _PreparedBatchRequest:
-    request: ScreenshotBatchRequest
-    loaded_clip: vs.VideoNode | Path
-    hdr_info: str | None
-    base_text: str | None
-    width: int
-    height: int
-    num_frames: int | None
-
-
-@dataclass(frozen=True, slots=True)
-class _ResolvedRequestActiveRect:
-    rect: GeometryRect | None
-    source: ActiveRectSource
-
-
-def _validate_batch_request_lengths(request: ScreenshotBatchRequest) -> None:
-    """Fail fast when a batch request carries mismatched frame metadata lists."""
-    display_len = len(request.display_frames)
-    source_len = len(request.source_frames)
-    selection_len = len(request.selection_labels)
-    selection_detail_len = (
-        len(request.selection_details) if request.selection_details is not None else display_len
-    )
-    diagnostic_len = (
-        len(request.diagnostic_metadata) if request.diagnostic_metadata is not None else display_len
-    )
-    if (
-        display_len != source_len
-        or display_len != selection_len
-        or display_len != selection_detail_len
-        or display_len != diagnostic_len
-    ):
-        raise ValueError(
-            f"ScreenshotBatchRequest {request.label!r} has mismatched lengths: "
-            f"display_frames={display_len}, source_frames={source_len}, "
-            f"selection_labels={selection_len}, selection_details={selection_detail_len}, "
-            f"diagnostic_metadata={diagnostic_len}"
-        )
+from frame_compare.utils.media_facts import (
+    ActivePictureFacts,
+    ActivePictureProvenance,
+    PresentationState,
+    RenderedGeometryFacts,
+)
 
 
 def resolve_target_renderer(config: ConfigSchema, renderer: Renderer) -> Renderer:
@@ -87,477 +40,47 @@ def resolve_target_renderer(config: ConfigSchema, renderer: Renderer) -> Rendere
     return renderer
 
 
-def validate_ffmpeg_batch_tonemap_gate(
-    batch_requests: list[ScreenshotBatchRequest],
-    config: ConfigSchema,
-    renderer: Renderer,
-) -> None:
-    if renderer != "ffmpeg" or not config.color.enable_tonemap:
-        return
+def resolve_batch_ffmpeg_runner(
+    ffmpeg_runner: FFmpegRunner | None, *, extraction_timeout_seconds: float = 30.0
+) -> FFmpegRunner:
+    return ffmpeg_runner or DefaultFFmpegRunner(
+        extraction_timeout_seconds=extraction_timeout_seconds
+    )
 
-    if any(req.probe_is_hdr is not False for req in batch_requests):
+
+def validate_ffmpeg_batch_tonemap_gate(
+    batch_requests: list[ScreenshotBatchRequest], config: ConfigSchema, renderer: Renderer
+) -> None:
+    if (
+        renderer == "ffmpeg"
+        and config.color.enable_tonemap
+        and any(request.signal.is_hdr for request in batch_requests)
+    ):
+        from frame_compare.vs.errors import TonemapRequiresVapourSynthError
+
         raise TonemapRequiresVapourSynthError()
 
 
-def resolve_batch_ffmpeg_runner(
-    ffmpeg_runner: FFmpegRunner | None,
-    *,
-    extraction_timeout_seconds: float = 30.0,
-) -> FFmpegRunner:
-    if ffmpeg_runner is not None:
-        return ffmpeg_runner
-
-    return DefaultFFmpegRunner(extraction_timeout_seconds=extraction_timeout_seconds)
-
-
 def validate_batch_requests(batch_requests: list[ScreenshotBatchRequest]) -> None:
-    seen_labels: set[str] = set()
-    seen_output_names: dict[str, tuple[str, int]] = {}
-    for req in batch_requests:
-        _validate_batch_request_lengths(req)
-        if req.label in seen_labels:
-            raise ValueError(f"Duplicate label {req.label!r} detected in batch requests")
-        seen_labels.add(req.label)
-        filename_label = _request_filename_label(req)
-        for display_frame in req.display_frames:
-            output_name = generate_screenshot_name(filename_label, display_frame)
-            prior = seen_output_names.get(output_name)
-            if prior is not None:
-                prior_label, prior_display_frame = prior
-                raise ValueError(
-                    f"Duplicate screenshot output {output_name!r} detected for "
-                    f"label={req.label!r}, display_frame={display_frame}; already produced by "
-                    f"label={prior_label!r}, display_frame={prior_display_frame}"
-                )
-            seen_output_names[output_name] = (req.label, display_frame)
-
-
-def _request_filename_label(request: ScreenshotBatchRequest) -> str:
-    return request.filename_label if request.filename_label is not None else request.label
-
-
-def _validate_source_frame_range(
-    request: ScreenshotBatchRequest,
-    *,
-    source_frame: int,
-    num_frames: int | None,
-) -> None:
-    if num_frames is None:
-        return
-
-    if 0 <= source_frame < num_frames:
-        return
-
-    raise ValueError(
-        f"ScreenshotBatchRequest {request.label!r} requested source frame "
-        f"{source_frame} outside valid range 0..{num_frames - 1} "
-        f"for {request.clip_path}"
-    )
-
-
-def _resolve_num_frames(
-    source_num_frames: object,
-    probe_num_frames: int | None,
-) -> int | None:
-    if type(source_num_frames) is int:
-        return source_num_frames
-    return probe_num_frames
-
-
-def _build_overlay_config(
-    request: ScreenshotBatchRequest,
-    *,
-    overlay_mode: OverlayMode,
-    source_frame: int,
-    display_frame: int,
-    selection_label: str | None,
-    selection_detail: OverlaySelectionDetail | None,
-    diagnostic_metadata: OverlayDiagnosticMetadata | None,
-    resolution: tuple[int, int],
-    resolution_summary: str | None,
-    origin: tuple[int, int] | None,
-    hdr_info: str | None,
-    base_text: str | None,
-    num_frames: int | None,
-    include_frame_number: bool,
-) -> OverlayConfig | None:
-    if overlay_mode == OverlayMode.NONE:
-        return None
-    return OverlayConfig(
-        mode=overlay_mode,
-        label=request.label,
-        frame_number=source_frame,
-        display_frame_number=display_frame,
-        base_text=base_text,
-        resolution_summary=resolution_summary,
-        num_frames=num_frames,
-        selection_label=selection_label,
-        selection_detail=selection_detail,
-        diagnostic_metadata=diagnostic_metadata,
-        burn_in_label=_request_filename_label(request),
-        include_frame_number=include_frame_number,
-        resolution=resolution,
-        origin=origin,
-        hdr_info=hdr_info,
-        font_path=None,
-    )
-
-
-def _format_dimensions(width: int, height: int) -> str:
-    return f"{int(width)} × {int(height)}"
-
-
-def _overlay_resolution_summary(
-    *,
-    source_size: tuple[int, int],
-    geometry_plan: RenderGeometryPlan | None,
-) -> str | None:
-    transformed = False
-    if geometry_plan is None:
-        original = source_size
-        final = source_size
-    else:
-        original = source_size
-        final = geometry_plan.final_canvas_size
-        transformed = not geometry_plan.is_noop
-
-    original_width, original_height = original
-    final_width, final_height = final
-    if original_width <= 0 or original_height <= 0 or final_width <= 0 or final_height <= 0:
-        return None
-
-    original_text = _format_dimensions(original_width, original_height)
-    final_text = _format_dimensions(final_width, final_height)
-    if not transformed:
-        return f"{original_text}  (native)"
-    return f"{original_text} → {final_text}  (original → target)"
-
-
-def _overlay_base_text_for_request(
-    *,
-    config: ConfigSchema,
-    source_is_hdr: bool,
-) -> str | None:
-    if not source_is_hdr or not config.color.enable_tonemap:
-        return None
-
-    settings = resolve_tonemap_settings(config)
-    return (
-        "Tonemapping Algorithm: "
-        f"{settings.tone_curve.value} "
-        f"dpd = {int(settings.dynamic_peak_detection)} "
-        f"dst = {settings.target_nits} nits"
-    )
-
-
-def _dovi_l5_active_rect(
-    metadata: OverlayDiagnosticMetadata | None,
-    *,
-    width: int,
-    height: int,
-) -> GeometryRect | None:
-    dovi = metadata.dolby_vision if metadata is not None else None
-    if dovi is None:
-        return None
-    margins = (dovi.l5_left, dovi.l5_top, dovi.l5_right, dovi.l5_bottom)
-    if any(value is None for value in margins):
-        return None
-
-    left, top, right, bottom = margins
-    if left is None or top is None or right is None or bottom is None:
-        return None
-    if left < 0 or top < 0 or right < 0 or bottom < 0:
-        return None
-    if left == 0 and top == 0 and right == 0 and bottom == 0:
-        return None
-
-    active_width = width - left - right
-    active_height = height - top - bottom
-    if active_width <= 0 or active_height <= 0:
-        return None
-    return GeometryRect(left, top, active_width, active_height)
-
-
-def _dovi_l5_metadata_warning_reason(
-    request: ScreenshotBatchRequest,
-    *,
-    width: int,
-    height: int,
-) -> str | None:
-    if request.diagnostic_metadata is None:
-        return None
-
-    if not request.diagnostic_metadata:
-        return "no selected-frame metadata entries were available"
-
-    rects: set[GeometryRect] = set()
-    partial_count = 0
-    invalid_count = 0
-    missing_count = 0
-    for metadata in request.diagnostic_metadata:
-        dovi = metadata.dolby_vision if metadata is not None else None
-        if dovi is None:
-            missing_count += 1
-            continue
-
-        margins = (dovi.l5_left, dovi.l5_top, dovi.l5_right, dovi.l5_bottom)
-        if all(value is None for value in margins):
-            missing_count += 1
-            continue
-        if any(value is None for value in margins):
-            partial_count += 1
-            continue
-
-        rect = _dovi_l5_active_rect(metadata, width=width, height=height)
-        if rect is None:
-            invalid_count += 1
-            continue
-        rects.add(rect)
-
-    if partial_count:
-        return "one or more selected-frame entries had partial Dolby Vision L5 margins"
-    if invalid_count:
-        return "one or more selected-frame entries had invalid Dolby Vision L5 margins"
-    if missing_count and (rects or partial_count or invalid_count):
-        return "one or more selected-frame entries had no Dolby Vision L5 margins"
-    if len(rects) > 1:
-        return "selected-frame Dolby Vision L5 margins were inconsistent"
-    return None
-
-
-def _trusted_metadata_active_rect(
-    request: ScreenshotBatchRequest,
-    *,
-    width: int,
-    height: int,
-) -> GeometryRect | None:
-    if request.diagnostic_metadata is None:
-        return None
-
-    rects: set[GeometryRect] = set()
-    for metadata in request.diagnostic_metadata:
-        rect = _dovi_l5_active_rect(metadata, width=width, height=height)
-        if rect is None:
-            return None
-        rects.add(rect)
-
-    if len(rects) == 1:
-        return next(iter(rects))
-    return None
-
-
-def _resolve_request_active_rect(
-    request: ScreenshotBatchRequest,
-    *,
-    width: int,
-    height: int,
-    warnings: list[str] | None,
-) -> _ResolvedRequestActiveRect:
-    if request.active_rect is not None:
-        if request.active_rect_source is not None:
-            return _ResolvedRequestActiveRect(
-                request.active_rect,
-                _validated_active_rect_source(request.active_rect_source),
-            )
-        if request.diagnostic_metadata_trusted_for_geometry:
-            _warn_if_metadata_geometry_rejected(
-                request,
-                width=width,
-                height=height,
-                fallback="explicit active rect override",
-                warnings=warnings,
-            )
-        return _ResolvedRequestActiveRect(request.active_rect, "explicit")
-
-    if request.diagnostic_metadata_trusted_for_geometry:
-        metadata_rect = _trusted_metadata_active_rect(request, width=width, height=height)
-        if metadata_rect is not None:
-            return _ResolvedRequestActiveRect(metadata_rect, "metadata")
-        _warn_if_metadata_geometry_rejected(
-            request,
-            width=width,
-            height=height,
-            fallback="geometry fallback",
-            warnings=warnings,
-        )
-
-    return _ResolvedRequestActiveRect(None, "explicit")
-
-
-def _validated_active_rect_source(value: ActiveRectSource) -> ActiveRectSource:
-    if value not in (
-        "explicit",
-        "metadata",
-        "dimension-derived",
-        "aspect-ratio-derived",
-        "content-derived",
-        "full-frame",
-    ):
-        raise ValueError(f"Unsupported active rect source {value!r}")
-    return value
-
-
-def _warn_if_metadata_geometry_rejected(
-    request: ScreenshotBatchRequest,
-    *,
-    width: int,
-    height: int,
-    fallback: str,
-    warnings: list[str] | None,
-) -> None:
-    warning_reason = _dovi_l5_metadata_warning_reason(request, width=width, height=height)
-    if warning_reason is None:
-        return
-
-    warning = (
-        f"Screenshot geometry alignment ignored Dolby Vision L5 active rect metadata "
-        f"for {request.label}: {warning_reason}; using {fallback}."
-    )
-    log.warning(
-        "screenshot_geometry_metadata_active_rect_ignored",
-        reason=warning_reason,
-        label=request.label,
-        has_explicit_active_rect=request.active_rect is not None,
-    )
-    if warnings is not None:
-        warnings.append(warning)
-
-
-def _prepare_batch_requests(
-    batch_requests: list[ScreenshotBatchRequest],
-    *,
-    config: ConfigSchema,
-    renderer: Renderer,
-    ffmpeg_runner: FFmpegRunner,
-) -> list[_PreparedBatchRequest]:
-    prepared_requests: list[_PreparedBatchRequest] = []
-    for req in batch_requests:
-        loaded_clip, _, hdr_info, source_info = prepare_clip_for_render(
-            req.clip_path, renderer, config, ffmpeg_runner=ffmpeg_runner
-        )
-
-        width = source_info.width if source_info is not None else (req.probe_width or 0)
-        height = source_info.height if source_info is not None else (req.probe_height or 0)
-        num_frames = (
-            _resolve_num_frames(source_info.num_frames, req.probe_num_frames)
-            if source_info is not None
-            else req.probe_num_frames
-        )
-        resolved_hdr_info = (
-            hdr_info if source_info is not None else ("HDR" if req.probe_is_hdr else None)
-        )
-        prepared_requests.append(
-            _PreparedBatchRequest(
-                request=req,
-                loaded_clip=loaded_clip,
-                hdr_info=resolved_hdr_info,
-                base_text=_overlay_base_text_for_request(
-                    config=config,
-                    source_is_hdr=(
-                        source_info.is_hdr if source_info is not None else req.probe_is_hdr is True
-                    ),
-                ),
-                width=width,
-                height=height,
-                num_frames=num_frames,
-            )
-        )
-    return prepared_requests
-
-
-def _geometry_plans_for_batch(
-    prepared_requests: list[_PreparedBatchRequest],
-    *,
-    config: ConfigSchema,
-    warnings: list[str] | None = None,
-) -> tuple[RenderGeometryPlan | None, ...]:
-    if config.screenshots.geometry_mode == ScreenshotGeometryMode.NATIVE:
-        return tuple(None for _prepared in prepared_requests)
-    if not any(prepared.request.source_frames for prepared in prepared_requests):
-        return tuple(None for _prepared in prepared_requests)
-    missing_dimension_labels = tuple(
-        prepared.request.label
-        for prepared in prepared_requests
-        if prepared.width <= 0 or prepared.height <= 0
-    )
-    if missing_dimension_labels:
-        visible_labels = ", ".join(missing_dimension_labels[:3])
-        if len(missing_dimension_labels) > 3:
-            visible_labels += f", ... ({len(missing_dimension_labels) - 3} more)"
-        warning = (
-            "Screenshot geometry alignment skipped: source dimensions were unavailable "
-            f"for {visible_labels}; using native screenshot geometry for this batch."
-        )
-        log.warning(
-            "screenshot_geometry_alignment_skipped",
-            reason="missing_source_dimensions",
-            labels=list(missing_dimension_labels),
-        )
-        if warnings is not None:
-            warnings.append(warning)
-        return tuple(None for _prepared in prepared_requests)
-
-    sources = tuple(
-        _source_geometry_for_request(prepared, warnings=warnings) for prepared in prepared_requests
-    )
-    return plan_render_geometry(
-        sources,
-        mode="aligned",
-        options=_geometry_options_from_config(config, prepared_requests),
-    )
-
-
-def _geometry_options_from_config(
-    config: ConfigSchema,
-    prepared_requests: list[_PreparedBatchRequest] | None = None,
-) -> RenderGeometryOptions:
-    target_size: tuple[int, int] | None = None
-    if config.screenshots.aligned_scale_policy == ScreenshotAlignedScalePolicy.EXPLICIT_SIZE:
-        target_width = config.screenshots.aligned_target_width
-        target_height = config.screenshots.aligned_target_height
-        if target_width is None or target_height is None:
-            raise ValueError("explicit screenshot geometry target size is incomplete")
-        target_size = (target_width, target_height)
-
-    return RenderGeometryOptions(
-        active_rect_detection=_active_rect_detection_for_geometry(config, prepared_requests),
-        aligned_scale_policy=config.screenshots.aligned_scale_policy.value,
-        aligned_target_size=target_size,
-    )
-
-
-def _active_rect_detection_for_geometry(
-    config: ConfigSchema,
-    prepared_requests: list[_PreparedBatchRequest] | None,
-) -> ActiveRectDetectionMode:
-    if prepared_requests and all(
-        prepared.request.active_rect is not None
-        and prepared.request.active_rect_source is not None
-        and prepared.request.active_rect_detection_mode is not None
-        for prepared in prepared_requests
-    ):
-        return "provided"
-    return config.screenshots.active_rect_detection.value
-
-
-def _source_geometry_for_request(
-    prepared: _PreparedBatchRequest,
-    *,
-    warnings: list[str] | None,
-) -> SourceGeometry:
-    active_rect = _resolve_request_active_rect(
-        prepared.request,
-        width=prepared.width,
-        height=prepared.height,
-        warnings=warnings,
-    )
-    return SourceGeometry(
-        width=prepared.width,
-        height=prepared.height,
-        active_rect=active_rect.rect,
-        active_rect_source=active_rect.source,
-        label=prepared.request.label,
-    )
+    labels: set[str] = set()
+    output_names: set[str] = set()
+    for request in batch_requests:
+        lengths = {
+            len(request.source_frames),
+            len(request.comparison_frames),
+            len(request.selection_labels),
+        }
+        if len(lengths) != 1:
+            raise ValueError(f"ScreenshotBatchRequest {request.label!r} list lengths differ")
+        if request.label in labels:
+            raise ValueError(f"Duplicate label {request.label!r} detected in batch requests")
+        labels.add(request.label)
+        filename_label = request.filename_label or request.label
+        for frame in request.comparison_frames:
+            output_name = generate_screenshot_name(filename_label, frame)
+            if output_name in output_names:
+                raise ValueError(f"Duplicate screenshot output {output_name!r}")
+            output_names.add(output_name)
 
 
 def expand_batch_render_requests(
@@ -569,90 +92,96 @@ def expand_batch_render_requests(
     renderer: Renderer,
     ffmpeg_runner: FFmpegRunner,
     warnings: list[str] | None = None,
-) -> tuple[list[RenderRequest], dict[str, range]]:
-    all_requests: list[RenderRequest] = []
-    label_to_range: dict[str, range] = {}
-    start_idx = 0
-    prepared_requests = _prepare_batch_requests(
-        batch_requests,
-        config=config,
-        renderer=renderer,
-        ffmpeg_runner=ffmpeg_runner,
-    )
-    geometry_plans = _geometry_plans_for_batch(
-        prepared_requests,
-        config=config,
-        warnings=warnings,
-    )
-
-    for prepared, geometry_plan in zip(prepared_requests, geometry_plans, strict=True):
-        req = prepared.request
-        num_frames_for_req = len(req.source_frames)
-        label_to_range[req.label] = range(start_idx, start_idx + num_frames_for_req)
-        start_idx += num_frames_for_req
-        overlay_resolution = (
-            geometry_plan.final_canvas_size
-            if geometry_plan is not None
-            else (prepared.width, prepared.height)
+) -> tuple[list[RenderRequest], dict[str, range], dict[str, RenderedClipFacts]]:
+    del warnings
+    prepared = [
+        prepare_clip_for_render(
+            request.clip_path,
+            renderer,
+            config,
+            ffmpeg_runner=ffmpeg_runner,
         )
-        overlay_origin = geometry_plan.overlay_origin if geometry_plan is not None else None
-        overlay_resolution_summary = _overlay_resolution_summary(
-            source_size=(prepared.width, prepared.height),
-            geometry_plan=geometry_plan,
+        for request in batch_requests
+    ]
+    plans = _geometry_plans(batch_requests, prepared, config)
+    requests: list[RenderRequest] = []
+    ranges: dict[str, range] = {}
+    clip_facts: dict[str, RenderedClipFacts] = {}
+    start = 0
+
+    for batch, source, plan in zip(batch_requests, prepared, plans, strict=True):
+        geometry = _geometry_facts(plan)
+        source_resolution = (
+            source.source_dimensions
+            if all(dimension > 0 for dimension in source.source_dimensions)
+            else batch.source_resolution
         )
+        source_total_frames = source.source_total_frames or batch.source_total_frames
+        state = (
+            PresentationState.HDR_TONEMAPPED
+            if source.tonemap_settings is not None
+            else PresentationState.HDR_TONEMAP_OFF
+            if batch.signal.is_hdr
+            else PresentationState.SDR
+        )
+        clip_facts[batch.label] = RenderedClipFacts(
+            size_bytes=batch.size_bytes,
+            source_resolution=source_resolution,
+            source_total_frames=source_total_frames,
+            signal=batch.signal,
+            presentation_state=state,
+            tonemap_settings=source.tonemap_settings,
+            geometry=geometry,
+        )
+        ranges[batch.label] = range(start, start + len(batch.source_frames))
+        start += len(batch.source_frames)
 
-        for idx, source_frame in enumerate(req.source_frames):
-            _validate_source_frame_range(
-                req, source_frame=source_frame, num_frames=prepared.num_frames
+        for index, source_frame in enumerate(batch.source_frames):
+            if source_total_frames is not None and not (0 <= source_frame < source_total_frames):
+                raise ValueError(
+                    f"ScreenshotBatchRequest {batch.label!r} requested source frame "
+                    f"{source_frame} outside valid range"
+                )
+            comparison_frame = batch.comparison_frames[index]
+            overlay = None
+            if overlay_mode != OverlayMode.NONE:
+                overlay = OverlayConfig(
+                    mode=overlay_mode,
+                    label=batch.label,
+                    comparison_frame=comparison_frame,
+                    source_frame=source_frame,
+                    source_total_frames=source_total_frames,
+                    include_frame_number=config.screenshots.include_frame_number,
+                    selection_label=batch.selection_labels[index],
+                    file_size_bytes=batch.size_bytes,
+                    source_resolution=source_resolution,
+                    signal=batch.signal,
+                    presentation_state=state,
+                    tonemap_settings=source.tonemap_settings,
+                    geometry=geometry,
+                    font_path=None,
+                    origin=plan.overlay_origin,
+                )
+            requests.append(
+                RenderRequest(
+                    clip=source.prepared_clip,
+                    diagnostic_source=source.diagnostic_source,
+                    frame_number=source_frame,
+                    output_path=generate_screenshot_path(
+                        output_dir,
+                        batch.filename_label or batch.label,
+                        comparison_frame,
+                    ),
+                    overlay=overlay,
+                    encoder_settings=EncoderSettings(
+                        compression=config.screenshots.png_compression,
+                        vs_writer=config.screenshots.vs_writer,
+                    ),
+                    ffmpeg_runner=ffmpeg_runner,
+                    geometry_plan=plan,
+                )
             )
-            display_frame = req.display_frames[idx]
-            selection_detail = (
-                req.selection_details[idx] if req.selection_details is not None else None
-            )
-            diagnostic_metadata = (
-                req.diagnostic_metadata[idx] if req.diagnostic_metadata is not None else None
-            )
-            selection_label = (
-                selection_detail.label
-                if selection_detail is not None
-                else req.selection_labels[idx]
-            )
-
-            output_path = generate_screenshot_path(
-                output_dir, _request_filename_label(req), display_frame
-            )
-            overlay = _build_overlay_config(
-                req,
-                overlay_mode=overlay_mode,
-                source_frame=source_frame,
-                display_frame=display_frame,
-                selection_label=selection_label,
-                selection_detail=selection_detail,
-                diagnostic_metadata=diagnostic_metadata,
-                resolution=overlay_resolution,
-                resolution_summary=overlay_resolution_summary,
-                origin=overlay_origin,
-                hdr_info=prepared.hdr_info,
-                base_text=prepared.base_text,
-                num_frames=prepared.num_frames,
-                include_frame_number=config.screenshots.include_frame_number,
-            )
-
-            render_req = RenderRequest(
-                clip=prepared.loaded_clip,
-                frame_number=source_frame,
-                output_path=output_path,
-                overlay=overlay,
-                encoder_settings=EncoderSettings(
-                    compression=config.screenshots.png_compression,
-                    vs_writer=config.screenshots.vs_writer,
-                ),
-                ffmpeg_runner=ffmpeg_runner,
-                geometry_plan=geometry_plan,
-            )
-            all_requests.append(render_req)
-
-    return all_requests, label_to_range
+    return requests, ranges, clip_facts
 
 
 def render_batch_results_by_label(
@@ -660,8 +189,112 @@ def render_batch_results_by_label(
     rendered_paths: list[Path],
     label_to_range: dict[str, range],
 ) -> dict[str, list[Path]]:
-    results: dict[str, list[Path]] = {}
-    for req in batch_requests:
-        result_range = label_to_range[req.label]
-        results[req.label] = rendered_paths[result_range.start : result_range.stop]
-    return results
+    return {
+        request.label: rendered_paths[
+            label_to_range[request.label].start : label_to_range[request.label].stop
+        ]
+        for request in batch_requests
+    }
+
+
+def _geometry_plans(
+    requests: list[ScreenshotBatchRequest],
+    prepared: list[PreparedRenderSource],
+    config: ConfigSchema,
+) -> tuple[RenderGeometryPlan, ...]:
+    sources: list[SourceGeometry] = []
+    for request, source in zip(requests, prepared, strict=True):
+        dimensions = source.source_dimensions
+        width, height = (
+            dimensions
+            if all(dimension > 0 for dimension in dimensions)
+            else request.source_resolution
+        )
+        active = request.active_picture
+        if request.source_resolution[0] <= 0 or request.source_resolution[1] <= 0:
+            active = ActivePictureFacts(0, 0, width, height, "full_frame", True)
+        sources.append(
+            SourceGeometry(
+                width=width,
+                height=height,
+                active_rect=GeometryRect(active.x, active.y, active.width, active.height),
+                active_rect_source=_to_geometry_provenance(active.provenance),
+                label=request.label,
+            )
+        )
+    mode = (
+        "aligned"
+        if config.screenshots.geometry_mode == ScreenshotGeometryMode.ALIGNED
+        else "native"
+    )
+    return plan_render_geometry(
+        tuple(sources),
+        mode=mode,
+        options=RenderGeometryOptions(
+            active_rect_detection="provided",
+            aligned_scale_policy=config.screenshots.aligned_scale_policy.value,
+            aligned_target_size=_target_size(config),
+        ),
+    )
+
+
+def _target_size(config: ConfigSchema) -> tuple[int, int] | None:
+    if config.screenshots.aligned_scale_policy != ScreenshotAlignedScalePolicy.EXPLICIT_SIZE:
+        return None
+    width = config.screenshots.aligned_target_width
+    height = config.screenshots.aligned_target_height
+    if width is None or height is None:
+        raise ValueError("explicit screenshot geometry target size is incomplete")
+    return width, height
+
+
+def _geometry_facts(plan: RenderGeometryPlan) -> RenderedGeometryFacts:
+    provenance = _from_geometry_provenance(plan.active_rect_source)
+    active = ActivePictureFacts(
+        x=plan.active_rect.x,
+        y=plan.active_rect.y,
+        width=plan.active_rect.width,
+        height=plan.active_rect.height,
+        provenance=provenance,
+        is_full_frame=plan.active_rect == plan.source_rect,
+    )
+    return RenderedGeometryFacts(
+        source_size=(plan.source.width, plan.source.height),
+        active_picture=active,
+        cropped_size=plan.cropped_size,
+        scaled_size=plan.scaled_size,
+        final_canvas_size=plan.final_canvas_size,
+        is_noop=plan.is_noop,
+    )
+
+
+def _to_geometry_provenance(provenance: ActivePictureProvenance) -> ActiveRectSource:
+    match provenance:
+        case "explicit":
+            return "explicit"
+        case "dolby_vision_l5":
+            return "metadata"
+        case "dimension_derived":
+            return "dimension-derived"
+        case "aspect_ratio_derived":
+            return "aspect-ratio-derived"
+        case "content_derived":
+            return "content-derived"
+        case "full_frame":
+            return "full-frame"
+
+
+def _from_geometry_provenance(provenance: ActiveRectSource) -> ActivePictureProvenance:
+    match provenance:
+        case "explicit":
+            return "explicit"
+        case "metadata":
+            return "dolby_vision_l5"
+        case "dimension-derived":
+            return "dimension_derived"
+        case "aspect-ratio-derived":
+            return "aspect_ratio_derived"
+        case "content-derived":
+            return "content_derived"
+        case "full-frame":
+            return "full_frame"

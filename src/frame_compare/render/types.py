@@ -1,12 +1,20 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from frame_compare.config.schema import OverlayMode
 from frame_compare.config.schema_enums import VsScreenshotWriter
-from frame_compare.render.geometry import ActiveRectDetectionMode, ActiveRectSource, GeometryRect
+from frame_compare.render.geometry import ActiveRectDetectionMode
+from frame_compare.utils.media_facts import (
+    ActivePictureFacts,
+    PresentationState,
+    RenderedFrameFacts,
+    RenderedGeometryFacts,
+    SourceSignalFacts,
+)
+from frame_compare.vs.types import TonemapSettings
 
 if TYPE_CHECKING:
     import vapoursynth as vs
@@ -21,38 +29,36 @@ class EncoderSettings:
     """Encoder settings for screenshot output files."""
 
     format: str = "png"
-    compression: int = 6  # PNG compression 0-9
+    compression: int = 6
     bit_depth: int = 8
     vs_writer: VsScreenshotWriter = VsScreenshotWriter.AUTO
 
 
-@dataclass(kw_only=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class OverlayConfig:
-    """Overlay rendering configuration for a single output frame."""
+    """Immutable presentation input for one screenshot overlay."""
 
-    mode: OverlayMode  # minimal, standard, diagnostic
-    label: str  # Human clip label for non-burn-in surfaces
-    frame_number: int
-    resolution: tuple[int, int]
-    hdr_info: str | None
+    mode: OverlayMode
+    label: str
+    comparison_frame: int
+    source_frame: int
+    source_total_frames: int | None
+    include_frame_number: bool
+    selection_label: str | None
+    file_size_bytes: int
+    source_resolution: tuple[int, int]
+    signal: SourceSignalFacts
+    presentation_state: PresentationState
+    tonemap_settings: TonemapSettings | None
+    geometry: RenderedGeometryFacts
     font_path: Path | None
-    base_text: str | None = None
-    resolution_summary: str | None = None
     origin: tuple[int, int] | None = None
-    display_frame_number: int | None = None
-    num_frames: int | None = None
-    picture_type: str | None = None
-    selection_label: str | None = None
-    selection_detail: OverlaySelectionDetail | None = None
-    diagnostic_metadata: OverlayDiagnosticMetadata | None = None
-    burn_in_label: str | None = None  # Screenshot identity for overlay text
-    include_frame_number: bool = True
     font_size: int = 24
 
 
 @dataclass(frozen=True, slots=True)
 class OverlaySelectionDetail:
-    """Render-local per-frame selection metadata for overlay consumers."""
+    """Render-local per-frame selection metadata."""
 
     frame_index: int
     label: str
@@ -64,50 +70,83 @@ class OverlaySelectionDetail:
 
 
 @dataclass(frozen=True, slots=True)
-class OverlayFrameMeasurement:
-    """Render-local score-derived diagnostic measurement for a selected frame."""
+class PreparedRenderSource:
+    """Original diagnostic source and prepared image-producing render graph."""
 
-    avg_nits: float
-    max_nits: float
-    category: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class OverlayDolbyVisionMetadata:
-    """Render-local clip-level Dolby Vision facts extracted from preserved props."""
-
-    rpu_present: bool = False
-    block_index: int | None = None
-    block_total: int | None = None
-    target_nits: float | None = None
-    l2_target_nits: float | None = None
-    l1_average: float | None = None
-    l1_maximum: float | None = None
-    l5_left: int | None = None
-    l5_right: int | None = None
-    l5_top: int | None = None
-    l5_bottom: int | None = None
-    l6_max_cll: float | None = None
-    l6_max_fall: float | None = None
+    diagnostic_source: vs.VideoNode | Path
+    prepared_clip: vs.VideoNode | Path
+    source_dimensions: tuple[int, int]
+    source_total_frames: int | None
+    source_is_hdr: bool
+    presentation_state: PresentationState
+    tonemap_settings: TonemapSettings | None
 
 
 @dataclass(frozen=True, slots=True)
-class OverlayDiagnosticMetadata:
-    """Render-local structured metadata for diagnostic overlay composition."""
+class RenderedClipFacts:
+    """Canonical clip facts produced while expanding a render batch."""
 
-    mastering_display: str | None = None
-    max_cll: int | None = None
-    max_fall: int | None = None
-    color_range: str | None = None
-    dolby_vision: OverlayDolbyVisionMetadata | None = None
-    measurement: OverlayFrameMeasurement | None = None
+    size_bytes: int
+    source_resolution: tuple[int, int]
+    source_total_frames: int | None
+    signal: SourceSignalFacts
+    presentation_state: PresentationState
+    tonemap_settings: TonemapSettings | None
+    geometry: RenderedGeometryFacts
+
+
+@dataclass(frozen=True, slots=True)
+class RenderedFrameResult:
+    """Rendered screenshot path plus exact-source-frame facts."""
+
+    path: Path
+    facts: RenderedFrameFacts
+
+
+def _empty_screenshots_by_label() -> dict[str, list[Path]]:
+    return {}
+
+
+def _empty_frame_facts_by_label() -> dict[str, list[RenderedFrameFacts]]:
+    return {}
+
+
+def _empty_clip_facts_by_label() -> dict[str, RenderedClipFacts]:
+    return {}
+
+
+@dataclass(frozen=True, slots=True)
+class RenderedBatchResult:
+    """One-to-one screenshot, frame-fact, and clip-fact mappings."""
+
+    screenshots_by_label: dict[str, list[Path]] = field(default_factory=_empty_screenshots_by_label)
+    frame_facts_by_label: dict[str, list[RenderedFrameFacts]] = field(
+        default_factory=_empty_frame_facts_by_label
+    )
+    clip_facts_by_label: dict[str, RenderedClipFacts] = field(
+        default_factory=_empty_clip_facts_by_label
+    )
+
+    def __post_init__(self) -> None:
+        labels = set(self.screenshots_by_label)
+        if labels != set(self.frame_facts_by_label) or labels != set(self.clip_facts_by_label):
+            raise ValueError("rendered batch mappings must have identical label sets")
+        for label in labels:
+            paths = self.screenshots_by_label[label]
+            facts = self.frame_facts_by_label[label]
+            if len(paths) != len(facts):
+                raise ValueError(
+                    f"rendered batch path/fact count mismatch for {label!r}: "
+                    f"{len(paths)} != {len(facts)}"
+                )
 
 
 @dataclass
 class RenderRequest:
-    """Single frame render job"""
+    """Single exact-source-frame render job."""
 
-    clip: vs.VideoNode | Path  # VS clip or file path (FFmpeg)
+    clip: vs.VideoNode | Path
+    diagnostic_source: vs.VideoNode | Path
     frame_number: int
     output_path: Path
     overlay: OverlayConfig | None
@@ -118,23 +157,19 @@ class RenderRequest:
 
 @dataclass(frozen=True)
 class ScreenshotBatchRequest:
-    """Batch request representing a single clip's screenshot render task."""
+    """Batch request for one clip's selected source frames."""
 
     clip_path: Path
     label: str
     source_frames: list[int]
-    display_frames: list[int]
+    comparison_frames: list[int]
     selection_labels: list[str | None]
-    probe_width: int | None
-    probe_height: int | None
-    probe_num_frames: int | None
-    probe_is_hdr: bool | None
-    selection_details: list[OverlaySelectionDetail | None] | None = None
-    diagnostic_metadata: list[OverlayDiagnosticMetadata | None] | None = None
-    diagnostic_metadata_trusted_for_geometry: bool = False
-    active_rect: GeometryRect | None = None
-    active_rect_source: ActiveRectSource | None = None
-    active_rect_detection_mode: ActiveRectDetectionMode | None = None
+    size_bytes: int
+    source_resolution: tuple[int, int]
+    source_total_frames: int | None
+    signal: SourceSignalFacts
+    active_picture: ActivePictureFacts
+    active_rect_detection_mode: ActiveRectDetectionMode
     filename_label: str | None = None
 
 
@@ -164,3 +199,19 @@ class ScreenshotRenderOptions:
     display_frames: list[int] | None = None
     selection_labels: list[str | None] | None = None
     ffmpeg_runner: FFmpegRunner | None = None
+
+
+__all__ = [
+    "BatchRenderOptions",
+    "EncoderSettings",
+    "OverlayConfig",
+    "OverlaySelectionDetail",
+    "PreparedRenderSource",
+    "RenderRequest",
+    "RenderedBatchResult",
+    "RenderedClipFacts",
+    "RenderedFrameResult",
+    "Renderer",
+    "ScreenshotBatchRequest",
+    "ScreenshotRenderOptions",
+]

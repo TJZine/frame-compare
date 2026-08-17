@@ -30,17 +30,17 @@ def generate_report(
     if len(data.frames) == 0:
         raise ReportError("no frames provided")
 
-    has_any_screenshot = any(len(clip.screenshots) > 0 for clip in data.clips)
+    has_any_screenshot = any(len(clip.images) > 0 for clip in data.clips)
     if not has_any_screenshot:
         raise ReportError("no screenshots provided")
 
     for clip in data.clips:
-        if not clip.screenshots:
+        if not clip.images:
             raise ReportError(f"no screenshots for clip: {clip.name}")
-        if len(clip.screenshots) != len(data.frames):
+        if len(clip.images) != len(data.frames):
             raise ReportError(
                 f"screenshot count mismatch for {clip.name}: "
-                f"expected {len(data.frames)}, got {len(clip.screenshots)}"
+                f"expected {len(data.frames)}, got {len(clip.images)}"
             )
 
     if output_path is None:

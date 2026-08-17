@@ -14,15 +14,18 @@ from frame_compare.render.batch.expansion import (
     validate_batch_requests,
     validate_ffmpeg_batch_tonemap_gate,
 )
-from frame_compare.render.encoders import render_frame
+from frame_compare.render.encoders import render_frame_detailed
 from frame_compare.render.prepare import is_hdr_via_runner
 from frame_compare.render.types import (
     BatchRenderOptions,
+    RenderedBatchResult,
+    RenderedFrameResult,
     Renderer,
     RenderRequest,
     ScreenshotBatchRequest,
     ScreenshotRenderOptions,
 )
+from frame_compare.utils.media_facts import ActivePictureFacts, SourceSignalFacts
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 
 if TYPE_CHECKING:
@@ -68,29 +71,29 @@ def _record_render_progress(
 def _submit_render_request(
     executor: ThreadPoolExecutor,
     requests: list[RenderRequest],
-    futures: dict[Future[Path], int],
+    futures: dict[Future[RenderedFrameResult], int],
     index: int,
 ) -> None:
-    futures[executor.submit(render_frame, requests[index])] = index
+    futures[executor.submit(render_frame_detailed, requests[index])] = index
 
 
 def _render_batch_sequential(
     requests: list[RenderRequest],
-    results: list[Path | None],
+    results: list[RenderedFrameResult | None],
     reporter: ProgressReporter | None,
 ) -> None:
     for index, request in enumerate(requests):
-        results[index] = render_frame(request)
+        results[index] = render_frame_detailed(request)
         _record_render_progress(reporter, request)
 
 
 def _render_batch_parallel(
     requests: list[RenderRequest],
-    results: list[Path | None],
+    results: list[RenderedFrameResult | None],
     parallelism: int,
     reporter: ProgressReporter | None,
 ) -> None:
-    futures: dict[Future[Path], int] = {}
+    futures: dict[Future[RenderedFrameResult], int] = {}
     next_index = 0
     first_exception: Exception | None = None
 
@@ -101,7 +104,7 @@ def _render_batch_parallel(
 
         while futures:
             done, _ = wait(futures.keys(), return_when=FIRST_COMPLETED)
-            completed: list[tuple[int, Path]] = []
+            completed: list[tuple[int, RenderedFrameResult]] = []
             for future in done:
                 index = futures.pop(future)
                 try:
@@ -146,10 +149,19 @@ def render_batch(
             submitted to the executor is allowed to finish before the first
             exception is re-raised.
     """
+    return [result.path for result in render_batch_detailed(requests, parallelism, reporter)]
+
+
+def render_batch_detailed(
+    requests: list[RenderRequest],
+    parallelism: int = 1,
+    reporter: ProgressReporter | None = None,
+) -> list[RenderedFrameResult]:
+    """Execute render jobs and preserve exact-frame facts in request order."""
     if not requests:
         return []
 
-    results: list[Path | None] = [None] * len(requests)
+    results: list[RenderedFrameResult | None] = [None] * len(requests)
 
     if reporter:
         reporter.start_phase("Rendering", len(requests))
@@ -167,10 +179,10 @@ def render_batch(
         if reporter:
             reporter.complete_phase(phase_status)
 
-    completed: list[Path] = []
+    completed: list[RenderedFrameResult] = []
     for result in results:
         if result is None:
-            raise RuntimeError("render batch completed without a rendered path")
+            raise RuntimeError("render batch completed without a rendered result")
         completed.append(result)
     return completed
 
@@ -231,22 +243,25 @@ def render_screenshots(
             else [None] * len(frames)
         )
 
+        probed_hdr = _resolve_probe_is_hdr(
+            clip_path,
+            config=config,
+            renderer=resolved_options.renderer,
+            ffmpeg_runner=resolved_ffmpeg_runner,
+        )
         req = ScreenshotBatchRequest(
             clip_path=clip_path,
             label=label,
             filename_label=clip_path.stem,
             source_frames=frames,
-            display_frames=display_frames,
+            comparison_frames=display_frames,
             selection_labels=sel_labels,
-            probe_width=None,
-            probe_height=None,
-            probe_num_frames=None,
-            probe_is_hdr=_resolve_probe_is_hdr(
-                clip_path,
-                config=config,
-                renderer=resolved_options.renderer,
-                ffmpeg_runner=resolved_ffmpeg_runner,
-            ),
+            size_bytes=0,
+            source_resolution=(0, 0),
+            source_total_frames=None,
+            signal=SourceSignalFacts(is_hdr=probed_hdr is True),
+            active_picture=ActivePictureFacts(0, 0, 1, 1, "full_frame", True),
+            active_rect_detection_mode=config.screenshots.active_rect_detection.value,
         )
         batch_requests.append(req)
 
@@ -280,6 +295,20 @@ def render_screenshots_from_batch(
     Returns:
         Dict mapping label -> list of rendered screenshot paths
     """
+    return render_screenshots_from_batch_detailed(
+        batch_requests, output_dir, config, options
+    ).screenshots_by_label
+
+
+def render_screenshots_from_batch_detailed(
+    batch_requests: list[ScreenshotBatchRequest],
+    output_dir: Path,
+    config: ConfigSchema,
+    options: BatchRenderOptions | None = None,
+) -> RenderedBatchResult:
+    """Render a validated batch with aligned path, frame-fact, and clip-fact mappings."""
+    if not batch_requests:
+        return RenderedBatchResult()
     resolved_options = options or BatchRenderOptions()
     resolved_ffmpeg_runner = resolve_batch_ffmpeg_runner(
         resolved_options.ffmpeg_runner,
@@ -290,7 +319,7 @@ def render_screenshots_from_batch(
     validate_ffmpeg_batch_tonemap_gate(batch_requests, config, target_renderer)
     validate_batch_requests(batch_requests)
 
-    all_requests, label_to_range = expand_batch_render_requests(
+    all_requests, label_to_range, clip_facts = expand_batch_render_requests(
         batch_requests,
         output_dir=output_dir,
         config=config,
@@ -300,9 +329,24 @@ def render_screenshots_from_batch(
         warnings=resolved_options.warnings,
     )
 
-    rendered_paths = render_batch(
+    rendered = render_batch_detailed(
         all_requests,
         parallelism=max(1, resolved_options.parallelism),
         reporter=resolved_options.reporter,
     )
-    return render_batch_results_by_label(batch_requests, rendered_paths, label_to_range)
+    rendered_paths = [result.path for result in rendered]
+    screenshots = render_batch_results_by_label(batch_requests, rendered_paths, label_to_range)
+    frame_facts = {
+        request.label: [
+            result.facts
+            for result in rendered[
+                label_to_range[request.label].start : label_to_range[request.label].stop
+            ]
+        ]
+        for request in batch_requests
+    }
+    return RenderedBatchResult(
+        screenshots_by_label=screenshots,
+        frame_facts_by_label=frame_facts,
+        clip_facts_by_label=clip_facts,
+    )

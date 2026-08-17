@@ -39,10 +39,17 @@ from frame_compare.services.metadata_parsing import parse_filename
 from frame_compare.services.publishers import publish_to_slowpics
 from frame_compare.services.report.display import (
     SourceFrameSelectionDetail,
-    frame_detail_for_source_frame,
+    frame_detail_for_comparison_frame,
 )
 from frame_compare.services.report.entry import generate_report
-from frame_compare.services.report.payload import FrameDetail, ReportData, clip_info_from_state
+from frame_compare.services.report.payload import (
+    ClipInfo,
+    FrameDetail,
+    ReportData,
+    ReportImageInfo,
+    ReportRenderingInfo,
+    source_identity_from_fingerprint,
+)
 from frame_compare.services.slowpics_post_upload import (
     SlowpicsPostUploadRequest,
     run_slowpics_post_upload_actions,
@@ -227,12 +234,59 @@ def run_report_phase(
         return ReportPhaseOutput(report_path=None, report_succeeded=True)
 
     clips = [ctx.reference, *ctx.comparisons]
-    clip_info = [
-        clip_info_from_state(clip, render.screenshots_by_label[clip.label]) for clip in clips
-    ]
+    clip_info: list[ClipInfo] = []
+    for clip in clips:
+        paths = render.screenshots_by_label[clip.label]
+        facts = render.frame_facts_by_label[clip.label]
+        images: list[ReportImageInfo] = []
+        for index, comparison_frame in enumerate(frames):
+            source_frame = map_aligned_to_source_frame(
+                clip=clip,
+                aligned_frame=comparison_frame,
+            )
+            if facts[index].source_frame != source_frame:
+                raise ValueError(
+                    f"report source-frame mapping mismatch for {clip.label!r} at "
+                    f"comparison frame {comparison_frame}"
+                )
+            images.append(ReportImageInfo(paths[index], source_frame, facts[index]))
+        clip_facts = render.clip_facts_by_label[clip.label]
+        clip_info.append(
+            ClipInfo(
+                name=clip.label,
+                path=clip.path,
+                frame_count=clip.probe.num_frames,
+                resolution=(clip.probe.width, clip.probe.height),
+                fps=float(clip.effective_fps),
+                size_bytes=clip_facts.size_bytes,
+                signal=clip_facts.signal,
+                presentation_state=clip_facts.presentation_state,
+                tonemap_settings=clip_facts.tonemap_settings,
+                active_picture=clip_facts.geometry.active_picture,
+                images=images,
+                label=clip.label,
+                source_identity=source_identity_from_fingerprint(clip.probe.fingerprint),
+            )
+        )
+    applied_settings = next(
+        (
+            facts.tonemap_settings
+            for facts in render.clip_facts_by_label.values()
+            if facts.tonemap_settings is not None
+        ),
+        None,
+    )
     report_data = ReportData(
         clips=clip_info,
         frames=frames,
+        rendering=ReportRenderingInfo(
+            overlay_mode=ctx.config.screenshots.overlay_mode,
+            include_frame_number=ctx.config.screenshots.include_frame_number,
+            tonemap_settings=applied_settings,
+            geometry_by_label={
+                label: facts.geometry for label, facts in render.clip_facts_by_label.items()
+            },
+        ),
         metadata=metadata,
         slowpics_url=slowpics_url,
         frame_details=report_frame_details_for_frames(ctx, frames=frames),
@@ -277,8 +331,8 @@ def report_frame_details_for_frames(ctx: RunContext, *, frames: list[int]) -> li
             else selection_label_for_frame(source_frame, ctx.selection_breakdown)
         )
         frame_details.append(
-            frame_detail_for_source_frame(
-                source_frame=source_frame,
+            frame_detail_for_comparison_frame(
+                comparison_frame=aligned_frame,
                 selection_detail=_report_selection_detail(detail),
                 selection_label=selection_label,
             )

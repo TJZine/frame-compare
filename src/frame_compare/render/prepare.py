@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING
 import structlog
 
 from frame_compare.config.schema_enums import VsScreenshotWriter
-from frame_compare.render.types import Renderer
+from frame_compare.render.types import PreparedRenderSource, Renderer
+from frame_compare.utils.media_facts import PresentationState
 
 if TYPE_CHECKING:
     import vapoursynth as vs  # type: ignore[import-untyped]
@@ -112,22 +113,15 @@ def _apply_vs_tonemap_and_labeling(
     loaded_clip: vs.VideoNode,
     source_info: SourceInfo,
     config: ConfigSchema,
-) -> tuple[vs.VideoNode, str | None]:
+) -> tuple[vs.VideoNode, TonemapSettings | None]:
     """Handles VapourSynth tonemap settings resolution and application."""
     if should_tonemap(source_info, config):
         from frame_compare.vs.tonemap import apply_tonemap
 
         settings = resolve_tonemap_settings(config)
         loaded_clip = apply_tonemap(loaded_clip, settings, source_info.hdr_metadata)
-        # Mark that tonemap was applied for overlay (§1.4.6)
-        hdr_info = f"HDR (tonemapped: {settings.preset}, {settings.target_nits} nits)"
-    elif source_info.is_hdr:
-        # HDR source, tonemap disabled (§1.4.6)
-        hdr_info = "HDR (native, no tonemap)"
-    else:
-        # SDR source
-        hdr_info = None  # or "SDR" in DIAGNOSTIC mode
-    return loaded_clip, hdr_info
+        return loaded_clip, settings
+    return loaded_clip, None
 
 
 def _resolve_auto_mode_fallback(
@@ -207,7 +201,7 @@ def prepare_clip_for_render(
     renderer: Renderer,
     config: ConfigSchema,
     ffmpeg_runner: FFmpegRunner | None = None,
-) -> tuple[vs.VideoNode | Path, tuple[int, int], str | None, SourceInfo | None]:
+) -> PreparedRenderSource:
     """Prepare a source clip for rendering, applying tonemap and fallback policies.
 
     Args:
@@ -215,9 +209,6 @@ def prepare_clip_for_render(
         renderer: Renderer to use ("vapoursynth", "ffmpeg", or "auto")
         config: Resolved configuration
         ffmpeg_runner: Optional FFmpegRunner for probing/extraction
-
-    Returns:
-        tuple containing (prepared_clip, resolution, hdr_info, source_info)
 
     Raises:
         PluginNotFoundError: If required VS plugin is missing
@@ -240,7 +231,8 @@ def prepare_clip_for_render(
 
     prepared_clip: vs.VideoNode | Path = clip_path
     resolution = (0, 0)
-    hdr_info: str | None = None
+    diagnostic_source: vs.VideoNode | Path = clip_path
+    tonemap_settings: TonemapSettings | None = None
     source_info: SourceInfo | None = None
     vs_load_failure: Exception | None = None
 
@@ -250,10 +242,11 @@ def prepare_clip_for_render(
 
             loader = DefaultVSLoader()
             source_info = loader.load(clip_path)
+            diagnostic_source = source_info.clip
             prepared_clip = source_info.clip
             resolution = (source_info.width, source_info.height)
 
-            prepared_clip, hdr_info = _apply_vs_tonemap_and_labeling(
+            prepared_clip, tonemap_settings = _apply_vs_tonemap_and_labeling(
                 prepared_clip, source_info, config
             )
 
@@ -275,4 +268,22 @@ def prepare_clip_for_render(
     if renderer == "ffmpeg" and config.color.enable_tonemap:
         _validate_ffmpeg_tonemap_gate(clip_path, config, ffmpeg_runner)
 
-    return prepared_clip, resolution, hdr_info, source_info
+    source_is_hdr = source_info.is_hdr if source_info is not None else False
+    if source_info is None and renderer == "ffmpeg":
+        source_is_hdr = is_hdr_via_runner(clip_path, ffmpeg_runner)
+    presentation_state = (
+        PresentationState.HDR_TONEMAPPED
+        if tonemap_settings is not None
+        else PresentationState.HDR_TONEMAP_OFF
+        if source_is_hdr
+        else PresentationState.SDR
+    )
+    return PreparedRenderSource(
+        diagnostic_source=diagnostic_source,
+        prepared_clip=prepared_clip,
+        source_dimensions=resolution,
+        source_total_frames=source_info.num_frames if source_info is not None else None,
+        source_is_hdr=source_is_hdr,
+        presentation_state=presentation_state,
+        tonemap_settings=tonemap_settings,
+    )

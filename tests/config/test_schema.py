@@ -29,7 +29,6 @@ from frame_compare.config.schema_enums import (
 )
 from frame_compare.config.schema_models import (
     AudioAlignmentConfig,
-    DiagnosticsConfig,
     LoggingConfig,
     PathsConfig,
     ScreenshotsConfig,
@@ -137,7 +136,6 @@ def test_schema_model_section_defaults_are_representative() -> None:
     sources = SourcesConfig()
     tmdb = TmdbConfig()
     report = ReportConfig()
-    diagnostics = DiagnosticsConfig()
     logging = LoggingConfig()
 
     assert paths.model_dump() == {
@@ -206,9 +204,6 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert report.default_mode == "slider"
     assert report.embed_images is False
     assert report.auto_open is True
-    assert diagnostics.model_dump() == {
-        "per_frame_nits": False,
-    }
     assert logging.level == LogLevel.INFO
     assert logging.format == LogFormat.CONSOLE
 
@@ -227,7 +222,6 @@ def test_schema_model_section_defaults_are_representative() -> None:
         (SlowpicsConfig, {}),
         (TmdbConfig, {}),
         (ReportConfig, {}),
-        (DiagnosticsConfig, {}),
         (LoggingConfig, {}),
     ],
     ids=lambda value: value.__name__ if isinstance(value, type) else None,
@@ -244,6 +238,13 @@ def test_root_config_ignores_unknown_keys() -> None:
     config = ConfigSchema.model_validate({"unknown_future_section": {"enabled": True}})
 
     assert "unknown_future_section" not in config.model_fields_set
+
+
+def test_root_config_ignores_removed_diagnostics_section() -> None:
+    config = ConfigSchema.model_validate({"diagnostics": {"per_frame_nits": True}})
+
+    assert "diagnostics" not in config.model_fields_set
+    assert not hasattr(config, "diagnostics")
 
 
 @pytest.mark.parametrize(

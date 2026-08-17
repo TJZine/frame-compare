@@ -270,7 +270,7 @@ def _render_info_modal(
 
     clip_items: list[str] = []
     for i, clip in enumerate(clips):
-        hdr_tag = "HDR" if clip["hdr"] else "SDR"
+        hdr_tag = "HDR" if clip["signal"]["is_hdr"] else "SDR"
         clip_items.append(
             f'<li class="rv-clip-meta-item" data-clip-index="{_esc_attr(i)}">'
             f'<div class="rv-clip-meta-heading">'

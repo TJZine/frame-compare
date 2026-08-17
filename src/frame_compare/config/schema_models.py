@@ -333,14 +333,6 @@ class ReportConfig(BaseModel):
     auto_open: bool = True
 
 
-class DiagnosticsConfig(BaseModel):
-    """Optional diagnostic outputs for development and debugging."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    per_frame_nits: bool = False
-
-
 class LoggingConfig(BaseModel):
     """Logging configuration (level and format)."""
 
@@ -354,7 +346,6 @@ __all__ = [
     "AnalysisConfig",
     "AudioAlignmentConfig",
     "ColorConfig",
-    "DiagnosticsConfig",
     "LoggingConfig",
     "PathsConfig",
     "ReportConfig",
