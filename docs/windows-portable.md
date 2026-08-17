@@ -195,9 +195,3 @@ revisions in the build manifest and generated inventory remain authoritative.
 | Reports disappeared after replacing the bundle | Configure an external generated-data root and restore the prior run folders from backup if available |
 
 For broader diagnosis, see [Troubleshooting](guides/troubleshooting.md).
-
-!!! note "Maintainer release procedure"
-    Public release orchestration, mandatory asset proof, signing, environment approval,
-    and exact-commit publication remain maintainer concerns in the
-    [Engineering Runbook](ENGINEERING_RUNBOOK.md). They are intentionally not part of
-    the end-user installation guide.

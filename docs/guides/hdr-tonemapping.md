@@ -85,6 +85,15 @@ For publication-bound comparisons:
 range, Dolby Vision facts, and selection context. The values depend on what the source
 and selected runtime can prove.
 
+<!-- SCREENSHOT_SLOT: hdr-diagnostic-overlay
+Target file: ../images/hdr-diagnostic-overlay.webp
+Replace this comment only after the active V2 capture plan has produced a
+publication-safe HDR frame on the physical Windows test machine. The image must show a
+real tonemapped output frame with an accurate diagnostic overlay and only metadata the
+source/runtime actually proves. Do not present an SDR browser capture as untonemapped
+native HDR. Update the alt text and caption to match the retained evidence.
+-->
+
 Selection scores are useful for explaining why a frame was chosen. They are not a
 replacement for calibrated luminance measurement, VMAF, or a perceptual review.
 

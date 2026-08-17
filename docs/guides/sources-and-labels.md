@@ -118,7 +118,7 @@ active_rect = { x = 0, y = 138, width = 1920, height = 804 }
 The rectangle must fit inside the probed source dimensions. Invalid explicit values fail
 instead of silently falling back.
 
-Automatic resolution can use, in order:
+The active-picture resolver uses this precedence:
 
 1. explicit source configuration;
 2. trusted static metadata;

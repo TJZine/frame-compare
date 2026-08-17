@@ -27,9 +27,12 @@ drivers. Use the same route and runtime when bit-for-bit output matters.
 | SDR screenshots and offline reports | Yes | Yes | Yes | Yes | Yes, with required runtime |
 | HDR tonemapping | Host Vulkan stack | Software Vulkan | Intended host GPU path | Host-dependent | Host-dependent |
 | Interactive VSPreview alignment | Included | No | No | Experimental | Optional and host-managed |
-| Native browser opening and clipboard behavior | Yes | No | No | Host-dependent | Yes |
+| Browser opening and clipboard behavior | Available in an interactive desktop session | No | No | Host/session-dependent | Host/session-dependent |
 | Signed code-only updates and rollback | Yes | No | No | No | No |
 | Persistent history and caches | Yes | Yes through host mounts | Yes | Yes | Yes |
+
+Browser and clipboard side effects require a suitable interactive desktop session.
+Headless, SSH, service, non-TTY, and restricted native sessions should not rely on them.
 
 ## Route details
 

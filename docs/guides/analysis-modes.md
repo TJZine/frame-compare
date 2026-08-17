@@ -13,7 +13,7 @@ search for visually distinct frames.
 | Random frames | No | Broad, reproducible coverage without metric cost |
 | Dark frames | Yes | Shadow detail, black levels, and low-light compression behavior |
 | Bright frames | Yes | Highlights, clipping, grain, and tone-mapping behavior |
-| Motion frames | Yes | Action, temporal compression stress, and difficult cuts |
+| Motion frames | Yes | High frame-to-frame change such as action, camera movement, flashes, or cuts; useful for locating potentially stressful scenes |
 
 Frame numbers are interpreted in the selected reference source domain before alignment.
 The final render plan is normalized to the overlap every aligned source can represent.
@@ -101,12 +101,16 @@ metrics cache.
 The same inputs and effective configuration produce the same deterministic selection,
 but the following changes can legitimately change the result:
 
-- source bytes, size, path, modification time, trims, or effective FPS;
+- source path, byte size, modification time, trims, or effective FPS;
 - selected reference or analysis source;
 - active-picture evidence or selection window;
 - performance mode or metric algorithm identity;
 - relevant managed media-runtime components;
 - alignment results that reduce the shared renderable overlap.
+
+Frame Compare does not hash complete media contents for cache freshness. If media is
+replaced while preserving its path, byte size, and modification time, advance the
+modification time or remove the smallest relevant cache entry before reuse.
 
 A cache hit means the cached metric request still matches; it does not freeze later
 selection or alignment decisions.

@@ -184,7 +184,7 @@ overlay_mode = "diagnostic"
 **What does not change:** browser viewer labels and controls remain a separate
 presentation layer.
 
-## Keep a run local
+## Disable slow.pics upload for one run
 
 **Goal:** guarantee no slow.pics upload for one invocation.
 

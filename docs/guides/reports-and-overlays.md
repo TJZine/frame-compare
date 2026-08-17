@@ -9,8 +9,8 @@ Set `report.embed_images = true` only when a single larger HTML file is more use
 the normal portable folder layout.
 
 <figure class="fc-doc-figure">
-  <img src="../images/report-viewer-overview.webp" alt="Frame Compare offline report displaying three synthetic video sources in slider mode with filmstrip, source labels, frame metadata, and primary controls visible.">
-  <figcaption>The canonical three-source report view combines source identity, frame context, filmstrip navigation, and comparison controls.</figcaption>
+  <img src="../images/report-viewer-overview.webp" alt="Frame Compare offline report in slider mode with source labels, frame metadata, filmstrip navigation, and primary review controls visible.">
+  <figcaption>The canonical report view combines source identity, the current comparison pair, frame context, filmstrip navigation, and review controls.</figcaption>
 </figure>
 
 ## Viewer modes
@@ -31,7 +31,7 @@ for spatial differences such as crop, scaling, haloing, texture, denoising, grai
 subtle tone changes.
 
 <figure class="fc-doc-figure">
-  <img src="../images/report-slider.webp" alt="Slider comparison showing Reference and Encode-A across a draggable divider positioned toward the right side of a synthetic test frame.">
+  <img src="../images/report-slider.webp" alt="Slider comparison revealing two selected sources across a draggable divider with source-pair and frame context visible.">
   <figcaption>Move the divider away from center to inspect spatial, texture, crop, and scaling differences between a selected pair.</figcaption>
 </figure>
 
@@ -42,7 +42,7 @@ a locator: identify where sources diverge, then switch back to slider or blink t
 whether the difference is meaningful.
 
 <figure class="fc-doc-figure">
-  <img src="../images/report-diff.webp" alt="Difference view highlighting changed image regions between the Reference and Encode-A synthetic sources with frame and pair context visible.">
+  <img src="../images/report-diff.webp" alt="Difference view highlighting changed image regions between the selected source pair with frame and pair context visible.">
   <figcaption>Diff mode is a locator for changed regions; switch back to slider or blink to judge whether a difference matters.</figcaption>
 </figure>
 
@@ -61,7 +61,7 @@ Grid mode displays several sources together so outliers are easy to identify. Us
 scan all encodes first, then choose a pair for detailed slider, diff, or blink review.
 
 <figure class="fc-doc-figure">
-  <img src="../images/report-grid.webp" alt="Grid view displaying the same selected frame from Reference, Encode-A, and Encode-B with readable labels.">
+  <img src="../images/report-grid.webp" alt="Grid view displaying the same selected frame across three clearly labeled sources.">
   <figcaption>Grid mode makes it easy to scan all three sources at the same selected frame before choosing a pair for detailed review.</figcaption>
 </figure>
 
@@ -79,7 +79,7 @@ The viewer supports:
 - browser-local review state and notes.
 
 <figure class="fc-doc-figure">
-  <img src="../images/report-inspector.webp" alt="Frame Compare report inspector showing frame number, category, source-frame detail, shown-count metadata, and review tabs beside the comparison grid.">
+  <img src="../images/report-inspector.webp" alt="Frame Compare report inspector showing frame, category, source-frame mapping, shown-count metadata, and review controls beside the comparison view.">
   <figcaption>The inspector keeps frame, source, alignment, review, and export context available without leaving the current report.</figcaption>
 </figure>
 

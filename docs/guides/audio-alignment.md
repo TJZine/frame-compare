@@ -56,7 +56,7 @@ installations. The default Docker route does not provide an interactive desktop
 session.
 
 <figure class="fc-doc-figure">
-  <img src="../images/vspreview-alignment.webp" alt="VSPreview session opened by Frame Compare showing the Encode-A comparison, a proposed six-frame audio offset, and alignment inspection controls.">
+  <img src="../images/vspreview-alignment.webp" alt="VSPreview session opened by Frame Compare showing a comparison source, a proposed frame offset, and alignment inspection controls.">
   <figcaption>The generated VSPreview session puts the proposed offset beside the comparison frame and timeline so alignment can be checked at multiple evidence points.</figcaption>
 </figure>
 

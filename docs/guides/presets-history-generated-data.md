@@ -53,9 +53,9 @@ See [Output Layout](../reference/output-layout.md) for ownership and portability
 frame-compare history list
 ```
 
-The list uses persisted lifecycle records and reports completed, completed-with-warning,
-failed, or unavailable entries. It does not require the original media to remain at its
-old path.
+The list uses persisted lifecycle records and reports `completed`,
+`completed_with_warnings`, `failed`, or `unavailable` entries. It does not require the
+original media to remain at its old path.
 
 For structured automation:
 

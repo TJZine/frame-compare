@@ -28,7 +28,7 @@ This avoids diagnosing a different Python or media runtime than the one that fai
 | Windows command is unavailable after install | Open a new terminal; if needed, rerun `install.cmd` from the bundle’s current location |
 | Windows shim says the bundle moved | Rerun `install.cmd` from the new bundle location to update installed state |
 | Code-only update reports a runtime fingerprint mismatch | Install the complete portable ZIP for that release; code-only updates cannot replace native media components |
-| Report opens without images | Keep `report.html` beside its `screenshots/` directory or regenerate with embedded images |
+| Report opens without images | Keep `report.html` beside its `screenshots/` directory or rerun the comparison with `report.embed_images = true` |
 | A cache hit appears stale after replacing media | Ensure path, size, or modification time changed, or remove the smallest relevant cache entry |
 
 ## Diagnose by pipeline stage

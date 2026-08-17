@@ -65,8 +65,8 @@ Always confirm the installed help text before scripting an option.
 | `[sources]` | Reference, analysis source, labels, FPS policy, and per-source overrides |
 | `[analysis]` | User/random/metric frame counts, mode, exclusions, and deterministic seed |
 | `[audio_alignment]` | Audio stream, correlation, consensus, reuse, and VSPreview behavior |
-| `[screenshots]` | Renderer, active-picture detection, image format, overlays, and timeouts |
-| `[color]` | HDR detection and tonemapping choices |
+| `[screenshots]` | Renderer, active-picture detection, geometry, overlays, PNG writer/compression, and timeouts |
+| `[color]` | HDR-to-SDR tonemapping preset, target luminance, tone curve, lift, and contrast recovery |
 | `[report]` | Static report generation, embedding, and auto-open behavior |
 | `[slowpics]` | Explicit publication, visibility, retries, confirmation, and webhook behavior |
 | `[tmdb]` | Optional metadata lookup behavior and secret reference |

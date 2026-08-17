@@ -8,7 +8,7 @@ result instead of independently reinterpreting the same media.
 flowchart TD
     A["Input sources"] --> B["Discovery and configuration validation"]
     B --> C["Probe cache and source loading"]
-    C --> D["Shared selectable window"]
+    C --> D["Initial selectable window"]
     D --> E["Active-picture resolution"]
     E --> F{"Frame request needs metrics?"}
     F -->|No| G["User and deterministic random frame plan"]
@@ -17,19 +17,24 @@ flowchart TD
     I --> J["Dark, bright, and motion selection"]
     G --> K["Audio alignment"]
     J --> K
-    K --> L{"Reusable or verified offset available?"}
+    K --> L{"Reusable accepted offset available?"}
     L -->|Yes| M["Apply accepted alignment"]
     L -->|No| N["Audio correlation"]
-    N --> O["Optional VSPreview verification"]
-    O --> M
-    M --> P{"HDR tonemapping required?"}
-    P -->|No| Q["Render SDR screenshots and overlays"]
-    P -->|Yes| R["VapourSynth and vs-placebo tonemapping"]
-    R --> Q
-    Q --> S["Run metadata and offline HTML report"]
-    S --> T{"Publishing enabled?"}
-    T -->|No| U["Local result"]
-    T -->|Yes| V["Optional slow.pics upload and webhook"]
+    N --> O{"Interactive verification enabled or required?"}
+    O -->|Yes| P["VSPreview review"]
+    O -->|No| Q["Apply computed alignment"]
+    P --> R["Apply verified alignment"]
+    M --> S["Finalize shared aligned overlap and frame mapping"]
+    Q --> S
+    R --> S
+    S --> T{"HDR tonemapping required?"}
+    T -->|No| U["Render SDR screenshots and overlays"]
+    T -->|Yes| V["VapourSynth and vs-placebo tonemapping"]
+    V --> U
+    U --> W["Run metadata and offline HTML report"]
+    W --> X{"Publishing enabled?"}
+    X -->|No| Y["Local result"]
+    X -->|Yes| Z["Optional slow.pics upload and webhook"]
 ```
 
 ## 1. Discovery and validation
@@ -44,8 +49,9 @@ full comparison.
 ## 2. Probing and selectable-window preparation
 
 Frame Compare loads source properties through the configured media runtime and creates
-a shared frame domain that every source can represent after explicit trims, effective
-FPS policy, alignment constraints, and leading or trailing exclusions.
+the initial selectable domain from source lengths, explicit trims, effective FPS policy,
+and leading or trailing exclusions. Alignment later maps that plan into a final shared
+overlap and may reduce the frames every source can represent.
 
 Active-picture resolution happens before metric analysis. Explicit rectangles have the
 highest precedence; trusted static evidence, dimension/aspect-ratio inference, optional
@@ -65,10 +71,10 @@ arrays. Selection counts and quantile choices are applied after metrics are avai
 
 ## 4. Alignment
 
-The selected source frames are normalized into the aligned comparison domain. Automatic
-audio correlation can estimate offsets when sources begin at different times or contain
-different trims. Previously accepted offsets can be reused, and an interactive route can
-open VSPreview for manual verification.
+The initial source-frame plan is normalized into the aligned comparison domain.
+Automatic audio correlation can estimate offsets when sources begin at different times
+or contain different trims. Previously accepted offsets can be reused, and an
+interactive route can open VSPreview when verification is enabled or required.
 
 Correlation is evidence, not certainty. Silence, replaced music, substantially different
 edits, or unrelated audio streams can produce weak or misleading matches. Review motion,
@@ -77,9 +83,9 @@ cuts, and dialogue in the final report.
 ## 5. Rendering and tonemapping
 
 Each aligned frame is mapped back to the corresponding source frame. SDR sources can be
-rendered directly. HDR sources that need SDR output pass through the configured
-VapourSynth and vs-placebo tonemapping path before screenshot encoding and overlay
-composition.
+rendered without HDR tonemapping. HDR sources that need SDR output pass through the
+configured VapourSynth and vs-placebo tonemapping path before screenshot encoding and
+overlay composition.
 
 The report viewer adds interactive labels and controls in the browser. Baked screenshot
 overlays are part of the image itself and remain visible outside the report.

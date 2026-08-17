@@ -19,7 +19,7 @@ archival quality-control workflows.
 </div>
 
 <figure class="fc-doc-figure">
-  <img src="images/report-viewer-overview.webp" alt="Frame Compare offline report displaying three synthetic video sources in slider mode with filmstrip, source labels, frame metadata, and primary controls visible.">
+  <img src="images/report-viewer-overview.webp" alt="Frame Compare offline report in slider mode with source labels, frame metadata, filmstrip navigation, and primary review controls visible.">
   <figcaption>The report viewer exposes the current frame, source pair, filmstrip, and primary review controls without requiring a server.</figcaption>
 </figure>
 
@@ -70,7 +70,7 @@ compatible Vulkan implementation on the host.
 - Shared-window and active-picture-aware analysis across the selected sources.
 - Automatic audio alignment with optional prior-offset reuse and VSPreview review.
 - HDR-to-SDR tonemapping when required, plus minimal, standard, or diagnostic overlays.
-- A self-contained browsing experience with slider, overlay, diff, blink, grid,
+- A portable offline report experience with slider, overlay, diff, blink, grid,
   filmstrip, zoom, inspection, and review tools.
 - Optional slow.pics publication and Discord-compatible webhook notification after a
   local result has been reviewed.

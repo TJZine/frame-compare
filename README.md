@@ -14,9 +14,9 @@
 
 <figure class="fc-doc-figure">
   <a href="docs/guides/reports-and-overlays.md">
-    <img src="docs/images/report-viewer-overview.webp" alt="Frame Compare offline report displaying three synthetic video sources in slider mode with filmstrip, source labels, frame metadata, and primary controls visible.">
+    <img src="docs/images/report-viewer-overview.webp" alt="Frame Compare offline report in slider mode with source labels, frame metadata, filmstrip navigation, and primary review controls visible.">
   </a>
-  <figcaption>The offline report keeps three source views, frame context, and review controls together for repeatable local inspection.</figcaption>
+  <figcaption>The offline report keeps the source set, current comparison pair, frame context, and review controls together for repeatable local inspection.</figcaption>
 </figure>
 
 Frame Compare turns two or more local video sources into a repeatable comparison:

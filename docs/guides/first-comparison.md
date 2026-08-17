@@ -94,7 +94,7 @@ selection intent, and output intent without entering the rendering pipeline. Che
 - publishing remains disabled unless deliberately enabled.
 
 <figure class="fc-doc-figure">
-  <img src="../images/first-run-dry-run.png" alt="Frame Compare dry-run summary identifying Reference, Encode-A, Encode-B, the requested frames, quality analysis, and disabled uploads.">
+  <img src="../images/first-run-dry-run.png" alt="Frame Compare dry-run summary identifying one reference, two comparison sources, requested frame selection, quality analysis, and disabled uploads.">
   <figcaption>A dry run makes source order, frame selection, analysis mode, local output intent, and publishing state visible before any rendering starts.</figcaption>
 </figure>
 
@@ -106,7 +106,7 @@ and writes the report. Network publication occurs only when the effective config
 or command explicitly enables it.
 
 <figure class="fc-doc-figure">
-  <img src="../images/first-run-complete.png" alt="Completed Frame Compare run showing three matched clips, the generated report and screenshots paths, three frames, and elapsed time.">
+  <img src="../images/first-run-complete.png" alt="Completed Frame Compare run showing three matched clips, generated report and screenshot paths, the selected frame count, and elapsed time.">
   <figcaption>The completed run summary links the report and screenshots to the matched source set and records the final frame count and duration.</figcaption>
 </figure>
 
