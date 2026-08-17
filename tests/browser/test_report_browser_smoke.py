@@ -224,7 +224,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const gridStageRect = stage.getBoundingClientRect();
         const gridPaletteRect = palette.getBoundingClientRect();
         const gridLabels = Array.from(document.querySelectorAll('.rv-grid-label-text'));
-        const expectedGridLabelCount = window.matchMedia('(max-width: 767px)').matches ? 1 : 2;
+        const expectedGridLabelCount = window.matchMedia('(max-width: 768px)').matches ? 1 : 2;
         document.documentElement.dataset.gridHudAnchored = String(
             window.getComputedStyle(document.querySelector('.rv-stage-labels')).display === 'none'
             && gridLabels.length === expectedGridLabelCount
@@ -324,9 +324,7 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     assert parser.document_attributes["data-filmstrip-hud-anchored"] == "true"
     assert parser.document_attributes["data-narrow-palette-horizontal"] == "true"
     assert parser.document_attributes["data-grid-hud-anchored"] == "true"
-    assert parser.document_attributes["data-source-hud-text"] == (
-        f"{_REFERENCE_LABEL} • 1×1 • SDR"
-    )
+    assert parser.document_attributes["data-source-hud-text"] == (f"{_REFERENCE_LABEL} • 1×1 • SDR")
     assert parser.stage_attributes is not None
     stage_classes = (parser.stage_attributes["class"] or "").split()
     assert "rv-mode-diff" in stage_classes

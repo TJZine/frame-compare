@@ -21,7 +21,7 @@ const grid = context.__GridView;
 assert.equal(grid.layoutName(2, 769, 2), 'two');
 assert.equal(grid.layoutName(3, 1200, 3), 'three-wide');
 assert.equal(grid.layoutName(3, 1199, 3), 'three-wrap');
-assert.equal(grid.layoutName(4, 768, 4), 'four');
+assert.equal(grid.layoutName(4, 768, 1), 'mobile');
 assert.equal(grid.layoutName(6, 1600, 4), 'four');
 assert.equal(grid.layoutName(6, 767, 1), 'mobile');
 
