@@ -66,7 +66,7 @@ const GridView = (() => {
 
         function isMobile() {
             const width = dom.grid?.getBoundingClientRect?.().width || 0;
-            return Boolean(state.mediaQuery?.matches || (width > 0 && width < 768));
+            return Boolean(state.mediaQuery?.matches || (width > 0 && width <= 768));
         }
 
         function indexes() {

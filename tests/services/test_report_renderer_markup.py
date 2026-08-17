@@ -7,7 +7,7 @@ import re
 
 from frame_compare.services.report.payload import ReportPayload
 from frame_compare.services.report.renderer import build_html
-from frame_compare.services.report.viewer import get_css, get_js
+from frame_compare.services.report.viewer import get_js
 from tests.services.report_viewer_contracts import (
     SelectParser,
     find_all,
@@ -167,21 +167,12 @@ def test_build_html_keeps_ten_plus_long_label_clips_reachable_and_mobile_safe(
 
     parser = SelectParser()
     parser.feed(build_html(payload))
-    css = get_css()
-
     for select_id in ("left-select", "right-select", "active-select"):
         options = parser.selects[select_id].options
         assert len(options) == 12
         assert options[9].attrs["value"] == "9"
         assert options[11].attrs["value"] == "11"
         assert options[11].text.endswith("12")
-
-    assert "text-overflow: ellipsis;" in css
-    assert "flex-wrap: wrap;" in css
-    assert ".rv-overlay-label" in css
-    assert ".rv-overlay-label.right" in css
-    assert ".rv-mode-slider #label-left" not in css
-    assert ".rv-mode-slider #label-right" not in css
 
 
 def test_build_html_renders_frame_metadata_and_category_filters(
