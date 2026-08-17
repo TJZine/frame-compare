@@ -335,13 +335,21 @@ Recommended final dimensions:
 
 | Asset family | Target |
 | --- | --- |
-| Report overview, slider, diff, grid, inspector | 1280 × 720 when the UI remains legible |
+| Report overview, slider, diff, grid, inspector | Exact visible 1080p-height browser surface; 1683 × 1080 on the current capture host |
 | VSPreview | Approximately 1600–1920 px wide; crop unused desktop chrome |
 | Terminal captures | Approximately 1000–1200 px wide, tightly cropped to relevant output |
 | HDR diagnostic | Approximately 1280 × 720 or the natural screenshot aspect ratio |
 
-Do not force 1280 × 720 when that crop removes required controls. Preserve clarity over
+For the 2026-08-17 recapture, the maintainer requested a 1080p-height browser capture
+so the documentation matches the intended full-screen local report. The current
+in-app-browser surface is 1683 × 1080; a 1920-wide CSS viewport override clips report
+controls on this host, so use the exact visible surface and do not upscale. Do not
+force 1280 × 720 when that crop removes required controls. Preserve clarity over
 uniformity, but keep the report-viewer set consistent.
+
+The allowed controlled-pattern `report-diff.webp` exception remains the retained
+1280 × 720 asset documented in the image record; the 1080p-height recapture applies
+to the natural-image overview, slider, grid, and inspector assets.
 
 ## Asset tasks
 

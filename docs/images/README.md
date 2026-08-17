@@ -65,11 +65,11 @@ Complete this table during each capture pass:
 | Physical filenames | `reference.mkv` (PQ10 remux), `hlg10-encode.mkv` (HLG10 remux), `pq10-encode.mkv` (FFmpeg SDR presentation derivative) |
 | Display labels | `EBU DVB PQ10 — Reference`; `EBU DVB HLG10 — Comparison`; `EBU DVB PQ10 — SDR Presentation` |
 | Frame number and category | Frame `1000`, `User`; 1 selected frame, 3 clips |
-| Frame Compare commit or release | `7107192b4a13968004fa7c9a8896e87918635a91` on `dev/v0.2.0` |
+| Frame Compare commit or release | `ac9b2fa24c83558af28105b895c5893ae9f48a95` on `dev/v0.2.0` |
 | Media-runtime profile | Windows portable bundle from the same commit; VapourSynth R79/API 4.2, L-SMASH-Works, vs-placebo 2.0.4, FFmpeg n8.1.2-34-g9b6c8969e0-20260731, Vulkan-capable path |
 | Capture host and OS | One physical Windows 10 Home 22H2 host, build 19045; display scaling 100% |
 | Browser and version | Codex In-app Browser (IAB production build; exact embedded engine version is not surfaced by the connector) |
-| Display scaling and browser zoom | Windows 100%; browser zoom 100%; report capture viewport 1280×720 |
+| Display scaling and browser zoom | Windows 100%; browser zoom 100%; report capture viewport 1683×1080 (exact visible IAB surface, 1080p height) |
 | Report theme | Dark |
 | Capture date | 2026-08-17 |
 | Captured by | Codex capture pass; maintainer review pending |
@@ -106,6 +106,13 @@ The downloaded source hashes were `33773E7275B83976B0D9A19D3AED47AA0FEDB1280BA20
   the pattern as a changed-region locator, not source footage.
 - `report-grid.webp` keeps the inspector's Clips tab open so all three full labels and
   their HDR/SDR roles remain readable while the three natural frames are visible.
+- The report overview, slider, grid, and inspector assets were recaptured after the
+  report-viewer HUD fixes in commit `ac9b2fa24c83558af28105b895c5893ae9f48a95`.
+  The capture host exposes a 1683×1080 visible in-app-browser surface; a 1920-wide
+  CSS override clipped the report controls, so the exact visible 1080p-height surface
+  is recorded and no upscaling is used.
+- `report-inspector.webp` uses the same report and frame with the Align tab open;
+  `report-grid.webp` uses the Clips tab as described above.
 - `hdr-diagnostic-overlay.webp` is a readability crop of the real physical-Windows
   diagnostic render. Its label card repeats only values proved by ffprobe, the selected
   run, and the portable runtime proof; it does not claim calibrated luminance or missing
