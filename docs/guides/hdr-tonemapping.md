@@ -85,14 +85,10 @@ For publication-bound comparisons:
 range, Dolby Vision facts, and selection context. The values depend on what the source
 and selected runtime can prove.
 
-<!-- SCREENSHOT_SLOT: hdr-diagnostic-overlay
-Target file: ../images/hdr-diagnostic-overlay.webp
-Replace this comment only after the active V2 capture plan has produced a
-publication-safe HDR frame on the physical Windows test machine. The image must show a
-real tonemapped output frame with an accurate diagnostic overlay and only metadata the
-source/runtime actually proves. Do not present an SDR browser capture as untonemapped
-native HDR. Update the alt text and caption to match the retained evidence.
--->
+<figure class="fc-doc-figure">
+  <img src="../images/hdr-diagnostic-overlay.webp" alt="Physical-Windows HDR diagnostic frame from EBU DVB HLG10 Comparison at frame 1000, showing HLG and BT.2020 metadata, limited range, bt2390 tonemapping at 100 nits, and the vs-placebo runtime proof.">
+  <figcaption>This physical-Windows diagnostic render shows only the HLG, BT.2020, limited-range, frame-selection, bt2390/100-nit, and vs-placebo facts proved by the source and runtime. It is a tonemapped SDR presentation for browser review, not a calibrated luminance measurement or untonemapped native-HDR claim.</figcaption>
+</figure>
 
 Selection scores are useful for explaining why a frame was chosen. They are not a
 replacement for calibrated luminance measurement, VMAF, or a perceptual review.

@@ -56,8 +56,8 @@ installations. The default Docker route does not provide an interactive desktop
 session.
 
 <figure class="fc-doc-figure">
-  <img src="../images/vspreview-alignment.webp" alt="VSPreview session opened by Frame Compare showing a comparison source, a proposed frame offset, and alignment inspection controls.">
-  <figcaption>The generated VSPreview session puts the proposed offset beside the comparison frame and timeline so alignment can be checked at multiple evidence points.</figcaption>
+  <img src="../images/vspreview-alignment.webp" alt="VSPreview showing EBU DVB PQ10 Reference beside EBU DVB HLG10 Comparison at frame 1000 with a zero-frame offset hint and timeline controls.">
+  <figcaption>The physical Windows proof places the EBU/DVB reference and comparison at frame 1000 with a zero-frame hint beside the timeline so alignment can be checked at multiple evidence points.</figcaption>
 </figure>
 
 During verification, inspect multiple evidence points:

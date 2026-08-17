@@ -14,9 +14,9 @@
 
 <figure class="fc-doc-figure">
   <a href="docs/guides/reports-and-overlays.md">
-    <img src="docs/images/report-viewer-overview.webp" alt="Frame Compare offline report in slider mode with source labels, frame metadata, filmstrip navigation, and primary review controls visible.">
+    <img src="docs/images/report-viewer-overview.webp" alt="Offline report at frame 1000 comparing EBU DVB PQ10 Reference with EBU DVB HLG10 Comparison in slider mode, with the filmstrip and review controls visible.">
   </a>
-  <figcaption>The offline report keeps the source set, current comparison pair, frame context, and review controls together for repeatable local inspection.</figcaption>
+  <figcaption>The offline report keeps the natural EBU/DVB source pair, frame 1000 context, filmstrip, and review controls together for repeatable local inspection.</figcaption>
 </figure>
 
 Frame Compare turns two or more local video sources into a repeatable comparison:

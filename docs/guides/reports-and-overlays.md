@@ -9,8 +9,8 @@ Set `report.embed_images = true` only when a single larger HTML file is more use
 the normal portable folder layout.
 
 <figure class="fc-doc-figure">
-  <img src="../images/report-viewer-overview.webp" alt="Frame Compare offline report in slider mode with source labels, frame metadata, filmstrip navigation, and primary review controls visible.">
-  <figcaption>The canonical report view combines source identity, the current comparison pair, frame context, filmstrip navigation, and review controls.</figcaption>
+  <img src="../images/report-viewer-overview.webp" alt="Offline report at frame 1000 comparing EBU DVB PQ10 Reference with EBU DVB HLG10 Comparison in slider mode, with the filmstrip and review controls visible.">
+  <figcaption>The canonical report view combines the natural EBU/DVB source pair, frame 1000 context, filmstrip navigation, and review controls.</figcaption>
 </figure>
 
 ## Viewer modes
@@ -31,8 +31,8 @@ for spatial differences such as crop, scaling, haloing, texture, denoising, grai
 subtle tone changes.
 
 <figure class="fc-doc-figure">
-  <img src="../images/report-slider.webp" alt="Slider comparison revealing two selected sources across a draggable divider with source-pair and frame context visible.">
-  <figcaption>Move the divider away from center to inspect spatial, texture, crop, and scaling differences between a selected pair.</figcaption>
+  <img src="../images/report-slider.webp" alt="Slider comparison revealing EBU DVB PQ10 Reference and EBU DVB HLG10 Comparison across a two-thirds divider at frame 1000.">
+  <figcaption>Move the divider away from center to inspect spatial, texture, crop, and scaling differences between the selected EBU/DVB pair.</figcaption>
 </figure>
 
 ### Diff
@@ -42,8 +42,8 @@ a locator: identify where sources diverge, then switch back to slider or blink t
 whether the difference is meaningful.
 
 <figure class="fc-doc-figure">
-  <img src="../images/report-diff.webp" alt="Difference view highlighting changed image regions between the selected source pair with frame and pair context visible.">
-  <figcaption>Diff mode is a locator for changed regions; switch back to slider or blink to judge whether a difference matters.</figcaption>
+  <img src="../images/report-diff.webp" alt="Controlled-pattern diff locator illustrating how changed regions are highlighted for a selected source pair.">
+  <figcaption>This controlled-pattern image is a changed-region locator, not representative source footage; switch back to slider or blink to judge a natural-image difference.</figcaption>
 </figure>
 
 ### Pair blink
@@ -61,8 +61,8 @@ Grid mode displays several sources together so outliers are easy to identify. Us
 scan all encodes first, then choose a pair for detailed slider, diff, or blink review.
 
 <figure class="fc-doc-figure">
-  <img src="../images/report-grid.webp" alt="Grid view displaying the same selected frame across three clearly labeled sources.">
-  <figcaption>Grid mode makes it easy to scan all three sources at the same selected frame before choosing a pair for detailed review.</figcaption>
+  <img src="../images/report-grid.webp" alt="Grid view showing frame 1000 from EBU DVB PQ10 Reference, EBU DVB HLG10 Comparison, and EBU DVB PQ10 SDR Presentation with the Clips inspector open.">
+  <figcaption>Grid mode scans all three natural sources at the same selected frame; the Clips inspector keeps their full labels and HDR/SDR roles readable before pair review.</figcaption>
 </figure>
 
 ## Navigation and inspection
@@ -79,8 +79,8 @@ The viewer supports:
 - browser-local review state and notes.
 
 <figure class="fc-doc-figure">
-  <img src="../images/report-inspector.webp" alt="Frame Compare report inspector showing frame, category, source-frame mapping, shown-count metadata, and review controls beside the comparison view.">
-  <figcaption>The inspector keeps frame, source, alignment, review, and export context available without leaving the current report.</figcaption>
+  <img src="../images/report-inspector.webp" alt="Report inspector Align tab showing the EBU DVB PQ10 Reference and EBU DVB HLG10 Comparison pair at frame 1000 with zero x and y offsets.">
+  <figcaption>The inspector keeps the selected pair and its alignment mapping visible without leaving the current report.</figcaption>
 </figure>
 
 Viewer state such as the current frame, mode, selected clips, reveal position, viewport,

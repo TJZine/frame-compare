@@ -11,9 +11,9 @@ For a publication-safe example, use names such as:
 
 ```text
 comparison_videos/
-├── Reference.mkv
-├── Encode-A.mkv
-└── Encode-B.mkv
+├── reference.mkv
+├── hlg10-encode.mkv
+└── pq10-encode.mkv
 ```
 
 Supported extensions are `.mkv`, `.mp4`, `.avi`, `.m2ts`, and `.ts`, matched
@@ -78,8 +78,8 @@ FFmpeg, VapourSynth, source-plugin, or Vulkan failure can block the correspondin
 rendering or alignment path.
 
 <figure class="fc-doc-figure">
-  <img src="../images/first-run-doctor.png" alt="Successful Frame Compare doctor output showing Python, VapourSynth, L-SMASH-Works, FFmpeg, VSPreview, slow.pics, and TMDB checks.">
-  <figcaption>The doctor command confirms the portable runtime and optional integrations before the first comparison begins.</figcaption>
+  <img src="../images/first-run-doctor.png" alt="Frame Compare doctor output showing passing Python, VapourSynth, L-SMASH-Works, vs-placebo, FFmpeg, VSPreview, and slow.pics checks, with the optional TMDB key noted as unconfigured.">
+  <figcaption>The doctor command confirms the core portable runtime before the first comparison; the optional TMDB integration can remain unconfigured.</figcaption>
 </figure>
 
 ### 3. Dry run
@@ -94,7 +94,7 @@ selection intent, and output intent without entering the rendering pipeline. Che
 - publishing remains disabled unless deliberately enabled.
 
 <figure class="fc-doc-figure">
-  <img src="../images/first-run-dry-run.png" alt="Frame Compare dry-run summary identifying one reference, two comparison sources, requested frame selection, quality analysis, and disabled uploads.">
+  <img src="../images/first-run-dry-run.png" alt="Frame Compare dry-run plan showing the generic workspace, three EBU/DVB display labels, frame 1000 intent, quality analysis, local output root, and disabled publishing.">
   <figcaption>A dry run makes source order, frame selection, analysis mode, local output intent, and publishing state visible before any rendering starts.</figcaption>
 </figure>
 
@@ -106,8 +106,8 @@ and writes the report. Network publication occurs only when the effective config
 or command explicitly enables it.
 
 <figure class="fc-doc-figure">
-  <img src="../images/first-run-complete.png" alt="Completed Frame Compare run showing three matched clips, generated report and screenshot paths, the selected frame count, and elapsed time.">
-  <figcaption>The completed run summary links the report and screenshots to the matched source set and records the final frame count and duration.</figcaption>
+  <img src="../images/first-run-complete.png" alt="Completed Frame Compare run showing three matched EBU/DVB clips, one selected frame, the report and run-folder paths, the VSPreview warning summary, and elapsed time.">
+  <figcaption>The completed run summary links the report and run folder to the three matched sources, records frame 1000, surfaces the optional VSPreview warning, and reports the duration.</figcaption>
 </figure>
 
 ## Find the result

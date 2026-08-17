@@ -19,8 +19,8 @@ archival quality-control workflows.
 </div>
 
 <figure class="fc-doc-figure">
-  <img src="images/report-viewer-overview.webp" alt="Frame Compare offline report in slider mode with source labels, frame metadata, filmstrip navigation, and primary review controls visible.">
-  <figcaption>The report viewer exposes the current frame, source pair, filmstrip, and primary review controls without requiring a server.</figcaption>
+  <img src="images/report-viewer-overview.webp" alt="Offline report at frame 1000 comparing EBU DVB PQ10 Reference with EBU DVB HLG10 Comparison in slider mode, with the filmstrip and review controls visible.">
+  <figcaption>The report viewer exposes the natural source pair, frame 1000 category, filmstrip, and primary review controls without requiring a server.</figcaption>
 </figure>
 
 ## Start with the route that fits your system

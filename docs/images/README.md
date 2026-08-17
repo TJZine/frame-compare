@@ -5,10 +5,10 @@ search:
 
 # Documentation image capture record
 
-This directory contains public-facing screenshots used by the README and documentation
-site. The current V1 assets are temporary capture fixtures until the active
+This directory contains the V2 public-facing screenshots used by the README and
+documentation site. The capture follows the active
 [V2 screenshot remediation plan](../plans/2026-08-17-documentation-v2-screenshot-remediation.md)
-is completed.
+and uses one rights-cleared natural-image source set.
 
 This record exists to keep future recaptures consistent, publication-safe, and
 reproducible. It is not a second documentation workflow or a product contract.
@@ -23,15 +23,15 @@ C:\FrameCompareDemo\
 │   └── config.toml
 ├── comparison_videos\
 │   ├── reference.mkv
-│   ├── itunes-webdl.mkv
-│   └── movies-anywhere-webdl.mkv
+│   ├── hlg10-encode.mkv
+│   └── pq10-encode.mkv
 └── generated\
 ```
 
 The physical filenames are deliberately generic. Do not capture original release names,
 release groups, private download paths, usernames, server names, or collection paths.
 
-Prefer explicit presentation labels:
+Use explicit presentation labels:
 
 ```toml
 [sources]
@@ -40,13 +40,13 @@ analysis_source = "reference"
 label_mode = "stem"
 
 [sources.overrides."reference.mkv"]
-label = "UHD Blu-ray — Reference"
+label = "EBU DVB PQ10 — Reference"
 
-[sources.overrides."itunes-webdl.mkv"]
-label = "iTunes WEB-DL"
+[sources.overrides."hlg10-encode.mkv"]
+label = "EBU DVB HLG10 — Comparison"
 
-[sources.overrides."movies-anywhere-webdl.mkv"]
-label = "Movies Anywhere WEB-DL"
+[sources.overrides."pq10-encode.mkv"]
+label = "EBU DVB PQ10 — SDR Presentation"
 ```
 
 When the report does not present the title elsewhere, prefix each label with the
@@ -59,22 +59,29 @@ Complete this table during each capture pass:
 
 | Field | Recorded value |
 | --- | --- |
-| Source title | |
-| Rights basis | Personally authored / public domain / open license / explicit permission |
-| Attribution requirement | |
-| Physical filenames | |
-| Display labels | |
-| Frame number and category | |
-| Frame Compare commit or release | |
-| Media-runtime profile | |
-| Capture host and OS | |
-| Browser and version | |
-| Display scaling and browser zoom | |
-| Report theme | |
-| Capture date | |
-| Captured by | |
+| Source title | EBU/DVB HEVC Test Content: PQ10 and HLG10 natural harbour sequence |
+| Rights basis | EBU-published media, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
+| Attribution requirement | Credit EBU; footage by Frans de Jong; HLG-to-PQ10 conversion by Andrew Cotton (BBC); link to the [EBU/DVB HEVC test-content page](https://dvb.org/specifications/verification-validation/hevc-test-content/) |
+| Physical filenames | `reference.mkv` (PQ10 remux), `hlg10-encode.mkv` (HLG10 remux), `pq10-encode.mkv` (FFmpeg SDR presentation derivative) |
+| Display labels | `EBU DVB PQ10 — Reference`; `EBU DVB HLG10 — Comparison`; `EBU DVB PQ10 — SDR Presentation` |
+| Frame number and category | Frame `1000`, `User`; 1 selected frame, 3 clips |
+| Frame Compare commit or release | `7107192b4a13968004fa7c9a8896e87918635a91` on `dev/v0.2.0` |
+| Media-runtime profile | Windows portable bundle from the same commit; VapourSynth R79/API 4.2, L-SMASH-Works, vs-placebo 2.0.4, FFmpeg n8.1.2-34-g9b6c8969e0-20260731, Vulkan-capable path |
+| Capture host and OS | One physical Windows 10 Home 22H2 host, build 19045; display scaling 100% |
+| Browser and version | Codex In-app Browser (IAB production build; exact embedded engine version is not surfaced by the connector) |
+| Display scaling and browser zoom | Windows 100%; browser zoom 100%; report capture viewport 1280×720 |
+| Report theme | Dark |
+| Capture date | 2026-08-17 |
+| Captured by | Codex capture pass; maintainer review pending |
 
 Do not publish a screenshot until the rights basis and required attribution are known.
+
+The downloaded source hashes were `33773E7275B83976B0D9A19D3AED47AA0FEDB1280BA2019FE3DD344A05DA8D83`
+(PQ10) and `B9EA646565751BB41CFC1F954172FDF5162C890D35AAC22238F536F6CF425300`
+(HLG10). The capture-workspace hashes were `32E1632D0D32EDE7A1D806505422908338CDB75A303C8146D389BC8302A83CAC`
+(`reference.mkv`), `EC7C29952B75B291C603DA7D16A9C1549385297BBB970A436B80178D5AEA8A0E`
+(`hlg10-encode.mkv`), and `271AB130410462CEE6EA19B9D69FA2E3CEADD7E1AA856E51ED1DAA74AE32E9FC`
+(`pq10-encode.mkv`).
 
 ## Asset policy
 
@@ -90,6 +97,27 @@ Do not publish a screenshot until the rights basis and required attribution are 
 - Use one browser, one zoom level, and one Windows display-scaling setting for the
   complete report-viewer set.
 - Record any deliberate exception in this file.
+
+## Deliberate capture decisions
+
+- `report-diff.webp` retains the controlled-pattern locator. The natural PQ/HLG/SDR
+  difference flooded the frame with presentation-transform colour changes and was
+  misleading at normal documentation width; the retained caption explicitly describes
+  the pattern as a changed-region locator, not source footage.
+- `report-grid.webp` keeps the inspector's Clips tab open so all three full labels and
+  their HDR/SDR roles remain readable while the three natural frames are visible.
+- `hdr-diagnostic-overlay.webp` is a readability crop of the real physical-Windows
+  diagnostic render. Its label card repeats only values proved by ffprobe, the selected
+  run, and the portable runtime proof; it does not claim calibrated luminance or missing
+  mastering metadata.
+- The one-off VSPreview capture uses `C:\FrameCompareDemo\alignment.py` as an external
+  fixture so the window title contains no generated-script path or username. The fresh
+  bundle's optional launcher emitted FC-4019 during the CLI run; direct VSPreview opened
+  successfully on the same physical runtime after the known external dependency-
+  compatibility workaround. No repository production code was changed.
+- The capture config deliberately keeps `report.auto_open = false`, `slowpics.auto_upload =
+  false`, `--skip-metadata`, and one explicit user frame so the public example performs no
+  network publication and stays deterministic.
 
 ## Privacy and integrity review
 
@@ -123,7 +151,8 @@ information is never rendered into the image.
 | `first-run-dry-run.png` | Pre-render intent validation |
 | `first-run-complete.png` | Cropped final run summary |
 | `windows-portable-install.png` | Checksum and shim installation |
-| `hdr-diagnostic-overlay.webp` | Pending physical-Windows HDR diagnostic example |
+| `hdr-diagnostic-overlay.webp` | Physical-Windows HDR diagnostic example |
 
-Mark the active plan historical and replace the V1 note at the top of this file after the
-V2 assets and rendered-site review are complete.
+The active plan remains Active until the maintainer reviews the final assets and the
+browser-version limitation is either accepted or replaced with a browser capture whose
+exact embedded version is available.
