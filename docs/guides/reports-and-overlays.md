@@ -8,14 +8,10 @@ result is moved, archived, or opened on another machine.
 Set `report.embed_images = true` only when a single larger HTML file is more useful than
 the normal portable folder layout.
 
-<!-- SCREENSHOT_SLOT: report-viewer-overview
-Target file: ../images/report-viewer-overview.webp
-Place the canonical full-width viewer image here. Show a completed three-source report
-in slider mode with the filmstrip, source labels, frame/category context, and primary
-controls visible. Reuse this asset on the README and documentation home.
-Suggested alt text: "Frame Compare offline report displaying three video sources in
-slider mode with filmstrip and metadata controls."
--->
+<figure class="fc-doc-figure">
+  <img src="../images/report-viewer-overview.webp" alt="Frame Compare offline report displaying three synthetic video sources in slider mode with filmstrip, source labels, frame metadata, and primary controls visible.">
+  <figcaption>The canonical three-source report view combines source identity, frame context, filmstrip navigation, and comparison controls.</figcaption>
+</figure>
 
 ## Viewer modes
 
@@ -34,13 +30,10 @@ Slider mode reveals one source against another across a draggable divider. It is
 for spatial differences such as crop, scaling, haloing, texture, denoising, grain, and
 subtle tone changes.
 
-<!-- SCREENSHOT_SLOT: report-slider
-Target file: ../images/report-slider.webp
-Place a wide crop here showing the comparison divider away from center, both source
-identity labels, and one representative frame. Avoid copyrighted or private material.
-Suggested alt text: "Slider comparison revealing two encodes across a draggable vertical
-divider."
--->
+<figure class="fc-doc-figure">
+  <img src="../images/report-slider.webp" alt="Slider comparison showing Reference and Encode-A across a draggable divider positioned toward the right side of a synthetic test frame.">
+  <figcaption>Move the divider away from center to inspect spatial, texture, crop, and scaling differences between a selected pair.</figcaption>
+</figure>
 
 ### Diff
 
@@ -48,12 +41,10 @@ Diff mode emphasizes pixel differences between the selected pair. It is most use
 a locator: identify where sources diverge, then switch back to slider or blink to judge
 whether the difference is meaningful.
 
-<!-- SCREENSHOT_SLOT: report-diff
-Target file: ../images/report-diff.webp
-Place a wide diff-mode capture here with the pair identity and scale/context visible.
-Suggested alt text: "Difference view highlighting changed image regions between the base
-and comparison sources."
--->
+<figure class="fc-doc-figure">
+  <img src="../images/report-diff.webp" alt="Difference view highlighting changed image regions between the Reference and Encode-A synthetic sources with frame and pair context visible.">
+  <figcaption>Diff mode is a locator for changed regions; switch back to slider or blink to judge whether a difference matters.</figcaption>
+</figure>
 
 ### Pair blink
 
@@ -69,12 +60,10 @@ playback measurement.
 Grid mode displays several sources together so outliers are easy to identify. Use it to
 scan all encodes first, then choose a pair for detailed slider, diff, or blink review.
 
-<!-- SCREENSHOT_SLOT: report-grid
-Target file: ../images/report-grid.webp
-Place a wide capture showing at least three sources, readable labels, and a shared frame.
-Suggested alt text: "Grid view displaying the same selected frame from three comparison
-sources."
--->
+<figure class="fc-doc-figure">
+  <img src="../images/report-grid.webp" alt="Grid view displaying the same selected frame from Reference, Encode-A, and Encode-B with readable labels.">
+  <figcaption>Grid mode makes it easy to scan all three sources at the same selected frame before choosing a pair for detailed review.</figcaption>
+</figure>
 
 ## Navigation and inspection
 
@@ -89,12 +78,10 @@ The viewer supports:
 - a lens for close inspection;
 - browser-local review state and notes.
 
-<!-- SCREENSHOT_SLOT: report-inspector
-Target file: ../images/report-inspector.webp
-Place a focused capture here showing the inspector and review controls without obscuring
-the entire frame. Suggested alt text: "Frame Compare report inspector showing source,
-frame, selection, and review metadata."
--->
+<figure class="fc-doc-figure">
+  <img src="../images/report-inspector.webp" alt="Frame Compare report inspector showing frame number, category, source-frame detail, shown-count metadata, and review tabs beside the comparison grid.">
+  <figcaption>The inspector keeps frame, source, alignment, review, and export context available without leaving the current report.</figcaption>
+</figure>
 
 Viewer state such as the current frame, mode, selected clips, reveal position, viewport,
 and review notes can persist in the browser for that report. It does not rewrite the

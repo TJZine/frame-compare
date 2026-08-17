@@ -55,14 +55,10 @@ VSPreview is included in the Windows portable bundle and optional in native
 installations. The default Docker route does not provide an interactive desktop
 session.
 
-<!-- SCREENSHOT_SLOT: vspreview-alignment
-Target file: ../images/vspreview-alignment.webp
-Place a wide application capture here. Show the Frame Compare-generated VSPreview
-session with reference and comparison clips, the proposed offset, and controls needed
-to inspect the alignment. Use synthetic or publication-safe media and generic labels.
-Suggested alt text: "VSPreview session opened by Frame Compare to verify the proposed
-audio alignment between reference and comparison sources."
--->
+<figure class="fc-doc-figure">
+  <img src="../images/vspreview-alignment.webp" alt="VSPreview session opened by Frame Compare showing the Encode-A comparison, a proposed six-frame audio offset, and alignment inspection controls.">
+  <figcaption>The generated VSPreview session puts the proposed offset beside the comparison frame and timeline so alignment can be checked at multiple evidence points.</figcaption>
+</figure>
 
 During verification, inspect multiple evidence points:
 

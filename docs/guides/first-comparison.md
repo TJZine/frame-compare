@@ -77,14 +77,10 @@ the features you intend to use. Optional integrations can remain disabled, but a
 FFmpeg, VapourSynth, source-plugin, or Vulkan failure can block the corresponding
 rendering or alignment path.
 
-<!-- SCREENSHOT_SLOT: first-run-doctor
-Target file: ../images/first-run-doctor.png
-Place a terminal capture after this paragraph. Show a successful human-readable doctor
-summary from the Windows portable route. Include the runtime profile, FFmpeg,
-VapourSynth, source plugin, and tonemapping checks. Redact usernames and absolute paths.
-Suggested alt text: "Successful Frame Compare doctor output for the Windows portable
-runtime."
--->
+<figure class="fc-doc-figure">
+  <img src="../images/first-run-doctor.png" alt="Successful Frame Compare doctor output showing Python, VapourSynth, L-SMASH-Works, FFmpeg, VSPreview, slow.pics, and TMDB checks.">
+  <figcaption>The doctor command confirms the portable runtime and optional integrations before the first comparison begins.</figcaption>
+</figure>
 
 ### 3. Dry run
 
@@ -97,14 +93,10 @@ selection intent, and output intent without entering the rendering pipeline. Che
 - frame counts and analysis mode match your intent;
 - publishing remains disabled unless deliberately enabled.
 
-<!-- SCREENSHOT_SLOT: first-run-dry-run
-Target file: ../images/first-run-dry-run.png
-Place a cropped terminal capture here. Show the at-a-glance section of a three-source
-dry run with generic labels and no private paths. Annotate the reference, comparisons,
-selected analysis mode, output root, and upload state.
-Suggested alt text: "Frame Compare dry-run summary identifying the reference, comparison
-sources, frame plan, and local output destination."
--->
+<figure class="fc-doc-figure">
+  <img src="../images/first-run-dry-run.png" alt="Frame Compare dry-run summary identifying Reference, Encode-A, Encode-B, the requested frames, quality analysis, and disabled uploads.">
+  <figcaption>A dry run makes source order, frame selection, analysis mode, local output intent, and publishing state visible before any rendering starts.</figcaption>
+</figure>
 
 ### 4. Run
 
@@ -113,14 +105,10 @@ performs analysis and alignment when required, renders screenshots, records meta
 and writes the report. Network publication occurs only when the effective configuration
 or command explicitly enables it.
 
-<!-- SCREENSHOT_SLOT: first-run-complete
-Target file: ../images/first-run-complete.png
-Place a final terminal capture here. Show the completed run summary, report path, frame
-count, warnings area, and elapsed time. Use generic source labels and redact absolute
-paths after the generated-data root is recognizable.
-Suggested alt text: "Completed Frame Compare run showing the generated report path and
-summary."
--->
+<figure class="fc-doc-figure">
+  <img src="../images/first-run-complete.png" alt="Completed Frame Compare run showing three matched clips, the generated report and screenshots paths, three frames, and elapsed time.">
+  <figcaption>The completed run summary links the report and screenshots to the matched source set and records the final frame count and duration.</figcaption>
+</figure>
 
 ## Find the result
 

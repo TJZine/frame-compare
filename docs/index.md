@@ -18,14 +18,10 @@ archival quality-control workflows.
 
 </div>
 
-<!-- SCREENSHOT_SLOT: report-viewer-overview
-Target file: images/report-viewer-overview.webp
-Place a full-width figure here after capture. It should show a completed three-source
-report in slider mode with the filmstrip, source labels, frame/category context, and
-main controls visible. Reuse the same source asset as the README hero when practical.
-Suggested alt text: "Frame Compare offline report displaying a three-source video
-comparison in slider mode."
--->
+<figure class="fc-doc-figure">
+  <img src="images/report-viewer-overview.webp" alt="Frame Compare offline report displaying three synthetic video sources in slider mode with filmstrip, source labels, frame metadata, and primary controls visible.">
+  <figcaption>The report viewer exposes the current frame, source pair, filmstrip, and primary review controls without requiring a server.</figcaption>
+</figure>
 
 ## Start with the route that fits your system
 

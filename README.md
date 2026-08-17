@@ -12,15 +12,12 @@
 **[Native source](docs/getting-started/native.md)** ·
 **[Documentation](https://tjzine.github.io/frame-compare/)**
 
-<!-- SCREENSHOT_SLOT: report-viewer-overview
-Replace this comment with a linked image after capturing the canonical report viewer.
-Target file: docs/images/report-viewer-overview.webp
-Capture: a completed three-source report in slider mode, with filmstrip, source labels,
-frame metadata, and primary controls visible. Use synthetic or publication-safe media,
-generic source names, and no private paths.
-Suggested replacement: a linked Markdown image using the target file above and the
-Reports and Overlays guide as the destination.
--->
+<figure class="fc-doc-figure">
+  <a href="docs/guides/reports-and-overlays.md">
+    <img src="docs/images/report-viewer-overview.webp" alt="Frame Compare offline report displaying three synthetic video sources in slider mode with filmstrip, source labels, frame metadata, and primary controls visible.">
+  </a>
+  <figcaption>The offline report keeps three source views, frame context, and review controls together for repeatable local inspection.</figcaption>
+</figure>
 
 Frame Compare turns two or more local video sources into a repeatable comparison:
 it discovers and validates the clips, selects representative frames, aligns differing

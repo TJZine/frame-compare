@@ -37,14 +37,10 @@ Extract the ZIP, open the extracted bundle folder, and run:
 
 Open a new terminal after installation so the updated user `PATH` is loaded.
 
-<!-- SCREENSHOT_SLOT: windows-portable-install
-Target file: images/windows-portable-install.png
-Place a terminal capture here after the first public screenshot pass. Show checksum
-verification, install completion, and the instruction to open a new terminal. Redact the
-username and private download path.
-Suggested alt text: "Verified and completed Frame Compare Windows portable installation
-in PowerShell."
--->
+<figure class="fc-doc-figure">
+  <img src="images/windows-portable-install.png" alt="Verified Frame Compare Windows portable checksum followed by successful shim installation and the instruction to open a new terminal.">
+  <figcaption>Verify the release ZIP first, then install the shim and open a new terminal so the updated user PATH is available.</figcaption>
+</figure>
 
 ## Build the portable bundle from a clone
 
