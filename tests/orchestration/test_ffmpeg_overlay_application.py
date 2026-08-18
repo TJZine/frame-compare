@@ -15,6 +15,7 @@ from frame_compare.orchestration.context import (
     RunContext,
 )
 from frame_compare.orchestration.execution import run_render_phase
+from frame_compare.utils.media_facts import RenderedFrameFacts
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.types import HDRMetadata
 
@@ -23,10 +24,13 @@ class FakeFFmpegRunner:
     def __init__(self) -> None:
         self.calls: list[tuple[Path, int, Path]] = []
 
-    def extract_frame(self, video: Path, frame_num: int, output: Path, **_kwargs) -> None:
+    def extract_frame(
+        self, video: Path, frame_num: int, output: Path, **_kwargs: object
+    ) -> RenderedFrameFacts:
         output.parent.mkdir(parents=True, exist_ok=True)
         Image.new("RGB", (10, 10), color=(0, 0, 0)).save(output, format="PNG")
         self.calls.append((video, frame_num, output))
+        return RenderedFrameFacts(source_frame=frame_num, picture_type="I")
 
     def probe_hdr(self, video: Path) -> HDRMetadata | None:
         _ = video
@@ -45,7 +49,7 @@ def test_ffmpeg_extraction_applies_overlay_post_process(
 ) -> None:
     applied: list[Path] = []
 
-    def _record_apply(path: Path, _overlay) -> None:  # type: ignore[no-untyped-def]
+    def _record_apply(path: Path, _overlay: object, _facts: RenderedFrameFacts) -> None:
         applied.append(path)
 
     monkeypatch.setattr("frame_compare.render.encoders.apply_overlay_to_file", _record_apply)

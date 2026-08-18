@@ -16,6 +16,8 @@ from frame_compare.orchestration.context import (
     RunContext,
 )
 from frame_compare.orchestration.execution import run_render_phase
+from frame_compare.render.types import RenderedFrameResult
+from frame_compare.utils.media_facts import RenderedFrameFacts
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.types import HDRMetadata, SourceInfo
 
@@ -64,11 +66,17 @@ def test_overlay_display_frame_number_matches_aligned_output_filename(
 ) -> None:
     captured: list[object] = []
 
-    def _fake_render_frame(request: object) -> Path:
+    def _fake_render_frame(request: object) -> RenderedFrameResult:
         captured.append(request)
-        return cast(Any, request).output_path
+        typed_request = cast(Any, request)
+        return RenderedFrameResult(
+            path=typed_request.output_path,
+            facts=RenderedFrameFacts(source_frame=typed_request.frame_number, picture_type="I"),
+        )
 
-    monkeypatch.setattr("frame_compare.render.batch.orchestrator.render_frame", _fake_render_frame)
+    monkeypatch.setattr(
+        "frame_compare.render.batch.orchestrator.render_frame_detailed", _fake_render_frame
+    )
     monkeypatch.setattr(vs_loader_module, "DefaultVSLoader", FakeVSLoader)
 
     config = ConfigSchema()
@@ -126,5 +134,5 @@ def test_overlay_display_frame_number_matches_aligned_output_filename(
     assert req.output_path.name == "10 - ref.png"
     assert req.overlay is not None
     assert req.overlay.label == "Reference"
-    assert req.overlay.burn_in_label == "ref"
-    assert req.overlay.display_frame_number == 10
+    assert req.overlay.comparison_frame == 10
+    assert req.overlay.source_frame == 20
