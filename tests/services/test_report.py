@@ -283,6 +283,51 @@ def test_report_id_identity_excludes_paths_and_timestamps(
         build_report_payload(changed, ReportConfig(), report_dir=tmp_path)["report_id"]
         != first["report_id"]
     )
+    changed_overlay = replace(
+        report_data,
+        rendering=replace(report_data.rendering, overlay_mode=OverlayMode.STANDARD),
+    )
+    assert (
+        build_report_payload(changed_overlay, ReportConfig(), report_dir=tmp_path)["report_id"]
+        != first["report_id"]
+    )
+    changed_frame_number = replace(
+        report_data,
+        rendering=replace(report_data.rendering, include_frame_number=False),
+    )
+    assert (
+        build_report_payload(changed_frame_number, ReportConfig(), report_dir=tmp_path)["report_id"]
+        != first["report_id"]
+    )
+    changed_geometry = replace(
+        report_data,
+        rendering=replace(
+            report_data.rendering,
+            geometry_by_label={
+                label: replace(value, final_canvas_size=(1919, 1080), is_noop=False)
+                for label, value in report_data.rendering.geometry_by_label.items()
+            },
+        ),
+    )
+    assert (
+        build_report_payload(changed_geometry, ReportConfig(), report_dir=tmp_path)["report_id"]
+        != first["report_id"]
+    )
+    changed_presentation = replace(
+        report_data,
+        clips=[
+            report_data.clips[0],
+            replace(
+                report_data.clips[1],
+                presentation_state=PresentationState.HDR_TONEMAP_OFF,
+                tonemap_settings=None,
+            ),
+        ],
+    )
+    assert (
+        build_report_payload(changed_presentation, ReportConfig(), report_dir=tmp_path)["report_id"]
+        != first["report_id"]
+    )
 
 
 def test_image_src_for_report_rejects_escape_and_accepts_contained_files(tmp_path: Path) -> None:

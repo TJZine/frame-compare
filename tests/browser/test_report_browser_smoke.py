@@ -29,6 +29,7 @@ from frame_compare.utils.media_facts import (
     RenderedGeometryFacts,
     SourceSignalFacts,
 )
+from frame_compare.vs.types import TonemapSettings
 
 _ONE_PIXEL_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
@@ -75,7 +76,7 @@ def _browser_executable() -> str | None:
     return None
 
 
-def _generated_report(tmp_path: Path) -> Path:
+def _generated_report(tmp_path: Path, *, tonemapped: bool = False) -> Path:
     clips: list[ClipInfo] = []
     geometry = RenderedGeometryFacts(
         source_size=(1, 1),
@@ -102,10 +103,16 @@ def _generated_report(tmp_path: Path) -> Path:
                 fps=24.0,
                 size_bytes=17 * 1024**3,
                 signal=SourceSignalFacts(
-                    is_hdr=False, primaries=1, transfer=1, matrix=10, color_range="limited"
+                    is_hdr=tonemapped,
+                    primaries=9 if tonemapped else 1,
+                    transfer=16 if tonemapped else 1,
+                    matrix=10,
+                    color_range="limited",
                 ),
-                presentation_state=PresentationState.SDR,
-                tonemap_settings=None,
+                presentation_state=(
+                    PresentationState.HDR_TONEMAPPED if tonemapped else PresentationState.SDR
+                ),
+                tonemap_settings=TonemapSettings() if tonemapped else None,
                 active_picture=geometry.active_picture,
                 images=[ReportImageInfo(screenshot, 10, RenderedFrameFacts(10, "B"))],
             )
@@ -118,7 +125,7 @@ def _generated_report(tmp_path: Path) -> Path:
             rendering=ReportRenderingInfo(
                 overlay_mode=OverlayMode.DIAGNOSTIC,
                 include_frame_number=True,
-                tonemap_settings=None,
+                tonemap_settings=TonemapSettings() if tonemapped else None,
                 geometry_by_label={clip.label or clip.name: geometry for clip in clips},
             ),
         ),
@@ -325,6 +332,109 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 """
     report_path.write_text(html.replace("</body>", f"{probe}</body>"), encoding="utf-8")
+
+
+def _append_tonemap_disclosure_probe(report_path: Path) -> None:
+    html = report_path.read_text(encoding="utf-8")
+    probe = """
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const disclosure = document.querySelector('[data-rendering-details]');
+    const summary = disclosure?.querySelector('summary');
+    const settings = disclosure?.querySelector('dl');
+    const advancedLabels = [
+        'Dynamic peak detection', 'Contrast recovery', 'Gamma lift', 'Source peak',
+        'Destination minimum', 'Knee offset', 'Smoothing period', 'Percentile',
+        'Scene threshold low', 'Scene threshold high', 'Gamut mapping',
+        'Metadata mode', 'Dolby Vision metadata use',
+    ];
+    ReportViewer.openInfoModal();
+    document.documentElement.dataset.tonemapSummary = String(
+        document.querySelector('[data-rendering-tonemap-summary]')?.textContent
+        === 'Reference · BT.2390 · 100 nits'
+    );
+    document.documentElement.dataset.tonemapDisclosureInitial = String(
+        Boolean(disclosure && summary && !disclosure.open && settings)
+    );
+    document.documentElement.dataset.tonemapAdvancedRows = String(
+        Boolean(settings)
+        && advancedLabels.every(label => settings.textContent.includes(label))
+        && settings.textContent.includes('On')
+        && settings.textContent.includes('Off')
+        && settings.textContent.includes('Auto')
+    );
+    let enterReceived = false;
+    summary?.addEventListener('keydown', event => {
+        if (event.key === 'Enter') enterReceived = true;
+    });
+    const pressEnter = () => {
+        summary?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        // Chrome does not run default actions for synthetic keyboard events in dump-dom.
+        if (summary) summary.click();
+        summary?.focus();
+    };
+    summary?.focus();
+    summary?.setAttribute('tabindex', '0');
+    summary?.focus();
+    pressEnter();
+    document.documentElement.dataset.tonemapOpenState = String(Boolean(disclosure?.open));
+    document.documentElement.dataset.tonemapFocusState = String(document.activeElement === summary);
+    document.documentElement.dataset.tonemapDisclosureOpened = String(
+        Boolean(enterReceived && disclosure?.open && document.activeElement === summary)
+    );
+    pressEnter();
+    document.documentElement.dataset.tonemapDisclosureClosed = String(
+        Boolean(disclosure && !disclosure.open && document.activeElement === summary)
+    );
+});
+</script>
+"""
+    report_path.write_text(html.replace("</body>", f"{probe}</body>"), encoding="utf-8")
+
+
+@pytest.mark.integration
+def test_applied_tonemap_disclosure_is_keyboard_operable(tmp_path: Path) -> None:
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable; CI preflight makes this a required proof")
+    report_path = _generated_report(tmp_path, tonemapped=True)
+    _append_tonemap_disclosure_probe(report_path)
+    completed = subprocess.run(
+        [
+            browser,
+            "--headless=new",
+            "--disable-background-networking",
+            "--disable-default-apps",
+            "--disable-gpu",
+            "--no-first-run",
+            "--virtual-time-budget=10000",
+            "--window-size=1280,720",
+            "--dump-dom",
+            report_path.as_uri(),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+    )
+    parser = _InitializedViewerParser()
+    parser.feed(completed.stdout)
+    assert parser.document_attributes is not None
+    for attribute in (
+        "data-tonemap-summary",
+        "data-tonemap-disclosure-initial",
+        "data-tonemap-advanced-rows",
+        "data-tonemap-open-state",
+        "data-tonemap-focus-state",
+        "data-tonemap-disclosure-opened",
+        "data-tonemap-disclosure-closed",
+    ):
+        assert parser.document_attributes[attribute] == "true", (
+            attribute,
+            parser.document_attributes[attribute],
+            parser.document_attributes,
+        )
 
 
 @pytest.mark.integration

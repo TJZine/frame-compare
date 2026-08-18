@@ -276,6 +276,63 @@ def test_build_html_displays_overlay_default_mode_as_single(
     assert info_modal.general["Default Mode"] == "Single"
 
 
+def test_build_html_renders_applied_tonemap_disclosure_with_all_effective_settings(
+    report_payload: ReportPayload,
+) -> None:
+    settings = {
+        "enabled": True,
+        "preset": "reference",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": None,
+        "dynamic_peak_detection": True,
+        "dst_min_nits": 0.18,
+        "knee_offset": 0.5,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 0,
+        "use_dovi": False,
+        "contrast_recovery": 0.3,
+        "gamma_lift": False,
+    }
+    payload: ReportPayload = {
+        **report_payload,
+        "rendering": {
+            **report_payload["rendering"],
+            "tonemap": {"applied": True, "settings": settings},
+        },
+    }
+    html = build_html(payload)
+    assert "Reference · BT.2390 · 100 nits" in html
+    details_start = html.index('<details class="rv-tonemap-details"')
+    details_end = html.index("</details>", details_start)
+    details = html[details_start:details_end]
+    assert " open" not in details.split(">", 1)[0]
+    for label in (
+        "Dynamic peak detection",
+        "Contrast recovery",
+        "Gamma lift",
+        "Source peak",
+        "Destination minimum",
+        "Knee offset",
+        "Smoothing period",
+        "Percentile",
+        "Scene threshold low",
+        "Scene threshold high",
+        "Gamut mapping",
+        "Metadata mode",
+        "Dolby Vision metadata use",
+    ):
+        assert label in details
+    assert "<dt>Dynamic peak detection</dt><dd>On</dd>" in details
+    assert "<dt>Gamma lift</dt><dd>Off</dd>" in details
+    assert "<dt>Source peak</dt><dd>Auto</dd>" in details
+    assert "<dt>Dolby Vision metadata use</dt><dd>Off</dd>" in details
+
+
 def test_build_html_avoids_inline_styles(report_payload: ReportPayload) -> None:
     html = build_html(report_payload)
     tags = parse_start_tags(html)
