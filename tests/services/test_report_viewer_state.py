@@ -51,7 +51,7 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
     assert inspector_state["blinkPausedPersisted"] is False
     assert inspector_state["closedInspectorInert"] is True
     assert inspector_state["closedInspectorTabIndex"] == "-1"
-    assert inspector_state["restoredKeyboardFocusToInfo"] is True
+    assert inspector_state["restoredKeyboardFocusToOrigin"] is True
     assert inspector_state["clearedKeyboardFocusRestoreTarget"] is True
 
     assert summary["escapeOrder"] == {
