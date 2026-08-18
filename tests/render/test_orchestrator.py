@@ -39,6 +39,8 @@ def _rendered(request: RenderRequest) -> RenderedFrameResult:
 
 
 def test_render_batch_detailed_parallel_order(mock_render_request):
+    frame_zero_started = Event()
+    frame_one_completed = Event()
     requests = [
         RenderRequest(
             clip=Path("video.mkv"),
@@ -50,8 +52,22 @@ def test_render_batch_detailed_parallel_order(mock_render_request):
         )
         for i in range(5)
     ]
+
     with patch("frame_compare.render.batch.orchestrator.render_frame_detailed") as mock_render:
-        mock_render.side_effect = _rendered
+
+        def side_effect(request: RenderRequest) -> RenderedFrameResult:
+            if request.frame_number == 0:
+                frame_zero_started.set()
+                assert frame_one_completed.wait(timeout=1.0)
+            else:
+                assert frame_zero_started.wait(timeout=1.0)
+                rendered = _rendered(request)
+                if request.frame_number == 1:
+                    frame_one_completed.set()
+                return rendered
+            return _rendered(request)
+
+        mock_render.side_effect = side_effect
         results = render_batch_detailed(requests, parallelism=2)
         assert [result.path for result in results] == [r.output_path for r in requests]
         assert [result.facts.source_frame for result in results] == [
