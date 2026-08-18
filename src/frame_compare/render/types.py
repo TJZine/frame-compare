@@ -57,19 +57,6 @@ class OverlayConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class OverlaySelectionDetail:
-    """Render-local per-frame selection metadata."""
-
-    frame_index: int
-    label: str
-    source: str
-    timecode: str | None
-    score: float | None = None
-    clip_role: str | None = None
-    notes: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
 class PreparedRenderSource:
     """Original diagnostic source and prepared image-producing render graph."""
 
@@ -205,7 +192,6 @@ __all__ = [
     "BatchRenderOptions",
     "EncoderSettings",
     "OverlayConfig",
-    "OverlaySelectionDetail",
     "PreparedRenderSource",
     "RenderRequest",
     "RenderedBatchResult",
