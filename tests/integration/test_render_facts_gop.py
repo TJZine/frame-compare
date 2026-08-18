@@ -11,7 +11,12 @@ import pytest
 
 from frame_compare.config.schema import OverlayMode, ReportConfig
 from frame_compare.render.encoders import render_frame_detailed
-from frame_compare.render.types import EncoderSettings, OverlayConfig, RenderRequest
+from frame_compare.render.types import (
+    EncoderSettings,
+    OverlayConfig,
+    RenderedFrameResult,
+    RenderRequest,
+)
 from frame_compare.services.report.payload import (
     ClipInfo,
     ReportData,
@@ -102,7 +107,10 @@ def test_deterministic_gop_picture_facts_match_vs_and_ffmpeg(tmp_path: Path) -> 
         is_noop=True,
     )
     signal = SourceSignalFacts(is_hdr=False, primaries=1, transfer=1, matrix=1)
-    results_by_backend = {"VapourSynth": [], "FFmpeg": []}
+    results_by_backend: dict[str, list[RenderedFrameResult]] = {
+        "VapourSynth": [],
+        "FFmpeg": [],
+    }
     for index in selected:
         overlay = OverlayConfig(
             mode=OverlayMode.MINIMAL,

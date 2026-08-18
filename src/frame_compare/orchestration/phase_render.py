@@ -12,9 +12,9 @@ from frame_compare.orchestration.phase_selection import (
     selection_label_for_frame,
 )
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
+from frame_compare.render.geometry import active_picture_provenance_from_rect_source
 from frame_compare.utils.media_facts import (
     ActivePictureFacts,
-    ActivePictureProvenance,
     HDRStaticFacts,
     SourceSignalFacts,
 )
@@ -172,20 +172,7 @@ def _active_picture_facts(clip: ClipState) -> ActivePictureFacts:
             "full_frame",
             True,
         )
-    provenance: ActivePictureProvenance
-    match active.source:
-        case "explicit":
-            provenance = "explicit"
-        case "metadata":
-            provenance = "dolby_vision_l5"
-        case "dimension-derived":
-            provenance = "dimension_derived"
-        case "aspect-ratio-derived":
-            provenance = "aspect_ratio_derived"
-        case "content-derived":
-            provenance = "content_derived"
-        case "full-frame":
-            provenance = "full_frame"
+    provenance = active_picture_provenance_from_rect_source(active.source)
     return ActivePictureFacts(
         active.x,
         active.y,

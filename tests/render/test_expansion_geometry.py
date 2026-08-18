@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_enums import (
@@ -11,8 +14,59 @@ from frame_compare.config.schema_enums import (
 )
 from frame_compare.config.schema_models import ScreenshotsConfig
 from frame_compare.render.batch.expansion import expand_batch_render_requests
+from frame_compare.render.geometry import (
+    ActiveRectSource,
+    active_picture_provenance_from_rect_source,
+    active_rect_source_from_provenance,
+)
 from frame_compare.render.types import PreparedRenderSource, ScreenshotBatchRequest
-from frame_compare.utils.media_facts import ActivePictureFacts, PresentationState, SourceSignalFacts
+from frame_compare.utils.media_facts import (
+    ActivePictureFacts,
+    ActivePictureProvenance,
+    PresentationState,
+    SourceSignalFacts,
+)
+
+
+@pytest.mark.parametrize(
+    ("provenance", "source"),
+    [
+        ("explicit", "explicit"),
+        ("dolby_vision_l5", "metadata"),
+        ("dimension_derived", "dimension-derived"),
+        ("aspect_ratio_derived", "aspect-ratio-derived"),
+        ("content_derived", "content-derived"),
+        ("full_frame", "full-frame"),
+    ],
+)
+def test_active_picture_provenance_converts_to_geometry_source(
+    provenance: ActivePictureProvenance,
+    source: ActiveRectSource,
+) -> None:
+    assert active_rect_source_from_provenance(provenance) == source
+
+
+@pytest.mark.parametrize(
+    ("source", "provenance"),
+    [
+        ("explicit", "explicit"),
+        ("metadata", "dolby_vision_l5"),
+        ("dimension-derived", "dimension_derived"),
+        ("aspect-ratio-derived", "aspect_ratio_derived"),
+        ("content-derived", "content_derived"),
+        ("full-frame", "full_frame"),
+    ],
+)
+def test_geometry_source_converts_to_active_picture_provenance(
+    source: ActiveRectSource,
+    provenance: ActivePictureProvenance,
+) -> None:
+    assert active_picture_provenance_from_rect_source(source) == provenance
+
+
+def test_invalid_active_picture_provenance_fails_explicitly() -> None:
+    with pytest.raises(AssertionError):
+        active_rect_source_from_provenance(cast(ActivePictureProvenance, "invalid"))
 
 
 def _batch(

@@ -8,11 +8,12 @@ from frame_compare.config.schema import ConfigSchema, OverlayMode
 from frame_compare.config.schema_enums import ScreenshotAlignedScalePolicy, ScreenshotGeometryMode
 from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner, FFmpegRunner
 from frame_compare.render.geometry import (
-    ActiveRectSource,
     GeometryRect,
     RenderGeometryOptions,
     RenderGeometryPlan,
     SourceGeometry,
+    active_picture_provenance_from_rect_source,
+    active_rect_source_from_provenance,
     plan_render_geometry,
 )
 from frame_compare.render.naming import generate_screenshot_name, generate_screenshot_path
@@ -28,7 +29,6 @@ from frame_compare.render.types import (
 )
 from frame_compare.utils.media_facts import (
     ActivePictureFacts,
-    ActivePictureProvenance,
     RenderedGeometryFacts,
 )
 
@@ -232,7 +232,7 @@ def _geometry_plans(
                 width=width,
                 height=height,
                 active_rect=GeometryRect(active.x, active.y, active.width, active.height),
-                active_rect_source=_to_geometry_provenance(active.provenance),
+                active_rect_source=active_rect_source_from_provenance(active.provenance),
                 label=request.label,
             )
         )
@@ -265,7 +265,7 @@ def _target_size(config: ConfigSchema) -> tuple[int, int] | None:
 
 
 def _geometry_facts(plan: RenderGeometryPlan) -> RenderedGeometryFacts:
-    provenance = _from_geometry_provenance(plan.active_rect_source)
+    provenance = active_picture_provenance_from_rect_source(plan.active_rect_source)
     active = ActivePictureFacts(
         x=plan.active_rect.x,
         y=plan.active_rect.y,
@@ -282,35 +282,3 @@ def _geometry_facts(plan: RenderGeometryPlan) -> RenderedGeometryFacts:
         final_canvas_size=plan.final_canvas_size,
         is_noop=plan.is_noop,
     )
-
-
-def _to_geometry_provenance(provenance: ActivePictureProvenance) -> ActiveRectSource:
-    match provenance:
-        case "explicit":
-            return "explicit"
-        case "dolby_vision_l5":
-            return "metadata"
-        case "dimension_derived":
-            return "dimension-derived"
-        case "aspect_ratio_derived":
-            return "aspect-ratio-derived"
-        case "content_derived":
-            return "content-derived"
-        case "full_frame":
-            return "full-frame"
-
-
-def _from_geometry_provenance(provenance: ActiveRectSource) -> ActivePictureProvenance:
-    match provenance:
-        case "explicit":
-            return "explicit"
-        case "metadata":
-            return "dolby_vision_l5"
-        case "dimension-derived":
-            return "dimension_derived"
-        case "aspect-ratio-derived":
-            return "aspect_ratio_derived"
-        case "content-derived":
-            return "content_derived"
-        case "full-frame":
-            return "full_frame"

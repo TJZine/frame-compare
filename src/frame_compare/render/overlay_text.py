@@ -7,6 +7,7 @@ from frame_compare.render.types import OverlayConfig
 from frame_compare.utils.media_facts import (
     ExactFrameDolbyVisionFacts,
     HDRStaticFacts,
+    PictureType,
     PresentationState,
     RenderedFrameFacts,
     normalize_picture_type,
@@ -81,7 +82,7 @@ def _format_file_size_if_valid(size_bytes: int) -> str | None:
     return format_file_size(size_bytes) if size_bytes > 0 else None
 
 
-def _frame_line(config: OverlayConfig, picture_type: str | None) -> str | None:
+def _frame_line(config: OverlayConfig, picture_type: PictureType | None) -> str | None:
     segments: list[str] = []
     if config.include_frame_number:
         total = f"/{config.source_total_frames}" if config.source_total_frames is not None else ""
