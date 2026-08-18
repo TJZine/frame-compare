@@ -15,14 +15,12 @@ the normal portable folder layout.
 
 ## Viewer modes
 
-### Single and overlay
+### Single
 
-Single view shows one selected source. Overlay view places the selected pair in the same
-viewport so opacity or presentation differences can be inspected without moving between
-frames.
+Single view shows one selected or active source.
 
-Use these modes for source-specific inspection, overlay diagnostics, and quick checks
-before entering a dedicated pair comparison.
+Use this mode for source-specific inspection and quick checks before entering a dedicated
+pair comparison.
 
 ### Slider
 

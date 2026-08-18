@@ -619,9 +619,11 @@ opened. If it is not opened, the CLI prints the report path before prompting.
   number is the common comparison-domain frame; every image separately records its
   mapped untrimmed source frame and exact-frame picture type when available.
 - The existing Frame inspector follows the images visible in Single, Slider, Diff,
-  Blink, and Grid modes. The existing Clips inspector shows compact source signal,
-  presentation, file-size, and non-full active-picture facts. Report Information owns
-  the Rendering disclosure, including resolved tonemap settings when tonemapping ran.
+  Blink, and Grid modes. The serialized/config viewer-mode value `overlay` is presented
+  as the user-facing `Single` mode and shows only the active source. The existing Clips
+  inspector shows compact source signal, presentation, file-size, and non-full
+  active-picture facts. Report Information owns the Rendering disclosure, including
+  resolved tonemap settings when tonemapping ran.
 - Report identity includes output-affecting overlay, geometry, tonemap, presentation,
   signal, and per-image provenance facts. It excludes absolute paths, image bytes or
   `src` values, timestamps, and transient browser state.

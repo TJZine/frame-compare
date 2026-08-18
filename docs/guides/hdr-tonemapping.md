@@ -93,6 +93,10 @@ selection context. Optional dynamic Dolby Vision fields appear only with exact s
 frame provenance. Missing values compose away without placeholders or fabricated
 defaults.
 
+The tracked [documentation image capture record](../images/README.md#provenance-record)
+records this asset's physical-Windows host, portable runtime, selected frame, and
+`bt2390`/100-nit diagnostic transform.
+
 <figure class="fc-doc-figure">
   <img src="../images/hdr-diagnostic-overlay.webp" alt="Physical-Windows HDR diagnostic frame from EBU DVB HLG10 Comparison at frame 1000, showing HLG and BT.2020 metadata, limited range, bt2390 tonemapping at 100 nits, and the vs-placebo runtime proof.">
   <figcaption>This physical-Windows diagnostic render shows only the HLG, BT.2020, limited-range, frame-selection, bt2390/100-nit, and vs-placebo facts proved by the source and runtime. It is a tonemapped SDR presentation for browser review, not a calibrated luminance measurement or untonemapped native-HDR claim.</figcaption>
