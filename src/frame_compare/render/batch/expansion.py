@@ -71,6 +71,17 @@ def validate_batch_requests(batch_requests: list[ScreenshotBatchRequest]) -> Non
         }
         if len(lengths) != 1:
             raise ValueError(f"ScreenshotBatchRequest {request.label!r} list lengths differ")
+        width, height = request.source_resolution
+        if width <= 0 or height <= 0:
+            raise ValueError(
+                f"ScreenshotBatchRequest {request.label!r} requires positive source dimensions"
+            )
+        active = request.active_picture
+        if active.x + active.width > width or active.y + active.height > height:
+            raise ValueError(
+                f"ScreenshotBatchRequest {request.label!r} active picture is outside "
+                "the source dimensions"
+            )
         if request.label in labels:
             raise ValueError(f"Duplicate label {request.label!r} detected in batch requests")
         labels.add(request.label)

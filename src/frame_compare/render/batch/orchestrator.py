@@ -4,8 +4,6 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import structlog
-
 from frame_compare.render.batch.expansion import (
     expand_batch_render_requests,
     render_batch_results_by_label,
@@ -15,44 +13,17 @@ from frame_compare.render.batch.expansion import (
     validate_ffmpeg_batch_tonemap_gate,
 )
 from frame_compare.render.encoders import render_frame_detailed
-from frame_compare.render.prepare import is_hdr_via_runner
 from frame_compare.render.types import (
     BatchRenderOptions,
     RenderedBatchResult,
     RenderedFrameResult,
-    Renderer,
     RenderRequest,
     ScreenshotBatchRequest,
-    ScreenshotRenderOptions,
-)
-from frame_compare.utils.media_facts import (
-    ActivePictureFacts,
-    SourceSignalFacts,
 )
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 
 if TYPE_CHECKING:
     from frame_compare.config.schema import ConfigSchema
-    from frame_compare.render.backend.ffmpeg import FFmpegRunner
-
-log = structlog.get_logger()
-
-
-def _resolve_probe_is_hdr(
-    clip_path: Path,
-    *,
-    config: ConfigSchema,
-    renderer: Renderer,
-    ffmpeg_runner: FFmpegRunner | None,
-) -> bool | None:
-    target_renderer = resolve_target_renderer(config, renderer)
-    if target_renderer != "ffmpeg" or not config.color.enable_tonemap:
-        return None
-    resolved_ffmpeg_runner = resolve_batch_ffmpeg_runner(
-        ffmpeg_runner,
-        extraction_timeout_seconds=config.screenshots.ffmpeg_timeout_seconds,
-    )
-    return is_hdr_via_runner(clip_path, resolved_ffmpeg_runner)
 
 
 def _render_description(request: RenderRequest) -> str:
@@ -195,96 +166,6 @@ def render_batch_detailed(
             raise RuntimeError("render batch completed without a rendered result")
         completed.append(result)
     return completed
-
-
-def render_screenshots(
-    clips: list[Path],
-    frames: list[int],
-    output_dir: Path,
-    config: ConfigSchema,
-    options: ScreenshotRenderOptions | None = None,
-) -> dict[str, list[Path]]:
-    """Render multiple frames from multiple clips.
-
-    Args:
-        clips: List of video paths
-        frames: List of frame indices to render
-        output_dir: Base output directory
-        config: Resolved configuration (required for tonemap gating)
-        options: Render options for labels, renderer, overlay, progress, and FFmpeg probing
-
-    Returns:
-        Dict mapping label -> list of rendered screenshot paths
-
-    Raises:
-        TonemapRequiresVapourSynthError: If HDR + enable_tonemap=True on FFmpeg-only path
-        PluginNotFoundError: If required VS plugin is missing (renderer=vapoursynth)
-        SourceLoadError: If source loading fails (renderer=vapoursynth)
-        FFmpegNotFoundError: If ffprobe is missing for HDR probe
-        RenderError: For other rendering failures
-    """
-    resolved_options = options or ScreenshotRenderOptions()
-    resolved_ffmpeg_runner = resolve_batch_ffmpeg_runner(
-        resolved_options.ffmpeg_runner,
-        extraction_timeout_seconds=config.screenshots.ffmpeg_timeout_seconds,
-    )
-    label_map = resolved_options.label_map or {}
-
-    if resolved_options.display_frames is not None and len(resolved_options.display_frames) != len(
-        frames
-    ):
-        raise ValueError("display_frames must have the same length as frames")
-    if resolved_options.selection_labels is not None and len(
-        resolved_options.selection_labels
-    ) != len(frames):
-        raise ValueError("selection_labels must have the same length as frames")
-
-    batch_requests: list[ScreenshotBatchRequest] = []
-    for clip_path in clips:
-        label = label_map.get(clip_path, clip_path.stem)
-        display_frames = (
-            resolved_options.display_frames
-            if resolved_options.display_frames is not None
-            else frames
-        )
-        sel_labels: list[str | None] = (
-            resolved_options.selection_labels
-            if resolved_options.selection_labels is not None
-            else [None] * len(frames)
-        )
-
-        probed_hdr = _resolve_probe_is_hdr(
-            clip_path,
-            config=config,
-            renderer=resolved_options.renderer,
-            ffmpeg_runner=resolved_ffmpeg_runner,
-        )
-        req = ScreenshotBatchRequest(
-            clip_path=clip_path,
-            label=label,
-            filename_label=clip_path.stem,
-            source_frames=frames,
-            comparison_frames=display_frames,
-            selection_labels=sel_labels,
-            size_bytes=0,
-            source_resolution=(0, 0),
-            source_total_frames=None,
-            signal=SourceSignalFacts(is_hdr=probed_hdr is True),
-            active_picture=ActivePictureFacts(0, 0, 1, 1, "full_frame", True),
-        )
-        batch_requests.append(req)
-
-    return render_screenshots_from_batch(
-        batch_requests=batch_requests,
-        output_dir=output_dir,
-        config=config,
-        options=BatchRenderOptions(
-            renderer=resolved_options.renderer,
-            overlay_mode=resolved_options.overlay_mode,
-            reporter=resolved_options.reporter,
-            ffmpeg_runner=resolved_ffmpeg_runner,
-        ),
-    )
 
 
 def render_screenshots_from_batch(

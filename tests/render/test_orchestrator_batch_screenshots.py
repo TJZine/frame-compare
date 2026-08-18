@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -227,6 +228,18 @@ def test_render_screenshots_from_batch_rejects_mismatched_lengths(tmp_path: Path
     config = ConfigSchema(color=ColorConfig(enable_tonemap=False))
     request = _batch_request("vid.mkv", "vid", [42], comparison_frames=[42, 43])
     with pytest.raises(ValueError, match="list lengths differ"):
+        render_screenshots_from_batch([request], tmp_path, config)
+
+
+def test_render_screenshots_from_batch_requires_positive_source_facts(tmp_path: Path) -> None:
+    config = ConfigSchema(color=ColorConfig(enable_tonemap=False))
+    request = _batch_request("vid.mkv", "vid", [42])
+    request = replace(
+        request,
+        source_resolution=(0, 0),
+        active_picture=ActivePictureFacts(0, 0, 1, 1, "full_frame", False),
+    )
+    with pytest.raises(ValueError, match="requires positive source dimensions"):
         render_screenshots_from_batch([request], tmp_path, config)
 
 

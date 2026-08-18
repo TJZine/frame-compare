@@ -172,19 +172,6 @@ class BatchRenderOptions:
     parallelism: int = 1
 
 
-@dataclass(frozen=True)
-class ScreenshotRenderOptions:
-    """Convenience options for render_screenshots."""
-
-    label_map: dict[Path, str] | None = None
-    renderer: Renderer = "auto"
-    overlay_mode: OverlayMode = OverlayMode.STANDARD
-    reporter: ProgressReporter | None = None
-    display_frames: list[int] | None = None
-    selection_labels: list[str | None] | None = None
-    ffmpeg_runner: FFmpegRunner | None = None
-
-
 __all__ = [
     "BatchRenderOptions",
     "EncoderSettings",
@@ -196,5 +183,4 @@ __all__ = [
     "RenderedFrameResult",
     "Renderer",
     "ScreenshotBatchRequest",
-    "ScreenshotRenderOptions",
 ]
