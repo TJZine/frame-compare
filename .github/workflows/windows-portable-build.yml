@@ -24,17 +24,8 @@ on:
       WINDOWS_UPDATE_SIGNING_KEY_XML:
         required: false
 
-permissions:
-  attestations: write
-  contents: read
-  id-token: write
-
 jobs:
   build:
-    permissions:
-      attestations: write
-      contents: read
-      id-token: write
     runs-on: windows-latest
     timeout-minutes: 90
     env:
