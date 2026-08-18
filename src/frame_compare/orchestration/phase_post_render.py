@@ -238,6 +238,12 @@ def run_report_phase(
     for clip in clips:
         paths = render.screenshots_by_label[clip.label]
         facts = render.frame_facts_by_label[clip.label]
+        if len(paths) != len(frames) or len(facts) != len(frames):
+            raise ValueError(
+                f"report artifacts for {clip.label!r} must contain one path and fact "
+                f"per frame: expected {len(frames)}, got {len(paths)} paths and "
+                f"{len(facts)} facts"
+            )
         images: list[ReportImageInfo] = []
         for index, comparison_frame in enumerate(frames):
             source_frame = map_aligned_to_source_frame(
@@ -276,10 +282,19 @@ def run_report_phase(
         ),
         None,
     )
+    if applied_settings is not None and any(
+        facts.tonemap_settings is not None and facts.tonemap_settings != applied_settings
+        for facts in render.clip_facts_by_label.values()
+    ):
+        raise ValueError(
+            "report rendering disclosure cannot represent mixed effective tonemap settings"
+        )
     report_data = ReportData(
         clips=clip_info,
         frames=frames,
         rendering=ReportRenderingInfo(
+            # These deterministic presentation policies come from resolved config;
+            # batch expansion has no post-render override or fallback for them.
             overlay_mode=ctx.config.screenshots.overlay_mode,
             include_frame_number=ctx.config.screenshots.include_frame_number,
             tonemap_settings=applied_settings,
