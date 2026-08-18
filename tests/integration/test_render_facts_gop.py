@@ -44,6 +44,12 @@ def test_deterministic_gop_picture_facts_match_vs_and_ffmpeg(tmp_path: Path) -> 
     """Compare test-only frame truth with both production exact-frame backends."""
     if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
         pytest.skip("ffmpeg/ffprobe unavailable")
+    encoders = run_subprocess(
+        ["ffmpeg", "-hide_banner", "-encoders"],
+        timeout_seconds=10,
+    )
+    if b"libx264" not in encoders.stdout:
+        pytest.skip("ffmpeg libx264 encoder unavailable")
 
     fixture = tmp_path / "gop.mkv"
     run_subprocess(

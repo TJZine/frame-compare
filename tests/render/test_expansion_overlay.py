@@ -66,7 +66,7 @@ def test_none_overlay_mode_does_not_create_overlay_config(mock_prepare: MagicMoc
     mock_prepare.return_value = PreparedRenderSource(
         diagnostic_source=source,
         prepared_clip=source,
-        source_dimensions=(1920, 1080),
+        source_dimensions=(3840, 2160),
         source_total_frames=143892,
         source_is_hdr=False,
         presentation_state=PresentationState.SDR,

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import cast
 
 import pytest
 
@@ -70,10 +69,15 @@ def _config(
     )
 
 
-def _lines(config: OverlayConfig, *, picture_type: str | None = "B", dv=None) -> list[str]:
+def _lines(
+    config: OverlayConfig,
+    *,
+    picture_type: PictureType | None = "B",
+    dv: ExactFrameDolbyVisionFacts | None = None,
+) -> list[str]:
     facts = RenderedFrameFacts(
         source_frame=config.source_frame,
-        picture_type=cast("PictureType | None", picture_type),
+        picture_type=picture_type,
         dolby_vision=dv,
     )
     return compose_overlay_text_lines(config, facts)
@@ -197,7 +201,7 @@ def test_unknown_optional_values_are_omitted_without_dangling_separators() -> No
         selection_label=None,
         presentation_state=PresentationState.HDR_TONEMAP_OFF,
     )
-    assert _lines(config, picture_type="?") == [
+    assert _lines(config, picture_type=None) == [
         "CtrlHD",
         "Frame 1842/143892",
         "Signal: HDR • tonemap off",

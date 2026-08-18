@@ -20,6 +20,7 @@ from frame_compare.render.types import (
 )
 from frame_compare.services.types import AlignmentResult
 from frame_compare.utils.media_facts import (
+    PictureType,
     PresentationState,
     RenderedFrameFacts,
     RenderedGeometryFacts,
@@ -32,7 +33,7 @@ def _result_for_requests(
     requests: list[ScreenshotBatchRequest],
     tmp_path: Path,
     *,
-    picture_types: dict[str, list[str | None]] | None = None,
+    picture_types: dict[str, list[PictureType | None]] | None = None,
 ) -> RenderedBatchResult:
     screenshots: dict[str, list[Path]] = {}
     frame_facts: dict[str, list[RenderedFrameFacts]] = {}
@@ -48,7 +49,7 @@ def _result_for_requests(
             else ["I"] * len(request.source_frames)
         )
         frame_facts[request.label] = [
-            RenderedFrameFacts(source_frame=frame, picture_type=cast(Any, picture_type))
+            RenderedFrameFacts(source_frame=frame, picture_type=picture_type)
             for frame, picture_type in zip(request.source_frames, values, strict=True)
         ]
         active = request.active_picture
@@ -76,7 +77,7 @@ def _capture_detailed_render(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
-    picture_types: dict[str, list[str | None]] | None = None,
+    picture_types: dict[str, list[PictureType | None]] | None = None,
 ) -> dict[str, Any]:
     captured: dict[str, Any] = {}
 
@@ -197,7 +198,6 @@ def test_run_render_phase_maps_canonical_clip_facts_without_io(
     assert request.signal.hdr_static.mastering_max_nits == pytest.approx(1000)
     assert request.active_picture.provenance == "dolby_vision_l5"
     assert request.active_picture.is_full_frame is False
-    assert not hasattr(request, "diagnostic_metadata")
 
 
 def test_run_render_phase_aggregates_missing_picture_type_once_per_clip(

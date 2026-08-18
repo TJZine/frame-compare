@@ -60,11 +60,21 @@ def test_render_batch_detailed_parallel_order(mock_render_request):
 
 
 def test_render_batch_fail_fast(mock_render_request):
-    requests = [mock_render_request] * 10
+    requests = [
+        RenderRequest(
+            clip=mock_render_request.clip,
+            diagnostic_source=mock_render_request.diagnostic_source,
+            frame_number=index,
+            output_path=mock_render_request.output_path.parent / f"out_{index}.png",
+            overlay=mock_render_request.overlay,
+            encoder_settings=mock_render_request.encoder_settings,
+        )
+        for index in range(10)
+    ]
     with patch("frame_compare.render.batch.orchestrator.render_frame_detailed") as mock_render:
-        # Fail on the 3rd request
+
         def side_effect(r):
-            if r == requests[2]:
+            if r.frame_number == 2:
                 raise RuntimeError("Failed")
             return _rendered(r)
 
@@ -72,8 +82,9 @@ def test_render_batch_fail_fast(mock_render_request):
         with pytest.raises(RuntimeError, match="Failed"):
             render_batch(requests, parallelism=2)
 
-        # Verify we didn't submit all 10
-        assert mock_render.call_count < 10
+        invoked_requests = [call.args[0] for call in mock_render.call_args_list]
+        assert requests[2] in invoked_requests
+        assert len(invoked_requests) < len(requests)
 
 
 @pytest.fixture

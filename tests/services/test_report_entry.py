@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -146,7 +147,7 @@ def _clear_encode_images(data: ReportData) -> ReportData:
 def test_generate_report_rejects_invalid_report_data_before_writing(
     report_data: ReportData,
     tmp_path: Path,
-    data_builder,
+    data_builder: Callable[[ReportData], ReportData],
     message: str,
 ) -> None:
     with pytest.raises(ReportError, match=message):
