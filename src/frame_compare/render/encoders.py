@@ -579,6 +579,7 @@ def apply_overlay_to_file(
     Args:
         path: Path to an existing image file (PNG expected).
         overlay: Overlay rendering configuration.
+        frame_facts: Exact-source-frame facts used to compose the overlay.
 
     Raises:
         OverlayError: If the overlay cannot be applied.

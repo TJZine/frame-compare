@@ -431,7 +431,6 @@ document.addEventListener('DOMContentLoaded', () => {
         summary?.focus();
     };
     summary?.focus();
-    summary?.focus();
     pressEnter();
     document.documentElement.dataset.tonemapOpenState = String(Boolean(disclosure?.open));
     document.documentElement.dataset.tonemapFocusState = String(document.activeElement === summary);
@@ -449,7 +448,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 @pytest.mark.integration
-def test_applied_tonemap_disclosure_is_keyboard_operable_and_scrollable(
+def test_applied_tonemap_disclosure_is_focusable_toggleable_and_scrollable(
     tmp_path: Path,
 ) -> None:
     browser = _browser_executable()
