@@ -280,6 +280,7 @@ def build_report_payload(
     data: ReportData, config: ReportConfig, *, report_dir: Path
 ) -> ReportPayload:
     """Shape validated report data into the embedded v1.1 JSON payload."""
+    _validate_report_cardinality(data)
     title = data.metadata.title if data.metadata else data.clips[0].name
     clips = build_clip_payloads(data.clips)
     frames = build_frame_payloads(data, config, report_dir=report_dir)
@@ -311,6 +312,25 @@ def build_report_payload(
         "frames": frames,
         "rendering": rendering,
     }
+
+
+def _validate_report_cardinality(data: ReportData) -> None:
+    """Fail at the report boundary before indexing or emitting partial HTML."""
+    if not data.clips:
+        raise ReportError("no clips provided")
+    if not data.frames:
+        raise ReportError("no frames provided")
+    if data.frame_details and len(data.frame_details) != len(data.frames):
+        raise ReportError(
+            f"frame detail count mismatch: expected {len(data.frames)}, "
+            f"got {len(data.frame_details)}"
+        )
+    for clip in data.clips:
+        if len(clip.images) != len(data.frames):
+            raise ReportError(
+                f"screenshot count mismatch for {clip.name}: "
+                f"expected {len(data.frames)}, got {len(clip.images)}"
+            )
 
 
 def build_clip_payloads(clips: list[ClipInfo]) -> list[ReportClipPayload]:

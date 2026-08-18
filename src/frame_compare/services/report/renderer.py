@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import html
 import json
-from typing import TYPE_CHECKING
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, cast
 from urllib.parse import urlparse
 
 from frame_compare.services.report.category_display import (
@@ -43,6 +44,19 @@ def _safe_http_href(url: str | None) -> str | None:
     if parsed.scheme not in {"http", "https"}:
         return None
     return _esc_attr(url)
+
+
+def _object_mapping(value: object) -> Mapping[str, object]:
+    """Narrow dynamic payload values without allowing untyped data inward."""
+    if isinstance(value, Mapping):
+        return cast(Mapping[str, object], value)
+    return {}
+
+
+def _render_tone_curve(value: object) -> str:
+    curves = {"bt2390": "BT.2390", "reinhard": "Reinhard", "spline": "Spline"}
+    normalized = str(value).lower()
+    return curves.get(normalized, normalized.replace("_", " "))
 
 
 def _json_for_script_tag(data: ReportPayload) -> str:
@@ -233,6 +247,61 @@ def _render_fps(fps: float) -> str:
     return f"{fps:g} fps"
 
 
+def _render_tonemap_summary(rendering: object) -> str:
+    """Render the concise archival tonemap summary from raw payload values."""
+    rendering_map = _object_mapping(rendering)
+    tonemap_map = _object_mapping(rendering_map.get("tonemap"))
+    if not tonemap_map.get("applied"):
+        return "Not applied"
+    settings_map = _object_mapping(tonemap_map.get("settings"))
+    if not settings_map:
+        return "Applied"
+    preset = str(settings_map.get("preset", "")).replace("_", " ").title()
+    curve = _render_tone_curve(settings_map.get("tone_curve", ""))
+    target = settings_map.get("target_nits")
+    parts = [part for part in (preset, curve) if part]
+    summary = " · ".join(parts)
+    if target is not None and summary:
+        return f"{summary} · {target} nits"
+    return summary or "Applied"
+
+
+def _render_tonemap_details(rendering: object) -> str:
+    """Render raw effective tonemap settings into an accessible details list."""
+    rendering_map = _object_mapping(rendering)
+    tonemap_map = _object_mapping(rendering_map.get("tonemap"))
+    settings_map = _object_mapping(tonemap_map.get("settings"))
+    if not settings_map:
+        return ""
+    labels = (
+        ("dynamic_peak_detection", "Dynamic peak detection"),
+        ("contrast_recovery", "Contrast recovery"),
+        ("gamma_lift", "Gamma lift"),
+        ("source_peak", "Source peak"),
+        ("dst_min_nits", "Destination minimum"),
+        ("knee_offset", "Knee offset"),
+        ("smoothing_period", "Smoothing period"),
+        ("percentile", "Percentile"),
+        ("scene_threshold_low", "Scene threshold low"),
+        ("scene_threshold_high", "Scene threshold high"),
+        ("gamut_mapping", "Gamut mapping"),
+        ("metadata", "Metadata mode"),
+        ("use_dovi", "Dolby Vision metadata use"),
+    )
+    rows: list[str] = []
+    for key, label in labels:
+        value = settings_map.get(key)
+        if value is None:
+            value_text = "Auto" if key == "source_peak" else None
+        elif isinstance(value, bool):
+            value_text = "On" if value else "Off"
+        else:
+            value_text = str(value)
+        if value_text is not None:
+            rows.append(f"<div><dt>{_esc_text(label)}</dt><dd>{_esc_text(value_text)}</dd></div>")
+    return "".join(rows)
+
+
 def _clip_label_for_index(clips: list[ReportClipPayload], index: int) -> str:
     if 0 <= index < len(clips):
         return clips[index]["label"]
@@ -270,7 +339,8 @@ def _render_info_modal(
 
     clip_items: list[str] = []
     for i, clip in enumerate(clips):
-        hdr_tag = "HDR" if clip["signal"]["is_hdr"] else "SDR"
+        signal = clip.get("signal") or {}
+        hdr_tag = "HDR" if signal.get("is_hdr", False) else "SDR"
         clip_items.append(
             f'<li class="rv-clip-meta-item" data-clip-index="{_esc_attr(i)}">'
             f'<div class="rv-clip-meta-heading">'
@@ -290,6 +360,25 @@ def _render_info_modal(
         if clip_items
         else '<div class="rv-metadata-empty">No clips in payload.</div>'
     )
+    rendering = data.get("rendering")
+    tonemap_summary = _render_tonemap_summary(rendering)
+    advanced_rows = _render_tonemap_details(rendering)
+    advanced_details = (
+        f"""<details class="rv-tonemap-details" data-rendering-details>
+                        <summary>Advanced tonemap settings</summary>
+                        <dl class="rv-metadata-list">{advanced_rows}</dl>
+                    </details>"""
+        if advanced_rows
+        else ""
+    )
+    rendering_section = f"""
+                <div class="rv-info-section">
+                    <h3>Rendering</h3>
+                    <dl class="rv-metadata-list rv-rendering-summary">
+                        <div><dt>Tonemap</dt><dd data-rendering-tonemap-summary>{_esc_text(tonemap_summary)}</dd></div>
+                    </dl>
+                    {advanced_details}
+                </div>"""
 
     return f"""    <div id="info-modal" class="rv-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="info-modal-title" tabindex="-1">
         <div class="rv-modal-content rv-modal-content--wide">
@@ -312,6 +401,7 @@ def _render_info_modal(
                     <h3>Clips</h3>
                     {clip_list_html}
                 </div>
+                {rendering_section}
             </div>
             <div class="rv-modal-actions rv-modal-actions--spacious">
                 <button id="btn-close-info">Close</button>
@@ -580,6 +670,10 @@ def _render_inspector() -> str:
                 <div><dt>Detail</dt><dd data-inspector-frame-detail></dd></div>
                 <div><dt>Shown</dt><dd data-inspector-frame-position></dd></div>
             </dl>
+            <div class="rv-inspector-source-group" data-inspector-source-group>
+                <h3>Source frames</h3>
+                <ol class="rv-inspector-source-list" data-inspector-source-frames></ol>
+            </div>
         </section>
         <section id="inspector-panel-clips" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-clips" tabindex="-1" hidden>
             <ol class="rv-inspector-clip-list" data-inspector-clips></ol>
