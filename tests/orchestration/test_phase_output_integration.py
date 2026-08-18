@@ -14,9 +14,6 @@ from frame_compare.analysis.types import (
     MetricsMetadata,
 )
 from frame_compare.orchestration import phase_alignment, phase_post_render, phase_render
-from frame_compare.orchestration.execution_types import (
-    RenderArtifacts,
-)
 from frame_compare.services.publishers import PublishResult
 from frame_compare.services.slowpics_post_upload import (
     SlowpicsPostUploadRequest,
@@ -26,6 +23,7 @@ from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from tests.orchestration.phase_task_helpers import (
     _clip,
     _context,
+    _render_artifacts,
     _RenderRunner,
 )
 
@@ -110,7 +108,7 @@ def test_output_phases_use_reselected_metric_metadata_after_real_initial_selecti
         frames=align_output.selected_frames,
         runner=cast(Any, _RenderRunner()),
     )
-    render = RenderArtifacts(
+    render = _render_artifacts(
         screenshots_by_label={
             "Reference": [
                 tmp_path / "screenshots" / "reference_1.png",
@@ -122,6 +120,7 @@ def test_output_phases_use_reselected_metric_metadata_after_real_initial_selecti
             ],
         },
         screenshot_dir=tmp_path / "screenshots",
+        source_frames_by_label={"Reference": [98, 99], "Encode 1": [0, 1]},
     )
     report_output = phase_post_render.run_report_phase(
         ctx,
@@ -273,12 +272,13 @@ def test_run_report_phase_labels_skipped_analysis_alignment_fallback_random_fram
     ctx.comparisons = align_output.comparisons
     ctx.selection_breakdown = align_output.selection_breakdown
     ctx.selection_details_by_source_frame = align_output.selection_details_by_source_frame
-    render = RenderArtifacts(
+    render = _render_artifacts(
         screenshots_by_label={
             "Reference": [tmp_path / "screenshots" / "reference.png"],
             "Encode 1": [tmp_path / "screenshots" / "encode.png"],
         },
         screenshot_dir=tmp_path / "screenshots",
+        source_frames_by_label={"Reference": [98], "Encode 1": [18]},
     )
 
     output = phase_post_render.run_report_phase(
@@ -294,4 +294,4 @@ def test_run_report_phase_labels_skipped_analysis_alignment_fallback_random_fram
     assert align_output.selected_frames == [18]
     assert [
         (detail.label, detail.detail, detail.category) for detail in report_data.frame_details
-    ] == [("Frame 98", "Source frame 98", "random")]
+    ] == [("Frame 18", "Selected comparison frame", "random")]

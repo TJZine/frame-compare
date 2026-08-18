@@ -19,7 +19,6 @@ from frame_compare.orchestration.execution_types import (
     ExecutionState,
     MetadataPrefetch,
     PublishPhaseOutput,
-    RenderArtifacts,
     ReportPhaseOutput,
     RunArtifacts,
 )
@@ -29,66 +28,20 @@ from frame_compare.orchestration.types import (
     SlowpicsUploadConfirmationDecision,
     SlowpicsUploadConfirmationRequest,
 )
-from frame_compare.render.types import RenderedClipFacts
 from frame_compare.services.errors import SlowpicsError
 from frame_compare.services.publishers import PublishResult
 from frame_compare.services.slowpics_post_upload import (
     SlowpicsPostUploadRequest,
 )
 from frame_compare.services.types import TmdbMetadata
-from frame_compare.utils.media_facts import (
-    ActivePictureFacts,
-    PresentationState,
-    RenderedFrameFacts,
-    RenderedGeometryFacts,
-    SourceSignalFacts,
-)
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.progress import NullProgressReporter
 from tests.orchestration.phase_task_helpers import (
     _clip,
     _context,
+    _render_artifacts,
     _RenderRunner,
 )
-
-
-def _render_artifacts(
-    *,
-    screenshots_by_label: dict[str, list[Path]],
-    screenshot_dir: Path | None,
-    source_frames_by_label: dict[str, list[int]] | None = None,
-) -> RenderArtifacts:
-    geometry = RenderedGeometryFacts(
-        source_size=(1920, 1080),
-        active_picture=ActivePictureFacts(0, 0, 1920, 1080, "full_frame", True),
-        cropped_size=(1920, 1080),
-        scaled_size=(1920, 1080),
-        final_canvas_size=(1920, 1080),
-        is_noop=True,
-    )
-    frames = source_frames_by_label or {
-        label: list(range(len(paths))) for label, paths in screenshots_by_label.items()
-    }
-    return RenderArtifacts(
-        screenshots_by_label=screenshots_by_label,
-        frame_facts_by_label={
-            label: [RenderedFrameFacts(source_frame=frame, picture_type="I") for frame in values]
-            for label, values in frames.items()
-        },
-        clip_facts_by_label={
-            label: RenderedClipFacts(
-                size_bytes=0,
-                source_resolution=(1920, 1080),
-                source_total_frames=100,
-                signal=SourceSignalFacts(is_hdr=False),
-                presentation_state=PresentationState.SDR,
-                tonemap_settings=None,
-                geometry=geometry,
-            )
-            for label in screenshots_by_label
-        },
-        screenshot_dir=screenshot_dir,
-    )
 
 
 async def test_run_metadata_phase_resolves_when_enabled_and_client_present(
