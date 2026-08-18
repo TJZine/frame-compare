@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from frame_compare.config.schema import OverlayMode
 from frame_compare.render.types import OverlayConfig
-from frame_compare.utils.media_facts import RenderedFrameFacts
+from frame_compare.utils.media_facts import (
+    ExactFrameDolbyVisionFacts,
+    HDRStaticFacts,
+    PresentationState,
+    RenderedFrameFacts,
+    normalize_picture_type,
+)
 
 _PRIMARIES = {1: "BT.709", 9: "BT.2020"}
 _TRANSFER = {1: "BT.709", 16: "PQ", 18: "HLG"}
@@ -18,29 +24,37 @@ def compose_overlay_text_lines(config: OverlayConfig, frame_facts: RenderedFrame
     if frame_facts.source_frame != config.source_frame:
         raise ValueError("overlay frame facts do not match the configured source frame")
 
-    lines = [config.label]
+    picture_type = normalize_picture_type(frame_facts.picture_type)
+
+    lines: list[str] = []
+    if config.label:
+        lines.append(config.label)
     if config.mode == OverlayMode.MINIMAL:
         segments: list[str] = []
         if config.include_frame_number:
             segments.append(f"Frame {config.comparison_frame}")
-        if frame_facts.picture_type is not None:
-            segments.append(f"{frame_facts.picture_type}-frame")
+        if picture_type is not None:
+            segments.append(f"{picture_type}-frame")
         if config.file_size_bytes > 0:
             segments.append(format_file_size(config.file_size_bytes))
         if segments:
             lines.append(" • ".join(segments))
         return lines
 
-    frame_line = _frame_line(config, frame_facts)
+    frame_line = _frame_line(config, picture_type)
     if frame_line:
         lines.append(frame_line)
     if config.selection_label:
         lines.append(f"Selection: {config.selection_label}")
-    source_segments = [
-        f"{config.source_resolution[0]}×{config.source_resolution[1]}",
-        format_file_size(config.file_size_bytes) if config.file_size_bytes > 0 else "",
-    ]
-    lines.append(f"Source: {' • '.join(part for part in source_segments if part)}")
+    source_segments: list[str] = []
+    width, height = config.source_resolution
+    if width > 0 and height > 0:
+        source_segments.append(f"{width}×{height}")
+    file_size = _format_file_size_if_valid(config.file_size_bytes)
+    if file_size is not None:
+        source_segments.append(file_size)
+    if source_segments:
+        lines.append(f"Source: {' • '.join(source_segments)}")
 
     if config.mode == OverlayMode.STANDARD:
         if not config.geometry.is_noop:
@@ -54,6 +68,8 @@ def compose_overlay_text_lines(config: OverlayConfig, frame_facts: RenderedFrame
 
 def format_file_size(size_bytes: int) -> str:
     """Format raw bytes with the locked IEC boundary policy."""
+    if size_bytes < 0:
+        raise ValueError("file size must be non-negative")
     if size_bytes >= 1024**4:
         return f"{size_bytes / 1024**4:.2f} TiB"
     if size_bytes >= 1024**3:
@@ -61,7 +77,11 @@ def format_file_size(size_bytes: int) -> str:
     return f"{size_bytes / 1024**2:.2f} MiB"
 
 
-def _frame_line(config: OverlayConfig, facts: RenderedFrameFacts) -> str | None:
+def _format_file_size_if_valid(size_bytes: int) -> str | None:
+    return format_file_size(size_bytes) if size_bytes > 0 else None
+
+
+def _frame_line(config: OverlayConfig, picture_type: str | None) -> str | None:
     segments: list[str] = []
     if config.include_frame_number:
         total = f"/{config.source_total_frames}" if config.source_total_frames is not None else ""
@@ -71,8 +91,8 @@ def _frame_line(config: OverlayConfig, facts: RenderedFrameFacts) -> str | None:
             segments.append(
                 f"Comparison {config.comparison_frame} → source {config.source_frame}{total}"
             )
-    if facts.picture_type is not None:
-        segments.append(f"{facts.picture_type}-frame")
+    if picture_type is not None:
+        segments.append(f"{picture_type}-frame")
     return " • ".join(segments) or None
 
 
@@ -88,12 +108,13 @@ def _diagnostic_lines(config: OverlayConfig, facts: RenderedFrameFacts) -> list[
             "aspect_ratio_derived": "aspect-ratio-derived",
             "content_derived": "content-derived",
             "full_frame": "full-frame",
-        }[active.provenance]
-        canvas = geometry.final_canvas_size
-        lines.append(
-            f"Geometry: active {active.width}×{active.height} @ ({active.x},{active.y}) "
-            f"• {provenance} → {canvas[0]}×{canvas[1]} canvas"
-        )
+        }.get(active.provenance)
+        if provenance is not None:
+            canvas = geometry.final_canvas_size
+            lines.append(
+                f"Geometry: active {active.width}×{active.height} @ ({active.x},{active.y}) "
+                f"• {provenance} → {canvas[0]}×{canvas[1]} canvas"
+            )
 
     signal = config.signal
     signal_parts = ["HDR" if signal.is_hdr else "SDR"]
@@ -105,16 +126,16 @@ def _diagnostic_lines(config: OverlayConfig, facts: RenderedFrameFacts) -> list[
     named_color = " / ".join(value for value in color if value is not None)
     if named_color:
         signal_parts.append(named_color)
-    if signal.color_range is not None:
+    if signal.color_range in ("limited", "full"):
         signal_parts.append(signal.color_range.title())
     if signal.dolby_vision_rpu:
         signal_parts.append("DV RPU")
-    if config.presentation_state.value == "hdr_tonemap_off":
+    if config.presentation_state == PresentationState.HDR_TONEMAP_OFF:
         signal_parts.append("tonemap off")
     lines.append(f"Signal: {' • '.join(signal_parts)}")
 
     settings = config.tonemap_settings
-    if settings is not None:
+    if settings is not None and config.presentation_state == PresentationState.HDR_TONEMAPPED:
         curve = {
             "bt2390": "BT.2390",
             "spline": "Spline",
@@ -139,26 +160,54 @@ def _diagnostic_lines(config: OverlayConfig, facts: RenderedFrameFacts) -> list[
         if groups:
             lines.append(f"HDR static: {' • '.join(groups)}")
 
-    dynamic = facts.dolby_vision
-    if dynamic is not None:
-        groups = []
-        if dynamic.l1_maximum_nits is not None and dynamic.l1_average_nits is not None:
-            groups.append(
-                f"L1 max/avg {_number(dynamic.l1_maximum_nits)}/"
-                f"{_number(dynamic.l1_average_nits)} nits"
-            )
-        elif dynamic.l1_maximum_nits is not None:
-            groups.append(f"L1 max {_number(dynamic.l1_maximum_nits)} nits")
-        elif dynamic.l1_average_nits is not None:
-            groups.append(f"L1 avg {_number(dynamic.l1_average_nits)} nits")
-        if dynamic.l2_target_nits is not None:
-            groups.append(f"L2 target {_number(dynamic.l2_target_nits)} nits")
-        if groups:
-            lines.append(f"DV frame: {' • '.join(groups)}")
+    lines.extend(_dolby_vision_lines(facts.dolby_vision, static))
     return lines
 
 
-def _number(value: float) -> str:
+def _dolby_vision_lines(
+    dynamic: ExactFrameDolbyVisionFacts | None,
+    static: HDRStaticFacts | None,
+) -> list[str]:
+    """Format only exact-frame Dolby Vision facts supplied by the caller."""
+    if dynamic is None:
+        return []
+
+    l1_max = dynamic.l1_maximum_nits
+    l1_average = dynamic.l1_average_nits
+    l2_target = dynamic.l2_target_nits
+    groups: list[str] = []
+    if l1_max is not None and l1_average is not None:
+        groups.append(f"L1 max/avg {_number(l1_max)}/{_number(l1_average)} nits")
+    elif l1_max is not None:
+        groups.append(f"L1 max {_number(l1_max)} nits")
+    elif l1_average is not None:
+        groups.append(f"L1 avg {_number(l1_average)} nits")
+    if l2_target is not None:
+        groups.append(f"L2 target {_number(l2_target)} nits")
+
+    lines = [f"DV frame: {' • '.join(groups)}"] if groups else []
+
+    static_max = static.max_cll if static is not None else None
+    static_fall = static.max_fall if static is not None else None
+    l6_max = dynamic.l6_max_cll
+    l6_fall = dynamic.l6_max_fall
+    # A matching static value adds no information.  Compare each component
+    # independently so partial L6 facts remain useful.
+    keep_max = l6_max is not None and l6_max != static_max
+    keep_fall = l6_fall is not None and l6_fall != static_fall
+    l6_groups: list[str] = []
+    if keep_max and l6_max is not None and keep_fall and l6_fall is not None:
+        l6_groups.append(f"MaxCLL/FALL {_number(l6_max)}/{_number(l6_fall)} nits")
+    elif keep_max and l6_max is not None:
+        l6_groups.append(f"MaxCLL {_number(l6_max)} nits")
+    elif keep_fall and l6_fall is not None:
+        l6_groups.append(f"MaxFALL {_number(l6_fall)} nits")
+    if l6_groups:
+        lines.append(f"DV L6: {' • '.join(l6_groups)}")
+    return lines
+
+
+def _number(value: float | int) -> str:
     return f"{value:.6f}".rstrip("0").rstrip(".")
 
 

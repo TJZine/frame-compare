@@ -130,46 +130,40 @@ def _resolve_auto_mode_fallback(
     config: ConfigSchema,
     renderer: Renderer,
     ffmpeg_runner: FFmpegRunner,
-) -> None:
+) -> bool:
     """Probes HDR and resolves fallback policy when VapourSynth load fails in auto mode."""
     from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 
-    if config.color.enable_tonemap:
-        # Must probe HDR status before deciding
-        try:
-            is_hdr = is_hdr_via_runner(clip_path, ffmpeg_runner)
-        except Exception:
-            # Probe failed — propagate (no fallback)
-            log.debug(
-                "probe_failed_no_fallback",
-                path=str(clip_path),
-                exc_info=True,
-            )
-            raise  # Propagate probe exception
-
-        if is_hdr:
-            # HDR + tonemap required in auto mode + VS unavailable → raise TonemapRequiresVapourSynthError from original VS failure.
-            log.debug(
-                "hdr_tonemap_required_no_fallback",
-                path=str(clip_path),
-            )
-            raise TonemapRequiresVapourSynthError() from vs_load_failure
-        else:
-            # SDR — fallback allowed
-            log.warning(
-                "vs_load_failed_falling_back",
-                path=str(clip_path),
-                renderer=renderer,
-                exc_info=True,
-            )
-    else:
-        # enable_tonemap=False — fallback allowed
-        log.warning(
-            "vs_load_failed_falling_back",
+    # Probe even when tonemapping is disabled.  The fallback still needs the
+    # actual source classification to produce HDR_TONEMAP_OFF rather than
+    # fabricating SDR from the absence of a VapourSynth SourceInfo object.
+    try:
+        is_hdr = is_hdr_via_runner(clip_path, ffmpeg_runner)
+    except Exception:
+        log.debug(
+            "probe_failed_no_fallback",
             path=str(clip_path),
-            renderer=renderer,
             exc_info=True,
         )
+        raise
+
+    if config.color.enable_tonemap and is_hdr:
+        # HDR + tonemap required in auto mode + VS unavailable → raise TonemapRequiresVapourSynthError from original VS failure.
+        log.debug(
+            "hdr_tonemap_required_no_fallback",
+            path=str(clip_path),
+        )
+        raise TonemapRequiresVapourSynthError() from vs_load_failure
+
+    # SDR with tonemap enabled and all sources when tonemap is disabled may use
+    # the FFmpeg fallback; the caller carries this exact classification forward.
+    log.warning(
+        "vs_load_failed_falling_back",
+        path=str(clip_path),
+        renderer=renderer,
+        exc_info=True,
+    )
+    return is_hdr
 
 
 def _validate_ffmpeg_tonemap_gate(
@@ -235,6 +229,7 @@ def prepare_clip_for_render(
     tonemap_settings: TonemapSettings | None = None
     source_info: SourceInfo | None = None
     vs_load_failure: Exception | None = None
+    fallback_source_is_hdr: bool | None = None
 
     if renderer in ("vapoursynth", "auto"):
         try:
@@ -262,13 +257,21 @@ def prepare_clip_for_render(
     if vs_load_failure is not None and renderer == "auto":
         if config.screenshots.vs_writer == VsScreenshotWriter.FPNG:
             raise vs_load_failure
-        _resolve_auto_mode_fallback(clip_path, vs_load_failure, config, renderer, ffmpeg_runner)
+        fallback_source_is_hdr = _resolve_auto_mode_fallback(
+            clip_path, vs_load_failure, config, renderer, ffmpeg_runner
+        )
 
     # === RENDERER=FFMPEG WITH TONEMAP GATING (§1.4.4) ===
     if renderer == "ffmpeg" and config.color.enable_tonemap:
         _validate_ffmpeg_tonemap_gate(clip_path, config, ffmpeg_runner)
 
-    source_is_hdr = source_info.is_hdr if source_info is not None else False
+    source_is_hdr = (
+        source_info.is_hdr
+        if source_info is not None
+        else fallback_source_is_hdr
+        if fallback_source_is_hdr is not None
+        else False
+    )
     if source_info is None and renderer == "ffmpeg":
         source_is_hdr = is_hdr_via_runner(clip_path, ffmpeg_runner)
     presentation_state = (

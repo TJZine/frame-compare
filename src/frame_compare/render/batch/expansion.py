@@ -29,7 +29,6 @@ from frame_compare.render.types import (
 from frame_compare.utils.media_facts import (
     ActivePictureFacts,
     ActivePictureProvenance,
-    PresentationState,
     RenderedGeometryFacts,
 )
 
@@ -116,14 +115,15 @@ def expand_batch_render_requests(
             if all(dimension > 0 for dimension in source.source_dimensions)
             else batch.source_resolution
         )
-        source_total_frames = source.source_total_frames or batch.source_total_frames
-        state = (
-            PresentationState.HDR_TONEMAPPED
-            if source.tonemap_settings is not None
-            else PresentationState.HDR_TONEMAP_OFF
-            if batch.signal.is_hdr
-            else PresentationState.SDR
+        source_total_frames = (
+            source.source_total_frames
+            if source.source_total_frames is not None
+            else batch.source_total_frames
         )
+        # Preparation owns this state: it reflects the actual source and whether
+        # the resolved tonemap was applied, rather than re-deriving it from the
+        # request's clip-level signal snapshot.
+        state = source.presentation_state
         clip_facts[batch.label] = RenderedClipFacts(
             size_bytes=batch.size_bytes,
             source_resolution=source_resolution,
@@ -231,7 +231,7 @@ def _geometry_plans(
         tuple(sources),
         mode=mode,
         options=RenderGeometryOptions(
-            active_rect_detection="provided",
+            active_rect_detection=config.screenshots.active_rect_detection.value,
             aligned_scale_policy=config.screenshots.aligned_scale_policy.value,
             aligned_target_size=_target_size(config),
         ),
