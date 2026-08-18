@@ -11,8 +11,10 @@ from frame_compare.render.batch.orchestrator import (
 )
 from frame_compare.render.types import (
     EncoderSettings,
+    RenderedFrameResult,
     RenderRequest,
 )
+from frame_compare.utils.media_facts import RenderedFrameFacts
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 
 
@@ -20,6 +22,7 @@ from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 def mock_render_request(tmp_path):
     return RenderRequest(
         clip=Path("video.mkv"),
+        diagnostic_source=Path("video.mkv"),
         frame_number=42,
         output_path=tmp_path / "out.png",
         overlay=None,
@@ -27,10 +30,18 @@ def mock_render_request(tmp_path):
     )
 
 
+def _rendered(request: RenderRequest) -> RenderedFrameResult:
+    return RenderedFrameResult(
+        path=request.output_path,
+        facts=RenderedFrameFacts(source_frame=request.frame_number),
+    )
+
+
 def test_render_batch_parallel_order(mock_render_request):
     requests = [
         RenderRequest(
             clip=Path("video.mkv"),
+            diagnostic_source=Path("video.mkv"),
             frame_number=i,
             output_path=Path(f"out_{i}.png"),
             overlay=None,
@@ -38,20 +49,20 @@ def test_render_batch_parallel_order(mock_render_request):
         )
         for i in range(5)
     ]
-    with patch("frame_compare.render.batch.orchestrator.render_frame") as mock_render:
-        mock_render.side_effect = lambda r: r.output_path
+    with patch("frame_compare.render.batch.orchestrator.render_frame_detailed") as mock_render:
+        mock_render.side_effect = _rendered
         results = render_batch(requests, parallelism=2)
         assert results == [r.output_path for r in requests]
 
 
 def test_render_batch_fail_fast(mock_render_request):
     requests = [mock_render_request] * 10
-    with patch("frame_compare.render.batch.orchestrator.render_frame") as mock_render:
+    with patch("frame_compare.render.batch.orchestrator.render_frame_detailed") as mock_render:
         # Fail on the 3rd request
         def side_effect(r):
             if r == requests[2]:
                 raise RuntimeError("Failed")
-            return r.output_path
+            return _rendered(r)
 
         mock_render.side_effect = side_effect
         with pytest.raises(RuntimeError, match="Failed"):
@@ -71,8 +82,8 @@ def test_render_batch_progress(mock_render_request):
     requests = [mock_render_request] * 3
     reporter = MagicMock(spec=ProgressReporter)
 
-    with patch("frame_compare.render.batch.orchestrator.render_frame") as mock_render:
-        mock_render.side_effect = lambda r: r.output_path
+    with patch("frame_compare.render.batch.orchestrator.render_frame_detailed") as mock_render:
+        mock_render.side_effect = _rendered
         render_batch(requests, parallelism=1, reporter=reporter)
 
         reporter.start_phase.assert_called_once_with("Rendering", 3)
@@ -93,6 +104,7 @@ def test_render_batch_parallel_waits_for_in_flight_work_before_raising() -> None
     requests = [
         RenderRequest(
             clip=Path("video.mkv"),
+            diagnostic_source=Path("video.mkv"),
             frame_number=0,
             output_path=Path("out_0.png"),
             overlay=None,
@@ -100,6 +112,7 @@ def test_render_batch_parallel_waits_for_in_flight_work_before_raising() -> None
         ),
         RenderRequest(
             clip=Path("video.mkv"),
+            diagnostic_source=Path("video.mkv"),
             frame_number=1,
             output_path=Path("out_1.png"),
             overlay=None,
@@ -114,7 +127,7 @@ def test_render_batch_parallel_waits_for_in_flight_work_before_raising() -> None
             slow_blocked.set()
             assert release_slow.wait(timeout=1.0)
             slow_finished.set()
-            return r.output_path
+            return _rendered(r)
         assert slow_blocked.wait(timeout=1.0)
         failure_raised.set()
         raise RuntimeError("Failed immediately")
@@ -127,7 +140,9 @@ def test_render_batch_parallel_waits_for_in_flight_work_before_raising() -> None
         finally:
             render_done.set()
 
-    with patch("frame_compare.render.batch.orchestrator.render_frame", side_effect=side_effect):
+    with patch(
+        "frame_compare.render.batch.orchestrator.render_frame_detailed", side_effect=side_effect
+    ):
         thread = Thread(target=run_render, daemon=True)
         thread.start()
         try:
@@ -150,7 +165,7 @@ def test_render_batch_marks_progress_failed_on_exception(mock_render_request) ->
 
     with (
         patch(
-            "frame_compare.render.batch.orchestrator.render_frame",
+            "frame_compare.render.batch.orchestrator.render_frame_detailed",
             side_effect=RuntimeError("Failed"),
         ),
         pytest.raises(RuntimeError, match="Failed"),
@@ -162,8 +177,8 @@ def test_render_batch_marks_progress_failed_on_exception(mock_render_request) ->
 
 def test_render_batch_sequential(mock_render_request):
     requests = [mock_render_request] * 3
-    with patch("frame_compare.render.batch.orchestrator.render_frame") as mock_render:
-        mock_render.side_effect = lambda r: r.output_path
+    with patch("frame_compare.render.batch.orchestrator.render_frame_detailed") as mock_render:
+        mock_render.side_effect = _rendered
         results = render_batch(requests, parallelism=1)
         assert results == [r.output_path for r in requests]
         assert mock_render.call_count == 3

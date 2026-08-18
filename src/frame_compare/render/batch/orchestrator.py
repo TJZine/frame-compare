@@ -25,7 +25,11 @@ from frame_compare.render.types import (
     ScreenshotBatchRequest,
     ScreenshotRenderOptions,
 )
-from frame_compare.utils.media_facts import ActivePictureFacts, SourceSignalFacts
+from frame_compare.utils.media_facts import (
+    ActivePictureFacts,
+    RenderedFrameFacts,
+    SourceSignalFacts,
+)
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 
 if TYPE_CHECKING:
@@ -116,6 +120,13 @@ def _render_batch_parallel(
             for index, rendered_path in completed:
                 results[index] = rendered_path
                 _record_render_progress(reporter, requests[index])
+
+            if first_exception is not None:
+                # Do not start new work after a failure. Cancel any futures that
+                # have not begun; running renders are allowed to finish so the
+                # executor has one deterministic cleanup path.
+                for future in futures:
+                    future.cancel()
 
             while (
                 first_exception is None
@@ -345,8 +356,29 @@ def render_screenshots_from_batch_detailed(
         ]
         for request in batch_requests
     }
+    _append_picture_type_warnings(
+        batch_requests,
+        frame_facts,
+        resolved_options.warnings,
+    )
     return RenderedBatchResult(
         screenshots_by_label=screenshots,
         frame_facts_by_label=frame_facts,
         clip_facts_by_label=clip_facts,
     )
+
+
+def _append_picture_type_warnings(
+    batch_requests: list[ScreenshotBatchRequest],
+    frame_facts: dict[str, list[RenderedFrameFacts]],
+    warnings: list[str] | None,
+) -> None:
+    if warnings is None:
+        return
+    for request in batch_requests:
+        unknown_count = sum(fact.picture_type is None for fact in frame_facts[request.label])
+        if unknown_count:
+            warnings.append(
+                f"render: picture type unavailable for {unknown_count} selected frame(s) "
+                f"in {request.label}; screenshots were rendered without picture-type metadata"
+            )

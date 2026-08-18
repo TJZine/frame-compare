@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
@@ -27,7 +28,7 @@ from frame_compare.render.types import (
     Renderer,
     RenderRequest,
 )
-from frame_compare.utils.media_facts import RenderedFrameFacts
+from frame_compare.utils.media_facts import RenderedFrameFacts, normalize_picture_type
 from frame_compare.vs.errors import SourceLoadError
 from frame_compare.vs.props import props_indicate_limited_range
 
@@ -109,7 +110,7 @@ def render_frame_detailed(
     facts = RenderedFrameFacts(source_frame=request.frame_number)
 
     try:
-        _execute_frame_render(request, use_vs, facts)
+        facts = _execute_frame_render(request, use_vs, facts)
 
     except (EncodingError, FrameExtractionError, RenderError, SourceLoadError):
         raise
@@ -145,16 +146,18 @@ def _use_vapoursynth_renderer(request: RenderRequest, renderer: Renderer) -> boo
 
 def _execute_frame_render(
     request: RenderRequest, use_vapoursynth: bool, facts: RenderedFrameFacts
-) -> None:
+) -> RenderedFrameFacts:
     if use_vapoursynth:
-        _execute_vapoursynth_render(request, facts)
-        return
+        return _execute_vapoursynth_render(request, facts)
 
-    _execute_ffmpeg_render(request, facts)
+    return _execute_ffmpeg_render(request, facts)
 
 
-def _execute_vapoursynth_render(request: RenderRequest, facts: RenderedFrameFacts) -> None:
+def _execute_vapoursynth_render(
+    request: RenderRequest, facts: RenderedFrameFacts
+) -> RenderedFrameFacts:
     node = cast("vs.VideoNode", request.clip)
+    facts = _facts_from_vapoursynth_source(request, facts)
     _render_vs(
         node,
         request.frame_number,
@@ -164,23 +167,47 @@ def _execute_vapoursynth_render(request: RenderRequest, facts: RenderedFrameFact
         frame_facts=facts,
         geometry_plan=request.geometry_plan,
     )
+    return facts
 
 
-def _execute_ffmpeg_render(request: RenderRequest, facts: RenderedFrameFacts) -> None:
+def _execute_ffmpeg_render(request: RenderRequest, facts: RenderedFrameFacts) -> RenderedFrameFacts:
     path = cast(Path, request.clip)
     runner = request.ffmpeg_runner or DefaultFFmpegRunner()
     if request.geometry_plan is None:
-        runner.extract_frame(path, request.frame_number, request.output_path)
+        extracted_facts = runner.extract_frame(path, request.frame_number, request.output_path)
     else:
-        runner.extract_frame(
+        extracted_facts = runner.extract_frame(
             path,
             request.frame_number,
             request.output_path,
             geometry_plan=request.geometry_plan,
         )
 
+    facts = extracted_facts
+
     if request.overlay is not None and request.overlay.mode != OverlayMode.NONE:
         apply_overlay_to_file(request.output_path, request.overlay, facts)
+    return facts
+
+
+def _facts_from_vapoursynth_source(
+    request: RenderRequest, facts: RenderedFrameFacts
+) -> RenderedFrameFacts:
+    """Read exact-frame properties from the original source node only.
+
+    A transformed render graph is deliberately never consulted for picture type:
+    filters and writer conversion are allowed to drop or alter reserved props.
+    Metadata failure is non-fatal because the image itself remains renderable.
+    """
+    source = request.diagnostic_source
+    if isinstance(source, Path):
+        return facts
+    try:
+        frame = source.get_frame(request.frame_number)
+        picture_type = normalize_picture_type(dict(frame.props).get("_PictType"))
+    except Exception:
+        picture_type = None
+    return replace(facts, picture_type=picture_type)
 
 
 def _render_error_reason(exc: Exception) -> str:

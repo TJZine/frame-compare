@@ -13,9 +13,9 @@ from frame_compare.render.encoders import (
     _clip_to_rgb24_for_pillow,
     _map_fpng_compression,
     _maybe_expand_tonemapped_video_range,
-    _picture_type_from_frame_props,
     apply_overlay_to_file,
     render_frame,
+    render_frame_detailed,
 )
 from frame_compare.render.errors import EncodingError, FrameExtractionError, RenderError
 from frame_compare.render.geometry import (
@@ -26,6 +26,7 @@ from frame_compare.render.geometry import (
 )
 from frame_compare.render.types import EncoderSettings, OverlayConfig, OverlayMode, RenderRequest
 from frame_compare.utils.ffmpeg_errors import FFmpegNotFoundError
+from frame_compare.utils.media_facts import normalize_picture_type
 from frame_compare.vs.errors import SourceLoadError
 
 
@@ -850,63 +851,44 @@ def test_picture_type_from_frame_props_normalizes_supported_values(
 ) -> None:
     # Intentional internal-seam coverage: render_frame tests below prove integration,
     # while this table protects the stable `_PictType` normalization contract.
-    assert _picture_type_from_frame_props({"_PictType": prop_value}) == expected
+    assert normalize_picture_type(prop_value) == expected
 
 
-def test_render_vs_populates_overlay_picture_type_from_frame_props(
+def test_render_vs_reads_picture_type_from_exact_diagnostic_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    fake_vs = SimpleNamespace(RGB24=1, RGB=2)
-    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
+    monkeypatch.setattr("frame_compare.render.encoders._render_vs", MagicMock())
 
-    captured_picture_types: list[str | None] = []
+    class _Frame:
+        def __init__(self, picture_type: str) -> None:
+            self.props = {"_PictType": picture_type}
 
-    def _capture_overlay(image: object, overlay: OverlayConfig) -> object:
-        captured_picture_types.append(overlay.picture_type)
-        return image
+    class _Node:
+        def __init__(self, picture_type: str) -> None:
+            self.picture_type = picture_type
+            self.requested: list[int] = []
 
-    monkeypatch.setattr("frame_compare.render.encoders.apply_overlay", _capture_overlay)
+        def get_frame(self, index: int) -> _Frame:
+            self.requested.append(index)
+            return _Frame(self.picture_type)
 
-    class _FrameWithPictureType:
-        def __init__(self) -> None:
-            self.props = {"_PictType": b"b"}
-            self.format = SimpleNamespace(num_planes=1)
-            self._plane = np.zeros((2, 2), dtype=np.uint8)
-
-        def __getitem__(self, index: int) -> np.ndarray:
-            assert index == 0
-            return self._plane
-
-    class _ClipWithPictureType:
-        def __init__(self) -> None:
-            self.format = SimpleNamespace(id=1, color_family=2)
-            self._frame = _FrameWithPictureType()
-
-        def get_frame(self, _index: int) -> _FrameWithPictureType:
-            return self._frame
-
-    overlay = OverlayConfig(
-        mode=OverlayMode.STANDARD,
-        label="Label",
-        frame_number=0,
-        resolution=(2, 2),
-        hdr_info=None,
-        font_path=None,
-    )
-
-    render_frame(
+    transformed = _Node("P")
+    source = _Node("B")
+    result = render_frame_detailed(
         RenderRequest(
-            clip=_ClipWithPictureType(),  # type: ignore[arg-type]
-            frame_number=0,
+            clip=transformed,  # type: ignore[arg-type]
+            diagnostic_source=source,  # type: ignore[arg-type]
+            frame_number=7,
             output_path=tmp_path / "out.png",
-            overlay=overlay,
+            overlay=None,
             encoder_settings=EncoderSettings(),
         ),
         renderer="vapoursynth",
     )
 
-    assert captured_picture_types == ["B"]
-    assert overlay.picture_type == "B"
+    assert result.facts.picture_type == "B"
+    assert source.requested == [7]
+    assert transformed.requested == []
 
 
 def test_render_vs_applies_geometry_plan_before_saving(
@@ -961,58 +943,25 @@ def test_render_vs_applies_geometry_plan_before_saving(
     assert clip.requested_frames[-1] == 3
 
 
-def test_render_vs_clears_overlay_picture_type_when_prop_is_unsupported(
+def test_render_vs_missing_or_invalid_source_property_is_nonfatal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    fake_vs = SimpleNamespace(RGB24=1, RGB=2)
-    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
+    monkeypatch.setattr("frame_compare.render.encoders._render_vs", MagicMock())
 
-    captured_picture_types: list[str | None] = []
+    class _Source:
+        def get_frame(self, index: int) -> object:
+            assert index == 3
+            return SimpleNamespace(props={"_PictType": "unknown"})
 
-    def _capture_overlay(image: object, overlay: OverlayConfig) -> object:
-        captured_picture_types.append(overlay.picture_type)
-        return image
-
-    monkeypatch.setattr("frame_compare.render.encoders.apply_overlay", _capture_overlay)
-
-    class _FrameWithoutSupportedPictureType:
-        def __init__(self) -> None:
-            self.props = {"_PictType": "unknown"}
-            self.format = SimpleNamespace(num_planes=1)
-            self._plane = np.zeros((2, 2), dtype=np.uint8)
-
-        def __getitem__(self, index: int) -> np.ndarray:
-            assert index == 0
-            return self._plane
-
-    class _ClipWithoutSupportedPictureType:
-        def __init__(self) -> None:
-            self.format = SimpleNamespace(id=1, color_family=2)
-            self._frame = _FrameWithoutSupportedPictureType()
-
-        def get_frame(self, _index: int) -> _FrameWithoutSupportedPictureType:
-            return self._frame
-
-    overlay = OverlayConfig(
-        mode=OverlayMode.STANDARD,
-        label="Label",
-        frame_number=0,
-        resolution=(2, 2),
-        hdr_info=None,
-        font_path=None,
-        picture_type="I",
-    )
-
-    render_frame(
+    result = render_frame_detailed(
         RenderRequest(
-            clip=_ClipWithoutSupportedPictureType(),  # type: ignore[arg-type]
-            frame_number=0,
+            clip=object(),  # type: ignore[arg-type]
+            diagnostic_source=_Source(),  # type: ignore[arg-type]
+            frame_number=3,
             output_path=tmp_path / "out.png",
-            overlay=overlay,
+            overlay=None,
             encoder_settings=EncoderSettings(),
         ),
         renderer="vapoursynth",
     )
-
-    assert captured_picture_types == [None]
-    assert overlay.picture_type is None
+    assert result.facts.picture_type is None
