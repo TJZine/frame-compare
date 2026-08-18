@@ -67,10 +67,16 @@ output contract says otherwise.
 
 ## Dolby Vision considerations
 
-Dolby Vision sources can expose useful RPU-derived properties through the selected media
-runtime, but profile, fallback-layer, decoder, and metadata availability vary. Treat
-missing or partial dynamic metadata as insufficient evidence rather than silently
-inventing values.
+The conservative supported presentation records clip-level DV RPU presence on the
+Signal line and identifies a DV L5-derived active picture as `DV L5` in geometry. It
+does not present L1, L2, or L6 values from a frame-0 probe snapshot as though they came
+from the selected frame.
+
+Dynamic L1/L2/L6 presentation is gated on documented provider semantics, exact selected
+source-frame access, correct types and units, independent frame-specific validation,
+repeatability, clean negative cases, and bounded access without scanning. Insufficient
+evidence closes the gate: absence is preferred to plausible but invented metadata. No
+raw-RPU parser is included merely to populate the UI.
 
 For publication-bound comparisons:
 
@@ -81,9 +87,11 @@ For publication-bound comparisons:
 
 ## Overlays and measurements
 
-`diagnostic` overlays can include available mastering metadata, MaxCLL/MaxFALL, color
-range, Dolby Vision facts, and selection context. The values depend on what the source
-and selected runtime can prove.
+`diagnostic` overlays can include observed mastering metadata, MaxCLL/MaxFALL, source
+color evidence, RPU presence, DV L5 geometry provenance, applied tonemap settings, and
+selection context. Optional dynamic Dolby Vision fields appear only with exact selected-
+frame provenance. Missing values compose away without placeholders or fabricated
+defaults.
 
 <figure class="fc-doc-figure">
   <img src="../images/hdr-diagnostic-overlay.webp" alt="Physical-Windows HDR diagnostic frame from EBU DVB HLG10 Comparison at frame 1000, showing HLG and BT.2020 metadata, limited range, bt2390 tonemapping at 100 nits, and the vs-placebo runtime proof.">
@@ -91,7 +99,10 @@ and selected runtime can prove.
 </figure>
 
 Selection scores are useful for explaining why a frame was chosen. They are not a
-replacement for calibrated luminance measurement, VMAF, or a perceptual review.
+replacement for calibrated luminance measurement, VMAF, or a perceptual review. Frame
+Compare does not derive pseudo-nits from selection scores. A tonemap target such as
+100 or 203 nits is an applied output setting, not an observation about source-frame
+luminance.
 
 ## Common problems
 

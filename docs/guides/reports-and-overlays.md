@@ -78,6 +78,18 @@ The viewer supports:
 - a lens for close inspection;
 - browser-local review state and notes.
 
+Report payload version 1.1 preserves two distinct frame domains. The selected report
+frame is the common comparison frame. Each visible image carries its own mapped,
+untrimmed source frame and exact picture type when the renderer can prove one. The Frame
+inspector updates that source list with the current Single, Slider, Diff, Blink, or Grid
+view; it does not present one reference-source frame as universal truth.
+
+The Clips inspector keeps archival source facts compact: complete file size, observed
+signal, actual presentation state, and a non-full active picture when applicable. Open
+Report Information for the Rendering section. It always states whether tonemapping was
+applied and, when applied, provides the full resolved settings in a closed-by-default
+advanced disclosure. No additional report tab or permanent metadata panel is created.
+
 <figure class="fc-doc-figure">
   <img src="../images/report-inspector.webp" alt="Report inspector Align tab showing the EBU DVB PQ10 Reference and EBU DVB HLG10 Comparison pair at frame 1000 with zero x and y offsets.">
   <figcaption>The inspector keeps the selected pair and its alignment mapping visible without leaving the current report.</figcaption>
@@ -95,10 +107,20 @@ Choose a baked screenshot overlay with the `--overlay` run option or
 
 | Mode | Use |
 | --- | --- |
-| `none` | Clean image output when metadata is recorded elsewhere |
-| `minimal` | Small source/frame identity |
-| `standard` | Normal comparison labeling and context |
-| `diagnostic` | Detailed color, HDR, selection, and source evidence when available |
+| `none` | No baked text; exact-frame facts remain available to the report |
+| `minimal` | Source identity, then available comparison frame, picture type, and file size |
+| `standard` | Minimal provenance plus one selection line, source resolution/size, and transformed output size when relevant |
+| `diagnostic` | Standard context plus only observed signal, applied tonemap, HDR static, exceptional geometry, and proven exact-frame DV facts |
+
+Frame numbering distinguishes the comparison frame from each mapped source frame when
+they differ. The denominator, when shown, is the untrimmed source total. Picture type is
+read from the exact selected original source frame; unknown values are simply omitted,
+and screenshot generation still succeeds.
+
+File size is the complete container storage cost, formatted with binary MiB/GiB/TiB
+units. It does not rank quality, bitrate efficiency, or a comparison winner. Tonemap
+target nits describe the configured output transform; they are not measured luminance
+for the selected frame.
 
 Overlay text is part of the rendered image. Viewer labels and controls are browser
 presentation and can be hidden or changed without modifying the screenshots.
@@ -130,6 +152,8 @@ browser; use the host helper and the exact path printed by the run.
 - Prefer `report.embed_images = true` only when a single-file artifact is required.
 - Review filenames and metadata before sharing; they may disclose source names.
 - Browser-local notes are not automatically included in the run folder.
+- Version 1.1 report metadata is archival raw evidence and resolved rendering state;
+  moving the complete report folder does not turn local paths into identity data.
 
 For exact opening precedence, persistence, and report-generation behavior, see the
 [report contract](../current-cli-contract.md#report-auto-open-ownership) and

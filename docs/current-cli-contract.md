@@ -613,6 +613,27 @@ upload, regardless of whether a later confirmed upload will open the slow.pics
 URL in a browser. The same report auto-open rules decide whether the report is
 opened. If it is not opened, the CLI prints the report path before prompting.
 
+### Report And Overlay Metadata Contract
+
+- Newly generated standalone reports use payload version `1.1`. The top-level frame
+  number is the common comparison-domain frame; every image separately records its
+  mapped untrimmed source frame and exact-frame picture type when available.
+- The existing Frame inspector follows the images visible in Single, Slider, Diff,
+  Blink, and Grid modes. The existing Clips inspector shows compact source signal,
+  presentation, file-size, and non-full active-picture facts. Report Information owns
+  the Rendering disclosure, including resolved tonemap settings when tonemapping ran.
+- Report identity includes output-affecting overlay, geometry, tonemap, presentation,
+  signal, and per-image provenance facts. It excludes absolute paths, image bytes or
+  `src` values, timestamps, and transient browser state.
+- `screenshots.overlay_mode` has four exact presentation levels: `none` bakes no text;
+  `minimal` carries source identity plus compact frame/type/size context; `standard`
+  adds selection and source/output context; `diagnostic` adds only observed signal,
+  applied tonemap, HDR static, exceptional geometry, and proven exact-frame facts.
+- Picture type is collected from the exact selected original source frame. Its absence
+  is nonfatal and is omitted from baked text rather than inferred from keyframe status.
+- Displayed file size is the complete container storage cost in IEC units. It is not a
+  bitrate, quality, efficiency, or winner metric.
+
 ### slow.pics Upload Behavior
 
 - slow.pics publishing is disabled by default. Users must set
@@ -1071,6 +1092,12 @@ now fail nested validation:
   placement is always the canonical run-root `report.html`.
 - Remove `logging.file`; Frame Compare does not support config-driven file
   logging.
+
+The former root `[diagnostics]` table and `DiagnosticsConfig` owner no longer exist.
+Because unknown root sections are deliberately ignored, a stale `[diagnostics]` table
+is inert; remove it. There is no `per_frame_nits` replacement: selection scores are not
+luminance measurements, and tonemap targets describe an applied transform rather than
+observed source-frame brightness.
 
 ## Config-Only Audio Alignment Surface
 
