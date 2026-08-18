@@ -33,7 +33,6 @@ def _request(label: str = "ref") -> ScreenshotBatchRequest:
         source_total_frames=100,
         signal=SourceSignalFacts(is_hdr=False),
         active_picture=ActivePictureFacts(0, 0, 1920, 1080, "full_frame", True),
-        active_rect_detection_mode="provided",
     )
 
 

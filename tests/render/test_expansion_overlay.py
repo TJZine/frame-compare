@@ -22,7 +22,6 @@ def _request() -> ScreenshotBatchRequest:
         source_total_frames=143892,
         signal=SourceSignalFacts(is_hdr=False),
         active_picture=ActivePictureFacts(0, 0, 3840, 2160, "full_frame", True),
-        active_rect_detection_mode="provided",
     )
 
 

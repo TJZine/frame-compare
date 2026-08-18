@@ -77,14 +77,11 @@ def _capture_detailed_render(
     tmp_path: Path,
     *,
     picture_types: dict[str, list[str | None]] | None = None,
-    warning: str | None = None,
 ) -> dict[str, Any]:
     captured: dict[str, Any] = {}
 
     def _fake(**kwargs: Any) -> RenderedBatchResult:
         captured.update(kwargs)
-        if warning is not None:
-            kwargs["options"].warnings.append(warning)
         return _result_for_requests(kwargs["batch_requests"], tmp_path, picture_types=picture_types)
 
     monkeypatch.setattr(
@@ -107,7 +104,6 @@ def test_run_render_phase_maps_comparison_and_source_frames_and_preserves_facts(
         monkeypatch,
         tmp_path,
         picture_types={"Reference": ["B"], "Encode 1": ["P"]},
-        warning="render: geometry alignment skipped",
     )
 
     output = phase_render.run_render_phase(ctx, frames=[1], runner=cast(Any, _RenderRunner()))
@@ -126,7 +122,7 @@ def test_run_render_phase_maps_comparison_and_source_frames_and_preserves_facts(
     assert output.render.frame_facts_by_label["Reference"] == [
         RenderedFrameFacts(source_frame=4, picture_type="B")
     ]
-    assert output.render.warnings == ["render: geometry alignment skipped"]
+    assert output.render.warnings == []
 
 
 def test_run_render_phase_maps_multiple_clips_in_stable_order(

@@ -90,9 +90,7 @@ def expand_batch_render_requests(
     overlay_mode: OverlayMode,
     renderer: Renderer,
     ffmpeg_runner: FFmpegRunner,
-    warnings: list[str] | None = None,
 ) -> tuple[list[RenderRequest], dict[str, range], dict[str, RenderedClipFacts]]:
-    del warnings
     prepared = [
         prepare_clip_for_render(
             request.clip_path,

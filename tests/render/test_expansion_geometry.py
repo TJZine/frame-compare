@@ -33,7 +33,6 @@ def _batch(
         source_total_frames=100,
         signal=SourceSignalFacts(is_hdr=False),
         active_picture=active or ActivePictureFacts(0, 0, width, height, "full_frame", True),
-        active_rect_detection_mode="provided",
     )
 
 

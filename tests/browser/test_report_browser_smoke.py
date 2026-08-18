@@ -348,13 +348,19 @@ document.addEventListener('DOMContentLoaded', () => {
         'Scene threshold low', 'Scene threshold high', 'Gamut mapping',
         'Metadata mode', 'Dolby Vision metadata use',
     ];
-    ReportViewer.openInfoModal();
+    document.getElementById('btn-info')?.click();
     document.documentElement.dataset.tonemapSummary = String(
         document.querySelector('[data-rendering-tonemap-summary]')?.textContent
         === 'Reference · BT.2390 · 100 nits'
     );
     document.documentElement.dataset.tonemapDisclosureInitial = String(
-        Boolean(disclosure && summary && !disclosure.open && settings)
+        Boolean(
+            ReportViewer.isInfoModalOpen()
+            && disclosure
+            && summary
+            && !disclosure.open
+            && settings
+        )
     );
     document.documentElement.dataset.tonemapAdvancedRows = String(
         Boolean(settings)

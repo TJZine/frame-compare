@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Literal
 
 from frame_compare.config.schema import OverlayMode
 from frame_compare.config.schema_enums import VsScreenshotWriter
-from frame_compare.render.geometry import ActiveRectDetectionMode
 from frame_compare.utils.media_facts import (
     ActivePictureFacts,
     PresentationState,
@@ -156,7 +155,6 @@ class ScreenshotBatchRequest:
     source_total_frames: int | None
     signal: SourceSignalFacts
     active_picture: ActivePictureFacts
-    active_rect_detection_mode: ActiveRectDetectionMode
     filename_label: str | None = None
 
 
@@ -172,7 +170,6 @@ class BatchRenderOptions:
     reporter: ProgressReporter | None = None
     ffmpeg_runner: FFmpegRunner | None = None
     parallelism: int = 1
-    warnings: list[str] | None = None
 
 
 @dataclass(frozen=True)

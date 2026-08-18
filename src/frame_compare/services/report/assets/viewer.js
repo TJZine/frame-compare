@@ -822,9 +822,7 @@ const ReportViewer = {
         });
         this.dom.modal.addEventListener('keydown', (e) => this.handleModalKey(e));
 
-        // The legacy info modal remains in markup as fallback content; the main Info
-        // surface is the non-modal inspector drawer to avoid duplicate focus traps.
-        this.dom.btnInfo.addEventListener('click', () => this.setInspectorOpen(!this.state.inspectorOpen));
+        this.dom.btnInfo.addEventListener('click', () => this.openInfoModal());
         this.dom.btnCloseInfo.addEventListener('click', () => this.closeInfoModal());
         this.dom.infoModal.addEventListener('click', (e) => {
             if (e.target === this.dom.infoModal) this.closeInfoModal();

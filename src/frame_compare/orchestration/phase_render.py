@@ -72,11 +72,6 @@ def run_render_phase(
                 source_total_frames=clip.probe.num_frames,
                 signal=_source_signal_facts(clip.probe),
                 active_picture=active_picture,
-                active_rect_detection_mode=(
-                    clip.active_rect.detection_mode
-                    if clip.active_rect is not None
-                    else ctx.config.screenshots.active_rect_detection.value
-                ),
             )
         )
 
@@ -89,7 +84,6 @@ def run_render_phase(
             overlay_mode=ctx.config.screenshots.overlay_mode,
             ffmpeg_runner=runner,
             reporter=ctx.reporter,
-            warnings=warnings,
         ),
     )
     for label, expected in expected_frames.items():

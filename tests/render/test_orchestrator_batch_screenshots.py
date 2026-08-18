@@ -49,7 +49,6 @@ def _batch_request(
         source_total_frames=total_frames,
         signal=SourceSignalFacts(is_hdr=is_hdr),
         active_picture=ActivePictureFacts(0, 0, width, height, "full_frame", True),
-        active_rect_detection_mode="provided",
     )
 
 

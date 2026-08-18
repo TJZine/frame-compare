@@ -271,7 +271,6 @@ def render_screenshots(
             source_total_frames=None,
             signal=SourceSignalFacts(is_hdr=probed_hdr is True),
             active_picture=ActivePictureFacts(0, 0, 1, 1, "full_frame", True),
-            active_rect_detection_mode=config.screenshots.active_rect_detection.value,
         )
         batch_requests.append(req)
 
@@ -336,7 +335,6 @@ def render_screenshots_from_batch_detailed(
         overlay_mode=resolved_options.overlay_mode,
         renderer=target_renderer,
         ffmpeg_runner=resolved_ffmpeg_runner,
-        warnings=resolved_options.warnings,
     )
 
     rendered = render_batch_detailed(
