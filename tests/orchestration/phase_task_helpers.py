@@ -5,6 +5,8 @@ from __future__ import annotations
 from fractions import Fraction
 from pathlib import Path
 
+from PIL import Image
+
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema import ConfigSchema
@@ -65,7 +67,12 @@ enable = false
 
 
 class _RenderRunner:
-    pass
+    def extract_frame(
+        self, _video: Path, frame_num: int, output: Path, **_kwargs: object
+    ) -> RenderedFrameFacts:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (10, 10), color=(0, 0, 0)).save(output, format="PNG")
+        return RenderedFrameFacts(source_frame=frame_num, picture_type="I")
 
 
 def _render_artifacts(

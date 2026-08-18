@@ -36,6 +36,7 @@ from frame_compare.orchestration.selection_domain import (
     compute_selection_window_for_clips,
 )
 from frame_compare.orchestration.source_selection import SourceSelection, resolve_source_selection
+from frame_compare.utils.media_facts import RenderedFrameFacts
 from frame_compare.vs.types import HDRMetadata, SourceInfo
 
 if TYPE_CHECKING:
@@ -383,10 +384,13 @@ class FakeFFmpegRunner:
     def __init__(self) -> None:
         self.calls: list[tuple[str, int, str]] = []
 
-    def extract_frame(self, video: Path, frame_num: int, output: Path) -> None:
+    def extract_frame(
+        self, video: Path, frame_num: int, output: Path, **_kwargs: object
+    ) -> RenderedFrameFacts:
         output.parent.mkdir(parents=True, exist_ok=True)
         Image.new("RGB", (10, 10), color=(0, 0, 0)).save(output, format="PNG")
         self.calls.append((video.name, frame_num, output.name))
+        return RenderedFrameFacts(source_frame=frame_num, picture_type="I")
 
     def probe_hdr(self, video: Path) -> HDRMetadata | None:
         return HDRMetadata(

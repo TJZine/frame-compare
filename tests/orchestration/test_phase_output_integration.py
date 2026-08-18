@@ -14,6 +14,7 @@ from frame_compare.analysis.types import (
     MetricsMetadata,
 )
 from frame_compare.orchestration import phase_alignment, phase_post_render, phase_render
+from frame_compare.render.types import RenderedBatchResult
 from frame_compare.services.publishers import PublishResult
 from frame_compare.services.slowpics_post_upload import (
     SlowpicsPostUploadRequest,
@@ -75,9 +76,27 @@ def test_output_phases_use_reselected_metric_metadata_after_real_initial_selecti
     report_capture: dict[str, Any] = {}
     expected_report_path = tmp_path / "run" / "report.html"
 
-    def _fake_render_screenshots_from_batch(**kwargs: object) -> dict[str, list[Path]]:
+    def _fake_render_screenshots_from_batch(**kwargs: object) -> RenderedBatchResult:
         render_capture.update(kwargs)
-        return {"Reference": [tmp_path / "reference.png"]}
+        requests = cast(list[Any], kwargs["batch_requests"])
+        screenshots = {
+            request.label: [
+                tmp_path / f"{request.label}-{frame}.png" for frame in request.source_frames
+            ]
+            for request in requests
+        }
+        artifacts = _render_artifacts(
+            screenshots_by_label=screenshots,
+            screenshot_dir=tmp_path / "screenshots",
+            source_frames_by_label={
+                request.label: list(request.source_frames) for request in requests
+            },
+        )
+        return RenderedBatchResult(
+            screenshots_by_label=artifacts.screenshots_by_label,
+            frame_facts_by_label=artifacts.frame_facts_by_label,
+            clip_facts_by_label=artifacts.clip_facts_by_label,
+        )
 
     def _fake_generate_report(
         report_data: object, report_config: object, *, output_path: Path
@@ -89,7 +108,7 @@ def test_output_phases_use_reselected_metric_metadata_after_real_initial_selecti
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
     monkeypatch.setattr(
-        "frame_compare.render.batch.orchestrator.render_screenshots_from_batch",
+        "frame_compare.render.batch.orchestrator.render_screenshots_from_batch_detailed",
         _fake_render_screenshots_from_batch,
     )
     monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
@@ -138,8 +157,8 @@ def test_output_phases_use_reselected_metric_metadata_after_real_initial_selecti
     assert [
         (detail.label, detail.detail, detail.category) for detail in report_data.frame_details
     ] == [
-        ("Frame 98", "Source frame 98", "quantile_dark"),
-        ("Frame 99", "Source frame 99", "quantile_dark"),
+        ("Frame 0", "Selected comparison frame", "quantile_dark"),
+        ("Frame 1", "Selected comparison frame", "quantile_dark"),
     ]
 
 
@@ -161,11 +180,21 @@ async def test_unresolved_comparison_remains_in_render_report_and_slowpics_membe
             screenshots_by_label[label].append(screenshot)
     captured: dict[str, Any] = {}
 
-    def _fake_render_screenshots_from_batch(**kwargs: object) -> dict[str, list[Path]]:
-        captured["render_labels"] = [
-            request.label for request in cast(list[Any], kwargs["batch_requests"])
-        ]
-        return screenshots_by_label
+    def _fake_render_screenshots_from_batch(**kwargs: object) -> RenderedBatchResult:
+        requests = cast(list[Any], kwargs["batch_requests"])
+        captured["render_labels"] = [request.label for request in requests]
+        artifacts = _render_artifacts(
+            screenshots_by_label=screenshots_by_label,
+            screenshot_dir=tmp_path / "screenshots",
+            source_frames_by_label={
+                request.label: list(request.source_frames) for request in requests
+            },
+        )
+        return RenderedBatchResult(
+            screenshots_by_label=artifacts.screenshots_by_label,
+            frame_facts_by_label=artifacts.frame_facts_by_label,
+            clip_facts_by_label=artifacts.clip_facts_by_label,
+        )
 
     def _fake_generate_report(
         report_data: object, report_config: object, *, output_path: Path
@@ -193,7 +222,7 @@ async def test_unresolved_comparison_remains_in_render_report_and_slowpics_membe
         return ()
 
     monkeypatch.setattr(
-        "frame_compare.render.batch.orchestrator.render_screenshots_from_batch",
+        "frame_compare.render.batch.orchestrator.render_screenshots_from_batch_detailed",
         _fake_render_screenshots_from_batch,
     )
     monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
