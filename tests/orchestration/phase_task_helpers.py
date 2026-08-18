@@ -90,9 +90,11 @@ def _render_artifacts(
         final_canvas_size=(1920, 1080),
         is_noop=True,
     )
-    frames = source_frames_by_label or {
-        label: list(range(len(paths))) for label, paths in screenshots_by_label.items()
-    }
+    frames = (
+        {label: list(range(len(paths))) for label, paths in screenshots_by_label.items()}
+        if source_frames_by_label is None
+        else source_frames_by_label
+    )
     return RenderArtifacts(
         screenshots_by_label=screenshots_by_label,
         frame_facts_by_label={
