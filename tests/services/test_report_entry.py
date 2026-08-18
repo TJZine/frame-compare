@@ -107,29 +107,40 @@ def test_generate_report_requires_explicit_output_path(report_data: ReportData) 
         generate_report(report_data, ReportConfig())
 
 
+def _clear_clips(data: ReportData) -> ReportData:
+    data.clips.clear()
+    return data
+
+
+def _remove_one_clip(data: ReportData) -> ReportData:
+    data.clips.pop()
+    return data
+
+
+def _clear_frames(data: ReportData) -> ReportData:
+    data.frames.clear()
+    return data
+
+
+def _clear_all_images(data: ReportData) -> ReportData:
+    for clip in data.clips:
+        clip.images.clear()
+    return data
+
+
+def _clear_encode_images(data: ReportData) -> ReportData:
+    data.clips[1].images.clear()
+    return data
+
+
 @pytest.mark.parametrize(
     ("data_builder", "message"),
     [
-        (
-            lambda data: (data.clips.clear() or data),
-            "no clips provided",
-        ),
-        (
-            lambda data: (data.clips.pop() and data),
-            "at least 2 clips required for comparison",
-        ),
-        (
-            lambda data: (data.frames.clear() or data),
-            "no frames provided",
-        ),
-        (
-            lambda data: ([clip.images.clear() for clip in data.clips] and data),
-            "no screenshots provided",
-        ),
-        (
-            lambda data: (data.clips[1].images.clear() or data),
-            "no screenshots for clip: encode",
-        ),
+        (_clear_clips, "no clips provided"),
+        (_remove_one_clip, "at least 2 clips required for comparison"),
+        (_clear_frames, "no frames provided"),
+        (_clear_all_images, "no screenshots provided"),
+        (_clear_encode_images, "no screenshots for clip: encode"),
     ],
 )
 def test_generate_report_rejects_invalid_report_data_before_writing(

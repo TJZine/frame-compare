@@ -78,18 +78,29 @@ def _browser_executable() -> str | None:
 
 def _generated_report(tmp_path: Path, *, tonemapped: bool = False) -> Path:
     clips: list[ClipInfo] = []
-    geometry = RenderedGeometryFacts(
-        source_size=(1, 1),
-        active_picture=ActivePictureFacts(0, 0, 1, 1, "full_frame", True),
-        cropped_size=(1, 1),
-        scaled_size=(1, 1),
-        final_canvas_size=(1, 1),
-        is_noop=True,
-    )
+    geometry_by_name = {
+        "reference": RenderedGeometryFacts(
+            source_size=(1920, 1080),
+            active_picture=ActivePictureFacts(0, 0, 1920, 1080, "full_frame", True),
+            cropped_size=(1920, 1080),
+            scaled_size=(1920, 1080),
+            final_canvas_size=(1920, 1080),
+            is_noop=True,
+        ),
+        "encode": RenderedGeometryFacts(
+            source_size=(1920, 1080),
+            active_picture=ActivePictureFacts(0, 276, 1920, 804, "explicit", False),
+            cropped_size=(1920, 804),
+            scaled_size=(1920, 804),
+            final_canvas_size=(1920, 804),
+            is_noop=False,
+        ),
+    }
     for name, label in (
         ("reference", _REFERENCE_LABEL),
         ("encode", _COMPARISON_LABEL),
     ):
+        geometry = geometry_by_name[name]
         screenshot = tmp_path / "screenshots" / name / "10.png"
         screenshot.parent.mkdir(parents=True)
         screenshot.write_bytes(_ONE_PIXEL_PNG)
@@ -99,7 +110,7 @@ def _generated_report(tmp_path: Path, *, tonemapped: bool = False) -> Path:
                 label=label,
                 path=tmp_path / f"{name}.mkv",
                 frame_count=20,
-                resolution=(1, 1),
+                resolution=(1920, 1080),
                 fps=24.0,
                 size_bytes=17 * 1024**3,
                 signal=SourceSignalFacts(
@@ -114,7 +125,13 @@ def _generated_report(tmp_path: Path, *, tonemapped: bool = False) -> Path:
                 ),
                 tonemap_settings=TonemapSettings() if tonemapped else None,
                 active_picture=geometry.active_picture,
-                images=[ReportImageInfo(screenshot, 10, RenderedFrameFacts(10, "B"))],
+                images=[
+                    ReportImageInfo(
+                        screenshot,
+                        10 if name == "reference" else 12,
+                        RenderedFrameFacts(10 if name == "reference" else 12, "B"),
+                    )
+                ],
             )
         )
 
@@ -126,7 +143,9 @@ def _generated_report(tmp_path: Path, *, tonemapped: bool = False) -> Path:
                 overlay_mode=OverlayMode.DIAGNOSTIC,
                 include_frame_number=True,
                 tonemap_settings=TonemapSettings() if tonemapped else None,
-                geometry_by_label={clip.label or clip.name: geometry for clip in clips},
+                geometry_by_label={
+                    clip.label or clip.name: geometry_by_name[clip.name] for clip in clips
+                },
             ),
         ),
         ReportConfig(
@@ -537,7 +556,9 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     assert parser.document_attributes["data-filmstrip-hud-anchored"] == "true"
     assert parser.document_attributes["data-narrow-palette-horizontal"] == "true"
     assert parser.document_attributes["data-grid-hud-anchored"] == "true"
-    assert parser.document_attributes["data-source-hud-text"] == (f"{_REFERENCE_LABEL} • 1×1 • SDR")
+    assert parser.document_attributes["data-source-hud-text"] == (
+        f"{_REFERENCE_LABEL} • 1920×1080 • SDR"
+    )
     assert parser.document_attributes["data-clips-metadata"] == "true"
     assert parser.document_attributes["data-rendering-disclosure"] == "true"
     assert parser.document_attributes["data-no-horizontal-overflow"] == "true"
@@ -545,7 +566,7 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     assert source_rows["overlay"] == [f"{_REFERENCE_LABEL} — 10 / 20 · B-frame"]
     assert source_rows["slider"] == [
         f"{_REFERENCE_LABEL} — 10 / 20 · B-frame",
-        f"{_COMPARISON_LABEL} — 10 / 20 · B-frame",
+        f"{_COMPARISON_LABEL} — 12 / 20 · B-frame",
     ]
     assert source_rows["diff"] == source_rows["slider"]
     assert source_rows["blink"] == source_rows["slider"]

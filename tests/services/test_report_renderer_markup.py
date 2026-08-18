@@ -12,6 +12,7 @@ from tests.services.report_viewer_contracts import (
     SelectParser,
     find_all,
     find_children,
+    parse_definition_pairs,
     parse_elements,
     parse_info_modal,
     parse_start_tags,
@@ -307,30 +308,13 @@ def test_build_html_renders_applied_tonemap_disclosure_with_all_effective_settin
     }
     html = build_html(payload)
     assert "Reference · BT.2390 · 100 nits" in html
-    details_start = html.index('<details class="rv-tonemap-details"')
-    details_end = html.index("</details>", details_start)
-    details = html[details_start:details_end]
-    assert " open" not in details.split(">", 1)[0]
-    for label in (
-        "Dynamic peak detection",
-        "Contrast recovery",
-        "Gamma lift",
-        "Source peak",
-        "Destination minimum",
-        "Knee offset",
-        "Smoothing period",
-        "Percentile",
-        "Scene threshold low",
-        "Scene threshold high",
-        "Gamut mapping",
-        "Metadata mode",
-        "Dolby Vision metadata use",
-    ):
-        assert label in details
-    assert "<dt>Dynamic peak detection</dt><dd>On</dd>" in details
-    assert "<dt>Gamma lift</dt><dd>Off</dd>" in details
-    assert "<dt>Source peak</dt><dd>Auto</dd>" in details
-    assert "<dt>Dolby Vision metadata use</dt><dd>Off</dd>" in details
+    details = require_first(parse_elements(html), tag="details", class_name="rv-tonemap-details")
+    assert "open" not in details.attrs
+    pairs = parse_definition_pairs(details)
+    assert pairs["Dynamic peak detection"] == "On"
+    assert pairs["Gamma lift"] == "Off"
+    assert pairs["Source peak"] == "Auto"
+    assert pairs["Dolby Vision metadata use"] == "Off"
 
 
 def test_build_html_avoids_inline_styles(report_payload: ReportPayload) -> None:

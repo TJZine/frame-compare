@@ -811,9 +811,11 @@ const summary = {};
         diff: viewer.clipOverlayLabel(clip, 'Base'),
     };
 
-    assert.equal(viewer.formatFileSize(1024 ** 2), '1.00 MiB');
+    assert.equal(viewer.formatFileSize(512 * 1024), '0.50 MiB');
     assert.equal(viewer.formatFileSize(1024 ** 3), '1.00 GiB');
     assert.equal(viewer.formatFileSize(1024 ** 4), '1.00 TiB');
+    assert.equal(viewer.formatFileSize(-1), '');
+    assert.equal(viewer.formatFileSize(Number.NaN), '');
     assert.equal(
         viewer.formatSignal({
             is_hdr: true,

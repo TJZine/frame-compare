@@ -41,15 +41,17 @@ from frame_compare.utils.media_facts import (
 from frame_compare.vs.types import TonemapSettings
 
 
-def _geometry() -> RenderedGeometryFacts:
-    active = ActivePictureFacts(0, 0, 1920, 1080, "full_frame", True)
+def _geometry(active: ActivePictureFacts | None = None) -> RenderedGeometryFacts:
+    active = active or ActivePictureFacts(0, 0, 1920, 1080, "full_frame", True)
+    transformed = not active.is_full_frame
+    content_size = (active.width, active.height) if transformed else (1920, 1080)
     return RenderedGeometryFacts(
         source_size=(1920, 1080),
         active_picture=active,
-        cropped_size=(1920, 1080),
-        scaled_size=(1920, 1080),
-        final_canvas_size=(1920, 1080),
-        is_noop=True,
+        cropped_size=content_size,
+        scaled_size=content_size,
+        final_canvas_size=content_size,
+        is_noop=not transformed,
     )
 
 
@@ -61,6 +63,7 @@ def _clip(
     hdr: bool = False,
     tonemapped: bool = False,
     dolby_vision: bool = False,
+    source_frame_offset: int = 0,
 ) -> ClipInfo:
     images: list[ReportImageInfo] = []
     active = ActivePictureFacts(0, 276, 1920, 804, "dolby_vision_l5", False)
@@ -68,7 +71,7 @@ def _clip(
         path = tmp_path / "screens" / name / f"{index}.png"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"fake_png_data")
-        source_frame = 10 + index
+        source_frame = 10 + index + source_frame_offset
         dovi = (
             ExactFrameDolbyVisionFacts(source_frame, l1_maximum_nits=1000.0)
             if dolby_vision
@@ -115,9 +118,19 @@ def _clip(
 def report_data(tmp_path: Path) -> ReportData:
     clips = [
         _clip(tmp_path, "clip1"),
-        _clip(tmp_path, "clip2", hdr=True, tonemapped=True, dolby_vision=True),
+        _clip(
+            tmp_path,
+            "clip2",
+            hdr=True,
+            tonemapped=True,
+            dolby_vision=True,
+            source_frame_offset=1,
+        ),
     ]
-    geometry = _geometry()
+    geometry_by_label = {
+        clips[0].label or clips[0].name: _geometry(clips[0].active_picture),
+        clips[1].label or clips[1].name: _geometry(clips[1].active_picture),
+    }
     return ReportData(
         clips=clips,
         frames=[10, 20],
@@ -125,7 +138,7 @@ def report_data(tmp_path: Path) -> ReportData:
             overlay_mode=OverlayMode.DIAGNOSTIC,
             include_frame_number=True,
             tonemap_settings=TonemapSettings(),
-            geometry_by_label={clip.label or clip.name: geometry for clip in clips},
+            geometry_by_label=geometry_by_label,
         ),
         metadata=TmdbMetadata(
             tmdb_id=123,
@@ -217,8 +230,24 @@ def test_report_payload_v11_raw_values_and_comparison_semantics(
     assert payload["frames"][0]["detail"] == "Selected comparison frame"
     assert payload["frames"][0]["images"][0]["source_frame"] == 10
     assert payload["frames"][0]["images"][0]["picture_type"] == "B"
-    assert payload["frames"][0]["images"][1]["dolby_vision"]["source_frame"] == 10
+    assert payload["frames"][0]["images"][1]["source_frame"] == 11
+    assert payload["frames"][0]["images"][1]["dolby_vision"]["source_frame"] == 11
     assert payload["rendering"]["tonemap"]["applied"] is True
+    assert payload["rendering"]["geometry_by_label"]["CLIP2"] == {
+        "source_size": (1920, 1080),
+        "active_picture": {
+            "x": 0,
+            "y": 276,
+            "width": 1920,
+            "height": 804,
+            "provenance": "dolby_vision_l5",
+            "is_full_frame": False,
+        },
+        "cropped_size": (1920, 804),
+        "scaled_size": (1920, 804),
+        "final_canvas_size": (1920, 804),
+        "is_noop": False,
+    }
 
 
 @pytest.mark.parametrize(
@@ -361,3 +390,7 @@ def test_generate_report_json_contains_v11_rendering(
     assert payload["version"] == "1.1"
     assert payload["rendering"]["overlay_mode"] == "diagnostic"
     assert payload["frames"][0]["detail"] == "Selected comparison frame"
+    geometry = payload["rendering"]["geometry_by_label"]["CLIP2"]
+    assert geometry["active_picture"]["provenance"] == "dolby_vision_l5"
+    assert geometry["active_picture"]["width"] == 1920
+    assert geometry["active_picture"]["height"] == 804

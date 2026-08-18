@@ -370,6 +370,13 @@ def find_all(
     return matches
 
 
+def parse_definition_pairs(element: ParsedElement) -> dict[str, str]:
+    terms = find_all(element, tag="dt")
+    definitions = find_all(element, tag="dd")
+    assert len(terms) == len(definitions)
+    return {term.text: definition.text for term, definition in zip(terms, definitions, strict=True)}
+
+
 def css_block(css: str, selector: str) -> str:
     selector_start = css.index(selector)
     return brace_block(css, css.index("{", selector_start))
