@@ -26,7 +26,14 @@ from frame_compare.render.geometry import (
 )
 from frame_compare.render.types import EncoderSettings, OverlayConfig, OverlayMode, RenderRequest
 from frame_compare.utils.ffmpeg_errors import FFmpegNotFoundError
-from frame_compare.utils.media_facts import normalize_picture_type
+from frame_compare.utils.media_facts import (
+    ActivePictureFacts,
+    PresentationState,
+    RenderedFrameFacts,
+    RenderedGeometryFacts,
+    SourceSignalFacts,
+    normalize_picture_type,
+)
 from frame_compare.vs.errors import SourceLoadError
 
 
@@ -49,6 +56,7 @@ def mock_render_vs(monkeypatch):
 @pytest.fixture
 def mock_ffmpeg_runner(monkeypatch):
     mock = MagicMock()
+    mock.return_value = RenderedFrameFacts(source_frame=100)
     monkeypatch.setattr(
         "frame_compare.render.backend.ffmpeg.DefaultFFmpegRunner.extract_frame", mock
     )
@@ -66,6 +74,33 @@ class FakeClip:
     """Mock for vs.VideoNode"""
 
     pass
+
+
+def _overlay(mode: OverlayMode = OverlayMode.MINIMAL, *, frame: int = 0) -> OverlayConfig:
+    resolution = (1920, 1080)
+    return OverlayConfig(
+        mode=mode,
+        label="Label",
+        comparison_frame=frame,
+        source_frame=frame,
+        source_total_frames=None,
+        include_frame_number=True,
+        selection_label=None,
+        file_size_bytes=0,
+        source_resolution=resolution,
+        signal=SourceSignalFacts(is_hdr=False),
+        presentation_state=PresentationState.SDR,
+        tonemap_settings=None,
+        geometry=RenderedGeometryFacts(
+            source_size=resolution,
+            active_picture=ActivePictureFacts(0, 0, *resolution, "full_frame", True),
+            cropped_size=resolution,
+            scaled_size=resolution,
+            final_canvas_size=resolution,
+            is_noop=True,
+        ),
+        font_path=None,
+    )
 
 
 class _FakeFpngJob:
@@ -170,6 +205,7 @@ def test_render_frame_vs_dispatch(mock_render_vs):
     clip = FakeClip()
     request = RenderRequest(
         clip=clip,  # type: ignore
+        diagnostic_source=clip,  # type: ignore
         frame_number=100,
         output_path=Path("out.png"),
         overlay=None,
@@ -182,6 +218,7 @@ def test_render_frame_vs_dispatch(mock_render_vs):
 def test_render_frame_ffmpeg_dispatch(mock_ffmpeg_runner):
     request = RenderRequest(
         clip=Path("test.mp4"),
+        diagnostic_source=Path("test.mp4"),
         frame_number=100,
         output_path=Path("out.png"),
         overlay=None,
@@ -195,6 +232,7 @@ def test_render_frame_mismatch_error():
     # Path but renderer="vapoursynth"
     request = RenderRequest(
         clip=Path("test.mp4"),
+        diagnostic_source=Path("test.mp4"),
         frame_number=100,
         output_path=Path("out.png"),
         overlay=None,
@@ -207,16 +245,10 @@ def test_render_frame_mismatch_error():
 def test_render_frame_overlay_integration(mock_render_vs):
     # VS Path: pass overlay to _render_vs
     clip = FakeClip()
-    overlay = OverlayConfig(
-        mode=OverlayMode.MINIMAL,
-        label="Label",
-        frame_number=100,
-        resolution=(1920, 1080),
-        hdr_info=None,
-        font_path=None,
-    )
+    overlay = _overlay(frame=100)
     request = RenderRequest(
         clip=clip,  # type: ignore
+        diagnostic_source=clip,  # type: ignore
         frame_number=100,
         output_path=Path("out.png"),
         overlay=overlay,
@@ -235,16 +267,10 @@ def test_render_frame_overlay_integration_ffmpeg(mock_ffmpeg_runner, mock_apply_
     # FFmpeg Path
     request = RenderRequest(
         clip=Path("test.mp4"),
+        diagnostic_source=Path("test.mp4"),
         frame_number=100,
         output_path=Path("out.png"),
-        overlay=OverlayConfig(
-            mode=OverlayMode.MINIMAL,
-            label="Label",
-            frame_number=100,
-            resolution=(1920, 1080),
-            hdr_info=None,
-            font_path=None,
-        ),
+        overlay=_overlay(frame=100),
         encoder_settings=EncoderSettings(),
     )
     render_frame(request, renderer="ffmpeg")
@@ -279,6 +305,7 @@ def test_render_frame_vs_auto_uses_fpng_for_geometry_without_overlay(
     render_frame(
         RenderRequest(
             clip=clip,  # type: ignore[arg-type]
+            diagnostic_source=clip,  # type: ignore[arg-type]
             frame_number=3,
             output_path=output,
             overlay=None,
@@ -302,7 +329,7 @@ def test_render_frame_vs_auto_uses_fpng_for_geometry_without_overlay(
     assert written_clip.ops[-1][1]["left"] == 1
     assert written_clip.ops[-1][1]["right"] == 1
     assert job.frames == [3]
-    assert clip.frame_reads == [0, 3]
+    assert clip.frame_reads == [3, 0, 3]
 
 
 def test_render_frame_vs_auto_preserves_pillow_for_native_geometry_without_overlay(
@@ -320,6 +347,7 @@ def test_render_frame_vs_auto_preserves_pillow_for_native_geometry_without_overl
     render_frame(
         RenderRequest(
             clip=clip,  # type: ignore[arg-type]
+            diagnostic_source=clip,  # type: ignore[arg-type]
             frame_number=3,
             output_path=tmp_path / "out.png",
             overlay=None,
@@ -344,18 +372,12 @@ def test_render_frame_vs_auto_falls_back_to_pillow_when_overlay_is_present(
     clip = _FakeFpngClip()
     pillow = MagicMock()
     monkeypatch.setattr("frame_compare.render.encoders._render_vs_pillow", pillow)
-    overlay = OverlayConfig(
-        mode=OverlayMode.MINIMAL,
-        label="Label",
-        frame_number=3,
-        resolution=(4, 4),
-        hdr_info=None,
-        font_path=None,
-    )
+    overlay = _overlay(frame=3)
 
     render_frame(
         RenderRequest(
             clip=clip,  # type: ignore[arg-type]
+            diagnostic_source=clip,  # type: ignore[arg-type]
             frame_number=3,
             output_path=tmp_path / "out.png",
             overlay=overlay,
@@ -383,6 +405,7 @@ def test_render_frame_vs_pillow_writer_ignores_available_fpng(
     render_frame(
         RenderRequest(
             clip=clip,  # type: ignore[arg-type]
+            diagnostic_source=clip,  # type: ignore[arg-type]
             frame_number=3,
             output_path=tmp_path / "out.png",
             overlay=None,
@@ -405,6 +428,7 @@ def test_render_frame_vs_fpng_requires_plugin_when_explicit(
         render_frame(
             RenderRequest(
                 clip=clip,  # type: ignore[arg-type]
+                diagnostic_source=clip,  # type: ignore[arg-type]
                 frame_number=3,
                 output_path=tmp_path / "out.png",
                 overlay=None,
@@ -430,16 +454,10 @@ def test_render_frame_vs_fpng_rejects_overlay_when_explicit(
         render_frame(
             RenderRequest(
                 clip=clip,  # type: ignore[arg-type]
+                diagnostic_source=clip,  # type: ignore[arg-type]
                 frame_number=3,
                 output_path=tmp_path / "out.png",
-                overlay=OverlayConfig(
-                    mode=OverlayMode.MINIMAL,
-                    label="Label",
-                    frame_number=3,
-                    resolution=(4, 4),
-                    hdr_info=None,
-                    font_path=None,
-                ),
+                overlay=_overlay(frame=3),
                 encoder_settings=EncoderSettings(vs_writer=VsScreenshotWriter.FPNG),
             ),
             renderer="vapoursynth",
@@ -464,6 +482,7 @@ def test_render_frame_vs_auto_falls_back_to_pillow_for_tonemapped_limited_rgb(
     render_frame(
         RenderRequest(
             clip=clip,  # type: ignore[arg-type]
+            diagnostic_source=clip,  # type: ignore[arg-type]
             frame_number=3,
             output_path=tmp_path / "out.png",
             overlay=None,
@@ -490,6 +509,7 @@ def test_render_frame_vs_fpng_rejects_tonemapped_limited_rgb_when_explicit(
         render_frame(
             RenderRequest(
                 clip=clip,  # type: ignore[arg-type]
+                diagnostic_source=clip,  # type: ignore[arg-type]
                 frame_number=3,
                 output_path=tmp_path / "out.png",
                 overlay=None,
@@ -538,6 +558,7 @@ def test_render_frame_ffmpeg_passes_geometry_plan_to_runner() -> None:
     runner = MagicMock()
     request = RenderRequest(
         clip=Path("test.mp4"),
+        diagnostic_source=Path("test.mp4"),
         frame_number=100,
         output_path=Path("out.png"),
         overlay=None,
@@ -559,6 +580,7 @@ def test_render_frame_ffmpeg_passes_geometry_plan_to_runner() -> None:
 def test_render_frame_ffmpeg_wraps_unrepresentable_geometry_as_render_error() -> None:
     request = RenderRequest(
         clip=Path("test.mp4"),
+        diagnostic_source=Path("test.mp4"),
         frame_number=100,
         output_path=Path("out.png"),
         overlay=None,
@@ -573,20 +595,15 @@ def test_render_frame_ffmpeg_wraps_unrepresentable_geometry_as_render_error() ->
 
 
 def test_apply_overlay_to_file_none_mode_is_noop(monkeypatch) -> None:
-    overlay = OverlayConfig(
-        mode=OverlayMode.NONE,
-        label="Label",
-        frame_number=100,
-        resolution=(1920, 1080),
-        hdr_info=None,
-        font_path=None,
-    )
+    overlay = _overlay(OverlayMode.NONE, frame=100)
 
     def _should_not_call(_path: Path, _config: OverlayConfig) -> None:
         raise AssertionError("_apply_overlay_to_file should not be called for NONE mode")
 
     monkeypatch.setattr("frame_compare.render.encoders._apply_overlay_to_file", _should_not_call)
-    apply_overlay_to_file(Path("does-not-matter.png"), overlay)
+    apply_overlay_to_file(
+        Path("does-not-matter.png"), overlay, RenderedFrameFacts(source_frame=100)
+    )
 
 
 def test_render_frame_overlay_none_mode_is_strict_noop_on_ffmpeg(
@@ -594,16 +611,10 @@ def test_render_frame_overlay_none_mode_is_strict_noop_on_ffmpeg(
 ):
     request = RenderRequest(
         clip=Path("test.mp4"),
+        diagnostic_source=Path("test.mp4"),
         frame_number=100,
         output_path=Path("out.png"),
-        overlay=OverlayConfig(
-            mode=OverlayMode.NONE,
-            label="Label",
-            frame_number=100,
-            resolution=(1920, 1080),
-            hdr_info=None,
-            font_path=None,
-        ),
+        overlay=_overlay(OverlayMode.NONE, frame=100),
         encoder_settings=EncoderSettings(),
     )
     render_frame(request, renderer="ffmpeg")
@@ -616,6 +627,7 @@ def test_error_wrapping(mock_ffmpeg_runner):
 
     request = RenderRequest(
         clip=Path("test.mp4"),
+        diagnostic_source=Path("test.mp4"),
         frame_number=100,
         output_path=Path("out.png"),
         overlay=None,
@@ -633,6 +645,7 @@ def test_render_frame_reraises_source_load_error(mock_ffmpeg_runner):
 
     request = RenderRequest(
         clip=Path("test.mp4"),
+        diagnostic_source=Path("test.mp4"),
         frame_number=100,
         output_path=Path("out.png"),
         overlay=None,
@@ -925,6 +938,7 @@ def test_render_vs_applies_geometry_plan_before_saving(
     render_frame(
         RenderRequest(
             clip=clip,  # type: ignore[arg-type]
+            diagnostic_source=clip,  # type: ignore[arg-type]
             frame_number=3,
             output_path=output,
             overlay=None,
