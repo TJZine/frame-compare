@@ -229,7 +229,7 @@ def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> No
     assert info_modal.attrs["class"] == "rv-modal"
     assert info_modal.attrs["aria-hidden"] == "true"
     assert info_modal.attrs["role"] == "dialog"
-    assert info_modal.section_headings == ["General", "Clips"]
+    assert info_modal.section_headings == ["General", "Clips", "Rendering"]
     assert info_modal.general == {
         "Title": "Renderer Contract",
         "Report ID": "report_0123456789abcdef0123456789abcdef",
@@ -239,6 +239,7 @@ def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> No
         "Default Mode": "slider",
         "Default Pair": 'REF <main> vs ENC "candidate"',
         "slow.pics": "https://slow.pics/c/abc?x=1&y=2",
+        "Tonemap": "Not applied",
     }
     assert [(clip.label, clip.dynamic_range, clip.fields) for clip in info_modal.clips] == [
         (
@@ -341,7 +342,7 @@ def test_build_html_avoids_duplicate_category_labels_when_label_matches_category
             {
                 "number": 10,
                 "label": "Motion",
-                "detail": "Source frame 10",
+                "detail": "Selected comparison frame",
                 "category": "motion",
                 "images": report_payload["frames"][0]["images"],
             },

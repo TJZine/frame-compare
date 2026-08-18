@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
 import shutil
 import subprocess
@@ -12,10 +13,22 @@ from pathlib import Path
 
 import pytest
 
-from frame_compare.config.schema import ReportConfig
+from frame_compare.config.schema import OverlayMode, ReportConfig
 from frame_compare.config.schema_enums import ViewerMode
 from frame_compare.services.report.entry import generate_report
-from frame_compare.services.report.payload import ClipInfo, ReportData
+from frame_compare.services.report.payload import (
+    ClipInfo,
+    ReportData,
+    ReportImageInfo,
+    ReportRenderingInfo,
+)
+from frame_compare.utils.media_facts import (
+    ActivePictureFacts,
+    PresentationState,
+    RenderedFrameFacts,
+    RenderedGeometryFacts,
+    SourceSignalFacts,
+)
 
 _ONE_PIXEL_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
@@ -64,6 +77,14 @@ def _browser_executable() -> str | None:
 
 def _generated_report(tmp_path: Path) -> Path:
     clips: list[ClipInfo] = []
+    geometry = RenderedGeometryFacts(
+        source_size=(1, 1),
+        active_picture=ActivePictureFacts(0, 0, 1, 1, "full_frame", True),
+        cropped_size=(1, 1),
+        scaled_size=(1, 1),
+        final_canvas_size=(1, 1),
+        is_noop=True,
+    )
     for name, label in (
         ("reference", _REFERENCE_LABEL),
         ("encode", _COMPARISON_LABEL),
@@ -79,13 +100,28 @@ def _generated_report(tmp_path: Path) -> Path:
                 frame_count=20,
                 resolution=(1, 1),
                 fps=24.0,
-                hdr=False,
-                screenshots=[screenshot],
+                size_bytes=17 * 1024**3,
+                signal=SourceSignalFacts(
+                    is_hdr=False, primaries=1, transfer=1, matrix=10, color_range="limited"
+                ),
+                presentation_state=PresentationState.SDR,
+                tonemap_settings=None,
+                active_picture=geometry.active_picture,
+                images=[ReportImageInfo(screenshot, 10, RenderedFrameFacts(10, "B"))],
             )
         )
 
     return generate_report(
-        ReportData(clips=[replace(clip) for clip in clips], frames=[10]),
+        ReportData(
+            clips=[replace(clip) for clip in clips],
+            frames=[10],
+            rendering=ReportRenderingInfo(
+                overlay_mode=OverlayMode.DIAGNOSTIC,
+                include_frame_number=True,
+                tonemap_settings=None,
+                geometry_by_label={clip.label or clip.name: geometry for clip in clips},
+            ),
+        ),
         ReportConfig(
             default_mode=ViewerMode.DIFF,
             embed_images=False,
@@ -246,6 +282,32 @@ document.addEventListener('DOMContentLoaded', () => {
             sourceHudStyle.whiteSpace === 'normal'
             && sourceHudStyle.textOverflow !== 'ellipsis'
         );
+        const sourceRowsByMode = {};
+        ['overlay', 'slider', 'diff', 'blink', 'grid'].forEach(mode => {
+            ReportViewer.setMode(mode);
+            ReportViewer.setInspectorTab('frame');
+            ReportViewer.updateInspectorData();
+            sourceRowsByMode[mode] = Array.from(
+                document.querySelectorAll('[data-inspector-source-frames] .rv-inspector-source')
+            ).map(row => row.textContent.trim());
+        });
+        document.documentElement.dataset.frameSourceRows = JSON.stringify(sourceRowsByMode);
+        ReportViewer.setInspectorTab('clips');
+        ReportViewer.updateInspectorData();
+        document.documentElement.dataset.clipsMetadata = String(
+            document.querySelector('[data-inspector-clips]')?.textContent.includes('File size')
+            && document.querySelector('[data-inspector-clips]')?.textContent.includes('Signal')
+            && document.querySelector('[data-inspector-clips]')?.textContent.includes('Presentation')
+            && !document.querySelector('[data-inspector-clips]')?.textContent.includes('Advanced tonemap')
+        );
+        document.documentElement.dataset.renderingDisclosure = String(
+            document.querySelector('[data-rendering-tonemap-summary]')?.textContent === 'Not applied'
+            && !document.querySelector('[data-rendering-details]')
+        );
+        document.documentElement.dataset.noHorizontalOverflow = String(
+            document.documentElement.scrollWidth <= window.innerWidth
+            && document.body.scrollWidth <= window.innerWidth
+        );
         ReportViewer.setMode('diff');
     };
     probeHud();
@@ -325,6 +387,19 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     assert parser.document_attributes["data-narrow-palette-horizontal"] == "true"
     assert parser.document_attributes["data-grid-hud-anchored"] == "true"
     assert parser.document_attributes["data-source-hud-text"] == (f"{_REFERENCE_LABEL} • 1×1 • SDR")
+    assert parser.document_attributes["data-clips-metadata"] == "true"
+    assert parser.document_attributes["data-rendering-disclosure"] == "true"
+    assert parser.document_attributes["data-no-horizontal-overflow"] == "true"
+    source_rows = json.loads(parser.document_attributes["data-frame-source-rows"] or "{}")
+    assert source_rows["overlay"] == [f"{_REFERENCE_LABEL} — 10 / 20 · B-frame"]
+    assert source_rows["slider"] == [
+        f"{_REFERENCE_LABEL} — 10 / 20 · B-frame",
+        f"{_COMPARISON_LABEL} — 10 / 20 · B-frame",
+    ]
+    assert source_rows["diff"] == source_rows["slider"]
+    assert source_rows["blink"] == source_rows["slider"]
+    expected_grid_rows = source_rows["slider"][:1] if width <= 768 else source_rows["slider"]
+    assert source_rows["grid"] == expected_grid_rows
     assert parser.stage_attributes is not None
     stage_classes = (parser.stage_attributes["class"] or "").split()
     assert "rv-mode-diff" in stage_classes

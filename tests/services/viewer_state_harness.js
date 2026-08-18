@@ -32,10 +32,24 @@ function payloadWithClipCount(clipCount) {
         frame_count: 100,
         resolution: [1920, 1080],
         fps: 24,
-        hdr: false,
+        size_bytes: 17 * 1024 * 1024 * 1024,
+        signal: {
+            is_hdr: false,
+            primaries: 1,
+            transfer: 1,
+            matrix: 10,
+            range: 'limited',
+            dolby_vision_rpu: false,
+        },
+        presentation: {
+            state: 'sdr',
+            tone_curve: null,
+            target_nits: null,
+        },
+        active_picture: null,
     }));
     return {
-        version: '1.0',
+        version: '1.1',
         report_id: 'report_viewer_state_contract',
         generated_at: '2026-06-02T12:00:00+00:00',
         title: 'Viewer State Contract',
@@ -53,11 +67,14 @@ function payloadWithClipCount(clipCount) {
         frames: [10, 20].map((number) => ({
             number,
             label: `Frame ${number}`,
-            detail: `Source frame ${number}`,
+            detail: 'Selected comparison frame',
             category: 'selected',
             images: clips.map((clip) => ({
                 clip: clip.name,
                 src: `${clip.name}/${number}.png`,
+                source_frame: number,
+                picture_type: 'B',
+                dolby_vision: null,
             })),
         })),
     };
@@ -744,7 +761,7 @@ const summary = {};
     const clip = {
         label: 'Title.2160p.WEB-DL.Service-GROUP',
         resolution: [3840, 2160],
-        hdr: true,
+        signal: { is_hdr: true },
     };
     assert.equal(
         viewer.clipOverlayLabel(clip),
@@ -759,6 +776,21 @@ const summary = {};
         slider: viewer.clipOverlayLabel(clip, 'Left'),
         diff: viewer.clipOverlayLabel(clip, 'Base'),
     };
+
+    assert.equal(viewer.formatFileSize(1024 ** 2), '1.00 MiB');
+    assert.equal(viewer.formatFileSize(1024 ** 3), '1.00 GiB');
+    assert.equal(viewer.formatFileSize(1024 ** 4), '1.00 TiB');
+    assert.equal(
+        viewer.formatSignal({
+            is_hdr: true,
+            primaries: 9,
+            transfer: 16,
+            matrix: 10,
+            range: 'limited',
+            dolby_vision_rpu: true,
+        }),
+        'HDR · BT.2020 / PQ / BT.2020c · Limited · DV RPU',
+    );
 }
 
 {

@@ -1636,7 +1636,7 @@ const ReportViewer = {
         const labels = {
             primaries: { 1: 'BT.709', 9: 'BT.2020' },
             transfer: { 1: 'BT.709', 13: 'sRGB', 16: 'PQ', 18: 'HLG' },
-            matrix: { 0: 'GBR', 1: 'BT.709', 9: 'BT.2020nc' },
+            matrix: { 0: 'GBR', 1: 'BT.709', 9: 'BT.2020nc', 10: 'BT.2020c' },
         };
         return labels[kind]?.[String(value)] || null;
     },
@@ -1753,7 +1753,7 @@ const ReportViewer = {
                 const label = clip?.label || `Clip ${clipIndex + 1}`;
                 const sourceFrame = Number.isInteger(image?.source_frame) ? image.source_frame : 'Unknown';
                 const total = Number.isInteger(clip?.frame_count) ? ` / ${clip.frame_count}` : '';
-                const pictureType = image?.picture_type || 'type unknown';
+                const pictureType = image?.picture_type ? `${image.picture_type}-frame` : 'type unknown';
                 item.textContent = `${label} — ${sourceFrame}${total} · ${pictureType}`;
                 return item;
             });
@@ -2766,8 +2766,8 @@ const ReportViewer = {
     },
 
     clipOverlayLabel(clip, role = '') {
-            const isHdr = clip.signal?.is_hdr === true;
-            const identity = `${clip.label} • ${clip.resolution[0]}×${clip.resolution[1]} • ${isHdr ? 'HDR' : 'SDR'}`;
+        const isHdr = clip.signal?.is_hdr === true;
+        const identity = `${clip.label} • ${clip.resolution[0]}×${clip.resolution[1]} • ${isHdr ? 'HDR' : 'SDR'}`;
         return role ? `${role.toUpperCase()}: ${identity}` : identity;
     },
 
