@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from PIL import Image
+from typing import Never
+
+import pytest
+from PIL import Image, ImageFont
 
 from frame_compare.config.schema_enums import OverlayMode
 from frame_compare.render.overlay import apply_overlay
@@ -48,19 +51,46 @@ def test_none_mode_is_a_true_noop() -> None:
     assert result.tobytes() == before
 
 
-def test_minimal_draws_composed_lines() -> None:
-    image = Image.new("RGB", (400, 200))
+def test_minimal_draws_translucent_background(monkeypatch: pytest.MonkeyPatch) -> None:
+    font = ImageFont.load_default(size=24)
+    monkeypatch.setattr("frame_compare.render.overlay._load_font", lambda _config: font)
+    image = Image.new("RGB", (400, 200), color=(100, 120, 140))
     before = image.tobytes()
+
     result = apply_overlay(image, _config(OverlayMode.MINIMAL), RenderedFrameFacts(12, "I"))
+
+    assert result is image
     assert result.size == image.size
     assert result.tobytes() != before
+    assert result.getpixel((20, 12)) == (29, 35, 41)
+
+
+def test_default_font_fallback_uses_configured_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fallback_font = ImageFont.load_default(size=24)
+    observed_sizes: list[int | None] = []
+
+    def _raise_missing_font(*_args: object, **_kwargs: object) -> Never:
+        raise OSError("font unavailable")
+
+    def _load_default(*, size: int | None = None) -> ImageFont.ImageFont:
+        observed_sizes.append(size)
+        return fallback_font
+
+    monkeypatch.setattr(ImageFont, "truetype", _raise_missing_font)
+    monkeypatch.setattr(ImageFont, "load_default", _load_default)
+
+    apply_overlay(
+        Image.new("RGB", (400, 200), color=(100, 120, 140)),
+        _config(OverlayMode.MINIMAL),
+        RenderedFrameFacts(12, "I"),
+    )
+
+    assert observed_sizes == [24]
 
 
 def test_overlay_rejects_mismatched_frame_facts() -> None:
     image = Image.new("RGB", (100, 100))
-    try:
+    with pytest.raises(ValueError, match="do not match"):
         apply_overlay(image, _config(OverlayMode.STANDARD), RenderedFrameFacts(13, "I"))
-    except ValueError as exc:
-        assert "do not match" in str(exc)
-    else:
-        raise AssertionError("mismatched frame facts must fail")

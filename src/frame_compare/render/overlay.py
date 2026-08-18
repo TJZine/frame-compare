@@ -19,7 +19,8 @@ def apply_overlay(
     if not lines:
         return image
     font = _load_font(config)
-    draw = ImageDraw.Draw(image)
+    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
     x, y = config.origin or (10, 10)
     spacing = max(4, config.font_size // 5)
     text = "\n".join(lines)
@@ -44,6 +45,11 @@ def apply_overlay(
         stroke_width=1,
         stroke_fill=(0, 0, 0),
     )
+
+    composited = Image.alpha_composite(image.convert("RGBA"), overlay)
+    if image.mode != "RGBA":
+        composited = composited.convert(image.mode)
+    image.paste(composited)
     return image
 
 
@@ -53,7 +59,7 @@ def _load_font(config: OverlayConfig) -> ImageFont.FreeTypeFont | ImageFont.Imag
     try:
         return ImageFont.truetype("DejaVuSans.ttf", config.font_size)
     except OSError:
-        return ImageFont.load_default()
+        return ImageFont.load_default(size=config.font_size)
 
 
 __all__ = ["apply_overlay"]
