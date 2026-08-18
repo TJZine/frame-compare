@@ -12,6 +12,7 @@ from tests.services.report_viewer_contracts import (
     SelectParser,
     find_all,
     find_children,
+    parse_definition_pairs,
     parse_elements,
     parse_info_modal,
     parse_start_tags,
@@ -229,7 +230,7 @@ def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> No
     assert info_modal.attrs["class"] == "rv-modal"
     assert info_modal.attrs["aria-hidden"] == "true"
     assert info_modal.attrs["role"] == "dialog"
-    assert info_modal.section_headings == ["General", "Clips"]
+    assert info_modal.section_headings == ["General", "Clips", "Rendering"]
     assert info_modal.general == {
         "Title": "Renderer Contract",
         "Report ID": "report_0123456789abcdef0123456789abcdef",
@@ -239,6 +240,7 @@ def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> No
         "Default Mode": "slider",
         "Default Pair": 'REF <main> vs ENC "candidate"',
         "slow.pics": "https://slow.pics/c/abc?x=1&y=2",
+        "Tonemap": "Not applied",
     }
     assert [(clip.label, clip.dynamic_range, clip.fields) for clip in info_modal.clips] == [
         (
@@ -273,6 +275,46 @@ def test_build_html_displays_overlay_default_mode_as_single(
 
     assert script_payload(html)["default_mode"] == "overlay"
     assert info_modal.general["Default Mode"] == "Single"
+
+
+def test_build_html_renders_applied_tonemap_disclosure_with_all_effective_settings(
+    report_payload: ReportPayload,
+) -> None:
+    settings = {
+        "enabled": True,
+        "preset": "reference",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": None,
+        "dynamic_peak_detection": True,
+        "dst_min_nits": 0.18,
+        "knee_offset": 0.5,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 0,
+        "use_dovi": False,
+        "contrast_recovery": 0.3,
+        "gamma_lift": False,
+    }
+    payload: ReportPayload = {
+        **report_payload,
+        "rendering": {
+            **report_payload["rendering"],
+            "tonemap": {"applied": True, "settings": settings},
+        },
+    }
+    html = build_html(payload)
+    assert "Reference · BT.2390 · 100 nits" in html
+    details = require_first(parse_elements(html), tag="details", class_name="rv-tonemap-details")
+    assert "open" not in details.attrs
+    pairs = parse_definition_pairs(details)
+    assert pairs["Dynamic peak detection"] == "On"
+    assert pairs["Gamma lift"] == "Off"
+    assert pairs["Source peak"] == "Auto"
+    assert pairs["Dolby Vision metadata use"] == "Off"
 
 
 def test_build_html_avoids_inline_styles(report_payload: ReportPayload) -> None:
@@ -341,7 +383,7 @@ def test_build_html_avoids_duplicate_category_labels_when_label_matches_category
             {
                 "number": 10,
                 "label": "Motion",
-                "detail": "Source frame 10",
+                "detail": "Selected comparison frame",
                 "category": "motion",
                 "images": report_payload["frames"][0]["images"],
             },

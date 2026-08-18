@@ -32,10 +32,24 @@ function payloadWithClipCount(clipCount) {
         frame_count: 100,
         resolution: [1920, 1080],
         fps: 24,
-        hdr: false,
+        size_bytes: 17 * 1024 * 1024 * 1024,
+        signal: {
+            is_hdr: false,
+            primaries: 1,
+            transfer: 1,
+            matrix: 10,
+            range: 'limited',
+            dolby_vision_rpu: false,
+        },
+        presentation: {
+            state: 'sdr',
+            tone_curve: null,
+            target_nits: null,
+        },
+        active_picture: null,
     }));
     return {
-        version: '1.0',
+        version: '1.1',
         report_id: 'report_viewer_state_contract',
         generated_at: '2026-06-02T12:00:00+00:00',
         title: 'Viewer State Contract',
@@ -53,11 +67,14 @@ function payloadWithClipCount(clipCount) {
         frames: [10, 20].map((number) => ({
             number,
             label: `Frame ${number}`,
-            detail: `Source frame ${number}`,
+            detail: 'Selected comparison frame',
             category: 'selected',
             images: clips.map((clip) => ({
                 clip: clip.name,
                 src: `${clip.name}/${number}.png`,
+                source_frame: number,
+                picture_type: 'B',
+                dolby_vision: null,
             })),
         })),
     };
@@ -67,6 +84,7 @@ function fakeElement() {
     const classes = new Set();
     const attributes = new Map();
     const listeners = new Map();
+    let definitionValues = null;
     return {
         value: '',
         textContent: '',
@@ -135,7 +153,10 @@ function fakeElement() {
                 return [fakeElement(), fakeElement()];
             }
             if (selector === 'dd') {
-                return [fakeElement(), fakeElement(), fakeElement(), fakeElement()];
+                if (definitionValues === null) {
+                    definitionValues = Array.from({ length: 7 }, () => fakeElement());
+                }
+                return definitionValues;
             }
             return [];
         },
@@ -321,6 +342,8 @@ function loadViewer({ clipCount, savedState = null }) {
             hidden: true,
         },
     };
+    viewer.dom.btnInfo.setAttribute('aria-label', 'Report information');
+    viewer.dom.btnInfo.setAttribute('title', 'Report Info');
     viewer.dom.inspectorFocusables = [
         viewer.dom.btnInspectorClose,
         ...viewer.dom.inspectorTabs,
@@ -528,6 +551,8 @@ const summary = {};
     assert.equal(viewer.state.inspectorTab, 'align');
     assert.equal(viewer.state.blinkIntervalMs, 1200);
     assert.equal(viewer.state.blinkPaused, false);
+    viewer.dom.btnInspectorClose.setAttribute('tabindex', '0');
+    viewer.setInspectorOpen(false, { focus: false, save: false });
 
     assert.equal(reviewMetrics.creates, 0);
     viewer.setInspectorTab('review');
@@ -538,8 +563,10 @@ const summary = {};
     assert.equal(reviewMetrics.creates, 1);
     viewer.setInspectorTab('export');
     const focusables = viewer.dom.inspectorFocusables;
-    viewer.dom.btnInspectorClose.setAttribute('tabindex', '0');
-    document.activeElement = viewer.dom.btnInfo;
+    const initiatingControl = fakeElement();
+    document.activeElement = initiatingControl;
+    const infoLabel = viewer.dom.btnInfo.getAttribute('aria-label');
+    const infoTitle = viewer.dom.btnInfo.getAttribute('title');
     viewer.setInspectorOpen(true);
     assert.equal(document.activeElement, viewer.dom.inspectorTabs[4]);
     const wrapEvent = keyboardEvent('ArrowRight');
@@ -551,7 +578,11 @@ const summary = {};
     assert.equal(viewer.dom.inspector.inert, false);
     assert.equal(viewer.dom.btnInspectorClose.getAttribute('tabindex'), '0');
     viewer.setInspectorOpen(false);
-    assert.equal(document.activeElement, viewer.dom.btnInfo);
+    assert.equal(document.activeElement, initiatingControl);
+    assert.equal(viewer.dom.btnInfo.getAttribute('aria-label'), infoLabel);
+    assert.equal(viewer.dom.btnInfo.getAttribute('title'), infoTitle);
+    assert.equal(viewer.dom.btnInfo.getAttribute('aria-pressed'), null);
+    const restoredKeyboardFocusToOrigin = document.activeElement === initiatingControl;
     assert.equal(viewer.state.inspectorRestoreFocus, null);
     assert.equal(viewer.dom.inspector.inert, true);
     focusables.forEach((element) => {
@@ -564,6 +595,10 @@ const summary = {};
         assert.equal(element.tabIndex, index === 4 ? 0 : -1);
     });
     viewer.setInspectorOpen(false);
+    document.activeElement = document.body;
+    viewer.setInspectorOpen(true);
+    viewer.setInspectorOpen(false);
+    assert.notEqual(document.activeElement, viewer.dom.btnInfo);
     viewer.setBlinkIntervalMs(300);
     viewer.setBlinkPaused(true);
     const saved = persisted(storage, storageKey);
@@ -583,8 +618,24 @@ const summary = {};
         blinkPausedPersisted: Object.hasOwn(saved, 'blinkPaused'),
         closedInspectorInert: viewer.dom.inspector.inert,
         closedInspectorTabIndex: viewer.dom.btnInspectorClose.getAttribute('tabindex'),
-        restoredKeyboardFocusToInfo: document.activeElement === viewer.dom.btnInfo,
+        restoredKeyboardFocusToOrigin,
         clearedKeyboardFocusRestoreTarget: viewer.state.inspectorRestoreFocus === null,
+    };
+}
+
+{
+    const { viewer } = loadViewer({ clipCount: 1 });
+    viewer.updateInspectorData();
+    const values = viewer.dom.inspectorClips.children[0].querySelectorAll('dd');
+    assert.equal(values.length, 7);
+    assert.equal(values[4].textContent, '17.00 GiB');
+    assert.equal(values[5].textContent, 'SDR · BT.709 / BT.709 / BT.2020c · Limited');
+    assert.equal(values[6].textContent, 'SDR');
+    summary.inspectorClipMetadata = {
+        valueCount: values.length,
+        fileSize: values[4].textContent,
+        signal: values[5].textContent,
+        presentation: values[6].textContent,
     };
 }
 
@@ -744,7 +795,7 @@ const summary = {};
     const clip = {
         label: 'Title.2160p.WEB-DL.Service-GROUP',
         resolution: [3840, 2160],
-        hdr: true,
+        signal: { is_hdr: true },
     };
     assert.equal(
         viewer.clipOverlayLabel(clip),
@@ -759,6 +810,23 @@ const summary = {};
         slider: viewer.clipOverlayLabel(clip, 'Left'),
         diff: viewer.clipOverlayLabel(clip, 'Base'),
     };
+
+    assert.equal(viewer.formatFileSize(512 * 1024), '0.50 MiB');
+    assert.equal(viewer.formatFileSize(1024 ** 3), '1.00 GiB');
+    assert.equal(viewer.formatFileSize(1024 ** 4), '1.00 TiB');
+    assert.equal(viewer.formatFileSize(-1), '');
+    assert.equal(viewer.formatFileSize(Number.NaN), '');
+    assert.equal(
+        viewer.formatSignal({
+            is_hdr: true,
+            primaries: 9,
+            transfer: 16,
+            matrix: 10,
+            range: 'limited',
+            dolby_vision_rpu: true,
+        }),
+        'HDR · BT.2020 / PQ / BT.2020c · Limited · DV RPU',
+    );
 }
 
 {

@@ -36,7 +36,6 @@ from frame_compare.utils.types import WorkspacePaths
 
 if TYPE_CHECKING:
     from frame_compare.config.schema import AnalysisConfig
-    from frame_compare.render.types import OverlaySelectionDetail
     from frame_compare.vs.loader import VSLoader
 
 __all__ = [
@@ -51,7 +50,6 @@ __all__ = [
     "selection_label_for_frame",
     "selection_timecode_for_frame",
     "source_frames_for_reference_base_domain",
-    "to_overlay_selection_detail",
 ]
 
 
@@ -510,20 +508,6 @@ def selection_timecode_for_frame(frame_index: int, fps: Fraction) -> str | None:
     total_minutes, seconds = divmod(total_seconds, 60)
     hours, minutes = divmod(total_minutes, 60)
     return f"{hours:02}:{minutes:02}:{seconds:02}.{milliseconds:03}"
-
-
-def to_overlay_selection_detail(detail: SelectionDetail) -> OverlaySelectionDetail:
-    from frame_compare.render.types import OverlaySelectionDetail
-
-    return OverlaySelectionDetail(
-        frame_index=detail.frame_index,
-        label=detail.label,
-        source=detail.source,
-        timecode=detail.timecode,
-        score=detail.score,
-        clip_role=detail.clip_role,
-        notes=detail.notes,
-    )
 
 
 def source_frames_for_reference_base_domain(

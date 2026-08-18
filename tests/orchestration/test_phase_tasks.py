@@ -31,10 +31,7 @@ from frame_compare.config.errors import ConfigValidationError
 from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 from frame_compare.orchestration import phase_post_render, phase_selection
 from frame_compare.orchestration.context import ClipActiveRect
-from frame_compare.orchestration.execution_types import (
-    RenderArtifacts,
-    RunArtifacts,
-)
+from frame_compare.orchestration.execution_types import RunArtifacts
 from frame_compare.orchestration.full_window_retry import (
     compute_selection_window_with_recovery,
     recover_from_exclusion_selection_failure,
@@ -51,6 +48,7 @@ from tests.orchestration.phase_task_helpers import (
     _clip,
     _context,
     _create_config,
+    _render_artifacts,
 )
 
 if TYPE_CHECKING:
@@ -1286,7 +1284,7 @@ def test_run_artifacts_uses_render_artifacts_carrier() -> None:
     assert artifacts.render is None
 
     screenshot = Path("screenshots/reference_1.png")
-    artifacts.render = RenderArtifacts(
+    artifacts.render = _render_artifacts(
         screenshots_by_label={"Reference": [screenshot]},
         screenshot_dir=Path("screenshots"),
     )

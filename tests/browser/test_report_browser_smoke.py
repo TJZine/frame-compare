@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
 import shutil
 import subprocess
@@ -12,10 +13,23 @@ from pathlib import Path
 
 import pytest
 
-from frame_compare.config.schema import ReportConfig
+from frame_compare.config.schema import OverlayMode, ReportConfig
 from frame_compare.config.schema_enums import ViewerMode
 from frame_compare.services.report.entry import generate_report
-from frame_compare.services.report.payload import ClipInfo, ReportData
+from frame_compare.services.report.payload import (
+    ClipInfo,
+    ReportData,
+    ReportImageInfo,
+    ReportRenderingInfo,
+)
+from frame_compare.utils.media_facts import (
+    ActivePictureFacts,
+    PresentationState,
+    RenderedFrameFacts,
+    RenderedGeometryFacts,
+    SourceSignalFacts,
+)
+from frame_compare.vs.types import TonemapSettings
 
 _ONE_PIXEL_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
@@ -62,12 +76,31 @@ def _browser_executable() -> str | None:
     return None
 
 
-def _generated_report(tmp_path: Path) -> Path:
+def _generated_report(tmp_path: Path, *, tonemapped: bool = False) -> Path:
     clips: list[ClipInfo] = []
+    geometry_by_name = {
+        "reference": RenderedGeometryFacts(
+            source_size=(1920, 1080),
+            active_picture=ActivePictureFacts(0, 0, 1920, 1080, "full_frame", True),
+            cropped_size=(1920, 1080),
+            scaled_size=(1920, 1080),
+            final_canvas_size=(1920, 1080),
+            is_noop=True,
+        ),
+        "encode": RenderedGeometryFacts(
+            source_size=(1920, 1080),
+            active_picture=ActivePictureFacts(0, 276, 1920, 804, "explicit", False),
+            cropped_size=(1920, 804),
+            scaled_size=(1920, 804),
+            final_canvas_size=(1920, 804),
+            is_noop=False,
+        ),
+    }
     for name, label in (
         ("reference", _REFERENCE_LABEL),
         ("encode", _COMPARISON_LABEL),
     ):
+        geometry = geometry_by_name[name]
         screenshot = tmp_path / "screenshots" / name / "10.png"
         screenshot.parent.mkdir(parents=True)
         screenshot.write_bytes(_ONE_PIXEL_PNG)
@@ -77,15 +110,44 @@ def _generated_report(tmp_path: Path) -> Path:
                 label=label,
                 path=tmp_path / f"{name}.mkv",
                 frame_count=20,
-                resolution=(1, 1),
+                resolution=(1920, 1080),
                 fps=24.0,
-                hdr=False,
-                screenshots=[screenshot],
+                size_bytes=17 * 1024**3,
+                signal=SourceSignalFacts(
+                    is_hdr=tonemapped,
+                    primaries=9 if tonemapped else 1,
+                    transfer=16 if tonemapped else 1,
+                    matrix=10,
+                    color_range="limited",
+                ),
+                presentation_state=(
+                    PresentationState.HDR_TONEMAPPED if tonemapped else PresentationState.SDR
+                ),
+                tonemap_settings=TonemapSettings() if tonemapped else None,
+                active_picture=geometry.active_picture,
+                images=[
+                    ReportImageInfo(
+                        screenshot,
+                        10 if name == "reference" else 12,
+                        RenderedFrameFacts(10 if name == "reference" else 12, "B"),
+                    )
+                ],
             )
         )
 
     return generate_report(
-        ReportData(clips=[replace(clip) for clip in clips], frames=[10]),
+        ReportData(
+            clips=[replace(clip) for clip in clips],
+            frames=[10],
+            rendering=ReportRenderingInfo(
+                overlay_mode=OverlayMode.DIAGNOSTIC,
+                include_frame_number=True,
+                tonemap_settings=TonemapSettings() if tonemapped else None,
+                geometry_by_label={
+                    clip.label or clip.name: geometry_by_name[clip.name] for clip in clips
+                },
+            ),
+        ),
         ReportConfig(
             default_mode=ViewerMode.DIFF,
             embed_images=False,
@@ -195,6 +257,28 @@ document.addEventListener('DOMContentLoaded', () => {
             && approximately(inspectorPaletteRect.right, inspectorStageRect.right - paletteInset)
         );
         ReportViewer.setInspectorOpen(false, { focus: false, save: false });
+        const infoButton = document.getElementById('btn-info');
+        const infoBefore = {
+            label: infoButton?.getAttribute('aria-label'),
+            title: infoButton?.getAttribute('title'),
+            pressed: infoButton?.getAttribute('aria-pressed'),
+        };
+        const inspectorFocusOrigin = infoButton;
+        inspectorFocusOrigin?.focus();
+        ReportViewer.setInspectorOpen(true, { save: false });
+        ReportViewer.setInspectorOpen(false, { save: false });
+        const infoAfter = {
+            label: infoButton?.getAttribute('aria-label'),
+            title: infoButton?.getAttribute('title'),
+            pressed: infoButton?.getAttribute('aria-pressed'),
+        };
+        document.documentElement.dataset.infoInspectorSemanticsStable = String(
+            infoBefore.label === 'Report information'
+            && infoBefore.title === 'Report Info'
+            && infoBefore.pressed === null
+            && JSON.stringify(infoBefore) === JSON.stringify(infoAfter)
+            && document.activeElement === inspectorFocusOrigin
+        );
 
         const filmstripAnchored = [false, true].every(collapsed => {
             ReportViewer.setFilmstripCollapsed(collapsed, { save: false });
@@ -246,6 +330,32 @@ document.addEventListener('DOMContentLoaded', () => {
             sourceHudStyle.whiteSpace === 'normal'
             && sourceHudStyle.textOverflow !== 'ellipsis'
         );
+        const sourceRowsByMode = {};
+        ['overlay', 'slider', 'diff', 'blink', 'grid'].forEach(mode => {
+            ReportViewer.setMode(mode);
+            ReportViewer.setInspectorTab('frame');
+            ReportViewer.updateInspectorData();
+            sourceRowsByMode[mode] = Array.from(
+                document.querySelectorAll('[data-inspector-source-frames] .rv-inspector-source')
+            ).map(row => row.textContent.trim());
+        });
+        document.documentElement.dataset.frameSourceRows = JSON.stringify(sourceRowsByMode);
+        ReportViewer.setInspectorTab('clips');
+        ReportViewer.updateInspectorData();
+        document.documentElement.dataset.clipsMetadata = String(
+            document.querySelector('[data-inspector-clips]')?.textContent.includes('File size')
+            && document.querySelector('[data-inspector-clips]')?.textContent.includes('Signal')
+            && document.querySelector('[data-inspector-clips]')?.textContent.includes('Presentation')
+            && !document.querySelector('[data-inspector-clips]')?.textContent.includes('Advanced tonemap')
+        );
+        document.documentElement.dataset.renderingDisclosure = String(
+            document.querySelector('[data-rendering-tonemap-summary]')?.textContent === 'Not applied'
+            && !document.querySelector('[data-rendering-details]')
+        );
+        document.documentElement.dataset.noHorizontalOverflow = String(
+            document.documentElement.scrollWidth <= window.innerWidth
+            && document.body.scrollWidth <= window.innerWidth
+        );
         ReportViewer.setMode('diff');
     };
     probeHud();
@@ -263,6 +373,126 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 """
     report_path.write_text(html.replace("</body>", f"{probe}</body>"), encoding="utf-8")
+
+
+def _append_tonemap_disclosure_probe(report_path: Path) -> None:
+    html = report_path.read_text(encoding="utf-8")
+    probe = """
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const disclosure = document.querySelector('[data-rendering-details]');
+    const summary = disclosure?.querySelector('summary');
+    const settings = disclosure?.querySelector('dl');
+    const advancedLabels = [
+        'Dynamic peak detection', 'Contrast recovery', 'Gamma lift', 'Source peak',
+        'Destination minimum', 'Knee offset', 'Smoothing period', 'Percentile',
+        'Scene threshold low', 'Scene threshold high', 'Gamut mapping',
+        'Metadata mode', 'Dolby Vision metadata use',
+    ];
+    document.getElementById('btn-info')?.click();
+    const infoContent = document.querySelector('#info-modal .rv-modal-content');
+    const infoContentStyle = infoContent ? window.getComputedStyle(infoContent) : null;
+    document.documentElement.dataset.infoModalScrollable = String(
+        Boolean(
+            infoContent
+            && infoContentStyle?.overflowY === 'auto'
+            && infoContentStyle?.overscrollBehaviorY === 'contain'
+            && infoContent.scrollHeight > infoContent.clientHeight
+        )
+    );
+    document.documentElement.dataset.tonemapSummary = String(
+        document.querySelector('[data-rendering-tonemap-summary]')?.textContent
+        === 'Reference · BT.2390 · 100 nits'
+    );
+    document.documentElement.dataset.tonemapDisclosureInitial = String(
+        Boolean(
+            ReportViewer.isInfoModalOpen()
+            && disclosure
+            && summary
+            && !disclosure.open
+            && settings
+        )
+    );
+    document.documentElement.dataset.tonemapAdvancedRows = String(
+        Boolean(settings)
+        && advancedLabels.every(label => settings.textContent.includes(label))
+        && settings.textContent.includes('On')
+        && settings.textContent.includes('Off')
+        && settings.textContent.includes('Auto')
+    );
+    let enterReceived = false;
+    summary?.addEventListener('keydown', event => {
+        if (event.key === 'Enter') enterReceived = true;
+    });
+    const pressEnter = () => {
+        summary?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        // Chrome does not run default actions for synthetic keyboard events in dump-dom.
+        if (summary) summary.click();
+        summary?.focus();
+    };
+    summary?.focus();
+    pressEnter();
+    document.documentElement.dataset.tonemapOpenState = String(Boolean(disclosure?.open));
+    document.documentElement.dataset.tonemapFocusState = String(document.activeElement === summary);
+    document.documentElement.dataset.tonemapDisclosureOpened = String(
+        Boolean(enterReceived && disclosure?.open && document.activeElement === summary)
+    );
+    pressEnter();
+    document.documentElement.dataset.tonemapDisclosureClosed = String(
+        Boolean(disclosure && !disclosure.open && document.activeElement === summary)
+    );
+});
+</script>
+"""
+    report_path.write_text(html.replace("</body>", f"{probe}</body>"), encoding="utf-8")
+
+
+@pytest.mark.integration
+def test_applied_tonemap_disclosure_is_focusable_toggleable_and_scrollable(
+    tmp_path: Path,
+) -> None:
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable; CI preflight makes this a required proof")
+    report_path = _generated_report(tmp_path, tonemapped=True)
+    _append_tonemap_disclosure_probe(report_path)
+    completed = subprocess.run(
+        [
+            browser,
+            "--headless=new",
+            "--disable-background-networking",
+            "--disable-default-apps",
+            "--disable-gpu",
+            "--no-first-run",
+            "--virtual-time-budget=10000",
+            "--window-size=375,240",
+            "--dump-dom",
+            report_path.as_uri(),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+    )
+    parser = _InitializedViewerParser()
+    parser.feed(completed.stdout)
+    assert parser.document_attributes is not None
+    for attribute in (
+        "data-tonemap-summary",
+        "data-tonemap-disclosure-initial",
+        "data-tonemap-advanced-rows",
+        "data-tonemap-open-state",
+        "data-tonemap-focus-state",
+        "data-tonemap-disclosure-opened",
+        "data-tonemap-disclosure-closed",
+        "data-info-modal-scrollable",
+    ):
+        assert parser.document_attributes[attribute] == "true", (
+            attribute,
+            parser.document_attributes[attribute],
+            parser.document_attributes,
+        )
 
 
 @pytest.mark.integration
@@ -321,10 +551,26 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     )
     assert parser.document_attributes["data-slider-labels-contained"] == "true"
     assert parser.document_attributes["data-inspector-hud-anchored"] == "true"
+    assert parser.document_attributes["data-info-inspector-semantics-stable"] == "true"
     assert parser.document_attributes["data-filmstrip-hud-anchored"] == "true"
     assert parser.document_attributes["data-narrow-palette-horizontal"] == "true"
     assert parser.document_attributes["data-grid-hud-anchored"] == "true"
-    assert parser.document_attributes["data-source-hud-text"] == (f"{_REFERENCE_LABEL} • 1×1 • SDR")
+    assert parser.document_attributes["data-source-hud-text"] == (
+        f"{_REFERENCE_LABEL} • 1920×1080 • SDR"
+    )
+    assert parser.document_attributes["data-clips-metadata"] == "true"
+    assert parser.document_attributes["data-rendering-disclosure"] == "true"
+    assert parser.document_attributes["data-no-horizontal-overflow"] == "true"
+    source_rows = json.loads(parser.document_attributes["data-frame-source-rows"] or "{}")
+    assert source_rows["overlay"] == [f"{_REFERENCE_LABEL} — 10 / 20 · B-frame"]
+    assert source_rows["slider"] == [
+        f"{_REFERENCE_LABEL} — 10 / 20 · B-frame",
+        f"{_COMPARISON_LABEL} — 12 / 20 · B-frame",
+    ]
+    assert source_rows["diff"] == source_rows["slider"]
+    assert source_rows["blink"] == source_rows["slider"]
+    expected_grid_rows = source_rows["slider"][:1] if width <= 768 else source_rows["slider"]
+    assert source_rows["grid"] == expected_grid_rows
     assert parser.stage_attributes is not None
     stage_classes = (parser.stage_attributes["class"] or "").split()
     assert "rv-mode-diff" in stage_classes

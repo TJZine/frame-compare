@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
@@ -20,7 +21,14 @@ from frame_compare.render.errors import (
 )
 from frame_compare.render.geometry import GeometryMargins, RenderGeometryPlan
 from frame_compare.render.overlay import apply_overlay
-from frame_compare.render.types import EncoderSettings, OverlayMode, Renderer, RenderRequest
+from frame_compare.render.types import (
+    EncoderSettings,
+    OverlayMode,
+    RenderedFrameResult,
+    Renderer,
+    RenderRequest,
+)
+from frame_compare.utils.media_facts import RenderedFrameFacts, normalize_picture_type
 from frame_compare.vs.errors import SourceLoadError
 from frame_compare.vs.props import props_indicate_limited_range
 
@@ -50,7 +58,6 @@ class _FpngWriter(Protocol):
 _VS_MATRIX_PROP: _ColorFramePropKey = "_Matrix"
 _VS_TRANSFER_PROP: _ColorFramePropKey = "_Transfer"
 _VS_PRIMARIES_PROP: _ColorFramePropKey = "_Primaries"
-_VS_PICTURE_TYPE_PROP = "_PictType"
 
 _MATRIX_TO_ZIMG: dict[int, str] = {
     1: "709",
@@ -77,27 +84,6 @@ def _should_expand_tonemapped_limited_rgb(frame_props: Mapping[str, object]) -> 
     return props_indicate_limited_range(frame_props) is True
 
 
-def _normalize_picture_type(value: object) -> str | None:
-    text: str | None
-    if isinstance(value, bytes):
-        text = value.decode("utf-8", "ignore")
-    elif isinstance(value, str):
-        text = value
-    else:
-        return None
-
-    normalized = text.strip("\x00").strip().upper()
-    if normalized in {"I", "P", "B"}:
-        return normalized
-    if normalized == "IDR":
-        return "I"
-    return None
-
-
-def _picture_type_from_frame_props(frame_props: Mapping[str, object]) -> str | None:
-    return _normalize_picture_type(frame_props.get(_VS_PICTURE_TYPE_PROP))
-
-
 def render_frame(request: RenderRequest, renderer: Renderer = "auto") -> Path:
     """
     Render a single frame to image file.
@@ -113,10 +99,18 @@ def render_frame(request: RenderRequest, renderer: Renderer = "auto") -> Path:
         RenderError: If rendering fails
         FrameExtractionError: If renderer requires vs.VideoNode but Path usage detected (or vice versa)
     """
+    return render_frame_detailed(request, renderer).path
+
+
+def render_frame_detailed(
+    request: RenderRequest, renderer: Renderer = "auto"
+) -> RenderedFrameResult:
+    """Render one frame and retain its exact source identity facts."""
     use_vs = _use_vapoursynth_renderer(request, renderer)
+    facts = RenderedFrameFacts(source_frame=request.frame_number)
 
     try:
-        _execute_frame_render(request, use_vs)
+        facts = _execute_frame_render(request, use_vs, facts)
 
     except (EncodingError, FrameExtractionError, RenderError, SourceLoadError):
         raise
@@ -124,7 +118,7 @@ def render_frame(request: RenderRequest, renderer: Renderer = "auto") -> Path:
         details = _render_error_details(request, renderer, use_vs)
         raise RenderError(reason=_render_error_reason(e), details=details) from e
 
-    return request.output_path
+    return RenderedFrameResult(path=request.output_path, facts=facts)
 
 
 def _use_vapoursynth_renderer(request: RenderRequest, renderer: Renderer) -> bool:
@@ -150,33 +144,39 @@ def _use_vapoursynth_renderer(request: RenderRequest, renderer: Renderer) -> boo
     return not is_path
 
 
-def _execute_frame_render(request: RenderRequest, use_vapoursynth: bool) -> None:
+def _execute_frame_render(
+    request: RenderRequest, use_vapoursynth: bool, facts: RenderedFrameFacts
+) -> RenderedFrameFacts:
     if use_vapoursynth:
-        _execute_vapoursynth_render(request)
-        return
+        return _execute_vapoursynth_render(request, facts)
 
-    _execute_ffmpeg_render(request)
+    return _execute_ffmpeg_render(request)
 
 
-def _execute_vapoursynth_render(request: RenderRequest) -> None:
+def _execute_vapoursynth_render(
+    request: RenderRequest, facts: RenderedFrameFacts
+) -> RenderedFrameFacts:
     node = cast("vs.VideoNode", request.clip)
+    facts = _facts_from_vapoursynth_source(request, facts)
     _render_vs(
         node,
         request.frame_number,
         request.output_path,
         request.encoder_settings,
         overlay=request.overlay,
+        frame_facts=facts,
         geometry_plan=request.geometry_plan,
     )
+    return facts
 
 
-def _execute_ffmpeg_render(request: RenderRequest) -> None:
+def _execute_ffmpeg_render(request: RenderRequest) -> RenderedFrameFacts:
     path = cast(Path, request.clip)
     runner = request.ffmpeg_runner or DefaultFFmpegRunner()
     if request.geometry_plan is None:
-        runner.extract_frame(path, request.frame_number, request.output_path)
+        extracted_facts = runner.extract_frame(path, request.frame_number, request.output_path)
     else:
-        runner.extract_frame(
+        extracted_facts = runner.extract_frame(
             path,
             request.frame_number,
             request.output_path,
@@ -184,7 +184,28 @@ def _execute_ffmpeg_render(request: RenderRequest) -> None:
         )
 
     if request.overlay is not None and request.overlay.mode != OverlayMode.NONE:
-        apply_overlay_to_file(request.output_path, request.overlay)
+        apply_overlay_to_file(request.output_path, request.overlay, extracted_facts)
+    return extracted_facts
+
+
+def _facts_from_vapoursynth_source(
+    request: RenderRequest, facts: RenderedFrameFacts
+) -> RenderedFrameFacts:
+    """Read exact-frame properties from the original source node only.
+
+    A transformed render graph is deliberately never consulted for picture type:
+    filters and writer conversion are allowed to drop or alter reserved props.
+    Metadata failure is non-fatal because the image itself remains renderable.
+    """
+    source = request.diagnostic_source
+    if isinstance(source, Path):
+        return facts
+    try:
+        frame = source.get_frame(request.frame_number)
+        picture_type = normalize_picture_type(dict(frame.props).get("_PictType"))
+    except Exception:
+        picture_type = None
+    return replace(facts, picture_type=picture_type)
 
 
 def _render_error_reason(exc: Exception) -> str:
@@ -307,6 +328,7 @@ def _render_vs(
     output: Path,
     settings: EncoderSettings,
     overlay: OverlayConfig | None = None,
+    frame_facts: RenderedFrameFacts | None = None,
     geometry_plan: RenderGeometryPlan | None = None,
 ) -> None:
     """Render frame via VapourSynth."""
@@ -344,6 +366,7 @@ def _render_vs(
             output,
             settings=settings,
             overlay=overlay,
+            frame_facts=frame_facts,
             geometry_plan=geometry_plan,
         )
 
@@ -360,6 +383,7 @@ def _render_vs_pillow(
     *,
     settings: EncoderSettings,
     overlay: OverlayConfig | None,
+    frame_facts: RenderedFrameFacts | None,
     geometry_plan: RenderGeometryPlan | None,
 ) -> None:
     clip = _clip_to_rgb24_for_pillow(clip)
@@ -380,8 +404,9 @@ def _render_vs_pillow(
     image = _apply_geometry_plan(image, geometry_plan)
 
     if overlay:
-        overlay.picture_type = _picture_type_from_frame_props(vs_frame.props)
-        image = apply_overlay(image, overlay)
+        if frame_facts is None:
+            raise OverlayError("rendered frame facts are required for overlay composition")
+        image = apply_overlay(image, overlay, frame_facts)
 
     image.save(output, format="PNG", compress_level=settings.compression)
 
@@ -463,14 +488,16 @@ def _map_fpng_compression(level: int) -> int:
     return 2
 
 
-def _apply_overlay_to_file(path: Path, config: OverlayConfig) -> None:
+def _apply_overlay_to_file(
+    path: Path, config: OverlayConfig, frame_facts: RenderedFrameFacts
+) -> None:
     """Helper to apply overlay to an existing image file."""
     try:
         with Image.open(path) as img:
             img.load()
             base = img.copy()
 
-        result = apply_overlay(base, config)
+        result = apply_overlay(base, config, frame_facts)
 
         result.save(path, format="PNG")
 
@@ -542,16 +569,19 @@ def _apply_geometry_plan_to_vs_clip(
     return work
 
 
-def apply_overlay_to_file(path: Path, overlay: OverlayConfig) -> None:
+def apply_overlay_to_file(
+    path: Path, overlay: OverlayConfig, frame_facts: RenderedFrameFacts
+) -> None:
     """Apply an overlay to an existing image file in place.
 
     Args:
         path: Path to an existing image file (PNG expected).
         overlay: Overlay rendering configuration.
+        frame_facts: Exact-source-frame facts used to compose the overlay.
 
     Raises:
         OverlayError: If the overlay cannot be applied.
     """
     if overlay.mode == OverlayMode.NONE:
         return
-    _apply_overlay_to_file(path, overlay)
+    _apply_overlay_to_file(path, overlay, frame_facts)

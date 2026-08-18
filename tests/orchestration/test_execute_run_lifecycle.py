@@ -23,7 +23,6 @@ from frame_compare.orchestration.execution_types import (
     MetadataPrefetch,
     PrepState,
     PublishPhaseOutput,
-    RenderArtifacts,
     RenderPhaseOutput,
     RunArtifacts,
 )
@@ -41,6 +40,7 @@ from .execute_run_helpers import (
     create_config,
     create_video_files,
 )
+from .phase_task_helpers import _render_artifacts
 
 
 def _workspace(tmp_path: Path) -> WorkspacePaths:
@@ -171,7 +171,7 @@ def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
     uploaded = tmp_path / "screenshots" / "planned.png"
     uploaded.parent.mkdir(parents=True, exist_ok=True)
     uploaded.write_bytes(b"\x89PNG\r\n\x1a\n")
-    render = RenderArtifacts(
+    render = _render_artifacts(
         screenshots_by_label={"Reference": [uploaded]},
         screenshot_dir=uploaded.parent,
     )
@@ -256,7 +256,7 @@ def test_execute_run_webhook_action_warning_is_warning_only(
     config.slowpics.confirm_upload_after_report = False
     config.report.enable = False
     webhook_warning = "slow.pics webhook: delivery failed"
-    render = RenderArtifacts(
+    render = _render_artifacts(
         screenshots_by_label={"Reference": [tmp_path / "screenshots" / "planned.png"]},
         screenshot_dir=tmp_path / "screenshots",
     )
@@ -337,7 +337,7 @@ def test_execute_run_report_warning_blocks_delete_after_upload_cleanup(
     uploaded = tmp_path / "screenshots" / "planned.png"
     uploaded.parent.mkdir(parents=True, exist_ok=True)
     uploaded.write_bytes(b"\x89PNG\r\n\x1a\n")
-    render = RenderArtifacts(
+    render = _render_artifacts(
         screenshots_by_label={"Reference": [uploaded]},
         screenshot_dir=uploaded.parent,
     )

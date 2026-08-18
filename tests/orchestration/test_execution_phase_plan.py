@@ -28,7 +28,6 @@ from frame_compare.orchestration.execution_types import (
     MetadataPrefetch,
     PrepState,
     PublishPhaseOutput,
-    RenderArtifacts,
     RenderPhaseOutput,
     RunArtifacts,
 )
@@ -37,6 +36,7 @@ from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.types import WorkspacePaths
 
 from .execute_run_helpers import FakeFFmpegRunner, FakeVSLoader, clip_state
+from .phase_task_helpers import _render_artifacts
 
 
 def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
@@ -457,11 +457,11 @@ def test_apply_phase_output_extends_warnings_from_render_output(tmp_path: Path) 
         selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
     state = ExecutionState(artifacts=RunArtifacts(warnings=["pre-existing warning"]))
-    render = RenderArtifacts(
+    render = _render_artifacts(
         screenshots_by_label={"Reference": [tmp_path / "reference.png"]},
         screenshot_dir=tmp_path / "screenshots",
-        warnings=["Screenshot geometry alignment skipped: using native geometry."],
     )
+    render.warnings.append("Screenshot geometry alignment skipped: using native geometry.")
 
     apply_phase_output(ctx=ctx, state=state, output=RenderPhaseOutput(render=render))
 

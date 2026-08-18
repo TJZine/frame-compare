@@ -154,6 +154,7 @@ const ReportViewer = {
             inspectorFrameCategory: document.querySelector('[data-inspector-frame-category]'),
             inspectorFrameDetail: document.querySelector('[data-inspector-frame-detail]'),
             inspectorFramePosition: document.querySelector('[data-inspector-frame-position]'),
+            inspectorSourceFrames: document.querySelector('[data-inspector-source-frames]'),
             inspectorClips: document.querySelector('[data-inspector-clips]'),
             inspectorAlignPair: document.querySelector('[data-inspector-align-pair]'),
             inspectorAlignPreset: document.querySelector('[data-inspector-align-preset]'),
@@ -821,9 +822,7 @@ const ReportViewer = {
         });
         this.dom.modal.addEventListener('keydown', (e) => this.handleModalKey(e));
 
-        // The legacy info modal remains in markup as fallback content; the main Info
-        // surface is the non-modal inspector drawer to avoid duplicate focus traps.
-        this.dom.btnInfo.addEventListener('click', () => this.setInspectorOpen(!this.state.inspectorOpen));
+        this.dom.btnInfo.addEventListener('click', () => this.openInfoModal());
         this.dom.btnCloseInfo.addEventListener('click', () => this.closeInfoModal());
         this.dom.infoModal.addEventListener('click', (e) => {
             if (e.target === this.dom.infoModal) this.closeInfoModal();
@@ -1437,9 +1436,14 @@ const ReportViewer = {
         if (nextOpen && this.state.inspectorTab === 'review') this.ensureReviewController();
         if (nextOpen && !wasOpen && options.focus !== false) {
             const activeElement = document.activeElement;
-            this.state.inspectorRestoreFocus = activeElement && typeof activeElement.focus === 'function'
-                ? activeElement
-                : this.dom.btnInfo;
+            const canRestoreFocus = activeElement
+                && activeElement !== document.body
+                && activeElement !== document.documentElement
+                && activeElement.isConnected !== false
+                && activeElement.disabled !== true
+                && typeof activeElement.focus === 'function'
+                && activeElement.tabIndex >= 0;
+            this.state.inspectorRestoreFocus = canRestoreFocus ? activeElement : null;
         }
 
         this.state.inspectorOpen = nextOpen;
@@ -1453,9 +1457,9 @@ const ReportViewer = {
             const shouldRestoreFocus = options.focus !== false;
             const restoreTarget = this.state.inspectorRestoreFocus?.isConnected
                 ? this.state.inspectorRestoreFocus
-                : this.dom.btnInfo;
+                : null;
             this.state.inspectorRestoreFocus = null;
-            if (shouldRestoreFocus) this.focusElement(restoreTarget);
+            if (shouldRestoreFocus && restoreTarget) this.focusElement(restoreTarget);
         }
     },
 
@@ -1469,16 +1473,6 @@ const ReportViewer = {
         this.dom.inspector.classList.toggle('open', visible);
         this.dom.inspector.setAttribute('aria-hidden', visible ? 'false' : 'true');
         this.setInspectorFocusable(visible);
-        this.dom.btnInfo.classList.toggle('active', visible);
-        this.dom.btnInfo.setAttribute('aria-pressed', visible ? 'true' : 'false');
-        this.dom.btnInfo.setAttribute(
-            'aria-label',
-            visible ? 'Close inspector' : 'Open inspector'
-        );
-        this.dom.btnInfo.setAttribute(
-            'title',
-            visible ? 'Close inspector (I)' : 'Open inspector (I)'
-        );
         this.updateInspectorTabs();
     },
 
@@ -1622,6 +1616,104 @@ const ReportViewer = {
         return `${Number.isInteger(fps) ? fps : fps.toString()} fps`;
     },
 
+    formatFileSize(value) {
+        const bytes = Number(value);
+        if (!Number.isFinite(bytes) || bytes < 0) return '';
+        const unit = 1024;
+        if (bytes >= unit ** 4) return `${(bytes / unit ** 4).toFixed(2)} TiB`;
+        if (bytes >= unit ** 3) return `${(bytes / unit ** 3).toFixed(2)} GiB`;
+        return `${(bytes / unit ** 2).toFixed(2)} MiB`;
+    },
+
+    signalCodeLabel(kind, value) {
+        const labels = {
+            primaries: { 1: 'BT.709', 9: 'BT.2020' },
+            transfer: { 1: 'BT.709', 13: 'sRGB', 16: 'PQ', 18: 'HLG' },
+            matrix: { 0: 'GBR', 1: 'BT.709', 9: 'BT.2020nc', 10: 'BT.2020c' },
+        };
+        return labels[kind]?.[String(value)] || null;
+    },
+
+    formatSignal(signal) {
+        if (!signal || typeof signal !== 'object') return '';
+        const parts = [signal.is_hdr ? 'HDR' : 'SDR'];
+        const primaries = this.signalCodeLabel('primaries', signal.primaries);
+        const transfer = this.signalCodeLabel('transfer', signal.transfer);
+        const matrix = this.signalCodeLabel('matrix', signal.matrix);
+        const color = [primaries, transfer, matrix].filter(Boolean).join(' / ');
+        if (color) parts.push(color);
+        if (signal.range === 'limited' || signal.range === 'full') {
+            parts.push(signal.range[0].toUpperCase() + signal.range.slice(1));
+        }
+        if (signal.dolby_vision_rpu === true) parts.push('DV RPU');
+        return parts.join(' · ');
+    },
+
+    formatPresentation(clip) {
+        const presentation = clip?.presentation;
+        if (!presentation || typeof presentation !== 'object') {
+            return clip?.signal?.is_hdr ? 'HDR' : 'SDR';
+        }
+        if (presentation.state === 'hdr_tonemapped') {
+            const curve = this.formatToneCurve(presentation.tone_curve);
+            const target = Number.isInteger(presentation.target_nits)
+                ? ` → ${presentation.target_nits} nits`
+                : '';
+            return `Tonemapped${curve ? ` · ${curve}` : ''}${target}`;
+        }
+        if (presentation.state === 'hdr_tonemap_off') return 'HDR · Tonemap off';
+        return 'SDR';
+    },
+
+    formatToneCurve(value) {
+        if (!value) return null;
+        const normalized = String(value).toLowerCase();
+        if (normalized === 'bt2390') return 'BT.2390';
+        if (normalized === 'reinhard') return 'Reinhard';
+        if (normalized === 'spline') return 'Spline';
+        return normalized.replaceAll('_', ' ');
+    },
+
+    formatActivePicture(active) {
+        if (!active || active.is_full_frame) return '';
+        const provenance = active.provenance === 'dolby_vision_l5' ? ' · DV L5' : '';
+        return `${active.width}×${active.height} @ ${active.x},${active.y}${provenance}`;
+    },
+
+    formatTonemapSummary() {
+        const settings = this.state.data?.rendering?.tonemap?.settings;
+        if (!this.state.data?.rendering?.tonemap?.applied || !settings) return 'Not applied';
+        const preset = settings.preset
+            ? String(settings.preset).replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase())
+            : '';
+        const curve = this.formatToneCurve(settings.tone_curve) || '';
+        const target = Number.isInteger(settings.target_nits) ? ` · ${settings.target_nits} nits` : '';
+        return [preset, curve].filter(Boolean).join(' · ') + target;
+    },
+
+    updateRenderingSummary() {
+        if (typeof document?.querySelector !== 'function') return;
+        const summary = document.querySelector('[data-rendering-tonemap-summary]');
+        if (summary) this.setText(summary, this.formatTonemapSummary());
+    },
+
+    visibleSourceIndexes() {
+        const indexes = [];
+        if (this.state.mode === 'overlay') {
+            indexes.push(this.state.activeClipIdx);
+        } else if (this.state.mode === 'grid') {
+            indexes.push(...(this.gridView?.indexes?.() || []));
+        } else {
+            indexes.push(this.state.leftClipIdx, this.state.rightClipIdx);
+        }
+        return indexes.filter((index, position) => (
+            Number.isInteger(index)
+            && index >= 0
+            && index < this.clipCount()
+            && indexes.indexOf(index) === position
+        ));
+    },
+
     currentPairLabel() {
         const left = this.state.data.clips[this.state.leftClipIdx]?.label || `Clip ${this.state.leftClipIdx + 1}`;
         const right = this.state.data.clips[this.state.rightClipIdx]?.label || `Clip ${this.state.rightClipIdx + 1}`;
@@ -1637,6 +1729,7 @@ const ReportViewer = {
 
     updateInspectorData() {
         if (!this.dom.inspector) return;
+        this.updateRenderingSummary();
         const frame = this.currentFrame();
         this.setText(this.dom.inspectorFrameLabel, frame?.label || 'No frame selected');
         this.setText(this.dom.inspectorFrameNumber, frame?.number ?? '');
@@ -1644,13 +1737,28 @@ const ReportViewer = {
         this.setText(this.dom.inspectorFrameDetail, frame?.detail || '');
         this.setText(this.dom.inspectorFramePosition, this.visibleFramePositionText());
 
+        if (this.dom.inspectorSourceFrames) {
+            const sourceRows = this.visibleSourceIndexes().map((clipIndex) => {
+                const clip = this.state.data.clips[clipIndex];
+                const image = frame?.images?.[clipIndex];
+                const item = document.createElement('li');
+                item.className = 'rv-inspector-source';
+                const label = clip?.label || `Clip ${clipIndex + 1}`;
+                const sourceFrame = Number.isInteger(image?.source_frame) ? image.source_frame : 'Unknown';
+                const total = Number.isInteger(clip?.frame_count) ? ` / ${clip.frame_count}` : '';
+                const pictureType = image?.picture_type ? `${image.picture_type}-frame` : 'type unknown';
+                item.textContent = `${label} — ${sourceFrame}${total} · ${pictureType}`;
+                return item;
+            });
+            this.dom.inspectorSourceFrames.replaceChildren(...sourceRows);
+        }
+
         if (this.dom.inspectorClips) {
             this.dom.inspectorClips.replaceChildren(...this.state.data.clips.map((clip, index) => {
                 const item = document.createElement('li');
                 item.className = 'rv-inspector-clip';
                 item.dataset.clipIndex = String(index);
                 const role = this.currentClipRole(index);
-                const hdrTag = clip.hdr ? 'HDR' : 'SDR';
                 item.innerHTML = `
                     <div class="rv-inspector-clip-heading">
                         <span></span>
@@ -1661,16 +1769,31 @@ const ReportViewer = {
                         <div><dt>Source</dt><dd></dd></div>
                         <div><dt>Resolution</dt><dd></dd></div>
                         <div><dt>FPS</dt><dd></dd></div>
+                        <div><dt>File size</dt><dd></dd></div>
+                        <div><dt>Signal</dt><dd></dd></div>
+                        <div><dt>Presentation</dt><dd></dd></div>
                     </dl>
                 `;
                 const heading = item.querySelectorAll('.rv-inspector-clip-heading span');
                 heading[0].textContent = clip.label || `Clip ${index + 1}`;
-                heading[1].textContent = hdrTag;
+                heading[1].textContent = clip.signal?.is_hdr ? 'HDR' : 'SDR';
                 const values = item.querySelectorAll('dd');
                 values[0].textContent = role;
                 values[1].textContent = clip.name || '';
                 values[2].textContent = Array.isArray(clip.resolution) ? `${clip.resolution[0]}x${clip.resolution[1]}` : '';
                 values[3].textContent = this.formatFps(clip.fps);
+                values[4].textContent = this.formatFileSize(clip.size_bytes);
+                values[5].textContent = this.formatSignal(clip.signal);
+                values[6].textContent = this.formatPresentation(clip);
+                const activePicture = this.formatActivePicture(clip.active_picture);
+                const clipList = typeof item.querySelector === 'function' ? item.querySelector('dl') : null;
+                if (activePicture && clipList?.appendChild) {
+                    const row = document.createElement('div');
+                    row.innerHTML = '<dt>Active picture</dt><dd></dd>';
+                    const rowValue = typeof row.querySelector === 'function' ? row.querySelector('dd') : null;
+                    if (rowValue) rowValue.textContent = activePicture;
+                    clipList.appendChild(row);
+                }
                 return item;
             }));
         }
@@ -2634,7 +2757,8 @@ const ReportViewer = {
     },
 
     clipOverlayLabel(clip, role = '') {
-        const identity = `${clip.label} • ${clip.resolution[0]}×${clip.resolution[1]} • ${clip.hdr ? 'HDR' : 'SDR'}`;
+        const isHdr = clip.signal?.is_hdr === true;
+        const identity = `${clip.label} • ${clip.resolution[0]}×${clip.resolution[1]} • ${isHdr ? 'HDR' : 'SDR'}`;
         return role ? `${role.toUpperCase()}: ${identity}` : identity;
     },
 

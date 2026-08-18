@@ -23,7 +23,6 @@ from frame_compare.config.schema_models import (
     AnalysisConfig,
     AudioAlignmentConfig,
     ColorConfig,
-    DiagnosticsConfig,
     LoggingConfig,
     PathsConfig,
     ReportConfig,
@@ -81,7 +80,6 @@ class ConfigSchema(BaseSettings):
     slowpics: SlowpicsConfig = Field(default_factory=SlowpicsConfig)
     tmdb: TmdbConfig = Field(default_factory=TmdbConfig)
     report: ReportConfig = Field(default_factory=ReportConfig)
-    diagnostics: DiagnosticsConfig = Field(default_factory=DiagnosticsConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
 
 
@@ -91,7 +89,6 @@ __all__ = [
     "AudioAlignmentConfig",
     "ColorConfig",
     "ConfigSchema",
-    "DiagnosticsConfig",
     "LogFormat",
     "LogLevel",
     "LoggingConfig",

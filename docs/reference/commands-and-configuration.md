@@ -70,11 +70,15 @@ Always confirm the installed help text before scripting an option.
 | `[report]` | Static report generation, embedding, and auto-open behavior |
 | `[slowpics]` | Explicit publication, visibility, retries, confirmation, and webhook behavior |
 | `[tmdb]` | Optional metadata lookup behavior and secret reference |
-| `[diagnostics]` | Additional recorded or overlay diagnostic features |
 | `[logging]` | Human or structured logging level and format |
 
 The wizard is the preferred entry point for supported common settings. Use manual TOML
 for advanced source overrides and configuration-only behavior.
+
+The former `[diagnostics].per_frame_nits` setting has been removed without replacement.
+A stale root `[diagnostics]` table is ignored, but should be deleted from maintained
+configuration files. Diagnostic overlays now use observed structured media/render facts;
+they never convert selection scores into luminance claims.
 
 ## Environment variables and secrets
 
