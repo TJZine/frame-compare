@@ -99,6 +99,7 @@ def expand_batch_render_requests(
             renderer,
             config,
             ffmpeg_runner=ffmpeg_runner,
+            source_is_hdr=request.signal.is_hdr,
         )
         for request in batch_requests
     ]
@@ -211,8 +212,12 @@ def _geometry_plans(
             else request.source_resolution
         )
         active = request.active_picture
-        if request.source_resolution[0] <= 0 or request.source_resolution[1] <= 0:
-            active = ActivePictureFacts(0, 0, width, height, "full_frame", True)
+        if width <= 0 or height <= 0:
+            # Path-only convenience calls may lack decoded dimensions, but the
+            # canonical active-picture facts still provide a valid bounded
+            # extent for geometry planning.
+            width = max(width, active.x + active.width)
+            height = max(height, active.y + active.height)
         sources.append(
             SourceGeometry(
                 width=width,

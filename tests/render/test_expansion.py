@@ -82,6 +82,7 @@ def test_expansion_preserves_source_mapping_and_prepared_source(
     ]
     assert all(request.diagnostic_source is prepared.diagnostic_source for request in requests)
     assert all(request.clip is prepared.prepared_clip for request in requests)
+    assert mock_prepare.call_args.kwargs["source_is_hdr"] is False
     assert ranges == {"ref": range(0, 2)}
     assert facts["ref"].source_total_frames == 101
     assert facts["ref"].presentation_state is PresentationState.SDR

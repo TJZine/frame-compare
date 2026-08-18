@@ -117,3 +117,24 @@ def test_supplied_active_picture_wins_over_config_detection(mock_prepare: MagicM
     assert geometry.final_canvas_size == (1600, 1080)
     assert requests[0].geometry_plan is not None
     assert requests[0].geometry_plan.active_rect_source == "explicit"
+
+
+@patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
+def test_unknown_dimensions_use_supplied_active_picture_extent(mock_prepare: MagicMock) -> None:
+    mock_prepare.return_value = _prepared(0, 0)
+    supplied = ActivePictureFacts(10, 20, 1000, 500, "explicit", False)
+    request = _batch("path-only", 0, 0, active=supplied)
+    requests, _, facts = expand_batch_render_requests(
+        [request],
+        output_dir=Path("out"),
+        config=ConfigSchema(
+            screenshots=ScreenshotsConfig(geometry_mode=ScreenshotGeometryMode.ALIGNED)
+        ),
+        overlay_mode=OverlayMode.STANDARD,
+        renderer="ffmpeg",
+        ffmpeg_runner=MagicMock(),
+    )
+    geometry = facts["path-only"].geometry
+    assert geometry.source_size == (1010, 520)
+    assert geometry.active_picture == supplied
+    assert requests[0].geometry_plan is not None
