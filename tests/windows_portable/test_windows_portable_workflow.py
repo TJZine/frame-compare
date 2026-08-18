@@ -13,13 +13,8 @@ def test_windows_portable_workflow_delegates_extracted_bundle_verification(
     workflow = _load_workflow(path)
 
     assert set(workflow["jobs"]) == {"build"}
-    expected_permissions = {
-        "attestations": "write",
-        "contents": "read",
-        "id-token": "write",
-    }
-    assert workflow["permissions"] == expected_permissions
-    assert workflow["jobs"]["build"]["permissions"] == expected_permissions
+    assert "permissions" not in workflow
+    assert "permissions" not in workflow["jobs"]["build"]
     verify_step = _step_by_name(workflow["jobs"]["build"], "Verify extracted portable bundle")
     assert "tools/windows_portable/verify_extracted_bundle.ps1" in verify_step["run"]
     assert "-ZipPath dist/frame-compare-portable-win-x64.zip" in verify_step["run"]
