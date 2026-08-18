@@ -150,7 +150,7 @@ def _execute_frame_render(
     if use_vapoursynth:
         return _execute_vapoursynth_render(request, facts)
 
-    return _execute_ffmpeg_render(request, facts)
+    return _execute_ffmpeg_render(request)
 
 
 def _execute_vapoursynth_render(
@@ -170,7 +170,7 @@ def _execute_vapoursynth_render(
     return facts
 
 
-def _execute_ffmpeg_render(request: RenderRequest, facts: RenderedFrameFacts) -> RenderedFrameFacts:
+def _execute_ffmpeg_render(request: RenderRequest) -> RenderedFrameFacts:
     path = cast(Path, request.clip)
     runner = request.ffmpeg_runner or DefaultFFmpegRunner()
     if request.geometry_plan is None:
@@ -183,11 +183,9 @@ def _execute_ffmpeg_render(request: RenderRequest, facts: RenderedFrameFacts) ->
             geometry_plan=request.geometry_plan,
         )
 
-    facts = extracted_facts
-
     if request.overlay is not None and request.overlay.mode != OverlayMode.NONE:
-        apply_overlay_to_file(request.output_path, request.overlay, facts)
-    return facts
+        apply_overlay_to_file(request.output_path, request.overlay, extracted_facts)
+    return extracted_facts
 
 
 def _facts_from_vapoursynth_source(
