@@ -175,9 +175,16 @@ def test_required_diagnostic_dv_examples_and_l6_suppression() -> None:
     assert _lines(config, dv=differing_l6)[-1] == "DV L6: MaxCLL/FALL 900/300 nits"
 
 
-def test_none_mode_has_no_lines_and_frame_facts_must_match() -> None:
+def test_none_mode_has_no_lines() -> None:
     config = _config(OverlayMode.NONE)
     assert _lines(config) == []
+
+
+def test_active_overlay_mode_rejects_mismatched_frame_facts() -> None:
+    config = _config(OverlayMode.STANDARD)
+    facts = RenderedFrameFacts(source_frame=config.source_frame + 1)
+    with pytest.raises(ValueError, match="do not match"):
+        compose_overlay_text_lines(config, facts)
 
 
 def test_unknown_optional_values_are_omitted_without_dangling_separators() -> None:

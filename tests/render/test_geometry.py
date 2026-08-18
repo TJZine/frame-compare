@@ -9,6 +9,17 @@ from frame_compare.render.geometry import (
 )
 
 
+@pytest.mark.parametrize(
+    ("width", "height"),
+    [(0, 1080), (1920, 0), (-1, 1080), (1920, -1)],
+)
+def test_plan_render_geometry_rejects_non_positive_source_dimensions(
+    width: int, height: int
+) -> None:
+    with pytest.raises(ValueError, match="source dimensions must be positive"):
+        plan_render_geometry((SourceGeometry(width=width, height=height),), mode="native")
+
+
 def test_plan_render_geometry_native_preserves_full_frame_for_multiple_sources():
     plans = plan_render_geometry(
         (

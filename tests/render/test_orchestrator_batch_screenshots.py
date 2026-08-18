@@ -138,6 +138,33 @@ def test_render_screenshots_from_batch_happy_path(tmp_path: Path) -> None:
     assert render_batch.call_args.kwargs["parallelism"] == 1
 
 
+def test_render_screenshots_from_batch_detailed_preserves_fact_slices_and_clip_mapping(
+    tmp_path: Path,
+) -> None:
+    config = ConfigSchema(color=ColorConfig(enable_tonemap=False))
+    requests = [
+        _batch_request("vid1.mkv", "label1", [10, 20]),
+        _batch_request("vid2.mkv", "label2", [30], width=1280, height=720),
+    ]
+    expanded = _expanded(tmp_path, requests)
+    rendered = _rendered(expanded[0])
+    with (
+        patch(
+            "frame_compare.render.batch.orchestrator.expand_batch_render_requests",
+            return_value=expanded,
+        ),
+        patch(
+            "frame_compare.render.batch.orchestrator.render_batch_detailed",
+            return_value=rendered,
+        ),
+    ):
+        result = render_screenshots_from_batch_detailed(requests, tmp_path, config)
+
+    assert [fact.source_frame for fact in result.frame_facts_by_label["label1"]] == [10, 20]
+    assert [fact.source_frame for fact in result.frame_facts_by_label["label2"]] == [30]
+    assert result.clip_facts_by_label == expanded[2]
+
+
 @pytest.mark.parametrize("parallelism, expected", [(2, 2), (0, 1)])
 def test_render_screenshots_from_batch_passes_clamped_parallelism(
     tmp_path: Path, parallelism: int, expected: int
@@ -183,7 +210,7 @@ def test_render_screenshots_from_batch_constructs_configured_default_runner(
         patch(
             "frame_compare.render.batch.orchestrator.expand_batch_render_requests",
             return_value=expanded,
-        ),
+        ) as expand_batch,
         patch(
             "frame_compare.render.batch.orchestrator.render_batch_detailed",
             return_value=_rendered(expanded[0]),
@@ -191,6 +218,7 @@ def test_render_screenshots_from_batch_constructs_configured_default_runner(
     ):
         render_screenshots_from_batch([request], tmp_path, config)
     default_runner.assert_called_once_with(extraction_timeout_seconds=47.0)
+    assert expand_batch.call_args.kwargs["ffmpeg_runner"] is default_runner.return_value
 
 
 def test_render_screenshots_from_batch_preserves_injected_runner(tmp_path: Path) -> None:

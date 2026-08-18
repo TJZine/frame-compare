@@ -597,7 +597,7 @@ def test_render_frame_ffmpeg_wraps_unrepresentable_geometry_as_render_error() ->
 def test_apply_overlay_to_file_none_mode_is_noop(monkeypatch) -> None:
     overlay = _overlay(OverlayMode.NONE, frame=100)
 
-    def _should_not_call(_path: Path, _config: OverlayConfig) -> None:
+    def _should_not_call(_path: Path, _config: OverlayConfig, _facts: RenderedFrameFacts) -> None:
         raise AssertionError("_apply_overlay_to_file should not be called for NONE mode")
 
     monkeypatch.setattr("frame_compare.render.encoders._apply_overlay_to_file", _should_not_call)
@@ -957,15 +957,21 @@ def test_render_vs_applies_geometry_plan_before_saving(
     assert clip.requested_frames[-1] == 3
 
 
+@pytest.mark.parametrize("source_case", ["invalid", "missing", "raises"])
 def test_render_vs_missing_or_invalid_source_property_is_nonfatal(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source_case: str,
 ) -> None:
     monkeypatch.setattr("frame_compare.render.encoders._render_vs", MagicMock())
 
     class _Source:
         def get_frame(self, index: int) -> object:
             assert index == 3
-            return SimpleNamespace(props={"_PictType": "unknown"})
+            if source_case == "raises":
+                raise RuntimeError("frame metadata unavailable")
+            props = {"_PictType": "unknown"} if source_case == "invalid" else {}
+            return SimpleNamespace(props=props)
 
     result = render_frame_detailed(
         RenderRequest(

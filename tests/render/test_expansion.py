@@ -58,6 +58,14 @@ def test_validate_batch_requests_rejects_duplicate_labels_and_outputs() -> None:
         validate_batch_requests([duplicate])
 
 
+@pytest.mark.parametrize("dimensions", [(0, 1080), (1920, 0), (-1, 1080)])
+def test_validate_batch_requests_rejects_non_positive_source_dimensions(
+    dimensions: tuple[int, int],
+) -> None:
+    with pytest.raises(ValueError, match="requires positive source dimensions"):
+        validate_batch_requests([replace(_request(), source_resolution=dimensions)])
+
+
 @patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
 def test_expansion_preserves_source_mapping_and_prepared_source(
     mock_prepare: MagicMock,
@@ -110,7 +118,24 @@ def test_expansion_uses_actual_preparation_state_and_overlay_facts(
     assert requests[0].overlay.comparison_frame == 12
 
 
-def test_render_batch_results_by_label_preserves_order() -> None:
+@patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
+def test_expansion_rejects_out_of_range_source_frame(mock_prepare: MagicMock) -> None:
+    mock_prepare.return_value = _prepared()
+    request = replace(
+        _request(), source_frames=[101], comparison_frames=[101], selection_labels=[None]
+    )
+    with pytest.raises(ValueError, match="outside valid range"):
+        expand_batch_render_requests(
+            [request],
+            output_dir=Path("out"),
+            config=ConfigSchema(),
+            overlay_mode=OverlayMode.NONE,
+            renderer="vapoursynth",
+            ffmpeg_runner=MagicMock(),
+        )
+
+
+def test_render_batch_results_by_label_slices_expansion_ranges() -> None:
     requests = [_request("a"), _request("b")]
     paths = [Path("a0"), Path("a1"), Path("b0"), Path("b1")]
     assert render_batch_results_by_label(requests, paths, {"a": range(0, 2), "b": range(2, 4)}) == {

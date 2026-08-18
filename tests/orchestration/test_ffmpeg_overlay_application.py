@@ -47,10 +47,10 @@ class FakeFFmpegRunner:
 def test_ffmpeg_extraction_applies_overlay_post_process(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    applied: list[Path] = []
+    applied: list[tuple[Path, object, RenderedFrameFacts]] = []
 
-    def _record_apply(path: Path, _overlay: object, _facts: RenderedFrameFacts) -> None:
-        applied.append(path)
+    def _record_apply(path: Path, overlay: object, facts: RenderedFrameFacts) -> None:
+        applied.append((path, overlay, facts))
 
     monkeypatch.setattr("frame_compare.render.encoders.apply_overlay_to_file", _record_apply)
 
@@ -105,4 +105,10 @@ def test_ffmpeg_extraction_applies_overlay_post_process(
     assert output.render.screenshot_dir == workspace.screenshots_dir
     assert "Reference" in output.render.screenshots_by_label
     assert len(output.render.screenshots_by_label["Reference"]) == 2
-    assert applied == output.render.screenshots_by_label["Reference"]
+    assert [path for path, _overlay, _facts in applied] == output.render.screenshots_by_label[
+        "Reference"
+    ]
+    assert [facts for _path, _overlay, facts in applied] == [
+        RenderedFrameFacts(source_frame=0, picture_type="I"),
+        RenderedFrameFacts(source_frame=1, picture_type="I"),
+    ]

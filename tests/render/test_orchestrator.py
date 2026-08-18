@@ -8,6 +8,7 @@ from frame_compare.config.schema import ColorConfig, ConfigSchema
 from frame_compare.render.batch.orchestrator import (
     ProgressReporter,
     render_batch,
+    render_batch_detailed,
 )
 from frame_compare.render.types import (
     EncoderSettings,
@@ -37,7 +38,7 @@ def _rendered(request: RenderRequest) -> RenderedFrameResult:
     )
 
 
-def test_render_batch_parallel_order(mock_render_request):
+def test_render_batch_detailed_parallel_order(mock_render_request):
     requests = [
         RenderRequest(
             clip=Path("video.mkv"),
@@ -51,8 +52,11 @@ def test_render_batch_parallel_order(mock_render_request):
     ]
     with patch("frame_compare.render.batch.orchestrator.render_frame_detailed") as mock_render:
         mock_render.side_effect = _rendered
-        results = render_batch(requests, parallelism=2)
-        assert results == [r.output_path for r in requests]
+        results = render_batch_detailed(requests, parallelism=2)
+        assert [result.path for result in results] == [r.output_path for r in requests]
+        assert [result.facts.source_frame for result in results] == [
+            r.frame_number for r in requests
+        ]
 
 
 def test_render_batch_fail_fast(mock_render_request):

@@ -189,9 +189,11 @@ def test_default_ffmpeg_runner_returns_picture_type_from_same_extraction(
             b"[Parsed_showinfo_1 @ 0x1] n:0 type:I\n[Parsed_showinfo_1 @ 0x1] n:0 type:unknown\n",
             None,
         ),
+        ("[Parsed_showinfo_1 @ 0x1] n:0 type:P", "P"),
+        ("", None),
     ],
 )
-def test_parse_showinfo_picture_type(stderr: bytes, expected: str | None) -> None:
+def test_parse_showinfo_picture_type(stderr: bytes | str, expected: str | None) -> None:
     assert parse_showinfo_picture_type(stderr) == expected
 
 
