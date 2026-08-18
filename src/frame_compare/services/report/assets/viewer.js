@@ -1436,9 +1436,14 @@ const ReportViewer = {
         if (nextOpen && this.state.inspectorTab === 'review') this.ensureReviewController();
         if (nextOpen && !wasOpen && options.focus !== false) {
             const activeElement = document.activeElement;
-            this.state.inspectorRestoreFocus = activeElement && typeof activeElement.focus === 'function'
-                ? activeElement
-                : this.dom.btnInfo;
+            const canRestoreFocus = activeElement
+                && activeElement !== document.body
+                && activeElement !== document.documentElement
+                && activeElement.isConnected !== false
+                && activeElement.disabled !== true
+                && typeof activeElement.focus === 'function'
+                && activeElement.tabIndex >= 0;
+            this.state.inspectorRestoreFocus = canRestoreFocus ? activeElement : null;
         }
 
         this.state.inspectorOpen = nextOpen;
@@ -1452,9 +1457,9 @@ const ReportViewer = {
             const shouldRestoreFocus = options.focus !== false;
             const restoreTarget = this.state.inspectorRestoreFocus?.isConnected
                 ? this.state.inspectorRestoreFocus
-                : this.dom.btnInfo;
+                : null;
             this.state.inspectorRestoreFocus = null;
-            if (shouldRestoreFocus) this.focusElement(restoreTarget);
+            if (shouldRestoreFocus && restoreTarget) this.focusElement(restoreTarget);
         }
     },
 
@@ -1468,16 +1473,6 @@ const ReportViewer = {
         this.dom.inspector.classList.toggle('open', visible);
         this.dom.inspector.setAttribute('aria-hidden', visible ? 'false' : 'true');
         this.setInspectorFocusable(visible);
-        this.dom.btnInfo.classList.toggle('active', visible);
-        this.dom.btnInfo.setAttribute('aria-pressed', visible ? 'true' : 'false');
-        this.dom.btnInfo.setAttribute(
-            'aria-label',
-            visible ? 'Close inspector' : 'Open inspector'
-        );
-        this.dom.btnInfo.setAttribute(
-            'title',
-            visible ? 'Close inspector (I)' : 'Open inspector (I)'
-        );
         this.updateInspectorTabs();
     },
 
@@ -1787,11 +1782,9 @@ const ReportViewer = {
                 values[1].textContent = clip.name || '';
                 values[2].textContent = Array.isArray(clip.resolution) ? `${clip.resolution[0]}x${clip.resolution[1]}` : '';
                 values[3].textContent = this.formatFps(clip.fps);
-                if (values.length >= 7) {
-                    values[4].textContent = this.formatFileSize(clip.size_bytes);
-                    values[5].textContent = this.formatSignal(clip.signal);
-                    values[6].textContent = this.formatPresentation(clip);
-                }
+                values[4].textContent = this.formatFileSize(clip.size_bytes);
+                values[5].textContent = this.formatSignal(clip.signal);
+                values[6].textContent = this.formatPresentation(clip);
                 const activePicture = this.formatActivePicture(clip.active_picture);
                 const clipList = typeof item.querySelector === 'function' ? item.querySelector('dl') : null;
                 if (activePicture && clipList?.appendChild) {

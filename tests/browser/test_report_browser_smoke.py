@@ -238,6 +238,28 @@ document.addEventListener('DOMContentLoaded', () => {
             && approximately(inspectorPaletteRect.right, inspectorStageRect.right - paletteInset)
         );
         ReportViewer.setInspectorOpen(false, { focus: false, save: false });
+        const infoButton = document.getElementById('btn-info');
+        const infoBefore = {
+            label: infoButton?.getAttribute('aria-label'),
+            title: infoButton?.getAttribute('title'),
+            pressed: infoButton?.getAttribute('aria-pressed'),
+        };
+        const inspectorFocusOrigin = infoButton;
+        inspectorFocusOrigin?.focus();
+        ReportViewer.setInspectorOpen(true, { save: false });
+        ReportViewer.setInspectorOpen(false, { save: false });
+        const infoAfter = {
+            label: infoButton?.getAttribute('aria-label'),
+            title: infoButton?.getAttribute('title'),
+            pressed: infoButton?.getAttribute('aria-pressed'),
+        };
+        document.documentElement.dataset.infoInspectorSemanticsStable = String(
+            infoBefore.label === 'Report information'
+            && infoBefore.title === 'Report Info'
+            && infoBefore.pressed === null
+            && JSON.stringify(infoBefore) === JSON.stringify(infoAfter)
+            && document.activeElement === inspectorFocusOrigin
+        );
 
         const filmstripAnchored = [false, true].every(collapsed => {
             ReportViewer.setFilmstripCollapsed(collapsed, { save: false });
@@ -349,6 +371,16 @@ document.addEventListener('DOMContentLoaded', () => {
         'Metadata mode', 'Dolby Vision metadata use',
     ];
     document.getElementById('btn-info')?.click();
+    const infoContent = document.querySelector('#info-modal .rv-modal-content');
+    const infoContentStyle = infoContent ? window.getComputedStyle(infoContent) : null;
+    document.documentElement.dataset.infoModalScrollable = String(
+        Boolean(
+            infoContent
+            && infoContentStyle?.overflowY === 'auto'
+            && infoContentStyle?.overscrollBehaviorY === 'contain'
+            && infoContent.scrollHeight > infoContent.clientHeight
+        )
+    );
     document.documentElement.dataset.tonemapSummary = String(
         document.querySelector('[data-rendering-tonemap-summary]')?.textContent
         === 'Reference · BT.2390 · 100 nits'
@@ -380,7 +412,6 @@ document.addEventListener('DOMContentLoaded', () => {
         summary?.focus();
     };
     summary?.focus();
-    summary?.setAttribute('tabindex', '0');
     summary?.focus();
     pressEnter();
     document.documentElement.dataset.tonemapOpenState = String(Boolean(disclosure?.open));
@@ -399,7 +430,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 @pytest.mark.integration
-def test_applied_tonemap_disclosure_is_keyboard_operable(tmp_path: Path) -> None:
+def test_applied_tonemap_disclosure_is_keyboard_operable_and_scrollable(
+    tmp_path: Path,
+) -> None:
     browser = _browser_executable()
     if browser is None:
         pytest.skip("Chrome/Chromium is unavailable; CI preflight makes this a required proof")
@@ -414,7 +447,7 @@ def test_applied_tonemap_disclosure_is_keyboard_operable(tmp_path: Path) -> None
             "--disable-gpu",
             "--no-first-run",
             "--virtual-time-budget=10000",
-            "--window-size=1280,720",
+            "--window-size=375,240",
             "--dump-dom",
             report_path.as_uri(),
         ],
@@ -435,6 +468,7 @@ def test_applied_tonemap_disclosure_is_keyboard_operable(tmp_path: Path) -> None
         "data-tonemap-focus-state",
         "data-tonemap-disclosure-opened",
         "data-tonemap-disclosure-closed",
+        "data-info-modal-scrollable",
     ):
         assert parser.document_attributes[attribute] == "true", (
             attribute,
@@ -499,6 +533,7 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     )
     assert parser.document_attributes["data-slider-labels-contained"] == "true"
     assert parser.document_attributes["data-inspector-hud-anchored"] == "true"
+    assert parser.document_attributes["data-info-inspector-semantics-stable"] == "true"
     assert parser.document_attributes["data-filmstrip-hud-anchored"] == "true"
     assert parser.document_attributes["data-narrow-palette-horizontal"] == "true"
     assert parser.document_attributes["data-grid-hud-anchored"] == "true"

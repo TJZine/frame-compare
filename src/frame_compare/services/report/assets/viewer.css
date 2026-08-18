@@ -2108,6 +2108,8 @@ body.rv-inspector-open .rv-viewer-stage {
     width: calc(100% - 1rem);
     min-width: 0;
     max-height: calc(100vh - 1rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
     box-shadow: 0 10px 30px rgba(0,0,0,0.6);
 }
 
