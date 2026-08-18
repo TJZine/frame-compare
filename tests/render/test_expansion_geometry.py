@@ -4,14 +4,24 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from frame_compare.config.schema import ConfigSchema
-from frame_compare.config.schema_enums import OverlayMode, ScreenshotGeometryMode
+from frame_compare.config.schema_enums import (
+    OverlayMode,
+    ScreenshotActiveRectDetection,
+    ScreenshotGeometryMode,
+)
 from frame_compare.config.schema_models import ScreenshotsConfig
 from frame_compare.render.batch.expansion import expand_batch_render_requests
 from frame_compare.render.types import PreparedRenderSource, ScreenshotBatchRequest
 from frame_compare.utils.media_facts import ActivePictureFacts, PresentationState, SourceSignalFacts
 
 
-def _batch(label: str, width: int, height: int) -> ScreenshotBatchRequest:
+def _batch(
+    label: str,
+    width: int,
+    height: int,
+    *,
+    active: ActivePictureFacts | None = None,
+) -> ScreenshotBatchRequest:
     return ScreenshotBatchRequest(
         clip_path=Path(f"{label}.mkv"),
         label=label,
@@ -22,7 +32,7 @@ def _batch(label: str, width: int, height: int) -> ScreenshotBatchRequest:
         source_resolution=(width, height),
         source_total_frames=100,
         signal=SourceSignalFacts(is_hdr=False),
-        active_picture=ActivePictureFacts(0, 0, width, height, "full_frame", True),
+        active_picture=active or ActivePictureFacts(0, 0, width, height, "full_frame", True),
         active_rect_detection_mode="provided",
     )
 
@@ -79,3 +89,31 @@ def test_geometry_facts_capture_aligned_active_picture_and_canvas(mock_prepare: 
     assert facts["wide"].geometry.is_noop is True
     assert requests[0].overlay is not None
     assert requests[0].overlay.geometry.final_canvas_size == (1920, 1080)
+
+
+@patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
+def test_supplied_active_picture_wins_over_config_detection(mock_prepare: MagicMock) -> None:
+    mock_prepare.side_effect = [_prepared(1920, 1080), _prepared(1440, 1080)]
+    supplied = ActivePictureFacts(160, 0, 1600, 1080, "explicit", False)
+    config = ConfigSchema(
+        screenshots=ScreenshotsConfig(
+            active_rect_detection=ScreenshotActiveRectDetection.ASPECT_RATIO,
+            geometry_mode=ScreenshotGeometryMode.ALIGNED,
+        )
+    )
+    requests, _, facts = expand_batch_render_requests(
+        [
+            _batch("wide", 1920, 1080, active=supplied),
+            _batch("narrow", 1440, 1080),
+        ],
+        output_dir=Path("out"),
+        config=config,
+        overlay_mode=OverlayMode.STANDARD,
+        renderer="vapoursynth",
+        ffmpeg_runner=MagicMock(),
+    )
+    geometry = facts["wide"].geometry
+    assert geometry.active_picture == supplied
+    assert geometry.final_canvas_size == (1600, 1080)
+    assert requests[0].geometry_plan is not None
+    assert requests[0].geometry_plan.active_rect_source == "explicit"

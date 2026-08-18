@@ -231,7 +231,9 @@ def _geometry_plans(
         tuple(sources),
         mode=mode,
         options=RenderGeometryOptions(
-            active_rect_detection=config.screenshots.active_rect_detection.value,
+            # Active-picture facts and provenance arrive canonically on the
+            # request; expansion must not re-detect or replace them from config.
+            active_rect_detection="provided",
             aligned_scale_policy=config.screenshots.aligned_scale_policy.value,
             aligned_target_size=_target_size(config),
         ),
