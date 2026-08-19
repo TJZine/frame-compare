@@ -78,9 +78,10 @@ The viewer supports:
 
 Report payload version 1.1 preserves two distinct frame domains. The selected report
 frame is the common comparison frame. Each visible image carries its own mapped,
-untrimmed source frame and exact picture type when the renderer can prove one. The Frame
-inspector updates that source list with the current Single, Slider, Diff, Blink, or Grid
-view; it does not present one reference-source frame as universal truth.
+untrimmed source frame, exact picture type, and exact-frame Dolby Vision RPU presence
+when the renderer can prove them. The Frame inspector updates that source list with the
+current Single, Slider, Diff, Blink, or Grid view; it does not present one
+reference-source frame as universal truth.
 
 The Clips inspector keeps archival source facts compact: complete file size, observed
 signal, actual presentation state, and a non-full active picture when applicable. Open

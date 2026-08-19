@@ -90,6 +90,7 @@ class ReportImagePayload(TypedDict):
     src: str
     source_frame: int
     picture_type: str | None
+    dolby_vision_rpu: bool | None
 
 
 class ReportFramePayload(TypedDict):
@@ -149,6 +150,7 @@ class ReportIdentityImagePayload(TypedDict):
     clip: str
     source_frame: int
     picture_type: str | None
+    dolby_vision_rpu: bool | None
 
 
 class ReportIdentityFramePayload(TypedDict):
@@ -363,6 +365,7 @@ def build_frame_payloads(
                     ),
                     "source_frame": image.source_frame,
                     "picture_type": image.facts.picture_type,
+                    "dolby_vision_rpu": image.facts.dolby_vision_rpu,
                 }
             )
         frames.append(
@@ -438,6 +441,7 @@ def build_report_identity_frames(
                     "clip": image["clip"],
                     "source_frame": image["source_frame"],
                     "picture_type": image["picture_type"],
+                    "dolby_vision_rpu": image["dolby_vision_rpu"],
                 }
                 for image in frame["images"]
             ],

@@ -68,11 +68,12 @@ output contract says otherwise.
 ## Dolby Vision considerations
 
 The conservative supported presentation records clip-level DV RPU presence on the
-Signal line and identifies a DV L5-derived active picture as `DV L5` in geometry. It
-does not present L1, L2, or L6 values from a frame-0 probe snapshot as though they came
-from the selected frame.
+Signal line, exact selected-frame RPU presence in the Frame inspector when the
+VapourSynth source exposes it, and a DV L5-derived active picture as `DV L5` in
+geometry. It does not present L1, L2, or L6 values from a frame-0 probe snapshot as
+though they came from the selected frame.
 
-Dynamic L1/L2/L6 presentation is gated on documented provider semantics, exact selected
+Dynamic L1/L2/L6 presentation remains gated on documented provider semantics, exact selected
 source-frame access, correct types and units, independent frame-specific validation,
 repeatability, clean negative cases, and bounded access without scanning. Insufficient
 evidence closes the gate: absence is preferred to plausible but invented metadata. No
@@ -88,10 +89,10 @@ For publication-bound comparisons:
 ## Overlays and measurements
 
 `diagnostic` overlays can include observed mastering metadata, MaxCLL/MaxFALL, source
-color evidence, RPU presence, DV L5 geometry provenance, applied tonemap settings, and
-selection context. Optional dynamic Dolby Vision fields appear only with exact selected-
-frame provenance. Missing values compose away without placeholders or fabricated
-defaults.
+color evidence, clip-level RPU presence, DV L5 geometry provenance, applied tonemap
+settings, and selection context. Exact-frame RPU presence stays in the Frame inspector
+to keep baked overlays concise. Dynamic Dolby Vision values require exact selected-frame
+provenance. Missing values compose away without placeholders or fabricated defaults.
 
 The tracked [documentation image capture record](../images/README.md#provenance-record)
 records this asset's physical-Windows host, portable runtime, selected frame, and

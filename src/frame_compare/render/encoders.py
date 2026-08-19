@@ -202,10 +202,17 @@ def _facts_from_vapoursynth_source(
         return facts
     try:
         frame = source.get_frame(request.frame_number)
-        picture_type = normalize_picture_type(dict(frame.props).get("_PictType"))
+        frame_props = dict(frame.props)
+        picture_type = normalize_picture_type(frame_props.get("_PictType"))
+        dolby_vision_rpu = "DolbyVisionRPU" in frame_props
     except Exception:
         picture_type = None
-    return replace(facts, picture_type=picture_type)
+        dolby_vision_rpu = None
+    return replace(
+        facts,
+        picture_type=picture_type,
+        dolby_vision_rpu=dolby_vision_rpu,
+    )
 
 
 def _render_error_reason(exc: Exception) -> str:

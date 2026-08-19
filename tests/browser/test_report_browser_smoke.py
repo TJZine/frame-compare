@@ -76,6 +76,101 @@ def _browser_executable() -> str | None:
     return None
 
 
+def _run_browser_dump(
+    browser: str,
+    report_path: Path,
+    *,
+    width: int,
+    height: int,
+) -> subprocess.CompletedProcess[str]:
+    command = [
+        browser,
+        "--headless=new",
+        "--disable-background-networking",
+        "--disable-default-apps",
+        "--disable-gpu",
+        "--no-first-run",
+        "--virtual-time-budget=10000",
+        f"--window-size={width},{height}",
+        "--dump-dom",
+        report_path.as_uri(),
+    ]
+    for attempt in range(2):
+        try:
+            return subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=30,
+            )
+        except subprocess.TimeoutExpired:
+            if attempt == 1:
+                raise
+    raise AssertionError("unreachable")
+
+
+def test_browser_dump_retries_one_transient_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report_path = tmp_path / "report.html"
+    report_path.write_text("<html></html>", encoding="utf-8")
+    completed = subprocess.CompletedProcess(["chrome"], 0, stdout="<html></html>", stderr="")
+    outcomes: list[subprocess.CompletedProcess[str] | subprocess.TimeoutExpired] = [
+        subprocess.TimeoutExpired(["chrome"], 30),
+        completed,
+    ]
+
+    def run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, subprocess.TimeoutExpired):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    assert _run_browser_dump("chrome", report_path, width=375, height=240) is completed
+    assert outcomes == []
+
+
+def test_browser_dump_stops_after_second_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def time_out(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        calls += 1
+        raise subprocess.TimeoutExpired(["chrome"], 30)
+
+    monkeypatch.setattr(subprocess, "run", time_out)
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        _run_browser_dump("chrome", tmp_path / "report.html", width=375, height=240)
+    assert calls == 2
+
+
+def test_browser_dump_does_not_retry_non_timeout_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def fail(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        calls += 1
+        raise subprocess.CalledProcessError(1, ["chrome"])
+
+    monkeypatch.setattr(subprocess, "run", fail)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        _run_browser_dump("chrome", tmp_path / "report.html", width=375, height=240)
+    assert calls == 1
+
+
 def _generated_report(tmp_path: Path, *, tonemapped: bool = False) -> Path:
     clips: list[ClipInfo] = []
     geometry_by_name = {
@@ -473,25 +568,7 @@ def test_applied_tonemap_disclosure_is_focusable_toggleable_and_scrollable(
         pytest.skip("Chrome/Chromium is unavailable; CI preflight makes this a required proof")
     report_path = _generated_report(tmp_path, tonemapped=True)
     _append_tonemap_disclosure_probe(report_path)
-    completed = subprocess.run(
-        [
-            browser,
-            "--headless=new",
-            "--disable-background-networking",
-            "--disable-default-apps",
-            "--disable-gpu",
-            "--no-first-run",
-            "--virtual-time-budget=10000",
-            "--window-size=375,240",
-            "--dump-dom",
-            report_path.as_uri(),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=30,
-    )
+    completed = _run_browser_dump(browser, report_path, width=375, height=240)
     parser = _InitializedViewerParser()
     parser.feed(completed.stdout)
     assert parser.document_attributes is not None
@@ -528,25 +605,7 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
 
     report_path = _generated_report(tmp_path)
     _append_screenshot_load_probe(report_path)
-    completed = subprocess.run(
-        [
-            browser,
-            "--headless=new",
-            "--disable-background-networking",
-            "--disable-default-apps",
-            "--disable-gpu",
-            "--no-first-run",
-            "--virtual-time-budget=10000",
-            f"--window-size={width},{height}",
-            "--dump-dom",
-            report_path.as_uri(),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=30,
-    )
+    completed = _run_browser_dump(browser, report_path, width=width, height=height)
 
     parser = _InitializedViewerParser()
     parser.feed(completed.stdout)

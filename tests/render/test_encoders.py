@@ -874,7 +874,7 @@ def test_render_vs_reads_picture_type_from_exact_diagnostic_source(
 
     class _Frame:
         def __init__(self, picture_type: str) -> None:
-            self.props = {"_PictType": picture_type}
+            self.props = {"_PictType": picture_type, "DolbyVisionRPU": b"opaque-rpu"}
 
     class _Node:
         def __init__(self, picture_type: str) -> None:
@@ -900,6 +900,7 @@ def test_render_vs_reads_picture_type_from_exact_diagnostic_source(
     )
 
     assert result.facts.picture_type == "B"
+    assert result.facts.dolby_vision_rpu is True
     assert source.requested == [7]
     assert transformed.requested == []
 
@@ -985,3 +986,4 @@ def test_render_vs_missing_or_invalid_source_property_is_nonfatal(
         renderer="vapoursynth",
     )
     assert result.facts.picture_type is None
+    assert result.facts.dolby_vision_rpu is (None if source_case == "raises" else False)

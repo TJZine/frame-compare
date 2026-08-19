@@ -617,7 +617,8 @@ opened. If it is not opened, the CLI prints the report path before prompting.
 
 - Newly generated standalone reports use payload version `1.1`. The top-level frame
   number is the common comparison-domain frame; every image separately records its
-  mapped untrimmed source frame and exact-frame picture type when available.
+  mapped untrimmed source frame, exact-frame picture type, and selected-frame Dolby
+  Vision RPU presence when available.
 - The existing Frame inspector follows the images visible in Single, Slider, Diff,
   Blink, and Grid modes. The serialized/config viewer-mode value `overlay` is presented
   as the user-facing `Single` mode and shows only the active source. The existing Clips
@@ -633,6 +634,10 @@ opened. If it is not opened, the CLI prints the report path before prompting.
   applied tonemap, HDR static, exceptional geometry, and proven exact-frame facts.
 - Picture type is collected from the exact selected original source frame. Its absence
   is nonfatal and is omitted from baked text rather than inferred from keyframe status.
+- Selected-frame Dolby Vision RPU presence is collected from that same original
+  VapourSynth frame and shown in the Frame inspector. It is omitted when the active
+  renderer cannot prove it; decoded L1/L2/L6 values are not inferred from clip-level or
+  frame-0 metadata.
 - Displayed file size is the complete container storage cost in IEC units. It is not a
   bitrate, quality, efficiency, or winner metric.
 

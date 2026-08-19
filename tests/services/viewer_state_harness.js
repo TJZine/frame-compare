@@ -69,11 +69,12 @@ function payloadWithClipCount(clipCount) {
             label: `Frame ${number}`,
             detail: 'Selected comparison frame',
             category: 'selected',
-            images: clips.map((clip) => ({
+            images: clips.map((clip, clipIndex) => ({
                 clip: clip.name,
                 src: `${clip.name}/${number}.png`,
                 source_frame: number,
                 picture_type: 'B',
+                dolby_vision_rpu: number === 10 && clipIndex === 0,
             })),
         })),
     };
@@ -304,6 +305,7 @@ function loadViewer({ clipCount, savedState = null }) {
         inspectorFrameCategory: fakeElement(),
         inspectorFrameDetail: fakeElement(),
         inspectorFramePosition: fakeElement(),
+        inspectorSourceFrames: fakeElement(),
         inspectorClips: fakeElement(),
         inspectorAlignPair: fakeElement(),
         inspectorAlignPreset: fakeElement(),
@@ -645,6 +647,14 @@ const summary = {};
         signal: values[5].textContent,
         presentation: values[6].textContent,
     };
+}
+
+{
+    const { viewer } = loadViewer({ clipCount: 2 });
+    viewer.updateInspectorData();
+    summary.inspectorFrameSources = viewer.dom.inspectorSourceFrames.children.map(
+        item => item.textContent,
+    );
 }
 
 {

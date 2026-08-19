@@ -67,6 +67,10 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
     assert summary["inspectorSlowpics"]["safeLinkTag"] == "A"
     assert summary["inspectorSlowpics"]["unsafeAsText"] is True
     assert summary["inspectorSlowpics"]["missingStatus"] == "Not uploaded"
+    assert summary["inspectorFrameSources"] == [
+        "Clip 1 — 10 / 100 · B-frame · DV RPU",
+        "Clip 2 — 10 / 100 · B-frame",
+    ]
 
     single_mode = summary["singleModeAlignment"]
     assert single_mode["mode"] == "overlay"

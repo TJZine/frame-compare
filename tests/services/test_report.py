@@ -224,7 +224,9 @@ def test_report_payload_v11_raw_values_and_comparison_semantics(
     assert payload["frames"][0]["detail"] == "Selected comparison frame"
     assert payload["frames"][0]["images"][0]["source_frame"] == 10
     assert payload["frames"][0]["images"][0]["picture_type"] == "B"
+    assert payload["frames"][0]["images"][0]["dolby_vision_rpu"] is None
     assert payload["frames"][0]["images"][1]["source_frame"] == 11
+    assert payload["frames"][0]["images"][1]["dolby_vision_rpu"] is None
     assert payload["rendering"]["tonemap"]["applied"] is True
     assert payload["rendering"]["geometry_by_label"]["CLIP2"] == {
         "source_size": (1920, 1080),
@@ -350,6 +352,34 @@ def test_report_id_identity_excludes_paths_and_timestamps(
         build_report_payload(changed_presentation, ReportConfig(), report_dir=tmp_path)["report_id"]
         != first["report_id"]
     )
+
+
+def test_report_id_includes_exact_frame_dolby_vision_state(
+    report_data: ReportData,
+    tmp_path: Path,
+) -> None:
+    def report_id_with_rpu(value: bool | None) -> str:
+        first_clip = report_data.clips[0]
+        first_image = first_clip.images[0]
+        changed = replace(
+            report_data,
+            clips=[
+                replace(
+                    first_clip,
+                    images=[
+                        replace(
+                            first_image,
+                            facts=replace(first_image.facts, dolby_vision_rpu=value),
+                        ),
+                        *first_clip.images[1:],
+                    ],
+                ),
+                *report_data.clips[1:],
+            ],
+        )
+        return build_report_payload(changed, ReportConfig(), report_dir=tmp_path)["report_id"]
+
+    assert len({report_id_with_rpu(None), report_id_with_rpu(False), report_id_with_rpu(True)}) == 3
 
 
 def test_image_src_for_report_rejects_escape_and_accepts_contained_files(tmp_path: Path) -> None:

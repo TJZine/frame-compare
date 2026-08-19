@@ -1752,7 +1752,8 @@ const ReportViewer = {
                 const sourceFrame = Number.isInteger(image?.source_frame) ? image.source_frame : 'Unknown';
                 const total = Number.isInteger(clip?.frame_count) ? ` / ${clip.frame_count}` : '';
                 const pictureType = image?.picture_type ? `${image.picture_type}-frame` : 'type unknown';
-                item.textContent = `${label} — ${sourceFrame}${total} · ${pictureType}`;
+                const dolbyVision = image?.dolby_vision_rpu === true ? ' · DV RPU' : '';
+                item.textContent = `${label} — ${sourceFrame}${total} · ${pictureType}${dolbyVision}`;
                 return item;
             });
             this.dom.inspectorSourceFrames.replaceChildren(...sourceRows);

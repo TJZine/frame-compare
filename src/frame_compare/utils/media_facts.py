@@ -116,6 +116,7 @@ class RenderedFrameFacts:
 
     source_frame: int
     picture_type: PictureType | None = None
+    dolby_vision_rpu: bool | None = None
 
     def __post_init__(self) -> None:
         if self.source_frame < 0:

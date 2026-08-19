@@ -79,6 +79,7 @@ def test_report_payload_v11_preserves_comparison_and_source_frame_domains(
     assert payload["frames"][0]["detail"] == "Selected comparison frame"
     assert payload["frames"][0]["images"][0]["source_frame"] == 9
     assert payload["frames"][0]["images"][0]["picture_type"] == "B"
+    assert payload["frames"][0]["images"][0]["dolby_vision_rpu"] is None
     assert payload["rendering"]["overlay_mode"] == "diagnostic"
 
 
