@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PIL import Image, ImageDraw, ImageFont
 
 from frame_compare.render.overlay_text import compose_overlay_text_lines
@@ -14,6 +16,9 @@ _FILL = (255, 255, 255)
 _STROKE_FILL = (0, 0, 0)
 _STROKE_WIDTH = 2
 _ASCII_GLYPH_FALLBACKS = {"•": "|", "→": "->", "×": "x", "–": "-"}
+_BUNDLED_FONT_PATH = (
+    Path(__file__).resolve().parent.parent / "assets" / "fonts" / "Inter-Regular.ttf"
+)
 _DEFAULT_FONT_CANDIDATES = (
     "segoeui.ttf",
     "Arial.ttf",
@@ -58,6 +63,10 @@ def _load_font(config: OverlayConfig) -> Font:
             return ImageFont.truetype(str(config.font_path), config.font_size)
         except OSError:
             pass
+    try:
+        return ImageFont.truetype(str(_BUNDLED_FONT_PATH), config.font_size)
+    except OSError:
+        pass
     for font_name in _DEFAULT_FONT_CANDIDATES:
         try:
             return ImageFont.truetype(font_name, config.font_size)

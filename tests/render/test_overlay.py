@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import replace
 from pathlib import Path
 from typing import Never
@@ -8,7 +9,12 @@ import pytest
 from PIL import Image, ImageDraw, ImageFont
 
 from frame_compare.config.schema_enums import OverlayMode
-from frame_compare.render.overlay import apply_overlay
+from frame_compare.render.overlay import (
+    _BUNDLED_FONT_PATH,
+    _display_text,
+    _load_font,
+    apply_overlay,
+)
 from frame_compare.render.types import OverlayConfig
 from frame_compare.utils.media_facts import (
     ActivePictureFacts,
@@ -112,7 +118,22 @@ def test_font_falls_back_from_missing_configured_font(
 
     apply_overlay(Image.new("RGB", (400, 200)), config, RenderedFrameFacts(12, "I"))
 
-    assert attempts[:2] == ["missing.ttf", "segoeui.ttf"]
+    assert attempts[:2] == ["missing.ttf", str(_BUNDLED_FONT_PATH)]
+
+
+def test_bundled_inter_font_is_the_deterministic_default() -> None:
+    font = _load_font(_config(OverlayMode.MINIMAL))
+
+    assert _BUNDLED_FONT_PATH.is_file()
+    assert isinstance(font, ImageFont.FreeTypeFont)
+    assert font.getname() == ("Inter", "Regular")
+    assert _display_text("A • B → 3×2 – done", font) == "A • B → 3×2 – done"
+
+
+def test_bundled_inter_font_matches_pinned_upstream_asset() -> None:
+    assert hashlib.sha256(_BUNDLED_FONT_PATH.read_bytes()).hexdigest() == (
+        "40d692fce188e4471e2b3cba937be967878f631ad3ebbbdcd587687c7ebe0c82"
+    )
 
 
 def test_missing_unicode_glyphs_fall_back_to_readable_ascii() -> None:
@@ -122,8 +143,6 @@ def test_missing_unicode_glyphs_fall_back_to_readable_ascii() -> None:
 
         def getlength(self, text: str) -> float:
             return 10.0 if not text.isascii() else 5.0
-
-    from frame_compare.render.overlay import _display_text
 
     assert _display_text("A • B → 3×2 – done", MissingGlyphFont()) == "A | B -> 3x2 - done"  # type: ignore[arg-type]
 

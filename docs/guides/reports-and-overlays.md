@@ -123,6 +123,9 @@ for the selected frame.
 
 Overlay text is part of the rendered image. Viewer labels and controls are browser
 presentation and can be hidden or changed without modifying the screenshots.
+Frame Compare uses its bundled Inter Regular font for deterministic overlay typography
+and glyph coverage across packaged Windows and Docker runtimes. The bundled font is
+distributed under the SIL Open Font License 1.1.
 
 The ordinary report is not a blind-comparison artifact: source identity can appear in
 baked overlays, physical filenames, report metadata, and viewer labels.
