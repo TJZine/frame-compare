@@ -12,6 +12,23 @@ def test_windows_portable_docs_do_not_disclose_private_key_on_command_line(
     assert "-PrivateKeyXml" not in portable_readme
 
 
+def test_windows_portable_docs_bind_attestation_to_selected_tag_commit(repo_root: Path) -> None:
+    docs = _read_text_or_fail(repo_root / "docs" / "windows-portable.md")
+
+    assert '$tag = "<tag>"' in docs
+    assert "git/ref/tags/$tag" in docs
+    assert "$tagSha.Count -ne 1" in docs
+    assert "^[0-9a-f]{40}$" in docs
+    assert "--repo TJZine/frame-compare" in docs
+    assert (
+        "--signer-workflow TJZine/frame-compare/.github/workflows/windows-portable-build.yml"
+    ) in docs
+    assert "--source-digest $tagSha" in docs
+    assert "--source-ref" not in docs
+    assert "Could not resolve release tag" in docs
+    assert "Release provenance verification failed" in docs
+
+
 def test_windows_portable_docs_describe_external_generated_data_preservation(
     repo_root: Path,
 ) -> None:

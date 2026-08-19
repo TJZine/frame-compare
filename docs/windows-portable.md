@@ -18,10 +18,24 @@ machine with the GitHub CLI installed, verify the release artifact against this
 repository and the dedicated Windows build workflow:
 
 ```powershell
-$zip = ".\frame-compare-portable-win-x64-<tag>.zip"
+$tag = "<tag>"
+$zip = ".\frame-compare-portable-win-x64-$tag.zip"
+# Resolve the selected lightweight refs/tags/<tag> ref through GitHub.
+$tagSha = @(gh api "repos/TJZine/frame-compare/git/ref/tags/$tag" --jq ".object.sha")
+if ($LASTEXITCODE -ne 0) {
+    throw "Could not resolve release tag $tag. Do not install this download."
+}
+if ($tagSha.Count -ne 1) {
+    throw "Release tag $tag did not resolve to exactly one commit SHA. Do not install this download."
+}
+$tagSha = $tagSha[0].Trim()
+if ($tagSha -notmatch "^[0-9a-f]{40}$") {
+    throw "Release tag $tag resolved to an invalid commit SHA. Do not install this download."
+}
 gh attestation verify $zip `
   --repo TJZine/frame-compare `
-  --signer-workflow TJZine/frame-compare/.github/workflows/windows-portable-build.yml
+  --signer-workflow TJZine/frame-compare/.github/workflows/windows-portable-build.yml `
+  --source-digest $tagSha
 if ($LASTEXITCODE -ne 0) {
     throw "Release provenance verification failed. Do not install this download."
 }
@@ -30,7 +44,7 @@ if ($LASTEXITCODE -ne 0) {
 Then verify the ZIP checksum before extracting it:
 
 ```powershell
-$zip = ".\frame-compare-portable-win-x64-<tag>.zip"
+$zip = ".\frame-compare-portable-win-x64-$tag.zip"
 $checksumFile = "$zip.sha256"
 $expected = ((Get-Content -LiteralPath $checksumFile -Raw).Trim() -split "\s+")[0].ToLowerInvariant()
 $actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
