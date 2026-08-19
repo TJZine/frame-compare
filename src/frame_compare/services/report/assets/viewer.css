@@ -123,7 +123,8 @@ body {
 }
 
 .rv-header-help-btn,
-.rv-header-info-btn {
+.rv-header-info-btn,
+.rv-header-inspector-btn {
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid var(--border);
     color: var(--text-secondary);
@@ -140,7 +141,8 @@ body {
 }
 
 .rv-header-help-btn:hover,
-.rv-header-info-btn:hover {
+.rv-header-info-btn:hover,
+.rv-header-inspector-btn:hover {
     border-color: var(--signal-border);
     background: rgba(255, 255, 255, 0.07);
     color: var(--text-primary);
@@ -153,7 +155,8 @@ body {
 }
 
 .rv-header-help-btn:hover .rv-btn-icon,
-.rv-header-info-btn:hover .rv-btn-icon {
+.rv-header-info-btn:hover .rv-btn-icon,
+.rv-header-inspector-btn:hover .rv-btn-icon {
     transform: rotate(15deg) scale(1.15);
 }
 

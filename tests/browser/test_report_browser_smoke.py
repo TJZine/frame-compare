@@ -258,26 +258,43 @@ document.addEventListener('DOMContentLoaded', () => {
         );
         ReportViewer.setInspectorOpen(false, { focus: false, save: false });
         const infoButton = document.getElementById('btn-info');
+        const inspectorButton = document.getElementById('btn-inspector');
+        const inspector = document.getElementById('rv-inspector');
         const infoBefore = {
             label: infoButton?.getAttribute('aria-label'),
             title: infoButton?.getAttribute('title'),
             pressed: infoButton?.getAttribute('aria-pressed'),
         };
-        const inspectorFocusOrigin = infoButton;
-        inspectorFocusOrigin?.focus();
-        ReportViewer.setInspectorOpen(true, { save: false });
-        ReportViewer.setInspectorOpen(false, { save: false });
         const infoAfter = {
             label: infoButton?.getAttribute('aria-label'),
             title: infoButton?.getAttribute('title'),
             pressed: infoButton?.getAttribute('aria-pressed'),
         };
+        const inspectorInitiallyClosed = inspectorButton?.getAttribute('aria-expanded') === 'false';
+        inspectorButton?.focus();
+        inspectorButton?.click();
+        const inspectorOpened = (
+            inspector?.classList.contains('open')
+            && inspector?.getAttribute('aria-hidden') === 'false'
+            && inspectorButton?.getAttribute('aria-expanded') === 'true'
+        );
+        inspectorButton?.click();
         document.documentElement.dataset.infoInspectorSemanticsStable = String(
             infoBefore.label === 'Report information'
             && infoBefore.title === 'Report Info'
             && infoBefore.pressed === null
             && JSON.stringify(infoBefore) === JSON.stringify(infoAfter)
-            && document.activeElement === inspectorFocusOrigin
+        );
+        document.documentElement.dataset.visibleInspectorBehavior = String(
+            inspectorButton?.getAttribute('type') === 'button'
+            && inspectorButton?.getAttribute('aria-controls') === 'rv-inspector'
+            && inspectorButton?.getAttribute('aria-label') === 'Open Inspector'
+            && inspectorButton?.getAttribute('title') === 'Inspector (I)'
+            && inspectorInitiallyClosed
+            && inspectorOpened
+            && inspector?.getAttribute('aria-hidden') === 'true'
+            && inspectorButton?.getAttribute('aria-expanded') === 'false'
+            && document.activeElement === inspectorButton
         );
 
         const filmstripAnchored = [false, true].every(collapsed => {
@@ -552,6 +569,7 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     assert parser.document_attributes["data-slider-labels-contained"] == "true"
     assert parser.document_attributes["data-inspector-hud-anchored"] == "true"
     assert parser.document_attributes["data-info-inspector-semantics-stable"] == "true"
+    assert parser.document_attributes["data-visible-inspector-behavior"] == "true"
     assert parser.document_attributes["data-filmstrip-hud-anchored"] == "true"
     assert parser.document_attributes["data-narrow-palette-horizontal"] == "true"
     assert parser.document_attributes["data-grid-hud-anchored"] == "true"

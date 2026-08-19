@@ -74,7 +74,6 @@ function payloadWithClipCount(clipCount) {
                 src: `${clip.name}/${number}.png`,
                 source_frame: number,
                 picture_type: 'B',
-                dolby_vision: null,
             })),
         })),
     };
@@ -289,6 +288,7 @@ function loadViewer({ clipCount, savedState = null }) {
         btnAlignToggle: fakeElement(),
         alignmentStatus: fakeElement(),
         btnInfo: fakeElement(),
+        btnInspector: fakeElement(),
         inspector: fakeElement(),
         btnInspectorClose: fakeElement(),
         inspectorTabs: ['frame', 'clips', 'align', 'review', 'export'].map((tab) => ({
@@ -344,6 +344,10 @@ function loadViewer({ clipCount, savedState = null }) {
     };
     viewer.dom.btnInfo.setAttribute('aria-label', 'Report information');
     viewer.dom.btnInfo.setAttribute('title', 'Report Info');
+    viewer.dom.btnInspector.setAttribute('aria-controls', 'rv-inspector');
+    viewer.dom.btnInspector.setAttribute('aria-expanded', 'false');
+    viewer.dom.btnInspector.setAttribute('aria-label', 'Open Inspector');
+    viewer.dom.btnInspector.setAttribute('title', 'Inspector (I)');
     viewer.dom.inspectorFocusables = [
         viewer.dom.btnInspectorClose,
         ...viewer.dom.inspectorTabs,
@@ -577,8 +581,12 @@ const summary = {};
     viewer.setInspectorTab('export');
     assert.equal(viewer.dom.inspector.inert, false);
     assert.equal(viewer.dom.btnInspectorClose.getAttribute('tabindex'), '0');
+    assert.equal(viewer.dom.btnInspector.getAttribute('aria-expanded'), 'true');
+    assert.equal(viewer.dom.btnInspector.classList.contains('active'), true);
     viewer.setInspectorOpen(false);
     assert.equal(document.activeElement, initiatingControl);
+    assert.equal(viewer.dom.btnInspector.getAttribute('aria-expanded'), 'false');
+    assert.equal(viewer.dom.btnInspector.classList.contains('active'), false);
     assert.equal(viewer.dom.btnInfo.getAttribute('aria-label'), infoLabel);
     assert.equal(viewer.dom.btnInfo.getAttribute('title'), infoTitle);
     assert.equal(viewer.dom.btnInfo.getAttribute('aria-pressed'), null);
@@ -598,7 +606,7 @@ const summary = {};
     document.activeElement = document.body;
     viewer.setInspectorOpen(true);
     viewer.setInspectorOpen(false);
-    assert.notEqual(document.activeElement, viewer.dom.btnInfo);
+    assert.equal(document.activeElement, viewer.dom.btnInspector);
     viewer.setBlinkIntervalMs(300);
     viewer.setBlinkPaused(true);
     const saved = persisted(storage, storageKey);

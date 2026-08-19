@@ -20,7 +20,7 @@ from frame_compare.utils.media_facts import (
 )
 from frame_compare.vs.props import range_label_from_props
 
-_MASTERING_LUMINANCE = re.compile(r"L\((\d+),(\d+)\)")
+_MASTERING_LUMINANCE = re.compile(r"L\((\d+(?:\.\d+)?|\.\d+),(\d+(?:\.\d+)?|\.\d+)\)")
 
 
 def run_render_phase(
@@ -126,6 +126,15 @@ def _source_signal_facts(probe: ClipProbeSnapshot) -> SourceSignalFacts:
         else None
     )
     hdr = probe.hdr_metadata
+    primaries = _observed_int(props.get("primaries"))
+    if primaries is None and hdr is not None:
+        primaries = _observed_int(hdr.color_primaries)
+    transfer = _observed_int(props.get("transfer"))
+    if transfer is None and hdr is not None:
+        transfer = _observed_int(hdr.transfer)
+    matrix = _observed_int(props.get("matrix"))
+    if matrix is None and hdr is not None:
+        matrix = _observed_int(hdr.matrix)
     static = None
     if hdr is not None:
         mastering_min, mastering_max = _mastering_luminance(hdr.mastering_display)
@@ -140,9 +149,9 @@ def _source_signal_facts(probe: ClipProbeSnapshot) -> SourceSignalFacts:
             )
     return SourceSignalFacts(
         is_hdr=probe.is_hdr,
-        primaries=_observed_int(props.get("primaries")),
-        transfer=_observed_int(props.get("transfer")),
-        matrix=_observed_int(props.get("matrix")),
+        primaries=primaries,
+        transfer=transfer,
+        matrix=matrix,
         color_range=color_range,
         dolby_vision_rpu="dolbyvisionrpu" in props,
         hdr_static=static,
@@ -156,8 +165,16 @@ def _observed_int(value: object) -> int | None:
 def _mastering_luminance(value: str | None) -> tuple[float | None, float | None]:
     if value is None or (match := _MASTERING_LUMINANCE.search(value)) is None:
         return None, None
-    maximum = int(match.group(1)) / 10000
-    minimum = int(match.group(2)) / 10000
+    maximum_token, minimum_token = match.groups()
+    try:
+        if "." in maximum_token or "." in minimum_token:
+            maximum = float(maximum_token)
+            minimum = float(minimum_token)
+        else:
+            maximum = int(maximum_token) / 10000
+            minimum = int(minimum_token) / 10000
+    except ValueError:
+        return None, None
     return minimum, maximum
 
 

@@ -138,6 +138,7 @@ const ReportViewer = {
             btnCloseHelp: document.getElementById('btn-close-help'),
             infoModal: document.getElementById('info-modal'),
             btnInfo: document.getElementById('btn-info'),
+            btnInspector: document.getElementById('btn-inspector'),
             live: document.getElementById('viewer-live'),
             grid: document.getElementById('rv-grid'),
             gridCells: document.querySelector('[data-grid-cells]'),
@@ -233,6 +234,7 @@ const ReportViewer = {
             this.dom.btnCloseHelp,
             this.dom.infoModal,
             this.dom.btnInfo,
+            this.dom.btnInspector,
             this.dom.live,
             this.dom.grid,
             this.dom.gridCells,
@@ -831,6 +833,7 @@ const ReportViewer = {
     },
 
     bindInspectorEvents() {
+        this.dom.btnInspector.addEventListener('click', () => this.setInspectorOpen(!this.state.inspectorOpen));
         this.dom.btnInspectorClose.addEventListener('click', () => this.setInspectorOpen(false));
         this.dom.inspectorTabs.forEach(tab => {
             tab.addEventListener('click', () => this.setInspectorTab(tab.dataset.inspectorTab));
@@ -1443,7 +1446,7 @@ const ReportViewer = {
                 && activeElement.disabled !== true
                 && typeof activeElement.focus === 'function'
                 && activeElement.tabIndex >= 0;
-            this.state.inspectorRestoreFocus = canRestoreFocus ? activeElement : null;
+            this.state.inspectorRestoreFocus = canRestoreFocus ? activeElement : this.dom.btnInspector;
         }
 
         this.state.inspectorOpen = nextOpen;
@@ -1457,7 +1460,7 @@ const ReportViewer = {
             const shouldRestoreFocus = options.focus !== false;
             const restoreTarget = this.state.inspectorRestoreFocus?.isConnected
                 ? this.state.inspectorRestoreFocus
-                : null;
+                : this.dom.btnInspector;
             this.state.inspectorRestoreFocus = null;
             if (shouldRestoreFocus && restoreTarget) this.focusElement(restoreTarget);
         }
@@ -1472,6 +1475,8 @@ const ReportViewer = {
         document.body?.classList?.toggle('rv-inspector-open', visible);
         this.dom.inspector.classList.toggle('open', visible);
         this.dom.inspector.setAttribute('aria-hidden', visible ? 'false' : 'true');
+        this.dom.btnInspector.classList.toggle('active', visible);
+        this.dom.btnInspector.setAttribute('aria-expanded', String(visible));
         this.setInspectorFocusable(visible);
         this.updateInspectorTabs();
     },

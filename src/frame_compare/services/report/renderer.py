@@ -417,6 +417,7 @@ def _render_header(
     clip_count: int,
     slowpics_link: str,
 ) -> str:
+    inspector_button = '<button id="btn-inspector" class="rv-header-inspector-btn" type="button" aria-controls="rv-inspector" aria-expanded="false" aria-label="Open Inspector" title="Inspector (I)"><span class="rv-btn-icon">☷</span></button>'
     info_button = '<button id="btn-info" class="rv-header-info-btn" aria-label="Report information" title="Report Info"><span class="rv-btn-icon">ℹ</span></button>'
     help_button = '<button id="btn-help" class="rv-header-help-btn" aria-label="Keyboard shortcuts" title="Help (?)"><span class="rv-btn-icon">?</span></button>'
     slowpics_block = f"{slowpics_link} • " if slowpics_link else ""
@@ -426,7 +427,7 @@ def _render_header(
                 <div class="rv-meta">Generated {_esc_text(generated_at)} • {frame_count} frames • {clip_count} clips</div>
             </div>
             <div class="rv-header-right">
-                {slowpics_block}{info_button} {help_button}
+                {slowpics_block}{inspector_button} {info_button} {help_button}
             </div>
         </header>"""
 

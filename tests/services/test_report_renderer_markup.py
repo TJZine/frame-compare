@@ -218,15 +218,25 @@ def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> No
     elements = parse_elements(html)
     help_button = require_first(elements, tag="button", element_id="btn-help")
     info_button = require_first(elements, tag="button", element_id="btn-info")
+    inspector_button = require_first(elements, tag="button", element_id="btn-inspector")
     help_icon = require_first(help_button, tag="span", class_name="rv-btn-icon")
     info_icon = require_first(info_button, tag="span", class_name="rv-btn-icon")
+    inspector_icon = require_first(inspector_button, tag="span", class_name="rv-btn-icon")
 
     assert "Generated 2026-05-22T12:00:00+00:00 • 2 frames • 2 clips" in html
     assert tags.by_id["btn-help"][1]["class"] == "rv-header-help-btn"
     assert tags.by_id["btn-info"][1]["class"] == "rv-header-info-btn"
     assert tags.by_id["btn-info"][1]["title"] == "Report Info"
+    assert tags.by_id["btn-inspector"][0] == "button"
+    assert tags.by_id["btn-inspector"][1]["class"] == "rv-header-inspector-btn"
+    assert tags.by_id["btn-inspector"][1]["type"] == "button"
+    assert tags.by_id["btn-inspector"][1]["aria-controls"] == "rv-inspector"
+    assert tags.by_id["btn-inspector"][1]["aria-expanded"] == "false"
+    assert tags.by_id["btn-inspector"][1]["aria-label"] == "Open Inspector"
+    assert tags.by_id["btn-inspector"][1]["title"] == "Inspector (I)"
     assert help_icon.text == "?"
     assert info_icon.text == "ℹ"
+    assert inspector_icon.text == "☷"
     assert info_modal.attrs["class"] == "rv-modal"
     assert info_modal.attrs["aria-hidden"] == "true"
     assert info_modal.attrs["role"] == "dialog"

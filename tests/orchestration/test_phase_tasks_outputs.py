@@ -200,6 +200,57 @@ def test_run_render_phase_maps_canonical_clip_facts_without_io(
     assert request.active_picture.is_full_frame is False
 
 
+@pytest.mark.parametrize(
+    ("preserved_frame_props", "expected"),
+    [
+        ({}, (9, 16, 9)),
+        ({"_Primaries": 2, "_Transfer": 2, "_Matrix": 2}, (9, 16, 9)),
+        ({"_Primaries": 1, "_Transfer": 17, "_Matrix": 0}, (1, 17, 0)),
+    ],
+)
+def test_run_render_phase_uses_observed_signal_then_hdr_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    preserved_frame_props: dict[str, int],
+    expected: tuple[int, int, int],
+) -> None:
+    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode")
+    ctx = _context(tmp_path, comparisons=[comparison])
+    ctx.reference = replace(
+        ctx.reference,
+        probe=replace(
+            ctx.reference.probe,
+            is_hdr=True,
+            hdr_metadata=HDRMetadata(None, None, None, 9, 16, 9),
+            preserved_frame_props=preserved_frame_props,
+        ),
+    )
+    captured = _capture_detailed_render(monkeypatch, tmp_path)
+
+    phase_render.run_render_phase(ctx, frames=[2], runner=cast(Any, _RenderRunner()))
+
+    request = captured["batch_requests"][0]
+    assert (request.signal.primaries, request.signal.transfer, request.signal.matrix) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("G(13250,34500)L(10000000,50)", (0.005, 1000.0)),
+        ("L(1000.0,0.0050)", (0.005, 1000.0)),
+        ("L(1000,invalid)", (None, None)),
+    ],
+)
+def test_mastering_luminance_accepts_known_encodings(
+    value: str, expected: tuple[float | None, float | None]
+) -> None:
+    actual = phase_render._mastering_luminance(value)
+    if expected[0] is None or expected[1] is None:
+        assert actual == expected
+    else:
+        assert actual == pytest.approx(expected)
+
+
 def test_run_render_phase_aggregates_missing_picture_type_once_per_clip(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
