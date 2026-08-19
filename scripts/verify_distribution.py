@@ -18,6 +18,12 @@ from typing import NoReturn
 
 EXPECTED_NAME = "frame-compare"
 EXPECTED_LICENSE = "GPL-3.0-only"
+EXPECTED_BUNDLED_FONT_SHA256 = "40d692fce188e4471e2b3cba937be967878f631ad3ebbbdcd587687c7ebe0c82"
+_BUNDLED_FONT_WHEEL_PATH = "frame_compare/assets/fonts/Inter-Regular.ttf"
+_BUNDLED_LICENSE_WHEEL_PATH = "frame_compare/assets/fonts/Inter-OFL.txt"
+_BUNDLED_FONT_SDIST_SUFFIX = "/src/frame_compare/assets/fonts/Inter-Regular.ttf"
+_BUNDLED_LICENSE_SDIST_SUFFIX = "/src/frame_compare/assets/fonts/Inter-OFL.txt"
+_BUNDLED_LICENSE_MARKER = b"SIL OPEN FONT LICENSE Version 1.1"
 FORBIDDEN_PARTS = {
     ".git",
     ".hg",
@@ -39,6 +45,17 @@ FORBIDDEN_NAMES = {
 
 def _fail(message: str) -> NoReturn:
     raise SystemExit(f"distribution verification failed: {message}")
+
+
+def _verify_bundled_font(data: bytes, *, artifact: Path) -> None:
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != EXPECTED_BUNDLED_FONT_SHA256:
+        _fail(f"{artifact.name} bundled Inter font SHA-256 mismatch")
+
+
+def _verify_bundled_font_license(data: bytes, *, artifact: Path) -> None:
+    if _BUNDLED_LICENSE_MARKER not in data:
+        _fail(f"{artifact.name} bundled Inter OFL notice is invalid")
 
 
 def _single_artifact(dist_dir: Path, pattern: str, label: str) -> Path:
@@ -127,11 +144,15 @@ def _verify_wheel(wheel: Path) -> str:
         wheel_names = [name for name in names if name.endswith(".dist-info/WHEEL")]
         record_names = [name for name in names if name.endswith(".dist-info/RECORD")]
         license_names = [name for name in names if name.endswith(".dist-info/licenses/LICENSE")]
+        bundled_font_names = [name for name in names if name == _BUNDLED_FONT_WHEEL_PATH]
+        bundled_license_names = [name for name in names if name == _BUNDLED_LICENSE_WHEEL_PATH]
         required_members = {
             "dist-info METADATA": metadata_names,
             "dist-info WHEEL": wheel_names,
             "dist-info RECORD": record_names,
             "packaged project LICENSE": license_names,
+            "bundled Inter font": bundled_font_names,
+            "bundled Inter OFL notice": bundled_license_names,
         }
         for label, matches in required_members.items():
             if len(matches) != 1:
@@ -149,6 +170,8 @@ def _verify_wheel(wheel: Path) -> str:
             _fail(f"{wheel.name} LICENSE is not in the METADATA dist-info directory")
         if not any(name.startswith("frame_compare/") for name in names):
             _fail(f"{wheel.name} does not contain the frame_compare package")
+        _verify_bundled_font(archive.read(bundled_font_names[0]), artifact=wheel)
+        _verify_bundled_font_license(archive.read(bundled_license_names[0]), artifact=wheel)
         _verify_wheel_record(
             archive,
             record_name=record_names[0],
@@ -173,6 +196,7 @@ def _verify_sdist(sdist: Path) -> str:
         metadata_names = [name for name in names if name.endswith("/PKG-INFO")]
         if len(metadata_names) != 1:
             _fail(f"{sdist.name} must contain exactly one PKG-INFO file")
+        sdist_root = PurePosixPath(metadata_names[0]).parent
         required_suffixes = (
             "/LICENSE",
             "/README.md",
@@ -182,6 +206,38 @@ def _verify_sdist(sdist: Path) -> str:
         for suffix in required_suffixes:
             if not any(name.endswith(suffix) for name in names):
                 _fail(f"{sdist.name} is missing required content ending in {suffix!r}")
+        bundled_font_path = f"{sdist_root}{_BUNDLED_FONT_SDIST_SUFFIX}"
+        bundled_license_path = f"{sdist_root}{_BUNDLED_LICENSE_SDIST_SUFFIX}"
+        bundled_font_names = [name for name in names if name == bundled_font_path]
+        bundled_license_names = [name for name in names if name == bundled_license_path]
+        required_assets = {
+            "bundled Inter font": bundled_font_names,
+            "bundled Inter OFL notice": bundled_license_names,
+        }
+        for label, matches in required_assets.items():
+            if len(matches) != 1:
+                _fail(f"{sdist.name} must contain exactly one {label} file")
+
+        bundled_font_member = next(
+            member for member in members if member.name == bundled_font_names[0]
+        )
+        if not bundled_font_member.isfile():
+            _fail(f"{sdist.name} bundled Inter font is not a regular file")
+        bundled_font_file = archive.extractfile(bundled_font_member)
+        if bundled_font_file is None:
+            _fail(f"{sdist.name} bundled Inter font is not a regular file")
+        _verify_bundled_font(bundled_font_file.read(), artifact=sdist)
+
+        bundled_license_member = next(
+            member for member in members if member.name == bundled_license_names[0]
+        )
+        if not bundled_license_member.isfile():
+            _fail(f"{sdist.name} bundled Inter OFL notice is not a regular file")
+        bundled_license_file = archive.extractfile(bundled_license_member)
+        if bundled_license_file is None:
+            _fail(f"{sdist.name} bundled Inter OFL notice is not a regular file")
+        _verify_bundled_font_license(bundled_license_file.read(), artifact=sdist)
+
         metadata_file = archive.extractfile(metadata_names[0])
         if metadata_file is None:
             _fail(f"{sdist.name} PKG-INFO is not a regular file")

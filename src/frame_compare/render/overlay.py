@@ -43,7 +43,8 @@ def apply_overlay(
     if not lines:
         return image
     font = _load_font(config)
-    draw = ImageDraw.Draw(image)
+    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
     x, y = config.origin or (10, 10)
     text = _display_text("\n".join(lines), font)
     draw.multiline_text(
@@ -54,6 +55,10 @@ def apply_overlay(
         stroke_width=_STROKE_WIDTH,
         stroke_fill=_STROKE_FILL,
     )
+    composited = Image.alpha_composite(image.convert("RGBA"), overlay)
+    if image.mode != "RGBA":
+        composited = composited.convert(image.mode)
+    image.paste(composited)
     return image
 
 
