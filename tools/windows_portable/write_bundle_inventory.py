@@ -43,6 +43,12 @@ SOURCE_SCRIPTS = (
 )
 PRIVATE_RSA_FIELDS = ("P", "Q", "DP", "DQ", "InverseQ", "D")
 PROHIBITED_BUNDLE_FILENAMES = frozenset({".env", "config.toml", "report.html"})
+_INTER_VERSION = "4.1"
+_INTER_LICENSE_SPDX = "OFL-1.1"
+_INTER_SOURCE_URL = "https://github.com/rsms/inter/releases/tag/v4.1"
+_INTER_LICENSE_SOURCE = Path("app/src/frame_compare/assets/fonts/Inter-OFL.txt")
+_INTER_LICENSE_DESTINATION = Path("licenses/Inter-OFL.txt")
+_INTER_LICENSE_SHA256 = "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -271,6 +277,20 @@ def _license_inventory(bundle_root: Path) -> list[JsonObject]:
     return records
 
 
+def _promote_bundled_inter_license(bundle_root: Path) -> None:
+    source = bundle_root / _INTER_LICENSE_SOURCE
+    if not source.is_file():
+        raise ValueError(
+            f"bundled Inter OFL notice is missing: {_INTER_LICENSE_SOURCE.as_posix()}"
+        )
+    if _sha256(source) != _INTER_LICENSE_SHA256:
+        raise ValueError("bundled Inter OFL notice SHA-256 mismatch")
+
+    destination = bundle_root / _INTER_LICENSE_DESTINATION
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(source.read_bytes())
+
+
 def _assert_safe_bundle(bundle_root: Path) -> None:
     prohibited: list[str] = []
     for path in bundle_root.rglob("*"):
@@ -316,6 +336,9 @@ def _write_source_urls(
     lines = [
         f"Frame Compare {app_version} source ({commit_sha}): {source_archive}",
         "",
+        "Bundled application assets:",
+        f"- Inter {_INTER_VERSION}: {_INTER_SOURCE_URL}",
+        "",
         "Manifest-provided runtime sources:",
     ]
     for artifact in artifacts:
@@ -350,8 +373,12 @@ def _write_notices(
     lines = [
         "Frame Compare Windows portable third-party inventory",
         "",
-        "License texts are under licenses/. Exact versions, declared license metadata,",
-        "hashes, and source pointers are recorded in bundle_inventory.json.",
+        "License texts are under licenses/. Exact versions and declared license metadata are",
+        "listed here; hashes are recorded in bundle_inventory.json and source pointers in",
+        "SOURCE_URLS.txt.",
+        "",
+        "Bundled application assets:",
+        f"- Inter {_INTER_VERSION} ({_INTER_LICENSE_SPDX})",
         "",
         "Manifest-provided runtimes:",
     ]
@@ -464,6 +491,7 @@ def main() -> int:
         )
 
     _assert_safe_bundle(bundle_root)
+    _promote_bundled_inter_license(bundle_root)
     distributions = _python_distributions(bundle_root / "app" / "site-packages")
     artifacts, corresponding_sources = _manifest_inventory(manifest)
     _write_source_urls(

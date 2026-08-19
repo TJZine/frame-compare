@@ -1725,6 +1725,12 @@ def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
     )
     runtime_fingerprints = manifest["bundle"]["runtime_fingerprints"]
     _write_packaged_runtime_contract(bundle=bundle, fingerprints=runtime_fingerprints)
+    bundled_font_dir = bundle / "app" / "src" / "frame_compare" / "assets" / "fonts"
+    bundled_font_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(
+        repo_root / "src" / "frame_compare" / "assets" / "fonts" / "Inter-OFL.txt",
+        bundled_font_dir / "Inter-OFL.txt",
+    )
     (bundle / "bundle_info.json").write_text(
         json.dumps(
             {
@@ -1827,10 +1833,13 @@ def test_windows_portable_bundle_inventory_is_sorted_exact_and_path_safe(
     license_paths = [license_entry["path"] for license_entry in inventory["licenses"]]
     assert license_paths == sorted(license_paths)
     assert "licenses/frame-compare-LICENSE.txt" in license_paths
+    assert "licenses/Inter-OFL.txt" in license_paths
     source_urls = (bundle / "licenses" / "SOURCE_URLS.txt").read_text(encoding="utf-8")
     assert inventory["bundle"]["commit_sha"] in source_urls
     assert "qt-everywhere-src-6.10.2.tar.xz" in source_urls
-    assert (bundle / "licenses" / "THIRD_PARTY_NOTICES.txt").is_file()
+    assert "Inter 4.1: https://github.com/rsms/inter/releases/tag/v4.1" in source_urls
+    notices = (bundle / "licenses" / "THIRD_PARTY_NOTICES.txt").read_text(encoding="utf-8")
+    assert "Inter 4.1 (OFL-1.1)" in notices
 
 
 @pytest.mark.parametrize("field", ["bytes", "source_bytes", "build_source_bytes"])
