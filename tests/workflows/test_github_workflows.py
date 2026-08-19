@@ -39,12 +39,18 @@ def test_release_workflows_preserve_triggers_permissions_and_windows_owner(
 
     assert set(release["on"]) == {"workflow_call"}
     assert release["permissions"] == {}
+    attestation_permissions = {
+        "attestations": "write",
+        "contents": "read",
+        "id-token": "write",
+    }
     assert release["jobs"]["preflight"]["permissions"] == {"contents": "read"}
+    assert release["jobs"]["windows"]["permissions"] == attestation_permissions
     assert release["jobs"]["publish"]["permissions"] == {"contents": "write"}
     assert release["jobs"]["windows"]["uses"].endswith("windows-portable-build.yml")
     assert portable["on"]["workflow_call"] is not None
-    assert portable["permissions"] == {"contents": "read"}
-    assert portable["jobs"]["build"]["permissions"] == {"contents": "read"}
+    assert "permissions" not in portable
+    assert "permissions" not in portable["jobs"]["build"]
 
 
 def test_release_workflow_keeps_fail_closed_asset_contract(repo_root: Path) -> None:
@@ -136,7 +142,11 @@ def test_ci_and_docker_workflows_keep_required_triggers_and_permissions(
     assert ci["permissions"] == {"contents": "read"}
     assert {"pull_request", "workflow_dispatch"} <= set(docker["on"])
     assert docker["permissions"] == {"contents": "read"}
-    assert {"main", "cleanup", "staging"} <= set(docker["on"]["pull_request"]["branches"])
+    assert {"main", "cleanup", "staging", "dev/v0.2.0"} <= set(
+        docker["on"]["pull_request"]["branches"]
+    )
+    assert "dev/v0.2.0" in ci["on"]["push"]["branches"]
+    assert "dev/v0.2.0" in ci["on"]["pull_request"]["branches"]
     workflow_paths = docker["on"]["pull_request"]["paths"]
     assert {
         "uv.lock",
@@ -189,12 +199,20 @@ def test_windows_portable_dispatch_owns_immutable_release_inputs_and_secrets(
     jobs = workflow["jobs"]
 
     assert set(inputs) == {"operation", "channel", "version", "tag", "expected_sha"}
+    assert workflow["permissions"] == {}
     assert jobs["release"]["uses"] == "./.github/workflows/release.yml"
     assert set(jobs["release"]["with"]) == {"channel", "version", "tag", "expected_sha"}
+    assert jobs["verify_pull_request"]["permissions"] == {"contents": "read"}
     assert jobs["verify_pull_request"]["with"]["require_signing"] == "false"
     assert "secrets" not in jobs["verify_pull_request"]
+    assert jobs["verify_manual"]["permissions"] == {"contents": "read"}
     assert jobs["verify_manual"]["with"]["require_signing"] == "true"
     assert set(jobs["verify_manual"]["secrets"]) == {"WINDOWS_UPDATE_SIGNING_KEY_XML"}
+    assert jobs["release"]["permissions"] == {
+        "attestations": "write",
+        "contents": "write",
+        "id-token": "write",
+    }
     assert set(jobs["release"]["secrets"]) == {"WINDOWS_UPDATE_SIGNING_KEY_XML"}
 
 

@@ -12,6 +12,41 @@ from frame_compare.render.types import (
     OverlayMode,
     RenderRequest,
 )
+from frame_compare.utils.media_facts import (
+    ActivePictureFacts,
+    PresentationState,
+    RenderedFrameFacts,
+    RenderedGeometryFacts,
+    SourceSignalFacts,
+)
+
+
+def _overlay_config() -> OverlayConfig:
+    geometry = RenderedGeometryFacts(
+        source_size=(100, 100),
+        active_picture=ActivePictureFacts(0, 0, 100, 100, "full_frame", True),
+        cropped_size=(100, 100),
+        scaled_size=(100, 100),
+        final_canvas_size=(100, 100),
+        is_noop=True,
+    )
+    return OverlayConfig(
+        mode=OverlayMode.STANDARD,
+        label="Test",
+        comparison_frame=1,
+        source_frame=1,
+        source_total_frames=10,
+        include_frame_number=True,
+        selection_label="Selected",
+        file_size_bytes=1024,
+        source_resolution=(100, 100),
+        signal=SourceSignalFacts(is_hdr=False),
+        presentation_state=PresentationState.SDR,
+        tonemap_settings=None,
+        geometry=geometry,
+        font_path=None,
+        font_size=24,
+    )
 
 
 @pytest.mark.integration
@@ -20,6 +55,7 @@ def test_ffmpeg_render_creates_valid_png(mock_video_path: Path, integration_outp
     output_path = integration_output_dir / "frame_00000.png"
     request = RenderRequest(
         clip=mock_video_path,
+        diagnostic_source=mock_video_path,
         frame_number=0,
         output_path=output_path,
         overlay=None,
@@ -43,17 +79,9 @@ def test_overlay_application_adds_visible_content(sample_image_path: Path):
     """
     with Image.open(sample_image_path) as img:
         # Initial image is solid red
-        config = OverlayConfig(
-            mode=OverlayMode.STANDARD,
-            label="Test",
-            frame_number=1,
-            resolution=(100, 100),
-            hdr_info=None,
-            font_path=None,
-            font_size=24,
-        )
+        config = _overlay_config()
 
-        result = apply_overlay(img, config)
+        result = apply_overlay(img, config, RenderedFrameFacts(source_frame=1, picture_type="I"))
 
         # Check that we have more than one color (originally solid red)
         # Use compatible approach that works with Pillow < 14 and >= 14
@@ -77,6 +105,7 @@ def test_render_batch_ordering_contract(mock_video_path: Path, integration_outpu
     for i in range(3):
         req = RenderRequest(
             clip=mock_video_path,
+            diagnostic_source=mock_video_path,
             frame_number=i,
             output_path=integration_output_dir / f"frame_{i:05d}.png",
             overlay=None,

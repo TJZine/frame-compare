@@ -19,7 +19,6 @@ from frame_compare.orchestration.execution_types import (
     ExecutionState,
     MetadataPrefetch,
     PublishPhaseOutput,
-    RenderArtifacts,
     ReportPhaseOutput,
     RunArtifacts,
 )
@@ -37,9 +36,11 @@ from frame_compare.services.slowpics_post_upload import (
 from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.progress import NullProgressReporter
+from frame_compare.vs.types import TonemapSettings
 from tests.orchestration.phase_task_helpers import (
     _clip,
     _context,
+    _render_artifacts,
     _RenderRunner,
 )
 
@@ -81,12 +82,13 @@ def test_run_report_phase_builds_report_data_and_records_path(
 ) -> None:
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
     ctx = _context(tmp_path, comparisons=[comparison])
-    render = RenderArtifacts(
+    render = _render_artifacts(
         screenshots_by_label={
             "Reference": [tmp_path / "screenshots" / "reference_1.png"],
             "Encode 1": [tmp_path / "screenshots" / "encode_1.png"],
         },
         screenshot_dir=tmp_path / "screenshots",
+        source_frames_by_label={"Reference": [5], "Encode 1": [5]},
     )
     artifacts = RunArtifacts(
         render=render,
@@ -119,9 +121,15 @@ def test_run_report_phase_builds_report_data_and_records_path(
     assert artifacts.report_path is None
     assert report_data.frames == [5]
     assert report_data.frame_details == []
-    assert report_data.clips[0].screenshots == render.screenshots_by_label["Reference"]
-    assert report_data.clips[1].screenshots == render.screenshots_by_label["Encode 1"]
+    assert [image.path for image in report_data.clips[0].images] == render.screenshots_by_label[
+        "Reference"
+    ]
+    assert [image.path for image in report_data.clips[1].images] == render.screenshots_by_label[
+        "Encode 1"
+    ]
     assert report_data.slowpics_url == "https://slow.pics/c/example"
+    assert report_data.rendering.overlay_mode == ctx.config.screenshots.overlay_mode
+    assert report_data.rendering.include_frame_number == ctx.config.screenshots.include_frame_number
     assert [(clip.name, clip.resolution, clip.fps) for clip in report_data.clips] == [
         ("Reference", (1920, 1080), 24.0),
         ("Encode 1", (1920, 1080), 24.0),
@@ -129,14 +137,144 @@ def test_run_report_phase_builds_report_data_and_records_path(
     assert captured["report_config"] == ctx.config.report
 
 
-def test_run_report_phase_requires_reserved_run_folder(tmp_path: Path) -> None:
+def test_run_report_phase_rejects_short_artifacts_before_indexing(tmp_path: Path) -> None:
     ctx = _context(tmp_path)
-    ctx.workspace = replace(ctx.workspace, run_dir=None)
-    render = RenderArtifacts(
+    render = _render_artifacts(
         screenshots_by_label={
             "Reference": [tmp_path / "screenshots" / "reference_1.png"],
         },
         screenshot_dir=tmp_path / "screenshots",
+        source_frames_by_label={"Reference": [1]},
+    )
+
+    with pytest.raises(ValueError, match="report artifacts for 'Reference'.*expected 2"):
+        phase_post_render.run_report_phase(
+            ctx,
+            frames=[1, 2],
+            render=render,
+            metadata=None,
+            slowpics_url=None,
+        )
+
+
+def test_run_report_phase_discloses_one_shared_tonemap_setting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
+    ctx = _context(tmp_path, comparisons=[comparison])
+    render = _render_artifacts(
+        screenshots_by_label={
+            "Reference": [tmp_path / "screenshots" / "reference_1.png"],
+            "Encode 1": [tmp_path / "screenshots" / "encode_1.png"],
+        },
+        screenshot_dir=tmp_path / "screenshots",
+        source_frames_by_label={"Reference": [1], "Encode 1": [1]},
+    )
+    settings = TonemapSettings(target_nits=203)
+    render.clip_facts_by_label = {
+        label: replace(facts, tonemap_settings=settings)
+        for label, facts in render.clip_facts_by_label.items()
+    }
+    captured: dict[str, Any] = {}
+
+    def _fake_generate_report(
+        report_data: object, report_config: object, *, output_path: Path
+    ) -> Path:
+        captured["report_data"] = report_data
+        return output_path
+
+    monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
+    phase_post_render.run_report_phase(
+        ctx,
+        frames=[1],
+        render=render,
+        metadata=None,
+        slowpics_url=None,
+    )
+
+    assert captured["report_data"].rendering.tonemap_settings == settings
+
+
+def test_run_report_phase_rejects_mixed_tonemap_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
+    ctx = _context(tmp_path, comparisons=[comparison])
+    render = _render_artifacts(
+        screenshots_by_label={
+            "Reference": [tmp_path / "screenshots" / "reference_1.png"],
+            "Encode 1": [tmp_path / "screenshots" / "encode_1.png"],
+        },
+        screenshot_dir=tmp_path / "screenshots",
+        source_frames_by_label={"Reference": [1], "Encode 1": [1]},
+    )
+    render.clip_facts_by_label = {
+        "Reference": replace(
+            render.clip_facts_by_label["Reference"],
+            tonemap_settings=TonemapSettings(target_nits=100),
+        ),
+        "Encode 1": replace(
+            render.clip_facts_by_label["Encode 1"],
+            tonemap_settings=TonemapSettings(target_nits=203),
+        ),
+    }
+
+    with pytest.raises(ValueError, match="cannot represent mixed effective tonemap settings"):
+        phase_post_render.run_report_phase(
+            ctx,
+            frames=[1],
+            render=render,
+            metadata=None,
+            slowpics_url=None,
+        )
+
+
+def test_run_report_phase_allows_sdr_alongside_shared_tonemap_setting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
+    ctx = _context(tmp_path, comparisons=[comparison])
+    render = _render_artifacts(
+        screenshots_by_label={
+            "Reference": [tmp_path / "screenshots" / "reference_1.png"],
+            "Encode 1": [tmp_path / "screenshots" / "encode_1.png"],
+        },
+        screenshot_dir=tmp_path / "screenshots",
+        source_frames_by_label={"Reference": [1], "Encode 1": [1]},
+    )
+    settings = TonemapSettings(target_nits=203)
+    render.clip_facts_by_label["Reference"] = replace(
+        render.clip_facts_by_label["Reference"], tonemap_settings=settings
+    )
+    captured: dict[str, Any] = {}
+
+    def _fake_generate_report(
+        report_data: object, report_config: object, *, output_path: Path
+    ) -> Path:
+        captured["report_data"] = report_data
+        return output_path
+
+    monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
+    phase_post_render.run_report_phase(
+        ctx,
+        frames=[1],
+        render=render,
+        metadata=None,
+        slowpics_url=None,
+    )
+
+    assert captured["report_data"].rendering.tonemap_settings == settings
+
+
+def test_run_report_phase_requires_reserved_run_folder(tmp_path: Path) -> None:
+    ctx = _context(tmp_path)
+    ctx.workspace = replace(ctx.workspace, run_dir=None)
+    render = _render_artifacts(
+        screenshots_by_label={
+            "Reference": [tmp_path / "screenshots" / "reference_1.png"],
+        },
+        screenshot_dir=tmp_path / "screenshots",
+        source_frames_by_label={"Reference": [1]},
     )
 
     with pytest.raises(RuntimeError, match="reserved run folder"):
@@ -162,9 +300,10 @@ def test_run_report_phase_builds_four_clip_payload_inputs_in_clip_order(
         "Encode 2": [tmp_path / "screenshots" / "encode_b_1.png"],
         "Encode 3": [tmp_path / "screenshots" / "encode_c_1.png"],
     }
-    render = RenderArtifacts(
+    render = _render_artifacts(
         screenshots_by_label=screenshots_by_label,
         screenshot_dir=tmp_path / "screenshots",
+        source_frames_by_label={label: [12] for label in screenshots_by_label},
     )
     captured: dict[str, Any] = {}
 
@@ -194,7 +333,7 @@ def test_run_report_phase_builds_four_clip_payload_inputs_in_clip_order(
         "Encode 2",
         "Encode 3",
     ]
-    assert [clip.screenshots for clip in report_data.clips] == [
+    assert [[image.path for image in clip.images] for clip in report_data.clips] == [
         screenshots_by_label["Reference"],
         screenshots_by_label["Encode 1"],
         screenshots_by_label["Encode 2"],
@@ -221,7 +360,7 @@ def test_run_report_phase_passes_reference_source_frame_details(
             notes="user_override",
         )
     }
-    render = RenderArtifacts(
+    render = _render_artifacts(
         screenshots_by_label={
             "Reference": [
                 tmp_path / "screenshots" / "reference_1.png",
@@ -233,6 +372,7 @@ def test_run_report_phase_passes_reference_source_frame_details(
             ],
         },
         screenshot_dir=tmp_path / "screenshots",
+        source_frames_by_label={"Reference": [4, 5], "Encode 1": [1, 2]},
     )
     captured: dict[str, Any] = {}
     expected_path = tmp_path / "run" / "report.html"
@@ -262,8 +402,8 @@ def test_run_report_phase_passes_reference_source_frame_details(
     assert [
         (detail.label, detail.detail, detail.category) for detail in report_data.frame_details
     ] == [
-        ("User", "Source frame 4", "user_override"),
-        ("Frame 5", "Source frame 5", "quantile_bright"),
+        ("User", "Selected comparison frame", "user_override"),
+        ("Frame 2", "Selected comparison frame", "quantile_bright"),
     ]
     assert captured["report_config"] == ctx.config.report
 
@@ -289,7 +429,7 @@ async def test_run_publish_phase_sets_url_from_publish_result_and_delegates_post
     stale = screenshot_dir / "stale.png"
     for screenshot in (ref_10, enc_10, ref_20, enc_20, stale):
         screenshot.write_bytes(b"\x89PNG\r\n\x1a\n")
-    render = RenderArtifacts(
+    render = _render_artifacts(
         screenshots_by_label={
             "Reference": [ref_10, ref_20],
             "Encode 1": [enc_10, enc_20],
@@ -372,7 +512,7 @@ async def test_run_publish_phase_rejects_duplicate_clip_labels_at_translation_se
     screenshot_dir.mkdir()
     screenshot = screenshot_dir / "10 - reference.png"
     screenshot.write_bytes(b"\x89PNG\r\n\x1a\n")
-    render = RenderArtifacts(
+    render = _render_artifacts(
         screenshots_by_label={"Reference": [screenshot]},
         screenshot_dir=screenshot_dir,
     )
@@ -397,7 +537,7 @@ async def test_run_publish_phase_skips_shortcut_when_config_disabled(
     screenshot_dir.mkdir()
     screenshot = screenshot_dir / "10 - reference.png"
     screenshot.write_bytes(b"\x89PNG\r\n\x1a\n")
-    render = RenderArtifacts(
+    render = _render_artifacts(
         screenshots_by_label={"Reference": [screenshot]},
         screenshot_dir=screenshot_dir,
     )
@@ -812,7 +952,7 @@ async def test_warn_only_publish_phase_keeps_sanitized_service_error_in_warning_
 
     state = ExecutionState(
         artifacts=RunArtifacts(
-            render=RenderArtifacts(
+            render=_render_artifacts(
                 screenshots_by_label={
                     "Reference": [tmp_path / "screenshots" / "reference.png"],
                     "Encode 1": [tmp_path / "screenshots" / "encode.png"],

@@ -16,15 +16,20 @@ from frame_compare.orchestration.context import (
     RunContext,
 )
 from frame_compare.orchestration.execution import run_render_phase
+from frame_compare.render.types import OverlayConfig
+from frame_compare.utils.media_facts import RenderedFrameFacts
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.types import HDRMetadata
 
 
 class FakeFFmpegRunner:
-    def extract_frame(self, video: Path, frame_num: int, output: Path, **_kwargs) -> None:
+    def extract_frame(
+        self, video: Path, frame_num: int, output: Path, **_kwargs: object
+    ) -> RenderedFrameFacts:
         _, _ = video, frame_num
         output.parent.mkdir(parents=True, exist_ok=True)
         Image.new("RGB", (10, 10), color=(0, 0, 0)).save(output, format="PNG")
+        return RenderedFrameFacts(source_frame=frame_num, picture_type="I")
 
     def probe_hdr(self, video: Path) -> HDRMetadata | None:
         _ = video
@@ -43,7 +48,7 @@ def test_selection_labels_are_looked_up_in_reference_source_frame_domain_after_t
 ) -> None:
     captured_labels: list[str | None] = []
 
-    def _record_apply(_path: Path, overlay) -> None:  # type: ignore[no-untyped-def]
+    def _record_apply(_path: Path, overlay: OverlayConfig, _facts: RenderedFrameFacts) -> None:
         captured_labels.append(overlay.selection_label)
 
     monkeypatch.setattr("frame_compare.render.encoders.apply_overlay_to_file", _record_apply)
@@ -99,16 +104,13 @@ def test_selection_labels_are_looked_up_in_reference_source_frame_domain_after_t
     assert captured_labels == ["Dark"]
 
 
-def test_selection_details_are_looked_up_in_reference_source_frame_domain_after_trim(
+def test_selection_detail_label_is_looked_up_in_reference_source_frame_domain_after_trim(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    captured: list[tuple[str | None, str | None]] = []
+    captured: list[str | None] = []
 
-    def _record_apply(_path: Path, overlay) -> None:  # type: ignore[no-untyped-def]
-        detail_label = (
-            overlay.selection_detail.label if overlay.selection_detail is not None else None
-        )
-        captured.append((overlay.selection_label, detail_label))
+    def _record_apply(_path: Path, overlay: OverlayConfig, _facts: RenderedFrameFacts) -> None:
+        captured.append(overlay.selection_label)
 
     monkeypatch.setattr("frame_compare.render.encoders.apply_overlay_to_file", _record_apply)
 
@@ -167,4 +169,4 @@ def test_selection_details_are_looked_up_in_reference_source_frame_domain_after_
         runner=FakeFFmpegRunner(),
     )
 
-    assert captured == [("User", "User")]
+    assert captured == ["User"]

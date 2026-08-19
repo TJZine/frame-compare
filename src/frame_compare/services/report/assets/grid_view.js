@@ -1,6 +1,6 @@
 const GridView = (() => {
     const DESKTOP_PAGE_SIZE = 4;
-    const MOBILE_QUERY = '(max-width: 767px)';
+    const MOBILE_QUERY = '(max-width: 768px)';
 
     function pageSize(isMobile) {
         return isMobile ? 1 : DESKTOP_PAGE_SIZE;
@@ -27,7 +27,7 @@ const GridView = (() => {
     }
 
     function layoutName(clipCount, viewportWidth, visibleCount = clipCount) {
-        if (viewportWidth < 768) return 'mobile';
+        if (viewportWidth <= 768) return 'mobile';
         if (clipCount === 2) return 'two';
         if (clipCount === 3 && viewportWidth >= 1200) return 'three-wide';
         if (clipCount === 3) return 'three-wrap';
@@ -66,7 +66,7 @@ const GridView = (() => {
 
         function isMobile() {
             const width = dom.grid?.getBoundingClientRect?.().width || 0;
-            return Boolean(state.mediaQuery?.matches || (width > 0 && width < 768));
+            return Boolean(state.mediaQuery?.matches || (width > 0 && width <= 768));
         }
 
         function indexes() {

@@ -24,13 +24,8 @@ on:
       WINDOWS_UPDATE_SIGNING_KEY_XML:
         required: false
 
-permissions:
-  contents: read
-
 jobs:
   build:
-    permissions:
-      contents: read
     runs-on: windows-latest
     timeout-minutes: 90
     env:
@@ -412,6 +407,14 @@ jobs:
               throw "Checksum mismatch for $assetPath"
             }
           }
+
+      - name: Attest release ZIP provenance
+        if: inputs.prepare_release_assets
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: |
+            dist/release-assets/frame-compare-portable-win-x64-${{ inputs.release_tag }}.zip
+            dist/release-assets/frame-compare-update-win-x64-${{ inputs.release_tag }}.zip
 
       - name: Upload bundle artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

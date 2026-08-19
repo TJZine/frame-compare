@@ -4,8 +4,9 @@ import pytest
 from PIL import Image
 
 from frame_compare.config.schema import ColorConfig, ConfigSchema
-from frame_compare.render.batch.orchestrator import render_screenshots
-from frame_compare.render.types import OverlayMode, ScreenshotRenderOptions
+from frame_compare.render.batch.orchestrator import render_screenshots_from_batch
+from frame_compare.render.types import BatchRenderOptions, ScreenshotBatchRequest
+from frame_compare.utils.media_facts import ActivePictureFacts, SourceSignalFacts
 
 
 @pytest.fixture
@@ -14,26 +15,39 @@ def integration_config() -> ConfigSchema:
     return ConfigSchema(color=ColorConfig(enable_tonemap=False))
 
 
+def _request(
+    clip_path: Path,
+    label: str,
+    frames: list[int],
+) -> ScreenshotBatchRequest:
+    return ScreenshotBatchRequest(
+        clip_path=clip_path,
+        label=label,
+        source_frames=frames,
+        comparison_frames=frames,
+        selection_labels=[None] * len(frames),
+        size_bytes=clip_path.stat().st_size,
+        source_resolution=(100, 100),
+        source_total_frames=3,
+        signal=SourceSignalFacts(is_hdr=False),
+        active_picture=ActivePictureFacts(0, 0, 100, 100, "full_frame", True),
+        filename_label=clip_path.stem,
+    )
+
+
 @pytest.mark.integration
 def test_render_screenshots_naming_and_output(
     mock_video_path: Path, integration_output_dir: Path, integration_config: ConfigSchema
 ):
-    """Verify render_screenshots naming convention and output mapping."""
-    clips = [mock_video_path]
+    """Verify canonical batch rendering naming and output mapping."""
     frames = [0, 1]
     output_dir = integration_output_dir
-    label_map = {mock_video_path: "TestLabel"}
 
-    results = render_screenshots(
-        clips,
-        frames,
+    results = render_screenshots_from_batch(
+        [_request(mock_video_path, "TestLabel", frames)],
         output_dir,
         integration_config,
-        ScreenshotRenderOptions(
-            label_map=label_map,
-            renderer="ffmpeg",
-            overlay_mode=OverlayMode.MINIMAL,
-        ),
+        BatchRenderOptions(renderer="ffmpeg"),
     )
 
     assert "TestLabel" in results
@@ -54,51 +68,34 @@ def test_render_screenshots_naming_and_output(
 def test_render_screenshots_empty_frames_returns_label_with_empty_list(
     mock_video_path: Path, integration_output_dir: Path, integration_config: ConfigSchema
 ):
-    clips = [mock_video_path]
-    results = render_screenshots(
-        clips,
-        [],
+    results = render_screenshots_from_batch(
+        [_request(mock_video_path, "EmptyFrames", [])],
         integration_output_dir,
         integration_config,
-        ScreenshotRenderOptions(
-            label_map={mock_video_path: "EmptyFrames"},
-            renderer="ffmpeg",
-            overlay_mode=OverlayMode.MINIMAL,
-        ),
+        BatchRenderOptions(renderer="ffmpeg"),
     )
 
     assert results == {"EmptyFrames": []}
 
 
 @pytest.mark.integration
-def test_render_screenshots_empty_clips_returns_empty_dict(
+def test_render_screenshots_from_batch_empty_clips_returns_empty_dict(
     integration_output_dir: Path, integration_config: ConfigSchema
 ):
-    results = render_screenshots(
-        [],
-        [0],
-        integration_output_dir,
-        integration_config,
-        ScreenshotRenderOptions(renderer="ffmpeg", overlay_mode=OverlayMode.MINIMAL),
-    )
+    results = render_screenshots_from_batch([], integration_output_dir, integration_config)
 
     assert results == {}
 
 
 @pytest.mark.integration
-def test_render_screenshots_defaults_label_to_clip_stem(
+def test_render_screenshots_from_batch_uses_supplied_label(
     mock_video_path: Path, integration_output_dir: Path, integration_config: ConfigSchema
 ):
-    results = render_screenshots(
-        [mock_video_path],
-        [],
+    results = render_screenshots_from_batch(
+        [_request(mock_video_path, mock_video_path.stem, [])],
         integration_output_dir,
         integration_config,
-        ScreenshotRenderOptions(
-            label_map=None,
-            renderer="ffmpeg",
-            overlay_mode=OverlayMode.MINIMAL,
-        ),
+        BatchRenderOptions(renderer="ffmpeg"),
     )
 
     assert results == {mock_video_path.stem: []}

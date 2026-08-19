@@ -60,7 +60,14 @@ def build_extract_frame_argv(
     """Build the canonical FFmpeg argv for single-frame extraction."""
     if frame_num < 0:
         raise ValueError("frame_num must be non-negative")
-    filters = [f"select=eq(n\\,{frame_num})", *_geometry_filters(geometry_plan)]
+    # showinfo must inspect the selected source frame before any geometry filter.
+    # Keeping it in this extraction process means the diagnostic fact and image
+    # share the same decode/selection operation.
+    filters = [
+        f"select=eq(n\\,{frame_num})",
+        "showinfo=checksum=0",
+        *_geometry_filters(geometry_plan),
+    ]
 
     argv = ["ffmpeg"]
     if overwrite:

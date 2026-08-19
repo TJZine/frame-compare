@@ -5,6 +5,8 @@ from __future__ import annotations
 from fractions import Fraction
 from pathlib import Path
 
+from PIL import Image
+
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema import ConfigSchema
@@ -13,6 +15,15 @@ from frame_compare.orchestration.context import (
     ClipProbeSnapshot,
     ClipState,
     RunContext,
+)
+from frame_compare.orchestration.execution_types import RenderArtifacts
+from frame_compare.render.types import RenderedClipFacts
+from frame_compare.utils.media_facts import (
+    ActivePictureFacts,
+    PresentationState,
+    RenderedFrameFacts,
+    RenderedGeometryFacts,
+    SourceSignalFacts,
 )
 from frame_compare.utils.types import WorkspacePaths
 
@@ -56,7 +67,54 @@ enable = false
 
 
 class _RenderRunner:
-    pass
+    def extract_frame(
+        self, _video: Path, frame_num: int, output: Path, **_kwargs: object
+    ) -> RenderedFrameFacts:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (10, 10), color=(0, 0, 0)).save(output, format="PNG")
+        return RenderedFrameFacts(source_frame=frame_num, picture_type="I")
+
+
+def _render_artifacts(
+    *,
+    screenshots_by_label: dict[str, list[Path]],
+    screenshot_dir: Path | None,
+    source_frames_by_label: dict[str, list[int]] | None = None,
+) -> RenderArtifacts:
+    """Build explicit, invariant-valid render artifacts for orchestration tests."""
+    geometry = RenderedGeometryFacts(
+        source_size=(1920, 1080),
+        active_picture=ActivePictureFacts(0, 0, 1920, 1080, "full_frame", True),
+        cropped_size=(1920, 1080),
+        scaled_size=(1920, 1080),
+        final_canvas_size=(1920, 1080),
+        is_noop=True,
+    )
+    frames = (
+        {label: list(range(len(paths))) for label, paths in screenshots_by_label.items()}
+        if source_frames_by_label is None
+        else source_frames_by_label
+    )
+    return RenderArtifacts(
+        screenshots_by_label=screenshots_by_label,
+        frame_facts_by_label={
+            label: [RenderedFrameFacts(source_frame=frame, picture_type="I") for frame in values]
+            for label, values in frames.items()
+        },
+        clip_facts_by_label={
+            label: RenderedClipFacts(
+                size_bytes=0,
+                source_resolution=(1920, 1080),
+                source_total_frames=100,
+                signal=SourceSignalFacts(is_hdr=False),
+                presentation_state=PresentationState.SDR,
+                tonemap_settings=None,
+                geometry=geometry,
+            )
+            for label in screenshots_by_label
+        },
+        screenshot_dir=screenshot_dir,
+    )
 
 
 def _workspace(tmp_path: Path) -> WorkspacePaths:

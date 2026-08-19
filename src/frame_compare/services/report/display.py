@@ -17,8 +17,8 @@ class SourceFrameSelectionDetail:
     notes: str | None = None
 
 
-def _default_frame_label(source_frame: int) -> str:
-    return f"Frame {source_frame}"
+def _default_frame_label(comparison_frame: int) -> str:
+    return f"Frame {comparison_frame}"
 
 
 def category_from_selection_label(label: str | None) -> str | None:
@@ -37,20 +37,20 @@ def category_from_selection_label(label: str | None) -> str | None:
             return None
 
 
-def frame_detail_for_source_frame(
+def frame_detail_for_comparison_frame(
     *,
-    source_frame: int,
+    comparison_frame: int,
     selection_detail: SourceFrameSelectionDetail | None,
     selection_label: str | None,
 ) -> FrameDetail:
-    """Build report display metadata for a selected source-domain frame."""
+    """Build report display metadata for a selected comparison-domain frame."""
     category = None
     if selection_detail is not None:
         category = selection_detail.notes or category_from_selection_label(selection_detail.label)
     if category is None:
         category = category_from_selection_label(selection_label)
 
-    label = _default_frame_label(source_frame)
+    label = _default_frame_label(comparison_frame)
     if (
         selection_detail is not None
         and selection_detail.label is not None
@@ -58,7 +58,7 @@ def frame_detail_for_source_frame(
     ):
         label = selection_detail.label
 
-    detail_text = f"Source frame {source_frame}"
+    detail_text = "Selected comparison frame"
 
     return FrameDetail(
         label=label,

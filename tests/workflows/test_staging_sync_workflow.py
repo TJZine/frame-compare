@@ -51,9 +51,19 @@ def test_staging_check_triggers_do_not_change_release_please_scope(repo_root: Pa
     docker = _load_workflow(repo_root / ".github" / "workflows" / "docker-integration.yml")
     release_please = _load_workflow(repo_root / ".github" / "workflows" / "release-please.yml")
 
-    assert ci["on"]["push"]["branches"] == ["main", "staging"]
-    assert ci["on"]["pull_request"]["branches"] == ["main", "cleanup", "staging"]
+    assert ci["on"]["push"]["branches"] == ["main", "staging", "dev/v0.2.0"]
+    assert ci["on"]["pull_request"]["branches"] == [
+        "main",
+        "cleanup",
+        "staging",
+        "dev/v0.2.0",
+    ]
     assert docs["on"]["push"]["branches"] == ["main", "staging"]
     assert docs["on"]["pull_request"]["branches"] == ["main", "cleanup", "staging"]
-    assert docker["on"]["pull_request"]["branches"] == ["main", "cleanup", "staging"]
+    assert docker["on"]["pull_request"]["branches"] == [
+        "main",
+        "cleanup",
+        "staging",
+        "dev/v0.2.0",
+    ]
     assert release_please["on"]["push"]["branches"] == ["main"]

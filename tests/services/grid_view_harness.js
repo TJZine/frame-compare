@@ -21,7 +21,7 @@ const grid = context.__GridView;
 assert.equal(grid.layoutName(2, 769, 2), 'two');
 assert.equal(grid.layoutName(3, 1200, 3), 'three-wide');
 assert.equal(grid.layoutName(3, 1199, 3), 'three-wrap');
-assert.equal(grid.layoutName(4, 768, 4), 'four');
+assert.equal(grid.layoutName(4, 768, 1), 'mobile');
 assert.equal(grid.layoutName(6, 1600, 4), 'four');
 assert.equal(grid.layoutName(6, 767, 1), 'mobile');
 
@@ -173,7 +173,9 @@ context.document = {
 context.window = {
     innerWidth: 1300,
     matchMedia() { return mediaQuery; },
-    addEventListener() {},
+    addEventListener(type, listener) {
+        if (type === 'resize') this.resizeListener = listener;
+    },
     requestAnimationFrame(callback) { callback(); },
 };
 context.ResizeObserver = undefined;
@@ -212,6 +214,12 @@ const owner = grid.create(viewer);
 owner.bind();
 owner.setActive(true);
 owner.render();
+gridRoot.rect.width = 768;
+context.window.resizeListener();
+assert.equal(owner.state.mobile, true);
+gridRoot.rect.width = 1300;
+context.window.resizeListener();
+assert.equal(owner.state.mobile, false);
 assert.equal(cells.children.length, 4);
 assert.deepEqual([...owner.indexes()], [0, 1, 2, 3]);
 assert.equal(controls.hidden, false);

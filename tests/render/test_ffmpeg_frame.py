@@ -7,7 +7,10 @@ import pytest
 from frame_compare.render.backend._ffmpeg_frame import (
     build_extract_frame_argv,
 )
-from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
+from frame_compare.render.backend.ffmpeg import (
+    DefaultFFmpegRunner,
+    parse_showinfo_picture_type,
+)
 from frame_compare.render.geometry import (
     GeometryMargins,
     GeometryRect,
@@ -29,7 +32,7 @@ def test_build_extract_frame_argv_supports_optional_overwrite() -> None:
         "-i",
         "clip.mkv",
         "-vf",
-        "select=eq(n\\,100)",
+        "select=eq(n\\,100),showinfo=checksum=0",
         "-frames:v",
         "1",
         "-q:v",
@@ -81,7 +84,7 @@ def test_build_extract_frame_argv_places_geometry_filters_after_exact_frame_sele
     )
 
     assert argv[argv.index("-vf") + 1] == (
-        "select=eq(n\\,100),crop=1440:1080:240:0,scale=1280:960,pad=1280:1080:0:60:color=black"
+        "select=eq(n\\,100),showinfo=checksum=0,crop=1440:1080:240:0,scale=1280:960,pad=1280:1080:0:60:color=black"
     )
 
 
@@ -132,7 +135,7 @@ def test_default_ffmpeg_runner_extract_frame_uses_shared_command_policy(
             "-i",
             "clip.mkv",
             "-vf",
-            "select=eq(n\\,100)",
+            "select=eq(n\\,100),showinfo=checksum=0",
             "-frames:v",
             "1",
             "-q:v",
@@ -142,6 +145,56 @@ def test_default_ffmpeg_runner_extract_frame_uses_shared_command_policy(
         timeout_seconds=30.0,
     )
     assert output.parent.is_dir()
+
+
+def test_default_ffmpeg_runner_returns_picture_type_from_same_extraction(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    run_subprocess = MagicMock(
+        return_value=subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=b"",
+            stderr=b"[Parsed_showinfo_1 @ 0x1] n:0 type:B",
+        )
+    )
+    monkeypatch.setattr("frame_compare.render.backend.ffmpeg.run_subprocess", run_subprocess)
+
+    facts = DefaultFFmpegRunner().extract_frame(Path("clip.mkv"), 12, tmp_path / "frame.png")
+
+    assert facts.source_frame == 12
+    assert facts.picture_type == "B"
+
+
+@pytest.mark.parametrize(
+    ("stderr", "expected"),
+    [
+        (b"[Parsed_showinfo_1 @ 0x1] n:0 type:I", "I"),
+        (b"[Parsed_showinfo_1 @ 0x1] n:0 type:P", "P"),
+        (b"[Parsed_showinfo_1 @ 0x1] n:0 type:B", "B"),
+        (b"[Parsed_showinfo_1 @ 0x1] n:0 type:?", None),
+        (
+            b"noise type:P\n[Parsed_showinfo_1 @ 0x1] n:0 type:B\n",
+            "B",
+        ),
+        (
+            b"[Parsed_showinfo_1 @ 0x1] n:0 type:B\n[Parsed_showinfo_1 @ 0x1] n:0 type:B\n",
+            "B",
+        ),
+        (
+            b"[Parsed_showinfo_1 @ 0x1] n:0 type:I\n[Parsed_showinfo_1 @ 0x1] n:0 type:B\n",
+            None,
+        ),
+        (
+            b"[Parsed_showinfo_1 @ 0x1] n:0 type:I\n[Parsed_showinfo_1 @ 0x1] n:0 type:unknown\n",
+            None,
+        ),
+        ("[Parsed_showinfo_1 @ 0x1] n:0 type:P", "P"),
+        ("", None),
+    ],
+)
+def test_parse_showinfo_picture_type(stderr: bytes | str, expected: str | None) -> None:
+    assert parse_showinfo_picture_type(stderr) == expected
 
 
 def test_default_ffmpeg_runner_extract_frame_uses_configured_timeout(

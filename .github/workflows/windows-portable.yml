@@ -66,7 +66,9 @@ jobs:
     name: Run guarded release
     if: github.event_name == 'workflow_dispatch' && inputs.operation == 'release'
     permissions:
+      attestations: write
       contents: write
+      id-token: write
     concurrency:
       group: frame-compare-release-${{ inputs.tag }}
       cancel-in-progress: false

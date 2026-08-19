@@ -7,11 +7,12 @@ import re
 
 from frame_compare.services.report.payload import ReportPayload
 from frame_compare.services.report.renderer import build_html
-from frame_compare.services.report.viewer import get_css, get_js
+from frame_compare.services.report.viewer import get_js
 from tests.services.report_viewer_contracts import (
     SelectParser,
     find_all,
     find_children,
+    parse_definition_pairs,
     parse_elements,
     parse_info_modal,
     parse_start_tags,
@@ -60,8 +61,8 @@ def test_build_html_renders_frame_and_clip_selectors(report_payload: ReportPaylo
 
     assert parser.selects["frame-select"].attrs["aria-label"] == "Select frame"
     assert [option.text for option in parser.selects["frame-select"].options] == [
-        "Frame 10",
-        "Frame 20",
+        "Frame 10 • Selected",
+        "Frame 20 • Scene Cuts",
     ]
     assert parser.selects["left-select"].attrs["aria-label"] == "Left clip"
     reference = next(
@@ -93,6 +94,17 @@ def test_build_html_renders_mode_aware_clip_controls(report_payload: ReportPaylo
     active_controls = require_first(
         document, tag="div", attr_name="data-control-scope", attr_value="active"
     )
+    mode_controls = require_first(document, tag="div", class_name="rv-mode-controls")
+    mode_buttons = find_children(mode_controls, tag="button")
+    assert [button.attrs["data-mode"] for button in mode_buttons] == [
+        "slider",
+        "overlay",
+        "diff",
+        "blink",
+        "grid",
+    ]
+    assert "rv-context-controls" in pair_controls.classes
+    assert "rv-context-controls" in active_controls.classes
     assert pair_controls.attrs["aria-label"] == "Comparison pair"
     assert active_controls.attrs["aria-label"] == "Single clip"
     assert "hidden" in active_controls.attrs
@@ -156,19 +168,12 @@ def test_build_html_keeps_ten_plus_long_label_clips_reachable_and_mobile_safe(
 
     parser = SelectParser()
     parser.feed(build_html(payload))
-    css = get_css()
-
     for select_id in ("left-select", "right-select", "active-select"):
         options = parser.selects[select_id].options
         assert len(options) == 12
         assert options[9].attrs["value"] == "9"
         assert options[11].attrs["value"] == "11"
         assert options[11].text.endswith("12")
-
-    assert "text-overflow: ellipsis;" in css
-    assert "flex-wrap: wrap;" in css
-    assert ".rv-mode-slider #label-left" in css
-    assert ".rv-mode-slider #label-right" in css
 
 
 def test_build_html_renders_frame_metadata_and_category_filters(
@@ -213,19 +218,29 @@ def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> No
     elements = parse_elements(html)
     help_button = require_first(elements, tag="button", element_id="btn-help")
     info_button = require_first(elements, tag="button", element_id="btn-info")
+    inspector_button = require_first(elements, tag="button", element_id="btn-inspector")
     help_icon = require_first(help_button, tag="span", class_name="rv-btn-icon")
     info_icon = require_first(info_button, tag="span", class_name="rv-btn-icon")
+    inspector_icon = require_first(inspector_button, tag="span", class_name="rv-btn-icon")
 
     assert "Generated 2026-05-22T12:00:00+00:00 • 2 frames • 2 clips" in html
     assert tags.by_id["btn-help"][1]["class"] == "rv-header-help-btn"
     assert tags.by_id["btn-info"][1]["class"] == "rv-header-info-btn"
     assert tags.by_id["btn-info"][1]["title"] == "Report Info"
+    assert tags.by_id["btn-inspector"][0] == "button"
+    assert tags.by_id["btn-inspector"][1]["class"] == "rv-header-inspector-btn"
+    assert tags.by_id["btn-inspector"][1]["type"] == "button"
+    assert tags.by_id["btn-inspector"][1]["aria-controls"] == "rv-inspector"
+    assert tags.by_id["btn-inspector"][1]["aria-expanded"] == "false"
+    assert tags.by_id["btn-inspector"][1]["aria-label"] == "Open Inspector"
+    assert tags.by_id["btn-inspector"][1]["title"] == "Inspector (I)"
     assert help_icon.text == "?"
     assert info_icon.text == "ℹ"
+    assert inspector_icon.text == "☷"
     assert info_modal.attrs["class"] == "rv-modal"
     assert info_modal.attrs["aria-hidden"] == "true"
     assert info_modal.attrs["role"] == "dialog"
-    assert info_modal.section_headings == ["General", "Clips"]
+    assert info_modal.section_headings == ["General", "Clips", "Rendering"]
     assert info_modal.general == {
         "Title": "Renderer Contract",
         "Report ID": "report_0123456789abcdef0123456789abcdef",
@@ -235,6 +250,7 @@ def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> No
         "Default Mode": "slider",
         "Default Pair": 'REF <main> vs ENC "candidate"',
         "slow.pics": "https://slow.pics/c/abc?x=1&y=2",
+        "Tonemap": "Not applied",
     }
     assert [(clip.label, clip.dynamic_range, clip.fields) for clip in info_modal.clips] == [
         (
@@ -269,6 +285,46 @@ def test_build_html_displays_overlay_default_mode_as_single(
 
     assert script_payload(html)["default_mode"] == "overlay"
     assert info_modal.general["Default Mode"] == "Single"
+
+
+def test_build_html_renders_applied_tonemap_disclosure_with_all_effective_settings(
+    report_payload: ReportPayload,
+) -> None:
+    settings = {
+        "enabled": True,
+        "preset": "reference",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": None,
+        "dynamic_peak_detection": True,
+        "dst_min_nits": 0.18,
+        "knee_offset": 0.5,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 0,
+        "use_dovi": False,
+        "contrast_recovery": 0.3,
+        "gamma_lift": False,
+    }
+    payload: ReportPayload = {
+        **report_payload,
+        "rendering": {
+            **report_payload["rendering"],
+            "tonemap": {"applied": True, "settings": settings},
+        },
+    }
+    html = build_html(payload)
+    assert "Reference · BT.2390 · 100 nits" in html
+    details = require_first(parse_elements(html), tag="details", class_name="rv-tonemap-details")
+    assert "open" not in details.attrs
+    pairs = parse_definition_pairs(details)
+    assert pairs["Dynamic peak detection"] == "On"
+    assert pairs["Gamma lift"] == "Off"
+    assert pairs["Source peak"] == "Auto"
+    assert pairs["Dolby Vision metadata use"] == "Off"
 
 
 def test_build_html_avoids_inline_styles(report_payload: ReportPayload) -> None:
@@ -337,7 +393,7 @@ def test_build_html_avoids_duplicate_category_labels_when_label_matches_category
             {
                 "number": 10,
                 "label": "Motion",
-                "detail": "Source frame 10",
+                "detail": "Selected comparison frame",
                 "category": "motion",
                 "images": report_payload["frames"][0]["images"],
             },

@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING
 import structlog
 
 from frame_compare.config.schema_enums import VsScreenshotWriter
-from frame_compare.render.types import Renderer
+from frame_compare.render.types import PreparedRenderSource, Renderer
+from frame_compare.utils.media_facts import PresentationState
 
 if TYPE_CHECKING:
     import vapoursynth as vs  # type: ignore[import-untyped]
@@ -112,22 +113,15 @@ def _apply_vs_tonemap_and_labeling(
     loaded_clip: vs.VideoNode,
     source_info: SourceInfo,
     config: ConfigSchema,
-) -> tuple[vs.VideoNode, str | None]:
+) -> tuple[vs.VideoNode, TonemapSettings | None]:
     """Handles VapourSynth tonemap settings resolution and application."""
     if should_tonemap(source_info, config):
         from frame_compare.vs.tonemap import apply_tonemap
 
         settings = resolve_tonemap_settings(config)
         loaded_clip = apply_tonemap(loaded_clip, settings, source_info.hdr_metadata)
-        # Mark that tonemap was applied for overlay (§1.4.6)
-        hdr_info = f"HDR (tonemapped: {settings.preset}, {settings.target_nits} nits)"
-    elif source_info.is_hdr:
-        # HDR source, tonemap disabled (§1.4.6)
-        hdr_info = "HDR (native, no tonemap)"
-    else:
-        # SDR source
-        hdr_info = None  # or "SDR" in DIAGNOSTIC mode
-    return loaded_clip, hdr_info
+        return loaded_clip, settings
+    return loaded_clip, None
 
 
 def _resolve_auto_mode_fallback(
@@ -136,70 +130,73 @@ def _resolve_auto_mode_fallback(
     config: ConfigSchema,
     renderer: Renderer,
     ffmpeg_runner: FFmpegRunner,
-) -> None:
+    supplied_source_is_hdr: bool | None = None,
+) -> bool:
     """Probes HDR and resolves fallback policy when VapourSynth load fails in auto mode."""
     from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 
-    if config.color.enable_tonemap:
-        # Must probe HDR status before deciding
+    # Probe even when tonemapping is disabled.  The fallback still needs the
+    # actual source classification to produce HDR_TONEMAP_OFF rather than
+    # fabricating SDR from the absence of a VapourSynth SourceInfo object.
+    if supplied_source_is_hdr is None:
         try:
             is_hdr = is_hdr_via_runner(clip_path, ffmpeg_runner)
         except Exception:
-            # Probe failed — propagate (no fallback)
             log.debug(
                 "probe_failed_no_fallback",
                 path=str(clip_path),
                 exc_info=True,
             )
-            raise  # Propagate probe exception
-
-        if is_hdr:
-            # HDR + tonemap required in auto mode + VS unavailable → raise TonemapRequiresVapourSynthError from original VS failure.
-            log.debug(
-                "hdr_tonemap_required_no_fallback",
-                path=str(clip_path),
-            )
-            raise TonemapRequiresVapourSynthError() from vs_load_failure
-        else:
-            # SDR — fallback allowed
-            log.warning(
-                "vs_load_failed_falling_back",
-                path=str(clip_path),
-                renderer=renderer,
-                exc_info=True,
-            )
+            raise
     else:
-        # enable_tonemap=False — fallback allowed
-        log.warning(
-            "vs_load_failed_falling_back",
+        is_hdr = supplied_source_is_hdr
+
+    if config.color.enable_tonemap and is_hdr:
+        # HDR + tonemap required in auto mode + VS unavailable → raise TonemapRequiresVapourSynthError from original VS failure.
+        log.debug(
+            "hdr_tonemap_required_no_fallback",
             path=str(clip_path),
-            renderer=renderer,
-            exc_info=True,
         )
+        raise TonemapRequiresVapourSynthError() from vs_load_failure
+
+    # SDR with tonemap enabled and all sources when tonemap is disabled may use
+    # the FFmpeg fallback; the caller carries this exact classification forward.
+    log.warning(
+        "vs_load_failed_falling_back",
+        path=str(clip_path),
+        renderer=renderer,
+        exc_info=True,
+    )
+    return is_hdr
 
 
 def _validate_ffmpeg_tonemap_gate(
     clip_path: Path,
     config: ConfigSchema,
     ffmpeg_runner: FFmpegRunner,
-) -> None:
+    supplied_source_is_hdr: bool | None = None,
+) -> bool:
     """Validates whether the tonemap gate is violated for FFmpeg renderer."""
     from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 
-    try:
-        is_hdr = is_hdr_via_runner(clip_path, ffmpeg_runner)
-    except Exception:
-        # Probe failed — propagate (no FFmpeg path)
-        log.debug(
-            "probe_failed_no_ffmpeg",
-            path=str(clip_path),
-            exc_info=True,
-        )
-        raise  # Propagate probe exception
+    if supplied_source_is_hdr is None:
+        try:
+            is_hdr = is_hdr_via_runner(clip_path, ffmpeg_runner)
+        except Exception:
+            # Probe failed — propagate (no FFmpeg path)
+            log.debug(
+                "probe_failed_no_ffmpeg",
+                path=str(clip_path),
+                exc_info=True,
+            )
+            raise  # Propagate probe exception
+    else:
+        is_hdr = supplied_source_is_hdr
 
     if is_hdr:
         # HDR + tonemap required → FFmpeg-only path is invalid.
         raise TonemapRequiresVapourSynthError()
+    return is_hdr
 
 
 def prepare_clip_for_render(
@@ -207,7 +204,8 @@ def prepare_clip_for_render(
     renderer: Renderer,
     config: ConfigSchema,
     ffmpeg_runner: FFmpegRunner | None = None,
-) -> tuple[vs.VideoNode | Path, tuple[int, int], str | None, SourceInfo | None]:
+    source_is_hdr: bool | None = None,
+) -> PreparedRenderSource:
     """Prepare a source clip for rendering, applying tonemap and fallback policies.
 
     Args:
@@ -215,9 +213,8 @@ def prepare_clip_for_render(
         renderer: Renderer to use ("vapoursynth", "ffmpeg", or "auto")
         config: Resolved configuration
         ffmpeg_runner: Optional FFmpegRunner for probing/extraction
-
-    Returns:
-        tuple containing (prepared_clip, resolution, hdr_info, source_info)
+        source_is_hdr: Canonical source classification when VS is unavailable.
+            When omitted, direct callers retain the legacy probe fallback.
 
     Raises:
         PluginNotFoundError: If required VS plugin is missing
@@ -240,9 +237,12 @@ def prepare_clip_for_render(
 
     prepared_clip: vs.VideoNode | Path = clip_path
     resolution = (0, 0)
-    hdr_info: str | None = None
+    diagnostic_source: vs.VideoNode | Path = clip_path
+    tonemap_settings: TonemapSettings | None = None
     source_info: SourceInfo | None = None
     vs_load_failure: Exception | None = None
+    fallback_source_is_hdr: bool | None = None
+    ffmpeg_source_is_hdr: bool | None = None
 
     if renderer in ("vapoursynth", "auto"):
         try:
@@ -250,10 +250,11 @@ def prepare_clip_for_render(
 
             loader = DefaultVSLoader()
             source_info = loader.load(clip_path)
+            diagnostic_source = source_info.clip
             prepared_clip = source_info.clip
             resolution = (source_info.width, source_info.height)
 
-            prepared_clip, hdr_info = _apply_vs_tonemap_and_labeling(
+            prepared_clip, tonemap_settings = _apply_vs_tonemap_and_labeling(
                 prepared_clip, source_info, config
             )
 
@@ -269,10 +270,50 @@ def prepare_clip_for_render(
     if vs_load_failure is not None and renderer == "auto":
         if config.screenshots.vs_writer == VsScreenshotWriter.FPNG:
             raise vs_load_failure
-        _resolve_auto_mode_fallback(clip_path, vs_load_failure, config, renderer, ffmpeg_runner)
+        fallback_source_is_hdr = _resolve_auto_mode_fallback(
+            clip_path,
+            vs_load_failure,
+            config,
+            renderer,
+            ffmpeg_runner,
+            supplied_source_is_hdr=source_is_hdr,
+        )
 
     # === RENDERER=FFMPEG WITH TONEMAP GATING (§1.4.4) ===
     if renderer == "ffmpeg" and config.color.enable_tonemap:
-        _validate_ffmpeg_tonemap_gate(clip_path, config, ffmpeg_runner)
+        ffmpeg_source_is_hdr = _validate_ffmpeg_tonemap_gate(
+            clip_path,
+            config,
+            ffmpeg_runner,
+            supplied_source_is_hdr=source_is_hdr,
+        )
 
-    return prepared_clip, resolution, hdr_info, source_info
+    resolved_source_is_hdr = (
+        source_info.is_hdr
+        if source_info is not None
+        else fallback_source_is_hdr
+        if fallback_source_is_hdr is not None
+        else source_is_hdr
+        if source_is_hdr is not None
+        else ffmpeg_source_is_hdr
+        if ffmpeg_source_is_hdr is not None
+        else is_hdr_via_runner(clip_path, ffmpeg_runner)
+        if renderer == "ffmpeg"
+        else False
+    )
+    presentation_state = (
+        PresentationState.HDR_TONEMAPPED
+        if tonemap_settings is not None
+        else PresentationState.HDR_TONEMAP_OFF
+        if resolved_source_is_hdr
+        else PresentationState.SDR
+    )
+    return PreparedRenderSource(
+        diagnostic_source=diagnostic_source,
+        prepared_clip=prepared_clip,
+        source_dimensions=resolution,
+        source_total_frames=source_info.num_frames if source_info is not None else None,
+        source_is_hdr=resolved_source_is_hdr,
+        presentation_state=presentation_state,
+        tonemap_settings=tonemap_settings,
+    )

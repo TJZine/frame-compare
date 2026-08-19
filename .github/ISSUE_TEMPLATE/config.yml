@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
-  - name: 📖 Documentation
-    url: https://github.com/TJZine/frame-compare/tree/main/docs
-    about: Check the documentation before opening an issue
-  - name: 🔒 Security Vulnerability
+  - name: Documentation
+    url: https://tjzine.github.io/frame-compare/
+    about: Review installation, user guides, reference material, and troubleshooting before opening an issue
+  - name: Security vulnerability
     url: https://github.com/TJZine/frame-compare/blob/main/SECURITY.md
-    about: Please report security vulnerabilities privately
+    about: Report security vulnerabilities privately rather than in a public issue

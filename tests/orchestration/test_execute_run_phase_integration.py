@@ -16,7 +16,6 @@ from frame_compare.orchestration.coordinator import RunDependencies, RunRequest,
 from frame_compare.orchestration.execution_types import (
     MetadataPrefetch,
     PublishPhaseOutput,
-    RenderArtifacts,
     RunArtifacts,
 )
 from frame_compare.orchestration.types import (
@@ -33,6 +32,7 @@ from .execute_run_helpers import (
     create_config,
     create_video_files,
 )
+from .phase_task_helpers import _render_artifacts
 
 
 def _workspace(tmp_path: Path) -> WorkspacePaths:
@@ -301,12 +301,19 @@ def test_run_report_phase_builds_report_from_current_clip_artifacts(
         year=2004,
         media_type="movie",
     )
-    render = RenderArtifacts(
+    render = _render_artifacts(
         screenshots_by_label={
-            "Reference": [tmp_path / "screenshots" / "Reference_000001.png"],
-            "Encode 1": [tmp_path / "screenshots" / "Encode_1_000001.png"],
+            "Reference": [
+                tmp_path / "screenshots" / "Reference_000007.png",
+                tmp_path / "screenshots" / "Reference_000011.png",
+            ],
+            "Encode 1": [
+                tmp_path / "screenshots" / "Encode_1_000007.png",
+                tmp_path / "screenshots" / "Encode_1_000011.png",
+            ],
         },
         screenshot_dir=tmp_path / "screenshots",
+        source_frames_by_label={"Reference": [7, 11], "Encode 1": [7, 11]},
     )
     artifacts = RunArtifacts(
         render=render,
@@ -336,8 +343,12 @@ def test_run_report_phase_builds_report_from_current_clip_artifacts(
     assert output.report_path == expected_report_path
     assert artifacts.report_path is None
     assert report_data.frames == [7, 11]
-    assert report_data.clips[0].screenshots == render.screenshots_by_label["Reference"]
-    assert report_data.clips[1].screenshots == render.screenshots_by_label["Encode 1"]
+    assert [image.path for image in report_data.clips[0].images] == render.screenshots_by_label[
+        "Reference"
+    ]
+    assert [image.path for image in report_data.clips[1].images] == render.screenshots_by_label[
+        "Encode 1"
+    ]
     assert report_data.metadata == metadata
     assert report_data.slowpics_url == "https://slow.pics/c/collateral"
     assert [(clip.name, clip.frame_count) for clip in report_data.clips] == [
