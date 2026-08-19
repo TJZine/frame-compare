@@ -5,8 +5,6 @@ from __future__ import annotations
 from frame_compare.config.schema import OverlayMode
 from frame_compare.render.types import OverlayConfig
 from frame_compare.utils.media_facts import (
-    ExactFrameDolbyVisionFacts,
-    HDRStaticFacts,
     PictureType,
     PresentationState,
     RenderedFrameFacts,
@@ -161,50 +159,6 @@ def _diagnostic_lines(config: OverlayConfig, facts: RenderedFrameFacts) -> list[
         if groups:
             lines.append(f"HDR static: {' • '.join(groups)}")
 
-    lines.extend(_dolby_vision_lines(facts.dolby_vision, static))
-    return lines
-
-
-def _dolby_vision_lines(
-    dynamic: ExactFrameDolbyVisionFacts | None,
-    static: HDRStaticFacts | None,
-) -> list[str]:
-    """Format only exact-frame Dolby Vision facts supplied by the caller."""
-    if dynamic is None:
-        return []
-
-    l1_max = dynamic.l1_maximum_nits
-    l1_average = dynamic.l1_average_nits
-    l2_target = dynamic.l2_target_nits
-    groups: list[str] = []
-    if l1_max is not None and l1_average is not None:
-        groups.append(f"L1 max/avg {_number(l1_max)}/{_number(l1_average)} nits")
-    elif l1_max is not None:
-        groups.append(f"L1 max {_number(l1_max)} nits")
-    elif l1_average is not None:
-        groups.append(f"L1 avg {_number(l1_average)} nits")
-    if l2_target is not None:
-        groups.append(f"L2 target {_number(l2_target)} nits")
-
-    lines = [f"DV frame: {' • '.join(groups)}"] if groups else []
-
-    static_max = static.max_cll if static is not None else None
-    static_fall = static.max_fall if static is not None else None
-    l6_max = dynamic.l6_max_cll
-    l6_fall = dynamic.l6_max_fall
-    # A matching static value adds no information.  Compare each component
-    # independently so partial L6 facts remain useful.
-    keep_max = l6_max is not None and l6_max != static_max
-    keep_fall = l6_fall is not None and l6_fall != static_fall
-    l6_groups: list[str] = []
-    if keep_max and l6_max is not None and keep_fall and l6_fall is not None:
-        l6_groups.append(f"MaxCLL/FALL {_number(l6_max)}/{_number(l6_fall)} nits")
-    elif keep_max and l6_max is not None:
-        l6_groups.append(f"MaxCLL {_number(l6_max)} nits")
-    elif keep_fall and l6_fall is not None:
-        l6_groups.append(f"MaxFALL {_number(l6_fall)} nits")
-    if l6_groups:
-        lines.append(f"DV L6: {' • '.join(l6_groups)}")
     return lines
 
 

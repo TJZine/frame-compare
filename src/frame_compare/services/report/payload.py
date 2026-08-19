@@ -17,7 +17,6 @@ from frame_compare.services.errors import ReportError
 from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.media_facts import (
     ActivePictureFacts,
-    ExactFrameDolbyVisionFacts,
     PresentationState,
     RenderedFrameFacts,
     RenderedGeometryFacts,
@@ -74,15 +73,6 @@ class ReportActivePicturePayload(TypedDict):
     is_full_frame: bool
 
 
-class ReportDolbyVisionPayload(TypedDict):
-    source_frame: int
-    l1_maximum_nits: float | None
-    l1_average_nits: float | None
-    l2_target_nits: float | None
-    l6_max_cll: int | None
-    l6_max_fall: int | None
-
-
 class ReportClipPayload(TypedDict):
     name: str
     label: str
@@ -100,7 +90,6 @@ class ReportImagePayload(TypedDict):
     src: str
     source_frame: int
     picture_type: str | None
-    dolby_vision: ReportDolbyVisionPayload | None
 
 
 class ReportFramePayload(TypedDict):
@@ -160,7 +149,6 @@ class ReportIdentityImagePayload(TypedDict):
     clip: str
     source_frame: int
     picture_type: str | None
-    dolby_vision: ReportDolbyVisionPayload | None
 
 
 class ReportIdentityFramePayload(TypedDict):
@@ -375,7 +363,6 @@ def build_frame_payloads(
                     ),
                     "source_frame": image.source_frame,
                     "picture_type": image.facts.picture_type,
-                    "dolby_vision": _dolby_vision_payload(image.facts.dolby_vision),
                 }
             )
         frames.append(
@@ -451,7 +438,6 @@ def build_report_identity_frames(
                     "clip": image["clip"],
                     "source_frame": image["source_frame"],
                     "picture_type": image["picture_type"],
-                    "dolby_vision": image["dolby_vision"],
                 }
                 for image in frame["images"]
             ],
@@ -576,21 +562,6 @@ def _active_picture_payload(active: ActivePictureFacts) -> ReportActivePicturePa
         "height": active.height,
         "provenance": active.provenance,
         "is_full_frame": active.is_full_frame,
-    }
-
-
-def _dolby_vision_payload(
-    facts: ExactFrameDolbyVisionFacts | None,
-) -> ReportDolbyVisionPayload | None:
-    if facts is None:
-        return None
-    return {
-        "source_frame": facts.source_frame,
-        "l1_maximum_nits": facts.l1_maximum_nits,
-        "l1_average_nits": facts.l1_average_nits,
-        "l2_target_nits": facts.l2_target_nits,
-        "l6_max_cll": facts.l6_max_cll,
-        "l6_max_fall": facts.l6_max_fall,
     }
 
 

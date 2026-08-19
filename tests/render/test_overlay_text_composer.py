@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
-
 import pytest
 
 from frame_compare.config.schema_enums import OverlayMode
@@ -9,7 +7,6 @@ from frame_compare.render.overlay_text import compose_overlay_text_lines, format
 from frame_compare.render.types import OverlayConfig
 from frame_compare.utils.media_facts import (
     ActivePictureFacts,
-    ExactFrameDolbyVisionFacts,
     HDRStaticFacts,
     PictureType,
     PresentationState,
@@ -73,12 +70,10 @@ def _lines(
     config: OverlayConfig,
     *,
     picture_type: PictureType | None = "B",
-    dv: ExactFrameDolbyVisionFacts | None = None,
 ) -> list[str]:
     facts = RenderedFrameFacts(
         source_frame=config.source_frame,
         picture_type=picture_type,
-        dolby_vision=dv,
     )
     return compose_overlay_text_lines(config, facts)
 
@@ -159,9 +154,9 @@ def test_required_diagnostic_hdr_example() -> None:
     ]
 
 
-def test_required_diagnostic_dv_examples_and_l6_suppression() -> None:
+def test_required_diagnostic_dv_source_facts() -> None:
     config = _hdr_config(dovi=True)
-    base = [
+    assert _lines(config, picture_type="B") == [
         "UHD Blu-ray",
         "Comparison 1842 → source 1855/143892 • B-frame",
         "Selection: Bright",
@@ -171,12 +166,6 @@ def test_required_diagnostic_dv_examples_and_l6_suppression() -> None:
         "Tonemap: BT.2390 → 100 nits",
         "HDR static: MDL 0.005–1000 nits • MaxCLL/FALL 982/244",
     ]
-    duplicate_l6 = ExactFrameDolbyVisionFacts(1855, 536, 24.1, 800, 982, 244)
-    assert _lines(config, dv=duplicate_l6) == base + [
-        "DV frame: L1 max/avg 536/24.1 nits • L2 target 800 nits"
-    ]
-    differing_l6 = replace(duplicate_l6, l6_max_cll=900, l6_max_fall=300)
-    assert _lines(config, dv=differing_l6)[-1] == "DV L6: MaxCLL/FALL 900/300 nits"
 
 
 def test_none_mode_has_no_lines() -> None:

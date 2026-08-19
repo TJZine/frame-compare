@@ -4,8 +4,6 @@ import pytest
 
 from frame_compare.utils.media_facts import (
     ActivePictureFacts,
-    ExactFrameDolbyVisionFacts,
-    RenderedFrameFacts,
     RenderedGeometryFacts,
     normalize_picture_type,
 )
@@ -17,16 +15,6 @@ from frame_compare.utils.media_facts import (
 )
 def test_normalize_picture_type(value: object, expected: str | None) -> None:
     assert normalize_picture_type(value) == expected
-
-
-def test_exact_dolby_vision_facts_require_matching_frame_and_observed_value() -> None:
-    with pytest.raises(ValueError, match="dynamic value"):
-        ExactFrameDolbyVisionFacts(source_frame=2)
-    with pytest.raises(ValueError, match="same source frame"):
-        RenderedFrameFacts(
-            source_frame=2,
-            dolby_vision=ExactFrameDolbyVisionFacts(source_frame=3, l1_maximum_nits=1000),
-        )
 
 
 def test_geometry_contains_active_picture_and_is_immutable() -> None:

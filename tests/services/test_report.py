@@ -32,7 +32,6 @@ from frame_compare.services.report.payload import (
 from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.media_facts import (
     ActivePictureFacts,
-    ExactFrameDolbyVisionFacts,
     PresentationState,
     RenderedFrameFacts,
     RenderedGeometryFacts,
@@ -72,16 +71,11 @@ def _clip(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"fake_png_data")
         source_frame = 10 + index + source_frame_offset
-        dovi = (
-            ExactFrameDolbyVisionFacts(source_frame, l1_maximum_nits=1000.0)
-            if dolby_vision
-            else None
-        )
         images.append(
             ReportImageInfo(
                 path=path,
                 source_frame=source_frame,
-                facts=RenderedFrameFacts(source_frame, "B", dovi),
+                facts=RenderedFrameFacts(source_frame, "B"),
             )
         )
     return ClipInfo(
@@ -231,7 +225,6 @@ def test_report_payload_v11_raw_values_and_comparison_semantics(
     assert payload["frames"][0]["images"][0]["source_frame"] == 10
     assert payload["frames"][0]["images"][0]["picture_type"] == "B"
     assert payload["frames"][0]["images"][1]["source_frame"] == 11
-    assert payload["frames"][0]["images"][1]["dolby_vision"]["source_frame"] == 11
     assert payload["rendering"]["tonemap"]["applied"] is True
     assert payload["rendering"]["geometry_by_label"]["CLIP2"] == {
         "source_size": (1920, 1080),

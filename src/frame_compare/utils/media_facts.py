@@ -111,50 +111,21 @@ class RenderedGeometryFacts:
 
 
 @dataclass(frozen=True, slots=True)
-class ExactFrameDolbyVisionFacts:
-    """Proven exact-source-frame Dolby Vision dynamic metadata."""
-
-    source_frame: int
-    l1_maximum_nits: float | None = None
-    l1_average_nits: float | None = None
-    l2_target_nits: float | None = None
-    l6_max_cll: int | None = None
-    l6_max_fall: int | None = None
-
-    def __post_init__(self) -> None:
-        if self.source_frame < 0:
-            raise ValueError("source_frame must be non-negative")
-        dynamic_values = (
-            self.l1_maximum_nits,
-            self.l1_average_nits,
-            self.l2_target_nits,
-            self.l6_max_cll,
-            self.l6_max_fall,
-        )
-        if all(value is None for value in dynamic_values):
-            raise ValueError("exact-frame Dolby Vision facts require a dynamic value")
-
-
-@dataclass(frozen=True, slots=True)
 class RenderedFrameFacts:
     """Facts collected from one exact original source frame."""
 
     source_frame: int
     picture_type: PictureType | None = None
-    dolby_vision: ExactFrameDolbyVisionFacts | None = None
 
     def __post_init__(self) -> None:
         if self.source_frame < 0:
             raise ValueError("source_frame must be non-negative")
-        if self.dolby_vision is not None and self.dolby_vision.source_frame != self.source_frame:
-            raise ValueError("Dolby Vision facts must describe the same source frame")
 
 
 __all__ = [
     "ActivePictureFacts",
     "ActivePictureProvenance",
     "ColorRange",
-    "ExactFrameDolbyVisionFacts",
     "HDRStaticFacts",
     "PictureType",
     "PresentationState",
