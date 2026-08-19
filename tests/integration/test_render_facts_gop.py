@@ -51,6 +51,9 @@ def test_deterministic_gop_picture_facts_match_vs_and_ffmpeg(tmp_path: Path) -> 
     if b"libx264" not in encoders.stdout:
         pytest.skip("ffmpeg libx264 encoder unavailable")
 
+    # Adaptive B-frame placement is disabled intentionally: I/P/B presence is
+    # a fixture invariant, so missing B after a successful libx264 encode is a
+    # test failure rather than an environment skip.
     fixture = tmp_path / "gop.mkv"
     run_subprocess(
         [
@@ -70,6 +73,8 @@ def test_deterministic_gop_picture_facts_match_vs_and_ffmpeg(tmp_path: Path) -> 
             "4",
             "-bf",
             "1",
+            "-b_strategy",
+            "0",
             "-sc_threshold",
             "0",
             "-pix_fmt",
