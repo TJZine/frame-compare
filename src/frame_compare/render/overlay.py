@@ -8,6 +8,25 @@ from frame_compare.render.overlay_text import compose_overlay_text_lines
 from frame_compare.render.types import OverlayConfig
 from frame_compare.utils.media_facts import RenderedFrameFacts
 
+type Font = ImageFont.ImageFont | ImageFont.FreeTypeFont
+
+_FILL = (255, 255, 255)
+_STROKE_FILL = (0, 0, 0)
+_STROKE_WIDTH = 2
+_ASCII_GLYPH_FALLBACKS = {"•": "|", "→": "->", "×": "x", "–": "-"}
+_DEFAULT_FONT_CANDIDATES = (
+    "segoeui.ttf",
+    "Arial.ttf",
+    "arial.ttf",
+    "Tahoma.ttf",
+    "tahoma.ttf",
+    "Calibri.ttf",
+    "calibri.ttf",
+    "Verdana.ttf",
+    "verdana.ttf",
+    "DejaVuSans.ttf",
+)
+
 
 def apply_overlay(
     image: Image.Image,
@@ -19,47 +38,42 @@ def apply_overlay(
     if not lines:
         return image
     font = _load_font(config)
-    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
+    draw = ImageDraw.Draw(image)
     x, y = config.origin or (10, 10)
-    spacing = max(4, config.font_size // 5)
-    text = "\n".join(lines)
-    bounds = draw.multiline_textbbox((x, y), text, font=font, spacing=spacing)
-    padding = max(4, config.font_size // 4)
-    draw.rounded_rectangle(
-        (
-            bounds[0] - padding,
-            bounds[1] - padding,
-            bounds[2] + padding,
-            bounds[3] + padding,
-        ),
-        radius=padding,
-        fill=(0, 0, 0, 180),
-    )
+    text = _display_text("\n".join(lines), font)
     draw.multiline_text(
         (x, y),
         text,
         font=font,
-        fill=(255, 255, 255),
-        spacing=spacing,
-        stroke_width=1,
-        stroke_fill=(0, 0, 0),
+        fill=_FILL,
+        stroke_width=_STROKE_WIDTH,
+        stroke_fill=_STROKE_FILL,
     )
-
-    composited = Image.alpha_composite(image.convert("RGBA"), overlay)
-    if image.mode != "RGBA":
-        composited = composited.convert(image.mode)
-    image.paste(composited)
     return image
 
 
-def _load_font(config: OverlayConfig) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+def _load_font(config: OverlayConfig) -> Font:
     if config.font_path is not None:
-        return ImageFont.truetype(str(config.font_path), config.font_size)
-    try:
-        return ImageFont.truetype("DejaVuSans.ttf", config.font_size)
-    except OSError:
-        return ImageFont.load_default(size=config.font_size)
+        try:
+            return ImageFont.truetype(str(config.font_path), config.font_size)
+        except OSError:
+            pass
+    for font_name in _DEFAULT_FONT_CANDIDATES:
+        try:
+            return ImageFont.truetype(font_name, config.font_size)
+        except OSError:
+            continue
+    return ImageFont.load_default(size=config.font_size)
+
+
+def _display_text(text: str, font: Font) -> str:
+    missing_glyph = (font.getbbox("\u0378"), font.getlength("\u0378"))
+    replacements = {
+        ord(glyph): fallback
+        for glyph, fallback in _ASCII_GLYPH_FALLBACKS.items()
+        if (font.getbbox(glyph), font.getlength(glyph)) == missing_glyph
+    }
+    return text.translate(replacements)
 
 
 __all__ = ["apply_overlay"]
