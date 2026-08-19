@@ -220,6 +220,25 @@ def test_distribution_verifier_rejects_corrupted_bundled_font(
     assert "bundled Inter font SHA-256 mismatch" in result.stderr
 
 
+def test_distribution_verifier_rejects_truncated_bundled_license(
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    _write_wheel(tmp_path)
+    _write_sdist(tmp_path)
+    wheel = tmp_path / "frame_compare-0.1.0-py3-none-any.whl"
+    _replace_wheel_member(
+        wheel,
+        "frame_compare/assets/fonts/Inter-OFL.txt",
+        "SIL OPEN FONT LICENSE Version 1.1\n",
+    )
+
+    result = _run_verifier(repo_root, tmp_path)
+
+    assert result.returncode != 0
+    assert "bundled Inter OFL notice is invalid" in result.stderr
+
+
 def test_distribution_verifier_rejects_payload_modified_after_record_generation(
     tmp_path: Path,
     repo_root: Path,

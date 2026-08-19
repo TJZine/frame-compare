@@ -19,11 +19,11 @@ from typing import NoReturn
 EXPECTED_NAME = "frame-compare"
 EXPECTED_LICENSE = "GPL-3.0-only"
 EXPECTED_BUNDLED_FONT_SHA256 = "40d692fce188e4471e2b3cba937be967878f631ad3ebbbdcd587687c7ebe0c82"
+EXPECTED_BUNDLED_LICENSE_SHA256 = "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a"
 _BUNDLED_FONT_WHEEL_PATH = "frame_compare/assets/fonts/Inter-Regular.ttf"
 _BUNDLED_LICENSE_WHEEL_PATH = "frame_compare/assets/fonts/Inter-OFL.txt"
 _BUNDLED_FONT_SDIST_SUFFIX = "/src/frame_compare/assets/fonts/Inter-Regular.ttf"
 _BUNDLED_LICENSE_SDIST_SUFFIX = "/src/frame_compare/assets/fonts/Inter-OFL.txt"
-_BUNDLED_LICENSE_MARKER = b"SIL OPEN FONT LICENSE Version 1.1"
 FORBIDDEN_PARTS = {
     ".git",
     ".hg",
@@ -54,7 +54,8 @@ def _verify_bundled_font(data: bytes, *, artifact: Path) -> None:
 
 
 def _verify_bundled_font_license(data: bytes, *, artifact: Path) -> None:
-    if _BUNDLED_LICENSE_MARKER not in data:
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != EXPECTED_BUNDLED_LICENSE_SHA256:
         _fail(f"{artifact.name} bundled Inter OFL notice is invalid")
 
 
