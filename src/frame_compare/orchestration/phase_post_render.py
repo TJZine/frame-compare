@@ -177,7 +177,7 @@ async def run_publish_phase(
 
 
 def run_confirm_slowpics_upload_phase(
-    _ctx: RunContext,
+    ctx: RunContext,
     *,
     report_path: Path | None,
     report_succeeded: bool,
@@ -206,7 +206,16 @@ def run_confirm_slowpics_upload_phase(
             ),
         )
 
-    decision = confirm_slowpics_upload(SlowpicsUploadConfirmationRequest(report_path=report_path))
+    progress = ctx.reporter
+    if progress is not None:
+        progress.suspend()
+    try:
+        decision = confirm_slowpics_upload(
+            SlowpicsUploadConfirmationRequest(report_path=report_path)
+        )
+    finally:
+        if progress is not None:
+            progress.resume()
     return ConfirmSlowpicsUploadPhaseOutput(status=decision)
 
 

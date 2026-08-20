@@ -47,6 +47,7 @@ class Phase:
     status: PhaseStatus = PhaseStatus.PENDING
     warn_only: bool = False
     fatal_exceptions: tuple[type[BaseException], ...] = ()
+    retain_on_success: bool | None = None
 
     @property
     def progress_label(self) -> str:
@@ -107,4 +108,10 @@ async def execute_phases(
             phase.status = PhaseStatus.COMPLETED
             reporter.advance(1)
         finally:
-            reporter.complete_phase(phase_progress_status)
+            if phase.retain_on_success is None:
+                reporter.complete_phase(phase_progress_status)
+            else:
+                reporter.complete_phase(
+                    phase_progress_status,
+                    retain=phase.retain_on_success,
+                )

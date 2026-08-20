@@ -2,6 +2,9 @@
 
 from concurrent.futures import ThreadPoolExecutor
 
+import pytest
+
+import frame_compare.utils.progress as progress_module
 from frame_compare.utils.progress import (
     LogProgressReporter,
     NullProgressReporter,
@@ -149,6 +152,109 @@ def test_rich_progress_reporter_warned_phase_does_not_force_total(
 
     assert {"description": "Warning", "refresh": True} in update_calls
     assert {"completed": 10, "refresh": True} not in update_calls
+
+
+def test_rich_progress_reporter_does_not_retain_success_below_ten_seconds(
+    monkeypatch,
+) -> None:
+    reporter = RichProgressReporter()
+    durable_lines: list[str] = []
+    clock = iter((0.0, 9.9))
+    monkeypatch.setattr(progress_module, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(
+        reporter._progress.console,  # noqa: SLF001
+        "print",
+        lambda value=None, **_: (durable_lines.append(str(value)) if value is not None else None),
+    )
+
+    reporter.start_phase("PLAN", 1)
+    reporter.complete_phase()
+
+    assert durable_lines == []
+
+
+def test_rich_progress_reporter_retain_success_at_ten_seconds(
+    monkeypatch,
+) -> None:
+    reporter = RichProgressReporter()
+    durable_lines: list[str] = []
+    clock = iter((0.0, 10.0))
+    monkeypatch.setattr(progress_module, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(
+        reporter._progress.console,  # noqa: SLF001
+        "print",
+        lambda value=None, **_: (durable_lines.append(str(value)) if value is not None else None),
+    )
+
+    reporter.start_phase("PLAN", 1)
+    reporter.complete_phase()
+
+    assert durable_lines == ["[OK] PLAN"]
+
+
+def test_rich_progress_reporter_explicitly_retains_short_success(
+    monkeypatch,
+) -> None:
+    reporter = RichProgressReporter()
+    durable_lines: list[str] = []
+    clock = iter((0.0, 0.1))
+    monkeypatch.setattr(progress_module, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(
+        reporter._progress.console,  # noqa: SLF001
+        "print",
+        lambda value=None, **_: (durable_lines.append(str(value)) if value is not None else None),
+    )
+
+    reporter.start_phase("PUBLISH", 1)
+    reporter.complete_phase(retain=True)
+
+    assert durable_lines == ["[OK] PUBLISH"]
+
+
+def test_rich_progress_reporter_suppresses_generic_confirm_completion(
+    monkeypatch,
+) -> None:
+    reporter = RichProgressReporter()
+    durable_lines: list[str] = []
+    clock = iter((0.0, 10.0))
+    monkeypatch.setattr(progress_module, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(
+        reporter._progress.console,  # noqa: SLF001
+        "print",
+        lambda value=None, **_: (durable_lines.append(str(value)) if value is not None else None),
+    )
+
+    reporter.start_phase("CONFIRM", 1)
+    reporter.complete_phase(retain=False)
+
+    assert durable_lines == []
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        (ProgressPhaseStatus.SKIPPED, "[SKIP] ANALYZE"),
+        (ProgressPhaseStatus.WARNED, "[WARN] ALIGN"),
+        (ProgressPhaseStatus.FAILED, "[FAIL] RENDER"),
+    ],
+)
+def test_rich_progress_reporter_retains_non_success_statuses(
+    status: ProgressPhaseStatus,
+    expected: str,
+    monkeypatch,
+) -> None:
+    reporter = RichProgressReporter()
+    durable_lines: list[str] = []
+    monkeypatch.setattr(
+        reporter._progress.console,  # noqa: SLF001
+        "print",
+        lambda value=None, **_: (durable_lines.append(str(value)) if value is not None else None),
+    )
+
+    reporter.start_phase(expected.split(maxsplit=1)[1], 1)
+    reporter.complete_phase(status)
+
+    assert durable_lines == [expected]
 
 
 def test_rich_progress_reporter_refreshes_state_changes(monkeypatch) -> None:

@@ -434,6 +434,17 @@ unchanged.
   `RENDER`, `METADATA`, `PUBLISH`, `REPORT`, `CONFIRM`, and `CLEANUP`.
   Internal phase names in logs and `phase_timings` remain the runtime keys such
   as `frame_plan`, `analyze`, `align`, and `confirm_slowpics_upload`.
+- Every Rich phase remains live while active. A successful phase leaves a durable
+  ASCII status line when it runs for at least 10.0 seconds, while skipped,
+  warned, and failed phases always remain visible. A successful slow.pics upload
+  also leaves a durable `PUBLISH` line regardless of duration. The report-confirmed
+  prompt is the durable `[WAIT] CONFIRM` record; it does not add a redundant
+  generic successful completion line. Progress is suspended around that blocking
+  prompt and restored afterward.
+- The known slow.pics upload start/complete lifecycle events are DEBUG evidence in
+  normal TTY runs because the product progress stream already represents the same
+  lifecycle. Retry, rate-limit, server, timeout, and network warnings remain
+  normal warning events.
 - `--no-color` disables ANSI color in interactive Rich progress output. It does
   not switch an interactive human run to structlog progress. It also disables
   ANSI styling for the previous-offset reuse table and prompt. Quiet and JSON

@@ -422,7 +422,7 @@ def build_confirm_slowpics_upload_callback(
         if not opened:
             console.print(f"Report: {escape(str(request.report_path))}", soft_wrap=True)
         if deps.confirm_upload(
-            "Review the local report, then upload this comparison to slow.pics?",
+            "[WAIT] CONFIRM Review the local report, then upload this comparison to slow.pics?",
             default=False,
         ):
             return "confirmed"

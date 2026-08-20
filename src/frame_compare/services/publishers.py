@@ -124,7 +124,7 @@ class SlowpicsPublisher:
         _validate_upload_files(files)
 
         visibility = self.config.visibility
-        log.info(
+        log.debug(
             "slowpics_upload_start",
             file_count=len(files),
             title=collection_metadata.title,
@@ -149,7 +149,7 @@ class SlowpicsPublisher:
             )
             url_key = metadata_response.first_comparison_key or metadata_response.key
             url = f"{SLOWPICS_BASE_URL}/c/{url_key}"
-            log.info("slowpics_upload_complete")
+            log.debug("slowpics_upload_complete")
             return url
 
         except Exception as exc:
@@ -493,7 +493,7 @@ async def publish_to_slowpics(
         upload_progress_status = ProgressPhaseStatus.COMPLETED
     finally:
         if progress is not None:
-            progress.complete_phase(upload_progress_status)
+            progress.complete_phase(upload_progress_status, retain=False)
 
     duration = monotonic() - start_time
 

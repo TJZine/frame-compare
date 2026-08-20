@@ -75,7 +75,11 @@ def _create_timed_phase(
     warn_only: bool = False,
     fatal_exceptions: tuple[type[BaseException], ...] = (),
     progress_total: int = 1,
+    retain_on_success: bool | None = None,
+    retain_if: Callable[[PhaseOutput], bool] | None = None,
 ) -> Phase:
+    phase: Phase | None = None
+
     async def _execute(ctx: RunContext) -> None:
         start = monotonic_timer()
         try:
@@ -85,6 +89,10 @@ def _create_timed_phase(
             else:
                 output = maybe_awaitable
             apply_phase_output(ctx=ctx, state=state, output=output)
+            if retain_if is not None:
+                if phase is None:
+                    raise RuntimeError("timed phase was not initialized")
+                phase.retain_on_success = retain_if(output)
         except Exception as exc:
             if warn_only:
                 warnings.append(f"{name}: {exc}")
@@ -93,14 +101,16 @@ def _create_timed_phase(
         finally:
             phase_timings[timing_key] = max(0.0, monotonic_timer() - start)
 
-    return Phase(
+    phase = Phase(
         name=name,
         execute=_execute,
         skip_condition=skip_condition,
         progress_total=progress_total,
         warn_only=warn_only,
         fatal_exceptions=fatal_exceptions,
+        retain_on_success=retain_on_success,
     )
+    return phase
 
 
 def build_phases_before_align(
@@ -247,13 +257,23 @@ def build_phases_after_align(
     publish_phase = _create_timed_phase(
         "publish",
         "publish",
-        lambda config: not config.slowpics.auto_upload,
+        lambda config: (
+            not config.slowpics.auto_upload
+            or http_client is None
+            or (
+                _requires_report_confirmed_slowpics(config)
+                and state.artifacts.slowpics_upload_confirmation_status != "confirmed"
+            )
+        ),
         _run_publish_with_current_artifacts,
         state=state,
         monotonic_timer=monotonic_timer,
         phase_timings=state.phase_timings,
         warnings=state.warnings,
         warn_only=True,
+        retain_if=lambda output: (
+            isinstance(output, PublishPhaseOutput) and output.slowpics_url is not None
+        ),
     )
     report_phase = _create_timed_phase(
         "report",
@@ -275,6 +295,7 @@ def build_phases_after_align(
         monotonic_timer=monotonic_timer,
         phase_timings=state.phase_timings,
         warnings=state.warnings,
+        retain_on_success=False,
     )
     post_report_cleanup_phase = _create_timed_phase(
         "post_report_cleanup",

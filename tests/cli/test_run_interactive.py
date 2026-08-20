@@ -190,7 +190,9 @@ def test_confirmation_callback_opens_report_before_prompt_and_defaults_decline()
 
     def _confirm_upload(text: str, *, default: bool) -> bool:
         assert opened == [Path("report.html")]
-        assert text == "Review the local report, then upload this comparison to slow.pics?"
+        assert text == (
+            "[WAIT] CONFIRM Review the local report, then upload this comparison to slow.pics?"
+        )
         assert default is False
         return True
 
