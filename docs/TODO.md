@@ -21,10 +21,20 @@ search:
 and Rich progress presentation. Redirected and CI human output still uses the
 existing log-oriented progress path; JSON remains the automation contract.
 
-**What**: Add automatic chronological text output for redirected or CI human runs,
-without live redraws or spinners. Reuse the current run-plan, source, phase, and
-result information hierarchy. Do not add a `--plain` flag by default and do not
-change JSON output.
+**What**: For non-JSON, non-quiet redirected or CI human runs, replace the existing
+user-facing log-progress milestones with automatic chronological text output without
+live redraws or spinners. Keep the current run-plan, source, and result renderers and
+their stream ownership; do not emit both log-progress milestones and chronological
+phase lines.
+
+**Acceptance criteria**:
+
+- Emit each run-plan, source, phase, warning, and result fact at most once.
+- Keep `run --json` output, schema, stderr behavior, and reporter selection unchanged.
+- Preserve `--quiet`, exit codes, prompt eligibility, and interactive TTY behavior.
+- Do not add a default `--plain` flag.
+- Update the authoritative CLI contract in the implementation pass that changes the
+  current non-TTY human behavior.
 
 **Risk**: Touches orchestration progress selection and user-visible CLI streams.
 Preserve JSON/stdout purity, quiet behavior, exit codes, and TTY prompt handling;

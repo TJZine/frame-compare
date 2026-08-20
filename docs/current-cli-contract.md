@@ -439,8 +439,8 @@ unchanged.
   reusing previous offsets (prompt)`, or `reuse previous offsets when valid
   (always)`.
 - The `analysis mode` row reports the effective `analysis.performance_mode` as
-  `quality` or `performance` and appends ` (skipped for this run)` when
-  `--skip-analysis` is active.
+  `quality` or `performance` and appends a space followed by
+  `(skipped for this run)` when `--skip-analysis` is active.
 - The Run plan workspace paths show `root`, `config`, `input`, and the resolved
   `generated` data root. The constant run-folder policy and derived screenshot path
   are not configuration rows.
