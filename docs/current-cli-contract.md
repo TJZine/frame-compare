@@ -1309,15 +1309,20 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   authored string after confirmation. The wizard does not check availability,
   writability, create, or probe this location while saving configuration.
 - Its goals are `Random spot check` (10 seeded random frames, no metrics scan),
-  `Dark, bright, and motion coverage` (4 random plus 2 each dark, bright, and motion
-  frames in full-resolution `quality` mode), and `Specific frame numbers` (1–100
-  sorted unique non-negative frame numbers, no metrics scan). Existing configs also
-  offer a default `Keep current frame selection` no-op.
+  `Visual coverage` (4 random plus 2 each dark, bright, and motion frames in
+  full-resolution `quality` mode), and `Specific frame numbers` (1–100 sorted unique
+  non-negative frame numbers, no metrics scan). Existing configs also offer a default
+  `Keep current frame selection` no-op. The initial choices are concise; after choosing
+  visual coverage, the wizard explains that its quality scan is slower and may take
+  longer.
 - It discovers supported filenames through the canonical deterministic discovery and
   source-selection owners without reading, hashing, opening, or probing media. The
-  input directory may be external. Zero files preserve reference selection; duplicate
-  stems fail before the reference prompt; automatic reference removes an explicit
-  reference key; explicit filename selection is canonically revalidated.
+  input directory may be external. Small source sets may be shown inline; larger sets
+  report their count before the reference choices without a duplicate filename dump.
+  The reference menu remains a simple numbered list without paging, search, or fuzzy
+  selection. Zero files preserve reference selection; duplicate stems fail before the
+  reference prompt; automatic reference removes an explicit reference key; explicit
+  filename selection is canonically revalidated.
 - First use starts from schema defaults and writes only the confirmed partial payload,
   including the authored `paths.generated_dir` value and
   `slowpics.auto_upload = false`. Environment values still have higher
@@ -1332,7 +1337,8 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   Environment-only values are neither displayed nor persisted. Wizard validation
   errors redact every raw Pydantic input.
 - Before writing, the wizard validates the complete candidate through the shared
-  config/preflight path policy and shows a semantic review containing changed/new
+  config/preflight path policy and shows a semantic review grouped into `Changes`,
+  `Runtime impact`, `Privacy`, and `Preserved settings`. It includes changed/new
   input, generated-data location, reference, and frame-selection facts, the
   metrics-scan consequence, and privacy/preservation statements, including explicit
   notice when a persisted webhook URL will be removed. It never displays secret

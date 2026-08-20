@@ -56,10 +56,13 @@ def test_first_use_writes_random_goal_minimal_payload_and_honest_privacy_copy(
         assert (
             result.stdout.index("Input directory")
             < result.stdout.index("Generated data location")
-            < result.stdout.index("What do you want to compare?")
+            < result.stdout.index("How should frames be selected?")
         )
         assert "durable comparison folders and reusable caches" in result.stdout
-        assert "10 deterministic random frames using the configured seed" in result.stdout
+        assert "1. Random spot check" in result.stdout
+        assert "2. Visual coverage" in result.stdout
+        assert "3. Specific frame numbers" in result.stdout
+        assert "Dark, bright, and motion coverage" not in result.stdout
         assert "file default disabled; environment may override at run time" in result.stdout
         assert "Configuration written" in result.stderr
         payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
@@ -231,8 +234,35 @@ def test_first_use_multiple_files_uses_canonical_order_and_coverage_patch(
             "motion_frame_count": 2,
             "performance_mode": "quality",
         }
-        assert "scans full-resolution luma" in result.stdout
+        assert "Visual coverage runs a slower quality scan" in result.stdout
         assert "Metric scan: quality" in result.stdout
+        sections = [
+            result.stdout.index("Changes"),
+            result.stdout.index("Runtime impact"),
+            result.stdout.index("Privacy"),
+            result.stdout.index("Preserved settings"),
+        ]
+        assert sections == sorted(sections)
+
+
+def test_large_source_set_reports_count_before_reference_menu_without_duplicate_dump(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
+        root, config_path = _workspace()
+        input_dir = root / "comparison_videos"
+        for index in range(12):
+            (input_dir / f"clip-{index:02d}.mkv").touch()
+
+        result = _invoke(root, "\n\n2\n1\ny\n")
+
+        assert result.exit_code == 0
+        before_reference = result.stdout.split("Reference:", maxsplit=1)[0]
+        assert "Found 12 video files; reference choices are listed below." in before_reference
+        assert "clip-00.mkv" not in before_reference
+        assert "Found 12 video files: " not in result.stdout
+        assert "clip-11.mkv" in result.stdout
+        assert config_path.exists()
 
 
 def test_existing_config_preserves_raw_values_but_strips_generated_secrets(
@@ -294,6 +324,8 @@ name = "first"
         assert "Publishing settings: preserved except webhook URL" in result.stdout
         assert "Webhook URL: removed from generated configuration" in result.stdout
         assert "TMDB API key: removed from generated configuration" in result.stdout
+        assert "Privacy" in result.stdout
+        assert "Preserved settings" in result.stdout
 
 
 def test_existing_config_ignores_environment_only_values_during_review(
@@ -387,6 +419,7 @@ def test_existing_keep_is_true_noop_without_confirmation_or_write(
         result = _invoke(root, "\n\n\n")
 
         assert result.exit_code == 0
+        assert "0. Keep current frame selection" in result.stdout
         assert "Write these changes?" not in result.stdout
         assert "No configuration changes. Configuration was not written." in result.stderr
         assert config_path.read_bytes() == original
