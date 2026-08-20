@@ -469,12 +469,20 @@ def test_execute_run_emits_reports_after_load_sources_and_after_align(
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
-    fps_calls: list[tuple[str, bool, tuple[str, ...]]] = []
-    alignment_calls: list[tuple[str, bool, bool, bool, tuple[int, ...]]] = []
+    fps_calls: list[tuple[str, bool, tuple[str, ...], Path, bool]] = []
+    alignment_calls: list[tuple[str, bool, bool, bool, tuple[int, ...], bool]] = []
 
-    def _record_emit(*, stage: str, no_color: bool, clips: Any, **_kwargs: Any) -> None:
+    def _record_emit(
+        *,
+        stage: str,
+        no_color: bool,
+        clips: Any,
+        input_dir: Path,
+        verbose: bool,
+        **_kwargs: Any,
+    ) -> None:
         clip_labels = tuple(clip.label for clip in clips)
-        fps_calls.append((stage, no_color, clip_labels))
+        fps_calls.append((stage, no_color, clip_labels, input_dir, verbose))
 
     def _record_alignment_emit(
         *,
@@ -483,6 +491,7 @@ def test_execute_run_emits_reports_after_load_sources_and_after_align(
         json_output: bool,
         quiet: bool,
         selected_frames: Any,
+        verbose: bool,
         **_kwargs: Any,
     ) -> None:
         alignment_calls.append(
@@ -492,6 +501,7 @@ def test_execute_run_emits_reports_after_load_sources_and_after_align(
                 json_output,
                 quiet,
                 tuple(cast(list[int], selected_frames)),
+                verbose,
             )
         )
 
@@ -501,12 +511,13 @@ def test_execute_run_emits_reports_after_load_sources_and_after_align(
     asyncio.run(execute_run(request, deps=deps))
 
     assert fps_calls == [
-        ("after_load_sources", True, ("comp", "source")),
-        ("after_align", True, ("comp", "source")),
+        ("after_load_sources", True, ("comp", "source"), tmp_path / "comparison_videos", False),
+        ("after_align", True, ("comp", "source"), tmp_path / "comparison_videos", False),
     ]
     assert len(alignment_calls) == 1
     assert alignment_calls[0][:4] == ("after_align", True, False, False)
     assert len(alignment_calls[0][4]) == 10
+    assert alignment_calls[0][5] is False
     assert all(isinstance(frame, int) for frame in alignment_calls[0][4])
 
 

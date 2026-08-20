@@ -25,7 +25,6 @@ PROMPT_UNAVAILABLE_MESSAGE = (
 )
 REUSE_PREVIOUS_OFFSETS_PROMPT = "Reuse previous preview-confirmed alignment offsets? [y/N]"
 _PROMPT_CONSOLE_WIDTH = 180
-_MIN_PROMPT_CONSOLE_WIDTH = 100
 
 __all__ = [
     "PROMPT_UNAVAILABLE_MESSAGE",
@@ -65,12 +64,12 @@ class PreviousOffsetPromptInput:
 
 
 def _console(*, no_color: bool) -> Console:
-    return Console(stderr=True, no_color=no_color, width=_prompt_console_width())
+    return Console(stderr=True, no_color=no_color, width=_prompt_console_width(), height=1000)
 
 
 def _prompt_console_width() -> int:
     columns = shutil.get_terminal_size(fallback=(_PROMPT_CONSOLE_WIDTH, 24)).columns
-    return min(max(columns, _MIN_PROMPT_CONSOLE_WIDTH), _PROMPT_CONSOLE_WIDTH)
+    return min(max(columns, 1), _PROMPT_CONSOLE_WIDTH)
 
 
 def _display_label(*, label: str, filename: str, stem: str) -> str:
@@ -124,7 +123,6 @@ def _render_previous_offsets_table(
         f"[dim]({escape(prompt_input.reference_filename)})[/]"
         "[/]",
     )
-    table.add_row("cache", f"[dim]{escape(str(prompt_input.shared_cache_path))}[/]")
     for row in prompt_input.rows:
         table.add_row("", "")
         display_label = _display_label(label=row.label, filename=row.filename, stem=row.stem)
@@ -138,6 +136,12 @@ def _render_previous_offsets_table(
         table.add_row("  accepted", f"[bright_white]{escape(row.accepted_at)}[/]")
         table.add_row("  file", f"[bright_white]{escape(row.filename)}[/]")
         table.add_row("  path", f"[dim]{escape(row.path)}[/]")
+    table.add_row("", "")
+    table.add_row(
+        "cache",
+        f"[dim]{escape(str(prompt_input.shared_cache_path.parent))}[/]",
+    )
+    table.add_row("  file", f"[dim]{escape(prompt_input.shared_cache_path.name)}[/]")
     return table
 
 

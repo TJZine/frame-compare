@@ -173,6 +173,8 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             json_output=request.json_output,
             quiet=request.quiet,
             no_color=request.no_color,
+            input_dir=context.workspace.input_dir,
+            verbose=request.verbose,
         )
         state.phase_timings["load_sources"] = max(
             0.0, local_deps.monotonic_timer() - prep.load_sources_start
@@ -216,6 +218,8 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             json_output=request.json_output,
             quiet=request.quiet,
             no_color=request.no_color,
+            input_dir=context.workspace.input_dir,
+            verbose=request.verbose,
         )
         emit_frame_alignment_report(
             stage="after_align",
@@ -230,6 +234,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             json_output=request.json_output,
             quiet=request.quiet,
             no_color=request.no_color,
+            verbose=request.verbose,
         )
         await execute_phases(phase_plan.after_align, context, reporter)
         duration_seconds = max(0.0, local_deps.monotonic_timer() - run_timer_start)

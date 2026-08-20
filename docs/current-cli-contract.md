@@ -373,6 +373,27 @@ unchanged.
   ranges, offsets, selected aligned frames, and rejected alignment warning context
   for comparisons with material alignment information. It is suppressed by
   `--quiet` and is never emitted to `run --json` stdout.
+- After sources load, normal human output begins the source summary with
+  `[OK] Sources loaded: N`. Its rows use `Reference` and `Comparison N` roles and
+  show each source's resolved label, resolution, source frame count, HDR/SDR
+  signal, source/effective FPS when they differ, complete container file size in
+  IEC units, and an input-relative path when the source is beneath the configured
+  input directory. External sources remain absolute. The displayed size comes
+  from the probed fingerprint's `size_bytes`; it is not bitrate or a quality
+  signal, and it is not added to successful `run --json`.
+- After alignment, normal human output emits one `[OK] Frame rates match: X` line
+  only when every effective FPS is equal and no source FPS was adjusted. Any
+  adjustment or effective-FPS divergence instead keeps a compact evidence table
+  with the source-to-effective transition and status. Normal post-alignment FPS
+  output omits repeated paths; `--verbose` retains the detailed rows and full
+  absolute paths. JSON-mode FPS diagnostics retain their existing structured
+  stderr event and do not add fields to the successful stdout payload.
+- Material `Frame Alignment` output puts comparison, offset, source, trim, and
+  warning evidence before verbose provenance details. Verbose mode also retains
+  row-zero source frames, selected aligned frames, and absolute source paths.
+  Source/FPS, alignment, and previous-offset prompt panels honor the actual
+  terminal width up to their existing maximum and do not impose a 100-column
+  minimum; status meaning remains visible in no-color output at narrow widths.
 - Verbose human runs emit a concise `Final Selection` summary to stderr immediately
   after alignment. It reports the final aligned frame count and each non-empty
   `SelectionBreakdown` category in `User`, `Dark`, `Bright`, `Motion`, `Random`
@@ -1160,10 +1181,12 @@ enabled.
   stdin is not a TTY, or EOF occurs while prompting, the CLI emits
   `Previous alignment offset reuse prompt unavailable; continuing without reuse.`
   to stderr and continues without reuse.
-- The previous-offset reuse table displays reference and comparison labels,
-  signed frame offset, time offset seconds, source label `confirmed`, the shared
-  cache path, and each entry's persisted `accepted_at` timestamp. It does not
-  derive freshness from file mtime or index mtime.
+- The previous-offset reuse table displays the reference and comparison labels,
+  signed frame offset, time offset seconds, and source label (`computed` or
+  `confirmed`) before the persisted `accepted_at` timestamp, filename, and full
+  path evidence. The shared cache directory and cache filename remain visible as
+  the final cache evidence rows. It does not derive freshness from file mtime or
+  index mtime.
 - Shared previous-offset entries live under
   `<resolved paths.generated_dir>/cache/alignment/`. This is shared generated-data
   cache state and does not live inside a fresh run folder.
