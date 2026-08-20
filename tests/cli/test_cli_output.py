@@ -52,8 +52,12 @@ def _workspace_path(*parts: str) -> Path:
     return Path(os.path.sep, "workspace", *parts)
 
 
-def _request(*, no_upload: bool = False) -> RunRequest:
-    return RunRequest(root=_workspace_path(), no_upload=no_upload)
+def _request(*, no_upload: bool = False, skip_analysis: bool = False) -> RunRequest:
+    return RunRequest(
+        root=_workspace_path(),
+        no_upload=no_upload,
+        skip_analysis=skip_analysis,
+    )
 
 
 def _missing_executable(_name: str) -> str:
@@ -82,36 +86,26 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
 
     output = _render(console)
     assert "Run plan" in output
-    assert "root" in output
-    assert str(_workspace_path()) in output
-    assert "config" in output
-    assert "config/config.toml" in output
-    assert "input" in output
-    assert "comparison_videos" in output
-    assert "generated" in output
+    assert str(_workspace_path()) in _rendered_row_value(output, "root")
+    assert str(Path("config") / "config.toml") in _rendered_row_value(output, "config")
+    assert "comparison_videos" in _rendered_row_value(output, "input")
+    assert "generated" in _rendered_row_value(output, "generated")
     assert "run folders" not in output
     assert "screenshots" not in output
     assert "requested" in output
     assert "user=0, random=10, dark=0, bright=0, motion=0" in output
     assert "seed" in output
-    assert "analysis mode" in output
     assert "quality" in _rendered_row_value(output, "analysis mode")
-    assert "FFmpeg audio" in output
-    assert "previous offsets" in output
-    assert "disabled" in output
-    assert "interactive alignment" in output
-    assert "force interactive" in output
+    assert "true" in _rendered_row_value(output, "FFmpeg audio")
+    assert "disabled" in _rendered_row_value(output, "previous offsets")
+    assert "false" in _rendered_row_value(output, "interactive alignment")
+    assert "false" in _rendered_row_value(output, "force interactive")
     assert "tone mapping" in output
     assert "reference" in output
-    assert "renderer" in output
-    assert "ffmpeg" in output
-    assert "slow.pics" in output
-    assert "visibility" in output
-    assert "public" in output
-    assert "report" in output
-    assert "auto-open" in output
-    assert "upload" in output
-    assert "disabled" in output
+    assert "ffmpeg" in _rendered_row_value(output, "renderer")
+    assert "disabled" in _rendered_row_value(output, "slow.pics")
+    assert "public" in _rendered_row_value(output, "visibility")
+    assert "auto-open=enabled" in _rendered_row_value(output, "report")
     assert "VSPreview" not in output
 
 
@@ -162,9 +156,16 @@ def test_at_a_glance_prints_previous_offsets_effective_mode(
     monkeypatch: MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
-    modes: tuple[Literal["disabled", "prompt", "always"], ...] = ("disabled", "prompt", "always")
+    cases: tuple[
+        tuple[Literal["disabled", "prompt", "always"], str],
+        ...,
+    ] = (
+        ("disabled", "[SKIP] do not reuse previous offsets (disabled)"),
+        ("prompt", "[WAIT] ask before reusing previous offsets (prompt)"),
+        ("always", "[OK] reuse previous offsets when valid (always)"),
+    )
 
-    for mode in modes:
+    for mode, expected in cases:
         config = _config()
         config.audio_alignment.previous_offsets = mode
         console = _console()
@@ -179,7 +180,7 @@ def test_at_a_glance_prints_previous_offsets_effective_mode(
 
         output = _render(console)
         previous_offsets_row = _rendered_row_value(output, "previous offsets")
-        assert mode in previous_offsets_row
+        assert expected in previous_offsets_row
 
 
 def test_at_a_glance_prints_effective_analysis_performance_mode(
@@ -201,6 +202,26 @@ def test_at_a_glance_prints_effective_analysis_performance_mode(
 
     analysis_mode_row = _rendered_row_value(_render(console), "analysis mode")
     assert "performance" in analysis_mode_row
+
+
+def test_at_a_glance_marks_analysis_mode_skipped_for_this_run(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    config = _config()
+    config.analysis.performance_mode = AnalysisPerformanceMode.PERFORMANCE
+    console = _console()
+    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
+
+    print_at_a_glance(
+        console,
+        request=_request(skip_analysis=True),
+        config=config,
+        root=_workspace_path(),
+        config_path=_workspace_path("config", "config.toml"),
+    )
+
+    analysis_mode_row = _rendered_row_value(_render(console), "analysis mode")
+    assert "performance (skipped for this run)" in analysis_mode_row
 
 
 def test_at_a_glance_preserves_literal_brackets_in_dynamic_paths(
@@ -344,24 +365,25 @@ def test_run_plan_preserves_all_material_settings(monkeypatch: MonkeyPatch) -> N
     )
 
     output = _render(console)
+    assert "99" in _rendered_row_value(output, "seed")
+    assert "performance" in _rendered_row_value(output, "analysis mode")
+    assert "diagnostic" in _rendered_row_value(output, "overlay")
+    assert "aligned" in _rendered_row_value(output, "geometry")
+    assert "auto" in _rendered_row_value(output, "active-picture policy")
+    assert "prompt" in _rendered_row_value(output, "previous offsets")
+    assert "auto-open=disabled" in _rendered_row_value(output, "report")
+    assert "unlisted" in _rendered_row_value(output, "visibility")
     for expected in (
         "Run plan",
         "Frame selection",
         "user=2, random=3, dark=2, bright=1, motion=4",
-        "99",
         "fastest",
-        "performance",
         "lead=2.5s, trail=4s",
         "Rendering",
-        "diagnostic",
-        "aligned",
-        "auto",
         "tone mapping",
         "previous offsets",
         "manual review",
         "report",
-        "auto-open=disabled",
-        "unlisted",
         "confirmation",
         "post-upload actions",
         "webhook=configured",
@@ -403,6 +425,24 @@ def test_run_plan_no_color_uses_native_wrapping_without_truncation(
     assert "[OK]" in output
 
 
+def test_run_plan_wraps_complete_key_labels_at_very_narrow_width(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    console = _console_at_width(24)
+    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
+
+    print_at_a_glance(
+        console,
+        request=_request(),
+        config=_config(),
+        root=_workspace_path(),
+        config_path=_workspace_path("config", "config.toml"),
+    )
+
+    compact_output = "".join(_render(console).replace("│", "").split())
+    assert "active-picturepolicy" in compact_output
+
+
 def test_result_summary_uses_result_hierarchy_and_relative_paths() -> None:
     console = _console()
     root = _workspace_path()
@@ -438,8 +478,10 @@ def test_result_summary_uses_result_hierarchy_and_relative_paths() -> None:
     assert output.index("report.html") < output.index("screenshots")
     assert "Published" in output
     assert "Follow-up actions" in output
-    assert "generated/run-1/report.html" in output
-    assert str(root / "generated" / "run-1" / "report.html") not in output
+    relative_report = Path("generated") / "run-1" / "report.html"
+    absolute_report = (root / relative_report).resolve()
+    assert str(relative_report) in output
+    assert str(absolute_report) not in output
 
 
 def test_verbose_path_presentation_adds_absolute_detail_and_keeps_external_absolute(
@@ -459,18 +501,21 @@ def test_verbose_path_presentation_adds_absolute_detail_and_keeps_external_absol
     )
 
     plan_output = _render(plan_console)
-    assert "config/config.toml" in plan_output
-    assert "(absolute: /workspace/config/config.toml)" in plan_output
+    relative_config = Path("config") / "config.toml"
+    absolute_config = (root / relative_config).resolve()
+    assert str(relative_config) in plan_output
+    assert f"(absolute: {absolute_config})" in plan_output
 
     normal_console = _console()
+    external_report = (root.parent / "outside" / "report.html").resolve()
     print_result_summary(
         normal_console,
-        result=RunResult(success=True, report_path=Path("/outside/report.html")),
+        result=RunResult(success=True, report_path=external_report),
         quiet=False,
         root=root,
     )
     normal_output = _render(normal_console)
-    assert "/outside/report.html" in normal_output
+    assert str(external_report) in normal_output
 
     verbose_console = _console()
     print_result_summary(
@@ -481,8 +526,10 @@ def test_verbose_path_presentation_adds_absolute_detail_and_keeps_external_absol
         verbose=True,
     )
     verbose_output = _render(verbose_console)
-    assert "generated/report.html" in verbose_output
-    assert "(absolute: /workspace/generated/report.html)" in verbose_output
+    relative_report = Path("generated") / "report.html"
+    absolute_report = (root / relative_report).resolve()
+    assert str(relative_report) in verbose_output
+    assert f"(absolute: {absolute_report})" in verbose_output
 
 
 def test_result_summary_warning_headline_cap_and_verbose_expansion() -> None:

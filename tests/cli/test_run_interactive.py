@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 import typer
 from rich.console import Console
+from structlog.testing import capture_logs
 from typer.testing import CliRunner
 
 from frame_compare.cli.errors import ExitCode
@@ -565,12 +566,13 @@ def test_interactive_slowpics_action_failures_are_warning_only() -> None:
         )
     )
 
-    actions = collect_interactive_slowpics_actions(
-        RunResult(success=True, slowpics_url="https://slow.pics/c/example"),
-        args=replace(_base_args(), quiet=False),
-        deps=deps,
-        config=get_default_config(),
-    )
+    with capture_logs() as captured_logs:
+        actions = collect_interactive_slowpics_actions(
+            RunResult(success=True, slowpics_url="https://slow.pics/c/example"),
+            args=replace(_base_args(), quiet=False),
+            deps=deps,
+            config=get_default_config(),
+        )
 
     assert [(action.kind, action.success) for action in actions] == [
         ("clipboard", False),
@@ -582,6 +584,14 @@ def test_interactive_slowpics_action_failures_are_warning_only() -> None:
         "slow.pics browser: failed to open URL: no browser accepted the request"
     )
     assert slowpics_browser_open_attempted(actions) is True
+    assert captured_logs == [
+        {
+            "event": "slowpics_clipboard_copy_failed",
+            "exception_type": "RuntimeError",
+            "exc_info": True,
+            "log_level": "debug",
+        }
+    ]
 
 
 def test_interactive_slowpics_browser_exception_warning_is_sanitized() -> None:
@@ -592,16 +602,25 @@ def test_interactive_slowpics_browser_exception_warning_is_sanitized() -> None:
         )
     )
 
-    actions = collect_interactive_slowpics_actions(
-        RunResult(success=True, slowpics_url="https://slow.pics/c/example"),
-        args=replace(_base_args(), quiet=False),
-        deps=deps,
-        config=get_default_config(),
-    )
+    with capture_logs() as captured_logs:
+        actions = collect_interactive_slowpics_actions(
+            RunResult(success=True, slowpics_url="https://slow.pics/c/example"),
+            args=replace(_base_args(), quiet=False),
+            deps=deps,
+            config=get_default_config(),
+        )
 
     browser_action = next(action for action in actions if action.kind == "browser")
     assert browser_action.warning == "slow.pics browser: failed to open URL"
     assert "browser secret sentinel" not in str(browser_action.warning)
+    assert captured_logs == [
+        {
+            "event": "slowpics_browser_open_failed",
+            "exception_type": "RuntimeError",
+            "exc_info": True,
+            "log_level": "debug",
+        }
+    ]
 
 
 def test_report_auto_open_can_be_suppressed_by_slowpics_browser_attempt() -> None:

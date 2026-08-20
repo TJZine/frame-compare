@@ -434,10 +434,13 @@ unchanged.
 - The Run plan uses user-facing row labels such as `FFmpeg audio`,
   `previous offsets`, `interactive alignment`, `force interactive`, and `VSPreview`
   while preserving the same effective
-  configuration facts. The `previous offsets` row reports only the effective
-  config mode: `disabled`, `prompt`, or `always`.
-- The `analysis mode` row reports the effective `analysis.performance_mode`:
-  `quality` or `performance`.
+  configuration facts. The `previous offsets` row reports status-prefixed
+  explanatory text: `do not reuse previous offsets (disabled)`, `ask before
+  reusing previous offsets (prompt)`, or `reuse previous offsets when valid
+  (always)`.
+- The `analysis mode` row reports the effective `analysis.performance_mode` as
+  `quality` or `performance` and appends ` (skipped for this run)` when
+  `--skip-analysis` is active.
 - The Run plan workspace paths show `root`, `config`, `input`, and the resolved
   `generated` data root. The constant run-folder policy and derived screenshot path
   are not configuration rows.

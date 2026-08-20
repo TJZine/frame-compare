@@ -129,22 +129,25 @@ def _absolute_display_path(path: Path, root: Path | None) -> Path:
     return (root.resolve() / path).resolve()
 
 
-def _display_path(path: Path, *, root: Path | None, verbose: bool = False) -> str:
-    """Render a complete path relative to the workspace when it is contained."""
+def format_display_path(path: Path, *, root: Path | None) -> str:
+    """Render a plain path relative to its root when it is contained."""
     absolute = _absolute_display_path(path, root)
     if root is None:
-        return _styled_path(str(path))
+        return str(path)
 
-    resolved_root = root.resolve()
     try:
-        relative = absolute.relative_to(resolved_root)
+        relative = absolute.relative_to(root.resolve())
     except ValueError:
-        display = str(absolute)
-    else:
-        display = str(relative) if relative != Path(".") else "."
+        return str(absolute)
+    return str(relative) if relative != Path(".") else "."
 
+
+def _display_path(path: Path, *, root: Path | None, verbose: bool = False) -> str:
+    """Render a complete path relative to the workspace when it is contained."""
+    display = format_display_path(path, root=root)
     rendered = _styled_path(display)
-    if verbose and display != str(absolute):
+    absolute = _absolute_display_path(path, root)
+    if verbose and root is not None and display != str(absolute):
         rendered += f" {_styled_unit(f'(absolute: {absolute})')}"
     return rendered
 
@@ -173,7 +176,7 @@ def _format_config_seconds(seconds: float) -> str:
 def _group_table() -> Table:
     """Create a borderless two-column table for key-value rows."""
     table = Table(show_header=False, box=None, pad_edge=False, padding=(0, 1, 0, 0))
-    table.add_column("key", style=STYLE_KEY, no_wrap=True, min_width=22)
+    table.add_column("key", style=STYLE_KEY, min_width=22, overflow="fold")
     table.add_column("value", overflow="fold")
     return table
 

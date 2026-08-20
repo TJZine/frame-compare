@@ -213,6 +213,7 @@ def test_run_dry_run_quiet_uses_plural_source_grammar(
 
     assert result.exit_code == 0
     assert "Dry run: 2 source files; no side effects performed." in result.stdout
+    assert result.stderr == ""
 
 
 def test_run_dry_run_always_reserves_a_run_folder_when_execution_proceeds(
@@ -245,8 +246,13 @@ def test_run_dry_run_accepts_external_input_override_and_reports_only_that_absol
         external_input.mkdir()
         (external_input / "external.ts").write_bytes(b"")
 
+        human_result = _invoke(root, config_path, "--input", str(external_input))
         result = _invoke(root, config_path, "--input", str(external_input), "--json")
 
+    assert human_result.exit_code == 0
+    compact_human_output = "".join(human_result.stdout.split())
+    assert f"Inputdirectory:{external_input}" in compact_human_output
+    assert human_result.stderr == ""
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["input"] == {

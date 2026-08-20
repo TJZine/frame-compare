@@ -10,6 +10,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+import structlog
 import typer
 from rich.console import Console
 from rich.markup import escape
@@ -39,6 +40,8 @@ from .run_contracts import (
     validate_run_contracts,
     validate_write_config_contracts,
 )
+
+log = structlog.get_logger()
 
 if TYPE_CHECKING:
     from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, RunResult
@@ -700,7 +703,12 @@ def _copy_slowpics_url(
 ) -> PostUploadActionPresentationResult:
     try:
         copy_to_clipboard(url)
-    except Exception:
+    except Exception as exc:
+        log.debug(
+            "slowpics_clipboard_copy_failed",
+            exception_type=type(exc).__name__,
+            exc_info=True,
+        )
         return PostUploadActionPresentationResult(
             kind="clipboard",
             success=False,
@@ -720,7 +728,12 @@ def _open_slowpics_url(
 ) -> PostUploadActionPresentationResult:
     try:
         opened = open_url(url)
-    except Exception:
+    except Exception as exc:
+        log.debug(
+            "slowpics_browser_open_failed",
+            exception_type=type(exc).__name__,
+            exc_info=True,
+        )
         return PostUploadActionPresentationResult(
             kind="browser",
             success=False,

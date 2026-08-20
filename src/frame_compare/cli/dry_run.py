@@ -9,6 +9,7 @@ from typing import Literal
 from rich.console import Console
 from rich.markup import escape
 
+from frame_compare.cli.output import format_display_path
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.analysis_policy import needs_analysis
 from frame_compare.orchestration.errors import (
@@ -312,7 +313,7 @@ def print_dry_run_plan(
             ),
             (
                 "Input directory",
-                _display_path(plan.input.resolved_directory, plan.workspace_root),
+                format_display_path(plan.input.resolved_directory, root=plan.workspace_root),
             ),
             (
                 f"Sources ({len(plan.input.source_filenames)})",
@@ -420,13 +421,6 @@ def _print_section(
     console.print(f"[bold]{title}[/]")
     for label, value in rows:
         console.print(f"  {label}: {escape(value)}")
-
-
-def _display_path(path: Path, root: Path) -> str:
-    try:
-        return path.relative_to(root).as_posix() or "."
-    except ValueError:
-        return str(path)
 
 
 def _selection_label(name: str) -> str:

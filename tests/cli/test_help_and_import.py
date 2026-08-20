@@ -266,6 +266,18 @@ def test_stabilize_typer_help_width_backfills_import_order_gap(monkeypatch: Monk
     assert typer_rich_utils.MAX_WIDTH == 200
 
 
+@pytest.mark.parametrize("terminal_width", [0, -1])
+def test_stabilize_typer_help_width_ignores_non_positive_explicit_width(
+    terminal_width: int,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(typer_rich_utils, "MAX_WIDTH", 120)
+
+    _stabilize_typer_help_width(terminal_width)
+
+    assert typer_rich_utils.MAX_WIDTH == 120
+
+
 def test_import_does_not_mutate_terminal_width():
     import os
     import subprocess

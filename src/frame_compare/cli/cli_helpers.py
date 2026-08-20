@@ -52,7 +52,8 @@ class HandleErrorFn(Protocol):
 def stabilize_typer_help_width(terminal_width: int | None = None) -> None:
     """Give Typer's Rich help renderer the current width when one is explicit."""
     if terminal_width is not None:
-        typer_rich_utils.MAX_WIDTH = terminal_width
+        if terminal_width > 0:
+            typer_rich_utils.MAX_WIDTH = terminal_width
         return
     if typer_rich_utils.MAX_WIDTH is not None:
         return
