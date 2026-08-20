@@ -339,7 +339,8 @@ unchanged.
   `run_folder_name` fact is always unknown until reservation.
 - Normal non-quiet runs begin with a `Run plan` decision checklist containing
   `Workspace`, `Frame selection`, `Rendering`, `Alignment`, `Review`, and
-  `Publishing` groups. It retains the effective renderer, overlay, geometry,
+  `Publishing` groups. It retains the renderer policy (`ffmpeg` when forced,
+  otherwise `auto` with VapourSynth preferred), overlay, geometry,
   active-picture policy, tone mapping, frame-selection counts and seed, analysis
   source/mode, nonzero lead/trail exclusions, alignment/reuse/manual-review policy,
   report intent, slow.pics visibility/confirmation/actions, and local deletion
@@ -444,7 +445,8 @@ unchanged.
   `RENDER`, `METADATA`, `PUBLISH`, `REPORT`, `CONFIRM`, and `CLEANUP`.
   Internal phase names in logs and `phase_timings` remain the runtime keys such
   as `frame_plan`, `analyze`, `align`, and `confirm_slowpics_upload`.
-- Every Rich phase remains live while active. A successful phase leaves a durable
+- Every Rich phase remains live while active with an ASCII `[RUN]` marker. A
+  successful phase leaves a durable
   ASCII status line when it runs for at least 10.0 seconds, while skipped,
   warned, and failed phases always remain visible. A successful slow.pics upload
   also leaves a durable `PUBLISH` line regardless of duration. The report-confirmed

@@ -31,6 +31,17 @@ def test_rich_progress_reporter_accepts_no_color() -> None:
     assert reporter.writes_to_stderr is True
 
 
+def test_rich_progress_reporter_marks_active_work_without_color() -> None:
+    reporter = RichProgressReporter(no_color=True)
+
+    reporter.start_phase("PLAN", 1)
+    assert reporter._progress.tasks[0].description == "[RUN] PLAN"  # noqa: SLF001
+
+    reporter.set_description("Selecting frames")
+    assert reporter._progress.tasks[0].description == "[RUN] Selecting frames"  # noqa: SLF001
+    reporter.complete_phase()
+
+
 def test_log_progress_reporter_supports_nested_phases(capsys) -> None:
     """Nested phases should restore parent context on completion."""
     reporter = LogProgressReporter()

@@ -120,8 +120,8 @@ class DryRunPlan:
     outputs: DryRunOutputs
     publishing: DryRunPublishing
     runtime_facts: DryRunRuntimeFacts
+    workspace_root: Path
     checks_not_performed: tuple[str, ...] = CHECKS_NOT_PERFORMED
-    workspace_root: Path | None = None
 
 
 def build_dry_run_plan(
@@ -308,7 +308,7 @@ def print_dry_run_plan(
         (
             (
                 "Workspace",
-                str(plan.workspace_root) if plan.workspace_root is not None else "not provided",
+                str(plan.workspace_root),
             ),
             (
                 "Input directory",
@@ -422,9 +422,7 @@ def _print_section(
         console.print(f"  {label}: {escape(value)}")
 
 
-def _display_path(path: Path, root: Path | None) -> str:
-    if root is None:
-        return str(path)
+def _display_path(path: Path, root: Path) -> str:
     try:
         return path.relative_to(root).as_posix() or "."
     except ValueError:

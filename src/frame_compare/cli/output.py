@@ -337,7 +337,7 @@ def print_at_a_glance(
     # ── Rendering ──
     _add_separator(table)
     _add_subheader(table, "Rendering")
-    renderer = "ffmpeg" if config.screenshots.use_ffmpeg else "vapoursynth"
+    renderer = "ffmpeg" if config.screenshots.use_ffmpeg else "auto (VapourSynth preferred)"
     _add_kv(table, "renderer", _styled_value(renderer))
     _add_kv(table, "overlay", _styled_value(str(overlay_mode.value)))
     _add_kv(table, "geometry", _styled_value(config.screenshots.geometry_mode.value))

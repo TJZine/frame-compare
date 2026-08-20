@@ -134,7 +134,7 @@ class RichProgressReporter:
                 self._progress.update(self._task_id, visible=False, refresh=True)
                 self._task_stack.append(self._task_id)
             self._task_id = self._progress.add_task(
-                name,
+                f"[RUN] {name}",
                 total=total,
                 spinner_only=spinner_only,
                 phase_label=name,
@@ -156,7 +156,7 @@ class RichProgressReporter:
         """Update the rich progress bar description."""
         with self._lock:
             if self._task_id is not None:
-                self._progress.update(self._task_id, description=desc, refresh=True)
+                self._progress.update(self._task_id, description=f"[RUN] {desc}", refresh=True)
 
     def complete_phase(
         self,

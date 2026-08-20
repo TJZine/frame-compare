@@ -115,6 +115,24 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     assert "VSPreview" not in output
 
 
+def test_run_plan_reports_auto_renderer_when_ffmpeg_is_not_forced(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    console = _console()
+    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
+
+    print_at_a_glance(
+        console,
+        request=_request(),
+        config=_config(),
+        root=_workspace_path(),
+        config_path=_workspace_path("config", "config.toml"),
+    )
+
+    renderer_row = _rendered_row_value(_render(console), "renderer")
+    assert "auto (VapourSynth preferred)" in renderer_row
+
+
 @pytest.mark.skipif(os.name == "nt", reason="Windows does not expose POSIX execute bits")
 def test_at_a_glance_reports_non_executable_ffmpeg_override_as_unavailable(
     monkeypatch: MonkeyPatch,
