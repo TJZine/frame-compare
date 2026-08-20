@@ -320,7 +320,7 @@ def test_emit_consolidated_fps_report_uses_relative_input_and_external_paths(
     )
 
     captured = capsys.readouterr()
-    assert "season/reference.mkv" in captured.err
+    assert str(Path("season") / "reference.mkv") in captured.err
     assert str(external_path) in captured.err
     assert str(internal_path) not in captured.err
 

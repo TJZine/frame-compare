@@ -398,9 +398,12 @@ def test_run_plan_no_color_uses_native_wrapping_without_truncation(
     monkeypatch: MonkeyPatch,
     width: int,
 ) -> None:
+    root = _workspace_path("workspace-root").resolve()
+    input_dir = root.parent / "external-media" / "very-long-source-directory"
+    generated_dir = root.parent / "external-output" / "very-long-generated-directory"
     config = _config()
-    config.paths.input_dir = "/Volumes/external-media/very-long-source-directory"
-    config.paths.generated_dir = "/Volumes/external-output/very-long-generated-directory"
+    config.paths.input_dir = input_dir
+    config.paths.generated_dir = generated_dir
     config.screenshots.overlay_mode = OverlayMode.DIAGNOSTIC
     console = _console_at_width(width)
 
@@ -410,16 +413,16 @@ def test_run_plan_no_color_uses_native_wrapping_without_truncation(
         console,
         request=_request(),
         config=config,
-        root=_workspace_path("workspace-root"),
-        config_path=_workspace_path("workspace-root", "config", "config.toml"),
+        root=root,
+        config_path=root / "config" / "config.toml",
     )
 
     output = _render(console)
     compact_output = "".join(output.replace("│", "").split())
     assert "Run plan" in output
     assert "diagnostic" in output
-    assert "/Volumes/external-media/very-long-source-directory" in compact_output
-    assert "/Volumes/external-output/very-long-generated-directory" in compact_output
+    assert str(input_dir) in compact_output
+    assert str(generated_dir) in compact_output
     assert "..." not in output
     assert "…" not in output
     assert "[OK]" in output
