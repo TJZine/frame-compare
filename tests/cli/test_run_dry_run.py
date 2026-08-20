@@ -198,6 +198,84 @@ def test_run_dry_run_human_and_quiet_follow_current_quiet_semantics(
     assert quiet.stderr == ""
 
 
+def test_run_dry_run_human_marks_disabled_parent_actions_not_applicable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
+        root = Path("workspace")
+        config_path = _write_workspace(
+            root,
+            config_suffix="""
+[report]
+enable = false
+auto_open = true
+
+[slowpics]
+auto_upload = false
+copy_url_to_clipboard = true
+open_in_browser = true
+create_url_shortcut = true
+webhook_url = "https://example.com/frame-compare"
+""",
+        )
+        input_dir = root / "comparison_videos"
+        input_dir.mkdir()
+        (input_dir / "source.mkv").write_bytes(b"")
+
+        human = _invoke(root, config_path)
+        json_result = _invoke(root, config_path, "--json")
+
+    assert human.exit_code == 0
+    for label in (
+        "Open report after success",
+        "Copy URL to clipboard",
+        "Open the published URL",
+        "Create a URL shortcut",
+        "Send a webhook notification",
+    ):
+        assert f"{label}: not applicable" in human.stdout
+
+    payload = json.loads(json_result.stdout)
+    assert payload["outputs"]["report_auto_open_configured"] is True
+    assert payload["publishing"]["copy_url_to_clipboard_configured"] is True
+    assert payload["publishing"]["open_in_browser_configured"] is True
+    assert payload["publishing"]["create_url_shortcut_configured"] is True
+    assert payload["publishing"]["webhook_configured"] is True
+
+
+def test_run_dry_run_human_preserves_child_configuration_when_parents_are_enabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
+        root = Path("workspace")
+        config_path = _write_workspace(
+            root,
+            config_suffix="""
+[report]
+enable = true
+auto_open = false
+
+[slowpics]
+auto_upload = true
+copy_url_to_clipboard = false
+open_in_browser = true
+create_url_shortcut = false
+""",
+        )
+        input_dir = root / "comparison_videos"
+        input_dir.mkdir()
+        (input_dir / "source.mkv").write_bytes(b"")
+
+        result = _invoke(root, config_path)
+
+    assert result.exit_code == 0
+    assert "Open report after success: not configured" in result.stdout
+    assert "Copy URL to clipboard: not configured" in result.stdout
+    assert "Open the published URL: configured" in result.stdout
+    assert "Create a URL shortcut: not configured" in result.stdout
+    assert "Send a webhook notification: not configured" in result.stdout
+
+
 def test_run_dry_run_quiet_uses_plural_source_grammar(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

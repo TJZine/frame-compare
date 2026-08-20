@@ -28,6 +28,7 @@ from frame_compare.orchestration.execution_types import (
 )
 from frame_compare.orchestration.phases import Phase
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
+from frame_compare.utils.progress import LogProgressReporter
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 from frame_compare.vs.types import SourceInfo
@@ -520,22 +521,27 @@ def test_execute_run_emits_reports_after_load_sources_and_after_align(
         no_upload=True,
         no_color=True,
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(
+        vs_loader=FakeVSLoader(),
+        ffmpeg_runner=FakeFFmpegRunner(),
+        progress=LogProgressReporter(),
+    )
 
-    fps_calls: list[tuple[str, bool, tuple[str, ...], Path, bool]] = []
+    fps_calls: list[tuple[str, bool, bool, tuple[str, ...], Path, bool]] = []
     alignment_calls: list[tuple[str, bool, bool, bool, tuple[int, ...], bool]] = []
 
     def _record_emit(
         *,
         stage: str,
         no_color: bool,
+        rich_output: bool,
         clips: Any,
         input_dir: Path,
         verbose: bool,
         **_kwargs: Any,
     ) -> None:
         clip_labels = tuple(clip.label for clip in clips)
-        fps_calls.append((stage, no_color, clip_labels, input_dir, verbose))
+        fps_calls.append((stage, no_color, rich_output, clip_labels, input_dir, verbose))
 
     def _record_alignment_emit(
         *,
@@ -564,8 +570,22 @@ def test_execute_run_emits_reports_after_load_sources_and_after_align(
     asyncio.run(execute_run(request, deps=deps))
 
     assert fps_calls == [
-        ("after_load_sources", True, ("comp", "source"), tmp_path / "comparison_videos", False),
-        ("after_align", True, ("comp", "source"), tmp_path / "comparison_videos", False),
+        (
+            "after_load_sources",
+            True,
+            False,
+            ("comp", "source"),
+            tmp_path / "comparison_videos",
+            False,
+        ),
+        (
+            "after_align",
+            True,
+            False,
+            ("comp", "source"),
+            tmp_path / "comparison_videos",
+            False,
+        ),
     ]
     assert len(alignment_calls) == 1
     assert alignment_calls[0][:4] == ("after_align", True, False, False)

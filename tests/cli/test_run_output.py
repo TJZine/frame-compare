@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from fractions import Fraction
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ from pytest import MonkeyPatch
 
 from frame_compare.cli.entry import app
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
+from frame_compare.orchestration.fps_report import FpsReportClip, emit_consolidated_fps_report
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
 
 from .cli_helpers import (
@@ -85,6 +87,51 @@ def test_run_human_output_routes_summaries_and_runtime_diagnostics(
     assert "Frame Alignment" in stderr
     assert "Run plan" not in stderr
     assert "Result" not in stderr
+
+
+def test_run_non_tty_routes_fps_diagnostics_through_logging(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        assert dependencies is None
+        emit_consolidated_fps_report(
+            stage="after_load_sources",
+            clips=[
+                FpsReportClip(
+                    path=Path("reference.mkv"),
+                    label="Reference",
+                    width=1920,
+                    height=1080,
+                    num_frames=100,
+                    is_hdr=False,
+                    source_fps=Fraction(24, 1),
+                    effective_fps=Fraction(24, 1),
+                    fps_divergent=False,
+                    note=None,
+                )
+            ],
+            json_output=False,
+            quiet=False,
+            rich_output=False,
+        )
+        return RunResult(success=True, screenshot_dir=Path("screenshots").resolve())
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace(
+        [],
+        env={"TERM": "dumb"},
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+
+    assert result.exit_code == 0
+    assert "fps_report" in result.stderr
+    assert "after_load_sources" in result.stderr
+    assert "Reference" in result.stderr
+    assert "╭" not in result.stderr
+    assert "Sources —" not in result.stderr
 
 
 def test_run_quiet_suppresses_run_plan_but_keeps_minimal_summary(

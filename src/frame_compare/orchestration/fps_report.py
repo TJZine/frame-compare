@@ -280,7 +280,6 @@ def _render_human_fps_report(
     no_color: bool,
     input_dir: Path | None,
     verbose: bool,
-    runtime_inset: bool,
 ) -> None:
     console = Console(stderr=True, no_color=no_color, width=_report_console_width(), height=1000)
     if stage == "after_load_sources":
@@ -294,8 +293,7 @@ def _render_human_fps_report(
     else:
         if not verbose and _can_summarize_matching_fps(clips):
             effective_fps = _format_fraction(clips[0].effective_fps)
-            inset = "  " if runtime_inset else ""
-            console.print(f"{inset}[bold green][OK][/] Frame rates match: {escape(effective_fps)}")
+            console.print(f"  [bold green][OK][/] Frame rates match: {escape(effective_fps)}")
             return
         title = "Frame rates"
         table = _render_fps_table(
@@ -323,17 +321,17 @@ def emit_consolidated_fps_report(
     clips: Sequence[FpsReportClip],
     json_output: bool,
     quiet: bool,
+    rich_output: bool,
     no_color: bool = False,
     diagnostics: Sequence[str] = (),
     input_dir: Path | None = None,
     verbose: bool = False,
-    runtime_inset: bool = False,
 ) -> None:
     """Emit the consolidated FPS report in JSON or human-readable form."""
     if quiet:
         return
 
-    if json_output:
+    if json_output or not rich_output:
         payload = [_serialize_clip(clip) for clip in clips]
         log.info("fps_report", stage=stage, clips=payload, diagnostics=list(diagnostics))
         return
@@ -345,5 +343,4 @@ def emit_consolidated_fps_report(
         no_color=no_color,
         input_dir=input_dir,
         verbose=verbose,
-        runtime_inset=runtime_inset,
     )

@@ -337,6 +337,10 @@ unchanged.
   gates will permit the action. Runtime-only facts remain `unknown` with null
   values until their existing runtime owners could determine them. The
   `run_folder_name` fact is always unknown until reservation.
+- Human dry-run output renders report auto-open as `not applicable` when report
+  generation is disabled, and renders all slow.pics post-upload actions as
+  `not applicable` when slow.pics upload is disabled. This presentation rule does
+  not alter the JSON fields, which continue to report effective configuration.
 - Normal non-quiet runs begin with a `Run plan` decision checklist containing
   `Workspace`, `Frame selection`, `Rendering`, `Alignment`, `Review`, and
   `Publishing` groups. It retains the renderer policy (`ffmpeg` when forced,
@@ -467,7 +471,8 @@ unchanged.
 - `--no-color` disables ANSI color in interactive Rich progress output. It does
   not switch an interactive human run to structlog progress. It also disables
   ANSI styling for the previous-offset reuse table and prompt. Quiet and JSON
-  modes still suppress Rich progress, and non-TTY runs still use log progress.
+  modes still suppress Rich progress, and non-TTY runs still use log progress,
+  including consolidated FPS diagnostics rather than Rich FPS panels.
 - `--diagnose-paths` emits a pinned JSON object with keys `cache`, `config`, `input`,
   `output`, and `root`, then exits without invoking the runtime pipeline. The
   `output` value is the resolved generated-data root and `cache` is its
@@ -1200,7 +1205,7 @@ enabled.
   VSPreview-confirmed results still write to the shared reuse cache when
   `cache_results = true`. `prompt` shows a Rich stderr table for a complete
   valid VSPreview-confirmed offset set and asks
-  `Reuse these offsets? [y/N]: `; default, EOF,
+  <code>Reuse these offsets? [y/N]: </code>; default, EOF,
   unavailable stdin, or unavailable stderr all continue without confirmed-offset
   reuse. If a confirmed cache entry also contains the computed audio alignment
   result that produced the preview suggestion, declining the prompt reuses that

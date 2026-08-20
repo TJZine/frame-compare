@@ -132,6 +132,7 @@ def test_emit_consolidated_fps_report_noop_when_quiet(
         clips=[clip],
         json_output=True,
         quiet=True,
+        rich_output=False,
     )
 
     captured = capsys.readouterr()
@@ -170,6 +171,7 @@ def test_emit_consolidated_fps_report_json_mode_logs_without_human_output(
         clips=[clip],
         json_output=True,
         quiet=False,
+        rich_output=False,
     )
 
     captured = capsys.readouterr()
@@ -241,6 +243,7 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
         clips=clips,
         json_output=False,
         quiet=False,
+        rich_output=True,
         no_color=True,
         diagnostics=[
             "Analysis source: encode.mkv (configured)",
@@ -315,6 +318,7 @@ def test_emit_consolidated_fps_report_uses_relative_input_and_external_paths(
         clips=clips,
         json_output=False,
         quiet=False,
+        rich_output=True,
         no_color=True,
         input_dir=input_dir,
     )
@@ -346,6 +350,7 @@ def test_emit_consolidated_fps_report_keeps_after_align_fps_panel(
         clips=[clip],
         json_output=False,
         quiet=False,
+        rich_output=True,
         no_color=True,
     )
 
@@ -395,8 +400,8 @@ def test_emit_consolidated_fps_report_collapses_matching_after_align_state(
         clips=clips,
         json_output=False,
         quiet=False,
+        rich_output=True,
         no_color=True,
-        runtime_inset=True,
     )
 
     captured = capsys.readouterr()
@@ -405,7 +410,8 @@ def test_emit_consolidated_fps_report_collapses_matching_after_align_state(
     assert "/tmp/reference.mkv" not in captured.err
 
 
-def test_emit_consolidated_fps_report_preserves_non_tty_matching_line(
+def test_emit_consolidated_fps_report_logs_non_tty_diagnostics_without_rich_output(
+    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     clip = FpsReportClip(
@@ -421,15 +427,34 @@ def test_emit_consolidated_fps_report_preserves_non_tty_matching_line(
         note=None,
     )
 
+    log_calls: list[tuple[str, str, list[dict[str, object]], list[str]]] = []
+
+    def _record_log(
+        event: str, *, stage: str, clips: list[dict[str, object]], diagnostics: list[str]
+    ) -> None:
+        log_calls.append((event, stage, clips, diagnostics))
+
+    monkeypatch.setattr("frame_compare.orchestration.fps_report.log.info", _record_log)
+
     emit_consolidated_fps_report(
         stage="after_align",
         clips=[clip],
         json_output=False,
         quiet=False,
+        rich_output=False,
         no_color=True,
     )
 
-    assert capsys.readouterr().err == "[OK] Frame rates match: 24/1\n"
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+    assert len(log_calls) == 1
+    event, stage, clips, diagnostics = log_calls[0]
+    assert event == "fps_report"
+    assert stage == "after_align"
+    assert clips[0]["effective_fps_num"] == 24
+    assert clips[0]["effective_fps_den"] == 1
+    assert diagnostics == []
 
 
 def test_emit_consolidated_fps_report_keeps_adjustment_evidence_without_normal_paths(
@@ -453,6 +478,7 @@ def test_emit_consolidated_fps_report_keeps_adjustment_evidence_without_normal_p
         clips=[clip],
         json_output=False,
         quiet=False,
+        rich_output=True,
         no_color=True,
     )
 
@@ -473,6 +499,7 @@ def test_emit_consolidated_fps_report_prioritizes_effective_fps_divergence(
         clips=build_consolidated_fps_report(reference, [comparison]),
         json_output=False,
         quiet=False,
+        rich_output=True,
         no_color=True,
     )
 
@@ -511,6 +538,7 @@ def test_emit_consolidated_fps_report_wraps_at_narrow_terminal_widths(
         ],
         json_output=False,
         quiet=False,
+        rich_output=True,
         no_color=True,
         input_dir=Path("/workspace/comparison_videos"),
     )

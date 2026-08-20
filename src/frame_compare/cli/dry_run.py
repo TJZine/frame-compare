@@ -359,7 +359,10 @@ def print_dry_run_plan(
             ("Offline report", _yes_no(plan.outputs.report)),
             (
                 "Open report after success",
-                _configured(plan.outputs.report_auto_open_configured),
+                _configured_when_enabled(
+                    parent_enabled=plan.outputs.report,
+                    configured=plan.outputs.report_auto_open_configured,
+                ),
             ),
         ),
     )
@@ -374,19 +377,31 @@ def print_dry_run_plan(
             ),
             (
                 "Copy URL to clipboard",
-                _configured(plan.publishing.copy_url_to_clipboard_configured),
+                _configured_when_enabled(
+                    parent_enabled=plan.publishing.slowpics_upload,
+                    configured=plan.publishing.copy_url_to_clipboard_configured,
+                ),
             ),
             (
                 "Open the published URL",
-                _configured(plan.publishing.open_in_browser_configured),
+                _configured_when_enabled(
+                    parent_enabled=plan.publishing.slowpics_upload,
+                    configured=plan.publishing.open_in_browser_configured,
+                ),
             ),
             (
                 "Create a URL shortcut",
-                _configured(plan.publishing.create_url_shortcut_configured),
+                _configured_when_enabled(
+                    parent_enabled=plan.publishing.slowpics_upload,
+                    configured=plan.publishing.create_url_shortcut_configured,
+                ),
             ),
             (
                 "Send a webhook notification",
-                _configured(plan.publishing.webhook_configured),
+                _configured_when_enabled(
+                    parent_enabled=plan.publishing.slowpics_upload,
+                    configured=plan.publishing.webhook_configured,
+                ),
             ),
         ),
     )
@@ -458,6 +473,12 @@ def _enabled_disabled(value: bool) -> str:
 
 def _configured(value: bool) -> str:
     return "configured" if value else "not configured"
+
+
+def _configured_when_enabled(*, parent_enabled: bool, configured: bool) -> str:
+    if not parent_enabled:
+        return "not applicable"
+    return _configured(configured)
 
 
 def _runtime_fact_json(fact: DryRunRuntimeFact) -> dict[str, object]:
