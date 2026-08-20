@@ -201,10 +201,10 @@ def _render_load_sources_overview(
 
 
 def _fps_status(clip: FpsReportClip, *, reference_fps: Fraction) -> str:
-    if clip.fps_divergent:
-        return "[yellow]adjusted[/]"
     if clip.effective_fps != reference_fps:
         return "[red]divergent[/]"
+    if clip.fps_divergent:
+        return "[yellow]adjusted[/]"
     return "[green]matched[/]"
 
 

@@ -434,6 +434,26 @@ def test_emit_consolidated_fps_report_keeps_adjustment_evidence_without_normal_p
     assert "/tmp/comparison.mkv" not in captured.err
 
 
+def test_emit_consolidated_fps_report_prioritizes_effective_fps_divergence(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    reference = _make_clip_state("ref.mkv", "Reference", Fraction(24), Fraction(24))
+    comparison = _make_clip_state("comp.mkv", "Comparison", Fraction(30), Fraction(25))
+
+    emit_consolidated_fps_report(
+        stage="after_align",
+        clips=build_consolidated_fps_report(reference, [comparison]),
+        json_output=False,
+        quiet=False,
+        no_color=True,
+    )
+
+    captured = capsys.readouterr()
+    assert "30/1 -> 25/1" in captured.err
+    assert "divergent" in captured.err
+    assert "adjusted" not in captured.err
+
+
 @pytest.mark.parametrize("columns", [60, 80])
 def test_emit_consolidated_fps_report_wraps_at_narrow_terminal_widths(
     columns: int,
