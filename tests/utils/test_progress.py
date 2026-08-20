@@ -167,78 +167,58 @@ def test_rich_progress_reporter_warned_phase_does_not_force_total(
 
 def test_rich_progress_reporter_does_not_retain_success_below_ten_seconds(
     monkeypatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     reporter = RichProgressReporter()
-    durable_lines: list[str] = []
     clock = iter((0.0, 9.9))
     monkeypatch.setattr(progress_module, "monotonic", lambda: next(clock))
-    monkeypatch.setattr(
-        reporter._progress.console,  # noqa: SLF001
-        "print",
-        lambda value=None, **_: (durable_lines.append(str(value)) if value is not None else None),
-    )
 
     reporter.start_phase("PLAN", 1)
     reporter.complete_phase()
 
-    assert durable_lines == []
+    assert "[OK] PLAN" not in capsys.readouterr().err
 
 
 def test_rich_progress_reporter_retain_success_at_ten_seconds(
     monkeypatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     reporter = RichProgressReporter()
-    durable_lines: list[str] = []
     clock = iter((0.0, 10.0))
     monkeypatch.setattr(progress_module, "monotonic", lambda: next(clock))
-    monkeypatch.setattr(
-        reporter._progress.console,  # noqa: SLF001
-        "print",
-        lambda value=None, **_: (durable_lines.append(str(value)) if value is not None else None),
-    )
 
     reporter.start_phase("PLAN", 1)
     reporter.complete_phase()
 
-    assert durable_lines == ["[OK] PLAN"]
+    assert "[OK] PLAN" in capsys.readouterr().err
 
 
 def test_rich_progress_reporter_explicitly_retains_short_success(
     monkeypatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     reporter = RichProgressReporter()
-    durable_lines: list[str] = []
     clock = iter((0.0, 0.1))
     monkeypatch.setattr(progress_module, "monotonic", lambda: next(clock))
-    monkeypatch.setattr(
-        reporter._progress.console,  # noqa: SLF001
-        "print",
-        lambda value=None, **_: (durable_lines.append(str(value)) if value is not None else None),
-    )
 
     reporter.start_phase("PUBLISH", 1)
     reporter.complete_phase(retain=True)
 
-    assert durable_lines == ["[OK] PUBLISH"]
+    assert "[OK] PUBLISH" in capsys.readouterr().err
 
 
 def test_rich_progress_reporter_suppresses_generic_confirm_completion(
     monkeypatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     reporter = RichProgressReporter()
-    durable_lines: list[str] = []
     clock = iter((0.0, 10.0))
     monkeypatch.setattr(progress_module, "monotonic", lambda: next(clock))
-    monkeypatch.setattr(
-        reporter._progress.console,  # noqa: SLF001
-        "print",
-        lambda value=None, **_: (durable_lines.append(str(value)) if value is not None else None),
-    )
 
     reporter.start_phase("CONFIRM", 1)
     reporter.complete_phase(retain=False)
 
-    assert durable_lines == []
+    assert "[OK] CONFIRM" not in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
@@ -253,19 +233,14 @@ def test_rich_progress_reporter_retains_non_success_statuses(
     status: ProgressPhaseStatus,
     expected: str,
     monkeypatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     reporter = RichProgressReporter()
-    durable_lines: list[str] = []
-    monkeypatch.setattr(
-        reporter._progress.console,  # noqa: SLF001
-        "print",
-        lambda value=None, **_: (durable_lines.append(str(value)) if value is not None else None),
-    )
 
     reporter.start_phase(expected.split(maxsplit=1)[1], 1)
     reporter.complete_phase(status)
 
-    assert durable_lines == [expected]
+    assert expected in capsys.readouterr().err
 
 
 def test_rich_progress_reporter_refreshes_state_changes(monkeypatch) -> None:

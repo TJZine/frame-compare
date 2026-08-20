@@ -87,7 +87,7 @@ def test_run_human_output_routes_summaries_and_runtime_diagnostics(
     assert "Result" not in stderr
 
 
-def test_run_quiet_suppresses_at_a_glance_but_keeps_minimal_summary(
+def test_run_quiet_suppresses_run_plan_but_keeps_minimal_summary(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -143,7 +143,7 @@ def test_run_json_is_machine_only_and_omits_post_upload_actions(
     assert payload["slowpics_url"] == "https://slow.pics/c/example"
     assert "post_upload_actions" not in payload
     assert "warnings" not in payload
-    assert "At-a-Glance" not in result.stdout
+    assert "Run plan" not in result.stdout
     assert "Screenshots:" not in result.stdout
     assert "Warnings" not in result.stdout
     assert result.stderr == ""

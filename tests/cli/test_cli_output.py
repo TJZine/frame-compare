@@ -100,8 +100,7 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     assert "disabled" in _rendered_row_value(output, "previous offsets")
     assert "false" in _rendered_row_value(output, "interactive alignment")
     assert "false" in _rendered_row_value(output, "force interactive")
-    assert "tone mapping" in output
-    assert "reference" in output
+    assert "reference" in _rendered_row_value(output, "tone mapping")
     assert "ffmpeg" in _rendered_row_value(output, "renderer")
     assert "disabled" in _rendered_row_value(output, "slow.pics")
     assert "public" in _rendered_row_value(output, "visibility")
