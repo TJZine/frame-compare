@@ -16,11 +16,11 @@ from rich.panel import Panel
 from rich.table import Table
 
 from frame_compare.orchestration.context import ClipState
+from frame_compare.render.overlay_text import format_file_size
 
 log = structlog.get_logger()
 
 _REPORT_CONSOLE_WIDTH = 180
-_MIN_REPORT_CONSOLE_WIDTH = 100
 
 
 @dataclass(frozen=True)
@@ -37,6 +37,7 @@ class FpsReportClip:
     effective_fps: Fraction
     fps_divergent: bool
     note: str | None
+    size_bytes: int = 0
 
 
 def build_consolidated_fps_report(
@@ -61,6 +62,7 @@ def build_consolidated_fps_report(
                 effective_fps=clip.effective_fps,
                 fps_divergent=clip.effective_fps != clip.source_fps,
                 note=None,
+                size_bytes=clip.probe.fingerprint.size_bytes,
             )
         )
     return tuple(clips)
@@ -103,8 +105,8 @@ def _stage_label(stage: str) -> str:
 
 def _clip_role(index: int) -> str:
     if index == 0:
-        return "reference"
-    return f"encode {index}"
+        return "Reference"
+    return f"Comparison {index}"
 
 
 def _format_fps_transition(clip: FpsReportClip) -> str:
@@ -126,19 +128,31 @@ def _format_dynamic_range(is_hdr: bool) -> str:
     return "[dim]SDR[/]"
 
 
-def _format_video_summary(clip: FpsReportClip) -> str:
-    resolution = escape(f"{clip.width}x{clip.height}")
-    frames = escape(_format_frame_count(clip.num_frames))
-    dynamic_range = _format_dynamic_range(clip.is_hdr)
-    return f"{resolution}  [dim]{frames}[/]  {dynamic_range}"
-
-
 def _report_console_width() -> int:
     columns = shutil.get_terminal_size(fallback=(_REPORT_CONSOLE_WIDTH, 24)).columns
-    return min(max(columns, _MIN_REPORT_CONSOLE_WIDTH), _REPORT_CONSOLE_WIDTH)
+    return min(max(columns, 1), _REPORT_CONSOLE_WIDTH)
 
 
-def _render_clip_overview(clips: Sequence[FpsReportClip]) -> Table:
+def _display_path(path: Path, *, input_dir: Path | None, verbose: bool) -> str:
+    absolute = path.resolve()
+    if verbose:
+        return str(absolute)
+    if input_dir is None:
+        return str(path)
+
+    try:
+        relative = absolute.relative_to(input_dir.resolve())
+    except ValueError:
+        return str(absolute)
+    return str(relative) if relative != Path(".") else "."
+
+
+def _render_clip_overview(
+    clips: Sequence[FpsReportClip],
+    *,
+    input_dir: Path | None,
+    verbose: bool,
+) -> Table:
     table = Table(
         show_header=False,
         box=None,
@@ -146,7 +160,7 @@ def _render_clip_overview(clips: Sequence[FpsReportClip]) -> Table:
         padding=(0, 2, 0, 0),
         expand=False,
     )
-    table.add_column("key", style="blue", no_wrap=True, min_width=12, overflow="fold")
+    table.add_column("key", style="blue", no_wrap=True, min_width=14, overflow="fold")
     table.add_column("value", overflow="fold")
 
     for index, clip in enumerate(clips):
@@ -154,9 +168,18 @@ def _render_clip_overview(clips: Sequence[FpsReportClip]) -> Table:
             table.add_row("", "")
 
         table.add_row(_clip_role(index), f"[bright_white]{escape(clip.label)}[/]")
-        table.add_row("  video", _format_video_summary(clip))
+        table.add_row("  resolution", f"[bright_white]{escape(f'{clip.width}x{clip.height}')}[/]")
+        table.add_row("  frames", f"[dim]{escape(_format_frame_count(clip.num_frames))}[/]")
+        table.add_row("  range", _format_dynamic_range(clip.is_hdr))
         table.add_row("  fps", f"[bright_white]{_format_fps_transition(clip)}[/]")
-        table.add_row("  path", f"[dim]{escape(str(clip.path))}[/]")
+        table.add_row(
+            "  file size",
+            f"[bright_white]{escape(format_file_size(clip.size_bytes))}[/]",
+        )
+        table.add_row(
+            "  path",
+            f"[dim]{escape(_display_path(clip.path, input_dir=input_dir, verbose=verbose))}[/]",
+        )
 
     return table
 
@@ -165,8 +188,10 @@ def _render_load_sources_overview(
     *,
     clips: Sequence[FpsReportClip],
     diagnostics: Sequence[str],
+    input_dir: Path | None,
+    verbose: bool,
 ) -> Table:
-    table = _render_clip_overview(clips)
+    table = _render_clip_overview(clips, input_dir=input_dir, verbose=verbose)
     if diagnostics:
         table.add_row("", "")
         for index, diagnostic in enumerate(diagnostics):
@@ -175,7 +200,20 @@ def _render_load_sources_overview(
     return table
 
 
-def _render_fps_table(clips: Sequence[FpsReportClip]) -> Table:
+def _fps_status(clip: FpsReportClip, *, reference_fps: Fraction) -> str:
+    if clip.effective_fps != reference_fps:
+        return "[red]divergent[/]"
+    if clip.fps_divergent:
+        return "[yellow]adjusted[/]"
+    return "[green]matched[/]"
+
+
+def _render_fps_table(
+    clips: Sequence[FpsReportClip],
+    *,
+    input_dir: Path | None,
+    verbose: bool,
+) -> Table:
     table = Table(
         show_header=True,
         box=None,
@@ -187,22 +225,35 @@ def _render_fps_table(clips: Sequence[FpsReportClip]) -> Table:
     table.add_column("clip", style="bright_white", overflow="fold")
     table.add_column("fps", style="bright_white", no_wrap=True, overflow="fold")
     table.add_column("status", no_wrap=True, overflow="fold")
-    table.add_column("path", style="dim", overflow="fold")
+    if verbose:
+        table.add_column("path", style="dim", overflow="fold")
 
+    if not clips:
+        return table
+    reference_fps = clips[0].effective_fps
     for index, clip in enumerate(clips):
-        status_text = "[yellow]adjusted[/]" if clip.fps_divergent else "[green]matched[/]"
+        status_text = _fps_status(clip, reference_fps=reference_fps)
         if clip.note is not None:
             status_text = f"{status_text} [dim]({escape(clip.note)})[/]"
 
-        table.add_row(
+        cells = [
             _clip_role(index),
             escape(clip.label),
             _format_fps_transition(clip),
             status_text,
-            escape(str(clip.path)),
-        )
+        ]
+        if verbose:
+            cells.append(escape(_display_path(clip.path, input_dir=input_dir, verbose=True)))
+        table.add_row(*cells)
 
     return table
+
+
+def _can_summarize_matching_fps(clips: Sequence[FpsReportClip]) -> bool:
+    if not clips or any(clip.fps_divergent for clip in clips):
+        return False
+    effective_fps = clips[0].effective_fps
+    return all(clip.effective_fps == effective_fps for clip in clips)
 
 
 def _render_human_fps_report(
@@ -211,15 +262,31 @@ def _render_human_fps_report(
     clips: Sequence[FpsReportClip],
     diagnostics: Sequence[str],
     no_color: bool,
+    input_dir: Path | None,
+    verbose: bool,
 ) -> None:
+    console = Console(stderr=True, no_color=no_color, width=_report_console_width(), height=1000)
     if stage == "after_load_sources":
-        title = "Clip Overview"
-        table = _render_load_sources_overview(clips=clips, diagnostics=diagnostics)
+        console.print(f"[bold green][OK][/] Sources loaded: {len(clips)}")
+        title = "Sources"
+        table = _render_load_sources_overview(
+            clips=clips,
+            diagnostics=diagnostics,
+            input_dir=input_dir,
+            verbose=verbose,
+        )
     else:
-        title = "Clip FPS"
-        table = _render_fps_table(clips)
+        if not verbose and _can_summarize_matching_fps(clips):
+            effective_fps = _format_fraction(clips[0].effective_fps)
+            console.print(f"[bold green][OK][/] Frame rates match: {escape(effective_fps)}")
+            return
+        title = "Frame rates"
+        table = _render_fps_table(
+            clips,
+            input_dir=input_dir,
+            verbose=verbose,
+        )
 
-    console = Console(stderr=True, no_color=no_color, width=_report_console_width())
     console.print(
         Panel(
             table,
@@ -237,6 +304,8 @@ def emit_consolidated_fps_report(
     quiet: bool,
     no_color: bool = False,
     diagnostics: Sequence[str] = (),
+    input_dir: Path | None = None,
+    verbose: bool = False,
 ) -> None:
     """Emit the consolidated FPS report in JSON or human-readable form."""
     if quiet:
@@ -252,4 +321,6 @@ def emit_consolidated_fps_report(
         clips=clips,
         diagnostics=diagnostics,
         no_color=no_color,
+        input_dir=input_dir,
+        verbose=verbose,
     )

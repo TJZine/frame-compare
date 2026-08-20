@@ -75,7 +75,7 @@ def test_run_human_output_routes_summaries_and_runtime_diagnostics(
     assert result.exit_code == 0
     stdout = _normalize_cli_output(result.stdout)
     stderr = _normalize_cli_output(result.stderr)
-    assert "At-a-Glance" in stdout
+    assert "Run plan" in stdout
     assert "Result" in stdout
     assert "Warnings" in stdout
     assert "metadata skipped" in stdout
@@ -83,11 +83,11 @@ def test_run_human_output_routes_summaries_and_runtime_diagnostics(
     assert "Frame Alignment" not in stdout
     assert "Clip Overview" in stderr
     assert "Frame Alignment" in stderr
-    assert "At-a-Glance" not in stderr
+    assert "Run plan" not in stderr
     assert "Result" not in stderr
 
 
-def test_run_quiet_suppresses_at_a_glance_but_keeps_minimal_summary(
+def test_run_quiet_suppresses_run_plan_but_keeps_minimal_summary(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -104,7 +104,7 @@ def test_run_quiet_suppresses_at_a_glance_but_keeps_minimal_summary(
 
     assert result.exit_code == 0
     output = _normalize_cli_output(result.stdout)
-    assert "At-a-Glance" not in output
+    assert "Run plan" not in output
     assert output.splitlines()[-1].startswith("Screenshots:")
 
 
@@ -143,7 +143,7 @@ def test_run_json_is_machine_only_and_omits_post_upload_actions(
     assert payload["slowpics_url"] == "https://slow.pics/c/example"
     assert "post_upload_actions" not in payload
     assert "warnings" not in payload
-    assert "At-a-Glance" not in result.stdout
+    assert "Run plan" not in result.stdout
     assert "Screenshots:" not in result.stdout
     assert "Warnings" not in result.stdout
     assert result.stderr == ""

@@ -38,6 +38,8 @@ documents that promise elsewhere.
 
 - `src/frame_compare/cli/entry.py` is the implementation owner for CLI command routing,
   argument parsing, stdout/stderr behavior, and interactive post-run behavior.
+- `src/frame_compare/cli/output.py` owns the human run plan, result hierarchy,
+  warning presentation, and path formatting; it does not own JSON serialization.
 - `src/frame_compare/config/overrides.py` owns CLI flag to config override mappings.
 - Primary executable contract checks include:
   - `tests/cli/test_help_and_import.py` for command registration, help text, and
@@ -91,6 +93,12 @@ persist only when combined with `--write-config`. Shared `--root` and `--config`
 help states their workspace-relative resolution, while runtime-only flags describe
 their one-run or early-exit behavior. These descriptions do not change option
 defaults, parsing, persistence, streams, or exit codes.
+
+Root help describes the repeatable comparison outcome and includes concise examples
+for first setup, a dry-run preview, and a local-only comparison. `run --help` groups
+options under Workspace and configuration, Sources and frame selection, Rendering
+and alignment, Reports and publishing, Planning and diagnostics, and Output modes.
+Help uses the current terminal width; it does not impose a routine 200-column width.
 
 ## Shared Path Resolution Rules
 
@@ -293,10 +301,14 @@ unchanged.
 - `--dry-run` is incompatible with `--write-config` and `--diagnose-paths`. It
   preserves the effective future run's existing `--json`, `--quiet`, interactive,
   frame-selection, source-selector, and cache-option compatibility validation.
-- Human dry-run output renders the same typed plan as JSON. Normal human mode shows
-  the detailed plan; `--quiet` emits only a minimal source-count/no-side-effects
-  summary. `--dry-run --json` writes exactly one JSON document to stdout, and typed
-  errors retain the standard JSON error schema and stream placement.
+- Human dry-run output renders the same typed plan as JSON. Normal human mode starts
+  with an explicit no-side-effects statement and groups the decision facts under
+  `Will use`, `Would create in a real run`, `Publishing after success`, `Unknown
+  until execution`, and `Not performed by dry-run`. Contained input paths are shown
+  relative to the workspace root, while external input paths remain absolute.
+  `--quiet` emits only a minimal source-count/no-side-effects summary.
+  `--dry-run --json` writes exactly one JSON document to stdout, and typed errors
+  retain the standard JSON error schema and stream placement.
 - Successful dry-run JSON has exactly these top-level keys:
   `checks_not_performed`, `dry_run`, `input`, `outputs`, `publishing`, `reference`,
   `runtime_facts`, and `selection`. Their exact nested fields are:
@@ -316,7 +328,7 @@ unchanged.
   `media_probe`, `analysis`, `alignment`, `cache_reads_or_writes`,
   `run_folder_reservation_or_metadata_writes`, `render_or_report_generation`,
   `network_publishing_or_metadata`, and `browser_clipboard_or_vspreview`.
-- The plan never dumps effective config. The resolved input directory is its only
+- The JSON plan never dumps effective config. The resolved input directory is its only
   deliberately reported absolute path. Source entries are filenames only. API keys,
   webhook URLs, tokens, and other secret values are excluded; only
   `webhook_configured` may reveal that a webhook-backed action is configured. The
@@ -325,6 +337,20 @@ unchanged.
   gates will permit the action. Runtime-only facts remain `unknown` with null
   values until their existing runtime owners could determine them. The
   `run_folder_name` fact is always unknown until reservation.
+- Normal non-quiet runs begin with a `Run plan` decision checklist containing
+  `Workspace`, `Frame selection`, `Rendering`, `Alignment`, `Review`, and
+  `Publishing` groups. It retains the renderer policy (`ffmpeg` when forced,
+  otherwise `auto` with VapourSynth preferred), overlay, geometry,
+  active-picture policy, tone mapping, frame-selection counts and seed, analysis
+  source/mode, nonzero lead/trail exclusions, alignment/reuse/manual-review policy,
+  report intent, slow.pics visibility/confirmation/actions, and local deletion
+  behavior. Configured webhook values are represented only as configured/not
+  configured; the URL itself is never displayed.
+- Human run-plan paths show the resolved workspace root once as an absolute anchor.
+  Contained config, input, generated-data, and result paths are shown relative to
+  that root; external paths remain absolute. Rich folds long paths at narrow
+  terminal widths without replacing path text with an ellipsis. `--verbose` may add
+  the absolute form beside a contained relative path.
 - `--json` writes a single JSON object to stdout and suppresses human-readable summaries.
 - In that JSON object, `slowpics_url` is the only machine-readable slow.pics
   result field. No copy/open/shortcut/webhook result fields are emitted.
@@ -345,7 +371,8 @@ unchanged.
   and `slowpics.confirm_upload_after_report = true`, the CLI rejects `--json`
   before entering the runtime pipeline with the standard config-error JSON
   payload on stdout.
-- `--quiet` suppresses the at-a-glance summary but still allows a minimal success summary.
+- `--quiet` suppresses the Run plan and retains the existing minimal success summary
+  byte/semantic contract.
 - `--quiet` is incompatible with `audio_alignment.previous_offsets = "prompt"`
   and is rejected before entering the runtime pipeline. It is compatible with
   `previous_offsets = "always"`.
@@ -357,6 +384,27 @@ unchanged.
   ranges, offsets, selected aligned frames, and rejected alignment warning context
   for comparisons with material alignment information. It is suppressed by
   `--quiet` and is never emitted to `run --json` stdout.
+- After sources load, normal human output begins the source summary with
+  `[OK] Sources loaded: N`. Its rows use `Reference` and `Comparison N` roles and
+  show each source's resolved label, resolution, source frame count, HDR/SDR
+  signal, source/effective FPS when they differ, complete container file size in
+  IEC units, and an input-relative path when the source is beneath the configured
+  input directory. External sources remain absolute. The displayed size comes
+  from the probed fingerprint's `size_bytes`; it is not bitrate or a quality
+  signal, and it is not added to successful `run --json`.
+- After alignment, normal human output emits one `[OK] Frame rates match: X` line
+  only when every effective FPS is equal and no source FPS was adjusted. Any
+  adjustment or effective-FPS divergence instead keeps a compact evidence table
+  with the source-to-effective transition and status. Normal post-alignment FPS
+  output omits repeated paths; `--verbose` retains the detailed rows and full
+  absolute paths. JSON-mode FPS diagnostics retain their existing structured
+  stderr event and do not add fields to the successful stdout payload.
+- Material `Frame Alignment` output puts comparison, offset, source, trim, and
+  warning evidence before verbose provenance details. Verbose mode also retains
+  row-zero source frames, selected aligned frames, and absolute source paths.
+  Source/FPS, alignment, and previous-offset prompt panels honor the actual
+  terminal width up to their existing maximum and do not impose a 100-column
+  minimum; status meaning remains visible in no-color output at narrow widths.
 - Verbose human runs emit a concise `Final Selection` summary to stderr immediately
   after alignment. It reports the final aligned frame count and each non-empty
   `SelectionBreakdown` category in `User`, `Dark`, `Bright`, `Motion`, `Random`
@@ -364,31 +412,54 @@ unchanged.
   domain. If the breakdown is unavailable, the aligned count is still reported with
   an unavailable indication. Normal, quiet, and JSON runs do not emit this summary,
   and it does not add a JSON field or log event.
-- Human-readable non-quiet successful runs group final warnings by source in a
-  `Warnings` panel. Existing runtime warning strings and slow.pics post-upload
-  action warnings are bridged into presentation rows with source, severity,
-  message, and optional detail/action context, then de-duplicated for display.
-  The visible warning cap remains eight rows; truncated output includes the
-  number of hidden rows and counts by hidden source.
+- Human-readable non-quiet successful runs begin with `[OK] Comparison completed`
+  or `[WARN] Comparison completed with N warning(s)`, using a de-duplicated warning
+  presentation count. The `Result` panel contains concise run facts, then a `Review`
+  group with the report before screenshots, a separate `Published` group, and a
+  separate `Follow-up actions` group for successful post-upload actions. Durations
+  use human units and the source/cache facts are labeled `sources` and
+  `Analysis cache`.
+- Final warnings are grouped by source in a `Warnings` panel. Existing runtime
+  warning strings and slow.pics post-upload action warnings are bridged into
+  presentation rows with source, severity, message, and optional action context,
+  then de-duplicated for display. A `because ...` reason is shown once as detail.
+  Normal output shows at most eight warning rows and summarizes hidden rows by
+  source; `--verbose` shows every warning. Status text uses ASCII `[OK]`, `[WARN]`,
+  `[SKIP]`, `[FAIL]`, and `[WAIT]` markers, with color only reinforcing meaning.
 - `run --json` does not emit the human warning panel, does not add warning
   fields, and keeps warning text off stdout for successful runs. Runtime logs,
   native VapourSynth diagnostics, and plugin stderr may still use stderr.
-- When the at-a-glance summary reports optional VSPreview probe failures, it uses a
+- When the Run plan reports optional VSPreview probe failures, it uses a
   sanitized summary rather than raw probe exception text.
-- The at-a-glance summary uses user-facing row labels such as `FFmpeg audio`,
+- The Run plan uses user-facing row labels such as `FFmpeg audio`,
   `previous offsets`, `interactive alignment`, `force interactive`, and `VSPreview`
   while preserving the same effective
-  configuration facts. The `previous offsets` row reports only the effective
-  config mode: `disabled`, `prompt`, or `always`.
-- The `analysis mode` row reports the effective `analysis.performance_mode`:
-  `quality` or `performance`.
-- The at-a-glance workspace paths show `root`, `config`, `input`, and the resolved
+  configuration facts. The `previous offsets` row reports status-prefixed
+  explanatory text: `do not reuse previous offsets (disabled)`, `ask before
+  reusing previous offsets (prompt)`, or `reuse previous offsets when valid
+  (always)`.
+- The `analysis mode` row reports the effective `analysis.performance_mode` as
+  `quality` or `performance` and appends a space followed by
+  `(skipped for this run)` when `--skip-analysis` is active.
+- The Run plan workspace paths show `root`, `config`, `input`, and the resolved
   `generated` data root. The constant run-folder policy and derived screenshot path
   are not configuration rows.
 - Human Rich progress uses product phase labels: `PLAN`, `ANALYZE`, `ALIGN`,
   `RENDER`, `METADATA`, `PUBLISH`, `REPORT`, `CONFIRM`, and `CLEANUP`.
   Internal phase names in logs and `phase_timings` remain the runtime keys such
   as `frame_plan`, `analyze`, `align`, and `confirm_slowpics_upload`.
+- Every Rich phase remains live while active with an ASCII `[RUN]` marker. A
+  successful phase leaves a durable
+  ASCII status line when it runs for at least 10.0 seconds, while skipped,
+  warned, and failed phases always remain visible. A successful slow.pics upload
+  also leaves a durable `PUBLISH` line regardless of duration. The report-confirmed
+  prompt is the durable `[WAIT] CONFIRM` record; it does not add a redundant
+  generic successful completion line. Progress is suspended around that blocking
+  prompt and restored afterward.
+- The known slow.pics upload start/complete lifecycle events are DEBUG evidence in
+  normal TTY runs because the product progress stream already represents the same
+  lifecycle. Retry, rate-limit, server, timeout, and network warnings remain
+  normal warning events.
 - `--no-color` disables ANSI color in interactive Rich progress output. It does
   not switch an interactive human run to structlog progress. It also disables
   ANSI styling for the previous-offset reuse table and prompt. Quiet and JSON
@@ -1136,10 +1207,12 @@ enabled.
   stdin is not a TTY, or EOF occurs while prompting, the CLI emits
   `Previous alignment offset reuse prompt unavailable; continuing without reuse.`
   to stderr and continues without reuse.
-- The previous-offset reuse table displays reference and comparison labels,
-  signed frame offset, time offset seconds, source label `confirmed`, the shared
-  cache path, and each entry's persisted `accepted_at` timestamp. It does not
-  derive freshness from file mtime or index mtime.
+- The previous-offset reuse table displays the reference and comparison labels,
+  signed frame offset, time offset seconds, and source label (`computed` or
+  `confirmed`) before the persisted `accepted_at` timestamp, filename, and full
+  path evidence. The shared cache directory and cache filename remain visible as
+  the final cache evidence rows. It does not derive freshness from file mtime or
+  index mtime.
 - Shared previous-offset entries live under
   `<resolved paths.generated_dir>/cache/alignment/`. This is shared generated-data
   cache state and does not live inside a fresh run folder.
@@ -1241,15 +1314,20 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   authored string after confirmation. The wizard does not check availability,
   writability, create, or probe this location while saving configuration.
 - Its goals are `Random spot check` (10 seeded random frames, no metrics scan),
-  `Dark, bright, and motion coverage` (4 random plus 2 each dark, bright, and motion
-  frames in full-resolution `quality` mode), and `Specific frame numbers` (1–100
-  sorted unique non-negative frame numbers, no metrics scan). Existing configs also
-  offer a default `Keep current frame selection` no-op.
+  `Visual coverage` (4 random plus 2 each dark, bright, and motion frames in
+  full-resolution `quality` mode), and `Specific frame numbers` (1–100 sorted unique
+  non-negative frame numbers, no metrics scan). Existing configs also offer a default
+  `Keep current frame selection` no-op. The initial choices are concise; after choosing
+  visual coverage, the wizard explains that its quality scan is slower and may take
+  longer.
 - It discovers supported filenames through the canonical deterministic discovery and
   source-selection owners without reading, hashing, opening, or probing media. The
-  input directory may be external. Zero files preserve reference selection; duplicate
-  stems fail before the reference prompt; automatic reference removes an explicit
-  reference key; explicit filename selection is canonically revalidated.
+  input directory may be external. Small source sets may be shown inline; larger sets
+  report their count before the reference choices without a duplicate filename dump.
+  The reference menu remains a simple numbered list without paging, search, or fuzzy
+  selection. Zero files preserve reference selection; duplicate stems fail before the
+  reference prompt; automatic reference removes an explicit reference key; explicit
+  filename selection is canonically revalidated.
 - First use starts from schema defaults and writes only the confirmed partial payload,
   including the authored `paths.generated_dir` value and
   `slowpics.auto_upload = false`. Environment values still have higher
@@ -1264,7 +1342,8 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   Environment-only values are neither displayed nor persisted. Wizard validation
   errors redact every raw Pydantic input.
 - Before writing, the wizard validates the complete candidate through the shared
-  config/preflight path policy and shows a semantic review containing changed/new
+  config/preflight path policy and shows a semantic review grouped into `Changes`,
+  `Runtime impact`, `Privacy`, and `Preserved settings`. It includes changed/new
   input, generated-data location, reference, and frame-selection facts, the
   metrics-scan consequence, and privacy/preservation statements, including explicit
   notice when a persisted webhook URL will be removed. It never displays secret
@@ -1313,15 +1392,18 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 - Human-mode typed top-level failures honor the `NO_COLOR` environment variable
   and do not suggest unsupported `--verbose` usage.
 - Without `--json`, `doctor` writes a human-readable report to stdout.
-- Human output uses a neutral status marker for optional unavailable checks such as
-  VSPreview, so optional availability gaps are visually distinct from critical
-  dependency failures. This does not change `doctor --json` status values.
-- Human output uses a warning marker, rather than the critical-failure marker, for
-  failed noncritical checks such as network reachability or missing optional
-  integration configuration. It ends with a deterministic readiness summary that
-  distinguishes a blocked core runtime, a ready core runtime with noncritical
-  warnings, and a fully passing check set. These presentation changes do not alter
-  JSON fields, JSON status values, or exit-code behavior.
+- Human output starts with one readiness outcome: `[FAIL] Runtime is not ready for
+  comparisons.`, `[WARN] Ready for local comparisons; optional or network checks
+  need attention.`, or `[OK] Runtime is ready for comparisons.` It then groups checks
+  under `Required`, `Optional`, and `Network and credentials`, in their existing
+  check order, using human labels such as `VapourSynth`, `FFmpeg`, `VSPreview`, and
+  `TMDB API key`.
+- Human check status markers are `[FAIL]` for critical failures, `[SKIP]` for
+  passed optional checks whose capability is unavailable, `[WARN]` for failed
+  noncritical checks, and `[OK]` for passed checks. Hints remain directly beneath
+  the affected check. There is no duplicate trailing readiness summary. These
+  presentation changes do not alter JSON fields, JSON status values, or exit-code
+  behavior.
 - Failed checks and optional-unavailable warnings include a short deterministic next
   action when the check can prove one. `doctor --json` exposes the same text as
   `install_hint`. Hints distinguish missing executables, unavailable runtimes/plugins,
@@ -1329,6 +1411,9 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   configuration/credential classes without guessing a package-manager command or
   install mode; when setup mode is unknown, they point to the repository's current
   setup documentation.
+- If an unexpected check function raises, the generic fallback uses stable failure
+  wording and may expose only the exception type in JSON `details`; raw exception
+  messages are not emitted in human or JSON doctor output.
 - If any critical failures are present, `doctor` exits with the dependency error exit code.
 - Optional VSPreview probe diagnostics may include exception type metadata, but do not
   expose raw probe exception messages.
@@ -1343,7 +1428,8 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 
 - Resolves the presets directory under `<root>/config/presets`.
 - Accepts `--config` for interface consistency, but current behavior ignores the resolved
-  config path and uses `--root` only when locating presets.
+  config path and uses `--root` only when locating presets. Help describes this value
+  as accepted for consistency and ignored by `preset list`.
 - Prints preset names one per line to stdout.
 - Emits no success confirmation.
 

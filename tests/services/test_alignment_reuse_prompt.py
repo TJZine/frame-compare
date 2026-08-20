@@ -142,6 +142,9 @@ def test_prompt_prints_rich_safe_table_to_stderr_and_accepts_yes(
     assert "computed" in stderr_output
     assert "confirmed" in stderr_output
     assert "cached" not in stderr_output
+    assert stderr_output.index("+12f") < stderr_output.index("computed")
+    assert stderr_output.index("computed") < stderr_output.index("accepted")
+    assert stderr_output.index("accepted") < stderr_output.index("cache")
 
 
 def test_prompt_does_not_use_unbounded_terminal_width(
@@ -175,6 +178,37 @@ def test_prompt_does_not_use_unbounded_terminal_width(
     assert accepted is False
     assert console_widths
     assert all(width is not None and width < 240 for width in console_widths)
+
+
+@pytest.mark.parametrize("columns", [60, 80])
+def test_prompt_uses_actual_narrow_terminal_width(
+    columns: int,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _request(tmp_path)
+    monkeypatch.setattr(
+        reuse_prompt.shutil,
+        "get_terminal_size",
+        lambda **_: os.terminal_size((columns, 24)),
+    )
+    monkeypatch.setattr(reuse_prompt.sys, "stdin", _TTYStringIO("n\n", is_tty=True))
+    stderr = _TTYStringIO("", is_tty=True)
+    monkeypatch.setattr(reuse_prompt.sys, "stderr", stderr)
+
+    assert (
+        prompt_for_previous_offset_reuse(
+            prompt_input=_prompt_input(request),
+            progress=None,
+            no_color=True,
+        )
+        is False
+    )
+    stderr_output = stderr.getvalue()
+    assert "Previous Alignment Offsets" in stderr_output
+    assert REUSE_PREVIOUS_OFFSETS_PROMPT in stderr_output
+    assert "\x1b[" not in stderr_output
+    assert all(len(line) <= columns for line in stderr_output.splitlines())
 
 
 @pytest.mark.parametrize("response", ["\n", "n\n", "NO\n", "anything else\n"])

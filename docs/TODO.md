@@ -15,29 +15,27 @@ search:
 
 ## CLI Output Follow-Ups
 
-### Optional Phase Section Headers
+### Plain Non-TTY Human Renderer
 
-**Context**: Current interactive progress now uses concise product phase labels
-inside the Rich progress task. It does not emit durable section headers around
-phase boundaries.
+**Context**: Interactive TTY output now has a decision-first information hierarchy
+and Rich progress presentation. Redirected and CI human output still uses the
+existing log-oriented progress path; JSON remains the automation contract.
 
-**What**: If users still need more visible workflow landmarks after the progress
-label pass, evaluate lightweight phase section headers around runtime progress
-without duplicating the existing progress task labels.
+**What**: For non-JSON, non-quiet redirected or CI human runs, replace the existing
+user-facing log-progress milestones with automatic chronological text output without
+live redraws or spinners. Keep the current run-plan, source, and result renderers and
+their stream ownership; do not emit both log-progress milestones and chronological
+phase lines.
 
-**Risk**: Touches orchestration hotspot files (`execution.py`, `coordinator.py`)
-and user-visible CLI output. Requires a focused plan and full verification.
+**Acceptance criteria**:
 
-### Post-Probe Clip Metadata Summary
+- Emit each run-plan, source, phase, warning, and result fact at most once.
+- Keep `run --json` output, schema, stderr behavior, and reporter selection unchanged.
+- Preserve `--quiet`, exit codes, prompt eligibility, and interactive TTY behavior.
+- Do not add a default `--plain` flag.
+- Update the authoritative CLI contract in the implementation pass that changes the
+  current non-TTY human behavior.
 
-**Context**: The legacy project shows per-clip metadata (resolution, fps, frame
-count, duration timecode) in a `[DISCOVER]` section.
-
-**What**: Surface clip probe data (resolution, fps, frames, duration) through
-`RunResult` or a post-probe callback and render it as a styled clip table.
-
-**Config gating**: Should be gated behind `--verbose` or a config flag (e.g.
-`diagnostics.show_clip_metadata`).
-
-**Risk**: Same as the frame plan breakdown — requires expanding `RunResult` and
-the orchestration data flow.
+**Risk**: Touches orchestration progress selection and user-visible CLI streams.
+Preserve JSON/stdout purity, quiet behavior, exit codes, and TTY prompt handling;
+use a focused plan and full verification.

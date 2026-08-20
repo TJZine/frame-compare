@@ -36,6 +36,7 @@ from frame_compare.services.slowpics_post_upload import (
 from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.progress import NullProgressReporter
+from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 from frame_compare.vs.types import TonemapSettings
 from tests.orchestration.phase_task_helpers import (
     _clip,
@@ -43,6 +44,36 @@ from tests.orchestration.phase_task_helpers import (
     _render_artifacts,
     _RenderRunner,
 )
+
+
+class _RecordingProgressReporter:
+    def __init__(self) -> None:
+        self.events: list[str] = []
+        self.completions: list[tuple[ProgressPhaseStatus, bool | None]] = []
+
+    def start_phase(self, name: str, total: int) -> None:
+        del total
+        self.events.append(f"start:{name}")
+
+    def advance(self, amount: int = 1) -> None:
+        self.events.append(f"advance:{amount}")
+
+    def set_description(self, desc: str) -> None:
+        self.events.append(f"description:{desc}")
+
+    def complete_phase(
+        self,
+        status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+        *,
+        retain: bool | None = None,
+    ) -> None:
+        self.completions.append((status, retain))
+
+    def suspend(self) -> None:
+        self.events.append("suspend")
+
+    def resume(self) -> None:
+        self.events.append("resume")
 
 
 async def test_run_metadata_phase_resolves_when_enabled_and_client_present(
@@ -589,6 +620,8 @@ async def test_report_confirmed_decline_skips_publish(
         artifacts=RunArtifacts(report_path=report_path, report_succeeded=True),
         selected_frames=[10],
     )
+    reporter = _RecordingProgressReporter()
+    ctx.reporter = reporter
     callback_calls: list[SlowpicsUploadConfirmationRequest] = []
 
     def _decline(
@@ -619,12 +652,18 @@ async def test_report_confirmed_decline_skips_publish(
         selected_phases = [
             phase for phase in phases if phase.name in {"confirm_slowpics_upload", "publish"}
         ]
-        await execute_phases(selected_phases, ctx, NullProgressReporter())
+        await execute_phases(selected_phases, ctx, reporter)
 
     assert callback_calls == [SlowpicsUploadConfirmationRequest(report_path=report_path)]
     assert state.artifacts.slowpics_upload_confirmation_status == "declined"
     assert state.artifacts.slowpics_url is None
     assert state.artifacts.uploaded_slowpics_file_paths == ()
+    assert [event for event in reporter.events if event in {"suspend", "resume"}] == [
+        "suspend",
+        "resume",
+    ]
+    assert (ProgressPhaseStatus.SKIPPED, None) in reporter.completions
+    assert (ProgressPhaseStatus.COMPLETED, True) not in reporter.completions
 
 
 async def test_report_confirmed_available_report_confirms_then_publishes(
@@ -639,6 +678,8 @@ async def test_report_confirmed_available_report_confirms_then_publishes(
         artifacts=RunArtifacts(report_path=report_path, report_succeeded=True),
         selected_frames=[10],
     )
+    reporter = _RecordingProgressReporter()
+    ctx.reporter = reporter
     publish_calls = 0
 
     def _confirm(
@@ -671,11 +712,17 @@ async def test_report_confirmed_available_report_confirms_then_publishes(
         selected_phases = [
             phase for phase in phases if phase.name in {"confirm_slowpics_upload", "publish"}
         ]
-        await execute_phases(selected_phases, ctx, NullProgressReporter())
+        await execute_phases(selected_phases, ctx, reporter)
 
     assert publish_calls == 1
     assert state.artifacts.slowpics_upload_confirmation_status == "confirmed"
     assert state.artifacts.slowpics_url == "https://slow.pics/c/confirmed"
+    assert [event for event in reporter.events if event in {"suspend", "resume"}] == [
+        "suspend",
+        "resume",
+    ]
+    assert (ProgressPhaseStatus.COMPLETED, False) in reporter.completions
+    assert (ProgressPhaseStatus.COMPLETED, True) in reporter.completions
 
 
 async def test_report_confirmed_report_failure_skips_prompt_and_publish(
@@ -686,6 +733,8 @@ async def test_report_confirmed_report_failure_skips_prompt_and_publish(
     ctx.config.slowpics.confirm_upload_after_report = True
     ctx.config.report.enable = True
     state = ExecutionState(artifacts=RunArtifacts(), selected_frames=[10])
+    reporter = _RecordingProgressReporter()
+    ctx.reporter = reporter
 
     def _failing_report(*_args: object, **_kwargs: object) -> ReportPhaseOutput:
         raise RuntimeError("report failed")
@@ -724,7 +773,7 @@ async def test_report_confirmed_report_failure_skips_prompt_and_publish(
             for phase in phases
             if phase.name in {"report", "confirm_slowpics_upload", "publish"}
         ]
-        await execute_phases(selected_phases, ctx, NullProgressReporter())
+        await execute_phases(selected_phases, ctx, reporter)
 
     assert state.artifacts.slowpics_upload_confirmation_status == "report_unavailable"
     assert state.artifacts.slowpics_url is None
@@ -732,6 +781,9 @@ async def test_report_confirmed_report_failure_skips_prompt_and_publish(
         "report: report failed",
         "slow.pics upload skipped because report confirmation was unavailable",
     ]
+    assert [event for event in reporter.events if event in {"suspend", "resume"}] == []
+    assert (ProgressPhaseStatus.SKIPPED, None) in reporter.completions
+    assert (ProgressPhaseStatus.COMPLETED, True) not in reporter.completions
 
 
 async def test_report_confirmed_report_payload_uses_no_slowpics_url(

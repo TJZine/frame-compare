@@ -131,19 +131,21 @@ def test_run_rejects_retired_frame_count_options(
         (
             ["--help"],
             [
-                "Compare video sources and generate screenshots",
-                "Interactively configure input, reference, and frame selection.",
-                "Check required runtimes and optional integrations.",
+                "Reproducible video comparisons with deterministic frame selection, audio alignment, HDR-aware rendering, and offline review reports.",
+                "Turn two or more local video sources into a repeatable comparison",
+                "First setup: frame-compare wizard",
+                "Preview a run: frame-compare run --dry-run",
+                "Compare locally: frame-compare run --no-upload",
             ],
         ),
         (
             ["run", "--help"],
             [
                 "Compare video sources and generate screenshots and an optional report.",
-                "Workspace root containing config and output directories.",
+                "Workspace root containing configuration, input, and generated output.",
                 "persists with --write-config",
                 "Require valid cached analysis",
-                "Plan without probing, rendering, writing outputs, or publishing.",
+                "Preview what a run would use and create without probing or side effects.",
                 "Write the effective config, then exit without running.",
                 "Print resolved workspace paths as JSON, then exit.",
             ],
@@ -170,7 +172,7 @@ def test_run_rejects_retired_frame_count_options(
             ["preset", "list", "--help"],
             [
                 "List available configuration presets.",
-                "Accepted for consistency; preset list uses --root.",
+                "Accepted for consistency; ignored here. Presets are located under --root.",
             ],
         ),
         (
@@ -201,6 +203,61 @@ def test_public_help_explains_commands_and_option_effects(
         assert fragment in output
 
 
+@pytest.mark.parametrize("terminal_width", [60, 80, 120])
+@pytest.mark.parametrize("args", [["--help"], ["run", "--help"]])
+def test_help_uses_requested_terminal_width(args: list[str], terminal_width: int) -> None:
+    result = runner.invoke(
+        app,
+        args,
+        color=False,
+        terminal_width=terminal_width,
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+
+    assert result.exit_code == 0
+    assert max((len(line) for line in result.stdout.splitlines()), default=0) <= terminal_width
+
+
+def test_help_no_color_disables_ansi_when_typer_forces_terminal(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(typer_rich_utils, "FORCE_TERMINAL", True)
+
+    result = runner.invoke(
+        app,
+        ["--help"],
+        color=False,
+        terminal_width=60,
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+
+    assert result.exit_code == 0
+    assert "\x1b[" not in result.stdout
+
+
+def test_run_help_groups_options_by_task() -> None:
+    result = runner.invoke(
+        app,
+        ["run", "--help"],
+        color=False,
+        terminal_width=80,
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+    output = _normalize_cli_help(result.stdout)
+    panels = [
+        "Workspace and configuration",
+        "Sources and frame selection",
+        "Rendering and alignment",
+        "Reports and publishing",
+        "Planning and diagnostics",
+        "Output modes",
+    ]
+
+    assert result.exit_code == 0
+    positions = [output.index(panel) for panel in panels]
+    assert positions == sorted(positions)
+
+
 def test_root_generates_shell_completion_source(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setenv("_TYPER_COMPLETE_TEST_DISABLE_SHELL_DETECTION", "True")
     result = runner.invoke(
@@ -224,6 +281,18 @@ def test_stabilize_typer_help_width_backfills_import_order_gap(monkeypatch: Monk
     monkeypatch.setattr(typer_rich_utils, "MAX_WIDTH", None)
     _stabilize_typer_help_width()
     assert typer_rich_utils.MAX_WIDTH == 200
+
+
+@pytest.mark.parametrize("terminal_width", [0, -1])
+def test_stabilize_typer_help_width_ignores_non_positive_explicit_width(
+    terminal_width: int,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(typer_rich_utils, "MAX_WIDTH", 120)
+
+    _stabilize_typer_help_width(terminal_width)
+
+    assert typer_rich_utils.MAX_WIDTH == 120
 
 
 def test_import_does_not_mutate_terminal_width():

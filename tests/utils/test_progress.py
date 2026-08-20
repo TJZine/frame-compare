@@ -2,6 +2,9 @@
 
 from concurrent.futures import ThreadPoolExecutor
 
+import pytest
+
+import frame_compare.utils.progress as progress_module
 from frame_compare.utils.progress import (
     LogProgressReporter,
     NullProgressReporter,
@@ -26,6 +29,17 @@ def test_rich_progress_reporter_accepts_no_color() -> None:
 
     assert reporter.no_color is True
     assert reporter.writes_to_stderr is True
+
+
+def test_rich_progress_reporter_marks_active_work_without_color() -> None:
+    reporter = RichProgressReporter(no_color=True)
+
+    reporter.start_phase("PLAN", 1)
+    assert reporter._progress.tasks[0].description == "[RUN] PLAN"  # noqa: SLF001
+
+    reporter.set_description("Selecting frames")
+    assert reporter._progress.tasks[0].description == "[RUN] Selecting frames"  # noqa: SLF001
+    reporter.complete_phase()
 
 
 def test_log_progress_reporter_supports_nested_phases(capsys) -> None:
@@ -149,6 +163,84 @@ def test_rich_progress_reporter_warned_phase_does_not_force_total(
 
     assert {"description": "Warning", "refresh": True} in update_calls
     assert {"completed": 10, "refresh": True} not in update_calls
+
+
+def test_rich_progress_reporter_does_not_retain_success_below_ten_seconds(
+    monkeypatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    reporter = RichProgressReporter()
+    clock = iter((0.0, 9.9))
+    monkeypatch.setattr(progress_module, "monotonic", lambda: next(clock))
+
+    reporter.start_phase("PLAN", 1)
+    reporter.complete_phase()
+
+    assert "[OK] PLAN" not in capsys.readouterr().err
+
+
+def test_rich_progress_reporter_retain_success_at_ten_seconds(
+    monkeypatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    reporter = RichProgressReporter()
+    clock = iter((0.0, 10.0))
+    monkeypatch.setattr(progress_module, "monotonic", lambda: next(clock))
+
+    reporter.start_phase("PLAN", 1)
+    reporter.complete_phase()
+
+    assert "[OK] PLAN" in capsys.readouterr().err
+
+
+def test_rich_progress_reporter_explicitly_retains_short_success(
+    monkeypatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    reporter = RichProgressReporter()
+    clock = iter((0.0, 0.1))
+    monkeypatch.setattr(progress_module, "monotonic", lambda: next(clock))
+
+    reporter.start_phase("PUBLISH", 1)
+    reporter.complete_phase(retain=True)
+
+    assert "[OK] PUBLISH" in capsys.readouterr().err
+
+
+def test_rich_progress_reporter_suppresses_generic_confirm_completion(
+    monkeypatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    reporter = RichProgressReporter()
+    clock = iter((0.0, 10.0))
+    monkeypatch.setattr(progress_module, "monotonic", lambda: next(clock))
+
+    reporter.start_phase("CONFIRM", 1)
+    reporter.complete_phase(retain=False)
+
+    assert "[OK] CONFIRM" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        (ProgressPhaseStatus.SKIPPED, "[SKIP] ANALYZE"),
+        (ProgressPhaseStatus.WARNED, "[WARN] ALIGN"),
+        (ProgressPhaseStatus.FAILED, "[FAIL] RENDER"),
+    ],
+)
+def test_rich_progress_reporter_retains_non_success_statuses(
+    status: ProgressPhaseStatus,
+    expected: str,
+    monkeypatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    reporter = RichProgressReporter()
+
+    reporter.start_phase(expected.split(maxsplit=1)[1], 1)
+    reporter.complete_phase(status)
+
+    assert expected in capsys.readouterr().err
 
 
 def test_rich_progress_reporter_refreshes_state_changes(monkeypatch) -> None:

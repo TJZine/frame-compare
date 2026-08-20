@@ -44,14 +44,11 @@ def run_doctor(
     for check in checks:
         try:
             result = check.check_fn()
-        except Exception as e:
+        except Exception as error:
             result = CheckResult(
                 passed=False,
-                message=f"{check.name} check raised: {e}",
-                details={
-                    "exception_type": type(e).__name__,
-                    "exception": str(e),
-                },
+                message=f"{check.name} check failed",
+                details={"exception_type": type(error).__name__},
             )
         results.append((check, result))
 

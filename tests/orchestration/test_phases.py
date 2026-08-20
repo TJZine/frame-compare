@@ -209,6 +209,46 @@ def test_execute_phases_preserves_internal_phase_name_for_log_progress(
     )
 
 
+def test_execute_phases_forwards_success_retention_hint(tmp_path: Path) -> None:
+    context = _make_context(tmp_path)
+
+    class SpyReporter:
+        def __init__(self) -> None:
+            self.complete_phase_calls: list[tuple[ProgressPhaseStatus, bool | None]] = []
+
+        def start_phase(self, name: str, total: int) -> None:
+            del name, total
+
+        def advance(self, amount: int = 1) -> None:
+            del amount
+
+        def set_description(self, desc: str) -> None:
+            del desc
+
+        def complete_phase(
+            self,
+            status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+            *,
+            retain: bool | None = None,
+        ) -> None:
+            self.complete_phase_calls.append((status, retain))
+
+    reporter = SpyReporter()
+
+    async def phase_publish(_: RunContext) -> None:
+        return None
+
+    asyncio.run(
+        execute_phases(
+            [Phase(name="publish", execute=phase_publish, retain_on_success=True)],
+            context,
+            reporter,
+        )
+    )
+
+    assert reporter.complete_phase_calls == [(ProgressPhaseStatus.COMPLETED, True)]
+
+
 def test_execute_phases_warn_only_failure_marks_warned_and_continues(
     tmp_path: Path,
 ) -> None:

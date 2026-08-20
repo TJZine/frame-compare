@@ -36,6 +36,7 @@ from frame_compare.orchestration.source_selection import (
 from .cli_helpers import HandleErrorFn, TextWriter
 from .wizard_policy import (
     GOAL_MENU_LINES,
+    VISUAL_COVERAGE_SCAN_NOTE,
     GoalChoice,
     WizardGoal,
     copy_payload,
@@ -50,6 +51,7 @@ from .wizard_policy import (
 )
 
 _CANCELED = "Canceled; configuration unchanged."
+_DISCOVERY_PREVIEW_LIMIT = 8
 _STALE_REFERENCE_WARNING = (
     "Current reference does not match the discovered files; a run may fail until the files "
     "or selector change."
@@ -226,7 +228,10 @@ def _discover_for_wizard(input_dir: Path) -> list[Path]:
         return []
     relative_names = [_relative_name(path, input_dir) for path in discovered]
     noun = "file" if len(relative_names) == 1 else "files"
-    typer.echo(f"Found {len(relative_names)} video {noun}: {', '.join(relative_names)}")
+    if len(relative_names) <= _DISCOVERY_PREVIEW_LIMIT:
+        typer.echo(f"Found {len(relative_names)} video {noun}: {', '.join(relative_names)}")
+    else:
+        typer.echo(f"Found {len(relative_names)} video {noun}; reference choices are listed below.")
     return discovered
 
 
@@ -325,7 +330,7 @@ def _prompt_goal(
     current_config: ConfigSchema,
     existing: bool,
 ) -> GoalChoice:
-    typer.echo("What do you want to compare?")
+    typer.echo("How should frames be selected?")
     if existing:
         typer.echo("  0. Keep current frame selection")
     for line in GOAL_MENU_LINES:
@@ -388,6 +393,7 @@ def _print_review(
     stale_reference: bool,
 ) -> None:
     typer.echo("Review configuration changes")
+    typer.echo("Changes")
     typer.echo(f"  Config: {config_path}")
     if input_changed:
         old_input = old_config.paths.input_dir if existing else "<not configured>"
@@ -403,8 +409,23 @@ def _print_review(
     if frame_changed:
         old_summary = keep_goal(old_config).summary if existing else "<default>"
         typer.echo(f"  Frame selection: {old_summary} -> {goal.summary}")
+
+    typer.echo("Runtime impact")
     typer.echo(f"  Metric scan: {goal.metric_scan}")
+    if goal.metric_scan == "quality":
+        typer.echo(f"  {VISUAL_COVERAGE_SCAN_NOTE}")
+    if stale_reference:
+        typer.echo(f"  {_STALE_REFERENCE_WARNING}")
+
+    typer.echo("Privacy")
+    typer.echo("  Secret values are never displayed.")
     webhook_removed = existing and table_key(original, "slowpics", "webhook_url") is not None
+    if webhook_removed:
+        typer.echo("  Webhook URL: removed from generated configuration")
+    if existing and table_key(original, "tmdb", "api_key") is not None:
+        typer.echo("  TMDB API key: removed from generated configuration")
+
+    typer.echo("Preserved settings")
     publishing = (
         "preserved except webhook URL"
         if webhook_removed
@@ -412,12 +433,6 @@ def _print_review(
     )
     typer.echo(f"  Publishing settings: {publishing}; environment may override at run time")
     typer.echo("  Other settings: preserved")
-    if webhook_removed:
-        typer.echo("  Webhook URL: removed from generated configuration")
-    if existing and table_key(original, "tmdb", "api_key") is not None:
-        typer.echo("  TMDB API key: removed from generated configuration")
-    if stale_reference:
-        typer.echo(f"  {_STALE_REFERENCE_WARNING}")
 
 
 def _relative_name(path: Path, input_dir: Path) -> str:

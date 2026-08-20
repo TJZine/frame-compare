@@ -1,6 +1,7 @@
 """Progress reporting utilities for Frame Compare."""
 
 from threading import RLock
+from time import monotonic
 
 import structlog
 from rich.console import Console, RenderableType
@@ -20,6 +21,14 @@ from rich.text import Text
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 
 log = structlog.get_logger()
+
+_MIN_DURABLE_PHASE_SECONDS = 10.0
+_DURABLE_STATUS_MARKERS = {
+    ProgressPhaseStatus.COMPLETED: "[OK]",
+    ProgressPhaseStatus.SKIPPED: "[SKIP]",
+    ProgressPhaseStatus.WARNED: "[WARN]",
+    ProgressPhaseStatus.FAILED: "[FAIL]",
+}
 
 __all__ = [
     "LogProgressReporter",
@@ -58,8 +67,10 @@ class NullProgressReporter:
     def complete_phase(
         self,
         status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+        *,
+        retain: bool | None = None,
     ) -> None:
-        del self, status
+        del self, status, retain
 
     def suspend(self) -> None:
         del self
@@ -87,6 +98,7 @@ class RichProgressReporter:
         self._task_id: TaskID | None = None
         self._task_stack: list[TaskID] = []
         self._task_totals: dict[TaskID, int] = {}
+        self._task_started_at: dict[TaskID, float] = {}
         self._suspend_depth = 0
         self._lock = RLock()
 
@@ -122,12 +134,16 @@ class RichProgressReporter:
                 self._progress.update(self._task_id, visible=False, refresh=True)
                 self._task_stack.append(self._task_id)
             self._task_id = self._progress.add_task(
-                name,
+                f"[RUN] {name}",
                 total=total,
                 spinner_only=spinner_only,
+                phase_label=name,
             )
+            task_id = self._task_id
+            self._task_started_at[task_id] = monotonic()
             if total is not None:
-                self._task_totals[self._task_id] = total
+                self._task_totals[task_id] = total
+            self._progress.refresh()
 
     def advance(self, amount: int = 1) -> None:
         """Advance the rich progress bar."""
@@ -140,30 +156,52 @@ class RichProgressReporter:
         """Update the rich progress bar description."""
         with self._lock:
             if self._task_id is not None:
-                self._progress.update(self._task_id, description=desc, refresh=True)
+                self._progress.update(self._task_id, description=f"[RUN] {desc}", refresh=True)
 
     def complete_phase(
         self,
         status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+        *,
+        retain: bool | None = None,
     ) -> None:
         """Complete the current phase and stop progress if all tasks done."""
         with self._lock:
             if self._task_id is not None:
-                total = self._task_totals.get(self._task_id)
+                task_id = self._task_id
+                total = self._task_totals.get(task_id)
+                started_at = self._task_started_at.get(task_id)
+                if started_at is None:
+                    started_at = monotonic()
+                duration = max(0.0, monotonic() - started_at)
+                task = next(
+                    (candidate for candidate in self._progress.tasks if candidate.id == task_id),
+                    None,
+                )
                 if status == ProgressPhaseStatus.SKIPPED:
-                    self._progress.update(self._task_id, description="Skipped", refresh=True)
+                    self._progress.update(task_id, description="Skipped", refresh=True)
                 elif status == ProgressPhaseStatus.WARNED:
-                    self._progress.update(self._task_id, description="Warning", refresh=True)
+                    self._progress.update(task_id, description="Warning", refresh=True)
                 elif status == ProgressPhaseStatus.FAILED:
-                    self._progress.update(self._task_id, description="Failed", refresh=True)
+                    self._progress.update(task_id, description="Failed", refresh=True)
 
                 if total is not None and status in {
                     ProgressPhaseStatus.COMPLETED,
                     ProgressPhaseStatus.SKIPPED,
                 }:
-                    self._progress.update(self._task_id, completed=total, refresh=True)
-                self._progress.remove_task(self._task_id)
-                self._task_totals.pop(self._task_id, None)
+                    self._progress.update(task_id, completed=total, refresh=True)
+
+                should_retain = status != ProgressPhaseStatus.COMPLETED
+                if status == ProgressPhaseStatus.COMPLETED and retain is not False:
+                    should_retain = retain is True or duration >= _MIN_DURABLE_PHASE_SECONDS
+                if should_retain and task is not None:
+                    label = task.fields.get("phase_label", task.description)
+                    if not isinstance(label, str):
+                        label = task.description
+                    self._progress.console.print(Text(f"{_DURABLE_STATUS_MARKERS[status]} {label}"))
+
+                self._progress.remove_task(task_id)
+                self._task_totals.pop(task_id, None)
+                self._task_started_at.pop(task_id, None)
                 self._task_id = None
 
             if self._task_stack:
@@ -247,8 +285,11 @@ class LogProgressReporter:
     def complete_phase(
         self,
         status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+        *,
+        retain: bool | None = None,
     ) -> None:
         """Log phase completion."""
+        del retain
         log.info("phase_completed", phase=self._name, status=status.value)
         if self._task_stack:
             self._name, self._total, self._current, self._last_logged_milestone = (

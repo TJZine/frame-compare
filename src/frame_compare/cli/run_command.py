@@ -10,6 +10,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+import structlog
 import typer
 from rich.console import Console
 from rich.markup import escape
@@ -39,6 +40,8 @@ from .run_contracts import (
     validate_run_contracts,
     validate_write_config_contracts,
 )
+
+log = structlog.get_logger()
 
 if TYPE_CHECKING:
     from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, RunResult
@@ -320,6 +323,8 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
         result=result,
         quiet=args.quiet,
         post_upload_actions=post_upload_actions,
+        root=args.resolved_root,
+        verbose=args.verbose,
     )
     maybe_open_run_report(
         result,
@@ -420,7 +425,7 @@ def build_confirm_slowpics_upload_callback(
         if not opened:
             console.print(f"Report: {escape(str(request.report_path))}", soft_wrap=True)
         if deps.confirm_upload(
-            "Review the local report, then upload this comparison to slow.pics?",
+            "[WAIT] CONFIRM Review the local report, then upload this comparison to slow.pics?",
             default=False,
         ):
             return "confirmed"
@@ -612,6 +617,7 @@ def print_run_preview(
         config=load_effective_config(),
         root=args.resolved_root,
         config_path=args.config_path,
+        verbose=args.verbose,
     )
 
 
@@ -698,10 +704,15 @@ def _copy_slowpics_url(
     try:
         copy_to_clipboard(url)
     except Exception as exc:
+        log.debug(
+            "slowpics_clipboard_copy_failed",
+            exception_type=type(exc).__name__,
+            exc_info=True,
+        )
         return PostUploadActionPresentationResult(
             kind="clipboard",
             success=False,
-            warning=f"slow.pics clipboard: failed to copy URL: {exc}",
+            warning="slow.pics clipboard: failed to copy URL",
         )
     return PostUploadActionPresentationResult(
         kind="clipboard",
@@ -718,10 +729,15 @@ def _open_slowpics_url(
     try:
         opened = open_url(url)
     except Exception as exc:
+        log.debug(
+            "slowpics_browser_open_failed",
+            exception_type=type(exc).__name__,
+            exc_info=True,
+        )
         return PostUploadActionPresentationResult(
             kind="browser",
             success=False,
-            warning=f"slow.pics browser: failed to open URL: {exc}",
+            warning="slow.pics browser: failed to open URL",
         )
     if not opened:
         return PostUploadActionPresentationResult(
