@@ -350,7 +350,11 @@ def test_confirmation_callback_prints_report_path_when_auto_open_disabled() -> N
     assert callback(SlowpicsUploadConfirmationRequest(report_path=Path("report.html"))) == (
         "declined"
     )
-    assert "Report: report.html" in output.getvalue()
+    rendered = output.getvalue()
+    assert "[WAIT] Publishing confirmation" in rendered
+    assert "Visibility  Public" in rendered
+    assert rendered.count("report.html") == 1
+    assert "Report: report.html" not in rendered
 
 
 def test_confirmation_callback_prints_report_path_when_auto_open_attempt_fails() -> None:
@@ -373,7 +377,47 @@ def test_confirmation_callback_prints_report_path_when_auto_open_attempt_fails()
     assert callback(SlowpicsUploadConfirmationRequest(report_path=Path("report.html"))) == (
         "declined"
     )
-    assert "Report: report.html" in output.getvalue()
+    rendered = output.getvalue()
+    assert "[WAIT] Publishing confirmation" in rendered
+    assert rendered.count("report.html") == 1
+
+
+@pytest.mark.parametrize("width", [60, 80])
+def test_confirmation_panel_fits_narrow_no_color_console(width: int) -> None:
+    config = get_default_config()
+    config.report.auto_open = False
+    output = StringIO()
+    callback = build_confirm_slowpics_upload_callback(
+        args=replace(_base_args(), quiet=False),
+        deps=_deps(
+            DepsOptions(
+                stdout_is_tty=True,
+                confirm_upload=lambda _text, *, default: False,
+            )
+        ),
+        console=Console(
+            file=output,
+            width=width,
+            no_color=True,
+            force_terminal=False,
+        ),
+        resolve_effective_config=lambda: config,
+        visibility="unlisted",
+    )
+
+    assert (
+        callback(
+            SlowpicsUploadConfirmationRequest(
+                report_path=Path("generated/a-long-comparison-name/report.html")
+            )
+        )
+        == "declined"
+    )
+    rendered = output.getvalue()
+    assert "[WAIT] Publishing confirmation" in rendered
+    assert "Visibility  Unlisted" in rendered
+    assert "\x1b[" not in rendered
+    assert max(len(line) for line in rendered.splitlines()) <= width
 
 
 def test_handle_run_interrupts_when_confirmation_prompt_aborts() -> None:

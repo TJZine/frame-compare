@@ -42,6 +42,17 @@ def test_rich_progress_reporter_marks_active_work_without_color() -> None:
     reporter.complete_phase()
 
 
+def test_rich_progress_reporter_indents_live_work() -> None:
+    reporter = RichProgressReporter(no_color=True)
+
+    reporter.start_phase("PLAN", 1)
+    task = reporter._progress.tasks[0]  # noqa: SLF001
+    description = reporter._progress.columns[1].render(task)  # noqa: SLF001
+    reporter.complete_phase()
+
+    assert str(description).startswith("  [RUN] PLAN")
+
+
 def test_log_progress_reporter_supports_nested_phases(capsys) -> None:
     """Nested phases should restore parent context on completion."""
     reporter = LogProgressReporter()
@@ -190,7 +201,7 @@ def test_rich_progress_reporter_retain_success_at_ten_seconds(
     reporter.start_phase("PLAN", 1)
     reporter.complete_phase()
 
-    assert "[OK] PLAN  Completed in 10s" in capsys.readouterr().err
+    assert "  [OK] PLAN  Completed in 10s" in capsys.readouterr().err
 
 
 def test_rich_progress_reporter_explicitly_retains_short_success(

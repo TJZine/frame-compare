@@ -97,7 +97,7 @@ class RichProgressReporter:
     def __init__(self, *, no_color: bool = False) -> None:
         self._progress = Progress(
             SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
+            TextColumn("  [progress.description]{task.description}"),
             _SpinnerAwareColumn(BarColumn()),
             _SpinnerAwareColumn(TaskProgressColumn()),
             _SpinnerAwareColumn(TimeRemainingColumn()),
@@ -218,7 +218,7 @@ class RichProgressReporter:
                         else ""
                     )
                     self._progress.console.print(
-                        Text(f"{_DURABLE_STATUS_MARKERS[status]} {label}{detail}")
+                        Text(f"  {_DURABLE_STATUS_MARKERS[status]} {label}{detail}")
                     )
 
                 self._progress.remove_task(task_id)

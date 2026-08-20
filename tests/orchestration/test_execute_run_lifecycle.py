@@ -159,6 +159,59 @@ def test_execute_run_returns_preflight_and_runtime_warnings(
     assert result.warnings == ["preflight: warned", "report: warned"]
 
 
+def test_execute_run_closes_execution_section_without_masking_phase_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prep = PrepState(
+        workspace=_workspace(tmp_path),
+        config=ConfigSchema(),
+        input_videos=[tmp_path / "reference.mkv"],
+        analysis_selection_domain="test-selection-domain",
+        clips=[clip_state(tmp_path / "reference.mkv", label="Reference")],
+        artifacts=RunArtifacts(),
+        metadata_prefetch=MetadataPrefetch(None, False),
+        preflight_warnings=[],
+        preflight_duration=0.0,
+        load_sources_start=_zero_monotonic_timer(),
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+    )
+    events: list[str] = []
+    phase_error = RuntimeError("phase failed")
+
+    async def _execute_prep(_request: RunRequest, _deps: RunDependencies) -> PrepState:
+        return prep
+
+    async def _execute_phases(*_args: object, **_kwargs: object) -> None:
+        raise phase_error
+
+    monkeypatch.setattr(coordinator, "execute_prep", _execute_prep)
+    monkeypatch.setattr(coordinator, "execute_phases", _execute_phases)
+    monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        coordinator,
+        "emit_execution_section_start",
+        lambda *_args, **_kwargs: events.append("start"),
+    )
+
+    def _failing_close(*_args: object, **_kwargs: object) -> None:
+        events.append("end")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(coordinator, "emit_execution_section_end", _failing_close)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        asyncio.run(
+            execute_run(
+                RunRequest(root=tmp_path),
+                deps=RunDependencies(monotonic_timer=_zero_monotonic_timer),
+            )
+        )
+
+    assert exc_info.value is phase_error
+    assert events == ["start", "end"]
+
+
 def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -573,6 +626,16 @@ def test_execute_run_emits_final_selection_at_post_align_boundary(
     monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", lambda **_kwargs: None)
     monkeypatch.setattr(coordinator, "emit_frame_alignment_report", lambda **_kwargs: None)
     monkeypatch.setattr(coordinator, "emit_final_selection_report", _record_selection)
+    monkeypatch.setattr(
+        coordinator,
+        "emit_execution_section_start",
+        lambda *_args, **_kwargs: events.append("execution_start"),
+    )
+    monkeypatch.setattr(
+        coordinator,
+        "emit_execution_section_end",
+        lambda *_args, **_kwargs: events.append("execution_end"),
+    )
 
     request = RunRequest(
         root=tmp_path,
@@ -588,7 +651,13 @@ def test_execute_run_emits_final_selection_at_post_align_boundary(
         )
     )
 
-    assert events == ["align", "selection_report", "after_align_phase"]
+    assert events == [
+        "execution_start",
+        "align",
+        "selection_report",
+        "after_align_phase",
+        "execution_end",
+    ]
     assert len(selection_calls) == 1
     assert selection_calls[0] == {
         "selected_frames": [2, 6],

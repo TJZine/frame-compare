@@ -12,8 +12,11 @@ from typing import TYPE_CHECKING, Protocol
 
 import structlog
 import typer
-from rich.console import Console
+from rich.console import Console, Group
 from rich.markup import escape
+from rich.padding import Padding
+from rich.panel import Panel
+from rich.table import Table
 
 from frame_compare.cli.errors import ExitCode, format_error_json, get_exit_code
 from frame_compare.cli.output import (
@@ -424,14 +427,29 @@ def build_confirm_slowpics_upload_callback(
             deps=deps,
             resolve_effective_config=resolve_effective_config,
         )
+        details = Table.grid(padding=(0, 2))
+        details.add_column(style="grey70", no_wrap=True)
+        details.add_column(overflow="fold")
+        details.add_row("Visibility", escape(visibility.title()))
         if not opened:
-            console.print(f"Report: {escape(str(request.report_path))}", soft_wrap=True)
-        console.print("[bold magenta][WAIT][/] [bold bright_cyan]Publishing confirmation[/]")
-        console.print("[dim]Review the local report before publishing.[/]")
-        if deps.confirm_upload(
+            details.add_row("Report", escape(str(request.report_path)))
+        console.print()
+        console.print(
+            Padding(
+                Panel.fit(
+                    Group("[dim]Review the local report before publishing.[/]", details),
+                    title="[bold magenta][WAIT][/] [bold bright_cyan]Publishing confirmation[/]",
+                    border_style="cyan",
+                ),
+                (0, 0, 0, 2),
+            )
+        )
+        confirmed = deps.confirm_upload(
             f"Upload to {visibility} slow.pics?",
             default=False,
-        ):
+        )
+        console.print()
+        if confirmed:
             return "confirmed"
         return "declined"
 

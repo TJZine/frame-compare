@@ -396,12 +396,40 @@ def test_emit_consolidated_fps_report_collapses_matching_after_align_state(
         json_output=False,
         quiet=False,
         no_color=True,
+        runtime_inset=True,
     )
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert captured.err == "[OK] Frame rates match: 24/1\n"
+    assert captured.err == "  [OK] Frame rates match: 24/1\n"
     assert "/tmp/reference.mkv" not in captured.err
+
+
+def test_emit_consolidated_fps_report_preserves_non_tty_matching_line(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    clip = FpsReportClip(
+        path=Path("/tmp/reference.mkv"),
+        label="Reference",
+        width=1920,
+        height=1080,
+        num_frames=100,
+        is_hdr=False,
+        source_fps=Fraction(24, 1),
+        effective_fps=Fraction(24, 1),
+        fps_divergent=False,
+        note=None,
+    )
+
+    emit_consolidated_fps_report(
+        stage="after_align",
+        clips=[clip],
+        json_output=False,
+        quiet=False,
+        no_color=True,
+    )
+
+    assert capsys.readouterr().err == "[OK] Frame rates match: 24/1\n"
 
 
 def test_emit_consolidated_fps_report_keeps_adjustment_evidence_without_normal_paths(

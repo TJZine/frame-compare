@@ -446,6 +446,11 @@ unchanged.
   `RENDER`, `METADATA`, `PUBLISH`, `REPORT`, `CONFIRM`, and `CLEANUP`.
   Internal phase names in logs and `phase_timings` remain the runtime keys such
   as `frame_plan`, `analyze`, `align`, and `confirm_slowpics_upload`.
+- Interactive Rich runs place those runtime phases and their diagnostics inside a
+  lightweight `Execution` rule band after the Sources panel and before the Result
+  panel. Loose live and durable runtime lines use a consistent two-space inset;
+  evidence and blocking-decision panels remain panels. JSON, quiet, and non-TTY
+  output do not gain the band or inset.
 - Every Rich phase remains live while active with an ASCII `[RUN]` marker. A
   successful top-level phase leaves a durable ASCII status line with elapsed time
   when it runs for at least 10.0 seconds. Successful nested tasks remain transient,
@@ -681,7 +686,9 @@ Report-confirmed slow.pics upload is the exception to that precedence rule. In
 that opted-in workflow, the CLI presents the local report before prompting for
 upload, regardless of whether a later confirmed upload will open the slow.pics
 URL in a browser. The same report auto-open rules decide whether the report is
-opened. If it is not opened, the CLI prints the report path before prompting.
+opened. A compact `[WAIT] Publishing confirmation` panel shows the visibility and,
+if the report was not opened, its path exactly once before the visibility-specific
+default-No question.
 
 ### Report And Overlay Metadata Contract
 
