@@ -16,11 +16,21 @@ from frame_compare.cli.output import (
 )
 from frame_compare.config.loader import get_default_config
 from frame_compare.config.schema import AnalysisPerformanceMode, ConfigSchema
+from frame_compare.config.schema_enums import (
+    OverlayMode,
+    ScreenshotActiveRectDetection,
+    ScreenshotGeometryMode,
+    Visibility,
+)
 from frame_compare.orchestration import RunRequest, RunResult
 
 
 def _console() -> Console:
     return Console(record=True, no_color=True, width=200)
+
+
+def _console_at_width(width: int) -> Console:
+    return Console(record=True, no_color=True, width=width)
 
 
 def _render(console: Console) -> str:
@@ -71,18 +81,19 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     )
 
     output = _render(console)
-    assert "At-a-Glance" in output
+    assert "Run plan" in output
     assert "root" in output
     assert str(_workspace_path()) in output
     assert "config" in output
-    assert str(_workspace_path("config", "config.toml")) in output
+    assert "config/config.toml" in output
     assert "input" in output
-    assert str(_workspace_path("comparison_videos")) in output
+    assert "comparison_videos" in output
     assert "generated" in output
     assert "run folders" not in output
     assert "screenshots" not in output
-    assert "selection" in output
-    assert "user=0, random=10, dark=0, bright=0, motion=0, seed=42" in output
+    assert "requested" in output
+    assert "user=0, random=10, dark=0, bright=0, motion=0" in output
+    assert "seed" in output
     assert "analysis mode" in output
     assert "quality" in _rendered_row_value(output, "analysis mode")
     assert "FFmpeg audio" in output
@@ -90,7 +101,7 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     assert "disabled" in output
     assert "interactive alignment" in output
     assert "force interactive" in output
-    assert "tonemap.preset" in output
+    assert "tone mapping" in output
     assert "reference" in output
     assert "renderer" in output
     assert "ffmpeg" in output
@@ -98,7 +109,7 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     assert "visibility" in output
     assert "public" in output
     assert "report" in output
-    assert "auto_open" in output
+    assert "auto-open" in output
     assert "upload" in output
     assert "disabled" in output
     assert "VSPreview" not in output
@@ -267,6 +278,238 @@ def test_at_a_glance_prints_vspreview_probe_failure(monkeypatch: MonkeyPatch) ->
     assert "display unavailable" not in output
 
 
+def test_run_plan_preserves_all_material_settings(monkeypatch: MonkeyPatch) -> None:
+    from frame_compare.vspreview.adapter import VSPreviewAvailability, VSPreviewAvailabilityStatus
+
+    config = _config()
+    config.analysis.user_frames = [12, 48]
+    config.analysis.random_frame_count = 3
+    config.analysis.dark_frame_count = 2
+    config.analysis.bright_frame_count = 1
+    config.analysis.motion_frame_count = 4
+    config.analysis.random_seed = 99
+    config.analysis.performance_mode = AnalysisPerformanceMode.PERFORMANCE
+    config.analysis.ignore_lead_seconds = 2.5
+    config.analysis.ignore_trail_seconds = 4.0
+    config.sources.analysis_source = "fastest"
+    config.screenshots.overlay_mode = OverlayMode.DIAGNOSTIC
+    config.screenshots.geometry_mode = ScreenshotGeometryMode.ALIGNED
+    config.screenshots.active_rect_detection = ScreenshotActiveRectDetection.AUTO
+    config.audio_alignment.previous_offsets = "prompt"
+    config.audio_alignment.use_vspreview = True
+    config.report.auto_open = False
+    config.slowpics.auto_upload = True
+    config.slowpics.confirm_upload_after_report = True
+    config.slowpics.visibility = Visibility.UNLISTED
+    config.slowpics.copy_url_to_clipboard = False
+    config.slowpics.open_in_browser = True
+    config.slowpics.create_url_shortcut = False
+    config.slowpics.webhook_url = "https://example.test/hook-secret"
+    config.slowpics.delete_after_upload = True
+    console = _console()
+
+    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.check_vspreview_availability",
+        lambda: VSPreviewAvailability(
+            status=VSPreviewAvailabilityStatus.AVAILABLE,
+            message="available",
+        ),
+    )
+
+    print_at_a_glance(
+        console,
+        request=_request(),
+        config=config,
+        root=_workspace_path(),
+        config_path=_workspace_path("config", "config.toml"),
+    )
+
+    output = _render(console)
+    for expected in (
+        "Run plan",
+        "Frame selection",
+        "user=2, random=3, dark=2, bright=1, motion=4",
+        "99",
+        "fastest",
+        "performance",
+        "lead=2.5s, trail=4s",
+        "Rendering",
+        "diagnostic",
+        "aligned",
+        "auto",
+        "tone mapping",
+        "previous offsets",
+        "manual review",
+        "report",
+        "auto-open=disabled",
+        "unlisted",
+        "confirmation",
+        "post-upload actions",
+        "webhook=configured",
+        "delete after upload",
+    ):
+        assert expected in output
+    assert "https://example.test/hook-secret" not in output
+
+
+@pytest.mark.parametrize("width", [60, 80])
+def test_run_plan_no_color_uses_native_wrapping_without_truncation(
+    monkeypatch: MonkeyPatch,
+    width: int,
+) -> None:
+    config = _config()
+    config.paths.input_dir = "/Volumes/external-media/very-long-source-directory"
+    config.paths.generated_dir = "/Volumes/external-output/very-long-generated-directory"
+    config.screenshots.overlay_mode = OverlayMode.DIAGNOSTIC
+    console = _console_at_width(width)
+
+    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
+
+    print_at_a_glance(
+        console,
+        request=_request(),
+        config=config,
+        root=_workspace_path("workspace-root"),
+        config_path=_workspace_path("workspace-root", "config", "config.toml"),
+    )
+
+    output = _render(console)
+    compact_output = "".join(output.replace("│", "").split())
+    assert "Run plan" in output
+    assert "diagnostic" in output
+    assert "/Volumes/external-media/very-long-source-directory" in compact_output
+    assert "/Volumes/external-output/very-long-generated-directory" in compact_output
+    assert "..." not in output
+    assert "…" not in output
+    assert "[OK]" in output
+
+
+def test_result_summary_uses_result_hierarchy_and_relative_paths() -> None:
+    console = _console()
+    root = _workspace_path()
+
+    print_result_summary(
+        console,
+        result=RunResult(
+            success=True,
+            screenshot_dir=root / "generated" / "run-1" / "screenshots",
+            report_path=root / "generated" / "run-1" / "report.html",
+            slowpics_url="https://slow.pics/c/example",
+            clips_processed=2,
+            frame_count=12,
+            duration_seconds=62.0,
+            metrics_cache_status="hit",
+            post_upload_actions=(
+                PostUploadActionPresentationResult(
+                    kind="shortcut",
+                    success=True,
+                    path=root / "generated" / "run-1" / "Example.url",
+                ),
+            ),
+        ),
+        quiet=False,
+        root=root,
+    )
+
+    output = _render(console)
+    assert "[OK] Comparison completed" in output
+    assert "sources" in output
+    assert "1m 02s" in output
+    assert "Analysis cache" in output
+    assert output.index("report.html") < output.index("screenshots")
+    assert "Published" in output
+    assert "Follow-up actions" in output
+    assert "generated/run-1/report.html" in output
+    assert str(root / "generated" / "run-1" / "report.html") not in output
+
+
+def test_verbose_path_presentation_adds_absolute_detail_and_keeps_external_absolute(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    root = _workspace_path()
+    plan_console = _console()
+    config = _config()
+    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
+    print_at_a_glance(
+        plan_console,
+        request=_request(),
+        config=config,
+        root=root,
+        config_path=root / "config" / "config.toml",
+        verbose=True,
+    )
+
+    plan_output = _render(plan_console)
+    assert "config/config.toml" in plan_output
+    assert "(absolute: /workspace/config/config.toml)" in plan_output
+
+    normal_console = _console()
+    print_result_summary(
+        normal_console,
+        result=RunResult(success=True, report_path=Path("/outside/report.html")),
+        quiet=False,
+        root=root,
+    )
+    normal_output = _render(normal_console)
+    assert "/outside/report.html" in normal_output
+
+    verbose_console = _console()
+    print_result_summary(
+        verbose_console,
+        result=RunResult(success=True, report_path=root / "generated" / "report.html"),
+        quiet=False,
+        root=root,
+        verbose=True,
+    )
+    verbose_output = _render(verbose_console)
+    assert "generated/report.html" in verbose_output
+    assert "(absolute: /workspace/generated/report.html)" in verbose_output
+
+
+def test_result_summary_warning_headline_cap_and_verbose_expansion() -> None:
+    warnings = [f"warning {index}" for index in range(1, 11)]
+    normal_console = _console()
+    print_result_summary(
+        normal_console,
+        result=RunResult(success=True, warnings=warnings),
+        quiet=False,
+    )
+    normal_output = _render(normal_console)
+    assert "[WARN] Comparison completed with 10 warnings" in normal_output
+    assert "warning 8" in normal_output
+    assert "warning 9" not in normal_output
+    assert "(2 more)" in normal_output
+
+    verbose_console = _console()
+    print_result_summary(
+        verbose_console,
+        result=RunResult(success=True, warnings=warnings),
+        quiet=False,
+        verbose=True,
+    )
+    verbose_output = _render(verbose_console)
+    assert "[WARN] Comparison completed with 10 warnings" in verbose_output
+    assert "warning 10" in verbose_output
+    assert "(2 more)" not in verbose_output
+
+
+def test_result_summary_does_not_duplicate_because_reason() -> None:
+    console = _console()
+    print_result_summary(
+        console,
+        result=RunResult(
+            success=True,
+            warnings=["slow.pics upload skipped because report confirmation was unavailable"],
+        ),
+        quiet=False,
+    )
+
+    output = _render(console)
+    assert output.count("because report confirmation was unavailable") == 1
+    assert "slow.pics upload skipped because report confirmation was unavailable" not in output
+
+
 def test_result_summary_quiet_mode_prints_only_screenshot_path_when_available() -> None:
     console = _console()
 
@@ -327,9 +570,9 @@ def test_result_summary_prints_declined_slowpics_as_skipped_not_artifact() -> No
     )
 
     output = _render(console)
-    assert "slow.pics upload skipped by confirmation" in output
-    assert "✓ slow.pics" not in output
-    assert "- slow.pics" in output
+    assert "upload skipped by confirmation" in output
+    assert "[SKIP] slow.pics" in output
+    assert "✓" not in output
 
 
 def test_result_summary_prints_report_unavailable_slowpics_as_skipped() -> None:
@@ -345,9 +588,9 @@ def test_result_summary_prints_report_unavailable_slowpics_as_skipped() -> None:
     )
 
     output = _render(console)
-    assert "slow.pics upload skipped because report confirmation was unavailable" in output
-    assert "✓ slow.pics" not in output
-    assert "- slow.pics" in output
+    assert "upload skipped because report confirmation was unavailable" in output
+    assert "[SKIP] slow.pics" in output
+    assert "✓" not in output
 
 
 def test_result_summary_groups_warning_sources_with_severity_detail_and_action() -> None:
@@ -377,13 +620,11 @@ def test_result_summary_groups_warning_sources_with_severity_detail_and_action()
     assert "alignment" in output
     assert "slow.pics" in output
     assert output.count("alignment") == 1
-    assert "align: encode_b low confidence; left unapplied and untrimmed (warning)" in output
-    assert "align: encode_c low confidence; left unapplied and untrimmed (warning)" in output
-    assert (
-        "slow.pics upload skipped because report confirmation was unavailable (skipped)" in output
-    )
-    assert "detail because report confirmation was unavailable" in output
-    assert "action clipboard" in output
+    assert "[WARN] align: encode_b low confidence; left unapplied and untrimmed" in output
+    assert "[WARN] align: encode_c low confidence; left unapplied and untrimmed" in output
+    assert "[SKIP] slow.pics upload skipped" in output
+    assert output.count("because report confirmation was unavailable") == 1
+    assert "action: clipboard" in output
     assert output.index("encode_c") < output.index("slow.pics upload skipped")
 
 
@@ -465,9 +706,10 @@ def test_result_summary_prints_success_fallback_and_truncates_warnings() -> None
     )
 
     output = _render(console)
+    assert "[WARN] Comparison completed with 10 warnings" in output
     assert "Result" in output
     assert "status" in output
-    assert "success" in output
+    assert "[OK] completed" in output
     assert "Warnings" in output
     assert "warning 1" in output
     assert "warning 8" in output

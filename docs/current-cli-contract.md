@@ -38,6 +38,8 @@ documents that promise elsewhere.
 
 - `src/frame_compare/cli/entry.py` is the implementation owner for CLI command routing,
   argument parsing, stdout/stderr behavior, and interactive post-run behavior.
+- `src/frame_compare/cli/output.py` owns the human run plan, result hierarchy,
+  warning presentation, and path formatting; it does not own JSON serialization.
 - `src/frame_compare/config/overrides.py` owns CLI flag to config override mappings.
 - Primary executable contract checks include:
   - `tests/cli/test_help_and_import.py` for command registration, help text, and
@@ -325,6 +327,19 @@ unchanged.
   gates will permit the action. Runtime-only facts remain `unknown` with null
   values until their existing runtime owners could determine them. The
   `run_folder_name` fact is always unknown until reservation.
+- Normal non-quiet runs begin with a `Run plan` decision checklist containing
+  `Workspace`, `Frame selection`, `Rendering`, `Alignment`, `Review`, and
+  `Publishing` groups. It retains the effective renderer, overlay, geometry,
+  active-picture policy, tone mapping, frame-selection counts and seed, analysis
+  source/mode, nonzero lead/trail exclusions, alignment/reuse/manual-review policy,
+  report intent, slow.pics visibility/confirmation/actions, and local deletion
+  behavior. Configured webhook values are represented only as configured/not
+  configured; the URL itself is never displayed.
+- Human run-plan paths show the resolved workspace root once as an absolute anchor.
+  Contained config, input, generated-data, and result paths are shown relative to
+  that root; external paths remain absolute. Rich folds long paths at narrow
+  terminal widths without replacing path text with an ellipsis. `--verbose` may add
+  the absolute form beside a contained relative path.
 - `--json` writes a single JSON object to stdout and suppresses human-readable summaries.
 - In that JSON object, `slowpics_url` is the only machine-readable slow.pics
   result field. No copy/open/shortcut/webhook result fields are emitted.
@@ -345,7 +360,8 @@ unchanged.
   and `slowpics.confirm_upload_after_report = true`, the CLI rejects `--json`
   before entering the runtime pipeline with the standard config-error JSON
   payload on stdout.
-- `--quiet` suppresses the at-a-glance summary but still allows a minimal success summary.
+- `--quiet` suppresses the Run plan and retains the existing minimal success summary
+  byte/semantic contract.
 - `--quiet` is incompatible with `audio_alignment.previous_offsets = "prompt"`
   and is rejected before entering the runtime pipeline. It is compatible with
   `previous_offsets = "always"`.
@@ -364,25 +380,33 @@ unchanged.
   domain. If the breakdown is unavailable, the aligned count is still reported with
   an unavailable indication. Normal, quiet, and JSON runs do not emit this summary,
   and it does not add a JSON field or log event.
-- Human-readable non-quiet successful runs group final warnings by source in a
-  `Warnings` panel. Existing runtime warning strings and slow.pics post-upload
-  action warnings are bridged into presentation rows with source, severity,
-  message, and optional detail/action context, then de-duplicated for display.
-  The visible warning cap remains eight rows; truncated output includes the
-  number of hidden rows and counts by hidden source.
+- Human-readable non-quiet successful runs begin with `[OK] Comparison completed`
+  or `[WARN] Comparison completed with N warning(s)`, using a de-duplicated warning
+  presentation count. The `Result` panel contains concise run facts, then a `Review`
+  group with the report before screenshots, a separate `Published` group, and a
+  separate `Follow-up actions` group for successful post-upload actions. Durations
+  use human units and the source/cache facts are labeled `sources` and
+  `Analysis cache`.
+- Final warnings are grouped by source in a `Warnings` panel. Existing runtime
+  warning strings and slow.pics post-upload action warnings are bridged into
+  presentation rows with source, severity, message, and optional action context,
+  then de-duplicated for display. A `because ...` reason is shown once as detail.
+  Normal output shows at most eight warning rows and summarizes hidden rows by
+  source; `--verbose` shows every warning. Status text uses ASCII `[OK]`, `[WARN]`,
+  `[SKIP]`, `[FAIL]`, and `[WAIT]` markers, with color only reinforcing meaning.
 - `run --json` does not emit the human warning panel, does not add warning
   fields, and keeps warning text off stdout for successful runs. Runtime logs,
   native VapourSynth diagnostics, and plugin stderr may still use stderr.
-- When the at-a-glance summary reports optional VSPreview probe failures, it uses a
+- When the Run plan reports optional VSPreview probe failures, it uses a
   sanitized summary rather than raw probe exception text.
-- The at-a-glance summary uses user-facing row labels such as `FFmpeg audio`,
+- The Run plan uses user-facing row labels such as `FFmpeg audio`,
   `previous offsets`, `interactive alignment`, `force interactive`, and `VSPreview`
   while preserving the same effective
   configuration facts. The `previous offsets` row reports only the effective
   config mode: `disabled`, `prompt`, or `always`.
 - The `analysis mode` row reports the effective `analysis.performance_mode`:
   `quality` or `performance`.
-- The at-a-glance workspace paths show `root`, `config`, `input`, and the resolved
+- The Run plan workspace paths show `root`, `config`, `input`, and the resolved
   `generated` data root. The constant run-folder policy and derived screenshot path
   are not configuration rows.
 - Human Rich progress uses product phase labels: `PLAN`, `ANALYZE`, `ALIGN`,

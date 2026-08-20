@@ -320,6 +320,8 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
         result=result,
         quiet=args.quiet,
         post_upload_actions=post_upload_actions,
+        root=args.resolved_root,
+        verbose=args.verbose,
     )
     maybe_open_run_report(
         result,
@@ -612,6 +614,7 @@ def print_run_preview(
         config=load_effective_config(),
         root=args.resolved_root,
         config_path=args.config_path,
+        verbose=args.verbose,
     )
 
 
