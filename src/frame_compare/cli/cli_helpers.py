@@ -21,8 +21,6 @@ from frame_compare.config.persistence import dump_config_for_persistence
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.errors import FrameCompareError
 
-_DEFAULT_HELP_WIDTH = 200
-
 
 class TextWriter(Protocol):
     def __call__(self, path: Path, content: str, *, encoding: str) -> None: ...
@@ -51,19 +49,33 @@ class HandleErrorFn(Protocol):
     ) -> int: ...
 
 
-def stabilize_typer_help_width() -> None:
-    """Backfill Typer's cached Rich help width when it was imported too early."""
-    os.environ.setdefault("TERMINAL_WIDTH", str(_DEFAULT_HELP_WIDTH))
+def stabilize_typer_help_width(terminal_width: int | None = None) -> None:
+    """Give Typer's Rich help renderer the current width when one is explicit."""
+    if terminal_width is not None:
+        typer_rich_utils.MAX_WIDTH = terminal_width
+        return
     if typer_rich_utils.MAX_WIDTH is not None:
         return
+    configured_width = os.environ.get("TERMINAL_WIDTH")
+    if configured_width is None:
+        return
     with contextlib.suppress(ValueError):
-        typer_rich_utils.MAX_WIDTH = int(os.environ["TERMINAL_WIDTH"])
+        parsed_width = int(configured_width)
+        if parsed_width > 0:
+            typer_rich_utils.MAX_WIDTH = parsed_width
 
 
 class FrameCompareTyperGroup(TyperGroup):
     def main(self, *args: Any, **kwargs: Any) -> Any:
-        stabilize_typer_help_width()
-        return super().main(*args, **kwargs)
+        previous_width = typer_rich_utils.MAX_WIDTH
+        terminal_width = kwargs.get("terminal_width")
+        if not isinstance(terminal_width, int):
+            terminal_width = None
+        stabilize_typer_help_width(terminal_width)
+        try:
+            return super().main(*args, **kwargs)
+        finally:
+            typer_rich_utils.MAX_WIDTH = previous_width
 
 
 def maybe_open_report(report_path: Path) -> bool:

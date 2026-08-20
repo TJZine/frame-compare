@@ -131,19 +131,21 @@ def test_run_rejects_retired_frame_count_options(
         (
             ["--help"],
             [
-                "Compare video sources and generate screenshots",
-                "Interactively configure input, reference, and frame selection.",
-                "Check required runtimes and optional integrations.",
+                "Reproducible video comparisons with deterministic frame selection, audio alignment, HDR-aware rendering, and offline review reports.",
+                "Turn two or more local video sources into a repeatable comparison",
+                "First setup: frame-compare wizard",
+                "Preview a run: frame-compare run --dry-run",
+                "Compare locally: frame-compare run --no-upload",
             ],
         ),
         (
             ["run", "--help"],
             [
                 "Compare video sources and generate screenshots and an optional report.",
-                "Workspace root containing config and output directories.",
+                "Workspace root containing configuration, input, and generated output.",
                 "persists with --write-config",
                 "Require valid cached analysis",
-                "Plan without probing, rendering, writing outputs, or publishing.",
+                "Preview what a run would use and create without probing or side effects.",
                 "Write the effective config, then exit without running.",
                 "Print resolved workspace paths as JSON, then exit.",
             ],
@@ -170,7 +172,7 @@ def test_run_rejects_retired_frame_count_options(
             ["preset", "list", "--help"],
             [
                 "List available configuration presets.",
-                "Accepted for consistency; preset list uses --root.",
+                "Accepted for consistency; ignored here. Presets are located under --root.",
             ],
         ),
         (
@@ -199,6 +201,44 @@ def test_public_help_explains_commands_and_option_effects(
     assert result.exit_code == 0
     for fragment in expected_fragments:
         assert fragment in output
+
+
+@pytest.mark.parametrize("terminal_width", [60, 80, 120])
+@pytest.mark.parametrize("args", [["--help"], ["run", "--help"]])
+def test_help_uses_requested_terminal_width(args: list[str], terminal_width: int) -> None:
+    result = runner.invoke(
+        app,
+        args,
+        color=False,
+        terminal_width=terminal_width,
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+
+    assert result.exit_code == 0
+    assert max((len(line) for line in result.stdout.splitlines()), default=0) <= terminal_width
+
+
+def test_run_help_groups_options_by_task() -> None:
+    result = runner.invoke(
+        app,
+        ["run", "--help"],
+        color=False,
+        terminal_width=80,
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+    output = _normalize_cli_help(result.stdout)
+    panels = [
+        "Workspace and configuration",
+        "Sources and frame selection",
+        "Rendering and alignment",
+        "Reports and publishing",
+        "Planning and diagnostics",
+        "Output modes",
+    ]
+
+    assert result.exit_code == 0
+    positions = [output.index(panel) for panel in panels]
+    assert positions == sorted(positions)
 
 
 def test_root_generates_shell_completion_source(monkeypatch: MonkeyPatch) -> None:

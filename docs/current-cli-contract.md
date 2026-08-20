@@ -94,6 +94,12 @@ help states their workspace-relative resolution, while runtime-only flags descri
 their one-run or early-exit behavior. These descriptions do not change option
 defaults, parsing, persistence, streams, or exit codes.
 
+Root help describes the repeatable comparison outcome and includes concise examples
+for first setup, a dry-run preview, and a local-only comparison. `run --help` groups
+options under Workspace and configuration, Sources and frame selection, Rendering
+and alignment, Reports and publishing, Planning and diagnostics, and Output modes.
+Help uses the current terminal width; it does not impose a routine 200-column width.
+
 ## Shared Path Resolution Rules
 
 These commands share the same root/config path resolution rules:
@@ -295,10 +301,14 @@ unchanged.
 - `--dry-run` is incompatible with `--write-config` and `--diagnose-paths`. It
   preserves the effective future run's existing `--json`, `--quiet`, interactive,
   frame-selection, source-selector, and cache-option compatibility validation.
-- Human dry-run output renders the same typed plan as JSON. Normal human mode shows
-  the detailed plan; `--quiet` emits only a minimal source-count/no-side-effects
-  summary. `--dry-run --json` writes exactly one JSON document to stdout, and typed
-  errors retain the standard JSON error schema and stream placement.
+- Human dry-run output renders the same typed plan as JSON. Normal human mode starts
+  with an explicit no-side-effects statement and groups the decision facts under
+  `Will use`, `Would create in a real run`, `Publishing after success`, `Unknown
+  until execution`, and `Not performed by dry-run`. Contained input paths are shown
+  relative to the workspace root, while external input paths remain absolute.
+  `--quiet` emits only a minimal source-count/no-side-effects summary.
+  `--dry-run --json` writes exactly one JSON document to stdout, and typed errors
+  retain the standard JSON error schema and stream placement.
 - Successful dry-run JSON has exactly these top-level keys:
   `checks_not_performed`, `dry_run`, `input`, `outputs`, `publishing`, `reference`,
   `runtime_facts`, and `selection`. Their exact nested fields are:
@@ -318,7 +328,7 @@ unchanged.
   `media_probe`, `analysis`, `alignment`, `cache_reads_or_writes`,
   `run_folder_reservation_or_metadata_writes`, `render_or_report_generation`,
   `network_publishing_or_metadata`, and `browser_clipboard_or_vspreview`.
-- The plan never dumps effective config. The resolved input directory is its only
+- The JSON plan never dumps effective config. The resolved input directory is its only
   deliberately reported absolute path. Source entries are filenames only. API keys,
   webhook URLs, tokens, and other secret values are excluded; only
   `webhook_configured` may reveal that a webhook-backed action is configured. The
@@ -1401,7 +1411,8 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 
 - Resolves the presets directory under `<root>/config/presets`.
 - Accepts `--config` for interface consistency, but current behavior ignores the resolved
-  config path and uses `--root` only when locating presets.
+  config path and uses `--root` only when locating presets. Help describes this value
+  as accepted for consistency and ignored by `preset list`.
 - Prints preset names one per line to stdout.
 - Emits no success confirmation.
 
