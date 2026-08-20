@@ -1,8 +1,11 @@
 """Unit tests for progress reporting utilities."""
 
+import re
 from concurrent.futures import ThreadPoolExecutor
+from io import StringIO
 
 import pytest
+from rich.console import Console
 
 import frame_compare.utils.progress as progress_module
 from frame_compare.utils.progress import (
@@ -11,6 +14,20 @@ from frame_compare.utils.progress import (
     RichProgressReporter,
 )
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus
+
+
+def _captured_rich_reporter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[RichProgressReporter, StringIO]:
+    monkeypatch.setenv("TERM", "xterm-256color")
+    output = StringIO()
+    console = Console(file=output, force_terminal=True, no_color=True, width=100)
+
+    def _console(**_kwargs: object) -> Console:
+        return console
+
+    monkeypatch.setattr(progress_module, "Console", _console)
+    return RichProgressReporter(no_color=True), output
 
 
 def test_null_progress_reporter_noops():
@@ -31,26 +48,29 @@ def test_rich_progress_reporter_accepts_no_color() -> None:
     assert reporter.writes_to_stderr is True
 
 
-def test_rich_progress_reporter_marks_active_work_without_color() -> None:
-    reporter = RichProgressReporter(no_color=True)
+def test_rich_progress_reporter_marks_active_work_without_color(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reporter, output = _captured_rich_reporter(monkeypatch)
 
     reporter.start_phase("PLAN", 1)
-    assert reporter._progress.tasks[0].description == "[RUN] PLAN"  # noqa: SLF001
+    try:
+        assert "[RUN] PLAN" in output.getvalue()
 
-    reporter.set_description("Selecting frames")
-    assert reporter._progress.tasks[0].description == "[RUN] Selecting frames"  # noqa: SLF001
-    reporter.complete_phase()
+        reporter.set_description("Selecting frames")
+        assert "[RUN] Selecting frames" in output.getvalue()
+    finally:
+        reporter.complete_phase()
 
 
-def test_rich_progress_reporter_indents_live_work() -> None:
-    reporter = RichProgressReporter(no_color=True)
+def test_rich_progress_reporter_indents_live_work(monkeypatch: pytest.MonkeyPatch) -> None:
+    reporter, output = _captured_rich_reporter(monkeypatch)
 
     reporter.start_phase("PLAN", 1)
-    task = reporter._progress.tasks[0]  # noqa: SLF001
-    description = reporter._progress.columns[1].render(task)  # noqa: SLF001
-    reporter.complete_phase()
-
-    assert str(description).startswith("  [RUN] PLAN")
+    try:
+        assert re.search(r" {2,}\[RUN\] PLAN", output.getvalue()) is not None
+    finally:
+        reporter.complete_phase()
 
 
 def test_log_progress_reporter_supports_nested_phases(capsys) -> None:

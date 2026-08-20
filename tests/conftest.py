@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -72,7 +73,7 @@ if _vs_needs_mock():
 
 
 @pytest.fixture(autouse=True)
-def reset_structlog_state():
+def reset_structlog_state() -> Iterator[None]:
     """Isolate process-global structlog configuration and context between tests."""
     structlog.reset_defaults()
     structlog.contextvars.clear_contextvars()
