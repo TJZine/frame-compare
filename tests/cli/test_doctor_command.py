@@ -160,8 +160,75 @@ def test_doctor_exit_code_is_3_on_core_failure(monkeypatch: MonkeyPatch) -> None
 
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 3
-    assert "\u274c vapoursynth" in result.stdout
-    assert "Core runtime is not ready; resolve required checks above." in result.stdout
+    assert result.stdout.splitlines()[0] == "[FAIL] Runtime is not ready for comparisons."
+    assert "[FAIL] VapourSynth — missing" in result.stdout
+    assert "Core runtime is not ready" not in result.stdout
+
+
+def test_doctor_human_output_is_readiness_first_and_grouped(monkeypatch: MonkeyPatch) -> None:
+    checks = [
+        DoctorCheck(
+            name="python_version",
+            category="core",
+            check_fn=lambda: CheckResult(passed=True, message="Python 3.13.0"),
+        ),
+        DoctorCheck(
+            name="ffmpeg",
+            category="optional",
+            check_fn=lambda: CheckResult(passed=False, message="FFmpeg not found"),
+        ),
+        DoctorCheck(
+            name="vspreview",
+            category="optional",
+            check_fn=lambda: CheckResult(
+                passed=True,
+                available=False,
+                message="VSPreview not installed",
+                hint="Install VSPreview, then rerun doctor",
+            ),
+        ),
+        DoctorCheck(
+            name="slowpics",
+            category="network",
+            check_fn=lambda: CheckResult(passed=True, message="slow.pics reachable"),
+        ),
+    ]
+    report = run_doctor(checks=checks)
+
+    def _run_doctor(
+        checks: list[DoctorCheck] | None = None,
+        reporter: ProgressReporter | None = None,
+    ) -> DoctorReport:
+        return report
+
+    monkeypatch.setattr("frame_compare.cli.entry.run_doctor", _run_doctor)
+
+    result = runner.invoke(
+        app,
+        ["doctor"],
+        color=False,
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    lines = result.stdout.splitlines()
+    assert lines[0] == (
+        "[WARN] Ready for local comparisons; optional or network checks need attention."
+    )
+    assert (
+        lines.index("Required") < lines.index("Optional") < lines.index("Network and credentials")
+    )
+    assert "[OK] Python version — Python 3.13.0" in result.stdout
+    assert "[WARN] FFmpeg — FFmpeg not found" in result.stdout
+    assert "[SKIP] VSPreview — VSPreview not installed" in result.stdout
+    assert "[OK] slow.pics — slow.pics reachable" in result.stdout
+    assert result.stdout.count("Ready for local comparisons") == 1
+    assert "Core runtime" not in result.stdout
+    assert "\u2705" not in result.stdout
+    assert "\u274c" not in result.stdout
+    assert "\u26a0" not in result.stdout
+    assert "\x1b[" not in result.stdout
 
 
 def test_doctor_managed_optional_policy_failure_blocks_human_and_json_output(
@@ -192,8 +259,9 @@ def test_doctor_managed_optional_policy_failure_blocks_human_and_json_output(
     human_result = runner.invoke(app, ["doctor"])
     assert human_result.exit_code == int(ExitCode.DEPENDENCY_ERROR)
     assert human_result.stderr == ""
-    assert "\u274c ffmpeg" in human_result.stdout
-    assert "Core runtime is not ready; resolve required checks above." in human_result.stdout
+    assert human_result.stdout.splitlines()[0] == "[FAIL] Runtime is not ready for comparisons."
+    assert "[FAIL] FFmpeg — FFmpeg executables do not match" in human_result.stdout
+    assert "Core runtime is not ready" not in human_result.stdout
 
     json_result = runner.invoke(app, ["doctor", "--json"])
     assert json_result.exit_code == int(ExitCode.DEPENDENCY_ERROR)
@@ -228,9 +296,12 @@ def _run_doctor_optional_failure_and_assert(monkeypatch: MonkeyPatch) -> None:
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 0
     assert result.stderr == ""
-    assert "\u26a0 slowpics" in result.stdout
-    assert "\u274c slowpics" not in result.stdout
-    assert "Core runtime checks passed; optional or network checks need attention." in result.stdout
+    assert result.stdout.splitlines()[0] == (
+        "[WARN] Ready for local comparisons; optional or network checks need attention."
+    )
+    assert "[WARN] slow.pics — offline" in result.stdout
+    assert "[FAIL] slow.pics" not in result.stdout
+    assert "Core runtime checks passed" not in result.stdout
 
 
 def test_doctor_exit_code_is_0_on_optional_or_network_failure(monkeypatch: MonkeyPatch) -> None:
@@ -265,9 +336,9 @@ def test_doctor_human_marks_optional_failed_check_neutrally(monkeypatch: MonkeyP
 
     assert result.exit_code == 0
     assert result.stderr == ""
-    assert "- ffmpeg" in result.stdout
-    assert "\u274c ffmpeg" not in result.stdout
-    assert "Core runtime checks passed; optional or network checks need attention." in result.stdout
+    assert "[WARN] FFmpeg — FFmpeg not found in PATH" in result.stdout
+    assert "[FAIL] FFmpeg" not in result.stdout
+    assert result.stdout.splitlines()[0].startswith("[WARN] Ready for local comparisons;")
 
 
 def test_doctor_human_marks_optional_vspreview_unavailable_neutrally(
@@ -300,9 +371,12 @@ def test_doctor_human_marks_optional_vspreview_unavailable_neutrally(
 
     assert result.exit_code == 0
     assert result.stderr == ""
-    assert "- vspreview" in result.stdout
-    assert "\u2705 vspreview" not in result.stdout
-    assert "\u274c vspreview" not in result.stdout
+    assert "[SKIP] VSPreview — VSPreview not installed" in result.stdout
+    assert "[OK] VSPreview" not in result.stdout
+    assert "[FAIL] VSPreview" not in result.stdout
+    assert result.stdout.splitlines()[0] == (
+        "[WARN] Ready for local comparisons; optional or network checks need attention."
+    )
 
     json_result = runner.invoke(app, ["doctor", "--json"])
     assert json_result.exit_code == 0
@@ -342,9 +416,12 @@ def test_doctor_human_marks_optional_vspreview_probe_failure_neutrally(
 
     assert result.exit_code == 0
     assert result.stderr == ""
-    assert "- vspreview" in result.stdout
-    assert "\u2705 vspreview" not in result.stdout
-    assert "\u274c vspreview" not in result.stdout
+    assert "[SKIP] VSPreview — VSPreview availability probe failed" in result.stdout
+    assert "[OK] VSPreview" not in result.stdout
+    assert "[FAIL] VSPreview" not in result.stdout
+    assert result.stdout.splitlines()[0] == (
+        "[WARN] Ready for local comparisons; optional or network checks need attention."
+    )
 
     json_result = runner.invoke(app, ["doctor", "--json"])
     assert json_result.exit_code == 0
@@ -384,9 +461,9 @@ def test_doctor_human_marks_available_optional_vspreview_as_pass(
 
     assert result.exit_code == 0
     assert result.stderr == ""
-    assert "\u2705 vspreview" in result.stdout
-    assert "- vspreview" not in result.stdout
-    assert "Core runtime checks passed." in result.stdout
+    assert "[OK] VSPreview — VSPreview is available" in result.stdout
+    assert "[SKIP] VSPreview" not in result.stdout
+    assert result.stdout.splitlines()[0] == "[OK] Runtime is ready for comparisons."
 
     json_result = runner.invoke(app, ["doctor", "--json"])
     assert json_result.exit_code == 0
@@ -433,6 +510,7 @@ def test_doctor_text_preserves_literal_brackets(monkeypatch: MonkeyPatch) -> Non
     assert "ffmpeg[optional]" in result.stdout
     assert "missing [ffmpeg]" in result.stdout
     assert "Hint: install [ffmpeg]" in result.stdout
+    assert "\x1b[" not in result.stdout
 
 
 def test_doctor_audited_hints_are_deterministic_in_human_and_json_output(
@@ -480,6 +558,34 @@ def test_doctor_audited_hints_are_deterministic_in_human_and_json_output(
     assert json_result.stderr == ""
     payload = json.loads(json_result.stdout)
     assert [entry["install_hint"] for entry in payload["doctor"]["checks"]] == list(_AUDITED_HINTS)
+
+
+def test_doctor_generic_check_failure_sanitizes_json_details(monkeypatch: MonkeyPatch) -> None:
+    sentinel = "SECRET_DOCTOR_EXCEPTION"
+
+    def _raise() -> CheckResult:
+        raise RuntimeError(f"{sentinel} at /private/config.toml")
+
+    check = DoctorCheck(name="custom_check", category="optional", check_fn=_raise)
+    report = run_doctor(checks=[check])
+
+    def _run_doctor(
+        checks: list[DoctorCheck] | None = None,
+        reporter: ProgressReporter | None = None,
+    ) -> DoctorReport:
+        return report
+
+    monkeypatch.setattr("frame_compare.cli.entry.run_doctor", _run_doctor)
+
+    result = runner.invoke(app, ["doctor", "--json"])
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    payload = json.loads(result.stdout)
+    entry = _doctor_check_entry(payload, "custom_check")
+    assert entry["message"] == "custom_check check failed"
+    assert entry["details"] == {"exception_type": "RuntimeError"}
+    assert sentinel not in result.stdout
 
 
 def test_doctor_top_level_frame_compare_error_uses_cli_error_contract(

@@ -558,7 +558,9 @@ def test_interactive_slowpics_action_failures_are_warning_only() -> None:
     deps = _deps(
         DepsOptions(
             stdout_is_tty=True,
-            copy_to_clipboard=lambda _url: (_ for _ in ()).throw(RuntimeError("clipboard denied")),
+            copy_to_clipboard=lambda _url: (_ for _ in ()).throw(
+                RuntimeError("clipboard secret sentinel")
+            ),
             open_url=lambda _url: False,
         )
     )
@@ -574,11 +576,32 @@ def test_interactive_slowpics_action_failures_are_warning_only() -> None:
         ("clipboard", False),
         ("browser", False),
     ]
-    assert actions[0].warning == "slow.pics clipboard: failed to copy URL: clipboard denied"
+    assert actions[0].warning == "slow.pics clipboard: failed to copy URL"
+    assert "clipboard secret sentinel" not in str(actions[0].warning)
     assert actions[1].warning == (
         "slow.pics browser: failed to open URL: no browser accepted the request"
     )
     assert slowpics_browser_open_attempted(actions) is True
+
+
+def test_interactive_slowpics_browser_exception_warning_is_sanitized() -> None:
+    deps = _deps(
+        DepsOptions(
+            stdout_is_tty=True,
+            open_url=lambda _url: (_ for _ in ()).throw(RuntimeError("browser secret sentinel")),
+        )
+    )
+
+    actions = collect_interactive_slowpics_actions(
+        RunResult(success=True, slowpics_url="https://slow.pics/c/example"),
+        args=replace(_base_args(), quiet=False),
+        deps=deps,
+        config=get_default_config(),
+    )
+
+    browser_action = next(action for action in actions if action.kind == "browser")
+    assert browser_action.warning == "slow.pics browser: failed to open URL"
+    assert "browser secret sentinel" not in str(browser_action.warning)
 
 
 def test_report_auto_open_can_be_suppressed_by_slowpics_browser_attempt() -> None:

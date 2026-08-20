@@ -611,7 +611,7 @@ def test_result_summary_groups_warning_sources_with_severity_detail_and_action()
             PostUploadActionPresentationResult(
                 kind="clipboard",
                 success=False,
-                warning="slow.pics clipboard: failed to copy URL: clipboard unavailable",
+                warning="slow.pics clipboard: failed to copy URL",
             ),
         ),
     )

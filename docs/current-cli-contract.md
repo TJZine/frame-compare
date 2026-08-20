@@ -1381,15 +1381,18 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 - Human-mode typed top-level failures honor the `NO_COLOR` environment variable
   and do not suggest unsupported `--verbose` usage.
 - Without `--json`, `doctor` writes a human-readable report to stdout.
-- Human output uses a neutral status marker for optional unavailable checks such as
-  VSPreview, so optional availability gaps are visually distinct from critical
-  dependency failures. This does not change `doctor --json` status values.
-- Human output uses a warning marker, rather than the critical-failure marker, for
-  failed noncritical checks such as network reachability or missing optional
-  integration configuration. It ends with a deterministic readiness summary that
-  distinguishes a blocked core runtime, a ready core runtime with noncritical
-  warnings, and a fully passing check set. These presentation changes do not alter
-  JSON fields, JSON status values, or exit-code behavior.
+- Human output starts with one readiness outcome: `[FAIL] Runtime is not ready for
+  comparisons.`, `[WARN] Ready for local comparisons; optional or network checks
+  need attention.`, or `[OK] Runtime is ready for comparisons.` It then groups checks
+  under `Required`, `Optional`, and `Network and credentials`, in their existing
+  check order, using human labels such as `VapourSynth`, `FFmpeg`, `VSPreview`, and
+  `TMDB API key`.
+- Human check status markers are `[FAIL]` for critical failures, `[SKIP]` for
+  passed optional checks whose capability is unavailable, `[WARN]` for failed
+  noncritical checks, and `[OK]` for passed checks. Hints remain directly beneath
+  the affected check. There is no duplicate trailing readiness summary. These
+  presentation changes do not alter JSON fields, JSON status values, or exit-code
+  behavior.
 - Failed checks and optional-unavailable warnings include a short deterministic next
   action when the check can prove one. `doctor --json` exposes the same text as
   `install_hint`. Hints distinguish missing executables, unavailable runtimes/plugins,
@@ -1397,6 +1400,9 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   configuration/credential classes without guessing a package-manager command or
   install mode; when setup mode is unknown, they point to the repository's current
   setup documentation.
+- If an unexpected check function raises, the generic fallback uses stable failure
+  wording and may expose only the exception type in JSON `details`; raw exception
+  messages are not emitted in human or JSON doctor output.
 - If any critical failures are present, `doctor` exits with the dependency error exit code.
 - Optional VSPreview probe diagnostics may include exception type metadata, but do not
   expose raw probe exception messages.

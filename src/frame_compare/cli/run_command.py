@@ -700,11 +700,11 @@ def _copy_slowpics_url(
 ) -> PostUploadActionPresentationResult:
     try:
         copy_to_clipboard(url)
-    except Exception as exc:
+    except Exception:
         return PostUploadActionPresentationResult(
             kind="clipboard",
             success=False,
-            warning=f"slow.pics clipboard: failed to copy URL: {exc}",
+            warning="slow.pics clipboard: failed to copy URL",
         )
     return PostUploadActionPresentationResult(
         kind="clipboard",
@@ -720,11 +720,11 @@ def _open_slowpics_url(
 ) -> PostUploadActionPresentationResult:
     try:
         opened = open_url(url)
-    except Exception as exc:
+    except Exception:
         return PostUploadActionPresentationResult(
             kind="browser",
             success=False,
-            warning=f"slow.pics browser: failed to open URL: {exc}",
+            warning="slow.pics browser: failed to open URL",
         )
     if not opened:
         return PostUploadActionPresentationResult(
