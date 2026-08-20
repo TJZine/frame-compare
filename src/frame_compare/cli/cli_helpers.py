@@ -20,6 +20,7 @@ from frame_compare.config.errors import ConfigWriteError
 from frame_compare.config.persistence import dump_config_for_persistence
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.errors import FrameCompareError
+from frame_compare.utils.terminal import no_color_requested
 
 
 class TextWriter(Protocol):
@@ -69,14 +70,18 @@ def stabilize_typer_help_width(terminal_width: int | None = None) -> None:
 class FrameCompareTyperGroup(TyperGroup):
     def main(self, *args: Any, **kwargs: Any) -> Any:
         previous_width = typer_rich_utils.MAX_WIDTH
+        previous_force_terminal = typer_rich_utils.FORCE_TERMINAL
         terminal_width = kwargs.get("terminal_width")
         if not isinstance(terminal_width, int):
             terminal_width = None
         stabilize_typer_help_width(terminal_width)
+        if no_color_requested():
+            typer_rich_utils.FORCE_TERMINAL = False
         try:
             return super().main(*args, **kwargs)
         finally:
             typer_rich_utils.MAX_WIDTH = previous_width
+            typer_rich_utils.FORCE_TERMINAL = previous_force_terminal
 
 
 def maybe_open_report(report_path: Path) -> bool:

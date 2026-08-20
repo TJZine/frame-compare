@@ -64,7 +64,13 @@ class PreviousOffsetPromptInput:
 
 
 def _console(*, no_color: bool) -> Console:
-    return Console(stderr=True, no_color=no_color, width=_prompt_console_width(), height=1000)
+    return Console(
+        stderr=True,
+        no_color=no_color,
+        color_system=None if no_color else "auto",
+        width=_prompt_console_width(),
+        height=1000,
+    )
 
 
 def _prompt_console_width() -> int:

@@ -218,6 +218,23 @@ def test_help_uses_requested_terminal_width(args: list[str], terminal_width: int
     assert max((len(line) for line in result.stdout.splitlines()), default=0) <= terminal_width
 
 
+def test_help_no_color_disables_ansi_when_typer_forces_terminal(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(typer_rich_utils, "FORCE_TERMINAL", True)
+
+    result = runner.invoke(
+        app,
+        ["--help"],
+        color=False,
+        terminal_width=60,
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+
+    assert result.exit_code == 0
+    assert "\x1b[" not in result.stdout
+
+
 def test_run_help_groups_options_by_task() -> None:
     result = runner.invoke(
         app,
