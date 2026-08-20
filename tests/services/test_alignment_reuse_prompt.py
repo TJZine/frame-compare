@@ -187,20 +187,11 @@ def test_prompt_uses_actual_narrow_terminal_width(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     request = _request(tmp_path)
-    console_widths: list[int | None] = []
-    original_console = reuse_prompt.Console
-
-    class RecordingConsole(original_console):
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            console_widths.append(kwargs.get("width"))
-            super().__init__(*args, **kwargs)
-
     monkeypatch.setattr(
         reuse_prompt.shutil,
         "get_terminal_size",
         lambda **_: os.terminal_size((columns, 24)),
     )
-    monkeypatch.setattr(reuse_prompt, "Console", RecordingConsole)
     monkeypatch.setattr(reuse_prompt.sys, "stdin", _TTYStringIO("n\n", is_tty=True))
     stderr = _TTYStringIO("", is_tty=True)
     monkeypatch.setattr(reuse_prompt.sys, "stderr", stderr)
@@ -213,9 +204,9 @@ def test_prompt_uses_actual_narrow_terminal_width(
         )
         is False
     )
-    assert console_widths
-    assert all(width == columns for width in console_widths)
     stderr_output = stderr.getvalue()
+    assert "Previous Alignment Offsets" in stderr_output
+    assert REUSE_PREVIOUS_OFFSETS_PROMPT in stderr_output
     assert "\x1b[" not in stderr_output
     assert all(len(line) <= columns for line in stderr_output.splitlines())
 
