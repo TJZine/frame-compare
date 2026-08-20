@@ -16,7 +16,6 @@ from rich.panel import Panel
 from rich.table import Table
 
 from frame_compare.orchestration.context import ClipState
-from frame_compare.render.overlay_text import format_file_size
 
 log = structlog.get_logger()
 
@@ -124,8 +123,17 @@ def _format_frame_count(num_frames: int) -> str:
 
 def _format_dynamic_range(is_hdr: bool) -> str:
     if is_hdr:
-        return "[bright_magenta]HDR[/]"
+        return "[bright_white]HDR[/]"
     return "[dim]SDR[/]"
+
+
+def _format_file_size(size_bytes: int) -> str:
+    value = float(size_bytes)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if value < 1024.0 or unit == "TiB":
+            return f"{value:.1f} {unit}"
+        value /= 1024.0
+    raise AssertionError("unreachable")
 
 
 def _report_console_width() -> int:
@@ -160,26 +168,34 @@ def _render_clip_overview(
         padding=(0, 2, 0, 0),
         expand=False,
     )
-    table.add_column("key", style="blue", no_wrap=True, min_width=14, overflow="fold")
+    table.add_column("key", style="grey70", no_wrap=True, min_width=14, overflow="fold")
     table.add_column("value", overflow="fold")
 
     for index, clip in enumerate(clips):
         if index > 0:
             table.add_row("", "")
 
-        table.add_row(_clip_role(index), f"[bright_white]{escape(clip.label)}[/]")
-        table.add_row("  resolution", f"[bright_white]{escape(f'{clip.width}x{clip.height}')}[/]")
-        table.add_row("  frames", f"[dim]{escape(_format_frame_count(clip.num_frames))}[/]")
-        table.add_row("  range", _format_dynamic_range(clip.is_hdr))
-        table.add_row("  fps", f"[bright_white]{_format_fps_transition(clip)}[/]")
+        filename = clip.path.name
+        label = clip.label.strip()
+        identity = filename if label in {"", clip.path.stem, filename} else label
+        table.add_row(_clip_role(index), f"[bright_white]{escape(identity)}[/]")
+        if identity != filename:
+            table.add_row("  File", f"[bright_white]{escape(filename)}[/]")
         table.add_row(
-            "  file size",
-            f"[bright_white]{escape(format_file_size(clip.size_bytes))}[/]",
+            "  Video",
+            f"[bright_white]{escape(f'{clip.width}x{clip.height}')}[/] | {_format_dynamic_range(clip.is_hdr)}",
         )
         table.add_row(
-            "  path",
-            f"[dim]{escape(_display_path(clip.path, input_dir=input_dir, verbose=verbose))}[/]",
+            "  Timing",
+            f"[bright_white]{_format_fps_transition(clip)}[/] | [dim]{escape(_format_frame_count(clip.num_frames))}[/]",
         )
+        table.add_row(
+            "  Size",
+            f"[bright_white]{escape(_format_file_size(clip.size_bytes))}[/]",
+        )
+        display_path = _display_path(clip.path, input_dir=input_dir, verbose=verbose)
+        if verbose or Path(display_path).parent != Path("."):
+            table.add_row("  Path", f"[dim]{escape(display_path)}[/]")
 
     return table
 
@@ -267,8 +283,7 @@ def _render_human_fps_report(
 ) -> None:
     console = Console(stderr=True, no_color=no_color, width=_report_console_width(), height=1000)
     if stage == "after_load_sources":
-        console.print(f"[bold green][OK][/] Sources loaded: {len(clips)}")
-        title = "Sources"
+        title = f"[bold green][OK][/] Sources — {len(clips)} loaded"
         table = _render_load_sources_overview(
             clips=clips,
             diagnostics=diagnostics,
@@ -290,7 +305,11 @@ def _render_human_fps_report(
     console.print(
         Panel(
             table,
-            title=f"[bold cyan]{escape(title)}[/] [dim]{escape(_stage_label(stage))}[/]",
+            title=(
+                f"[bold cyan]{title}[/]"
+                if stage == "after_load_sources"
+                else f"[bold cyan]{escape(title)}[/] [dim]{escape(_stage_label(stage))}[/]"
+            ),
             border_style="cyan",
         )
     )

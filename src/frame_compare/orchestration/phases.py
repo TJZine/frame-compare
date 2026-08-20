@@ -33,6 +33,7 @@ class PhaseStatus(StrEnum):
 
 PhaseExecute = Callable[[RunContext], Awaitable[None]]
 PhaseSkipCondition = Callable[[ConfigSchema], bool]
+PhaseSkipDetail = str | Callable[[], str | None]
 
 
 @dataclass
@@ -48,6 +49,7 @@ class Phase:
     warn_only: bool = False
     fatal_exceptions: tuple[type[BaseException], ...] = ()
     retain_on_success: bool | None = None
+    skip_detail: PhaseSkipDetail | None = None
 
     @property
     def progress_label(self) -> str:
@@ -70,10 +72,15 @@ async def execute_phases(
     for phase in phases:
         if phase.skip_condition is not None and phase.skip_condition(context.config):
             phase.status = PhaseStatus.SKIPPED
+            skip_detail = phase.skip_detail() if callable(phase.skip_detail) else phase.skip_detail
             start_phase_progress(
                 reporter,
                 name=phase.name,
-                display_label=phase.progress_label,
+                display_label=(
+                    f"{phase.progress_label}  {skip_detail}"
+                    if skip_detail is not None
+                    else phase.progress_label
+                ),
                 total=phase.progress_total,
             )
             reporter.set_description("Skipped")

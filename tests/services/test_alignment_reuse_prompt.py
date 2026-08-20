@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import io
 import os
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 import frame_compare.services.alignment_reuse_prompt as reuse_prompt
-from frame_compare.services.alignment_reuse_cache import CACHE_FILE_NAME as REUSE_CACHE_FILE_NAME
 from frame_compare.services.alignment_reuse_prompt import (
     PROMPT_UNAVAILABLE_MESSAGE,
     REUSE_PREVIOUS_OFFSETS_PROMPT,
@@ -126,25 +126,48 @@ def test_prompt_prints_rich_safe_table_to_stderr_and_accepts_yes(
     stderr_output = stderr.getvalue()
     assert accepted is True
     assert captured.out == ""
-    assert "Previous Alignment Offsets" in stderr_output
-    assert REUSE_CACHE_FILE_NAME in stderr_output
+    assert "[WAIT] Reuse previous alignment?" in stderr_output
     assert "[y/N]" in stderr_output
     assert "Comparison [cyan]" in stderr_output
     assert "<one>" in stderr_output
     assert "A [red].mkv" in stderr_output
-    normalized_output = stderr_output.replace("\\", "/")
-    assert "[green]/A [red].mkv" in normalized_output
-    assert "+12f" in stderr_output
-    assert "-4f" in stderr_output
+    assert stderr_output.count("A [red].mkv") == 1
+    assert "+12 frames" in stderr_output
+    assert "-4 frames" in stderr_output
     assert "0.5" in stderr_output
     assert "-0.166" in stderr_output
-    assert "2026-06-06T12:34:56Z" in stderr_output
-    assert "computed" in stderr_output
-    assert "confirmed" in stderr_output
+    assert "2026-06-06 12:34:56 UTC" in stderr_output
+    assert "Computed" in stderr_output
+    assert "Preview-confirmed" in stderr_output
     assert "cached" not in stderr_output
-    assert stderr_output.index("+12f") < stderr_output.index("computed")
-    assert stderr_output.index("computed") < stderr_output.index("accepted")
-    assert stderr_output.index("accepted") < stderr_output.index("cache")
+    assert stderr_output.index("+12 frames") < stderr_output.index("Computed")
+    assert stderr_output.index("Computed") < stderr_output.index("Accepted")
+    assert stderr_output.index("Accepted") < stderr_output.index("Cache")
+
+
+def test_prompt_shows_full_filename_once_when_label_equals_stem(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _request(tmp_path)
+    prompt_input = _prompt_input(request)
+    first_row = prompt_input.rows[0]
+    prompt_input = replace(
+        prompt_input,
+        reference_label=Path(prompt_input.reference_filename).stem,
+        shared_cache_path=Path("generated/cache/alignment/alignment_reuse.toml"),
+        rows=(replace(first_row, label=first_row.stem),),
+    )
+    stderr = _TTYStringIO("", is_tty=True)
+    monkeypatch.setattr(reuse_prompt.sys, "stdin", _TTYStringIO("n\n", is_tty=True))
+    monkeypatch.setattr(reuse_prompt.sys, "stderr", stderr)
+
+    prompt_for_previous_offset_reuse(prompt_input=prompt_input, progress=None, no_color=True)
+
+    output = stderr.getvalue()
+    assert output.count(prompt_input.reference_filename) == 1
+    assert output.count(first_row.filename) == 1
+    assert str(prompt_input.shared_cache_path) in "".join(output.split())
 
 
 def test_prompt_does_not_use_unbounded_terminal_width(
@@ -205,7 +228,7 @@ def test_prompt_uses_actual_narrow_terminal_width(
         is False
     )
     stderr_output = stderr.getvalue()
-    assert "Previous Alignment Offsets" in stderr_output
+    assert "[WAIT] Reuse previous alignment?" in stderr_output
     assert REUSE_PREVIOUS_OFFSETS_PROMPT in stderr_output
     assert "\x1b[" not in stderr_output
     assert all(len(line) <= columns for line in stderr_output.splitlines())
@@ -251,7 +274,7 @@ def test_prompt_non_tty_stdin_prints_only_fallback_line(
     assert accepted is False
     assert captured.out == ""
     assert _fallback_only_output(stderr_output)
-    assert "Previous Alignment Offsets" not in stderr_output
+    assert "Reuse previous alignment?" not in stderr_output
     assert "[y/N]" not in stderr_output
     assert "Comparison [cyan] <one>" not in stderr_output
 
@@ -280,7 +303,7 @@ def test_prompt_visible_prompt_path_fallbacks_on_eof_or_read_failure(
     assert accepted is False
     assert captured.out == ""
     stderr_output = stderr.getvalue()
-    assert "Previous Alignment Offsets" in stderr_output
+    assert "[WAIT] Reuse previous alignment?" in stderr_output
     assert "[y/N]" in stderr_output
     assert f"{REUSE_PREVIOUS_OFFSETS_PROMPT}\n{PROMPT_UNAVAILABLE_MESSAGE}" in stderr_output
 

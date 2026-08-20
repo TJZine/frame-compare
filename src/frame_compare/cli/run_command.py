@@ -352,6 +352,7 @@ def build_runner_dependencies(
             deps=deps,
             console=console,
             resolve_effective_config=resolve_effective_config,
+            visibility=config.slowpics.visibility.value,
         )
         if report_confirmed_slowpics_enabled(config)
         else None
@@ -412,6 +413,7 @@ def build_confirm_slowpics_upload_callback(
     deps: RunCommandDeps,
     console: Console,
     resolve_effective_config: EffectiveConfigLoader,
+    visibility: str,
 ) -> SlowpicsUploadConfirmationFn:
     def _confirm_slowpics_upload(
         request: SlowpicsUploadConfirmationRequest,
@@ -424,8 +426,10 @@ def build_confirm_slowpics_upload_callback(
         )
         if not opened:
             console.print(f"Report: {escape(str(request.report_path))}", soft_wrap=True)
+        console.print("[bold magenta][WAIT][/] [bold bright_cyan]Publishing confirmation[/]")
+        console.print("[dim]Review the local report before publishing.[/]")
         if deps.confirm_upload(
-            "[WAIT] CONFIRM Review the local report, then upload this comparison to slow.pics?",
+            f"Upload to {visibility} slow.pics?",
             default=False,
         ):
             return "confirmed"

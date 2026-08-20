@@ -190,7 +190,7 @@ def test_rich_progress_reporter_retain_success_at_ten_seconds(
     reporter.start_phase("PLAN", 1)
     reporter.complete_phase()
 
-    assert "[OK] PLAN" in capsys.readouterr().err
+    assert "[OK] PLAN  Completed in 10s" in capsys.readouterr().err
 
 
 def test_rich_progress_reporter_explicitly_retains_short_success(
@@ -204,7 +204,25 @@ def test_rich_progress_reporter_explicitly_retains_short_success(
     reporter.start_phase("PUBLISH", 1)
     reporter.complete_phase(retain=True)
 
-    assert "[OK] PUBLISH" in capsys.readouterr().err
+    assert "[OK] PUBLISH  Completed in 0s" in capsys.readouterr().err
+
+
+def test_rich_progress_reporter_suppresses_long_nested_success(
+    monkeypatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    reporter = RichProgressReporter()
+    clock = iter((0.0, 1.0, 12.0, 13.0))
+    monkeypatch.setattr(progress_module, "monotonic", lambda: next(clock))
+
+    reporter.start_phase("RENDER", 1)
+    reporter.start_phase("ENCODE", 1)
+    reporter.complete_phase()
+    reporter.complete_phase()
+
+    output = capsys.readouterr().err
+    assert "[OK] ENCODE" not in output
+    assert "[OK] RENDER  Completed in 13s" in output
 
 
 def test_rich_progress_reporter_suppresses_generic_confirm_completion(

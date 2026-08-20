@@ -18,12 +18,12 @@ if TYPE_CHECKING:
 # ── Theme constants ────────────────────────────────────────────────────────────
 # Role-based color vocabulary inspired by the legacy CLI layout engine.
 
-STYLE_KEY = "blue"
+STYLE_KEY = "grey70"
 STYLE_VALUE = "bright_white"
 STYLE_UNIT = "dim"
 STYLE_PATH = "dim"
-STYLE_BOOL_TRUE = "green"
-STYLE_BOOL_FALSE = "red"
+STYLE_ARTIFACT_PATH = "bright_white"
+STYLE_URL = "bright_cyan"
 STYLE_SUCCESS = "bold green"
 STYLE_WARN = "yellow"
 STYLE_SKIPPED = "yellow"
@@ -87,13 +87,6 @@ class WarningPresentation:
 # ── Formatting helpers ─────────────────────────────────────────────────────────
 
 
-def _styled_bool(value: bool) -> str:
-    """Return a color-coded boolean string."""
-    if value:
-        return f"[{STYLE_BOOL_TRUE}]true[/]"
-    return f"[{STYLE_BOOL_FALSE}]false[/]"
-
-
 def _styled_value(value: str) -> str:
     return f"[{STYLE_VALUE}]{escape(value)}[/]"
 
@@ -104,6 +97,10 @@ def _styled_unit(value: str) -> str:
 
 def _styled_path(value: str) -> str:
     return f"[{STYLE_PATH}]{escape(value)}[/]"
+
+
+def _styled_artifact_path(value: str) -> str:
+    return f"[{STYLE_ARTIFACT_PATH}]{escape(value)}[/]"
 
 
 def _status_token(status: StatusPresentation) -> str:
@@ -142,10 +139,16 @@ def format_display_path(path: Path, *, root: Path | None) -> str:
     return str(relative) if relative != Path(".") else "."
 
 
-def _display_path(path: Path, *, root: Path | None, verbose: bool = False) -> str:
+def _display_path(
+    path: Path,
+    *,
+    root: Path | None,
+    verbose: bool = False,
+    artifact: bool = False,
+) -> str:
     """Render a complete path relative to the workspace when it is contained."""
     display = format_display_path(path, root=root)
-    rendered = _styled_path(display)
+    rendered = _styled_artifact_path(display) if artifact else _styled_path(display)
     absolute = _absolute_display_path(path, root)
     if verbose and root is not None and display != str(absolute):
         rendered += f" {_styled_unit(f'(absolute: {absolute})')}"
@@ -171,6 +174,15 @@ def _format_duration(seconds: float) -> str:
 
 def _format_config_seconds(seconds: float) -> str:
     return f"{seconds:g}s"
+
+
+def _humanize(value: str) -> str:
+    return {
+        "auto": "Automatic",
+        "bt2390": "BT.2390",
+        "quality": "Quality",
+        "performance": "Performance",
+    }.get(value, value.replace("_", " ").title())
 
 
 def _group_table() -> Table:
@@ -308,25 +320,35 @@ def print_at_a_glance(
     # ── Frame selection ──
     _add_separator(table)
     _add_subheader(table, "Frame selection")
-    selection_text = (
-        f"user={len(user_frames)}, "
-        f"random={random_frame_count}, "
-        f"dark={dark_frame_count}, "
-        f"bright={bright_frame_count}, "
-        f"motion={motion_frame_count}"
-    )
-    _add_kv(table, "requested", _styled_value(selection_text))
-    _add_kv(table, "total frames", _styled_value(str(requested_total)))
-    _add_kv(table, "seed", _styled_value(str(random_seed)))
-    _add_kv(table, "analysis source", _styled_value(config.sources.analysis_source))
-    analysis_mode = config.analysis.performance_mode.value
+    categories = [
+        f"{name} {count}"
+        for name, count in (
+            ("user", len(user_frames)),
+            ("random", random_frame_count),
+            ("dark", dark_frame_count),
+            ("bright", bright_frame_count),
+            ("motion", motion_frame_count),
+        )
+        if count
+    ]
+    _add_kv(table, "Frames", _styled_value(f"{requested_total} total"))
+    _add_kv(table, "", _styled_unit(" | ".join(categories)))
+    if user_frames:
+        _add_kv(table, "User frames", _styled_value(", ".join(str(frame) for frame in user_frames)))
+    if random_frame_count:
+        _add_kv(table, "Seed", _styled_value(str(random_seed)))
+    analysis_mode = _humanize(config.analysis.performance_mode.value)
     if request.skip_analysis:
         analysis_mode = f"{analysis_mode} (skipped for this run)"
-    _add_kv(table, "analysis mode", _styled_value(analysis_mode))
+    source_policy = config.sources.analysis_source.replace("_", " ")
     cache_policy = (
-        "cache-only" if request.from_cache_only else "bypassed" if request.no_cache else "normal"
+        "cache only"
+        if request.from_cache_only
+        else "cache bypassed"
+        if request.no_cache
+        else "cache read/write"
     )
-    _add_kv(table, "analysis cache", _styled_value(cache_policy))
+    _add_kv(table, "Analysis", _styled_value(f"{analysis_mode} | {source_policy} | {cache_policy}"))
     excluded_window = (
         "none"
         if analysis.ignore_lead_seconds == 0.0 and analysis.ignore_trail_seconds == 0.0
@@ -335,44 +357,40 @@ def print_at_a_glance(
             f"trail={_format_config_seconds(analysis.ignore_trail_seconds)}"
         )
     )
-    _add_kv(table, "exclusion window", _styled_value(excluded_window))
+    _add_kv(table, "Window", _styled_value(excluded_window))
 
     # ── Rendering ──
     _add_separator(table)
     _add_subheader(table, "Rendering")
-    renderer = "ffmpeg" if config.screenshots.use_ffmpeg else "auto (VapourSynth preferred)"
-    _add_kv(table, "renderer", _styled_value(renderer))
-    _add_kv(table, "overlay", _styled_value(str(overlay_mode.value)))
-    _add_kv(table, "geometry", _styled_value(config.screenshots.geometry_mode.value))
+    renderer = "FFmpeg" if config.screenshots.use_ffmpeg else "Automatic | VapourSynth preferred"
+    _add_kv(table, "Renderer", _styled_value(renderer))
     _add_kv(
         table,
-        "active-picture policy",
-        _styled_value(config.screenshots.active_rect_detection.value),
+        "Output",
+        _styled_value(
+            f"{_humanize(overlay_mode.value)} overlay | {_humanize(config.screenshots.geometry_mode.value)} geometry"
+        ),
+    )
+    _add_kv(
+        table,
+        "Active area",
+        _styled_value(_humanize(config.screenshots.active_rect_detection.value)),
     )
     tonemap_settings = _resolve_preview_tonemap_settings(config, request)
     tonemap_text = (
-        f"{'enabled' if tonemap_enabled else 'disabled'}; "
-        f"preset={tonemap_settings.preset.value}; "
-        f"target={tonemap_settings.target_nits} nits; "
-        f"curve={tonemap_settings.tone_curve.value}"
+        "Disabled"
+        if not tonemap_enabled
+        else (
+            f"{_humanize(tonemap_settings.preset.value)} | "
+            f"{tonemap_settings.target_nits} nits | {_humanize(tonemap_settings.tone_curve.value)}"
+        )
     )
-    _add_kv(
-        table,
-        "tone mapping",
-        _status_value("OK" if tonemap_enabled else "SKIP", tonemap_text),
-    )
+    _add_kv(table, "Tone map", _styled_value(tonemap_text))
 
     # ── Alignment ──
     _add_separator(table)
     _add_subheader(table, "Alignment")
-    _add_kv(
-        table,
-        "audio alignment",
-        _status_value(
-            "OK" if alignment_enabled else "SKIP",
-            "enabled" if alignment_enabled else "disabled",
-        ),
-    )
+    _add_kv(table, "Mode", _styled_value("Audio alignment" if alignment_enabled else "Disabled"))
     ffmpeg_text = "available (true)" if ffmpeg_available else "unavailable (false)"
     _add_kv(
         table,
@@ -384,24 +402,15 @@ def print_at_a_glance(
         "prompt": "ask before reusing previous offsets (prompt)",
         "always": "reuse previous offsets when valid (always)",
     }[config.audio_alignment.previous_offsets]
-    reuse_status_by_policy: dict[str, StatusPresentation] = {
-        "disabled": "SKIP",
-        "prompt": "WAIT",
-        "always": "OK",
-    }
-    reuse_status = reuse_status_by_policy[config.audio_alignment.previous_offsets]
-    _add_kv(table, "previous offsets", _status_value(reuse_status, reuse_policy))
-    _add_kv(table, "interactive alignment", _styled_bool(use_vspreview))
-    _add_kv(table, "force interactive", _styled_bool(force_interactive))
-    manual_review_status: StatusPresentation
+    _add_kv(table, "Offsets", _styled_value(reuse_policy.split(" (")[0].capitalize()))
     manual_review_text: str
     if not use_vspreview and not force_interactive:
-        manual_review_status, manual_review_text = "SKIP", "not configured"
+        manual_review_text = "Not configured"
     elif force_interactive:
-        manual_review_status, manual_review_text = "WAIT", "VSPreview required"
+        manual_review_text = "VSPreview required"
     else:
-        manual_review_status, manual_review_text = "WAIT", "VSPreview requested"
-    _add_kv(table, "manual review", _status_value(manual_review_status, manual_review_text))
+        manual_review_text = "VSPreview requested"
+    _add_kv(table, "Review", _styled_value(manual_review_text))
     if vspreview_status is not None:
         preview_status: StatusPresentation = (
             "OK" if vspreview_status.startswith("available") else "WARN"
@@ -417,51 +426,47 @@ def print_at_a_glance(
     )
     _add_kv(
         table,
-        "report",
-        _status_value("OK" if config.report.enable else "SKIP", report_text),
+        "Report",
+        _styled_value(report_text.replace("enabled", "Enabled").replace("disabled", "Disabled")),
     )
     _add_kv(
         table,
-        "metadata",
-        _status_value(
-            "SKIP" if request.skip_metadata else "OK",
-            "lookup skipped" if request.skip_metadata else "lookup enabled",
-        ),
+        "Metadata",
+        _styled_value("Lookup disabled" if request.skip_metadata else "TMDB lookup enabled"),
     )
 
     # ── Publishing ──
     _add_separator(table)
     _add_subheader(table, "Publishing")
     if not upload_enabled:
-        upload_status: StatusPresentation = "SKIP"
         upload_text = "disabled by --no-upload" if request.no_upload else "disabled"
     elif report_confirmed_upload:
-        upload_status, upload_text = "WAIT", "confirm after local report"
+        upload_text = "confirm after local report"
     else:
-        upload_status, upload_text = "OK", "automatic upload"
-    _add_kv(table, "slow.pics", _status_value(upload_status, upload_text))
-    _add_kv(table, "visibility", _styled_value(config.slowpics.visibility.value))
+        upload_text = "automatic upload"
     _add_kv(
         table,
-        "confirmation",
-        _status_value(
-            "WAIT" if report_confirmed_upload else "SKIP",
-            "required after report" if report_confirmed_upload else "not required",
-        ),
+        "slow.pics",
+        _styled_value(f"{_humanize(config.slowpics.visibility.value)} | {upload_text}"),
     )
     actions_text = (
         f"clipboard={'enabled' if config.slowpics.copy_url_to_clipboard else 'disabled'}; "
         f"browser={'enabled' if config.slowpics.open_in_browser else 'disabled'}; "
-        f"shortcut={'enabled' if config.slowpics.create_url_shortcut else 'disabled'}; "
-        f"webhook={'configured' if config.slowpics.webhook_url else 'not configured'}"
+        f"shortcut={'enabled' if config.slowpics.create_url_shortcut else 'disabled'}"
     )
-    _add_kv(table, "post-upload actions", _styled_value(actions_text))
+    _add_kv(table, "Actions", _styled_value(actions_text))
     _add_kv(
         table,
-        "delete after upload",
-        _status_value(
-            "OK" if config.slowpics.delete_after_upload else "SKIP",
-            "enabled (report-safe only)" if config.slowpics.delete_after_upload else "disabled",
+        "Webhook",
+        _styled_value("Configured" if config.slowpics.webhook_url else "Not configured"),
+    )
+    _add_kv(
+        table,
+        "Cleanup",
+        _styled_value(
+            "Delete uploaded screenshots when report-safe"
+            if config.slowpics.delete_after_upload
+            else "Keep local artifacts"
         ),
     )
 
@@ -503,8 +508,6 @@ def print_result_summary(
     else:
         headline_status = "OK"
         headline = "Comparison completed"
-    console.print(f"{_status_token(headline_status)} {escape(headline)}")
-
     table = _group_table()
 
     # ── Run facts ──
@@ -525,7 +528,7 @@ def print_result_summary(
         or result.clips_processed > 0
     ):
         has_facts = True
-        _add_kv(table, "Analysis cache", _styled_value(result.metrics_cache_status))
+        _add_kv(table, "Cache", _styled_value(result.metrics_cache_status))
     if not has_facts:
         _add_kv(
             table,
@@ -542,30 +545,30 @@ def print_result_summary(
         if result.report_path is not None:
             table.add_row(
                 f"  {_status_token('OK')} report",
-                _display_path(result.report_path, root=root, verbose=verbose),
+                _display_path(result.report_path, root=root, verbose=verbose, artifact=True),
             )
         if result.screenshot_dir is not None:
             table.add_row(
                 f"  {_status_token('OK')} screenshots",
-                _display_path(result.screenshot_dir, root=root, verbose=verbose),
+                _display_path(result.screenshot_dir, root=root, verbose=verbose, artifact=True),
             )
 
-    # ── Published ──
+    # ── Publishing ──
     if result.slowpics_url is not None or result.slowpics_upload_confirmation_status in {
         "declined",
         "report_unavailable",
     }:
         _add_separator(table)
-        _add_subheader(table, "Published")
+        _add_subheader(table, "Publishing")
         if result.slowpics_url is not None:
             table.add_row(
                 f"  {_status_token('OK')} slow.pics",
-                _styled_value(result.slowpics_url),
+                f"[{STYLE_URL}]{escape(result.slowpics_url)}[/]",
             )
         elif result.slowpics_upload_confirmation_status == "declined":
             table.add_row(
                 f"  {_status_token('SKIP')} slow.pics",
-                _styled_value("upload skipped by confirmation"),
+                _styled_value("Not uploaded — declined"),
             )
         else:
             table.add_row(
@@ -584,7 +587,13 @@ def print_result_summary(
                 _post_upload_action_detail(action, root=root, verbose=verbose),
             )
 
-    console.print(Panel(table, title=f"[{STYLE_HEADER}]Result[/]", border_style="cyan"))
+    console.print(
+        Panel(
+            table,
+            title=f"[{STYLE_HEADER}]{_status_token(headline_status)} {escape(headline)}[/]",
+            border_style="cyan",
+        )
+    )
 
     if warnings:
         max_lines = len(warnings) if verbose else 8

@@ -122,6 +122,7 @@ def test_execute_phases_skips_when_skip_condition_true(tmp_path: Path) -> None:
             name="skip",
             execute=phase_skip,
             skip_condition=lambda config: True,
+            skip_detail=lambda: "Disabled",
         ),
         Phase(name="next", execute=phase_next),
     ]
@@ -171,13 +172,14 @@ def test_execute_phases_reports_skipped_phase_lifecycle(tmp_path: Path) -> None:
             name="skip",
             execute=phase_skip,
             skip_condition=lambda config: True,
+            skip_detail="Disabled",
         ),
         Phase(name="next", execute=phase_next),
     ]
 
     asyncio.run(execute_phases(phases, context, reporter))
 
-    assert reporter.start_phase_calls == [("SKIP", 1), ("NEXT", 1)]
+    assert reporter.start_phase_calls == [("SKIP  Disabled", 1), ("NEXT", 1)]
     assert reporter.set_description_calls == ["Skipped"]
     assert reporter.complete_phase_calls == [
         ProgressPhaseStatus.SKIPPED,
@@ -488,3 +490,5 @@ def test_publish_phase_skip_condition_uses_effective_slowpics_config() -> None:
 
     assert publish_phase.skip_condition is not None
     assert publish_phase.skip_condition(config) is True
+    assert callable(publish_phase.skip_detail)
+    assert publish_phase.skip_detail() == "Disabled"

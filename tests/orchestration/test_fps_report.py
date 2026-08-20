@@ -250,9 +250,9 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert captured.err.startswith("[OK] Sources loaded: 2\n")
+    assert "[OK] Sources — 2 loaded" in captured.err
     assert "Sources" in captured.err
-    assert "After Load Sources" in captured.err
+    assert "After Load Sources" not in captured.err
     assert "Reference" in captured.err
     assert "Comparison 1" in captured.err
     assert "Reference [source]" in captured.err
@@ -265,8 +265,8 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
     assert "1,200 frames" in captured.err
     assert "HDR" in captured.err
     assert "SDR" in captured.err
-    assert "17.00 GiB" in captured.err
-    assert "6.00 GiB" in captured.err
+    assert "17.0 GiB" in captured.err
+    assert "6.0 GiB" in captured.err
     assert "ref.mkv" in captured.err
     assert "encode.mkv" in captured.err
     assert "Analysis source: encode.mkv (configured)" in captured.err
@@ -489,7 +489,7 @@ def test_emit_consolidated_fps_report_wraps_at_narrow_terminal_widths(
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "[OK] Sources loaded: 1" in captured.err
+    assert "[OK] Sources — 1 loaded" in captured.err
     assert "A source with" in captured.err
     assert "deliberately" in captured.err
     assert "\x1b[" not in captured.err

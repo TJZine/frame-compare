@@ -44,7 +44,7 @@ from frame_compare.orchestration.phase_selection import (
     select_initial_frame_plan,
     selection_label_for_frame,
 )
-from frame_compare.orchestration.phases import Phase
+from frame_compare.orchestration.phases import Phase, PhaseSkipDetail
 from frame_compare.orchestration.types import (
     RunDependencies,
     RunRequest,
@@ -77,6 +77,7 @@ def _create_timed_phase(
     progress_total: int = 1,
     retain_on_success: bool | None = None,
     retain_if: Callable[[PhaseOutput], bool] | None = None,
+    skip_detail: PhaseSkipDetail | None = None,
 ) -> Phase:
     phase: Phase | None = None
 
@@ -109,6 +110,7 @@ def _create_timed_phase(
         warn_only=warn_only,
         fatal_exceptions=fatal_exceptions,
         retain_on_success=retain_on_success,
+        skip_detail=skip_detail,
     )
     return phase
 
@@ -151,6 +153,7 @@ def build_phases_before_align(
             warn_only=True,
             fatal_exceptions=(ExclusionRecoverySelectionError,),
             progress_total=ANALYZE_PROGRESS_TOTAL,
+            skip_detail="Disabled" if request.skip_analysis else "Not required",
         ),
         _create_timed_phase(
             "align",
@@ -164,6 +167,7 @@ def build_phases_before_align(
             warn_only=True,
             fatal_exceptions=(ExclusionRecoverySelectionError,),
             progress_total=max(1, len(input_videos)),
+            skip_detail="Disabled",
         ),
     ]
 
@@ -252,6 +256,7 @@ def build_phases_after_align(
             phase_timings=state.phase_timings,
             warnings=state.warnings,
             warn_only=True,
+            skip_detail="Disabled",
         ),
     ]
     publish_phase = _create_timed_phase(
@@ -274,6 +279,17 @@ def build_phases_after_align(
         retain_if=lambda output: (
             isinstance(output, PublishPhaseOutput) and output.slowpics_url is not None
         ),
+        skip_detail=lambda: (
+            "Disabled"
+            if not config.slowpics.auto_upload
+            else "Unavailable"
+            if http_client is None
+            else "Declined"
+            if state.artifacts.slowpics_upload_confirmation_status == "declined"
+            else "Report unavailable"
+            if state.artifacts.slowpics_upload_confirmation_status == "report_unavailable"
+            else None
+        ),
     )
     report_phase = _create_timed_phase(
         "report",
@@ -285,6 +301,7 @@ def build_phases_after_align(
         phase_timings=state.phase_timings,
         warnings=state.warnings,
         warn_only=True,
+        skip_detail="Disabled",
     )
     confirm_slowpics_upload_phase = _create_timed_phase(
         "confirm_slowpics_upload",

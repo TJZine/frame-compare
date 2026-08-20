@@ -384,12 +384,13 @@ unchanged.
   ranges, offsets, selected aligned frames, and rejected alignment warning context
   for comparisons with material alignment information. It is suppressed by
   `--quiet` and is never emitted to `run --json` stdout.
-- After sources load, normal human output begins the source summary with
-  `[OK] Sources loaded: N`. Its rows use `Reference` and `Comparison N` roles and
-  show each source's resolved label, resolution, source frame count, HDR/SDR
+- After sources load, normal human output uses one `[OK] Sources — N loaded`
+  panel heading. Its rows use `Reference` and `Comparison N` roles and show each
+  source's de-duplicated label/filename identity, resolution, source frame count, HDR/SDR
   signal, source/effective FPS when they differ, complete container file size in
   IEC units, and an input-relative path when the source is beneath the configured
-  input directory. External sources remain absolute. The displayed size comes
+  input directory when nested. External sources remain absolute. Sizes use one
+  decimal place. The displayed size comes
   from the probed fingerprint's `size_bytes`; it is not bitrate or a quality
   signal, and it is not added to successful `run --json`.
 - After alignment, normal human output emits one `[OK] Frame rates match: X` line
@@ -412,13 +413,13 @@ unchanged.
   domain. If the breakdown is unavailable, the aligned count is still reported with
   an unavailable indication. Normal, quiet, and JSON runs do not emit this summary,
   and it does not add a JSON field or log event.
-- Human-readable non-quiet successful runs begin with `[OK] Comparison completed`
-  or `[WARN] Comparison completed with N warning(s)`, using a de-duplicated warning
-  presentation count. The `Result` panel contains concise run facts, then a `Review`
-  group with the report before screenshots, a separate `Published` group, and a
+- Human-readable non-quiet successful runs use `[OK] Comparison completed`
+  or `[WARN] Comparison completed with N warning(s)` as the result panel title,
+  using a de-duplicated warning presentation count. The panel contains concise run
+  facts, then a `Review` group with the report before screenshots, a separate
+  `Publishing` group, and a
   separate `Follow-up actions` group for successful post-upload actions. Durations
-  use human units and the source/cache facts are labeled `sources` and
-  `Analysis cache`.
+  use human units and the source/cache facts are labeled `sources` and `Cache`.
 - Final warnings are grouped by source in a `Warnings` panel. Existing runtime
   warning strings and slow.pics post-upload action warnings are bridged into
   presentation rows with source, severity, message, and optional action context,
@@ -431,15 +432,12 @@ unchanged.
   native VapourSynth diagnostics, and plugin stderr may still use stderr.
 - When the Run plan reports optional VSPreview probe failures, it uses a
   sanitized summary rather than raw probe exception text.
-- The Run plan uses user-facing row labels such as `FFmpeg audio`,
-  `previous offsets`, `interactive alignment`, `force interactive`, and `VSPreview`
-  while preserving the same effective
-  configuration facts. The `previous offsets` row reports status-prefixed
-  explanatory text: `do not reuse previous offsets (disabled)`, `ask before
-  reusing previous offsets (prompt)`, or `reuse previous offsets when valid
-  (always)`.
-- The `analysis mode` row reports the effective `analysis.performance_mode` as
-  `quality` or `performance` and appends a space followed by
+- The Run plan uses neutral configuration rows such as `Mode`, `Offsets`, `Review`,
+  and `VSPreview`; status tokens are reserved for actual capability checks and
+  runtime outcomes. The `Offsets` row reports `Do not reuse previous offsets`,
+  `Ask before reusing previous offsets`, or `Reuse previous offsets when valid`.
+- The `Analysis` row reports the effective `analysis.performance_mode` as
+  `Quality` or `Performance` and appends a space followed by
   `(skipped for this run)` when `--skip-analysis` is active.
 - The Run plan workspace paths show `root`, `config`, `input`, and the resolved
   `generated` data root. The constant run-folder policy and derived screenshot path
@@ -449,8 +447,9 @@ unchanged.
   Internal phase names in logs and `phase_timings` remain the runtime keys such
   as `frame_plan`, `analyze`, `align`, and `confirm_slowpics_upload`.
 - Every Rich phase remains live while active with an ASCII `[RUN]` marker. A
-  successful phase leaves a durable
-  ASCII status line when it runs for at least 10.0 seconds, while skipped,
+  successful top-level phase leaves a durable ASCII status line with elapsed time
+  when it runs for at least 10.0 seconds. Successful nested tasks remain transient,
+  while skipped,
   warned, and failed phases always remain visible. A successful slow.pics upload
   also leaves a durable `PUBLISH` line regardless of duration. The report-confirmed
   prompt is the durable `[WAIT] CONFIRM` record; it does not add a redundant
@@ -1194,7 +1193,7 @@ enabled.
   VSPreview-confirmed results still write to the shared reuse cache when
   `cache_results = true`. `prompt` shows a Rich stderr table for a complete
   valid VSPreview-confirmed offset set and asks
-  `Reuse previous preview-confirmed alignment offsets? [y/N]`; default, EOF,
+  `Reuse these offsets? [y/N]: `; default, EOF,
   unavailable stdin, or unavailable stderr all continue without confirmed-offset
   reuse. If a confirmed cache entry also contains the computed audio alignment
   result that produced the preview suggestion, declining the prompt reuses that
@@ -1207,11 +1206,11 @@ enabled.
   stdin is not a TTY, or EOF occurs while prompting, the CLI emits
   `Previous alignment offset reuse prompt unavailable; continuing without reuse.`
   to stderr and continues without reuse.
-- The previous-offset reuse table displays the reference and comparison labels,
-  signed frame offset, time offset seconds, and source label (`computed` or
-  `confirmed`) before the persisted `accepted_at` timestamp, filename, and full
-  path evidence. The shared cache directory and cache filename remain visible as
-  the final cache evidence rows. It does not derive freshness from file mtime or
+- The previous-offset reuse table de-duplicates labels and filenames, displays the
+  signed frame offset and time offset, humanizes evidence as `Computed` or
+  `Preview-confirmed`, and renders valid timestamps in UTC while preserving invalid
+  values verbatim. The combined shared cache path remains visible as the final
+  cache evidence row. It does not derive freshness from file mtime or
   index mtime.
 - Shared previous-offset entries live under
   `<resolved paths.generated_dir>/cache/alignment/`. This is shared generated-data

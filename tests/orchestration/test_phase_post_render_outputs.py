@@ -663,6 +663,7 @@ async def test_report_confirmed_decline_skips_publish(
         "resume",
     ]
     assert (ProgressPhaseStatus.SKIPPED, None) in reporter.completions
+    assert "start:PUBLISH  Declined" in reporter.events
     assert (ProgressPhaseStatus.COMPLETED, True) not in reporter.completions
 
 

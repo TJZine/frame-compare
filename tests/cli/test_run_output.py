@@ -76,7 +76,7 @@ def test_run_human_output_routes_summaries_and_runtime_diagnostics(
     stdout = _normalize_cli_output(result.stdout)
     stderr = _normalize_cli_output(result.stderr)
     assert "Run plan" in stdout
-    assert "Result" in stdout
+    assert "Comparison completed" in stdout
     assert "Warnings" in stdout
     assert "metadata skipped" in stdout
     assert "Clip Overview" not in stdout

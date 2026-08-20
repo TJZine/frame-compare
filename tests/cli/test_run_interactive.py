@@ -191,9 +191,7 @@ def test_confirmation_callback_opens_report_before_prompt_and_defaults_decline()
 
     def _confirm_upload(text: str, *, default: bool) -> bool:
         assert opened == [Path("report.html")]
-        assert text == (
-            "[WAIT] CONFIRM Review the local report, then upload this comparison to slow.pics?"
-        )
+        assert text == "Upload to unlisted slow.pics?"
         assert default is False
         return True
 
@@ -208,6 +206,7 @@ def test_confirmation_callback_opens_report_before_prompt_and_defaults_decline()
         ),
         console=Console(file=StringIO(), no_color=True),
         resolve_effective_config=get_default_config,
+        visibility="unlisted",
     )
 
     assert callback(SlowpicsUploadConfirmationRequest(report_path=Path("report.html"))) == (
@@ -345,6 +344,7 @@ def test_confirmation_callback_prints_report_path_when_auto_open_disabled() -> N
         ),
         console=Console(file=output, no_color=True, force_terminal=False),
         resolve_effective_config=lambda: disabled_auto_open,
+        visibility="public",
     )
 
     assert callback(SlowpicsUploadConfirmationRequest(report_path=Path("report.html"))) == (
@@ -367,6 +367,7 @@ def test_confirmation_callback_prints_report_path_when_auto_open_attempt_fails()
         ),
         console=Console(file=output, no_color=True, force_terminal=False),
         resolve_effective_config=get_default_config,
+        visibility="public",
     )
 
     assert callback(SlowpicsUploadConfirmationRequest(report_path=Path("report.html"))) == (

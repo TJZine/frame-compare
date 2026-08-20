@@ -30,6 +30,18 @@ _DURABLE_STATUS_MARKERS = {
     ProgressPhaseStatus.FAILED: "[FAIL]",
 }
 
+
+def _format_elapsed(seconds: float) -> str:
+    whole_seconds = int(max(0.0, seconds))
+    hours, remainder = divmod(whole_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m {seconds:02d}s"
+    if minutes:
+        return f"{minutes}m {seconds:02d}s"
+    return f"{seconds}s"
+
+
 __all__ = [
     "LogProgressReporter",
     "NullProgressReporter",
@@ -190,14 +202,24 @@ class RichProgressReporter:
                 }:
                     self._progress.update(task_id, completed=total, refresh=True)
 
+                nested = bool(self._task_stack)
                 should_retain = status != ProgressPhaseStatus.COMPLETED
                 if status == ProgressPhaseStatus.COMPLETED and retain is not False:
-                    should_retain = retain is True or duration >= _MIN_DURABLE_PHASE_SECONDS
+                    should_retain = retain is True or (
+                        not nested and duration >= _MIN_DURABLE_PHASE_SECONDS
+                    )
                 if should_retain and task is not None:
                     label = task.fields.get("phase_label", task.description)
                     if not isinstance(label, str):
                         label = task.description
-                    self._progress.console.print(Text(f"{_DURABLE_STATUS_MARKERS[status]} {label}"))
+                    detail = (
+                        f"  Completed in {_format_elapsed(duration)}"
+                        if status == ProgressPhaseStatus.COMPLETED
+                        else ""
+                    )
+                    self._progress.console.print(
+                        Text(f"{_DURABLE_STATUS_MARKERS[status]} {label}{detail}")
+                    )
 
                 self._progress.remove_task(task_id)
                 self._task_totals.pop(task_id, None)

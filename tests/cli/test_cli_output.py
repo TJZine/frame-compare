@@ -92,19 +92,18 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     assert "generated" in _rendered_row_value(output, "generated")
     assert "run folders" not in output
     assert "screenshots" not in output
-    assert "requested" in output
-    assert "user=0, random=10, dark=0, bright=0, motion=0" in output
-    assert "seed" in output
-    assert "quality" in _rendered_row_value(output, "analysis mode")
+    assert "Frames" in output
+    assert "random 10" in output
+    assert "Seed" in output
+    assert "Quality" in _rendered_row_value(output, "Analysis")
     assert "true" in _rendered_row_value(output, "FFmpeg audio")
-    assert "disabled" in _rendered_row_value(output, "previous offsets")
-    assert "false" in _rendered_row_value(output, "interactive alignment")
-    assert "false" in _rendered_row_value(output, "force interactive")
-    assert "reference" in _rendered_row_value(output, "tone mapping")
-    assert "ffmpeg" in _rendered_row_value(output, "renderer")
+    assert "Do not reuse" in _rendered_row_value(output, "Offsets")
+    assert "Not configured" in _rendered_row_value(output, "Review")
+    assert "Reference" in _rendered_row_value(output, "Tone map")
+    assert "FFmpeg" in _rendered_row_value(output, "Renderer")
     assert "disabled" in _rendered_row_value(output, "slow.pics")
-    assert "public" in _rendered_row_value(output, "visibility")
-    assert "auto-open=enabled" in _rendered_row_value(output, "report")
+    assert "Public" in _rendered_row_value(output, "slow.pics")
+    assert "auto-open=Enabled" in _rendered_row_value(output, "Report")
     assert "VSPreview" not in output
 
 
@@ -122,8 +121,8 @@ def test_run_plan_reports_auto_renderer_when_ffmpeg_is_not_forced(
         config_path=_workspace_path("config", "config.toml"),
     )
 
-    renderer_row = _rendered_row_value(_render(console), "renderer")
-    assert "auto (VapourSynth preferred)" in renderer_row
+    renderer_row = _rendered_row_value(_render(console), "Renderer")
+    assert "Automatic | VapourSynth preferred" in renderer_row
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows does not expose POSIX execute bits")
@@ -155,13 +154,10 @@ def test_at_a_glance_prints_previous_offsets_effective_mode(
     monkeypatch: MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
-    cases: tuple[
-        tuple[Literal["disabled", "prompt", "always"], str],
-        ...,
-    ] = (
-        ("disabled", "[SKIP] do not reuse previous offsets (disabled)"),
-        ("prompt", "[WAIT] ask before reusing previous offsets (prompt)"),
-        ("always", "[OK] reuse previous offsets when valid (always)"),
+    cases: tuple[tuple[Literal["disabled", "prompt", "always"], str], ...] = (
+        ("disabled", "Do not reuse previous offsets"),
+        ("prompt", "Ask before reusing previous offsets"),
+        ("always", "Reuse previous offsets when valid"),
     )
 
     for mode, expected in cases:
@@ -178,7 +174,7 @@ def test_at_a_glance_prints_previous_offsets_effective_mode(
         )
 
         output = _render(console)
-        previous_offsets_row = _rendered_row_value(output, "previous offsets")
+        previous_offsets_row = _rendered_row_value(output, "Offsets")
         assert expected in previous_offsets_row
 
 
@@ -199,8 +195,8 @@ def test_at_a_glance_prints_effective_analysis_performance_mode(
         config_path=_workspace_path("config", "config.toml"),
     )
 
-    analysis_mode_row = _rendered_row_value(_render(console), "analysis mode")
-    assert "performance" in analysis_mode_row
+    analysis_mode_row = _rendered_row_value(_render(console), "Analysis")
+    assert "Performance" in analysis_mode_row
 
 
 def test_at_a_glance_marks_analysis_mode_skipped_for_this_run(
@@ -219,8 +215,8 @@ def test_at_a_glance_marks_analysis_mode_skipped_for_this_run(
         config_path=_workspace_path("config", "config.toml"),
     )
 
-    analysis_mode_row = _rendered_row_value(_render(console), "analysis mode")
-    assert "performance (skipped for this run)" in analysis_mode_row
+    analysis_mode_row = _rendered_row_value(_render(console), "Analysis")
+    assert "Performance (skipped for this run)" in analysis_mode_row
 
 
 def test_at_a_glance_preserves_literal_brackets_in_dynamic_paths(
@@ -276,9 +272,9 @@ def test_at_a_glance_prints_vspreview_availability_when_probe_succeeds(
     )
 
     output = _render(console)
-    assert "interactive alignment" in output
+    assert "VSPreview requested" in output
     assert "VSPreview" in output
-    assert "true" in output
+    assert "available (true)" in output
 
 
 def test_at_a_glance_prints_vspreview_probe_failure(monkeypatch: MonkeyPatch) -> None:
@@ -310,7 +306,7 @@ def test_at_a_glance_prints_vspreview_probe_failure(monkeypatch: MonkeyPatch) ->
     )
 
     output = _render(console)
-    assert "force interactive" in output
+    assert "VSPreview required" in output
     assert "VSPreview" in output
     assert "probe failed (RuntimeError)" in output
     assert "display unavailable" not in output
@@ -364,29 +360,29 @@ def test_run_plan_preserves_all_material_settings(monkeypatch: MonkeyPatch) -> N
     )
 
     output = _render(console)
-    assert "99" in _rendered_row_value(output, "seed")
-    assert "performance" in _rendered_row_value(output, "analysis mode")
-    assert "diagnostic" in _rendered_row_value(output, "overlay")
-    assert "aligned" in _rendered_row_value(output, "geometry")
-    assert "auto" in _rendered_row_value(output, "active-picture policy")
-    assert "prompt" in _rendered_row_value(output, "previous offsets")
-    assert "auto-open=disabled" in _rendered_row_value(output, "report")
-    assert "unlisted" in _rendered_row_value(output, "visibility")
+    assert "99" in _rendered_row_value(output, "Seed")
+    assert "Performance" in _rendered_row_value(output, "Analysis")
+    assert "Diagnostic overlay" in _rendered_row_value(output, "Output")
+    assert "Aligned geometry" in _rendered_row_value(output, "Output")
+    assert "Automatic" in _rendered_row_value(output, "Active area")
+    assert "Ask before" in _rendered_row_value(output, "Offsets")
+    assert "auto-open=Disabled" in _rendered_row_value(output, "Report")
+    assert "Unlisted" in _rendered_row_value(output, "slow.pics")
     for expected in (
         "Run plan",
         "Frame selection",
-        "user=2, random=3, dark=2, bright=1, motion=4",
+        "user 2 | random 3 | dark 2 | bright 1 | motion 4",
         "fastest",
         "lead=2.5s, trail=4s",
         "Rendering",
-        "tone mapping",
-        "previous offsets",
-        "manual review",
-        "report",
-        "confirmation",
-        "post-upload actions",
-        "webhook=configured",
-        "delete after upload",
+        "Tone map",
+        "Offsets",
+        "Review",
+        "Report",
+        "Actions",
+        "Webhook",
+        "Configured",
+        "Cleanup",
     ):
         assert expected in output
     assert "https://example.test/hook-secret" not in output
@@ -419,12 +415,12 @@ def test_run_plan_no_color_uses_native_wrapping_without_truncation(
     output = _render(console)
     compact_output = "".join(output.replace("│", "").split())
     assert "Run plan" in output
-    assert "diagnostic" in output
+    assert "Diagnostic" in output
     assert str(input_dir) in compact_output
     assert str(generated_dir) in compact_output
     assert "..." not in output
     assert "…" not in output
-    assert "[OK]" in output
+    assert "[OK]" not in output
 
 
 def test_run_plan_wraps_complete_key_labels_at_very_narrow_width(
@@ -442,7 +438,7 @@ def test_run_plan_wraps_complete_key_labels_at_very_narrow_width(
     )
 
     compact_output = "".join(_render(console).replace("│", "").split())
-    assert "active-picturepolicy" in compact_output
+    assert "Activearea" in compact_output
 
 
 def test_result_summary_uses_result_hierarchy_and_relative_paths() -> None:
@@ -476,9 +472,9 @@ def test_result_summary_uses_result_hierarchy_and_relative_paths() -> None:
     assert "[OK] Comparison completed" in output
     assert "sources" in output
     assert "1m 02s" in output
-    assert "Analysis cache" in output
+    assert "Cache" in output
     assert output.index("report.html") < output.index("screenshots")
-    assert "Published" in output
+    assert "Publishing" in output
     assert "Follow-up actions" in output
     relative_report = Path("generated") / "run-1" / "report.html"
     absolute_report = (root / relative_report).resolve()
@@ -610,7 +606,7 @@ def test_result_summary_prints_artifact_rows_and_untruncated_warnings() -> None:
     )
 
     output = _render(console)
-    assert "Result" in output
+    assert "Comparison completed with 2 warnings" in output
     assert "screenshots" in output
     assert str(_workspace_path("screenshots")) in output
     assert "slow.pics" in output
@@ -637,7 +633,7 @@ def test_result_summary_prints_declined_slowpics_as_skipped_not_artifact() -> No
     )
 
     output = _render(console)
-    assert "upload skipped by confirmation" in output
+    assert "Not uploaded — declined" in output
     assert "[SKIP] slow.pics" in output
     assert "✓" not in output
 
@@ -755,7 +751,7 @@ def test_result_summary_reports_skipped_analysis_cache_status() -> None:
     )
 
     output = _render(console)
-    assert "cache" in output
+    assert "Cache" in output
     assert "skipped" in output
     assert "miss" not in output
 
@@ -774,7 +770,7 @@ def test_result_summary_prints_success_fallback_and_truncates_warnings() -> None
 
     output = _render(console)
     assert "[WARN] Comparison completed with 10 warnings" in output
-    assert "Result" in output
+    assert "Comparison completed with 10 warnings" in output
     assert "status" in output
     assert "[OK] completed" in output
     assert "Warnings" in output
