@@ -5,8 +5,8 @@ This record captures non-secret Windows evidence for commit
 publication of the official `v0.1.0` tag.
 
 > Historical note: the recorded release-event-chain blocker reflects the workflow
-> architecture at the time of this evidence. The active remediation plan now
-> supersedes that chain with one guarded exact-SHA, draft-first orchestrator. This
+> architecture at the time of this evidence. The final v0.1.0 release implementation
+> superseded that chain with one guarded exact-SHA, draft-first orchestrator. This
 > record still proves the standalone protected Windows build/sign path; it does not
 > prove the revised RC or stable publication workflow.
 

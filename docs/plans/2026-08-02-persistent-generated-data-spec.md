@@ -3,7 +3,7 @@ search:
   exclude: true
 ---
 
-Status: Approved specification; execution authority is the [active implementation plan](2026-08-02-persistent-generated-data-implementation-plan.md)
+Status: Implemented historical specification; current behavior is documented in the present-state architecture and CLI contract
 Scope: Persistent generated-data location, canonical run layout, and run-root local reports
 Owner: Maintainer and implementing sessions
 

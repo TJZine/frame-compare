@@ -120,8 +120,7 @@ class ClipState:
 
     # FPS hierarchy:
     # - source_fps: from probe
-    # - forced_fps: user override (optional; may be added later)
-    # - effective_fps: forced if set else source_fps
+    # - effective_fps: configured override when present, otherwise source_fps
     source_fps: Fraction
     effective_fps: Fraction
 
