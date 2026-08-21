@@ -163,6 +163,11 @@ the explicit owner of the import-time contract. Owner-specific exceptions belong
 imports belong in focused protocol modules such as
 `frame_compare.utils.progress_protocol`.
 
+Render orchestration derives optional, unique progress labels from already-parsed
+release identities and passes them through the batch request seam. Render workers only
+present that string; `OverlayConfig.label`, overlay pixels, output paths, and
+label-keyed result mappings continue to use canonical clip labels.
+
 `docs/api.md` is generated reference material for importable conveniences. It does
 not promote package roots or module exports into supported stable APIs beyond the
 compatibility policy in the runbook.
@@ -472,7 +477,11 @@ retry/idempotency handling, and advance a nested image-count progress task after
 each completed upload. `frame_compare.services.slowpics_upload_plan` owns the
 explicit upload-plan seam for current render artifacts, row/image names, and
 upload ordering; the final upload path uses that plan and does not scan the
-screenshot directory for membership. After a successful upload, orchestration
+screenshot directory for membership. Orchestration carries canonical clip labels as
+local screenshot lookup keys while assigning exact explicit labels or unique release
+descriptors as remote image names. Collection metadata, row names, membership,
+ordering, and multipart construction remain owned by their existing seams. After a
+successful upload, orchestration
 carries the exact uploaded planned local file paths into `post_report_cleanup`
 and carries typed post-upload action results plus warnings returned by
 `frame_compare.services.slowpics_post_upload` into the final `RunResult`.

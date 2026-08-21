@@ -222,10 +222,12 @@ Explicit labels are trimmed and control-free. Derived labels replace control
 characters with spaces and collapse whitespace. Duplicate explicit labels fail
 before probing, metadata prefetch, run-folder reservation, rendering, or HTTP
 work. Derived collisions are qualified deterministically with source stems and
-then stable source order. Resolved labels drive overlays, progress, reports,
-alignment display, render artifact keys, and slow.pics column names, but do not
-change source/cache/alignment identity or physical PNG filenames. Orchestrated
-rendering continues to use the source stem as `filename_label`. When the resulting
+then stable source order. Resolved labels drive overlays, reports, alignment display,
+and render artifact keys, but do not change source/cache/alignment identity or physical
+PNG filenames. Live render progress uses exact explicit labels or unique role-prefixed
+micro release descriptors. slow.pics columns use exact explicit labels or unique full
+release descriptors, with the canonical resolved label as the uninformative-parser
+fallback. Orchestrated rendering continues to use the source stem as `filename_label`. When the resulting
 absolute screenshot path would exceed the legacy Windows browser-safe boundary, the
 physical filename retains a readable source-stem prefix and adds a deterministic
 digest suffix so local `file://` reports remain loadable without identity collisions.
@@ -746,6 +748,9 @@ default-No question.
 - Upload membership comes from the explicit current-render upload plan, not from
   scanning the screenshot directory. The plan is built from selected frames,
   current render artifacts, and clip order.
+- Remote image/column names use exact explicit source labels when configured;
+  otherwise they use unique release descriptors with a canonical-label fallback.
+  Collection titles, row names, membership, and ordering are independent and unchanged.
 - The normal non-confirmed phase order remains:
   `frame_plan -> analyze -> align -> render -> metadata -> publish -> report -> post_report_cleanup`.
 - Report-confirmed upload changes only the opted-in interactive path:

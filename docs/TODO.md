@@ -11,6 +11,13 @@ search:
 
 - Consider adding a dedicated packaging/release workflow skill if Python packaging, Docker, Windows portable, or updater/signing work becomes frequent.
 
+## Release Identity Presentation Follow-Ups
+
+- Consider dedicated release-identity display fields for the HTML report/HUD, baked
+  screenshot overlays, wizard/dry-run exact-file presentation, and warnings where
+  useful. Exclude run-folder/history names, the slow.pics collection title, and all
+  internal identities.
+
 ---
 
 ## CLI Output Follow-Ups

@@ -30,6 +30,7 @@ from frame_compare.orchestration.types import (
 )
 from frame_compare.services.errors import SlowpicsError
 from frame_compare.services.publishers import PublishResult
+from frame_compare.services.release_identity import ContentIdentity, ReleaseIdentity
 from frame_compare.services.slowpics_post_upload import (
     SlowpicsPostUploadRequest,
 )
@@ -74,6 +75,45 @@ class _RecordingProgressReporter:
 
     def resume(self) -> None:
         self.events.append("resume")
+
+
+def test_slowpics_upload_clips_use_unique_release_descriptors_and_explicit_labels(
+    tmp_path: Path,
+) -> None:
+    identity = ReleaseIdentity(
+        ContentIdentity("Example", year=2026),
+        resolution="2160p",
+        service="ATV",
+        source_type="WEB-DL",
+        dynamic_range_claims=("DV", "HDR10+"),
+        release_group="Kitsune",
+    )
+    comparison = _clip(
+        tmp_path / "comparison_videos" / "comparison.mkv",
+        label="Comparison canonical",
+        release_identity=identity,
+    )
+    explicit = _clip(
+        tmp_path / "comparison_videos" / "explicit.mkv",
+        label="My Encode",
+        release_identity=identity,
+        label_is_explicit=True,
+    )
+    ctx = _context(tmp_path, comparisons=[comparison, explicit])
+    ctx.reference = replace(ctx.reference, release_identity=identity)
+
+    clips = phase_post_render._slowpics_upload_clips(ctx)
+
+    assert [clip.label for clip in clips] == [
+        "Reference",
+        "Comparison canonical",
+        "My Encode",
+    ]
+    assert [clip.image_name for clip in clips] == [
+        "Reference | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
+        "Comparison 1 | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
+        "My Encode",
+    ]
 
 
 async def test_run_metadata_phase_resolves_when_enabled_and_client_present(

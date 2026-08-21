@@ -98,6 +98,11 @@ def test_formatters_and_common_content() -> None:
         "Reference | same",
         "Comparison 1 | same",
     ]
+    assert unique_presentation_names(
+        ["My Encode", "My Encode"],
+        roles=["Reference", "Comparison 1"],
+        protected=[True, False],
+    ) == ["My Encode", "Comparison 1 | My Encode"]
 
 
 def test_malformed_name_fails_open_to_stem(monkeypatch: pytest.MonkeyPatch) -> None:

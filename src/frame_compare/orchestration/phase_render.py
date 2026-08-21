@@ -13,6 +13,7 @@ from frame_compare.orchestration.phase_selection import (
 )
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
 from frame_compare.render.geometry import active_picture_provenance_from_rect_source
+from frame_compare.services.release_identity import format_micro_descriptor
 from frame_compare.utils.media_facts import (
     ActivePictureFacts,
     HDRStaticFacts,
@@ -53,7 +54,8 @@ def run_render_phase(
 
     requests: list[ScreenshotBatchRequest] = []
     expected_frames: dict[str, list[int]] = {}
-    for clip in clips:
+    progress_labels = _render_progress_labels(clips)
+    for clip, progress_label in zip(clips, progress_labels, strict=True):
         source_frames = [
             map_aligned_to_source_frame(clip=clip, aligned_frame=frame) for frame in frames
         ]
@@ -72,6 +74,7 @@ def run_render_phase(
                 source_total_frames=clip.probe.num_frames,
                 signal=_source_signal_facts(clip.probe),
                 active_picture=active_picture,
+                progress_label=progress_label,
             )
         )
 
@@ -108,6 +111,31 @@ def run_render_phase(
             warnings=warnings,
         )
     )
+
+
+def _render_progress_label(clip: ClipState, index: int) -> str:
+    if clip.label_is_explicit:
+        return clip.label
+    role = "Reference" if index == 0 else f"Comparison {index}"
+    descriptor = (
+        format_micro_descriptor(clip.release_identity) if clip.release_identity is not None else ""
+    )
+    return f"{role} | {descriptor or clip.label}"
+
+
+def _render_progress_labels(clips: list[ClipState]) -> list[str]:
+    labels = [_render_progress_label(clip, index) for index, clip in enumerate(clips)]
+    used = {label for clip, label in zip(clips, labels, strict=True) if clip.label_is_explicit}
+    for index, clip in enumerate(clips):
+        if clip.label_is_explicit:
+            continue
+        base = labels[index]
+        suffix = 2
+        while labels[index] in used:
+            labels[index] = f"{base} ({suffix})"
+            suffix += 1
+        used.add(labels[index])
+    return labels
 
 
 def _source_signal_facts(probe: ClipProbeSnapshot) -> SourceSignalFacts:

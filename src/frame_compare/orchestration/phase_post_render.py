@@ -37,6 +37,10 @@ from frame_compare.services.errors import SlowpicsError
 from frame_compare.services.metadata import resolve_metadata
 from frame_compare.services.metadata_parsing import parse_filename
 from frame_compare.services.publishers import publish_to_slowpics
+from frame_compare.services.release_identity import (
+    format_release_descriptor,
+    unique_presentation_names,
+)
 from frame_compare.services.report.display import (
     SourceFrameSelectionDetail,
     frame_detail_for_comparison_frame,
@@ -221,13 +225,23 @@ def run_confirm_slowpics_upload_phase(
 
 def _slowpics_upload_clips(ctx: RunContext) -> list[SlowpicsUploadClip]:
     clips = [ctx.reference, *ctx.comparisons]
+    image_names = unique_presentation_names(
+        [
+            clip.label
+            if clip.label_is_explicit or clip.release_identity is None
+            else format_release_descriptor(clip.release_identity) or clip.label
+            for clip in clips
+        ],
+        roles=["Reference", *(f"Comparison {index}" for index in range(1, len(clips)))],
+        protected=[clip.label_is_explicit for clip in clips],
+    )
     seen_labels: set[str] = set()
     upload_clips: list[SlowpicsUploadClip] = []
-    for clip in clips:
+    for clip, image_name in zip(clips, image_names, strict=True):
         if clip.label in seen_labels:
             raise SlowpicsError(f"Duplicate clip label in slow.pics upload input: {clip.label!r}")
         seen_labels.add(clip.label)
-        upload_clips.append(SlowpicsUploadClip(label=clip.label, image_name=clip.label))
+        upload_clips.append(SlowpicsUploadClip(label=clip.label, image_name=image_name))
     return upload_clips
 
 

@@ -139,6 +139,7 @@ class RenderRequest:
     encoder_settings: EncoderSettings
     ffmpeg_runner: FFmpegRunner | None = None
     geometry_plan: RenderGeometryPlan | None = None
+    progress_label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -156,6 +157,7 @@ class ScreenshotBatchRequest:
     signal: SourceSignalFacts
     active_picture: ActivePictureFacts
     filename_label: str | None = None
+    progress_label: str | None = None
 
 
 Renderer = Literal["vapoursynth", "ffmpeg", "auto"]

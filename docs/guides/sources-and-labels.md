@@ -1,8 +1,9 @@
 # Sources, references, and labels
 
 Frame Compare keeps source identity separate from presentation. Paths and fingerprints
-control discovery, caches, and alignment, while resolved labels control progress output,
-overlays, reports, and slow.pics column names.
+control discovery, caches, and alignment, while resolved labels remain canonical for
+overlays, reports, and artifact mappings. Live render progress and slow.pics columns
+use release descriptors when parsing is informative; explicit labels remain exact.
 
 ## Choose the reference
 
@@ -63,6 +64,11 @@ label = "Encode A — AV1"
 
 Duplicate explicit labels fail. Derived collisions are qualified deterministically so
 presentation remains unambiguous.
+
+For live render progress, automatic labels become unique role-prefixed compact release
+descriptors. For slow.pics, automatic labels become unique full release descriptors.
+Neither presentation changes baked overlays, local screenshot names, report mappings,
+or the slow.pics collection title.
 
 ## Apply trims without modifying media
 

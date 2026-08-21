@@ -80,19 +80,29 @@ def format_micro_descriptor(identity: ReleaseIdentity) -> str:
     )
 
 
-def unique_presentation_names(names: list[str], *, roles: list[str]) -> list[str]:
+def unique_presentation_names(
+    names: list[str], *, roles: list[str], protected: list[bool] | None = None
+) -> list[str]:
     """Resolve display-only collisions deterministically without changing identities."""
     if len(names) != len(roles):
         raise ValueError("names and roles must have equal lengths")
+    protected = [False] * len(names) if protected is None else protected
+    if len(names) != len(protected):
+        raise ValueError("names and protected must have equal lengths")
     counts = Counter(names)
     resolved = [
-        f"{roles[index]} | {name}" if counts[name] > 1 else name for index, name in enumerate(names)
+        f"{roles[index]} | {name}" if counts[name] > 1 and not protected[index] else name
+        for index, name in enumerate(names)
     ]
-    used: dict[str, int] = {}
+    used = {name for index, name in enumerate(resolved) if protected[index]}
     for index, name in enumerate(resolved):
-        used[name] = used.get(name, 0) + 1
-        if used[name] > 1:
-            resolved[index] = f"{name} ({used[name]})"
+        if protected[index]:
+            continue
+        suffix = 2
+        while resolved[index] in used:
+            resolved[index] = f"{name} ({suffix})"
+            suffix += 1
+        used.add(resolved[index])
     return resolved
 
 

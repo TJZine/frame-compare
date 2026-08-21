@@ -18,6 +18,7 @@ from frame_compare.orchestration.context import (
 )
 from frame_compare.orchestration.execution_types import RenderArtifacts
 from frame_compare.render.types import RenderedClipFacts
+from frame_compare.services.release_identity import ReleaseIdentity
 from frame_compare.utils.media_facts import (
     ActivePictureFacts,
     PresentationState,
@@ -138,7 +139,14 @@ def _create_config(tmp_path: Path, content: str = MINIMAL_CONFIG) -> ConfigSchem
     return load_config(config_path)
 
 
-def _clip(path: Path, *, label: str, num_frames: int = 100) -> ClipState:
+def _clip(
+    path: Path,
+    *,
+    label: str,
+    num_frames: int = 100,
+    release_identity: ReleaseIdentity | None = None,
+    label_is_explicit: bool = False,
+) -> ClipState:
     probe = ClipProbeSnapshot(
         fingerprint=ClipFingerprint(path=path, size_bytes=0, mtime_ns=0),
         width=1920,
@@ -153,6 +161,8 @@ def _clip(path: Path, *, label: str, num_frames: int = 100) -> ClipState:
         probe=probe,
         source_fps=probe.fps,
         effective_fps=probe.fps,
+        release_identity=release_identity,
+        label_is_explicit=label_is_explicit,
     )
 
 
