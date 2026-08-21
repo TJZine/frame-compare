@@ -13,7 +13,11 @@ from frame_compare.config.schema_models import SourceOverrideConfig
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot, ClipState
 from frame_compare.orchestration.errors import SourceSelectionError
 from frame_compare.orchestration.selection_domain import build_analysis_selection_domain_token
-from frame_compare.orchestration.source_labels import resolve_source_labels
+from frame_compare.orchestration.source_labels import (
+    resolve_source_label_details,
+    resolve_source_labels,
+)
+from frame_compare.services.release_identity import ContentIdentity, ReleaseIdentity
 
 
 def _labels(
@@ -67,6 +71,15 @@ def test_explicit_override_wins_and_controls_are_normalized_for_derived_text() -
         [reference, comparison],
         overrides={comparison: SourceOverrideConfig(label="Custom Encode")},
     ) == ["Reference Source", "Custom Encode"]
+
+    details = resolve_source_label_details(
+        ordered_paths=[reference, comparison],
+        overrides_by_path={comparison: SourceOverrideConfig(label="Custom Encode")},
+        label_mode="stem",
+        label_parser="auto",
+    )
+    assert not details[reference].explicit
+    assert details[comparison].explicit
 
 
 def test_duplicate_explicit_labels_fail_with_typed_source_selection_error() -> None:
@@ -123,6 +136,11 @@ def test_display_labels_do_not_change_analysis_cache_identity() -> None:
         effective_fps=probe.fps,
     )
     relabeled = replace(clip, label="Custom Source")
+    presentation_enriched = replace(
+        clip,
+        release_identity=ReleaseIdentity(ContentIdentity("Source"), resolution="1080p"),
+        label_is_explicit=True,
+    )
     config = ConfigSchema()
     window = SelectionWindow(start_frame=0, end_frame_exclusive=100)
 
@@ -138,5 +156,12 @@ def test_display_labels_do_not_change_analysis_cache_identity() -> None:
         config=config,
         selection_window=window,
     )
+    enriched_identity = build_analysis_selection_domain_token(
+        clips=[presentation_enriched],
+        analysis_clip=presentation_enriched,
+        config=config,
+        selection_window=window,
+    )
 
     assert relabeled_identity == original_identity
+    assert enriched_identity == original_identity

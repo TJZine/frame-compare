@@ -108,6 +108,11 @@ window and are not restricted to sampled metric frames.
 
 `frame_compare.orchestration.source_labels` resolves presentation labels after
 selector/override resolution and before probing or run-folder reservation.
+`frame_compare.services.release_identity` owns dependency-light, non-persisted
+content/release identity types and plain formatters. Preparation invokes the existing
+GuessIt/Anitopy parser seam once per source and attaches the resulting presentation
+metadata and explicit-label provenance to `ClipState`; these fields are excluded from
+source, cache, selection, and report identity.
 `selection_domain` receives the resolved per-path map when constructing
 `ClipState`; it does not own parsing or collision policy. Labels propagate
 through presentation surfaces while source paths, fingerprints,
