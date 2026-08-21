@@ -11,6 +11,7 @@ from pytest import MonkeyPatch
 from frame_compare.cli.entry import app
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
 from frame_compare.orchestration.fps_report import FpsReportClip, emit_consolidated_fps_report
+from frame_compare.orchestration.progress import select_reporter, uses_rich_progress
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
 
 from .cli_helpers import (
@@ -95,6 +96,12 @@ def test_run_non_tty_routes_fps_diagnostics_through_logging(
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         assert dependencies is None
+        reporter = select_reporter(
+            quiet=_request.quiet,
+            json_output=_request.json_output,
+            no_color=_request.no_color,
+            force_tty=False,
+        )
         emit_consolidated_fps_report(
             stage="after_load_sources",
             clips=[
@@ -111,9 +118,9 @@ def test_run_non_tty_routes_fps_diagnostics_through_logging(
                     note=None,
                 )
             ],
-            json_output=False,
-            quiet=False,
-            rich_output=False,
+            json_output=_request.json_output,
+            quiet=_request.quiet,
+            rich_output=uses_rich_progress(reporter),
         )
         return RunResult(success=True, screenshot_dir=Path("screenshots").resolve())
 
@@ -127,6 +134,8 @@ def test_run_non_tty_routes_fps_diagnostics_through_logging(
     )
 
     assert result.exit_code == 0
+    assert "fps_report" not in result.stdout
+    assert "after_load_sources" not in result.stdout
     assert "fps_report" in result.stderr
     assert "after_load_sources" in result.stderr
     assert "Reference" in result.stderr

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 import pytest
 
@@ -527,8 +527,24 @@ def test_execute_run_emits_reports_after_load_sources_and_after_align(
         progress=LogProgressReporter(),
     )
 
-    fps_calls: list[tuple[str, bool, bool, tuple[str, ...], Path, bool]] = []
-    alignment_calls: list[tuple[str, bool, bool, bool, tuple[int, ...], bool]] = []
+    class FpsCall(NamedTuple):
+        stage: str
+        no_color: bool
+        rich_output: bool
+        clip_labels: tuple[str, ...]
+        input_dir: Path
+        verbose: bool
+
+    class AlignmentCall(NamedTuple):
+        stage: str
+        no_color: bool
+        json_output: bool
+        quiet: bool
+        selected_frames: tuple[int, ...]
+        verbose: bool
+
+    fps_calls: list[FpsCall] = []
+    alignment_calls: list[AlignmentCall] = []
 
     def _record_emit(
         *,
@@ -541,7 +557,16 @@ def test_execute_run_emits_reports_after_load_sources_and_after_align(
         **_kwargs: Any,
     ) -> None:
         clip_labels = tuple(clip.label for clip in clips)
-        fps_calls.append((stage, no_color, rich_output, clip_labels, input_dir, verbose))
+        fps_calls.append(
+            FpsCall(
+                stage=stage,
+                no_color=no_color,
+                rich_output=rich_output,
+                clip_labels=clip_labels,
+                input_dir=input_dir,
+                verbose=verbose,
+            )
+        )
 
     def _record_alignment_emit(
         *,
@@ -554,13 +579,13 @@ def test_execute_run_emits_reports_after_load_sources_and_after_align(
         **_kwargs: Any,
     ) -> None:
         alignment_calls.append(
-            (
-                stage,
-                no_color,
-                json_output,
-                quiet,
-                tuple(cast(list[int], selected_frames)),
-                verbose,
+            AlignmentCall(
+                stage=stage,
+                no_color=no_color,
+                json_output=json_output,
+                quiet=quiet,
+                selected_frames=tuple(cast(list[int], selected_frames)),
+                verbose=verbose,
             )
         )
 
@@ -570,28 +595,32 @@ def test_execute_run_emits_reports_after_load_sources_and_after_align(
     asyncio.run(execute_run(request, deps=deps))
 
     assert fps_calls == [
-        (
-            "after_load_sources",
-            True,
-            False,
-            ("comp", "source"),
-            tmp_path / "comparison_videos",
-            False,
+        FpsCall(
+            stage="after_load_sources",
+            no_color=True,
+            rich_output=False,
+            clip_labels=("comp", "source"),
+            input_dir=tmp_path / "comparison_videos",
+            verbose=False,
         ),
-        (
-            "after_align",
-            True,
-            False,
-            ("comp", "source"),
-            tmp_path / "comparison_videos",
-            False,
+        FpsCall(
+            stage="after_align",
+            no_color=True,
+            rich_output=False,
+            clip_labels=("comp", "source"),
+            input_dir=tmp_path / "comparison_videos",
+            verbose=False,
         ),
     ]
     assert len(alignment_calls) == 1
-    assert alignment_calls[0][:4] == ("after_align", True, False, False)
-    assert len(alignment_calls[0][4]) == 10
-    assert alignment_calls[0][5] is False
-    assert all(isinstance(frame, int) for frame in alignment_calls[0][4])
+    alignment_call = alignment_calls[0]
+    assert alignment_call.stage == "after_align"
+    assert alignment_call.no_color is True
+    assert alignment_call.json_output is False
+    assert alignment_call.quiet is False
+    assert len(alignment_call.selected_frames) == 10
+    assert alignment_call.verbose is False
+    assert all(isinstance(frame, int) for frame in alignment_call.selected_frames)
 
 
 def test_execute_run_emits_final_selection_at_post_align_boundary(

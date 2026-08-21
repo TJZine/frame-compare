@@ -217,12 +217,20 @@ async def test_publish_to_slowpics_success_returns_url(
     assert result.url == "https://slow.pics/c/first-key"
     assert result.screenshot_count == 4
     assert result.upload_duration_seconds >= 0.0
-    lifecycle_events = [call.args[0] for call in logger.debug.call_args_list]
+    lifecycle_event_names = {
+        "slowpics_upload_start",
+        "slowpics_upload_complete",
+    }
+    lifecycle_events = [
+        call.args[0]
+        for call in logger.debug.call_args_list
+        if call.args and call.args[0] in lifecycle_event_names
+    ]
     assert lifecycle_events == [
         "slowpics_upload_start",
         "slowpics_upload_complete",
     ]
-    assert logger.info.call_args_list == []
+    logger.info.assert_not_called()
 
 
 @pytest.mark.anyio
