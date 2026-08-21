@@ -388,8 +388,8 @@ def _probe_input_videos(
     config: ConfigSchema,
     overrides_by_path: dict[Path, SourceOverrideConfig],
     labels_by_path: dict[Path, str],
-    release_identities_by_path: dict[Path, ReleaseIdentity] | None = None,
-    explicit_labels_by_path: dict[Path, bool] | None = None,
+    release_identities_by_path: dict[Path, ReleaseIdentity],
+    explicit_labels_by_path: dict[Path, bool],
 ) -> tuple[list[ClipState], list[str], list[str]]:
     cache_paths = _probe_cache_paths_for_run(workspace)
     entries_by_key = _load_probe_cache_entries(cache_paths)
