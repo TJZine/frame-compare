@@ -38,6 +38,10 @@ from frame_compare.services.release_identity import (
             ("AMZN", "WEBRip", ("HLG",), (), "GROUP"),
         ),
         (
+            "Show.S01E05.1080p.AMZN.WEBRip.HLG.HEVC-HLG-GROUP.mkv",
+            ("AMZN", "WEBRip", ("HLG",), (), "HLG-GROUP"),
+        ),
+        (
             "Film.2020.2160p.UHD.BluRay.REMUX.DV.HDR-GROUP.mkv",
             (None, "UHD BluRay REMUX", ("DV", "HDR"), (), "GROUP"),
         ),
@@ -99,6 +103,12 @@ def test_hlg_claim_is_not_duplicated_in_release_descriptor() -> None:
     identity = parse_release_identity("Show.S01E05.1080p.AMZN.WEBRip.HLG-GROUP.mkv")
 
     assert format_release_descriptor(identity) == "1080p | AMZN WEBRip | HLG | GROUP"
+
+
+def test_hlg_group_correction_normalizes_the_remaining_group() -> None:
+    identity = parse_release_identity("Show.S01E05.1080p.AMZN.WEBRip.HLG-\x1bGROUP.mkv")
+
+    assert identity.release_group == "GROUP"
 
 
 @pytest.mark.parametrize(

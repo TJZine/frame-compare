@@ -321,7 +321,11 @@ def _release_identity(filename: str, fields: _ParsedFilenameFields) -> ReleaseId
         service=_service(fields.service, release_tokens),
         source_type=source_type,
         dynamic_range_claims=dynamic_range_claims,
-        release_group=_release_group(fields.release_group, dynamic_range_claims),
+        release_group=_release_group(
+            fields.release_group,
+            dynamic_range_claims,
+            release_suffix,
+        ),
         revision_tags=_revision_tags(release_suffix),
         variant_tags=_variant_tags(release_suffix),
     )
@@ -382,11 +386,20 @@ def _dynamic_range_claims(tokens: tuple[str, ...]) -> tuple[str, ...]:
 def _release_group(
     parsed_group: str | None,
     dynamic_range_claims: tuple[str, ...],
+    release_suffix: str,
 ) -> str | None:
     group = _normalize_optional_release_text(parsed_group)
     # GuessIt currently folds an unrecognized HLG tag into the release group.
-    if group is not None and "HLG" in dynamic_range_claims and group.upper().startswith("HLG-"):
-        return group[4:] or None
+    # Only correct the tag-position form; a group after the conventional "-"
+    # separator may legitimately begin with "HLG-".
+    normalized_suffix = _normalize_release_text(release_suffix)
+    if (
+        group is not None
+        and "HLG" in dynamic_range_claims
+        and group.upper().startswith("HLG-")
+        and re.search(rf"(?i)(?:^|[. _]){re.escape(group)}$", normalized_suffix) is not None
+    ):
+        return _normalize_optional_release_text(group[4:])
     return group
 
 
