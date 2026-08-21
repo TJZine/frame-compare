@@ -18,8 +18,10 @@ def get_css() -> str:
 def get_js() -> str:
     """Load focused viewer owners before the composition asset."""
     assets = files("frame_compare.services.report") / "assets"
+    viewer_format = (assets / "viewer_format.js").read_text(encoding="utf-8")
     review_state = (assets / "review_state.js").read_text(encoding="utf-8")
     lens = (assets / "lens.js").read_text(encoding="utf-8")
     grid_view = (assets / "grid_view.js").read_text(encoding="utf-8")
+    inspector = (assets / "inspector.js").read_text(encoding="utf-8")
     viewer = (assets / "viewer.js").read_text(encoding="utf-8")
-    return f"{review_state}\n\n{lens}\n\n{grid_view}\n\n{viewer}"
+    return f"{viewer_format}\n\n{review_state}\n\n{lens}\n\n{grid_view}\n\n{inspector}\n\n{viewer}"

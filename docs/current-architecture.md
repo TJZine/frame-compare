@@ -651,6 +651,14 @@ one normalized viewport center without changing pair-mode persistence semantics.
 
 #### Review State And Viewer Composition
 
+`assets/viewer_format.js` is the dependency-free owner for clip display profiles,
+exact and accessible names, FPS and IEC sizes, signal/presentation/tonemap and
+active-picture labels, mode names, and stable clip roles. It does not read the DOM,
+storage, or viewer state. `assets/inspector.js` owns Inspector DOM references,
+open/close focus and inert policy, tab selection and roving keyboard behavior, Frame,
+Clips, Align, and Export rendering, safe slow.pics link presentation, and lazy Review
+activation through the root viewer.
+
 `assets/review_state.js` owns the exact report-scoped local review schema, bounded
 bookmark/tag/note/preferred-clip records, fail-closed localStorage reads, deterministic
 V1 JSON export, strict import validation and preview, atomic merge/replace apply, and
@@ -659,9 +667,9 @@ created on first visible Review use, keeps form rendering stable across unrelate
 refreshes, and routes transition announcements through the existing shared polite live
 region. Its storage is
 separate from viewport preferences and never writes into the report or run directory.
-`assets/viewer.js` caches the Review DOM and composes that focused controller with the
-other owners and the existing mode,
-pointer, viewport, alignment, and inspector state rather than owning duplicate
+`assets/viewer.js` caches the Review DOM and composes those focused owners with the
+existing canonical report, mode, pointer, viewport, alignment, and Inspector state
+rather than owning duplicate Inspector rendering/focus policy or
 coordinate conversions
 or grid mount policy. Grid remains outside the public report default-mode payload
 enum and does not preload adjacent grid pages. Blink mode supports 0.3s/0.7s/1.2s speeds,

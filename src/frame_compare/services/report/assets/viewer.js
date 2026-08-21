@@ -41,20 +41,19 @@ const ReportViewer = {
     },
 
     clipDisplay(clip, profile = 'control') {
-        return clip.display[profile];
+        return ViewerFormat.clipDisplay(clip, profile);
     },
 
     clipFilename(clip) {
-        return clip.display.filename;
+        return ViewerFormat.clipFilename(clip);
     },
 
     clipAccessibleName(clip) {
-        const primary = this.clipDisplay(clip, 'primary');
-        const filename = this.clipFilename(clip);
-        return filename && filename !== primary ? `${primary} — ${filename}` : primary;
+        return ViewerFormat.clipAccessibleName(clip);
     },
 
     init() {
+        this.inspector = Inspector.create(this);
         this.cacheDOM();
         if (!this.hasRequiredDOM()) {
             this.showStatus('Report viewer markup is incomplete.', 'error');
@@ -152,7 +151,6 @@ const ReportViewer = {
             btnCloseHelp: document.getElementById('btn-close-help'),
             infoModal: document.getElementById('info-modal'),
             btnInfo: document.getElementById('btn-info'),
-            btnInspector: document.getElementById('btn-inspector'),
             live: document.getElementById('viewer-live'),
             grid: document.getElementById('rv-grid'),
             gridCells: document.querySelector('[data-grid-cells]'),
@@ -160,28 +158,6 @@ const ReportViewer = {
             btnGridPrev: document.getElementById('btn-grid-prev'),
             btnGridNext: document.getElementById('btn-grid-next'),
             btnCloseInfo: document.getElementById('btn-close-info'),
-            inspector: document.getElementById('rv-inspector'),
-            btnInspectorClose: document.getElementById('btn-inspector-close'),
-            inspectorTabs: document.querySelectorAll('[data-inspector-tab]'),
-            inspectorPanels: document.querySelectorAll('.rv-inspector-panel'),
-            inspectorFrameLabel: document.querySelector('[data-inspector-frame-label]'),
-            inspectorFrameNumber: document.querySelector('[data-inspector-frame-number]'),
-            inspectorFrameCategory: document.querySelector('[data-inspector-frame-category]'),
-            inspectorFrameDetail: document.querySelector('[data-inspector-frame-detail]'),
-            inspectorFramePosition: document.querySelector('[data-inspector-frame-position]'),
-            inspectorSourceFrames: document.querySelector('[data-inspector-source-frames]'),
-            inspectorClips: document.querySelector('[data-inspector-clips]'),
-            inspectorAlignPair: document.querySelector('[data-inspector-align-pair]'),
-            inspectorAlignPreset: document.querySelector('[data-inspector-align-preset]'),
-            inspectorAlignX: document.querySelector('[data-inspector-align-x]'),
-            inspectorAlignY: document.querySelector('[data-inspector-align-y]'),
-            btnInspectorResetCurrentAlign: document.getElementById('btn-inspector-reset-current-align'),
-            btnInspectorResetAllAlign: document.getElementById('btn-inspector-reset-all-align'),
-            inspectorExportTitle: document.querySelector('[data-inspector-export-title]'),
-            inspectorExportId: document.querySelector('[data-inspector-export-id]'),
-            inspectorExportGenerated: document.querySelector('[data-inspector-export-generated]'),
-            inspectorExportSlowpics: document.querySelector('[data-inspector-export-slowpics]'),
-            inspectorExportSummary: document.querySelector('[data-inspector-export-summary]'),
             reviewFrame: document.querySelector('[data-review-frame]'),
             reviewBookmark: document.querySelector('[data-review-bookmark]'),
             reviewTag: document.querySelector('[data-review-tag]'),
@@ -199,6 +175,7 @@ const ReportViewer = {
             btnAlignToggle: document.getElementById('btn-align-toggle'),
             alignPopover: document.getElementById('align-popover'),
             btnOverlays: document.getElementById('btn-overlays'),
+            ...this.inspector.cacheDOM(),
         };
     },
 
@@ -847,20 +824,7 @@ const ReportViewer = {
     },
 
     bindInspectorEvents() {
-        this.dom.btnInspector.addEventListener('click', () => this.setInspectorOpen(!this.state.inspectorOpen));
-        this.dom.btnInspectorClose.addEventListener('click', () => this.setInspectorOpen(false));
-        this.dom.inspectorTabs.forEach(tab => {
-            tab.addEventListener('click', () => this.setInspectorTab(tab.dataset.inspectorTab));
-            tab.addEventListener('keydown', (e) => this.handleInspectorTabKey(e));
-        });
-        this.dom.btnInspectorResetCurrentAlign.addEventListener('click', () => this.resetCurrentPairAlignment());
-        this.dom.btnInspectorResetAllAlign.addEventListener('click', () => this.resetAllPairAlignments());
-        this.dom.inspector.addEventListener('keydown', (e) => {
-            if (e.key !== 'Escape') return;
-            e.preventDefault();
-            e.stopPropagation();
-            this.setInspectorOpen(false);
-        });
+        this.inspector.bind();
     },
 
     bindBlinkEvents() {
@@ -1354,7 +1318,7 @@ const ReportViewer = {
     },
 
     validInspectorTab(tab) {
-        return ['frame', 'clips', 'align', 'review', 'export'].includes(tab);
+        return this.inspector.validTab(tab);
     },
 
     validBlinkIntervalMs(intervalMs) {
@@ -1448,151 +1412,43 @@ const ReportViewer = {
     },
 
     setInspectorOpen(open, options = {}) {
-        const nextOpen = Boolean(open);
-        const wasOpen = this.state.inspectorOpen;
-        if (nextOpen && this.state.inspectorTab === 'review') this.ensureReviewController();
-        if (nextOpen && !wasOpen && options.focus !== false) {
-            const activeElement = document.activeElement;
-            const canRestoreFocus = activeElement
-                && activeElement !== document.body
-                && activeElement !== document.documentElement
-                && activeElement.isConnected !== false
-                && activeElement.disabled !== true
-                && typeof activeElement.focus === 'function'
-                && activeElement.tabIndex >= 0;
-            this.state.inspectorRestoreFocus = canRestoreFocus ? activeElement : this.dom.btnInspector;
-        }
-
-        this.state.inspectorOpen = nextOpen;
-        this.updateInspectorVisibility();
-        if (options.save !== false) this.persistViewportState();
-        if (this.state.inspectorOpen && options.focus !== false) {
-            const activeTab = Array.from(this.dom.inspectorTabs)
-                .find(tab => tab.dataset.inspectorTab === this.state.inspectorTab);
-            this.focusElement(activeTab);
-        } else if (!this.state.inspectorOpen && wasOpen) {
-            const shouldRestoreFocus = options.focus !== false;
-            const restoreTarget = this.state.inspectorRestoreFocus?.isConnected
-                ? this.state.inspectorRestoreFocus
-                : this.dom.btnInspector;
-            this.state.inspectorRestoreFocus = null;
-            if (shouldRestoreFocus && restoreTarget) this.focusElement(restoreTarget);
-        }
+        this.inspector.setOpen(open, options);
     },
 
     isInspectorVisible() {
-        return this.state.inspectorOpen;
+        return this.inspector.isVisible();
     },
 
     updateInspectorVisibility() {
-        const visible = this.isInspectorVisible();
-        document.body?.classList?.toggle('rv-inspector-open', visible);
-        this.dom.inspector.classList.toggle('open', visible);
-        this.dom.inspector.setAttribute('aria-hidden', visible ? 'false' : 'true');
-        this.dom.btnInspector.classList.toggle('active', visible);
-        this.dom.btnInspector.setAttribute('aria-expanded', String(visible));
-        this.setInspectorFocusable(visible);
-        this.updateInspectorTabs();
+        this.inspector.updateVisibility();
     },
 
     inspectorFocusableElements() {
-        return Array.from(
-            this.dom.inspector.querySelectorAll('button, [href], input, select, textarea, [tabindex]')
-        );
+        return this.inspector.focusableElements();
     },
 
     setInspectorFocusable(enabled) {
-        this.dom.inspector.inert = !enabled;
-        this.inspectorFocusableElements().forEach(element => {
-            if (enabled) {
-                if (Object.hasOwn(element.dataset, 'inspectorPreviousTabindex')) {
-                    const previous = element.dataset.inspectorPreviousTabindex;
-                    if (previous === '' || previous === '-1') {
-                        element.removeAttribute('tabindex');
-                    } else {
-                        element.setAttribute('tabindex', previous);
-                    }
-                    delete element.dataset.inspectorPreviousTabindex;
-                } else if (element.getAttribute('tabindex') === '-1') {
-                    element.removeAttribute('tabindex');
-                }
-                return;
-            }
-
-            if (!Object.hasOwn(element.dataset, 'inspectorPreviousTabindex')) {
-                element.dataset.inspectorPreviousTabindex = element.getAttribute('tabindex') ?? '';
-            }
-            element.setAttribute('tabindex', '-1');
-        });
+        this.inspector.setFocusable(enabled);
     },
 
     safeHttpUrl(url) {
-        if (typeof url !== 'string' || url.length === 0) return null;
-        try {
-            const parsed = new URL(url);
-            return ['http:', 'https:'].includes(parsed.protocol) ? parsed.href : null;
-        } catch {
-            return null;
-        }
+        return this.inspector.safeHttpUrl(url);
     },
 
     updateInspectorSlowpics() {
-        if (!this.dom.inspectorExportSlowpics) return;
-        const slowpicsUrl = this.state.data.slowpics_url;
-        const safeUrl = this.safeHttpUrl(slowpicsUrl);
-        if (!safeUrl) {
-            this.dom.inspectorExportSlowpics.replaceChildren(
-                document.createTextNode(slowpicsUrl || 'Not uploaded')
-            );
-            return;
-        }
-
-        const link = document.createElement('a');
-        link.href = safeUrl;
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        link.className = 'rv-link';
-        link.textContent = slowpicsUrl;
-        this.dom.inspectorExportSlowpics.replaceChildren(link);
+        this.inspector.renderSlowpics();
     },
 
     setInspectorTab(tab, options = {}) {
-        if (!this.validInspectorTab(tab)) tab = 'frame';
-        this.state.inspectorTab = tab;
-        if (tab === 'review') this.ensureReviewController();
-        this.updateInspectorTabs();
-        if (options.save !== false) this.persistViewportState();
+        this.inspector.setTab(tab, options);
     },
 
     handleInspectorTabKey(e) {
-        const tabs = Array.from(this.dom.inspectorTabs);
-        const currentIndex = tabs.indexOf(e.currentTarget);
-        if (currentIndex === -1) return;
-        let nextIndex = null;
-        if (e.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
-        if (e.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length;
-        if (e.key === 'Home') nextIndex = 0;
-        if (e.key === 'End') nextIndex = tabs.length - 1;
-        if (nextIndex === null) return;
-        e.preventDefault();
-        e.stopPropagation();
-        const nextTab = tabs[nextIndex];
-        this.setInspectorTab(nextTab.dataset.inspectorTab);
-        this.focusElement(nextTab);
+        this.inspector.handleTabKey(e);
     },
 
     updateInspectorTabs() {
-        this.dom.inspectorTabs.forEach(tab => {
-            const isActive = tab.dataset.inspectorTab === this.state.inspectorTab;
-            tab.classList.toggle('active', isActive);
-            tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
-            tab.tabIndex = this.state.inspectorOpen && isActive ? 0 : -1;
-        });
-        this.dom.inspectorPanels.forEach(panel => {
-            const isActive = panel.id === `inspector-panel-${this.state.inspectorTab}`;
-            panel.hidden = !isActive;
-            panel.tabIndex = this.state.inspectorOpen && isActive ? 0 : -1;
-        });
+        this.inspector.updateTabs();
     },
 
     setText(element, text) {
@@ -1604,116 +1460,47 @@ const ReportViewer = {
     },
 
     currentClipRole(index) {
-        const roles = [];
-        if (this.state.mode === 'grid' && this.gridView?.indexes().includes(index)) {
-            if (index === this.referenceClipIndex()) roles.push('Reference');
-            if (index === this.state.activeClipIdx) roles.push('Active');
-            roles.push('Visible');
-        }
-        if (index === this.state.leftClipIdx && !['overlay', 'grid'].includes(this.state.mode)) roles.push('Left');
-        if (index === this.state.rightClipIdx && !['overlay', 'grid'].includes(this.state.mode)) roles.push('Right');
-        if (index === this.state.activeClipIdx && (this.state.mode === 'overlay' || this.state.mode === 'blink')) {
-            roles.push(this.state.mode === 'overlay' ? 'Active' : 'Visible');
-        }
-        return roles.length > 0 ? roles.join(', ') : 'Available';
+        return this.inspector.currentClipRole(index);
     },
 
     stableClipRole(index) {
-        const referenceIndex = this.referenceClipIndex();
-        if (index === referenceIndex) return 'Reference';
-        return `Comparison ${index < referenceIndex ? index + 1 : index}`;
+        return ViewerFormat.stableClipRole(index, this.referenceClipIndex());
     },
 
     modeLabel(mode = this.state.mode) {
-        const labels = {
-            slider: 'Slider',
-            overlay: 'Single',
-            diff: 'Diff',
-            blink: 'Blink',
-            grid: 'Grid'
-        };
-        return labels[mode] || mode;
+        return ViewerFormat.modeLabel(mode);
     },
 
     formatFps(value) {
-        const fps = Number(value);
-        if (!Number.isFinite(fps)) return '';
-        return `${Number.isInteger(fps) ? fps : fps.toString()} fps`;
+        return ViewerFormat.formatFps(value);
     },
 
     formatFileSize(value) {
-        const bytes = Number(value);
-        if (!Number.isFinite(bytes) || bytes < 0) return '';
-        const unit = 1024;
-        if (bytes >= unit ** 4) return `${(bytes / unit ** 4).toFixed(2)} TiB`;
-        if (bytes >= unit ** 3) return `${(bytes / unit ** 3).toFixed(2)} GiB`;
-        return `${(bytes / unit ** 2).toFixed(2)} MiB`;
+        return ViewerFormat.formatFileSize(value);
     },
 
     signalCodeLabel(kind, value) {
-        const labels = {
-            primaries: { 1: 'BT.709', 9: 'BT.2020' },
-            transfer: { 1: 'BT.709', 13: 'sRGB', 16: 'PQ', 18: 'HLG' },
-            matrix: { 0: 'GBR', 1: 'BT.709', 9: 'BT.2020nc', 10: 'BT.2020c' },
-        };
-        return labels[kind]?.[String(value)] || null;
+        return ViewerFormat.signalCodeLabel(kind, value);
     },
 
     formatSignal(signal) {
-        if (!signal || typeof signal !== 'object') return '';
-        const parts = [signal.is_hdr ? 'HDR' : 'SDR'];
-        const primaries = this.signalCodeLabel('primaries', signal.primaries);
-        const transfer = this.signalCodeLabel('transfer', signal.transfer);
-        const matrix = this.signalCodeLabel('matrix', signal.matrix);
-        const color = [primaries, transfer, matrix].filter(Boolean).join(' / ');
-        if (color) parts.push(color);
-        if (signal.range === 'limited' || signal.range === 'full') {
-            parts.push(signal.range[0].toUpperCase() + signal.range.slice(1));
-        }
-        if (signal.dolby_vision_rpu === true) parts.push('DV RPU');
-        return parts.join(' · ');
+        return ViewerFormat.formatSignal(signal);
     },
 
     formatPresentation(clip) {
-        const presentation = clip?.presentation;
-        if (!presentation || typeof presentation !== 'object') {
-            return clip?.signal?.is_hdr ? 'HDR' : 'SDR';
-        }
-        if (presentation.state === 'hdr_tonemapped') {
-            const curve = this.formatToneCurve(presentation.tone_curve);
-            const target = Number.isInteger(presentation.target_nits)
-                ? ` → ${presentation.target_nits} nits`
-                : '';
-            return `Tonemapped${curve ? ` · ${curve}` : ''}${target}`;
-        }
-        if (presentation.state === 'hdr_tonemap_off') return 'HDR · Tonemap off';
-        return 'SDR';
+        return ViewerFormat.formatPresentation(clip);
     },
 
     formatToneCurve(value) {
-        if (!value) return null;
-        const normalized = String(value).toLowerCase();
-        if (normalized === 'bt2390') return 'BT.2390';
-        if (normalized === 'reinhard') return 'Reinhard';
-        if (normalized === 'spline') return 'Spline';
-        return normalized.replaceAll('_', ' ');
+        return ViewerFormat.formatToneCurve(value);
     },
 
     formatActivePicture(active) {
-        if (!active || active.is_full_frame) return '';
-        const provenance = active.provenance === 'dolby_vision_l5' ? ' · DV L5' : '';
-        return `${active.width}×${active.height} @ ${active.x},${active.y}${provenance}`;
+        return ViewerFormat.formatActivePicture(active);
     },
 
     formatTonemapSummary() {
-        const settings = this.state.data?.rendering?.tonemap?.settings;
-        if (!this.state.data?.rendering?.tonemap?.applied || !settings) return 'Not applied';
-        const preset = settings.preset
-            ? String(settings.preset).replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase())
-            : '';
-        const curve = this.formatToneCurve(settings.tone_curve) || '';
-        const target = Number.isInteger(settings.target_nits) ? ` · ${settings.target_nits} nits` : '';
-        return [preset, curve].filter(Boolean).join(' · ') + target;
+        return ViewerFormat.formatTonemapSummary(this.state.data?.rendering?.tonemap);
     },
 
     updateRenderingSummary() {
@@ -1753,112 +1540,8 @@ const ReportViewer = {
     },
 
     updateInspectorData() {
-        if (!this.dom.inspector) return;
-        this.updateRenderingSummary();
-        const frame = this.currentFrame();
-        this.setText(this.dom.inspectorFrameLabel, frame?.label || 'No frame selected');
-        this.setText(this.dom.inspectorFrameNumber, frame?.number ?? '');
-        this.setText(this.dom.inspectorFrameCategory, frame?.category ? this.humanizeCategory(frame.category) : '');
-        this.setText(this.dom.inspectorFrameDetail, frame?.detail || '');
-        this.setText(this.dom.inspectorFramePosition, this.visibleFramePositionText());
-
-        if (this.dom.inspectorSourceFrames) {
-            const sourceRows = this.visibleSourceIndexes().map((clipIndex) => {
-                const clip = this.state.data.clips[clipIndex];
-                const image = frame?.images?.[clipIndex];
-                const item = document.createElement('li');
-                item.className = 'rv-inspector-source';
-                const label = this.clipDisplay(clip);
-                const sourceFrame = Number.isInteger(image?.source_frame) ? image.source_frame : 'Unknown';
-                const total = Number.isInteger(clip?.frame_count) ? ` / ${clip.frame_count}` : '';
-                const pictureType = image?.picture_type ? `${image.picture_type}-frame` : 'type unknown';
-                const dolbyVision = image?.dolby_vision_rpu === true ? ' · DV RPU' : '';
-                item.textContent = `${label} — ${sourceFrame}${total} · ${pictureType}${dolbyVision}`;
-                return item;
-            });
-            this.dom.inspectorSourceFrames.replaceChildren(...sourceRows);
-        }
-
-        if (this.dom.inspectorClips) {
-            this.dom.inspectorClips.replaceChildren(...this.state.data.clips.map((clip, index) => {
-                const item = document.createElement('li');
-                item.className = 'rv-inspector-clip';
-                item.dataset.clipIndex = String(index);
-                const role = this.currentClipRole(index);
-                item.innerHTML = `
-                    <div class="rv-inspector-clip-heading">
-                        <span></span>
-                        <span></span>
-                    </div>
-                    <div class="rv-inspector-clip-primary"></div>
-                    <div class="rv-inspector-clip-release" hidden></div>
-                    <dl class="rv-inspector-list">
-                        <div><dt>View role</dt><dd></dd></div>
-                        <div><dt>File</dt><dd></dd></div>
-                        <div><dt>Resolution</dt><dd></dd></div>
-                        <div><dt>FPS</dt><dd></dd></div>
-                        <div><dt>File size</dt><dd></dd></div>
-                        <div><dt>Signal</dt><dd></dd></div>
-                        <div><dt>Presentation</dt><dd></dd></div>
-                    </dl>
-                `;
-                const heading = item.querySelectorAll('.rv-inspector-clip-heading span');
-                heading[0].textContent = this.stableClipRole(index);
-                heading[1].textContent = clip.signal?.is_hdr ? 'HDR' : 'SDR';
-                const primary = this.clipDisplay(clip, 'primary');
-                const release = this.clipDisplay(clip, 'release');
-                const primaryElement = item.querySelector('.rv-inspector-clip-primary');
-                const releaseElement = item.querySelector('.rv-inspector-clip-release');
-                primaryElement.textContent = primary;
-                const normalizedPrimary = this.normalizedDisplayToken(primary);
-                const normalizedRelease = this.normalizedDisplayToken(release);
-                const showRelease = Boolean(
-                    normalizedRelease
-                    && normalizedPrimary !== normalizedRelease
-                    && !normalizedPrimary.endsWith(`| ${normalizedRelease}`)
-                );
-                releaseElement.hidden = !showRelease;
-                releaseElement.textContent = showRelease ? release : '';
-                const values = item.querySelectorAll('dd');
-                values[0].textContent = role;
-                values[1].textContent = this.clipFilename(clip);
-                values[2].textContent = Array.isArray(clip.resolution) ? `${clip.resolution[0]}x${clip.resolution[1]}` : '';
-                values[3].textContent = this.formatFps(clip.fps);
-                values[4].textContent = this.formatFileSize(clip.size_bytes);
-                values[5].textContent = this.formatSignal(clip.signal);
-                values[6].textContent = this.formatPresentation(clip);
-                const activePicture = this.formatActivePicture(clip.active_picture);
-                const clipList = typeof item.querySelector === 'function' ? item.querySelector('dl') : null;
-                if (activePicture && clipList?.appendChild) {
-                    const row = document.createElement('div');
-                    row.innerHTML = '<dt>Active picture</dt><dd></dd>';
-                    const rowValue = typeof row.querySelector === 'function' ? row.querySelector('dd') : null;
-                    if (rowValue) rowValue.textContent = activePicture;
-                    clipList.appendChild(row);
-                }
-                return item;
-            }));
-        }
-
-        this.setText(this.dom.inspectorAlignPair, `${this.currentPairLabel()} (${this.currentPairAlignmentKey()})`);
-        this.setText(this.dom.inspectorAlignPreset, this.alignmentPresetLabel(this.state.alignmentPreset));
-        this.setText(this.dom.inspectorAlignX, this.formatSignedPixels(this.state.alignX, 'x'));
-        this.setText(this.dom.inspectorAlignY, this.formatSignedPixels(this.state.alignY, 'y'));
-
-        this.setText(this.dom.inspectorExportTitle, this.state.data.title || '');
-        this.setText(this.dom.inspectorExportId, this.state.data.report_id || '');
-        this.setText(this.dom.inspectorExportGenerated, this.state.data.generated_at || '');
-        this.updateInspectorSlowpics();
-        this.setText(
-            this.dom.inspectorExportSummary,
-            `${this.state.data.title || 'Report'} • ${this.state.data.stats.frame_count} frames • ${this.state.data.stats.clip_count} clips • ${this.modeLabel()}`
-        );
-        this.reviewController?.render();
-
-        this.updateInspectorTabs();
-        this.updateInspectorVisibility();
+        this.inspector.render();
     },
-
     resetCurrentPairAlignment() {
         delete this.state.pairAlignments[this.currentPairAlignmentKey()];
         this.applyAlignmentState(this.neutralAlignmentState());
