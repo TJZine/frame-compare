@@ -458,8 +458,9 @@ unchanged.
 - Interactive Rich runs place those runtime phases and their diagnostics inside a
   lightweight `Execution` rule band after the Sources panel and before the Result
   panel. Loose live and durable runtime lines use a consistent two-space inset;
-  evidence and blocking-decision panels remain panels. JSON, quiet, and non-TTY
-  output do not gain the band or inset.
+  evidence and blocking-decision panels remain panels, with nested decision
+  questions using a four-space inset immediately below their panel. JSON, quiet,
+  and non-TTY output do not gain the band or inset.
 - Every Rich phase remains live while active with an ASCII `[RUN]` marker. A
   successful top-level phase leaves a durable ASCII status line with elapsed time
   when it runs for at least 10.0 seconds. Successful nested tasks remain transient,
@@ -699,8 +700,8 @@ URL in a browser. The same report auto-open rules decide whether the report is
 opened. A compact `[WAIT] Publishing confirmation` panel shows the visibility and,
 if the report was not opened, its path exactly once before the visibility-specific
 default-No question. The confirmation seam receives the literal
-`Upload to <visibility> slow.pics?`, where `<visibility>` is `public` or `unlisted`,
-with `default=False`.
+four-space-inset question `    Upload to <visibility> slow.pics?`, where
+`<visibility>` is `public` or `unlisted`, with `default=False`.
 
 ### Report And Overlay Metadata Contract
 
@@ -1232,7 +1233,7 @@ enabled.
   VSPreview-confirmed results still write to the shared reuse cache when
   `cache_results = true`. `prompt` shows a Rich stderr table for a complete
   valid VSPreview-confirmed offset set and asks
-  <code>Reuse these offsets? [y/N]: </code>; default, EOF,
+  <code>    Reuse these offsets? [y/N]: </code>; default, EOF,
   unavailable stdin, or unavailable stderr all continue without confirmed-offset
   reuse. If a confirmed cache entry also contains the computed audio alignment
   result that produced the preview suggestion, declining the prompt reuses that

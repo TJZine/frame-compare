@@ -187,13 +187,25 @@ def test_handle_run_injects_confirmation_dependency_only_for_prompt_required_pat
     assert normal_runner.dependencies == [None]
 
 
-def test_confirmation_callback_opens_report_before_prompt_and_defaults_decline() -> None:
+@pytest.mark.parametrize(
+    ("visibility", "expected_prompt"),
+    [
+        (Visibility.PUBLIC, "    Upload to public slow.pics?"),
+        (Visibility.UNLISTED, "    Upload to unlisted slow.pics?"),
+    ],
+)
+def test_confirmation_callback_uses_nested_prompt_and_returns_confirmed(
+    visibility: Visibility,
+    expected_prompt: str,
+) -> None:
     opened: list[Path] = []
+    output = StringIO()
 
     def _confirm_upload(text: str, *, default: bool) -> bool:
         assert opened == [Path("report.html")]
-        assert text == "Upload to unlisted slow.pics?"
+        assert text == expected_prompt
         assert default is False
+        output.write(f"{text} yes\n")
         return True
 
     callback = build_confirm_slowpics_upload_callback(
@@ -205,13 +217,28 @@ def test_confirmation_callback_opens_report_before_prompt_and_defaults_decline()
             ),
             opened,
         ),
-        console=Console(file=StringIO(), no_color=True),
+        console=Console(file=output, no_color=True),
         resolve_effective_config=get_default_config,
-        visibility=Visibility.UNLISTED,
+        visibility=visibility,
     )
 
     assert callback(SlowpicsUploadConfirmationRequest(report_path=Path("report.html"))) == (
         "confirmed"
+    )
+    rendered = output.getvalue()
+    assert rendered.index("[WAIT] Publishing confirmation") < rendered.index(expected_prompt)
+    assert rendered.endswith(f"{expected_prompt} yes\n\n")
+    panel_line = next(
+        line for line in rendered.splitlines() if "[WAIT] Publishing confirmation" in line
+    )
+    assert panel_line.startswith("  ")
+    assert not panel_line.startswith("   ")
+    output.write("  [OK] PUBLISH  Completed in 20s\n")
+    transcript = output.getvalue()
+    assert (
+        transcript.index("[WAIT] Publishing confirmation")
+        < transcript.index(expected_prompt)
+        < transcript.index("  [OK] PUBLISH")
     )
 
 

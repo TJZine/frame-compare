@@ -35,6 +35,17 @@ class _TTYStringIO(io.StringIO):
         return self._is_tty
 
 
+class _EchoingTTYStringIO(_TTYStringIO):
+    def __init__(self, value: str, *, is_tty: bool, echo_to: io.StringIO) -> None:
+        super().__init__(value, is_tty=is_tty)
+        self._echo_to = echo_to
+
+    def readline(self, *_args: object, **_kwargs: object) -> str:
+        response = super().readline()
+        self._echo_to.write(response)
+        return response
+
+
 class _FailingTTYStringIO(_TTYStringIO):
     def readline(self, *_args: object, **_kwargs: object) -> str:
         raise OSError("input unavailable")
@@ -128,6 +139,18 @@ def test_prompt_prints_rich_safe_table_to_stderr_and_accepts_yes(
     assert captured.out == ""
     assert "[WAIT] Alignment reuse" in stderr_output
     assert "[y/N]" in stderr_output
+    panel_line = next(
+        line for line in stderr_output.splitlines() if "[WAIT] Alignment reuse" in line
+    )
+    assert panel_line.startswith("  ")
+    assert not panel_line.startswith("   ")
+    prompt_line = next(
+        line for line in stderr_output.splitlines() if "Reuse these offsets?" in line
+    )
+    assert prompt_line == f"    {REUSE_PREVIOUS_OFFSETS_PROMPT}"
+    assert stderr_output.index("[WAIT] Alignment reuse") < stderr_output.index(
+        "    Reuse these offsets?"
+    )
     assert "Comparison [cyan]" in stderr_output
     assert "<one>" in stderr_output
     assert "A [red].mkv" in stderr_output
@@ -143,6 +166,37 @@ def test_prompt_prints_rich_safe_table_to_stderr_and_accepts_yes(
     assert stderr_output.index("+12 frames") < stderr_output.index("Computed")
     assert stderr_output.index("Computed") < stderr_output.index("Accepted")
     assert stderr_output.index("Accepted") < stderr_output.index("Cache")
+
+
+def test_prompt_leaves_one_blank_line_after_a_normal_answer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _request(tmp_path)
+    stderr = _TTYStringIO("", is_tty=True)
+    monkeypatch.setattr(
+        reuse_prompt.sys,
+        "stdin",
+        _EchoingTTYStringIO("yes\n", is_tty=True, echo_to=stderr),
+    )
+    monkeypatch.setattr(reuse_prompt.sys, "stderr", stderr)
+
+    assert prompt_for_previous_offset_reuse(
+        prompt_input=_prompt_input(request),
+        progress=None,
+        no_color=True,
+    )
+
+    stderr.write("  [OK] ALIGN  Completed in 20s\n")
+    rendered = stderr.getvalue()
+    assert rendered.endswith(
+        f"    {REUSE_PREVIOUS_OFFSETS_PROMPT}yes\n\n  [OK] ALIGN  Completed in 20s\n"
+    )
+    assert (
+        rendered.index("[WAIT] Alignment reuse")
+        < rendered.index("    Reuse these offsets?")
+        < rendered.index("  [OK] ALIGN")
+    )
 
 
 def test_prompt_shows_full_filename_once_when_label_equals_stem(
@@ -347,7 +401,9 @@ def test_prompt_visible_prompt_path_fallbacks_on_eof_or_read_failure(
     stderr_output = stderr.getvalue()
     assert "[WAIT] Alignment reuse" in stderr_output
     assert "[y/N]" in stderr_output
-    assert f"{REUSE_PREVIOUS_OFFSETS_PROMPT}\n{PROMPT_UNAVAILABLE_MESSAGE}" in stderr_output
+    expected_prompt = f"    {REUSE_PREVIOUS_OFFSETS_PROMPT}"
+    assert f"{expected_prompt}\n{PROMPT_UNAVAILABLE_MESSAGE}" in stderr_output
+    assert f"    {PROMPT_UNAVAILABLE_MESSAGE}" not in stderr_output
 
 
 def test_prompt_emits_no_human_diagnostic_when_stderr_is_not_tty(

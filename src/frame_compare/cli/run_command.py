@@ -453,7 +453,7 @@ def build_confirm_slowpics_upload_callback(
             )
         )
         confirmed = deps.confirm_upload(
-            f"Upload to {visibility_text} slow.pics?",
+            f"    Upload to {visibility_text} slow.pics?",
             default=False,
         )
         console.print()

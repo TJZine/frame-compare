@@ -26,6 +26,7 @@ PROMPT_UNAVAILABLE_MESSAGE = (
     "Previous alignment offset reuse prompt unavailable; continuing without reuse."
 )
 REUSE_PREVIOUS_OFFSETS_PROMPT = "Reuse these offsets? [y/N]: "
+_DECISION_PROMPT_INDENT = "    "
 _PROMPT_CONSOLE_WIDTH = 180
 
 __all__ = [
@@ -223,7 +224,7 @@ def _read_reuse_response(*, no_color: bool) -> bool:
         return False
 
     console = _console(no_color=no_color)
-    console.print(Text(REUSE_PREVIOUS_OFFSETS_PROMPT), end="")
+    console.print(Text(f"{_DECISION_PROMPT_INDENT}{REUSE_PREVIOUS_OFFSETS_PROMPT}"), end="")
     try:
         raw_response = sys.stdin.readline()
     except OSError:
@@ -233,6 +234,7 @@ def _read_reuse_response(*, no_color: bool) -> bool:
         _print_prompt_unavailable(no_color=no_color, leading_newline=True)
         return False
 
+    console.print()
     normalized = raw_response.strip().lower()
     return normalized in {"y", "yes"}
 
