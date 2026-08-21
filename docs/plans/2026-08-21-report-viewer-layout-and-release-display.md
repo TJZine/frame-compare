@@ -31,6 +31,7 @@ Progress:
   manual evidence is recorded.
 
 # Frame Compare Local Report Presentation and Layout Refinement
+
 ## Execution-Ready Plan
 
 **Repository:** `TJZine/frame-compare`

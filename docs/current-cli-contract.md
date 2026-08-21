@@ -700,7 +700,7 @@ URL in a browser. The same report auto-open rules decide whether the report is
 opened. A compact `[WAIT] Publishing confirmation` panel shows the visibility and,
 if the report was not opened, its path exactly once before the visibility-specific
 default-No question. The confirmation seam receives the literal
-four-space-inset question `    Upload to <visibility> slow.pics?`, where
+four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</code>, where
 `<visibility>` is `public` or `unlisted`, with `default=False`.
 
 ### Report And Overlay Metadata Contract

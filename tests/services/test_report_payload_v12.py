@@ -56,10 +56,10 @@ def _report_data(image: Path) -> ReportData:
                     )
                 ],
                 display=ReportClipDisplayInfo(
-                    primary="Reference",
-                    release="",
-                    control="Reference",
-                    micro="Reference",
+                    primary="Reference Primary",
+                    release="Reference Release",
+                    control="Reference Control",
+                    micro="Reference Micro",
                     filename="reference.mkv",
                 ),
             )
@@ -84,10 +84,10 @@ def test_report_payload_v12_preserves_comparison_and_source_frame_domains(
 
     assert payload["version"] == REPORT_VERSION == "1.2"
     assert payload["clips"][0]["display"] == {
-        "primary": "Reference",
-        "release": "",
-        "control": "Reference",
-        "micro": "Reference",
+        "primary": "Reference Primary",
+        "release": "Reference Release",
+        "control": "Reference Control",
+        "micro": "Reference Micro",
         "filename": "reference.mkv",
     }
     assert payload["frames"][0]["number"] == 7
