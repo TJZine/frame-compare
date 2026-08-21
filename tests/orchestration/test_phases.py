@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from fractions import Fraction
 from pathlib import Path
 
 import pytest
+import structlog
 from structlog.testing import capture_logs
 
 from frame_compare.analysis.errors import ExclusionRecoverySelectionError
@@ -26,6 +28,7 @@ from frame_compare.orchestration.execution_types import (
 )
 from frame_compare.orchestration.phases import Phase, PhaseStatus, execute_phases
 from frame_compare.orchestration.types import RunRequest
+from frame_compare.utils.logging import configure_logging
 from frame_compare.utils.progress import (
     LogProgressReporter,
     NullProgressReporter,
@@ -410,6 +413,60 @@ def test_execute_phases_warn_only_failure_reports_warned_progress_status(
         ProgressPhaseStatus.WARNED,
         ProgressPhaseStatus.COMPLETED,
     ]
+
+
+def test_execute_phases_plain_warn_only_emits_one_ascii_status_line(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    context = _make_context(tmp_path)
+
+    async def phase_warn(_: RunContext) -> None:
+        raise RuntimeError("boom")
+
+    configure_logging(log_format="console")
+    asyncio.run(
+        execute_phases(
+            [Phase(name="publish", execute=phase_warn, warn_only=True)],
+            context,
+            PlainProgressReporter(),
+        )
+    )
+
+    stderr = capsys.readouterr().err
+    assert stderr == "[WARN] PUBLISH\n"
+    assert stderr.isascii()
+    assert "\x1b[" not in stderr
+    assert "Traceback" not in stderr
+    assert "phase_warned" not in stderr
+
+
+def test_execute_phases_log_warn_only_retains_structured_exception(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _make_context(tmp_path)
+
+    async def phase_warn(_: RunContext) -> None:
+        raise RuntimeError("boom")
+
+    configure_logging(log_format="json")
+    monkeypatch.setattr("frame_compare.orchestration.phases.log", structlog.get_logger())
+    asyncio.run(
+        execute_phases(
+            [Phase(name="publish", execute=phase_warn, warn_only=True)],
+            context,
+            LogProgressReporter(),
+        )
+    )
+
+    events = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
+    warning = next(event for event in events if event["event"] == "phase_warned")
+    assert warning["phase"] == "publish"
+    assert warning["error_type"] == "RuntimeError"
+    assert warning["error"] == "boom"
+    assert warning["exception"]
 
 
 def test_execute_phases_fail_fast_failure_reports_failed_progress_status(

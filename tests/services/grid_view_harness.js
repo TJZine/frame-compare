@@ -216,6 +216,7 @@ const viewer = {
     sourceHudLabel(clip, profile = 'control') {
         return `${clip.display[profile]} • ${clip.resolution[0]}×${clip.resolution[1]} • SDR • 17.00 GiB`;
     },
+    formatFileSize() { return '17.00 GiB'; },
     clipAccessibleName(clip) { return `${clip.display.primary} — ${clip.display.filename}`; },
     referenceClipIndex() { return 0; },
     clampPan() {},
@@ -240,6 +241,7 @@ assert.equal(controls.hidden, false);
 assert.equal(position.textContent, 'Clips 1–4 of 6');
 assert.equal(cells.children[0].dataset.reference, 'true');
 assert.match(cells.children[0].getAttribute('aria-label'), /Reference/);
+assert.match(cells.children[0].getAttribute('aria-label'), /17\.00 GiB/);
 assert.equal(cells.children[3].dataset.reference, 'false');
 assert.doesNotMatch(cells.children[3].getAttribute('aria-label'), /Reference/);
 assert.equal(cells.children[1].dataset.active, 'true');
@@ -248,6 +250,11 @@ assert.equal(
     cells.children[0].querySelector('.rv-grid-label-text').textContent,
     'Clip 1 • 1920×1080 • SDR • 17.00 GiB',
 );
+viewer.state.overlaysHidden = true;
+owner.updateCellRoles();
+assert.doesNotMatch(cells.children[0].getAttribute('aria-label'), /17\.00 GiB/);
+viewer.state.overlaysHidden = false;
+owner.updateCellRoles();
 
 const mixedImages = cells.querySelectorAll('.rv-grid-image');
 mixedImages.forEach((image, index) => {

@@ -5,6 +5,26 @@ All notable user-facing changes to Frame Compare are documented in this file.
 Frame Compare follows Conventional Commits, and Release Please turns the
 `Unreleased` section into versioned release notes.
 
+## Unreleased
+
+### Added
+
+- Audio alignment now reports bounded diagnostic evidence when a retained constant
+  offset may drift, vary, or cross an edit discontinuity; legacy alignment caches
+  remain reusable.
+- Offline report HUD labels now include the existing complete source file size in
+  Single, Slider, Diff, Blink, and Grid views.
+
+### Changed
+
+- Automatic random, dark, bright, and motion frame selection now distributes evidence
+  across deterministic temporal regions while preserving category precedence and
+  sparse source-frame coordinates.
+- Redirected human runs now use chronological ASCII phase progress on stderr with one
+  human owner for warn-only status; JSON retains structured exception evidence.
+- Report Inspector and viewport behavior now live in focused dependency-free viewer
+  owners without changing report payload or browser-storage schemas.
+
 ## [0.1.0]
 
 This is the first public alpha release of Frame Compare.

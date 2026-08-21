@@ -203,7 +203,7 @@ def _render_alignment_table(
             table.add_row("", "")
         table.add_row("warnings", "")
         for warning in alignment_warnings:
-            table.add_row("  rejected", f"[yellow]{escape(warning)}[/]")
+            table.add_row("  warning", f"[yellow]{escape(warning)}[/]")
 
     if verbose:
         for comparison in comparisons:

@@ -376,7 +376,7 @@ def test_emit_frame_alignment_report_verbose_marks_legacy_stability_unavailable(
     assert "unavailable (legacy cache entry)" in capsys.readouterr().err
 
 
-def test_emit_frame_alignment_report_renders_rejected_alignment_warning_context(
+def test_emit_frame_alignment_report_renders_alignment_warning_context(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     comparison = AlignmentReportComparison(
@@ -404,8 +404,43 @@ def test_emit_frame_alignment_report_renders_rejected_alignment_warning_context(
     assert "Encode" in captured.err
     assert "none" in captured.err
     assert "warnings" in captured.err
-    assert "rejected" in captured.err
+    assert "warning" in captured.err
+    assert "rejected" not in captured.err
     assert "align: encode low confidence; left unapplied and untrimmed" in captured.err
+
+
+def test_emit_frame_alignment_report_does_not_label_applied_stability_warning_rejected(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    summary = AlignmentStabilitySummary("possible_drift", 4, 178, 182, 178, 182, 2, None)
+    comparison = AlignmentReportComparison(
+        label="Encode",
+        alignment_source="computed",
+        relative_offset_frames=180,
+        reference_row_zero_source_frame=180,
+        comparison_row_zero_source_frame=0,
+        reference_trim_range=(180, 999),
+        comparison_trim_range=(0, 819),
+        stability=summary,
+    )
+
+    emit_frame_alignment_report(
+        stage="after_align",
+        comparisons=[comparison],
+        selected_frames=[],
+        alignment_warnings=[
+            "align: Comparison 1 alignment may drift across the source. "
+            "The applied constant offset was retained and should be verified."
+        ],
+        json_output=False,
+        quiet=False,
+        no_color=True,
+    )
+
+    output = capsys.readouterr().err
+    assert "warning" in output
+    assert "applied constant offset was retained" in output
+    assert "rejected" not in output
 
 
 def test_emit_frame_alignment_report_preserves_literal_brackets_in_warnings(

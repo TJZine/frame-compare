@@ -15,6 +15,7 @@ import structlog
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.progress import phase_display_label, start_phase_progress
+from frame_compare.utils.progress import LogProgressReporter
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 
 log = structlog.get_logger()
@@ -104,13 +105,14 @@ async def execute_phases(
                 raise
             phase.status = PhaseStatus.WARNED
             phase_progress_status = ProgressPhaseStatus.WARNED
-            log.warning(
-                "phase_warned",
-                phase=phase.name,
-                error_type=type(exc).__name__,
-                error=str(exc),
-                exc_info=exc,
-            )
+            if isinstance(reporter, LogProgressReporter):
+                log.warning(
+                    "phase_warned",
+                    phase=phase.name,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                    exc_info=exc,
+                )
         else:
             phase.status = PhaseStatus.COMPLETED
             reporter.advance(1)

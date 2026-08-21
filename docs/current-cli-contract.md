@@ -387,7 +387,7 @@ unchanged.
 - Human-readable non-quiet runs emit a `Frame Alignment` diagnostic to stderr after
   the alignment phase when accepted or rejected frame alignment changes need
   explanation. The diagnostic reports normalized source-frame row 0, final trim
-  ranges, offsets, selected aligned frames, and rejected alignment warning context
+  ranges, offsets, selected aligned frames, and alignment warning context
   for comparisons with material alignment information. Material non-constant offset
   evidence adds one concise stability row and one bounded warning stating that the
   applied constant offset was retained and should be verified. Stable or insufficient
@@ -465,7 +465,9 @@ unchanged.
   successful lines include elapsed time, skips preserve their detail, and failed
   phases emit `[FAIL]` before the existing typed error presentation. Successful
   nested work and percentage milestones remain silent. Warned or failed nested
-  work may emit one line when needed to preserve a material outcome.
+  work may emit one line when needed to preserve a material outcome. Expected
+  warn-only phase failures do not add a console traceback or duplicate warning
+  event; JSON progress retains the structured `phase_warned` exception evidence.
 - Interactive Rich runs place those runtime phases and their diagnostics inside a
   lightweight `Execution` rule band after the Sources panel and before the Result
   panel. Loose live and durable runtime lines use a consistent two-space inset;
@@ -758,7 +760,9 @@ four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</cod
   renderer cannot prove it; decoded L1/L2/L6 values are not inferred from clip-level or
   frame-0 metadata.
 - Displayed file size is the complete container storage cost in IEC units. It is not a
-  bitrate, quality, efficiency, or winner metric.
+  bitrate, quality, efficiency, or winner metric. The existing value appears in visible
+  Single, Slider, Diff, Blink, and Grid HUD source labels when positive and available;
+  hiding the HUD hides the size, and the report payload remains version `1.2`.
 
 ### slow.pics Upload Behavior
 

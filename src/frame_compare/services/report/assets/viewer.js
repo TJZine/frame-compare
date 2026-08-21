@@ -1406,6 +1406,7 @@ const ReportViewer = {
             'title',
             `${overlaysVisible ? 'Hide' : 'Show'} HUD (H)`
         );
+        this.gridView?.updateCellRoles();
     },
 
     reducedMotionActive() {

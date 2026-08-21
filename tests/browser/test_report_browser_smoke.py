@@ -278,6 +278,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const label = document.getElementById('label-left');
         const rightLabel = document.getElementById('label-right');
         const stage = document.querySelector('.rv-viewer-stage');
+        const stageLabels = document.querySelector('.rv-stage-labels');
         const palette = document.querySelector('.rv-viewport-palette');
         const rectanglesIntersect = (first, second) => !(
             first.right <= second.left
@@ -296,15 +297,29 @@ document.addEventListener('DOMContentLoaded', () => {
         document.documentElement.dataset.diffHudsSeparate = String(
             !rectanglesIntersect(label.getBoundingClientRect(), frameHud.getBoundingClientRect())
         );
+        const stageHudAccessible = ['overlay', 'slider', 'diff', 'blink'].every(mode => {
+            ReportViewer.setMode(mode);
+            const visibleLabels = [label, rightLabel].filter(item => item.textContent);
+            return stageLabels.getAttribute('aria-hidden') === null
+                && visibleLabels.every(item => (
+                    item.textContent.split('17.00 GiB').length - 1 === 1
+                ));
+        });
+        ReportViewer.setMode('diff');
         const sourceHudStyle = window.getComputedStyle(label);
         document.documentElement.dataset.hudStylesAligned = String(
             label.getBoundingClientRect().top === rightLabel.getBoundingClientRect().top
             && sourceHudStyle.borderRadius === window.getComputedStyle(rightLabel).borderRadius
         );
+        label.style.transition = 'none';
+        rightLabel.style.transition = 'none';
+        frameHud.style.transition = 'none';
         ReportViewer.setOverlaysHidden(true, { save: false });
         document.documentElement.dataset.hudToggleHidesBoth = String(
             ReportViewer.dom.stage.classList.contains('rv-overlays-hidden')
             && frameHud !== null
+            && window.getComputedStyle(label).visibility === 'hidden'
+            && window.getComputedStyle(rightLabel).visibility === 'hidden'
         );
         ReportViewer.setOverlaysHidden(false, { save: false });
 
@@ -591,12 +606,30 @@ document.addEventListener('DOMContentLoaded', () => {
         const gridStageRect = stage.getBoundingClientRect();
         const gridPaletteRect = palette.getBoundingClientRect();
         const gridLabels = Array.from(document.querySelectorAll('.rv-grid-label-text'));
+        const gridCells = Array.from(document.querySelectorAll('.rv-grid-cell'));
         const expectedGridLabelCount = window.matchMedia('(max-width: 768px)').matches ? 1 : 2;
         document.documentElement.dataset.gridHudAnchored = String(
             window.getComputedStyle(document.querySelector('.rv-stage-labels')).display === 'none'
             && gridLabels.length === expectedGridLabelCount
             && gridLabels.every(gridLabel => gridLabel.textContent.trim().length > 0)
             && approximately(gridPaletteRect.bottom, gridStageRect.bottom - paletteInset)
+        );
+        const gridHudAccessible = gridCells.every(cell => (
+            cell.getAttribute('aria-label').split('17.00 GiB').length - 1 === 1
+        ));
+        gridLabels.forEach(gridLabel => {
+            gridLabel.closest('.rv-grid-label').style.transition = 'none';
+        });
+        ReportViewer.setOverlaysHidden(true, { save: false });
+        const gridHudHidden = gridLabels.every(gridLabel => (
+            window.getComputedStyle(gridLabel.closest('.rv-grid-label')).visibility === 'hidden'
+        )) && gridCells.every(cell => !cell.getAttribute('aria-label').includes('17.00 GiB'));
+        ReportViewer.setOverlaysHidden(false, { save: false });
+        const gridHudRestored = gridCells.every(cell => (
+            cell.getAttribute('aria-label').split('17.00 GiB').length - 1 === 1
+        ));
+        document.documentElement.dataset.sourceHudAccessible = String(
+            stageHudAccessible && gridHudAccessible && gridHudHidden && gridHudRestored
         );
 
         ReportViewer.setMode('overlay');
@@ -829,6 +862,7 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     assert parser.document_attributes["data-diff-huds-separate"] == "true"
     assert parser.document_attributes["data-hud-styles-aligned"] == "true"
     assert parser.document_attributes["data-hud-toggle-hides-both"] == "true"
+    assert parser.document_attributes["data-source-hud-accessible"] == "true"
     assert parser.document_attributes["data-slider-labels-separate"] == "true"
     assert parser.document_attributes["data-palette-bottom-anchored"] == "true"
     assert parser.document_attributes["data-bottom-huds-separate"] == "true"

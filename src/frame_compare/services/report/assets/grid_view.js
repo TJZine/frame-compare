@@ -123,15 +123,19 @@ const GridView = (() => {
             dom.cells.querySelectorAll('.rv-grid-cell').forEach(cell => {
                 const index = Number(cell.dataset.clipIndex);
                 const label = safeLabel(index);
-                const accessibleName = viewer.clipAccessibleName(
-                    viewer.state.data?.clips?.[index],
-                );
+                const clip = viewer.state.data?.clips?.[index];
+                const accessibleName = viewer.clipAccessibleName(clip);
+                const fileSize = viewer.state.overlaysHidden
+                    ? ''
+                    : viewer.formatFileSize(clip?.size_bytes);
                 const roles = clipRoles(index);
                 cell.dataset.reference = roles.includes('Reference') ? 'true' : 'false';
                 cell.dataset.active = roles.includes('Active') ? 'true' : 'false';
                 cell.setAttribute(
                     'aria-label',
-                    [`Clip ${index + 1}, ${accessibleName}`, ...roles].join(', '),
+                    [`Clip ${index + 1}, ${accessibleName}`, fileSize, ...roles]
+                        .filter(Boolean)
+                        .join(', '),
                 );
                 const role = cell.querySelector('[data-grid-role]');
                 if (role) {
@@ -510,6 +514,7 @@ const GridView = (() => {
             setActive,
             state,
             syncViewport,
+            updateCellRoles,
             zoomAnchorForPoint,
         };
     }

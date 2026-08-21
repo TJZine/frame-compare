@@ -1397,6 +1397,13 @@ No session may require destructive config, report, or cache migration to roll ba
 
 # 17. Progress
 
+- 2026-08-21 — Session A completed: automatic categories now use deterministic
+  temporal strata with ranked global backfill and spacing-only relaxation; focused
+  selection/orchestration proof and the full local gate passed; sparse coordinates,
+  cache identity, and media-analysis work remain unchanged; a 216,000-frame synthetic
+  benchmark measured 0.324s before and 0.369s after (1.14x); CI was not run locally;
+  Session B is ready.
+
 - 2026-08-21 — Session B completed: non-TTY human runs now use chronological
   ASCII plain progress while JSON, quiet, and interactive Rich selection remain
   unchanged; focused proof and the full local gate passed; the existing reporter
@@ -1404,28 +1411,6 @@ No session may require destructive config, report, or cache migration to roll ba
   run emitted exactly 10,000 ASCII lines in 0.063 seconds; environment-gated
   Windows, live-service, and real-VapourSynth tests remain unavailable; Session C
   is ready.
-
-Add one concise entry after each session:
-
-```text
-- YYYY-MM-DD — Session X completed: outcome; focused proof; full-gate/CI status;
-  material decisions; known unavailable evidence; next-session readiness.
-```
-
-When complete:
-
-```text
-Status: Historical
-```
-
-Retain the plan as implementation history after closeout.
-
-- 2026-08-21 — Session A completed: automatic categories now use deterministic
-  temporal strata with ranked global backfill and spacing-only relaxation; focused
-  selection/orchestration proof and the full local gate passed; sparse coordinates,
-  cache identity, and media-analysis work remain unchanged; a 216,000-frame synthetic
-  benchmark measured 0.324s before and 0.369s after (1.14x); CI was not run locally;
-  Session B is ready.
 
 - 2026-08-21 — Session C completed: bounded immutable window evidence now classifies
   stable, drift, discontinuity, variable, and insufficient evidence without changing
@@ -1458,3 +1443,24 @@ Retain the plan as implementation history after closeout.
   visual behavior are unchanged; 100 viewport harness processes completed in 3.503
   seconds; CI and environment-gated Windows, live-service, and real-VapourSynth
   evidence were not run locally; Session G is ready.
+
+- 2026-08-21 — Session G completed: visible Single, Slider, Diff, Blink, and Grid HUD
+  labels now append the existing canonical IEC file size while payload 1.2, probing,
+  baked screenshots, storage, Lens identity, and the HUD toggle remain unchanged;
+  focused Node/browser proof and the full local gate passed; CI and environment-gated
+  Windows, live-service, and real-VapourSynth evidence were not run locally; Session H
+  is ready.
+
+- 2026-08-21 — Session H local integration completed: one fresh read-only review found
+  three valid issues, all closed with focused fixes—HUD sizes now participate once in
+  accessible stage/Grid naming and hide with the HUD, human warn-only phases no longer
+  duplicate structured traceback output, and mixed alignment warnings use a neutral row
+  label. The remediation-focused suite, exact 1280/1440/2560 browser checks, and the
+  full local verification gate passed. Fresh measurements were 0.243s median to select
+  100 frames from 216,000, 0.0135s for 10,000 plain phases, and 0.60 microseconds
+  per HUD label. Real VapourSynth, live slow.pics/webhook, PowerShell/physical Windows,
+  and manual platform accessibility/visual evidence remain unavailable locally. The
+  latest upstream commit is green in every named workflow, but the committed A–G head
+  is still seven commits ahead of `origin/dev/v0.2.0`, the Session H closeout diff is
+  uncommitted, and neither has GitHub checks. The plan therefore remains Active pending
+  integrated-head CI before historical closeout.

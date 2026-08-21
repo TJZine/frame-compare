@@ -37,7 +37,7 @@ from frame_compare.services.slowpics_post_upload import (
 from frame_compare.services.slowpics_upload_plan import SlowpicsUploadPlan
 from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
-from frame_compare.utils.progress import NullProgressReporter
+from frame_compare.utils.progress import LogProgressReporter, NullProgressReporter
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 from frame_compare.vs.types import TonemapSettings
 from tests.orchestration.phase_task_helpers import (
@@ -1101,7 +1101,7 @@ def test_post_report_cleanup_returns_warning_and_logs_for_delete_error(
     assert warning_events == ["slowpics_uploaded_file_delete_failed"]
 
 
-async def test_warn_only_publish_phase_keeps_sanitized_service_error_in_warning_and_log(
+async def test_warn_only_publish_phase_keeps_sanitized_service_error_in_warning_and_log_progress(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1148,7 +1148,7 @@ async def test_warn_only_publish_phase_keeps_sanitized_service_error_in_warning_
         )
         publish_phase = next(phase for phase in phases if phase.name == "publish")
 
-        await execute_phases([publish_phase], ctx, NullProgressReporter())
+        await execute_phases([publish_phase], ctx, LogProgressReporter())
 
     assert len(state.warnings) == 1
     assert "publish:" in state.warnings[0]

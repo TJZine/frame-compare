@@ -1241,12 +1241,14 @@ select optgroup {
 }
 
 .rv-overlay-label,
-.rv-stage-overlay-info {
+.rv-stage-overlay-info,
+.rv-grid-label {
     transition: opacity 0.15s ease, visibility 0.15s ease;
 }
 
 .rv-viewer-stage.rv-overlays-hidden .rv-overlay-label,
-.rv-viewer-stage.rv-overlays-hidden .rv-stage-overlay-info {
+.rv-viewer-stage.rv-overlays-hidden .rv-stage-overlay-info,
+.rv-viewer-stage.rv-overlays-hidden .rv-grid-label {
     opacity: 0;
     visibility: hidden;
 }

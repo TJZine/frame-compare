@@ -599,6 +599,11 @@ The Clips inspector composes those profiles into stable Reference/Comparison car
 Primary and informative release identities wrap normally, exact filenames and long
 technical values may wrap anywhere, and drawer/panel overflow is constrained locally
 rather than masked at the document boundary.
+Visible Single, Slider, Diff, Blink, and Grid HUD labels reuse the payload's canonical
+container byte size through the shared IEC formatter; hiding the HUD hides that size
+with the source label, and no report payload or probing owner is duplicated.
+Stage labels participate directly in accessible text, while Grid cell names retain
+primary identity and exact filename and append the same size only while the HUD is shown.
 
 The ordinary report artifact does not claim presentation blindness. Source identity
 can be present in baked screenshot overlays, physical image filenames, and report
