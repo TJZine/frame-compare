@@ -26,7 +26,11 @@ from frame_compare.orchestration.execution_types import (
 )
 from frame_compare.orchestration.phases import Phase, PhaseStatus, execute_phases
 from frame_compare.orchestration.types import RunRequest
-from frame_compare.utils.progress import LogProgressReporter, NullProgressReporter
+from frame_compare.utils.progress import (
+    LogProgressReporter,
+    NullProgressReporter,
+    PlainProgressReporter,
+)
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 from frame_compare.utils.types import WorkspacePaths
 
@@ -209,6 +213,52 @@ def test_execute_phases_preserves_internal_phase_name_for_log_progress(
         and event.get("total") == 1
         for event in captured
     )
+
+
+def test_execute_phases_plain_progress_uses_display_labels_without_log_milestones(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    context = _make_context(tmp_path)
+
+    async def phase_analyze(_: RunContext) -> None:
+        return None
+
+    with capture_logs() as captured:
+        asyncio.run(
+            execute_phases(
+                [Phase(name="analyze", execute=phase_analyze)],
+                context,
+                PlainProgressReporter(),
+            )
+        )
+
+    assert capsys.readouterr().err.startswith("[OK] ANALYZE  Completed in ")
+    assert not any(
+        event.get("event") in {"phase_started", "phase_progress", "phase_completed"}
+        for event in captured
+    )
+
+
+def test_execute_phases_plain_failure_line_is_emitted_before_error_propagates(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    context = _make_context(tmp_path)
+
+    async def phase_fail(_: RunContext) -> None:
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        asyncio.run(
+            execute_phases(
+                [Phase(name="render", execute=phase_fail)],
+                context,
+                PlainProgressReporter(),
+            )
+        )
+
+    assert capsys.readouterr().err == "[FAIL] RENDER\n"
 
 
 def test_execute_phases_forwards_success_retention_hint(tmp_path: Path) -> None:

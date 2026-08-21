@@ -1,5 +1,8 @@
 """Progress reporting utilities for Frame Compare."""
 
+import sys
+from dataclasses import dataclass
+from io import TextIOBase
 from threading import RLock
 from time import monotonic
 
@@ -45,9 +48,16 @@ def _format_elapsed(seconds: float) -> str:
 __all__ = [
     "LogProgressReporter",
     "NullProgressReporter",
+    "PlainProgressReporter",
     "ProgressReporter",
     "RichProgressReporter",
 ]
+
+
+@dataclass(frozen=True)
+class _PlainTask:
+    label: str
+    started_at: float
 
 
 class _SpinnerAwareColumn(ProgressColumn):
@@ -89,6 +99,64 @@ class NullProgressReporter:
 
     def resume(self) -> None:
         del self
+
+
+class PlainProgressReporter:
+    """Chronological ASCII progress for redirected human output."""
+
+    def __init__(self, stream: TextIOBase | None = None) -> None:
+        self._stream = stream
+        self._task: _PlainTask | None = None
+        self._task_stack: list[_PlainTask] = []
+        self._lock = RLock()
+
+    def start_phase(self, name: str, total: int) -> None:
+        del total
+        with self._lock:
+            if self._task is not None:
+                self._task_stack.append(self._task)
+            self._task = _PlainTask(name, monotonic())
+
+    def start_indeterminate(self, name: str) -> None:
+        self.start_phase(name, total=0)
+
+    def advance(self, amount: int = 1) -> None:
+        del amount
+
+    def set_description(self, desc: str) -> None:
+        del desc
+
+    def complete_phase(
+        self,
+        status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+        *,
+        retain: bool | None = None,
+    ) -> None:
+        del retain
+        with self._lock:
+            if self._task is None:
+                return
+            task = self._task
+            nested = bool(self._task_stack)
+            if not nested or status in {
+                ProgressPhaseStatus.WARNED,
+                ProgressPhaseStatus.FAILED,
+            }:
+                detail = (
+                    f"  Completed in {_format_elapsed(monotonic() - task.started_at)}"
+                    if status == ProgressPhaseStatus.COMPLETED
+                    else ""
+                )
+                line = f"{_DURABLE_STATUS_MARKERS[status]} {task.label}{detail}"
+                stream = self._stream if self._stream is not None else sys.stderr
+                print(line.encode("ascii", "backslashreplace").decode("ascii"), file=stream)
+            self._task = self._task_stack.pop() if self._task_stack else None
+
+    def suspend(self) -> None:
+        return
+
+    def resume(self) -> None:
+        return
 
 
 class RichProgressReporter:

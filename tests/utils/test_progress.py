@@ -11,6 +11,7 @@ import frame_compare.utils.progress as progress_module
 from frame_compare.utils.progress import (
     LogProgressReporter,
     NullProgressReporter,
+    PlainProgressReporter,
     RichProgressReporter,
 )
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus
@@ -91,6 +92,53 @@ def test_log_progress_reporter_supports_nested_phases(capsys) -> None:
     assert "phase=inner" in captured.out
     assert "percentage=100" in captured.out
     assert "percentage=25" in captured.out
+
+
+def test_plain_progress_reporter_emits_one_ascii_line_per_top_level_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = StringIO()
+    clock = iter((0.0, 84.9, 85.0, 86.0))
+    monkeypatch.setattr(progress_module, "monotonic", lambda: next(clock))
+    reporter = PlainProgressReporter(output)
+
+    reporter.start_phase("ANALYZE", 100)
+    reporter.start_indeterminate("D\N{LATIN SMALL LETTER E WITH ACUTE}CODE")
+    reporter.complete_phase()
+    reporter.complete_phase()
+    reporter.start_phase("METADATA  Disabled", 1)
+    reporter.complete_phase(ProgressPhaseStatus.SKIPPED)
+
+    assert output.getvalue().splitlines() == [
+        "[OK] ANALYZE  Completed in 1m 25s",
+        "[SKIP] METADATA  Disabled",
+    ]
+    assert output.getvalue().isascii()
+    assert "\x1b[" not in output.getvalue()
+    assert "\r" not in output.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        (ProgressPhaseStatus.WARNED, "[WARN] nested"),
+        (ProgressPhaseStatus.FAILED, "[FAIL] nested"),
+    ],
+)
+def test_plain_progress_reporter_preserves_material_nested_outcomes(
+    status: ProgressPhaseStatus,
+    expected: str,
+) -> None:
+    output = StringIO()
+    reporter = PlainProgressReporter(output)
+
+    reporter.start_phase("TOP", 1)
+    reporter.start_indeterminate("nested")
+    reporter.complete_phase(status)
+    reporter.complete_phase()
+
+    assert output.getvalue().splitlines()[0] == expected
+    assert output.getvalue().count("TOP") == 1
 
 
 def test_rich_progress_reporter_suspend_and_resume_preserves_active_task() -> None:

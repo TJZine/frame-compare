@@ -1397,6 +1397,14 @@ No session may require destructive config, report, or cache migration to roll ba
 
 # 17. Progress
 
+- 2026-08-21 — Session B completed: non-TTY human runs now use chronological
+  ASCII plain progress while JSON, quiet, and interactive Rich selection remain
+  unchanged; focused proof and the full local gate passed; the existing reporter
+  protocol required no phase wiring or ownership change; a 10,000-phase synthetic
+  run emitted exactly 10,000 ASCII lines in 0.063 seconds; environment-gated
+  Windows, live-service, and real-VapourSynth tests remain unavailable; Session C
+  is ready.
+
 Add one concise entry after each session:
 
 ```text

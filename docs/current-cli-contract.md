@@ -455,6 +455,12 @@ unchanged.
   `RENDER`, `METADATA`, `PUBLISH`, `REPORT`, `CONFIRM`, and `CLEANUP`.
   Internal phase names in logs and `phase_timings` remain the runtime keys such
   as `frame_plan`, `analyze`, `align`, and `confirm_slowpics_upload`.
+- Non-TTY human runs use those product phase labels in chronological ASCII
+  progress lines on stderr. Each top-level phase emits once when it completes;
+  successful lines include elapsed time, skips preserve their detail, and failed
+  phases emit `[FAIL]` before the existing typed error presentation. Successful
+  nested work and percentage milestones remain silent. Warned or failed nested
+  work may emit one line when needed to preserve a material outcome.
 - Interactive Rich runs place those runtime phases and their diagnostics inside a
   lightweight `Execution` rule band after the Sources panel and before the Result
   panel. Loose live and durable runtime lines use a consistent two-space inset;
@@ -477,8 +483,9 @@ unchanged.
 - `--no-color` disables ANSI color in interactive Rich progress output. It does
   not switch an interactive human run to structlog progress. It also disables
   ANSI styling for the previous-offset reuse table and prompt. Quiet and JSON
-  modes still suppress Rich progress, and non-TTY runs still use log progress,
-  including consolidated FPS diagnostics rather than Rich FPS panels.
+  modes still suppress Rich progress, and non-TTY human runs use plain progress.
+  Consolidated FPS diagnostics retain their existing log presentation rather than
+  Rich FPS panels.
 - `--diagnose-paths` emits a pinned JSON object with keys `cache`, `config`, `input`,
   `output`, and `root`, then exits without invoking the runtime pipeline. The
   `output` value is the resolved generated-data root and `cache` is its
