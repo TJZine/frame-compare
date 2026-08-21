@@ -51,7 +51,7 @@ def resolve_analysis_source(
         return AnalysisSourceSelection(
             clip=selected,
             reason="fastest",
-            warning=f"Analysis source: {selected.path.name} (fastest)",
+            warning=f"Analysis source: {_clip_role(clips, selected)} | selected by fastest-source policy",
         )
 
     paths = [clip.path for clip in clips]
@@ -66,9 +66,14 @@ def resolve_analysis_source(
             return AnalysisSourceSelection(
                 clip=clip,
                 reason="configured",
-                warning=f"Analysis source: {clip.path.name} (configured)",
+                warning=f"Analysis source: {_clip_role(clips, clip)} | selected by configured policy",
             )
     raise FastestAnalysisSourceError()
+
+
+def _clip_role(clips: list[ClipState], selected: ClipState) -> str:
+    index = clips.index(selected)
+    return "Reference" if index == 0 else f"Comparison {index}"
 
 
 def _select_fastest_clip(*, clips: list[ClipState], vs_loader: VSLoader | None) -> ClipState:

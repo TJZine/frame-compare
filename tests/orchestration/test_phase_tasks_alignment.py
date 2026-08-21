@@ -109,6 +109,7 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
         "_Transfer": 1,
         "_Primaries": 1,
     }
+    assert alignment_request.reference.presentation_name == "reference.mkv"
     assert [comparison_request.path for comparison_request in alignment_request.comparisons] == [
         comparison.path
     ]
@@ -124,6 +125,8 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
         "_Transfer": 16,
         "_Primaries": 9,
     }
+    assert alignment_request.comparisons[0].presentation_name == "encode.mkv"
+    assert alignment_request.presentation_content is None
     assert alignment_request.generated_dir == ctx.workspace.generated_dir
     assert alignment_request.shared_alignment_cache_dir == ctx.workspace.shared_alignment_cache_dir
     assert alignment_request.selected_reference_relationship == "auto"

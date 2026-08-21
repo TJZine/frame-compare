@@ -126,7 +126,7 @@ def test_prompt_prints_rich_safe_table_to_stderr_and_accepts_yes(
     stderr_output = stderr.getvalue()
     assert accepted is True
     assert captured.out == ""
-    assert "[WAIT] Reuse previous alignment?" in stderr_output
+    assert "[WAIT] Alignment reuse" in stderr_output
     assert "[y/N]" in stderr_output
     assert "Comparison [cyan]" in stderr_output
     assert "<one>" in stderr_output
@@ -170,6 +170,45 @@ def test_prompt_shows_full_filename_once_when_label_equals_stem(
     assert str(prompt_input.shared_cache_path) in "".join(output.split())
 
 
+def test_prompt_renders_prebuilt_compact_identity_without_paths_or_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _request(tmp_path)
+    request = replace(
+        request,
+        reference=replace(
+            request.reference,
+            presentation_name="2160p | PMTP WEB-DL | DV HDR10+ | Kitsune",
+        ),
+        presentation_content="Avatar Aang The Last Airbender (2026)",
+    )
+    prompt_input = _prompt_input(request)
+    prompt_input = replace(
+        prompt_input,
+        rows=(
+            replace(
+                prompt_input.rows[0],
+                presentation_name="2160p | ATV WEB-DL | DV HDR10+ | REPACK | Kitsune",
+            ),
+        ),
+    )
+    stderr = _TTYStringIO("", is_tty=True)
+    monkeypatch.setattr(reuse_prompt.sys, "stdin", _TTYStringIO("\n", is_tty=True))
+    monkeypatch.setattr(reuse_prompt.sys, "stderr", stderr)
+
+    assert not prompt_for_previous_offset_reuse(
+        prompt_input=prompt_input, progress=None, no_color=True
+    )
+    output = stderr.getvalue()
+    assert "[WAIT] Alignment reuse" in output
+    assert "Avatar Aang The Last Airbender (2026)" in output
+    assert "PMTP WEB-DL" in output
+    assert "ATV WEB-DL" in output
+    assert str(tmp_path) not in output
+    assert "Cache" not in output
+
+
 def test_prompt_does_not_use_unbounded_terminal_width(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -203,7 +242,7 @@ def test_prompt_does_not_use_unbounded_terminal_width(
     assert all(width is not None and width < 240 for width in console_widths)
 
 
-@pytest.mark.parametrize("columns", [60, 80])
+@pytest.mark.parametrize("columns", [60, 80, 120, 240])
 def test_prompt_uses_actual_narrow_terminal_width(
     columns: int,
     tmp_path: Path,
@@ -228,7 +267,7 @@ def test_prompt_uses_actual_narrow_terminal_width(
         is False
     )
     stderr_output = stderr.getvalue()
-    assert "[WAIT] Reuse previous alignment?" in stderr_output
+    assert "[WAIT] Alignment reuse" in stderr_output
     assert REUSE_PREVIOUS_OFFSETS_PROMPT in stderr_output
     assert "\x1b[" not in stderr_output
     assert all(len(line) <= columns for line in stderr_output.splitlines())
@@ -274,7 +313,7 @@ def test_prompt_non_tty_stdin_prints_only_fallback_line(
     assert accepted is False
     assert captured.out == ""
     assert _fallback_only_output(stderr_output)
-    assert "Reuse previous alignment?" not in stderr_output
+    assert "Alignment reuse" not in stderr_output
     assert "[y/N]" not in stderr_output
     assert "Comparison [cyan] <one>" not in stderr_output
 
@@ -303,7 +342,7 @@ def test_prompt_visible_prompt_path_fallbacks_on_eof_or_read_failure(
     assert accepted is False
     assert captured.out == ""
     stderr_output = stderr.getvalue()
-    assert "[WAIT] Reuse previous alignment?" in stderr_output
+    assert "[WAIT] Alignment reuse" in stderr_output
     assert "[y/N]" in stderr_output
     assert f"{REUSE_PREVIOUS_OFFSETS_PROMPT}\n{PROMPT_UNAVAILABLE_MESSAGE}" in stderr_output
 

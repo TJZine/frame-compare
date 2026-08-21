@@ -3,6 +3,7 @@
 import os
 from fractions import Fraction
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -12,6 +13,7 @@ from frame_compare.orchestration.fps_report import (
     build_consolidated_fps_report,
     emit_consolidated_fps_report,
 )
+from frame_compare.services.release_identity import ContentIdentity, ReleaseIdentity
 
 
 def _make_clip_state(
@@ -25,6 +27,8 @@ def _make_clip_state(
     num_frames: int = 100,
     is_hdr: bool = False,
     size_bytes: int = 123,
+    release_identity: ReleaseIdentity | None = None,
+    label_is_explicit: bool = False,
 ) -> ClipState:
     fingerprint = ClipFingerprint(Path(path), size_bytes, 456)
     probe = ClipProbeSnapshot(
@@ -41,7 +45,63 @@ def _make_clip_state(
         probe=probe,
         source_fps=fps,
         effective_fps=effective_fps,
+        release_identity=release_identity,
+        label_is_explicit=label_is_explicit,
     )
+
+
+def test_sources_factors_reliable_content_and_keeps_release_file_and_probe_facts_separate(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    content = ContentIdentity("Avatar Aang The Last Airbender", year=2026)
+    reference = _make_clip_state(
+        "Avatar.Aang.PMTP.Kitsune.mkv",
+        "Reference label",
+        Fraction(24),
+        Fraction(24),
+        release_identity=ReleaseIdentity(
+            content,
+            resolution="2160p",
+            service="PMTP",
+            source_type="WEB-DL",
+            dynamic_range_claims=("DV", "HDR10+"),
+            release_group="Kitsune",
+        ),
+        label_is_explicit=True,
+    )
+    comparison = _make_clip_state(
+        "Avatar.Aang.ATV.REPACK.Kitsune.mkv",
+        "Generated label",
+        Fraction(24),
+        Fraction(24),
+        release_identity=ReleaseIdentity(
+            content,
+            resolution="2160p",
+            service="ATV",
+            source_type="WEB-DL",
+            dynamic_range_claims=("DV", "HDR10+"),
+            revision_tags=("REPACK",),
+            release_group="Kitsune",
+        ),
+    )
+
+    emit_consolidated_fps_report(
+        stage="after_load_sources",
+        clips=build_consolidated_fps_report(reference, [comparison]),
+        json_output=False,
+        quiet=False,
+        rich_output=True,
+        no_color=True,
+    )
+
+    output = capsys.readouterr().err
+    assert output.count("Avatar Aang The Last Airbender (2026)") == 1
+    assert "Reference label" in output
+    assert "2160p | PMTP WEB-DL | DV HDR10+ | Kitsune" in output
+    assert "2160p | ATV WEB-DL | DV HDR10+ | REPACK | Kitsune" in output
+    assert output.count("Avatar.Aang.PMTP.Kitsune.mkv") == 1
+    assert output.count("Avatar.Aang.ATV.REPACK.Kitsune.mkv") == 1
+    assert "1920x1080" in output
 
 
 def test_build_consolidated_fps_report_includes_probe_metadata_and_fps_order() -> None:
@@ -125,7 +185,7 @@ def test_emit_consolidated_fps_report_noop_when_quiet(
     def _fail(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("No logs should be emitted when quiet=True")
 
-    monkeypatch.setattr("frame_compare.orchestration.fps_report.log.info", _fail)
+    monkeypatch.setattr("frame_compare.orchestration.fps_report.log", SimpleNamespace(info=_fail))
 
     emit_consolidated_fps_report(
         stage="after_load_sources",
@@ -164,7 +224,9 @@ def test_emit_consolidated_fps_report_json_mode_logs_without_human_output(
     ) -> None:
         log_calls.append((event, stage, clips, diagnostics))
 
-    monkeypatch.setattr("frame_compare.orchestration.fps_report.log.info", _record_log)
+    monkeypatch.setattr(
+        "frame_compare.orchestration.fps_report.log", SimpleNamespace(info=_record_log)
+    )
 
     emit_consolidated_fps_report(
         stage="after_load_sources",
@@ -246,7 +308,7 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
         rich_output=True,
         no_color=True,
         diagnostics=[
-            "Analysis source: encode.mkv (configured)",
+            "Analysis source: Comparison 1 | selected by configured policy",
             "FPS target: 24000/1001 (majority)",
         ],
     )
@@ -272,7 +334,7 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
     assert "6.0 GiB" in captured.err
     assert "ref.mkv" in captured.err
     assert "encode.mkv" in captured.err
-    assert "Analysis source: encode.mkv (configured)" in captured.err
+    assert "Analysis source: Comparison 1 | selected by configured policy" in captured.err
     assert "FPS target: 24000/1001 (majority)" in captured.err
     assert "\x1b[" not in captured.err
     assert "[bold cyan]" not in captured.err
@@ -434,7 +496,9 @@ def test_emit_consolidated_fps_report_logs_non_tty_diagnostics_without_rich_outp
     ) -> None:
         log_calls.append((event, stage, clips, diagnostics))
 
-    monkeypatch.setattr("frame_compare.orchestration.fps_report.log.info", _record_log)
+    monkeypatch.setattr(
+        "frame_compare.orchestration.fps_report.log", SimpleNamespace(info=_record_log)
+    )
 
     emit_consolidated_fps_report(
         stage="after_align",
@@ -509,7 +573,7 @@ def test_emit_consolidated_fps_report_prioritizes_effective_fps_divergence(
     assert "adjusted" not in captured.err
 
 
-@pytest.mark.parametrize("columns", [60, 80])
+@pytest.mark.parametrize("columns", [60, 80, 120, 240])
 def test_emit_consolidated_fps_report_wraps_at_narrow_terminal_widths(
     columns: int,
     monkeypatch: pytest.MonkeyPatch,

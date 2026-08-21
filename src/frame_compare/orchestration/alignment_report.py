@@ -13,6 +13,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from frame_compare.orchestration.context import ClipState
+from frame_compare.services.release_identity import format_release_descriptor
 from frame_compare.services.types import AlignmentSource
 
 _REPORT_CONSOLE_WIDTH = 180
@@ -32,6 +33,7 @@ class AlignmentReportComparison:
     comparison_trim_range: tuple[int, int]
     reference_path: Path | None = None
     comparison_path: Path | None = None
+    presentation_name: str | None = None
 
 
 def build_frame_alignment_report(
@@ -58,6 +60,15 @@ def build_frame_alignment_report(
             comparison_trim_range=_trim_range(comparison),
             reference_path=reference.path,
             comparison_path=comparison.path,
+            presentation_name=(
+                comparison.label
+                if comparison.label_is_explicit
+                else (
+                    format_release_descriptor(comparison.release_identity)
+                    if comparison.release_identity is not None
+                    else comparison.label
+                )
+            ),
         )
         for comparison in comparisons
     )
@@ -147,7 +158,10 @@ def _render_alignment_table(
             table.add_row("", "")
 
         source = comparison.alignment_source if comparison.alignment_source is not None else "none"
-        table.add_row("comparison", f"[bright_white]{escape(comparison.label)}[/]")
+        display_name = (
+            comparison.label if verbose else (comparison.presentation_name or comparison.label)
+        )
+        table.add_row("comparison", f"[bright_white]{escape(display_name)}[/]")
         table.add_row(
             "  offset",
             f"[bright_white]{escape(_format_offset(comparison.relative_offset_frames))}[/]",
@@ -157,7 +171,7 @@ def _render_alignment_table(
             "  trims",
             "[bright_white]"
             f"Reference {escape(_format_range(comparison.reference_trim_range))}, "
-            f"{escape(comparison.label)} "
+            f"{escape(display_name)} "
             f"{escape(_format_range(comparison.comparison_trim_range))}"
             "[/]",
         )

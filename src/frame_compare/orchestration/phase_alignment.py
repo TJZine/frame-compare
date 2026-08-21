@@ -35,6 +35,12 @@ from frame_compare.services.alignment import (
     format_rejected_alignment_warning,
 )
 from frame_compare.services.errors import AudioAlignmentError
+from frame_compare.services.release_identity import (
+    common_content_identity,
+    format_compact_identity,
+    format_content_identity,
+    format_release_descriptor,
+)
 from frame_compare.services.types import AlignmentConfig
 from frame_compare.utils.types import (
     AlignmentCacheSettings,
@@ -254,10 +260,26 @@ def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
         refinement_mode=ctx.config.audio_alignment.refinement_mode,
         refinement_sample_rate=ctx.config.audio_alignment.refinement_sample_rate,
     )
+    clips = [ctx.reference, *ctx.comparisons]
+    identities = [clip.release_identity for clip in clips]
+    common_content = (
+        common_content_identity([identity for identity in identities if identity is not None])
+        if all(identity is not None for identity in identities)
+        else None
+    )
+    presentation_names = [
+        _alignment_presentation_name(clip, common_content is not None) for clip in clips
+    ]
+    counts = {name: presentation_names.count(name) for name in presentation_names}
+    presentation_names = [
+        clip.path.name if not name or counts[name] > 1 else name
+        for clip, name in zip(clips, presentation_names, strict=True)
+    ]
     return AlignmentRequest(
         reference=_alignment_clip_request(
             ctx.reference,
             selected_audio_stream=ctx.config.audio_alignment.reference_stream,
+            presentation_name=presentation_names[0],
         ),
         selected_reference_relationship=_selected_reference_relationship(ctx),
         comparisons=[
@@ -266,14 +288,27 @@ def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
                 selected_audio_stream=ctx.config.audio_alignment.comparison_streams.get(
                     comparison.path.stem
                 ),
+                presentation_name=presentation_names[index],
             )
-            for comparison in ctx.comparisons
+            for index, comparison in enumerate(ctx.comparisons, start=1)
         ],
         previous_offsets=ctx.config.audio_alignment.previous_offsets,
         generated_dir=ctx.workspace.generated_dir,
         shared_alignment_cache_dir=ctx.workspace.shared_alignment_cache_dir,
         settings=settings,
+        presentation_content=(
+            None if common_content is None else format_content_identity(common_content)
+        ),
     )
+
+
+def _alignment_presentation_name(clip: ClipState, has_common_content: bool) -> str:
+    if clip.label_is_explicit and clip.label.strip():
+        return clip.label.strip()
+    if clip.release_identity is None:
+        return clip.path.name
+    formatter = format_release_descriptor if has_common_content else format_compact_identity
+    return formatter(clip.release_identity) or clip.path.name
 
 
 def _selected_reference_relationship(ctx: RunContext) -> AlignmentSelectedReferenceRelationship:
@@ -284,7 +319,7 @@ def _selected_reference_relationship(ctx: RunContext) -> AlignmentSelectedRefere
 
 
 def _alignment_clip_request(
-    clip: ClipState, *, selected_audio_stream: int | None
+    clip: ClipState, *, selected_audio_stream: int | None, presentation_name: str | None = None
 ) -> AlignmentClipRequest:
     fingerprint = clip.probe.fingerprint
     return AlignmentClipRequest(
@@ -301,6 +336,7 @@ def _alignment_clip_request(
         effective_fps_den=clip.effective_fps.denominator,
         selected_audio_stream=selected_audio_stream,
         preserved_frame_props=dict(clip.probe.preserved_frame_props),
+        presentation_name=presentation_name,
     )
 
 

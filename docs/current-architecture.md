@@ -350,7 +350,9 @@ The align phase uses a typed orchestration-to-services request seam:
 state, the workspace-level shared alignment cache path, reference/comparison
 labels, source identity facts, trims, effective FPS values, selected reference
 relationship, selected audio streams, cache-identity settings, and preserved
-frame props. These cache-identity DTOs use layer-neutral primitives or
+frame props. Orchestration also supplies presentation-only common-content and
+per-source display strings as optional primitives for the reuse prompt; alignment
+services do not parse filenames. These cache-identity DTOs use layer-neutral primitives or
 dependency-light shared utility types; `services` must not import
 orchestration-owned or analysis-owned identity types such as `ClipState`,
 `ClipIdentity`, or `ClipFingerprint`.

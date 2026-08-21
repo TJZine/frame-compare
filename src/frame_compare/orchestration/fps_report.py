@@ -16,6 +16,13 @@ from rich.panel import Panel
 from rich.table import Table
 
 from frame_compare.orchestration.context import ClipState
+from frame_compare.services.release_identity import (
+    ReleaseIdentity,
+    common_content_identity,
+    format_compact_identity,
+    format_content_identity,
+    format_release_descriptor,
+)
 
 log = structlog.get_logger()
 
@@ -37,6 +44,8 @@ class FpsReportClip:
     fps_divergent: bool
     note: str | None
     size_bytes: int = 0
+    release_identity: ReleaseIdentity | None = None
+    label_is_explicit: bool = False
 
 
 def build_consolidated_fps_report(
@@ -62,6 +71,8 @@ def build_consolidated_fps_report(
                 fps_divergent=clip.effective_fps != clip.source_fps,
                 note=None,
                 size_bytes=clip.probe.fingerprint.size_bytes,
+                release_identity=clip.release_identity,
+                label_is_explicit=clip.label_is_explicit,
             )
         )
     return tuple(clips)
@@ -171,16 +182,36 @@ def _render_clip_overview(
     table.add_column("key", style="grey70", no_wrap=True, min_width=14, overflow="fold")
     table.add_column("value", overflow="fold")
 
+    identities = [clip.release_identity for clip in clips]
+    common_content = (
+        common_content_identity([identity for identity in identities if identity is not None])
+        if all(identity is not None for identity in identities)
+        else None
+    )
+    if common_content is not None:
+        table.add_row(
+            "Content", f"[bright_white]{escape(format_content_identity(common_content))}[/]"
+        )
+
     for index, clip in enumerate(clips):
         if index > 0:
             table.add_row("", "")
 
         filename = clip.path.name
         label = clip.label.strip()
-        identity = filename if label in {"", clip.path.stem, filename} else label
-        table.add_row(_clip_role(index), f"[bright_white]{escape(identity)}[/]")
-        if identity != filename:
-            table.add_row("  File", f"[bright_white]{escape(filename)}[/]")
+        table.add_row(_clip_role(index), "")
+        if clip.label_is_explicit and label:
+            table.add_row("  Label", f"[bright_white]{escape(label)}[/]")
+        if clip.release_identity is not None:
+            release = (
+                format_release_descriptor(clip.release_identity)
+                if common_content is not None
+                else format_compact_identity(clip.release_identity)
+            )
+            table.add_row("  Release", f"[bright_white]{escape(release or filename)}[/]")
+        elif label and label not in {clip.path.stem, filename}:
+            table.add_row("  Label", f"[bright_white]{escape(label)}[/]")
+        table.add_row("  File", f"[bright_white]{escape(filename)}[/]")
         table.add_row(
             "  Video",
             f"[bright_white]{escape(f'{clip.width}x{clip.height}')}[/] | {_format_dynamic_range(clip.is_hdr)}",
@@ -252,9 +283,18 @@ def _render_fps_table(
         if clip.note is not None:
             status_text = f"{status_text} [dim]({escape(clip.note)})[/]"
 
+        descriptor = (
+            clip.label
+            if clip.label_is_explicit
+            else (
+                format_release_descriptor(clip.release_identity)
+                if clip.release_identity is not None
+                else clip.label
+            )
+        )
         cells = [
             _clip_role(index),
-            escape(clip.label),
+            escape(descriptor or clip.path.name),
             _format_fps_transition(clip),
             status_text,
         ]

@@ -389,8 +389,10 @@ unchanged.
   for comparisons with material alignment information. It is suppressed by
   `--quiet` and is never emitted to `run --json` stdout.
 - After sources load, normal human output uses one `[OK] Sources — N loaded`
-  panel heading. Its rows use `Reference` and `Comparison N` roles and show each
-  source's de-duplicated label/filename identity, resolution, source frame count, HDR/SDR
+  panel heading. Its rows use `Reference` and `Comparison N` roles, factor one
+  reliable common content identity, and show each source's filename-claimed release
+  descriptor and exact filename separately. Explicit labels remain primary. Parsed
+  release claims remain distinct from probed resolution, source frame count, HDR/SDR
   signal, source/effective FPS when they differ, complete container file size in
   IEC units, and an input-relative path when the source is beneath the configured
   input directory when nested. External sources remain absolute. Sizes use one
@@ -406,7 +408,8 @@ unchanged.
   stderr event and do not add fields to the successful stdout payload.
 - Material `Frame Alignment` output puts comparison, offset, source, trim, and
   warning evidence before verbose provenance details. Verbose mode also retains
-  row-zero source frames, selected aligned frames, and absolute source paths.
+  canonical labels, row-zero source frames, selected aligned frames, and absolute
+  source paths; normal mode uses compact release identities.
   Source/FPS, alignment, and previous-offset prompt panels honor the actual
   terminal width up to their existing maximum and do not impose a 100-column
   minimum; status meaning remains visible in no-color output at narrow widths.
@@ -1218,12 +1221,14 @@ enabled.
   stdin is not a TTY, or EOF occurs while prompting, the CLI emits
   `Previous alignment offset reuse prompt unavailable; continuing without reuse.`
   to stderr and continues without reuse.
-- The previous-offset reuse table de-duplicates labels and filenames, displays the
+- The nested `Alignment reuse` decision panel consumes primitive presentation strings
+  prepared by orchestration; it never reparses source paths. It factors reliable
+  common content, uses compact release identities or canonical filename fallbacks,
+  displays the
   signed frame offset and time offset, humanizes evidence as `Computed` or
   `Preview-confirmed`, and renders valid timestamps in UTC while preserving invalid
-  values verbatim. The combined shared cache path remains visible as the final
-  cache evidence row. It does not derive freshness from file mtime or
-  index mtime.
+  values verbatim. Legacy/fallback prompt inputs retain exact filename, path, and
+  cache evidence. It does not derive freshness from file mtime or index mtime.
 - Shared previous-offset entries live under
   `<resolved paths.generated_dir>/cache/alignment/`. This is shared generated-data
   cache state and does not live inside a fresh run folder.

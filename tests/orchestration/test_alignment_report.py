@@ -86,6 +86,7 @@ def test_build_frame_alignment_report_uses_final_normalized_trim_domain() -> Non
             comparison_trim_range=(0, 844),
             reference_path=Path("ref.mkv"),
             comparison_path=Path("encode.mkv"),
+            presentation_name="Encode",
         ),
     )
 
@@ -439,7 +440,47 @@ def test_emit_frame_alignment_report_verbose_retains_row_zero_frames_and_paths(
     assert str(comparison_path) in captured.err
 
 
-@pytest.mark.parametrize("columns", [60, 80])
+def test_emit_frame_alignment_report_uses_compact_name_only_in_normal_mode(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    comparison = AlignmentReportComparison(
+        label="Canonical Encode",
+        presentation_name="2160p | ATV WEB-DL | DV | Kitsune",
+        alignment_source="computed",
+        relative_offset_frames=2,
+        reference_row_zero_source_frame=2,
+        comparison_row_zero_source_frame=0,
+        reference_trim_range=(2, 99),
+        comparison_trim_range=(0, 97),
+    )
+
+    emit_frame_alignment_report(
+        stage="after_align",
+        comparisons=[comparison],
+        selected_frames=[],
+        alignment_warnings=[],
+        json_output=False,
+        quiet=False,
+        no_color=True,
+    )
+    normal = capsys.readouterr().err
+    assert "2160p | ATV WEB-DL | DV | Kitsune" in normal
+    assert "Canonical Encode" not in normal
+
+    emit_frame_alignment_report(
+        stage="after_align",
+        comparisons=[comparison],
+        selected_frames=[],
+        alignment_warnings=[],
+        json_output=False,
+        quiet=False,
+        no_color=True,
+        verbose=True,
+    )
+    assert "Canonical Encode" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("columns", [60, 80, 120, 240])
 def test_emit_frame_alignment_report_wraps_at_narrow_terminal_widths(
     columns: int,
     monkeypatch: pytest.MonkeyPatch,

@@ -440,7 +440,7 @@ enable = false
     assert result.success is True
     assert result.cache_hit is True
     assert diagnostics_by_stage["after_load_sources"] == [
-        "Analysis source: analysis.mkv (configured)"
+        "Analysis source: Comparison 1 | selected by configured policy"
     ]
 
 

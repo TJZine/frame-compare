@@ -12,6 +12,7 @@ from typing import Literal
 
 from rich.console import Console
 from rich.markup import escape
+from rich.padding import Padding
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -52,6 +53,7 @@ class PreviousOffsetPromptRow:
     time_offset_seconds: float
     accepted_at: str
     source: PreviousOffsetPromptSource
+    presentation_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +64,8 @@ class PreviousOffsetPromptInput:
     reference_filename: str
     shared_cache_path: Path
     rows: tuple[PreviousOffsetPromptRow, ...]
+    content: str | None = None
+    reference_name_is_prebuilt: bool = False
 
 
 def _console(*, no_color: bool) -> Console:
@@ -115,7 +119,8 @@ def previous_offset_prompt_input_from_rows(
 ) -> PreviousOffsetPromptInput:
     """Build prompt input from pre-resolved shared-cache display rows."""
     return PreviousOffsetPromptInput(
-        reference_label=_display_label(
+        reference_label=request.reference.presentation_name
+        or _display_label(
             label=request.reference.label,
             filename=request.reference.path.name,
             stem=request.reference.path.stem,
@@ -123,6 +128,8 @@ def previous_offset_prompt_input_from_rows(
         reference_filename=request.reference.path.name,
         shared_cache_path=request.shared_alignment_cache_dir / CACHE_FILE_NAME,
         rows=tuple(rows),
+        content=request.presentation_content,
+        reference_name_is_prebuilt=request.reference.presentation_name is not None,
     )
 
 
@@ -139,10 +146,17 @@ def _render_previous_offsets_table(
     )
     table.add_column("key", style="grey70", no_wrap=True, min_width=12, overflow="fold")
     table.add_column("value", overflow="fold")
-    reference_identity = _display_label(
-        label=prompt_input.reference_label,
-        filename=prompt_input.reference_filename,
-        stem=Path(prompt_input.reference_filename).stem,
+    if prompt_input.content:
+        table.add_row("Content", f"[bright_white]{escape(prompt_input.content)}[/]")
+        table.add_row("", "")
+    reference_identity = (
+        prompt_input.reference_label
+        if prompt_input.reference_name_is_prebuilt
+        else _display_label(
+            label=prompt_input.reference_label,
+            filename=prompt_input.reference_filename,
+            stem=Path(prompt_input.reference_filename).stem,
+        )
     )
     table.add_row(
         "reference",
@@ -155,9 +169,11 @@ def _render_previous_offsets_table(
         table.add_row("  File", f"[bright_white]{escape(prompt_input.reference_filename)}[/]")
     for row in prompt_input.rows:
         table.add_row("", "")
-        display_label = _display_label(label=row.label, filename=row.filename, stem=row.stem)
+        display_label = row.presentation_name or _display_label(
+            label=row.label, filename=row.filename, stem=row.stem
+        )
         table.add_row("comparison", f"[bright_white]{escape(display_label)}[/]")
-        if display_label not in {row.filename, row.stem}:
+        if row.presentation_name is None and display_label not in {row.filename, row.stem}:
             table.add_row("  File", f"[bright_white]{escape(row.filename)}[/]")
         table.add_row(
             "  Offset",
@@ -168,18 +184,19 @@ def _render_previous_offsets_table(
         table.add_row(
             "  Accepted", f"[bright_white]{escape(_format_accepted_at(row.accepted_at))}[/]"
         )
-        if Path(row.path).name != row.filename:
+        if row.presentation_name is None and Path(row.path).name != row.filename:
             table.add_row("  Path", f"[dim]{escape(row.path)}[/]")
-    table.add_row("", "")
-    table.add_row(
-        "Cache",
-        Text(
-            str(prompt_input.shared_cache_path),
-            style="dim",
-            overflow="fold",
-            no_wrap=False,
-        ),
-    )
+    if not prompt_input.reference_name_is_prebuilt:
+        table.add_row("", "")
+        table.add_row(
+            "Cache",
+            Text(
+                str(prompt_input.shared_cache_path),
+                style="dim",
+                overflow="fold",
+                no_wrap=False,
+            ),
+        )
     return table
 
 
@@ -243,10 +260,13 @@ def prompt_for_previous_offset_reuse(
     try:
         console = _console(no_color=no_color)
         console.print(
-            Panel(
-                _render_previous_offsets_table(prompt_input=prompt_input),
-                title="[bold magenta][WAIT][/] [bold cyan]Reuse previous alignment?[/]",
-                border_style="cyan",
+            Padding(
+                Panel(
+                    _render_previous_offsets_table(prompt_input=prompt_input),
+                    title="[bold magenta][WAIT][/] [bold cyan]Alignment reuse[/]",
+                    border_style="cyan",
+                ),
+                (0, 0, 0, 2),
             ),
             crop=False,
         )
