@@ -23,5 +23,9 @@ def get_js() -> str:
     lens = (assets / "lens.js").read_text(encoding="utf-8")
     grid_view = (assets / "grid_view.js").read_text(encoding="utf-8")
     inspector = (assets / "inspector.js").read_text(encoding="utf-8")
+    viewport = (assets / "viewport.js").read_text(encoding="utf-8")
     viewer = (assets / "viewer.js").read_text(encoding="utf-8")
-    return f"{viewer_format}\n\n{review_state}\n\n{lens}\n\n{grid_view}\n\n{inspector}\n\n{viewer}"
+    return (
+        f"{viewer_format}\n\n{review_state}\n\n{lens}\n\n{grid_view}\n\n"
+        f"{inspector}\n\n{viewport}\n\n{viewer}"
+    )

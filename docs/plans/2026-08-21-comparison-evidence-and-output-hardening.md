@@ -1449,3 +1449,12 @@ Retain the plan as implementation history after closeout.
   1.2, report identity, storage, review JSON, and visual behavior are unchanged; 100 focused
   Inspector harness processes completed in 3.33 seconds; CI and environment-gated Windows,
   live-service, and real-VapourSynth evidence were not run locally; Session F is ready.
+
+- 2026-08-21 — Session F completed: a focused Viewport owner now handles zoom/pan,
+  fit/reveal, transient pointer/pinch mechanics, Grid normalization, directional
+  pair alignment, and Lens/Grid refreshes while viewer.js retains canonical state,
+  storage, event/shortcut routing, transitions, and render sequencing; focused
+  Node/browser proof and the full local gate passed; payload 1.2, storage, CSS, and
+  visual behavior are unchanged; 100 viewport harness processes completed in 3.503
+  seconds; CI and environment-gated Windows, live-service, and real-VapourSynth
+  evidence were not run locally; Session G is ready.

@@ -646,7 +646,7 @@ presentation, and visible-range controls. It consumes the viewer's single viewpo
 state while exposing visible image entries to the lens rather than duplicating either. In
 Grid mode the shared pan fields represent normalized image-box translation and each
 cell derives its CSS-pixel transform from its own contained image dimensions; the
-viewer converts those fields at the Grid/pair-mode boundary so mixed-aspect cells keep
+viewport owner converts those fields at the Grid/pair-mode boundary so mixed-aspect cells keep
 one normalized viewport center without changing pair-mode persistence semantics.
 
 #### Review State And Viewer Composition
@@ -659,6 +659,13 @@ open/close focus and inert policy, tab selection and roving keyboard behavior, F
 Clips, Align, and Export rendering, safe slow.pics link presentation, and lazy Review
 activation through the root viewer.
 
+`assets/viewport.js` owns zoom clamping and pointer anchoring, pan bounds and Grid
+normalization, fit/reset/reveal math, transient pointer/pinch mechanics, directional
+pair-alignment normalization and offsets, and Lens/Grid viewport refreshes. It mutates
+the root viewer's canonical state and routes persistence back through the root; it does
+not create a second state or storage owner. The root continues to register events,
+route shortcuts and mode/source/frame transitions, and sequence rendering.
+
 `assets/review_state.js` owns the exact report-scoped local review schema, bounded
 bookmark/tag/note/preferred-clip records, fail-closed localStorage reads, deterministic
 V1 JSON export, strict import validation and preview, atomic merge/replace apply, and
@@ -668,7 +675,7 @@ refreshes, and routes transition announcements through the existing shared polit
 region. Its storage is
 separate from viewport preferences and never writes into the report or run directory.
 `assets/viewer.js` caches the Review DOM and composes those focused owners with the
-existing canonical report, mode, pointer, viewport, alignment, and Inspector state
+existing canonical report, mode, viewport, alignment, and Inspector state
 rather than owning duplicate Inspector rendering/focus policy or
 coordinate conversions
 or grid mount policy. Grid remains outside the public report default-mode payload

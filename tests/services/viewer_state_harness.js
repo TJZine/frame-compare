@@ -24,6 +24,7 @@ const lensPath = path.join(
 );
 const viewerFormatPath = path.join(repoRoot, 'src', 'frame_compare', 'services', 'report', 'assets', 'viewer_format.js');
 const inspectorPath = path.join(repoRoot, 'src', 'frame_compare', 'services', 'report', 'assets', 'inspector.js');
+const viewportPath = path.join(repoRoot, 'src', 'frame_compare', 'services', 'report', 'assets', 'viewport.js');
 
 let activeDocument = null;
 
@@ -244,12 +245,13 @@ function loadViewer({ clipCount, savedState = null }) {
         },
     };
     activeDocument = context.document;
-    const script = `${fs.readFileSync(viewerFormatPath, 'utf8')}\n${fs.readFileSync(lensPath, 'utf8')}\n${fs.readFileSync(inspectorPath, 'utf8')}\n${fs.readFileSync(viewerPath, 'utf8')}\nglobalThis.__Lens = Lens;\nglobalThis.__Inspector = Inspector;\nglobalThis.__ReportViewer = ReportViewer;`;
+    const script = `${fs.readFileSync(viewerFormatPath, 'utf8')}\n${fs.readFileSync(lensPath, 'utf8')}\n${fs.readFileSync(inspectorPath, 'utf8')}\n${fs.readFileSync(viewportPath, 'utf8')}\n${fs.readFileSync(viewerPath, 'utf8')}\nglobalThis.__Lens = Lens;\nglobalThis.__Inspector = Inspector;\nglobalThis.__Viewport = Viewport;\nglobalThis.__ReportViewer = ReportViewer;`;
     vm.runInNewContext(script, context, { filename: viewerPath });
     assert.equal(typeof context.__Lens.create, 'function');
 
     const viewer = context.__ReportViewer;
     viewer.inspector = context.__Inspector.create(viewer);
+    viewer.viewport = context.__Viewport.create(viewer);
     const payload = viewer.normalizePayload(payloadWithClipCount(clipCount));
     viewer.state.data = payload;
     viewer.state.mode = payload.default_mode;
@@ -1254,7 +1256,7 @@ const summary = {};
     };
     viewer.state.panX = 3;
     viewer.state.panY = 4;
-    viewer.setPan = function setPanWithoutLayout(x, y) {
+    viewer.viewport.setPan = function setPanWithoutLayout(x, y) {
         this.state.panX = x;
         this.state.panY = y;
     };
