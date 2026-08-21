@@ -17,7 +17,7 @@ from frame_compare.analysis.window import SelectionWindow
 from frame_compare.orchestration import phase_alignment, phase_selection
 from frame_compare.orchestration.full_window_retry import FullWindowRetryOverride
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentResult
+from frame_compare.services.types import AlignmentResult, AlignmentStabilitySummary
 from tests.orchestration.phase_task_helpers import (
     _clip,
     _context,
@@ -145,6 +145,40 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     assert selected_frames == [0, 2, 50, 99]
     assert output.selection_breakdown is None
     assert output.selection_details_by_source_frame is None
+
+
+def test_run_align_phase_warns_without_changing_material_variable_alignment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Comparison 1")
+    ctx = _context(tmp_path, comparisons=[comparison])
+    summary = AlignmentStabilitySummary("variable", 4, -3, 4, 0, 2, 3, None)
+    monkeypatch.setattr(
+        phase_alignment,
+        "align_clips_from_request",
+        lambda *_args, **_kwargs: [
+            AlignmentResult(
+                "reference.mkv",
+                "encode.mkv",
+                2,
+                0.08,
+                0.9,
+                "cross_correlation",
+                "computed",
+                stability=summary,
+            )
+        ],
+    )
+
+    output = phase_alignment.run_align_phase(ctx, selected_frames=[2, 50])
+
+    assert output.comparisons[0].alignment is not None
+    assert output.comparisons[0].alignment.relative_offset_frames == 2
+    assert output.comparisons[0].alignment.stability == summary
+    assert output.warnings == [
+        "align: Comparison 1 alignment varies across the source. "
+        "The applied constant offset was retained and should be verified."
+    ]
 
 
 def test_alignment_request_records_configured_reference_relationship(tmp_path: Path) -> None:

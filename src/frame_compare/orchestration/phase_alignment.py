@@ -105,7 +105,9 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
     warnings = [
         format_rejected_alignment_warning(result) for result in results if not result.applied
     ]
-    for comparison, result in zip(ctx.comparisons, results, strict=True):
+    for comparison_index, (comparison, result) in enumerate(
+        zip(ctx.comparisons, results, strict=True), start=1
+    ):
         alignment = None
         if result.applied:
             frame_offset = result.frame_offset
@@ -116,7 +118,31 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
                 comparison_stem=Path(result.comparison_clip).stem,
                 relative_offset_frames=frame_offset,
                 source=result.source,
+                stability=result.stability,
             )
+            if result.stability is not None and result.stability.classification in {
+                "possible_drift",
+                "possible_discontinuity",
+                "variable",
+            }:
+                detail = {
+                    "possible_drift": "may drift across the source",
+                    "possible_discontinuity": "varies across the source; possible edit discontinuity",
+                    "variable": "varies across the source",
+                }[result.stability.classification]
+                position = result.stability.change_position_seconds
+                if (
+                    position is not None
+                    and result.stability.classification == "possible_discontinuity"
+                ):
+                    seconds = round(position)
+                    detail += (
+                        f" near {seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
+                    )
+                warnings.append(
+                    f"align: Comparison {comparison_index} alignment {detail}. "
+                    "The applied constant offset was retained and should be verified."
+                )
         updated_comparisons.append(
             replace(
                 comparison,

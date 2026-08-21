@@ -252,7 +252,9 @@ recovery requirement.
   entries may also retain the computed
   audio alignment result that produced the preview suggestion so a later run can
   decline the human-confirmed offset without rerunning deterministic audio
-  alignment. Unreadable, corrupt, unsupported-version, malformed source-table, or
+  alignment. Computed results may include a bounded scalar stability summary; legacy
+  version-1 entries without it remain reusable, and no per-window evidence or audio is
+  persisted. Unreadable, corrupt, unsupported-version, malformed source-table, or
   invalid-entry shared reuse data degrades to the normal alignment path with a
   warning log event. Ordinary no-match, incomplete, or stale source-set misses
   can silently return no reusable set and continue through the normal alignment
@@ -371,7 +373,10 @@ orchestration-owned or analysis-owned identity types such as `ClipState`,
 `ClipIdentity`, or `ClipFingerprint`.
 
 `frame_compare.services.alignment` owns alignment entrypoint sequencing and
-precedence, while `frame_compare.services.alignment_previous_offsets` owns
+precedence and carries diagnostic-only stability summaries without allowing them to
+change the applied constant offset or trims. Immutable orchestration alignment state
+carries that summary to warning and human-report owners without a mutable diagnostics
+side channel. `frame_compare.services.alignment_previous_offsets` owns
 previous-offset reuse policy. Exact-match computed audio alignment cache hits are
 treated as deterministic and can be reused independently of the human
 confirmed-offset policy; `previous_offsets` governs only VSPreview-confirmed

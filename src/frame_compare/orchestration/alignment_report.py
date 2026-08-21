@@ -14,7 +14,7 @@ from rich.table import Table
 from frame_compare.orchestration.context import ClipState
 from frame_compare.orchestration.presentation import report_console_width
 from frame_compare.services.release_identity import format_release_descriptor
-from frame_compare.services.types import AlignmentSource
+from frame_compare.services.types import AlignmentSource, AlignmentStabilitySummary
 
 _MAX_SELECTED_FRAMES = 8
 
@@ -33,6 +33,7 @@ class AlignmentReportComparison:
     reference_path: Path | None = None
     comparison_path: Path | None = None
     presentation_name: str | None = None
+    stability: AlignmentStabilitySummary | None = None
 
 
 def build_frame_alignment_report(
@@ -68,6 +69,7 @@ def build_frame_alignment_report(
                     else comparison.label
                 )
             ),
+            stability=None if comparison.alignment is None else comparison.alignment.stability,
         )
         for comparison in comparisons
     )
@@ -107,6 +109,16 @@ def _format_selected_frames(selected_frames: Sequence[int]) -> str:
     if len(selected_frames) > _MAX_SELECTED_FRAMES:
         shown.append(f"... ({len(selected_frames)} total)")
     return ", ".join(shown)
+
+
+def _format_stability(summary: AlignmentStabilitySummary) -> str:
+    text = summary.classification.replace("_", " ")
+    if summary.offset_min_frames is not None and summary.offset_max_frames is not None:
+        text += f"; {summary.offset_min_frames:+d}..{summary.offset_max_frames:+d} frames"
+    if summary.change_position_seconds is not None:
+        seconds = round(summary.change_position_seconds)
+        text += f"; change near {seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
+    return text
 
 
 def _has_material_alignment_info(
@@ -160,6 +172,17 @@ def _render_alignment_table(
             "  offset",
             f"[bright_white]{escape(_format_offset(comparison.relative_offset_frames))}[/]",
         )
+        stability = comparison.stability
+        if stability is not None and (
+            verbose
+            or stability.classification in {"possible_drift", "possible_discontinuity", "variable"}
+        ):
+            value = _format_stability(stability)
+            if verbose:
+                value += f"; {stability.valid_windows} valid windows"
+            table.add_row("  stability", f"[bright_white]{escape(value)}[/]")
+        elif verbose:
+            table.add_row("  stability", "[dim]unavailable (legacy cache entry)[/]")
         table.add_row("  source", f"[bright_white]{escape(source)}[/]")
         table.add_row(
             "  trims",

@@ -388,7 +388,12 @@ unchanged.
   the alignment phase when accepted or rejected frame alignment changes need
   explanation. The diagnostic reports normalized source-frame row 0, final trim
   ranges, offsets, selected aligned frames, and rejected alignment warning context
-  for comparisons with material alignment information. It is suppressed by
+  for comparisons with material alignment information. Material non-constant offset
+  evidence adds one concise stability row and one bounded warning stating that the
+  applied constant offset was retained and should be verified. Stable or insufficient
+  evidence does not warn. Verbose mode may also show stable, valid-window-count, or
+  legacy-cache-unavailable evidence; individual diagnostic windows are never printed.
+  It is suppressed by
   `--quiet` and is never emitted to `run --json` stdout.
 - After sources load, normal human output uses one `[OK] Sources — N loaded`
   panel heading. Its rows use `Reference` and `Comparison N` roles, factor one
@@ -1280,6 +1285,9 @@ enabled.
 - `force_interactive = true` is incompatible with `previous_offsets = "prompt"`
   and `previous_offsets = "always"` because reuse can skip VSPreview.
 - Successful `run --json` output remains unchanged by previous-offset reuse.
+- Optional cached stability summaries are diagnostic-only scalar evidence. Version-1
+  entries without a summary remain valid and reusable; summaries do not affect cache
+  identity, selected offsets, or trims.
 - `correlation_mode = "raw_fft" | "gcc_phat"` selects the correlation algorithm
   used by the computed estimator. `raw_fft` is the default.
 - `preprocessing_mode = "none" | "standard"` selects signal preprocessing before

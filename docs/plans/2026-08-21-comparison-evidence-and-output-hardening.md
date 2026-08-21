@@ -1433,3 +1433,11 @@ Retain the plan as implementation history after closeout.
   120-second synthetic comparison measured 0.081s before and 0.178s with diagnostics
   (2.20x total) using two supplemental windows, with the selected offset unchanged;
   CI was not run locally and environment-gated skips remain; Session D is ready.
+
+- 2026-08-21 — Session D completed: compact stability summaries now survive computed,
+  cached, and VSPreview-confirmed results, immutable orchestration state, bounded
+  path-safe warnings, and concise/verbose Frame Alignment output without changing
+  offsets, trims, JSON, or HTML payloads; focused proof and the full local gate passed;
+  100,000 synthetic summaries serialized at 0.416 microseconds each and parsed at
+  2.237 microseconds each; CI was not run locally and environment-gated skips remain;
+  Session E is ready.

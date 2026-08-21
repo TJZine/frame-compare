@@ -123,6 +123,7 @@ def _apply_confirmed_vspreview_offsets(
         if key not in confirmed_offsets_by_key:
             continue
         frame_offset = int(confirmed_offsets_by_key[key])
+        computed_stability = results_map[key].stability if key in results_map else None
         results_map[key] = AlignmentResult(
             reference_clip=reference.name,
             comparison_clip=comp.name,
@@ -131,6 +132,7 @@ def _apply_confirmed_vspreview_offsets(
             correlation_score=1.0,
             algorithm=None,
             source="manual",
+            stability=computed_stability,
         )
     return resolved_fps_reference
 
@@ -270,6 +272,7 @@ def _compute_missing_alignments(
             source="computed",
             applied=estimate.applied,
             diagnostic=estimate.diagnostic,
+            stability=estimate.stability,
         )
         results_map[_alignment_key(reference, comp)] = res
         _record_alignment_progress(progress=progress, result=res)

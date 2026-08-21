@@ -49,6 +49,13 @@ runtime identity.
 A cache miss simply returns to normal alignment. Corrupt or unsupported reuse data is
 ignored with a warning rather than treated as authoritative evidence.
 
+Computed alignment may also classify bounded evidence across the source as stable,
+possible drift, possible discontinuity, variable, or insufficient. This summary is
+diagnostic only: Frame Compare always retains the selected constant offset and trims.
+Material non-stable evidence produces one concise warning and should be verified at
+multiple points. Stable and insufficient evidence do not warn. New cache entries can
+retain the compact summary, while legacy entries without it remain reusable.
+
 ## Interactive verification with VSPreview
 
 VSPreview is included in the Windows portable bundle and optional in native

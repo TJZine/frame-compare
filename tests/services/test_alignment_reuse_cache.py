@@ -21,7 +21,11 @@ from frame_compare.services.alignment_reuse_cache import (
     save_reusable_offsets,
     source_set_cache_key,
 )
-from frame_compare.services.types import AlignmentProvenance, AlignmentResult
+from frame_compare.services.types import (
+    AlignmentProvenance,
+    AlignmentResult,
+    AlignmentStabilitySummary,
+)
 from frame_compare.utils.file_lock import FileLockTimeoutError
 from frame_compare.utils.types import (
     AlignmentCacheSettings,
@@ -135,6 +139,38 @@ def _write_computed(request: AlignmentRequest) -> None:
         ],
         accepted_at="2026-06-06T12:00:00Z",
     )
+
+
+def test_stability_summary_round_trips_without_changing_cache_version(tmp_path: Path) -> None:
+    request = _request(tmp_path)
+    summary = AlignmentStabilitySummary(
+        classification="possible_discontinuity",
+        valid_windows=4,
+        offset_min_frames=178,
+        offset_max_frames=202,
+        first_offset_frames=178,
+        last_offset_frames=202,
+        largest_adjacent_jump_frames=24,
+        change_position_seconds=2832.0,
+    )
+    result = replace(_result(request), stability=summary)
+
+    save_reusable_offsets(request, [_provenance(request, result=result)])
+    loaded = load_reusable_offset_entries(request)
+
+    assert loaded is not None
+    assert loaded[comparison_cache_key(request.comparisons[0])].result.stability == summary
+    assert _cache_data(request)["version"] == CACHE_VERSION
+
+
+def test_legacy_cache_entry_without_stability_remains_reusable(tmp_path: Path) -> None:
+    request = _request(tmp_path)
+    _write_computed(request)
+
+    loaded = load_reusable_offset_entries(request)
+
+    assert loaded is not None
+    assert loaded[comparison_cache_key(request.comparisons[0])].result.stability is None
 
 
 def _cache_data(request: AlignmentRequest) -> dict[str, object]:
@@ -287,7 +323,10 @@ def test_shared_reuse_cache_round_trips_vspreview_entry_with_computed_fallback(
     tmp_path: Path,
 ) -> None:
     request = _request(tmp_path)
-    computed = _result(request, frame_offset=42, correlation_score=0.876)
+    summary = AlignmentStabilitySummary("possible_drift", 4, 40, 42, 40, 42, 1, None)
+    computed = replace(
+        _result(request, frame_offset=42, correlation_score=0.876), stability=summary
+    )
     confirmed = AlignmentResult(
         reference_clip=request.reference.path.name,
         comparison_clip=request.comparisons[0].path.name,
@@ -316,10 +355,12 @@ def test_shared_reuse_cache_round_trips_vspreview_entry_with_computed_fallback(
     entry = next(iter(entries.values()))
     assert entry.origin == "vspreview_confirmed"
     assert entry.result.frame_offset == 47
+    assert entry.result.stability == summary
     assert entry.computed_result is not None
     assert entry.computed_result.frame_offset == 42
     assert entry.computed_result.algorithm == "cross_correlation"
     assert entry.computed_result.correlation_score == pytest.approx(0.876)
+    assert entry.computed_result.stability == summary
 
 
 def test_shared_reuse_cache_requires_complete_source_set(tmp_path: Path) -> None:

@@ -67,6 +67,7 @@ class AlignmentResult:
     source: AlignmentSource
     applied: bool = True
     diagnostic: str | None = None
+    stability: AlignmentStabilitySummary | None = None
 
 
 @dataclass(frozen=True)

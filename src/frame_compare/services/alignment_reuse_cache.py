@@ -15,6 +15,8 @@ from frame_compare.services.types import (
     AlignmentProvenance,
     AlignmentResult,
     AlignmentReuseCacheOrigin,
+    AlignmentStabilityClassification,
+    AlignmentStabilitySummary,
     ReusableAlignmentEntry,
 )
 from frame_compare.utils.atomic_write import write_bytes_atomic
@@ -259,6 +261,9 @@ def _parse_entry(
         raise ValueError("shared alignment cache entry identity mismatch")
 
     computed_result = _parse_cached_computed_result(entry.get("computed_result"), entry=entry)
+    stability = _parse_stability(entry.get("stability"))
+    if stability is None and computed_result is not None:
+        stability = computed_result.stability
 
     result = AlignmentResult(
         reference_clip=reference_clip,
@@ -268,6 +273,7 @@ def _parse_entry(
         correlation_score=replay_correlation_score,
         algorithm="cross_correlation" if origin == "computed" else None,
         source="cached",
+        stability=stability,
     )
     return ReusableAlignmentEntry(
         result=result,
@@ -310,7 +316,83 @@ def _parse_cached_computed_result(
         correlation_score=float(correlation_score),
         algorithm="cross_correlation",
         source="cached",
+        stability=_parse_stability(computed.get("stability")),
     )
+
+
+def _parse_stability(value: object) -> AlignmentStabilitySummary | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise TypeError("stability must be table")
+    data = cast(dict[str, object], value)
+    allowed_fields = {
+        "classification",
+        "valid_windows",
+        "offset_min_frames",
+        "offset_max_frames",
+        "first_offset_frames",
+        "last_offset_frames",
+        "largest_adjacent_jump_frames",
+        "change_position_seconds",
+    }
+    if unknown_fields := data.keys() - allowed_fields:
+        raise ValueError(f"unsupported stability fields: {sorted(unknown_fields)}")
+    classification = data.get("classification")
+    if classification not in {
+        "stable",
+        "possible_drift",
+        "possible_discontinuity",
+        "variable",
+        "insufficient_evidence",
+    }:
+        raise ValueError("unsupported stability classification")
+    valid_windows = data.get("valid_windows")
+    if not isinstance(valid_windows, int) or isinstance(valid_windows, bool) or valid_windows < 0:
+        raise TypeError("stability.valid_windows must be non-negative int")
+
+    def optional_int(name: str) -> int | None:
+        field = data.get(name)
+        if field is None:
+            return None
+        if not isinstance(field, int) or isinstance(field, bool):
+            raise TypeError(f"stability.{name} must be int or absent")
+        return field
+
+    position = data.get("change_position_seconds")
+    if position is not None and (
+        isinstance(position, bool) or not isinstance(position, int | float) or position < 0
+    ):
+        raise TypeError("stability.change_position_seconds must be non-negative number or absent")
+    return AlignmentStabilitySummary(
+        classification=cast(AlignmentStabilityClassification, classification),
+        valid_windows=valid_windows,
+        offset_min_frames=optional_int("offset_min_frames"),
+        offset_max_frames=optional_int("offset_max_frames"),
+        first_offset_frames=optional_int("first_offset_frames"),
+        last_offset_frames=optional_int("last_offset_frames"),
+        largest_adjacent_jump_frames=optional_int("largest_adjacent_jump_frames"),
+        change_position_seconds=None if position is None else float(position),
+    )
+
+
+def _stability_dict(summary: AlignmentStabilitySummary) -> dict[str, object]:
+    data: dict[str, object] = {
+        "classification": summary.classification,
+        "valid_windows": summary.valid_windows,
+    }
+    for name in (
+        "offset_min_frames",
+        "offset_max_frames",
+        "first_offset_frames",
+        "last_offset_frames",
+        "largest_adjacent_jump_frames",
+        "change_position_seconds",
+    ):
+        value = getattr(summary, name)
+        if value is not None:
+            data[name] = value
+    return data
 
 
 def load_reusable_offset_entries(
@@ -414,6 +496,8 @@ def _entry_from_provenance(
     }
     if origin == "computed":
         entry["correlation_score"] = result.correlation_score
+        if result.stability is not None:
+            entry["stability"] = _stability_dict(result.stability)
     elif provenance.computed_result is not None:
         computed = provenance.computed_result
         if computed.frame_offset is not None and computed.time_offset_seconds is not None:
@@ -422,6 +506,10 @@ def _entry_from_provenance(
                 "time_offset_seconds": computed.time_offset_seconds,
                 "correlation_score": computed.correlation_score,
             }
+            if computed.stability is not None:
+                cast(dict[str, object], entry["computed_result"])["stability"] = _stability_dict(
+                    computed.stability
+                )
     return entry
 
 

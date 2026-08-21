@@ -17,6 +17,7 @@ from frame_compare.orchestration.context import (
     ClipProbeSnapshot,
     ClipState,
 )
+from frame_compare.services.types import AlignmentStabilitySummary
 
 
 @pytest.fixture(autouse=True)
@@ -318,6 +319,61 @@ def test_emit_frame_alignment_report_caps_selected_frame_list(
 
     captured = capsys.readouterr()
     assert "aligned 0, 1, 2, 3, 4, 5, 6, 7, ... (12 total)" in captured.err
+
+
+def test_emit_frame_alignment_report_shows_material_stability_concisely(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    summary = AlignmentStabilitySummary("possible_discontinuity", 4, 178, 202, 178, 202, 24, 2832.0)
+    comparison = AlignmentReportComparison(
+        label="Encode",
+        alignment_source="computed",
+        relative_offset_frames=190,
+        reference_row_zero_source_frame=190,
+        comparison_row_zero_source_frame=0,
+        reference_trim_range=(190, 999),
+        comparison_trim_range=(0, 809),
+        stability=summary,
+    )
+
+    emit_frame_alignment_report(
+        stage="after_align",
+        comparisons=[comparison],
+        selected_frames=[],
+        alignment_warnings=[],
+        json_output=False,
+        quiet=False,
+        no_color=True,
+    )
+
+    output = capsys.readouterr().err
+    assert "possible discontinuity; +178..+202 frames; change near 00:47:12" in output
+    assert "valid windows" not in output
+
+
+def test_emit_frame_alignment_report_verbose_marks_legacy_stability_unavailable(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    comparison = AlignmentReportComparison(
+        label="Encode",
+        alignment_source="cached",
+        relative_offset_frames=2,
+        reference_row_zero_source_frame=2,
+        comparison_row_zero_source_frame=0,
+        reference_trim_range=(2, 99),
+        comparison_trim_range=(0, 97),
+    )
+    emit_frame_alignment_report(
+        stage="after_align",
+        comparisons=[comparison],
+        selected_frames=[],
+        alignment_warnings=[],
+        json_output=False,
+        quiet=False,
+        no_color=True,
+        verbose=True,
+    )
+    assert "unavailable (legacy cache entry)" in capsys.readouterr().err
 
 
 def test_emit_frame_alignment_report_renders_rejected_alignment_warning_context(
