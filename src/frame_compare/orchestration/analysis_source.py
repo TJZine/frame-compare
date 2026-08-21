@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from frame_compare.orchestration.context import ClipState
 from frame_compare.orchestration.errors import FastestAnalysisSourceError
+from frame_compare.orchestration.presentation import clip_role
 from frame_compare.orchestration.source_selection import resolve_source_selector
 
 if TYPE_CHECKING:
@@ -48,10 +49,13 @@ def resolve_analysis_source(
         return AnalysisSourceSelection(clip=clips[0], reason="reference")
     if selector == "fastest":
         selected = _select_fastest_clip(clips=clips, vs_loader=vs_loader)
+        selected_index = clips.index(selected)
         return AnalysisSourceSelection(
             clip=selected,
             reason="fastest",
-            warning=f"Analysis source: {_clip_role(clips, selected)} | selected by fastest-source policy",
+            warning=(
+                f"Analysis source: {clip_role(selected_index)} | selected by fastest-source policy"
+            ),
         )
 
     paths = [clip.path for clip in clips]
@@ -61,19 +65,14 @@ def resolve_analysis_source(
         paths=paths,
         role="sources.analysis_source",
     )
-    for clip in clips:
+    for index, clip in enumerate(clips):
         if clip.path == selected_path:
             return AnalysisSourceSelection(
                 clip=clip,
                 reason="configured",
-                warning=f"Analysis source: {_clip_role(clips, clip)} | selected by configured policy",
+                warning=(f"Analysis source: {clip_role(index)} | selected by configured policy"),
             )
     raise FastestAnalysisSourceError()
-
-
-def _clip_role(clips: list[ClipState], selected: ClipState) -> str:
-    index = clips.index(selected)
-    return "Reference" if index == 0 else f"Comparison {index}"
 
 
 def _select_fastest_clip(*, clips: list[ClipState], vs_loader: VSLoader | None) -> ClipState:

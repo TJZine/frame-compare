@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,10 +12,10 @@ from rich.panel import Panel
 from rich.table import Table
 
 from frame_compare.orchestration.context import ClipState
+from frame_compare.orchestration.presentation import report_console_width
 from frame_compare.services.release_identity import format_release_descriptor
 from frame_compare.services.types import AlignmentSource
 
-_REPORT_CONSOLE_WIDTH = 180
 _MAX_SELECTED_FRAMES = 8
 
 
@@ -88,11 +87,6 @@ def _stage_label(stage: str) -> str:
     if stage == "after_align":
         return "After Alignment"
     return stage.replace("_", " ").title()
-
-
-def _report_console_width() -> int:
-    columns = shutil.get_terminal_size(fallback=(_REPORT_CONSOLE_WIDTH, 24)).columns
-    return min(max(columns, 1), _REPORT_CONSOLE_WIDTH)
 
 
 def _format_offset(offset: int | None) -> str:
@@ -223,7 +217,12 @@ def _render_human_alignment_report(
     no_color: bool,
     verbose: bool,
 ) -> None:
-    console = Console(stderr=True, no_color=no_color, width=_report_console_width(), height=1000)
+    console = Console(
+        stderr=True,
+        no_color=no_color,
+        width=report_console_width(),
+        height=1000,
+    )
     console.print(
         Panel(
             _render_alignment_table(

@@ -34,6 +34,7 @@ from frame_compare.services.release_identity import ContentIdentity, ReleaseIden
 from frame_compare.services.slowpics_post_upload import (
     SlowpicsPostUploadRequest,
 )
+from frame_compare.services.slowpics_upload_plan import SlowpicsUploadPlan
 from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.progress import NullProgressReporter
@@ -77,8 +78,9 @@ class _RecordingProgressReporter:
         self.events.append("resume")
 
 
-def test_slowpics_upload_clips_use_unique_release_descriptors_and_explicit_labels(
+async def test_slowpics_upload_plan_uses_unique_release_descriptors_and_explicit_labels(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     identity = ReleaseIdentity(
         ContentIdentity("Example", year=2026),
@@ -102,17 +104,63 @@ def test_slowpics_upload_clips_use_unique_release_descriptors_and_explicit_label
     ctx = _context(tmp_path, comparisons=[comparison, explicit])
     ctx.reference = replace(ctx.reference, release_identity=identity)
 
-    clips = phase_post_render._slowpics_upload_clips(ctx)
+    screenshot_dir = tmp_path / "screenshots"
+    screenshot_dir.mkdir()
+    screenshots_by_label = {
+        "Reference": screenshot_dir / "reference.png",
+        "Comparison canonical": screenshot_dir / "comparison.png",
+        "My Encode": screenshot_dir / "explicit.png",
+    }
+    for screenshot in screenshots_by_label.values():
+        screenshot.write_bytes(b"\x89PNG\r\n\x1a\n")
+    render = _render_artifacts(
+        screenshots_by_label={
+            label: [screenshot] for label, screenshot in screenshots_by_label.items()
+        },
+        screenshot_dir=screenshot_dir,
+    )
+    captured_upload_plan: SlowpicsUploadPlan | None = None
 
-    assert [clip.label for clip in clips] == [
-        "Reference",
-        "Comparison canonical",
-        "My Encode",
-    ]
-    assert [clip.image_name for clip in clips] == [
-        "Reference | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
-        "Comparison 1 | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
-        "My Encode",
+    async def _fake_publish_to_slowpics(**kwargs: object) -> PublishResult:
+        nonlocal captured_upload_plan
+        upload_plan = kwargs["upload_plan"]
+        assert isinstance(upload_plan, SlowpicsUploadPlan)
+        captured_upload_plan = upload_plan
+        return PublishResult(
+            url="https://slow.pics/c/example",
+            screenshot_count=upload_plan.screenshot_count,
+            upload_duration_seconds=0.0,
+            uploaded_file_paths=tuple(upload_plan.file_paths),
+        )
+
+    async def _fake_run_slowpics_post_upload_actions(
+        _request: SlowpicsPostUploadRequest,
+    ) -> tuple[PostUploadActionResult, ...]:
+        return ()
+
+    monkeypatch.setattr(phase_post_render, "publish_to_slowpics", _fake_publish_to_slowpics)
+    monkeypatch.setattr(
+        phase_post_render,
+        "run_slowpics_post_upload_actions",
+        _fake_run_slowpics_post_upload_actions,
+    )
+
+    async with httpx.AsyncClient() as client:
+        await phase_post_render.run_publish_phase(
+            ctx,
+            client=client,
+            metadata=None,
+            render=render,
+            selected_frames=[10],
+        )
+
+    assert captured_upload_plan is not None
+    assert [[image.image_name for image in row.images] for row in captured_upload_plan.rows] == [
+        [
+            "Reference | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
+            "Comparison 1 | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
+            "My Encode",
+        ]
     ]
 
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Sequence
 from dataclasses import dataclass
 from fractions import Fraction
@@ -16,6 +15,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from frame_compare.orchestration.context import ClipState
+from frame_compare.orchestration.presentation import clip_role, report_console_width
 from frame_compare.services.release_identity import (
     ReleaseIdentity,
     common_content_identity,
@@ -25,8 +25,6 @@ from frame_compare.services.release_identity import (
 )
 
 log = structlog.get_logger()
-
-_REPORT_CONSOLE_WIDTH = 180
 
 
 @dataclass(frozen=True)
@@ -113,12 +111,6 @@ def _stage_label(stage: str) -> str:
     return stage.replace("_", " ").title()
 
 
-def _clip_role(index: int) -> str:
-    if index == 0:
-        return "Reference"
-    return f"Comparison {index}"
-
-
 def _format_fps_transition(clip: FpsReportClip) -> str:
     source_fps = _format_fraction(clip.source_fps)
     effective_fps = _format_fraction(clip.effective_fps)
@@ -145,11 +137,6 @@ def _format_file_size(size_bytes: int) -> str:
             return f"{value:.1f} {unit}"
         value /= 1024.0
     raise AssertionError("unreachable")
-
-
-def _report_console_width() -> int:
-    columns = shutil.get_terminal_size(fallback=(_REPORT_CONSOLE_WIDTH, 24)).columns
-    return min(max(columns, 1), _REPORT_CONSOLE_WIDTH)
 
 
 def _display_path(path: Path, *, input_dir: Path | None, verbose: bool) -> str:
@@ -199,7 +186,7 @@ def _render_clip_overview(
 
         filename = clip.path.name
         label = clip.label.strip()
-        table.add_row(_clip_role(index), "")
+        table.add_row(clip_role(index), "")
         if clip.label_is_explicit and label:
             table.add_row("  Label", f"[bright_white]{escape(label)}[/]")
         if clip.release_identity is not None:
@@ -293,7 +280,7 @@ def _render_fps_table(
             )
         )
         cells = [
-            _clip_role(index),
+            clip_role(index),
             escape(descriptor or clip.path.name),
             _format_fps_transition(clip),
             status_text,
@@ -321,7 +308,12 @@ def _render_human_fps_report(
     input_dir: Path | None,
     verbose: bool,
 ) -> None:
-    console = Console(stderr=True, no_color=no_color, width=_report_console_width(), height=1000)
+    console = Console(
+        stderr=True,
+        no_color=no_color,
+        width=report_console_width(),
+        height=1000,
+    )
     if stage == "after_load_sources":
         title = f"[bold green][OK][/] Sources — {len(clips)} loaded"
         table = _render_load_sources_overview(

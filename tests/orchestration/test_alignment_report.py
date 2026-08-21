@@ -406,8 +406,13 @@ def test_emit_frame_alignment_report_prioritizes_normal_alignment_evidence(
 
 def test_emit_frame_alignment_report_verbose_retains_row_zero_frames_and_paths(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    monkeypatch.setattr(
+        "frame_compare.orchestration.presentation.shutil.get_terminal_size",
+        lambda **_: os.terminal_size((240, 24)),
+    )
     reference_path = tmp_path / "reference.mkv"
     comparison_path = tmp_path / "comparison.mkv"
     comparison = AlignmentReportComparison(
@@ -487,7 +492,7 @@ def test_emit_frame_alignment_report_wraps_at_narrow_terminal_widths(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(
-        "frame_compare.orchestration.alignment_report.shutil.get_terminal_size",
+        "frame_compare.orchestration.presentation.shutil.get_terminal_size",
         lambda **_: os.terminal_size((columns, 24)),
     )
     emit_frame_alignment_report(

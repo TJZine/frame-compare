@@ -26,6 +26,7 @@ from frame_compare.orchestration.phase_selection import (
     selection_detail_for_frame,
     selection_label_for_frame,
 )
+from frame_compare.orchestration.presentation import clip_role
 from frame_compare.orchestration.slowpics_metadata import (
     resolve_slowpics_collection_metadata,
 )
@@ -232,7 +233,7 @@ def _slowpics_upload_clips(ctx: RunContext) -> list[SlowpicsUploadClip]:
             else format_release_descriptor(clip.release_identity) or clip.label
             for clip in clips
         ],
-        roles=["Reference", *(f"Comparison {index}" for index in range(1, len(clips)))],
+        roles=[clip_role(index) for index in range(len(clips))],
         protected=[clip.label_is_explicit for clip in clips],
     )
     seen_labels: set[str] = set()

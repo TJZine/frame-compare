@@ -11,6 +11,7 @@ from frame_compare.orchestration.phase_selection import (
     selection_detail_for_frame,
     selection_label_for_frame,
 )
+from frame_compare.orchestration.presentation import clip_role
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
 from frame_compare.render.geometry import active_picture_provenance_from_rect_source
 from frame_compare.services.release_identity import format_micro_descriptor
@@ -116,7 +117,7 @@ def run_render_phase(
 def _render_progress_label(clip: ClipState, index: int) -> str:
     if clip.label_is_explicit:
         return clip.label
-    role = "Reference" if index == 0 else f"Comparison {index}"
+    role = clip_role(index)
     descriptor = (
         format_micro_descriptor(clip.release_identity) if clip.release_identity is not None else ""
     )

@@ -343,8 +343,13 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
 
 def test_emit_consolidated_fps_report_uses_relative_input_and_external_paths(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    monkeypatch.setattr(
+        "frame_compare.orchestration.presentation.shutil.get_terminal_size",
+        lambda **_: os.terminal_size((240, 24)),
+    )
     input_dir = tmp_path / "comparison_videos"
     internal_path = input_dir / "season" / "reference.mkv"
     external_path = tmp_path / "outside" / "comparison.mkv"
@@ -428,11 +433,14 @@ def test_emit_consolidated_fps_report_keeps_after_align_fps_panel(
 
 
 def test_emit_consolidated_fps_report_collapses_matching_after_align_state(
+    tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    reference_path = tmp_path / "reference.mkv"
+    comparison_path = tmp_path / "comparison.mkv"
     clips = [
         FpsReportClip(
-            path=Path("/tmp/reference.mkv"),
+            path=reference_path,
             label="Reference",
             width=1920,
             height=1080,
@@ -444,7 +452,7 @@ def test_emit_consolidated_fps_report_collapses_matching_after_align_state(
             note=None,
         ),
         FpsReportClip(
-            path=Path("/tmp/comparison.mkv"),
+            path=comparison_path,
             label="Comparison",
             width=1920,
             height=1080,
@@ -469,15 +477,17 @@ def test_emit_consolidated_fps_report_collapses_matching_after_align_state(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == "  [OK] Frame rates match: 24/1\n"
-    assert "/tmp/reference.mkv" not in captured.err
+    assert str(reference_path) not in captured.err
 
 
 def test_emit_consolidated_fps_report_logs_non_tty_diagnostics_without_rich_output(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    reference_path = tmp_path / "reference.mkv"
     clip = FpsReportClip(
-        path=Path("/tmp/reference.mkv"),
+        path=reference_path,
         label="Reference",
         width=1920,
         height=1080,
@@ -522,10 +532,12 @@ def test_emit_consolidated_fps_report_logs_non_tty_diagnostics_without_rich_outp
 
 
 def test_emit_consolidated_fps_report_keeps_adjustment_evidence_without_normal_paths(
+    tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    comparison_path = tmp_path / "comparison.mkv"
     clip = FpsReportClip(
-        path=Path("/tmp/comparison.mkv"),
+        path=comparison_path,
         label="Comparison",
         width=1920,
         height=1080,
@@ -549,7 +561,7 @@ def test_emit_consolidated_fps_report_keeps_adjustment_evidence_without_normal_p
     captured = capsys.readouterr()
     assert "30000/1001 -> 24000/1001" in captured.err
     assert "adjusted" in captured.err
-    assert "/tmp/comparison.mkv" not in captured.err
+    assert str(comparison_path) not in captured.err
 
 
 def test_emit_consolidated_fps_report_prioritizes_effective_fps_divergence(
@@ -580,7 +592,7 @@ def test_emit_consolidated_fps_report_wraps_at_narrow_terminal_widths(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(
-        "frame_compare.orchestration.fps_report.shutil.get_terminal_size",
+        "frame_compare.orchestration.presentation.shutil.get_terminal_size",
         lambda **_: os.terminal_size((columns, 24)),
     )
     emit_consolidated_fps_report(

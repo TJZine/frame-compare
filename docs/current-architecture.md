@@ -108,6 +108,8 @@ window and are not restricted to sampled metric frames.
 
 `frame_compare.orchestration.source_labels` resolves presentation labels after
 selector/override resolution and before probing or run-folder reservation.
+`frame_compare.orchestration.presentation` owns the stable reference/comparison
+role labels and bounded console-width policy shared by orchestration reports.
 `frame_compare.services.release_identity` owns dependency-light, non-persisted
 content/release identity types and plain formatters. Preparation invokes the existing
 GuessIt/Anitopy parser seam once per source and attaches the resulting presentation
