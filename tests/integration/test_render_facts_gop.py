@@ -19,6 +19,7 @@ from frame_compare.render.types import (
 )
 from frame_compare.services.report.payload import (
     ClipInfo,
+    ReportClipDisplayInfo,
     ReportData,
     ReportImageInfo,
     ReportRenderingInfo,
@@ -184,6 +185,13 @@ def test_deterministic_gop_picture_facts_match_vs_and_ffmpeg(tmp_path: Path) -> 
                 ReportImageInfo(result.path, index, result.facts)
                 for index, result in zip(selected, results, strict=True)
             ],
+            display=ReportClipDisplayInfo(
+                primary=backend,
+                release="",
+                control=backend,
+                micro=backend,
+                filename=fixture.name,
+            ),
             label=backend,
         )
         for backend, results in results_by_backend.items()

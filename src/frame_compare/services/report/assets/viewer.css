@@ -2014,11 +2014,6 @@ select optgroup {
     font-size: var(--text-xs);
 }
 
-.rv-inspector-file,
-.rv-inspector-technical {
-    overflow-wrap: anywhere;
-}
-
 .rv-inspector-actions {
     display: grid;
     gap: 0.5rem;
@@ -2449,15 +2444,6 @@ body.rv-inspector-open .rv-viewer-stage {
 
     .rv-filmstrip-size-control {
         overflow-x: auto;
-    }
-
-    body.rv-inspector-open .rv-viewer-stage {
-        margin-right: 0;
-    }
-
-    .rv-inspector {
-        top: 0;
-        width: min(var(--rv-inspector-width), 92vw);
     }
 
     .rv-grid {

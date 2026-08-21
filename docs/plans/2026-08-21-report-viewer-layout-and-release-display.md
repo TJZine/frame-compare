@@ -20,6 +20,15 @@ Progress:
   constraints, and real-Chrome geometry/overflow/accessibility probes at the required
   viewport widths. The plan remains Active for Session C integration, visual evidence,
   documentation closeout, and review.
+- 2026-08-21 — Session C integration passed the focused report/Node/browser suite,
+  the full repository gate, strict documentation build, and an additional real-Chrome
+  2560×1440 geometry probe. Adversarial review found and remediation closed the v1.2
+  Review initialization defect, impossible cross-version transfer guidance, duplicated
+  release presentation, stale current-facing screenshots, and legacy display fallbacks.
+  The final read-only reviewer cleared all blockers and the Ponytail verdict was “Lean
+  already. Ship.” Physical-Windows v1.2 recapture and extension-backed interactive
+  Chrome zoom remain unavailable on this host, so this plan stays Active until that
+  manual evidence is recorded.
 
 # Frame Compare Local Report Presentation and Layout Refinement
 ## Execution-Ready Plan
@@ -267,8 +276,9 @@ No in-place report migration is needed.
 The report ID currently incorporates the report version. Newly generated v1.2 reports
 may therefore receive a new report ID and a fresh browser-local viewer/review state.
 
-Do not add automatic state migration in this package. Existing review export/import is
-the supported transfer path.
+Do not add state migration in this package. Review export/import is scoped to copies of
+the exact same report ID and payload version; it cannot transfer v1.1 review data into a
+regenerated v1.2 report.
 
 ## 5.4 Display metadata must not affect semantic report identity
 
@@ -329,10 +339,11 @@ class ReportClipDisplayInfo:
 Add:
 
 ```python
-display: ReportClipDisplayInfo | None = None
+display: ReportClipDisplayInfo
 ```
 
-to `ClipInfo`, with a deterministic fallback for existing direct test construction.
+to `ClipInfo` as required v1.2 input. Update direct test construction to supply the
+complete display profile; do not retain a v1.1 compatibility fallback.
 
 ## 6.2 Field semantics
 
@@ -753,7 +764,7 @@ needed for display fields.
 2. Add `ReportClipDisplayInfo` and nested payload.
 3. Build set-level names once in `phase_post_render`.
 4. Exclude display from report identity.
-5. Add robust JS display helper/fallback.
+5. Add JS helpers that consume the required v1.2 display profile.
 6. Audit every human-facing clip-label consumer.
 7. Preserve canonical keys and persisted review data.
 8. Add full accessible/title strings.
@@ -762,7 +773,7 @@ needed for display fields.
 ## Acceptance criteria
 
 - New report payload has display metadata.
-- Existing direct ClipInfo tests have deterministic fallback.
+- Direct `ClipInfo` tests provide the required v1.2 display profile.
 - Changing only display metadata does not change report ID.
 - Canonical label and source identity still do change report identity as before.
 - All relevant viewer surfaces show release-aware names.
@@ -771,7 +782,7 @@ needed for display fields.
 - No JS filename parser exists.
 - No report image, geometry, review-state, or clip-key semantics change.
 - Old v1.1 reports remain self-contained.
-- New viewer safely falls back when a test/minimal payload omits display fields.
+- New v1.2 reports and test payloads always provide the complete display profile.
 
 ## Focused proof
 
@@ -1124,8 +1135,8 @@ Rollback options:
 1. Revert all report v1.2/layout commits.
 2. Revert toolbar/Inspector commit while retaining display payload work.
 3. Revert report display consumers while retaining payload fields.
-4. Revert one display surface to canonical fallback if a browser-specific issue is
-   found.
+4. Revert the affected display-surface change if a browser-specific issue is isolated;
+   do not add a legacy payload fallback.
 5. Existing v1.1 reports remain unaffected.
 
 Do not add a legacy-viewer compatibility switch as rollback machinery.
@@ -1165,7 +1176,7 @@ Review priorities:
 - required release differentiators remain visible;
 - explicit label precedence;
 - exact filename availability;
-- fallback behavior;
+- required display-profile behavior;
 - all human-facing clip-name consumers audited;
 - no display/canonical confusion.
 

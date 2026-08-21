@@ -41,11 +41,11 @@ const ReportViewer = {
     },
 
     clipDisplay(clip, profile = 'control') {
-        return clip?.display?.[profile] || clip?.label || clip?.name || 'Clip';
+        return clip.display[profile];
     },
 
     clipFilename(clip) {
-        return clip?.display?.filename || clip?.name || clip?.label || 'Clip';
+        return clip.display.filename;
     },
 
     clipAccessibleName(clip) {
@@ -1794,12 +1794,12 @@ const ReportViewer = {
                     <div class="rv-inspector-clip-release" hidden></div>
                     <dl class="rv-inspector-list">
                         <div><dt>View role</dt><dd></dd></div>
-                        <div><dt>File</dt><dd class="rv-inspector-file"></dd></div>
+                        <div><dt>File</dt><dd></dd></div>
                         <div><dt>Resolution</dt><dd></dd></div>
                         <div><dt>FPS</dt><dd></dd></div>
                         <div><dt>File size</dt><dd></dd></div>
-                        <div><dt>Signal</dt><dd class="rv-inspector-technical"></dd></div>
-                        <div><dt>Presentation</dt><dd class="rv-inspector-technical"></dd></div>
+                        <div><dt>Signal</dt><dd></dd></div>
+                        <div><dt>Presentation</dt><dd></dd></div>
                     </dl>
                 `;
                 const heading = item.querySelectorAll('.rv-inspector-clip-heading span');
@@ -1810,9 +1810,12 @@ const ReportViewer = {
                 const primaryElement = item.querySelector('.rv-inspector-clip-primary');
                 const releaseElement = item.querySelector('.rv-inspector-clip-release');
                 primaryElement.textContent = primary;
+                const normalizedPrimary = this.normalizedDisplayToken(primary);
+                const normalizedRelease = this.normalizedDisplayToken(release);
                 const showRelease = Boolean(
-                    clip?.display?.release
-                    && this.normalizedDisplayToken(release) !== this.normalizedDisplayToken(primary)
+                    normalizedRelease
+                    && normalizedPrimary !== normalizedRelease
+                    && !normalizedPrimary.endsWith(`| ${normalizedRelease}`)
                 );
                 releaseElement.hidden = !showRelease;
                 releaseElement.textContent = showRelease ? release : '';

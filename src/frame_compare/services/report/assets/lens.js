@@ -294,7 +294,7 @@ const Lens = (() => {
 
         function clipLabel(index) {
             const clip = viewer.state.data?.clips?.[index];
-            return viewer.clipDisplay?.(clip, 'micro') || clip?.label || `Clip ${index + 1}`;
+            return viewer.clipDisplay(clip, 'micro');
         }
 
         function fullSourceIdentity(index) {
@@ -302,7 +302,7 @@ const Lens = (() => {
                 return 'Source unavailable.';
             }
             const clip = viewer.state.data?.clips?.[index];
-            const primary = viewer.clipDisplay?.(clip, 'primary') || clip?.label || clipLabel(index);
+            const primary = viewer.clipDisplay(clip, 'primary');
             return `#${index + 1} · ${primary}`;
         }
 
@@ -908,8 +908,8 @@ const Lens = (() => {
                 .map((clip, index) => {
                     const option = document.createElement('option');
                     option.value = String(index);
-                    option.textContent = viewer.clipDisplay?.(clip) || clip.label || `Clip ${index + 1}`;
-                    option.title = viewer.clipAccessibleName?.(clip) || option.textContent;
+                    option.textContent = viewer.clipDisplay(clip);
+                    option.title = viewer.clipAccessibleName(clip);
                     option.disabled = index === active;
                     option.selected = index === target;
                     return option;

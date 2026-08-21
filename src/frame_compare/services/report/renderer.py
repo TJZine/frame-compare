@@ -5,7 +5,7 @@ from __future__ import annotations
 import html
 import json
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 from urllib.parse import urlparse
 
 from frame_compare.services.report.category_display import (
@@ -100,18 +100,15 @@ def _render_clip_options(clips: list[ReportClipPayload], *, selected_index: int 
     return "".join(options)
 
 
-def _clip_display(clip: ReportClipPayload, profile: str) -> str:
-    value = clip.get("display", {}).get(profile)
-    return (
-        value
-        if isinstance(value, str) and value
-        else clip.get("label") or clip.get("name") or "Clip"
-    )
+def _clip_display(
+    clip: ReportClipPayload, profile: Literal["primary", "release", "control", "micro"]
+) -> str:
+    return clip["display"][profile]
 
 
 def _clip_accessible_name(clip: ReportClipPayload) -> str:
     primary = _clip_display(clip, "primary")
-    filename = clip.get("display", {}).get("filename")
+    filename = clip["display"]["filename"]
     return f"{primary} — {filename}" if filename else primary
 
 
@@ -366,7 +363,7 @@ def _render_info_modal(
             f"<span>{hdr_tag}</span>"
             f"</div>"
             f'<dl class="rv-metadata-list">'
-            f"<div><dt>Filename</dt><dd>{_esc_text(clip.get('display', {}).get('filename') or clip['name'])}</dd></div>"
+            f"<div><dt>Filename</dt><dd>{_esc_text(clip['display']['filename'])}</dd></div>"
             f"<div><dt>Resolution</dt><dd>{_render_resolution(clip['resolution'])}</dd></div>"
             f"<div><dt>FPS</dt><dd>{_render_fps(clip['fps'])}</dd></div>"
             f"<div><dt>Frames</dt><dd>{clip['frame_count']}</dd></div>"

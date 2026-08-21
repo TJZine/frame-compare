@@ -101,6 +101,12 @@ The downloaded source hashes were `33773E7275B83976B0D9A19D3AED47AA0FEDB1280BA20
 
 ## Deliberate capture decisions
 
+- The report-viewer images predate payload v1.2 and its stable toolbar/responsive
+  Inspector presentation. They remain publication-safe historical assets, but they are
+  intentionally absent from current-facing documentation and are not acceptance
+  evidence for the v1.2 layout. Replace the overview, slider, grid, and Inspector
+  captures together on the documented physical Windows capture host before restoring
+  those references or closing the active report-viewer plan.
 - `report-diff.webp` retains the controlled-pattern locator. The natural PQ/HLG/SDR
   difference flooded the frame with presentation-transform colour changes and was
   misleading at normal documentation width; the retained caption explicitly describes

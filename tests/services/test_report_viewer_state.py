@@ -19,7 +19,7 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
     summary = json.loads(result.stdout.strip().splitlines()[-1])
 
     assert summary["clipDisplayProfiles"] == {
-        "payloadProfilesAndLegacyFallback": True,
+        "requiredPayloadProfiles": True,
         "stableInspectorRoles": True,
     }
 

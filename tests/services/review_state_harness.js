@@ -9,7 +9,7 @@ const asset = path.join(__dirname, '..', '..', 'src', 'frame_compare', 'services
 vm.runInThisContext(`${fs.readFileSync(asset, 'utf8')}\nglobalThis.__ReviewState = ReviewState;`, { filename: asset });
 const R = globalThis.__ReviewState;
 const reportId = `report_${'a'.repeat(32)}`;
-const context = { reportId, payloadVersion: '1.0', frameCount: 1001, clipCount: 3 };
+const context = { reportId, payloadVersion: '1.2', frameCount: 1001, clipCount: 3 };
 
 class Storage {
     constructor(initial = null) { this.value = initial; this.failRead = false; this.failWrite = false; this.writes = 0; }
@@ -20,7 +20,7 @@ class Storage {
 const bytes = (text) => new TextEncoder().encode(text);
 const exported = (reviews, overrides = {}) => JSON.stringify({
     format: 'frame-compare-review', schema_version: 1,
-    report: { id: reportId, payload_version: '1.0' }, reviews,
+    report: { id: reportId, payload_version: '1.2' }, reviews,
     exported_at: '2026-07-14T16:30:00.000Z', ...overrides,
 });
 
@@ -48,7 +48,7 @@ assert.throws(() => state.mutate(1, { note: '😀'.repeat(1001) }), /too long/);
 assert.throws(() => state.mutate(1, { note: '\ud800' }), /surrogate/);
 assert.throws(() => state.mutate(1, { bookmark: 'true' }), /boolean/);
 assert.throws(() => state.mutate(1, { bookmark: true, unexpected: true }), /unknown or missing/);
-assert.throws(() => R.create({ ...context, payloadVersion: '2.0', storage: null }), /identity/);
+assert.throws(() => R.create({ ...context, payloadVersion: '1.1', storage: null }), /identity/);
 assert.throws(
     () => state.parseImport(new Uint8Array(R.constants.MAX_BYTES + 1)),
     new RegExp(`exceeds ${R.constants.MAX_BYTES.toLocaleString('en-US')} bytes`),
@@ -66,7 +66,7 @@ for (const bad of [
     exported([{ ...record(1), extra: true }]),
     exported([], { extra: true }),
     exported([]).replace('"reviews":[]', '"reviews":[],"__proto__":{}'),
-    exported([]).replace('"payload_version":"1.0"', '"payload_version":"1.0","constructor":{}'),
+    exported([]).replace('"payload_version":"1.2"', '"payload_version":"1.2","constructor":{}'),
     exported([record(1)]).replace('"bookmark":true', '"bookmark":true,"prototype":{}'),
     exported([]).replace('"schema_version":1', '"schema_version":0'),
     exported([]).replace('"schema_version":1', '"schema_version":2'),

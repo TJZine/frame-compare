@@ -6,6 +6,7 @@ from frame_compare.config.schema import OverlayMode, ReportConfig
 from frame_compare.services.report.payload import (
     REPORT_VERSION,
     ClipInfo,
+    ReportClipDisplayInfo,
     ReportData,
     ReportImageInfo,
     ReportRenderingInfo,
@@ -54,6 +55,13 @@ def _report_data(image: Path) -> ReportData:
                         facts=RenderedFrameFacts(source_frame=9, picture_type="B"),
                     )
                 ],
+                display=ReportClipDisplayInfo(
+                    primary="Reference",
+                    release="",
+                    control="Reference",
+                    micro="Reference",
+                    filename="reference.mkv",
+                ),
             )
         ],
         frames=[7],

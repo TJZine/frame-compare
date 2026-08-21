@@ -29,6 +29,13 @@ function payloadWithClipCount(clipCount) {
     const clips = Array.from({ length: clipCount }, (_, idx) => ({
         name: `clip-${idx + 1}`,
         label: `Clip ${idx + 1}`,
+        display: {
+            primary: `Clip ${idx + 1}`,
+            release: '',
+            control: `Clip ${idx + 1}`,
+            micro: `Clip ${idx + 1}`,
+            filename: `clip-${idx + 1}.mkv`,
+        },
         frame_count: 100,
         resolution: [1920, 1080],
         fps: 24,
@@ -49,7 +56,7 @@ function payloadWithClipCount(clipCount) {
         active_picture: null,
     }));
     return {
-        version: '1.1',
+        version: '1.2',
         report_id: 'report_viewer_state_contract',
         generated_at: '2026-06-02T12:00:00+00:00',
         title: 'Viewer State Contract',
@@ -451,7 +458,6 @@ const summary = {};
         viewer.clipAccessibleName(clip),
         'Primary release identity — Exact.File.Name.mkv',
     );
-    assert.equal(viewer.clipDisplay({ label: 'Legacy label' }), 'Legacy label');
     assert.equal(viewer.stableClipRole(0), 'Reference');
     assert.equal(viewer.stableClipRole(1), 'Comparison 1');
     viewer.state.data.default_selection.left_clip_index = 2;
@@ -460,7 +466,7 @@ const summary = {};
     assert.equal(viewer.stableClipRole(2), 'Reference');
     assert.equal(viewer.stableClipRole(3), 'Comparison 3');
     summary.clipDisplayProfiles = {
-        payloadProfilesAndLegacyFallback: true,
+        requiredPayloadProfiles: true,
         stableInspectorRoles: true,
     };
 }
@@ -697,6 +703,32 @@ const summary = {};
 
 {
     const { viewer } = loadViewer({ clipCount: 2 });
+    const release = '2160p | WEB-DL | GROUP';
+    viewer.state.data.clips[0].display = {
+        primary: `Example (2026) | ${release}`,
+        release,
+    };
+    viewer.state.data.clips[1].display = {
+        primary: 'Explicit comparison label',
+        release,
+    };
+    viewer.updateInspectorData();
+    const automaticRelease = viewer.dom.inspectorClips.children[0]
+        .querySelector('.rv-inspector-clip-release');
+    const explicitRelease = viewer.dom.inspectorClips.children[1]
+        .querySelector('.rv-inspector-clip-release');
+    assert.equal(automaticRelease.hidden, true);
+    assert.equal(automaticRelease.textContent, '');
+    assert.equal(explicitRelease.hidden, false);
+    assert.equal(explicitRelease.textContent, release);
+    summary.inspectorReleasePresentation = {
+        automaticIdentityNotDuplicated: automaticRelease.hidden,
+        explicitLabelKeepsReleaseDifferentiator: !explicitRelease.hidden,
+    };
+}
+
+{
+    const { viewer } = loadViewer({ clipCount: 2 });
     viewer.updateInspectorData();
     summary.inspectorFrameSources = viewer.dom.inspectorSourceFrames.children.map(
         item => item.textContent,
@@ -858,6 +890,13 @@ const summary = {};
     const { viewer } = loadViewer({ clipCount: 2 });
     const clip = {
         label: 'Title.2160p.WEB-DL.Service-GROUP',
+        display: {
+            primary: 'Title.2160p.WEB-DL.Service-GROUP',
+            release: '2160p | Service WEB-DL | GROUP',
+            control: 'Title.2160p.WEB-DL.Service-GROUP',
+            micro: 'Service WEB-DL',
+            filename: 'Title.2160p.WEB-DL.Service-GROUP.mkv',
+        },
         resolution: [3840, 2160],
         signal: { is_hdr: true },
     };

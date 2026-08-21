@@ -67,8 +67,12 @@ presentation remains unambiguous.
 
 For live render progress, automatic labels become unique role-prefixed compact release
 descriptors. For slow.pics, automatic labels become unique full release descriptors.
-Neither presentation changes baked overlays, local screenshot names, report mappings,
-or the slow.pics collection title.
+Report v1.2 similarly derives collision-safe control and constrained labels from the
+prepared release identity while retaining the canonical label for keys and mappings.
+The report Clips inspector keeps the exact filename available, and an explicit source
+label remains the primary report presentation name. None of these presentation choices
+changes baked overlays, local screenshot names, report mappings, or the slow.pics
+collection title.
 
 ## Apply trims without modifying media
 

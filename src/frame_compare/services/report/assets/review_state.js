@@ -179,7 +179,7 @@ const ReviewState = (() => {
             frameCount: options.frameCount,
             clipCount: options.clipCount,
         };
-        if (!/^report_[0-9a-f]{32}$/.test(context.reportId) || context.payloadVersion !== '1.0') {
+        if (!/^report_[0-9a-f]{32}$/.test(context.reportId) || context.payloadVersion !== '1.2') {
             throw new ReviewStateError('Current report identity is invalid.');
         }
         const storageKey = `frame-compare:report-review:v1:${context.reportId}`;
@@ -397,7 +397,7 @@ const ReviewState = (() => {
         function populatePreferredOptions() {
             const options = [new Option('No preferred clip', '')];
             viewer.state.data.clips.forEach((clip, index) => {
-                options.push(new Option(viewer.clipDisplay?.(clip) || clip.label || `Clip ${index + 1}`, `clip:${index}`));
+                options.push(new Option(viewer.clipDisplay(clip), `clip:${index}`));
             });
             viewer.dom.reviewPreferred.replaceChildren(...options);
         }

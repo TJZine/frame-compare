@@ -713,6 +713,11 @@ with `default=False`.
   number is the common comparison-domain frame; every image separately records its
   mapped untrimmed source frame, exact-frame picture type, and selected-frame Dolby
   Vision RPU presence when available.
+- Existing payload v1.1 HTML reports remain self-contained and viewable as generated;
+  Frame Compare does not rewrite or migrate them. Because the payload version
+  participates in report ID generation, a newly generated v1.2 report may use a new
+  browser-local viewer/review storage key. Review JSON is valid only for the exact report
+  ID and payload version; there is no cross-version review-state migration or import.
 - The existing Frame inspector follows the images visible in Single, Slider, Diff,
   Blink, and Grid modes. The serialized/config viewer-mode value `overlay` is presented
   as the user-facing `Single` mode and shows only the active source. The existing Clips

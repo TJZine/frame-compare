@@ -104,6 +104,13 @@ def _clip(
         tonemap_settings=TonemapSettings() if tonemapped else None,
         active_picture=active if dolby_vision else _geometry().active_picture,
         images=images,
+        display=ReportClipDisplayInfo(
+            primary=name.upper(),
+            release="",
+            control=name.upper(),
+            micro=name.upper(),
+            filename=f"{name}.mkv",
+        ),
         label=name.upper(),
         source_identity=f"source_{name}",
     )

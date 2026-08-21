@@ -587,6 +587,28 @@ document.addEventListener('DOMContentLoaded', () => {
             && document.querySelector('[data-inspector-clips]')?.textContent.includes('Presentation')
             && !document.querySelector('[data-inspector-clips]')?.textContent.includes('Advanced tonemap')
         );
+        let reviewTabUsable = false;
+        try {
+            ReportViewer.setInspectorTab('review', { save: false });
+            const bookmark = document.querySelector('[data-review-bookmark]');
+            const note = document.querySelector('[data-review-note]');
+            bookmark.checked = true;
+            bookmark.dispatchEvent(new Event('change', { bubbles: true }));
+            note.value = 'Browser integration proof';
+            note.dispatchEvent(new Event('input', { bubbles: true }));
+            reviewTabUsable = Boolean(
+                ReportViewer.reviewController
+                && bookmark.checked
+                && note.value === 'Browser integration proof'
+                && document.querySelector('[data-review-status]')?.textContent.includes(
+                    'saved locally'
+                )
+            );
+        } catch (error) {
+            document.documentElement.dataset.reviewTabError = String(error);
+        }
+        document.documentElement.dataset.reviewTabUsable = String(reviewTabUsable);
+        ReportViewer.setInspectorTab('clips', { save: false });
         document.documentElement.dataset.renderingDisclosure = String(
             document.querySelector('[data-rendering-tonemap-summary]')?.textContent === 'Not applied'
             && !document.querySelector('[data-rendering-details]')
@@ -789,6 +811,9 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
         f"{_REFERENCE_RELEASE} • 1920×1080 • SDR"
     )
     assert parser.document_attributes["data-clips-metadata"] == "true"
+    assert parser.document_attributes["data-review-tab-usable"] == "true", (
+        parser.document_attributes.get("data-review-tab-error")
+    )
     assert parser.document_attributes["data-rendering-disclosure"] == "true"
     assert parser.document_attributes["data-no-horizontal-overflow"] == "true"
     source_rows = json.loads(parser.document_attributes["data-frame-source-rows"] or "{}")

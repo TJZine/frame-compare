@@ -240,9 +240,9 @@ class ClipInfo:
     tonemap_settings: TonemapSettings | None
     active_picture: ActivePictureFacts | None
     images: list[ReportImageInfo]
+    display: ReportClipDisplayInfo
     label: str | None = None
     source_identity: str | None = None
-    display: ReportClipDisplayInfo | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -356,13 +356,7 @@ def build_clip_payloads(clips: list[ClipInfo]) -> list[ReportClipPayload]:
     payloads: list[ReportClipPayload] = []
     for clip in clips:
         label = clip.label or clip.name
-        display = clip.display or ReportClipDisplayInfo(
-            primary=label,
-            release="",
-            control=label,
-            micro=label,
-            filename=clip.path.name,
-        )
+        display = clip.display
         payloads.append(
             {
                 "name": clip.name,
