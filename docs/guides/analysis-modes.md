@@ -20,6 +20,14 @@ The final render plan is normalized to the overlap every aligned source can repr
 A configured user frame that cannot survive trims or alignment is reported rather than
 silently replaced.
 
+Automatic selections divide the eligible timeline into deterministic temporal regions.
+Random selection chooses a seeded candidate from each region, while dark, bright, and
+motion selection chooses that region's strongest available metric candidate before
+globally backfilling any missing choices. Frame Compare prefers five-frame separation
+from all earlier evidence, but relaxes that spacing deterministically when a short clip
+still has enough distinct frames to satisfy the request. User frames remain exact and
+take precedence over every automatic category.
+
 ## Quality versus performance analysis
 
 Choose the metric strategy in `config.toml`:
@@ -108,6 +116,9 @@ but the following changes can legitimately change the result:
 - performance mode or metric algorithm identity;
 - relevant managed media-runtime components;
 - alignment results that reduce the shared renderable overlap.
+
+Automatic frame choices may also differ from releases that predate temporal
+stratification, even when the same inputs and configuration are reused.
 
 Frame Compare does not hash complete media contents for cache freshness. If media is
 replaced while preserving its path, byte size, and modification time, advance the

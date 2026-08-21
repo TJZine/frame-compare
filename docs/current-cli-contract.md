@@ -981,6 +981,15 @@ per-clip selectable window within clip bounds, preferring to extend the end
 first and then shift the start earlier. If a shared selectable intersection
 cannot be formed, the run fails with the standard typed selection error.
 
+Each automatic category distributes its requested count across deterministic
+integer-coordinate temporal strata before globally backfilling. Random uses the
+configured stable seed-derived order; dark, bright, and motion retain their metric
+rankings, including sparse performance-mode source coordinates. Automatic choices
+prefer five-frame separation from all higher-precedence evidence, then relax spacing
+deterministically when enough distinct frames exist. Uniqueness and the precedence
+`User`, `Dark`, `Bright`, `Motion`, `Random` are never relaxed. Exact automatic frame
+choices may therefore differ from releases that predate temporal stratification.
+
 ## Config-Only slow.pics Surface
 
 These eighteen fields are the full current public `[slowpics]` config surface:

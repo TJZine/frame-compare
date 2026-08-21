@@ -257,13 +257,13 @@ def test_run_align_phase_labels_skipped_analysis_fallback_random_frame(
     output = phase_alignment.run_align_phase(ctx, selected_frames=[0, 66])
 
     assert output.reference.trim.trim_start_frames == 80
-    assert output.selected_frames == [18]
+    assert output.selected_frames == [16]
     assert output.selection_breakdown is not None
     assert output.selection_breakdown.user == []
-    assert output.selection_breakdown.random == [98]
+    assert output.selection_breakdown.random == [96]
     assert output.selection_details_by_source_frame is not None
-    assert output.selection_details_by_source_frame[98].label == "Random"
-    assert output.selection_details_by_source_frame[98].notes == "random"
+    assert output.selection_details_by_source_frame[96].label == "Random"
+    assert output.selection_details_by_source_frame[96].notes == "random"
     assert output.warnings == [
         "frame selection: dropped user frame(s) outside aligned renderable range: 0"
     ]

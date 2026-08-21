@@ -8,9 +8,8 @@ from pathlib import Path
 import structlog
 
 from frame_compare.analysis.errors import SelectionError
-from frame_compare.analysis.frame_plan import create_frame_plan
 from frame_compare.analysis.metrics import slice_frame_metrics
-from frame_compare.analysis.selection import select_frames
+from frame_compare.analysis.selection import select_frames, select_random_frames
 from frame_compare.analysis.types import (
     FrameMetrics,
     SelectionBreakdown,
@@ -615,20 +614,20 @@ def _fallback_generated_frames_for_aligned_window(
     if count <= 0:
         return []
     fallback_offset = selectable_start - reference_trim_start
-    sample_count = min(selectable_length, count + len(excluded_frames))
-    while True:
-        selected = [
-            frame + fallback_offset
-            for frame in create_frame_plan(
-                num_frames=selectable_length,
-                count=sample_count,
-                seed=seed,
-            ).frames
-            if frame + selectable_start not in excluded_frames
-        ]
-        if len(selected) >= count or sample_count >= selectable_length:
-            return selected[:count]
-        sample_count = min(selectable_length, sample_count * 2)
+    local_exclusions = {
+        frame - selectable_start
+        for frame in excluded_frames
+        if selectable_start <= frame < selectable_start + selectable_length
+    }
+    return [
+        frame + fallback_offset
+        for frame in select_random_frames(
+            selectable_length,
+            count,
+            seed,
+            local_exclusions,
+        )
+    ]
 
 
 def _selectable_aligned_source_window(

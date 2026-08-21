@@ -182,8 +182,8 @@ def test_run_analyze_phase_confirmed_full_window_retry_recomputes_cache_domain(
             "analysis": ctx.config.analysis.model_copy(
                 update={
                     "user_frames": [10, 120],
-                    "random_frame_count": 4,
-                    "motion_frame_count": 4,
+                    "random_frame_count": 12,
+                    "motion_frame_count": 12,
                     "ignore_lead_seconds": 40 / 24,
                     "ignore_trail_seconds": 40 / 24,
                     "min_window_seconds": 0.0,
@@ -241,10 +241,10 @@ def test_run_analyze_phase_confirmed_full_window_retry_recomputes_cache_domain(
     assert ctx.selection_window == SelectionWindow(start_frame=0, end_frame_exclusive=100)
     assert cache_keys[0] != cache_keys[1]
     assert calculate_ranges == [(40, 60), (0, 100)]
-    assert len(output.selected_frames) == 9
+    assert len(output.selected_frames) == 25
     assert output.selection_breakdown.user == [10]
-    assert len(output.selection_breakdown.motion) == 4
-    assert len(output.selection_breakdown.random) == 4
+    assert len(output.selection_breakdown.motion) == 12
+    assert len(output.selection_breakdown.random) == 12
     assert {detail.label for detail in output.selection_details_by_source_frame.values()} == {
         "User",
         "Motion",
@@ -325,8 +325,8 @@ def test_run_analyze_phase_refused_or_failed_prompt_is_fatal_without_retry(
         update={
             "analysis": ctx.config.analysis.model_copy(
                 update={
-                    "random_frame_count": 4,
-                    "motion_frame_count": 4,
+                    "random_frame_count": 12,
+                    "motion_frame_count": 12,
                     "ignore_lead_seconds": 40 / 24,
                     "ignore_trail_seconds": 40 / 24,
                     "min_window_seconds": 0.0,
@@ -384,8 +384,8 @@ def test_run_analyze_phase_full_window_retry_failure_does_not_prompt_twice(
         update={
             "analysis": ctx.config.analysis.model_copy(
                 update={
-                    "random_frame_count": 10,
-                    "motion_frame_count": 10,
+                    "random_frame_count": 0,
+                    "motion_frame_count": 100,
                     "ignore_lead_seconds": 40 / 24,
                     "ignore_trail_seconds": 40 / 24,
                     "min_window_seconds": 0.0,
@@ -396,12 +396,27 @@ def test_run_analyze_phase_full_window_retry_failure_does_not_prompt_twice(
     ctx.selection_window = SelectionWindow(start_frame=40, end_frame_exclusive=60)
     ctx.run_warnings = []
     prompt_calls = 0
+    dense_full_metrics = _metrics_for_range(start=0, end=100)
+    sparse_full_metrics = FrameMetrics(
+        luminance=dense_full_metrics.luminance[:99],
+        motion=dense_full_metrics.motion[:99],
+        metadata=replace(
+            dense_full_metrics.metadata,
+            frame_count=99,
+            performance_mode="performance",
+        ),
+        sampled_source_frames=tuple(range(99)),
+    )
 
     def _load_cache(*_args: object, **kwargs: Any) -> CacheLoadResult:
         frame_range = kwargs["request"].metric_frame_range
         return CacheLoadResult(
             success=True,
-            metrics=_metrics_for_range(start=frame_range.start, end=frame_range.end_exclusive),
+            metrics=(
+                sparse_full_metrics
+                if frame_range.start == 0
+                else _metrics_for_range(start=frame_range.start, end=frame_range.end_exclusive)
+            ),
         )
 
     def _confirm(
@@ -416,9 +431,13 @@ def test_run_analyze_phase_full_window_retry_failure_does_not_prompt_twice(
     monkeypatch.setattr(
         phase_selection,
         "calculate_metrics",
-        lambda **kwargs: _metrics_for_range(
-            start=kwargs["metric_frame_range"].start,
-            end=kwargs["metric_frame_range"].end_exclusive,
+        lambda **kwargs: (
+            sparse_full_metrics
+            if kwargs["metric_frame_range"].start == 0
+            else _metrics_for_range(
+                start=kwargs["metric_frame_range"].start,
+                end=kwargs["metric_frame_range"].end_exclusive,
+            )
         ),
     )
 
@@ -536,8 +555,8 @@ def test_run_analyze_phase_cache_only_exclusion_failure_does_not_offer_retry(
         update={
             "analysis": ctx.config.analysis.model_copy(
                 update={
-                    "random_frame_count": 4,
-                    "motion_frame_count": 4,
+                    "random_frame_count": 12,
+                    "motion_frame_count": 12,
                     "ignore_lead_seconds": 40 / 24,
                     "ignore_trail_seconds": 40 / 24,
                     "min_window_seconds": 0.0,
