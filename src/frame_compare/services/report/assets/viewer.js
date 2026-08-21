@@ -2056,9 +2056,12 @@ const ReportViewer = {
     },
 
     clipOverlayLabel(clip, role = '') {
-        const isHdr = clip.signal?.is_hdr === true;
-        const identity = `${this.clipDisplay(clip)} • ${clip.resolution[0]}×${clip.resolution[1]} • ${isHdr ? 'HDR' : 'SDR'}`;
+        const identity = ViewerFormat.sourceHudLabel(clip);
         return role ? `${role.toUpperCase()}: ${identity}` : identity;
+    },
+
+    sourceHudLabel(clip, profile = 'control') {
+        return ViewerFormat.sourceHudLabel(clip, profile);
     },
 
     humanizeCategory(cat) {

@@ -191,6 +191,8 @@ const clips = Array.from({ length: 6 }, (_, index) => ({
         filename: `clip-${index + 1}.mkv`,
     },
     resolution: [1920, 1080],
+    size_bytes: 17 * 1024 ** 3,
+    signal: { is_hdr: false },
 }));
 clips[1].resolution = [1080, 1920];
 clips[2].resolution = [2560, 1080];
@@ -211,6 +213,9 @@ const viewer = {
     dom: { stage: gridRoot },
     currentFrame() { return frame; },
     clipDisplay(clip, profile = 'control') { return clip.display[profile]; },
+    sourceHudLabel(clip, profile = 'control') {
+        return `${clip.display[profile]} • ${clip.resolution[0]}×${clip.resolution[1]} • SDR • 17.00 GiB`;
+    },
     clipAccessibleName(clip) { return `${clip.display.primary} — ${clip.display.filename}`; },
     referenceClipIndex() { return 0; },
     clampPan() {},
@@ -239,6 +244,10 @@ assert.equal(cells.children[3].dataset.reference, 'false');
 assert.doesNotMatch(cells.children[3].getAttribute('aria-label'), /Reference/);
 assert.equal(cells.children[1].dataset.active, 'true');
 assert.match(cells.children[1].getAttribute('aria-label'), /Active/);
+assert.equal(
+    cells.children[0].querySelector('.rv-grid-label-text').textContent,
+    'Clip 1 • 1920×1080 • SDR • 17.00 GiB',
+);
 
 const mixedImages = cells.querySelectorAll('.rv-grid-image');
 mixedImages.forEach((image, index) => {

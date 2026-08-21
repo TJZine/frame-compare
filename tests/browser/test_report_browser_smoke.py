@@ -862,7 +862,7 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     assert parser.document_attributes["data-narrow-palette-horizontal"] == "true"
     assert parser.document_attributes["data-grid-hud-anchored"] == "true"
     assert parser.document_attributes["data-source-hud-text"] == (
-        f"{_REFERENCE_RELEASE} • 1920×1080 • SDR"
+        f"{_REFERENCE_RELEASE} • 1920×1080 • SDR • 17.00 GiB"
     )
     assert parser.document_attributes["data-clips-metadata"] == "true"
     assert parser.document_attributes["data-review-tab-usable"] == "true", (

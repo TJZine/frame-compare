@@ -903,15 +903,16 @@ const summary = {};
             filename: 'Title.2160p.WEB-DL.Service-GROUP.mkv',
         },
         resolution: [3840, 2160],
+        size_bytes: 17 * 1024 ** 3,
         signal: { is_hdr: true },
     };
     assert.equal(
         viewer.clipOverlayLabel(clip),
-        'Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR',
+        'Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR • 17.00 GiB',
     );
     assert.equal(
         viewer.clipOverlayLabel(clip, 'Left'),
-        'LEFT: Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR',
+        'LEFT: Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR • 17.00 GiB',
     );
     summary.sourceOverlayLabels = {
         single: viewer.clipOverlayLabel(clip),
@@ -922,6 +923,7 @@ const summary = {};
     assert.equal(viewer.formatFileSize(512 * 1024), '0.50 MiB');
     assert.equal(viewer.formatFileSize(1024 ** 3), '1.00 GiB');
     assert.equal(viewer.formatFileSize(1024 ** 4), '1.00 TiB');
+    assert.equal(viewer.formatFileSize(0), '');
     assert.equal(viewer.formatFileSize(-1), '');
     assert.equal(viewer.formatFileSize(Number.NaN), '');
     assert.equal(
@@ -947,6 +949,8 @@ const summary = {};
     viewer.state.mode = 'blink';
     viewer.state.activeClipIdx = viewer.state.leftClipIdx;
     viewer.updateImages();
+    assert.equal(viewer.dom.labelLeft.textContent, 'FIRST: Clip 1 • 1920×1080 • SDR • 17.00 GiB');
+    assert.equal(viewer.dom.labelRight.textContent, 'SECOND: Clip 2 • 1920×1080 • SDR • 17.00 GiB');
     assert.equal(viewer.dom.labelLeft.classList.contains('rv-overlay-label--active'), true);
     assert.equal(viewer.dom.labelRight.classList.contains('rv-overlay-label--active'), false);
     viewer.state.activeClipIdx = viewer.state.rightClipIdx;

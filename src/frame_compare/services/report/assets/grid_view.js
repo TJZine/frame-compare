@@ -108,7 +108,7 @@ const GridView = (() => {
 
         function safeLabel(index) {
             const clip = viewer.state.data?.clips?.[index];
-            return viewer.clipDisplay(clip, 'micro');
+            return viewer.sourceHudLabel(clip, 'micro');
         }
 
         function clipRoles(index) {

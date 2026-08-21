@@ -21,11 +21,21 @@ const ViewerFormat = {
 
     formatFileSize(value) {
         const bytes = Number(value);
-        if (!Number.isFinite(bytes) || bytes < 0) return '';
+        if (!Number.isFinite(bytes) || bytes <= 0) return '';
         const unit = 1024;
         if (bytes >= unit ** 4) return `${(bytes / unit ** 4).toFixed(2)} TiB`;
         if (bytes >= unit ** 3) return `${(bytes / unit ** 3).toFixed(2)} GiB`;
         return `${(bytes / unit ** 2).toFixed(2)} MiB`;
+    },
+
+    sourceHudLabel(clip, profile = 'control') {
+        const isHdr = clip.signal?.is_hdr === true;
+        return [
+            this.clipDisplay(clip, profile),
+            `${clip.resolution[0]}×${clip.resolution[1]}`,
+            isHdr ? 'HDR' : 'SDR',
+            this.formatFileSize(clip.size_bytes),
+        ].filter(Boolean).join(' • ');
     },
 
     signalCodeLabel(kind, value) {

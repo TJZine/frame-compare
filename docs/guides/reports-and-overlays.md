@@ -84,6 +84,11 @@ section. It always states whether tonemapping was applied and, when applied, pro
 the full resolved settings in a closed-by-default advanced disclosure. No additional
 report tab or permanent metadata panel is created.
 
+Visible source HUD labels in Single, Slider, Diff, Blink, and Grid views append that
+same complete file size when available. File size is decision context only: it is not
+bitrate or evidence of visual quality, efficiency, or a comparison winner. Hiding the
+HUD hides the size together with the source labels.
+
 The primary toolbar keeps frame navigation, view modes, and mode-specific context in
 stable zones at desktop widths. It reflows to two rows and then a narrow stack as space
 decreases, without changing keyboard order or replacing native controls.
