@@ -60,3 +60,17 @@ def test_viewer_css_anchors_toolbar_and_shares_responsive_inspector_width() -> N
     assert "overflow-x: hidden;" in panel
     metadata = css_block(css, ".rv-inspector-list")
     assert "grid-template-columns: minmax(5.5rem, max-content) minmax(0, 1fr);" in metadata
+
+
+def test_viewer_css_keeps_report_information_wide_and_wrappable() -> None:
+    css = get_css()
+
+    modal = css_block(css, ".rv-modal-content--wide")
+    assert "width: min(56rem, calc(100vw - 2rem));" in modal
+    assert "max-width: none;" in modal
+    info_grid = css_block(css, ".rv-info-grid")
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr));" in info_grid
+    clip_heading = css_block(css, ".rv-clip-meta-heading span:first-child")
+    assert "overflow-wrap: anywhere;" in clip_heading
+    assert "white-space: nowrap;" not in clip_heading
+    assert "text-overflow: ellipsis;" not in clip_heading

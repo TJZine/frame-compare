@@ -356,12 +356,20 @@ def _render_info_modal(
     for i, clip in enumerate(clips):
         signal = clip.get("signal") or {}
         hdr_tag = "HDR" if signal.get("is_hdr", False) else "SDR"
+        primary = _clip_display(clip, "primary")
+        release = _clip_display(clip, "release")
+        release_html = (
+            f'<div class="rv-clip-meta-release">{_esc_text(release)}</div>'
+            if release and release != primary and not primary.endswith(f"| {release}")
+            else ""
+        )
         clip_items.append(
             f'<li class="rv-clip-meta-item" data-clip-index="{_esc_attr(i)}">'
             f'<div class="rv-clip-meta-heading">'
-            f"<span>{_esc_text(_clip_display(clip, 'primary'))}</span>"
+            f"<span>{_esc_text(primary)}</span>"
             f"<span>{hdr_tag}</span>"
             f"</div>"
+            f"{release_html}"
             f'<dl class="rv-metadata-list">'
             f"<div><dt>Filename</dt><dd>{_esc_text(clip['display']['filename'])}</dd></div>"
             f"<div><dt>Resolution</dt><dd>{_render_resolution(clip['resolution'])}</dd></div>"

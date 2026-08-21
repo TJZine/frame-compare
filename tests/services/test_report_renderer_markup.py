@@ -54,6 +54,18 @@ def test_build_html_renders_only_safe_slowpics_links(report_payload: ReportPaylo
     assert no_upload_info_modal.general["slow.pics"] == "Not uploaded"
 
 
+def test_build_html_keeps_distinct_release_identity_in_info_clip_card(
+    report_payload: ReportPayload,
+) -> None:
+    document = parse_elements(build_html(report_payload))
+    clips = find_all(document, tag="li", class_name="rv-clip-meta-item")
+
+    assert [require_first(clip, class_name="rv-clip-meta-release").text for clip in clips] == [
+        "Reference release",
+        "Encode release",
+    ]
+
+
 def test_build_html_renders_frame_and_clip_selectors(report_payload: ReportPayload) -> None:
     html = build_html(report_payload)
     parser = SelectParser()

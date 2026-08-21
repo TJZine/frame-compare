@@ -41,7 +41,7 @@ _REFERENCE_LABEL = "Movie.Title.2026.2160p.WEB-DL.Service-GROUP.with-an-extremel
 _COMPARISON_LABEL = "Movie.Title.2026.1080p.WEB-DL.Service-ENCODE.with-an-equally-long-source-name-that-must-stay-on-the-right"
 _REFERENCE_PRIMARY = "Movie Title (2026) | 2160p | PMTP WEB-DL | DV HDR10+ | REPACK | Kitsune"
 _REFERENCE_RELEASE = "2160p | PMTP WEB-DL | DV HDR10+ | REPACK | Kitsune"
-_COMPARISON_PRIMARY = "Movie Title (2026) | 1080p | ATV WEB-DL | HDR10 | ENCODE"
+_COMPARISON_PRIMARY = "Encode A"
 _COMPARISON_RELEASE = "1080p | ATV WEB-DL | HDR10 | ENCODE"
 
 
@@ -87,6 +87,7 @@ def _run_browser_dump(
     *,
     width: int,
     height: int,
+    scale: float = 1.0,
 ) -> subprocess.CompletedProcess[str]:
     command = [
         browser,
@@ -97,6 +98,7 @@ def _run_browser_dump(
         "--no-first-run",
         "--virtual-time-budget=10000",
         f"--window-size={width},{height}",
+        f"--force-device-scale-factor={scale}",
         "--dump-dom",
         report_path.as_uri(),
     ]
@@ -481,6 +483,48 @@ document.addEventListener('DOMContentLoaded', () => {
         );
         ReportViewer.setInspectorOpen(false, { focus: false, save: false });
         const infoButton = document.getElementById('btn-info');
+        infoButton?.focus();
+        infoButton?.click();
+        const infoModal = document.getElementById('info-modal');
+        const infoContent = infoModal?.querySelector('.rv-modal-content');
+        const infoText = infoContent?.textContent || '';
+        const infoClipHeadings = Array.from(
+            infoContent?.querySelectorAll('.rv-clip-meta-heading span:first-child') || []
+        );
+        document.documentElement.dataset.infoModalOverflowSafe = String(
+            infoModal.scrollWidth <= infoModal.clientWidth
+            && infoContent.scrollWidth <= infoContent.clientWidth
+            && document.documentElement.scrollWidth <= document.documentElement.clientWidth
+        );
+        const infoCards = Array.from(infoContent?.querySelectorAll('.rv-clip-meta-item') || []);
+        document.documentElement.dataset.infoModalIdentityComplete = String(
+            infoText.includes(__REFERENCE_FILENAME__)
+            && infoText.includes(__COMPARISON_FILENAME__)
+            && infoText.includes(__REFERENCE_PRIMARY__)
+            && infoText.includes(__COMPARISON_PRIMARY__)
+            && infoText.includes(__REFERENCE_RELEASE__)
+            && infoText.includes(__COMPARISON_RELEASE__)
+            && infoCards.length === 2
+            && infoCards[0].textContent.includes(__REFERENCE_FILENAME__)
+            && infoCards[0].textContent.includes(__REFERENCE_RELEASE__)
+            && infoCards[1].textContent.includes(__COMPARISON_FILENAME__)
+            && infoCards[1].textContent.includes(__COMPARISON_PRIMARY__)
+            && infoCards[1].textContent.includes(__COMPARISON_RELEASE__)
+            && infoClipHeadings.every(heading => {
+                const style = window.getComputedStyle(heading);
+                return style.whiteSpace !== 'nowrap' && style.textOverflow !== 'ellipsis';
+            })
+        );
+        document.documentElement.dataset.infoModalWidthPolicy = String(
+            approximately(
+                infoContent.getBoundingClientRect().width,
+                Math.min(896, window.innerWidth - 32)
+            )
+        );
+        ReportViewer.closeInfoModal();
+        document.documentElement.dataset.infoModalFocusRestored = String(
+            document.activeElement === infoButton
+        );
         const inspectorButton = document.getElementById('btn-inspector');
         const infoBefore = {
             label: infoButton?.getAttribute('aria-label'),
@@ -634,8 +678,11 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 """
     probe = probe.replace("__REFERENCE_FILENAME__", json.dumps(f"{_REFERENCE_LABEL}.mkv"))
+    probe = probe.replace("__COMPARISON_FILENAME__", json.dumps(f"{_COMPARISON_LABEL}.mkv"))
     probe = probe.replace("__REFERENCE_PRIMARY__", json.dumps(_REFERENCE_PRIMARY))
+    probe = probe.replace("__COMPARISON_PRIMARY__", json.dumps(_COMPARISON_PRIMARY))
     probe = probe.replace("__REFERENCE_RELEASE__", json.dumps(_REFERENCE_RELEASE))
+    probe = probe.replace("__COMPARISON_RELEASE__", json.dumps(_COMPARISON_RELEASE))
     report_path.write_text(html.replace("</body>", f"{probe}</body>"), encoding="utf-8")
 
 
@@ -743,21 +790,24 @@ def test_applied_tonemap_disclosure_is_focusable_toggleable_and_scrollable(
 
 @pytest.mark.integration
 @pytest.mark.parametrize(
-    ("width", "height"),
+    ("width", "height", "scale"),
     [
-        (375, 800),
-        (768, 720),
-        (900, 720),
-        (1024, 768),
-        (1366, 768),
-        (1920, 1080),
-        (3440, 1440),
+        (375, 800, 1.0),
+        (768, 720, 1.0),
+        (900, 720, 1.0),
+        (1024, 768, 1.0),
+        (1366, 768, 1.0),
+        (1920, 1080, 1.0),
+        (3440, 1440, 1.0),
+        (1920, 1080, 1.25),
+        (1920, 1080, 1.5),
     ],
 )
 def test_generated_report_initializes_observable_mode_and_aria_state(
     tmp_path: Path,
     width: int,
     height: int,
+    scale: float,
 ) -> None:
     browser = _browser_executable()
     if browser is None:
@@ -765,7 +815,7 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
 
     report_path = _generated_report(tmp_path)
     _append_screenshot_load_probe(report_path)
-    completed = _run_browser_dump(browser, report_path, width=width, height=height)
+    completed = _run_browser_dump(browser, report_path, width=width, height=height, scale=scale)
 
     parser = _InitializedViewerParser()
     parser.feed(completed.stdout)
@@ -802,6 +852,10 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     assert parser.document_attributes["data-inspector-width-policy"] == "true"
     assert parser.document_attributes["data-inspector-overflow-safe"] == "true"
     assert parser.document_attributes["data-inspector-identity-complete"] == "true"
+    assert parser.document_attributes["data-info-modal-overflow-safe"] == "true"
+    assert parser.document_attributes["data-info-modal-identity-complete"] == "true"
+    assert parser.document_attributes["data-info-modal-width-policy"] == "true"
+    assert parser.document_attributes["data-info-modal-focus-restored"] == "true"
     assert parser.document_attributes["data-info-inspector-semantics-stable"] == "true"
     assert parser.document_attributes["data-visible-inspector-behavior"] == "true"
     assert parser.document_attributes["data-filmstrip-hud-anchored"] == "true"

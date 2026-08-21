@@ -2170,7 +2170,8 @@ body.rv-inspector-open .rv-viewer-stage {
 }
 
 .rv-modal-content--wide {
-    max-width: min(600px, calc(100vw - 1rem));
+    width: min(56rem, calc(100vw - 2rem));
+    max-width: none;
 }
 
 .rv-modal-title {
@@ -2512,12 +2513,18 @@ body.rv-inspector-open .rv-viewer-stage {
 
 /* 13. Info Modal Content Styling */
 .rv-info-grid {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 1.25rem;
-    max-height: 450px;
-    overflow-y: auto;
-    padding-right: 0.5rem;
+    min-width: 0;
+}
+
+.rv-info-section {
+    min-width: 0;
+}
+
+.rv-info-section:last-child {
+    grid-column: 1 / -1;
 }
 
 .rv-info-section h3 {
@@ -2572,6 +2579,7 @@ body.rv-inspector-open .rv-viewer-stage {
     list-style: none;
     display: grid;
     gap: 0.75rem;
+    min-width: 0;
 }
 
 .rv-clip-meta-item {
@@ -2581,6 +2589,7 @@ body.rv-inspector-open .rv-viewer-stage {
     border: 1px solid var(--border);
     border-radius: 4px;
     padding: 0.5rem;
+    min-width: 0;
 }
 
 .rv-clip-meta-heading {
@@ -2591,15 +2600,16 @@ body.rv-inspector-open .rv-viewer-stage {
     color: var(--text-primary);
     font-size: var(--text-xs);
     font-weight: 600;
+    min-width: 0;
 }
 
 .rv-clip-meta-heading span:first-child {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .rv-clip-meta-heading span:last-child {
+    flex: 0 0 auto;
     font-family: var(--font-mono);
     font-size: 0.65rem;
     font-weight: 600;
@@ -2610,4 +2620,21 @@ body.rv-inspector-open .rv-viewer-stage {
     padding: 0.05rem 0.35rem;
     letter-spacing: 0.05em;
     line-height: 1;
+}
+
+.rv-clip-meta-release {
+    min-width: 0;
+    color: var(--text-secondary);
+    font-size: var(--text-xs);
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 48rem) {
+    .rv-info-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .rv-info-section:last-child {
+        grid-column: auto;
+    }
 }
