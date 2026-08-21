@@ -6,6 +6,7 @@ from frame_compare.config.schema import OverlayMode, ReportConfig
 from frame_compare.services.report.payload import (
     REPORT_VERSION,
     ClipInfo,
+    ReportClipDisplayInfo,
     ReportData,
     ReportImageInfo,
     ReportRenderingInfo,
@@ -54,6 +55,13 @@ def _report_data(image: Path) -> ReportData:
                         facts=RenderedFrameFacts(source_frame=9, picture_type="B"),
                     )
                 ],
+                display=ReportClipDisplayInfo(
+                    primary="Reference Primary",
+                    release="Reference Release",
+                    control="Reference Control",
+                    micro="Reference Micro",
+                    filename="reference.mkv",
+                ),
             )
         ],
         frames=[7],
@@ -66,7 +74,7 @@ def _report_data(image: Path) -> ReportData:
     )
 
 
-def test_report_payload_v11_preserves_comparison_and_source_frame_domains(
+def test_report_payload_v12_preserves_comparison_and_source_frame_domains(
     tmp_path: Path,
 ) -> None:
     image = tmp_path / "reference_7.png"
@@ -74,7 +82,14 @@ def test_report_payload_v11_preserves_comparison_and_source_frame_domains(
 
     payload = build_report_payload(_report_data(image), ReportConfig(), report_dir=tmp_path)
 
-    assert payload["version"] == REPORT_VERSION == "1.1"
+    assert payload["version"] == REPORT_VERSION == "1.2"
+    assert payload["clips"][0]["display"] == {
+        "primary": "Reference Primary",
+        "release": "Reference Release",
+        "control": "Reference Control",
+        "micro": "Reference Micro",
+        "filename": "reference.mkv",
+    }
     assert payload["frames"][0]["number"] == 7
     assert payload["frames"][0]["detail"] == "Selected comparison frame"
     assert payload["frames"][0]["images"][0]["source_frame"] == 9

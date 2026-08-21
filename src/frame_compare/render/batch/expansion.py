@@ -189,6 +189,7 @@ def expand_batch_render_requests(
                     ),
                     ffmpeg_runner=ffmpeg_runner,
                     geometry_plan=plan,
+                    progress_label=batch.progress_label,
                 )
             )
     return requests, ranges, clip_facts

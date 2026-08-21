@@ -5,7 +5,7 @@ from __future__ import annotations
 import html
 import json
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 from urllib.parse import urlparse
 
 from frame_compare.services.report.category_display import (
@@ -85,16 +85,31 @@ def _render_frame_options(
 def _render_clip_options(clips: list[ReportClipPayload], *, selected_index: int | None) -> str:
     if selected_index is None:
         return "".join(
-            f'<option value="{_esc_attr(i)}">{_esc_text(clip["label"])}</option>'
+            f'<option value="{_esc_attr(i)}" title="{_esc_attr(_clip_accessible_name(clip))}">'
+            f"{_esc_text(_clip_display(clip, 'control'))}</option>"
             for i, clip in enumerate(clips)
         )
     options: list[str] = []
     for i, clip in enumerate(clips):
         selected_attr = " selected" if i == selected_index else ""
         options.append(
-            f'<option value="{_esc_attr(i)}"{selected_attr}>{_esc_text(clip["label"])}</option>'
+            f'<option value="{_esc_attr(i)}"{selected_attr} '
+            f'title="{_esc_attr(_clip_accessible_name(clip))}">'
+            f"{_esc_text(_clip_display(clip, 'control'))}</option>"
         )
     return "".join(options)
+
+
+def _clip_display(
+    clip: ReportClipPayload, profile: Literal["primary", "release", "control", "micro"]
+) -> str:
+    return clip["display"][profile]
+
+
+def _clip_accessible_name(clip: ReportClipPayload) -> str:
+    primary = _clip_display(clip, "primary")
+    filename = clip["display"]["filename"]
+    return f"{primary} — {filename}" if filename else primary
 
 
 def _clip_index_or_default(value: object, *, clip_count: int, fallback: int) -> int:
@@ -183,7 +198,7 @@ def _render_filmstrip(
     include_filmstrip: bool,
     category_filter_keys: dict[str, str],
 ) -> str:
-    first_clip_label = clips[0]["label"] if clips else "Clip"
+    first_clip_label = _clip_display(clips[0], "primary") if clips else "Clip"
     items = (
         "".join(
             f"""
@@ -304,7 +319,7 @@ def _render_tonemap_details(rendering: object) -> str:
 
 def _clip_label_for_index(clips: list[ReportClipPayload], index: int) -> str:
     if 0 <= index < len(clips):
-        return clips[index]["label"]
+        return _clip_display(clips[index], "control")
     return f"Clip {index + 1}"
 
 
@@ -341,14 +356,22 @@ def _render_info_modal(
     for i, clip in enumerate(clips):
         signal = clip.get("signal") or {}
         hdr_tag = "HDR" if signal.get("is_hdr", False) else "SDR"
+        primary = _clip_display(clip, "primary")
+        release = _clip_display(clip, "release")
+        release_html = (
+            f'<div class="rv-clip-meta-release">{_esc_text(release)}</div>'
+            if release and release != primary and not primary.endswith(f"| {release}")
+            else ""
+        )
         clip_items.append(
             f'<li class="rv-clip-meta-item" data-clip-index="{_esc_attr(i)}">'
             f'<div class="rv-clip-meta-heading">'
-            f"<span>{_esc_text(clip['label'])}</span>"
+            f"<span>{_esc_text(primary)}</span>"
             f"<span>{hdr_tag}</span>"
             f"</div>"
+            f"{release_html}"
             f'<dl class="rv-metadata-list">'
-            f"<div><dt>Name</dt><dd>{_esc_text(clip['name'])}</dd></div>"
+            f"<div><dt>Filename</dt><dd>{_esc_text(clip['display']['filename'])}</dd></div>"
             f"<div><dt>Resolution</dt><dd>{_render_resolution(clip['resolution'])}</dd></div>"
             f"<div><dt>FPS</dt><dd>{_render_fps(clip['fps'])}</dd></div>"
             f"<div><dt>Frames</dt><dd>{clip['frame_count']}</dd></div>"
@@ -457,6 +480,7 @@ def _render_controls(
             <button data-mode="grid" role="radio" aria-checked="false" aria-label="Grid mode" title="Grid comparison">Grid</button>
         </div>
 
+        <div class="rv-context-zone">
         <div class="rv-control-group rv-grid-controls rv-context-controls" data-control-scope="grid" aria-label="Grid clips" hidden>
             <button id="btn-grid-prev" type="button" aria-label="Previous grid clips">←</button>
             <span class="rv-grid-position" data-grid-position aria-live="off"></span>
@@ -483,6 +507,7 @@ def _render_controls(
             </select>
         </div>
         <div id="alignment-status" class="rv-alignment-status" role="status" aria-live="polite">Aligned: none</div>
+        </div>
         </div>
     </div>"""
 

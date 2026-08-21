@@ -8,11 +8,6 @@ result is moved, archived, or opened on another machine.
 Set `report.embed_images = true` only when a single larger HTML file is more useful than
 the normal portable folder layout.
 
-<figure class="fc-doc-figure">
-  <img src="../images/report-viewer-overview.webp" alt="Offline report at frame 1000 comparing EBU DVB PQ10 Reference with EBU DVB HLG10 Comparison in slider mode, with the filmstrip and review controls visible.">
-  <figcaption>The canonical report view combines the natural EBU/DVB source pair, frame 1000 context, filmstrip navigation, and review controls.</figcaption>
-</figure>
-
 ## Viewer modes
 
 ### Single
@@ -27,11 +22,6 @@ pair comparison.
 Slider mode reveals one source against another across a draggable divider. It is useful
 for spatial differences such as crop, scaling, haloing, texture, denoising, grain, and
 subtle tone changes.
-
-<figure class="fc-doc-figure">
-  <img src="../images/report-slider.webp" alt="Slider comparison revealing EBU DVB PQ10 Reference and EBU DVB HLG10 Comparison across a two-thirds divider at frame 1000.">
-  <figcaption>Move the divider away from center to inspect spatial, texture, crop, and scaling differences between the selected EBU/DVB pair.</figcaption>
-</figure>
 
 ### Diff
 
@@ -58,11 +48,6 @@ playback measurement.
 Grid mode displays several sources together so outliers are easy to identify. Use it to
 scan all encodes first, then choose a pair for detailed slider, diff, or blink review.
 
-<figure class="fc-doc-figure">
-  <img src="../images/report-grid.webp" alt="Grid view showing frame 1000 from EBU DVB PQ10 Reference, EBU DVB HLG10 Comparison, and EBU DVB PQ10 SDR Presentation with the Clips inspector open.">
-  <figcaption>Grid mode scans all three natural sources at the same selected frame; the Clips inspector keeps their full labels and HDR/SDR roles readable before pair review.</figcaption>
-</figure>
-
 ## Navigation and inspection
 
 The viewer supports:
@@ -76,28 +61,40 @@ The viewer supports:
 - a lens for close inspection;
 - browser-local review state and notes.
 
-Report payload version 1.1 preserves two distinct frame domains. The selected report
-frame is the common comparison frame. Each visible image carries its own mapped,
-untrimmed source frame, exact picture type, and exact-frame Dolby Vision RPU presence
-when the renderer can prove them. The Frame inspector updates that source list with the
-current Single, Slider, Diff, Blink, or Grid view; it does not present one
-reference-source frame as universal truth.
+Report payload version 1.2 adds release-aware source presentation without changing
+canonical source identity. Ordinary controls use compact, collision-safe release
+descriptors; constrained grid and lens labels use shorter variants. Explicit source
+labels remain authoritative. The Clips inspector and Report Information retain the
+full primary identity and exact, wrapping filename, so shortened controls do not hide
+the archival source name.
+
+The v1.2 payload also preserves two distinct frame domains. The selected report frame
+is the common comparison frame. Each visible image carries its own mapped, untrimmed
+source frame, exact picture type, and exact-frame Dolby Vision RPU presence when the
+renderer can prove them. The Frame inspector updates that source list with the current
+Single, Slider, Diff, Blink, or Grid view; it does not present one reference-source
+frame as universal truth.
 
 The Clips inspector keeps archival source facts compact: complete file size, observed
-signal, actual presentation state, and a non-full active picture when applicable. Open
-Report Information for the Rendering section. It always states whether tonemapping was
-applied and, when applied, provides the full resolved settings in a closed-by-default
-advanced disclosure. No additional report tab or permanent metadata panel is created.
+signal, actual presentation state, and a non-full active picture when applicable. On
+desktop it uses a wider responsive drawer; on narrower screens it overlays the stage.
+Source names, filenames, and long signal/presentation values wrap without requiring a
+document or Inspector horizontal scrollbar. Open Report Information for the Rendering
+section. It always states whether tonemapping was applied and, when applied, provides
+the full resolved settings in a closed-by-default advanced disclosure. No additional
+report tab or permanent metadata panel is created.
 
-<figure class="fc-doc-figure">
-  <img src="../images/report-inspector.webp" alt="Report inspector Align tab showing the EBU DVB PQ10 Reference and EBU DVB HLG10 Comparison pair at frame 1000 with zero x and y offsets.">
-  <figcaption>The inspector keeps the selected pair and its alignment mapping visible without leaving the current report.</figcaption>
-</figure>
+The primary toolbar keeps frame navigation, view modes, and mode-specific context in
+stable zones at desktop widths. It reflows to two rows and then a narrow stack as space
+decreases, without changing keyboard order or replacing native controls.
 
 Viewer state such as the current frame, mode, selected clips, reveal position, viewport,
 and review notes can persist in the browser for that report. It does not rewrite the
 HTML or run directory. Clearing browser storage or opening the report under a different
-URL can remove that local state.
+URL can remove that local state. Existing v1.1 reports remain self-contained and are not
+migrated. Regenerated v1.2 reports start with fresh browser-local viewer and review state.
+Review JSON is scoped to the exact report ID and payload version; it is not a migration
+format.
 
 ## Screenshot overlays
 
@@ -154,7 +151,7 @@ browser; use the host helper and the exact path printed by the run.
 - Prefer `report.embed_images = true` only when a single-file artifact is required.
 - Review filenames and metadata before sharing; they may disclose source names.
 - Browser-local notes are not automatically included in the run folder.
-- Version 1.1 report metadata is archival raw evidence and resolved rendering state;
+- Version 1.2 report metadata is archival raw evidence and resolved rendering state;
   moving the complete report folder does not turn local paths into identity data.
 
 For exact opening precedence, persistence, and report-generation behavior, see the

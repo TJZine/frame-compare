@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from fractions import Fraction
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,8 @@ from pytest import MonkeyPatch
 
 from frame_compare.cli.entry import app
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
+from frame_compare.orchestration.fps_report import FpsReportClip, emit_consolidated_fps_report
+from frame_compare.orchestration.progress import select_reporter, uses_rich_progress
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
 
 from .cli_helpers import (
@@ -75,19 +78,72 @@ def test_run_human_output_routes_summaries_and_runtime_diagnostics(
     assert result.exit_code == 0
     stdout = _normalize_cli_output(result.stdout)
     stderr = _normalize_cli_output(result.stderr)
-    assert "At-a-Glance" in stdout
-    assert "Result" in stdout
+    assert "Run plan" in stdout
+    assert "Comparison completed" in stdout
     assert "Warnings" in stdout
     assert "metadata skipped" in stdout
     assert "Clip Overview" not in stdout
     assert "Frame Alignment" not in stdout
     assert "Clip Overview" in stderr
     assert "Frame Alignment" in stderr
-    assert "At-a-Glance" not in stderr
+    assert "Run plan" not in stderr
     assert "Result" not in stderr
 
 
-def test_run_quiet_suppresses_at_a_glance_but_keeps_minimal_summary(
+def test_run_non_tty_routes_fps_diagnostics_through_logging(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        assert dependencies is None
+        reporter = select_reporter(
+            quiet=_request.quiet,
+            json_output=_request.json_output,
+            no_color=_request.no_color,
+            force_tty=False,
+        )
+        emit_consolidated_fps_report(
+            stage="after_load_sources",
+            clips=[
+                FpsReportClip(
+                    path=Path("reference.mkv"),
+                    label="Reference",
+                    width=1920,
+                    height=1080,
+                    num_frames=100,
+                    is_hdr=False,
+                    source_fps=Fraction(24, 1),
+                    effective_fps=Fraction(24, 1),
+                    fps_divergent=False,
+                    note=None,
+                )
+            ],
+            json_output=_request.json_output,
+            quiet=_request.quiet,
+            rich_output=uses_rich_progress(reporter),
+        )
+        return RunResult(success=True, screenshot_dir=Path("screenshots").resolve())
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace(
+        [],
+        env={"TERM": "dumb"},
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+
+    assert result.exit_code == 0
+    assert "fps_report" not in result.stdout
+    assert "after_load_sources" not in result.stdout
+    assert "fps_report" in result.stderr
+    assert "after_load_sources" in result.stderr
+    assert "Reference" in result.stderr
+    assert "╭" not in result.stderr
+    assert "Sources —" not in result.stderr
+
+
+def test_run_quiet_suppresses_run_plan_but_keeps_minimal_summary(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -104,7 +160,7 @@ def test_run_quiet_suppresses_at_a_glance_but_keeps_minimal_summary(
 
     assert result.exit_code == 0
     output = _normalize_cli_output(result.stdout)
-    assert "At-a-Glance" not in output
+    assert "Run plan" not in output
     assert output.splitlines()[-1].startswith("Screenshots:")
 
 
@@ -143,7 +199,7 @@ def test_run_json_is_machine_only_and_omits_post_upload_actions(
     assert payload["slowpics_url"] == "https://slow.pics/c/example"
     assert "post_upload_actions" not in payload
     assert "warnings" not in payload
-    assert "At-a-Glance" not in result.stdout
+    assert "Run plan" not in result.stdout
     assert "Screenshots:" not in result.stdout
     assert "Warnings" not in result.stdout
     assert result.stderr == ""

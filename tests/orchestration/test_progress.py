@@ -1,10 +1,17 @@
 """Tests for orchestration progress reporter selection."""
 
 import sys
+from io import StringIO
 
 import pytest
+from rich.console import Console
 
-from frame_compare.orchestration.progress import select_reporter
+import frame_compare.orchestration.progress as progress_module
+from frame_compare.orchestration.progress import (
+    emit_execution_section_end,
+    emit_execution_section_start,
+    select_reporter,
+)
 from frame_compare.utils.progress import (
     LogProgressReporter,
     NullProgressReporter,
@@ -140,3 +147,25 @@ def test_select_reporter_no_color_non_tty_returns_log():
     """Non-interactive no-color output should still use log progress."""
     reporter = select_reporter(no_color=True, force_tty=False)
     assert isinstance(reporter, LogProgressReporter)
+
+
+@pytest.mark.parametrize("width", [60, 80])
+def test_execution_section_is_rich_only_and_fits_without_color(
+    width: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = StringIO()
+    console = Console(file=output, width=width, no_color=True, force_terminal=False)
+    monkeypatch.setattr(progress_module, "Console", lambda **_kwargs: console)
+
+    reporter = RichProgressReporter(no_color=True)
+    emit_execution_section_start(reporter, no_color=True)
+    emit_execution_section_end(reporter, no_color=True)
+    for non_rich in (LogProgressReporter(), NullProgressReporter()):
+        emit_execution_section_start(non_rich, no_color=True)
+        emit_execution_section_end(non_rich, no_color=True)
+
+    rendered = output.getvalue()
+    assert rendered.count("Execution") == 1
+    assert "\x1b[" not in rendered
+    assert max(len(line) for line in rendered.splitlines()) <= width

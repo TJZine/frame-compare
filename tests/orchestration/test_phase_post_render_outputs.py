@@ -30,12 +30,15 @@ from frame_compare.orchestration.types import (
 )
 from frame_compare.services.errors import SlowpicsError
 from frame_compare.services.publishers import PublishResult
+from frame_compare.services.release_identity import ContentIdentity, ReleaseIdentity
 from frame_compare.services.slowpics_post_upload import (
     SlowpicsPostUploadRequest,
 )
+from frame_compare.services.slowpics_upload_plan import SlowpicsUploadPlan
 from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.progress import NullProgressReporter
+from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 from frame_compare.vs.types import TonemapSettings
 from tests.orchestration.phase_task_helpers import (
     _clip,
@@ -43,6 +46,122 @@ from tests.orchestration.phase_task_helpers import (
     _render_artifacts,
     _RenderRunner,
 )
+
+
+class _RecordingProgressReporter:
+    def __init__(self) -> None:
+        self.events: list[str] = []
+        self.completions: list[tuple[ProgressPhaseStatus, bool | None]] = []
+
+    def start_phase(self, name: str, total: int) -> None:
+        del total
+        self.events.append(f"start:{name}")
+
+    def advance(self, amount: int = 1) -> None:
+        self.events.append(f"advance:{amount}")
+
+    def set_description(self, desc: str) -> None:
+        self.events.append(f"description:{desc}")
+
+    def complete_phase(
+        self,
+        status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+        *,
+        retain: bool | None = None,
+    ) -> None:
+        self.completions.append((status, retain))
+
+    def suspend(self) -> None:
+        self.events.append("suspend")
+
+    def resume(self) -> None:
+        self.events.append("resume")
+
+
+async def test_slowpics_upload_plan_uses_unique_release_descriptors_and_explicit_labels(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    identity = ReleaseIdentity(
+        ContentIdentity("Example", year=2026),
+        resolution="2160p",
+        service="ATV",
+        source_type="WEB-DL",
+        dynamic_range_claims=("DV", "HDR10+"),
+        release_group="Kitsune",
+    )
+    comparison = _clip(
+        tmp_path / "comparison_videos" / "comparison.mkv",
+        label="Comparison canonical",
+        release_identity=identity,
+    )
+    explicit = _clip(
+        tmp_path / "comparison_videos" / "explicit.mkv",
+        label="My Encode",
+        release_identity=identity,
+        label_is_explicit=True,
+    )
+    ctx = _context(tmp_path, comparisons=[comparison, explicit])
+    ctx.reference = replace(ctx.reference, release_identity=identity)
+
+    screenshot_dir = tmp_path / "screenshots"
+    screenshot_dir.mkdir()
+    screenshots_by_label = {
+        "Reference": screenshot_dir / "reference.png",
+        "Comparison canonical": screenshot_dir / "comparison.png",
+        "My Encode": screenshot_dir / "explicit.png",
+    }
+    for screenshot in screenshots_by_label.values():
+        screenshot.write_bytes(b"\x89PNG\r\n\x1a\n")
+    render = _render_artifacts(
+        screenshots_by_label={
+            label: [screenshot] for label, screenshot in screenshots_by_label.items()
+        },
+        screenshot_dir=screenshot_dir,
+    )
+    captured_upload_plan: SlowpicsUploadPlan | None = None
+
+    async def _fake_publish_to_slowpics(**kwargs: object) -> PublishResult:
+        nonlocal captured_upload_plan
+        upload_plan = kwargs["upload_plan"]
+        assert isinstance(upload_plan, SlowpicsUploadPlan)
+        captured_upload_plan = upload_plan
+        return PublishResult(
+            url="https://slow.pics/c/example",
+            screenshot_count=upload_plan.screenshot_count,
+            upload_duration_seconds=0.0,
+            uploaded_file_paths=tuple(upload_plan.file_paths),
+        )
+
+    async def _fake_run_slowpics_post_upload_actions(
+        _request: SlowpicsPostUploadRequest,
+    ) -> tuple[PostUploadActionResult, ...]:
+        return ()
+
+    monkeypatch.setattr(phase_post_render, "publish_to_slowpics", _fake_publish_to_slowpics)
+    monkeypatch.setattr(
+        phase_post_render,
+        "run_slowpics_post_upload_actions",
+        _fake_run_slowpics_post_upload_actions,
+    )
+
+    async with httpx.AsyncClient() as client:
+        await phase_post_render.run_publish_phase(
+            ctx,
+            client=client,
+            metadata=None,
+            render=render,
+            selected_frames=[10],
+        )
+
+    assert captured_upload_plan is not None
+    assert [[image.image_name for image in row.images] for row in captured_upload_plan.rows] == [
+        [
+            "Reference | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
+            "Comparison 1 | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
+            "My Encode",
+        ]
+    ]
 
 
 async def test_run_metadata_phase_resolves_when_enabled_and_client_present(
@@ -80,15 +199,35 @@ async def test_run_metadata_phase_resolves_when_enabled_and_client_present(
 def test_run_report_phase_builds_report_data_and_records_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
-    ctx = _context(tmp_path, comparisons=[comparison])
+    identity = ReleaseIdentity(
+        ContentIdentity("Example", year=2026),
+        resolution="2160p",
+        service="ATV",
+        source_type="WEB-DL",
+        dynamic_range_claims=("DV", "HDR10+"),
+        release_group="Kitsune",
+    )
+    comparison = _clip(
+        tmp_path / "comparison_videos" / "encode.mkv",
+        label="Encode 1",
+        release_identity=identity,
+    )
+    explicit = _clip(
+        tmp_path / "comparison_videos" / "explicit.mkv",
+        label="My Explicit",
+        release_identity=identity,
+        label_is_explicit=True,
+    )
+    ctx = _context(tmp_path, comparisons=[comparison, explicit])
+    ctx.reference = replace(ctx.reference, release_identity=identity)
     render = _render_artifacts(
         screenshots_by_label={
             "Reference": [tmp_path / "screenshots" / "reference_1.png"],
             "Encode 1": [tmp_path / "screenshots" / "encode_1.png"],
+            "My Explicit": [tmp_path / "screenshots" / "explicit_1.png"],
         },
         screenshot_dir=tmp_path / "screenshots",
-        source_frames_by_label={"Reference": [5], "Encode 1": [5]},
+        source_frames_by_label={"Reference": [5], "Encode 1": [5], "My Explicit": [5]},
     )
     artifacts = RunArtifacts(
         render=render,
@@ -127,12 +266,25 @@ def test_run_report_phase_builds_report_data_and_records_path(
     assert [image.path for image in report_data.clips[1].images] == render.screenshots_by_label[
         "Encode 1"
     ]
+    assert [clip.display.control for clip in report_data.clips] == [
+        "Reference | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
+        "Comparison 1 | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
+        "My Explicit",
+    ]
+    assert [clip.display.micro for clip in report_data.clips] == [
+        "Reference | ATV WEB-DL | DV HDR10+ | Kitsune",
+        "Comparison 1 | ATV WEB-DL | DV HDR10+ | Kitsune",
+        "My Explicit",
+    ]
+    assert report_data.clips[2].display.release == "2160p | ATV WEB-DL | DV HDR10+ | Kitsune"
+    assert report_data.clips[2].display.filename == "explicit.mkv"
     assert report_data.slowpics_url == "https://slow.pics/c/example"
     assert report_data.rendering.overlay_mode == ctx.config.screenshots.overlay_mode
     assert report_data.rendering.include_frame_number == ctx.config.screenshots.include_frame_number
     assert [(clip.name, clip.resolution, clip.fps) for clip in report_data.clips] == [
         ("Reference", (1920, 1080), 24.0),
         ("Encode 1", (1920, 1080), 24.0),
+        ("My Explicit", (1920, 1080), 24.0),
     ]
     assert captured["report_config"] == ctx.config.report
 
@@ -589,6 +741,8 @@ async def test_report_confirmed_decline_skips_publish(
         artifacts=RunArtifacts(report_path=report_path, report_succeeded=True),
         selected_frames=[10],
     )
+    reporter = _RecordingProgressReporter()
+    ctx.reporter = reporter
     callback_calls: list[SlowpicsUploadConfirmationRequest] = []
 
     def _decline(
@@ -619,12 +773,19 @@ async def test_report_confirmed_decline_skips_publish(
         selected_phases = [
             phase for phase in phases if phase.name in {"confirm_slowpics_upload", "publish"}
         ]
-        await execute_phases(selected_phases, ctx, NullProgressReporter())
+        await execute_phases(selected_phases, ctx, reporter)
 
     assert callback_calls == [SlowpicsUploadConfirmationRequest(report_path=report_path)]
     assert state.artifacts.slowpics_upload_confirmation_status == "declined"
     assert state.artifacts.slowpics_url is None
     assert state.artifacts.uploaded_slowpics_file_paths == ()
+    assert [event for event in reporter.events if event in {"suspend", "resume"}] == [
+        "suspend",
+        "resume",
+    ]
+    assert (ProgressPhaseStatus.SKIPPED, None) in reporter.completions
+    assert "start:PUBLISH  Declined" in reporter.events
+    assert (ProgressPhaseStatus.COMPLETED, True) not in reporter.completions
 
 
 async def test_report_confirmed_available_report_confirms_then_publishes(
@@ -639,6 +800,8 @@ async def test_report_confirmed_available_report_confirms_then_publishes(
         artifacts=RunArtifacts(report_path=report_path, report_succeeded=True),
         selected_frames=[10],
     )
+    reporter = _RecordingProgressReporter()
+    ctx.reporter = reporter
     publish_calls = 0
 
     def _confirm(
@@ -671,11 +834,17 @@ async def test_report_confirmed_available_report_confirms_then_publishes(
         selected_phases = [
             phase for phase in phases if phase.name in {"confirm_slowpics_upload", "publish"}
         ]
-        await execute_phases(selected_phases, ctx, NullProgressReporter())
+        await execute_phases(selected_phases, ctx, reporter)
 
     assert publish_calls == 1
     assert state.artifacts.slowpics_upload_confirmation_status == "confirmed"
     assert state.artifacts.slowpics_url == "https://slow.pics/c/confirmed"
+    assert [event for event in reporter.events if event in {"suspend", "resume"}] == [
+        "suspend",
+        "resume",
+    ]
+    assert (ProgressPhaseStatus.COMPLETED, False) in reporter.completions
+    assert (ProgressPhaseStatus.COMPLETED, True) in reporter.completions
 
 
 async def test_report_confirmed_report_failure_skips_prompt_and_publish(
@@ -686,6 +855,8 @@ async def test_report_confirmed_report_failure_skips_prompt_and_publish(
     ctx.config.slowpics.confirm_upload_after_report = True
     ctx.config.report.enable = True
     state = ExecutionState(artifacts=RunArtifacts(), selected_frames=[10])
+    reporter = _RecordingProgressReporter()
+    ctx.reporter = reporter
 
     def _failing_report(*_args: object, **_kwargs: object) -> ReportPhaseOutput:
         raise RuntimeError("report failed")
@@ -724,7 +895,7 @@ async def test_report_confirmed_report_failure_skips_prompt_and_publish(
             for phase in phases
             if phase.name in {"report", "confirm_slowpics_upload", "publish"}
         ]
-        await execute_phases(selected_phases, ctx, NullProgressReporter())
+        await execute_phases(selected_phases, ctx, reporter)
 
     assert state.artifacts.slowpics_upload_confirmation_status == "report_unavailable"
     assert state.artifacts.slowpics_url is None
@@ -732,6 +903,9 @@ async def test_report_confirmed_report_failure_skips_prompt_and_publish(
         "report: report failed",
         "slow.pics upload skipped because report confirmation was unavailable",
     ]
+    assert [event for event in reporter.events if event in {"suspend", "resume"}] == []
+    assert (ProgressPhaseStatus.SKIPPED, None) in reporter.completions
+    assert (ProgressPhaseStatus.COMPLETED, True) not in reporter.completions
 
 
 async def test_report_confirmed_report_payload_uses_no_slowpics_url(

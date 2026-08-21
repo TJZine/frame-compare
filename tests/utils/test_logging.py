@@ -9,16 +9,6 @@ from structlog.testing import ReturnLogger
 from frame_compare.utils.logging import configure_logging
 
 
-@pytest.fixture(autouse=True)
-def reset_logging_state():
-    """Reset structlog configuration and context before each test."""
-    structlog.reset_defaults()
-    structlog.contextvars.clear_contextvars()
-    yield
-    structlog.reset_defaults()
-    structlog.contextvars.clear_contextvars()
-
-
 def test_configure_logging_json_format():
     """Test that configure_logging with log_format='json' adds JSONRenderer."""
     configure_logging(log_format="json")

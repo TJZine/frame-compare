@@ -12,13 +12,6 @@
 **[Native source](docs/getting-started/native.md)** ·
 **[Documentation](https://tjzine.github.io/frame-compare/)**
 
-<figure class="fc-doc-figure">
-  <a href="docs/guides/reports-and-overlays.md">
-    <img src="docs/images/report-viewer-overview.webp" alt="Offline report at frame 1000 comparing EBU DVB PQ10 Reference with EBU DVB HLG10 Comparison in slider mode, with the filmstrip and review controls visible.">
-  </a>
-  <figcaption>The offline report keeps the natural EBU/DVB source pair, frame 1000 context, filmstrip, and review controls together for repeatable local inspection.</figcaption>
-</figure>
-
 Frame Compare turns two or more local video sources into a repeatable comparison:
 it discovers and validates the clips, selects representative frames, aligns differing
 edits when possible, renders labeled screenshots, and builds a static HTML report that

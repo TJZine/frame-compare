@@ -1,4 +1,4 @@
-"""Tests for the v1.1 report generation service."""
+"""Tests for the v1.2 report generation service."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ from frame_compare.services.report.entry import generate_report
 from frame_compare.services.report.payload import (
     ClipInfo,
     FrameDetail,
+    ReportClipDisplayInfo,
     ReportData,
     ReportImageInfo,
     ReportPayload,
@@ -103,6 +104,13 @@ def _clip(
         tonemap_settings=TonemapSettings() if tonemapped else None,
         active_picture=active if dolby_vision else _geometry().active_picture,
         images=images,
+        display=ReportClipDisplayInfo(
+            primary=name.upper(),
+            release="",
+            control=name.upper(),
+            micro=name.upper(),
+            filename=f"{name}.mkv",
+        ),
         label=name.upper(),
         source_identity=f"source_{name}",
     )
@@ -211,11 +219,11 @@ def test_generate_report_embed_images_and_relative_paths(
     assert 'src="clip1/0.png"' in relative.read_text(encoding="utf-8")
 
 
-def test_report_payload_v11_raw_values_and_comparison_semantics(
+def test_report_payload_v12_raw_values_and_comparison_semantics(
     report_data: ReportData, tmp_path: Path
 ) -> None:
     payload = build_report_payload(report_data, ReportConfig(), report_dir=tmp_path)
-    assert payload["version"] == "1.1"
+    assert payload["version"] == "1.2"
     assert payload["clips"][0]["size_bytes"] == 17 * 1024**3
     assert payload["clips"][1]["signal"]["primaries"] == 9
     assert payload["clips"][1]["signal"]["dolby_vision_rpu"] is True
@@ -299,6 +307,43 @@ def test_report_id_identity_excludes_paths_and_timestamps(
     assert first["generated_at"] != second["generated_at"]
     assert first["report_id"] == second["report_id"]
     assert str(tmp_path) not in first["report_id"]
+    display_only = replace(
+        report_data,
+        clips=[
+            replace(
+                clip,
+                display=ReportClipDisplayInfo(
+                    primary=f"Primary {index}",
+                    release=f"Release {index}",
+                    control=f"Control {index}",
+                    micro=f"Micro {index}",
+                    filename=f"exact-{index}.mkv",
+                ),
+            )
+            for index, clip in enumerate(report_data.clips)
+        ],
+    )
+    assert (
+        build_report_payload(display_only, ReportConfig(), report_dir=tmp_path)["report_id"]
+        == first["report_id"]
+    )
+    canonical_label_changed = replace(
+        report_data,
+        clips=[replace(report_data.clips[0], label="RENAMED"), *report_data.clips[1:]],
+        rendering=replace(
+            report_data.rendering,
+            geometry_by_label={
+                "RENAMED" if label == report_data.clips[0].label else label: geometry
+                for label, geometry in report_data.rendering.geometry_by_label.items()
+            },
+        ),
+    )
+    assert (
+        build_report_payload(canonical_label_changed, ReportConfig(), report_dir=tmp_path)[
+            "report_id"
+        ]
+        != first["report_id"]
+    )
     changed = replace(
         report_data,
         rendering=replace(report_data.rendering, tonemap_settings=TonemapSettings(target_nits=203)),
@@ -405,12 +450,12 @@ def test_report_data_and_clip_are_frozen(report_data: ReportData) -> None:
         report_data.clips[0].name = "new"  # type: ignore
 
 
-def test_generate_report_json_contains_v11_rendering(
+def test_generate_report_json_contains_v12_rendering(
     report_data: ReportData, tmp_path: Path
 ) -> None:
     output = generate_report(report_data, ReportConfig(), output_path=tmp_path / "report.html")
     payload = _json_payload_from_report(output)
-    assert payload["version"] == "1.1"
+    assert payload["version"] == "1.2"
     assert payload["rendering"]["overlay_mode"] == "diagnostic"
     assert payload["frames"][0]["detail"] == "Selected comparison frame"
     geometry = payload["rendering"]["geometry_by_label"]["CLIP2"]

@@ -251,6 +251,8 @@ def test_normal_run_folder_probe_cache_excludes_unrelated_shared_entries(tmp_pat
         config=ConfigSchema(),
         overrides_by_path={},
         labels_by_path={current_path: current_path.stem},
+        release_identities_by_path={},
+        explicit_labels_by_path={},
     )
 
     run_path = workspace.generated_dir / "clip_probe.toml"

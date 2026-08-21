@@ -129,6 +129,10 @@ def test_execute_prep_analysis_source_fastest_selects_lowest_timing_and_ties_by_
 
     assert prep.analysis_clip is not None
     assert prep.analysis_clip.path.name == "01-fast.mkv"
+    assert (
+        "Analysis source: Comparison 1 | selected by fastest-source policy"
+        in prep.load_source_diagnostics
+    )
 
 
 def test_execute_prep_analysis_source_fastest_compares_per_sample_time(

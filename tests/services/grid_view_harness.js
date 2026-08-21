@@ -183,6 +183,13 @@ context.ResizeObserver = undefined;
 const announcements = [];
 const clips = Array.from({ length: 6 }, (_, index) => ({
     label: `Clip ${index + 1}`,
+    display: {
+        primary: `Clip ${index + 1}`,
+        release: '',
+        control: `Clip ${index + 1}`,
+        micro: `Clip ${index + 1}`,
+        filename: `clip-${index + 1}.mkv`,
+    },
     resolution: [1920, 1080],
 }));
 clips[1].resolution = [1080, 1920];
@@ -203,6 +210,8 @@ const viewer = {
     },
     dom: { stage: gridRoot },
     currentFrame() { return frame; },
+    clipDisplay(clip, profile = 'control') { return clip.display[profile]; },
+    clipAccessibleName(clip) { return `${clip.display.primary} — ${clip.display.filename}`; },
     referenceClipIndex() { return 0; },
     clampPan() {},
     updateInspectorData() {},

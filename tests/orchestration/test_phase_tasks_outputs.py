@@ -18,6 +18,7 @@ from frame_compare.render.types import (
     RenderedClipFacts,
     ScreenshotBatchRequest,
 )
+from frame_compare.services.release_identity import ContentIdentity, ReleaseIdentity
 from frame_compare.services.types import AlignmentResult
 from frame_compare.utils.media_facts import (
     PictureType,
@@ -148,6 +149,47 @@ def test_run_render_phase_maps_multiple_clips_in_stable_order(
         ("Encode B", [6, 7]),
     ]
     assert [request.comparison_frames for request in requests] == [[1, 2], [1, 2], [1, 2]]
+
+
+def test_run_render_phase_adds_unique_progress_labels_without_changing_canonical_labels(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    identity = ReleaseIdentity(
+        ContentIdentity("Example", year=2026),
+        service="ATV",
+        source_type="WEB-DL",
+        dynamic_range_claims=("DV", "HDR10+"),
+        release_group="Kitsune",
+    )
+    comparison = _clip(
+        tmp_path / "comparison_videos" / "comparison.mkv",
+        label="Canonical comparison",
+        release_identity=identity,
+    )
+    generated_progress_label = "Comparison 1 | ATV WEB-DL | DV HDR10+ | Kitsune"
+    explicit = _clip(
+        tmp_path / "comparison_videos" / "explicit.mkv",
+        label=generated_progress_label,
+        release_identity=identity,
+        label_is_explicit=True,
+    )
+    ctx = _context(tmp_path, comparisons=[comparison, explicit])
+    ctx.reference = replace(ctx.reference, release_identity=identity)
+    captured = _capture_detailed_render(monkeypatch, tmp_path)
+
+    phase_render.run_render_phase(ctx, frames=[1], runner=cast(Any, _RenderRunner()))
+
+    requests = captured["batch_requests"]
+    assert [request.label for request in requests] == [
+        "Reference",
+        "Canonical comparison",
+        generated_progress_label,
+    ]
+    assert [request.progress_label for request in requests] == [
+        "Reference | ATV WEB-DL | DV HDR10+ | Kitsune",
+        f"{generated_progress_label} (2)",
+        generated_progress_label,
+    ]
 
 
 def test_run_render_phase_maps_canonical_clip_facts_without_io(

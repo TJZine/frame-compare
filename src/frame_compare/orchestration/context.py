@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from frame_compare.config.schema import ConfigSchema
     from frame_compare.orchestration.full_window_retry import FullWindowRetryOverride
     from frame_compare.orchestration.types import FullWindowRetryConfirmationFn
+    from frame_compare.services.release_identity import ReleaseIdentity
     from frame_compare.utils.progress_protocol import ProgressReporter
     from frame_compare.utils.types import WorkspacePaths
 
@@ -120,14 +121,15 @@ class ClipState:
 
     # FPS hierarchy:
     # - source_fps: from probe
-    # - forced_fps: user override (optional; may be added later)
-    # - effective_fps: forced if set else source_fps
+    # - effective_fps: configured override when present, otherwise source_fps
     source_fps: Fraction
     effective_fps: Fraction
 
     trim: ClipTrimState = field(default_factory=ClipTrimState)
     alignment: ClipAlignmentState | None = None
     active_rect: ClipActiveRect | None = None
+    release_identity: ReleaseIdentity | None = None
+    label_is_explicit: bool = False
 
     def effective_num_frames(self) -> int:
         """Return effective frame count after applied trims.

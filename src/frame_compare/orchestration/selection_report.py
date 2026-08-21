@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -12,9 +11,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from frame_compare.analysis.types import SelectionBreakdown
-
-_REPORT_CONSOLE_WIDTH = 180
-_MIN_REPORT_CONSOLE_WIDTH = 100
+from frame_compare.orchestration.presentation import report_console_width
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,11 +88,6 @@ def build_final_selection_report(
     )
 
 
-def _report_console_width() -> int:
-    columns = shutil.get_terminal_size(fallback=(_REPORT_CONSOLE_WIDTH, 24)).columns
-    return min(max(columns, _MIN_REPORT_CONSOLE_WIDTH), _REPORT_CONSOLE_WIDTH)
-
-
 def _format_count(count: int, *, domain: str) -> str:
     unit = "frame" if count == 1 else "frames"
     return f"{count:,} {domain} {unit}"
@@ -130,7 +122,7 @@ def _render_human_selection_report(
     if not report.breakdown_available:
         table.add_row("breakdown", "[dim]unavailable[/]")
 
-    console = Console(stderr=True, no_color=no_color, width=_report_console_width())
+    console = Console(stderr=True, no_color=no_color, width=report_console_width(minimum=100))
     console.print(
         Panel(
             table,

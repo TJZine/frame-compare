@@ -54,6 +54,18 @@ def test_build_html_renders_only_safe_slowpics_links(report_payload: ReportPaylo
     assert no_upload_info_modal.general["slow.pics"] == "Not uploaded"
 
 
+def test_build_html_keeps_distinct_release_identity_in_info_clip_card(
+    report_payload: ReportPayload,
+) -> None:
+    document = parse_elements(build_html(report_payload))
+    clips = find_all(document, tag="li", class_name="rv-clip-meta-item")
+
+    assert [require_first(clip, class_name="rv-clip-meta-release").text for clip in clips] == [
+        "Reference release",
+        "Encode release",
+    ]
+
+
 def test_build_html_renders_frame_and_clip_selectors(report_payload: ReportPayload) -> None:
     html = build_html(report_payload)
     parser = SelectParser()
@@ -66,19 +78,25 @@ def test_build_html_renders_frame_and_clip_selectors(report_payload: ReportPaylo
     ]
     assert parser.selects["left-select"].attrs["aria-label"] == "Left clip"
     reference = next(
-        option for option in parser.selects["left-select"].options if option.text == "REF <main>"
+        option
+        for option in parser.selects["left-select"].options
+        if option.text == "Reference control"
     )
     assert "selected" in reference.attrs
+    assert reference.attrs["title"] == "Reference primary <unsafe> — reference exact <unsafe>.mkv"
     assert parser.selects["right-select"].attrs["aria-label"] == "Right clip"
     candidate = next(
         option
         for option in parser.selects["right-select"].options
-        if option.text == 'ENC "candidate"'
+        if option.text == "Encode control"
     )
     assert "selected" in candidate.attrs
+    assert candidate.attrs["title"] == 'Encode primary "unsafe" — encode exact "unsafe".mkv'
     assert parser.selects["active-select"].attrs["aria-label"] == "Single clip"
     active_reference = next(
-        option for option in parser.selects["active-select"].options if option.text == "REF <main>"
+        option
+        for option in parser.selects["active-select"].options
+        if option.text == "Reference control"
     )
     assert "selected" in active_reference.attrs
 
@@ -95,6 +113,7 @@ def test_build_html_renders_mode_aware_clip_controls(report_payload: ReportPaylo
         document, tag="div", attr_name="data-control-scope", attr_value="active"
     )
     mode_controls = require_first(document, tag="div", class_name="rv-mode-controls")
+    context_zone = require_first(document, tag="div", class_name="rv-context-zone")
     mode_buttons = find_children(mode_controls, tag="button")
     assert [button.attrs["data-mode"] for button in mode_buttons] == [
         "slider",
@@ -105,6 +124,10 @@ def test_build_html_renders_mode_aware_clip_controls(report_payload: ReportPaylo
     ]
     assert "rv-context-controls" in pair_controls.classes
     assert "rv-context-controls" in active_controls.classes
+    assert pair_controls in context_zone.children
+    assert active_controls in context_zone.children
+    assert require_first(context_zone, element_id="alignment-status")
+    assert "role" not in context_zone.attrs
     assert pair_controls.attrs["aria-label"] == "Comparison pair"
     assert active_controls.attrs["aria-label"] == "Single clip"
     assert "hidden" in active_controls.attrs
@@ -150,6 +173,13 @@ def test_build_html_keeps_ten_plus_long_label_clips_reachable_and_mobile_safe(
             **report_payload["clips"][0],
             "name": f"clip-{idx + 1}",
             "label": f"{long_label}{idx + 1:02d}",
+            "display": {
+                "primary": f"{long_label}{idx + 1:02d}",
+                "release": "",
+                "control": f"{long_label}{idx + 1:02d}",
+                "micro": f"Clip {idx + 1:02d}",
+                "filename": f"clip-{idx + 1}.mkv",
+            },
         }
         for idx in range(12)
     ]
@@ -248,26 +278,26 @@ def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> No
         "Frames": "2",
         "Clips": "2",
         "Default Mode": "slider",
-        "Default Pair": 'REF <main> vs ENC "candidate"',
+        "Default Pair": "Reference control vs Encode control",
         "slow.pics": "https://slow.pics/c/abc?x=1&y=2",
         "Tonemap": "Not applied",
     }
     assert [(clip.label, clip.dynamic_range, clip.fields) for clip in info_modal.clips] == [
         (
-            "REF <main>",
+            "Reference primary <unsafe>",
             "SDR",
             {
-                "Name": "reference",
+                "Filename": "reference exact <unsafe>.mkv",
                 "Resolution": "1920x1080",
                 "FPS": "24 fps",
                 "Frames": "100",
             },
         ),
         (
-            'ENC "candidate"',
+            'Encode primary "unsafe"',
             "HDR",
             {
-                "Name": "encode",
+                "Filename": 'encode exact "unsafe".mkv',
                 "Resolution": "1920x1080",
                 "FPS": "24 fps",
                 "Frames": "100",
@@ -485,9 +515,9 @@ def test_build_html_uses_payload_default_selection_for_clip_controls(
         if "selected" in option.attrs
     ]
 
-    assert left_selected == ['ENC "candidate"']
-    assert right_selected == ["REF <main>"]
-    assert active_selected == ['ENC "candidate"']
+    assert left_selected == ["Encode control"]
+    assert right_selected == ["Reference control"]
+    assert active_selected == ["Encode control"]
 
 
 def test_build_html_renders_viewport_audit_controls(report_payload: ReportPayload) -> None:

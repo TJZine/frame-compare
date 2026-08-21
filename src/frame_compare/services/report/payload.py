@@ -1,4 +1,4 @@
-"""Report v1.1 input validation, wire shaping, and stable identity."""
+"""Report v1.2 input validation, wire shaping, and stable identity."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol, TypedDict
+from typing import Protocol, TypedDict, cast
 
 from frame_compare.config.schema import OverlayMode, ReportConfig
 from frame_compare.errors import PathEscapesRootError
@@ -25,7 +25,7 @@ from frame_compare.utils.media_facts import (
 from frame_compare.utils.paths import require_managed_descendant
 from frame_compare.vs.types import TonemapSettings
 
-REPORT_VERSION = "1.1"
+REPORT_VERSION = "1.2"
 
 
 def _empty_frame_details() -> list[FrameDetail]:
@@ -73,6 +73,14 @@ class ReportActivePicturePayload(TypedDict):
     is_full_frame: bool
 
 
+class ReportClipDisplayPayload(TypedDict):
+    primary: str
+    release: str
+    control: str
+    micro: str
+    filename: str
+
+
 class ReportClipPayload(TypedDict):
     name: str
     label: str
@@ -83,6 +91,7 @@ class ReportClipPayload(TypedDict):
     signal: ReportSignalPayload
     presentation: ReportPresentationPayload
     active_picture: ReportActivePicturePayload | None
+    display: ReportClipDisplayPayload
 
 
 class ReportImagePayload(TypedDict):
@@ -142,7 +151,16 @@ class ReportRenderingPayload(TypedDict):
     geometry_by_label: dict[str, ReportGeometryPayload]
 
 
-class ReportIdentityClipPayload(ReportClipPayload):
+class ReportIdentityClipPayload(TypedDict):
+    name: str
+    label: str
+    frame_count: int
+    resolution: tuple[int, int]
+    fps: float
+    size_bytes: int
+    signal: ReportSignalPayload
+    presentation: ReportPresentationPayload
+    active_picture: ReportActivePicturePayload | None
     source_identity: str | None
 
 
@@ -199,6 +217,15 @@ class ReportImageInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class ReportClipDisplayInfo:
+    primary: str
+    release: str
+    control: str
+    micro: str
+    filename: str
+
+
+@dataclass(frozen=True, slots=True)
 class ClipInfo:
     """Canonical clip/report input assembled by orchestration."""
 
@@ -213,6 +240,7 @@ class ClipInfo:
     tonemap_settings: TonemapSettings | None
     active_picture: ActivePictureFacts | None
     images: list[ReportImageInfo]
+    display: ReportClipDisplayInfo
     label: str | None = None
     source_identity: str | None = None
 
@@ -269,7 +297,7 @@ class ReportData:
 def build_report_payload(
     data: ReportData, config: ReportConfig, *, report_dir: Path
 ) -> ReportPayload:
-    """Shape validated report data into the embedded v1.1 JSON payload."""
+    """Shape validated report data into the embedded v1.2 JSON payload."""
     _validate_report_cardinality(data)
     title = data.metadata.title if data.metadata else data.clips[0].name
     clips = build_clip_payloads(data.clips)
@@ -325,24 +353,37 @@ def _validate_report_cardinality(data: ReportData) -> None:
 
 def build_clip_payloads(clips: list[ClipInfo]) -> list[ReportClipPayload]:
     """Build raw stable clip payload entries."""
-    return [
-        {
-            "name": clip.name,
-            "label": clip.label or clip.name,
-            "frame_count": clip.frame_count,
-            "resolution": clip.resolution,
-            "fps": clip.fps,
-            "size_bytes": clip.size_bytes,
-            "signal": _signal_payload(clip.signal),
-            "presentation": _presentation_payload(clip.presentation_state, clip.tonemap_settings),
-            "active_picture": (
-                None
-                if clip.active_picture is None or clip.active_picture.is_full_frame
-                else _active_picture_payload(clip.active_picture)
-            ),
-        }
-        for clip in clips
-    ]
+    payloads: list[ReportClipPayload] = []
+    for clip in clips:
+        label = clip.label or clip.name
+        display = clip.display
+        payloads.append(
+            {
+                "name": clip.name,
+                "label": label,
+                "frame_count": clip.frame_count,
+                "resolution": clip.resolution,
+                "fps": clip.fps,
+                "size_bytes": clip.size_bytes,
+                "signal": _signal_payload(clip.signal),
+                "presentation": _presentation_payload(
+                    clip.presentation_state, clip.tonemap_settings
+                ),
+                "active_picture": (
+                    None
+                    if clip.active_picture is None or clip.active_picture.is_full_frame
+                    else _active_picture_payload(clip.active_picture)
+                ),
+                "display": {
+                    "primary": display.primary,
+                    "release": display.release,
+                    "control": display.control,
+                    "micro": display.micro,
+                    "filename": display.filename,
+                },
+            }
+        )
+    return payloads
 
 
 def build_frame_payloads(
@@ -421,10 +462,16 @@ def build_default_selection(clip_count: int) -> ReportDefaultSelectionPayload:
 def build_report_identity_clips(
     clip_infos: list[ClipInfo], clips: list[ReportClipPayload]
 ) -> list[ReportIdentityClipPayload]:
-    return [
-        {**clip, "source_identity": info.source_identity}
-        for info, clip in zip(clip_infos, clips, strict=True)
-    ]
+    identity_clips: list[ReportIdentityClipPayload] = []
+    for info, clip in zip(clip_infos, clips, strict=True):
+        identity_clip = {key: value for key, value in clip.items() if key != "display"}
+        identity_clips.append(
+            cast(
+                ReportIdentityClipPayload,
+                {**identity_clip, "source_identity": info.source_identity},
+            )
+        )
+    return identity_clips
 
 
 def build_report_identity_frames(
@@ -606,6 +653,8 @@ __all__ = [
     "ClipInfo",
     "FrameDetail",
     "REPORT_VERSION",
+    "ReportClipDisplayInfo",
+    "ReportClipDisplayPayload",
     "ReportClipPayload",
     "ReportData",
     "ReportFramePayload",

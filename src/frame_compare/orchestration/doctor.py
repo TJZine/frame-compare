@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import structlog
+
 from frame_compare.orchestration.doctor_checks import collect_checks
 from frame_compare.orchestration.doctor_types import CheckResult, DoctorCheck, DoctorReport
 
@@ -17,6 +19,8 @@ __all__ = [
     "collect_checks",
     "run_doctor",
 ]
+
+log = structlog.get_logger()
 
 
 def run_doctor(
@@ -44,14 +48,17 @@ def run_doctor(
     for check in checks:
         try:
             result = check.check_fn()
-        except Exception as e:
+        except Exception as error:
+            log.debug(
+                "doctor_check_failed",
+                check=check.name,
+                exception_type=type(error).__name__,
+                exc_info=True,
+            )
             result = CheckResult(
                 passed=False,
-                message=f"{check.name} check raised: {e}",
-                details={
-                    "exception_type": type(e).__name__,
-                    "exception": str(e),
-                },
+                message=f"{check.name} check failed",
+                details={"exception_type": type(error).__name__},
             )
         results.append((check, result))
 

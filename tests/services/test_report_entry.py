@@ -12,6 +12,7 @@ from frame_compare.services.errors import ReportError
 from frame_compare.services.report.entry import generate_report
 from frame_compare.services.report.payload import (
     ClipInfo,
+    ReportClipDisplayInfo,
     ReportData,
     ReportImageInfo,
     ReportRenderingInfo,
@@ -59,6 +60,13 @@ def report_data(tmp_path: Path) -> ReportData:
                 tonemap_settings=None,
                 active_picture=geometry.active_picture,
                 images=images,
+                display=ReportClipDisplayInfo(
+                    primary=label,
+                    release="",
+                    control=label,
+                    micro=label,
+                    filename=f"{name}.mkv",
+                ),
                 label=label,
             )
         )

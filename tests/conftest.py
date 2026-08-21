@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+import structlog
 
 _NON_UNIT_MARKERS = frozenset({"integration", "e2e", "vs_required", "slow", "network"})
 _NON_UNIT_NODEID_PREFIXES = ("tests/integration/", "tests/e2e/")
@@ -68,6 +70,16 @@ if _vs_needs_mock():
 
 
 # ─── Fixtures ──────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def reset_structlog_state() -> Iterator[None]:
+    """Isolate process-global structlog configuration and context between tests."""
+    structlog.reset_defaults()
+    structlog.contextvars.clear_contextvars()
+    yield
+    structlog.reset_defaults()
+    structlog.contextvars.clear_contextvars()
 
 
 @pytest.fixture

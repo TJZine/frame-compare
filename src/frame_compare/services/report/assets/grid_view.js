@@ -107,7 +107,8 @@ const GridView = (() => {
         }
 
         function safeLabel(index) {
-            return viewer.state.data?.clips?.[index]?.label || `Clip ${index + 1}`;
+            const clip = viewer.state.data?.clips?.[index];
+            return viewer.clipDisplay(clip, 'micro');
         }
 
         function clipRoles(index) {
@@ -122,12 +123,15 @@ const GridView = (() => {
             dom.cells.querySelectorAll('.rv-grid-cell').forEach(cell => {
                 const index = Number(cell.dataset.clipIndex);
                 const label = safeLabel(index);
+                const accessibleName = viewer.clipAccessibleName(
+                    viewer.state.data?.clips?.[index],
+                );
                 const roles = clipRoles(index);
                 cell.dataset.reference = roles.includes('Reference') ? 'true' : 'false';
                 cell.dataset.active = roles.includes('Active') ? 'true' : 'false';
                 cell.setAttribute(
                     'aria-label',
-                    [`Clip ${index + 1}, ${label}`, ...roles].join(', '),
+                    [`Clip ${index + 1}, ${accessibleName}`, ...roles].join(', '),
                 );
                 const role = cell.querySelector('[data-grid-role]');
                 if (role) {
@@ -255,13 +259,13 @@ const GridView = (() => {
             cell.dataset.clipIndex = String(index);
             cell.dataset.status = 'loading';
             cell.tabIndex = 0;
-            cell.title = label;
+            cell.title = viewer.clipAccessibleName(viewer.state.data?.clips?.[index]);
 
             const media = document.createElement('div');
             media.className = 'rv-grid-media';
             const image = document.createElement('img');
             image.className = 'rv-grid-image';
-            image.alt = `${label} - Frame ${currentFrame()?.number ?? viewer.state.currentFrameIdx + 1}`;
+            image.alt = `${viewer.clipAccessibleName(viewer.state.data?.clips?.[index])} - Frame ${currentFrame()?.number ?? viewer.state.currentFrameIdx + 1}`;
             image.decoding = 'async';
             image.dataset.clipIndex = String(index);
             image.addEventListener('load', () => handleLoad(cell, image, index, generation));

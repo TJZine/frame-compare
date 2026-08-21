@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 from rich.console import Console
 from rich.markup import escape
@@ -12,10 +12,10 @@ from rich.panel import Panel
 from rich.table import Table
 
 from frame_compare.orchestration.context import ClipState
+from frame_compare.orchestration.presentation import report_console_width
+from frame_compare.services.release_identity import format_release_descriptor
 from frame_compare.services.types import AlignmentSource
 
-_REPORT_CONSOLE_WIDTH = 180
-_MIN_REPORT_CONSOLE_WIDTH = 100
 _MAX_SELECTED_FRAMES = 8
 
 
@@ -30,6 +30,9 @@ class AlignmentReportComparison:
     comparison_row_zero_source_frame: int
     reference_trim_range: tuple[int, int]
     comparison_trim_range: tuple[int, int]
+    reference_path: Path | None = None
+    comparison_path: Path | None = None
+    presentation_name: str | None = None
 
 
 def build_frame_alignment_report(
@@ -54,6 +57,17 @@ def build_frame_alignment_report(
             comparison_row_zero_source_frame=comparison.trim.trim_start_frames,
             reference_trim_range=_trim_range(reference),
             comparison_trim_range=_trim_range(comparison),
+            reference_path=reference.path,
+            comparison_path=comparison.path,
+            presentation_name=(
+                comparison.label
+                if comparison.label_is_explicit
+                else (
+                    format_release_descriptor(comparison.release_identity)
+                    if comparison.release_identity is not None
+                    else comparison.label
+                )
+            ),
         )
         for comparison in comparisons
     )
@@ -73,11 +87,6 @@ def _stage_label(stage: str) -> str:
     if stage == "after_align":
         return "After Alignment"
     return stage.replace("_", " ").title()
-
-
-def _report_console_width() -> int:
-    columns = shutil.get_terminal_size(fallback=(_REPORT_CONSOLE_WIDTH, 24)).columns
-    return min(max(columns, _MIN_REPORT_CONSOLE_WIDTH), _REPORT_CONSOLE_WIDTH)
 
 
 def _format_offset(offset: int | None) -> str:
@@ -126,6 +135,7 @@ def _render_alignment_table(
     comparisons: Sequence[AlignmentReportComparison],
     selected_frames: Sequence[int],
     alignment_warnings: Sequence[str],
+    verbose: bool,
 ) -> Table:
     table = Table(
         show_header=False,
@@ -142,25 +152,20 @@ def _render_alignment_table(
             table.add_row("", "")
 
         source = comparison.alignment_source if comparison.alignment_source is not None else "none"
-        table.add_row("comparison", f"[bright_white]{escape(comparison.label)}[/]")
-        table.add_row("  source", f"[bright_white]{escape(source)}[/]")
+        display_name = (
+            comparison.label if verbose else (comparison.presentation_name or comparison.label)
+        )
+        table.add_row("comparison", f"[bright_white]{escape(display_name)}[/]")
         table.add_row(
             "  offset",
             f"[bright_white]{escape(_format_offset(comparison.relative_offset_frames))}[/]",
         )
-        table.add_row(
-            "  row 0",
-            "[bright_white]"
-            f"Reference source {comparison.reference_row_zero_source_frame}"
-            f" <-> {escape(comparison.label)} source "
-            f"{comparison.comparison_row_zero_source_frame}"
-            "[/]",
-        )
+        table.add_row("  source", f"[bright_white]{escape(source)}[/]")
         table.add_row(
             "  trims",
             "[bright_white]"
             f"Reference {escape(_format_range(comparison.reference_trim_range))}, "
-            f"{escape(comparison.label)} "
+            f"{escape(display_name)} "
             f"{escape(_format_range(comparison.comparison_trim_range))}"
             "[/]",
         )
@@ -177,6 +182,29 @@ def _render_alignment_table(
         for warning in alignment_warnings:
             table.add_row("  rejected", f"[yellow]{escape(warning)}[/]")
 
+    if verbose:
+        for comparison in comparisons:
+            table.add_row("", "")
+            table.add_row("details", f"[bright_white]{escape(comparison.label)}[/]")
+            table.add_row(
+                "  row 0",
+                "[bright_white]"
+                f"Reference source {comparison.reference_row_zero_source_frame}"
+                f" <-> {escape(comparison.label)} source "
+                f"{comparison.comparison_row_zero_source_frame}"
+                "[/]",
+            )
+            if comparison.reference_path is not None:
+                table.add_row(
+                    "  reference path",
+                    f"[dim]{escape(str(comparison.reference_path.resolve()))}[/]",
+                )
+            if comparison.comparison_path is not None:
+                table.add_row(
+                    "  comparison path",
+                    f"[dim]{escape(str(comparison.comparison_path.resolve()))}[/]",
+                )
+
     return table
 
 
@@ -187,14 +215,21 @@ def _render_human_alignment_report(
     selected_frames: Sequence[int],
     alignment_warnings: Sequence[str],
     no_color: bool,
+    verbose: bool,
 ) -> None:
-    console = Console(stderr=True, no_color=no_color, width=_report_console_width())
+    console = Console(
+        stderr=True,
+        no_color=no_color,
+        width=report_console_width(),
+        height=1000,
+    )
     console.print(
         Panel(
             _render_alignment_table(
                 comparisons=comparisons,
                 selected_frames=selected_frames,
                 alignment_warnings=alignment_warnings,
+                verbose=verbose,
             ),
             title=f"[bold cyan]Frame Alignment[/] [dim]{escape(_stage_label(stage))}[/]",
             border_style="cyan",
@@ -211,6 +246,7 @@ def emit_frame_alignment_report(
     json_output: bool,
     quiet: bool,
     no_color: bool = False,
+    verbose: bool = False,
 ) -> None:
     """Emit the frame alignment report for human-readable runs."""
     if quiet or json_output:
@@ -227,4 +263,5 @@ def emit_frame_alignment_report(
         selected_frames=selected_frames,
         alignment_warnings=alignment_warnings,
         no_color=no_color,
+        verbose=verbose,
     )

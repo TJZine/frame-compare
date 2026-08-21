@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from datetime import datetime
 
 import httpx
@@ -24,7 +25,12 @@ from frame_compare.orchestration.fps_report import (
 )
 from frame_compare.orchestration.phases import execute_phases
 from frame_compare.orchestration.preparation import execute_prep
-from frame_compare.orchestration.progress import select_reporter
+from frame_compare.orchestration.progress import (
+    emit_execution_section_end,
+    emit_execution_section_start,
+    select_reporter,
+    uses_rich_progress,
+)
 from frame_compare.orchestration.run_result_lifecycle import (
     record_completed_run_result,
     record_failed_run_best_effort,
@@ -172,7 +178,10 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             diagnostics=prep.load_source_diagnostics,
             json_output=request.json_output,
             quiet=request.quiet,
+            rich_output=uses_rich_progress(reporter),
             no_color=request.no_color,
+            input_dir=context.workspace.input_dir,
+            verbose=request.verbose,
         )
         state.phase_timings["load_sources"] = max(
             0.0, local_deps.monotonic_timer() - prep.load_sources_start
@@ -200,38 +209,50 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             state=state,
         )
 
-        await execute_phases(phase_plan.before_align, context, reporter)
-        selected_frame_count = len(state.selected_frames)
-        emit_final_selection_report(
-            selected_frames=state.selected_frames,
-            breakdown=context.selection_breakdown,
-            verbose=request.verbose,
-            json_output=request.json_output,
-            quiet=request.quiet,
-            no_color=request.no_color,
-        )
-        emit_consolidated_fps_report(
-            stage="after_align",
-            clips=build_consolidated_fps_report(context.reference, context.comparisons),
-            json_output=request.json_output,
-            quiet=request.quiet,
-            no_color=request.no_color,
-        )
-        emit_frame_alignment_report(
-            stage="after_align",
-            comparisons=build_frame_alignment_report(
-                reference=context.reference,
-                comparisons=context.comparisons,
-            ),
-            selected_frames=state.selected_frames,
-            alignment_warnings=[
-                warning for warning in state.warnings if warning.startswith("align:")
-            ],
-            json_output=request.json_output,
-            quiet=request.quiet,
-            no_color=request.no_color,
-        )
-        await execute_phases(phase_plan.after_align, context, reporter)
+        emit_execution_section_start(reporter, no_color=request.no_color)
+        try:
+            await execute_phases(phase_plan.before_align, context, reporter)
+            selected_frame_count = len(state.selected_frames)
+            emit_final_selection_report(
+                selected_frames=state.selected_frames,
+                breakdown=context.selection_breakdown,
+                verbose=request.verbose,
+                json_output=request.json_output,
+                quiet=request.quiet,
+                no_color=request.no_color,
+            )
+            emit_consolidated_fps_report(
+                stage="after_align",
+                clips=build_consolidated_fps_report(context.reference, context.comparisons),
+                json_output=request.json_output,
+                quiet=request.quiet,
+                rich_output=uses_rich_progress(reporter),
+                no_color=request.no_color,
+                input_dir=context.workspace.input_dir,
+                verbose=request.verbose,
+            )
+            emit_frame_alignment_report(
+                stage="after_align",
+                comparisons=build_frame_alignment_report(
+                    reference=context.reference,
+                    comparisons=context.comparisons,
+                ),
+                selected_frames=state.selected_frames,
+                alignment_warnings=[
+                    warning for warning in state.warnings if warning.startswith("align:")
+                ],
+                json_output=request.json_output,
+                quiet=request.quiet,
+                no_color=request.no_color,
+                verbose=request.verbose,
+            )
+            await execute_phases(phase_plan.after_align, context, reporter)
+        except BaseException:
+            with suppress(BaseException):
+                emit_execution_section_end(reporter, no_color=request.no_color)
+            raise
+        else:
+            emit_execution_section_end(reporter, no_color=request.no_color)
         duration_seconds = max(0.0, local_deps.monotonic_timer() - run_timer_start)
         run_end = local_deps.clock()
         result = _assemble_run_result(

@@ -123,6 +123,27 @@ def test_render_batch_progress(mock_render_request):
         reporter.complete_phase.assert_called_once()
 
 
+def test_render_batch_progress_prefers_dedicated_presentation_label(mock_render_request):
+    request = RenderRequest(
+        clip=mock_render_request.clip,
+        diagnostic_source=mock_render_request.diagnostic_source,
+        frame_number=42,
+        output_path=mock_render_request.output_path,
+        overlay=None,
+        encoder_settings=mock_render_request.encoder_settings,
+        progress_label="Comparison 1 | ATV WEB-DL",
+    )
+    reporter = MagicMock(spec=ProgressReporter)
+
+    with patch(
+        "frame_compare.render.batch.orchestrator.render_frame_detailed",
+        side_effect=_rendered,
+    ):
+        render_batch([request], reporter=reporter)
+
+    reporter.set_description.assert_called_once_with("Comparison 1 | ATV WEB-DL — Frame 42")
+
+
 def test_render_batch_parallel_waits_for_in_flight_work_before_raising() -> None:
     slow_started = Event()
     slow_blocked = Event()

@@ -89,10 +89,32 @@ def test_expansion_preserves_source_mapping_and_prepared_source(
     ]
     assert all(request.diagnostic_source is prepared.diagnostic_source for request in requests)
     assert all(request.clip is prepared.prepared_clip for request in requests)
+    assert all(request.progress_label is None for request in requests)
     assert mock_prepare.call_args.kwargs["source_is_hdr"] is False
     assert ranges == {"ref": range(0, 2)}
     assert facts["ref"].source_total_frames == 101
     assert facts["ref"].presentation_state is PresentationState.SDR
+
+
+@patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
+def test_expansion_copies_progress_label_without_changing_overlay_label(
+    mock_prepare: MagicMock,
+) -> None:
+    mock_prepare.return_value = _prepared()
+    batch = replace(_request(), progress_label="Reference | ATV WEB-DL")
+
+    requests, _, _ = expand_batch_render_requests(
+        [batch],
+        output_dir=Path("out"),
+        config=ConfigSchema(),
+        overlay_mode=OverlayMode.STANDARD,
+        renderer="vapoursynth",
+        ffmpeg_runner=MagicMock(),
+    )
+
+    assert requests[0].progress_label == "Reference | ATV WEB-DL"
+    assert requests[0].overlay is not None
+    assert requests[0].overlay.label == "ref"
 
 
 @patch("frame_compare.render.batch.expansion.prepare_clip_for_render")

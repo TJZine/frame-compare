@@ -178,14 +178,146 @@ def test_run_dry_run_human_and_quiet_follow_current_quiet_semantics(
         quiet = _invoke(root, config_path, "--quiet")
 
     assert normal.exit_code == 0
-    assert "Dry-run plan" in normal.stdout
+    assert "No side effects:" in normal.stdout
+    for section in (
+        "Will use",
+        "Would create in a real run",
+        "Publishing after success",
+        "Unknown until execution",
+        "Not performed by dry-run",
+    ):
+        assert section in normal.stdout
     assert "source.mkv" in normal.stdout
-    assert "checks not performed" in normal.stdout
+    assert "ffprobe_or_ffmpeg" not in normal.stdout
+    assert "runtime readiness checks" in normal.stdout
+    assert "Input directory: comparison_videos" in normal.stdout
     assert normal.stderr == ""
     assert quiet.exit_code == 0
-    assert "Dry run: 1 source files; no side effects performed." in quiet.stdout
-    assert "checks not performed" not in quiet.stdout
+    assert "Dry run: 1 source file; no side effects performed." in quiet.stdout
+    assert "source files" not in quiet.stdout
     assert quiet.stderr == ""
+
+
+def test_run_dry_run_human_reports_workspace_root_input_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
+        root = Path("workspace")
+        config_path = _write_workspace(root)
+        config_path.write_text(
+            MINIMAL_CONFIG.replace(
+                'input_dir = "comparison_videos"',
+                'input_dir = "."',
+            ),
+            encoding="utf-8",
+        )
+        (root / "source.mkv").write_bytes(b"")
+        resolved_root = root.resolve()
+
+        result = _invoke(root, config_path)
+
+    assert result.exit_code == 0
+    compact_output = "".join(result.stdout.split())
+    assert "Inputdirectory:." in compact_output
+    assert f"Inputdirectory:{resolved_root}" not in compact_output
+    assert f"Workspace:{resolved_root}" in compact_output
+
+
+def test_run_dry_run_human_marks_disabled_parent_actions_not_applicable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
+        root = Path("workspace")
+        config_path = _write_workspace(
+            root,
+            config_suffix="""
+[report]
+enable = false
+auto_open = true
+
+[slowpics]
+auto_upload = false
+copy_url_to_clipboard = true
+open_in_browser = true
+create_url_shortcut = true
+webhook_url = "https://example.com/frame-compare"
+""",
+        )
+        input_dir = root / "comparison_videos"
+        input_dir.mkdir()
+        (input_dir / "source.mkv").write_bytes(b"")
+
+        human = _invoke(root, config_path)
+        json_result = _invoke(root, config_path, "--json")
+
+    assert human.exit_code == 0
+    for label in (
+        "Open report after success",
+        "Copy URL to clipboard",
+        "Open the published URL",
+        "Create a URL shortcut",
+        "Send a webhook notification",
+    ):
+        assert f"{label}: not applicable" in human.stdout
+
+    payload = json.loads(json_result.stdout)
+    assert payload["outputs"]["report_auto_open_configured"] is True
+    assert payload["publishing"]["copy_url_to_clipboard_configured"] is True
+    assert payload["publishing"]["open_in_browser_configured"] is True
+    assert payload["publishing"]["create_url_shortcut_configured"] is True
+    assert payload["publishing"]["webhook_configured"] is True
+
+
+def test_run_dry_run_human_preserves_child_configuration_when_parents_are_enabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
+        root = Path("workspace")
+        config_path = _write_workspace(
+            root,
+            config_suffix="""
+[report]
+enable = true
+auto_open = false
+
+[slowpics]
+auto_upload = true
+copy_url_to_clipboard = false
+open_in_browser = true
+create_url_shortcut = false
+""",
+        )
+        input_dir = root / "comparison_videos"
+        input_dir.mkdir()
+        (input_dir / "source.mkv").write_bytes(b"")
+
+        result = _invoke(root, config_path)
+
+    assert result.exit_code == 0
+    assert "Open report after success: not configured" in result.stdout
+    assert "Copy URL to clipboard: not configured" in result.stdout
+    assert "Open the published URL: configured" in result.stdout
+    assert "Create a URL shortcut: not configured" in result.stdout
+    assert "Send a webhook notification: not configured" in result.stdout
+
+
+def test_run_dry_run_quiet_uses_plural_source_grammar(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
+        root = Path("workspace")
+        config_path = _write_workspace(root)
+        input_dir = root / "comparison_videos"
+        input_dir.mkdir()
+        for name in ("reference.mkv", "comparison.mkv"):
+            (input_dir / name).write_bytes(b"")
+
+        result = _invoke(root, config_path, "--quiet")
+
+    assert result.exit_code == 0
+    assert "Dry run: 2 source files; no side effects performed." in result.stdout
+    assert result.stderr == ""
 
 
 def test_run_dry_run_always_reserves_a_run_folder_when_execution_proceeds(
@@ -218,8 +350,13 @@ def test_run_dry_run_accepts_external_input_override_and_reports_only_that_absol
         external_input.mkdir()
         (external_input / "external.ts").write_bytes(b"")
 
+        human_result = _invoke(root, config_path, "--input", str(external_input))
         result = _invoke(root, config_path, "--input", str(external_input), "--json")
 
+    assert human_result.exit_code == 0
+    compact_human_output = "".join(human_result.stdout.split())
+    assert f"Inputdirectory:{external_input}" in compact_human_output
+    assert human_result.stderr == ""
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["input"] == {

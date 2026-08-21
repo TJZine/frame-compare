@@ -108,6 +108,13 @@ window and are not restricted to sampled metric frames.
 
 `frame_compare.orchestration.source_labels` resolves presentation labels after
 selector/override resolution and before probing or run-folder reservation.
+`frame_compare.orchestration.presentation` owns the stable reference/comparison
+role labels and bounded console-width policy shared by orchestration reports.
+`frame_compare.services.release_identity` owns dependency-light, non-persisted
+content/release identity types and plain formatters. Preparation invokes the existing
+GuessIt/Anitopy parser seam once per source and attaches the resulting presentation
+metadata and explicit-label provenance to `ClipState`; these fields are excluded from
+source, cache, selection, and report identity.
 `selection_domain` receives the resolved per-path map when constructing
 `ClipState`; it does not own parsing or collision policy. Labels propagate
 through presentation surfaces while source paths, fingerprints,
@@ -157,6 +164,11 @@ the explicit owner of the import-time contract. Owner-specific exceptions belong
 `frame_compare.errors`. Dependency-light protocols that must avoid UI or runtime
 imports belong in focused protocol modules such as
 `frame_compare.utils.progress_protocol`.
+
+Render orchestration derives optional, unique progress labels from already-parsed
+release identities and passes them through the batch request seam. Render workers only
+present that string; `OverlayConfig.label`, overlay pixels, output paths, and
+label-keyed result mappings continue to use canonical clip labels.
 
 `docs/api.md` is generated reference material for importable conveniences. It does
 not promote package roots or module exports into supported stable APIs beyond the
@@ -345,7 +357,9 @@ The align phase uses a typed orchestration-to-services request seam:
 state, the workspace-level shared alignment cache path, reference/comparison
 labels, source identity facts, trims, effective FPS values, selected reference
 relationship, selected audio streams, cache-identity settings, and preserved
-frame props. These cache-identity DTOs use layer-neutral primitives or
+frame props. Orchestration also supplies presentation-only common-content and
+per-source display strings as optional primitives for the reuse prompt; alignment
+services do not parse filenames. These cache-identity DTOs use layer-neutral primitives or
 dependency-light shared utility types; `services` must not import
 orchestration-owned or analysis-owned identity types such as `ClipState`,
 `ClipIdentity`, or `ClipFingerprint`.
@@ -465,7 +479,11 @@ retry/idempotency handling, and advance a nested image-count progress task after
 each completed upload. `frame_compare.services.slowpics_upload_plan` owns the
 explicit upload-plan seam for current render artifacts, row/image names, and
 upload ordering; the final upload path uses that plan and does not scan the
-screenshot directory for membership. After a successful upload, orchestration
+screenshot directory for membership. Orchestration carries canonical clip labels as
+local screenshot lookup keys while assigning exact explicit labels or unique release
+descriptors as remote image names. Collection metadata, row names, membership,
+ordering, and multipart construction remain owned by their existing seams. After a
+successful upload, orchestration
 carries the exact uploaded planned local file paths into `post_report_cleanup`
 and carries typed post-upload action results plus warnings returned by
 `frame_compare.services.slowpics_post_upload` into the final `RunResult`.
@@ -549,9 +567,27 @@ assets. The generated viewer exposes slider, internal overlay mode presented to
 users as Single where appropriate, diff, and pair-based blink modes; frame/category
 navigation; a HUD toggle for stage labels and current-frame metadata; a primary
 toolbar plus floating viewport palette; a collapsible, compact/normal/large
-filmstrip bottom panel; an inspector drawer with Frame, Clips, Align, Review, and
-Export tabs; fullscreen support; viewport pan, zoom, actual/width/height fit, reveal,
-and adjacent-frame preloading.
+filmstrip bottom panel; a responsive inspector drawer with Frame, Clips, Align,
+Review, and Export tabs; fullscreen support; viewport pan, zoom,
+actual/width/height fit, reveal, and adjacent-frame preloading. The toolbar owner uses
+CSS Grid to keep frame, mode, and context/alignment zones stable at wide widths, then
+reflows them to two rows and a narrow stack without JavaScript measurement or DOM
+reordering. One responsive Inspector width token owns both desktop drawer width and
+stage reservation; the existing tablet/phone overlay boundary keeps stage margin at
+zero.
+
+Report payload v1.2 carries one orchestration-built, presentation-only display profile
+per clip. `phase_post_render` reuses prepared release identities, explicit-label
+provenance, shared formatters, stable roles, and set-level collision handling once per
+report. Report controls consume control or micro names, while Inspector/info and ARIA
+surfaces consume primary identity and exact filename. Canonical clip labels continue
+to own image mappings, geometry, browser state, and review JSON; payload identity
+shaping explicitly omits display profiles.
+
+The Clips inspector composes those profiles into stable Reference/Comparison cards.
+Primary and informative release identities wrap normally, exact filenames and long
+technical values may wrap anywhere, and drawer/panel overflow is constrained locally
+rather than masked at the document boundary.
 
 The ordinary report artifact does not claim presentation blindness. Source identity
 can be present in baked screenshot overlays, physical image filenames, and report

@@ -28,7 +28,9 @@ if TYPE_CHECKING:
 
 def _render_description(request: RenderRequest) -> str:
     """Build a consistent progress description for a render request."""
-    label = request.overlay.label if request.overlay is not None else None
+    label = request.progress_label
+    if label is None and request.overlay is not None:
+        label = request.overlay.label
     return f"{label} — Frame {request.frame_number}" if label else f"Frame {request.frame_number}"
 
 

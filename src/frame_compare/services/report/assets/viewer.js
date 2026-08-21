@@ -40,6 +40,20 @@ const ReportViewer = {
         paletteOrientation: 'horizontal'
     },
 
+    clipDisplay(clip, profile = 'control') {
+        return clip.display[profile];
+    },
+
+    clipFilename(clip) {
+        return clip.display.filename;
+    },
+
+    clipAccessibleName(clip) {
+        const primary = this.clipDisplay(clip, 'primary');
+        const filename = this.clipFilename(clip);
+        return filename && filename !== primary ? `${primary} — ${filename}` : primary;
+    },
+
     init() {
         this.cacheDOM();
         if (!this.hasRequiredDOM()) {
@@ -1604,6 +1618,12 @@ const ReportViewer = {
         return roles.length > 0 ? roles.join(', ') : 'Available';
     },
 
+    stableClipRole(index) {
+        const referenceIndex = this.referenceClipIndex();
+        if (index === referenceIndex) return 'Reference';
+        return `Comparison ${index < referenceIndex ? index + 1 : index}`;
+    },
+
     modeLabel(mode = this.state.mode) {
         const labels = {
             slider: 'Slider',
@@ -1720,8 +1740,8 @@ const ReportViewer = {
     },
 
     currentPairLabel() {
-        const left = this.state.data.clips[this.state.leftClipIdx]?.label || `Clip ${this.state.leftClipIdx + 1}`;
-        const right = this.state.data.clips[this.state.rightClipIdx]?.label || `Clip ${this.state.rightClipIdx + 1}`;
+        const left = this.clipDisplay(this.state.data.clips[this.state.leftClipIdx]);
+        const right = this.clipDisplay(this.state.data.clips[this.state.rightClipIdx]);
         return `${left} vs ${right}`;
     },
 
@@ -1748,7 +1768,7 @@ const ReportViewer = {
                 const image = frame?.images?.[clipIndex];
                 const item = document.createElement('li');
                 item.className = 'rv-inspector-source';
-                const label = clip?.label || `Clip ${clipIndex + 1}`;
+                const label = this.clipDisplay(clip);
                 const sourceFrame = Number.isInteger(image?.source_frame) ? image.source_frame : 'Unknown';
                 const total = Number.isInteger(clip?.frame_count) ? ` / ${clip.frame_count}` : '';
                 const pictureType = image?.picture_type ? `${image.picture_type}-frame` : 'type unknown';
@@ -1770,9 +1790,11 @@ const ReportViewer = {
                         <span></span>
                         <span></span>
                     </div>
+                    <div class="rv-inspector-clip-primary"></div>
+                    <div class="rv-inspector-clip-release" hidden></div>
                     <dl class="rv-inspector-list">
-                        <div><dt>Role</dt><dd></dd></div>
-                        <div><dt>Source</dt><dd></dd></div>
+                        <div><dt>View role</dt><dd></dd></div>
+                        <div><dt>File</dt><dd></dd></div>
                         <div><dt>Resolution</dt><dd></dd></div>
                         <div><dt>FPS</dt><dd></dd></div>
                         <div><dt>File size</dt><dd></dd></div>
@@ -1781,11 +1803,25 @@ const ReportViewer = {
                     </dl>
                 `;
                 const heading = item.querySelectorAll('.rv-inspector-clip-heading span');
-                heading[0].textContent = clip.label || `Clip ${index + 1}`;
+                heading[0].textContent = this.stableClipRole(index);
                 heading[1].textContent = clip.signal?.is_hdr ? 'HDR' : 'SDR';
+                const primary = this.clipDisplay(clip, 'primary');
+                const release = this.clipDisplay(clip, 'release');
+                const primaryElement = item.querySelector('.rv-inspector-clip-primary');
+                const releaseElement = item.querySelector('.rv-inspector-clip-release');
+                primaryElement.textContent = primary;
+                const normalizedPrimary = this.normalizedDisplayToken(primary);
+                const normalizedRelease = this.normalizedDisplayToken(release);
+                const showRelease = Boolean(
+                    normalizedRelease
+                    && normalizedPrimary !== normalizedRelease
+                    && !normalizedPrimary.endsWith(`| ${normalizedRelease}`)
+                );
+                releaseElement.hidden = !showRelease;
+                releaseElement.textContent = showRelease ? release : '';
                 const values = item.querySelectorAll('dd');
                 values[0].textContent = role;
-                values[1].textContent = clip.name || '';
+                values[1].textContent = this.clipFilename(clip);
                 values[2].textContent = Array.isArray(clip.resolution) ? `${clip.resolution[0]}x${clip.resolution[1]}` : '';
                 values[3].textContent = this.formatFps(clip.fps);
                 values[4].textContent = this.formatFileSize(clip.size_bytes);
@@ -2764,7 +2800,7 @@ const ReportViewer = {
 
     clipOverlayLabel(clip, role = '') {
         const isHdr = clip.signal?.is_hdr === true;
-        const identity = `${clip.label} • ${clip.resolution[0]}×${clip.resolution[1]} • ${isHdr ? 'HDR' : 'SDR'}`;
+        const identity = `${this.clipDisplay(clip)} • ${clip.resolution[0]}×${clip.resolution[1]} • ${isHdr ? 'HDR' : 'SDR'}`;
         return role ? `${role.toUpperCase()}: ${identity}` : identity;
     },
 
@@ -2950,8 +2986,8 @@ const ReportViewer = {
                 leftLabelTxt = this.clipOverlayLabel(leftClip, 'Left');
                 rightLabelTxt = this.clipOverlayLabel(rightClip, 'Right');
             }
-            leftAlt = `${leftClip.label} - Frame ${frameData.number}`;
-            rightAlt = `${rightClip.label} - Frame ${frameData.number}`;
+            leftAlt = `${this.clipAccessibleName(leftClip)} - Frame ${frameData.number}`;
+            rightAlt = `${this.clipAccessibleName(rightClip)} - Frame ${frameData.number}`;
 
             // For Diff mode, right layer is the "compare" one which gets difference blend
             // Left layer is base.
@@ -2974,8 +3010,8 @@ const ReportViewer = {
 
             leftLabelTxt = this.clipOverlayLabel(activeClip);
             rightLabelTxt = "";
-            leftAlt = `${activeClip.label} - Frame ${frameData.number}`;
-            rightAlt = `${rightClip.label} - Frame ${frameData.number}`;
+            leftAlt = `${this.clipAccessibleName(activeClip)} - Frame ${frameData.number}`;
+            rightAlt = `${this.clipAccessibleName(rightClip)} - Frame ${frameData.number}`;
         }
 
         this.hideStageMessage();
@@ -3029,6 +3065,9 @@ const ReportViewer = {
         this.dom.leftSelect.value = this.state.leftClipIdx;
         this.dom.rightSelect.value = this.state.rightClipIdx;
         this.dom.activeSelect.value = this.state.activeClipIdx;
+        this.dom.leftSelect.title = this.clipAccessibleName(this.state.data.clips[this.state.leftClipIdx]);
+        this.dom.rightSelect.title = this.clipAccessibleName(this.state.data.clips[this.state.rightClipIdx]);
+        this.dom.activeSelect.title = this.clipAccessibleName(this.state.data.clips[this.state.activeClipIdx]);
         this.updateOverlayVisibility();
         this.updateFilmstripPanel();
         this.updatePaletteOrientation();

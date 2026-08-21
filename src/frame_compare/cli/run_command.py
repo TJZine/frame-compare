@@ -10,9 +10,13 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+import structlog
 import typer
-from rich.console import Console
+from rich.console import Console, Group
 from rich.markup import escape
+from rich.padding import Padding
+from rich.panel import Panel
+from rich.table import Table
 
 from frame_compare.cli.errors import ExitCode, format_error_json, get_exit_code
 from frame_compare.cli.output import (
@@ -24,7 +28,13 @@ from frame_compare.cli.output import (
 from frame_compare.config.effective import load_effective_config
 from frame_compare.config.errors import ConfigValidationError
 from frame_compare.config.overrides import cli_config_overrides_from
-from frame_compare.config.schema import ConfigSchema, OverlayMode, ToneCurve, TonemapPreset
+from frame_compare.config.schema import (
+    ConfigSchema,
+    OverlayMode,
+    ToneCurve,
+    TonemapPreset,
+    Visibility,
+)
 from frame_compare.errors import FrameCompareError
 from frame_compare.orchestration.preflight import (
     resolve_selected_config_path,
@@ -39,6 +49,8 @@ from .run_contracts import (
     validate_run_contracts,
     validate_write_config_contracts,
 )
+
+log = structlog.get_logger()
 
 if TYPE_CHECKING:
     from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, RunResult
@@ -320,6 +332,8 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
         result=result,
         quiet=args.quiet,
         post_upload_actions=post_upload_actions,
+        root=args.resolved_root,
+        verbose=args.verbose,
     )
     maybe_open_run_report(
         result,
@@ -347,6 +361,7 @@ def build_runner_dependencies(
             deps=deps,
             console=console,
             resolve_effective_config=resolve_effective_config,
+            visibility=config.slowpics.visibility,
         )
         if report_confirmed_slowpics_enabled(config)
         else None
@@ -407,7 +422,10 @@ def build_confirm_slowpics_upload_callback(
     deps: RunCommandDeps,
     console: Console,
     resolve_effective_config: EffectiveConfigLoader,
+    visibility: Visibility,
 ) -> SlowpicsUploadConfirmationFn:
+    visibility_text = visibility.value
+
     def _confirm_slowpics_upload(
         request: SlowpicsUploadConfirmationRequest,
     ) -> SlowpicsUploadConfirmationDecision:
@@ -417,12 +435,29 @@ def build_confirm_slowpics_upload_callback(
             deps=deps,
             resolve_effective_config=resolve_effective_config,
         )
+        details = Table.grid(padding=(0, 2))
+        details.add_column(style="grey70", no_wrap=True)
+        details.add_column(overflow="fold")
+        details.add_row("Visibility", escape(visibility_text.title()))
         if not opened:
-            console.print(f"Report: {escape(str(request.report_path))}", soft_wrap=True)
-        if deps.confirm_upload(
-            "Review the local report, then upload this comparison to slow.pics?",
+            details.add_row("Report", escape(str(request.report_path)))
+        console.print()
+        console.print(
+            Padding(
+                Panel.fit(
+                    Group("[dim]Review the local report before publishing.[/]", details),
+                    title="[bold magenta][WAIT][/] [bold bright_cyan]Publishing confirmation[/]",
+                    border_style="cyan",
+                ),
+                (0, 0, 0, 2),
+            )
+        )
+        confirmed = deps.confirm_upload(
+            f"    Upload to {visibility_text} slow.pics?",
             default=False,
-        ):
+        )
+        console.print()
+        if confirmed:
             return "confirmed"
         return "declined"
 
@@ -612,6 +647,7 @@ def print_run_preview(
         config=load_effective_config(),
         root=args.resolved_root,
         config_path=args.config_path,
+        verbose=args.verbose,
     )
 
 
@@ -698,10 +734,15 @@ def _copy_slowpics_url(
     try:
         copy_to_clipboard(url)
     except Exception as exc:
+        log.debug(
+            "slowpics_clipboard_copy_failed",
+            exception_type=type(exc).__name__,
+            exc_info=True,
+        )
         return PostUploadActionPresentationResult(
             kind="clipboard",
             success=False,
-            warning=f"slow.pics clipboard: failed to copy URL: {exc}",
+            warning="slow.pics clipboard: failed to copy URL",
         )
     return PostUploadActionPresentationResult(
         kind="clipboard",
@@ -718,10 +759,15 @@ def _open_slowpics_url(
     try:
         opened = open_url(url)
     except Exception as exc:
+        log.debug(
+            "slowpics_browser_open_failed",
+            exception_type=type(exc).__name__,
+            exc_info=True,
+        )
         return PostUploadActionPresentationResult(
             kind="browser",
             success=False,
-            warning=f"slow.pics browser: failed to open URL: {exc}",
+            warning="slow.pics browser: failed to open URL",
         )
     if not opened:
         return PostUploadActionPresentationResult(

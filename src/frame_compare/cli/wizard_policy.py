@@ -33,14 +33,13 @@ class GoalChoice:
 
 
 GOAL_MENU_LINES = (
-    "1. Random spot check — Select 10 deterministic random frames using the configured seed. "
-    "This does not run the luminance/motion metrics scan.",
-    "2. Dark, bright, and motion coverage — Request 10 frames: 4 random, 2 dark, 2 bright, "
-    "and 2 high-motion. This overrides performance mode, scans full-resolution luma for "
-    "every eligible frame, can choose different frames than the 25%-sampled performance "
-    "mode, and can take substantially longer.",
-    "3. Specific frame numbers — Use only the listed zero-based frame numbers. This does not "
-    "run the luminance/motion metrics scan.",
+    "1. Random spot check",
+    "2. Visual coverage",
+    "3. Specific frame numbers",
+)
+
+VISUAL_COVERAGE_SCAN_NOTE = (
+    "Visual coverage runs a slower quality scan across every eligible frame and may take longer."
 )
 
 

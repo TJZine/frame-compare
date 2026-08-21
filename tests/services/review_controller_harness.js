@@ -80,11 +80,24 @@ const ReviewState = context.__ReviewState;
 const reportId = `report_${'c'.repeat(32)}`;
 const encoder = new TextEncoder();
 
+function clipDisplay(label) {
+    return {
+        label,
+        display: {
+            primary: label,
+            release: '',
+            control: label,
+            micro: label,
+            filename: `${label}.mkv`,
+        },
+    };
+}
+
 function exported(reviews) {
     return JSON.stringify({
         format: 'frame-compare-review',
         schema_version: 1,
-        report: { id: reportId, payload_version: '1.0' },
+        report: { id: reportId, payload_version: '1.2' },
         reviews,
         exported_at: '2026-07-14T16:30:00.000Z',
     });
@@ -159,11 +172,12 @@ const viewer = {
         currentFrameIdx: 0,
         data: {
             report_id: reportId,
-            version: '1.0',
+            version: '1.2',
             frames: [{}, {}, {}, {}],
-            clips: [{ label: 'Reference' }, { label: 'Encode' }],
+            clips: [clipDisplay('Reference'), clipDisplay('Encode')],
         },
     },
+    clipDisplay(clip) { return clip.display.control; },
     localStorage: () => storage,
     announce(message) { announcements.push(message); },
     setText(target, text) { target.textContent = String(text); },
@@ -188,11 +202,12 @@ function warningViewer(storageApi) {
                 currentFrameIdx: 0,
                 data: {
                     report_id: reportId,
-                    version: '1.0',
+                    version: '1.2',
                     frames: [{}],
-                    clips: [{ label: 'Reference' }],
+                    clips: [clipDisplay('Reference')],
                 },
             },
+            clipDisplay(clip) { return clip.display.control; },
             localStorage: () => storageApi,
             announce(message) { warningAnnouncements.push(message); },
             setText(target, text) { target.textContent = String(text); },

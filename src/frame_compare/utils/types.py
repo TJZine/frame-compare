@@ -153,6 +153,7 @@ class AlignmentClipRequest:
     effective_fps_den: int
     selected_audio_stream: int | None = None
     preserved_frame_props: PreservedFrameProps = field(default_factory=_empty_preserved_frame_props)
+    presentation_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,3 +191,4 @@ class AlignmentRequest:
     generated_dir: Path
     shared_alignment_cache_dir: Path
     settings: AlignmentCacheSettings
+    presentation_content: str | None = None
