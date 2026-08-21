@@ -35,7 +35,7 @@ from frame_compare.services.release_identity import (
         ),
         (
             "Show.S01E05.1080p.AMZN.WEBRip.HLG-GROUP.mkv",
-            ("AMZN", "WEBRip", ("HLG",), (), "HLG-GROUP"),
+            ("AMZN", "WEBRip", ("HLG",), (), "GROUP"),
         ),
         (
             "Film.2020.2160p.UHD.BluRay.REMUX.DV.HDR-GROUP.mkv",
@@ -85,6 +85,20 @@ def test_title_tokens_are_not_release_false_positives(filename: str) -> None:
     assert identity.service is None
     assert not identity.dynamic_range_claims
     assert not identity.revision_tags
+
+
+def test_embedded_source_text_does_not_start_the_release_suffix() -> None:
+    identity = parse_release_identity("The.WebRipples.PROPER.Man.2024.1080p.WEBRip-GROUP.mkv")
+
+    assert identity.source_type == "WEBRip"
+    assert identity.revision_tags == ()
+    assert identity.release_group == "GROUP"
+
+
+def test_hlg_claim_is_not_duplicated_in_release_descriptor() -> None:
+    identity = parse_release_identity("Show.S01E05.1080p.AMZN.WEBRip.HLG-GROUP.mkv")
+
+    assert format_release_descriptor(identity) == "1080p | AMZN WEBRip | HLG | GROUP"
 
 
 @pytest.mark.parametrize(
@@ -147,6 +161,23 @@ def test_parser_derived_controls_are_normalized(monkeypatch: pytest.MonkeyPatch)
     assert identity.release_group == "GROUP EVIL"
     assert "\n" not in format_compact_identity(identity)
     assert "\x1b" not in format_compact_identity(identity)
+
+
+def test_normalized_empty_parser_title_uses_stem_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "frame_compare.services.metadata_parsing.guessit",
+        lambda _name: {"title": "\x01\x02"},
+    )
+    monkeypatch.setattr("frame_compare.services.metadata_parsing.anitopy.parse", lambda _name: {})
+
+    identity = parse_release_identity("Meaningful.Movie.mkv")
+
+    assert identity.content == ContentIdentity(
+        "Meaningful Movie",
+        title_origin="fallback",
+    )
 
 
 @pytest.mark.parametrize(

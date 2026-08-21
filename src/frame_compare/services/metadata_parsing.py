@@ -301,25 +301,27 @@ def parse_filename_with_release_identity(
 
 def _release_identity(filename: str, fields: _ParsedFilenameFields) -> ReleaseIdentity:
     stem = Path(filename).stem
-    title = _normalize_release_text(re.sub(r"[._\-]", " ", fields.title or stem))
+    parsed_title = _normalize_release_text(re.sub(r"[._\-]", " ", fields.title or ""))
+    fallback_title = _normalize_release_text(re.sub(r"[._\-]", " ", stem))
     resolution = _normalize_optional_release_text(fields.resolution)
     source_type = _source_type(filename, fields.source)
     release_suffix = _release_suffix(stem, resolution, source_type)
     release_tokens = _release_tokens(release_suffix)
+    dynamic_range_claims = _dynamic_range_claims(release_tokens)
     return ReleaseIdentity(
         content=ContentIdentity(
-            title or "comparison",
+            parsed_title or fallback_title or "comparison",
             fields.year,
             fields.season,
             fields.episode,
             _normalize_optional_release_text(fields.episode_title),
-            "parsed" if fields.title else "fallback",
+            "parsed" if parsed_title else "fallback",
         ),
         resolution=resolution,
         service=_service(fields.service, release_tokens),
         source_type=source_type,
-        dynamic_range_claims=_dynamic_range_claims(release_tokens),
-        release_group=_normalize_optional_release_text(fields.release_group),
+        dynamic_range_claims=dynamic_range_claims,
+        release_group=_release_group(fields.release_group, dynamic_range_claims),
         revision_tags=_revision_tags(release_suffix),
         variant_tags=_variant_tags(release_suffix),
     )
@@ -377,6 +379,17 @@ def _dynamic_range_claims(tokens: tuple[str, ...]) -> tuple[str, ...]:
     )
 
 
+def _release_group(
+    parsed_group: str | None,
+    dynamic_range_claims: tuple[str, ...],
+) -> str | None:
+    group = _normalize_optional_release_text(parsed_group)
+    # GuessIt currently folds an unrecognized HLG tag into the release group.
+    if group is not None and "HLG" in dynamic_range_claims and group.upper().startswith("HLG-"):
+        return group[4:] or None
+    return group
+
+
 def _has_release_tag(value: str, expression: str) -> bool:
     return bool(re.search(rf"(?i)(?:^|[. _\-]){expression}(?:$|[. _\-])", value))
 
@@ -414,7 +427,7 @@ def _release_suffix(stem: str, resolution: str | None, source_type: str | None) 
         if match is not None:
             starts.append(match.start())
     for pattern, label in _SOURCE_PATTERNS:
-        if source_type == label and (match := re.search(pattern, stem, re.IGNORECASE)) is not None:
+        if source_type == label and (match := _delimited_source_match(pattern, stem)) is not None:
             starts.append(match.start())
     if source_type in {"HDTV", "DVD"}:
         match = re.search(rf"(?i)(?:^|[. _\-]){source_type}(?:$|[. _\-])", stem)
@@ -426,10 +439,14 @@ def _release_suffix(stem: str, resolution: str | None, source_type: str | None) 
 def _source_type(filename: str, parsed_source: str | None) -> str | None:
     stem = Path(filename).stem
     for pattern, label in _SOURCE_PATTERNS:
-        if re.search(rf"(?i)(?:^|[. _-]){pattern}(?:$|[. _-])", stem):
+        if _delimited_source_match(pattern, stem) is not None:
             return label
     normalized = {"Blu-ray": "BluRay", "HDTV": "HDTV", "DVD": "DVD"}
     return normalized.get((parsed_source or "").strip())
+
+
+def _delimited_source_match(pattern: str, value: str) -> re.Match[str] | None:
+    return re.search(rf"(?i)(?:^|[. _-])(?:{pattern})(?=$|[. _-])", value)
 
 
 def _has_usable_title(title: str | None) -> bool:
