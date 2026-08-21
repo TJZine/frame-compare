@@ -247,6 +247,7 @@ def _compute_missing_alignments(
             ref_audio,
             comp_audio,
             config=config,
+            fps=fps_reference,
         )
         frame_offset = (
             _samples_to_frames(estimate.sample_offset, config.sample_rate, fps_reference)

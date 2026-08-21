@@ -1426,3 +1426,10 @@ Retain the plan as implementation history after closeout.
   cache identity, and media-analysis work remain unchanged; a 216,000-frame synthetic
   benchmark measured 0.324s before and 0.369s after (1.14x); CI was not run locally;
   Session B is ready.
+
+- 2026-08-21 — Session C completed: bounded immutable window evidence now classifies
+  stable, drift, discontinuity, variable, and insufficient evidence without changing
+  accepted offsets or application; focused proof and the full local gate passed; a
+  120-second synthetic comparison measured 0.081s before and 0.178s with diagnostics
+  (2.20x total) using two supplemental windows, with the selected offset unchanged;
+  CI was not run locally and environment-gated skips remain; Session D is ready.

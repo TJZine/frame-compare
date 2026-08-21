@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from fractions import Fraction
 
 import numpy as np
 import numpy.typing as npt
@@ -12,8 +13,13 @@ from frame_compare.services.alignment_correlation import (
     CorrelationEstimate,
     estimate_alignment_offset,
 )
+from frame_compare.services.alignment_stability import classify_alignment_stability
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentConfig
+from frame_compare.services.types import (
+    AlignmentConfig,
+    AlignmentStabilitySummary,
+    AlignmentWindowEvidence,
+)
 
 FloatArray = npt.NDArray[np.float64]
 
@@ -32,6 +38,8 @@ class AlignmentConsensus:
     consensus_windows: int
     consensus_ratio: float
     ambiguity_ratio: float | None
+    window_evidence: tuple[AlignmentWindowEvidence, ...] = ()
+    stability: AlignmentStabilitySummary | None = None
 
 
 def _as_signal(signal: npt.ArrayLike, *, name: str) -> FloatArray:
@@ -86,6 +94,54 @@ def _window_estimate(
         return None
 
 
+def _diagnostic_spans(
+    signal_size: int,
+    *,
+    count: int,
+    config: AlignmentConfig,
+) -> list[tuple[int, int]]:
+    preferred_seconds = min(90.0, max(30.0, 2 * config.max_offset_seconds + 15.0))
+    window_size = min(signal_size, int(round(preferred_seconds * config.sample_rate)))
+    if window_size <= 0 or window_size >= signal_size:
+        return [(0, signal_size)]
+    available_start = signal_size - window_size
+    divisor = max(1, count - 1)
+    indexes = list(range(count))
+    if count == 5:
+        indexes = [0, 4, 2, 1, 3]
+    return list(
+        dict.fromkeys(
+            (
+                round(index * available_start / divisor),
+                round(index * available_start / divisor) + window_size,
+            )
+            for index in indexes
+        )
+    )
+
+
+def _valid_evidence(
+    estimate: CorrelationEstimate | None,
+    *,
+    start: int,
+    end: int,
+    config: AlignmentConfig,
+) -> AlignmentWindowEvidence | None:
+    if (
+        estimate is None
+        or estimate.score < config.confidence_threshold
+        or estimate.peak_ratio < config.ambiguity_peak_ratio
+    ):
+        return None
+    return AlignmentWindowEvidence(
+        start_sample=start,
+        end_sample=end,
+        sample_offset=estimate.sample_offset,
+        score=estimate.score,
+        peak_ratio=estimate.peak_ratio,
+    )
+
+
 def _reject(
     diagnostic: str,
     *,
@@ -94,6 +150,8 @@ def _reject(
     consensus_windows: int,
     consensus_ratio: float,
     ambiguity_ratio: float | None,
+    window_evidence: tuple[AlignmentWindowEvidence, ...],
+    stability: AlignmentStabilitySummary,
 ) -> AlignmentConsensus:
     return AlignmentConsensus(
         sample_offset=None,
@@ -104,6 +162,8 @@ def _reject(
         consensus_windows=consensus_windows,
         consensus_ratio=consensus_ratio,
         ambiguity_ratio=ambiguity_ratio,
+        window_evidence=window_evidence,
+        stability=stability,
     )
 
 
@@ -112,6 +172,7 @@ def estimate_consensus_offset(
     comparison: npt.ArrayLike,
     *,
     config: AlignmentConfig,
+    fps: Fraction,
 ) -> AlignmentConsensus:
     """Estimate and gate a single computed offset from per-window candidates."""
     reference_signal = _as_signal(reference, name="reference")
@@ -120,6 +181,7 @@ def estimate_consensus_offset(
     spans = _window_spans(signal_size, config=config)
 
     candidates: list[CorrelationEstimate] = []
+    evidence: list[AlignmentWindowEvidence] = []
     for start, end in spans:
         estimate = _window_estimate(
             reference_signal,
@@ -130,6 +192,38 @@ def estimate_consensus_offset(
         )
         if estimate is not None:
             candidates.append(estimate)
+        valid = _valid_evidence(estimate, start=start, end=end, config=config)
+        if valid is not None:
+            evidence.append(valid)
+
+    if len(evidence) < 3:
+        existing_spans = set(spans)
+        for start, end in _diagnostic_spans(
+            signal_size,
+            count=5,
+            config=config,
+        ):
+            if len(evidence) >= 3:
+                break
+            if (start, end) in existing_spans:
+                continue
+            estimate = _window_estimate(
+                reference_signal,
+                comparison_signal,
+                start=start,
+                end=end,
+                config=config,
+            )
+            valid = _valid_evidence(estimate, start=start, end=end, config=config)
+            if valid is not None:
+                evidence.append(valid)
+
+    window_evidence = tuple(sorted(evidence, key=lambda item: item.start_sample))
+    stability = classify_alignment_stability(
+        window_evidence,
+        sample_rate=config.sample_rate,
+        fps=fps,
+    )
 
     if len(candidates) < config.minimum_valid_windows:
         return _reject(
@@ -139,6 +233,8 @@ def estimate_consensus_offset(
             consensus_windows=0,
             consensus_ratio=0.0,
             ambiguity_ratio=None,
+            window_evidence=window_evidence,
+            stability=stability,
         )
 
     offsets = [candidate.sample_offset for candidate in candidates]
@@ -162,6 +258,8 @@ def estimate_consensus_offset(
             consensus_windows=winner_count,
             consensus_ratio=consensus_ratio,
             ambiguity_ratio=ambiguity_ratio,
+            window_evidence=window_evidence,
+            stability=stability,
         )
 
     if consensus_ratio < config.consensus_minimum_ratio:
@@ -172,6 +270,8 @@ def estimate_consensus_offset(
             consensus_windows=winner_count,
             consensus_ratio=consensus_ratio,
             ambiguity_ratio=ambiguity_ratio,
+            window_evidence=window_evidence,
+            stability=stability,
         )
 
     if ambiguity_ratio < config.ambiguity_peak_ratio:
@@ -182,6 +282,8 @@ def estimate_consensus_offset(
             consensus_windows=winner_count,
             consensus_ratio=consensus_ratio,
             ambiguity_ratio=ambiguity_ratio,
+            window_evidence=window_evidence,
+            stability=stability,
         )
 
     return AlignmentConsensus(
@@ -193,4 +295,6 @@ def estimate_consensus_offset(
         consensus_windows=winner_count,
         consensus_ratio=consensus_ratio,
         ambiguity_ratio=ambiguity_ratio,
+        window_evidence=window_evidence,
+        stability=stability,
     )
