@@ -39,6 +39,8 @@ from frame_compare.services.metadata import resolve_metadata
 from frame_compare.services.metadata_parsing import parse_filename
 from frame_compare.services.publishers import publish_to_slowpics
 from frame_compare.services.release_identity import (
+    format_compact_identity,
+    format_micro_descriptor,
     format_release_descriptor,
     unique_presentation_names,
 )
@@ -50,6 +52,7 @@ from frame_compare.services.report.entry import generate_report
 from frame_compare.services.report.payload import (
     ClipInfo,
     FrameDetail,
+    ReportClipDisplayInfo,
     ReportData,
     ReportImageInfo,
     ReportRenderingInfo,
@@ -258,8 +261,43 @@ def run_report_phase(
         return ReportPhaseOutput(report_path=None, report_succeeded=True)
 
     clips = [ctx.reference, *ctx.comparisons]
+    roles = [clip_role(index) for index in range(len(clips))]
+    protected = [clip.label_is_explicit for clip in clips]
+    releases = [
+        format_release_descriptor(clip.release_identity) if clip.release_identity else ""
+        for clip in clips
+    ]
+    primaries = unique_presentation_names(
+        [
+            clip.label
+            if clip.label_is_explicit or clip.release_identity is None
+            else format_compact_identity(clip.release_identity) or clip.label
+            for clip in clips
+        ],
+        roles=roles,
+        protected=protected,
+    )
+    controls = unique_presentation_names(
+        [
+            clip.label if clip.label_is_explicit else releases[index] or primaries[index]
+            for index, clip in enumerate(clips)
+        ],
+        roles=roles,
+        protected=protected,
+    )
+    micros = unique_presentation_names(
+        [
+            clip.label
+            if clip.label_is_explicit
+            else (format_micro_descriptor(clip.release_identity) if clip.release_identity else "")
+            or controls[index]
+            for index, clip in enumerate(clips)
+        ],
+        roles=roles,
+        protected=protected,
+    )
     clip_info: list[ClipInfo] = []
-    for clip in clips:
+    for clip_index, clip in enumerate(clips):
         paths = render.screenshots_by_label[clip.label]
         facts = render.frame_facts_by_label[clip.label]
         if len(paths) != len(frames) or len(facts) != len(frames):
@@ -296,6 +334,13 @@ def run_report_phase(
                 images=images,
                 label=clip.label,
                 source_identity=source_identity_from_fingerprint(clip.probe.fingerprint),
+                display=ReportClipDisplayInfo(
+                    primary=primaries[clip_index],
+                    release=releases[clip_index],
+                    control=controls[clip_index],
+                    micro=micros[clip_index],
+                    filename=clip.path.name,
+                ),
             )
         )
     applied_settings = next(

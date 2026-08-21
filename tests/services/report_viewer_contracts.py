@@ -404,7 +404,7 @@ def script_payload(html: str) -> ReportPayload:
 @pytest.fixture
 def report_payload() -> ReportPayload:
     return {
-        "version": "1.1",
+        "version": "1.2",
         "report_id": "report_0123456789abcdef0123456789abcdef",
         "generated_at": "2026-05-22T12:00:00+00:00",
         "title": "Renderer Contract",
@@ -437,6 +437,13 @@ def report_payload() -> ReportPayload:
                 },
                 "presentation": {"state": "sdr", "tone_curve": None, "target_nits": None},
                 "active_picture": None,
+                "display": {
+                    "primary": "Reference primary <unsafe>",
+                    "release": "Reference release",
+                    "control": "Reference control",
+                    "micro": "Reference micro",
+                    "filename": "reference exact <unsafe>.mkv",
+                },
             },
             {
                 "name": "encode",
@@ -460,6 +467,13 @@ def report_payload() -> ReportPayload:
                     "target_nits": None,
                 },
                 "active_picture": None,
+                "display": {
+                    "primary": 'Encode primary "unsafe"',
+                    "release": "Encode release",
+                    "control": "Encode control",
+                    "micro": "Encode micro",
+                    "filename": 'encode exact "unsafe".mkv',
+                },
             },
         ],
         "frames": [

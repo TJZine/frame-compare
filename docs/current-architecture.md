@@ -571,6 +571,14 @@ filmstrip bottom panel; an inspector drawer with Frame, Clips, Align, Review, an
 Export tabs; fullscreen support; viewport pan, zoom, actual/width/height fit, reveal,
 and adjacent-frame preloading.
 
+Report payload v1.2 carries one orchestration-built, presentation-only display profile
+per clip. `phase_post_render` reuses prepared release identities, explicit-label
+provenance, shared formatters, stable roles, and set-level collision handling once per
+report. Report controls consume control or micro names, while Inspector/info and ARIA
+surfaces consume primary identity and exact filename. Canonical clip labels continue
+to own image mappings, geometry, browser state, and review JSON; payload identity
+shaping explicitly omits display profiles.
+
 The ordinary report artifact does not claim presentation blindness. Source identity
 can be present in baked screenshot overlays, physical image filenames, and report
 metadata, so viewer-only label hiding cannot provide an honest blind workflow. Any

@@ -704,7 +704,12 @@ with `default=False`.
 
 ### Report And Overlay Metadata Contract
 
-- Newly generated standalone reports use payload version `1.1`. The top-level frame
+- Newly generated standalone reports use payload version `1.2`. Each clip carries a
+  presentation-only `display` object with full primary identity, release descriptor,
+  ordinary-control label, constrained micro label, and exact filename. These strings
+  are assembled once from prepared release identity and explicit-label state. They do
+  not change canonical clip labels, report image/geometry mappings, review JSON keys,
+  or semantic report identity. The top-level frame
   number is the common comparison-domain frame; every image separately records its
   mapped untrimmed source frame, exact-frame picture type, and selected-frame Dolby
   Vision RPU presence when available.
@@ -716,7 +721,7 @@ with `default=False`.
   resolved tonemap settings when tonemapping ran.
 - Report identity includes output-affecting overlay, geometry, tonemap, presentation,
   signal, and per-image provenance facts. It excludes absolute paths, image bytes or
-  `src` values, timestamps, and transient browser state.
+  `src` values, timestamps, transient browser state, and clip display strings.
 - `screenshots.overlay_mode` has four exact presentation levels: `none` bakes no text;
   `minimal` carries source identity plus compact frame/type/size context; `standard`
   adds selection and source/output context; `diagnostic` adds only observed signal,

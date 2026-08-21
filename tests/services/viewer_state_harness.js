@@ -420,6 +420,29 @@ function keyboardEvent(key) {
 const summary = {};
 
 {
+    const { viewer } = loadViewer({ clipCount: 2 });
+    const clip = {
+        name: 'canonical-name',
+        label: 'Canonical label',
+        display: {
+            primary: 'Primary release identity',
+            release: 'Release descriptor',
+            control: 'Control descriptor',
+            micro: 'Micro descriptor',
+            filename: 'Exact.File.Name.mkv',
+        },
+    };
+    assert.equal(viewer.clipDisplay(clip), 'Control descriptor');
+    assert.equal(viewer.clipDisplay(clip, 'micro'), 'Micro descriptor');
+    assert.equal(
+        viewer.clipAccessibleName(clip),
+        'Primary release identity — Exact.File.Name.mkv',
+    );
+    assert.equal(viewer.clipDisplay({ label: 'Legacy label' }), 'Legacy label');
+    summary.clipDisplayProfiles = { payloadProfilesAndLegacyFallback: true };
+}
+
+{
     const { viewer } = loadViewer({
         clipCount: 4,
         savedState: {

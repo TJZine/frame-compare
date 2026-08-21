@@ -199,15 +199,35 @@ async def test_run_metadata_phase_resolves_when_enabled_and_client_present(
 def test_run_report_phase_builds_report_data_and_records_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
-    ctx = _context(tmp_path, comparisons=[comparison])
+    identity = ReleaseIdentity(
+        ContentIdentity("Example", year=2026),
+        resolution="2160p",
+        service="ATV",
+        source_type="WEB-DL",
+        dynamic_range_claims=("DV", "HDR10+"),
+        release_group="Kitsune",
+    )
+    comparison = _clip(
+        tmp_path / "comparison_videos" / "encode.mkv",
+        label="Encode 1",
+        release_identity=identity,
+    )
+    explicit = _clip(
+        tmp_path / "comparison_videos" / "explicit.mkv",
+        label="My Explicit",
+        release_identity=identity,
+        label_is_explicit=True,
+    )
+    ctx = _context(tmp_path, comparisons=[comparison, explicit])
+    ctx.reference = replace(ctx.reference, release_identity=identity)
     render = _render_artifacts(
         screenshots_by_label={
             "Reference": [tmp_path / "screenshots" / "reference_1.png"],
             "Encode 1": [tmp_path / "screenshots" / "encode_1.png"],
+            "My Explicit": [tmp_path / "screenshots" / "explicit_1.png"],
         },
         screenshot_dir=tmp_path / "screenshots",
-        source_frames_by_label={"Reference": [5], "Encode 1": [5]},
+        source_frames_by_label={"Reference": [5], "Encode 1": [5], "My Explicit": [5]},
     )
     artifacts = RunArtifacts(
         render=render,
@@ -246,12 +266,25 @@ def test_run_report_phase_builds_report_data_and_records_path(
     assert [image.path for image in report_data.clips[1].images] == render.screenshots_by_label[
         "Encode 1"
     ]
+    assert [clip.display.control for clip in report_data.clips] == [
+        "Reference | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
+        "Comparison 1 | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
+        "My Explicit",
+    ]
+    assert [clip.display.micro for clip in report_data.clips] == [
+        "Reference | ATV WEB-DL | DV HDR10+ | Kitsune",
+        "Comparison 1 | ATV WEB-DL | DV HDR10+ | Kitsune",
+        "My Explicit",
+    ]
+    assert report_data.clips[2].display.release == "2160p | ATV WEB-DL | DV HDR10+ | Kitsune"
+    assert report_data.clips[2].display.filename == "explicit.mkv"
     assert report_data.slowpics_url == "https://slow.pics/c/example"
     assert report_data.rendering.overlay_mode == ctx.config.screenshots.overlay_mode
     assert report_data.rendering.include_frame_number == ctx.config.screenshots.include_frame_number
     assert [(clip.name, clip.resolution, clip.fps) for clip in report_data.clips] == [
         ("Reference", (1920, 1080), 24.0),
         ("Encode 1", (1920, 1080), 24.0),
+        ("My Explicit", (1920, 1080), 24.0),
     ]
     assert captured["report_config"] == ctx.config.report
 

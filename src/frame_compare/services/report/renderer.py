@@ -85,16 +85,34 @@ def _render_frame_options(
 def _render_clip_options(clips: list[ReportClipPayload], *, selected_index: int | None) -> str:
     if selected_index is None:
         return "".join(
-            f'<option value="{_esc_attr(i)}">{_esc_text(clip["label"])}</option>'
+            f'<option value="{_esc_attr(i)}" title="{_esc_attr(_clip_accessible_name(clip))}">'
+            f"{_esc_text(_clip_display(clip, 'control'))}</option>"
             for i, clip in enumerate(clips)
         )
     options: list[str] = []
     for i, clip in enumerate(clips):
         selected_attr = " selected" if i == selected_index else ""
         options.append(
-            f'<option value="{_esc_attr(i)}"{selected_attr}>{_esc_text(clip["label"])}</option>'
+            f'<option value="{_esc_attr(i)}"{selected_attr} '
+            f'title="{_esc_attr(_clip_accessible_name(clip))}">'
+            f"{_esc_text(_clip_display(clip, 'control'))}</option>"
         )
     return "".join(options)
+
+
+def _clip_display(clip: ReportClipPayload, profile: str) -> str:
+    value = clip.get("display", {}).get(profile)
+    return (
+        value
+        if isinstance(value, str) and value
+        else clip.get("label") or clip.get("name") or "Clip"
+    )
+
+
+def _clip_accessible_name(clip: ReportClipPayload) -> str:
+    primary = _clip_display(clip, "primary")
+    filename = clip.get("display", {}).get("filename")
+    return f"{primary} — {filename}" if filename else primary
 
 
 def _clip_index_or_default(value: object, *, clip_count: int, fallback: int) -> int:
@@ -183,7 +201,7 @@ def _render_filmstrip(
     include_filmstrip: bool,
     category_filter_keys: dict[str, str],
 ) -> str:
-    first_clip_label = clips[0]["label"] if clips else "Clip"
+    first_clip_label = _clip_display(clips[0], "primary") if clips else "Clip"
     items = (
         "".join(
             f"""
@@ -304,7 +322,7 @@ def _render_tonemap_details(rendering: object) -> str:
 
 def _clip_label_for_index(clips: list[ReportClipPayload], index: int) -> str:
     if 0 <= index < len(clips):
-        return clips[index]["label"]
+        return _clip_display(clips[index], "control")
     return f"Clip {index + 1}"
 
 
@@ -344,11 +362,11 @@ def _render_info_modal(
         clip_items.append(
             f'<li class="rv-clip-meta-item" data-clip-index="{_esc_attr(i)}">'
             f'<div class="rv-clip-meta-heading">'
-            f"<span>{_esc_text(clip['label'])}</span>"
+            f"<span>{_esc_text(_clip_display(clip, 'primary'))}</span>"
             f"<span>{hdr_tag}</span>"
             f"</div>"
             f'<dl class="rv-metadata-list">'
-            f"<div><dt>Name</dt><dd>{_esc_text(clip['name'])}</dd></div>"
+            f"<div><dt>Filename</dt><dd>{_esc_text(clip.get('display', {}).get('filename') or clip['name'])}</dd></div>"
             f"<div><dt>Resolution</dt><dd>{_render_resolution(clip['resolution'])}</dd></div>"
             f"<div><dt>FPS</dt><dd>{_render_fps(clip['fps'])}</dd></div>"
             f"<div><dt>Frames</dt><dd>{clip['frame_count']}</dd></div>"

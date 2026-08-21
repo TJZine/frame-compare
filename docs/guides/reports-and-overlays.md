@@ -76,7 +76,7 @@ The viewer supports:
 - a lens for close inspection;
 - browser-local review state and notes.
 
-Report payload version 1.1 preserves two distinct frame domains. The selected report
+Report payload version 1.2 preserves two distinct frame domains. The selected report
 frame is the common comparison frame. Each visible image carries its own mapped,
 untrimmed source frame, exact picture type, and exact-frame Dolby Vision RPU presence
 when the renderer can prove them. The Frame inspector updates that source list with the
@@ -154,7 +154,7 @@ browser; use the host helper and the exact path printed by the run.
 - Prefer `report.embed_images = true` only when a single-file artifact is required.
 - Review filenames and metadata before sharing; they may disclose source names.
 - Browser-local notes are not automatically included in the run folder.
-- Version 1.1 report metadata is archival raw evidence and resolved rendering state;
+- Version 1.2 report metadata is archival raw evidence and resolved rendering state;
   moving the complete report folder does not turn local paths into identity data.
 
 For exact opening precedence, persistence, and report-generation behavior, see the
