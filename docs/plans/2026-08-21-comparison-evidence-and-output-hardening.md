@@ -3,7 +3,7 @@ search:
   exclude: true
 ---
 
-Status: Active
+Status: Historical
 Scope: Automatic frame-selection diversity, plain non-TTY progress, alignment-stability diagnostics, report-viewer modularization, and file-size HUD presentation
 Owner: Primary implementation controller
 
@@ -1458,9 +1458,9 @@ No session may require destructive config, report, or cache migration to roll ba
   label. The remediation-focused suite, exact 1280/1440/2560 browser checks, and the
   full local verification gate passed. Fresh measurements were 0.243s median to select
   100 frames from 216,000, 0.0135s for 10,000 plain phases, and 0.60 microseconds
-  per HUD label. Real VapourSynth, live slow.pics/webhook, PowerShell/physical Windows,
-  and manual platform accessibility/visual evidence remain unavailable locally. The
-  latest upstream commit is green in every named workflow, but the committed A–G head
-  is still seven commits ahead of `origin/dev/v0.2.0`, the Session H closeout diff is
-  uncommitted, and neither has GitHub checks. The plan therefore remains Active pending
-  integrated-head CI before historical closeout.
+  per HUD label. Real VapourSynth, live slow.pics/webhook, physical Windows, and manual
+  platform accessibility/visual evidence remain unavailable locally. Draft PR
+  [#82](https://github.com/TJZine/frame-compare/pull/82) passed CI, Documentation,
+  generated report browser smoke, dependency audits on Linux and Windows,
+  build/install distribution, Windows portable, and Docker integration. All closeout
+  gates are satisfied, so the plan is Historical.
