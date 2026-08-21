@@ -170,7 +170,7 @@ def test_prompt_shows_full_filename_once_when_label_equals_stem(
     assert str(prompt_input.shared_cache_path) in "".join(output.split())
 
 
-def test_prompt_renders_prebuilt_compact_identity_without_paths_or_cache(
+def test_prompt_renders_prebuilt_compact_identity_with_cache_provenance(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -186,6 +186,7 @@ def test_prompt_renders_prebuilt_compact_identity_without_paths_or_cache(
     prompt_input = _prompt_input(request)
     prompt_input = replace(
         prompt_input,
+        shared_cache_path=Path("generated/cache/alignment/alignment_reuse.toml"),
         rows=(
             replace(
                 prompt_input.rows[0],
@@ -205,8 +206,10 @@ def test_prompt_renders_prebuilt_compact_identity_without_paths_or_cache(
     assert "Avatar Aang The Last Airbender (2026)" in output
     assert "PMTP WEB-DL" in output
     assert "ATV WEB-DL" in output
-    assert str(tmp_path) not in output
-    assert "Cache" not in output
+    assert str(request.reference.path) not in output
+    assert str(request.comparisons[0].path) not in output
+    assert "Cache" in output
+    assert str(prompt_input.shared_cache_path) in "".join(output.split())
 
 
 def test_prompt_does_not_use_unbounded_terminal_width(

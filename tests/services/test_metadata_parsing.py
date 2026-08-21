@@ -182,7 +182,7 @@ def test_metadata_parsing_fallback_policy_rejects_malformed_primary_fields(mocke
         return {
             "anime_title": {"unexpected": "mapping"},
             "anime_episode": True,
-            "release_group": ["unexpected"],
+            "release_group": {"unexpected": "mapping"},
         }
 
     def fake_guessit(_filename: str) -> dict[str, object]:

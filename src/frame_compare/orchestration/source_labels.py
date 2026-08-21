@@ -11,7 +11,6 @@ from frame_compare.config.schema_models import SourceOverrideConfig
 from frame_compare.config.text_validation import is_control_character
 from frame_compare.orchestration.errors import SourceSelectionError
 from frame_compare.services.metadata_parsing import parse_filename
-from frame_compare.services.release_identity import ReleaseIdentity
 from frame_compare.services.types import ParsedMetadata
 
 _WHITESPACE_RE = re.compile(r"\s+")
@@ -39,7 +38,6 @@ def resolve_source_labels(
     overrides_by_path: dict[Path, SourceOverrideConfig],
     label_mode: Literal["stem", "filename", "parsed"],
     label_parser: Literal["auto", "guessit", "anitopy"],
-    release_identities_by_path: dict[Path, ReleaseIdentity] | None = None,
 ) -> dict[Path, str]:
     """Resolve unique presentation labels without changing source identity."""
     return {
@@ -49,7 +47,6 @@ def resolve_source_labels(
             overrides_by_path=overrides_by_path,
             label_mode=label_mode,
             label_parser=label_parser,
-            release_identities_by_path=release_identities_by_path,
         ).items()
     }
 
@@ -60,7 +57,7 @@ def resolve_source_label_details(
     overrides_by_path: dict[Path, SourceOverrideConfig],
     label_mode: Literal["stem", "filename", "parsed"],
     label_parser: Literal["auto", "guessit", "anitopy"],
-    release_identities_by_path: dict[Path, ReleaseIdentity] | None = None,
+    parsed_metadata_by_path: dict[Path, ParsedMetadata] | None = None,
 ) -> dict[Path, ResolvedSourceLabel]:
     """Resolve canonical labels while retaining explicit-label provenance."""
     candidates = [
@@ -70,7 +67,7 @@ def resolve_source_label_details(
             label_mode=label_mode,
             label_parser=label_parser,
             source_index=index,
-            release_identity=(release_identities_by_path or {}).get(path),
+            parsed_metadata=(parsed_metadata_by_path or {}).get(path),
         )
         for index, path in enumerate(ordered_paths)
     ]
@@ -122,7 +119,7 @@ def _label_candidate(
     label_mode: Literal["stem", "filename", "parsed"],
     label_parser: Literal["auto", "guessit", "anitopy"],
     source_index: int,
-    release_identity: ReleaseIdentity | None,
+    parsed_metadata: ParsedMetadata | None,
 ) -> _LabelCandidate:
     if override is not None and override.label is not None:
         return _LabelCandidate(path, override.label, True, source_index)
@@ -130,17 +127,8 @@ def _label_candidate(
         label = normalize_derived_display_text(path.name)
     elif label_mode == "parsed":
         parsed = (
-            ParsedMetadata(
-                title=release_identity.content.title,
-                year=release_identity.content.year,
-                season=release_identity.content.season,
-                episode=release_identity.content.episode,
-                episode_title=release_identity.content.episode_title,
-                release_group=release_identity.release_group,
-                source=release_identity.source_type,
-                resolution=release_identity.resolution,
-            )
-            if release_identity is not None
+            parsed_metadata
+            if parsed_metadata is not None
             else parse_filename(
                 path.name,
                 parser_priority=label_parser,

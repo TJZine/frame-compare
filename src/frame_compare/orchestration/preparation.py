@@ -77,7 +77,7 @@ from frame_compare.services.errors import (
     TmdbError,
     TmdbRateLimitedError,
 )
-from frame_compare.services.metadata_parsing import parse_release_identity
+from frame_compare.services.metadata_parsing import parse_filename_with_release_identity
 from frame_compare.services.release_identity import ReleaseIdentity
 from frame_compare.services.run_folder import reserve_run_folder
 from frame_compare.services.run_info import (
@@ -86,7 +86,7 @@ from frame_compare.services.run_info import (
     RunInfoTmdbSkipReason,
     write_run_info,
 )
-from frame_compare.services.types import TmdbMetadata
+from frame_compare.services.types import ParsedMetadata, TmdbMetadata
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 from frame_compare.utils.paths import (
     require_managed_descendant,
@@ -550,20 +550,21 @@ async def execute_prep(
     )
     input_videos = source_selection.ordered_paths
     overrides_by_path = dict(source_selection.overrides_by_path)
-    release_identities_by_path = {
-        path: parse_release_identity(
+    parsed_metadata_by_path: dict[Path, ParsedMetadata] = {}
+    release_identities_by_path: dict[Path, ReleaseIdentity] = {}
+    for path in input_videos:
+        parsed_metadata, release_identity = parse_filename_with_release_identity(
             path.name,
             parser_priority=config.sources.label_parser,
-            alternate_policy="fallback" if config.sources.label_mode == "parsed" else "merge",
         )
-        for path in input_videos
-    }
+        parsed_metadata_by_path[path] = parsed_metadata
+        release_identities_by_path[path] = release_identity
     label_details_by_path = resolve_source_label_details(
         ordered_paths=input_videos,
         overrides_by_path=overrides_by_path,
         label_mode=config.sources.label_mode,
         label_parser=config.sources.label_parser,
-        release_identities_by_path=release_identities_by_path,
+        parsed_metadata_by_path=parsed_metadata_by_path,
     )
     labels_by_path = {path: detail.value for path, detail in label_details_by_path.items()}
     explicit_labels_by_path = {

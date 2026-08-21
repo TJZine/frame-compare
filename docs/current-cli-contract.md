@@ -1232,8 +1232,9 @@ enabled.
   displays the
   signed frame offset and time offset, humanizes evidence as `Computed` or
   `Preview-confirmed`, and renders valid timestamps in UTC while preserving invalid
-  values verbatim. Legacy/fallback prompt inputs retain exact filename, path, and
-  cache evidence. It does not derive freshness from file mtime or index mtime.
+  values verbatim. The shared cache path remains the final evidence row;
+  legacy/fallback prompt inputs also retain exact filename and path evidence. It does
+  not derive freshness from file mtime or index mtime.
 - Shared previous-offset entries live under
   `<resolved paths.generated_dir>/cache/alignment/`. This is shared generated-data
   cache state and does not live inside a fresh run folder.

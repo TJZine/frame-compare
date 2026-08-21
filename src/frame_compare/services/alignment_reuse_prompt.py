@@ -186,17 +186,16 @@ def _render_previous_offsets_table(
         )
         if row.presentation_name is None and Path(row.path).name != row.filename:
             table.add_row("  Path", f"[dim]{escape(row.path)}[/]")
-    if not prompt_input.reference_name_is_prebuilt:
-        table.add_row("", "")
-        table.add_row(
-            "Cache",
-            Text(
-                str(prompt_input.shared_cache_path),
-                style="dim",
-                overflow="fold",
-                no_wrap=False,
-            ),
-        )
+    table.add_row("", "")
+    table.add_row(
+        "Cache",
+        Text(
+            str(prompt_input.shared_cache_path),
+            style="dim",
+            overflow="fold",
+            no_wrap=False,
+        ),
+    )
     return table
 
 
