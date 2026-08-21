@@ -37,3 +37,26 @@ def test_viewer_css_preserves_accessible_input_modes() -> None:
         target = css_block(coarse, selector)
         assert "min-width: 44px;" in target, selector
         assert "min-height: 44px;" in target, selector
+
+
+def test_viewer_css_anchors_toolbar_and_shares_responsive_inspector_width() -> None:
+    css = get_css()
+
+    root = css_block(css, ":root")
+    assert "--rv-inspector-width: clamp(28rem, 30vw, 42rem);" in root
+
+    toolbar = css_block(css, ".rv-primary-controls")
+    assert "display: grid;" in toolbar
+    assert "grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);" in toolbar
+    assert 'grid-template-areas: "frame mode context";' in toolbar
+
+    inspector = css_block(css, ".rv-inspector")
+    assert "width: min(var(--rv-inspector-width), calc(100vw - 2rem));" in inspector
+    assert "overflow-x: hidden;" in inspector
+    stage = css_block(css, "body.rv-inspector-open .rv-viewer-stage")
+    assert "margin-right: min(var(--rv-inspector-width), calc(100vw - 2rem));" in stage
+
+    panel = css_block(css, ".rv-inspector-panel")
+    assert "overflow-x: hidden;" in panel
+    metadata = css_block(css, ".rv-inspector-list")
+    assert "grid-template-columns: minmax(5.5rem, max-content) minmax(0, 1fr);" in metadata

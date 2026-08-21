@@ -101,6 +101,7 @@ def test_build_html_renders_mode_aware_clip_controls(report_payload: ReportPaylo
         document, tag="div", attr_name="data-control-scope", attr_value="active"
     )
     mode_controls = require_first(document, tag="div", class_name="rv-mode-controls")
+    context_zone = require_first(document, tag="div", class_name="rv-context-zone")
     mode_buttons = find_children(mode_controls, tag="button")
     assert [button.attrs["data-mode"] for button in mode_buttons] == [
         "slider",
@@ -111,6 +112,10 @@ def test_build_html_renders_mode_aware_clip_controls(report_payload: ReportPaylo
     ]
     assert "rv-context-controls" in pair_controls.classes
     assert "rv-context-controls" in active_controls.classes
+    assert pair_controls in context_zone.children
+    assert active_controls in context_zone.children
+    assert require_first(context_zone, element_id="alignment-status")
+    assert "role" not in context_zone.attrs
     assert pair_controls.attrs["aria-label"] == "Comparison pair"
     assert active_controls.attrs["aria-label"] == "Single clip"
     assert "hidden" in active_controls.attrs

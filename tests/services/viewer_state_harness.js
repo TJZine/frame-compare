@@ -85,6 +85,8 @@ function fakeElement() {
     const attributes = new Map();
     const listeners = new Map();
     let definitionValues = null;
+    const inspectorPrimary = { value: null };
+    const inspectorRelease = { value: null };
     return {
         value: '',
         textContent: '',
@@ -147,6 +149,17 @@ function fakeElement() {
         },
         replaceChildren(...children) {
             this.children = children;
+        },
+        querySelector(selector) {
+            if (selector === '.rv-inspector-clip-primary') {
+                if (!inspectorPrimary.value) inspectorPrimary.value = fakeElement();
+                return inspectorPrimary.value;
+            }
+            if (selector === '.rv-inspector-clip-release') {
+                if (!inspectorRelease.value) inspectorRelease.value = fakeElement();
+                return inspectorRelease.value;
+            }
+            return null;
         },
         querySelectorAll(selector) {
             if (selector === '.rv-inspector-clip-heading span') {
@@ -420,7 +433,7 @@ function keyboardEvent(key) {
 const summary = {};
 
 {
-    const { viewer } = loadViewer({ clipCount: 2 });
+    const { viewer } = loadViewer({ clipCount: 4 });
     const clip = {
         name: 'canonical-name',
         label: 'Canonical label',
@@ -439,7 +452,17 @@ const summary = {};
         'Primary release identity — Exact.File.Name.mkv',
     );
     assert.equal(viewer.clipDisplay({ label: 'Legacy label' }), 'Legacy label');
-    summary.clipDisplayProfiles = { payloadProfilesAndLegacyFallback: true };
+    assert.equal(viewer.stableClipRole(0), 'Reference');
+    assert.equal(viewer.stableClipRole(1), 'Comparison 1');
+    viewer.state.data.default_selection.left_clip_index = 2;
+    assert.equal(viewer.stableClipRole(0), 'Comparison 1');
+    assert.equal(viewer.stableClipRole(1), 'Comparison 2');
+    assert.equal(viewer.stableClipRole(2), 'Reference');
+    assert.equal(viewer.stableClipRole(3), 'Comparison 3');
+    summary.clipDisplayProfiles = {
+        payloadProfilesAndLegacyFallback: true,
+        stableInspectorRoles: true,
+    };
 }
 
 {

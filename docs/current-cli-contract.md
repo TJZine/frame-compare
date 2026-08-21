@@ -716,9 +716,16 @@ with `default=False`.
 - The existing Frame inspector follows the images visible in Single, Slider, Diff,
   Blink, and Grid modes. The serialized/config viewer-mode value `overlay` is presented
   as the user-facing `Single` mode and shows only the active source. The existing Clips
-  inspector shows compact source signal, presentation, file-size, and non-full
-  active-picture facts. Report Information owns the Rendering disclosure, including
-  resolved tonemap settings when tonemapping ran.
+  inspector uses a responsive desktop drawer and a narrow-screen overlay. Its stable
+  Reference/Comparison headings keep the dynamic viewer role separate, show primary
+  and informative release identity, retain the complete wrapping filename, and wrap
+  compact source signal, presentation, file-size, and non-full active-picture facts
+  without horizontal panel scrolling. Report Information owns the Rendering
+  disclosure, including resolved tonemap settings when tonemapping ran.
+- The primary report toolbar keeps frame navigation, view modes, and mode-specific
+  context/alignment in three stable CSS-owned zones on wide screens. It becomes a
+  two-row layout at medium widths and a stacked layout at narrow widths without
+  changing DOM order, native controls, keyboard behavior, or ARIA semantics.
 - Report identity includes output-affecting overlay, geometry, tonemap, presentation,
   signal, and per-image provenance facts. It excludes absolute paths, image bytes or
   `src` values, timestamps, transient browser state, and clip display strings.

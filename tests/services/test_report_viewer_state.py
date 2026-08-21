@@ -18,6 +18,11 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
     assert result.returncode == 0, result.stdout + result.stderr
     summary = json.loads(result.stdout.strip().splitlines()[-1])
 
+    assert summary["clipDisplayProfiles"] == {
+        "payloadProfilesAndLegacyFallback": True,
+        "stableInspectorRoles": True,
+    }
+
     restored = summary["restoreFourClip"]
     assert restored["clipCount"] == 4
     assert restored["leftClipIdx"] != restored["rightClipIdx"]

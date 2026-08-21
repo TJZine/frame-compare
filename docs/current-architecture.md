@@ -567,9 +567,14 @@ assets. The generated viewer exposes slider, internal overlay mode presented to
 users as Single where appropriate, diff, and pair-based blink modes; frame/category
 navigation; a HUD toggle for stage labels and current-frame metadata; a primary
 toolbar plus floating viewport palette; a collapsible, compact/normal/large
-filmstrip bottom panel; an inspector drawer with Frame, Clips, Align, Review, and
-Export tabs; fullscreen support; viewport pan, zoom, actual/width/height fit, reveal,
-and adjacent-frame preloading.
+filmstrip bottom panel; a responsive inspector drawer with Frame, Clips, Align,
+Review, and Export tabs; fullscreen support; viewport pan, zoom,
+actual/width/height fit, reveal, and adjacent-frame preloading. The toolbar owner uses
+CSS Grid to keep frame, mode, and context/alignment zones stable at wide widths, then
+reflows them to two rows and a narrow stack without JavaScript measurement or DOM
+reordering. One responsive Inspector width token owns both desktop drawer width and
+stage reservation; the existing tablet/phone overlay boundary keeps stage margin at
+zero.
 
 Report payload v1.2 carries one orchestration-built, presentation-only display profile
 per clip. `phase_post_render` reuses prepared release identities, explicit-label
@@ -578,6 +583,11 @@ report. Report controls consume control or micro names, while Inspector/info and
 surfaces consume primary identity and exact filename. Canonical clip labels continue
 to own image mappings, geometry, browser state, and review JSON; payload identity
 shaping explicitly omits display profiles.
+
+The Clips inspector composes those profiles into stable Reference/Comparison cards.
+Primary and informative release identities wrap normally, exact filenames and long
+technical values may wrap anywhere, and drawer/panel overflow is constrained locally
+rather than masked at the document boundary.
 
 The ordinary report artifact does not claim presentation blindness. Source identity
 can be present in baked screenshot overlays, physical image filenames, and report

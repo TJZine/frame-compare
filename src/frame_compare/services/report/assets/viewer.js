@@ -1618,6 +1618,12 @@ const ReportViewer = {
         return roles.length > 0 ? roles.join(', ') : 'Available';
     },
 
+    stableClipRole(index) {
+        const referenceIndex = this.referenceClipIndex();
+        if (index === referenceIndex) return 'Reference';
+        return `Comparison ${index < referenceIndex ? index + 1 : index}`;
+    },
+
     modeLabel(mode = this.state.mode) {
         const labels = {
             slider: 'Slider',
@@ -1784,19 +1790,32 @@ const ReportViewer = {
                         <span></span>
                         <span></span>
                     </div>
+                    <div class="rv-inspector-clip-primary"></div>
+                    <div class="rv-inspector-clip-release" hidden></div>
                     <dl class="rv-inspector-list">
-                        <div><dt>Role</dt><dd></dd></div>
-                        <div><dt>Source</dt><dd></dd></div>
+                        <div><dt>View role</dt><dd></dd></div>
+                        <div><dt>File</dt><dd class="rv-inspector-file"></dd></div>
                         <div><dt>Resolution</dt><dd></dd></div>
                         <div><dt>FPS</dt><dd></dd></div>
                         <div><dt>File size</dt><dd></dd></div>
-                        <div><dt>Signal</dt><dd></dd></div>
-                        <div><dt>Presentation</dt><dd></dd></div>
+                        <div><dt>Signal</dt><dd class="rv-inspector-technical"></dd></div>
+                        <div><dt>Presentation</dt><dd class="rv-inspector-technical"></dd></div>
                     </dl>
                 `;
                 const heading = item.querySelectorAll('.rv-inspector-clip-heading span');
-                heading[0].textContent = this.clipDisplay(clip, 'primary');
+                heading[0].textContent = this.stableClipRole(index);
                 heading[1].textContent = clip.signal?.is_hdr ? 'HDR' : 'SDR';
+                const primary = this.clipDisplay(clip, 'primary');
+                const release = this.clipDisplay(clip, 'release');
+                const primaryElement = item.querySelector('.rv-inspector-clip-primary');
+                const releaseElement = item.querySelector('.rv-inspector-clip-release');
+                primaryElement.textContent = primary;
+                const showRelease = Boolean(
+                    clip?.display?.release
+                    && this.normalizedDisplayToken(release) !== this.normalizedDisplayToken(primary)
+                );
+                releaseElement.hidden = !showRelease;
+                releaseElement.textContent = showRelease ? release : '';
                 const values = item.querySelectorAll('dd');
                 values[0].textContent = role;
                 values[1].textContent = this.clipFilename(clip);

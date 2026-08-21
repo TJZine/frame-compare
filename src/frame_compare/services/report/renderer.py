@@ -475,6 +475,7 @@ def _render_controls(
             <button data-mode="grid" role="radio" aria-checked="false" aria-label="Grid mode" title="Grid comparison">Grid</button>
         </div>
 
+        <div class="rv-context-zone">
         <div class="rv-control-group rv-grid-controls rv-context-controls" data-control-scope="grid" aria-label="Grid clips" hidden>
             <button id="btn-grid-prev" type="button" aria-label="Previous grid clips">←</button>
             <span class="rv-grid-position" data-grid-position aria-live="off"></span>
@@ -501,6 +502,7 @@ def _render_controls(
             </select>
         </div>
         <div id="alignment-status" class="rv-alignment-status" role="status" aria-live="polite">Aligned: none</div>
+        </div>
         </div>
     </div>"""
 
