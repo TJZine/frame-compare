@@ -306,7 +306,21 @@ def _release_identity(filename: str, fields: _ParsedFilenameFields) -> ReleaseId
     resolution = _normalize_optional_release_text(fields.resolution)
     source_type = _source_type(filename, fields.source)
     release_suffix = _release_suffix(stem, resolution, source_type)
-    release_tokens = _release_tokens(release_suffix)
+    full_dynamic_range_claims = _dynamic_range_claims(_release_tokens(release_suffix))
+    release_group = _release_group(
+        fields.release_group,
+        full_dynamic_range_claims,
+        release_suffix,
+    )
+    inference_suffix = _normalize_release_text(release_suffix)
+    if release_group is not None:
+        terminal_group = re.search(
+            rf"(?i)(?:^|[._ -]){re.escape(release_group)}$",
+            inference_suffix,
+        )
+        if terminal_group is not None:
+            inference_suffix = inference_suffix[: terminal_group.start()].rstrip("._- ")
+    release_tokens = _release_tokens(inference_suffix)
     dynamic_range_claims = _dynamic_range_claims(release_tokens)
     return ReleaseIdentity(
         content=ContentIdentity(
@@ -321,13 +335,9 @@ def _release_identity(filename: str, fields: _ParsedFilenameFields) -> ReleaseId
         service=_service(fields.service, release_tokens),
         source_type=source_type,
         dynamic_range_claims=dynamic_range_claims,
-        release_group=_release_group(
-            fields.release_group,
-            dynamic_range_claims,
-            release_suffix,
-        ),
-        revision_tags=_revision_tags(release_suffix),
-        variant_tags=_variant_tags(release_suffix),
+        release_group=release_group,
+        revision_tags=_revision_tags(inference_suffix),
+        variant_tags=_variant_tags(inference_suffix),
     )
 
 
@@ -389,17 +399,29 @@ def _release_group(
     release_suffix: str,
 ) -> str | None:
     group = _normalize_optional_release_text(parsed_group)
-    # GuessIt currently folds an unrecognized HLG tag into the release group.
+    if group is None:
+        return None
+    # GuessIt can fold recognized dynamic-range tags into the release group.
     # Only correct the tag-position form; a group after the conventional "-"
-    # separator may legitimately begin with "HLG-".
+    # separator may legitimately begin with one of these prefixes.
     normalized_suffix = _normalize_release_text(release_suffix)
+    prefix = next(
+        (
+            candidate
+            for candidate, claim in (
+                ("HLG", "HLG"),
+                ("HDR10+", "HDR10+"),
+                ("HDR10PLUS", "HDR10+"),
+            )
+            if claim in dynamic_range_claims and group.upper().startswith(f"{candidate}-")
+        ),
+        None,
+    )
     if (
-        group is not None
-        and "HLG" in dynamic_range_claims
-        and group.upper().startswith("HLG-")
+        prefix is not None
         and re.search(rf"(?i)(?:^|[. _]){re.escape(group)}$", normalized_suffix) is not None
     ):
-        return _normalize_optional_release_text(group[4:])
+        return _normalize_optional_release_text(group[len(prefix) + 1 :])
     return group
 
 
