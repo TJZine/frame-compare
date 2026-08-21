@@ -698,7 +698,9 @@ upload, regardless of whether a later confirmed upload will open the slow.pics
 URL in a browser. The same report auto-open rules decide whether the report is
 opened. A compact `[WAIT] Publishing confirmation` panel shows the visibility and,
 if the report was not opened, its path exactly once before the visibility-specific
-default-No question.
+default-No question. The confirmation seam receives the literal
+`Upload to <visibility> slow.pics?`, where `<visibility>` is `public` or `unlisted`,
+with `default=False`.
 
 ### Report And Overlay Metadata Contract
 

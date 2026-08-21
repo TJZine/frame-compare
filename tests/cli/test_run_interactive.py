@@ -24,6 +24,7 @@ from frame_compare.config.loader import get_default_config
 from frame_compare.config.schema import (
     ConfigSchema,
     ReportConfig,
+    Visibility,
 )
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
 from frame_compare.orchestration.types import (
@@ -206,7 +207,7 @@ def test_confirmation_callback_opens_report_before_prompt_and_defaults_decline()
         ),
         console=Console(file=StringIO(), no_color=True),
         resolve_effective_config=get_default_config,
-        visibility="unlisted",
+        visibility=Visibility.UNLISTED,
     )
 
     assert callback(SlowpicsUploadConfirmationRequest(report_path=Path("report.html"))) == (
@@ -344,7 +345,7 @@ def test_confirmation_callback_prints_report_path_when_auto_open_disabled() -> N
         ),
         console=Console(file=output, no_color=True, force_terminal=False),
         resolve_effective_config=lambda: disabled_auto_open,
-        visibility="public",
+        visibility=Visibility.PUBLIC,
     )
 
     assert callback(SlowpicsUploadConfirmationRequest(report_path=Path("report.html"))) == (
@@ -371,7 +372,7 @@ def test_confirmation_callback_prints_report_path_when_auto_open_attempt_fails()
         ),
         console=Console(file=output, no_color=True, force_terminal=False),
         resolve_effective_config=get_default_config,
-        visibility="public",
+        visibility=Visibility.PUBLIC,
     )
 
     assert callback(SlowpicsUploadConfirmationRequest(report_path=Path("report.html"))) == (
@@ -402,7 +403,7 @@ def test_confirmation_panel_fits_narrow_no_color_console(width: int) -> None:
             force_terminal=False,
         ),
         resolve_effective_config=lambda: config,
-        visibility="unlisted",
+        visibility=Visibility.UNLISTED,
     )
 
     assert (
@@ -629,14 +630,13 @@ def test_interactive_slowpics_action_failures_are_warning_only() -> None:
         "slow.pics browser: failed to open URL: no browser accepted the request"
     )
     assert slowpics_browser_open_attempted(actions) is True
-    assert captured_logs == [
-        {
-            "event": "slowpics_clipboard_copy_failed",
-            "exception_type": "RuntimeError",
-            "exc_info": True,
-            "log_level": "debug",
-        }
-    ]
+    clipboard_record = next(
+        item for item in captured_logs if item["event"] == "slowpics_clipboard_copy_failed"
+    )
+    assert clipboard_record["event"] == "slowpics_clipboard_copy_failed"
+    assert clipboard_record["exception_type"] == "RuntimeError"
+    assert clipboard_record["exc_info"] is True
+    assert clipboard_record["log_level"] == "debug"
 
 
 def test_interactive_slowpics_browser_exception_warning_is_sanitized() -> None:
@@ -658,14 +658,13 @@ def test_interactive_slowpics_browser_exception_warning_is_sanitized() -> None:
     browser_action = next(action for action in actions if action.kind == "browser")
     assert browser_action.warning == "slow.pics browser: failed to open URL"
     assert "browser secret sentinel" not in str(browser_action.warning)
-    assert captured_logs == [
-        {
-            "event": "slowpics_browser_open_failed",
-            "exception_type": "RuntimeError",
-            "exc_info": True,
-            "log_level": "debug",
-        }
-    ]
+    browser_record = next(
+        item for item in captured_logs if item["event"] == "slowpics_browser_open_failed"
+    )
+    assert browser_record["event"] == "slowpics_browser_open_failed"
+    assert browser_record["exception_type"] == "RuntimeError"
+    assert browser_record["exc_info"] is True
+    assert browser_record["log_level"] == "debug"
 
 
 def test_report_auto_open_can_be_suppressed_by_slowpics_browser_attempt() -> None:

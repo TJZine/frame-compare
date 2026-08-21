@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from pytest import MonkeyPatch
+from structlog.testing import capture_logs
 
 from frame_compare.cli.entry import app
 from frame_compare.cli.errors import ExitCode, format_error_json
@@ -567,7 +568,8 @@ def test_doctor_generic_check_failure_sanitizes_json_details(monkeypatch: Monkey
         raise RuntimeError(f"{sentinel} at /private/config.toml")
 
     check = DoctorCheck(name="custom_check", category="optional", check_fn=_raise)
-    report = run_doctor(checks=[check])
+    with capture_logs() as captured_logs:
+        report = run_doctor(checks=[check])
 
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
@@ -586,6 +588,13 @@ def test_doctor_generic_check_failure_sanitizes_json_details(monkeypatch: Monkey
     assert entry["message"] == "custom_check check failed"
     assert entry["details"] == {"exception_type": "RuntimeError"}
     assert sentinel not in result.stdout
+    assert "/private/config.toml" not in result.stdout
+    record = next(item for item in captured_logs if item["event"] == "doctor_check_failed")
+    assert record["event"] == "doctor_check_failed"
+    assert record["check"] == "custom_check"
+    assert record["exception_type"] == "RuntimeError"
+    assert record["exc_info"] is True
+    assert record["log_level"] == "debug"
 
 
 def test_doctor_top_level_frame_compare_error_uses_cli_error_contract(

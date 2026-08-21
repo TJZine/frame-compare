@@ -28,7 +28,13 @@ from frame_compare.cli.output import (
 from frame_compare.config.effective import load_effective_config
 from frame_compare.config.errors import ConfigValidationError
 from frame_compare.config.overrides import cli_config_overrides_from
-from frame_compare.config.schema import ConfigSchema, OverlayMode, ToneCurve, TonemapPreset
+from frame_compare.config.schema import (
+    ConfigSchema,
+    OverlayMode,
+    ToneCurve,
+    TonemapPreset,
+    Visibility,
+)
 from frame_compare.errors import FrameCompareError
 from frame_compare.orchestration.preflight import (
     resolve_selected_config_path,
@@ -355,7 +361,7 @@ def build_runner_dependencies(
             deps=deps,
             console=console,
             resolve_effective_config=resolve_effective_config,
-            visibility=config.slowpics.visibility.value,
+            visibility=config.slowpics.visibility,
         )
         if report_confirmed_slowpics_enabled(config)
         else None
@@ -416,8 +422,10 @@ def build_confirm_slowpics_upload_callback(
     deps: RunCommandDeps,
     console: Console,
     resolve_effective_config: EffectiveConfigLoader,
-    visibility: str,
+    visibility: Visibility,
 ) -> SlowpicsUploadConfirmationFn:
+    visibility_text = visibility.value
+
     def _confirm_slowpics_upload(
         request: SlowpicsUploadConfirmationRequest,
     ) -> SlowpicsUploadConfirmationDecision:
@@ -430,7 +438,7 @@ def build_confirm_slowpics_upload_callback(
         details = Table.grid(padding=(0, 2))
         details.add_column(style="grey70", no_wrap=True)
         details.add_column(overflow="fold")
-        details.add_row("Visibility", escape(visibility.title()))
+        details.add_row("Visibility", escape(visibility_text.title()))
         if not opened:
             details.add_row("Report", escape(str(request.report_path)))
         console.print()
@@ -445,7 +453,7 @@ def build_confirm_slowpics_upload_callback(
             )
         )
         confirmed = deps.confirm_upload(
-            f"Upload to {visibility} slow.pics?",
+            f"Upload to {visibility_text} slow.pics?",
             default=False,
         )
         console.print()

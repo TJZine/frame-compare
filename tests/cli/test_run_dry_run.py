@@ -198,6 +198,32 @@ def test_run_dry_run_human_and_quiet_follow_current_quiet_semantics(
     assert quiet.stderr == ""
 
 
+def test_run_dry_run_human_reports_workspace_root_input_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
+        root = Path("workspace")
+        config_path = _write_workspace(root)
+        config_path.write_text(
+            MINIMAL_CONFIG.replace(
+                'input_dir = "comparison_videos"',
+                'input_dir = "."',
+            ),
+            encoding="utf-8",
+        )
+        (root / "source.mkv").write_bytes(b"")
+        resolved_root = root.resolve()
+
+        result = _invoke(root, config_path)
+
+    assert result.exit_code == 0
+    compact_output = "".join(result.stdout.split())
+    assert f"Inputdirectory:{resolved_root}" in compact_output
+    assert "Inputdirectory:." not in compact_output
+    assert f"Workspace:{resolved_root}" in compact_output
+
+
 def test_run_dry_run_human_marks_disabled_parent_actions_not_applicable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

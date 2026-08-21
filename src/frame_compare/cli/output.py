@@ -391,18 +391,23 @@ def print_at_a_glance(
     _add_separator(table)
     _add_subheader(table, "Alignment")
     _add_kv(table, "Mode", _styled_value("Audio alignment" if alignment_enabled else "Disabled"))
-    ffmpeg_text = "available (true)" if ffmpeg_available else "unavailable (false)"
+    if alignment_enabled:
+        ffmpeg_status: StatusPresentation = "OK" if ffmpeg_available else "WARN"
+        ffmpeg_text = "available (true)" if ffmpeg_available else "unavailable (false)"
+    else:
+        ffmpeg_status = "SKIP"
+        ffmpeg_text = "not required (alignment disabled)"
     _add_kv(
         table,
         "FFmpeg audio",
-        _status_value("OK" if ffmpeg_available else "WARN", ffmpeg_text),
+        _status_value(ffmpeg_status, ffmpeg_text),
     )
-    reuse_policy = {
-        "disabled": "do not reuse previous offsets (disabled)",
-        "prompt": "ask before reusing previous offsets (prompt)",
-        "always": "reuse previous offsets when valid (always)",
+    reuse_policy_label = {
+        "disabled": "Do not reuse previous offsets",
+        "prompt": "Ask before reusing previous offsets",
+        "always": "Reuse previous offsets when valid",
     }[config.audio_alignment.previous_offsets]
-    _add_kv(table, "Offsets", _styled_value(reuse_policy.split(" (")[0].capitalize()))
+    _add_kv(table, "Offsets", _styled_value(reuse_policy_label))
     manual_review_text: str
     if not use_vspreview and not force_interactive:
         manual_review_text = "Not configured"

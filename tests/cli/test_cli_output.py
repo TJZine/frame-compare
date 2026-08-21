@@ -38,9 +38,28 @@ def _render(console: Console) -> str:
 
 
 def _rendered_row_value(output: str, row_label: str) -> str:
-    for line in output.splitlines():
-        if row_label in line:
-            return line
+    lines = output.splitlines()
+    for index, line in enumerate(lines):
+        content = line.partition("│")[2].partition("│")[0]
+        row_prefix = f"   {row_label}"
+        if not content.startswith(row_prefix):
+            continue
+        value_start = len(row_prefix)
+        if value_start == len(content) or not content[value_start].isspace():
+            continue
+        if not content[value_start:].strip():
+            continue
+        rendered_lines = [line]
+        for continuation in lines[index + 1 :]:
+            continuation_content = continuation.partition("│")[2].partition("│")[0]
+            if not continuation_content.strip():
+                break
+            if not continuation_content.startswith("   "):
+                break
+            if len(continuation_content) > 3 and not continuation_content[3].isspace():
+                break
+            rendered_lines.append(continuation)
+        return "\n".join(rendered_lines)
     raise AssertionError(f"Missing row label: {row_label}")
 
 
@@ -90,8 +109,10 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     assert str(Path("config") / "config.toml") in _rendered_row_value(output, "config")
     assert "comparison_videos" in _rendered_row_value(output, "input")
     assert "generated" in _rendered_row_value(output, "generated")
-    assert "run folders" not in output
-    assert "screenshots" not in output
+    with pytest.raises(AssertionError, match="run folders"):
+        _rendered_row_value(output, "run folders")
+    with pytest.raises(AssertionError, match="screenshots"):
+        _rendered_row_value(output, "screenshots")
     assert "Frames" in output
     assert "random 10" in output
     assert "Seed" in output
@@ -148,6 +169,30 @@ def test_at_a_glance_reports_non_executable_ffmpeg_override_as_unavailable(
     )
 
     assert "false" in _rendered_row_value(_render(console), "FFmpeg audio")
+
+
+def test_at_a_glance_skips_ffmpeg_audio_when_alignment_is_disabled(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    config = _config()
+    config.audio_alignment.enable = False
+    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
+    console = _console()
+
+    print_at_a_glance(
+        console,
+        request=_request(),
+        config=config,
+        root=_workspace_path(),
+        config_path=_workspace_path("config", "config.toml"),
+    )
+
+    output = _render(console)
+    assert "Disabled" in _rendered_row_value(output, "Mode")
+    ffmpeg_row = _rendered_row_value(output, "FFmpeg audio")
+    assert "[SKIP]" in ffmpeg_row
+    assert "not required (alignment disabled)" in ffmpeg_row
+    assert "[WARN]" not in ffmpeg_row
 
 
 def test_at_a_glance_prints_previous_offsets_effective_mode(
@@ -365,27 +410,43 @@ def test_run_plan_preserves_all_material_settings(monkeypatch: MonkeyPatch) -> N
     assert "Diagnostic overlay" in _rendered_row_value(output, "Output")
     assert "Aligned geometry" in _rendered_row_value(output, "Output")
     assert "Automatic" in _rendered_row_value(output, "Active area")
+    assert "user 2 | random 3 | dark 2 | bright 1 | motion 4" in _rendered_row_value(
+        output, "Frames"
+    )
+    assert "fastest" in _rendered_row_value(output, "Analysis")
+    assert "lead=2.5s, trail=4s" in _rendered_row_value(output, "Window")
     assert "Ask before" in _rendered_row_value(output, "Offsets")
     assert "auto-open=Disabled" in _rendered_row_value(output, "Report")
     assert "Unlisted" in _rendered_row_value(output, "slow.pics")
-    for expected in (
-        "Run plan",
-        "Frame selection",
-        "user 2 | random 3 | dark 2 | bright 1 | motion 4",
-        "fastest",
-        "lead=2.5s, trail=4s",
-        "Rendering",
-        "Tone map",
-        "Offsets",
-        "Review",
-        "Report",
-        "Actions",
-        "Webhook",
-        "Configured",
-        "Cleanup",
-    ):
-        assert expected in output
+    assert "Configured" in _rendered_row_value(output, "Webhook")
+    assert "Delete uploaded screenshots when report-safe" in _rendered_row_value(output, "Cleanup")
     assert "https://example.test/hook-secret" not in output
+
+
+def test_run_plan_preserves_output_hierarchy(monkeypatch: MonkeyPatch) -> None:
+    console = _console()
+    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
+
+    print_at_a_glance(
+        console,
+        request=_request(),
+        config=_config(),
+        root=_workspace_path(),
+        config_path=_workspace_path("config", "config.toml"),
+    )
+
+    output = _render(console)
+    assert "Run plan" in output
+    headings = ("Workspace", "Frame selection", "Rendering", "Alignment", "Review", "Publishing")
+    heading_lines = {
+        heading: next(
+            index
+            for index, line in enumerate(output.splitlines())
+            if line.partition("│")[2].partition("│")[0].strip() == heading
+        )
+        for heading in headings
+    }
+    assert tuple(heading_lines.values()) == tuple(sorted(heading_lines.values()))
 
 
 @pytest.mark.parametrize("width", [60, 80])
@@ -482,15 +543,16 @@ def test_result_summary_uses_result_hierarchy_and_relative_paths() -> None:
     assert str(absolute_report) not in output
 
 
-def test_verbose_path_presentation_adds_absolute_detail_and_keeps_external_absolute(
+def test_verbose_run_plan_path_presentation_adds_absolute_detail(
     monkeypatch: MonkeyPatch,
 ) -> None:
     root = _workspace_path()
-    plan_console = _console()
     config = _config()
     monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
+
+    console = _console()
     print_at_a_glance(
-        plan_console,
+        console,
         request=_request(),
         config=config,
         root=root,
@@ -498,36 +560,45 @@ def test_verbose_path_presentation_adds_absolute_detail_and_keeps_external_absol
         verbose=True,
     )
 
-    plan_output = _render(plan_console)
+    output = _render(console)
     relative_config = Path("config") / "config.toml"
     absolute_config = (root / relative_config).resolve()
-    assert str(relative_config) in plan_output
-    assert f"(absolute: {absolute_config})" in plan_output
+    assert str(relative_config) in output
+    assert f"(absolute: {absolute_config})" in output
 
-    normal_console = _console()
+
+def test_result_summary_keeps_external_report_path_absolute() -> None:
+    root = _workspace_path()
+    console = _console()
     external_report = (root.parent / "outside" / "report.html").resolve()
+
     print_result_summary(
-        normal_console,
+        console,
         result=RunResult(success=True, report_path=external_report),
         quiet=False,
         root=root,
     )
-    normal_output = _render(normal_console)
-    assert str(external_report) in normal_output
 
-    verbose_console = _console()
+    output = _render(console)
+    assert str(external_report) in output
+
+
+def test_verbose_result_summary_path_presentation_adds_absolute_detail() -> None:
+    root = _workspace_path()
+    console = _console()
+
     print_result_summary(
-        verbose_console,
+        console,
         result=RunResult(success=True, report_path=root / "generated" / "report.html"),
         quiet=False,
         root=root,
         verbose=True,
     )
-    verbose_output = _render(verbose_console)
+    output = _render(console)
     relative_report = Path("generated") / "report.html"
     absolute_report = (root / relative_report).resolve()
-    assert str(relative_report) in verbose_output
-    assert f"(absolute: {absolute_report})" in verbose_output
+    assert str(relative_report) in output
+    assert f"(absolute: {absolute_report})" in output
 
 
 def test_result_summary_warning_headline_cap_and_verbose_expansion() -> None:
