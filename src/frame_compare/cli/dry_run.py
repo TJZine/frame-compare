@@ -303,12 +303,6 @@ def print_dry_run_plan(
         "[bold]No side effects:[/] this dry run validates configuration and input "
         "filenames only; it does not write, render, upload, or open anything."
     )
-    input_display = format_display_path(
-        plan.input.resolved_directory,
-        root=plan.workspace_root,
-    )
-    if input_display == ".":
-        input_display = str(plan.input.resolved_directory)
     _print_section(
         console,
         "Will use",
@@ -319,7 +313,10 @@ def print_dry_run_plan(
             ),
             (
                 "Input directory",
-                input_display,
+                format_display_path(
+                    plan.input.resolved_directory,
+                    root=plan.workspace_root,
+                ),
             ),
             (
                 f"Sources ({len(plan.input.source_filenames)})",

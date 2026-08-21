@@ -219,8 +219,8 @@ def test_run_dry_run_human_reports_workspace_root_input_path(
 
     assert result.exit_code == 0
     compact_output = "".join(result.stdout.split())
-    assert f"Inputdirectory:{resolved_root}" in compact_output
-    assert "Inputdirectory:." not in compact_output
+    assert "Inputdirectory:." in compact_output
+    assert f"Inputdirectory:{resolved_root}" not in compact_output
     assert f"Workspace:{resolved_root}" in compact_output
 
 
