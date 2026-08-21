@@ -16,6 +16,14 @@ from frame_compare.orchestration.fps_report import (
 from frame_compare.services.release_identity import ContentIdentity, ReleaseIdentity
 
 
+@pytest.fixture(autouse=True)
+def _stable_report_width(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "frame_compare.orchestration.presentation.shutil.get_terminal_size",
+        lambda **_: os.terminal_size((240, 24)),
+    )
+
+
 def _make_clip_state(
     path: str,
     label: str,
@@ -343,13 +351,8 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
 
 def test_emit_consolidated_fps_report_uses_relative_input_and_external_paths(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr(
-        "frame_compare.orchestration.presentation.shutil.get_terminal_size",
-        lambda **_: os.terminal_size((240, 24)),
-    )
     input_dir = tmp_path / "comparison_videos"
     internal_path = input_dir / "season" / "reference.mkv"
     external_path = tmp_path / "outside" / "comparison.mkv"

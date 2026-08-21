@@ -166,9 +166,10 @@ def test_run_render_phase_adds_unique_progress_labels_without_changing_canonical
         label="Canonical comparison",
         release_identity=identity,
     )
+    generated_progress_label = "Comparison 1 | ATV WEB-DL | DV HDR10+ | Kitsune"
     explicit = _clip(
         tmp_path / "comparison_videos" / "explicit.mkv",
-        label="My Encode",
+        label=generated_progress_label,
         release_identity=identity,
         label_is_explicit=True,
     )
@@ -182,12 +183,12 @@ def test_run_render_phase_adds_unique_progress_labels_without_changing_canonical
     assert [request.label for request in requests] == [
         "Reference",
         "Canonical comparison",
-        "My Encode",
+        generated_progress_label,
     ]
     assert [request.progress_label for request in requests] == [
         "Reference | ATV WEB-DL | DV HDR10+ | Kitsune",
-        "Comparison 1 | ATV WEB-DL | DV HDR10+ | Kitsune",
-        "My Encode",
+        f"{generated_progress_label} (2)",
+        generated_progress_label,
     ]
 
 

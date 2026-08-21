@@ -226,9 +226,9 @@ def test_help_no_color_disables_ansi_when_typer_forces_terminal(
     result = runner.invoke(
         app,
         ["--help"],
-        color=False,
+        color=True,
         terminal_width=60,
-        env={"NO_COLOR": "1", "TERM": "dumb"},
+        env={"NO_COLOR": "1", "TERM": "xterm-256color"},
     )
 
     assert result.exit_code == 0
