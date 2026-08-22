@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard, cast
 
 import structlog
 import tomli_w
@@ -33,10 +34,17 @@ log = structlog.get_logger()
 type _TomlValue = str | int | float | bool | None
 
 
+def _is_finite_number(value: object) -> TypeGuard[int | float]:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (OverflowError, ValueError):
+        return False
+
+
 def _float_matches(value: object, expected: float) -> bool:
-    return (
-        not isinstance(value, bool) and isinstance(value, int | float) and float(value) == expected
-    )
+    return _is_finite_number(value) and float(value) == expected
 
 
 def _int_matches(value: object, expected: int) -> bool:
@@ -247,13 +255,13 @@ def _parse_entry(
         raise TypeError("comparison_clip must be str")
     if not isinstance(frame_offset, int) or isinstance(frame_offset, bool):
         raise TypeError("frame_offset must be int")
-    if not isinstance(time_offset_seconds, int | float) or isinstance(time_offset_seconds, bool):
-        raise TypeError("time_offset_seconds must be number")
+    if not _is_finite_number(time_offset_seconds):
+        raise TypeError("time_offset_seconds must be finite number")
     if not isinstance(accepted_at, str) or not accepted_at:
         raise TypeError("accepted_at must be non-empty str")
     if origin == "computed":
-        if not isinstance(correlation_score, int | float) or isinstance(correlation_score, bool):
-            raise TypeError("computed correlation_score must be number")
+        if not _is_finite_number(correlation_score):
+            raise TypeError("computed correlation_score must be finite number")
         replay_correlation_score = float(correlation_score)
     else:
         replay_correlation_score = 1.0
@@ -298,10 +306,10 @@ def _parse_cached_computed_result(
     correlation_score = computed.get("correlation_score")
     if not isinstance(frame_offset, int) or isinstance(frame_offset, bool):
         raise TypeError("computed_result.frame_offset must be int")
-    if not isinstance(time_offset_seconds, int | float) or isinstance(time_offset_seconds, bool):
-        raise TypeError("computed_result.time_offset_seconds must be number")
-    if not isinstance(correlation_score, int | float) or isinstance(correlation_score, bool):
-        raise TypeError("computed_result.correlation_score must be number")
+    if not _is_finite_number(time_offset_seconds):
+        raise TypeError("computed_result.time_offset_seconds must be finite number")
+    if not _is_finite_number(correlation_score):
+        raise TypeError("computed_result.correlation_score must be finite number")
     reference_clip = entry.get("reference_clip")
     comparison_clip = entry.get("comparison_clip")
     if not isinstance(reference_clip, str):
@@ -360,10 +368,10 @@ def _parse_stability(value: object) -> AlignmentStabilitySummary | None:
         return field
 
     position = data.get("change_position_seconds")
-    if position is not None and (
-        isinstance(position, bool) or not isinstance(position, int | float) or position < 0
-    ):
-        raise TypeError("stability.change_position_seconds must be non-negative number or absent")
+    if position is not None and (not _is_finite_number(position) or position < 0):
+        raise TypeError(
+            "stability.change_position_seconds must be finite non-negative number or absent"
+        )
     return AlignmentStabilitySummary(
         classification=cast(AlignmentStabilityClassification, classification),
         valid_windows=valid_windows,

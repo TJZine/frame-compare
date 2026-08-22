@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import tomllib
 from collections.abc import Callable, Iterator
@@ -839,6 +840,88 @@ def test_shared_reuse_cache_boolean_numeric_fields_warn_and_miss(
     data = _cache_data(request)
     entry = _first_entry(data)
     entry[field_name] = field_value
+    _persist_cache_data(request, data)
+    warnings: list[str] = []
+
+    def _warning(event: str, **_kwargs: object) -> None:
+        warnings.append(event)
+
+    monkeypatch.setattr("frame_compare.services.alignment_reuse_cache.log.warning", _warning)
+
+    assert load_reusable_offset_entries(request) is None
+    assert warnings == ["alignment_reuse_cache_invalid_entry"]
+
+
+@pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf, 10**400])
+@pytest.mark.parametrize(
+    ("container_name", "field_name"),
+    [
+        ("entry", "time_offset_seconds"),
+        ("entry", "correlation_score"),
+        ("computed_result", "time_offset_seconds"),
+        ("computed_result", "correlation_score"),
+        ("stability", "change_position_seconds"),
+        ("computed_stability", "change_position_seconds"),
+    ],
+)
+def test_shared_reuse_cache_invalid_float_fields_warn_and_miss(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    container_name: str,
+    field_name: str,
+    value: float,
+) -> None:
+    request = _request(tmp_path)
+    summary = AlignmentStabilitySummary(
+        classification="possible_discontinuity",
+        valid_windows=4,
+        offset_min_frames=178,
+        offset_max_frames=202,
+        first_offset_frames=178,
+        last_offset_frames=202,
+        largest_adjacent_jump_frames=24,
+        change_position_seconds=2832.0,
+    )
+    result = replace(_result(request), stability=summary)
+    if container_name.startswith("computed"):
+        confirmed = replace(
+            result,
+            frame_offset=47,
+            time_offset_seconds=1.96,
+            correlation_score=1.0,
+            algorithm=None,
+            source="manual",
+        )
+        provenance = _provenance(
+            request,
+            result=confirmed,
+            provenance="vspreview_confirmed_this_run",
+            computed_result=result,
+        )
+    else:
+        provenance = _provenance(request, result=result)
+    save_reusable_offsets(request, [provenance])
+    data = _cache_data(request)
+    entry = _first_entry(data)
+
+    container: dict[str, object]
+    if container_name == "entry":
+        container = entry
+    elif container_name == "computed_result":
+        computed = entry["computed_result"]
+        assert isinstance(computed, dict)
+        container = computed
+    elif container_name == "stability":
+        stability = entry["stability"]
+        assert isinstance(stability, dict)
+        container = stability
+    else:
+        computed = entry["computed_result"]
+        assert isinstance(computed, dict)
+        stability = computed["stability"]
+        assert isinstance(stability, dict)
+        container = stability
+    container[field_name] = value
     _persist_cache_data(request, data)
     warnings: list[str] = []
 
