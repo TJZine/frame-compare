@@ -378,6 +378,9 @@ def _parse_stability(value: object) -> AlignmentStabilitySummary | None:
         raise TypeError(
             "stability.change_position_seconds must be finite non-negative number or absent"
         )
+    largest_adjacent_jump_frames = optional_int("largest_adjacent_jump_frames")
+    if largest_adjacent_jump_frames is not None and largest_adjacent_jump_frames < 0:
+        raise ValueError("stability.largest_adjacent_jump_frames must be non-negative")
     return AlignmentStabilitySummary(
         classification=cast(AlignmentStabilityClassification, classification),
         valid_windows=valid_windows,
@@ -385,7 +388,7 @@ def _parse_stability(value: object) -> AlignmentStabilitySummary | None:
         offset_max_frames=optional_int("offset_max_frames"),
         first_offset_frames=optional_int("first_offset_frames"),
         last_offset_frames=optional_int("last_offset_frames"),
-        largest_adjacent_jump_frames=optional_int("largest_adjacent_jump_frames"),
+        largest_adjacent_jump_frames=largest_adjacent_jump_frames,
         change_position_seconds=None if position is None else float(position),
     )
 

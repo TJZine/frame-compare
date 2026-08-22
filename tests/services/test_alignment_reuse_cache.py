@@ -238,6 +238,54 @@ def test_computed_cache_evidence_without_stability_warns_and_misses(
     assert warnings == ["alignment_reuse_cache_invalid_entry"]
 
 
+@pytest.mark.parametrize("embedded", [False, True], ids=["computed-entry", "computed-result"])
+def test_negative_largest_adjacent_jump_warns_and_misses(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    embedded: bool,
+) -> None:
+    request = _request(tmp_path)
+    computed = _result(request)
+    if embedded:
+        confirmed = replace(
+            computed,
+            frame_offset=47,
+            time_offset_seconds=1.96,
+            correlation_score=1.0,
+            algorithm=None,
+            source="manual",
+            stability=None,
+        )
+        provenance = _provenance(
+            request,
+            result=confirmed,
+            provenance="vspreview_confirmed_this_run",
+            computed_result=computed,
+        )
+    else:
+        provenance = _provenance(request, result=computed)
+    save_reusable_offsets(request, [provenance])
+    data = _cache_data(request)
+    container = _first_entry(data)
+    if embedded:
+        computed_result = container["computed_result"]
+        assert isinstance(computed_result, dict)
+        container = computed_result
+    stability = container["stability"]
+    assert isinstance(stability, dict)
+    stability["largest_adjacent_jump_frames"] = -1
+    _persist_cache_data(request, data)
+    warnings: list[str] = []
+
+    def _warning(event: str, **_kwargs: object) -> None:
+        warnings.append(event)
+
+    monkeypatch.setattr("frame_compare.services.alignment_reuse_cache.log.warning", _warning)
+
+    assert load_reusable_offset_entries(request) is None
+    assert warnings == ["alignment_reuse_cache_invalid_entry"]
+
+
 def test_shared_reuse_cache_does_not_write_computed_entry_without_stability(
     tmp_path: Path,
 ) -> None:

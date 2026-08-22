@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 import tomli_w
 
-from frame_compare.services.alignment import align_clips, align_clips_from_request
+from frame_compare.services.alignment import align_clips_from_request
 from frame_compare.services.alignment_consensus import AlignmentConsensus
 from frame_compare.services.alignment_reuse_cache import (
     CACHE_FILE_NAME as REUSE_CACHE_FILE_NAME,
@@ -40,20 +40,27 @@ from frame_compare.utils.types import (
 )
 
 _DEFAULT_STABILITY = AlignmentStabilitySummary(
-    "insufficient_evidence", 0, None, None, None, None, None, None
+    classification="insufficient_evidence",
+    valid_windows=0,
+    offset_min_frames=None,
+    offset_max_frames=None,
+    first_offset_frames=None,
+    last_offset_frames=None,
+    largest_adjacent_jump_frames=None,
+    change_position_seconds=None,
 )
 
 
 def _accepted_consensus(sample_offset: int = 0) -> AlignmentConsensus:
     return AlignmentConsensus(
-        sample_offset,
-        0.99,
-        True,
-        "accepted",
-        1,
-        1,
-        1.0,
-        None,
+        sample_offset=sample_offset,
+        score=0.99,
+        applied=True,
+        diagnostic="accepted",
+        valid_windows=1,
+        consensus_windows=1,
+        consensus_ratio=1.0,
+        ambiguity_ratio=None,
         stability=_DEFAULT_STABILITY,
     )
 
@@ -1115,23 +1122,3 @@ def test_align_clips_from_request_rejects_invalid_previous_offset_policy_combina
 
     with pytest.raises(AudioAlignmentError, match=error_match):
         align_clips_from_request(request, config)
-
-
-@pytest.mark.parametrize(
-    "config",
-    [
-        AlignmentConfig(cache_results=False, previous_offsets="prompt"),
-        AlignmentConfig(force_interactive=True, previous_offsets="always"),
-    ],
-)
-def test_align_clips_rejects_invalid_previous_offset_policy_combinations(
-    tmp_path: Path,
-    config: AlignmentConfig,
-) -> None:
-    ref = tmp_path / "ref.mkv"
-    comp = tmp_path / "comp.mkv"
-    ref.touch()
-    comp.touch()
-
-    with pytest.raises(AudioAlignmentError, match="previous_offsets|force_interactive"):
-        align_clips(ref, [comp], config, tmp_path)

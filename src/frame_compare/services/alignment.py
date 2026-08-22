@@ -8,7 +8,6 @@ from pathlib import Path
 import structlog
 
 from frame_compare.services.alignment_audio import (
-    extract_audio,
     extract_matching_audio,
     extract_reference_audio,
     probe_fps,
@@ -40,7 +39,6 @@ from frame_compare.vspreview.overrides import load_manual_overrides
 
 log = structlog.get_logger()
 
-_extract_audio = extract_audio
 _extract_matching_audio = extract_matching_audio
 _extract_reference_audio = extract_reference_audio
 _probe_fps = probe_fps
@@ -50,11 +48,9 @@ _samples_to_frames = samples_to_frames
 
 __all__ = [
     "_cross_correlate",
-    "_extract_audio",
     "_estimate_consensus_offset",
     "_probe_fps",
     "_samples_to_frames",
-    "align_clips",
     "align_clips_from_request",
     "calculate_alignment_trims",
     "format_rejected_alignment_warning",
@@ -154,34 +150,6 @@ def _check_duplicate_stems(comparisons: list[Path]) -> None:
         )
 
 
-def _apply_manual_overrides(
-    reference: Path,
-    comparisons: list[Path],
-    cache_dir: Path,
-    results_map: dict[str, AlignmentResult],
-    fps_reference: Fraction | None,
-) -> Fraction | None:
-    """Apply manual offsets from overrides config, returning reference FPS if probed."""
-    manual_overrides = load_manual_overrides(cache_dir)
-
-    for comp in comparisons:
-        key = _alignment_key(reference, comp)
-        if key in manual_overrides:
-            override = manual_overrides[key]
-            if fps_reference is None:
-                fps_reference = _probe_fps(reference)
-            results_map[key] = AlignmentResult(
-                reference_clip=reference.name,
-                comparison_clip=comp.name,
-                frame_offset=override.frame_offset,
-                time_offset_seconds=override.frame_offset / float(fps_reference),
-                correlation_score=1.0,
-                algorithm=None,
-                source="manual",
-            )
-    return fps_reference
-
-
 def _apply_manual_overrides_with_provenance(
     *,
     reference: Path,
@@ -229,6 +197,7 @@ def _compute_missing_alignments(
     progress_descriptions: dict[Path, str] | None = None,
 ) -> None:
     """Extract audio, perform cross-correlation, and populate results map."""
+    descriptions = progress_descriptions or {}
     ref_audio, reference_stream = _extract_reference_audio(
         reference,
         config.sample_rate,
@@ -237,9 +206,7 @@ def _compute_missing_alignments(
     )
     for comp in requested_comparisons:
         if progress:
-            progress.set_description(
-                (progress_descriptions or {}).get(comp, f"ALIGN | {comp.name}")
-            )
+            progress.set_description(descriptions.get(comp, f"ALIGN | {comp.name}"))
 
         comp_audio = _extract_matching_audio(
             comp,
@@ -278,11 +245,8 @@ def _compute_missing_alignments(
             stability=estimate.stability,
         )
         results_map[_alignment_key(reference, comp)] = res
-        _record_alignment_progress(
-            progress=progress,
-            result=res,
-            description=(progress_descriptions or {}).get(comp),
-        )
+        if progress:
+            progress.advance(1)
 
 
 def _compute_missing_alignments_with_provenance(
@@ -528,84 +492,3 @@ def align_clips_from_request(
         results_map[_alignment_key(reference, comparison.path)]
         for comparison in request.comparisons
     ]
-
-
-def align_clips(
-    reference: Path,
-    comparisons: list[Path],
-    config: AlignmentConfig,
-    cache_dir: Path,
-    progress: ProgressReporter | None = None,
-    reference_fps: Fraction | None = None,
-    frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
-) -> list[AlignmentResult]:
-    """
-    Align comparison clips to reference using audio cross-correlation.
-
-    Returns:
-        List of AlignmentResult for each comparison, in the same order
-        as the input `comparisons` list.
-    """
-    _check_duplicate_stems(comparisons)
-    validate_previous_offsets_policy(config)
-
-    if progress:
-        progress.set_description("ALIGN | Checking saved offsets")
-
-    results_map: dict[str, AlignmentResult] = {}
-    # 0. Load manual overrides (highest precedence per §2.4)
-    fps_reference = _apply_manual_overrides(
-        reference,
-        comparisons,
-        cache_dir,
-        results_map,
-        reference_fps,
-    )
-
-    requested_comparisons = [
-        c for c in comparisons if _alignment_key(reference, c) not in results_map
-    ]
-    if requested_comparisons:
-        _record_resolved_alignment_progress(
-            progress=progress,
-            reference=reference,
-            comparisons=comparisons,
-            results_map=results_map,
-        )
-
-    # 2. Compute missing
-    if requested_comparisons:
-        if fps_reference is None:
-            fps_reference = _probe_fps(reference)
-        _compute_missing_alignments(
-            reference=reference,
-            requested_comparisons=requested_comparisons,
-            config=config,
-            results_map=results_map,
-            fps_reference=fps_reference,
-            progress=progress,
-        )
-
-    offsets_by_key = _build_offsets_map(
-        reference=reference,
-        comparisons=comparisons,
-        results_map=results_map,
-    )
-    confirmed_offsets = maybe_launch_alignment_vspreview(
-        reference=reference,
-        comparisons=comparisons,
-        offsets_by_key=offsets_by_key,
-        cache_dir=cache_dir,
-        config=config,
-        progress=progress,
-        frame_props_by_stem=frame_props_by_stem,
-    )
-    fps_reference = _apply_confirmed_vspreview_offsets(
-        reference=reference,
-        comparisons=comparisons,
-        confirmed_offsets_by_key=confirmed_offsets,
-        results_map=results_map,
-        fps_reference=fps_reference,
-    )
-
-    return [results_map[_alignment_key(reference, c)] for c in comparisons]
