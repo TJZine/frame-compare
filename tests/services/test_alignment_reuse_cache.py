@@ -142,6 +142,28 @@ def _write_computed(request: AlignmentRequest) -> None:
     )
 
 
+def _cache_data(request: AlignmentRequest) -> dict[str, object]:
+    cache_file = request.shared_alignment_cache_dir / CACHE_FILE_NAME
+    return tomllib.loads(cache_file.read_text(encoding="utf-8"))
+
+
+def _persist_cache_data(request: AlignmentRequest, data: dict[str, object]) -> None:
+    cache_file = request.shared_alignment_cache_dir / CACHE_FILE_NAME
+    cache_file.write_text(tomli_w.dumps(data), encoding="utf-8")
+
+
+def _first_entry(data: dict[str, object]) -> dict[str, object]:
+    source_sets = data["source_sets"]
+    assert isinstance(source_sets, dict)
+    source_set = next(iter(source_sets.values()))
+    assert isinstance(source_set, dict)
+    entries = source_set["entries"]
+    assert isinstance(entries, dict)
+    entry = next(iter(entries.values()))
+    assert isinstance(entry, dict)
+    return entry
+
+
 def test_stability_summary_round_trips_without_changing_cache_version(tmp_path: Path) -> None:
     request = _request(tmp_path)
     summary = AlignmentStabilitySummary(
@@ -166,34 +188,18 @@ def test_stability_summary_round_trips_without_changing_cache_version(tmp_path: 
 
 def test_legacy_cache_entry_without_stability_remains_reusable(tmp_path: Path) -> None:
     request = _request(tmp_path)
-    _write_computed(request)
+    summary = AlignmentStabilitySummary("stable", 3, 42, 42, 42, 42, 0, None)
+    result = replace(_result(request), stability=summary)
+    save_reusable_offsets(request, [_provenance(request, result=result)])
+    data = _cache_data(request)
+    removed = _first_entry(data).pop("stability")
+    assert isinstance(removed, dict)
+    _persist_cache_data(request, data)
 
     loaded = load_reusable_offset_entries(request)
 
     assert loaded is not None
     assert loaded[comparison_cache_key(request.comparisons[0])].result.stability is None
-
-
-def _cache_data(request: AlignmentRequest) -> dict[str, object]:
-    cache_file = request.shared_alignment_cache_dir / CACHE_FILE_NAME
-    return tomllib.loads(cache_file.read_text(encoding="utf-8"))
-
-
-def _persist_cache_data(request: AlignmentRequest, data: dict[str, object]) -> None:
-    cache_file = request.shared_alignment_cache_dir / CACHE_FILE_NAME
-    cache_file.write_text(tomli_w.dumps(data), encoding="utf-8")
-
-
-def _first_entry(data: dict[str, object]) -> dict[str, object]:
-    source_sets = data["source_sets"]
-    assert isinstance(source_sets, dict)
-    source_set = next(iter(source_sets.values()))
-    assert isinstance(source_set, dict)
-    entries = source_set["entries"]
-    assert isinstance(entries, dict)
-    entry = next(iter(entries.values()))
-    assert isinstance(entry, dict)
-    return entry
 
 
 def test_source_set_cache_key_changes_with_media_runtime(
