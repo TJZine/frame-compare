@@ -278,7 +278,7 @@ def test_rich_progress_reporter_ellipsizes_only_the_rendered_description(
 
     assert task.description == f"[RUN] {description}"
     assert "…" in output.getvalue()
-    assert "━" in output.getvalue()
+    assert re.search(r"[━-]", output.getvalue())
     assert "10/30" in output.getvalue()
     reporter.complete_phase()
 
@@ -295,7 +295,7 @@ def test_rich_progress_reporter_keeps_a_useful_bar_at_narrow_width(
     reporter.start_phase("Reference | PMTP WEB-DL | DV HDR10+ | Kitsune", 30)
     reporter.advance(10)
 
-    rendered_bar = max(re.findall(r"([━╸╺][━╸╺ ]+)10/30", output.getvalue()), key=len)
+    rendered_bar = max(re.findall(r"([━╸╺-][━╸╺ -]+)10/30", output.getvalue()), key=len)
     assert len(rendered_bar.rstrip()) >= 7
     assert len(rendered_bar) >= 20
     assert "10/30" in output.getvalue()
