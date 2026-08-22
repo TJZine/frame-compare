@@ -283,9 +283,9 @@ def build_phases_after_align(
         retain_if=lambda output: (
             isinstance(output, PublishPhaseOutput) and output.slowpics_url is not None
         ),
-        skip_detail=lambda: (
+        skip_detail=lambda effective_config: (
             "Disabled"
-            if not config.slowpics.auto_upload
+            if not effective_config.slowpics.auto_upload
             else "Unavailable"
             if http_client is None
             else "Declined"

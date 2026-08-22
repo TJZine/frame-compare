@@ -34,7 +34,7 @@ class PhaseStatus(StrEnum):
 
 PhaseExecute = Callable[[RunContext], Awaitable[None]]
 PhaseSkipCondition = Callable[[ConfigSchema], bool]
-PhaseSkipDetail = str | Callable[[], str | None]
+PhaseSkipDetail = str | Callable[[ConfigSchema], str | None]
 
 
 @dataclass
@@ -73,7 +73,11 @@ async def execute_phases(
     for phase in phases:
         if phase.skip_condition is not None and phase.skip_condition(context.config):
             phase.status = PhaseStatus.SKIPPED
-            skip_detail = phase.skip_detail() if callable(phase.skip_detail) else phase.skip_detail
+            skip_detail = (
+                phase.skip_detail(context.config)
+                if callable(phase.skip_detail)
+                else phase.skip_detail
+            )
             start_phase_progress(
                 reporter,
                 name=phase.name,

@@ -129,7 +129,7 @@ def test_execute_phases_skips_when_skip_condition_true(tmp_path: Path) -> None:
             name="skip",
             execute=phase_skip,
             skip_condition=lambda config: True,
-            skip_detail=lambda: "Disabled",
+            skip_detail=lambda _config: "Disabled",
         ),
         Phase(name="next", execute=phase_next),
     ]
@@ -598,4 +598,4 @@ def test_publish_phase_skip_condition_uses_effective_slowpics_config() -> None:
     assert publish_phase.skip_condition is not None
     assert publish_phase.skip_condition(config) is True
     assert callable(publish_phase.skip_detail)
-    assert publish_phase.skip_detail() == "Disabled"
+    assert publish_phase.skip_detail(config) == "Disabled"
