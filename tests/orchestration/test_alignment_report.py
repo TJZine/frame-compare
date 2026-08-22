@@ -17,7 +17,7 @@ from frame_compare.orchestration.context import (
     ClipProbeSnapshot,
     ClipState,
 )
-from frame_compare.services.types import AlignmentSource, AlignmentStabilitySummary
+from frame_compare.services.types import AlignmentStabilitySummary
 
 
 @pytest.fixture(autouse=True)
@@ -349,61 +349,6 @@ def test_emit_frame_alignment_report_shows_material_stability_concisely(
     output = capsys.readouterr().err
     assert "possible discontinuity; +178..+202 frames; change near 00:47:12" in output
     assert "valid windows" not in output
-
-
-def test_emit_frame_alignment_report_verbose_marks_legacy_stability_unavailable(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    comparison = AlignmentReportComparison(
-        label="Encode",
-        alignment_source="cached",
-        relative_offset_frames=2,
-        reference_row_zero_source_frame=2,
-        comparison_row_zero_source_frame=0,
-        reference_trim_range=(2, 99),
-        comparison_trim_range=(0, 97),
-    )
-    emit_frame_alignment_report(
-        stage="after_align",
-        comparisons=[comparison],
-        selected_frames=[],
-        alignment_warnings=[],
-        json_output=False,
-        quiet=False,
-        no_color=True,
-        verbose=True,
-    )
-    assert "unavailable (legacy cache entry)" in capsys.readouterr().err
-
-
-@pytest.mark.parametrize("alignment_source", [None, "manual", "computed"])
-def test_emit_frame_alignment_report_does_not_mark_non_cached_missing_stability_as_legacy(
-    alignment_source: AlignmentSource | None,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    has_alignment = alignment_source is not None
-    comparison = AlignmentReportComparison(
-        label="Encode",
-        alignment_source=alignment_source,
-        relative_offset_frames=2 if has_alignment else None,
-        reference_row_zero_source_frame=2 if has_alignment else 0,
-        comparison_row_zero_source_frame=0,
-        reference_trim_range=(2, 99) if has_alignment else (0, 99),
-        comparison_trim_range=(0, 97) if has_alignment else (0, 99),
-    )
-
-    emit_frame_alignment_report(
-        stage="after_align",
-        comparisons=[comparison],
-        selected_frames=[],
-        alignment_warnings=[] if has_alignment else ["alignment was not applied"],
-        json_output=False,
-        quiet=False,
-        no_color=True,
-        verbose=True,
-    )
-
-    assert "unavailable (legacy cache entry)" not in capsys.readouterr().err
 
 
 def test_emit_frame_alignment_report_renders_alignment_warning_context(

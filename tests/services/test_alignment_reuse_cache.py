@@ -35,6 +35,10 @@ from frame_compare.utils.types import (
     AlignmentRequest,
 )
 
+_DEFAULT_STABILITY = AlignmentStabilitySummary(
+    "insufficient_evidence", 0, None, None, None, None, None, None
+)
+
 
 def _touch_clip(path: Path, payload: bytes) -> Path:
     path.write_bytes(payload)
@@ -110,6 +114,7 @@ def _result(
         correlation_score=correlation_score,
         algorithm="cross_correlation",
         source=source,  # type: ignore[arg-type]
+        stability=_DEFAULT_STABILITY,
     )
 
 
@@ -164,7 +169,7 @@ def _first_entry(data: dict[str, object]) -> dict[str, object]:
     return entry
 
 
-def test_stability_summary_round_trips_without_changing_cache_version(tmp_path: Path) -> None:
+def test_stability_summary_round_trips_in_current_cache_schema(tmp_path: Path) -> None:
     request = _request(tmp_path)
     summary = AlignmentStabilitySummary(
         classification="possible_discontinuity",
@@ -186,20 +191,62 @@ def test_stability_summary_round_trips_without_changing_cache_version(tmp_path: 
     assert _cache_data(request)["version"] == CACHE_VERSION
 
 
-def test_legacy_cache_entry_without_stability_remains_reusable(tmp_path: Path) -> None:
+@pytest.mark.parametrize("embedded", [False, True], ids=["computed-entry", "computed-result"])
+def test_computed_cache_evidence_without_stability_warns_and_misses(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    embedded: bool,
+) -> None:
     request = _request(tmp_path)
-    summary = AlignmentStabilitySummary("stable", 3, 42, 42, 42, 42, 0, None)
-    result = replace(_result(request), stability=summary)
-    save_reusable_offsets(request, [_provenance(request, result=result)])
+    computed = _result(request)
+    if embedded:
+        confirmed = replace(
+            computed,
+            frame_offset=47,
+            time_offset_seconds=1.96,
+            correlation_score=1.0,
+            algorithm=None,
+            source="manual",
+            stability=None,
+        )
+        provenance = _provenance(
+            request,
+            result=confirmed,
+            provenance="vspreview_confirmed_this_run",
+            computed_result=computed,
+        )
+    else:
+        provenance = _provenance(request, result=computed)
+    save_reusable_offsets(request, [provenance])
     data = _cache_data(request)
-    removed = _first_entry(data).pop("stability")
+    container = _first_entry(data)
+    if embedded:
+        computed_result = container["computed_result"]
+        assert isinstance(computed_result, dict)
+        container = computed_result
+    removed = container.pop("stability")
     assert isinstance(removed, dict)
     _persist_cache_data(request, data)
+    warnings: list[str] = []
 
-    loaded = load_reusable_offset_entries(request)
+    def _warning(event: str, **_kwargs: object) -> None:
+        warnings.append(event)
 
-    assert loaded is not None
-    assert loaded[comparison_cache_key(request.comparisons[0])].result.stability is None
+    monkeypatch.setattr("frame_compare.services.alignment_reuse_cache.log.warning", _warning)
+
+    assert load_reusable_offset_entries(request) is None
+    assert warnings == ["alignment_reuse_cache_invalid_entry"]
+
+
+def test_shared_reuse_cache_does_not_write_computed_entry_without_stability(
+    tmp_path: Path,
+) -> None:
+    request = _request(tmp_path)
+    result = replace(_result(request), stability=None)
+
+    save_reusable_offsets(request, [_provenance(request, result=result)])
+
+    assert not (request.shared_alignment_cache_dir / CACHE_FILE_NAME).exists()
 
 
 def test_source_set_cache_key_changes_with_media_runtime(
@@ -577,7 +624,7 @@ def test_shared_reuse_cache_version_mismatch_warns_and_misses(
     request = _request(tmp_path)
     cache_file = request.shared_alignment_cache_dir / CACHE_FILE_NAME
     cache_file.parent.mkdir(parents=True)
-    cache_file.write_text('version = "999"', encoding="utf-8")
+    cache_file.write_text('version = "1"', encoding="utf-8")
     warnings: list[str] = []
 
     def _warning(event: str, **_kwargs: object) -> None:

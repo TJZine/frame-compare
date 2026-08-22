@@ -181,8 +181,6 @@ def _render_alignment_table(
             if verbose:
                 value += f"; {stability.valid_windows} valid windows"
             table.add_row("  stability", f"[bright_white]{escape(value)}[/]")
-        elif verbose and comparison.alignment_source == "cached":
-            table.add_row("  stability", "[dim]unavailable (legacy cache entry)[/]")
         table.add_row("  source", f"[bright_white]{escape(source)}[/]")
         table.add_row(
             "  trims",

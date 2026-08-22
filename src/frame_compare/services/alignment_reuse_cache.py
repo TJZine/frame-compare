@@ -25,7 +25,7 @@ from frame_compare.utils.file_lock import exclusive_file_lock
 from frame_compare.utils.types import AlignmentClipRequest, AlignmentRequest
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
 
-CACHE_VERSION = "1"
+CACHE_VERSION = "2"
 CACHE_FILE_NAME = "alignment_reuse.toml"
 
 log = structlog.get_logger()
@@ -269,9 +269,12 @@ def _parse_entry(
         raise ValueError("shared alignment cache entry identity mismatch")
 
     computed_result = _parse_cached_computed_result(entry.get("computed_result"), entry=entry)
-    stability = _parse_stability(entry.get("stability"))
-    if stability is None and computed_result is not None:
-        stability = computed_result.stability
+    if origin == "computed":
+        stability = _parse_stability(entry.get("stability"))
+        if stability is None:
+            raise ValueError("computed stability is required")
+    else:
+        stability = computed_result.stability if computed_result is not None else None
 
     result = AlignmentResult(
         reference_clip=reference_clip,
@@ -316,6 +319,9 @@ def _parse_cached_computed_result(
         raise TypeError("reference_clip must be str")
     if not isinstance(comparison_clip, str):
         raise TypeError("comparison_clip must be str")
+    stability = _parse_stability(computed.get("stability"))
+    if stability is None:
+        raise ValueError("computed_result.stability is required")
     return AlignmentResult(
         reference_clip=reference_clip,
         comparison_clip=comparison_clip,
@@ -324,7 +330,7 @@ def _parse_cached_computed_result(
         correlation_score=float(correlation_score),
         algorithm="cross_correlation",
         source="cached",
-        stability=_parse_stability(computed.get("stability")),
+        stability=stability,
     )
 
 
@@ -471,11 +477,14 @@ def _origin_for_provenance(provenance: AlignmentProvenance) -> AlignmentReuseCac
 
 def _is_write_eligible(provenance: AlignmentProvenance) -> bool:
     result = provenance.result
+    origin = _origin_for_provenance(provenance)
     return (
-        _origin_for_provenance(provenance) is not None
+        origin is not None
         and result.applied
         and result.frame_offset is not None
         and result.time_offset_seconds is not None
+        and (origin != "computed" or result.stability is not None)
+        and (provenance.computed_result is None or provenance.computed_result.stability is not None)
     )
 
 
@@ -503,21 +512,21 @@ def _entry_from_provenance(
         "settings": _settings_identity_dict(request),
     }
     if origin == "computed":
+        if result.stability is None:
+            raise ValueError("computed stability is required")
         entry["correlation_score"] = result.correlation_score
-        if result.stability is not None:
-            entry["stability"] = _stability_dict(result.stability)
+        entry["stability"] = _stability_dict(result.stability)
     elif provenance.computed_result is not None:
         computed = provenance.computed_result
         if computed.frame_offset is not None and computed.time_offset_seconds is not None:
+            if computed.stability is None:
+                raise ValueError("computed_result.stability is required")
             entry["computed_result"] = {
                 "frame_offset": computed.frame_offset,
                 "time_offset_seconds": computed.time_offset_seconds,
                 "correlation_score": computed.correlation_score,
+                "stability": _stability_dict(computed.stability),
             }
-            if computed.stability is not None:
-                cast(dict[str, object], entry["computed_result"])["stability"] = _stability_dict(
-                    computed.stability
-                )
     return entry
 
 

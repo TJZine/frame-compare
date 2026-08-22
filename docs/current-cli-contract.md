@@ -391,8 +391,8 @@ unchanged.
   for comparisons with material alignment information. Material non-constant offset
   evidence adds one concise stability row and one bounded warning stating that the
   applied constant offset was retained and should be verified. Stable or insufficient
-  evidence does not warn. Verbose mode may also show stable, valid-window-count, or
-  legacy-cache-unavailable evidence; individual diagnostic windows are never printed.
+  evidence does not warn. Verbose mode may also show stable evidence and valid-window
+  counts; individual diagnostic windows are never printed.
   It is suppressed by
   `--quiet` and is never emitted to `run --json` stdout.
 - After sources load, normal human output uses one `[OK] Sources — N loaded`
@@ -1295,9 +1295,10 @@ enabled.
 - `force_interactive = true` is incompatible with `previous_offsets = "prompt"`
   and `previous_offsets = "always"` because reuse can skip VSPreview.
 - Successful `run --json` output remains unchanged by previous-offset reuse.
-- Optional cached stability summaries are diagnostic-only scalar evidence. Version-1
-  entries without a summary remain valid and reusable; summaries do not affect cache
-  identity, selected offsets, or trims.
+- Cached computed stability summaries are diagnostic-only scalar evidence. The current
+  cache schema requires them for computed entries and embedded computed results; version
+  mismatches or entries missing required summaries are ignored. Summaries do not affect
+  cache identity, selected offsets, or trims.
 - `correlation_mode = "raw_fft" | "gcc_phat"` selects the correlation algorithm
   used by the computed estimator. `raw_fft` is the default.
 - `preprocessing_mode = "none" | "standard"` selects signal preprocessing before

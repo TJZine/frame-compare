@@ -27,6 +27,7 @@ from frame_compare.services.types import (
     AlignmentConfig,
     AlignmentProvenance,
     AlignmentResult,
+    AlignmentStabilitySummary,
     ReusableAlignmentEntry,
 )
 from frame_compare.utils.types import (
@@ -35,6 +36,24 @@ from frame_compare.utils.types import (
     AlignmentClipRequest,
     AlignmentRequest,
 )
+
+_DEFAULT_STABILITY = AlignmentStabilitySummary(
+    "insufficient_evidence", 0, None, None, None, None, None, None
+)
+
+
+def _accepted_consensus(sample_offset: int = 0) -> AlignmentConsensus:
+    return AlignmentConsensus(
+        sample_offset,
+        0.99,
+        True,
+        "accepted",
+        1,
+        1,
+        1.0,
+        None,
+        stability=_DEFAULT_STABILITY,
+    )
 
 
 def _request_clip(path: Path, *, label: str | None = None) -> AlignmentClipRequest:
@@ -131,7 +150,7 @@ def test_align_clips_from_request_disabled_skips_shared_reuse_io(
         ),
         patch(
             "frame_compare.services.alignment._estimate_consensus_offset",
-            return_value=AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, None),
+            return_value=_accepted_consensus(),
         ),
     ):
         results = align_clips_from_request(request, config)
@@ -168,6 +187,7 @@ def test_align_clips_from_request_always_reuses_shared_offsets_skips_compute_and
         correlation_score=0.87,
         algorithm="cross_correlation",
         source="computed",
+        stability=_DEFAULT_STABILITY,
     )
     save_reusable_offsets(
         request,
@@ -518,7 +538,7 @@ def test_align_clips_from_request_mixed_cached_computed_and_new_computed_write_b
         ),
         patch(
             "frame_compare.services.alignment._estimate_consensus_offset",
-            return_value=AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, None),
+            return_value=_accepted_consensus(),
         ),
         patch(
             "frame_compare.services.alignment.maybe_launch_alignment_vspreview",
@@ -602,7 +622,7 @@ def test_align_clips_from_request_prompt_passes_real_shared_prompt_metadata(
         ),
         patch(
             "frame_compare.services.alignment._estimate_consensus_offset",
-            return_value=AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, None),
+            return_value=_accepted_consensus(),
         ),
         patch(
             "frame_compare.services.alignment.maybe_launch_alignment_vspreview", return_value=None
@@ -653,6 +673,7 @@ def test_align_clips_from_request_reuses_shared_offsets_for_unresolved_only_afte
                     correlation_score=0.91,
                     algorithm="cross_correlation",
                     source="computed",
+                    stability=_DEFAULT_STABILITY,
                 ),
                 comparison_cache_key=comparison_cache_key(request.comparisons[0]),
                 provenance="computed_this_run",
@@ -666,6 +687,7 @@ def test_align_clips_from_request_reuses_shared_offsets_for_unresolved_only_afte
                     correlation_score=0.93,
                     algorithm="cross_correlation",
                     source="computed",
+                    stability=_DEFAULT_STABILITY,
                 ),
                 comparison_cache_key=comparison_cache_key(request.comparisons[1]),
                 provenance="computed_this_run",
@@ -750,7 +772,7 @@ def test_align_clips_from_request_disabled_writes_shared_reuse_without_legacy_ca
         ),
         patch(
             "frame_compare.services.alignment._estimate_consensus_offset",
-            return_value=AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, None),
+            return_value=_accepted_consensus(),
         ),
         patch(
             "frame_compare.services.alignment_previous_offsets.load_reusable_offset_entries",
@@ -774,6 +796,7 @@ def test_align_clips_from_request_disabled_writes_shared_reuse_without_legacy_ca
     assert entry["frame_offset"] == 0
     assert entry["time_offset_seconds"] == 0.0
     assert entry["correlation_score"] == pytest.approx(0.99)
+    assert entry["stability"]["classification"] == "insufficient_evidence"
 
 
 def test_align_clips_from_request_does_not_attempt_shared_write_for_preexisting_manual_override(
@@ -866,7 +889,7 @@ def test_align_clips_from_request_reconfirmed_manual_override_becomes_write_elig
         ),
         patch(
             "frame_compare.services.alignment._estimate_consensus_offset",
-            return_value=AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, None),
+            return_value=_accepted_consensus(),
         ),
         patch(
             "frame_compare.services.alignment.maybe_launch_alignment_vspreview",
@@ -923,7 +946,7 @@ def test_align_clips_from_request_vspreview_confirmed_entry_keeps_computed_fallb
         ),
         patch(
             "frame_compare.services.alignment._estimate_consensus_offset",
-            return_value=AlignmentConsensus(4000, 0.99, True, "accepted", 1, 1, 1.0, None),
+            return_value=_accepted_consensus(4000),
         ),
         patch(
             "frame_compare.services.alignment.maybe_launch_alignment_vspreview",
