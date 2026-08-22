@@ -31,7 +31,7 @@ def _render_description(request: RenderRequest) -> str:
     label = request.progress_label
     if label is None and request.overlay is not None:
         label = request.overlay.label
-    return f"{label} — Frame {request.frame_number}" if label else f"Frame {request.frame_number}"
+    return f"{label} - frame {request.frame_number}" if label else f"frame {request.frame_number}"
 
 
 def _record_render_progress(

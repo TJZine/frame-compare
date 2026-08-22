@@ -193,8 +193,100 @@ def test_rich_progress_reporter_indeterminate_phase_is_spinner_only() -> None:
 
     task = reporter._progress.tasks[0]  # noqa: SLF001
     assert task.total is None
-    assert task.fields["spinner_only"] is True
+    assert task.fields["presentation"] == "indeterminate"
 
+    reporter.complete_phase()
+
+
+def test_rich_progress_reporter_uses_distinct_task_presentations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reporter, output = _captured_rich_reporter(monkeypatch)
+
+    reporter.start_phase("Rendering", 30)
+    reporter.advance(10)
+    measurable_output = output.getvalue()
+    task = reporter._progress.tasks[0]  # noqa: SLF001
+
+    assert task.fields["presentation"] == "measurable"
+    assert "  [RUN] Rendering" in measurable_output
+    assert "10/30" in measurable_output
+    assert "ETA --:--" in measurable_output
+    assert "%" not in measurable_output
+    assert not re.search(r"[-\\|/]\s+\[RUN\]", measurable_output)
+    reporter.complete_phase()
+
+    output.seek(0)
+    output.truncate()
+    reporter.start_indeterminate("Loading alignment offsets")
+    indeterminate_output = output.getvalue()
+
+    assert re.search(r"\[RUN\] Loading alignment offsets\s+-", indeterminate_output)
+    assert "ETA" not in indeterminate_output
+    assert not re.search(r"\d+/\d+", indeterminate_output)
+    assert "━" not in indeterminate_output
+    reporter.complete_phase()
+
+    output.seek(0)
+    output.truncate()
+    reporter.start_phase("PLAN", 1)
+    simple_output = output.getvalue()
+
+    assert "[RUN] PLAN" in simple_output
+    assert "ETA" not in simple_output
+    assert "0/1" not in simple_output
+    assert "━" not in simple_output
+    reporter.complete_phase()
+
+
+def test_rich_progress_reporter_adds_one_blank_line_when_measurable_work_begins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reporter, output = _captured_rich_reporter(monkeypatch)
+
+    reporter.start_phase("Rendering", 30)
+    reporter.advance(1)
+    reporter.set_description("Rendering frame 1")
+    reporter.advance(1)
+
+    assert output.getvalue().startswith("\n")
+    assert output.getvalue().count("\n") == 1
+    reporter.complete_phase()
+
+
+def test_rich_progress_reporter_ellipsizes_only_the_rendered_description(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reporter, output = _captured_rich_reporter(monkeypatch)
+    description = "Reference | " + "very-long-release-identity-" * 8
+
+    reporter.start_phase(description, 30)
+    reporter.advance(10)
+    task = reporter._progress.tasks[0]  # noqa: SLF001
+
+    assert task.description == f"[RUN] {description}"
+    assert "…" in output.getvalue()
+    assert "━" in output.getvalue()
+    assert "10/30" in output.getvalue()
+    reporter.complete_phase()
+
+
+def test_rich_progress_reporter_keeps_a_useful_bar_at_narrow_width(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TERM", "xterm-256color")
+    output = StringIO()
+    console = Console(file=output, force_terminal=True, no_color=True, width=60)
+    monkeypatch.setattr(progress_module, "Console", lambda **_kwargs: console)
+    reporter = RichProgressReporter(no_color=True)
+
+    reporter.start_phase("Reference | PMTP WEB-DL | DV HDR10+ | Kitsune", 30)
+    reporter.advance(10)
+
+    rendered_bar = max(re.findall(r"([━╸╺][━╸╺ ]+)10/30", output.getvalue()), key=len)
+    assert len(rendered_bar.rstrip()) >= 7
+    assert len(rendered_bar) >= 20
+    assert "10/30" in output.getvalue()
     reporter.complete_phase()
 
 

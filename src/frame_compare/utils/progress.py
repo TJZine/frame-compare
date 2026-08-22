@@ -10,15 +10,16 @@ import structlog
 from rich.console import Console, RenderableType
 from rich.progress import (
     BarColumn,
+    MofNCompleteColumn,
     Progress,
     ProgressColumn,
     SpinnerColumn,
     Task,
     TaskID,
-    TaskProgressColumn,
     TextColumn,
     TimeRemainingColumn,
 )
+from rich.table import Column
 from rich.text import Text
 
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
@@ -60,13 +61,14 @@ class _PlainTask:
     started_at: float
 
 
-class _SpinnerAwareColumn(ProgressColumn):
-    def __init__(self, column: ProgressColumn) -> None:
-        super().__init__()
+class _TaskPresentationColumn(ProgressColumn):
+    def __init__(self, column: ProgressColumn, *presentations: str) -> None:
+        super().__init__(table_column=column.get_table_column())
         self._column = column
+        self._presentations = presentations
 
     def render(self, task: Task) -> RenderableType:
-        if task.fields.get("spinner_only"):
+        if task.fields.get("presentation") not in self._presentations:
             return Text("")
         return self._column.render(task)
 
@@ -164,15 +166,24 @@ class RichProgressReporter:
 
     def __init__(self, *, no_color: bool = False) -> None:
         self._progress = Progress(
-            SpinnerColumn(),
-            TextColumn("  [progress.description]{task.description}"),
-            _SpinnerAwareColumn(BarColumn()),
-            _SpinnerAwareColumn(TaskProgressColumn()),
-            _SpinnerAwareColumn(TimeRemainingColumn()),
+            TextColumn(
+                "  [progress.description]{task.description}",
+                table_column=Column(ratio=1, overflow="ellipsis", no_wrap=True),
+            ),
+            _TaskPresentationColumn(TextColumn(" "), "measurable", "indeterminate"),
+            _TaskPresentationColumn(
+                BarColumn(bar_width=None, table_column=Column(min_width=20, ratio=1)),
+                "measurable",
+            ),
+            _TaskPresentationColumn(MofNCompleteColumn(), "measurable"),
+            _TaskPresentationColumn(TextColumn("ETA"), "measurable"),
+            _TaskPresentationColumn(TimeRemainingColumn(compact=True), "measurable"),
+            _TaskPresentationColumn(SpinnerColumn(spinner_name="line"), "indeterminate"),
             transient=True,
             auto_refresh=False,
             redirect_stdout=False,
             redirect_stderr=False,
+            expand=True,
             console=Console(stderr=True, no_color=no_color),
         )
         self._task_id: TaskID | None = None
@@ -194,20 +205,23 @@ class RichProgressReporter:
 
     def start_phase(self, name: str, total: int) -> None:
         """Start a new phase with a rich progress bar."""
-        self._start_task(name, total=total, spinner_only=False)
+        presentation = "measurable" if total > 1 else "simple"
+        self._start_task(name, total=total, presentation=presentation)
 
     def start_indeterminate(self, name: str) -> None:
         """Start a new phase with spinner-only activity."""
-        self._start_task(name, total=None, spinner_only=True)
+        self._start_task(name, total=None, presentation="indeterminate")
 
     def _start_task(
         self,
         name: str,
         *,
         total: int | None,
-        spinner_only: bool,
+        presentation: str,
     ) -> None:
         with self._lock:
+            if presentation == "measurable":
+                self._progress.console.print()
             if not self._progress.live.is_started:
                 self._progress.start()
             if self._task_id is not None:
@@ -216,7 +230,7 @@ class RichProgressReporter:
             self._task_id = self._progress.add_task(
                 f"[RUN] {name}",
                 total=total,
-                spinner_only=spinner_only,
+                presentation=presentation,
                 phase_label=name,
             )
             task_id = self._task_id

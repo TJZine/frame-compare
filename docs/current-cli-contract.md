@@ -474,8 +474,14 @@ unchanged.
   evidence and blocking-decision panels remain panels, with nested decision
   questions using a four-space inset immediately below their panel. JSON, quiet,
   and non-TTY output do not gain the band or inset.
-- Every Rich phase remains live while active with an ASCII `[RUN]` marker. A
-  successful top-level phase leaves a durable ASCII status line with elapsed time
+- Every Rich phase remains live while active with an ASCII `[RUN]` marker. Meaningful
+  measurable tasks use a Rich progress bar separated from preceding
+  durable output by one blank line and report completed/total work with a labeled
+  `ETA`. Indeterminate activity uses an ASCII spinner after its description, while
+  one-step phases remain simple activity lines without a bar. Live render descriptions
+  use compact source identity followed by an ASCII `- frame N` suffix; constrained
+  terminals may visually ellipsize the description without changing its stored value.
+  A successful top-level phase leaves a durable ASCII status line with elapsed time
   when it runs for at least 10.0 seconds. Successful nested tasks remain transient,
   while skipped,
   warned, and failed phases always remain visible. A successful slow.pics upload
