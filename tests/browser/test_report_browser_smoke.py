@@ -495,6 +495,7 @@ document.addEventListener('DOMContentLoaded', () => {
             && inspectorText.includes(__REFERENCE_FILENAME__)
             && inspectorText.includes(__REFERENCE_PRIMARY__)
             && inspectorText.includes(__REFERENCE_RELEASE__)
+            && inspectorText.includes('1920×1080')
             && ['2160p', 'PMTP', 'WEB-DL', 'DV HDR10+', 'REPACK', 'Kitsune']
                 .every(fact => inspectorText.includes(fact))
             && inspectorCards.every(card => {

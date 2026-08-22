@@ -28,11 +28,20 @@ const ViewerFormat = {
         return `${(bytes / unit ** 2).toFixed(2)} MiB`;
     },
 
+    formatResolution(resolution) {
+        if (!Array.isArray(resolution) || resolution.length !== 2) return '';
+        const [width, height] = resolution;
+        if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
+            return '';
+        }
+        return `${width}×${height}`;
+    },
+
     sourceHudLabel(clip, profile = 'control') {
         const isHdr = clip.signal?.is_hdr === true;
         return [
             this.clipDisplay(clip, profile),
-            `${clip.resolution[0]}×${clip.resolution[1]}`,
+            this.formatResolution(clip.resolution),
             isHdr ? 'HDR' : 'SDR',
             this.formatFileSize(clip.size_bytes),
         ].filter(Boolean).join(' • ');
