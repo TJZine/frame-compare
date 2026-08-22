@@ -17,7 +17,6 @@ import sys
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import cast
 
 import structlog
 
@@ -32,6 +31,11 @@ _STARTUP_PROBE_TIMEOUT_SECONDS = 10.0
 _STARTUP_STDERR_LIMIT = 4000
 _MISSING_MODULE_PATTERN = re.compile(
     r"ModuleNotFoundError:\s+No module named ['\"]([A-Za-z0-9_.]+)['\"]"
+)
+_SENSITIVE_ENV_KEY_PATTERN = re.compile(
+    r"(?:^|_)(?:API_KEY|TOKEN|SECRET|PASSWORD|PASSWD|WEBHOOK_URL|AUTHORIZATION|"
+    r"CREDENTIAL|PRIVATE_KEY|ACCESS_KEY|COOKIE)(?:_|$)",
+    re.IGNORECASE,
 )
 
 
@@ -153,13 +157,11 @@ class VSPreviewConfig:
 
     Attributes:
         enabled: Whether to launch VSPreview for verification
-        timeout_seconds: Reserved for future bounded interactive confirmation flows
-        auto_close: Close VSPreview after user confirms
+        no_color: Whether diagnostics should omit terminal color
+        verbose: Whether to print launch diagnostics
     """
 
     enabled: bool = False
-    timeout_seconds: float = 300.0  # 5 minutes
-    auto_close: bool = True
     no_color: bool = False
     verbose: bool = False
 
@@ -269,7 +271,7 @@ def _check_startup_readiness(command: list[str], *, env: dict[str, str]) -> None
             startup_stderr=(
                 None
                 if timeout_output is None
-                else cast(str, timeout_output)[-_STARTUP_STDERR_LIMIT:]
+                else _redact_inherited_secrets(timeout_output, env)[-_STARTUP_STDERR_LIMIT:]
             ),
         ) from exc
     except OSError as exc:
@@ -279,7 +281,7 @@ def _check_startup_readiness(command: list[str], *, env: dict[str, str]) -> None
         ) from exc
     if result.returncode == 0:
         return
-    startup_stderr = result.stderr[-_STARTUP_STDERR_LIMIT:]
+    startup_stderr = _redact_inherited_secrets(result.stderr, env)[-_STARTUP_STDERR_LIMIT:]
     match = _MISSING_MODULE_PATTERN.search(startup_stderr)
     missing_module = match.group(1) if match else None
     public_reason = (
@@ -294,6 +296,16 @@ def _check_startup_readiness(command: list[str], *, env: dict[str, str]) -> None
         returncode=result.returncode,
         startup_stderr=startup_stderr,
     )
+
+
+def _redact_inherited_secrets(text: str, env: dict[str, str]) -> str:
+    """Redact exact sensitive environment values inherited by the child process."""
+    sensitive_values = {
+        value for key, value in env.items() if value and _SENSITIVE_ENV_KEY_PATTERN.search(key)
+    }
+    for value in sorted(sensitive_values, key=len, reverse=True):
+        text = text.replace(value, "<redacted>")
+    return text
 
 
 def _run_vspreview_command(command: list[str], *, env: dict[str, str]) -> int:

@@ -61,26 +61,55 @@ def test_startup_readiness_accepts_healthy_current_interpreter(
     assert "import vspreview.init" in probe_command[2]
 
 
-def test_startup_readiness_returns_safe_missing_module_failure(
+def test_launch_session_returns_safe_missing_module_failure(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    secret = "tiny"
+    monkeypatch.setenv("FRAME_COMPARE_API_TOKEN", secret)
     stderr = (
         "Traceback (most recent call last):\n"
         '  File "C:\\private\\vspreview.py", line 1\n'
+        f"  inherited token: {secret}\n"
         "ModuleNotFoundError: No module named 'vstools.utils.gpu'\n"
+    )
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.check_vspreview_availability",
+        lambda: VSPreviewAvailability(
+            status=VSPreviewAvailabilityStatus.AVAILABLE,
+            message="available",
+        ),
+    )
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter._resolve_launch_command",
+        lambda script_path: [sys.executable, "-m", "vspreview", str(script_path)],
     )
     monkeypatch.setattr(
         "frame_compare.vspreview.adapter.subprocess.run",
         MagicMock(return_value=subprocess.CompletedProcess([], 1, "", stderr)),
     )
+    popen = MagicMock()
+    monkeypatch.setattr("frame_compare.vspreview.adapter.subprocess.Popen", popen)
 
     with pytest.raises(VSPreviewError) as excinfo:
-        _check_startup_readiness([sys.executable, "-m", "vspreview", "session.py"], env={})
+        launch_alignment_verification_session(
+            VSPreviewSessionRequest(
+                reference=Path("ref.mkv"),
+                comparisons=[Path("a.mkv")],
+                suggested_offsets_by_key={},
+                cache_dir=tmp_path,
+            ),
+            VSPreviewConfig(enabled=True),
+        )
 
     assert excinfo.value.public_reason == "Missing optional dependency: vstools.utils.gpu"
     assert excinfo.value.missing_module == "vstools.utils.gpu"
-    assert excinfo.value.startup_stderr == stderr
+    assert excinfo.value.startup_stderr is not None
+    assert secret not in excinfo.value.startup_stderr
+    assert "<redacted>" in excinfo.value.startup_stderr
+    assert "vstools.utils.gpu" in excinfo.value.startup_stderr
     assert "C:\\private" not in str(excinfo.value)
+    popen.assert_not_called()
 
 
 def test_startup_readiness_does_not_probe_external_launcher(
@@ -94,19 +123,51 @@ def test_startup_readiness_does_not_probe_external_launcher(
     mock_run.assert_not_called()
 
 
-def test_startup_readiness_timeout_is_bounded_and_generic(
+def test_launch_session_startup_timeout_is_bounded_redacted_and_prevents_launch(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    secret = "timeout-secret-token"
+    monkeypatch.setenv("FRAME_COMPARE_SECRET", secret)
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.check_vspreview_availability",
+        lambda: VSPreviewAvailability(
+            status=VSPreviewAvailabilityStatus.AVAILABLE,
+            message="available",
+        ),
+    )
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter._resolve_launch_command",
+        lambda script_path: [sys.executable, "-m", "vspreview", str(script_path)],
+    )
     monkeypatch.setattr(
         "frame_compare.vspreview.adapter.subprocess.run",
-        MagicMock(side_effect=subprocess.TimeoutExpired([sys.executable], 10.0)),
+        MagicMock(
+            side_effect=subprocess.TimeoutExpired(
+                [sys.executable],
+                10.0,
+                stderr=f"waiting with {secret}".encode(),
+            )
+        ),
     )
+    popen = MagicMock()
+    monkeypatch.setattr("frame_compare.vspreview.adapter.subprocess.Popen", popen)
 
     with pytest.raises(VSPreviewError) as excinfo:
-        _check_startup_readiness([sys.executable, "-m", "vspreview", "session.py"], env={})
+        launch_alignment_verification_session(
+            VSPreviewSessionRequest(
+                reference=Path("ref.mkv"),
+                comparisons=[Path("a.mkv")],
+                suggested_offsets_by_key={},
+                cache_dir=tmp_path,
+            ),
+            VSPreviewConfig(enabled=True),
+        )
 
     assert excinfo.value.public_reason == "startup dependency check timed out"
     assert "Traceback" not in str(excinfo.value)
+    assert excinfo.value.startup_stderr == "waiting with <redacted>"
+    popen.assert_not_called()
 
 
 def test_portable_windows_launch_preloads_media_runtime(
@@ -304,7 +365,7 @@ def test_launch_alignment_verification_session_waits_for_vspreview_completion(
 
     monkeypatch.setattr("frame_compare.vspreview.adapter.subprocess.Popen", _fake_popen)
 
-    cfg = VSPreviewConfig(enabled=True, timeout_seconds=1.0)
+    cfg = VSPreviewConfig(enabled=True)
     script_path = launch_alignment_verification_session(
         request=VSPreviewSessionRequest(
             reference=Path("ref.mkv"),
@@ -430,7 +491,7 @@ def test_launch_alignment_verification_session_reports_missing_launcher(
 
     monkeypatch.setattr("frame_compare.vspreview.adapter.subprocess.Popen", _raise_missing_launcher)
 
-    cfg = VSPreviewConfig(enabled=True, timeout_seconds=1.0)
+    cfg = VSPreviewConfig(enabled=True)
 
     with pytest.raises(VSPreviewError) as excinfo:
         launch_alignment_verification_session(
