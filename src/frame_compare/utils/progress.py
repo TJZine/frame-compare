@@ -2,9 +2,9 @@
 
 import sys
 from dataclasses import dataclass
-from io import TextIOBase
 from threading import RLock
 from time import monotonic
+from typing import TextIO
 
 import structlog
 from rich.console import Console, RenderableType
@@ -147,7 +147,7 @@ class NullProgressReporter:
 class PlainProgressReporter:
     """Chronological ASCII progress for redirected human output."""
 
-    def __init__(self, stream: TextIOBase | None = None) -> None:
+    def __init__(self, stream: TextIO | None = None) -> None:
         self._stream = stream
         self._task: _PlainTask | None = None
         self._task_stack: list[_PlainTask] = []

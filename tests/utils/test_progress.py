@@ -6,7 +6,7 @@ from io import StringIO
 
 import pytest
 from rich.console import Console
-from rich.progress import ProgressSample, Task
+from rich.progress import Progress, Task
 
 import frame_compare.utils.progress as progress_module
 from frame_compare.utils.progress import (
@@ -274,13 +274,17 @@ def test_rich_progress_reporter_uses_distinct_task_presentations(
 
 def test_eta_column_appears_only_after_rich_has_an_estimate() -> None:
     column = progress_module._EstimatedTimeRemainingColumn()  # noqa: SLF001
-    task = Task(0, "work", total=2, completed=0, _get_time=lambda: 1.0)
+    current_time = 0.0
+    progress = Progress(auto_refresh=False, get_time=lambda: current_time)
+    task_id = progress.add_task("work", total=3)
+    task = progress.tasks[0]
 
     assert column.render(task).plain == ""
 
-    task.start_time = 0.0
-    task.completed = 1
-    task._progress.extend((ProgressSample(0.0, 0), ProgressSample(1.0, 1)))  # noqa: SLF001
+    current_time = 1.0
+    progress.advance(task_id)
+    current_time = 2.0
+    progress.advance(task_id)
     assert column.render(task).plain.startswith("ETA ")
 
 
