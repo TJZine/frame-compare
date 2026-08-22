@@ -187,14 +187,16 @@ const directionalAlignment = viewer.state.alignX === -7
 viewer.state.revealPercent = 37;
 viewport.updateSlider();
 assert.equal(viewer.dom.canvas.style.values['--reveal-percent'], '37%');
-assert.ok(refresh.grid > 0);
-assert.ok(refresh.lens > 0);
-const revealAndRefresh = viewer.dom.canvas.style.values['--reveal-percent'] === '37%'
-    && refresh.grid > 0
-    && refresh.lens > 0;
+const reveal = viewer.dom.canvas.style.values['--reveal-percent'] === '37%';
 
+const refreshBefore = { ...refresh };
 const persistenceCalls = persistence.calls;
 viewport.setZoom(3);
+const gridRefreshDelta = refresh.grid - refreshBefore.grid;
+const lensRefreshDelta = refresh.lens - refreshBefore.lens;
+assert.ok(gridRefreshDelta > 0);
+assert.ok(lensRefreshDelta > 0);
+const gridAndLensRefresh = gridRefreshDelta > 0 && lensRefreshDelta > 0;
 const storageDelegated = persistence.calls === persistenceCalls + 1
     && viewer.state.zoom === 3;
 
@@ -205,6 +207,7 @@ console.log(JSON.stringify({
     panClampAndGridConversion,
     fitAndReset,
     directionalAlignment,
-    revealAndRefresh,
+    reveal,
+    gridAndLensRefresh,
     storageDelegated,
 }));

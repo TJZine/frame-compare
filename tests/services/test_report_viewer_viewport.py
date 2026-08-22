@@ -24,7 +24,8 @@ def test_viewport_harness_owns_coordinate_and_alignment_policy() -> None:
         "panClampAndGridConversion": True,
         "fitAndReset": True,
         "directionalAlignment": True,
-        "revealAndRefresh": True,
+        "reveal": True,
+        "gridAndLensRefresh": True,
         "storageDelegated": True,
     }
 
