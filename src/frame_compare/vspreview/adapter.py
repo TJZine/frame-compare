@@ -234,11 +234,14 @@ def _check_startup_readiness(command: list[str], *, env: dict[str, str]) -> None
     """Probe imports once when the resolved launcher uses this interpreter."""
     if not command or Path(command[0]).resolve() != Path(sys.executable).resolve():
         return
-    probe_code = "import vspreview"
+    probe_code = (
+        "from frame_compare.vspreview.launcher import prepare_vspreview_compatibility; "
+        "prepare_vspreview_compatibility(); import vspreview.init"
+    )
     if runtime_kind().casefold() == "windows-portable":
         probe_code = (
             "from frame_compare.vspreview.launcher import preload_vapoursynth_runtime; "
-            "preload_vapoursynth_runtime(); import vspreview"
+            f"preload_vapoursynth_runtime(); {probe_code}"
         )
     probe_command = [sys.executable, "-c", probe_code]
     try:
@@ -317,11 +320,14 @@ def _write_vspreview_session_script(request: VSPreviewSessionRequest) -> Path:
 def _resolve_launch_command(script_path: Path) -> list[str]:
     """Resolve the launch command for VSPreview.
 
-    The managed Windows runtime preloads VapourSynth before Qt can register its
-    private native runtime. Other environments retain the normal executable-first
-    resolution from the VSPreview integration contract.
+    The current interpreter uses Frame Compare's compatibility bootstrap. The
+    managed Windows runtime additionally preloads VapourSynth before Qt can
+    register its private native runtime. An external launcher remains the fallback
+    when VSPreview is not installed in the current interpreter.
     """
-    if runtime_kind().casefold() == "windows-portable":
+    if runtime_kind().casefold() == "windows-portable" or importlib.util.find_spec(
+        "vspreview"
+    ) is not None:
         return [
             sys.executable,
             "-m",

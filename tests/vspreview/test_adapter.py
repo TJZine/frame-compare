@@ -56,6 +56,9 @@ def test_startup_readiness_accepts_healthy_current_interpreter(
     _check_startup_readiness([sys.executable, "-m", "vspreview", "session.py"], env={})
 
     mock_run.assert_called_once()
+    probe_command = mock_run.call_args.args[0]
+    assert "prepare_vspreview_compatibility" in probe_command[2]
+    assert "import vspreview.init" in probe_command[2]
 
 
 def test_startup_readiness_returns_safe_missing_module_failure(
@@ -122,6 +125,45 @@ def test_portable_windows_launch_preloads_media_runtime(
         "-m",
         "frame_compare.vspreview.launcher",
         str(script_path),
+    ]
+
+
+def test_current_interpreter_launch_uses_compatibility_bootstrap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("frame_compare.vspreview.adapter.runtime_kind", lambda: "unmanaged")
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.importlib.util.find_spec",
+        lambda module: SimpleNamespace() if module == "vspreview" else None,
+    )
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.shutil.which",
+        lambda _command: pytest.fail("Current interpreter must use compatibility bootstrap"),
+    )
+    script_path = Path("generated/session.py")
+
+    assert _resolve_launch_command(script_path) == [
+        sys.executable,
+        "-m",
+        "frame_compare.vspreview.launcher",
+        str(script_path),
+    ]
+
+
+def test_windows_external_launcher_remains_available_without_current_module(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("frame_compare.vspreview.adapter.sys.platform", "win32")
+    monkeypatch.setattr("frame_compare.vspreview.adapter.runtime_kind", lambda: "unmanaged")
+    monkeypatch.setattr("frame_compare.vspreview.adapter.importlib.util.find_spec", lambda _module: None)
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.shutil.which",
+        lambda command: "C:/external/vspreview.exe" if command == "vspreview" else None,
+    )
+
+    assert _resolve_launch_command(Path("generated/session.py")) == [
+        "C:/external/vspreview.exe",
+        str(Path("generated/session.py")),
     ]
 
 

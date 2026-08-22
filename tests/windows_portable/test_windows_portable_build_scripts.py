@@ -570,15 +570,16 @@ def test_windows_portable_build_reads_version_from_archived_app_source(
 def test_windows_portable_build_runtime_validation_checks_qt_stack(repo_root: Path) -> None:
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     build_script = _read_text_or_fail(build_path)
-    assert "import vspreview" in build_script
+    assert "import vspreview.init" in build_script
     assert "import PyQt6" in build_script
     assert "pyqt6_import=ok" in build_script
-    assert "vspreview_pyqt6=ok" in build_script
+    assert "vspreview_pyqt6_compatibility=ok" in build_script
     combined_proof = build_script[
         build_script.index("def prove_qt_media_runtime") : build_script.index("phase = sys.argv[1]")
     ]
     for required_proof in (
         "preload_vapoursynth_runtime()",
+        "prepare_vspreview_compatibility()",
         "prove_runtime_contract()",
         "prove_vapoursynth_environment()",
         "prove_lwlibavsource(media_path)",
@@ -590,8 +591,13 @@ def test_windows_portable_build_runtime_validation_checks_qt_stack(repo_root: Pa
     assert combined_proof.index("preload_vapoursynth_runtime()") < combined_proof.index(
         "import PyQt6"
     )
-    assert combined_proof.index("import PyQt6") < combined_proof.index("import vspreview")
-    assert combined_proof.index("import vspreview") < combined_proof.index(
+    assert combined_proof.index("import PyQt6") < combined_proof.index(
+        "prepare_vspreview_compatibility()"
+    )
+    assert combined_proof.index("prepare_vspreview_compatibility()") < combined_proof.index(
+        "import vspreview.init"
+    )
+    assert combined_proof.index("import vspreview.init") < combined_proof.index(
         "prove_vapoursynth_environment()"
     )
     assert "qt_media_runtime_preload=ok" in combined_proof
