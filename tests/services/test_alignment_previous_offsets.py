@@ -3,6 +3,7 @@
 # pyright: reportPrivateUsage=false
 
 import tomllib
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -30,6 +31,7 @@ from frame_compare.services.types import (
     AlignmentStabilitySummary,
     ReusableAlignmentEntry,
 )
+from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.types import (
     AlignmentCacheSettings,
     AlignmentClipIdentity,
@@ -109,6 +111,59 @@ def _alignment_request(
         shared_alignment_cache_dir=shared_cache_dir or (tmp_path / "shared-alignment"),
         settings=_alignment_cache_settings(config),
     )
+
+
+def test_typed_alignment_progress_uses_prepared_comparison_presentation(
+    tmp_path: Path,
+) -> None:
+    reference = tmp_path / "reference-raw-name.mkv"
+    comparison = tmp_path / "very-long-raw-comparison-name.mkv"
+    reference.touch()
+    comparison.touch()
+    config = AlignmentConfig(cache_results=False)
+    request = _alignment_request(
+        tmp_path,
+        reference=reference,
+        comparisons=[comparison],
+        config=config,
+    )
+    request = replace(
+        request,
+        comparisons=[
+            replace(
+                request.comparisons[0],
+                presentation_name="2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
+            )
+        ],
+    )
+    progress = Mock(spec=ProgressReporter)
+
+    with (
+        patch(
+            "frame_compare.services.alignment._extract_reference_audio",
+            return_value=(np.ones(10, dtype=np.float32), object()),
+        ),
+        patch(
+            "frame_compare.services.alignment._extract_matching_audio",
+            return_value=np.ones(10, dtype=np.float32),
+        ),
+        patch(
+            "frame_compare.services.alignment._estimate_consensus_offset",
+            return_value=_accepted_consensus(),
+        ),
+    ):
+        align_clips_from_request(
+            request,
+            config,
+            progress=progress,
+            reference_fps=Fraction(24, 1),
+        )
+
+    descriptions = [call.args[0] for call in progress.set_description.call_args_list]
+    assert descriptions[0] == "ALIGN | Checking saved offsets"
+    assert "ALIGN | Comparison 1 | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune" in descriptions
+    assert not any("very-long-raw-comparison-name.mkv" in value for value in descriptions)
+    progress.start_indeterminate.assert_not_called()
 
 
 def test_align_clips_from_request_disabled_skips_shared_reuse_io(

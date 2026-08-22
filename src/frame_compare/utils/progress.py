@@ -73,6 +73,20 @@ class _TaskPresentationColumn(ProgressColumn):
         return self._column.render(task)
 
 
+class _EstimatedTimeRemainingColumn(ProgressColumn):
+    """Render the ETA label and value only after Rich has an estimate."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._remaining = TimeRemainingColumn(compact=True)
+
+    def render(self, task: Task) -> RenderableType:
+        if task.time_remaining is None:
+            return Text("")
+        value = self._remaining.render(task)
+        return Text.assemble("ETA ", value)
+
+
 class NullProgressReporter:
     """No-op progress reporter."""
 
@@ -176,8 +190,7 @@ class RichProgressReporter:
                 "measurable",
             ),
             _TaskPresentationColumn(MofNCompleteColumn(), "measurable"),
-            _TaskPresentationColumn(TextColumn("ETA"), "measurable"),
-            _TaskPresentationColumn(TimeRemainingColumn(compact=True), "measurable"),
+            _TaskPresentationColumn(_EstimatedTimeRemainingColumn(), "measurable"),
             _TaskPresentationColumn(SpinnerColumn(spinner_name="line"), "indeterminate"),
             transient=True,
             auto_refresh=False,

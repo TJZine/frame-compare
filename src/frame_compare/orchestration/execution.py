@@ -159,7 +159,11 @@ def build_phases_before_align(
             "align",
             "align",
             lambda config: not config.audio_alignment.enable,
-            partial(run_align_phase, selected_frames=state.selected_frames),
+            partial(
+                run_align_phase,
+                selected_frames=state.selected_frames,
+                verbose=request.verbose,
+            ),
             state=state,
             monotonic_timer=monotonic_timer,
             phase_timings=state.phase_timings,

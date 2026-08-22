@@ -17,6 +17,7 @@ STYLE_VALUE = "bright_white"
 STYLE_PATH = "dim"
 STYLE_HINT = "yellow"
 STYLE_HEADER = "bold cyan"
+_STARTUP_STDERR_LIMIT = 4000
 
 
 def _console(*, no_color: bool) -> Console:
@@ -45,6 +46,41 @@ def print_vspreview_session(
     console = _console(no_color=no_color)
     console.print()
     console.print(f"[{STYLE_HEADER}]VSPreview Session[/]")
+    console.print(table)
+
+
+def print_vspreview_unavailable(
+    *,
+    reason: str,
+    no_color: bool = False,
+) -> None:
+    """Print the single normal human warning for optional verification failure."""
+    console = _console(no_color=no_color)
+    console.print()
+    console.print("[yellow][WARN] VSPreview verification unavailable[/]")
+    console.print(f"       {escape(reason)}")
+    console.print("       Continuing with computed audio alignment.")
+    console.print("       Hint: Check the VSPreview setup with frame-compare doctor.")
+
+
+def print_vspreview_failure_details(
+    *,
+    command: tuple[str, ...],
+    reason: str,
+    returncode: int | None,
+    startup_stderr: str | None,
+    no_color: bool = False,
+) -> None:
+    """Print bounded verbose startup evidence captured by the readiness probe."""
+    table = _group_table()
+    table.add_row("command", f"[{STYLE_PATH}]{escape(' '.join(command))}[/]")
+    detail = reason if returncode is None else f"{reason} (exit {returncode})"
+    table.add_row("reason", escape(detail))
+    if startup_stderr:
+        table.add_row("stderr", escape(startup_stderr[-_STARTUP_STDERR_LIMIT:]))
+    console = _console(no_color=no_color)
+    console.print()
+    console.print(f"[{STYLE_HEADER}]VSPreview Failure Details[/]")
     console.print(table)
 
 

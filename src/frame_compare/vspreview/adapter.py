@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import shutil
 import subprocess  # nosec B404
 import sys
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import cast
 
 import structlog
 
@@ -25,6 +27,12 @@ from frame_compare.vspreview.output import print_vspreview_session
 from frame_compare.vspreview.session_script import write_vspreview_session_script
 
 log = structlog.get_logger()
+
+_STARTUP_PROBE_TIMEOUT_SECONDS = 10.0
+_STARTUP_STDERR_LIMIT = 4000
+_MISSING_MODULE_PATTERN = re.compile(
+    r"ModuleNotFoundError:\s+No module named ['\"]([A-Za-z0-9_.]+)['\"]"
+)
 
 
 class VSPreviewAvailabilityStatus(Enum):
@@ -153,6 +161,7 @@ class VSPreviewConfig:
     timeout_seconds: float = 300.0  # 5 minutes
     auto_close: bool = True
     no_color: bool = False
+    verbose: bool = False
 
 
 @dataclass(frozen=True)
@@ -190,39 +199,97 @@ def launch_alignment_verification_session(
 
     command = _resolve_launch_command(script_path)
 
-    # Print telemetry per vspreview spec §3.2.3.
-    print_vspreview_session(
-        script_path=script_path,
-        command=command,
-        no_color=config.no_color,
-    )
+    if config.verbose:
+        print_vspreview_session(
+            script_path=script_path,
+            command=command,
+            no_color=config.no_color,
+        )
 
     try:
         env = os.environ.copy()
         if config.no_color:
             env["NO_COLOR"] = "1"
+        _check_startup_readiness(command, env=env)
         returncode = _run_vspreview_command(command, env=env)
     except FileNotFoundError as e:
         raise VSPreviewError("launcher command was not found") from e
+    except VSPreviewError:
+        raise
     except Exception as e:
-        log.debug(
-            "vspreview_launch_unexpected_debug",
-            exception_type=type(e).__name__,
-            error=str(e),
-        )
         raise VSPreviewError(f"unexpected launch error ({type(e).__name__})") from e
 
     if returncode != 0:
         public_reason = f"launch exited with code {returncode}"
-        log.warning(
-            "vspreview_launch_failed",
-            reason=public_reason,
+        raise VSPreviewError(
+            public_reason,
+            command=tuple(command),
             returncode=returncode,
-            hint="Inspect the VSPreview output displayed above",
         )
-        raise VSPreviewError(public_reason)
 
     return script_path
+
+
+def _check_startup_readiness(command: list[str], *, env: dict[str, str]) -> None:
+    """Probe imports once when the resolved launcher uses this interpreter."""
+    if not command or Path(command[0]).resolve() != Path(sys.executable).resolve():
+        return
+    probe_code = "import vspreview"
+    if runtime_kind().casefold() == "windows-portable":
+        probe_code = (
+            "from frame_compare.vspreview.launcher import preload_vapoursynth_runtime; "
+            "preload_vapoursynth_runtime(); import vspreview"
+        )
+    probe_command = [sys.executable, "-c", probe_code]
+    try:
+        result = subprocess.run(  # nosec B603
+            probe_command,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=_STARTUP_PROBE_TIMEOUT_SECONDS,
+            env=env,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        timeout_output: str | None = None
+        raw_timeout_output = exc.stderr
+        if isinstance(raw_timeout_output, str):
+            timeout_output = raw_timeout_output
+        elif isinstance(raw_timeout_output, bytes):
+            timeout_output = raw_timeout_output.decode("utf-8", errors="replace")
+        raise VSPreviewError(
+            "startup dependency check timed out",
+            command=tuple(command),
+            startup_stderr=(
+                None
+                if timeout_output is None
+                else cast(str, timeout_output)[-_STARTUP_STDERR_LIMIT:]
+            ),
+        ) from exc
+    except OSError as exc:
+        raise VSPreviewError(
+            "startup dependency check could not run",
+            command=tuple(command),
+        ) from exc
+    if result.returncode == 0:
+        return
+    startup_stderr = result.stderr[-_STARTUP_STDERR_LIMIT:]
+    match = _MISSING_MODULE_PATTERN.search(startup_stderr)
+    missing_module = match.group(1) if match else None
+    public_reason = (
+        f"Missing optional dependency: {missing_module}"
+        if missing_module is not None
+        else "VSPreview failed its startup dependency check."
+    )
+    raise VSPreviewError(
+        public_reason,
+        missing_module=missing_module,
+        command=tuple(command),
+        returncode=result.returncode,
+        startup_stderr=startup_stderr,
+    )
 
 
 def _run_vspreview_command(command: list[str], *, env: dict[str, str]) -> int:

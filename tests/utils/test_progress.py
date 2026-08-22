@@ -6,6 +6,7 @@ from io import StringIO
 
 import pytest
 from rich.console import Console
+from rich.progress import ProgressSample, Task
 
 import frame_compare.utils.progress as progress_module
 from frame_compare.utils.progress import (
@@ -211,11 +212,10 @@ def test_rich_progress_reporter_uses_distinct_task_presentations(
     assert task.fields["presentation"] == "measurable"
     assert "  [RUN] Rendering" in measurable_output
     assert "10/30" in measurable_output
-    assert "ETA --:--" in measurable_output
+    assert "ETA" not in measurable_output
     assert "%" not in measurable_output
     assert not re.search(r"[-\\|/]\s+\[RUN\]", measurable_output)
     reporter.complete_phase()
-
     output.seek(0)
     output.truncate()
     reporter.start_indeterminate("Loading alignment offsets")
@@ -237,6 +237,18 @@ def test_rich_progress_reporter_uses_distinct_task_presentations(
     assert "0/1" not in simple_output
     assert "━" not in simple_output
     reporter.complete_phase()
+
+
+def test_eta_column_appears_only_after_rich_has_an_estimate() -> None:
+    column = progress_module._EstimatedTimeRemainingColumn()  # noqa: SLF001
+    task = Task(0, "work", total=2, completed=0, _get_time=lambda: 1.0)
+
+    assert column.render(task).plain == ""
+
+    task.start_time = 0.0
+    task.completed = 1
+    task._progress.extend((ProgressSample(0.0, 0), ProgressSample(1.0, 1)))  # noqa: SLF001
+    assert column.render(task).plain.startswith("ETA ")
 
 
 def test_rich_progress_reporter_adds_one_blank_line_when_measurable_work_begins(

@@ -477,7 +477,8 @@ unchanged.
 - Every Rich phase remains live while active with an ASCII `[RUN]` marker. Meaningful
   measurable tasks use a Rich progress bar separated from preceding
   durable output by one blank line and report completed/total work with a labeled
-  `ETA`. Indeterminate activity uses an ASCII spinner after its description, while
+  `ETA` once Rich has an estimate; before then, only completed/total work is shown.
+  Indeterminate activity uses an ASCII spinner after its description, while
   one-step phases remain simple activity lines without a bar. Live render descriptions
   use compact source identity followed by an ASCII `- frame N` suffix; constrained
   terminals may visually ellipsize the description without changing its stored value.
@@ -489,6 +490,16 @@ unchanged.
   prompt is the durable `[WAIT] CONFIRM` record; it does not add a redundant
   generic successful completion line. Progress is suspended around that blocking
   prompt and restored afterward.
+- Audio alignment remains one coherent `ALIGN` phase. Saved/manual/shared offset
+  lookup is shown as `ALIGN | Checking saved offsets` without a nested task, typed
+  comparison work uses `ALIGN | Comparison N | <prepared presentation>`, and optional
+  VSPreview review is labeled `ALIGN | Interactive verification`.
+- Normal interactive VSPreview launch presentation omits generated script and command
+  telemetry. `--verbose` retains those launch facts and bounded startup-failure
+  evidence. When a current-interpreter readiness check detects a missing optional
+  module, normal mode emits one sanitized warning and continues with the computed
+  audio alignment; forced interactive failure remains fatal. A successful VSPreview
+  child continues to inherit its native stdout and stderr diagnostics.
 - The known slow.pics upload start/complete lifecycle events are DEBUG evidence in
   normal TTY runs because the product progress stream already represents the same
   lifecycle. Retry, rate-limit, server, timeout, and network warnings remain

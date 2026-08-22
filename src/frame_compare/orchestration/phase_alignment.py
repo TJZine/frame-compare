@@ -52,7 +52,9 @@ from frame_compare.utils.types import (
 log = structlog.get_logger()
 
 
-def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhaseOutput:
+def run_align_phase(
+    ctx: RunContext, *, selected_frames: list[int], verbose: bool = False
+) -> AlignPhaseOutput:
     if not ctx.comparisons:
         return AlignPhaseOutput(
             reference=ctx.reference,
@@ -99,6 +101,7 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
             ctx.reference.path.stem: dict(ctx.reference.probe.preserved_frame_props),
             **{comp.path.stem: dict(comp.probe.preserved_frame_props) for comp in ctx.comparisons},
         },
+        verbose=verbose,
     )
 
     updated_comparisons: list[ClipState] = []

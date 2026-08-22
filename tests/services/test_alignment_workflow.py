@@ -62,9 +62,10 @@ def test_align_clips_computed_results_advance_phase_progress(
     )
 
     reporter.advance.assert_called_once_with(1)
-    reporter.start_indeterminate.assert_called_once()
+    reporter.start_indeterminate.assert_not_called()
     descriptions = [args[0] for args, _kwargs in reporter.set_description.call_args_list]
-    assert descriptions
+    assert descriptions[0] == "ALIGN | Checking saved offsets"
+    assert all(description.startswith("ALIGN |") for description in descriptions)
     assert any("comp.mkv" in description for description in descriptions)
 
 
@@ -149,7 +150,7 @@ def test_align_clips_uses_supplied_reference_fps_for_computed_frame_offsets(
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_matching_audio")
 @patch("frame_compare.services.alignment._extract_reference_audio")
-def test_align_clips_full_manual_hit_uses_spinner_without_progress_bar(
+def test_align_clips_full_manual_hit_stays_in_parent_align_phase(
     mock_extract_reference: MagicMock,
     mock_extract_matching: MagicMock,
     mock_probe: MagicMock,
@@ -180,10 +181,10 @@ def test_align_clips_full_manual_hit_uses_spinner_without_progress_bar(
 
     align_clips(ref, [comp], AlignmentConfig(cache_results=True), tmp_path, progress=reporter)
 
-    reporter.start_indeterminate.assert_called_once()
+    reporter.start_indeterminate.assert_not_called()
     reporter.advance.assert_not_called()
     descriptions = [args[0] for args, _kwargs in reporter.set_description.call_args_list]
-    assert not any("comp.mkv" in description for description in descriptions)
+    assert descriptions == ["ALIGN | Checking saved offsets"]
 
 
 @patch("frame_compare.services.alignment._probe_fps")

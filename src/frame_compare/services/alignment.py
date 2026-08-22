@@ -34,7 +34,7 @@ from frame_compare.services.types import (
     AlignmentProvenance,
     AlignmentResult,
 )
-from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
+from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.types import AlignmentClipRequest, AlignmentRequest
 from frame_compare.vspreview.overrides import load_manual_overrides
 
@@ -226,6 +226,7 @@ def _compute_missing_alignments(
     results_map: dict[str, AlignmentResult],
     fps_reference: Fraction,
     progress: ProgressReporter | None,
+    progress_descriptions: dict[Path, str] | None = None,
 ) -> None:
     """Extract audio, perform cross-correlation, and populate results map."""
     ref_audio, reference_stream = _extract_reference_audio(
@@ -236,7 +237,9 @@ def _compute_missing_alignments(
     )
     for comp in requested_comparisons:
         if progress:
-            progress.set_description(f"Checking alignment for {comp.name}")
+            progress.set_description(
+                (progress_descriptions or {}).get(comp, f"ALIGN | {comp.name}")
+            )
 
         comp_audio = _extract_matching_audio(
             comp,
@@ -275,7 +278,11 @@ def _compute_missing_alignments(
             stability=estimate.stability,
         )
         results_map[_alignment_key(reference, comp)] = res
-        _record_alignment_progress(progress=progress, result=res)
+        _record_alignment_progress(
+            progress=progress,
+            result=res,
+            description=(progress_descriptions or {}).get(comp),
+        )
 
 
 def _compute_missing_alignments_with_provenance(
@@ -287,6 +294,7 @@ def _compute_missing_alignments_with_provenance(
     provenances: dict[str, AlignmentProvenance],
     fps_reference: Fraction,
     progress: ProgressReporter | None,
+    progress_descriptions: dict[Path, str],
 ) -> None:
     _compute_missing_alignments(
         reference=reference,
@@ -295,6 +303,7 @@ def _compute_missing_alignments_with_provenance(
         results_map=results_map,
         fps_reference=fps_reference,
         progress=progress,
+        progress_descriptions=progress_descriptions,
     )
     for comparison in requested_comparisons:
         key = _alignment_key(reference, comparison.path)
@@ -310,17 +319,13 @@ def _record_alignment_progress(
     *,
     progress: ProgressReporter | None,
     result: AlignmentResult,
+    description: str | None = None,
 ) -> None:
     if progress is None:
         return
 
-    match result.source:
-        case "cached":
-            description = f"Loaded cached alignment for {result.comparison_clip}"
-        case "manual":
-            description = f"Using manual alignment for {result.comparison_clip}"
-        case _:
-            description = f"Checked alignment for {result.comparison_clip}"
+    if description is None:
+        description = f"ALIGN | {result.comparison_clip}"
     progress.set_description(description)
     progress.advance(1)
 
@@ -331,11 +336,16 @@ def _record_resolved_alignment_progress(
     reference: Path,
     comparisons: list[Path],
     results_map: dict[str, AlignmentResult],
+    progress_descriptions: dict[Path, str] | None = None,
 ) -> None:
     for comp in comparisons:
         result = results_map.get(_alignment_key(reference, comp))
         if result is not None:
-            _record_alignment_progress(progress=progress, result=result)
+            _record_alignment_progress(
+                progress=progress,
+                result=result,
+                description=(progress_descriptions or {}).get(comp),
+            )
 
 
 def _record_resolved_alignment_request_progress(
@@ -344,12 +354,23 @@ def _record_resolved_alignment_request_progress(
     request: AlignmentRequest,
     results_map: dict[str, AlignmentResult],
 ) -> None:
+    progress_descriptions = _request_progress_descriptions(request)
     _record_resolved_alignment_progress(
         progress=progress,
         reference=request.reference.path,
         comparisons=[comparison.path for comparison in request.comparisons],
         results_map=results_map,
+        progress_descriptions=progress_descriptions,
     )
+
+
+def _request_progress_descriptions(request: AlignmentRequest) -> dict[Path, str]:
+    return {
+        comparison.path: (
+            f"ALIGN | Comparison {index} | {comparison.presentation_name or comparison.path.name}"
+        )
+        for index, comparison in enumerate(request.comparisons, start=1)
+    }
 
 
 def _record_vspreview_provenance(
@@ -390,6 +411,7 @@ def align_clips_from_request(
     progress: ProgressReporter | None = None,
     reference_fps: Fraction | None = None,
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
+    verbose: bool = False,
 ) -> list[AlignmentResult]:
     """Align clips from the typed request seam with shared previous-offset reuse."""
     reference = request.reference.path
@@ -400,50 +422,39 @@ def align_clips_from_request(
     validate_previous_offsets_policy(config)
 
     if progress:
-        progress.set_description("Audio Alignment")
+        progress.set_description("ALIGN | Checking saved offsets")
 
     results_map: dict[str, AlignmentResult] = {}
     provenances: dict[str, AlignmentProvenance] = {}
-    cache_activity_status = ProgressPhaseStatus.COMPLETED
-    if progress:
-        progress.start_indeterminate("Loading alignment offsets")
-    try:
-        fps_reference = _apply_manual_overrides_with_provenance(
-            reference=reference,
-            comparisons=request.comparisons,
-            cache_dir=request.generated_dir,
-            results_map=results_map,
-            provenances=provenances,
-            fps_reference=reference_fps,
-        )
-        unresolved_comparisons = [
-            comparison
-            for comparison in request.comparisons
-            if _alignment_key(reference, comparison.path) not in results_map
-        ]
+    fps_reference = _apply_manual_overrides_with_provenance(
+        reference=reference,
+        comparisons=request.comparisons,
+        cache_dir=request.generated_dir,
+        results_map=results_map,
+        provenances=provenances,
+        fps_reference=reference_fps,
+    )
+    unresolved_comparisons = [
+        comparison
+        for comparison in request.comparisons
+        if _alignment_key(reference, comparison.path) not in results_map
+    ]
 
-        completed_confirmed_reuse = apply_shared_reuse(
-            request=request,
-            unresolved_comparisons=unresolved_comparisons,
-            results_map=results_map,
-            provenances=provenances,
-            cache_results=config.cache_results,
-            progress=progress,
-            no_color=config.no_color,
-        )
+    completed_confirmed_reuse = apply_shared_reuse(
+        request=request,
+        unresolved_comparisons=unresolved_comparisons,
+        results_map=results_map,
+        provenances=provenances,
+        cache_results=config.cache_results,
+        progress=progress,
+        no_color=config.no_color,
+    )
 
-        requested_comparisons = [
-            comparison
-            for comparison in request.comparisons
-            if _alignment_key(reference, comparison.path) not in results_map
-        ]
-    except Exception:
-        cache_activity_status = ProgressPhaseStatus.FAILED
-        raise
-    finally:
-        if progress:
-            progress.complete_phase(cache_activity_status)
-
+    requested_comparisons = [
+        comparison
+        for comparison in request.comparisons
+        if _alignment_key(reference, comparison.path) not in results_map
+    ]
     if requested_comparisons:
         _record_resolved_alignment_request_progress(
             progress=progress,
@@ -460,6 +471,7 @@ def align_clips_from_request(
             provenances=provenances,
             fps_reference=fps_reference,
             progress=progress,
+            progress_descriptions=_request_progress_descriptions(request),
         )
 
     if completed_confirmed_reuse and not requested_comparisons:
@@ -481,6 +493,7 @@ def align_clips_from_request(
         config=config,
         progress=progress,
         frame_props_by_stem=frame_props_by_stem,
+        verbose=verbose,
     )
     fps_reference = _apply_confirmed_vspreview_offsets(
         reference=reference,
@@ -528,32 +541,21 @@ def align_clips(
     validate_previous_offsets_policy(config)
 
     if progress:
-        progress.set_description("Audio Alignment")
+        progress.set_description("ALIGN | Checking saved offsets")
 
     results_map: dict[str, AlignmentResult] = {}
-    cache_activity_status = ProgressPhaseStatus.COMPLETED
-    if progress:
-        progress.start_indeterminate("Loading alignment offsets")
-    try:
-        # 0. Load manual overrides (highest precedence per §2.4)
-        fps_reference = _apply_manual_overrides(
-            reference,
-            comparisons,
-            cache_dir,
-            results_map,
-            reference_fps,
-        )
+    # 0. Load manual overrides (highest precedence per §2.4)
+    fps_reference = _apply_manual_overrides(
+        reference,
+        comparisons,
+        cache_dir,
+        results_map,
+        reference_fps,
+    )
 
-        requested_comparisons = [
-            c for c in comparisons if _alignment_key(reference, c) not in results_map
-        ]
-    except Exception:
-        cache_activity_status = ProgressPhaseStatus.FAILED
-        raise
-    finally:
-        if progress:
-            progress.complete_phase(cache_activity_status)
-
+    requested_comparisons = [
+        c for c in comparisons if _alignment_key(reference, c) not in results_map
+    ]
     if requested_comparisons:
         _record_resolved_alignment_progress(
             progress=progress,

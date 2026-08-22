@@ -11,6 +11,7 @@ import sys
 import types
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -19,6 +20,7 @@ from frame_compare.vspreview.adapter import (
     VSPreviewAvailabilityStatus,
     VSPreviewConfig,
     VSPreviewSessionRequest,
+    _check_startup_readiness,
     _resolve_launch_command,
     check_vspreview_availability,
     launch_alignment_verification_session,
@@ -43,6 +45,65 @@ class _FakeVSPreviewProcess:
 
     def wait(self) -> int:
         return self._returncode
+
+
+def test_startup_readiness_accepts_healthy_current_interpreter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock_run = MagicMock(return_value=subprocess.CompletedProcess([], 0, "", ""))
+    monkeypatch.setattr("frame_compare.vspreview.adapter.subprocess.run", mock_run)
+
+    _check_startup_readiness([sys.executable, "-m", "vspreview", "session.py"], env={})
+
+    mock_run.assert_called_once()
+
+
+def test_startup_readiness_returns_safe_missing_module_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stderr = (
+        "Traceback (most recent call last):\n"
+        '  File "C:\\private\\vspreview.py", line 1\n'
+        "ModuleNotFoundError: No module named 'vstools.utils.gpu'\n"
+    )
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.subprocess.run",
+        MagicMock(return_value=subprocess.CompletedProcess([], 1, "", stderr)),
+    )
+
+    with pytest.raises(VSPreviewError) as excinfo:
+        _check_startup_readiness([sys.executable, "-m", "vspreview", "session.py"], env={})
+
+    assert excinfo.value.public_reason == "Missing optional dependency: vstools.utils.gpu"
+    assert excinfo.value.missing_module == "vstools.utils.gpu"
+    assert excinfo.value.startup_stderr == stderr
+    assert "C:\\private" not in str(excinfo.value)
+
+
+def test_startup_readiness_does_not_probe_external_launcher(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock_run = MagicMock()
+    monkeypatch.setattr("frame_compare.vspreview.adapter.subprocess.run", mock_run)
+
+    _check_startup_readiness(["external-vspreview", "session.py"], env={})
+
+    mock_run.assert_not_called()
+
+
+def test_startup_readiness_timeout_is_bounded_and_generic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.subprocess.run",
+        MagicMock(side_effect=subprocess.TimeoutExpired([sys.executable], 10.0)),
+    )
+
+    with pytest.raises(VSPreviewError) as excinfo:
+        _check_startup_readiness([sys.executable, "-m", "vspreview", "session.py"], env={})
+
+    assert excinfo.value.public_reason == "startup dependency check timed out"
+    assert "Traceback" not in str(excinfo.value)
 
 
 def test_portable_windows_launch_preloads_media_runtime(
@@ -161,7 +222,9 @@ def _execute_generated_script(
 
 
 def test_launch_alignment_verification_session_waits_for_vspreview_completion(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     # Force launch path
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
@@ -174,8 +237,10 @@ def test_launch_alignment_verification_session_waits_for_vspreview_completion(
     )
     monkeypatch.setattr(
         "frame_compare.vspreview.adapter._resolve_launch_command",
-        lambda script_path: ["vspreview", str(script_path)],
+        lambda script_path: [sys.executable, "-m", "vspreview", str(script_path)],
     )
+    readiness_run = MagicMock(return_value=subprocess.CompletedProcess([], 0, "", ""))
+    monkeypatch.setattr("frame_compare.vspreview.adapter.subprocess.run", readiness_run)
 
     run_calls: list[tuple[object, object]] = []
 
@@ -199,7 +264,8 @@ def test_launch_alignment_verification_session_waits_for_vspreview_completion(
     assert script_path.exists()
     assert len(run_calls) == 1
     command, kwargs = run_calls[0]
-    assert command == ["vspreview", str(script_path)]
+    assert command == [sys.executable, "-m", "vspreview", str(script_path)]
+    readiness_run.assert_called_once()
     assert "timeout" not in kwargs
     assert kwargs["stdin"] is None
     assert kwargs["stdout"] is None
@@ -207,6 +273,7 @@ def test_launch_alignment_verification_session_waits_for_vspreview_completion(
     assert "text" not in kwargs
     assert "errors" not in kwargs
     assert "bufsize" not in kwargs
+    assert "VSPreview Session" not in capsys.readouterr().err
 
 
 def test_launch_alignment_verification_session_writes_launch_telemetry_to_stderr(
@@ -240,7 +307,7 @@ def test_launch_alignment_verification_session_writes_launch_telemetry_to_stderr
             suggested_offsets_by_key={},
             cache_dir=tmp_path,
         ),
-        config=VSPreviewConfig(enabled=True, no_color=True),
+        config=VSPreviewConfig(enabled=True, no_color=True, verbose=True),
     )
 
     captured = capsys.readouterr()
@@ -340,12 +407,6 @@ def test_launch_alignment_verification_session_reports_nonzero_exit(
         "frame_compare.vspreview.adapter._resolve_launch_command",
         lambda script_path: ["vspreview", str(script_path)],
     )
-    warnings: list[tuple[str, dict[str, object]]] = []
-
-    def _capture_warning(event: str, **kwargs: object) -> None:
-        warnings.append((event, kwargs))
-
-    monkeypatch.setattr("frame_compare.vspreview.adapter.log.warning", _capture_warning)
     monkeypatch.setattr(
         "frame_compare.vspreview.adapter.subprocess.Popen",
         lambda _command, **_kwargs: _FakeVSPreviewProcess(returncode=7),
@@ -361,17 +422,6 @@ def test_launch_alignment_verification_session_reports_nonzero_exit(
             ),
             config=VSPreviewConfig(enabled=True),
         )
-
-    assert warnings == [
-        (
-            "vspreview_launch_failed",
-            {
-                "reason": "launch exited with code 7",
-                "returncode": 7,
-                "hint": "Inspect the VSPreview output displayed above",
-            },
-        )
-    ]
 
 
 def test_build_script_content_escapes_path_literals() -> None:

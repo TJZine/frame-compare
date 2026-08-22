@@ -22,8 +22,8 @@ commentary tracks, or unrelated audio can make correlation ambiguous or invalid.
 
 1. Let automatic alignment compute an offset.
 2. Review confidence and warnings.
-3. Use VSPreview when the interactive route is available and the evidence needs manual
-   confirmation.
+3. Use VSPreview for optional interactive verification when the route is available and
+   the evidence needs manual confirmation. It is not part of automatic correlation.
 4. Verify dialogue, cuts, and motion in the final report.
 5. Reuse an accepted result only while the same source identities and alignment-affecting
    settings remain valid.
@@ -53,14 +53,21 @@ Computed alignment may also classify bounded evidence across the source as stabl
 possible drift, possible discontinuity, variable, or insufficient. This summary is
 diagnostic only: Frame Compare always retains the selected constant offset and trims.
 Material non-stable evidence produces one concise warning and should be verified at
-multiple points. Stable and insufficient evidence do not warn. New cache entries can
-retain the compact summary, while legacy entries without it remain reusable.
+multiple points. Stable and insufficient evidence do not warn. Alignment reuse cache
+schema v2 requires the compact summary for computed entries and does not provide
+compatibility or migration for older cache data.
 
 ## Interactive verification with VSPreview
 
 VSPreview is included in the Windows portable bundle and optional in native
 installations. The default Docker route does not provide an interactive desktop
 session.
+
+Normal mode keeps VSPreview launch and optional startup-failure presentation concise.
+Use `--verbose` for the generated command and bounded startup diagnostics. If optional
+VSPreview verification cannot start, Frame Compare retains the computed audio alignment
+and directs you to `frame-compare doctor`; forced interactive mode still fails.
+Successful sessions continue to inherit VSPreview and native decoder/index output.
 
 <figure class="fc-doc-figure">
   <img src="../images/vspreview-alignment.webp" alt="VSPreview showing EBU DVB PQ10 Reference beside EBU DVB HLG10 Comparison at frame 1000 with a zero-frame offset hint and timeline controls.">
