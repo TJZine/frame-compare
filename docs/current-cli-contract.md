@@ -489,7 +489,10 @@ unchanged.
   also leaves a durable `PUBLISH` line regardless of duration. The report-confirmed
   prompt is the durable `[WAIT] CONFIRM` record; it does not add a redundant
   generic successful completion line. Progress is suspended around that blocking
-  prompt and restored afterward.
+  prompt and restored afterward. Rich status color is confined to the semantic
+  marker: `[RUN]` is bright cyan, `[OK]` green, `[WAIT]` magenta, `[WARN]` yellow,
+  `[SKIP]` subdued yellow, and `[FAIL]` red. The description remains normally styled,
+  and no-color output retains the same literal markers.
 - Audio alignment remains one coherent `ALIGN` phase. Saved/manual/shared offset
   lookup is shown as `ALIGN | Checking saved offsets` without a nested task, typed
   comparison work uses `ALIGN | Comparison N | <prepared presentation>`, and optional
@@ -1137,12 +1140,20 @@ When interactive alignment launches a generated VSPreview session, the
 diagnostic order is:
 
 1. parent `VSPreview Session` telemetry
-2. generated `VSPreview Bootstrap`
-3. generated reference and loaded comparison rows
+2. generated `[RUN] VSPreview Bootstrap` and prepared reference identity, before the
+   first source load can emit native indexing diagnostics
+3. generated reference FPS plus prepared `Comparison N` identities, audio hints, and
+   paired truthful output-slot mappings
 4. generated `VSPreview Assumptions`, only when assumptions exist
-5. generated output slot rows
-6. generated `VSPreview Ready`
-7. parent `VSPreview Confirmation` prompt text
+5. generated `[OK] VSPreview Ready` with the next operator action
+6. parent `[WAIT] VSPreview Confirmation` prompt text
+
+Normal VSPreview labels reuse the release-aware presentation identities prepared by
+the typed alignment request. Paths and stems remain the internal source, suggested
+offset, confirmation, manual-override, and alignment-result identities. Confirmation
+uses untrimmed source-frame indices and calculates the offset as reference minus
+comparison. Generated and parent no-color output retain the literal lifecycle markers,
+and native source/index diagnostics remain inherited without filtering or buffering.
 
 Generated VSPreview assumptions are preview-only diagnostics derived from
 Frame Compare's existing clip probe metadata and serialized into the generated

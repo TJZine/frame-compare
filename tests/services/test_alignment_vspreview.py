@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import frame_compare.services.alignment_vspreview as alignment_vspreview
+import frame_compare.vspreview.output as vspreview_output
 from frame_compare.services.alignment_vspreview import maybe_launch_alignment_vspreview
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig
@@ -350,10 +351,15 @@ def test_prompt_for_confirmed_offsets_writes_to_stderr(
     captured = capsys.readouterr()
     assert confirmed == {"ref:comp": 12}
     assert captured.out == ""
-    assert "VSPreview Confirmation" in captured.err
+    assert "[WAIT] VSPreview Confirmation" in captured.err
     assert "ref" in captured.err
-    assert "comp" in captured.err
-    assert "+4" in captured.err
+    assert "Comparison 1 | comp" in captured.err
+    assert "domain       Untrimmed source-frame indices" in captured.err
+    assert "enter        reference_frame comparison_frame" in captured.err
+    assert "offset       reference - comparison" in captured.err
+    assert "skip         'skip' or 's'" in captured.err
+    assert "frames       [+4f] >" in captured.err
+    assert captured.err.endswith("\n")
     assert "\x1b[" not in captured.err
     assert "[bold cyan]" not in captured.err
 
@@ -376,6 +382,44 @@ def test_prompt_for_confirmed_offsets_does_not_show_numeric_hint_when_absent(
     assert confirmed == {"ref:comp": 12}
     assert "comp" in captured.err
     assert "+0" not in captured.err
+    assert "frames       [no trusted audio hint] >" in captured.err
+
+
+def test_prompt_for_confirmed_offsets_uses_prepared_names_but_keeps_stem_keys(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(alignment_vspreview.sys, "stdin", io.StringIO("120 108\n"))
+
+    confirmed = alignment_vspreview._prompt_for_confirmed_offsets(
+        reference=tmp_path / "raw-reference-stem.mkv",
+        comparisons=[tmp_path / "raw-comparison-stem.mkv"],
+        offsets_by_key={"raw-reference-stem:raw-comparison-stem": 4},
+        presentation_names_by_stem={
+            "raw-reference-stem": "PMTP WEB-DL | DV HDR10+ | Kitsune",
+            "raw-comparison-stem": "ATV WEB-DL | DV HDR10+ | Kitsune",
+        },
+        no_color=True,
+    )
+
+    output = capsys.readouterr().err
+    assert confirmed == {"raw-reference-stem:raw-comparison-stem": 12}
+    assert "PMTP WEB-DL | DV HDR10+ | Kitsune" in output
+    assert "Comparison 1 | ATV WEB-DL | DV HDR10+ | Kitsune" in output
+    assert "raw-reference-stem" not in output
+    assert "raw-comparison-stem" not in output
+
+
+def test_wait_status_text_styles_only_marker() -> None:
+    from rich.console import Console
+
+    rendered = vspreview_output._status_text(  # noqa: SLF001
+        "[WAIT]", "VSPreview Confirmation", style="magenta"
+    )
+
+    assert str(rendered.get_style_at_offset(Console(), 0)) == "magenta"
+    assert str(rendered.get_style_at_offset(Console(), 7)) == "none"
 
 
 def test_prompt_for_confirmed_offsets_accepts_zero_source_frame_offset(

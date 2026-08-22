@@ -65,6 +65,39 @@ def test_rich_progress_reporter_marks_active_work_without_color(
         reporter.complete_phase()
 
 
+def test_rich_progress_active_marker_style_does_not_leak_to_description() -> None:
+    task = Task(
+        0,
+        "ALIGN | Interactive verification",
+        total=1,
+        completed=0,
+        _get_time=lambda: 0.0,
+    )
+    rendered = progress_module._ActiveDescriptionColumn().render(task)  # noqa: SLF001
+
+    assert isinstance(rendered, progress_module.Text)
+    assert rendered.plain == "  [RUN] ALIGN | Interactive verification"
+    assert str(rendered.get_style_at_offset(Console(), 2)) == "bright_cyan"
+    assert str(rendered.get_style_at_offset(Console(), 8)) == "none"
+
+
+@pytest.mark.parametrize(
+    ("marker", "style"),
+    [
+        ("[OK]", "green"),
+        ("[WARN]", "yellow"),
+        ("[FAIL]", "red"),
+        ("[SKIP]", "dim yellow"),
+    ],
+)
+def test_rich_durable_status_styles_only_the_marker(marker: str, style: str) -> None:
+    rendered = progress_module._status_line(marker, "ALIGN")  # noqa: SLF001
+
+    assert rendered.plain == f"  {marker} ALIGN"
+    assert str(rendered.get_style_at_offset(Console(), 2)) == style
+    assert str(rendered.get_style_at_offset(Console(), 2 + len(marker) + 1)) == "none"
+
+
 def test_rich_progress_reporter_indents_live_work(monkeypatch: pytest.MonkeyPatch) -> None:
     reporter, output = _captured_rich_reporter(monkeypatch)
 
@@ -276,7 +309,7 @@ def test_rich_progress_reporter_ellipsizes_only_the_rendered_description(
     reporter.advance(10)
     task = reporter._progress.tasks[0]  # noqa: SLF001
 
-    assert task.description == f"[RUN] {description}"
+    assert task.description == description
     assert "…" in output.getvalue()
     assert re.search(r"[━-]", output.getvalue())
     assert "10/30" in output.getvalue()

@@ -166,6 +166,69 @@ def test_typed_alignment_progress_uses_prepared_comparison_presentation(
     progress.start_indeterminate.assert_not_called()
 
 
+def test_typed_alignment_passes_presentation_names_without_changing_vspreview_keys(
+    tmp_path: Path,
+) -> None:
+    reference = tmp_path / "raw-reference-stem.mkv"
+    comparison = tmp_path / "raw-comparison-stem.mkv"
+    reference.touch()
+    comparison.touch()
+    config = AlignmentConfig(cache_results=False)
+    request = _alignment_request(
+        tmp_path,
+        reference=reference,
+        comparisons=[comparison],
+        config=config,
+    )
+    request = replace(
+        request,
+        reference=replace(
+            request.reference,
+            presentation_name="PMTP WEB-DL | DV HDR10+ | Kitsune",
+        ),
+        comparisons=[
+            replace(
+                request.comparisons[0],
+                presentation_name="ATV WEB-DL | DV HDR10+ | Kitsune",
+            )
+        ],
+    )
+
+    with (
+        patch(
+            "frame_compare.services.alignment._extract_reference_audio",
+            return_value=(np.ones(10, dtype=np.float32), object()),
+        ),
+        patch(
+            "frame_compare.services.alignment._extract_matching_audio",
+            return_value=np.ones(10, dtype=np.float32),
+        ),
+        patch(
+            "frame_compare.services.alignment._estimate_consensus_offset",
+            return_value=_accepted_consensus(),
+        ),
+        patch(
+            "frame_compare.services.alignment.maybe_launch_alignment_vspreview",
+            return_value=None,
+        ) as launch,
+    ):
+        results = align_clips_from_request(
+            request,
+            config,
+            reference_fps=Fraction(24, 1),
+        )
+
+    assert launch.call_args.kwargs["offsets_by_key"] == {
+        "raw-reference-stem:raw-comparison-stem": 0
+    }
+    assert launch.call_args.kwargs["presentation_names_by_stem"] == {
+        "raw-reference-stem": "PMTP WEB-DL | DV HDR10+ | Kitsune",
+        "raw-comparison-stem": "ATV WEB-DL | DV HDR10+ | Kitsune",
+    }
+    assert results[0].reference_clip == reference.name
+    assert results[0].comparison_clip == comparison.name
+
+
 def test_align_clips_from_request_disabled_skips_shared_reuse_io(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

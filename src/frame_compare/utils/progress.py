@@ -33,6 +33,14 @@ _DURABLE_STATUS_MARKERS = {
     ProgressPhaseStatus.WARNED: "[WARN]",
     ProgressPhaseStatus.FAILED: "[FAIL]",
 }
+_STATUS_STYLES = {
+    "[RUN]": "bright_cyan",
+    "[OK]": "green",
+    "[WAIT]": "magenta",
+    "[WARN]": "yellow",
+    "[SKIP]": "dim yellow",
+    "[FAIL]": "red",
+}
 
 
 def _format_elapsed(seconds: float) -> str:
@@ -71,6 +79,25 @@ class _TaskPresentationColumn(ProgressColumn):
         if task.fields.get("presentation") not in self._presentations:
             return Text("")
         return self._column.render(task)
+
+
+class _ActiveDescriptionColumn(ProgressColumn):
+    """Render the active marker separately from the unstyled description."""
+
+    def __init__(self) -> None:
+        super().__init__(table_column=Column(ratio=1, overflow="ellipsis", no_wrap=True))
+
+    def render(self, task: Task) -> RenderableType:
+        return Text.assemble(
+            "  ",
+            Text("[RUN]", style=_STATUS_STYLES["[RUN]"]),
+            " ",
+            task.description,
+        )
+
+
+def _status_line(marker: str, text: str) -> Text:
+    return Text.assemble("  ", Text(marker, style=_STATUS_STYLES[marker]), " ", text)
 
 
 class _EstimatedTimeRemainingColumn(ProgressColumn):
@@ -180,10 +207,7 @@ class RichProgressReporter:
 
     def __init__(self, *, no_color: bool = False) -> None:
         self._progress = Progress(
-            TextColumn(
-                "  [progress.description]{task.description}",
-                table_column=Column(ratio=1, overflow="ellipsis", no_wrap=True),
-            ),
+            _ActiveDescriptionColumn(),
             _TaskPresentationColumn(TextColumn(" "), "measurable", "indeterminate"),
             _TaskPresentationColumn(
                 BarColumn(bar_width=None, table_column=Column(min_width=20, ratio=1)),
@@ -241,7 +265,7 @@ class RichProgressReporter:
                 self._progress.update(self._task_id, visible=False, refresh=True)
                 self._task_stack.append(self._task_id)
             self._task_id = self._progress.add_task(
-                f"[RUN] {name}",
+                name,
                 total=total,
                 presentation=presentation,
                 phase_label=name,
@@ -263,7 +287,7 @@ class RichProgressReporter:
         """Update the rich progress bar description."""
         with self._lock:
             if self._task_id is not None:
-                self._progress.update(self._task_id, description=f"[RUN] {desc}", refresh=True)
+                self._progress.update(self._task_id, description=desc, refresh=True)
 
     def complete_phase(
         self,
@@ -312,9 +336,8 @@ class RichProgressReporter:
                         if status == ProgressPhaseStatus.COMPLETED
                         else ""
                     )
-                    self._progress.console.print(
-                        Text(f"  {_DURABLE_STATUS_MARKERS[status]} {label}{detail}")
-                    )
+                    marker = _DURABLE_STATUS_MARKERS[status]
+                    self._progress.console.print(_status_line(marker, f"{label}{detail}"))
 
                 self._progress.remove_task(task_id)
                 self._task_totals.pop(task_id, None)

@@ -68,6 +68,17 @@ Use `--verbose` for the generated command and bounded startup diagnostics. If op
 VSPreview verification cannot start, Frame Compare retains the computed audio alignment
 and directs you to `frame-compare doctor`; forced interactive mode still fails.
 Successful sessions continue to inherit VSPreview and native decoder/index output.
+The interactive terminal flow remains nested under `ALIGN` and stages the operator
+through `[RUN] VSPreview Bootstrap`, `[OK] VSPreview Ready`, and
+`[WAIT] VSPreview Confirmation`. Normal labels use the same prepared release-aware
+source identities as the rest of Frame Compare, while paths and filename stems remain
+the internal alignment and override identities. These literal markers remain present
+with color disabled.
+
+Confirmation uses untrimmed source-frame indices. Enter the reference source frame
+followed by the comparison source frame; the confirmed offset is reference minus
+comparison. Native decoder and index diagnostics remain visible between Frame
+Compare-owned status rows.
 
 <figure class="fc-doc-figure">
   <img src="../images/vspreview-alignment.webp" alt="VSPreview showing EBU DVB PQ10 Reference beside EBU DVB HLG10 Comparison at frame 1000 with a zero-frame offset hint and timeline controls.">

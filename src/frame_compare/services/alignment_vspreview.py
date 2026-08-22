@@ -22,6 +22,7 @@ from frame_compare.vspreview.adapter import (
 )
 from frame_compare.vspreview.errors import VSPreviewError
 from frame_compare.vspreview.output import (
+    print_vspreview_confirmation_footer,
     print_vspreview_confirmation_header,
     print_vspreview_failure_details,
     print_vspreview_input_hint,
@@ -214,21 +215,29 @@ def _prompt_for_confirmed_offsets(
     reference: Path,
     comparisons: list[Path],
     offsets_by_key: dict[str, int | None],
+    presentation_names_by_stem: dict[str, str] | None = None,
     no_color: bool = False,
 ) -> dict[str, int] | None:
     if not comparisons:
         return {}
 
-    print_vspreview_confirmation_header(reference=reference, no_color=no_color)
+    presentation_names = presentation_names_by_stem or {}
+    print_vspreview_confirmation_header(
+        reference_name=presentation_names.get(reference.stem, reference.stem),
+        no_color=no_color,
+    )
 
     confirmed: dict[str, int] = {}
-    for comparison in comparisons:
+    for comparison_number, comparison in enumerate(comparisons, start=1):
         key = f"{reference.stem}:{comparison.stem}"
         suggested_offset = _format_suggested_offset(offsets_by_key.get(key))
         while True:
             try:
                 raw_value = _read_vspreview_prompt(
-                    label=comparison.stem,
+                    label=(
+                        f"Comparison {comparison_number} | "
+                        f"{presentation_names.get(comparison.stem, comparison.stem)}"
+                    ),
                     suggested_offset=suggested_offset,
                     no_color=no_color,
                 ).strip()
@@ -257,6 +266,7 @@ def _prompt_for_confirmed_offsets(
             reference_source_frame, comparison_source_frame = source_frames
             confirmed[key] = reference_source_frame - comparison_source_frame
             break
+    print_vspreview_confirmation_footer(no_color=no_color)
     return confirmed
 
 
@@ -315,6 +325,7 @@ def maybe_launch_alignment_vspreview(
     config: AlignmentConfig,
     progress: ProgressReporter | None,
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
+    presentation_names_by_stem: dict[str, str] | None = None,
     verbose: bool = False,
 ) -> dict[str, int] | None:
     """Best-effort VSPreview alignment verification.
@@ -375,6 +386,7 @@ def maybe_launch_alignment_vspreview(
                 suggested_offsets_by_key=offsets_by_key,
                 cache_dir=cache_dir,
                 frame_props_by_stem=frame_props_by_stem,
+                presentation_names_by_stem=presentation_names_by_stem,
             ),
             config=VSPreviewConfig(
                 enabled=launch_decision.enabled,
@@ -390,6 +402,7 @@ def maybe_launch_alignment_vspreview(
             reference=reference,
             comparisons=comparisons,
             offsets_by_key=offsets_by_key,
+            presentation_names_by_stem=presentation_names_by_stem,
             no_color=config.no_color,
         )
         if confirmed_offsets is None:

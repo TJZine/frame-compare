@@ -155,7 +155,9 @@ def test_windows_external_launcher_remains_available_without_current_module(
 ) -> None:
     monkeypatch.setattr("frame_compare.vspreview.adapter.sys.platform", "win32")
     monkeypatch.setattr("frame_compare.vspreview.adapter.runtime_kind", lambda: "unmanaged")
-    monkeypatch.setattr("frame_compare.vspreview.adapter.importlib.util.find_spec", lambda _module: None)
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.importlib.util.find_spec", lambda _module: None
+    )
     monkeypatch.setattr(
         "frame_compare.vspreview.adapter.shutil.which",
         lambda command: "C:/external/vspreview.exe" if command == "vspreview" else None,
@@ -176,6 +178,9 @@ def _execute_generated_script(
     num_frames_by_stem: dict[str, int] | None = None,
     frame_props_by_stem: dict[str, dict[str, object]] | None = None,
     overlay_failure_stems: set[str] | None = None,
+    presentation_names_by_stem: dict[str, str] | None = None,
+    native_loader_output: bool = False,
+    load_failure_stems: set[str] | None = None,
 ) -> tuple[
     dict[str, list[tuple[int | None, int | None, int | None]]],
     list[int],
@@ -200,6 +205,7 @@ def _execute_generated_script(
     if frame_props_by_stem is not None:
         resolved_frame_props.update(frame_props_by_stem)
     resolved_overlay_failure_stems = overlay_failure_stems or set()
+    resolved_load_failure_stems = load_failure_stems or set()
 
     class FakeClip:
         def __init__(self, stem: str, num_frames: int) -> None:
@@ -226,7 +232,12 @@ def _execute_generated_script(
 
     class FakeLsmas:
         def LWLibavSource(self, path: str) -> FakeClip:
-            return clips[Path(path).stem]
+            if native_loader_output:
+                print("NATIVE INDEX OUTPUT", file=sys.stderr)
+            stem = Path(path).stem
+            if stem in resolved_load_failure_stems:
+                raise RuntimeError("load failed")
+            return clips[stem]
 
     class FakeText:
         def Text(self, clip: FakeClip, _text: str, *, alignment: int) -> FakeClip:
@@ -253,6 +264,7 @@ def _execute_generated_script(
         suggested_offsets_by_key=suggested_offsets_by_key,
         bootstrap_paths=[tmp_path],
         frame_props_by_stem=resolved_frame_props,
+        presentation_names_by_stem=presentation_names_by_stem,
     )
 
     exec(
@@ -650,7 +662,7 @@ def test_generated_script_output_order_matches_prompt_input_order_for_unsorted_c
     assert output_indices == [0, 1, 2, 3, 4, 5]
     assert output_stems == ["ref", "zeta", "ref", "alpha", "ref", "mid"]
     assert captured.out == ""
-    for token in ("loaded", "zeta", "alpha", "mid", "audio hint"):
+    for token in ("comparison 1", "zeta", "alpha", "mid", "audio hint", "outputs"):
         assert token in captured.err
 
 
@@ -668,17 +680,111 @@ def test_generated_script_current_human_output_organization_without_launching_vs
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "VSPreview Bootstrap" in captured.err
+    assert "[RUN] VSPreview Bootstrap" in captured.err
     assert "reference" in captured.err
-    assert "loaded" in captured.err
-    assert "output 0" in captured.err
-    assert "output 1" in captured.err
-    assert "output 2" in captured.err
-    assert "output 3" in captured.err
-    assert "VSPreview Ready" in captured.err
+    assert "loaded" not in captured.err
+    assert "Reference 0 | Comparison 1 1" in captured.err
+    assert "Reference 2 | Comparison 2 3" in captured.err
+    assert (
+        captured.err.index("comparison 1")
+        < captured.err.index("Reference 0 | Comparison 1 1")
+        < captured.err.index("comparison 2")
+    )
+    assert captured.err.index("comparison 2") < captured.err.index("Reference 2 | Comparison 2 3")
+    assert "[OK] VSPreview Ready" in captured.err
     assert "VSPreview Assumptions" not in captured.err
     assert "a" in captured.err
     assert "b" in captured.err
+
+
+def test_generated_script_uses_prepared_names_without_changing_internal_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _execute_generated_script(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        suggested_offsets_by_key={"ref:long-comparison-stem": 7},
+        comparison_stems=("long-comparison-stem",),
+        presentation_names_by_stem={
+            "ref": "PMTP WEB-DL | DV HDR10+ | Kitsune",
+            "long-comparison-stem": "ATV WEB-DL | DV HDR10+ | Kitsune",
+        },
+    )
+
+    output = capsys.readouterr().err
+    assert "PMTP WEB-DL | DV HDR10+ | Kitsune" in output
+    assert "ATV WEB-DL | DV HDR10+ | Kitsune" in output
+    assert "long-comparison-stem" not in output
+    assert "+7f" in output
+    assert "Reference 0 | Comparison 1 1" in output
+    assert "\x1b[" not in output
+
+
+def test_generated_assumptions_use_prepared_names_not_internal_stems(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _execute_generated_script(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        suggested_offsets_by_key={"ref:very-long-raw-comparison-stem": 7},
+        comparison_stems=("very-long-raw-comparison-stem",),
+        presentation_names_by_stem={
+            "ref": "PMTP WEB-DL | DV HDR10+ | Kitsune",
+            "very-long-raw-comparison-stem": "ATV WEB-DL | DV HDR10+ | Kitsune",
+        },
+        frame_props_by_stem={
+            "ref": {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1},
+            "very-long-raw-comparison-stem": {"_Transfer": 2},
+        },
+    )
+
+    output = capsys.readouterr().err
+    assert "ATV WEB-DL | DV HDR10+ | Kitsune missing" in output
+    assert "very-long-raw-comparison-stem" not in output
+
+
+def test_failed_comparison_keeps_visible_warning_and_truthful_output_grouping(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _execute_generated_script(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        suggested_offsets_by_key={"ref:a": 1, "ref:b": 2},
+        comparison_stems=("a", "b"),
+        load_failure_stems={"a"},
+    )
+
+    output = capsys.readouterr().err
+    assert "comparison 1  a" in output
+    assert "[WARN] Comparison source could not be loaded" in output
+    assert "comparison 2  b" in output
+    assert "Reference 0 | Comparison 2 1" in output
+    assert "Comparison 1 1" not in output
+
+
+def test_generated_bootstrap_precedes_native_source_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _execute_generated_script(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        suggested_offsets_by_key={"ref:a": 0},
+        comparison_stems=("a",),
+        native_loader_output=True,
+    )
+
+    output = capsys.readouterr().err
+    assert output.index("[RUN] VSPreview Bootstrap") < output.index("NATIVE INDEX OUTPUT")
+    assert output.index("reference") < output.index("NATIVE INDEX OUTPUT")
+    assert output.index("fps") > output.index("NATIVE INDEX OUTPUT")
 
 
 def test_generated_script_collects_preview_assumptions_before_outputs_and_ready(
@@ -807,7 +913,7 @@ core = _Core()
 
     assert result.returncode == 1
     assert result.stdout == ""
-    assert "ERROR: Failed to resolve LWLibavSource loader:" in result.stderr
+    assert "[FAIL] Failed to resolve LWLibavSource loader:" in result.stderr
     assert "LWLibavSource not found on core.lsmas or core.lw" in result.stderr
     assert "Traceback" not in result.stderr
 

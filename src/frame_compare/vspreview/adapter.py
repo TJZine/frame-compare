@@ -173,6 +173,7 @@ class VSPreviewSessionRequest:
     suggested_offsets_by_key: dict[str, int | None]
     cache_dir: Path
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None
+    presentation_names_by_stem: dict[str, str] | None = None
 
 
 def launch_alignment_verification_session(
@@ -314,6 +315,7 @@ def _write_vspreview_session_script(request: VSPreviewSessionRequest) -> Path:
         suggested_offsets_by_key=request.suggested_offsets_by_key,
         cache_dir=request.cache_dir,
         frame_props_by_stem=request.frame_props_by_stem,
+        presentation_names_by_stem=request.presentation_names_by_stem,
     )
 
 
@@ -325,9 +327,10 @@ def _resolve_launch_command(script_path: Path) -> list[str]:
     register its private native runtime. An external launcher remains the fallback
     when VSPreview is not installed in the current interpreter.
     """
-    if runtime_kind().casefold() == "windows-portable" or importlib.util.find_spec(
-        "vspreview"
-    ) is not None:
+    if (
+        runtime_kind().casefold() == "windows-portable"
+        or importlib.util.find_spec("vspreview") is not None
+    ):
         return [
             sys.executable,
             "-m",

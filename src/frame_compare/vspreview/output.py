@@ -17,6 +17,7 @@ STYLE_VALUE = "bright_white"
 STYLE_PATH = "dim"
 STYLE_HINT = "yellow"
 STYLE_HEADER = "bold cyan"
+STYLE_WAIT = "magenta"
 _STARTUP_STDERR_LIMIT = 4000
 
 
@@ -29,6 +30,10 @@ def _group_table() -> Table:
     table.add_column("key", style=STYLE_KEY, no_wrap=True, min_width=11)
     table.add_column("value", overflow="fold")
     return table
+
+
+def _status_text(marker: str, message: str, *, style: str) -> Text:
+    return Text.assemble(Text(marker, style=style), " ", message)
 
 
 def print_vspreview_session(
@@ -57,7 +62,7 @@ def print_vspreview_unavailable(
     """Print the single normal human warning for optional verification failure."""
     console = _console(no_color=no_color)
     console.print()
-    console.print("[yellow][WARN] VSPreview verification unavailable[/]")
+    console.print(_status_text("[WARN]", "VSPreview verification unavailable", style="yellow"))
     console.print(f"       {escape(reason)}")
     console.print("       Continuing with computed audio alignment.")
     console.print("       Hint: Check the VSPreview setup with frame-compare doctor.")
@@ -86,25 +91,20 @@ def print_vspreview_failure_details(
 
 def print_vspreview_confirmation_header(
     *,
-    reference: Path,
+    reference_name: str,
     no_color: bool = False,
 ) -> None:
     """Print the manual alignment confirmation instructions to stderr."""
     table = _group_table()
-    table.add_row("reference", f"[{STYLE_VALUE}]{escape(reference.stem)}[/]")
-    table.add_row("domain", "source-frame indices from the untrimmed clips")
-    table.add_row(
-        "enter",
-        (
-            f"[{STYLE_HINT}]reference_source_frame comparison_source_frame[/]; "
-            "offset = reference_source_frame - comparison_source_frame"
-        ),
-    )
-    table.add_row("skip", f"enter [{STYLE_HINT}]'skip'[/] or [{STYLE_HINT}]'s'[/]")
+    table.add_row("reference", f"[{STYLE_VALUE}]{escape(reference_name)}[/]")
+    table.add_row("domain", "Untrimmed source-frame indices")
+    table.add_row("enter", f"[{STYLE_HINT}]reference_frame comparison_frame[/]")
+    table.add_row("offset", "reference - comparison")
+    table.add_row("skip", f"[{STYLE_HINT}]'skip'[/] or [{STYLE_HINT}]'s'[/]")
 
     console = _console(no_color=no_color)
     console.print()
-    console.print(f"[{STYLE_HEADER}]VSPreview Confirmation[/]")
+    console.print(_status_text("[WAIT]", "VSPreview Confirmation", style=STYLE_WAIT))
     console.print(table)
     console.print()
 
@@ -120,9 +120,9 @@ def write_vspreview_prompt(
     table = _group_table()
     table.add_row("comparison", f"[{STYLE_VALUE}]{escape(label)}[/]")
     console.print(table)
-    prompt = Text("  frames [")
-    prompt.append(suggested_offset, style=STYLE_HINT)
-    prompt.append("]: ")
+    prompt = Text("  frames       ", style=STYLE_KEY)
+    prompt.append(f"[{suggested_offset}]", style=STYLE_HINT)
+    prompt.append(" > ", style="bright_white")
     console.print(prompt, end="")
     sys.stderr.flush()
 
@@ -130,3 +130,8 @@ def write_vspreview_prompt(
 def print_vspreview_input_hint(message: str, *, no_color: bool = False) -> None:
     console = _console(no_color=no_color)
     console.print(f"  [{STYLE_HINT}]Hint[/] {escape(message)}")
+
+
+def print_vspreview_confirmation_footer(*, no_color: bool = False) -> None:
+    """Separate the completed blocking workflow from resumed parent progress."""
+    _console(no_color=no_color).print()

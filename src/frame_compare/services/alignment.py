@@ -493,6 +493,15 @@ def align_clips_from_request(
         config=config,
         progress=progress,
         frame_props_by_stem=frame_props_by_stem,
+        presentation_names_by_stem={
+            request.reference.path.stem: (
+                request.reference.presentation_name or request.reference.path.stem
+            ),
+            **{
+                comparison.path.stem: (comparison.presentation_name or comparison.path.stem)
+                for comparison in request.comparisons
+            },
+        },
         verbose=verbose,
     )
     fps_reference = _apply_confirmed_vspreview_offsets(
