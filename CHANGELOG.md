@@ -10,10 +10,11 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 ### Added
 
 - Audio alignment now reports bounded diagnostic evidence when a retained constant
-  offset may drift, vary, or cross an edit discontinuity; legacy alignment caches
-  remain reusable.
-- Offline report HUD labels now include the existing complete source file size in
-  Single, Slider, Diff, Blink, and Grid views.
+  offset may drift, vary, or cross an edit discontinuity, with strict validation of
+  the current alignment-cache schema.
+- Offline report HUD labels now expose complete source identities and accurate file
+  sizes in Single, Slider, Diff, Blink, and Grid views, including accessible role
+  labels for every comparison mode.
 
 ### Changed
 
@@ -24,6 +25,8 @@ Frame Compare follows Conventional Commits, and Release Please turns the
   human owner for warn-only status; JSON retains structured exception evidence.
 - Report Inspector and viewport behavior now live in focused dependency-free viewer
   owners without changing report payload or browser-storage schemas.
+- Optional VSPreview sessions now use the locked application runtime for startup
+  checks and redact inherited credentials from bounded launch diagnostics.
 
 ## [0.1.0]
 
