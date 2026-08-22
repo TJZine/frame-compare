@@ -219,7 +219,7 @@ const viewer = {
     formatFileSize() { return '17.00 GiB'; },
     clipAccessibleName(clip) { return `${clip.display.primary} — ${clip.display.filename}`; },
     referenceClipIndex() { return 0; },
-    clampPan() {},
+    viewport: { clampPan() {} },
     updateInspectorData() {},
     updateCurrentFrameMetadata() {},
     announce(message) { announcements.push(message); },
@@ -307,14 +307,25 @@ owner.render();
 const currentCell = cells.children[0];
 const currentImage = currentCell.querySelector('.rv-grid-image');
 const currentError = currentCell.querySelector('[data-grid-error]');
+viewer.state.overlaysHidden = true;
+owner.updateCellRoles();
 currentImage.dispatch('error');
 assert.equal(owner.state.failed.has(0), true);
 assert.equal(currentError.hidden, false);
+assert.doesNotMatch(currentCell.getAttribute('aria-label'), /17\.00 GiB/);
+assert.equal(currentError.children[0].textContent, 'Clip 1 image unavailable');
+assert.equal(
+    currentCell.querySelector('[data-grid-retry]').getAttribute('aria-label'),
+    'Retry Clip 1 image',
+);
+assert.equal(announcements.at(-1), 'Clip 1 image unavailable.');
 staleImage.dispatch('load');
 assert.equal(owner.state.failed.has(0), true);
 currentImage.dispatch('load');
 assert.equal(owner.state.failed.has(0), false);
 assert.equal(currentError.hidden, true);
+viewer.state.overlaysHidden = false;
+owner.updateCellRoles();
 
 currentImage.dispatch('error');
 const retry = currentCell.querySelector('[data-grid-retry]');

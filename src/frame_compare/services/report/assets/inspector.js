@@ -69,7 +69,8 @@ const Inspector = {
                     viewer.state.inspectorRestoreFocus = canRestoreFocus ? activeElement : viewer.dom.btnInspector;
                 }
                 viewer.state.inspectorOpen = nextOpen;
-                this.updateVisibility();
+                if (nextOpen) this.render();
+                else this.updateVisibility();
                 if (options.save !== false) viewer.persistViewportState();
                 if (nextOpen && options.focus !== false) {
                     viewer.focusElement(Array.from(viewer.dom.inspectorTabs)
@@ -125,7 +126,9 @@ const Inspector = {
 
             setTab(tab, options = {}) {
                 viewer.state.inspectorTab = this.validTab(tab) ? tab : 'frame';
-                if (viewer.state.inspectorTab === 'review') viewer.ensureReviewController();
+                if (viewer.state.inspectorTab === 'review' && viewer.state.inspectorOpen) {
+                    viewer.ensureReviewController().render();
+                }
                 this.updateTabs();
                 if (options.save !== false) viewer.persistViewportState();
             },
@@ -205,6 +208,8 @@ const Inspector = {
 
             render() {
                 if (!viewer.dom.inspector) return;
+                this.updateVisibility();
+                if (!viewer.state.inspectorOpen) return;
                 viewer.updateRenderingSummary();
                 const frame = viewer.currentFrame();
                 viewer.setText(viewer.dom.inspectorFrameLabel, frame?.label || 'No frame selected');
@@ -277,10 +282,10 @@ const Inspector = {
                     }));
                 }
 
-                viewer.setText(viewer.dom.inspectorAlignPair, `${viewer.currentPairLabel()} (${viewer.currentPairAlignmentKey()})`);
-                viewer.setText(viewer.dom.inspectorAlignPreset, viewer.alignmentPresetLabel(viewer.state.alignmentPreset));
-                viewer.setText(viewer.dom.inspectorAlignX, viewer.formatSignedPixels(viewer.state.alignX, 'x'));
-                viewer.setText(viewer.dom.inspectorAlignY, viewer.formatSignedPixels(viewer.state.alignY, 'y'));
+                viewer.setText(viewer.dom.inspectorAlignPair, `${viewer.currentPairLabel()} (${viewer.viewport.currentPairAlignmentKey()})`);
+                viewer.setText(viewer.dom.inspectorAlignPreset, viewer.viewport.alignmentPresetLabel(viewer.state.alignmentPreset));
+                viewer.setText(viewer.dom.inspectorAlignX, viewer.viewport.formatSignedPixels(viewer.state.alignX, 'x'));
+                viewer.setText(viewer.dom.inspectorAlignY, viewer.viewport.formatSignedPixels(viewer.state.alignY, 'y'));
                 viewer.setText(viewer.dom.inspectorExportTitle, viewer.state.data.title || '');
                 viewer.setText(viewer.dom.inspectorExportId, viewer.state.data.report_id || '');
                 viewer.setText(viewer.dom.inspectorExportGenerated, viewer.state.data.generated_at || '');
@@ -288,8 +293,6 @@ const Inspector = {
                 viewer.setText(viewer.dom.inspectorExportSummary,
                     `${viewer.state.data.title || 'Report'} • ${viewer.state.data.stats.frame_count} frames • ${viewer.state.data.stats.clip_count} clips • ${ViewerFormat.modeLabel(viewer.state.mode)}`);
                 viewer.reviewController?.render();
-                this.updateTabs();
-                this.updateVisibility();
             },
         };
     },

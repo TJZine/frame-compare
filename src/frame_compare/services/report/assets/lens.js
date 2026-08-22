@@ -440,7 +440,7 @@ const Lens = (() => {
                 return { clipIdx: viewer.state.activeClipIdx, image };
             }
             if (viewer.state.mode === 'slider') {
-                const rect = viewer.sliderCanvasRect?.();
+                const rect = viewer.viewport?.sliderCanvasRect();
                 const divider = rect?.left + rect?.width * (1 - viewer.state.revealPercent / 100);
                 return clientX <= divider
                     ? { clipIdx: viewer.state.leftClipIdx, image: viewer.dom.leftImg }
@@ -467,7 +467,7 @@ const Lens = (() => {
                 return { clipIdx: viewer.state.activeClipIdx, image };
             }
             if (viewer.state.mode === 'slider') {
-                const rect = viewer.sliderCanvasRect?.();
+                const rect = viewer.viewport?.sliderCanvasRect();
                 if (rect && validDimensions(rect.width, rect.height)) {
                     return entryForPointer(
                         rect.left + rect.width / 2,

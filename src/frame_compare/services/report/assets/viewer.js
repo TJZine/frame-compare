@@ -602,18 +602,18 @@ const ReportViewer = {
             lensTouchStart: null,
         };
 
-        this.dom.zoomRange.addEventListener('input', (e) => this.setZoom(parseFloat(e.target.value)));
-        this.dom.btnZoomOut.addEventListener('click', () => this.setZoom(this.state.zoom - 0.1));
-        this.dom.btnZoomIn.addEventListener('click', () => this.setZoom(this.state.zoom + 0.1));
-        this.dom.btnZoomReset.addEventListener('click', () => this.resetViewport());
+        this.dom.zoomRange.addEventListener('input', (e) => this.viewport.setZoom(parseFloat(e.target.value)));
+        this.dom.btnZoomOut.addEventListener('click', () => this.viewport.setZoom(this.state.zoom - 0.1));
+        this.dom.btnZoomIn.addEventListener('click', () => this.viewport.setZoom(this.state.zoom + 0.1));
+        this.dom.btnZoomReset.addEventListener('click', () => this.viewport.resetViewport());
 
         this.dom.fitBtns.forEach(btn => {
-            btn.addEventListener('click', () => this.setFitMode(btn.dataset.fit));
+            btn.addEventListener('click', () => this.viewport.setFitMode(btn.dataset.fit));
         });
-        this.dom.sizerImg.addEventListener('load', () => this.applyFitMode());
-        window.addEventListener('resize', () => this.applyFitMode());
+        this.dom.sizerImg.addEventListener('load', () => this.viewport.applyFitMode());
+        window.addEventListener('resize', () => this.viewport.applyFitMode());
         document.addEventListener('fullscreenchange', () => {
-            this.applyFitMode();
+            this.viewport.applyFitMode();
             this.updateFullscreenButton();
         });
         this.dom.btnFullscreen.addEventListener('click', () => this.toggleFullscreen());
@@ -629,13 +629,13 @@ const ReportViewer = {
         this.dom.stage.addEventListener('pointerdown', (e) => {
             if (this.isViewerChromeEvent(e)) return;
             this.pointerInteraction.lensPointHandled = this.lens.handleStagePointerDown(e);
-            this.trackPointerPosition(e);
-            this.capturePointer(e.pointerId);
-            if (this.shouldStartPinch(e)) {
+            this.viewport.trackPointerPosition(e);
+            this.viewport.capturePointer(e.pointerId);
+            if (this.viewport.shouldStartPinch(e)) {
                 this.lens.cancelTouchPending();
                 this.pointerInteraction.lensPointHandled = false;
                 this.pointerInteraction.lensTouchStart = null;
-                this.startPinchFromTrackedPointers();
+                this.viewport.startPinchFromTrackedPointers();
                 if (this.state.mode === 'blink') this.state.blinkPaused = true;
                 e.preventDefault();
                 return;
@@ -649,14 +649,14 @@ const ReportViewer = {
                 e.preventDefault();
                 return;
             }
-            if (this.shouldPanFromPointer(e)) {
-                this.startPanFromPointer(e);
+            if (this.viewport.shouldPanFromPointer(e)) {
+                this.viewport.startPanFromPointer(e);
                 if (this.state.mode === 'blink') this.state.blinkPaused = true;
                 e.preventDefault();
             } else if (this.state.mode === 'slider') {
                 this.pointerInteraction.isDragging = true;
-                this.captureStagePointer(e);
-                this.updateSliderFromPointer(e);
+                this.viewport.captureStagePointer(e);
+                this.viewport.updateSliderFromPointer(e);
                 e.preventDefault();
             }
         });
@@ -664,7 +664,7 @@ const ReportViewer = {
         this.dom.stage.addEventListener('pointermove', (e) => {
             if (this.isViewerChromeEvent(e)) return;
             const lensMove = this.lens.handleStagePointerMove(e);
-            this.trackPointerPosition(e);
+            this.viewport.trackPointerPosition(e);
             const pointer = this.pointerInteraction;
             if (pointer.lensPointHandled && pointer.lensTouchStart?.pointerId === e.pointerId) {
                 if (lensMove === 'pending') {
@@ -678,23 +678,23 @@ const ReportViewer = {
                 }
             }
             if (pointer.pinchActive) {
-                this.updatePinchFromTrackedPointers();
+                this.viewport.updatePinchFromTrackedPointers();
                 e.preventDefault();
                 return;
             }
             if (pointer.activePointerId !== null && e.pointerId !== pointer.activePointerId) return;
-            if (this.updatePanFromPointer(e)) {
+            if (this.viewport.updatePanFromPointer(e)) {
                 e.preventDefault();
                 return;
             }
             if (pointer.isDragging) {
-                this.updateSliderFromPointer(e);
+                this.viewport.updateSliderFromPointer(e);
                 e.preventDefault();
             }
         });
-        this.dom.stage.addEventListener('pointerup', (e) => this.stopPointerInteraction(e));
+        this.dom.stage.addEventListener('pointerup', (e) => this.viewport.stopPointerInteraction(e));
         this.dom.stage.addEventListener('pointercancel', (e) => {
-            this.stopPointerInteraction(e, { cancelled: true });
+            this.viewport.stopPointerInteraction(e, { cancelled: true });
         });
         this.dom.stage.addEventListener('dblclick', (e) => this.handleViewportDoubleClick(e));
         this.dom.stage.addEventListener('wheel', (e) => this.handleViewportWheel(e), { passive: false });
@@ -708,17 +708,17 @@ const ReportViewer = {
         if (this.isViewerChromeEvent(e)) return;
         if (this.state.mode === 'overlay' || this.state.mode === 'diff') return;
         e.preventDefault();
-        this.resetViewport();
+        this.viewport.resetViewport();
     },
 
     handleViewportWheel(e) {
         if (this.isViewerChromeEvent(e)) return;
         e.preventDefault();
         if (e.shiftKey) {
-            this.panByPixels(-e.deltaX, -e.deltaY, e.clientX, e.clientY);
+            this.viewport.panByPixels(-e.deltaX, -e.deltaY, e.clientX, e.clientY);
             return;
         }
-        this.zoomAtPoint(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1);
+        this.viewport.zoomAtPoint(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1);
     },
 
     startDeferredViewportGesture(e, start) {
@@ -732,41 +732,41 @@ const ReportViewer = {
             clientY: start.clientY,
         };
         if (this.state.mode === 'blink') this.state.blinkPaused = true;
-        if (this.shouldPanFromPointer(e)) {
-            this.startPanFromPointer(origin);
-            this.updatePanFromPointer(e);
+        if (this.viewport.shouldPanFromPointer(e)) {
+            this.viewport.startPanFromPointer(origin);
+            this.viewport.updatePanFromPointer(e);
             return;
         }
         if (this.state.mode === 'slider') {
             this.pointerInteraction.isDragging = true;
-            this.captureStagePointer(e);
-            this.updateSliderFromPointer(e);
+            this.viewport.captureStagePointer(e);
+            this.viewport.updateSliderFromPointer(e);
         }
     },
 
     bindAlignmentEvents() {
         this.dom.alignmentPreset.addEventListener('change', (e) => {
-            this.setAlignmentPreset(e.target.value);
+            this.viewport.setAlignmentPreset(e.target.value);
         });
         this.dom.alignX.addEventListener('input', (e) => {
-            this.setRawAlignmentInput('x', e.target.value);
+            this.viewport.setRawAlignmentInput('x', e.target.value);
         });
         this.dom.alignY.addEventListener('input', (e) => {
-            this.setRawAlignmentInput('y', e.target.value);
+            this.viewport.setRawAlignmentInput('y', e.target.value);
         });
-        this.dom.alignX.addEventListener('blur', () => this.commitRawAlignmentInput('x'));
-        this.dom.alignY.addEventListener('blur', () => this.commitRawAlignmentInput('y'));
+        this.dom.alignX.addEventListener('blur', () => this.viewport.commitRawAlignmentInput('x'));
+        this.dom.alignY.addEventListener('blur', () => this.viewport.commitRawAlignmentInput('y'));
         this.dom.alignX.addEventListener('keydown', (e) => {
             if (e.key !== 'Enter') return;
             e.preventDefault();
-            this.commitRawAlignmentInput('x');
+            this.viewport.commitRawAlignmentInput('x');
         });
         this.dom.alignY.addEventListener('keydown', (e) => {
             if (e.key !== 'Enter') return;
             e.preventDefault();
-            this.commitRawAlignmentInput('y');
+            this.viewport.commitRawAlignmentInput('y');
         });
-        this.dom.btnAlignmentReset.addEventListener('click', () => this.setAlignmentPreset('none'));
+        this.dom.btnAlignmentReset.addEventListener('click', () => this.viewport.setAlignmentPreset('none'));
 
         // Toggle popover visibility
         this.dom.btnAlignToggle.addEventListener('click', (e) => {
@@ -853,70 +853,6 @@ const ReportViewer = {
         document.addEventListener('keydown', (e) => this.handleKey(e));
     },
 
-    capturePointer(...args) {
-        return this.viewport.capturePointer(...args);
-    },
-
-    releasePointer(...args) {
-        return this.viewport.releasePointer(...args);
-    },
-
-    captureStagePointer(...args) {
-        return this.viewport.captureStagePointer(...args);
-    },
-
-    trackPointerPosition(...args) {
-        return this.viewport.trackPointerPosition(...args);
-    },
-
-    untrackPointer(...args) {
-        return this.viewport.untrackPointer(...args);
-    },
-
-    trackedTouchPointers(...args) {
-        return this.viewport.trackedTouchPointers(...args);
-    },
-
-    shouldStartPinch(...args) {
-        return this.viewport.shouldStartPinch(...args);
-    },
-
-    pinchMetricsFromTrackedPointers(...args) {
-        return this.viewport.pinchMetricsFromTrackedPointers(...args);
-    },
-
-    startPinchFromTrackedPointers(...args) {
-        return this.viewport.startPinchFromTrackedPointers(...args);
-    },
-
-    updatePinchFromTrackedPointers(...args) {
-        return this.viewport.updatePinchFromTrackedPointers(...args);
-    },
-
-    finishPinchInteraction(...args) {
-        return this.viewport.finishPinchInteraction(...args);
-    },
-
-    updateSliderFromPointer(...args) {
-        return this.viewport.updateSliderFromPointer(...args);
-    },
-
-    shouldPanFromPointer(...args) {
-        return this.viewport.shouldPanFromPointer(...args);
-    },
-
-    startPanFromPointer(...args) {
-        return this.viewport.startPanFromPointer(...args);
-    },
-
-    updatePanFromPointer(...args) {
-        return this.viewport.updatePanFromPointer(...args);
-    },
-
-    stopPointerInteraction(...args) {
-        return this.viewport.stopPointerInteraction(...args);
-    },
-
     clipCount() {
         return this.state.data?.clips?.length || 0;
     },
@@ -979,20 +915,20 @@ const ReportViewer = {
 
     setLeftClip(idx) {
         const nextIndex = this.clipIndexOrDefault(idx, this.state.leftClipIdx);
-        this.storeCurrentPairAlignment();
+        this.viewport.storeCurrentPairAlignment();
         this.state.leftClipIdx = nextIndex;
         this.ensureDistinctPairSelection();
-        this.loadCurrentPairAlignment();
+        this.viewport.loadCurrentPairAlignment();
         if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
         this.render();
     },
 
     setRightClip(idx) {
         const nextIndex = this.clipIndexOrDefault(idx, this.state.rightClipIdx);
-        this.storeCurrentPairAlignment();
+        this.viewport.storeCurrentPairAlignment();
         this.state.rightClipIdx = nextIndex;
         this.ensureDistinctPairSelection();
-        this.loadCurrentPairAlignment();
+        this.viewport.loadCurrentPairAlignment();
         if (this.state.mode === 'blink') {
             this.state.activeClipIdx = this.state.rightClipIdx;
         }
@@ -1003,11 +939,11 @@ const ReportViewer = {
     swapPairClips() {
         if (this.state.mode === 'overlay' || this.state.mode === 'grid' || this.clipCount() <= 1) return;
 
-        this.storeCurrentPairAlignment();
+        this.viewport.storeCurrentPairAlignment();
         const previousLeft = this.state.leftClipIdx;
         this.state.leftClipIdx = this.state.rightClipIdx;
         this.state.rightClipIdx = previousLeft;
-        this.loadCurrentPairAlignment();
+        this.viewport.loadCurrentPairAlignment();
         if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
         this.render();
     },
@@ -1048,7 +984,7 @@ const ReportViewer = {
         this.state.leftClipIdx = this.clipIndexOrDefault(saved.leftClipIdx, this.state.leftClipIdx);
         this.state.rightClipIdx = this.clipIndexOrDefault(saved.rightClipIdx, this.state.rightClipIdx);
         this.state.activeClipIdx = this.clipIndexOrDefault(saved.activeClipIdx, this.state.activeClipIdx);
-        this.state.zoom = this.clampZoom(saved.zoom);
+        this.state.zoom = this.viewport.clampZoom(saved.zoom);
         this.state.panX = this.numberOrDefault(saved.panX, 0);
         this.state.panY = this.numberOrDefault(saved.panY, 0);
         this.state.revealPercent = Math.max(0, Math.min(100, this.numberOrDefault(saved.revealPercent, 50)));
@@ -1081,14 +1017,14 @@ const ReportViewer = {
             this.state.currentFrameIdx = saved.currentFrameIdx;
         }
         this.ensureDistinctPairSelection();
-        this.state.pairAlignments = this.normalizedPairAlignments(saved.pairAlignments);
-        if (!this.state.pairAlignments[this.currentPairAlignmentKey()]) {
-            const legacyAlignment = this.normalizedAlignmentState(saved);
+        this.state.pairAlignments = this.viewport.normalizedPairAlignments(saved.pairAlignments);
+        if (!this.state.pairAlignments[this.viewport.currentPairAlignmentKey()]) {
+            const legacyAlignment = this.viewport.normalizedAlignmentState(saved);
             if (legacyAlignment) {
-                this.state.pairAlignments[this.currentPairAlignmentKey()] = legacyAlignment;
+                this.state.pairAlignments[this.viewport.currentPairAlignmentKey()] = legacyAlignment;
             }
         }
-        this.loadCurrentPairAlignment();
+        this.viewport.loadCurrentPairAlignment();
         this.normalizeCurrentFrameForFilter();
         if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
     },
@@ -1096,7 +1032,7 @@ const ReportViewer = {
     persistViewportState() {
         const storage = this.localStorage();
         if (!this.state.storageKey || !storage) return false;
-        this.storeCurrentPairAlignment();
+        this.viewport.storeCurrentPairAlignment();
 
         const payload = {
             currentFrameIdx: this.state.currentFrameIdx,
@@ -1238,7 +1174,6 @@ const ReportViewer = {
         if (this.reviewController) return this.reviewController;
         this.reviewController = ReviewState.createController(this);
         this.reviewController.bind();
-        this.reviewController.render();
         return this.reviewController;
     },
 
@@ -1374,16 +1309,16 @@ const ReportViewer = {
         this.inspector.render();
     },
     resetCurrentPairAlignment() {
-        delete this.state.pairAlignments[this.currentPairAlignmentKey()];
-        this.applyAlignmentState(this.neutralAlignmentState());
-        this.applyAlignment();
+        delete this.state.pairAlignments[this.viewport.currentPairAlignmentKey()];
+        this.viewport.applyAlignmentState(this.viewport.neutralAlignmentState());
+        this.viewport.applyAlignment();
         this.persistViewportState();
     },
 
     resetAllPairAlignments() {
         this.state.pairAlignments = {};
-        this.applyAlignmentState(this.neutralAlignmentState());
-        this.applyAlignment();
+        this.viewport.applyAlignmentState(this.viewport.neutralAlignmentState());
+        this.viewport.applyAlignment();
         this.persistViewportState();
     },
 
@@ -1685,9 +1620,9 @@ const ReportViewer = {
             case 'x': case 'X': this.swapPairClips(); break;
             case 'h': case 'H': this.setOverlaysHidden(!this.state.overlaysHidden); break;
             case 'f': case 'F': this.setFilmstripCollapsed(!this.state.filmstripCollapsed); break;
-            case '=': case '+': this.setZoom(this.state.zoom + 0.1); break;
-            case '-': this.setZoom(this.state.zoom - 0.1); break;
-            case 'r': case 'R': this.resetViewport(); break;
+            case '=': case '+': this.viewport.setZoom(this.state.zoom + 0.1); break;
+            case '-': this.viewport.setZoom(this.state.zoom - 0.1); break;
+            case 'r': case 'R': this.viewport.resetViewport(); break;
 
             default:
                 if (e.key >= '1' && e.key <= '9') {
@@ -1708,7 +1643,7 @@ const ReportViewer = {
         if (!this.validMode(mode)) return;
         const previousMode = this.state.mode;
         if (previousMode !== 'grid' && mode === 'grid') {
-            const base = this.baseCanvasSize();
+            const base = this.viewport.baseCanvasSize();
             this.state.panX = base.width > 0 ? this.state.panX / base.width : 0;
             this.state.panY = base.height > 0 ? this.state.panY / base.height : 0;
         }
@@ -1747,7 +1682,7 @@ const ReportViewer = {
         this.dom.stage.classList.add(`rv-mode-${mode}`);
         this.gridView?.setActive(mode === 'grid');
         if (previousMode === 'grid' && mode !== 'grid') {
-            const base = this.baseCanvasSize();
+            const base = this.viewport.baseCanvasSize();
             this.state.panX = base.width > 0 ? this.state.panX * base.width : 0;
             this.state.panY = base.height > 0 ? this.state.panY * base.height : 0;
         }
@@ -1858,166 +1793,6 @@ const ReportViewer = {
         }
     },
 
-    setZoom(...args) {
-        return this.viewport.setZoom(...args);
-    },
-
-    clampZoom(...args) {
-        return this.viewport.clampZoom(...args);
-    },
-
-    applyZoom(...args) {
-        return this.viewport.applyZoom(...args);
-    },
-
-    resetViewport(...args) {
-        return this.viewport.resetViewport(...args);
-    },
-
-    zoomAtPoint(...args) {
-        return this.viewport.zoomAtPoint(...args);
-    },
-
-    panByPixels(...args) {
-        return this.viewport.panByPixels(...args);
-    },
-
-    setPan(...args) {
-        return this.viewport.setPan(...args);
-    },
-
-    clampPan(...args) {
-        return this.viewport.clampPan(...args);
-    },
-
-    applyPan(...args) {
-        return this.viewport.applyPan(...args);
-    },
-
-    setFitMode(...args) {
-        return this.viewport.setFitMode(...args);
-    },
-
-    updateFitButtons(...args) {
-        return this.viewport.updateFitButtons(...args);
-    },
-
-    baseCanvasSize(...args) {
-        return this.viewport.baseCanvasSize(...args);
-    },
-
-    sliderCanvasRect(...args) {
-        return this.viewport.sliderCanvasRect(...args);
-    },
-
-    applyFitMode(...args) {
-        return this.viewport.applyFitMode(...args);
-    },
-
-    applyAlignmentPresetOffsets(...args) {
-        return this.viewport.applyAlignmentPresetOffsets(...args);
-    },
-
-    validAlignmentPreset(...args) {
-        return this.viewport.validAlignmentPreset(...args);
-    },
-
-    currentPairAlignmentKey(...args) {
-        return this.viewport.currentPairAlignmentKey(...args);
-    },
-
-    pairAlignmentKey(...args) {
-        return this.viewport.pairAlignmentKey(...args);
-    },
-
-    isValidPairAlignmentKey(...args) {
-        return this.viewport.isValidPairAlignmentKey(...args);
-    },
-
-    neutralAlignmentState(...args) {
-        return this.viewport.neutralAlignmentState(...args);
-    },
-
-    presetAlignmentOffsets(...args) {
-        return this.viewport.presetAlignmentOffsets(...args);
-    },
-
-    currentAlignmentState(...args) {
-        return this.viewport.currentAlignmentState(...args);
-    },
-
-    normalizedAlignmentState(...args) {
-        return this.viewport.normalizedAlignmentState(...args);
-    },
-
-    normalizedPairAlignments(...args) {
-        return this.viewport.normalizedPairAlignments(...args);
-    },
-
-    applyAlignmentState(...args) {
-        return this.viewport.applyAlignmentState(...args);
-    },
-
-    storeCurrentPairAlignment(...args) {
-        return this.viewport.storeCurrentPairAlignment(...args);
-    },
-
-    loadCurrentPairAlignment(...args) {
-        return this.viewport.loadCurrentPairAlignment(...args);
-    },
-
-    setAlignmentPreset(...args) {
-        return this.viewport.setAlignmentPreset(...args);
-    },
-
-    setManualAlignment(...args) {
-        return this.viewport.setManualAlignment(...args);
-    },
-
-    clearRawAlignmentInputs(...args) {
-        return this.viewport.clearRawAlignmentInputs(...args);
-    },
-
-    rawAlignmentField(...args) {
-        return this.viewport.rawAlignmentField(...args);
-    },
-
-    rawAlignmentElement(...args) {
-        return this.viewport.rawAlignmentElement(...args);
-    },
-
-    setRawAlignmentInput(...args) {
-        return this.viewport.setRawAlignmentInput(...args);
-    },
-
-    isValidAlignmentNumber(...args) {
-        return this.viewport.isValidAlignmentNumber(...args);
-    },
-
-    commitRawAlignmentInput(...args) {
-        return this.viewport.commitRawAlignmentInput(...args);
-    },
-
-    applyAlignment(...args) {
-        return this.viewport.applyAlignment(...args);
-    },
-
-    formatSignedPixels(...args) {
-        return this.viewport.formatSignedPixels(...args);
-    },
-
-    alignmentPresetLabel(...args) {
-        return this.viewport.alignmentPresetLabel(...args);
-    },
-
-    alignmentStatusText(...args) {
-        return this.viewport.alignmentStatusText(...args);
-    },
-
-    updateAlignmentStatus(...args) {
-        return this.viewport.updateAlignmentStatus(...args);
-    },
-
     toggleFullscreen() {
         if (document.fullscreenElement) {
             document.exitFullscreen?.();
@@ -2037,10 +1812,6 @@ const ReportViewer = {
             isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'
         );
         this.dom.btnFullscreen.setAttribute('aria-pressed', isFullscreen ? 'true' : 'false');
-    },
-
-    updateSlider(...args) {
-        return this.viewport.updateSlider(...args);
     },
 
     isShortcutEditableTarget(target) {
@@ -2336,10 +2107,10 @@ const ReportViewer = {
         this.updateInspectorData();
         // Update images and labels
         this.updateImages();
-        this.updateSlider();
-        this.applyFitMode();
-        this.applyAlignment();
-        this.applyPan();
+        this.viewport.updateSlider();
+        this.viewport.applyFitMode();
+        this.viewport.applyAlignment();
+        this.viewport.applyPan();
 
         // Update filmstrip active state
         Array.from(this.dom.filmstrip.children).forEach((el, idx) => {

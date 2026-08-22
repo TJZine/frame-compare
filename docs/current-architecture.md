@@ -662,14 +662,18 @@ active-picture labels, mode names, and stable clip roles. It does not read the D
 storage, or viewer state. `assets/inspector.js` owns Inspector DOM references,
 open/close focus and inert policy, tab selection and roving keyboard behavior, Frame,
 Clips, Align, and Export rendering, safe slow.pics link presentation, and lazy Review
-activation through the root viewer.
+activation through the root viewer. Hidden Inspectors update only visibility and tab
+semantics; opening refreshes their content before focus moves into the drawer.
 
 `assets/viewport.js` owns zoom clamping and pointer anchoring, pan bounds and Grid
 normalization, fit/reset/reveal math, transient pointer/pinch mechanics, directional
 pair-alignment normalization and offsets, and Lens/Grid viewport refreshes. It mutates
 the root viewer's canonical state and routes persistence back through the root; it does
-not create a second state or storage owner. The root continues to register events,
-route shortcuts and mode/source/frame transitions, and sequence rendering.
+not create a second state or storage owner. The owner holds an explicit reference to
+the root viewer rather than inheriting the root prototype, and consumers call the
+Viewport owner directly instead of relying on a root forwarding facade. The root
+continues to register events, route shortcuts and mode/source/frame transitions, and
+sequence rendering.
 
 `assets/review_state.js` owns the exact report-scoped local review schema, bounded
 bookmark/tag/note/preferred-clip records, fail-closed localStorage reads, deterministic

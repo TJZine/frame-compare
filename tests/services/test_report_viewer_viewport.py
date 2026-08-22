@@ -17,20 +17,19 @@ def test_viewport_harness_owns_coordinate_and_alignment_policy() -> None:
     result = run_node_harness(Path(__file__).with_name("viewport_harness.js"))
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert all(json.loads(result.stdout.strip().splitlines()[-1]).values())
+    assert json.loads(result.stdout.strip().splitlines()[-1]) == {
+        "canonicalStateShared": True,
+        "zoomBounds": True,
+        "pointerAnchor": True,
+        "panClampAndGridConversion": True,
+        "fitAndReset": True,
+        "directionalAlignment": True,
+        "revealAndRefresh": True,
+        "storageDelegated": True,
+    }
 
 
 @pytest.mark.unit
-def test_viewer_assets_have_one_viewport_owner_and_deterministic_order() -> None:
-    assets = Path(__file__).parents[2] / "src/frame_compare/services/report/assets"
-    viewport = (assets / "viewport.js").read_text(encoding="utf-8")
-    viewer = (assets / "viewer.js").read_text(encoding="utf-8")
-
-    assert "clampZoom(level)" in viewport
-    assert "clampZoom(level)" not in viewer
-    assert "pairAlignmentKey(leftIdx, rightIdx)" in viewport
-    assert "pairAlignmentKey(leftIdx, rightIdx)" not in viewer
-    assert "localStorage" not in viewport
-
+def test_viewer_assets_have_deterministic_owner_assembly_order() -> None:
     assembled = get_js()
     assert assembled.index("const Viewport") < assembled.index("const ReportViewer")

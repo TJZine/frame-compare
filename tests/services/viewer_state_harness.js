@@ -403,7 +403,7 @@ function loadViewer({ clipCount, savedState = null }) {
     };
     viewer.reviewController = null;
     viewer.render = function renderStateOnly() {
-        this.applyAlignment();
+        this.viewport.applyAlignment();
         this.persistViewportState();
     };
 
@@ -413,7 +413,7 @@ function loadViewer({ clipCount, savedState = null }) {
 
     viewer.applyDefaultSelection();
     viewer.restorePersistedState();
-    viewer.applyAlignment();
+    viewer.viewport.applyAlignment();
     return {
         viewer,
         storage,
@@ -620,10 +620,10 @@ const summary = {};
     assert.equal(reviewMetrics.creates, 0);
     viewer.setInspectorTab('review');
     assert.equal(viewer.state.inspectorTab, 'review');
-    assert.deepEqual(reviewMetrics, { creates: 1, binds: 1, renders: 1 });
+    assert.deepEqual(reviewMetrics, { creates: 0, binds: 0, renders: 0 });
     viewer.setInspectorTab('export');
     viewer.setInspectorTab('review');
-    assert.equal(reviewMetrics.creates, 1);
+    assert.equal(reviewMetrics.creates, 0);
     viewer.setInspectorTab('export');
     const focusables = viewer.dom.inspectorFocusables;
     const initiatingControl = fakeElement();
@@ -692,7 +692,7 @@ const summary = {};
 
 {
     const { viewer } = loadViewer({ clipCount: 1 });
-    viewer.updateInspectorData();
+    viewer.setInspectorOpen(true, { focus: false, save: false });
     const values = viewer.dom.inspectorClips.children[0].querySelectorAll('dd');
     assert.equal(values.length, 7);
     assert.equal(values[4].textContent, '17.00 GiB');
@@ -717,7 +717,7 @@ const summary = {};
         primary: 'Explicit comparison label',
         release,
     };
-    viewer.updateInspectorData();
+    viewer.setInspectorOpen(true, { focus: false, save: false });
     const automaticRelease = viewer.dom.inspectorClips.children[0]
         .querySelector('.rv-inspector-clip-release');
     const explicitRelease = viewer.dom.inspectorClips.children[1]
@@ -734,7 +734,7 @@ const summary = {};
 
 {
     const { viewer } = loadViewer({ clipCount: 2 });
-    viewer.updateInspectorData();
+    viewer.setInspectorOpen(true, { focus: false, save: false });
     summary.inspectorFrameSources = viewer.dom.inspectorSourceFrames.children.map(
         item => item.textContent,
     );
@@ -995,7 +995,7 @@ const summary = {};
 {
     const { viewer, storage, storageKey } = loadViewer({ clipCount: 4 });
 
-    viewer.setManualAlignment(4, 5);
+    viewer.viewport.setManualAlignment(4, 5);
     assert.equal(viewer.dom.alignmentStatus.textContent, 'Aligned: custom +4x +5y');
     viewer.setRightClip(2);
     assert.equal(viewer.state.leftClipIdx, 0);
@@ -1004,7 +1004,7 @@ const summary = {};
     assert.equal(viewer.state.alignY, 0);
     assert.equal(viewer.dom.alignmentStatus.textContent, 'Aligned: none');
 
-    viewer.setManualAlignment(-1, 8);
+    viewer.viewport.setManualAlignment(-1, 8);
     viewer.setRightClip(1);
     assert.equal(viewer.state.alignX, 4);
     assert.equal(viewer.state.alignY, 5);
@@ -1020,14 +1020,14 @@ const summary = {};
     assert.equal(viewer.state.alignX, 0);
     assert.equal(viewer.state.alignY, 0);
 
-    viewer.setManualAlignment(21, -3);
+    viewer.viewport.setManualAlignment(21, -3);
     viewer.swapPairClips();
     assert.equal(viewer.state.leftClipIdx, 3);
     assert.equal(viewer.state.rightClipIdx, 0);
     assert.equal(viewer.state.alignX, 0);
     assert.equal(viewer.state.alignY, 0);
 
-    viewer.setManualAlignment(-21, 3);
+    viewer.viewport.setManualAlignment(-21, 3);
     viewer.swapPairClips();
     assert.equal(viewer.state.leftClipIdx, 0);
     assert.equal(viewer.state.rightClipIdx, 3);
@@ -1046,7 +1046,7 @@ const summary = {};
     assert.equal(viewer.state.alignX, 0);
     assert.equal(viewer.state.alignY, 0);
 
-    viewer.setManualAlignment(12, 13);
+    viewer.viewport.setManualAlignment(12, 13);
     viewer.swapPairClips();
     assert.equal(viewer.state.leftClipIdx, 0);
     assert.equal(viewer.state.rightClipIdx, 2);
@@ -1107,11 +1107,11 @@ const summary = {};
     const { viewer } = loadViewer({ clipCount: 4 });
 
     assert.equal(viewer.dom.alignmentStatus.textContent, 'Aligned: none');
-    viewer.setAlignmentPreset('left-1');
+    viewer.viewport.setAlignmentPreset('left-1');
     assert.equal(viewer.state.alignX, -1);
     assert.equal(viewer.state.alignY, 0);
     assert.equal(viewer.dom.alignmentStatus.textContent, 'Aligned: preset left 1px');
-    viewer.setAlignmentPreset('none');
+    viewer.viewport.setAlignmentPreset('none');
     assert.equal(viewer.dom.alignmentStatus.textContent, 'Aligned: none');
     summary.alignmentStatus = {
         neutral: 'Aligned: none',
@@ -1125,7 +1125,7 @@ const summary = {};
 
     viewer.setMode('overlay');
     viewer.state.activeClipIdx = viewer.state.rightClipIdx;
-    viewer.setManualAlignment(9, -4);
+    viewer.viewport.setManualAlignment(9, -4);
     viewer.updateImages();
     assert.equal(viewer.dom.canvas.style.values['--align-x'], '9px');
     assert.equal(viewer.dom.canvas.style.values['--align-y'], '-4px');
@@ -1261,12 +1261,12 @@ const summary = {};
     viewer.state.panX = 3;
     viewer.state.panY = 4;
     viewer.viewport.setPan = function setPanWithoutLayout(x, y) {
-        this.state.panX = x;
-        this.state.panY = y;
+        this.viewer.state.panX = x;
+        this.viewer.state.panY = y;
     };
 
     assert.equal(
-        viewer.updatePanFromPointer({ pointerId: 7, clientX: 16, clientY: 20 }),
+        viewer.viewport.updatePanFromPointer({ pointerId: 7, clientX: 16, clientY: 20 }),
         true,
     );
     assert.deepEqual([viewer.state.panX, viewer.state.panY], [9, 4]);
@@ -1290,7 +1290,7 @@ const summary = {};
         lensPointHandled: true,
         lensTouchStart: { pointerId: 8, clientX: 20, clientY: 30 },
     };
-    viewer.stopPointerInteraction({ pointerId: 8, clientX: 20, clientY: 30 });
+    viewer.viewport.stopPointerInteraction({ pointerId: 8, clientX: 20, clientY: 30 });
     assert.equal(cycleCount, 0);
     summary.lensPanIndependence = {
         panAppliedWithoutInspectorGestureGate: true,
@@ -1308,9 +1308,9 @@ const summary = {};
     const touchSample = { ...viewer.lens.state.point };
     viewer.state.panX = 12;
     viewer.state.panY = -7;
-    viewer.applyPan();
-    viewer.applyZoom(1.75, { clampPan: false });
-    viewer.applyAlignment();
+    viewer.viewport.applyPan();
+    viewer.viewport.applyZoom(1.75, { clampPan: false });
+    viewer.viewport.applyAlignment();
     assert.deepEqual(viewer.lens.state.point, touchSample);
     assert.equal(viewer.lens.refreshes, 3);
     assert.equal(viewer.lens.syncs, 0);
@@ -1335,10 +1335,10 @@ const summary = {};
             isPanning: false,
             capturedPointerIds: new Set(),
         };
-        viewer.startPanFromPointer = () => { panStarts += 1; };
-        viewer.updatePanFromPointer = () => { panMoves += 1; return true; };
-        viewer.updateSliderFromPointer = () => { sliderMoves += 1; };
-        viewer.captureStagePointer = () => {};
+        viewer.viewport.startPanFromPointer = () => { panStarts += 1; };
+        viewer.viewport.updatePanFromPointer = () => { panMoves += 1; return true; };
+        viewer.viewport.updateSliderFromPointer = () => { sliderMoves += 1; };
+        viewer.viewport.captureStagePointer = () => {};
         viewer.startDeferredViewportGesture(
             { pointerId: 1, pointerType: 'touch', button: 0, clientX: 30, clientY: 40 },
             { clientX: 10, clientY: 20 },
@@ -1368,9 +1368,9 @@ const summary = {};
             return selector.split(', ').includes('.rv-lens-settings') ? this : null;
         },
     };
-    viewer.resetViewport = () => { resets += 1; };
-    viewer.zoomAtPoint = () => { zooms += 1; };
-    viewer.panByPixels = () => { pans += 1; };
+    viewer.viewport.resetViewport = () => { resets += 1; };
+    viewer.viewport.zoomAtPoint = () => { zooms += 1; };
+    viewer.viewport.panByPixels = () => { pans += 1; };
     viewer.state.mode = 'slider';
     viewer.handleViewportDoubleClick({ target: chromeTarget, preventDefault() {} });
     viewer.handleViewportWheel({

@@ -15,6 +15,7 @@ import pytest
 
 from frame_compare.config.schema import OverlayMode, ReportConfig
 from frame_compare.config.schema_enums import ViewerMode
+from frame_compare.render.overlay_text import format_file_size
 from frame_compare.services.report.entry import generate_report
 from frame_compare.services.report.payload import (
     ClipInfo,
@@ -43,6 +44,8 @@ _REFERENCE_PRIMARY = "Movie Title (2026) | 2160p | PMTP WEB-DL | DV HDR10+ | REP
 _REFERENCE_RELEASE = "2160p | PMTP WEB-DL | DV HDR10+ | REPACK | Kitsune"
 _COMPARISON_PRIMARY = "Encode A"
 _COMPARISON_RELEASE = "1080p | ATV WEB-DL | HDR10 | ENCODE"
+_FIXTURE_SIZE_BYTES = 17 * 1024**3
+_FIXTURE_SIZE_LABEL = format_file_size(_FIXTURE_SIZE_BYTES)
 
 
 class _InitializedViewerParser(HTMLParser):
@@ -214,7 +217,7 @@ def _generated_report(tmp_path: Path, *, tonemapped: bool = False) -> Path:
                 frame_count=20,
                 resolution=(1920, 1080),
                 fps=24.0,
-                size_bytes=17 * 1024**3,
+                size_bytes=_FIXTURE_SIZE_BYTES,
                 signal=SourceSignalFacts(
                     is_hdr=tonemapped,
                     primaries=9 if tonemapped else 1,
@@ -286,6 +289,16 @@ document.addEventListener('DOMContentLoaded', () => {
             || first.bottom <= second.top
             || second.bottom <= first.top
         );
+        const ariaLabelHasSizeOnce = element => {
+            const accessibleName = element?.getAttribute('aria-label');
+            return typeof accessibleName === 'string'
+                && accessibleName.split(__FIXTURE_SIZE_LABEL__).length - 1 === 1;
+        };
+        const ariaLabelOmitsSize = element => {
+            const accessibleName = element?.getAttribute('aria-label');
+            return typeof accessibleName === 'string'
+                && !accessibleName.includes(__FIXTURE_SIZE_LABEL__);
+        };
         ReportViewer.setMode('slider');
         ReportViewer.setMode('diff');
         document.documentElement.dataset.diffSourceHudVisible = String(
@@ -302,7 +315,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const visibleLabels = [label, rightLabel].filter(item => item.textContent);
             return stageLabels.getAttribute('aria-hidden') === null
                 && visibleLabels.every(item => (
-                    item.textContent.split('17.00 GiB').length - 1 === 1
+                    item.textContent.split(__FIXTURE_SIZE_LABEL__).length - 1 === 1
                 ));
         });
         ReportViewer.setMode('diff');
@@ -326,7 +339,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ReportViewer.setMode('slider');
         const sliderLabelsSeparate = [0, 50, 100].every(revealPercent => {
             ReportViewer.state.revealPercent = revealPercent;
-            ReportViewer.updateSlider();
+            ReportViewer.viewport.updateSlider();
             ReportViewer.dom.canvas.style.setProperty('--zoom-level', '2');
             ReportViewer.dom.canvas.style.setProperty('--pan-x', '120px');
             ReportViewer.dom.canvas.style.setProperty('--pan-y', '80px');
@@ -614,20 +627,20 @@ document.addEventListener('DOMContentLoaded', () => {
             && gridLabels.every(gridLabel => gridLabel.textContent.trim().length > 0)
             && approximately(gridPaletteRect.bottom, gridStageRect.bottom - paletteInset)
         );
-        const gridHudAccessible = gridCells.every(cell => (
-            cell.getAttribute('aria-label').split('17.00 GiB').length - 1 === 1
-        ));
+        const gridHudAccessible = gridCells.every(ariaLabelHasSizeOnce);
         gridLabels.forEach(gridLabel => {
             gridLabel.closest('.rv-grid-label').style.transition = 'none';
         });
         ReportViewer.setOverlaysHidden(true, { save: false });
         const gridHudHidden = gridLabels.every(gridLabel => (
             window.getComputedStyle(gridLabel.closest('.rv-grid-label')).visibility === 'hidden'
-        )) && gridCells.every(cell => !cell.getAttribute('aria-label').includes('17.00 GiB'));
+        )) && gridCells.every(ariaLabelOmitsSize);
         ReportViewer.setOverlaysHidden(false, { save: false });
-        const gridHudRestored = gridCells.every(cell => (
-            cell.getAttribute('aria-label').split('17.00 GiB').length - 1 === 1
-        ));
+        const gridHudRestored = gridCells.every(ariaLabelHasSizeOnce);
+        document.documentElement.dataset.stageHudAccessible = String(stageHudAccessible);
+        document.documentElement.dataset.gridHudAccessible = String(gridHudAccessible);
+        document.documentElement.dataset.gridHudHidden = String(gridHudHidden);
+        document.documentElement.dataset.gridHudRestored = String(gridHudRestored);
         document.documentElement.dataset.sourceHudAccessible = String(
             stageHudAccessible && gridHudAccessible && gridHudHidden && gridHudRestored
         );
@@ -646,6 +659,7 @@ document.addEventListener('DOMContentLoaded', () => {
             sourceHudStyle.whiteSpace === 'normal'
             && sourceHudStyle.textOverflow !== 'ellipsis'
         );
+        ReportViewer.setInspectorOpen(true, { focus: false, save: false });
         const sourceRowsByMode = {};
         ['overlay', 'slider', 'diff', 'blink', 'grid'].forEach(mode => {
             ReportViewer.setMode(mode);
@@ -694,6 +708,7 @@ document.addEventListener('DOMContentLoaded', () => {
             document.documentElement.scrollWidth <= window.innerWidth
             && document.body.scrollWidth <= window.innerWidth
         );
+        ReportViewer.setInspectorOpen(false, { focus: false, save: false });
         ReportViewer.setMode('diff');
     };
     probeHud();
@@ -716,6 +731,7 @@ document.addEventListener('DOMContentLoaded', () => {
     probe = probe.replace("__COMPARISON_PRIMARY__", json.dumps(_COMPARISON_PRIMARY))
     probe = probe.replace("__REFERENCE_RELEASE__", json.dumps(_REFERENCE_RELEASE))
     probe = probe.replace("__COMPARISON_RELEASE__", json.dumps(_COMPARISON_RELEASE))
+    probe = probe.replace("__FIXTURE_SIZE_LABEL__", json.dumps(_FIXTURE_SIZE_LABEL))
     report_path.write_text(html.replace("</body>", f"{probe}</body>"), encoding="utf-8")
 
 
@@ -862,7 +878,16 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     assert parser.document_attributes["data-diff-huds-separate"] == "true"
     assert parser.document_attributes["data-hud-styles-aligned"] == "true"
     assert parser.document_attributes["data-hud-toggle-hides-both"] == "true"
-    assert parser.document_attributes["data-source-hud-accessible"] == "true"
+    hud_accessibility = {
+        name: parser.document_attributes[f"data-{name.replace('_', '-')}"]
+        for name in (
+            "stage_hud_accessible",
+            "grid_hud_accessible",
+            "grid_hud_hidden",
+            "grid_hud_restored",
+        )
+    }
+    assert parser.document_attributes["data-source-hud-accessible"] == "true", hud_accessibility
     assert parser.document_attributes["data-slider-labels-separate"] == "true"
     assert parser.document_attributes["data-palette-bottom-anchored"] == "true"
     assert parser.document_attributes["data-bottom-huds-separate"] == "true"
@@ -896,7 +921,7 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     assert parser.document_attributes["data-narrow-palette-horizontal"] == "true"
     assert parser.document_attributes["data-grid-hud-anchored"] == "true"
     assert parser.document_attributes["data-source-hud-text"] == (
-        f"{_REFERENCE_RELEASE} • 1920×1080 • SDR • 17.00 GiB"
+        f"{_REFERENCE_RELEASE} • 1920×1080 • SDR • {_FIXTURE_SIZE_LABEL}"
     )
     assert parser.document_attributes["data-clips-metadata"] == "true"
     assert parser.document_attributes["data-review-tab-usable"] == "true", (

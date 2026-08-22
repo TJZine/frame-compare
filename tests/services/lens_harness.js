@@ -268,7 +268,7 @@ function makeEnvironment({ failingWrites = false, coarse = false, autoLoadClones
         clipDisplay(clip, profile = 'control') { return clip.display[profile]; },
         clipAccessibleName(clip) { return clip.display.primary; },
         referenceClipIndex() { return 0; },
-        sliderCanvasRect() { return activeImage.getBoundingClientRect(); },
+        viewport: { sliderCanvasRect() { return activeImage.getBoundingClientRect(); } },
         announce(message) { announcements.push(message); },
         gridView: { entries() { return []; } },
     };

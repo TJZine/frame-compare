@@ -111,6 +111,11 @@ const GridView = (() => {
             return viewer.sourceHudLabel(clip, 'micro');
         }
 
+        function unavailableLabel(index) {
+            const clip = viewer.state.data?.clips?.[index];
+            return viewer.clipDisplay(clip, 'micro');
+        }
+
         function clipRoles(index) {
             const roles = [];
             if (index === viewer.referenceClipIndex()) roles.push('Reference');
@@ -198,7 +203,7 @@ const GridView = (() => {
 
         function sizeImages() {
             entries().forEach(entry => sizeImage(entry.image));
-            viewer.clampPan?.();
+            viewer.viewport?.clampPan();
             viewer.lens?.refresh?.();
         }
 
@@ -234,7 +239,7 @@ const GridView = (() => {
             const error = cell.querySelector('[data-grid-error]');
             if (error) error.hidden = false;
             updateFrameError();
-            const label = safeLabel(index);
+            const label = unavailableLabel(index);
             announce(`${label} image unavailable.`);
             if (!src.startsWith('data:')) return;
             cell.querySelector('[data-grid-retry]')?.remove();
@@ -257,6 +262,7 @@ const GridView = (() => {
 
         function buildCell(index, generation) {
             const label = safeLabel(index);
+            const errorLabel = unavailableLabel(index);
             const src = sourceFor(index);
             const cell = document.createElement('figure');
             cell.className = 'rv-grid-cell';
@@ -285,14 +291,14 @@ const GridView = (() => {
             error.dataset.gridError = '';
             error.hidden = true;
             const errorText = document.createElement('span');
-            errorText.textContent = `${label} image unavailable`;
+            errorText.textContent = `${errorLabel} image unavailable`;
             error.append(errorText);
             if (src && !src.startsWith('data:')) {
                 const retryButton = document.createElement('button');
                 retryButton.type = 'button';
                 retryButton.dataset.gridRetry = '';
                 retryButton.textContent = 'Retry';
-                retryButton.setAttribute('aria-label', `Retry ${label} image`);
+                retryButton.setAttribute('aria-label', `Retry ${errorLabel} image`);
                 retryButton.addEventListener('pointerdown', event => event.stopPropagation());
                 retryButton.addEventListener('click', event => {
                     event.stopPropagation();

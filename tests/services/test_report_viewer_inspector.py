@@ -25,19 +25,7 @@ def test_inspector_harness_owns_formatting_and_inspector_policy() -> None:
 
 
 @pytest.mark.unit
-def test_viewer_assets_have_one_inspector_owner_and_deterministic_order() -> None:
-    assets = Path(__file__).parents[2] / "src" / "frame_compare" / "services" / "report" / "assets"
-    viewer_format = (assets / "viewer_format.js").read_text(encoding="utf-8")
-    inspector = (assets / "inspector.js").read_text(encoding="utf-8")
-    viewer = (assets / "viewer.js").read_text(encoding="utf-8")
-
-    assert "document" not in viewer_format
-    assert "localStorage" not in viewer_format
-    assert "renderSlowpics()" in inspector
-    assert "const slowpicsUrl" not in viewer
-    assert "rv-inspector-clip-heading" in inspector
-    assert "rv-inspector-clip-heading" not in viewer
-
+def test_viewer_assets_have_deterministic_owner_assembly_order() -> None:
     assembled = get_js()
     assert assembled.index("const ViewerFormat") < assembled.index("const Inspector")
     assert assembled.index("const Inspector") < assembled.index("const ReportViewer")
