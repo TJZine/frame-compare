@@ -73,7 +73,10 @@ through `[RUN] VSPreview Bootstrap`, `[OK] VSPreview Ready`, and
 `[WAIT] VSPreview Confirmation`. Normal labels use the same prepared release-aware
 source identities as the rest of Frame Compare, while paths and filename stems remain
 the internal alignment and override identities. These literal markers remain present
-with color disabled.
+with color disabled. Ready gives a directly nested next action, and the confirmation
+instructions and prompts are visibly nested beneath the blocking `[WAIT]` state. One
+known non-actionable vendor `SyntaxWarning` is suppressed in the VSPreview child;
+other child and native diagnostics remain inherited.
 
 Confirmation uses untrimmed source-frame indices. Enter the reference source frame
 followed by the comparison source frame; the confirmed offset is reference minus

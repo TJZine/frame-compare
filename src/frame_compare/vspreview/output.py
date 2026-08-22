@@ -7,6 +7,7 @@ from pathlib import Path
 
 from rich.console import Console
 from rich.markup import escape
+from rich.padding import Padding
 from rich.table import Table
 from rich.text import Text
 
@@ -19,6 +20,7 @@ STYLE_HINT = "yellow"
 STYLE_HEADER = "bold cyan"
 STYLE_WAIT = "magenta"
 _STARTUP_STDERR_LIMIT = 4000
+_CONTENT_INDENT = 4
 
 
 def _console(*, no_color: bool) -> Console:
@@ -105,7 +107,7 @@ def print_vspreview_confirmation_header(
     console = _console(no_color=no_color)
     console.print()
     console.print(_status_text("[WAIT]", "VSPreview Confirmation", style=STYLE_WAIT))
-    console.print(table)
+    console.print(Padding(table, (0, 0, 0, _CONTENT_INDENT)))
     console.print()
 
 
@@ -119,8 +121,8 @@ def write_vspreview_prompt(
     console = _console(no_color=no_color)
     table = _group_table()
     table.add_row("comparison", f"[{STYLE_VALUE}]{escape(label)}[/]")
-    console.print(table)
-    prompt = Text("  frames       ", style=STYLE_KEY)
+    console.print(Padding(table, (0, 0, 0, _CONTENT_INDENT)))
+    prompt = Text(f"{' ' * _CONTENT_INDENT}frames       ", style=STYLE_KEY)
     prompt.append(f"[{suggested_offset}]", style=STYLE_HINT)
     prompt.append(" > ", style="bright_white")
     console.print(prompt, end="")
@@ -129,7 +131,7 @@ def write_vspreview_prompt(
 
 def print_vspreview_input_hint(message: str, *, no_color: bool = False) -> None:
     console = _console(no_color=no_color)
-    console.print(f"  [{STYLE_HINT}]Hint[/] {escape(message)}")
+    console.print(f"{' ' * _CONTENT_INDENT}[{STYLE_HINT}]Hint[/] {escape(message)}")
 
 
 def print_vspreview_confirmation_footer(*, no_color: bool = False) -> None:

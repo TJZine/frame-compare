@@ -500,10 +500,7 @@ def main():
             safe_print(f"  {_key('preview')}   {_hint(assumption)}")
 
     safe_print("\\n" + _status_line("[OK]", "VSPreview Ready"))
-    safe_print(
-        f"  {_key('next')}          Inspect the untrimmed clips in VSPreview, then return here "
-        "to confirm frames."
-    )
+    safe_print("    Inspect the untrimmed clips in VSPreview, then return here to confirm frames.")
 
 main()
 """
