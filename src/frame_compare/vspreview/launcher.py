@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import importlib
 import runpy
-from typing import Any, cast
 
 from frame_compare.vs.env import ensure_vs_environment
 from frame_compare.vs.runtime_contract import runtime_kind
@@ -16,14 +16,13 @@ def preload_vapoursynth_runtime() -> None:
 
 def prepare_vspreview_compatibility() -> None:
     """Restore the VSJetPack 1.x APIs still used by VSPreview 0.20."""
-    import vstools
-
-    import vspreview
+    vstools = importlib.import_module("vstools")
+    vspreview = importlib.import_module("vspreview")
 
     if not hasattr(vstools, "vs_object") and hasattr(vstools, "VSObject"):
         vstools.__dict__["vs_object"] = vstools.VSObject
     if not hasattr(vstools, "set_output") and hasattr(vspreview, "set_output"):
-        vstools.__dict__["set_output"] = cast(Any, vspreview).set_output
+        vstools.__dict__["set_output"] = vspreview.set_output
 
     dither_type = vstools.DitherType
     if not hasattr(dither_type, "is_fmtc"):
