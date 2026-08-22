@@ -920,7 +920,11 @@ const summary = {};
         diff: viewer.clipOverlayLabel(clip, 'Base'),
     };
 
-    assert.equal(viewer.formatFileSize(512 * 1024), '0.50 MiB');
+    assert.equal(viewer.formatFileSize(1), '1.00 B');
+    assert.equal(viewer.formatFileSize(1023), '1023.00 B');
+    assert.equal(viewer.formatFileSize(1024), '1.00 KiB');
+    assert.equal(viewer.formatFileSize(512 * 1024), '512.00 KiB');
+    assert.equal(viewer.formatFileSize(1024 ** 2), '1.00 MiB');
     assert.equal(viewer.formatFileSize(1024 ** 3), '1.00 GiB');
     assert.equal(viewer.formatFileSize(1024 ** 4), '1.00 TiB');
     assert.equal(viewer.formatFileSize(0), '');

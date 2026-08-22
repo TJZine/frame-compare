@@ -310,14 +310,35 @@ document.addEventListener('DOMContentLoaded', () => {
         document.documentElement.dataset.diffHudsSeparate = String(
             !rectanglesIntersect(label.getBoundingClientRect(), frameHud.getBoundingClientRect())
         );
-        const stageHudAccessible = ['overlay', 'slider', 'diff', 'blink'].every(mode => {
-            ReportViewer.setMode(mode);
-            const visibleLabels = [label, rightLabel].filter(item => item.textContent);
-            return stageLabels.getAttribute('aria-hidden') === null
-                && visibleLabels.every(item => (
-                    item.textContent.split(__FIXTURE_SIZE_LABEL__).length - 1 === 1
-                ));
-        });
+        const expectedStageHudPrefixes = {
+            overlay: [__REFERENCE_HUD_LABEL__],
+            slider: [
+                `LEFT: ${__REFERENCE_HUD_LABEL__}`,
+                `RIGHT: ${__COMPARISON_HUD_LABEL__}`,
+            ],
+            diff: [
+                `BASE: ${__REFERENCE_HUD_LABEL__}`,
+                `COMPARE: ${__COMPARISON_HUD_LABEL__}`,
+            ],
+            blink: [
+                `FIRST: ${__REFERENCE_HUD_LABEL__}`,
+                `SECOND: ${__COMPARISON_HUD_LABEL__}`,
+            ],
+        };
+        const stageHudAccessible = Object.entries(expectedStageHudPrefixes).every(
+            ([mode, expectedPrefixes]) => {
+                ReportViewer.setMode(mode);
+                const visibleLabels = [label, rightLabel].filter(
+                    item => item.textContent.length > 0
+                );
+                return stageLabels.getAttribute('aria-hidden') === null
+                    && visibleLabels.length === expectedPrefixes.length
+                    && visibleLabels.every((item, index) => (
+                        item.textContent.startsWith(expectedPrefixes[index])
+                        && item.textContent.split(__FIXTURE_SIZE_LABEL__).length - 1 === 1
+                    ));
+            }
+        );
         ReportViewer.setMode('diff');
         const sourceHudStyle = window.getComputedStyle(label);
         document.documentElement.dataset.hudStylesAligned = String(
@@ -733,6 +754,8 @@ document.addEventListener('DOMContentLoaded', () => {
     probe = probe.replace("__REFERENCE_RELEASE__", json.dumps(_REFERENCE_RELEASE))
     probe = probe.replace("__COMPARISON_RELEASE__", json.dumps(_COMPARISON_RELEASE))
     probe = probe.replace("__FIXTURE_SIZE_LABEL__", json.dumps(_FIXTURE_SIZE_LABEL))
+    probe = probe.replace("__REFERENCE_HUD_LABEL__", json.dumps(_REFERENCE_RELEASE))
+    probe = probe.replace("__COMPARISON_HUD_LABEL__", json.dumps(_COMPARISON_RELEASE))
     report_path.write_text(html.replace("</body>", f"{probe}</body>"), encoding="utf-8")
 
 

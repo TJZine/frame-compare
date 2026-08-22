@@ -25,7 +25,9 @@ const ViewerFormat = {
         const unit = 1024;
         if (bytes >= unit ** 4) return `${(bytes / unit ** 4).toFixed(2)} TiB`;
         if (bytes >= unit ** 3) return `${(bytes / unit ** 3).toFixed(2)} GiB`;
-        return `${(bytes / unit ** 2).toFixed(2)} MiB`;
+        if (bytes >= unit ** 2) return `${(bytes / unit ** 2).toFixed(2)} MiB`;
+        if (bytes >= unit) return `${(bytes / unit).toFixed(2)} KiB`;
+        return `${bytes.toFixed(2)} B`;
     },
 
     formatResolution(resolution) {

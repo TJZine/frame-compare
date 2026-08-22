@@ -112,7 +112,11 @@ const upperZoomBound = viewer.state.zoom === 4;
 viewport.setZoom(0);
 assert.equal(viewer.state.zoom, 0.25);
 const zoomBounds = upperZoomBound && viewer.state.zoom === 0.25;
-const canonicalStateShared = viewer.state.zoom === 0.25;
+viewer.state.zoom = 2;
+const baseCanvasSize = viewport.baseCanvasSize();
+assert.equal(baseCanvasSize.width, 100);
+assert.equal(baseCanvasSize.height, 50);
+const canonicalStateShared = baseCanvasSize.width === 100 && baseCanvasSize.height === 50;
 
 viewer.state.zoom = 1;
 viewer.state.panX = 0;
@@ -187,7 +191,11 @@ const directionalAlignment = viewer.state.alignX === -7
 viewer.state.revealPercent = 37;
 viewport.updateSlider();
 assert.equal(viewer.dom.canvas.style.values['--reveal-percent'], '37%');
-const reveal = viewer.dom.canvas.style.values['--reveal-percent'] === '37%';
+assert.equal(viewer.dom.leftLayer.style.values['--reveal-percent'], '37%');
+assert.equal(viewer.dom.divider.style.values['--reveal-percent'], '37%');
+const reveal = [viewer.dom.canvas, viewer.dom.leftLayer, viewer.dom.divider].every(
+    item => item.style.values['--reveal-percent'] === '37%',
+);
 
 const refreshBefore = { ...refresh };
 const persistenceCalls = persistence.calls;
