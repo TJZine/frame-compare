@@ -67,13 +67,13 @@ def test_prepare_vspreview_compatibility_preserves_existing_apis(
     assert DitherType.is_fmtc is existing_is_fmtc
 
 
-def test_launcher_preloads_runtime_without_creating_core_before_vspreview(
+def test_windows_portable_launcher_preloads_runtime_before_vspreview(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events: list[str] = []
     monkeypatch.setattr(
         launcher,
-        "ensure_vs_environment",
+        "preload_vapoursynth_runtime",
         lambda: events.append("vapoursynth"),
     )
     monkeypatch.setattr(launcher, "runtime_kind", lambda: "windows-portable")

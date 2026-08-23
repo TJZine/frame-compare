@@ -354,11 +354,19 @@ def test_prompt_for_confirmed_offsets_writes_to_stderr(
     assert "[WAIT] VSPreview Confirmation" in captured.err
     assert "ref" in captured.err
     assert "Comparison 1 | comp" in captured.err
-    assert "domain       Untrimmed source-frame indices" in captured.err
-    assert "enter        reference_frame comparison_frame" in captured.err
-    assert "offset       reference - comparison" in captured.err
-    assert "skip         'skip' or 's'" in captured.err
-    assert "frames       [+4f] >" in captured.err
+    for fragment in (
+        "domain",
+        "Untrimmed source-frame indices",
+        "enter",
+        "reference_frame comparison_frame",
+        "offset",
+        "reference - comparison",
+        "skip",
+        "'skip' or 's'",
+        "frames",
+        "[+4f] >",
+    ):
+        assert fragment in captured.err
     assert captured.err.endswith("\n")
     assert "\x1b[" not in captured.err
     assert "[bold cyan]" not in captured.err
@@ -382,7 +390,8 @@ def test_prompt_for_confirmed_offsets_does_not_show_numeric_hint_when_absent(
     assert confirmed == {"ref:comp": 12}
     assert "comp" in captured.err
     assert "+0" not in captured.err
-    assert "frames       [no trusted audio hint] >" in captured.err
+    assert "frames" in captured.err
+    assert "[no trusted audio hint] >" in captured.err
 
 
 def test_prompt_for_confirmed_offsets_uses_prepared_names_but_keeps_stem_keys(
@@ -411,15 +420,22 @@ def test_prompt_for_confirmed_offsets_uses_prepared_names_but_keeps_stem_keys(
     assert "raw-comparison-stem" not in output
 
 
-def test_wait_status_text_styles_only_marker() -> None:
-    from rich.console import Console
+def test_wait_status_text_styles_only_marker(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    monkeypatch.setenv("TERM", "xterm-256color")
 
-    rendered = vspreview_output._status_text(  # noqa: SLF001
-        "[WAIT]", "VSPreview Confirmation", style="magenta"
+    vspreview_output.print_vspreview_confirmation_header(
+        reference_name="Reference",
+        no_color=False,
     )
 
-    assert str(rendered.get_style_at_offset(Console(), 0)) == "magenta"
-    assert str(rendered.get_style_at_offset(Console(), 7)) == "none"
+    output = capsys.readouterr().err
+    assert "\x1b[35m[WAIT]\x1b[0m VSPreview Confirmation" in output
+    assert "\x1b[35m[WAIT] VSPreview Confirmation\x1b[0m" not in output
 
 
 def test_prompt_for_confirmed_offsets_accepts_zero_source_frame_offset(

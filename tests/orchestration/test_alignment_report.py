@@ -324,7 +324,16 @@ def test_emit_frame_alignment_report_caps_selected_frame_list(
 def test_emit_frame_alignment_report_shows_material_stability_concisely(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    summary = AlignmentStabilitySummary("possible_discontinuity", 4, 178, 202, 178, 202, 24, 2832.0)
+    summary = AlignmentStabilitySummary(
+        classification="possible_discontinuity",
+        valid_windows=4,
+        offset_min_frames=178,
+        offset_max_frames=202,
+        first_offset_frames=178,
+        last_offset_frames=202,
+        largest_adjacent_jump_frames=24,
+        change_position_seconds=2832.0,
+    )
     comparison = AlignmentReportComparison(
         label="Encode",
         alignment_source="computed",
@@ -387,7 +396,16 @@ def test_emit_frame_alignment_report_renders_alignment_warning_context(
 def test_emit_frame_alignment_report_does_not_label_applied_stability_warning_rejected(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    summary = AlignmentStabilitySummary("possible_drift", 4, 178, 182, 178, 182, 2, None)
+    summary = AlignmentStabilitySummary(
+        classification="possible_drift",
+        valid_windows=4,
+        offset_min_frames=178,
+        offset_max_frames=182,
+        first_offset_frames=178,
+        last_offset_frames=182,
+        largest_adjacent_jump_frames=2,
+        change_position_seconds=None,
+    )
     comparison = AlignmentReportComparison(
         label="Encode",
         alignment_source="computed",
