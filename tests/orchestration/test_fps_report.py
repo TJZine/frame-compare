@@ -277,6 +277,7 @@ def test_emit_consolidated_fps_report_json_mode_logs_without_human_output(
 
 
 def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
+    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     clips = [
@@ -347,6 +348,23 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
     assert "\x1b[" not in captured.err
     assert "[bold cyan]" not in captured.err
     assert "[dim]" not in captured.err
+
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    monkeypatch.setenv("TERM", "xterm-256color")
+    emit_consolidated_fps_report(
+        stage="after_load_sources",
+        clips=clips,
+        json_output=False,
+        quiet=False,
+        rich_output=True,
+        no_color=False,
+    )
+
+    colored = capsys.readouterr()
+    assert colored.out == ""
+    assert "\x1b[1;36mReference\x1b[0m" in colored.err
+    assert "\x1b[1;36mComparison 1\x1b[0m" in colored.err
 
 
 def test_emit_consolidated_fps_report_uses_relative_input_and_external_paths(

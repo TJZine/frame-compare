@@ -186,7 +186,7 @@ def _render_clip_overview(
 
         filename = clip.path.name
         label = clip.label.strip()
-        table.add_row(clip_role(index), "")
+        table.add_row(f"[bold cyan]{escape(clip_role(index))}[/]", "")
         if clip.label_is_explicit and label:
             table.add_row("  Label", f"[bright_white]{escape(label)}[/]")
         if clip.release_identity is not None:
