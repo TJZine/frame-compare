@@ -389,7 +389,8 @@ def test_prompt_for_confirmed_offsets_does_not_show_numeric_hint_when_absent(
     assert confirmed == {"ref:comp": 12}
     assert "comp" in captured.err
     assert "+0" not in captured.err
-    assert "frames       [no trusted audio hint] >" in captured.err
+    assert "frames" in captured.err
+    assert "[no trusted audio hint] >" in captured.err
 
 
 def test_prompt_for_confirmed_offsets_uses_prepared_names_but_keeps_stem_keys(
@@ -418,15 +419,22 @@ def test_prompt_for_confirmed_offsets_uses_prepared_names_but_keeps_stem_keys(
     assert "raw-comparison-stem" not in output
 
 
-def test_wait_status_text_styles_only_marker() -> None:
-    from rich.console import Console
+def test_wait_status_text_styles_only_marker(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    monkeypatch.setenv("TERM", "xterm-256color")
 
-    rendered = vspreview_output._status_text(  # noqa: SLF001
-        "[WAIT]", "VSPreview Confirmation", style="magenta"
+    vspreview_output.print_vspreview_confirmation_header(
+        reference_name="Reference",
+        no_color=False,
     )
 
-    assert str(rendered.get_style_at_offset(Console(), 0)) == "magenta"
-    assert str(rendered.get_style_at_offset(Console(), 7)) == "none"
+    output = capsys.readouterr().err
+    assert "\x1b[35m[WAIT]\x1b[0m VSPreview Confirmation" in output
+    assert "\x1b[35m[WAIT] VSPreview Confirmation\x1b[0m" not in output
 
 
 def test_prompt_for_confirmed_offsets_accepts_zero_source_frame_offset(

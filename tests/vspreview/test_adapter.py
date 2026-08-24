@@ -348,10 +348,9 @@ def test_current_interpreter_launch_uses_compatibility_bootstrap(
     ]
 
 
-def test_windows_external_launcher_remains_available_without_current_module(
+def test_external_vspreview_executable_is_used_when_current_interpreter_cannot_import_vspreview(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("frame_compare.vspreview.adapter.sys.platform", "win32")
     monkeypatch.setattr("frame_compare.vspreview.adapter.runtime_kind", lambda: "unmanaged")
     monkeypatch.setattr(
         "frame_compare.vspreview.adapter.importlib.util.find_spec", lambda _module: None

@@ -150,9 +150,18 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
 def test_run_align_phase_warns_without_changing_material_variable_alignment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Comparison 1")
+    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
     ctx = _context(tmp_path, comparisons=[comparison])
-    summary = AlignmentStabilitySummary("variable", 4, -3, 4, 0, 2, 3, None)
+    summary = AlignmentStabilitySummary(
+        classification="variable",
+        valid_windows=4,
+        offset_min_frames=-3,
+        offset_max_frames=4,
+        first_offset_frames=0,
+        last_offset_frames=2,
+        largest_adjacent_jump_frames=3,
+        change_position_seconds=None,
+    )
     monkeypatch.setattr(
         phase_alignment,
         "align_clips_from_request",
@@ -176,7 +185,7 @@ def test_run_align_phase_warns_without_changing_material_variable_alignment(
     assert output.comparisons[0].alignment.relative_offset_frames == 2
     assert output.comparisons[0].alignment.stability == summary
     assert output.warnings == [
-        "align: Comparison 1 alignment varies across the source. "
+        "align: Encode 1 alignment varies across the source. "
         "The applied constant offset was retained and should be verified."
     ]
 
@@ -787,7 +796,8 @@ def test_run_align_phase_preserves_accepted_alignment_when_another_result_is_rej
     warning = output.warnings[0]
     normalized_warning = warning.replace("_", " ").lower()
     assert "align:" in warning.lower()
-    assert "encode_b" in warning.lower()
+    assert "align: Encode B alignment" in warning
+    assert "encode_b" not in warning
     assert "low confidence" in normalized_warning
     assert "unapplied" in normalized_warning
     assert "best-effort reference-frame domain" in warning
@@ -848,7 +858,8 @@ def test_run_align_phase_normalizes_three_comparisons_with_rejected_zero_offset_
     assert [comparison.trim.trim_start_frames for comparison in output.comparisons] == [0, 2, 5]
     assert output.selected_frames == [0, 48, 94]
     assert len(output.warnings) == 1
-    assert "encode_b" in output.warnings[0].lower()
+    assert "align: Encode B alignment" in output.warnings[0]
+    assert "encode_b" not in output.warnings[0]
 
 
 def test_run_align_phase_legacy_normalizes_positive_negative_and_zero_offsets_with_base_trims(

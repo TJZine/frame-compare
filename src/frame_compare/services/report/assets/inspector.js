@@ -2,6 +2,7 @@ const Inspector = {
     create(viewer) {
         return {
             viewer,
+            focusableVisibility: null,
 
             cacheDOM() {
                 return {
@@ -120,7 +121,10 @@ const Inspector = {
                 viewer.dom.inspector.setAttribute('aria-hidden', visible ? 'false' : 'true');
                 viewer.dom.btnInspector.classList.toggle('active', visible);
                 viewer.dom.btnInspector.setAttribute('aria-expanded', String(visible));
-                this.setFocusable(visible);
+                if (this.focusableVisibility !== visible) {
+                    this.setFocusable(visible);
+                    this.focusableVisibility = visible;
+                }
                 this.updateTabs();
             },
 

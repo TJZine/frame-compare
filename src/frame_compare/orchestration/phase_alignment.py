@@ -105,12 +105,8 @@ def run_align_phase(
     )
 
     updated_comparisons: list[ClipState] = []
-    warnings = [
-        format_rejected_alignment_warning(result) for result in results if not result.applied
-    ]
-    for comparison_index, (comparison, result) in enumerate(
-        zip(ctx.comparisons, results, strict=True), start=1
-    ):
+    warnings: list[str] = []
+    for comparison, result in zip(ctx.comparisons, results, strict=True):
         alignment = None
         if result.applied:
             frame_offset = result.frame_offset
@@ -143,9 +139,16 @@ def run_align_phase(
                         f" near {seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
                     )
                 warnings.append(
-                    f"align: Comparison {comparison_index} alignment {detail}. "
+                    f"align: {comparison.label} alignment {detail}. "
                     "The applied constant offset was retained and should be verified."
                 )
+        else:
+            warnings.append(
+                format_rejected_alignment_warning(
+                    result,
+                    comparison_label=comparison.label,
+                )
+            )
         updated_comparisons.append(
             replace(
                 comparison,

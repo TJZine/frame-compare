@@ -191,7 +191,7 @@ const clips = Array.from({ length: 6 }, (_, index) => ({
         filename: `clip-${index + 1}.mkv`,
     },
     resolution: [1920, 1080],
-    size_bytes: 17 * 1024 ** 3,
+    size_bytes: (17 + index) * 1024 ** 3,
     signal: { is_hdr: false },
 }));
 clips[1].resolution = [1080, 1920];
@@ -214,9 +214,9 @@ const viewer = {
     currentFrame() { return frame; },
     clipDisplay(clip, profile = 'control') { return clip.display[profile]; },
     sourceHudLabel(clip, profile = 'control') {
-        return `${clip.display[profile]} • ${clip.resolution[0]}×${clip.resolution[1]} • SDR • 17.00 GiB`;
+        return `${clip.display[profile]} • ${clip.resolution[0]}×${clip.resolution[1]} • SDR • ${this.formatFileSize(clip.size_bytes)}`;
     },
-    formatFileSize() { return '17.00 GiB'; },
+    formatFileSize(size) { return `${(size / 1024 ** 3).toFixed(2)} GiB`; },
     clipAccessibleName(clip) { return `${clip.display.primary} — ${clip.display.filename}`; },
     referenceClipIndex() { return 0; },
     viewport: { clampPan() {} },
@@ -242,6 +242,7 @@ assert.equal(position.textContent, 'Clips 1–4 of 6');
 assert.equal(cells.children[0].dataset.reference, 'true');
 assert.match(cells.children[0].getAttribute('aria-label'), /Reference/);
 assert.match(cells.children[0].getAttribute('aria-label'), /17\.00 GiB/);
+assert.match(cells.children[1].getAttribute('aria-label'), /18\.00 GiB/);
 assert.equal(cells.children[3].dataset.reference, 'false');
 assert.doesNotMatch(cells.children[3].getAttribute('aria-label'), /Reference/);
 assert.equal(cells.children[1].dataset.active, 'true');
@@ -249,6 +250,10 @@ assert.match(cells.children[1].getAttribute('aria-label'), /Active/);
 assert.equal(
     cells.children[0].querySelector('.rv-grid-label-text').textContent,
     'Clip 1 • 1920×1080 • SDR • 17.00 GiB',
+);
+assert.equal(
+    cells.children[1].querySelector('.rv-grid-label-text').textContent,
+    'Clip 2 • 1080×1920 • SDR • 18.00 GiB',
 );
 viewer.state.overlaysHidden = true;
 owner.updateCellRoles();

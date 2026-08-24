@@ -74,12 +74,15 @@ def _safe_alignment_diagnostic(diagnostic: str | None) -> str:
     return normalized[:120]
 
 
-def format_rejected_alignment_warning(result: AlignmentResult) -> str:
+def format_rejected_alignment_warning(
+    result: AlignmentResult,
+    *,
+    comparison_label: str,
+) -> str:
     """Format a rejected computed alignment as a deterministic run warning."""
-    comparison_stem = Path(result.comparison_clip).stem or result.comparison_clip
     reason = _safe_alignment_diagnostic(result.diagnostic)
     return (
-        f"align: {comparison_stem} alignment left unapplied because {reason}; "
+        f"align: {comparison_label} alignment left unapplied because {reason}; "
         "rendering in best-effort reference-frame domain without accepted alignment."
     )
 

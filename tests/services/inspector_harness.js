@@ -139,6 +139,12 @@ const viewer = {
     focusElement() {},
 };
 const inspector = context.__Inspector.create(viewer);
+let focusabilityUpdates = 0;
+const setFocusable = inspector.setFocusable.bind(inspector);
+inspector.setFocusable = enabled => {
+    focusabilityUpdates += 1;
+    setFocusable(enabled);
+};
 assert.equal(inspector.viewer, viewer);
 assert.equal(inspector.validTab('review'), true);
 assert.equal(inspector.validTab('unknown'), false);
@@ -146,19 +152,25 @@ assert.equal(inspector.safeHttpUrl('https://slow.pics/c/example'), 'https://slow
 assert.equal(inspector.safeHttpUrl('javascript:alert(1)'), null);
 
 inspector.render();
+inspector.render();
 assert.equal(renderingSummaryCalls, 0);
+assert.equal(focusabilityUpdates, 1);
 assert.equal(slowpics.children[0].textContent, 'sentinel');
 assert.equal(inspectorElement.getAttribute('aria-hidden'), 'true');
 
 inspector.setOpen(true, { focus: false, save: false });
 assert.equal(renderingSummaryCalls, 1);
+inspector.updateVisibility();
+assert.equal(focusabilityUpdates, 2);
 assert.equal(slowpics.children[0].tagName, 'A');
 assert.equal(slowpics.children[0].href, 'https://slow.pics/c/example');
 assert.equal(inspectorElement.getAttribute('aria-hidden'), 'false');
 
 inspector.setOpen(false, { focus: false, save: false });
+assert.equal(focusabilityUpdates, 3);
 viewer.state.data.slowpics_url = 'javascript:alert(1)';
 inspector.setOpen(true, { focus: false, save: false });
+assert.equal(focusabilityUpdates, 4);
 assert.equal(renderingSummaryCalls, 2);
 assert.equal(slowpics.children[0].textContent, 'javascript:alert(1)');
 assert.equal(slowpics.children[0].tagName, undefined);

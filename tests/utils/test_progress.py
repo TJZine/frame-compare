@@ -6,7 +6,7 @@ from io import StringIO
 
 import pytest
 from rich.console import Console
-from rich.progress import Progress, Task
+from rich.progress import Progress
 
 import frame_compare.utils.progress as progress_module
 from frame_compare.utils.progress import (
@@ -20,16 +20,26 @@ from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 
 def _captured_rich_reporter(
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    no_color: bool = True,
 ) -> tuple[RichProgressReporter, StringIO]:
     monkeypatch.setenv("TERM", "xterm-256color")
+    if not no_color:
+        monkeypatch.delenv("NO_COLOR", raising=False)
     output = StringIO()
-    console = Console(file=output, force_terminal=True, no_color=True, width=100)
+    console = Console(
+        file=output,
+        force_terminal=True,
+        no_color=no_color,
+        color_system="standard",
+        width=100,
+    )
 
     def _console(**_kwargs: object) -> Console:
         return console
 
     monkeypatch.setattr(progress_module, "Console", _console)
-    return RichProgressReporter(no_color=True), output
+    return RichProgressReporter(no_color=no_color), output
 
 
 def test_null_progress_reporter_noops():
@@ -65,37 +75,42 @@ def test_rich_progress_reporter_marks_active_work_without_color(
         reporter.complete_phase()
 
 
-def test_rich_progress_active_marker_style_does_not_leak_to_description() -> None:
-    task = Task(
-        0,
-        "ALIGN | Interactive verification",
-        total=1,
-        completed=0,
-        _get_time=lambda: 0.0,
-    )
-    rendered = progress_module._ActiveDescriptionColumn().render(task)  # noqa: SLF001
+def test_rich_progress_active_marker_style_does_not_leak_to_description(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reporter, output = _captured_rich_reporter(monkeypatch, no_color=False)
 
-    assert isinstance(rendered, progress_module.Text)
-    assert rendered.plain == "  [RUN] ALIGN | Interactive verification"
-    assert str(rendered.get_style_at_offset(Console(), 2)) == "bright_cyan"
-    assert str(rendered.get_style_at_offset(Console(), 8)) == "none"
+    reporter.start_phase("ALIGN | Interactive verification", 1)
+    try:
+        rendered = output.getvalue()
+        assert "\x1b[96m[RUN]\x1b[0m ALIGN | Interactive verification" in rendered
+        assert "\x1b[96m[RUN] ALIGN" not in rendered
+    finally:
+        reporter.complete_phase(retain=False)
 
 
 @pytest.mark.parametrize(
-    ("marker", "style"),
+    ("status", "styled_marker"),
     [
-        ("[OK]", "green"),
-        ("[WARN]", "yellow"),
-        ("[FAIL]", "red"),
-        ("[SKIP]", "dim yellow"),
+        (ProgressPhaseStatus.COMPLETED, "\x1b[32m[OK]\x1b[0m"),
+        (ProgressPhaseStatus.WARNED, "\x1b[33m[WARN]\x1b[0m"),
+        (ProgressPhaseStatus.FAILED, "\x1b[31m[FAIL]\x1b[0m"),
+        (ProgressPhaseStatus.SKIPPED, "\x1b[2;33m[SKIP]\x1b[0m"),
     ],
 )
-def test_rich_durable_status_styles_only_the_marker(marker: str, style: str) -> None:
-    rendered = progress_module._status_line(marker, "ALIGN")  # noqa: SLF001
+def test_rich_durable_status_styles_only_the_marker(
+    monkeypatch: pytest.MonkeyPatch,
+    status: ProgressPhaseStatus,
+    styled_marker: str,
+) -> None:
+    reporter, output = _captured_rich_reporter(monkeypatch, no_color=False)
 
-    assert rendered.plain == f"  {marker} ALIGN"
-    assert str(rendered.get_style_at_offset(Console(), 2)) == style
-    assert str(rendered.get_style_at_offset(Console(), 2 + len(marker) + 1)) == "none"
+    reporter.start_phase("ALIGN", 1)
+    reporter.complete_phase(status, retain=True)
+
+    rendered = output.getvalue()
+    assert f"  {styled_marker} ALIGN" in rendered
+    assert styled_marker.replace("\x1b[0m", " ALIGN\x1b[0m") not in rendered
 
 
 def test_rich_progress_reporter_indents_live_work(monkeypatch: pytest.MonkeyPatch) -> None:
