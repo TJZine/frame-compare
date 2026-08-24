@@ -634,7 +634,7 @@ def _render_stage() -> str:
             </div>
             <div class="rv-divider"><div class="rv-divider-handle"></div></div>
         </div>
-        <div class="rv-stage-labels" aria-hidden="true">
+        <div class="rv-stage-labels">
             <div id="label-left" class="rv-overlay-label"></div>
             <div id="label-right" class="rv-overlay-label right"></div>
         </div>

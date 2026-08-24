@@ -8,9 +8,8 @@ from pathlib import Path
 import structlog
 
 from frame_compare.analysis.errors import SelectionError
-from frame_compare.analysis.frame_plan import create_frame_plan
 from frame_compare.analysis.metrics import slice_frame_metrics
-from frame_compare.analysis.selection import select_frames
+from frame_compare.analysis.selection import select_frames, select_random_frames
 from frame_compare.analysis.types import (
     FrameMetrics,
     SelectionBreakdown,
@@ -53,7 +52,9 @@ from frame_compare.utils.types import (
 log = structlog.get_logger()
 
 
-def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhaseOutput:
+def run_align_phase(
+    ctx: RunContext, *, selected_frames: list[int], verbose: bool = False
+) -> AlignPhaseOutput:
     if not ctx.comparisons:
         return AlignPhaseOutput(
             reference=ctx.reference,
@@ -100,12 +101,11 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
             ctx.reference.path.stem: dict(ctx.reference.probe.preserved_frame_props),
             **{comp.path.stem: dict(comp.probe.preserved_frame_props) for comp in ctx.comparisons},
         },
+        verbose=verbose,
     )
 
     updated_comparisons: list[ClipState] = []
-    warnings = [
-        format_rejected_alignment_warning(result) for result in results if not result.applied
-    ]
+    warnings: list[str] = []
     for comparison, result in zip(ctx.comparisons, results, strict=True):
         alignment = None
         if result.applied:
@@ -117,6 +117,37 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
                 comparison_stem=Path(result.comparison_clip).stem,
                 relative_offset_frames=frame_offset,
                 source=result.source,
+                stability=result.stability,
+            )
+            if result.stability is not None and result.stability.classification in {
+                "possible_drift",
+                "possible_discontinuity",
+                "variable",
+            }:
+                detail = {
+                    "possible_drift": "may drift across the source",
+                    "possible_discontinuity": "varies across the source; possible edit discontinuity",
+                    "variable": "varies across the source",
+                }[result.stability.classification]
+                position = result.stability.change_position_seconds
+                if (
+                    position is not None
+                    and result.stability.classification == "possible_discontinuity"
+                ):
+                    seconds = round(position)
+                    detail += (
+                        f" near {seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
+                    )
+                warnings.append(
+                    f"align: {comparison.label} alignment {detail}. "
+                    "The applied constant offset was retained and should be verified."
+                )
+        else:
+            warnings.append(
+                format_rejected_alignment_warning(
+                    result,
+                    comparison_label=comparison.label,
+                )
             )
         updated_comparisons.append(
             replace(
@@ -615,20 +646,20 @@ def _fallback_generated_frames_for_aligned_window(
     if count <= 0:
         return []
     fallback_offset = selectable_start - reference_trim_start
-    sample_count = min(selectable_length, count + len(excluded_frames))
-    while True:
-        selected = [
-            frame + fallback_offset
-            for frame in create_frame_plan(
-                num_frames=selectable_length,
-                count=sample_count,
-                seed=seed,
-            ).frames
-            if frame + selectable_start not in excluded_frames
-        ]
-        if len(selected) >= count or sample_count >= selectable_length:
-            return selected[:count]
-        sample_count = min(selectable_length, sample_count * 2)
+    local_exclusions = {
+        frame - selectable_start
+        for frame in excluded_frames
+        if selectable_start <= frame < selectable_start + selectable_length
+    }
+    return [
+        frame + fallback_offset
+        for frame in select_random_frames(
+            selectable_length,
+            count,
+            seed,
+            local_exclusions,
+        )
+    ]
 
 
 def _selectable_aligned_source_window(

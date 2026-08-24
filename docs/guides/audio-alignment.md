@@ -22,8 +22,8 @@ commentary tracks, or unrelated audio can make correlation ambiguous or invalid.
 
 1. Let automatic alignment compute an offset.
 2. Review confidence and warnings.
-3. Use VSPreview when the interactive route is available and the evidence needs manual
-   confirmation.
+3. Use VSPreview for optional interactive verification when the route is available and
+   the evidence needs manual confirmation. It is not part of automatic correlation.
 4. Verify dialogue, cuts, and motion in the final report.
 5. Reuse an accepted result only while the same source identities and alignment-affecting
    settings remain valid.
@@ -49,11 +49,36 @@ runtime identity.
 A cache miss simply returns to normal alignment. Corrupt or unsupported reuse data is
 ignored with a warning rather than treated as authoritative evidence.
 
+Computed alignment may also classify bounded evidence across the source as stable,
+possible drift, possible discontinuity, variable, or insufficient. This summary is
+diagnostic only: Frame Compare always retains the selected constant offset and trims.
+Material non-stable evidence produces one concise warning and should be verified at
+multiple points. Stable and insufficient evidence do not warn. Alignment reuse cache
+schema v2 requires the compact summary for computed entries and does not provide
+compatibility or migration for older cache data.
+
 ## Interactive verification with VSPreview
 
 VSPreview is included in the Windows portable bundle and optional in native
 installations. The default Docker route does not provide an interactive desktop
 session.
+
+Normal mode keeps VSPreview launch and optional startup-failure presentation concise.
+Use `--verbose` for the generated command and bounded startup diagnostics. If optional
+VSPreview verification cannot start, Frame Compare retains the computed audio alignment
+and directs you to `frame-compare doctor`; forced interactive mode still fails.
+Successful sessions continue to inherit VSPreview and native decoder/index output.
+The interactive terminal flow remains nested under `ALIGN` and stages the operator
+through `[RUN] VSPreview Bootstrap`, `[OK] VSPreview Ready`, and
+`[WAIT] VSPreview Confirmation`. Normal labels use the same prepared release-aware
+source identities as the rest of Frame Compare, while paths and filename stems remain
+the internal alignment and override identities. These literal markers remain present
+with color disabled.
+
+Confirmation uses untrimmed source-frame indices. Enter the reference source frame
+followed by the comparison source frame; the confirmed offset is reference minus
+comparison. Native decoder and index diagnostics remain visible between Frame
+Compare-owned status rows.
 
 <figure class="fc-doc-figure">
   <img src="../images/vspreview-alignment.webp" alt="VSPreview showing EBU DVB PQ10 Reference beside EBU DVB HLG10 Comparison at frame 1000 with a zero-frame offset hint and timeline controls.">

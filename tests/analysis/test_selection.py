@@ -91,7 +91,33 @@ def test_motion_count_returns_high_motion() -> None:
 
     result = select_frames(metrics, config)
 
-    assert result.frames == [50, 60, 70, 80, 90]
+    assert result.frames == [0, 20, 50, 60, 80]
+
+
+def test_metric_categories_choose_best_candidate_per_temporal_stratum() -> None:
+    luminance = [0.5] * 40
+    motion = [0.1] * 40
+    for rank, frame in enumerate((1, 11, 21, 31)):
+        luminance[frame] = 0.01 + rank * 0.01
+        motion[frame] = 1.0 - rank * 0.01
+    for rank, frame in enumerate((8, 18, 28, 38)):
+        luminance[frame] = 0.99 - rank * 0.01
+
+    result = select_frames(
+        make_metrics(luminance, motion),
+        AnalysisConfig(
+            random_frame_count=0,
+            dark_frame_count=4,
+            bright_frame_count=4,
+            motion_frame_count=4,
+            dark_quantile=0.2,
+            bright_quantile=0.8,
+        ),
+    )
+
+    assert result.breakdown.quantile_dark == [1, 11, 21, 31]
+    assert result.breakdown.quantile_bright == [8, 18, 28, 38]
+    assert len(result.breakdown.motion) == 4
 
 
 def test_random_count_same_seed_deterministic() -> None:
@@ -173,18 +199,25 @@ def test_metric_categories_backfill_after_user_collisions() -> None:
     assert result.frames == [0, 1, 2, 3, 4, 5]
 
 
-def test_random_underfill_raises_when_min_gap_prevents_requested_count() -> None:
+def test_random_relaxes_spacing_when_short_clip_has_enough_unique_frames() -> None:
     metrics = make_metrics([0.1] * 5, [0.0] * 5)
     config = AnalysisConfig(random_frame_count=2)
 
-    with pytest.raises(SelectionError) as exc:
-        select_frames(metrics, config)
+    result = select_frames(metrics, config)
 
-    assert exc.value.context.details == {
-        "reason": "insufficient_candidates",
-        "requested": 2,
-        "found": 1,
-    }
+    assert len(result.frames) == 2
+    assert len(set(result.frames)) == 2
+
+
+def test_random_selection_uses_every_temporal_stratum() -> None:
+    metrics = make_metrics(LUMINANCE_100, MOTION_100)
+
+    frames = select_frames(
+        metrics,
+        AnalysisConfig(random_frame_count=10, random_seed=42),
+    ).breakdown.random
+
+    assert all(any(start <= frame < start + 10 for frame in frames) for start in range(0, 100, 10))
 
 
 def test_insufficient_candidates_raises() -> None:
@@ -259,6 +292,27 @@ def test_sparse_selection_uses_source_coordinates_and_full_window_for_user_frame
     assert result.selection_details[20].score == pytest.approx(0.9)
     assert result.selection_details[38].score == pytest.approx(1.0)
     assert result.selection_details[38].timecode == "00:00:01.583"
+
+
+def test_sparse_metric_selection_stratifies_in_source_coordinates() -> None:
+    metrics = make_sparse_metrics(
+        [0.4, 0.3, 0.2, 0.1],
+        [0.7, 0.8, 0.9, 1.0],
+        (101, 111, 121, 131),
+    )
+
+    result = select_frames(
+        metrics,
+        AnalysisConfig(random_frame_count=0, motion_frame_count=4),
+    )
+
+    assert result.breakdown.motion == [1, 11, 21, 31]
+    assert [result.selection_details[frame].score for frame in (1, 11, 21, 31)] == [
+        pytest.approx(0.7),
+        pytest.approx(0.8),
+        pytest.approx(0.9),
+        pytest.approx(1.0),
+    ]
 
 
 def test_sparse_selection_reports_insufficient_metric_candidates() -> None:

@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import frame_compare.services.alignment_vspreview as alignment_vspreview
+import frame_compare.vspreview.output as vspreview_output
 from frame_compare.services.alignment_vspreview import maybe_launch_alignment_vspreview
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig
@@ -24,6 +25,7 @@ def _call_maybe_launch(
     tmp_path: Path,
     config: AlignmentConfig,
     progress: object | None = None,
+    verbose: bool = False,
 ) -> None:
     maybe_launch_alignment_vspreview(
         reference=tmp_path / "ref.mkv",
@@ -32,6 +34,7 @@ def _call_maybe_launch(
         cache_dir=tmp_path,
         config=config,
         progress=progress,
+        verbose=verbose,
     )
 
 
@@ -125,7 +128,7 @@ def test_force_interactive_unavailable_raises_without_launch(
         (VSPreviewAvailabilityStatus.PROBE_FAILED, "vspreview_availability_probe_failed"),
     ],
 )
-def test_optional_unavailable_generates_script_without_launch_and_logs_warning(
+def test_optional_unavailable_generates_script_with_one_human_warning(
     status: VSPreviewAvailabilityStatus,
     expected_warning: str,
     tmp_path: Path,
@@ -139,8 +142,10 @@ def test_optional_unavailable_generates_script_without_launch_and_logs_warning(
     )
     mock_launch = MagicMock(return_value=tmp_path / "vspreview.py")
     mock_warning = MagicMock()
+    mock_human_warning = MagicMock()
     monkeypatch.setattr(alignment_vspreview, "launch_alignment_verification_session", mock_launch)
     monkeypatch.setattr(alignment_vspreview.log, "warning", mock_warning)
+    monkeypatch.setattr(alignment_vspreview, "print_vspreview_unavailable", mock_human_warning)
 
     _call_maybe_launch(tmp_path=tmp_path, config=AlignmentConfig(use_vspreview=True))
 
@@ -148,12 +153,13 @@ def test_optional_unavailable_generates_script_without_launch_and_logs_warning(
     _, launch_kwargs = mock_launch.call_args
     assert isinstance(launch_kwargs["request"], VSPreviewSessionRequest)
     assert launch_kwargs["config"].enabled is False
-    warning_args, warning_kwargs = mock_warning.call_args_list[0]
-    assert warning_args == (expected_warning,)
-    assert warning_kwargs["hint"] in {"install VSPreview", "check install"}
-    if status == VSPreviewAvailabilityStatus.PROBE_FAILED:
-        assert warning_kwargs["reason"] == "availability probe failed (RuntimeError)"
-        assert warning_kwargs["exception_type"] == "RuntimeError"
+    mock_warning.assert_not_called()
+    expected_reason = (
+        "VSPreview availability check failed."
+        if expected_warning == "vspreview_availability_probe_failed"
+        else "VSPreview is not installed."
+    )
+    mock_human_warning.assert_called_once_with(reason=expected_reason, no_color=False)
 
 
 def test_available_without_tty_generates_script_disabled_and_logs_no_tty(
@@ -235,7 +241,7 @@ def test_forced_available_without_tty_raises_without_launch(
     mock_launch.assert_not_called()
 
 
-def test_optional_launch_error_logs_warning(
+def test_optional_launch_error_has_one_human_warning(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -251,15 +257,58 @@ def test_optional_launch_error_logs_warning(
         MagicMock(side_effect=VSPreviewError("launch exited with code 7")),
     )
     mock_warning = MagicMock()
+    mock_human_warning = MagicMock()
     monkeypatch.setattr(alignment_vspreview.log, "warning", mock_warning)
+    monkeypatch.setattr(alignment_vspreview, "print_vspreview_unavailable", mock_human_warning)
 
     _call_maybe_launch(tmp_path=tmp_path, config=AlignmentConfig(use_vspreview=True))
 
-    mock_warning.assert_called_once()
-    warning_args, warning_kwargs = mock_warning.call_args
-    assert warning_args == ("vspreview_optional_launch_failed",)
-    assert warning_kwargs["reason"] == "VSPreview failed: launch exited with code 7"
-    assert warning_kwargs["code"] == "FC-4019"
+    mock_warning.assert_not_called()
+    mock_human_warning.assert_called_once_with(
+        reason="launch exited with code 7",
+        no_color=False,
+    )
+
+
+def test_verbose_optional_startup_failure_adds_bounded_forensic_surface(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_tty(monkeypatch, is_tty=True)
+    monkeypatch.setattr(
+        alignment_vspreview,
+        "check_vspreview_availability",
+        MagicMock(return_value=_availability(VSPreviewAvailabilityStatus.AVAILABLE)),
+    )
+    monkeypatch.setattr(
+        alignment_vspreview,
+        "launch_alignment_verification_session",
+        MagicMock(
+            side_effect=VSPreviewError(
+                "Missing optional dependency: vstools.utils.gpu",
+                missing_module="vstools.utils.gpu",
+                command=("python", "-m", "vspreview", "session.py"),
+                returncode=1,
+                startup_stderr="captured traceback tail",
+            )
+        ),
+    )
+    details = MagicMock()
+    monkeypatch.setattr(alignment_vspreview, "print_vspreview_failure_details", details)
+
+    _call_maybe_launch(
+        tmp_path=tmp_path,
+        config=AlignmentConfig(use_vspreview=True),
+        verbose=True,
+    )
+
+    details.assert_called_once_with(
+        command=("python", "-m", "vspreview", "session.py"),
+        reason="Missing optional dependency: vstools.utils.gpu",
+        returncode=1,
+        startup_stderr="captured traceback tail",
+        no_color=False,
+    )
 
 
 def test_forced_launch_error_raises(
@@ -302,10 +351,23 @@ def test_prompt_for_confirmed_offsets_writes_to_stderr(
     captured = capsys.readouterr()
     assert confirmed == {"ref:comp": 12}
     assert captured.out == ""
-    assert "VSPreview Confirmation" in captured.err
+    assert "[WAIT] VSPreview Confirmation" in captured.err
     assert "ref" in captured.err
-    assert "comp" in captured.err
-    assert "+4" in captured.err
+    assert "Comparison 1 | comp" in captured.err
+    for fragment in (
+        "domain",
+        "Untrimmed source-frame indices",
+        "enter",
+        "reference_frame comparison_frame",
+        "offset",
+        "reference - comparison",
+        "skip",
+        "'skip' or 's'",
+        "frames",
+        "[+4f] >",
+    ):
+        assert fragment in captured.err
+    assert captured.err.endswith("\n")
     assert "\x1b[" not in captured.err
     assert "[bold cyan]" not in captured.err
 
@@ -328,6 +390,52 @@ def test_prompt_for_confirmed_offsets_does_not_show_numeric_hint_when_absent(
     assert confirmed == {"ref:comp": 12}
     assert "comp" in captured.err
     assert "+0" not in captured.err
+    assert "frames" in captured.err
+    assert "[no trusted audio hint] >" in captured.err
+
+
+def test_prompt_for_confirmed_offsets_uses_prepared_names_but_keeps_stem_keys(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(alignment_vspreview.sys, "stdin", io.StringIO("120 108\n"))
+
+    confirmed = alignment_vspreview._prompt_for_confirmed_offsets(
+        reference=tmp_path / "raw-reference-stem.mkv",
+        comparisons=[tmp_path / "raw-comparison-stem.mkv"],
+        offsets_by_key={"raw-reference-stem:raw-comparison-stem": 4},
+        presentation_names_by_stem={
+            "raw-reference-stem": "PMTP WEB-DL | DV HDR10+ | Kitsune",
+            "raw-comparison-stem": "ATV WEB-DL | DV HDR10+ | Kitsune",
+        },
+        no_color=True,
+    )
+
+    output = capsys.readouterr().err
+    assert confirmed == {"raw-reference-stem:raw-comparison-stem": 12}
+    assert "PMTP WEB-DL | DV HDR10+ | Kitsune" in output
+    assert "Comparison 1 | ATV WEB-DL | DV HDR10+ | Kitsune" in output
+    assert "raw-reference-stem" not in output
+    assert "raw-comparison-stem" not in output
+
+
+def test_wait_status_text_styles_only_marker(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    monkeypatch.setenv("TERM", "xterm-256color")
+
+    vspreview_output.print_vspreview_confirmation_header(
+        reference_name="Reference",
+        no_color=False,
+    )
+
+    output = capsys.readouterr().err
+    assert "\x1b[35m[WAIT]\x1b[0m VSPreview Confirmation" in output
+    assert "\x1b[35m[WAIT] VSPreview Confirmation\x1b[0m" not in output
 
 
 def test_prompt_for_confirmed_offsets_accepts_zero_source_frame_offset(
@@ -584,7 +692,7 @@ def test_available_with_tty_suspends_progress_during_launch_and_prompt(
         progress=progress,
     )
 
-    progress.set_description.assert_called_once_with("Alignment verification")
+    progress.set_description.assert_called_once_with("ALIGN | Interactive verification")
     progress.suspend.assert_called_once_with()
     progress.resume.assert_called_once_with()
 

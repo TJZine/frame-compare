@@ -307,7 +307,7 @@ def test_run_report_phase_labels_skipped_analysis_alignment_fallback_random_fram
             "Encode 1": [tmp_path / "screenshots" / "encode.png"],
         },
         screenshot_dir=tmp_path / "screenshots",
-        source_frames_by_label={"Reference": [98], "Encode 1": [18]},
+        source_frames_by_label={"Reference": [96], "Encode 1": [16]},
     )
 
     output = phase_post_render.run_report_phase(
@@ -320,7 +320,7 @@ def test_run_report_phase_labels_skipped_analysis_alignment_fallback_random_fram
 
     report_data = captured["report_data"]
     assert output.report_path == expected_path
-    assert align_output.selected_frames == [18]
+    assert align_output.selected_frames == [16]
     assert [
         (detail.label, detail.detail, detail.category) for detail in report_data.frame_details
-    ] == [("Frame 18", "Selected comparison frame", "random")]
+    ] == [("Frame 16", "Selected comparison frame", "random")]

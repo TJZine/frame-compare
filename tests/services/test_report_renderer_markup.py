@@ -385,7 +385,7 @@ def test_build_html_positions_stage_labels_outside_image_layers(
     assert stage.attrs["aria-label"] == "Comparison viewer"
     assert canvas.attrs["role"] == "img"
     assert canvas.attrs["aria-label"] == "Comparison image canvas"
-    assert stage_labels.attrs["aria-hidden"] == "true"
+    assert "aria-hidden" not in stage_labels.attrs
     require_first(stage_labels, tag="div", element_id="label-left")
     require_first(stage_labels, tag="div", element_id="label-right")
     for layer_class in ("rv-left", "rv-right"):

@@ -102,9 +102,9 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
     assert summary["activeFilterBadge"]["badgeHiddenByDefault"] is True
     assert summary["activeFilterBadge"]["badgeClearedToHidden"] is True
     assert summary["sourceOverlayLabels"] == {
-        "single": "Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR",
-        "slider": "LEFT: Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR",
-        "diff": "BASE: Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR",
+        "single": "Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR • 17.00 GiB",
+        "slider": "LEFT: Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR • 17.00 GiB",
+        "diff": "BASE: Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR • 17.00 GiB",
     }
     assert summary["blinkLabels"] == {
         "labels": {"left": "FIRST: Clip 1", "right": "SECOND: Clip 2"},

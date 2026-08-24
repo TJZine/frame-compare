@@ -105,6 +105,12 @@ series. Performance returns a sampled metric series with an explicit source-fram
 map; metric-based dark, bright, and motion selection is limited to those samples.
 Configured user and random frames remain eligible across the whole selectable
 window and are not restricted to sampled metric frames.
+Automatic selection divides that whole window into deterministic integer-coordinate
+temporal strata. Dark, bright, and motion candidates retain their existing metric
+rankings, while random candidates retain stable seed-derived ordering; all categories
+prefer five-frame separation, globally backfill empty strata, and relax spacing—but
+never uniqueness—when distinct candidates can otherwise satisfy the requested count.
+Sparse performance samples remain in source-frame coordinates during this allocation.
 
 `frame_compare.orchestration.source_labels` resolves presentation labels after
 selector/override resolution and before probing or run-folder reservation.
@@ -246,7 +252,9 @@ recovery requirement.
   entries may also retain the computed
   audio alignment result that produced the preview suggestion so a later run can
   decline the human-confirmed offset without rerunning deterministic audio
-  alignment. Unreadable, corrupt, unsupported-version, malformed source-table, or
+  alignment. Cache version 2 requires a bounded scalar stability summary for computed
+  entries and embedded computed results; no per-window evidence or audio is persisted.
+  Unreadable, corrupt, unsupported-version, malformed source-table, or
   invalid-entry shared reuse data degrades to the normal alignment path with a
   warning log event. Ordinary no-match, incomplete, or stale source-set misses
   can silently return no reusable set and continue through the normal alignment
@@ -365,7 +373,10 @@ orchestration-owned or analysis-owned identity types such as `ClipState`,
 `ClipIdentity`, or `ClipFingerprint`.
 
 `frame_compare.services.alignment` owns alignment entrypoint sequencing and
-precedence, while `frame_compare.services.alignment_previous_offsets` owns
+precedence and carries diagnostic-only stability summaries without allowing them to
+change the applied constant offset or trims. Immutable orchestration alignment state
+carries that summary to warning and human-report owners without a mutable diagnostics
+side channel. `frame_compare.services.alignment_previous_offsets` owns
 previous-offset reuse policy. Exact-match computed audio alignment cache hits are
 treated as deterministic and can be reused independently of the human
 confirmed-offset policy; `previous_offsets` governs only VSPreview-confirmed
@@ -588,6 +599,11 @@ The Clips inspector composes those profiles into stable Reference/Comparison car
 Primary and informative release identities wrap normally, exact filenames and long
 technical values may wrap anywhere, and drawer/panel overflow is constrained locally
 rather than masked at the document boundary.
+Visible Single, Slider, Diff, Blink, and Grid HUD labels reuse the payload's canonical
+container byte size through the shared IEC formatter; hiding the HUD hides that size
+with the source label, and no report payload or probing owner is duplicated.
+Stage labels participate directly in accessible text, while Grid cell names retain
+primary identity and exact filename and append the same size only while the HUD is shown.
 
 The ordinary report artifact does not claim presentation blindness. Source identity
 can be present in baked screenshot overlays, physical image filenames, and report
@@ -635,10 +651,29 @@ presentation, and visible-range controls. It consumes the viewer's single viewpo
 state while exposing visible image entries to the lens rather than duplicating either. In
 Grid mode the shared pan fields represent normalized image-box translation and each
 cell derives its CSS-pixel transform from its own contained image dimensions; the
-viewer converts those fields at the Grid/pair-mode boundary so mixed-aspect cells keep
+viewport owner converts those fields at the Grid/pair-mode boundary so mixed-aspect cells keep
 one normalized viewport center without changing pair-mode persistence semantics.
 
 #### Review State And Viewer Composition
+
+`assets/viewer_format.js` is the dependency-free owner for clip display profiles,
+exact and accessible names, FPS and IEC sizes, signal/presentation/tonemap and
+active-picture labels, mode names, and stable clip roles. It does not read the DOM,
+storage, or viewer state. `assets/inspector.js` owns Inspector DOM references,
+open/close focus and inert policy, tab selection and roving keyboard behavior, Frame,
+Clips, Align, and Export rendering, safe slow.pics link presentation, and lazy Review
+activation through the root viewer. Hidden Inspectors update only visibility and tab
+semantics; opening refreshes their content before focus moves into the drawer.
+
+`assets/viewport.js` owns zoom clamping and pointer anchoring, pan bounds and Grid
+normalization, fit/reset/reveal math, transient pointer/pinch mechanics, directional
+pair-alignment normalization and offsets, and Lens/Grid viewport refreshes. It mutates
+the root viewer's canonical state and routes persistence back through the root; it does
+not create a second state or storage owner. The owner holds an explicit reference to
+the root viewer rather than inheriting the root prototype, and consumers call the
+Viewport owner directly instead of relying on a root forwarding facade. The root
+continues to register events, route shortcuts and mode/source/frame transitions, and
+sequence rendering.
 
 `assets/review_state.js` owns the exact report-scoped local review schema, bounded
 bookmark/tag/note/preferred-clip records, fail-closed localStorage reads, deterministic
@@ -648,9 +683,9 @@ created on first visible Review use, keeps form rendering stable across unrelate
 refreshes, and routes transition announcements through the existing shared polite live
 region. Its storage is
 separate from viewport preferences and never writes into the report or run directory.
-`assets/viewer.js` caches the Review DOM and composes that focused controller with the
-other owners and the existing mode,
-pointer, viewport, alignment, and inspector state rather than owning duplicate
+`assets/viewer.js` caches the Review DOM and composes those focused owners with the
+existing canonical report, mode, viewport, alignment, and Inspector state
+rather than owning duplicate Inspector rendering/focus policy or
 coordinate conversions
 or grid mount policy. Grid remains outside the public report default-mode payload
 enum and does not preload adjacent grid pages. Blink mode supports 0.3s/0.7s/1.2s speeds,
@@ -708,7 +743,7 @@ Runtime ownership matrix:
 | Audio correlation, preprocessing, and refinement estimation | `frame_compare.services.alignment_correlation` |
 | Audio alignment window collection, weak-window rejection, consensus selection, and ambiguity gating | `frame_compare.services.alignment_consensus` |
 | Alignment-specific VSPreview verification display and override policy | `frame_compare.services.alignment_vspreview` |
-| VSPreview availability, launch adapter, and managed-Windows media-runtime preload | `frame_compare.vspreview.adapter`, `frame_compare.vspreview.launcher` |
+| VSPreview availability, launch adapter, VSJetPack compatibility bootstrap, and managed-Windows media-runtime preload | `frame_compare.vspreview.adapter`, `frame_compare.vspreview.launcher` |
 | VapourSynth import, Windows DLL registration, plugin detection/loading helpers | `frame_compare.vs.env` |
 | Coordinated media component identity, scoped cache/index fingerprints, and deployment runtime comparison | `frame_compare.vs.runtime_contract` |
 | Doctor execution and diagnostic result mapping | `frame_compare.orchestration.doctor` |

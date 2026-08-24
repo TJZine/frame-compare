@@ -41,20 +41,20 @@ const ReportViewer = {
     },
 
     clipDisplay(clip, profile = 'control') {
-        return clip.display[profile];
+        return ViewerFormat.clipDisplay(clip, profile);
     },
 
     clipFilename(clip) {
-        return clip.display.filename;
+        return ViewerFormat.clipFilename(clip);
     },
 
     clipAccessibleName(clip) {
-        const primary = this.clipDisplay(clip, 'primary');
-        const filename = this.clipFilename(clip);
-        return filename && filename !== primary ? `${primary} — ${filename}` : primary;
+        return ViewerFormat.clipAccessibleName(clip);
     },
 
     init() {
+        this.inspector = Inspector.create(this);
+        this.viewport = Viewport.create(this);
         this.cacheDOM();
         if (!this.hasRequiredDOM()) {
             this.showStatus('Report viewer markup is incomplete.', 'error');
@@ -152,7 +152,6 @@ const ReportViewer = {
             btnCloseHelp: document.getElementById('btn-close-help'),
             infoModal: document.getElementById('info-modal'),
             btnInfo: document.getElementById('btn-info'),
-            btnInspector: document.getElementById('btn-inspector'),
             live: document.getElementById('viewer-live'),
             grid: document.getElementById('rv-grid'),
             gridCells: document.querySelector('[data-grid-cells]'),
@@ -160,28 +159,6 @@ const ReportViewer = {
             btnGridPrev: document.getElementById('btn-grid-prev'),
             btnGridNext: document.getElementById('btn-grid-next'),
             btnCloseInfo: document.getElementById('btn-close-info'),
-            inspector: document.getElementById('rv-inspector'),
-            btnInspectorClose: document.getElementById('btn-inspector-close'),
-            inspectorTabs: document.querySelectorAll('[data-inspector-tab]'),
-            inspectorPanels: document.querySelectorAll('.rv-inspector-panel'),
-            inspectorFrameLabel: document.querySelector('[data-inspector-frame-label]'),
-            inspectorFrameNumber: document.querySelector('[data-inspector-frame-number]'),
-            inspectorFrameCategory: document.querySelector('[data-inspector-frame-category]'),
-            inspectorFrameDetail: document.querySelector('[data-inspector-frame-detail]'),
-            inspectorFramePosition: document.querySelector('[data-inspector-frame-position]'),
-            inspectorSourceFrames: document.querySelector('[data-inspector-source-frames]'),
-            inspectorClips: document.querySelector('[data-inspector-clips]'),
-            inspectorAlignPair: document.querySelector('[data-inspector-align-pair]'),
-            inspectorAlignPreset: document.querySelector('[data-inspector-align-preset]'),
-            inspectorAlignX: document.querySelector('[data-inspector-align-x]'),
-            inspectorAlignY: document.querySelector('[data-inspector-align-y]'),
-            btnInspectorResetCurrentAlign: document.getElementById('btn-inspector-reset-current-align'),
-            btnInspectorResetAllAlign: document.getElementById('btn-inspector-reset-all-align'),
-            inspectorExportTitle: document.querySelector('[data-inspector-export-title]'),
-            inspectorExportId: document.querySelector('[data-inspector-export-id]'),
-            inspectorExportGenerated: document.querySelector('[data-inspector-export-generated]'),
-            inspectorExportSlowpics: document.querySelector('[data-inspector-export-slowpics]'),
-            inspectorExportSummary: document.querySelector('[data-inspector-export-summary]'),
             reviewFrame: document.querySelector('[data-review-frame]'),
             reviewBookmark: document.querySelector('[data-review-bookmark]'),
             reviewTag: document.querySelector('[data-review-tag]'),
@@ -199,6 +176,7 @@ const ReportViewer = {
             btnAlignToggle: document.getElementById('btn-align-toggle'),
             alignPopover: document.getElementById('align-popover'),
             btnOverlays: document.getElementById('btn-overlays'),
+            ...this.inspector.cacheDOM(),
         };
     },
 
@@ -624,18 +602,18 @@ const ReportViewer = {
             lensTouchStart: null,
         };
 
-        this.dom.zoomRange.addEventListener('input', (e) => this.setZoom(parseFloat(e.target.value)));
-        this.dom.btnZoomOut.addEventListener('click', () => this.setZoom(this.state.zoom - 0.1));
-        this.dom.btnZoomIn.addEventListener('click', () => this.setZoom(this.state.zoom + 0.1));
-        this.dom.btnZoomReset.addEventListener('click', () => this.resetViewport());
+        this.dom.zoomRange.addEventListener('input', (e) => this.viewport.setZoom(parseFloat(e.target.value)));
+        this.dom.btnZoomOut.addEventListener('click', () => this.viewport.setZoom(this.state.zoom - 0.1));
+        this.dom.btnZoomIn.addEventListener('click', () => this.viewport.setZoom(this.state.zoom + 0.1));
+        this.dom.btnZoomReset.addEventListener('click', () => this.viewport.resetViewport());
 
         this.dom.fitBtns.forEach(btn => {
-            btn.addEventListener('click', () => this.setFitMode(btn.dataset.fit));
+            btn.addEventListener('click', () => this.viewport.setFitMode(btn.dataset.fit));
         });
-        this.dom.sizerImg.addEventListener('load', () => this.applyFitMode());
-        window.addEventListener('resize', () => this.applyFitMode());
+        this.dom.sizerImg.addEventListener('load', () => this.viewport.applyFitMode());
+        window.addEventListener('resize', () => this.viewport.applyFitMode());
         document.addEventListener('fullscreenchange', () => {
-            this.applyFitMode();
+            this.viewport.applyFitMode();
             this.updateFullscreenButton();
         });
         this.dom.btnFullscreen.addEventListener('click', () => this.toggleFullscreen());
@@ -651,13 +629,13 @@ const ReportViewer = {
         this.dom.stage.addEventListener('pointerdown', (e) => {
             if (this.isViewerChromeEvent(e)) return;
             this.pointerInteraction.lensPointHandled = this.lens.handleStagePointerDown(e);
-            this.trackPointerPosition(e);
-            this.capturePointer(e.pointerId);
-            if (this.shouldStartPinch(e)) {
+            this.viewport.trackPointerPosition(e);
+            this.viewport.capturePointer(e.pointerId);
+            if (this.viewport.shouldStartPinch(e)) {
                 this.lens.cancelTouchPending();
                 this.pointerInteraction.lensPointHandled = false;
                 this.pointerInteraction.lensTouchStart = null;
-                this.startPinchFromTrackedPointers();
+                this.viewport.startPinchFromTrackedPointers();
                 if (this.state.mode === 'blink') this.state.blinkPaused = true;
                 e.preventDefault();
                 return;
@@ -671,14 +649,14 @@ const ReportViewer = {
                 e.preventDefault();
                 return;
             }
-            if (this.shouldPanFromPointer(e)) {
-                this.startPanFromPointer(e);
+            if (this.viewport.shouldPanFromPointer(e)) {
+                this.viewport.startPanFromPointer(e);
                 if (this.state.mode === 'blink') this.state.blinkPaused = true;
                 e.preventDefault();
             } else if (this.state.mode === 'slider') {
                 this.pointerInteraction.isDragging = true;
-                this.captureStagePointer(e);
-                this.updateSliderFromPointer(e);
+                this.viewport.captureStagePointer(e);
+                this.viewport.updateSliderFromPointer(e);
                 e.preventDefault();
             }
         });
@@ -686,7 +664,7 @@ const ReportViewer = {
         this.dom.stage.addEventListener('pointermove', (e) => {
             if (this.isViewerChromeEvent(e)) return;
             const lensMove = this.lens.handleStagePointerMove(e);
-            this.trackPointerPosition(e);
+            this.viewport.trackPointerPosition(e);
             const pointer = this.pointerInteraction;
             if (pointer.lensPointHandled && pointer.lensTouchStart?.pointerId === e.pointerId) {
                 if (lensMove === 'pending') {
@@ -700,23 +678,23 @@ const ReportViewer = {
                 }
             }
             if (pointer.pinchActive) {
-                this.updatePinchFromTrackedPointers();
+                this.viewport.updatePinchFromTrackedPointers();
                 e.preventDefault();
                 return;
             }
             if (pointer.activePointerId !== null && e.pointerId !== pointer.activePointerId) return;
-            if (this.updatePanFromPointer(e)) {
+            if (this.viewport.updatePanFromPointer(e)) {
                 e.preventDefault();
                 return;
             }
             if (pointer.isDragging) {
-                this.updateSliderFromPointer(e);
+                this.viewport.updateSliderFromPointer(e);
                 e.preventDefault();
             }
         });
-        this.dom.stage.addEventListener('pointerup', (e) => this.stopPointerInteraction(e));
+        this.dom.stage.addEventListener('pointerup', (e) => this.viewport.stopPointerInteraction(e));
         this.dom.stage.addEventListener('pointercancel', (e) => {
-            this.stopPointerInteraction(e, { cancelled: true });
+            this.viewport.stopPointerInteraction(e, { cancelled: true });
         });
         this.dom.stage.addEventListener('dblclick', (e) => this.handleViewportDoubleClick(e));
         this.dom.stage.addEventListener('wheel', (e) => this.handleViewportWheel(e), { passive: false });
@@ -730,17 +708,17 @@ const ReportViewer = {
         if (this.isViewerChromeEvent(e)) return;
         if (this.state.mode === 'overlay' || this.state.mode === 'diff') return;
         e.preventDefault();
-        this.resetViewport();
+        this.viewport.resetViewport();
     },
 
     handleViewportWheel(e) {
         if (this.isViewerChromeEvent(e)) return;
         e.preventDefault();
         if (e.shiftKey) {
-            this.panByPixels(-e.deltaX, -e.deltaY, e.clientX, e.clientY);
+            this.viewport.panByPixels(-e.deltaX, -e.deltaY, e.clientX, e.clientY);
             return;
         }
-        this.zoomAtPoint(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1);
+        this.viewport.zoomAtPoint(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1);
     },
 
     startDeferredViewportGesture(e, start) {
@@ -754,41 +732,41 @@ const ReportViewer = {
             clientY: start.clientY,
         };
         if (this.state.mode === 'blink') this.state.blinkPaused = true;
-        if (this.shouldPanFromPointer(e)) {
-            this.startPanFromPointer(origin);
-            this.updatePanFromPointer(e);
+        if (this.viewport.shouldPanFromPointer(e)) {
+            this.viewport.startPanFromPointer(origin);
+            this.viewport.updatePanFromPointer(e);
             return;
         }
         if (this.state.mode === 'slider') {
             this.pointerInteraction.isDragging = true;
-            this.captureStagePointer(e);
-            this.updateSliderFromPointer(e);
+            this.viewport.captureStagePointer(e);
+            this.viewport.updateSliderFromPointer(e);
         }
     },
 
     bindAlignmentEvents() {
         this.dom.alignmentPreset.addEventListener('change', (e) => {
-            this.setAlignmentPreset(e.target.value);
+            this.viewport.setAlignmentPreset(e.target.value);
         });
         this.dom.alignX.addEventListener('input', (e) => {
-            this.setRawAlignmentInput('x', e.target.value);
+            this.viewport.setRawAlignmentInput('x', e.target.value);
         });
         this.dom.alignY.addEventListener('input', (e) => {
-            this.setRawAlignmentInput('y', e.target.value);
+            this.viewport.setRawAlignmentInput('y', e.target.value);
         });
-        this.dom.alignX.addEventListener('blur', () => this.commitRawAlignmentInput('x'));
-        this.dom.alignY.addEventListener('blur', () => this.commitRawAlignmentInput('y'));
+        this.dom.alignX.addEventListener('blur', () => this.viewport.commitRawAlignmentInput('x'));
+        this.dom.alignY.addEventListener('blur', () => this.viewport.commitRawAlignmentInput('y'));
         this.dom.alignX.addEventListener('keydown', (e) => {
             if (e.key !== 'Enter') return;
             e.preventDefault();
-            this.commitRawAlignmentInput('x');
+            this.viewport.commitRawAlignmentInput('x');
         });
         this.dom.alignY.addEventListener('keydown', (e) => {
             if (e.key !== 'Enter') return;
             e.preventDefault();
-            this.commitRawAlignmentInput('y');
+            this.viewport.commitRawAlignmentInput('y');
         });
-        this.dom.btnAlignmentReset.addEventListener('click', () => this.setAlignmentPreset('none'));
+        this.dom.btnAlignmentReset.addEventListener('click', () => this.viewport.setAlignmentPreset('none'));
 
         // Toggle popover visibility
         this.dom.btnAlignToggle.addEventListener('click', (e) => {
@@ -847,20 +825,7 @@ const ReportViewer = {
     },
 
     bindInspectorEvents() {
-        this.dom.btnInspector.addEventListener('click', () => this.setInspectorOpen(!this.state.inspectorOpen));
-        this.dom.btnInspectorClose.addEventListener('click', () => this.setInspectorOpen(false));
-        this.dom.inspectorTabs.forEach(tab => {
-            tab.addEventListener('click', () => this.setInspectorTab(tab.dataset.inspectorTab));
-            tab.addEventListener('keydown', (e) => this.handleInspectorTabKey(e));
-        });
-        this.dom.btnInspectorResetCurrentAlign.addEventListener('click', () => this.resetCurrentPairAlignment());
-        this.dom.btnInspectorResetAllAlign.addEventListener('click', () => this.resetAllPairAlignments());
-        this.dom.inspector.addEventListener('keydown', (e) => {
-            if (e.key !== 'Escape') return;
-            e.preventDefault();
-            e.stopPropagation();
-            this.setInspectorOpen(false);
-        });
+        this.inspector.bind();
     },
 
     bindBlinkEvents() {
@@ -886,240 +851,6 @@ const ReportViewer = {
 
     bindKeyboardEvents() {
         document.addEventListener('keydown', (e) => this.handleKey(e));
-    },
-
-    capturePointer(pointerId) {
-        this.pointerInteraction.capturedPointerIds.add(pointerId);
-        this.dom.stage.setPointerCapture?.(pointerId);
-    },
-
-    releasePointer(pointerId) {
-        if (!this.pointerInteraction.capturedPointerIds.has(pointerId)) return;
-        if (this.dom.stage.hasPointerCapture?.(pointerId)) {
-            this.dom.stage.releasePointerCapture(pointerId);
-        }
-        this.pointerInteraction.capturedPointerIds.delete(pointerId);
-    },
-
-    captureStagePointer(e) {
-        this.pointerInteraction.activePointerId = e.pointerId;
-        this.capturePointer(e.pointerId);
-    },
-
-    trackPointerPosition(e) {
-        this.pointerInteraction.pointerPositions.set(e.pointerId, {
-            x: e.clientX,
-            y: e.clientY,
-            type: e.pointerType,
-        });
-    },
-
-    untrackPointer(pointerId) {
-        this.pointerInteraction.pointerPositions.delete(pointerId);
-    },
-
-    trackedTouchPointers() {
-        return Array.from(this.pointerInteraction.pointerPositions.values())
-            .filter(pointer => pointer.type === 'touch');
-    },
-
-    shouldStartPinch(e) {
-        return e.pointerType === 'touch' && this.trackedTouchPointers().length >= 2;
-    },
-
-    pinchMetricsFromTrackedPointers() {
-        const [first, second] = this.trackedTouchPointers();
-        if (!first || !second) return null;
-
-        const dx = second.x - first.x;
-        const dy = second.y - first.y;
-        return {
-            centerX: (first.x + second.x) / 2,
-            centerY: (first.y + second.y) / 2,
-            distance: Math.hypot(dx, dy),
-        };
-    },
-
-    startPinchFromTrackedPointers() {
-        const metrics = this.pinchMetricsFromTrackedPointers();
-        if (!metrics) return;
-
-        const pointer = this.pointerInteraction;
-        const stageRect = this.dom.stage.getBoundingClientRect();
-        const stageCenterX = stageRect.left + stageRect.width / 2;
-        const stageCenterY = stageRect.top + stageRect.height / 2;
-
-        pointer.pinchActive = true;
-        pointer.isDragging = false;
-        pointer.isPanning = false;
-        pointer.activePointerId = null;
-        pointer.panMoved = true;
-        pointer.pinchStartDistance = Math.max(metrics.distance, 1);
-        pointer.pinchStartZoom = this.state.zoom;
-        pointer.pinchGridAnchor = this.state.mode === 'grid'
-            ? this.gridView.zoomAnchorForPoint(metrics.centerX, metrics.centerY)
-            : null;
-        pointer.pinchContentX = (metrics.centerX - stageCenterX - this.state.panX) / this.state.zoom;
-        pointer.pinchContentY = (metrics.centerY - stageCenterY - this.state.panY) / this.state.zoom;
-
-        this.state.fitMode = 'custom';
-        this.updateFitButtons();
-        this.dom.stage.classList.add('is-panning');
-    },
-
-    updatePinchFromTrackedPointers() {
-        const metrics = this.pinchMetricsFromTrackedPointers();
-        if (!metrics) return;
-
-        const pointer = this.pointerInteraction;
-        if (pointer.pinchStartDistance <= 0) return;
-
-        const nextZoom = this.clampZoom(
-            pointer.pinchStartZoom * (metrics.distance / pointer.pinchStartDistance)
-        );
-        this.applyZoom(nextZoom, { clampPan: false });
-        if (this.state.mode === 'grid' && pointer.pinchGridAnchor) {
-            const pan = this.gridView.panForZoomAnchor(
-                pointer.pinchGridAnchor,
-                metrics.centerX,
-                metrics.centerY,
-                nextZoom,
-            );
-            if (pan) this.setPan(pan.x, pan.y, { save: false });
-            return;
-        }
-        const stageRect = this.dom.stage.getBoundingClientRect();
-        const stageCenterX = stageRect.left + stageRect.width / 2;
-        const stageCenterY = stageRect.top + stageRect.height / 2;
-        this.setPan(
-            metrics.centerX - stageCenterX - pointer.pinchContentX * nextZoom,
-            metrics.centerY - stageCenterY - pointer.pinchContentY * nextZoom,
-            { save: false },
-        );
-    },
-
-    finishPinchInteraction() {
-        const pointer = this.pointerInteraction;
-        if (!pointer.pinchActive) return;
-
-        pointer.pinchActive = false;
-        pointer.pinchStartDistance = 0;
-        pointer.pinchGridAnchor = null;
-        this.dom.stage.classList.remove('is-panning');
-        this.persistViewportState();
-        if (this.state.mode === 'blink') this.state.blinkPaused = false;
-    },
-
-    updateSliderFromPointer(e) {
-        const rect = this.sliderCanvasRect();
-        if (rect.width <= 0) return;
-        const clampedClientX = Math.max(rect.left, Math.min(rect.right, e.clientX));
-        const x = clampedClientX - rect.left;
-        let percent = (1 - (x / rect.width)) * 100;
-        percent = Math.max(0, Math.min(100, percent));
-
-        this.state.revealPercent = percent;
-        this.updateSlider();
-    },
-
-    shouldPanFromPointer(e) {
-        return e.button === 1 || e.altKey || e.shiftKey || this.state.mode !== 'slider';
-    },
-
-    startPanFromPointer(e) {
-        const pointer = this.pointerInteraction;
-        pointer.isPanning = true;
-        pointer.panMoved = false;
-        pointer.lastPanX = e.clientX;
-        pointer.lastPanY = e.clientY;
-        pointer.panBasis = this.state.mode === 'grid'
-            ? this.gridView.panBasisForPoint(e.clientX, e.clientY)
-            : null;
-        this.captureStagePointer(e);
-        this.dom.stage.classList.add('is-panning');
-    },
-
-    updatePanFromPointer(e) {
-        const pointer = this.pointerInteraction;
-        if (!pointer.isPanning) return false;
-
-        const dx = e.clientX - pointer.lastPanX;
-        const dy = e.clientY - pointer.lastPanY;
-        if (Math.abs(dx) > 1 || Math.abs(dy) > 1) pointer.panMoved = true;
-        pointer.lastPanX = e.clientX;
-        pointer.lastPanY = e.clientY;
-        this.panByPixels(dx, dy, e.clientX, e.clientY, {
-            save: false,
-            basis: pointer.panBasis,
-        });
-        return true;
-    },
-
-    stopPointerInteraction(e, options = {}) {
-        const pointer = this.pointerInteraction;
-        this.untrackPointer(e.pointerId);
-        this.releasePointer(e.pointerId);
-
-        if (pointer.pinchActive) {
-            if (this.trackedTouchPointers().length >= 2) {
-                this.startPinchFromTrackedPointers();
-                return;
-            }
-            this.finishPinchInteraction();
-            return;
-        }
-
-        const wasLensTapPending = Boolean(
-            pointer.lensPointHandled
-            && pointer.lensTouchStart?.pointerId === e.pointerId
-        );
-        if (wasLensTapPending) {
-            this.lens.endStagePointer(e, { cancelled: Boolean(options.cancelled) });
-            pointer.lensPointHandled = false;
-            pointer.lensTouchStart = null;
-            pointer.isDragging = false;
-            pointer.isPanning = false;
-            pointer.panBasis = null;
-            pointer.panMoved = false;
-            if (pointer.activePointerId === e.pointerId) pointer.activePointerId = null;
-            this.dom.stage.classList.remove('is-panning');
-            if (this.state.mode === 'blink') this.state.blinkPaused = false;
-            return;
-        }
-
-        if (pointer.activePointerId !== null && e.pointerId !== pointer.activePointerId) return;
-        const completedDrag = pointer.isDragging;
-        const completedPan = pointer.isPanning;
-        if (!options.cancelled) {
-            this.lens.handleStagePointerMove(e);
-            this.updatePanFromPointer(e);
-        }
-        const completedPanMoved = pointer.panMoved;
-        pointer.isDragging = false;
-        pointer.isPanning = false;
-        pointer.panBasis = null;
-        if (pointer.activePointerId === e.pointerId) {
-            pointer.activePointerId = null;
-        }
-        pointer.panMoved = false;
-        this.dom.stage.classList.remove('is-panning');
-        if (this.state.mode === 'blink') this.state.blinkPaused = false;
-        if (completedDrag) this.updateSliderFromPointer(e);
-        const acquiredLensPoint = pointer.lensPointHandled;
-        pointer.lensPointHandled = false;
-        pointer.lensTouchStart = null;
-        if (completedPan) {
-            this.persistViewportState();
-            if (
-                !acquiredLensPoint
-                && !options.cancelled
-                && !completedPanMoved
-                && (this.state.mode === 'overlay' || this.state.mode === 'diff')
-            ) {
-                this.cycleClip();
-            }
-        }
-        if (completedDrag) this.persistViewportState();
     },
 
     clipCount() {
@@ -1184,20 +915,20 @@ const ReportViewer = {
 
     setLeftClip(idx) {
         const nextIndex = this.clipIndexOrDefault(idx, this.state.leftClipIdx);
-        this.storeCurrentPairAlignment();
+        this.viewport.storeCurrentPairAlignment();
         this.state.leftClipIdx = nextIndex;
         this.ensureDistinctPairSelection();
-        this.loadCurrentPairAlignment();
+        this.viewport.loadCurrentPairAlignment();
         if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
         this.render();
     },
 
     setRightClip(idx) {
         const nextIndex = this.clipIndexOrDefault(idx, this.state.rightClipIdx);
-        this.storeCurrentPairAlignment();
+        this.viewport.storeCurrentPairAlignment();
         this.state.rightClipIdx = nextIndex;
         this.ensureDistinctPairSelection();
-        this.loadCurrentPairAlignment();
+        this.viewport.loadCurrentPairAlignment();
         if (this.state.mode === 'blink') {
             this.state.activeClipIdx = this.state.rightClipIdx;
         }
@@ -1208,11 +939,11 @@ const ReportViewer = {
     swapPairClips() {
         if (this.state.mode === 'overlay' || this.state.mode === 'grid' || this.clipCount() <= 1) return;
 
-        this.storeCurrentPairAlignment();
+        this.viewport.storeCurrentPairAlignment();
         const previousLeft = this.state.leftClipIdx;
         this.state.leftClipIdx = this.state.rightClipIdx;
         this.state.rightClipIdx = previousLeft;
-        this.loadCurrentPairAlignment();
+        this.viewport.loadCurrentPairAlignment();
         if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
         this.render();
     },
@@ -1253,7 +984,7 @@ const ReportViewer = {
         this.state.leftClipIdx = this.clipIndexOrDefault(saved.leftClipIdx, this.state.leftClipIdx);
         this.state.rightClipIdx = this.clipIndexOrDefault(saved.rightClipIdx, this.state.rightClipIdx);
         this.state.activeClipIdx = this.clipIndexOrDefault(saved.activeClipIdx, this.state.activeClipIdx);
-        this.state.zoom = this.clampZoom(saved.zoom);
+        this.state.zoom = this.viewport.clampZoom(saved.zoom);
         this.state.panX = this.numberOrDefault(saved.panX, 0);
         this.state.panY = this.numberOrDefault(saved.panY, 0);
         this.state.revealPercent = Math.max(0, Math.min(100, this.numberOrDefault(saved.revealPercent, 50)));
@@ -1286,14 +1017,14 @@ const ReportViewer = {
             this.state.currentFrameIdx = saved.currentFrameIdx;
         }
         this.ensureDistinctPairSelection();
-        this.state.pairAlignments = this.normalizedPairAlignments(saved.pairAlignments);
-        if (!this.state.pairAlignments[this.currentPairAlignmentKey()]) {
-            const legacyAlignment = this.normalizedAlignmentState(saved);
+        this.state.pairAlignments = this.viewport.normalizedPairAlignments(saved.pairAlignments);
+        if (!this.state.pairAlignments[this.viewport.currentPairAlignmentKey()]) {
+            const legacyAlignment = this.viewport.normalizedAlignmentState(saved);
             if (legacyAlignment) {
-                this.state.pairAlignments[this.currentPairAlignmentKey()] = legacyAlignment;
+                this.state.pairAlignments[this.viewport.currentPairAlignmentKey()] = legacyAlignment;
             }
         }
-        this.loadCurrentPairAlignment();
+        this.viewport.loadCurrentPairAlignment();
         this.normalizeCurrentFrameForFilter();
         if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
     },
@@ -1301,7 +1032,7 @@ const ReportViewer = {
     persistViewportState() {
         const storage = this.localStorage();
         if (!this.state.storageKey || !storage) return false;
-        this.storeCurrentPairAlignment();
+        this.viewport.storeCurrentPairAlignment();
 
         const payload = {
             currentFrameIdx: this.state.currentFrameIdx,
@@ -1354,7 +1085,7 @@ const ReportViewer = {
     },
 
     validInspectorTab(tab) {
-        return ['frame', 'clips', 'align', 'review', 'export'].includes(tab);
+        return this.inspector.validTab(tab);
     },
 
     validBlinkIntervalMs(intervalMs) {
@@ -1443,156 +1174,47 @@ const ReportViewer = {
         if (this.reviewController) return this.reviewController;
         this.reviewController = ReviewState.createController(this);
         this.reviewController.bind();
-        this.reviewController.render();
         return this.reviewController;
     },
 
     setInspectorOpen(open, options = {}) {
-        const nextOpen = Boolean(open);
-        const wasOpen = this.state.inspectorOpen;
-        if (nextOpen && this.state.inspectorTab === 'review') this.ensureReviewController();
-        if (nextOpen && !wasOpen && options.focus !== false) {
-            const activeElement = document.activeElement;
-            const canRestoreFocus = activeElement
-                && activeElement !== document.body
-                && activeElement !== document.documentElement
-                && activeElement.isConnected !== false
-                && activeElement.disabled !== true
-                && typeof activeElement.focus === 'function'
-                && activeElement.tabIndex >= 0;
-            this.state.inspectorRestoreFocus = canRestoreFocus ? activeElement : this.dom.btnInspector;
-        }
-
-        this.state.inspectorOpen = nextOpen;
-        this.updateInspectorVisibility();
-        if (options.save !== false) this.persistViewportState();
-        if (this.state.inspectorOpen && options.focus !== false) {
-            const activeTab = Array.from(this.dom.inspectorTabs)
-                .find(tab => tab.dataset.inspectorTab === this.state.inspectorTab);
-            this.focusElement(activeTab);
-        } else if (!this.state.inspectorOpen && wasOpen) {
-            const shouldRestoreFocus = options.focus !== false;
-            const restoreTarget = this.state.inspectorRestoreFocus?.isConnected
-                ? this.state.inspectorRestoreFocus
-                : this.dom.btnInspector;
-            this.state.inspectorRestoreFocus = null;
-            if (shouldRestoreFocus && restoreTarget) this.focusElement(restoreTarget);
-        }
+        this.inspector.setOpen(open, options);
     },
 
     isInspectorVisible() {
-        return this.state.inspectorOpen;
+        return this.inspector.isVisible();
     },
 
     updateInspectorVisibility() {
-        const visible = this.isInspectorVisible();
-        document.body?.classList?.toggle('rv-inspector-open', visible);
-        this.dom.inspector.classList.toggle('open', visible);
-        this.dom.inspector.setAttribute('aria-hidden', visible ? 'false' : 'true');
-        this.dom.btnInspector.classList.toggle('active', visible);
-        this.dom.btnInspector.setAttribute('aria-expanded', String(visible));
-        this.setInspectorFocusable(visible);
-        this.updateInspectorTabs();
+        this.inspector.updateVisibility();
     },
 
     inspectorFocusableElements() {
-        return Array.from(
-            this.dom.inspector.querySelectorAll('button, [href], input, select, textarea, [tabindex]')
-        );
+        return this.inspector.focusableElements();
     },
 
     setInspectorFocusable(enabled) {
-        this.dom.inspector.inert = !enabled;
-        this.inspectorFocusableElements().forEach(element => {
-            if (enabled) {
-                if (Object.hasOwn(element.dataset, 'inspectorPreviousTabindex')) {
-                    const previous = element.dataset.inspectorPreviousTabindex;
-                    if (previous === '' || previous === '-1') {
-                        element.removeAttribute('tabindex');
-                    } else {
-                        element.setAttribute('tabindex', previous);
-                    }
-                    delete element.dataset.inspectorPreviousTabindex;
-                } else if (element.getAttribute('tabindex') === '-1') {
-                    element.removeAttribute('tabindex');
-                }
-                return;
-            }
-
-            if (!Object.hasOwn(element.dataset, 'inspectorPreviousTabindex')) {
-                element.dataset.inspectorPreviousTabindex = element.getAttribute('tabindex') ?? '';
-            }
-            element.setAttribute('tabindex', '-1');
-        });
+        this.inspector.setFocusable(enabled);
     },
 
     safeHttpUrl(url) {
-        if (typeof url !== 'string' || url.length === 0) return null;
-        try {
-            const parsed = new URL(url);
-            return ['http:', 'https:'].includes(parsed.protocol) ? parsed.href : null;
-        } catch {
-            return null;
-        }
+        return this.inspector.safeHttpUrl(url);
     },
 
     updateInspectorSlowpics() {
-        if (!this.dom.inspectorExportSlowpics) return;
-        const slowpicsUrl = this.state.data.slowpics_url;
-        const safeUrl = this.safeHttpUrl(slowpicsUrl);
-        if (!safeUrl) {
-            this.dom.inspectorExportSlowpics.replaceChildren(
-                document.createTextNode(slowpicsUrl || 'Not uploaded')
-            );
-            return;
-        }
-
-        const link = document.createElement('a');
-        link.href = safeUrl;
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        link.className = 'rv-link';
-        link.textContent = slowpicsUrl;
-        this.dom.inspectorExportSlowpics.replaceChildren(link);
+        this.inspector.renderSlowpics();
     },
 
     setInspectorTab(tab, options = {}) {
-        if (!this.validInspectorTab(tab)) tab = 'frame';
-        this.state.inspectorTab = tab;
-        if (tab === 'review') this.ensureReviewController();
-        this.updateInspectorTabs();
-        if (options.save !== false) this.persistViewportState();
+        this.inspector.setTab(tab, options);
     },
 
     handleInspectorTabKey(e) {
-        const tabs = Array.from(this.dom.inspectorTabs);
-        const currentIndex = tabs.indexOf(e.currentTarget);
-        if (currentIndex === -1) return;
-        let nextIndex = null;
-        if (e.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
-        if (e.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length;
-        if (e.key === 'Home') nextIndex = 0;
-        if (e.key === 'End') nextIndex = tabs.length - 1;
-        if (nextIndex === null) return;
-        e.preventDefault();
-        e.stopPropagation();
-        const nextTab = tabs[nextIndex];
-        this.setInspectorTab(nextTab.dataset.inspectorTab);
-        this.focusElement(nextTab);
+        this.inspector.handleTabKey(e);
     },
 
     updateInspectorTabs() {
-        this.dom.inspectorTabs.forEach(tab => {
-            const isActive = tab.dataset.inspectorTab === this.state.inspectorTab;
-            tab.classList.toggle('active', isActive);
-            tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
-            tab.tabIndex = this.state.inspectorOpen && isActive ? 0 : -1;
-        });
-        this.dom.inspectorPanels.forEach(panel => {
-            const isActive = panel.id === `inspector-panel-${this.state.inspectorTab}`;
-            panel.hidden = !isActive;
-            panel.tabIndex = this.state.inspectorOpen && isActive ? 0 : -1;
-        });
+        this.inspector.updateTabs();
     },
 
     setText(element, text) {
@@ -1604,116 +1226,47 @@ const ReportViewer = {
     },
 
     currentClipRole(index) {
-        const roles = [];
-        if (this.state.mode === 'grid' && this.gridView?.indexes().includes(index)) {
-            if (index === this.referenceClipIndex()) roles.push('Reference');
-            if (index === this.state.activeClipIdx) roles.push('Active');
-            roles.push('Visible');
-        }
-        if (index === this.state.leftClipIdx && !['overlay', 'grid'].includes(this.state.mode)) roles.push('Left');
-        if (index === this.state.rightClipIdx && !['overlay', 'grid'].includes(this.state.mode)) roles.push('Right');
-        if (index === this.state.activeClipIdx && (this.state.mode === 'overlay' || this.state.mode === 'blink')) {
-            roles.push(this.state.mode === 'overlay' ? 'Active' : 'Visible');
-        }
-        return roles.length > 0 ? roles.join(', ') : 'Available';
+        return this.inspector.currentClipRole(index);
     },
 
     stableClipRole(index) {
-        const referenceIndex = this.referenceClipIndex();
-        if (index === referenceIndex) return 'Reference';
-        return `Comparison ${index < referenceIndex ? index + 1 : index}`;
+        return ViewerFormat.stableClipRole(index, this.referenceClipIndex());
     },
 
     modeLabel(mode = this.state.mode) {
-        const labels = {
-            slider: 'Slider',
-            overlay: 'Single',
-            diff: 'Diff',
-            blink: 'Blink',
-            grid: 'Grid'
-        };
-        return labels[mode] || mode;
+        return ViewerFormat.modeLabel(mode);
     },
 
     formatFps(value) {
-        const fps = Number(value);
-        if (!Number.isFinite(fps)) return '';
-        return `${Number.isInteger(fps) ? fps : fps.toString()} fps`;
+        return ViewerFormat.formatFps(value);
     },
 
     formatFileSize(value) {
-        const bytes = Number(value);
-        if (!Number.isFinite(bytes) || bytes < 0) return '';
-        const unit = 1024;
-        if (bytes >= unit ** 4) return `${(bytes / unit ** 4).toFixed(2)} TiB`;
-        if (bytes >= unit ** 3) return `${(bytes / unit ** 3).toFixed(2)} GiB`;
-        return `${(bytes / unit ** 2).toFixed(2)} MiB`;
+        return ViewerFormat.formatFileSize(value);
     },
 
     signalCodeLabel(kind, value) {
-        const labels = {
-            primaries: { 1: 'BT.709', 9: 'BT.2020' },
-            transfer: { 1: 'BT.709', 13: 'sRGB', 16: 'PQ', 18: 'HLG' },
-            matrix: { 0: 'GBR', 1: 'BT.709', 9: 'BT.2020nc', 10: 'BT.2020c' },
-        };
-        return labels[kind]?.[String(value)] || null;
+        return ViewerFormat.signalCodeLabel(kind, value);
     },
 
     formatSignal(signal) {
-        if (!signal || typeof signal !== 'object') return '';
-        const parts = [signal.is_hdr ? 'HDR' : 'SDR'];
-        const primaries = this.signalCodeLabel('primaries', signal.primaries);
-        const transfer = this.signalCodeLabel('transfer', signal.transfer);
-        const matrix = this.signalCodeLabel('matrix', signal.matrix);
-        const color = [primaries, transfer, matrix].filter(Boolean).join(' / ');
-        if (color) parts.push(color);
-        if (signal.range === 'limited' || signal.range === 'full') {
-            parts.push(signal.range[0].toUpperCase() + signal.range.slice(1));
-        }
-        if (signal.dolby_vision_rpu === true) parts.push('DV RPU');
-        return parts.join(' · ');
+        return ViewerFormat.formatSignal(signal);
     },
 
     formatPresentation(clip) {
-        const presentation = clip?.presentation;
-        if (!presentation || typeof presentation !== 'object') {
-            return clip?.signal?.is_hdr ? 'HDR' : 'SDR';
-        }
-        if (presentation.state === 'hdr_tonemapped') {
-            const curve = this.formatToneCurve(presentation.tone_curve);
-            const target = Number.isInteger(presentation.target_nits)
-                ? ` → ${presentation.target_nits} nits`
-                : '';
-            return `Tonemapped${curve ? ` · ${curve}` : ''}${target}`;
-        }
-        if (presentation.state === 'hdr_tonemap_off') return 'HDR · Tonemap off';
-        return 'SDR';
+        return ViewerFormat.formatPresentation(clip);
     },
 
     formatToneCurve(value) {
-        if (!value) return null;
-        const normalized = String(value).toLowerCase();
-        if (normalized === 'bt2390') return 'BT.2390';
-        if (normalized === 'reinhard') return 'Reinhard';
-        if (normalized === 'spline') return 'Spline';
-        return normalized.replaceAll('_', ' ');
+        return ViewerFormat.formatToneCurve(value);
     },
 
     formatActivePicture(active) {
-        if (!active || active.is_full_frame) return '';
-        const provenance = active.provenance === 'dolby_vision_l5' ? ' · DV L5' : '';
-        return `${active.width}×${active.height} @ ${active.x},${active.y}${provenance}`;
+        return ViewerFormat.formatActivePicture(active);
     },
 
     formatTonemapSummary() {
-        const settings = this.state.data?.rendering?.tonemap?.settings;
-        if (!this.state.data?.rendering?.tonemap?.applied || !settings) return 'Not applied';
-        const preset = settings.preset
-            ? String(settings.preset).replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase())
-            : '';
-        const curve = this.formatToneCurve(settings.tone_curve) || '';
-        const target = Number.isInteger(settings.target_nits) ? ` · ${settings.target_nits} nits` : '';
-        return [preset, curve].filter(Boolean).join(' · ') + target;
+        return ViewerFormat.formatTonemapSummary(this.state.data?.rendering?.tonemap);
     },
 
     updateRenderingSummary() {
@@ -1753,123 +1306,19 @@ const ReportViewer = {
     },
 
     updateInspectorData() {
-        if (!this.dom.inspector) return;
-        this.updateRenderingSummary();
-        const frame = this.currentFrame();
-        this.setText(this.dom.inspectorFrameLabel, frame?.label || 'No frame selected');
-        this.setText(this.dom.inspectorFrameNumber, frame?.number ?? '');
-        this.setText(this.dom.inspectorFrameCategory, frame?.category ? this.humanizeCategory(frame.category) : '');
-        this.setText(this.dom.inspectorFrameDetail, frame?.detail || '');
-        this.setText(this.dom.inspectorFramePosition, this.visibleFramePositionText());
-
-        if (this.dom.inspectorSourceFrames) {
-            const sourceRows = this.visibleSourceIndexes().map((clipIndex) => {
-                const clip = this.state.data.clips[clipIndex];
-                const image = frame?.images?.[clipIndex];
-                const item = document.createElement('li');
-                item.className = 'rv-inspector-source';
-                const label = this.clipDisplay(clip);
-                const sourceFrame = Number.isInteger(image?.source_frame) ? image.source_frame : 'Unknown';
-                const total = Number.isInteger(clip?.frame_count) ? ` / ${clip.frame_count}` : '';
-                const pictureType = image?.picture_type ? `${image.picture_type}-frame` : 'type unknown';
-                const dolbyVision = image?.dolby_vision_rpu === true ? ' · DV RPU' : '';
-                item.textContent = `${label} — ${sourceFrame}${total} · ${pictureType}${dolbyVision}`;
-                return item;
-            });
-            this.dom.inspectorSourceFrames.replaceChildren(...sourceRows);
-        }
-
-        if (this.dom.inspectorClips) {
-            this.dom.inspectorClips.replaceChildren(...this.state.data.clips.map((clip, index) => {
-                const item = document.createElement('li');
-                item.className = 'rv-inspector-clip';
-                item.dataset.clipIndex = String(index);
-                const role = this.currentClipRole(index);
-                item.innerHTML = `
-                    <div class="rv-inspector-clip-heading">
-                        <span></span>
-                        <span></span>
-                    </div>
-                    <div class="rv-inspector-clip-primary"></div>
-                    <div class="rv-inspector-clip-release" hidden></div>
-                    <dl class="rv-inspector-list">
-                        <div><dt>View role</dt><dd></dd></div>
-                        <div><dt>File</dt><dd></dd></div>
-                        <div><dt>Resolution</dt><dd></dd></div>
-                        <div><dt>FPS</dt><dd></dd></div>
-                        <div><dt>File size</dt><dd></dd></div>
-                        <div><dt>Signal</dt><dd></dd></div>
-                        <div><dt>Presentation</dt><dd></dd></div>
-                    </dl>
-                `;
-                const heading = item.querySelectorAll('.rv-inspector-clip-heading span');
-                heading[0].textContent = this.stableClipRole(index);
-                heading[1].textContent = clip.signal?.is_hdr ? 'HDR' : 'SDR';
-                const primary = this.clipDisplay(clip, 'primary');
-                const release = this.clipDisplay(clip, 'release');
-                const primaryElement = item.querySelector('.rv-inspector-clip-primary');
-                const releaseElement = item.querySelector('.rv-inspector-clip-release');
-                primaryElement.textContent = primary;
-                const normalizedPrimary = this.normalizedDisplayToken(primary);
-                const normalizedRelease = this.normalizedDisplayToken(release);
-                const showRelease = Boolean(
-                    normalizedRelease
-                    && normalizedPrimary !== normalizedRelease
-                    && !normalizedPrimary.endsWith(`| ${normalizedRelease}`)
-                );
-                releaseElement.hidden = !showRelease;
-                releaseElement.textContent = showRelease ? release : '';
-                const values = item.querySelectorAll('dd');
-                values[0].textContent = role;
-                values[1].textContent = this.clipFilename(clip);
-                values[2].textContent = Array.isArray(clip.resolution) ? `${clip.resolution[0]}x${clip.resolution[1]}` : '';
-                values[3].textContent = this.formatFps(clip.fps);
-                values[4].textContent = this.formatFileSize(clip.size_bytes);
-                values[5].textContent = this.formatSignal(clip.signal);
-                values[6].textContent = this.formatPresentation(clip);
-                const activePicture = this.formatActivePicture(clip.active_picture);
-                const clipList = typeof item.querySelector === 'function' ? item.querySelector('dl') : null;
-                if (activePicture && clipList?.appendChild) {
-                    const row = document.createElement('div');
-                    row.innerHTML = '<dt>Active picture</dt><dd></dd>';
-                    const rowValue = typeof row.querySelector === 'function' ? row.querySelector('dd') : null;
-                    if (rowValue) rowValue.textContent = activePicture;
-                    clipList.appendChild(row);
-                }
-                return item;
-            }));
-        }
-
-        this.setText(this.dom.inspectorAlignPair, `${this.currentPairLabel()} (${this.currentPairAlignmentKey()})`);
-        this.setText(this.dom.inspectorAlignPreset, this.alignmentPresetLabel(this.state.alignmentPreset));
-        this.setText(this.dom.inspectorAlignX, this.formatSignedPixels(this.state.alignX, 'x'));
-        this.setText(this.dom.inspectorAlignY, this.formatSignedPixels(this.state.alignY, 'y'));
-
-        this.setText(this.dom.inspectorExportTitle, this.state.data.title || '');
-        this.setText(this.dom.inspectorExportId, this.state.data.report_id || '');
-        this.setText(this.dom.inspectorExportGenerated, this.state.data.generated_at || '');
-        this.updateInspectorSlowpics();
-        this.setText(
-            this.dom.inspectorExportSummary,
-            `${this.state.data.title || 'Report'} • ${this.state.data.stats.frame_count} frames • ${this.state.data.stats.clip_count} clips • ${this.modeLabel()}`
-        );
-        this.reviewController?.render();
-
-        this.updateInspectorTabs();
-        this.updateInspectorVisibility();
+        this.inspector.render();
     },
-
     resetCurrentPairAlignment() {
-        delete this.state.pairAlignments[this.currentPairAlignmentKey()];
-        this.applyAlignmentState(this.neutralAlignmentState());
-        this.applyAlignment();
+        delete this.state.pairAlignments[this.viewport.currentPairAlignmentKey()];
+        this.viewport.applyAlignmentState(this.viewport.neutralAlignmentState());
+        this.viewport.applyAlignment();
         this.persistViewportState();
     },
 
     resetAllPairAlignments() {
         this.state.pairAlignments = {};
-        this.applyAlignmentState(this.neutralAlignmentState());
-        this.applyAlignment();
+        this.viewport.applyAlignmentState(this.viewport.neutralAlignmentState());
+        this.viewport.applyAlignment();
         this.persistViewportState();
     },
 
@@ -1892,6 +1341,7 @@ const ReportViewer = {
             'title',
             `${overlaysVisible ? 'Hide' : 'Show'} HUD (H)`
         );
+        this.gridView?.updateCellRoles();
     },
 
     reducedMotionActive() {
@@ -2170,9 +1620,9 @@ const ReportViewer = {
             case 'x': case 'X': this.swapPairClips(); break;
             case 'h': case 'H': this.setOverlaysHidden(!this.state.overlaysHidden); break;
             case 'f': case 'F': this.setFilmstripCollapsed(!this.state.filmstripCollapsed); break;
-            case '=': case '+': this.setZoom(this.state.zoom + 0.1); break;
-            case '-': this.setZoom(this.state.zoom - 0.1); break;
-            case 'r': case 'R': this.resetViewport(); break;
+            case '=': case '+': this.viewport.setZoom(this.state.zoom + 0.1); break;
+            case '-': this.viewport.setZoom(this.state.zoom - 0.1); break;
+            case 'r': case 'R': this.viewport.resetViewport(); break;
 
             default:
                 if (e.key >= '1' && e.key <= '9') {
@@ -2193,7 +1643,7 @@ const ReportViewer = {
         if (!this.validMode(mode)) return;
         const previousMode = this.state.mode;
         if (previousMode !== 'grid' && mode === 'grid') {
-            const base = this.baseCanvasSize();
+            const base = this.viewport.baseCanvasSize();
             this.state.panX = base.width > 0 ? this.state.panX / base.width : 0;
             this.state.panY = base.height > 0 ? this.state.panY / base.height : 0;
         }
@@ -2232,7 +1682,7 @@ const ReportViewer = {
         this.dom.stage.classList.add(`rv-mode-${mode}`);
         this.gridView?.setActive(mode === 'grid');
         if (previousMode === 'grid' && mode !== 'grid') {
-            const base = this.baseCanvasSize();
+            const base = this.viewport.baseCanvasSize();
             this.state.panX = base.width > 0 ? this.state.panX * base.width : 0;
             this.state.panY = base.height > 0 ? this.state.panY * base.height : 0;
         }
@@ -2343,421 +1793,6 @@ const ReportViewer = {
         }
     },
 
-    setZoom(level) {
-        this.state.fitMode = 'custom';
-        this.updateFitButtons();
-        this.applyZoom(level);
-        this.persistViewportState();
-    },
-
-    clampZoom(level) {
-        return Math.max(0.25, Math.min(4.0, this.numberOrDefault(level, 1.0)));
-    },
-
-    applyZoom(level, options = {}) {
-        this.state.zoom = this.clampZoom(level);
-        this.dom.zoomRange.value = this.state.zoom;
-        this.dom.zoomRange.setAttribute('aria-valuenow', this.state.zoom);
-        this.dom.zoomVal.textContent = Math.round(this.state.zoom * 100) + '%';
-        this.dom.canvas.classList.toggle('rv-canvas--pixelated', this.state.zoom > 1);
-        this.dom.canvas.style.setProperty('--zoom-level', this.state.zoom);
-        this.gridView?.syncViewport();
-        if (options.clampPan !== false) this.clampPan();
-        this.lens?.refresh();
-    },
-
-    resetViewport() {
-        this.state.fitMode = 'custom';
-        this.updateFitButtons();
-        this.applyZoom(1.0, { clampPan: false });
-        this.setPan(0, 0);
-    },
-
-    zoomAtPoint(clientX, clientY, factor) {
-        const stageRect = this.dom.stage.getBoundingClientRect();
-        if (stageRect.width <= 0 || stageRect.height <= 0) {
-            this.setZoom(this.state.zoom * factor);
-            return;
-        }
-
-        const oldZoom = this.state.zoom;
-        const nextZoom = this.clampZoom(oldZoom * factor);
-        if (nextZoom === oldZoom) return;
-
-        if (this.state.mode === 'grid') {
-            const anchor = this.gridView.zoomAnchorForPoint(clientX, clientY);
-            this.state.fitMode = 'custom';
-            this.updateFitButtons();
-            this.applyZoom(nextZoom, { clampPan: false });
-            const pan = this.gridView.panForZoomAnchor(anchor, clientX, clientY, nextZoom);
-            if (pan) this.setPan(pan.x, pan.y);
-            else this.clampPan();
-            return;
-        }
-
-        const viewportCenter = {
-            x: stageRect.left + stageRect.width / 2,
-            y: stageRect.top + stageRect.height / 2,
-        };
-        const stageCenterX = viewportCenter.x;
-        const stageCenterY = viewportCenter.y;
-        const contentX = (clientX - stageCenterX - this.state.panX) / oldZoom;
-        const contentY = (clientY - stageCenterY - this.state.panY) / oldZoom;
-
-        this.state.fitMode = 'custom';
-        this.updateFitButtons();
-        this.applyZoom(nextZoom, { clampPan: false });
-        this.setPan(
-            clientX - stageCenterX - contentX * nextZoom,
-            clientY - stageCenterY - contentY * nextZoom,
-        );
-    },
-
-    panByPixels(dx, dy, clientX, clientY, options = {}) {
-        if (this.state.mode !== 'grid') {
-            this.setPan(this.state.panX + dx, this.state.panY + dy, options);
-            return;
-        }
-        const basis = options.basis || this.gridView.panBasisForPoint(clientX, clientY);
-        if (!basis || basis.width <= 0 || basis.height <= 0) return;
-        this.setPan(
-            this.state.panX + dx / basis.width,
-            this.state.panY + dy / basis.height,
-            options,
-        );
-    },
-
-    setPan(x, y, options = {}) {
-        this.state.panX = this.numberOrDefault(x, 0);
-        this.state.panY = this.numberOrDefault(y, 0);
-        this.clampPan();
-        this.applyPan();
-        if (options.save !== false) this.persistViewportState();
-    },
-
-    clampPan() {
-        if (this.state.mode === 'grid' && this.gridView?.isActive()) {
-            const bounds = this.gridView.panBounds();
-            this.state.panX = Math.max(-bounds.x, Math.min(bounds.x, this.state.panX));
-            this.state.panY = Math.max(-bounds.y, Math.min(bounds.y, this.state.panY));
-            this.applyPan();
-            return;
-        }
-        const stageRect = this.dom.stage.getBoundingClientRect();
-        const base = this.baseCanvasSize();
-        if (stageRect.width <= 0 || stageRect.height <= 0 || base.width <= 0 || base.height <= 0) {
-            return;
-        }
-
-        const scaledWidth = base.width * this.state.zoom;
-        const scaledHeight = base.height * this.state.zoom;
-        const maxPanX = Math.max(0, (scaledWidth - stageRect.width) / 2);
-        const maxPanY = Math.max(0, (scaledHeight - stageRect.height) / 2);
-        this.state.panX = Math.max(-maxPanX, Math.min(maxPanX, this.state.panX));
-        this.state.panY = Math.max(-maxPanY, Math.min(maxPanY, this.state.panY));
-        this.applyPan();
-    },
-
-    applyPan() {
-        this.dom.canvas.style.setProperty('--pan-x', `${this.state.panX}px`);
-        this.dom.canvas.style.setProperty('--pan-y', `${this.state.panY}px`);
-        this.gridView?.syncViewport();
-        this.lens?.refresh();
-    },
-
-    setFitMode(mode, options = {}) {
-        if (!['actual', 'width', 'height'].includes(mode)) return;
-
-        this.state.fitMode = mode;
-        this.updateFitButtons();
-
-        if (options.updateZoom === false) return;
-        this.applyFitMode({ resetPan: true });
-        this.persistViewportState();
-    },
-
-    updateFitButtons() {
-        this.dom.fitBtns.forEach(btn => {
-            const isActive = btn.dataset.fit === this.state.fitMode;
-            btn.classList.toggle('active', isActive);
-            btn.setAttribute('aria-checked', isActive);
-        });
-    },
-
-    baseCanvasSize() {
-        const rect = this.dom.sizerImg.getBoundingClientRect();
-        const zoom = this.state.zoom || 1.0;
-        return {
-            width: rect.width / zoom,
-            height: rect.height / zoom
-        };
-    },
-
-    sliderCanvasRect() {
-        return this.dom.canvas.getBoundingClientRect();
-    },
-
-    applyFitMode(options = {}) {
-        if (this.state.fitMode === 'custom') {
-            this.clampPan();
-            return;
-        }
-
-        if (this.state.mode === 'grid') {
-            // Grid cells each establish their own contained baseline. The shared zoom
-            // remains the single linked intent layered over those equal-weight cells.
-            this.applyZoom(1.0, { clampPan: false });
-            if (options.resetPan) this.setPan(0, 0, { save: false });
-            else this.clampPan();
-            return;
-        }
-
-        if (this.state.fitMode === 'actual') {
-            this.applyZoom(1.0);
-            if (options.resetPan) this.setPan(0, 0, { save: false });
-            return;
-        }
-
-        const stageRect = this.dom.stage.getBoundingClientRect();
-        const base = this.baseCanvasSize();
-        if (stageRect.width <= 0 || stageRect.height <= 0 || base.width <= 0 || base.height <= 0) {
-            return;
-        }
-
-        const fitWidthZoom = stageRect.width / base.width;
-        const fitHeightZoom = stageRect.height / base.height;
-        const nextZoom = this.state.fitMode === 'width'
-            ? fitWidthZoom
-            : fitHeightZoom;
-        this.applyZoom(nextZoom, { clampPan: false });
-        if (options.resetPan) {
-            this.setPan(0, 0, { save: false });
-        } else {
-            this.clampPan();
-        }
-    },
-
-    applyAlignmentPresetOffsets(preset) {
-        const offset = this.presetAlignmentOffsets(preset);
-        if (!offset) return;
-        this.clearRawAlignmentInputs();
-        this.state.alignX = offset[0];
-        this.state.alignY = offset[1];
-    },
-
-    validAlignmentPreset(preset) {
-        return ['none', 'left-1', 'right-1', 'up-1', 'down-1', 'custom'].includes(preset);
-    },
-
-    currentPairAlignmentKey() {
-        return this.pairAlignmentKey(this.state.leftClipIdx, this.state.rightClipIdx);
-    },
-
-    pairAlignmentKey(leftIdx, rightIdx) {
-        return `${leftIdx}:${rightIdx}`;
-    },
-
-    isValidPairAlignmentKey(key) {
-        if (typeof key !== 'string') return false;
-        const match = key.match(/^(\d+):(\d+)$/);
-        if (!match) return false;
-        const leftIdx = Number(match[1]);
-        const rightIdx = Number(match[2]);
-        const count = this.clipCount();
-        return leftIdx >= 0 && rightIdx >= 0 && leftIdx < count && rightIdx < count;
-    },
-
-    neutralAlignmentState() {
-        return {
-            alignmentPreset: 'none',
-            alignX: 0,
-            alignY: 0
-        };
-    },
-
-    presetAlignmentOffsets(preset) {
-        const presets = {
-            none: [0, 0],
-            'left-1': [-1, 0],
-            'right-1': [1, 0],
-            'up-1': [0, -1],
-            'down-1': [0, 1]
-        };
-        return presets[preset] || null;
-    },
-
-    currentAlignmentState() {
-        return {
-            alignmentPreset: this.state.alignmentPreset,
-            alignX: this.state.alignX,
-            alignY: this.state.alignY
-        };
-    },
-
-    normalizedAlignmentState(value) {
-        if (!value || typeof value !== 'object') return null;
-        const preset = this.validAlignmentPreset(value.alignmentPreset)
-            ? value.alignmentPreset
-            : 'none';
-        const alignment = {
-            alignmentPreset: preset,
-            alignX: this.numberOrDefault(value.alignX, 0),
-            alignY: this.numberOrDefault(value.alignY, 0)
-        };
-        if (preset !== 'custom') {
-            const offset = this.presetAlignmentOffsets(preset);
-            if (offset) {
-                alignment.alignX = offset[0];
-                alignment.alignY = offset[1];
-            }
-        }
-        return alignment;
-    },
-
-    normalizedPairAlignments(value) {
-        if (!value || typeof value !== 'object') return {};
-        const pairAlignments = {};
-        Object.entries(value).forEach(([key, alignment]) => {
-            if (!this.isValidPairAlignmentKey(key)) return;
-            const normalized = this.normalizedAlignmentState(alignment);
-            if (normalized) pairAlignments[key] = normalized;
-        });
-        return pairAlignments;
-    },
-
-    applyAlignmentState(alignment) {
-        const normalized = this.normalizedAlignmentState(alignment) || this.neutralAlignmentState();
-        this.clearRawAlignmentInputs();
-        this.state.alignmentPreset = normalized.alignmentPreset;
-        this.state.alignX = normalized.alignX;
-        this.state.alignY = normalized.alignY;
-    },
-
-    storeCurrentPairAlignment() {
-        if (this.clipCount() <= 0) return;
-        const key = this.currentPairAlignmentKey();
-        if (!this.isValidPairAlignmentKey(key)) return;
-        this.state.pairAlignments[key] = this.currentAlignmentState();
-    },
-
-    loadCurrentPairAlignment() {
-        const saved = this.state.pairAlignments[this.currentPairAlignmentKey()];
-        this.applyAlignmentState(saved || this.neutralAlignmentState());
-    },
-
-    setAlignmentPreset(preset) {
-        if (!this.validAlignmentPreset(preset)) {
-            return;
-        }
-        this.state.alignmentPreset = preset;
-        if (preset !== 'custom') {
-            this.applyAlignmentPresetOffsets(preset);
-        }
-        this.applyAlignment();
-        this.persistViewportState();
-    },
-
-    setManualAlignment(x, y) {
-        this.clearRawAlignmentInputs();
-        this.state.alignmentPreset = 'custom';
-        this.state.alignX = this.numberOrDefault(x, 0);
-        this.state.alignY = this.numberOrDefault(y, 0);
-        this.applyAlignment();
-        this.persistViewportState();
-    },
-
-    clearRawAlignmentInputs() {
-        this.state.rawAlignX = null;
-        this.state.rawAlignY = null;
-    },
-
-    rawAlignmentField(axis) {
-        return axis === 'x' ? 'rawAlignX' : 'rawAlignY';
-    },
-
-    rawAlignmentElement(axis) {
-        return axis === 'x' ? this.dom.alignX : this.dom.alignY;
-    },
-
-    setRawAlignmentInput(axis, rawValue) {
-        this.state[this.rawAlignmentField(axis)] = rawValue;
-    },
-
-    isValidAlignmentNumber(rawValue) {
-        const normalized = String(rawValue).trim();
-        return /^-?(?:\d+\.?\d*|\.\d+)$/.test(normalized)
-            && Number.isFinite(Number(normalized));
-    },
-
-    commitRawAlignmentInput(axis) {
-        const field = this.rawAlignmentField(axis);
-        const rawValue = this.state[field];
-        if (rawValue === null) return;
-
-        if (!this.isValidAlignmentNumber(rawValue)) {
-            this.state[field] = null;
-            this.applyAlignment();
-            return;
-        }
-
-        const committedValue = Number(String(rawValue).trim());
-        this.state[field] = null;
-        this.setManualAlignment(
-            axis === 'x' ? committedValue : this.state.alignX,
-            axis === 'y' ? committedValue : this.state.alignY,
-        );
-        this.rawAlignmentElement(axis).value = committedValue;
-    },
-
-    applyAlignment() {
-        this.dom.canvas.style.setProperty('--align-x', `${this.state.alignX}px`);
-        this.dom.canvas.style.setProperty('--align-y', `${this.state.alignY}px`);
-        this.dom.alignmentPreset.value = this.state.alignmentPreset;
-        this.dom.alignX.value = this.state.rawAlignX ?? this.state.alignX;
-        this.dom.alignY.value = this.state.rawAlignY ?? this.state.alignY;
-
-        // Visual indicator on gear button if offset is non-zero
-        const isOffset = this.state.alignX !== 0 || this.state.alignY !== 0;
-        this.dom.btnAlignToggle.classList.toggle('has-offset', isOffset);
-        this.updateAlignmentStatus();
-        this.updateInspectorData();
-        this.lens?.refresh();
-    },
-
-    formatSignedPixels(value, axis) {
-        const numberValue = this.numberOrDefault(value, 0);
-        const prefix = numberValue > 0 ? '+' : '';
-        return `${prefix}${numberValue}${axis}`;
-    },
-
-    alignmentPresetLabel(preset) {
-        const labels = {
-            'left-1': 'left 1px',
-            'right-1': 'right 1px',
-            'up-1': 'up 1px',
-            'down-1': 'down 1px'
-        };
-        return labels[preset] || preset;
-    },
-
-    alignmentStatusText() {
-        const xText = this.formatSignedPixels(this.state.alignX, 'x');
-        const yText = this.formatSignedPixels(this.state.alignY, 'y');
-        const hasOffset = this.state.alignX !== 0 || this.state.alignY !== 0;
-
-        if (!hasOffset && this.state.alignmentPreset === 'none') return 'Aligned: none';
-        if (this.state.alignmentPreset === 'custom') return `Aligned: custom ${xText} ${yText}`;
-        if (this.state.alignmentPreset !== 'none') {
-            return `Aligned: preset ${this.alignmentPresetLabel(this.state.alignmentPreset)}`;
-        }
-        return `Aligned: ${xText} ${yText}`;
-    },
-
-    updateAlignmentStatus() {
-        if (!this.dom.alignmentStatus) return;
-        this.dom.alignmentStatus.textContent = this.alignmentStatusText();
-    },
-
     toggleFullscreen() {
         if (document.fullscreenElement) {
             document.exitFullscreen?.();
@@ -2779,12 +1814,6 @@ const ReportViewer = {
         this.dom.btnFullscreen.setAttribute('aria-pressed', isFullscreen ? 'true' : 'false');
     },
 
-    updateSlider() {
-        this.dom.leftLayer.style.setProperty('--reveal-percent', this.state.revealPercent + '%');
-        this.dom.divider.style.setProperty('--reveal-percent', this.state.revealPercent + '%');
-        this.dom.canvas.style.setProperty('--reveal-percent', this.state.revealPercent + '%');
-    },
-
     isShortcutEditableTarget(target) {
         if (!target) return false;
         if (target.isContentEditable) return true;
@@ -2799,9 +1828,12 @@ const ReportViewer = {
     },
 
     clipOverlayLabel(clip, role = '') {
-        const isHdr = clip.signal?.is_hdr === true;
-        const identity = `${this.clipDisplay(clip)} • ${clip.resolution[0]}×${clip.resolution[1]} • ${isHdr ? 'HDR' : 'SDR'}`;
+        const identity = ViewerFormat.sourceHudLabel(clip);
         return role ? `${role.toUpperCase()}: ${identity}` : identity;
+    },
+
+    sourceHudLabel(clip, profile = 'control') {
+        return ViewerFormat.sourceHudLabel(clip, profile);
     },
 
     humanizeCategory(cat) {
@@ -3075,10 +2107,10 @@ const ReportViewer = {
         this.updateInspectorData();
         // Update images and labels
         this.updateImages();
-        this.updateSlider();
-        this.applyFitMode();
-        this.applyAlignment();
-        this.applyPan();
+        this.viewport.updateSlider();
+        this.viewport.applyFitMode();
+        this.viewport.applyAlignment();
+        this.viewport.applyPan();
 
         // Update filmstrip active state
         Array.from(this.dom.filmstrip.children).forEach((el, idx) => {

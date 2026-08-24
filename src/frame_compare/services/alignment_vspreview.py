@@ -22,8 +22,11 @@ from frame_compare.vspreview.adapter import (
 )
 from frame_compare.vspreview.errors import VSPreviewError
 from frame_compare.vspreview.output import (
+    print_vspreview_confirmation_footer,
     print_vspreview_confirmation_header,
+    print_vspreview_failure_details,
     print_vspreview_input_hint,
+    print_vspreview_unavailable,
     write_vspreview_prompt,
 )
 from frame_compare.vspreview.overrides import ManualOverride, save_manual_override
@@ -88,9 +91,23 @@ def _log_optional_unavailable(
     force_interactive: bool,
     probe_failure_reason: str,
     probe_failure_details: dict[str, str],
+    tty_status: _TTYStatus,
+    no_color: bool,
 ) -> None:
+    if tty_status.stderr:
+        reason = {
+            VSPreviewAvailabilityStatus.MISSING_EXEC_AND_MODULE: "VSPreview is not installed.",
+            VSPreviewAvailabilityStatus.MISSING_QT_BACKEND: (
+                "Missing optional VSPreview Qt backend."
+            ),
+            VSPreviewAvailabilityStatus.PROBE_FAILED: ("VSPreview availability check failed."),
+        }.get(status, "VSPreview is unavailable.")
+        print_vspreview_unavailable(reason=reason, no_color=no_color)
+        log_method = log.debug
+    else:
+        log_method = log.warning
     if status == VSPreviewAvailabilityStatus.PROBE_FAILED:
-        log.warning(
+        log_method(
             "vspreview_availability_probe_failed",
             reason=probe_failure_reason,
             exception_type=probe_failure_details.get("exception_type"),
@@ -104,7 +121,7 @@ def _log_optional_unavailable(
                 error_details=error_details,
             )
     elif use_vspreview and not force_interactive:
-        log.warning(
+        log_method(
             "vspreview_unavailable",
             hint=hint,
             use_vspreview=use_vspreview,
@@ -123,7 +140,31 @@ def _log_no_tty(script_path: Path, tty_status: _TTYStatus) -> None:
     )
 
 
-def _log_optional_launch_failed(exc: VSPreviewError, config: AlignmentConfig) -> None:
+def _present_optional_launch_failed(
+    exc: VSPreviewError,
+    config: AlignmentConfig,
+    *,
+    verbose: bool,
+    tty_status: _TTYStatus,
+) -> None:
+    if tty_status.stderr:
+        print_vspreview_unavailable(reason=exc.public_reason, no_color=config.no_color)
+        if verbose and exc.command:
+            print_vspreview_failure_details(
+                command=exc.command,
+                reason=exc.public_reason,
+                returncode=exc.returncode,
+                startup_stderr=exc.startup_stderr,
+                no_color=config.no_color,
+            )
+        log.debug(
+            "vspreview_optional_launch_failed",
+            reason=exc.context.message,
+            code=exc.code,
+            force_interactive=config.force_interactive,
+            use_vspreview=config.use_vspreview,
+        )
+        return
     log.warning(
         "vspreview_optional_launch_failed",
         reason=exc.context.message,
@@ -174,21 +215,29 @@ def _prompt_for_confirmed_offsets(
     reference: Path,
     comparisons: list[Path],
     offsets_by_key: dict[str, int | None],
+    presentation_names_by_stem: dict[str, str] | None = None,
     no_color: bool = False,
 ) -> dict[str, int] | None:
     if not comparisons:
         return {}
 
-    print_vspreview_confirmation_header(reference=reference, no_color=no_color)
+    presentation_names = presentation_names_by_stem or {}
+    print_vspreview_confirmation_header(
+        reference_name=presentation_names.get(reference.stem, reference.stem),
+        no_color=no_color,
+    )
 
     confirmed: dict[str, int] = {}
-    for comparison in comparisons:
+    for comparison_number, comparison in enumerate(comparisons, start=1):
         key = f"{reference.stem}:{comparison.stem}"
         suggested_offset = _format_suggested_offset(offsets_by_key.get(key))
         while True:
             try:
                 raw_value = _read_vspreview_prompt(
-                    label=comparison.stem,
+                    label=(
+                        f"Comparison {comparison_number} | "
+                        f"{presentation_names.get(comparison.stem, comparison.stem)}"
+                    ),
                     suggested_offset=suggested_offset,
                     no_color=no_color,
                 ).strip()
@@ -217,6 +266,7 @@ def _prompt_for_confirmed_offsets(
             reference_source_frame, comparison_source_frame = source_frames
             confirmed[key] = reference_source_frame - comparison_source_frame
             break
+    print_vspreview_confirmation_footer(no_color=no_color)
     return confirmed
 
 
@@ -275,6 +325,8 @@ def maybe_launch_alignment_vspreview(
     config: AlignmentConfig,
     progress: ProgressReporter | None,
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
+    presentation_names_by_stem: dict[str, str] | None = None,
+    verbose: bool = False,
 ) -> dict[str, int] | None:
     """Best-effort VSPreview alignment verification.
 
@@ -296,6 +348,7 @@ def maybe_launch_alignment_vspreview(
             probe_failure_reason=availability.public_probe_failure_reason(),
         )
 
+    tty_status = _current_tty_status()
     if not availability.is_available:
         _log_optional_unavailable(
             status=availability.status,
@@ -305,9 +358,10 @@ def maybe_launch_alignment_vspreview(
             force_interactive=config.force_interactive,
             probe_failure_reason=availability.public_probe_failure_reason(),
             probe_failure_details=availability.public_probe_failure_details(),
+            tty_status=tty_status,
+            no_color=config.no_color,
         )
 
-    tty_status = _current_tty_status()
     launch_decision = _resolve_launch_decision(
         config=config,
         is_available=availability.is_available,
@@ -315,7 +369,7 @@ def maybe_launch_alignment_vspreview(
     )
 
     if progress:
-        progress.set_description("Alignment verification")
+        progress.set_description("ALIGN | Interactive verification")
 
     if config.force_interactive and launch_decision.no_tty:
         raise AudioAlignmentError(
@@ -332,10 +386,12 @@ def maybe_launch_alignment_vspreview(
                 suggested_offsets_by_key=offsets_by_key,
                 cache_dir=cache_dir,
                 frame_props_by_stem=frame_props_by_stem,
+                presentation_names_by_stem=presentation_names_by_stem,
             ),
             config=VSPreviewConfig(
                 enabled=launch_decision.enabled,
                 no_color=config.no_color,
+                verbose=verbose,
             ),
         )
         if launch_decision.no_tty:
@@ -346,6 +402,7 @@ def maybe_launch_alignment_vspreview(
             reference=reference,
             comparisons=comparisons,
             offsets_by_key=offsets_by_key,
+            presentation_names_by_stem=presentation_names_by_stem,
             no_color=config.no_color,
         )
         if confirmed_offsets is None:
@@ -360,7 +417,12 @@ def maybe_launch_alignment_vspreview(
     except VSPreviewError as exc:
         if config.force_interactive:
             raise
-        _log_optional_launch_failed(exc, config)
+        _present_optional_launch_failed(
+            exc,
+            config,
+            verbose=verbose,
+            tty_status=tty_status,
+        )
     finally:
         if progress_suspended and interactive_progress is not None:
             interactive_progress.resume()

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard, cast
 
 import structlog
 import tomli_w
@@ -15,6 +16,8 @@ from frame_compare.services.types import (
     AlignmentProvenance,
     AlignmentResult,
     AlignmentReuseCacheOrigin,
+    AlignmentStabilityClassification,
+    AlignmentStabilitySummary,
     ReusableAlignmentEntry,
 )
 from frame_compare.utils.atomic_write import write_bytes_atomic
@@ -22,7 +25,7 @@ from frame_compare.utils.file_lock import exclusive_file_lock
 from frame_compare.utils.types import AlignmentClipRequest, AlignmentRequest
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
 
-CACHE_VERSION = "1"
+CACHE_VERSION = "2"
 CACHE_FILE_NAME = "alignment_reuse.toml"
 
 log = structlog.get_logger()
@@ -31,10 +34,17 @@ log = structlog.get_logger()
 type _TomlValue = str | int | float | bool | None
 
 
+def _is_finite_number(value: object) -> TypeGuard[int | float]:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (OverflowError, ValueError):
+        return False
+
+
 def _float_matches(value: object, expected: float) -> bool:
-    return (
-        not isinstance(value, bool) and isinstance(value, int | float) and float(value) == expected
-    )
+    return _is_finite_number(value) and float(value) == expected
 
 
 def _int_matches(value: object, expected: int) -> bool:
@@ -245,13 +255,13 @@ def _parse_entry(
         raise TypeError("comparison_clip must be str")
     if not isinstance(frame_offset, int) or isinstance(frame_offset, bool):
         raise TypeError("frame_offset must be int")
-    if not isinstance(time_offset_seconds, int | float) or isinstance(time_offset_seconds, bool):
-        raise TypeError("time_offset_seconds must be number")
+    if not _is_finite_number(time_offset_seconds):
+        raise TypeError("time_offset_seconds must be finite number")
     if not isinstance(accepted_at, str) or not accepted_at:
         raise TypeError("accepted_at must be non-empty str")
     if origin == "computed":
-        if not isinstance(correlation_score, int | float) or isinstance(correlation_score, bool):
-            raise TypeError("computed correlation_score must be number")
+        if not _is_finite_number(correlation_score):
+            raise TypeError("computed correlation_score must be finite number")
         replay_correlation_score = float(correlation_score)
     else:
         replay_correlation_score = 1.0
@@ -259,6 +269,12 @@ def _parse_entry(
         raise ValueError("shared alignment cache entry identity mismatch")
 
     computed_result = _parse_cached_computed_result(entry.get("computed_result"), entry=entry)
+    if origin == "computed":
+        stability = _parse_stability(entry.get("stability"))
+        if stability is None:
+            raise ValueError("computed stability is required")
+    else:
+        stability = computed_result.stability if computed_result is not None else None
 
     result = AlignmentResult(
         reference_clip=reference_clip,
@@ -268,6 +284,7 @@ def _parse_entry(
         correlation_score=replay_correlation_score,
         algorithm="cross_correlation" if origin == "computed" else None,
         source="cached",
+        stability=stability,
     )
     return ReusableAlignmentEntry(
         result=result,
@@ -292,16 +309,19 @@ def _parse_cached_computed_result(
     correlation_score = computed.get("correlation_score")
     if not isinstance(frame_offset, int) or isinstance(frame_offset, bool):
         raise TypeError("computed_result.frame_offset must be int")
-    if not isinstance(time_offset_seconds, int | float) or isinstance(time_offset_seconds, bool):
-        raise TypeError("computed_result.time_offset_seconds must be number")
-    if not isinstance(correlation_score, int | float) or isinstance(correlation_score, bool):
-        raise TypeError("computed_result.correlation_score must be number")
+    if not _is_finite_number(time_offset_seconds):
+        raise TypeError("computed_result.time_offset_seconds must be finite number")
+    if not _is_finite_number(correlation_score):
+        raise TypeError("computed_result.correlation_score must be finite number")
     reference_clip = entry.get("reference_clip")
     comparison_clip = entry.get("comparison_clip")
     if not isinstance(reference_clip, str):
         raise TypeError("reference_clip must be str")
     if not isinstance(comparison_clip, str):
         raise TypeError("comparison_clip must be str")
+    stability = _parse_stability(computed.get("stability"))
+    if stability is None:
+        raise ValueError("computed_result.stability is required")
     return AlignmentResult(
         reference_clip=reference_clip,
         comparison_clip=comparison_clip,
@@ -310,7 +330,86 @@ def _parse_cached_computed_result(
         correlation_score=float(correlation_score),
         algorithm="cross_correlation",
         source="cached",
+        stability=stability,
     )
+
+
+def _parse_stability(value: object) -> AlignmentStabilitySummary | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise TypeError("stability must be table")
+    data = cast(dict[str, object], value)
+    allowed_fields = {
+        "classification",
+        "valid_windows",
+        "offset_min_frames",
+        "offset_max_frames",
+        "first_offset_frames",
+        "last_offset_frames",
+        "largest_adjacent_jump_frames",
+        "change_position_seconds",
+    }
+    if unknown_fields := data.keys() - allowed_fields:
+        raise ValueError(f"unsupported stability fields: {sorted(unknown_fields)}")
+    classification = data.get("classification")
+    if classification not in {
+        "stable",
+        "possible_drift",
+        "possible_discontinuity",
+        "variable",
+        "insufficient_evidence",
+    }:
+        raise ValueError("unsupported stability classification")
+    valid_windows = data.get("valid_windows")
+    if not isinstance(valid_windows, int) or isinstance(valid_windows, bool) or valid_windows < 0:
+        raise TypeError("stability.valid_windows must be non-negative int")
+
+    def optional_int(name: str) -> int | None:
+        field = data.get(name)
+        if field is None:
+            return None
+        if not isinstance(field, int) or isinstance(field, bool):
+            raise TypeError(f"stability.{name} must be int or absent")
+        return field
+
+    position = data.get("change_position_seconds")
+    if position is not None and (not _is_finite_number(position) or position < 0):
+        raise TypeError(
+            "stability.change_position_seconds must be finite non-negative number or absent"
+        )
+    largest_adjacent_jump_frames = optional_int("largest_adjacent_jump_frames")
+    if largest_adjacent_jump_frames is not None and largest_adjacent_jump_frames < 0:
+        raise ValueError("stability.largest_adjacent_jump_frames must be non-negative")
+    return AlignmentStabilitySummary(
+        classification=cast(AlignmentStabilityClassification, classification),
+        valid_windows=valid_windows,
+        offset_min_frames=optional_int("offset_min_frames"),
+        offset_max_frames=optional_int("offset_max_frames"),
+        first_offset_frames=optional_int("first_offset_frames"),
+        last_offset_frames=optional_int("last_offset_frames"),
+        largest_adjacent_jump_frames=largest_adjacent_jump_frames,
+        change_position_seconds=None if position is None else float(position),
+    )
+
+
+def _stability_dict(summary: AlignmentStabilitySummary) -> dict[str, object]:
+    data: dict[str, object] = {
+        "classification": summary.classification,
+        "valid_windows": summary.valid_windows,
+    }
+    for name in (
+        "offset_min_frames",
+        "offset_max_frames",
+        "first_offset_frames",
+        "last_offset_frames",
+        "largest_adjacent_jump_frames",
+        "change_position_seconds",
+    ):
+        value = getattr(summary, name)
+        if value is not None:
+            data[name] = value
+    return data
 
 
 def load_reusable_offset_entries(
@@ -381,11 +480,14 @@ def _origin_for_provenance(provenance: AlignmentProvenance) -> AlignmentReuseCac
 
 def _is_write_eligible(provenance: AlignmentProvenance) -> bool:
     result = provenance.result
+    origin = _origin_for_provenance(provenance)
     return (
-        _origin_for_provenance(provenance) is not None
+        origin is not None
         and result.applied
         and result.frame_offset is not None
         and result.time_offset_seconds is not None
+        and (origin != "computed" or result.stability is not None)
+        and (provenance.computed_result is None or provenance.computed_result.stability is not None)
     )
 
 
@@ -413,14 +515,20 @@ def _entry_from_provenance(
         "settings": _settings_identity_dict(request),
     }
     if origin == "computed":
+        if result.stability is None:
+            raise ValueError("computed stability is required")
         entry["correlation_score"] = result.correlation_score
+        entry["stability"] = _stability_dict(result.stability)
     elif provenance.computed_result is not None:
         computed = provenance.computed_result
         if computed.frame_offset is not None and computed.time_offset_seconds is not None:
+            if computed.stability is None:
+                raise ValueError("computed_result.stability is required")
             entry["computed_result"] = {
                 "frame_offset": computed.frame_offset,
                 "time_offset_seconds": computed.time_offset_seconds,
                 "correlation_score": computed.correlation_score,
+                "stability": _stability_dict(computed.stability),
             }
     return entry
 

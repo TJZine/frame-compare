@@ -975,7 +975,10 @@ def prove_apply_tonemap_frame() -> None:
 
 
 def prove_qt_media_runtime(media_path: Path) -> None:
-    from frame_compare.vspreview.launcher import preload_vapoursynth_runtime
+    from frame_compare.vspreview.launcher import (
+        preload_vapoursynth_runtime,
+        prepare_vspreview_compatibility,
+    )
 
     preload_vapoursynth_runtime()
     proof("qt_media_runtime_preload=ok")
@@ -984,9 +987,10 @@ def prove_qt_media_runtime(media_path: Path) -> None:
 
     proof("pyqt6_import=ok")
 
-    import vspreview  # noqa: F401
+    prepare_vspreview_compatibility()
+    import vspreview.init  # noqa: F401
 
-    proof("vspreview_pyqt6=ok")
+    proof("vspreview_pyqt6_compatibility=ok")
     prove_runtime_contract()
     prove_vapoursynth_environment()
     prove_lwlibavsource(media_path)

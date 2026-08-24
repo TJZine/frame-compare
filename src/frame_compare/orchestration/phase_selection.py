@@ -8,9 +8,8 @@ from typing import TYPE_CHECKING
 
 import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError, SelectionError
-from frame_compare.analysis.frame_plan import create_frame_plan
 from frame_compare.analysis.metrics import calculate_metrics
-from frame_compare.analysis.selection import select_frames
+from frame_compare.analysis.selection import select_frames, select_random_frames
 from frame_compare.analysis.types import (
     CacheLoadResult,
     FrameMetrics,
@@ -87,25 +86,23 @@ def _select_initial_frame_plan_once(ctx: RunContext) -> FramePlanPhaseOutput:
     )
     user_frame_set = set(user_frames)
     source_offset = ctx.reference.trim.trim_start_frames + window_start
-    selectable_random_indices = [
-        frame_index
-        for frame_index in range(frame_count)
-        if source_offset + frame_index not in user_frame_set
-    ]
+    excluded_random_indices = {frame - source_offset for frame in user_frame_set}
     random_count = ctx.config.analysis.random_frame_count
-    if random_count > len(selectable_random_indices):
+    available_random_count = frame_count - len(excluded_random_indices)
+    if random_count > available_random_count:
         raise SelectionError(
             "insufficient random candidates after user frames",
             requested=random_count,
-            found=len(selectable_random_indices),
+            found=available_random_count,
         )
     random_frames = [
-        selectable_random_indices[frame] + window_start
-        for frame in create_frame_plan(
-            num_frames=len(selectable_random_indices),
-            count=random_count,
-            seed=ctx.config.analysis.random_seed,
-        ).frames
+        frame + window_start
+        for frame in select_random_frames(
+            frame_count,
+            random_count,
+            ctx.config.analysis.random_seed,
+            excluded_random_indices,
+        )
     ]
     random_source_frames = [ctx.reference.trim.trim_start_frames + frame for frame in random_frames]
     selected_frames = sorted(

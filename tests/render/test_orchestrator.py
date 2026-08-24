@@ -52,6 +52,7 @@ def test_render_batch_detailed_parallel_order(mock_render_request):
         )
         for i in range(5)
     ]
+    reporter = MagicMock(spec=ProgressReporter)
 
     with patch("frame_compare.render.batch.orchestrator.render_frame_detailed") as mock_render:
 
@@ -68,11 +69,15 @@ def test_render_batch_detailed_parallel_order(mock_render_request):
             return _rendered(request)
 
         mock_render.side_effect = side_effect
-        results = render_batch_detailed(requests, parallelism=2)
+        results = render_batch_detailed(requests, parallelism=2, reporter=reporter)
         assert [result.path for result in results] == [r.output_path for r in requests]
         assert [result.facts.source_frame for result in results] == [
             r.frame_number for r in requests
         ]
+        assert {call.args[0] for call in reporter.set_description.call_args_list} == {
+            f"frame {request.frame_number}" for request in requests
+        }
+        assert reporter.advance.call_count == len(requests)
 
 
 def test_render_batch_fail_fast(mock_render_request):
@@ -141,7 +146,7 @@ def test_render_batch_progress_prefers_dedicated_presentation_label(mock_render_
     ):
         render_batch([request], reporter=reporter)
 
-    reporter.set_description.assert_called_once_with("Comparison 1 | ATV WEB-DL — Frame 42")
+    reporter.set_description.assert_called_once_with("Comparison 1 | ATV WEB-DL - frame 42")
 
 
 def test_render_batch_parallel_waits_for_in_flight_work_before_raising() -> None:

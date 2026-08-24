@@ -76,7 +76,9 @@ enable = false
         progress=None,
         reference_fps=None,
         frame_props_by_stem=None,
+        verbose=False,
     ):
+        assert verbose is False
         assert request.shared_alignment_cache_dir == tmp_path / "generated" / "cache" / "alignment"
         assert request.reference.identity.path == request.reference.path
         assert [comparison.identity.path for comparison in request.comparisons] == [
@@ -123,9 +125,9 @@ enable = false
     for video_name, frame_num, _ in ffmpeg.calls:
         by_video.setdefault(video_name, []).append(frame_num)
 
-    assert by_video["a_ref.mkv"] == [5, 50, 97]
-    assert by_video["b_comp1.mkv"] == [4, 49, 96]
-    assert by_video["c_comp2.mkv"] == [6, 51, 98]
+    assert by_video["a_ref.mkv"] == [32, 66, 83]
+    assert by_video["b_comp1.mkv"] == [31, 65, 82]
+    assert by_video["c_comp2.mkv"] == [33, 67, 84]
 
 
 def test_execute_run_report_confirmed_decline_skips_publish(

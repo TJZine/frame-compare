@@ -17,7 +17,7 @@ from frame_compare.analysis.window import SelectionWindow
 from frame_compare.orchestration import phase_alignment, phase_selection
 from frame_compare.orchestration.full_window_retry import FullWindowRetryOverride
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentResult
+from frame_compare.services.types import AlignmentResult, AlignmentStabilitySummary
 from tests.orchestration.phase_task_helpers import (
     _clip,
     _context,
@@ -147,6 +147,49 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     assert output.selection_details_by_source_frame is None
 
 
+def test_run_align_phase_warns_without_changing_material_variable_alignment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
+    ctx = _context(tmp_path, comparisons=[comparison])
+    summary = AlignmentStabilitySummary(
+        classification="variable",
+        valid_windows=4,
+        offset_min_frames=-3,
+        offset_max_frames=4,
+        first_offset_frames=0,
+        last_offset_frames=2,
+        largest_adjacent_jump_frames=3,
+        change_position_seconds=None,
+    )
+    monkeypatch.setattr(
+        phase_alignment,
+        "align_clips_from_request",
+        lambda *_args, **_kwargs: [
+            AlignmentResult(
+                "reference.mkv",
+                "encode.mkv",
+                2,
+                0.08,
+                0.9,
+                "cross_correlation",
+                "computed",
+                stability=summary,
+            )
+        ],
+    )
+
+    output = phase_alignment.run_align_phase(ctx, selected_frames=[2, 50])
+
+    assert output.comparisons[0].alignment is not None
+    assert output.comparisons[0].alignment.relative_offset_frames == 2
+    assert output.comparisons[0].alignment.stability == summary
+    assert output.warnings == [
+        "align: Encode 1 alignment varies across the source. "
+        "The applied constant offset was retained and should be verified."
+    ]
+
+
 def test_alignment_request_records_configured_reference_relationship(tmp_path: Path) -> None:
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
     ctx = _context(tmp_path, comparisons=[comparison])
@@ -257,13 +300,13 @@ def test_run_align_phase_labels_skipped_analysis_fallback_random_frame(
     output = phase_alignment.run_align_phase(ctx, selected_frames=[0, 66])
 
     assert output.reference.trim.trim_start_frames == 80
-    assert output.selected_frames == [18]
+    assert output.selected_frames == [16]
     assert output.selection_breakdown is not None
     assert output.selection_breakdown.user == []
-    assert output.selection_breakdown.random == [98]
+    assert output.selection_breakdown.random == [96]
     assert output.selection_details_by_source_frame is not None
-    assert output.selection_details_by_source_frame[98].label == "Random"
-    assert output.selection_details_by_source_frame[98].notes == "random"
+    assert output.selection_details_by_source_frame[96].label == "Random"
+    assert output.selection_details_by_source_frame[96].notes == "random"
     assert output.warnings == [
         "frame selection: dropped user frame(s) outside aligned renderable range: 0"
     ]
@@ -753,7 +796,8 @@ def test_run_align_phase_preserves_accepted_alignment_when_another_result_is_rej
     warning = output.warnings[0]
     normalized_warning = warning.replace("_", " ").lower()
     assert "align:" in warning.lower()
-    assert "encode_b" in warning.lower()
+    assert "align: Encode B alignment" in warning
+    assert "encode_b" not in warning
     assert "low confidence" in normalized_warning
     assert "unapplied" in normalized_warning
     assert "best-effort reference-frame domain" in warning
@@ -814,7 +858,8 @@ def test_run_align_phase_normalizes_three_comparisons_with_rejected_zero_offset_
     assert [comparison.trim.trim_start_frames for comparison in output.comparisons] == [0, 2, 5]
     assert output.selected_frames == [0, 48, 94]
     assert len(output.warnings) == 1
-    assert "encode_b" in output.warnings[0].lower()
+    assert "align: Encode B alignment" in output.warnings[0]
+    assert "encode_b" not in output.warnings[0]
 
 
 def test_run_align_phase_legacy_normalizes_positive_negative_and_zero_offsets_with_base_trims(

@@ -8,14 +8,15 @@ import numpy as np
 import pytest
 import tomli_w
 
-from frame_compare.services.alignment import align_clips
+from frame_compare.services.alignment import align_clips_from_request
 from frame_compare.services.alignment_consensus import AlignmentConsensus
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig
 from frame_compare.utils.progress_protocol import ProgressReporter
+from tests.services.alignment_request_test_support import alignment_request
 
 
-def test_align_clips_duplicate_stems_fail_before_starting_progress(tmp_path: Path) -> None:
+def test_alignment_duplicate_stems_fail_before_starting_progress(tmp_path: Path) -> None:
     ref = tmp_path / "ref.mkv"
     comp_a = tmp_path / "dup.mkv"
     comp_b = tmp_path / "dup.mp4"
@@ -25,8 +26,15 @@ def test_align_clips_duplicate_stems_fail_before_starting_progress(tmp_path: Pat
 
     reporter = MagicMock(spec=ProgressReporter)
 
+    config = AlignmentConfig()
+    request = alignment_request(
+        reference=ref,
+        comparisons=[comp_a, comp_b],
+        config=config,
+        generated_dir=tmp_path,
+    )
     with pytest.raises(AudioAlignmentError, match="Duplicate comparison clip stems detected"):
-        align_clips(ref, [comp_a, comp_b], AlignmentConfig(), tmp_path, progress=reporter)
+        align_clips_from_request(request, config, progress=reporter)
 
     reporter.start_phase.assert_not_called()
     reporter.complete_phase.assert_not_called()
@@ -36,7 +44,7 @@ def test_align_clips_duplicate_stems_fail_before_starting_progress(tmp_path: Pat
 @patch("frame_compare.services.alignment._extract_matching_audio")
 @patch("frame_compare.services.alignment._extract_reference_audio")
 @patch("frame_compare.services.alignment._estimate_consensus_offset")
-def test_align_clips_computed_results_advance_phase_progress(
+def test_alignment_computed_results_advance_phase_progress(
     mock_estimate: MagicMock,
     mock_extract_reference: MagicMock,
     mock_extract_matching: MagicMock,
@@ -53,26 +61,27 @@ def test_align_clips_computed_results_advance_phase_progress(
     mock_estimate.return_value = AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, None)
     reporter = MagicMock(spec=ProgressReporter)
 
-    align_clips(
-        ref,
-        [comp],
-        AlignmentConfig(cache_results=False),
-        tmp_path,
-        progress=reporter,
+    config = AlignmentConfig(cache_results=False)
+    request = alignment_request(
+        reference=ref,
+        comparisons=[comp],
+        config=config,
+        generated_dir=tmp_path,
     )
+    align_clips_from_request(request, config, progress=reporter)
 
     reporter.advance.assert_called_once_with(1)
-    reporter.start_indeterminate.assert_called_once()
+    reporter.start_indeterminate.assert_not_called()
     descriptions = [args[0] for args, _kwargs in reporter.set_description.call_args_list]
-    assert descriptions
-    assert any("comp.mkv" in description for description in descriptions)
+    assert descriptions[0] == "ALIGN | Checking saved offsets"
+    assert descriptions.count("ALIGN | Comparison 1 | comp.mkv") == 1
 
 
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_matching_audio")
 @patch("frame_compare.services.alignment._extract_reference_audio")
 @patch("frame_compare.services.alignment._estimate_consensus_offset")
-def test_align_clips_advances_each_computed_comparison_before_starting_next(
+def test_alignment_advances_each_computed_comparison_before_starting_next(
     mock_estimate: MagicMock,
     mock_extract_reference: MagicMock,
     mock_extract_matching: MagicMock,
@@ -91,25 +100,26 @@ def test_align_clips_advances_each_computed_comparison_before_starting_next(
     mock_estimate.return_value = AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, None)
     reporter = MagicMock(spec=ProgressReporter)
 
-    align_clips(
-        ref,
-        [comp_a, comp_b],
-        AlignmentConfig(cache_results=False),
-        tmp_path,
-        progress=reporter,
+    config = AlignmentConfig(cache_results=False)
+    request = alignment_request(
+        reference=ref,
+        comparisons=[comp_a, comp_b],
+        config=config,
+        generated_dir=tmp_path,
     )
+    align_clips_from_request(request, config, progress=reporter)
 
     assert reporter.advance.call_count == 2
     descriptions = [args[0] for args, _kwargs in reporter.set_description.call_args_list]
-    assert any("comp_a.mkv" in description for description in descriptions)
-    assert any("comp_b.mkv" in description for description in descriptions)
+    assert descriptions.count("ALIGN | Comparison 1 | comp_a.mkv") == 1
+    assert descriptions.count("ALIGN | Comparison 2 | comp_b.mkv") == 1
 
 
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_matching_audio")
 @patch("frame_compare.services.alignment._extract_reference_audio")
 @patch("frame_compare.services.alignment._estimate_consensus_offset")
-def test_align_clips_uses_supplied_reference_fps_for_computed_frame_offsets(
+def test_alignment_uses_supplied_reference_fps_for_computed_frame_offsets(
     mock_estimate: MagicMock,
     mock_extract_reference: MagicMock,
     mock_extract_matching: MagicMock,
@@ -134,11 +144,16 @@ def test_align_clips_uses_supplied_reference_fps_for_computed_frame_offsets(
         None,
     )
 
-    results = align_clips(
-        ref,
-        [comp],
-        AlignmentConfig(cache_results=False),
-        tmp_path,
+    config = AlignmentConfig(cache_results=False)
+    request = alignment_request(
+        reference=ref,
+        comparisons=[comp],
+        config=config,
+        generated_dir=tmp_path,
+    )
+    results = align_clips_from_request(
+        request,
+        config,
         reference_fps=Fraction(24000, 1001),
     )
 
@@ -149,7 +164,7 @@ def test_align_clips_uses_supplied_reference_fps_for_computed_frame_offsets(
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_matching_audio")
 @patch("frame_compare.services.alignment._extract_reference_audio")
-def test_align_clips_full_manual_hit_uses_spinner_without_progress_bar(
+def test_alignment_full_manual_hit_stays_in_parent_align_phase(
     mock_extract_reference: MagicMock,
     mock_extract_matching: MagicMock,
     mock_probe: MagicMock,
@@ -178,19 +193,26 @@ def test_align_clips_full_manual_hit_uses_spinner_without_progress_bar(
     mock_extract_matching.side_effect = AssertionError("manual alignment should not extract audio")
     reporter = MagicMock(spec=ProgressReporter)
 
-    align_clips(ref, [comp], AlignmentConfig(cache_results=True), tmp_path, progress=reporter)
+    config = AlignmentConfig(cache_results=True)
+    request = alignment_request(
+        reference=ref,
+        comparisons=[comp],
+        config=config,
+        generated_dir=tmp_path,
+    )
+    align_clips_from_request(request, config, progress=reporter)
 
-    reporter.start_indeterminate.assert_called_once()
+    reporter.start_indeterminate.assert_not_called()
     reporter.advance.assert_not_called()
     descriptions = [args[0] for args, _kwargs in reporter.set_description.call_args_list]
-    assert not any("comp.mkv" in description for description in descriptions)
+    assert descriptions == ["ALIGN | Checking saved offsets"]
 
 
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_matching_audio")
 @patch("frame_compare.services.alignment._extract_reference_audio")
 @patch("frame_compare.services.alignment._estimate_consensus_offset")
-def test_align_clips_passes_stream_overrides_and_channel_strategy_to_audio_owner(
+def test_alignment_passes_stream_overrides_and_channel_strategy_to_audio_owner(
     mock_estimate: MagicMock,
     mock_extract_reference: MagicMock,
     mock_extract_matching: MagicMock,
@@ -215,7 +237,13 @@ def test_align_clips_passes_stream_overrides_and_channel_strategy_to_audio_owner
         comparison_streams={"comp_b": 1},
     )
 
-    align_clips(ref, [comp_a, comp_b], config, tmp_path)
+    request = alignment_request(
+        reference=ref,
+        comparisons=[comp_a, comp_b],
+        config=config,
+        generated_dir=tmp_path,
+    )
+    align_clips_from_request(request, config)
 
     mock_extract_reference.assert_called_once_with(
         ref,

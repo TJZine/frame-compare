@@ -195,6 +195,7 @@ def test_consensus_rejects_low_confidence_without_offset() -> None:
         reference,
         comparison,
         config=AlignmentConfig(confidence_threshold=1.1),
+        fps=Fraction(24, 1),
     )
 
     assert estimate.applied is False
@@ -214,6 +215,7 @@ def test_consensus_rejects_single_window_ambiguous_correlation_peak() -> None:
             max_offset_seconds=24 / 8000,
             ambiguity_peak_ratio=1.1,
         ),
+        fps=Fraction(24, 1),
     )
 
     assert estimate.applied is False
@@ -239,6 +241,7 @@ def test_consensus_rejects_repeated_windows_with_ambiguous_correlation_peak() ->
             consensus_minimum_ratio=1.0,
             ambiguity_peak_ratio=3.0,
         ),
+        fps=Fraction(24, 1),
     )
 
     assert estimate.applied is False
@@ -264,6 +267,7 @@ def test_windowed_consensus_accepts_quorum_offset() -> None:
             minimum_valid_windows=2,
             consensus_minimum_ratio=0.75,
         ),
+        fps=Fraction(24, 1),
     )
 
     assert estimate.applied is True

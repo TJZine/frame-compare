@@ -15,6 +15,7 @@ from frame_compare.orchestration.progress import (
 from frame_compare.utils.progress import (
     LogProgressReporter,
     NullProgressReporter,
+    PlainProgressReporter,
     RichProgressReporter,
 )
 
@@ -37,10 +38,10 @@ def test_select_reporter_force_tty_true_returns_rich():
     assert isinstance(reporter, RichProgressReporter)
 
 
-def test_select_reporter_force_tty_false_returns_log():
-    """force_tty=False should return LogProgressReporter."""
+def test_select_reporter_force_tty_false_returns_plain():
+    """force_tty=False should return PlainProgressReporter."""
     reporter = select_reporter(force_tty=False)
-    assert isinstance(reporter, LogProgressReporter)
+    assert isinstance(reporter, PlainProgressReporter)
 
 
 def test_select_reporter_tty_detection_interactive(monkeypatch: pytest.MonkeyPatch):
@@ -51,11 +52,11 @@ def test_select_reporter_tty_detection_interactive(monkeypatch: pytest.MonkeyPat
 
 
 def test_select_reporter_tty_detection_non_interactive(monkeypatch: pytest.MonkeyPatch):
-    """Auto-detection in non-TTY should return LogProgressReporter."""
+    """Auto-detection in non-TTY should return PlainProgressReporter."""
     monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
     monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
     reporter = select_reporter()
-    assert isinstance(reporter, LogProgressReporter)
+    assert isinstance(reporter, PlainProgressReporter)
 
 
 def test_select_reporter_uses_stderr_tty_when_stdout_is_not_tty(
@@ -69,7 +70,7 @@ def test_select_reporter_uses_stderr_tty_when_stdout_is_not_tty(
 
 
 def test_select_reporter_tty_detection_no_isatty_attr(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Auto-detection without isatty attributes should return LogProgressReporter."""
+    """Auto-detection without isatty attributes should return PlainProgressReporter."""
 
     class _NoIsatty:
         pass
@@ -77,7 +78,7 @@ def test_select_reporter_tty_detection_no_isatty_attr(monkeypatch: pytest.Monkey
     monkeypatch.setattr(sys, "stdout", _NoIsatty())
     monkeypatch.setattr(sys, "stderr", _NoIsatty())
     reporter = select_reporter()
-    assert isinstance(reporter, LogProgressReporter)
+    assert isinstance(reporter, PlainProgressReporter)
 
 
 def test_select_reporter_tty_detection_isatty_raises_oserror(
@@ -91,7 +92,7 @@ def test_select_reporter_tty_detection_isatty_raises_oserror(
     monkeypatch.setattr(sys.stdout, "isatty", _raise_oserror)
     monkeypatch.setattr(sys.stderr, "isatty", _raise_oserror)
     reporter = select_reporter()
-    assert isinstance(reporter, LogProgressReporter)
+    assert isinstance(reporter, PlainProgressReporter)
 
 
 def test_select_reporter_tty_detection_isatty_raises_valueerror(
@@ -105,7 +106,7 @@ def test_select_reporter_tty_detection_isatty_raises_valueerror(
     monkeypatch.setattr(sys.stdout, "isatty", _raise_value_error)
     monkeypatch.setattr(sys.stderr, "isatty", _raise_value_error)
     reporter = select_reporter()
-    assert isinstance(reporter, LogProgressReporter)
+    assert isinstance(reporter, PlainProgressReporter)
 
 
 def test_select_reporter_quiet_takes_precedence_over_json():
@@ -143,10 +144,10 @@ def test_select_reporter_no_color_uses_rich_for_detected_tty(
     assert reporter.no_color is True
 
 
-def test_select_reporter_no_color_non_tty_returns_log():
-    """Non-interactive no-color output should still use log progress."""
+def test_select_reporter_no_color_non_tty_returns_plain():
+    """Non-interactive no-color output should still use plain progress."""
     reporter = select_reporter(no_color=True, force_tty=False)
-    assert isinstance(reporter, LogProgressReporter)
+    assert isinstance(reporter, PlainProgressReporter)
 
 
 @pytest.mark.parametrize("width", [60, 80])
@@ -161,7 +162,7 @@ def test_execution_section_is_rich_only_and_fits_without_color(
     reporter = RichProgressReporter(no_color=True)
     emit_execution_section_start(reporter, no_color=True)
     emit_execution_section_end(reporter, no_color=True)
-    for non_rich in (LogProgressReporter(), NullProgressReporter()):
+    for non_rich in (LogProgressReporter(), PlainProgressReporter(), NullProgressReporter()):
         emit_execution_section_start(non_rich, no_color=True)
         emit_execution_section_end(non_rich, no_color=True)
 

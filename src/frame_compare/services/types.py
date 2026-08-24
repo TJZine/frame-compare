@@ -7,6 +7,13 @@ type AlignmentCorrelationMode = Literal["raw_fft", "gcc_phat"]
 type AlignmentPreprocessingMode = Literal["none", "standard"]
 type AlignmentChannelStrategy = Literal["mono_downmix", "best_channel"]
 type AlignmentRefinementMode = Literal["disabled", "local"]
+type AlignmentStabilityClassification = Literal[
+    "stable",
+    "possible_drift",
+    "possible_discontinuity",
+    "variable",
+    "insufficient_evidence",
+]
 type PreviousOffsetReusePolicy = Literal["disabled", "prompt", "always"]
 type AlignmentReuseCacheOrigin = Literal["computed", "vspreview_confirmed"]
 type AlignmentWriteProvenance = Literal[
@@ -23,6 +30,31 @@ def _empty_comparison_streams() -> dict[str, int]:
 
 
 @dataclass(frozen=True)
+class AlignmentWindowEvidence:
+    """One bounded correlation estimate used only for stability diagnostics."""
+
+    start_sample: int
+    end_sample: int
+    sample_offset: int
+    score: float
+    peak_ratio: float
+
+
+@dataclass(frozen=True)
+class AlignmentStabilitySummary:
+    """Compact diagnostic classification of offset variation over time."""
+
+    classification: AlignmentStabilityClassification
+    valid_windows: int
+    offset_min_frames: int | None
+    offset_max_frames: int | None
+    first_offset_frames: int | None
+    last_offset_frames: int | None
+    largest_adjacent_jump_frames: int | None
+    change_position_seconds: float | None
+
+
+@dataclass(frozen=True)
 class AlignmentResult:
     """Result of an audio alignment operation."""
 
@@ -35,6 +67,7 @@ class AlignmentResult:
     source: AlignmentSource
     applied: bool = True
     diagnostic: str | None = None
+    stability: AlignmentStabilitySummary | None = None
 
 
 @dataclass(frozen=True)

@@ -159,7 +159,11 @@ def build_phases_before_align(
             "align",
             "align",
             lambda config: not config.audio_alignment.enable,
-            partial(run_align_phase, selected_frames=state.selected_frames),
+            partial(
+                run_align_phase,
+                selected_frames=state.selected_frames,
+                verbose=request.verbose,
+            ),
             state=state,
             monotonic_timer=monotonic_timer,
             phase_timings=state.phase_timings,
@@ -279,9 +283,9 @@ def build_phases_after_align(
         retain_if=lambda output: (
             isinstance(output, PublishPhaseOutput) and output.slowpics_url is not None
         ),
-        skip_detail=lambda: (
+        skip_detail=lambda effective_config: (
             "Disabled"
-            if not config.slowpics.auto_upload
+            if not effective_config.slowpics.auto_upload
             else "Unavailable"
             if http_client is None
             else "Declined"

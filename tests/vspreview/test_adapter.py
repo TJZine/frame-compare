@@ -11,6 +11,7 @@ import sys
 import types
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -19,6 +20,7 @@ from frame_compare.vspreview.adapter import (
     VSPreviewAvailabilityStatus,
     VSPreviewConfig,
     VSPreviewSessionRequest,
+    _check_startup_readiness,
     _resolve_launch_command,
     check_vspreview_availability,
     launch_alignment_verification_session,
@@ -45,6 +47,129 @@ class _FakeVSPreviewProcess:
         return self._returncode
 
 
+def test_startup_readiness_accepts_healthy_current_interpreter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock_run = MagicMock(return_value=subprocess.CompletedProcess([], 0, "", ""))
+    monkeypatch.setattr("frame_compare.vspreview.adapter.subprocess.run", mock_run)
+
+    _check_startup_readiness([sys.executable, "-m", "vspreview", "session.py"], env={})
+
+    mock_run.assert_called_once()
+    probe_command = mock_run.call_args.args[0]
+    assert "prepare_vspreview_compatibility" in probe_command[2]
+    assert "import vspreview.init" in probe_command[2]
+
+
+def test_launch_session_returns_safe_missing_module_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "tiny"
+    monkeypatch.setenv("FRAME_COMPARE_API_TOKEN", secret)
+    stderr = (
+        "Traceback (most recent call last):\n"
+        '  File "C:\\private\\vspreview.py", line 1\n'
+        f"  inherited token: {secret}\n"
+        "ModuleNotFoundError: No module named 'vstools.utils.gpu'\n"
+    )
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.check_vspreview_availability",
+        lambda: VSPreviewAvailability(
+            status=VSPreviewAvailabilityStatus.AVAILABLE,
+            message="available",
+        ),
+    )
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter._resolve_launch_command",
+        lambda script_path: [sys.executable, "-m", "vspreview", str(script_path)],
+    )
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.subprocess.run",
+        MagicMock(return_value=subprocess.CompletedProcess([], 1, "", stderr)),
+    )
+    popen = MagicMock()
+    monkeypatch.setattr("frame_compare.vspreview.adapter.subprocess.Popen", popen)
+
+    with pytest.raises(VSPreviewError) as excinfo:
+        launch_alignment_verification_session(
+            VSPreviewSessionRequest(
+                reference=Path("ref.mkv"),
+                comparisons=[Path("a.mkv")],
+                suggested_offsets_by_key={},
+                cache_dir=tmp_path,
+            ),
+            VSPreviewConfig(enabled=True),
+        )
+
+    assert excinfo.value.public_reason == "Missing optional dependency: vstools.utils.gpu"
+    assert excinfo.value.missing_module == "vstools.utils.gpu"
+    assert excinfo.value.startup_stderr is not None
+    assert secret not in excinfo.value.startup_stderr
+    assert "<redacted>" in excinfo.value.startup_stderr
+    assert "vstools.utils.gpu" in excinfo.value.startup_stderr
+    assert "C:\\private" not in str(excinfo.value)
+    popen.assert_not_called()
+
+
+def test_startup_readiness_does_not_probe_external_launcher(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock_run = MagicMock()
+    monkeypatch.setattr("frame_compare.vspreview.adapter.subprocess.run", mock_run)
+
+    _check_startup_readiness(["external-vspreview", "session.py"], env={})
+
+    mock_run.assert_not_called()
+
+
+def test_launch_session_startup_timeout_is_bounded_redacted_and_prevents_launch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "timeout-secret-token"
+    monkeypatch.setenv("FRAME_COMPARE_SECRET", secret)
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.check_vspreview_availability",
+        lambda: VSPreviewAvailability(
+            status=VSPreviewAvailabilityStatus.AVAILABLE,
+            message="available",
+        ),
+    )
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter._resolve_launch_command",
+        lambda script_path: [sys.executable, "-m", "vspreview", str(script_path)],
+    )
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.subprocess.run",
+        MagicMock(
+            side_effect=subprocess.TimeoutExpired(
+                [sys.executable],
+                10.0,
+                stderr=f"waiting with {secret}".encode(),
+            )
+        ),
+    )
+    popen = MagicMock()
+    monkeypatch.setattr("frame_compare.vspreview.adapter.subprocess.Popen", popen)
+
+    with pytest.raises(VSPreviewError) as excinfo:
+        launch_alignment_verification_session(
+            VSPreviewSessionRequest(
+                reference=Path("ref.mkv"),
+                comparisons=[Path("a.mkv")],
+                suggested_offsets_by_key={},
+                cache_dir=tmp_path,
+            ),
+            VSPreviewConfig(enabled=True),
+        )
+
+    assert excinfo.value.public_reason == "startup dependency check timed out"
+    assert "Traceback" not in str(excinfo.value)
+    assert excinfo.value.startup_stderr == "waiting with <redacted>"
+    popen.assert_not_called()
+
+
 def test_portable_windows_launch_preloads_media_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -64,6 +189,46 @@ def test_portable_windows_launch_preloads_media_runtime(
     ]
 
 
+def test_current_interpreter_launch_uses_compatibility_bootstrap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("frame_compare.vspreview.adapter.runtime_kind", lambda: "unmanaged")
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.importlib.util.find_spec",
+        lambda module: SimpleNamespace() if module == "vspreview" else None,
+    )
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.shutil.which",
+        lambda _command: pytest.fail("Current interpreter must use compatibility bootstrap"),
+    )
+    script_path = Path("generated/session.py")
+
+    assert _resolve_launch_command(script_path) == [
+        sys.executable,
+        "-m",
+        "frame_compare.vspreview.launcher",
+        str(script_path),
+    ]
+
+
+def test_external_vspreview_executable_is_used_when_current_interpreter_cannot_import_vspreview(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("frame_compare.vspreview.adapter.runtime_kind", lambda: "unmanaged")
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.importlib.util.find_spec", lambda _module: None
+    )
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.shutil.which",
+        lambda command: "C:/external/vspreview.exe" if command == "vspreview" else None,
+    )
+
+    assert _resolve_launch_command(Path("generated/session.py")) == [
+        "C:/external/vspreview.exe",
+        str(Path("generated/session.py")),
+    ]
+
+
 def _execute_generated_script(
     *,
     tmp_path: Path,
@@ -73,6 +238,9 @@ def _execute_generated_script(
     num_frames_by_stem: dict[str, int] | None = None,
     frame_props_by_stem: dict[str, dict[str, object]] | None = None,
     overlay_failure_stems: set[str] | None = None,
+    presentation_names_by_stem: dict[str, str] | None = None,
+    native_loader_output: bool = False,
+    load_failure_stems: set[str] | None = None,
 ) -> tuple[
     dict[str, list[tuple[int | None, int | None, int | None]]],
     list[int],
@@ -97,6 +265,7 @@ def _execute_generated_script(
     if frame_props_by_stem is not None:
         resolved_frame_props.update(frame_props_by_stem)
     resolved_overlay_failure_stems = overlay_failure_stems or set()
+    resolved_load_failure_stems = load_failure_stems or set()
 
     class FakeClip:
         def __init__(self, stem: str, num_frames: int) -> None:
@@ -123,7 +292,12 @@ def _execute_generated_script(
 
     class FakeLsmas:
         def LWLibavSource(self, path: str) -> FakeClip:
-            return clips[Path(path).stem]
+            if native_loader_output:
+                print("NATIVE INDEX OUTPUT", file=sys.stderr)
+            stem = Path(path).stem
+            if stem in resolved_load_failure_stems:
+                raise RuntimeError("load failed")
+            return clips[stem]
 
     class FakeText:
         def Text(self, clip: FakeClip, _text: str, *, alignment: int) -> FakeClip:
@@ -150,6 +324,7 @@ def _execute_generated_script(
         suggested_offsets_by_key=suggested_offsets_by_key,
         bootstrap_paths=[tmp_path],
         frame_props_by_stem=resolved_frame_props,
+        presentation_names_by_stem=presentation_names_by_stem,
     )
 
     exec(
@@ -161,7 +336,9 @@ def _execute_generated_script(
 
 
 def test_launch_alignment_verification_session_waits_for_vspreview_completion(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     # Force launch path
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
@@ -174,8 +351,10 @@ def test_launch_alignment_verification_session_waits_for_vspreview_completion(
     )
     monkeypatch.setattr(
         "frame_compare.vspreview.adapter._resolve_launch_command",
-        lambda script_path: ["vspreview", str(script_path)],
+        lambda script_path: [sys.executable, "-m", "vspreview", str(script_path)],
     )
+    readiness_run = MagicMock(return_value=subprocess.CompletedProcess([], 0, "", ""))
+    monkeypatch.setattr("frame_compare.vspreview.adapter.subprocess.run", readiness_run)
 
     run_calls: list[tuple[object, object]] = []
 
@@ -185,7 +364,7 @@ def test_launch_alignment_verification_session_waits_for_vspreview_completion(
 
     monkeypatch.setattr("frame_compare.vspreview.adapter.subprocess.Popen", _fake_popen)
 
-    cfg = VSPreviewConfig(enabled=True, timeout_seconds=1.0)
+    cfg = VSPreviewConfig(enabled=True)
     script_path = launch_alignment_verification_session(
         request=VSPreviewSessionRequest(
             reference=Path("ref.mkv"),
@@ -199,7 +378,8 @@ def test_launch_alignment_verification_session_waits_for_vspreview_completion(
     assert script_path.exists()
     assert len(run_calls) == 1
     command, kwargs = run_calls[0]
-    assert command == ["vspreview", str(script_path)]
+    assert command == [sys.executable, "-m", "vspreview", str(script_path)]
+    readiness_run.assert_called_once()
     assert "timeout" not in kwargs
     assert kwargs["stdin"] is None
     assert kwargs["stdout"] is None
@@ -207,6 +387,7 @@ def test_launch_alignment_verification_session_waits_for_vspreview_completion(
     assert "text" not in kwargs
     assert "errors" not in kwargs
     assert "bufsize" not in kwargs
+    assert "VSPreview Session" not in capsys.readouterr().err
 
 
 def test_launch_alignment_verification_session_writes_launch_telemetry_to_stderr(
@@ -240,7 +421,7 @@ def test_launch_alignment_verification_session_writes_launch_telemetry_to_stderr
             suggested_offsets_by_key={},
             cache_dir=tmp_path,
         ),
-        config=VSPreviewConfig(enabled=True, no_color=True),
+        config=VSPreviewConfig(enabled=True, no_color=True, verbose=True),
     )
 
     captured = capsys.readouterr()
@@ -309,7 +490,7 @@ def test_launch_alignment_verification_session_reports_missing_launcher(
 
     monkeypatch.setattr("frame_compare.vspreview.adapter.subprocess.Popen", _raise_missing_launcher)
 
-    cfg = VSPreviewConfig(enabled=True, timeout_seconds=1.0)
+    cfg = VSPreviewConfig(enabled=True)
 
     with pytest.raises(VSPreviewError) as excinfo:
         launch_alignment_verification_session(
@@ -340,12 +521,6 @@ def test_launch_alignment_verification_session_reports_nonzero_exit(
         "frame_compare.vspreview.adapter._resolve_launch_command",
         lambda script_path: ["vspreview", str(script_path)],
     )
-    warnings: list[tuple[str, dict[str, object]]] = []
-
-    def _capture_warning(event: str, **kwargs: object) -> None:
-        warnings.append((event, kwargs))
-
-    monkeypatch.setattr("frame_compare.vspreview.adapter.log.warning", _capture_warning)
     monkeypatch.setattr(
         "frame_compare.vspreview.adapter.subprocess.Popen",
         lambda _command, **_kwargs: _FakeVSPreviewProcess(returncode=7),
@@ -361,17 +536,6 @@ def test_launch_alignment_verification_session_reports_nonzero_exit(
             ),
             config=VSPreviewConfig(enabled=True),
         )
-
-    assert warnings == [
-        (
-            "vspreview_launch_failed",
-            {
-                "reason": "launch exited with code 7",
-                "returncode": 7,
-                "hint": "Inspect the VSPreview output displayed above",
-            },
-        )
-    ]
 
 
 def test_build_script_content_escapes_path_literals() -> None:
@@ -558,7 +722,7 @@ def test_generated_script_output_order_matches_prompt_input_order_for_unsorted_c
     assert output_indices == [0, 1, 2, 3, 4, 5]
     assert output_stems == ["ref", "zeta", "ref", "alpha", "ref", "mid"]
     assert captured.out == ""
-    for token in ("loaded", "zeta", "alpha", "mid", "audio hint"):
+    for token in ("comparison 1", "zeta", "alpha", "mid", "audio hint", "outputs"):
         assert token in captured.err
 
 
@@ -576,17 +740,111 @@ def test_generated_script_current_human_output_organization_without_launching_vs
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "VSPreview Bootstrap" in captured.err
+    assert "[RUN] VSPreview Bootstrap" in captured.err
     assert "reference" in captured.err
-    assert "loaded" in captured.err
-    assert "output 0" in captured.err
-    assert "output 1" in captured.err
-    assert "output 2" in captured.err
-    assert "output 3" in captured.err
-    assert "VSPreview Ready" in captured.err
+    assert "loaded" not in captured.err
+    assert "Reference 0 | Comparison 1 1" in captured.err
+    assert "Reference 2 | Comparison 2 3" in captured.err
+    assert (
+        captured.err.index("comparison 1")
+        < captured.err.index("Reference 0 | Comparison 1 1")
+        < captured.err.index("comparison 2")
+    )
+    assert captured.err.index("comparison 2") < captured.err.index("Reference 2 | Comparison 2 3")
+    assert "[OK] VSPreview Ready" in captured.err
     assert "VSPreview Assumptions" not in captured.err
     assert "a" in captured.err
     assert "b" in captured.err
+
+
+def test_generated_script_uses_prepared_names_without_changing_internal_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _execute_generated_script(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        suggested_offsets_by_key={"ref:long-comparison-stem": 7},
+        comparison_stems=("long-comparison-stem",),
+        presentation_names_by_stem={
+            "ref": "PMTP WEB-DL | DV HDR10+ | Kitsune",
+            "long-comparison-stem": "ATV WEB-DL | DV HDR10+ | Kitsune",
+        },
+    )
+
+    output = capsys.readouterr().err
+    assert "PMTP WEB-DL | DV HDR10+ | Kitsune" in output
+    assert "ATV WEB-DL | DV HDR10+ | Kitsune" in output
+    assert "long-comparison-stem" not in output
+    assert "+7f" in output
+    assert "Reference 0 | Comparison 1 1" in output
+    assert "\x1b[" not in output
+
+
+def test_generated_assumptions_use_prepared_names_not_internal_stems(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _execute_generated_script(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        suggested_offsets_by_key={"ref:very-long-raw-comparison-stem": 7},
+        comparison_stems=("very-long-raw-comparison-stem",),
+        presentation_names_by_stem={
+            "ref": "PMTP WEB-DL | DV HDR10+ | Kitsune",
+            "very-long-raw-comparison-stem": "ATV WEB-DL | DV HDR10+ | Kitsune",
+        },
+        frame_props_by_stem={
+            "ref": {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1},
+            "very-long-raw-comparison-stem": {"_Transfer": 2},
+        },
+    )
+
+    output = capsys.readouterr().err
+    assert "ATV WEB-DL | DV HDR10+ | Kitsune missing" in output
+    assert "very-long-raw-comparison-stem" not in output
+
+
+def test_failed_comparison_keeps_visible_warning_and_truthful_output_grouping(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _execute_generated_script(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        suggested_offsets_by_key={"ref:a": 1, "ref:b": 2},
+        comparison_stems=("a", "b"),
+        load_failure_stems={"a"},
+    )
+
+    output = capsys.readouterr().err
+    assert "comparison 1  a" in output
+    assert "[WARN] Comparison source could not be loaded" in output
+    assert "comparison 2  b" in output
+    assert "Reference 0 | Comparison 2 1" in output
+    assert "Comparison 1 1" not in output
+
+
+def test_generated_bootstrap_precedes_native_source_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _execute_generated_script(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        suggested_offsets_by_key={"ref:a": 0},
+        comparison_stems=("a",),
+        native_loader_output=True,
+    )
+
+    output = capsys.readouterr().err
+    assert output.index("[RUN] VSPreview Bootstrap") < output.index("NATIVE INDEX OUTPUT")
+    assert output.index("reference") < output.index("NATIVE INDEX OUTPUT")
+    assert output.index("fps") > output.index("NATIVE INDEX OUTPUT")
 
 
 def test_generated_script_collects_preview_assumptions_before_outputs_and_ready(
@@ -715,7 +973,7 @@ core = _Core()
 
     assert result.returncode == 1
     assert result.stdout == ""
-    assert "ERROR: Failed to resolve LWLibavSource loader:" in result.stderr
+    assert "[FAIL] Failed to resolve LWLibavSource loader:" in result.stderr
     assert "LWLibavSource not found on core.lsmas or core.lw" in result.stderr
     assert "Traceback" not in result.stderr
 

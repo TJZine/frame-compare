@@ -387,8 +387,13 @@ unchanged.
 - Human-readable non-quiet runs emit a `Frame Alignment` diagnostic to stderr after
   the alignment phase when accepted or rejected frame alignment changes need
   explanation. The diagnostic reports normalized source-frame row 0, final trim
-  ranges, offsets, selected aligned frames, and rejected alignment warning context
-  for comparisons with material alignment information. It is suppressed by
+  ranges, offsets, selected aligned frames, and alignment warning context
+  for comparisons with material alignment information. Material non-constant offset
+  evidence adds one concise stability row and one bounded warning stating that the
+  applied constant offset was retained and should be verified. Stable or insufficient
+  evidence does not warn. Verbose mode may also show stable evidence and valid-window
+  counts; individual diagnostic windows are never printed.
+  It is suppressed by
   `--quiet` and is never emitted to `run --json` stdout.
 - After sources load, normal human output uses one `[OK] Sources — N loaded`
   panel heading. Its rows use `Reference` and `Comparison N` roles, factor one
@@ -455,21 +460,49 @@ unchanged.
   `RENDER`, `METADATA`, `PUBLISH`, `REPORT`, `CONFIRM`, and `CLEANUP`.
   Internal phase names in logs and `phase_timings` remain the runtime keys such
   as `frame_plan`, `analyze`, `align`, and `confirm_slowpics_upload`.
+- Non-TTY human runs use those product phase labels in chronological ASCII
+  progress lines on stderr. Each top-level phase emits once when it completes;
+  successful lines include elapsed time, skips preserve their detail, and failed
+  phases emit `[FAIL]` before the existing typed error presentation. Successful
+  nested work and percentage milestones remain silent. Warned or failed nested
+  work may emit one line when needed to preserve a material outcome. Expected
+  warn-only phase failures do not add a console traceback or duplicate warning
+  event; JSON progress retains the structured `phase_warned` exception evidence.
 - Interactive Rich runs place those runtime phases and their diagnostics inside a
   lightweight `Execution` rule band after the Sources panel and before the Result
   panel. Loose live and durable runtime lines use a consistent two-space inset;
   evidence and blocking-decision panels remain panels, with nested decision
   questions using a four-space inset immediately below their panel. JSON, quiet,
   and non-TTY output do not gain the band or inset.
-- Every Rich phase remains live while active with an ASCII `[RUN]` marker. A
-  successful top-level phase leaves a durable ASCII status line with elapsed time
+- Every Rich phase remains live while active with an ASCII `[RUN]` marker. Meaningful
+  measurable tasks use a Rich progress bar separated from preceding
+  durable output by one blank line and report completed/total work with a labeled
+  `ETA` once Rich has an estimate; before then, only completed/total work is shown.
+  Indeterminate activity uses an ASCII spinner after its description, while
+  one-step phases remain simple activity lines without a bar. Live render descriptions
+  use compact source identity followed by an ASCII `- frame N` suffix; constrained
+  terminals may visually ellipsize the description without changing its stored value.
+  A successful top-level phase leaves a durable ASCII status line with elapsed time
   when it runs for at least 10.0 seconds. Successful nested tasks remain transient,
   while skipped,
   warned, and failed phases always remain visible. A successful slow.pics upload
   also leaves a durable `PUBLISH` line regardless of duration. The report-confirmed
   prompt is the durable `[WAIT] CONFIRM` record; it does not add a redundant
   generic successful completion line. Progress is suspended around that blocking
-  prompt and restored afterward.
+  prompt and restored afterward. Rich status color is confined to the semantic
+  marker: `[RUN]` is bright cyan, `[OK]` green, `[WAIT]` magenta, `[WARN]` yellow,
+  `[SKIP]` subdued yellow, and `[FAIL]` red. The description remains normally styled,
+  and no-color output retains the same literal markers.
+- Audio alignment remains one coherent `ALIGN` phase. Saved/manual/shared offset
+  lookup is shown as `ALIGN | Checking saved offsets` without a nested task, typed
+  comparison work uses `ALIGN | Comparison N | <prepared presentation>`, and optional
+  VSPreview review is labeled `ALIGN | Interactive verification`.
+- Normal interactive VSPreview launch presentation omits generated script and command
+  telemetry. `--verbose` retains those launch facts and bounded startup-failure
+  evidence. When a current-interpreter readiness check detects a missing optional
+  module, normal mode emits one sanitized warning and continues with the computed
+  audio alignment; forced interactive failure remains fatal. A successful VSPreview
+  child continues to inherit its native stdout and stderr diagnostics.
 - The known slow.pics upload start/complete lifecycle events are DEBUG evidence in
   normal TTY runs because the product progress stream already represents the same
   lifecycle. Retry, rate-limit, server, timeout, and network warnings remain
@@ -477,8 +510,9 @@ unchanged.
 - `--no-color` disables ANSI color in interactive Rich progress output. It does
   not switch an interactive human run to structlog progress. It also disables
   ANSI styling for the previous-offset reuse table and prompt. Quiet and JSON
-  modes still suppress Rich progress, and non-TTY runs still use log progress,
-  including consolidated FPS diagnostics rather than Rich FPS panels.
+  modes still suppress Rich progress, and non-TTY human runs use plain progress.
+  Consolidated FPS diagnostics retain their existing log presentation rather than
+  Rich FPS panels.
 - `--diagnose-paths` emits a pinned JSON object with keys `cache`, `config`, `input`,
   `output`, and `root`, then exits without invoking the runtime pipeline. The
   `output` value is the resolved generated-data root and `cache` is its
@@ -746,7 +780,9 @@ four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</cod
   renderer cannot prove it; decoded L1/L2/L6 values are not inferred from clip-level or
   frame-0 metadata.
 - Displayed file size is the complete container storage cost in IEC units. It is not a
-  bitrate, quality, efficiency, or winner metric.
+  bitrate, quality, efficiency, or winner metric. The existing value appears in visible
+  Single, Slider, Diff, Blink, and Grid HUD source labels when positive and available;
+  hiding the HUD hides the size, and the report payload remains version `1.2`.
 
 ### slow.pics Upload Behavior
 
@@ -981,6 +1017,15 @@ per-clip selectable window within clip bounds, preferring to extend the end
 first and then shift the start earlier. If a shared selectable intersection
 cannot be formed, the run fails with the standard typed selection error.
 
+Each automatic category distributes its requested count across deterministic
+integer-coordinate temporal strata before globally backfilling. Random uses the
+configured stable seed-derived order; dark, bright, and motion retain their metric
+rankings, including sparse performance-mode source coordinates. Automatic choices
+prefer five-frame separation from all higher-precedence evidence, then relax spacing
+deterministically when enough distinct frames exist. Uniqueness and the precedence
+`User`, `Dark`, `Bright`, `Motion`, `Random` are never relaxed. Exact automatic frame
+choices may therefore differ from releases that predate temporal stratification.
+
 ## Config-Only slow.pics Surface
 
 These eighteen fields are the full current public `[slowpics]` config surface:
@@ -1095,12 +1140,20 @@ When interactive alignment launches a generated VSPreview session, the
 diagnostic order is:
 
 1. parent `VSPreview Session` telemetry
-2. generated `VSPreview Bootstrap`
-3. generated reference and loaded comparison rows
+2. generated `[RUN] VSPreview Bootstrap` and prepared reference identity, before the
+   first source load can emit native indexing diagnostics
+3. generated reference FPS plus prepared `Comparison N` identities, audio hints, and
+   paired truthful output-slot mappings
 4. generated `VSPreview Assumptions`, only when assumptions exist
-5. generated output slot rows
-6. generated `VSPreview Ready`
-7. parent `VSPreview Confirmation` prompt text
+5. generated `[OK] VSPreview Ready` with the next operator action
+6. parent `[WAIT] VSPreview Confirmation` prompt text
+
+Normal VSPreview labels reuse the release-aware presentation identities prepared by
+the typed alignment request. Paths and stems remain the internal source, suggested
+offset, confirmation, manual-override, and alignment-result identities. Confirmation
+uses untrimmed source-frame indices and calculates the offset as reference minus
+comparison. Generated and parent no-color output retain the literal lifecycle markers,
+and native source/index diagnostics remain inherited without filtering or buffering.
 
 Generated VSPreview assumptions are preview-only diagnostics derived from
 Frame Compare's existing clip probe metadata and serialized into the generated
@@ -1264,6 +1317,10 @@ enabled.
 - `force_interactive = true` is incompatible with `previous_offsets = "prompt"`
   and `previous_offsets = "always"` because reuse can skip VSPreview.
 - Successful `run --json` output remains unchanged by previous-offset reuse.
+- Cached computed stability summaries are diagnostic-only scalar evidence. The current
+  cache schema requires them for computed entries and embedded computed results; version
+  mismatches or entries missing required summaries are ignored. Summaries do not affect
+  cache identity, selected offsets, or trims.
 - `correlation_mode = "raw_fft" | "gcc_phat"` selects the correlation algorithm
   used by the computed estimator. `raw_fft` is the default.
 - `preprocessing_mode = "none" | "standard"` selects signal preprocessing before

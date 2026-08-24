@@ -17,6 +17,7 @@ from frame_compare.orchestration.context import (
     ClipProbeSnapshot,
     ClipState,
 )
+from frame_compare.services.types import AlignmentStabilitySummary
 
 
 @pytest.fixture(autouse=True)
@@ -320,7 +321,46 @@ def test_emit_frame_alignment_report_caps_selected_frame_list(
     assert "aligned 0, 1, 2, 3, 4, 5, 6, 7, ... (12 total)" in captured.err
 
 
-def test_emit_frame_alignment_report_renders_rejected_alignment_warning_context(
+def test_emit_frame_alignment_report_shows_material_stability_concisely(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    summary = AlignmentStabilitySummary(
+        classification="possible_discontinuity",
+        valid_windows=4,
+        offset_min_frames=178,
+        offset_max_frames=202,
+        first_offset_frames=178,
+        last_offset_frames=202,
+        largest_adjacent_jump_frames=24,
+        change_position_seconds=2832.0,
+    )
+    comparison = AlignmentReportComparison(
+        label="Encode",
+        alignment_source="computed",
+        relative_offset_frames=190,
+        reference_row_zero_source_frame=190,
+        comparison_row_zero_source_frame=0,
+        reference_trim_range=(190, 999),
+        comparison_trim_range=(0, 809),
+        stability=summary,
+    )
+
+    emit_frame_alignment_report(
+        stage="after_align",
+        comparisons=[comparison],
+        selected_frames=[],
+        alignment_warnings=[],
+        json_output=False,
+        quiet=False,
+        no_color=True,
+    )
+
+    output = capsys.readouterr().err
+    assert "possible discontinuity; +178..+202 frames; change near 00:47:12" in output
+    assert "valid windows" not in output
+
+
+def test_emit_frame_alignment_report_renders_alignment_warning_context(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     comparison = AlignmentReportComparison(
@@ -348,8 +388,52 @@ def test_emit_frame_alignment_report_renders_rejected_alignment_warning_context(
     assert "Encode" in captured.err
     assert "none" in captured.err
     assert "warnings" in captured.err
-    assert "rejected" in captured.err
+    assert "warning" in captured.err
+    assert "rejected" not in captured.err
     assert "align: encode low confidence; left unapplied and untrimmed" in captured.err
+
+
+def test_emit_frame_alignment_report_does_not_label_applied_stability_warning_rejected(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    summary = AlignmentStabilitySummary(
+        classification="possible_drift",
+        valid_windows=4,
+        offset_min_frames=178,
+        offset_max_frames=182,
+        first_offset_frames=178,
+        last_offset_frames=182,
+        largest_adjacent_jump_frames=2,
+        change_position_seconds=None,
+    )
+    comparison = AlignmentReportComparison(
+        label="Encode",
+        alignment_source="computed",
+        relative_offset_frames=180,
+        reference_row_zero_source_frame=180,
+        comparison_row_zero_source_frame=0,
+        reference_trim_range=(180, 999),
+        comparison_trim_range=(0, 819),
+        stability=summary,
+    )
+
+    emit_frame_alignment_report(
+        stage="after_align",
+        comparisons=[comparison],
+        selected_frames=[],
+        alignment_warnings=[
+            "align: Comparison 1 alignment may drift across the source. "
+            "The applied constant offset was retained and should be verified."
+        ],
+        json_output=False,
+        quiet=False,
+        no_color=True,
+    )
+
+    output = capsys.readouterr().err
+    assert "warning" in output
+    assert "applied constant offset was retained" in output
+    assert "rejected" not in output
 
 
 def test_emit_frame_alignment_report_preserves_literal_brackets_in_warnings(
