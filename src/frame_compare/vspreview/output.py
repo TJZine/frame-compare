@@ -20,6 +20,7 @@ STYLE_HINT = "yellow"
 STYLE_HEADER = "bold cyan"
 STYLE_WAIT = "magenta"
 _STARTUP_STDERR_LIMIT = 4000
+_SECTION_INDENT = 2
 _CONTENT_INDENT = 4
 
 
@@ -106,7 +107,12 @@ def print_vspreview_confirmation_header(
 
     console = _console(no_color=no_color)
     console.print()
-    console.print(_status_text("[WAIT]", "VSPreview Confirmation", style=STYLE_WAIT))
+    console.print(
+        Text.assemble(
+            " " * _SECTION_INDENT,
+            _status_text("[WAIT]", "VSPreview Confirmation", style=STYLE_WAIT),
+        )
+    )
     console.print(Padding(table, (0, 0, 0, _CONTENT_INDENT)))
     console.print()
 

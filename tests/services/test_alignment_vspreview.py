@@ -355,7 +355,7 @@ def test_prompt_for_confirmed_offsets_writes_to_stderr(
     assert captured.out == ""
     lines = captured.err.splitlines()
     wait_line = next(line for line in lines if "[WAIT] VSPreview Confirmation" in line)
-    assert wait_line == "[WAIT] VSPreview Confirmation"
+    assert wait_line == "  [WAIT] VSPreview Confirmation"
     assert "ref" in captured.err
     assert "Comparison 1 | comp" in captured.err
     for key in ("reference", "domain", "enter", "offset", "skip", "comparison", "frames"):

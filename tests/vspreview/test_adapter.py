@@ -880,7 +880,7 @@ def test_generated_script_current_human_output_organization_without_launching_vs
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "[RUN] VSPreview Bootstrap" in captured.err
+    assert "  [RUN] VSPreview Bootstrap" in captured.err
     assert "reference" in captured.err
     assert "loaded" not in captured.err
     assert "Reference 0 | Comparison 1 1" in captured.err
@@ -893,7 +893,7 @@ def test_generated_script_current_human_output_organization_without_launching_vs
     assert captured.err.index("comparison 2") < captured.err.index("Reference 2 | Comparison 2 3")
     assert "[OK] VSPreview Ready" in captured.err
     assert (
-        "[OK] VSPreview Ready\n"
+        "  [OK] VSPreview Ready\n"
         "    Inspect the untrimmed clips in VSPreview, then return here to confirm frames."
     ) in captured.err
     assert "next" not in captured.err

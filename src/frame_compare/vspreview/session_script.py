@@ -202,7 +202,7 @@ def _status(marker):
 
 
 def _status_line(marker, text):
-    return f"{_status(marker)} {text}"
+    return f"  {_status(marker)} {text}"
 
 
 def safe_print(*args, **kwargs):
@@ -399,7 +399,7 @@ def main():
 
     safe_print("")
     safe_print(_status_line("[RUN]", "VSPreview Bootstrap"))
-    safe_print(f"  {_key('reference')}     {_value(REFERENCE['display_name'])}")
+    safe_print(f"    {_key('reference')}     {_value(REFERENCE['display_name'])}")
 
     try:
         ref_clip = load_source(str(ref_path))
@@ -416,7 +416,7 @@ def main():
     if ref_assumption is not None:
         preview_assumptions.append(ref_assumption)
 
-    safe_print(f"  {_key('fps')}           {_hint(f'{ref_fps_num}/{ref_fps_den}')}")
+    safe_print(f"    {_key('fps')}           {_hint(f'{ref_fps_num}/{ref_fps_den}')}")
 
     # Apply overlay to reference (best-effort)
     try:
@@ -434,7 +434,7 @@ def main():
         comp_path = Path(target["path"])
         display_name = target["display_name"]
         safe_print("")
-        safe_print(f"  {_key(f'comparison {comparison_number}')}  {_value(display_name)}")
+        safe_print(f"    {_key(f'comparison {comparison_number}')}  {_value(display_name)}")
         if not comp_path.exists():
             safe_print(_status_line("[WARN]", f"Comparison source not found: {comp_path}"))
             continue
@@ -479,13 +479,13 @@ def main():
         except Exception:
             safe_print(_status_line("[WARN]", "Could not apply comparison text overlay"))
 
-        safe_print(f"  {_key('audio hint')}    {_hint(audio_hint)}")
+        safe_print(f"    {_key('audio hint')}    {_hint(audio_hint)}")
         reference_output = loaded_comparison_count * 2
         comparison_output = reference_output + 1
         ref_clip.set_output(reference_output)
         comp_clip.set_output(comparison_output)
         safe_print(
-            f"  {_key('outputs')}       "
+            f"    {_key('outputs')}       "
             f"Reference {reference_output} | Comparison {comparison_number} {comparison_output}"
         )
         loaded_comparison_count += 1
@@ -495,9 +495,9 @@ def main():
         sys.exit(1)
 
     if preview_assumptions:
-        safe_print("\\n" + _header("VSPreview Assumptions"))
+        safe_print("\\n    " + _header("VSPreview Assumptions"))
         for assumption in preview_assumptions:
-            safe_print(f"  {_key('preview')}   {_hint(assumption)}")
+            safe_print(f"    {_key('preview')}   {_hint(assumption)}")
 
     safe_print("\\n" + _status_line("[OK]", "VSPreview Ready"))
     safe_print("    Inspect the untrimmed clips in VSPreview, then return here to confirm frames.")
