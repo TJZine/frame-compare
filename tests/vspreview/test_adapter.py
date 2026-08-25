@@ -12,17 +12,16 @@ import sys
 import types
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
 
 from frame_compare.vspreview.adapter import (
-    _VSTOOLS_COLOR_SYNTAX_WARNING_FILTER,
     VSPreviewAvailability,
     VSPreviewAvailabilityStatus,
     VSPreviewConfig,
     VSPreviewSessionRequest,
-    _build_vspreview_child_env,
     _check_startup_readiness,
     _resolve_launch_command,
     check_vspreview_availability,
@@ -34,6 +33,8 @@ from frame_compare.vspreview.session_script import (
     _build_script_content,
     write_vspreview_session_script,
 )
+
+_EXPECTED_VSTOOLS_WARNING_FILTER = "ignore:Starting from R74:SyntaxWarning:vstools.enums.color"
 
 
 class _FakeVSPreviewProcess:
@@ -50,35 +51,73 @@ class _FakeVSPreviewProcess:
         return self._returncode
 
 
-def test_vspreview_child_env_adds_only_narrow_filter_without_mutating_parent(
+def _launch_and_capture_child_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    no_color: bool = False,
+) -> dict[str, str]:
+    popen = MagicMock(return_value=_FakeVSPreviewProcess())
+
+    with monkeypatch.context() as launch_patches:
+        launch_patches.setattr(
+            "frame_compare.vspreview.adapter.check_vspreview_availability",
+            lambda: VSPreviewAvailability(
+                status=VSPreviewAvailabilityStatus.AVAILABLE,
+                message="available",
+            ),
+        )
+        launch_patches.setattr(
+            "frame_compare.vspreview.adapter._resolve_launch_command",
+            lambda script_path: ["vspreview", str(script_path)],
+        )
+        launch_patches.setattr(
+            "frame_compare.vspreview.adapter.subprocess.Popen",
+            popen,
+        )
+        launch_alignment_verification_session(
+            VSPreviewSessionRequest(
+                reference=Path("ref.mkv"),
+                comparisons=[Path("comparison.mkv")],
+                suggested_offsets_by_key={},
+                cache_dir=tmp_path,
+            ),
+            VSPreviewConfig(enabled=True, no_color=no_color),
+        )
+    env = popen.call_args.kwargs["env"]
+    assert isinstance(env, dict)
+    return cast("dict[str, str]", env)
+
+
+def test_launch_session_child_env_adds_only_narrow_filter_without_mutating_parent(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("PYTHONWARNINGS", raising=False)
     monkeypatch.delenv("NO_COLOR", raising=False)
     parent_env = os.environ.copy()
 
-    child_env = _build_vspreview_child_env(no_color=True)
+    child_env = _launch_and_capture_child_env(tmp_path, monkeypatch, no_color=True)
 
-    assert child_env["PYTHONWARNINGS"] == _VSTOOLS_COLOR_SYNTAX_WARNING_FILTER
+    assert child_env["PYTHONWARNINGS"] == _EXPECTED_VSTOOLS_WARNING_FILTER
     assert child_env["NO_COLOR"] == "1"
     assert os.environ == parent_env
 
 
-def test_vspreview_child_env_preserves_later_user_warning_policy(
+def test_launch_session_child_env_preserves_later_user_warning_policy(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     user_filters = "error::ResourceWarning"
     monkeypatch.setenv("PYTHONWARNINGS", user_filters)
 
-    child_env = _build_vspreview_child_env(no_color=False)
+    child_env = _launch_and_capture_child_env(tmp_path, monkeypatch)
 
-    assert child_env["PYTHONWARNINGS"] == (
-        f"{_VSTOOLS_COLOR_SYNTAX_WARNING_FILTER},{user_filters}"
-    )
+    assert child_env["PYTHONWARNINGS"] == (f"{_EXPECTED_VSTOOLS_WARNING_FILTER},{user_filters}")
     assert os.environ["PYTHONWARNINGS"] == user_filters
 
 
-def test_vspreview_child_warning_filter_is_narrow_in_real_python_subprocess(
+def test_launch_session_child_warning_filter_is_narrow_in_real_python_subprocess(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -98,12 +137,11 @@ def test_vspreview_child_warning_filter_is_narrow_in_real_python_subprocess(
         encoding="utf-8",
     )
     (tmp_path / "another_package" / "color.py").write_text(
-        "import warnings\n"
-        f"warnings.warn({warning_message!r}, SyntaxWarning)\n",
+        f"import warnings\nwarnings.warn({warning_message!r}, SyntaxWarning)\n",
         encoding="utf-8",
     )
     monkeypatch.delenv("PYTHONWARNINGS", raising=False)
-    env = _build_vspreview_child_env(no_color=False)
+    env = _launch_and_capture_child_env(tmp_path, monkeypatch)
     inherited_pythonpath = env.get("PYTHONPATH")
     env["PYTHONPATH"] = str(tmp_path) + (
         f"{os.pathsep}{inherited_pythonpath}" if inherited_pythonpath else ""
@@ -148,7 +186,7 @@ def test_vspreview_child_warning_filter_is_narrow_in_real_python_subprocess(
     assert "another_package" in different_module_result.stderr
 
 
-def test_vspreview_child_warning_filter_keeps_later_user_override_authoritative(
+def test_launch_session_child_warning_filter_keeps_later_user_override_authoritative(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -160,15 +198,14 @@ def test_vspreview_child_warning_filter_keeps_later_user_override_authoritative(
     (tmp_path / "vstools" / "__init__.py").write_text("", encoding="utf-8")
     (module_dir / "__init__.py").write_text("", encoding="utf-8")
     (module_dir / "color.py").write_text(
-        "import warnings\n"
-        f"warnings.warn({warning_message!r}, SyntaxWarning)\n",
+        f"import warnings\nwarnings.warn({warning_message!r}, SyntaxWarning)\n",
         encoding="utf-8",
     )
     monkeypatch.setenv(
         "PYTHONWARNINGS",
         "error:Starting from R74:SyntaxWarning:vstools.enums.color",
     )
-    env = _build_vspreview_child_env(no_color=False)
+    env = _launch_and_capture_child_env(tmp_path, monkeypatch)
     env["PYTHONPATH"] = str(tmp_path)
 
     result = subprocess.run(
@@ -519,7 +556,6 @@ def test_launch_alignment_verification_session_waits_for_vspreview_completion(
     readiness_run.assert_called_once()
     readiness_env = readiness_run.call_args.kwargs["env"]
     assert readiness_env is kwargs["env"]
-    assert readiness_env["PYTHONWARNINGS"] == _VSTOOLS_COLOR_SYNTAX_WARNING_FILTER
     assert "timeout" not in kwargs
     assert kwargs["stdin"] is None
     assert kwargs["stdout"] is None
