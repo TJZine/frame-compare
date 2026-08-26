@@ -192,7 +192,7 @@ def test_release_please_remains_guarded_and_non_merging(repo_root: Path) -> None
     assert release["if"] == "needs.initial_release_guard.outputs.enabled == 'true'"
     assert release["permissions"] == {"contents": "write", "pull-requests": "write"}
     assert action["with"]["skip-github-release"] == "true"
-    assert checkout["with"]["fetch-depth"] == 1
+    assert checkout["with"]["fetch-depth"] == "1"
     assert checkout["with"]["persist-credentials"] == "false"
     assert ".release-please-manifest.json" in guard_run
     assert 'release_tag="v${manifest_version}"' in guard_run
