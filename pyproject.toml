@@ -54,7 +54,7 @@ packages = ["src/frame_compare"]
 # ─── Dependency Groups (PEP 735) ───────────────────────────────────────────────
 [dependency-groups]
 docs = [
-    "zensical==0.0.51",
+    "zensical==0.0.57",
 ]
 dev = [
     "anyio>=4.12.0",
