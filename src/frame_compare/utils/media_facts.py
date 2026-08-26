@@ -86,7 +86,7 @@ class ActivePictureFacts:
 
 @dataclass(frozen=True, slots=True)
 class RenderedGeometryFacts:
-    """Dependency-light snapshot of the resolved render geometry plan."""
+    """Dependency-light source active-picture evidence and applied render geometry."""
 
     source_size: tuple[int, int]
     active_picture: ActivePictureFacts

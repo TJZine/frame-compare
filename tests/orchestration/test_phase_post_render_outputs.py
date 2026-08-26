@@ -36,6 +36,7 @@ from frame_compare.services.slowpics_post_upload import (
 )
 from frame_compare.services.slowpics_upload_plan import SlowpicsUploadPlan
 from frame_compare.services.types import TmdbMetadata
+from frame_compare.utils.media_facts import ActivePictureFacts
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.progress import LogProgressReporter, NullProgressReporter
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus
@@ -220,6 +221,7 @@ def test_run_report_phase_builds_report_data_and_records_path(
     )
     ctx = _context(tmp_path, comparisons=[comparison, explicit])
     ctx.reference = replace(ctx.reference, release_identity=identity)
+    active_picture = ActivePictureFacts(0, 140, 1920, 800, "content_derived", False)
     render = _render_artifacts(
         screenshots_by_label={
             "Reference": [tmp_path / "screenshots" / "reference_1.png"],
@@ -228,6 +230,7 @@ def test_run_report_phase_builds_report_data_and_records_path(
         },
         screenshot_dir=tmp_path / "screenshots",
         source_frames_by_label={"Reference": [5], "Encode 1": [5], "My Explicit": [5]},
+        active_picture=active_picture,
     )
     artifacts = RunArtifacts(
         render=render,
@@ -260,6 +263,9 @@ def test_run_report_phase_builds_report_data_and_records_path(
     assert artifacts.report_path is None
     assert report_data.frames == [5]
     assert report_data.frame_details == []
+    assert report_data.clips[0].active_picture == active_picture
+    assert report_data.rendering.geometry_by_label["Reference"].active_picture == active_picture
+    assert report_data.rendering.geometry_by_label["Reference"].is_noop
     assert [image.path for image in report_data.clips[0].images] == render.screenshots_by_label[
         "Reference"
     ]

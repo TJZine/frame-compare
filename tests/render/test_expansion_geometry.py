@@ -103,10 +103,13 @@ def _prepared(width: int, height: int) -> PreparedRenderSource:
 
 
 @patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
-def test_geometry_facts_mark_native_plan_as_noop(mock_prepare: MagicMock) -> None:
+def test_geometry_facts_preserve_native_active_picture_without_transform(
+    mock_prepare: MagicMock,
+) -> None:
     mock_prepare.return_value = _prepared(1920, 1080)
+    supplied = ActivePictureFacts(0, 140, 1920, 800, "content_derived", False)
     requests, _, clip_facts = expand_batch_render_requests(
-        [_batch("ref", 1920, 1080)],
+        [_batch("ref", 1920, 1080, active=supplied)],
         output_dir=Path("out"),
         config=ConfigSchema(
             screenshots=ScreenshotsConfig(geometry_mode=ScreenshotGeometryMode.NATIVE)
@@ -116,8 +119,11 @@ def test_geometry_facts_mark_native_plan_as_noop(mock_prepare: MagicMock) -> Non
         ffmpeg_runner=MagicMock(),
     )
     facts = clip_facts["ref"].geometry
+    assert facts.active_picture == supplied
     assert facts.is_noop
     assert facts.source_size == (1920, 1080)
+    assert facts.cropped_size == (1920, 1080)
+    assert facts.scaled_size == (1920, 1080)
     assert facts.final_canvas_size == (1920, 1080)
     assert requests[0].overlay is not None
     assert requests[0].overlay.geometry is facts

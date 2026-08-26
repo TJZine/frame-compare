@@ -81,11 +81,12 @@ def _render_artifacts(
     screenshots_by_label: dict[str, list[Path]],
     screenshot_dir: Path | None,
     source_frames_by_label: dict[str, list[int]] | None = None,
+    active_picture: ActivePictureFacts | None = None,
 ) -> RenderArtifacts:
     """Build explicit, invariant-valid render artifacts for orchestration tests."""
     geometry = RenderedGeometryFacts(
         source_size=(1920, 1080),
-        active_picture=ActivePictureFacts(0, 0, 1920, 1080, "full_frame", True),
+        active_picture=active_picture or ActivePictureFacts(0, 0, 1920, 1080, "full_frame", True),
         cropped_size=(1920, 1080),
         scaled_size=(1920, 1080),
         final_canvas_size=(1920, 1080),

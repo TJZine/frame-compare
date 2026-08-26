@@ -43,8 +43,8 @@ def test_plan_render_geometry_native_preserves_full_frame_for_multiple_sources()
     assert plans[1].is_noop
 
 
-def test_plan_render_geometry_native_ignores_content_derived_active_rect() -> None:
-    plans = plan_render_geometry(
+def test_plan_render_geometry_native_preserves_active_picture_without_transform() -> None:
+    (plan,) = plan_render_geometry(
         (
             SourceGeometry(
                 width=1920,
@@ -57,8 +57,15 @@ def test_plan_render_geometry_native_ignores_content_derived_active_rect() -> No
         mode="native",
     )
 
-    assert plans[0].active_rect == GeometryRect(0, 0, 1920, 1080)
-    assert plans[0].active_rect_source == "full-frame"
+    assert plan.active_rect == GeometryRect(0, 140, 1920, 800)
+    assert plan.active_rect_source == "content-derived"
+    assert plan.crop_rect == GeometryRect(0, 0, 1920, 1080)
+    assert plan.crop == GeometryMargins()
+    assert plan.cropped_size == (1920, 1080)
+    assert plan.scaled_size == (1920, 1080)
+    assert plan.pad == GeometryMargins()
+    assert plan.final_canvas_size == (1920, 1080)
+    assert plan.is_noop
 
 
 def test_plan_render_geometry_aligned_same_height_center_crops_wider_source():

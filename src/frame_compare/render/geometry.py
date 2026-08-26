@@ -121,7 +121,7 @@ class RenderGeometryOptions:
 
 @dataclass(frozen=True, slots=True)
 class RenderGeometryPlan:
-    """Pure crop/scale/pad plan for one rendered screenshot source."""
+    """Source active-picture evidence plus one pure crop/scale/pad plan."""
 
     source: SourceGeometry
     source_rect: GeometryRect
@@ -163,9 +163,9 @@ def plan_render_geometry(
 ) -> tuple[RenderGeometryPlan, ...]:
     """Plan pure screenshot geometry for one or more sources.
 
-    ``native`` preserves current full-frame behavior. ``aligned`` crops to safe
-    active rectangles, fits active content inside a selected target canvas, and
-    centers padding on that canvas.
+    ``native`` preserves full-frame output while retaining known active-picture
+    evidence. ``aligned`` crops to safe active rectangles, fits active content
+    inside a selected target canvas, and centers padding on that canvas.
     """
 
     if mode not in ("native", "aligned"):
@@ -258,6 +258,9 @@ def _validate_options(options: RenderGeometryOptions) -> None:
 
 def _native_plan(source: SourceGeometry, *, overlay_margin: int) -> RenderGeometryPlan:
     source_rect = GeometryRect(0, 0, source.width, source.height)
+    active_rect, active_rect_source = _resolve_active_rects(
+        (source,), active_rect_detection="provided"
+    )[0]
     overlay_origin = (
         min(overlay_margin, source.width - 1),
         min(overlay_margin, source.height - 1),
@@ -265,8 +268,8 @@ def _native_plan(source: SourceGeometry, *, overlay_margin: int) -> RenderGeomet
     return RenderGeometryPlan(
         source=source,
         source_rect=source_rect,
-        active_rect=source_rect,
-        active_rect_source="full-frame",
+        active_rect=active_rect,
+        active_rect_source=active_rect_source,
         crop_rect=source_rect,
         crop=GeometryMargins(),
         cropped_size=(source.width, source.height),
