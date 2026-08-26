@@ -31,6 +31,21 @@ complete contributor or CI toolchain.
 Use the runbook command canon to confirm the environment is healthy before changing
 code.
 
+### Optional Codanna setup
+
+Codanna users should generate checkout-local settings before indexing. The generated
+file is ignored because Codanna requires canonical absolute roots:
+
+```bash
+python3 scripts/bootstrap_codanna.py
+codanna config
+codanna index
+```
+
+Re-run the bootstrap after moving the checkout. Project-wide defaults remain in the
+tracked `.codanna/settings.toml.in` template; never commit the rendered
+`.codanna/settings.toml`.
+
 ## Branch and pull request workflow
 
 1. Start from the base branch named in the issue, handoff, or maintainer request.
