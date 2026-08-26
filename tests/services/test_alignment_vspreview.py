@@ -334,10 +334,12 @@ def test_forced_launch_error_raises(
         )
 
 
+@pytest.mark.parametrize("no_color", [False, True])
 def test_prompt_for_confirmed_offsets_writes_to_stderr(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    no_color: bool,
 ) -> None:
     monkeypatch.setattr(alignment_vspreview.sys, "stdin", io.StringIO("120 108\n"))
 
@@ -345,28 +347,25 @@ def test_prompt_for_confirmed_offsets_writes_to_stderr(
         reference=tmp_path / "ref.mkv",
         comparisons=[tmp_path / "comp.mkv"],
         offsets_by_key={"ref:comp": 4},
-        no_color=True,
+        no_color=no_color,
     )
 
     captured = capsys.readouterr()
     assert confirmed == {"ref:comp": 12}
     assert captured.out == ""
-    assert "[WAIT] VSPreview Confirmation" in captured.err
+    lines = captured.err.splitlines()
+    wait_line = next(line for line in lines if "[WAIT] VSPreview Confirmation" in line)
+    assert wait_line == "  [WAIT] VSPreview Confirmation"
     assert "ref" in captured.err
     assert "Comparison 1 | comp" in captured.err
-    for fragment in (
-        "domain",
-        "Untrimmed source-frame indices",
-        "enter",
-        "reference_frame comparison_frame",
-        "offset",
-        "reference - comparison",
-        "skip",
-        "'skip' or 's'",
-        "frames",
-        "[+4f] >",
-    ):
-        assert fragment in captured.err
+    for key in ("reference", "domain", "enter", "offset", "skip", "comparison", "frames"):
+        matching_line = next(line for line in lines if line.lstrip().startswith(key))
+        assert matching_line.startswith(f"    {key}")
+    assert "    domain       Untrimmed source-frame indices" in captured.err
+    assert "    enter        reference_frame comparison_frame" in captured.err
+    assert "    offset       reference - comparison" in captured.err
+    assert "    skip         'skip' or 's'" in captured.err
+    assert "    frames       [+4f] >" in captured.err
     assert captured.err.endswith("\n")
     assert "\x1b[" not in captured.err
     assert "[bold cyan]" not in captured.err
@@ -535,6 +534,7 @@ def test_prompt_for_confirmed_offsets_reprompts_after_blank_and_malformed_input(
         reference=tmp_path / "ref.mkv",
         comparisons=[tmp_path / "comp.mkv"],
         offsets_by_key={"ref:comp": 4},
+        no_color=True,
     )
 
     captured = capsys.readouterr()
@@ -542,6 +542,17 @@ def test_prompt_for_confirmed_offsets_reprompts_after_blank_and_malformed_input(
     assert confirmed != {"ref:comp": 4}
     assert "source frames" in captured.err
     assert "non-negative" in captured.err
+    assert captured.err.count("    Hint") == 5
+
+
+def test_vspreview_input_hint_has_wait_content_indent(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    vspreview_output.print_vspreview_input_hint("Retry the frame pair.", no_color=True)
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "    Hint Retry the frame pair.\n"
 
 
 def test_maybe_launch_blank_then_valid_source_frames_saves_only_computed_offset(

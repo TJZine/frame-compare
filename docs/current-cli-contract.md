@@ -502,7 +502,9 @@ unchanged.
   evidence. When a current-interpreter readiness check detects a missing optional
   module, normal mode emits one sanitized warning and continues with the computed
   audio alignment; forced interactive failure remains fatal. A successful VSPreview
-  child continues to inherit its native stdout and stderr diagnostics.
+  child continues to inherit its native stdout and stderr diagnostics, except for one
+  known non-actionable `vstools.enums.color` `SyntaxWarning` suppressed through the
+  child-only Python warning environment.
 - The known slow.pics upload start/complete lifecycle events are DEBUG evidence in
   normal TTY runs because the product progress stream already represents the same
   lifecycle. Retry, rate-limit, server, timeout, and network warnings remain
@@ -1145,15 +1147,16 @@ diagnostic order is:
 3. generated reference FPS plus prepared `Comparison N` identities, audio hints, and
    paired truthful output-slot mappings
 4. generated `VSPreview Assumptions`, only when assumptions exist
-5. generated `[OK] VSPreview Ready` with the next operator action
-6. parent `[WAIT] VSPreview Confirmation` prompt text
+5. generated `[OK] VSPreview Ready` with a directly nested operator action
+6. parent `[WAIT] VSPreview Confirmation` with nested instructions and prompts
 
 Normal VSPreview labels reuse the release-aware presentation identities prepared by
 the typed alignment request. Paths and stems remain the internal source, suggested
 offset, confirmation, manual-override, and alignment-result identities. Confirmation
 uses untrimmed source-frame indices and calculates the offset as reference minus
-comparison. Generated and parent no-color output retain the literal lifecycle markers,
-and native source/index diagnostics remain inherited without filtering or buffering.
+comparison. Generated and parent no-color output retain the literal lifecycle markers.
+Native source/index diagnostics remain inherited without buffering; only the known
+non-actionable `vstools.enums.color` `SyntaxWarning` is suppressed in the child.
 
 Generated VSPreview assumptions are preview-only diagnostics derived from
 Frame Compare's existing clip probe metadata and serialized into the generated

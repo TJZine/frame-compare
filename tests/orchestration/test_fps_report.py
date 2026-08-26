@@ -6,6 +6,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from rich.ansi import AnsiDecoder
+from rich.color import Color
+from rich.style import Style
 
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot, ClipState
 from frame_compare.orchestration.fps_report import (
@@ -22,6 +25,20 @@ def _stable_report_width(monkeypatch: pytest.MonkeyPatch) -> None:
         "frame_compare.orchestration.presentation.shutil.get_terminal_size",
         lambda **_: os.terminal_size((240, 24)),
     )
+
+
+def _assert_ansi_text_is_bold_cyan(output: str, label: str) -> None:
+    cyan_number = Color.parse("cyan").number
+    for line in AnsiDecoder().decode(output):
+        for span in line.spans:
+            if label not in line.plain[span.start : span.end]:
+                continue
+            assert isinstance(span.style, Style)
+            assert span.style.bold is True
+            assert span.style.color is not None
+            assert span.style.color.number == cyan_number
+            return
+    pytest.fail(f"{label!r} was not rendered in bold cyan")
 
 
 def _make_clip_state(
@@ -277,6 +294,7 @@ def test_emit_consolidated_fps_report_json_mode_logs_without_human_output(
 
 
 def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
+    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     clips = [
@@ -347,6 +365,23 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
     assert "\x1b[" not in captured.err
     assert "[bold cyan]" not in captured.err
     assert "[dim]" not in captured.err
+
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    monkeypatch.setenv("TERM", "xterm-256color")
+    emit_consolidated_fps_report(
+        stage="after_load_sources",
+        clips=clips,
+        json_output=False,
+        quiet=False,
+        rich_output=True,
+        no_color=False,
+    )
+
+    colored = capsys.readouterr()
+    assert colored.out == ""
+    _assert_ansi_text_is_bold_cyan(colored.err, "Reference")
+    _assert_ansi_text_is_bold_cyan(colored.err, "Comparison 1")
 
 
 def test_emit_consolidated_fps_report_uses_relative_input_and_external_paths(

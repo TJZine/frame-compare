@@ -29,6 +29,9 @@ log = structlog.get_logger()
 
 _STARTUP_PROBE_TIMEOUT_SECONDS = 10.0
 _STARTUP_STDERR_LIMIT = 4000
+_VSTOOLS_COLOR_SYNTAX_WARNING_FILTER = (
+    "ignore:Starting from R74:SyntaxWarning:vstools.enums.color"
+)
 _MISSING_MODULE_PATTERN = re.compile(
     r"ModuleNotFoundError:\s+No module named ['\"]([A-Za-z0-9_.]+)['\"]"
 )
@@ -210,9 +213,7 @@ def launch_alignment_verification_session(
         )
 
     try:
-        env = os.environ.copy()
-        if config.no_color:
-            env["NO_COLOR"] = "1"
+        env = _build_vspreview_child_env(no_color=config.no_color)
         _check_startup_readiness(command, env=env)
         returncode = _run_vspreview_command(command, env=env)
     except FileNotFoundError as e:
@@ -231,6 +232,20 @@ def launch_alignment_verification_session(
         )
 
     return script_path
+
+
+def _build_vspreview_child_env(*, no_color: bool) -> dict[str, str]:
+    """Build the child-only environment, preserving later user warning policy."""
+    env = os.environ.copy()
+    existing_filters = env.get("PYTHONWARNINGS")
+    env["PYTHONWARNINGS"] = (
+        f"{_VSTOOLS_COLOR_SYNTAX_WARNING_FILTER},{existing_filters}"
+        if existing_filters
+        else _VSTOOLS_COLOR_SYNTAX_WARNING_FILTER
+    )
+    if no_color:
+        env["NO_COLOR"] = "1"
+    return env
 
 
 def _check_startup_readiness(command: list[str], *, env: dict[str, str]) -> None:
