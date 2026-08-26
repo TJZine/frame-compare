@@ -92,19 +92,6 @@ jobs:
               encoding="utf-8",
           )
 
-          release_config_path = Path("release-please-config.json")
-          release_config = json.loads(release_config_path.read_text(encoding="utf-8"))
-          package_config = release_config.get("packages", {}).get(".")
-          if not isinstance(package_config, dict):
-              raise SystemExit("release-please package configuration is missing")
-          bootstrap_sha = package_config.pop("bootstrap-sha", None)
-          if bootstrap_sha != "57a11cbbf069023ce269c6c09229aa8519ab79e4":
-              raise SystemExit(f"unexpected Release Please bootstrap SHA: {bootstrap_sha!r}")
-          release_config_path.write_text(
-              json.dumps(release_config, indent=2) + "\n",
-              encoding="utf-8",
-          )
-
           Path("CHANGELOG.md").write_text(
               '''# Changelog
 
@@ -237,7 +224,6 @@ jobs:
             CHANGELOG.md \
             docs/ENGINEERING_RUNBOOK.md \
             pyproject.toml \
-            release-please-config.json \
             src/frame_compare/__init__.py \
             tests/workflows/test_github_workflows.py \
             uv.lock
