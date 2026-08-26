@@ -32,6 +32,10 @@ jobs:
         with:
           version: "0.12.5"
 
+      - name: Install Python 3.13.15
+        shell: bash
+        run: uv python install 3.13.15
+
       - name: Prepare v0.2.0 version state
         env:
           EXPECTED_SHA: ${{ github.sha }}
