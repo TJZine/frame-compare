@@ -320,10 +320,12 @@ Current CI ownership:
   tag/release collisions, and publishes only after a complete draft asset proof.
   Keeping dispatch at this pre-existing path makes the pre-merge RC reachable
   without a preparatory commit on `main`.
-- `.github/workflows/release-please.yml` stays dormant until a published stable
-  `v0.1.0` exists, then resumes human-reviewed version/changelog PR behavior with
-  GitHub-release creation disabled. The guarded entrypoint publishes later
-  releases too.
+- `.github/workflows/release-please.yml` runs only after the version currently
+  recorded in `.release-please-manifest.json` has a matching published stable tag
+  and release. This keeps it dormant while the guarded release entrypoint is
+  publishing that manifest version, then resumes human-reviewed version/changelog
+  PR behavior for later changes. GitHub-release creation remains disabled; the
+  guarded entrypoint owns publication.
 - `.github/workflows/windows-portable-build.yml` is the reusable full portable
   build/sign/verification boundary called by PR, manual verification, and the
   release orchestrator.

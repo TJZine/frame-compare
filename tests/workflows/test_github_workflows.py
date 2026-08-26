@@ -178,6 +178,13 @@ def test_release_please_remains_guarded_and_non_merging(repo_root: Path) -> None
     guard = workflow["jobs"]["initial_release_guard"]
     release = workflow["jobs"]["release_please"]
     action = next(step for step in release["steps"] if "uses" in step)
+    checkout = next(
+        step
+        for step in guard["steps"]
+        if str(step.get("uses", "")).startswith("actions/checkout@")
+    )
+    guard_step = next(step for step in guard["steps"] if step.get("id") == "guard")
+    guard_run = str(guard_step["run"])
 
     assert workflow["permissions"] == {"contents": "read"}
     assert guard["permissions"] == {"contents": "read"}
@@ -185,7 +192,13 @@ def test_release_please_remains_guarded_and_non_merging(repo_root: Path) -> None
     assert release["if"] == "needs.initial_release_guard.outputs.enabled == 'true'"
     assert release["permissions"] == {"contents": "write", "pull-requests": "write"}
     assert action["with"]["skip-github-release"] == "true"
-    assert "v0.1.0" in guard["steps"][0]["run"]
+    assert checkout["with"]["fetch-depth"] == 1
+    assert checkout["with"]["persist-credentials"] == "false"
+    assert ".release-please-manifest.json" in guard_run
+    assert 'release_tag="v${manifest_version}"' in guard_run
+    assert "releases/tags/${release_tag}" in guard_run
+    assert "git/ref/tags/${release_tag}" in guard_run
+    assert "v0.1.0" not in guard_run
     for step in _steps(workflow):
         command = str(step.get("run", ""))
         assert "gh pr merge" not in command, step.get("name")
