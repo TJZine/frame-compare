@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from pathlib import Path
-from threading import Barrier, Event, Thread
+from threading import Barrier, Event, Lock, Thread
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -262,6 +262,18 @@ def test_render_batch_sequential(mock_render_request):
         assert mock_render.call_count == 3
 
 
+def test_render_batch_empty_validates_work_unit_ranges() -> None:
+    assert (
+        render_batch_detailed(
+            [],
+            work_unit_ranges=[range(0, 0), range(0, 0)],
+        )
+        == []
+    )
+    with pytest.raises(ValueError, match="contiguous and ordered"):
+        render_batch_detailed([], work_unit_ranges=[range(1, 1)])
+
+
 def test_render_batch_sequential_batches_adjacent_default_ffmpeg_requests(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -401,6 +413,59 @@ def test_render_batch_parallel_overlaps_ffmpeg_groups_and_preserves_order_and_pr
         f"frame {request.frame_number}" for request in requests
     ]
     assert reporter.advance.call_count == len(requests)
+
+
+def test_render_batch_parallelizes_clip_units_but_serializes_each_clip(
+    tmp_path: Path,
+) -> None:
+    requests = [
+        RenderRequest(
+            clip=Path(clip_name),
+            diagnostic_source=Path(clip_name),
+            frame_number=frame,
+            output_path=tmp_path / f"{clip_name}-{frame}.jpg",
+            overlay=None,
+            encoder_settings=EncoderSettings(),
+        )
+        for clip_name, frames in (("reference.mkv", [10, 20]), ("comparison.mkv", [30, 40]))
+        for frame in frames
+    ]
+    first_frame_by_clip = {Path("reference.mkv"): 10, Path("comparison.mkv"): 30}
+    both_clips_started = Barrier(2)
+    state_lock = Lock()
+    active_by_clip: dict[Path, int] = {}
+    calls_by_clip: dict[Path, list[int]] = {}
+
+    def render_single(request: RenderRequest) -> RenderedFrameResult:
+        clip = request.clip
+        assert isinstance(clip, Path)
+        with state_lock:
+            active_by_clip[clip] = active_by_clip.get(clip, 0) + 1
+            assert active_by_clip[clip] == 1
+            calls_by_clip.setdefault(clip, []).append(request.frame_number)
+        try:
+            if request.frame_number == first_frame_by_clip[clip]:
+                both_clips_started.wait(timeout=1.0)
+            return _rendered(request)
+        finally:
+            with state_lock:
+                active_by_clip[clip] -= 1
+
+    with patch(
+        "frame_compare.render.batch.orchestrator.render_frame_detailed",
+        side_effect=render_single,
+    ):
+        results = render_batch_detailed(
+            requests,
+            parallelism=2,
+            work_unit_ranges=[range(0, 2), range(2, 4)],
+        )
+
+    assert calls_by_clip == {
+        Path("reference.mkv"): [10, 20],
+        Path("comparison.mkv"): [30, 40],
+    }
+    assert [result.facts.source_frame for result in results] == [10, 20, 30, 40]
 
 
 def test_render_batch_parallel_mixes_indivisible_ffmpeg_groups_and_singletons(

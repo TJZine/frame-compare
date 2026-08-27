@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -48,8 +49,28 @@ def _record_render_progress(
 type _RenderWorkUnit = tuple[int, tuple[RenderRequest, ...]]
 
 
-def _render_work_units(requests: list[RenderRequest]) -> list[_RenderWorkUnit]:
+def _render_work_units(
+    requests: list[RenderRequest],
+    work_unit_ranges: Sequence[range] | None = None,
+) -> list[_RenderWorkUnit]:
     """Group compatible adjacent requests into indivisible render work units."""
+    if work_unit_ranges is not None:
+        units: list[_RenderWorkUnit] = []
+        next_start = 0
+        for unit_range in work_unit_ranges:
+            if unit_range.step != 1 or unit_range.start != next_start:
+                raise ValueError("render work-unit ranges must be contiguous and ordered")
+            if unit_range.stop < unit_range.start or unit_range.stop > len(requests):
+                raise ValueError("render work-unit range is outside the request list")
+            if unit_range:
+                units.append(
+                    (unit_range.start, tuple(requests[unit_range.start : unit_range.stop]))
+                )
+            next_start = unit_range.stop
+        if next_start != len(requests):
+            raise ValueError("render work-unit ranges must cover every request")
+        return units
+
     units: list[_RenderWorkUnit] = []
     index = 0
     while index < len(requests):
@@ -60,14 +81,14 @@ def _render_work_units(requests: list[RenderRequest]) -> list[_RenderWorkUnit]:
 
 
 def _render_work_unit(requests: tuple[RenderRequest, ...]) -> list[RenderedFrameResult]:
-    """Render one logical unit, preserving FFmpeg batches as a single operation."""
-    if len(requests) > 1:
-        rendered = render_ffmpeg_batch_detailed(list(requests))
+    """Render one logical unit, batching FFmpeg or serializing its other frames."""
+    request_list = list(requests)
+    if not request_list:
+        raise RuntimeError("render work unit cannot be empty")
+    if len(request_list) > 1 and _ffmpeg_batch_end(request_list, 0) == len(request_list):
+        rendered = render_ffmpeg_batch_detailed(request_list)
     else:
-        request = next(iter(requests), None)
-        if request is None:
-            raise RuntimeError("render work unit cannot be empty")
-        rendered = [render_frame_detailed(request)]
+        rendered = [render_frame_detailed(request) for request in request_list]
     if len(rendered) != len(requests):
         raise RuntimeError("render work unit completed without one result per request")
     return rendered
@@ -111,9 +132,10 @@ def _render_batch_sequential(
     requests: list[RenderRequest],
     results: list[RenderedFrameResult | None],
     reporter: ProgressReporter | None,
+    work_unit_ranges: Sequence[range] | None,
 ) -> None:
     next_progress_index = 0
-    for unit in _render_work_units(requests):
+    for unit in _render_work_units(requests, work_unit_ranges):
         _store_work_unit_results(
             unit,
             _render_work_unit(unit[1]),
@@ -160,8 +182,9 @@ def _render_batch_parallel(
     results: list[RenderedFrameResult | None],
     parallelism: int,
     reporter: ProgressReporter | None,
+    work_unit_ranges: Sequence[range] | None,
 ) -> None:
-    units = _render_work_units(requests)
+    units = _render_work_units(requests, work_unit_ranges)
     futures: dict[Future[list[RenderedFrameResult]], _RenderWorkUnit] = {}
     next_unit_index = 0
     next_progress_index = 0
@@ -241,9 +264,17 @@ def render_batch_detailed(
     requests: list[RenderRequest],
     parallelism: int = 1,
     reporter: ProgressReporter | None = None,
+    *,
+    work_unit_ranges: Sequence[range] | None = None,
 ) -> list[RenderedFrameResult]:
-    """Execute render jobs and preserve exact-frame facts in request order."""
+    """Execute render jobs and preserve exact-frame facts in request order.
+
+    When ``work_unit_ranges`` is provided, each range is scheduled as one unit.
+    Eligible FFmpeg units use one-pass extraction; other unit frames render
+    sequentially while separate units may overlap.
+    """
     if not requests:
+        _render_work_units(requests, work_unit_ranges)
         return []
 
     results: list[RenderedFrameResult | None] = [None] * len(requests)
@@ -254,9 +285,15 @@ def render_batch_detailed(
     phase_status = ProgressPhaseStatus.COMPLETED
     try:
         if parallelism <= 1:
-            _render_batch_sequential(requests, results, reporter)
+            _render_batch_sequential(requests, results, reporter, work_unit_ranges)
         else:
-            _render_batch_parallel(requests, results, parallelism, reporter)
+            _render_batch_parallel(
+                requests,
+                results,
+                parallelism,
+                reporter,
+                work_unit_ranges,
+            )
     except Exception:
         phase_status = ProgressPhaseStatus.FAILED
         raise
@@ -326,6 +363,7 @@ def render_screenshots_from_batch_detailed(
         all_requests,
         parallelism=max(1, resolved_options.parallelism),
         reporter=resolved_options.reporter,
+        work_unit_ranges=[label_to_range[request.label] for request in batch_requests],
     )
     rendered_paths = [result.path for result in rendered]
     screenshots = render_batch_results_by_label(batch_requests, rendered_paths, label_to_range)

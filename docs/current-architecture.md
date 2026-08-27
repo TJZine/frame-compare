@@ -737,10 +737,11 @@ static geometry inference; render does not sample content. Native screenshot
 render remains full-frame. The FFmpeg backend applies geometry filters after
 exact frame selection, and the VapourSynth path chooses between the Pillow writer
 and eligible `core.fpng.Write` output without changing CLI import-time behavior.
-The render batch scheduler preserves each compatible clip's ordered FFmpeg requests
-as one decode work unit. Production rendering runs at most two logical work units at
-once; singleton/custom/non-PNG requests retain their per-frame path, results remain
-in request order, and overlay/color processing is unchanged.
+The render batch scheduler treats each clip as one production work unit and runs at
+most two clip units at once. Compatible ordered FFmpeg requests within a clip use one
+decode pass; VapourSynth, custom-runner, and non-PNG frames within one clip render
+sequentially while a second clip may overlap. Results remain in request order, and
+overlay/color processing is unchanged.
 
 Runtime ownership matrix:
 

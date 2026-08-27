@@ -191,6 +191,7 @@ def test_render_screenshots_from_batch_passes_clamped_parallelism(
             ),
         )
     assert render_batch.call_args.kwargs["parallelism"] == expected
+    assert render_batch.call_args.kwargs["work_unit_ranges"] == [range(0, 1)]
 
 
 def test_render_screenshots_from_batch_constructs_configured_default_runner(
