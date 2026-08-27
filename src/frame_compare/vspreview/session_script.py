@@ -126,6 +126,7 @@ untrimmed source clips so the operator can inspect source-frame positions.
 """
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -215,6 +216,32 @@ def safe_print(*args, **kwargs):
         print(text.encode("ascii", errors="replace").decode("ascii"), **kwargs)
 
 
+_EMPTY_FRAME_ASSUMPTION_BODY = (
+    "The following frame properties had to be assumed for previewing: <>\\n"
+    "You may want to set explicit frame properties instead. "
+    "See https://www.vapoursynth.com/doc/apireference.html#reserved-frame-properties "
+    "for more information."
+)
+
+
+class _VSPreviewWarningFilter(logging.Filter):
+    def filter(self, record):
+        node_label, separator, body = record.getMessage().partition(": ")
+        is_exact_empty_warning = (
+            record.name == "root"
+            and record.levelno == logging.WARNING
+            and bool(separator)
+            and node_label.startswith("Video Node ")
+            and node_label.removeprefix("Video Node ").isdecimal()
+            and body == _EMPTY_FRAME_ASSUMPTION_BODY
+        )
+        return not is_exact_empty_warning
+
+
+def install_vspreview_warning_filter():
+    logging.getLogger().addFilter(_VSPreviewWarningFilter())
+
+
 def resolve_lwlibavsource(core):
     """Resolve LWLibavSource using Frame Compare's lsmas-then-lw contract."""
     if hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource"):
@@ -249,10 +276,6 @@ def _parse_frame_prop_int(value):
     return None
 
 
-def _join_prop_names(names):
-    return "/".join(names)
-
-
 def _read_prop(props, canonical_key):
     for key in FRAME_PROP_ALIASES[canonical_key]:
         if key in props:
@@ -260,45 +283,48 @@ def _read_prop(props, canonical_key):
     raise KeyError(canonical_key)
 
 
+def _range_issue(props):
+    if "_Range" not in props:
+        return "missing"
+    parsed_value = _parse_frame_prop_int(props["_Range"])
+    if parsed_value in (0, 1):
+        return None
+    if parsed_value == UNSPECIFIED_FRAME_PROP:
+        return "unspecified"
+    return "invalid"
+
+
 def collect_preview_assumption(label, display_name):
     props = FRAME_PROPS_BY_LABEL.get(label)
     if props is None:
         return None
 
-    missing = []
-    unspecified = []
-    unparseable = []
+    color_metadata_incomplete = False
     for key in FRAME_PROP_ALIASES:
         try:
             raw_value = _read_prop(props, key)
-        except KeyError:
-            missing.append(key)
-            continue
         except Exception:
-            unparseable.append(key)
+            color_metadata_incomplete = True
             continue
 
         parsed_value = _parse_frame_prop_int(raw_value)
-        if parsed_value is None:
-            unparseable.append(key)
-        elif parsed_value == UNSPECIFIED_FRAME_PROP:
-            unspecified.append(key)
+        if parsed_value is None or parsed_value == UNSPECIFIED_FRAME_PROP:
+            color_metadata_incomplete = True
 
-    details = []
-    if missing:
-        details.append(f"missing {_join_prop_names(missing)}")
-    if unspecified:
-        details.append(f"unspecified {_join_prop_names(unspecified)}")
-    if unparseable:
-        details.append(f"unparseable {_join_prop_names(unparseable)}")
-    if not details:
+    range_issue = _range_issue(props)
+    if not color_metadata_incomplete and range_issue is None:
         return None
 
-    return (
-        f"{display_name} {'; '.join(details)}; "
-        "using display-safe BT.709 defaults for preview only; "
-        "render/report semantics unchanged"
-    )
+    assumption = {"source": display_name}
+    if color_metadata_incomplete:
+        assumption["preview"] = (
+            "Color metadata incomplete; using standard display defaults (BT.709)"
+        )
+    if range_issue is not None:
+        assumption["range"] = (
+            f"Color-range metadata {range_issue}; VSPreview infers preview range"
+        )
+    return assumption
 
 
 def apply_preview_defaults(core, clip, label):
@@ -404,6 +430,7 @@ def main():
         sys.exit(1)
 
     core = vs.core
+    install_vspreview_warning_filter()
     try:
         load_source = resolve_lwlibavsource(core)
     except RuntimeError as e:
@@ -520,9 +547,19 @@ def main():
         sys.exit(1)
 
     if preview_assumptions:
-        safe_print("\\n    " + _header("VSPreview Assumptions"))
-        for assumption in preview_assumptions:
-            safe_print(f"    {_key('preview')}   {_hint(assumption)}")
+        safe_print("\\n" + _status_line("[WARN]", "VSPreview Display Assumptions"))
+        for assumption_number, assumption in enumerate(preview_assumptions):
+            if assumption_number:
+                safe_print()
+            safe_print(f"    {_key('source')}      {_value(assumption['source'])}")
+            if "preview" in assumption:
+                safe_print(f"    {_key('preview')}     {_hint(assumption['preview'])}")
+            if "range" in assumption:
+                safe_print(f"    {_key('range')}       {_hint(assumption['range'])}")
+            safe_print(
+                f"    {_key('impact')}      "
+                f"{_hint('Preview only; source, render, and report unchanged')}"
+            )
 
     safe_print("\\n" + _status_line("[OK]", "VSPreview Ready"))
     safe_print("    Inspect the untrimmed clips in VSPreview, then return here to confirm frames.")
