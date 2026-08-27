@@ -141,7 +141,7 @@ def test_build_extract_frames_argv_selects_ordered_frames_in_one_pass() -> None:
         "1",
         "-start_number",
         "0",
-        "staging/%09d.png",
+        str(Path("staging") / "%09d.png"),
     ]
 
     legacy = build_extract_frames_argv(
