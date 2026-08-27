@@ -275,7 +275,7 @@ def estimate_alignment_offset(
     *,
     config: AlignmentConfig,
 ) -> CorrelationEstimate:
-    """Estimate an alignment offset from extracted audio and runtime config."""
+    """Estimate ``reference - comparison`` alignment from extracted audio."""
     max_offset_samples = int(config.max_offset_seconds * config.sample_rate)
     estimate = correlate_audio(
         reference,
@@ -285,7 +285,7 @@ def estimate_alignment_offset(
         preprocessing_mode=config.preprocessing_mode,
     )
     if config.refinement_mode == "disabled":
-        return estimate
+        return CorrelationEstimate(-estimate.sample_offset, estimate.score, estimate.peak_ratio)
     if config.refinement_mode != "local":
         raise AudioAlignmentError(
             f"unsupported alignment refinement mode: {config.refinement_mode}"
@@ -300,7 +300,7 @@ def estimate_alignment_offset(
         mode=config.preprocessing_mode,
     )
     refinement_sample_rate = config.refinement_sample_rate or config.sample_rate
-    return _refine_locally(
+    refined = _refine_locally(
         reference_signal,
         comparison_signal,
         coarse_offset=estimate.sample_offset,
@@ -310,3 +310,4 @@ def estimate_alignment_offset(
         refinement_sample_rate=refinement_sample_rate,
         max_offset_samples=max_offset_samples,
     )
+    return CorrelationEstimate(-refined.sample_offset, refined.score, refined.peak_ratio)

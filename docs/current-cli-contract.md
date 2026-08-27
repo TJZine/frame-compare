@@ -1279,6 +1279,11 @@ audio-alignment accuracy workstream. There are no dedicated `run` flags for them
 These fields affect current computed alignment behavior when audio alignment is
 enabled.
 
+All computed, confirmed, and reused signed offsets use `reference source frame -
+comparison source frame`. A positive offset trims that many frames from the reference;
+a negative offset trims the absolute value from the comparison. Correlation lag is
+converted to this sign convention before consensus evidence, hints, caching, and trims.
+
 - `previous_offsets = "disabled" | "prompt" | "always"` controls opt-in reuse of
   shared VSPreview-confirmed offsets. It is config-only, has no `run` flag, and
   is not present in the CLI override map. Exact-match computed audio alignment
@@ -1321,9 +1326,11 @@ enabled.
   and `previous_offsets = "always"` because reuse can skip VSPreview.
 - Successful `run --json` output remains unchanged by previous-offset reuse.
 - Cached computed stability summaries are diagnostic-only scalar evidence. The current
-  cache schema requires them for computed entries and embedded computed results; version
-  mismatches or entries missing required summaries are ignored. Summaries do not affect
-  cache identity, selected offsets, or trims.
+  alignment reuse cache schema is v1. It requires summaries for computed entries and
+  embedded computed results and uses the reference-minus-comparison sign convention.
+  Other schema versions and entries missing required summaries are ignored; there is no
+  cache migration or compatibility path. Summaries do not affect cache identity,
+  selected offsets, or trims.
 - `correlation_mode = "raw_fft" | "gcc_phat"` selects the correlation algorithm
   used by the computed estimator. `raw_fft` is the default.
 - `preprocessing_mode = "none" | "standard"` selects signal preprocessing before

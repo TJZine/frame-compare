@@ -25,7 +25,7 @@ from frame_compare.utils.file_lock import exclusive_file_lock
 from frame_compare.utils.types import AlignmentClipRequest, AlignmentRequest
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
 
-CACHE_VERSION = "2"
+CACHE_VERSION = "1"
 CACHE_FILE_NAME = "alignment_reuse.toml"
 
 log = structlog.get_logger()

@@ -672,7 +672,7 @@ def test_shared_reuse_cache_version_mismatch_warns_and_misses(
     request = _request(tmp_path)
     cache_file = request.shared_alignment_cache_dir / CACHE_FILE_NAME
     cache_file.parent.mkdir(parents=True)
-    cache_file.write_text('version = "1"', encoding="utf-8")
+    cache_file.write_text('version = "2"', encoding="utf-8")
     warnings: list[str] = []
 
     def _warning(event: str, **_kwargs: object) -> None:

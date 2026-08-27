@@ -161,6 +161,56 @@ def test_alignment_uses_supplied_reference_fps_for_computed_frame_offsets(
     mock_probe.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    ("reference", "comparison", "expected_offset"),
+    [
+        (
+            np.array([0, 0, 0, 0, 1, 2, 3], dtype=np.float32),
+            np.array([0, 0, 1, 2, 3, 0, 0], dtype=np.float32),
+            2,
+        ),
+        (
+            np.array([0, 0, 1, 2, 3, 0, 0], dtype=np.float32),
+            np.array([0, 0, 0, 0, 1, 2, 3], dtype=np.float32),
+            -2,
+        ),
+    ],
+)
+@patch("frame_compare.services.alignment._extract_matching_audio")
+@patch("frame_compare.services.alignment._extract_reference_audio")
+def test_computed_alignment_offset_is_reference_frame_minus_comparison_frame(
+    mock_extract_reference: MagicMock,
+    mock_extract_matching: MagicMock,
+    reference: np.ndarray,
+    comparison: np.ndarray,
+    expected_offset: int,
+    tmp_path: Path,
+) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+    mock_extract_reference.return_value = (reference, object())
+    mock_extract_matching.return_value = comparison
+
+    config = AlignmentConfig(sample_rate=24, cache_results=False)
+    request = alignment_request(
+        reference=ref,
+        comparisons=[comp],
+        config=config,
+        generated_dir=tmp_path,
+    )
+
+    results = align_clips_from_request(
+        request,
+        config,
+        reference_fps=Fraction(24, 1),
+    )
+
+    assert results[0].frame_offset == expected_offset
+    assert results[0].time_offset_seconds == expected_offset / 24
+
+
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_matching_audio")
 @patch("frame_compare.services.alignment._extract_reference_audio")

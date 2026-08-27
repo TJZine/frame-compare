@@ -24,7 +24,11 @@ from frame_compare.services.alignment_math import (
     samples_to_frames as _samples_to_frames,
 )
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentConfig, AlignmentResult
+from frame_compare.services.types import (
+    AlignmentConfig,
+    AlignmentRefinementMode,
+    AlignmentResult,
+)
 
 
 def test_alignment_result_is_frozen():
@@ -121,8 +125,11 @@ def test_cross_correlate_empty_signal_raises() -> None:
         _cross_correlate(ref, comp)
 
 
-def test_estimate_alignment_offset_raw_fft_preserves_current_mode() -> None:
-    """The config-driven estimator keeps raw FFT available for debug comparisons."""
+@pytest.mark.parametrize("refinement_mode", ["disabled", "local"])
+def test_estimate_alignment_offset_uses_reference_minus_comparison_sign(
+    refinement_mode: AlignmentRefinementMode,
+) -> None:
+    """The configured estimator converts correlation lag to the alignment contract."""
     reference = np.array([0, 0, 1, 2, 3, 0, 0], dtype=np.float32)
     comparison = np.array([0, 0, 0, 0, 1, 2, 3], dtype=np.float32)
 
@@ -134,10 +141,11 @@ def test_estimate_alignment_offset_raw_fft_preserves_current_mode() -> None:
             max_offset_seconds=1.0,
             correlation_mode="raw_fft",
             preprocessing_mode="none",
+            refinement_mode=refinement_mode,
         ),
     )
 
-    assert estimate.sample_offset == 2
+    assert estimate.sample_offset == -2
 
 
 def test_gcc_phat_standard_preprocessing_recovers_offset_with_dc_and_gain() -> None:
@@ -271,6 +279,6 @@ def test_windowed_consensus_accepts_quorum_offset() -> None:
     )
 
     assert estimate.applied is True
-    assert estimate.sample_offset == 2
+    assert estimate.sample_offset == -2
     assert estimate.valid_windows >= 2
     assert estimate.consensus_ratio >= 0.75

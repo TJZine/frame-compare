@@ -54,8 +54,9 @@ possible drift, possible discontinuity, variable, or insufficient. This summary 
 diagnostic only: Frame Compare always retains the selected constant offset and trims.
 Material non-stable evidence produces one concise warning and should be verified at
 multiple points. Stable and insufficient evidence do not warn. Alignment reuse cache
-schema v2 requires the compact summary for computed entries and does not provide
-compatibility or migration for older cache data.
+schema v1 requires the compact summary and the reference-minus-comparison sign
+convention. Other schema versions are ignored; there is no cache migration or
+compatibility path.
 
 ## Interactive verification with VSPreview
 

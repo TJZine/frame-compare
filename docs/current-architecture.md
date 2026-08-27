@@ -374,9 +374,11 @@ orchestration-owned or analysis-owned identity types such as `ClipState`,
 
 `frame_compare.services.alignment` owns alignment entrypoint sequencing and
 precedence and carries diagnostic-only stability summaries without allowing them to
-change the applied constant offset or trims. Immutable orchestration alignment state
-carries that summary to warning and human-report owners without a mutable diagnostics
-side channel. `frame_compare.services.alignment_previous_offsets` owns
+change the applied constant offset or trims. `alignment_correlation` converts its raw
+correlation lag into the signed `reference source frame - comparison source frame`
+contract before consensus results reach hints, caches, or trim calculation. Immutable
+orchestration alignment state carries that summary to warning and human-report owners
+without a mutable diagnostics side channel. `frame_compare.services.alignment_previous_offsets` owns
 previous-offset reuse policy. Exact-match computed audio alignment cache hits are
 treated as deterministic and can be reused independently of the human
 confirmed-offset policy; `previous_offsets` governs only VSPreview-confirmed
