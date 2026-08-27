@@ -95,9 +95,9 @@ def test_render_batch_detailed_parallel_order(mock_render_request):
         assert [result.facts.source_frame for result in results] == [
             r.frame_number for r in requests
         ]
-        assert {call.args[0] for call in reporter.set_description.call_args_list} == {
+        assert [call.args[0] for call in reporter.set_description.call_args_list] == [
             f"frame {request.frame_number}" for request in requests
-        }
+        ]
         assert reporter.advance.call_count == len(requests)
 
 
@@ -397,9 +397,9 @@ def test_render_batch_parallel_overlaps_ffmpeg_groups_and_preserves_order_and_pr
     render_frame.assert_not_called()
     assert [result.path for result in results] == [request.output_path for request in requests]
     assert [result.facts.source_frame for result in results] == [10, 20, 30, 40, 50]
-    assert {call.args[0] for call in reporter.set_description.call_args_list} == {
+    assert [call.args[0] for call in reporter.set_description.call_args_list] == [
         f"frame {request.frame_number}" for request in requests
-    }
+    ]
     assert reporter.advance.call_count == len(requests)
 
 

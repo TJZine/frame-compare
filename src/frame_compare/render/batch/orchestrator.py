@@ -73,16 +73,28 @@ def _render_work_unit(requests: tuple[RenderRequest, ...]) -> list[RenderedFrame
     return rendered
 
 
-def _record_work_unit_results(
+def _store_work_unit_results(
     unit: _RenderWorkUnit,
     rendered: list[RenderedFrameResult],
     results: list[RenderedFrameResult | None],
-    reporter: ProgressReporter | None,
 ) -> None:
     start, requests = unit
-    for offset, (request, result) in enumerate(zip(requests, rendered, strict=True)):
+    for offset, (_request, result) in enumerate(zip(requests, rendered, strict=True)):
         results[start + offset] = result
-        _record_render_progress(reporter, request)
+
+
+def _record_ready_progress(
+    requests: list[RenderRequest],
+    results: list[RenderedFrameResult | None],
+    reporter: ProgressReporter | None,
+    start: int,
+) -> int:
+    """Record the longest completed prefix so progress follows request order."""
+    index = start
+    while index < len(results) and results[index] is not None:
+        _record_render_progress(reporter, requests[index])
+        index += 1
+    return index
 
 
 def _submit_render_work_unit(
@@ -100,12 +112,18 @@ def _render_batch_sequential(
     results: list[RenderedFrameResult | None],
     reporter: ProgressReporter | None,
 ) -> None:
+    next_progress_index = 0
     for unit in _render_work_units(requests):
-        _record_work_unit_results(
+        _store_work_unit_results(
             unit,
             _render_work_unit(unit[1]),
             results,
+        )
+        next_progress_index = _record_ready_progress(
+            requests,
+            results,
             reporter,
+            next_progress_index,
         )
 
 
@@ -146,6 +164,7 @@ def _render_batch_parallel(
     units = _render_work_units(requests)
     futures: dict[Future[list[RenderedFrameResult]], _RenderWorkUnit] = {}
     next_unit_index = 0
+    next_progress_index = 0
     first_exception: Exception | None = None
 
     with ThreadPoolExecutor(max_workers=parallelism) as executor:
@@ -165,7 +184,13 @@ def _render_batch_parallel(
                         first_exception = exc
 
             for unit, rendered in sorted(completed, key=lambda item: item[0][0]):
-                _record_work_unit_results(unit, rendered, results, reporter)
+                _store_work_unit_results(unit, rendered, results)
+            next_progress_index = _record_ready_progress(
+                requests,
+                results,
+                reporter,
+                next_progress_index,
+            )
 
             if first_exception is not None:
                 # Do not start new work after a failure. Cancel any futures that
@@ -183,6 +208,9 @@ def _render_batch_parallel(
                 next_unit_index += 1
 
     if first_exception is not None:
+        for index in range(next_progress_index, len(results)):
+            if results[index] is not None:
+                _record_render_progress(reporter, requests[index])
         raise first_exception
 
 
