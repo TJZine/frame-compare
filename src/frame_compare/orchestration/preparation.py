@@ -86,6 +86,7 @@ from frame_compare.services.run_info import (
     RunInfoTmdbSkipReason,
     write_run_info,
 )
+from frame_compare.services.tmdb_cache import TmdbCache
 from frame_compare.services.types import ParsedMetadata, TmdbMetadata
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 from frame_compare.utils.paths import (
@@ -138,6 +139,7 @@ async def _resolve_run_directory(
                 filenames=[input_videos[0].name],
                 config=config,
                 client=deps.http_client,
+                cache=TmdbCache(workspace.shared_tmdb_cache_path),
             )
             was_attempted = True
             tmdb_facts = _attempted_run_info_tmdb_prefetch_facts(metadata)

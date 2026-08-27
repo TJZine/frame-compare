@@ -83,6 +83,11 @@ class WorkspacePaths:
         return self.generated_root / "cache" / "alignment"
 
     @property
+    def shared_tmdb_cache_path(self) -> Path:
+        """Workspace-level shared TMDB response cache file."""
+        return self.generated_root / "cache" / "tmdb.toml"
+
+    @property
     def cache_dir(self) -> Path:
         """Directory for shared analysis cache files."""
         return self.shared_analysis_cache_dir
@@ -111,6 +116,7 @@ class WorkspacePaths:
             resolved_run_dir / "generated",
             self.shared_analysis_cache_dir,
             self.shared_alignment_cache_dir,
+            self.shared_tmdb_cache_path,
             self.generated_root / "clip_probe.toml",
         ):
             require_managed_descendant(

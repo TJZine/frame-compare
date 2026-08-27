@@ -314,6 +314,26 @@ class TestResolvePaths:
             "root": str(generated_root.resolve()),
         }
 
+    def test_resolve_paths_rejects_shared_tmdb_cache_symlink_escape(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        root = tmp_path / "workspace"
+        generated_root = root / "generated"
+        external_cache = tmp_path / "external-cache"
+        (generated_root / "cache").mkdir(parents=True)
+        external_cache.mkdir()
+        (generated_root / "cache" / "tmdb.toml").symlink_to(external_cache / "tmdb.toml")
+        config = ConfigSchema(paths=PathsConfig(generated_dir="generated"))
+
+        with pytest.raises(PathEscapesRootError) as exc_info:
+            resolve_paths(config, root)
+
+        assert exc_info.value.context.details == {
+            "path": str((external_cache / "tmdb.toml").resolve()),
+            "root": str(generated_root.resolve()),
+        }
+
     @pytest.mark.parametrize("generated_dir", ["", " ", "\t\n"])
     def test_resolve_paths_rejects_empty_generated_directory(
         self,

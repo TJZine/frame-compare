@@ -194,6 +194,7 @@ async def test_run_metadata_phase_resolves_when_enabled_and_client_present(
 
     assert captured["filenames"] == ["reference.mkv"]
     assert captured["config"] == ctx.config
+    assert captured["cache"].path == ctx.workspace.shared_tmdb_cache_path
     assert output.resolved_metadata == expected
 
 
