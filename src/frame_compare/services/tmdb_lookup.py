@@ -170,7 +170,28 @@ def _map_tmdb_results_with_cacheability(
     results_raw = cast(dict[str, object], data).get("results")
     if not isinstance(results_raw, list):
         return mapped_results, False
-    return mapped_results, all(isinstance(item, dict) for item in cast(list[object], results_raw))
+    cacheable = all(
+        _tmdb_result_is_cacheable(item, endpoint_media_type)
+        for item in cast(list[object], results_raw)
+    )
+    return mapped_results, cacheable
+
+
+def _tmdb_result_is_cacheable(
+    item: object,
+    endpoint_media_type: _TmdbMediaType | None,
+) -> bool:
+    if not isinstance(item, dict):
+        return False
+    typed_item = cast(dict[str, object], item)
+    if endpoint_media_type is None and typed_item.get("media_type") == "person":
+        person_id = typed_item.get("id")
+        name = typed_item.get("name")
+        has_valid_id = (isinstance(person_id, int) and not isinstance(person_id, bool)) or (
+            isinstance(person_id, str) and person_id.isdigit()
+        )
+        return has_valid_id and isinstance(name, str) and bool(name.strip())
+    return _map_tmdb_result(typed_item, endpoint_media_type=endpoint_media_type) is not None
 
 
 def _map_tmdb_alternative_titles(

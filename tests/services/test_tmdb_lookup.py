@@ -425,7 +425,18 @@ async def test_search_tmdb_cache_hit_reuses_ordered_response_across_api_keys(
 
 
 @pytest.mark.anyio
-async def test_lookup_does_not_cache_malformed_success_response(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "malformed_result",
+    [
+        "malformed-result",
+        {"id": 1.5, "title": "Float ID", "release_date": "2020-01-01"},
+        {"title": "Missing ID", "release_date": "2020-01-01"},
+    ],
+)
+async def test_lookup_does_not_cache_malformed_success_response(
+    tmp_path: Path,
+    malformed_result: object,
+) -> None:
     cache_path = tmp_path / "tmdb.toml"
     cache = TmdbCache(cache_path)
 
@@ -436,7 +447,7 @@ async def test_lookup_does_not_cache_malformed_success_response(tmp_path: Path) 
             json={
                 "results": [
                     {"id": 1, "title": "Valid", "release_date": "2020-01-01"},
-                    "malformed-result",
+                    malformed_result,
                 ]
             },
         )
@@ -447,6 +458,93 @@ async def test_lookup_does_not_cache_malformed_success_response(tmp_path: Path) 
             MetadataConfig(api_key="a" * 32),
             client,
             cache=cache,
+        )
+
+    assert [item.tmdb_id for item in result] == [1]
+    assert not cache_path.exists()
+
+
+@pytest.mark.anyio
+async def test_multi_search_can_cache_while_ignoring_person_results(tmp_path: Path) -> None:
+    request_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {"id": 9, "media_type": "person", "name": "Performer"},
+                    {
+                        "id": 1,
+                        "media_type": "movie",
+                        "title": "Known",
+                        "release_date": "2020-01-01",
+                    },
+                ]
+            },
+        )
+
+    cache = TmdbCache(tmp_path / "tmdb.toml")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        first = await tmdb_lookup.search_tmdb(
+            ParsedMetadata(title="Known"),
+            MetadataConfig(api_key="a" * 32),
+            client,
+            cache=cache,
+        )
+        second = await tmdb_lookup.search_tmdb(
+            ParsedMetadata(title="Known"),
+            MetadataConfig(api_key="b" * 32),
+            client,
+            cache=cache,
+        )
+
+    assert second == first
+    assert [item.tmdb_id for item in second] == [1]
+    assert request_count == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "person_result",
+    [
+        {"media_type": "person", "name": "Missing ID"},
+        {"id": 1.5, "media_type": "person", "name": "Float ID"},
+        {"id": 9, "media_type": "person"},
+        {"id": 9, "media_type": "person", "name": "  "},
+    ],
+)
+async def test_multi_search_does_not_cache_malformed_person_results(
+    tmp_path: Path,
+    person_result: object,
+) -> None:
+    cache_path = tmp_path / "tmdb.toml"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    person_result,
+                    {
+                        "id": 1,
+                        "media_type": "movie",
+                        "title": "Known",
+                        "release_date": "2020-01-01",
+                    },
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await tmdb_lookup.search_tmdb(
+            ParsedMetadata(title="Known"),
+            MetadataConfig(api_key="a" * 32),
+            client,
+            cache=TmdbCache(cache_path),
         )
 
     assert [item.tmdb_id for item in result] == [1]
