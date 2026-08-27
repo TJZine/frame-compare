@@ -259,6 +259,14 @@ recovery requirement.
   warning log event. Ordinary no-match, incomplete, or stale source-set misses
   can silently return no reusable set and continue through the normal alignment
   path.
+- `<resolved paths.generated_dir>/cache/tmdb.toml`: shared low-level TMDB response
+  cache owned by `frame_compare.services.tmdb_cache`. It stores ordered normalized
+  search results and alternative-title lists, never the resolver's selected match or
+  the API key. Request keys are opaque hashes rather than plain query text. Positive
+  responses expire after 30 days, valid empty responses after 24 hours, and the cache
+  is capped at 2,000 entries and 5 MiB with deterministic oldest-first eviction.
+  Corrupt, unsupported, malformed, unreadable, unwritable, or lock-blocked cache
+  state degrades to the normal network path; external request failures are not cached.
 - `generated/clip_probe.toml` or `<resolved paths.generated_dir>/clip_probe.toml`:
   shared clip probe cache used by `--from-cache-only` prevalidation before
   run-folder reservation. The file format remains version 1, while each probe key
@@ -319,14 +327,15 @@ symlinked config leaf that resolves elsewhere.
 
 `WorkspacePaths` resolves the runtime path set and switches into a reserved run folder
 so screenshots and generated files live inside a fresh directory beneath the resolved
-`paths.generated_dir`, never beneath an external media input. The
-analysis and shared alignment reuse caches are the exceptions:
+`paths.generated_dir`, never beneath an external media input. The analysis,
+shared alignment reuse, and TMDB response caches are the exceptions:
 `WorkspacePaths.cache_dir` and `WorkspacePaths.shared_analysis_cache_dir` remain
 the shared workspace-level `<resolved paths.generated_dir>/cache/analysis` path,
 and `WorkspacePaths.shared_alignment_cache_dir` remains the shared
-workspace-level `<resolved paths.generated_dir>/cache/alignment` path, even after
-`with_run_dir()` moves `generated_dir` and `screenshots_dir` into a fresh run
-folder.
+workspace-level `<resolved paths.generated_dir>/cache/alignment` path. The
+`WorkspacePaths.shared_tmdb_cache_path` file remains at
+`<resolved paths.generated_dir>/cache/tmdb.toml`. All three stay shared after
+`with_run_dir()` moves `generated_dir` and `screenshots_dir` into a fresh run folder.
 
 Normal runs and cache-only runs that proceed reserve a fresh run folder beneath the
 resolved `paths.generated_dir`. Existing run folders are not reused for analysis cache
@@ -424,7 +433,8 @@ Keep these integrations at their current owners:
 
 - metadata lookups: `frame_compare.services.metadata` remains the facade owner;
   `frame_compare.services.tmdb_resolution` owns resolver policy and
-  `frame_compare.services.tmdb_lookup` owns low-level TMDB HTTP and response mapping
+  `frame_compare.services.tmdb_lookup` owns low-level TMDB HTTP and response mapping,
+  while `frame_compare.services.tmdb_cache` owns bounded durable response reuse
 - publishing: `frame_compare.services.publishers`
 - slow.pics post-upload shortcut/webhook policy and action aggregation:
   `frame_compare.services.slowpics_post_upload`
@@ -727,6 +737,10 @@ static geometry inference; render does not sample content. Native screenshot
 render remains full-frame. The FFmpeg backend applies geometry filters after
 exact frame selection, and the VapourSynth path chooses between the Pillow writer
 and eligible `core.fpng.Write` output without changing CLI import-time behavior.
+The render batch scheduler preserves each compatible clip's ordered FFmpeg requests
+as one decode work unit. Production rendering runs at most two logical work units at
+once; singleton/custom/non-PNG requests retain their per-frame path, results remain
+in request order, and overlay/color processing is unchanged.
 
 Runtime ownership matrix:
 

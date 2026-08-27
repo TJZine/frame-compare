@@ -636,6 +636,17 @@ recovery requirement.
   fingerprint. In the managed Windows portable and Debian/Docker profiles, a
   selected supported FFmpeg lineage change cannot reuse an offset computed under the
   previous tool build.
+- Successful low-level TMDB search and alternative-title responses are reused from
+  `<resolved paths.generated_dir>/cache/tmdb.toml`. Ordered normalized response data
+  is cached rather than the final ranked match, so current resolver policy always
+  reruns. Opaque request keys exclude the API key and do not store plain query text;
+  cached response values can still reveal media-title history. Positive entries
+  expire after 30 days, valid empty entries after 24 hours, and deterministic
+  oldest-first eviction limits the file to 2,000 entries and 5 MiB. Authentication,
+  rate-limit, timeout, transport, HTTP, JSON, and malformed-response failures are not
+  cached. Corrupt, unsupported, malformed, unreadable, unwritable, or lock-blocked
+  cache state produces a sanitized warning and continues through the network path.
+  Deleting this file clears durable TMDB history and forces fresh successful lookups.
 - Frame Compare-owned L-SMASH-Works indexes use
   `<media>.frame-compare-lsw1296-<12-hex-index-fingerprint>.lwi`. The token is
   profile scoped (currently `lsw1296-72386a70c626` on managed/portable Windows,
@@ -692,12 +703,15 @@ recovery requirement.
   metric algorithm identity, and analysis settings before continuing. It does
   not clear unrelated shared analysis entries and does not delete shared
   previous-offset reuse entries under
-  `<resolved paths.generated_dir>/cache/alignment/`.
+  `<resolved paths.generated_dir>/cache/alignment/` or the shared TMDB response file.
 - `--from-cache-only` is analysis-cache-only. When analysis is not skipped, it validates
   the matching shared analysis cache entry for the exact current performance mode
   and metric algorithm identity before metadata prefetch and before run-folder
   reservation, so a missing, wrong-mode, or invalid entry does not leave an empty
   run folder.
+- `--from-cache-only` does not require or prohibit TMDB network access after analysis
+  cache prevalidation succeeds. `--skip-metadata`, disabled TMDB, and a missing API
+  key perform no TMDB cache reads or writes.
 - When the exact all-source selection-domain token requires probe data and the
   probe cache is missing, `--from-cache-only` fails before metadata prefetch and
   before run-folder reservation rather than validating a weaker fingerprint.

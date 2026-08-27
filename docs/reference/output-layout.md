@@ -11,8 +11,9 @@ sharing only explicitly reusable cache state across runs.
 ├── cache/
 │   ├── analysis/
 │   │   └── <source-and-request-identity>.compframes
-│   └── alignment/
-│       └── alignment_reuse.toml
+│   ├── alignment/
+│   │   └── alignment_reuse.toml
+│   └── tmdb.toml
 ├── clip_probe.toml
 └── <reserved-run-name>/
     ├── report.html
@@ -33,6 +34,7 @@ rely only on documented artifacts rather than assuming every internal file is st
 | --- | --- |
 | `cache/analysis/` | Reusable luminance and motion metrics keyed by the effective metric request and runtime identity |
 | `cache/alignment/` | Reusable accepted source offsets |
+| `cache/tmdb.toml` | Bounded reusable TMDB search and alternative-title responses; contains no API key or final match decision |
 | `clip_probe.toml` | Shared compatible source-probe evidence |
 | `<run>/report.html` | Canonical offline report entry point |
 | `<run>/screenshots/` | Rendered comparison images referenced by the normal report |
@@ -54,6 +56,10 @@ To move or archive one comparison:
 - use embedded images only when a single-file artifact is required.
 
 Shared caches are not required to view an existing report.
+
+The TMDB cache can reveal previously resolved media titles even though its lookup keys
+do not store plain query text. Delete `cache/tmdb.toml` to remove that history or force
+fresh metadata requests; Frame Compare recreates it as successful lookups occur.
 
 ## Windows portable persistence
 
