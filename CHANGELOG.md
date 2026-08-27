@@ -9,11 +9,7 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 
 ### Fixed
 
-- Correct computed audio-alignment offsets to use the documented
-  `reference - comparison` sign convention. The pre-MVP shared alignment cache
-  format is reset to schema v1.
-- Clarify VSPreview matching-frame confirmation and avoid duplicate preview
-  frame-property warnings after Frame Compare reports and applies the same defaults.
+
 
 ## [0.2.0]
 
@@ -69,6 +65,11 @@ Frame Compare follows Conventional Commits, and Release Please turns the
   post-retry fatal error behavior.
 - Harden VSPreview startup compatibility checks and redact inherited credential
   values from surfaced startup diagnostics.
+  - Correct computed audio-alignment offsets to use the documented
+  `reference - comparison` sign convention. The pre-MVP shared alignment cache
+  format is reset to schema v1.
+- Clarify VSPreview matching-frame confirmation and replace duplicate or malformed
+  preview frame-property warnings with Frame Compare's styled assumption details.
 
 ### Security
 
