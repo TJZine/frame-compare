@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 import numpy as np
@@ -119,6 +120,65 @@ def render_frame_detailed(
         raise RenderError(reason=_render_error_reason(e), details=details) from e
 
     return RenderedFrameResult(path=request.output_path, facts=facts)
+
+
+def render_ffmpeg_batch_detailed(requests: list[RenderRequest]) -> list[RenderedFrameResult]:
+    """Render one clip's ordered FFmpeg requests through a single decode pass."""
+    if not requests:
+        return []
+
+    first = requests[0]
+    clip = first.clip
+    runner = first.ffmpeg_runner
+    if (
+        not isinstance(clip, Path)
+        or type(runner) is not DefaultFFmpegRunner
+        or first.output_path.suffix.casefold() != ".png"
+    ):
+        raise ValueError("FFmpeg batch rendering requires compatible PNG requests")
+    batch_runner = cast(DefaultFFmpegRunner, runner)
+    previous_frame = -1
+    for request in requests:
+        if (
+            request.clip != clip
+            or request.ffmpeg_runner is not runner
+            or request.geometry_plan is not first.geometry_plan
+            or request.output_path.parent != first.output_path.parent
+            or request.output_path.suffix.casefold() != ".png"
+            or request.frame_number <= previous_frame
+        ):
+            raise ValueError("FFmpeg batch requests must be compatible and strictly ordered")
+        previous_frame = request.frame_number
+
+    try:
+        output_parent = first.output_path.parent
+        output_parent.mkdir(parents=True, exist_ok=True)
+        with TemporaryDirectory(prefix=".frame-compare-ffmpeg-", dir=output_parent) as temp_dir:
+            staging_dir = Path(temp_dir)
+            facts = batch_runner.extract_frames(
+                clip,
+                [request.frame_number for request in requests],
+                staging_dir,
+                geometry_plan=first.geometry_plan,
+            )
+            if len(facts) != len(requests):
+                raise FrameExtractionError(first.frame_number, str(clip))
+
+            rendered: list[RenderedFrameResult] = []
+            for index, (request, frame_facts) in enumerate(zip(requests, facts, strict=True)):
+                staged_path = staging_dir / f"{index:09d}.png"
+                if not staged_path.is_file():
+                    raise FrameExtractionError(request.frame_number, str(clip))
+                staged_path.replace(request.output_path)
+                if request.overlay is not None and request.overlay.mode != OverlayMode.NONE:
+                    apply_overlay_to_file(request.output_path, request.overlay, frame_facts)
+                rendered.append(RenderedFrameResult(path=request.output_path, facts=frame_facts))
+            return rendered
+    except (EncodingError, FrameExtractionError, RenderError, SourceLoadError):
+        raise
+    except Exception as exc:
+        details = _render_error_details(first, "auto", False)
+        raise RenderError(reason=_render_error_reason(exc), details=details) from exc
 
 
 def _use_vapoursynth_renderer(request: RenderRequest, renderer: Renderer) -> bool:

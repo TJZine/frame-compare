@@ -1,4 +1,5 @@
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -6,10 +7,12 @@ import pytest
 
 from frame_compare.render.backend._ffmpeg_frame import (
     build_extract_frame_argv,
+    build_extract_frames_argv,
 )
 from frame_compare.render.backend.ffmpeg import (
     DefaultFFmpegRunner,
     parse_showinfo_picture_type,
+    parse_showinfo_picture_types,
 )
 from frame_compare.render.geometry import (
     GeometryMargins,
@@ -18,6 +21,7 @@ from frame_compare.render.geometry import (
     SourceGeometry,
 )
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
+from frame_compare.utils.media_facts import RenderedFrameFacts
 from frame_compare.vs.types import HDRMetadata
 
 
@@ -116,6 +120,53 @@ def test_build_extract_frame_argv_rejects_unrepresentable_geometry_plan() -> Non
         )
 
 
+def test_build_extract_frames_argv_selects_ordered_frames_in_one_pass() -> None:
+    assert build_extract_frames_argv(
+        video=Path("clip.mkv"),
+        frame_nums=[10, 20, 42],
+        output_pattern=Path("staging/%09d.png"),
+        overwrite=True,
+    ) == [
+        "ffmpeg",
+        "-y",
+        "-i",
+        "clip.mkv",
+        "-vf",
+        "select=eq(n\\,10)+eq(n\\,20)+eq(n\\,42),showinfo=checksum=0",
+        "-fps_mode",
+        "passthrough",
+        "-frames:v",
+        "3",
+        "-q:v",
+        "1",
+        "-start_number",
+        "0",
+        "staging/%09d.png",
+    ]
+
+    legacy = build_extract_frames_argv(
+        video=Path("clip.mkv"),
+        frame_nums=[10, 20, 42],
+        output_pattern=Path("staging/%09d.png"),
+        overwrite=True,
+        legacy_vsync=True,
+    )
+    assert legacy[legacy.index("-vsync") : legacy.index("-vsync") + 2] == ["-vsync", "0"]
+
+
+@pytest.mark.parametrize("frame_nums", [[], [2, 2], [2, 1], [-1, 2]])
+def test_build_extract_frames_argv_rejects_unsafe_frame_sequences(
+    frame_nums: Sequence[int],
+) -> None:
+    with pytest.raises(ValueError):
+        build_extract_frames_argv(
+            video=Path("clip.mkv"),
+            frame_nums=frame_nums,
+            output_pattern=Path("staging/%09d.png"),
+            overwrite=True,
+        )
+
+
 def test_default_ffmpeg_runner_extract_frame_uses_shared_command_policy(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -166,6 +217,70 @@ def test_default_ffmpeg_runner_returns_picture_type_from_same_extraction(
     assert facts.picture_type == "B"
 
 
+def test_default_ffmpeg_runner_extract_frames_preserves_indexed_picture_types(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    run_subprocess = MagicMock(
+        return_value=subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=b"",
+            stderr=(
+                b"[Parsed_showinfo_1 @ 0x1] n:0 type:I\n"
+                b"[Parsed_showinfo_1 @ 0x1] n:1 type:B\n"
+                b"[Parsed_showinfo_1 @ 0x1] n:2 type:P\n"
+            ),
+        )
+    )
+    monkeypatch.setattr("frame_compare.render.backend.ffmpeg.run_subprocess", run_subprocess)
+
+    output_dir = tmp_path / "staging"
+    facts = DefaultFFmpegRunner().extract_frames(Path("clip.mkv"), [10, 20, 42], output_dir)
+
+    assert [(fact.source_frame, fact.picture_type) for fact in facts] == [
+        (10, "I"),
+        (20, "B"),
+        (42, "P"),
+    ]
+    assert run_subprocess.call_args.args[0][-1] == str(output_dir / "%09d.png")
+    assert run_subprocess.call_args.kwargs["timeout_seconds"] == 30.0
+
+
+def test_default_ffmpeg_runner_extract_frames_retries_legacy_vsync_when_required(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    run_subprocess = MagicMock(
+        side_effect=[
+            subprocess.CalledProcessError(
+                1,
+                ["ffmpeg"],
+                stderr=b"Unrecognized option 'fps_mode'. Error splitting: Option not found",
+            ),
+            subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout=b"",
+                stderr=b"[Parsed_showinfo_1 @ 0x1] n:0 type:I",
+            ),
+        ]
+    )
+    monkeypatch.setattr("frame_compare.render.backend.ffmpeg.run_subprocess", run_subprocess)
+
+    facts = DefaultFFmpegRunner().extract_frames(Path("clip.mkv"), [10], tmp_path)
+
+    assert facts == [RenderedFrameFacts(source_frame=10, picture_type="I")]
+    modern_argv = run_subprocess.call_args_list[0].args[0]
+    legacy_argv = run_subprocess.call_args_list[1].args[0]
+    assert modern_argv[modern_argv.index("-fps_mode") : modern_argv.index("-fps_mode") + 2] == [
+        "-fps_mode",
+        "passthrough",
+    ]
+    assert legacy_argv[legacy_argv.index("-vsync") : legacy_argv.index("-vsync") + 2] == [
+        "-vsync",
+        "0",
+    ]
+
+
 @pytest.mark.parametrize(
     ("stderr", "expected"),
     [
@@ -195,6 +310,17 @@ def test_default_ffmpeg_runner_returns_picture_type_from_same_extraction(
 )
 def test_parse_showinfo_picture_type(stderr: bytes | str, expected: str | None) -> None:
     assert parse_showinfo_picture_type(stderr) == expected
+
+
+def test_parse_showinfo_picture_types_isolates_missing_and_conflicting_records() -> None:
+    stderr = (
+        b"[Parsed_showinfo_1 @ 0x1] n:0 type:I\n"
+        b"[Parsed_showinfo_1 @ 0x1] n:0 type:I\n"
+        b"[Parsed_showinfo_1 @ 0x1] n:2 type:B\n"
+        b"[Parsed_showinfo_1 @ 0x1] n:2 type:P\n"
+    )
+
+    assert parse_showinfo_picture_types(stderr, 4) == ["I", None, None, None]
 
 
 def test_default_ffmpeg_runner_extract_frame_uses_configured_timeout(

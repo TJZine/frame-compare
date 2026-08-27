@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from fractions import Fraction
 from pathlib import Path
 
@@ -15,33 +16,10 @@ from frame_compare.orchestration.context import (
     RunContext,
 )
 from frame_compare.orchestration.execution import run_render_phase
+from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 from frame_compare.utils.media_facts import RenderedFrameFacts
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.types import HDRMetadata
-
-
-class FakeFFmpegRunner:
-    def __init__(self) -> None:
-        self.calls: list[tuple[Path, int, Path]] = []
-
-    def extract_frame(
-        self, video: Path, frame_num: int, output: Path, **_kwargs: object
-    ) -> RenderedFrameFacts:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        Image.new("RGB", (10, 10), color=(0, 0, 0)).save(output, format="PNG")
-        self.calls.append((video, frame_num, output))
-        return RenderedFrameFacts(source_frame=frame_num, picture_type="I")
-
-    def probe_hdr(self, video: Path) -> HDRMetadata | None:
-        _ = video
-        return HDRMetadata(
-            mastering_display=None,
-            max_cll=None,
-            max_fall=None,
-            color_primaries=1,
-            transfer=1,
-            matrix=1,
-        )
 
 
 def test_ffmpeg_extraction_applies_overlay_post_process(
@@ -94,7 +72,47 @@ def test_ffmpeg_extraction_applies_overlay_post_process(
         reporter=None,
     )
 
-    runner = FakeFFmpegRunner()
+    runner = DefaultFFmpegRunner()
+    calls: list[tuple[Path, int, Path]] = []
+    batch_calls: list[tuple[Path, list[int]]] = []
+
+    def _extract_frame(
+        video: Path, frame_num: int, output: Path, **_kwargs: object
+    ) -> RenderedFrameFacts:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (10, 10), color=(0, 0, 0)).save(output, format="PNG")
+        calls.append((video, frame_num, output))
+        return RenderedFrameFacts(source_frame=frame_num, picture_type="I")
+
+    def _extract_frames(
+        video: Path,
+        frame_nums: Sequence[int],
+        output_dir: Path,
+        **_kwargs: object,
+    ) -> list[RenderedFrameFacts]:
+        batch_calls.append((video, list(frame_nums)))
+        for index in range(len(frame_nums)):
+            Image.new("RGB", (10, 10), color=(0, 0, 0)).save(
+                output_dir / f"{index:09d}.png", format="PNG"
+            )
+        return [
+            RenderedFrameFacts(source_frame=frame_num, picture_type="I") for frame_num in frame_nums
+        ]
+
+    def _probe_hdr(video: Path) -> HDRMetadata | None:
+        _ = video
+        return HDRMetadata(
+            mastering_display=None,
+            max_cll=None,
+            max_fall=None,
+            color_primaries=1,
+            transfer=1,
+            matrix=1,
+        )
+
+    monkeypatch.setattr(runner, "extract_frame", _extract_frame)
+    monkeypatch.setattr(runner, "extract_frames", _extract_frames)
+    monkeypatch.setattr(runner, "probe_hdr", _probe_hdr)
 
     output = run_render_phase(
         ctx=ctx,
@@ -112,3 +130,5 @@ def test_ffmpeg_extraction_applies_overlay_post_process(
         RenderedFrameFacts(source_frame=0, picture_type="I"),
         RenderedFrameFacts(source_frame=1, picture_type="I"),
     ]
+    assert batch_calls == [(Path("ref.mkv"), [0, 1])]
+    assert calls == []

@@ -4,6 +4,7 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 from frame_compare.render.batch.expansion import (
     expand_batch_render_requests,
     render_batch_results_by_label,
@@ -12,7 +13,7 @@ from frame_compare.render.batch.expansion import (
     validate_batch_requests,
     validate_ffmpeg_batch_tonemap_gate,
 )
-from frame_compare.render.encoders import render_frame_detailed
+from frame_compare.render.encoders import render_ffmpeg_batch_detailed, render_frame_detailed
 from frame_compare.render.types import (
     BatchRenderOptions,
     RenderedBatchResult,
@@ -58,9 +59,47 @@ def _render_batch_sequential(
     results: list[RenderedFrameResult | None],
     reporter: ProgressReporter | None,
 ) -> None:
-    for index, request in enumerate(requests):
-        results[index] = render_frame_detailed(request)
-        _record_render_progress(reporter, request)
+    index = 0
+    while index < len(requests):
+        batch_end = _ffmpeg_batch_end(requests, index)
+        if batch_end - index > 1:
+            rendered = render_ffmpeg_batch_detailed(requests[index:batch_end])
+            for offset, result in enumerate(rendered):
+                request_index = index + offset
+                results[request_index] = result
+                _record_render_progress(reporter, requests[request_index])
+        else:
+            results[index] = render_frame_detailed(requests[index])
+            _record_render_progress(reporter, requests[index])
+        index = batch_end
+
+
+def _ffmpeg_batch_end(requests: list[RenderRequest], start: int) -> int:
+    first = requests[start]
+    runner = first.ffmpeg_runner
+    if (
+        not isinstance(first.clip, Path)
+        or type(runner) is not DefaultFFmpegRunner
+        or first.output_path.suffix.casefold() != ".png"
+    ):
+        return start + 1
+
+    end = start + 1
+    previous_frame = first.frame_number
+    while end < len(requests):
+        candidate = requests[end]
+        if (
+            candidate.clip != first.clip
+            or candidate.ffmpeg_runner is not runner
+            or candidate.geometry_plan is not first.geometry_plan
+            or candidate.output_path.parent != first.output_path.parent
+            or candidate.output_path.suffix.casefold() != ".png"
+            or candidate.frame_number <= previous_frame
+        ):
+            break
+        previous_frame = candidate.frame_number
+        end += 1
+    return end
 
 
 def _render_batch_parallel(

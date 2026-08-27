@@ -1,10 +1,13 @@
+from collections.abc import Sequence
 from pathlib import Path
 from threading import Event, Thread
 from unittest.mock import MagicMock, patch
 
 import pytest
+from PIL import Image
 
 from frame_compare.config.schema import ColorConfig, ConfigSchema
+from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 from frame_compare.render.batch.orchestrator import (
     ProgressReporter,
     render_batch,
@@ -17,6 +20,24 @@ from frame_compare.render.types import (
 )
 from frame_compare.utils.media_facts import RenderedFrameFacts
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus
+
+
+class _CustomFFmpegRunner(DefaultFFmpegRunner):
+    def __init__(self) -> None:
+        super().__init__()
+        self.single_calls: list[int] = []
+
+    def extract_frame(
+        self,
+        video: Path,
+        frame_num: int,
+        output: Path,
+        **_kwargs: object,
+    ) -> RenderedFrameFacts:
+        _ = video
+        self.single_calls.append(frame_num)
+        Image.new("RGB", (2, 2), color=(frame_num, 0, 0)).save(output)
+        return RenderedFrameFacts(source_frame=frame_num, picture_type="I")
 
 
 @pytest.fixture
@@ -239,3 +260,96 @@ def test_render_batch_sequential(mock_render_request):
         results = render_batch(requests, parallelism=1)
         assert results == [r.output_path for r in requests]
         assert mock_render.call_count == 3
+
+
+def test_render_batch_sequential_batches_adjacent_default_ffmpeg_requests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner = DefaultFFmpegRunner()
+    batches: list[tuple[Path, list[int]]] = []
+
+    def _extract_frames(
+        video: Path,
+        frame_nums: Sequence[int],
+        output_dir: Path,
+        **_kwargs: object,
+    ) -> list[RenderedFrameFacts]:
+        batches.append((video, list(frame_nums)))
+        for index in range(len(frame_nums)):
+            Image.new("RGB", (2, 2), color=(index, 0, 0)).save(output_dir / f"{index:09d}.png")
+        return [
+            RenderedFrameFacts(source_frame=frame_num, picture_type="I") for frame_num in frame_nums
+        ]
+
+    monkeypatch.setattr(runner, "extract_frames", _extract_frames)
+    requests = [
+        RenderRequest(
+            clip=Path("video.mkv"),
+            diagnostic_source=Path("video.mkv"),
+            frame_number=frame,
+            output_path=tmp_path / f"out_{frame}.png",
+            overlay=None,
+            encoder_settings=EncoderSettings(),
+            ffmpeg_runner=runner,
+        )
+        for frame in [10, 20, 42]
+    ]
+
+    results = render_batch_detailed(requests, parallelism=1)
+
+    assert batches == [(Path("video.mkv"), [10, 20, 42])]
+    assert [result.path for result in results] == [request.output_path for request in requests]
+    assert [result.facts.source_frame for result in results] == [10, 20, 42]
+    assert all(request.output_path.is_file() for request in requests)
+
+
+def test_render_batch_sequential_preserves_default_runner_subclass_override(
+    tmp_path: Path,
+) -> None:
+    runner = _CustomFFmpegRunner()
+    requests = [
+        RenderRequest(
+            clip=Path("video.mkv"),
+            diagnostic_source=Path("video.mkv"),
+            frame_number=frame,
+            output_path=tmp_path / f"out_{frame}.png",
+            overlay=None,
+            encoder_settings=EncoderSettings(),
+            ffmpeg_runner=runner,
+        )
+        for frame in [1, 2]
+    ]
+
+    render_batch_detailed(requests, parallelism=1)
+
+    assert runner.single_calls == [1, 2]
+
+
+def test_render_batch_sequential_does_not_batch_non_png_outputs(tmp_path: Path) -> None:
+    runner = DefaultFFmpegRunner()
+    requests = [
+        RenderRequest(
+            clip=Path("video.mkv"),
+            diagnostic_source=Path("video.mkv"),
+            frame_number=frame,
+            output_path=tmp_path / f"out_{frame}.jpg",
+            overlay=None,
+            encoder_settings=EncoderSettings(),
+            ffmpeg_runner=runner,
+        )
+        for frame in [1, 2]
+    ]
+
+    with (
+        patch(
+            "frame_compare.render.batch.orchestrator.render_frame_detailed",
+            side_effect=_rendered,
+        ) as render_frame,
+        patch(
+            "frame_compare.render.batch.orchestrator.render_ffmpeg_batch_detailed"
+        ) as render_ffmpeg_batch,
+    ):
+        render_batch_detailed(requests, parallelism=1)
+
+    assert render_frame.call_count == 2
+    render_ffmpeg_batch.assert_not_called()
