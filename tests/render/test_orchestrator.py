@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from pathlib import Path
-from threading import Event, Thread
+from threading import Barrier, Event, Thread
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -353,3 +353,174 @@ def test_render_batch_sequential_does_not_batch_non_png_outputs(tmp_path: Path) 
 
     assert render_frame.call_count == 2
     render_ffmpeg_batch.assert_not_called()
+
+
+def test_render_batch_parallel_overlaps_ffmpeg_groups_and_preserves_order_and_progress(
+    tmp_path: Path,
+) -> None:
+    runner = DefaultFFmpegRunner()
+    requests = [
+        RenderRequest(
+            clip=Path(clip_name),
+            diagnostic_source=Path(clip_name),
+            frame_number=frame,
+            output_path=tmp_path / f"{clip_name}-{frame}.png",
+            overlay=None,
+            encoder_settings=EncoderSettings(),
+            ffmpeg_runner=runner,
+        )
+        for clip_name, frames in (("reference.mkv", [10, 20]), ("comparison.mkv", [30, 40, 50]))
+        for frame in frames
+    ]
+    both_groups_started = Barrier(2)
+    reporter = MagicMock(spec=ProgressReporter)
+
+    def render_ffmpeg_group(
+        group: list[RenderRequest],
+    ) -> list[RenderedFrameResult]:
+        both_groups_started.wait(timeout=1.0)
+        return [_rendered(request) for request in group]
+
+    with (
+        patch(
+            "frame_compare.render.batch.orchestrator.render_ffmpeg_batch_detailed",
+            side_effect=render_ffmpeg_group,
+        ) as render_batch,
+        patch("frame_compare.render.batch.orchestrator.render_frame_detailed") as render_frame,
+    ):
+        results = render_batch_detailed(requests, parallelism=2, reporter=reporter)
+
+    assert sorted(
+        tuple(request.frame_number for request in call.args[0])
+        for call in render_batch.call_args_list
+    ) == [(10, 20), (30, 40, 50)]
+    render_frame.assert_not_called()
+    assert [result.path for result in results] == [request.output_path for request in requests]
+    assert [result.facts.source_frame for result in results] == [10, 20, 30, 40, 50]
+    assert {call.args[0] for call in reporter.set_description.call_args_list} == {
+        f"frame {request.frame_number}" for request in requests
+    }
+    assert reporter.advance.call_count == len(requests)
+
+
+def test_render_batch_parallel_mixes_indivisible_ffmpeg_groups_and_singletons(
+    tmp_path: Path,
+) -> None:
+    default_runner = DefaultFFmpegRunner()
+    singleton_runner = _CustomFFmpegRunner()
+    requests = [
+        RenderRequest(
+            clip=Path(clip_name),
+            diagnostic_source=Path(clip_name),
+            frame_number=frame,
+            output_path=tmp_path / f"{clip_name}-{frame}.png",
+            overlay=None,
+            encoder_settings=EncoderSettings(),
+            ffmpeg_runner=runner,
+        )
+        for clip_name, frames, runner in (
+            ("first.mkv", [1, 2], default_runner),
+            ("single.mkv", [3], singleton_runner),
+            ("last.mkv", [4, 5], default_runner),
+        )
+        for frame in frames
+    ]
+    batches: list[list[int]] = []
+    singletons: list[int] = []
+
+    def render_ffmpeg_group(
+        group: list[RenderRequest],
+    ) -> list[RenderedFrameResult]:
+        batches.append([request.frame_number for request in group])
+        return [_rendered(request) for request in group]
+
+    def render_single(request: RenderRequest) -> RenderedFrameResult:
+        singletons.append(request.frame_number)
+        return _rendered(request)
+
+    with (
+        patch(
+            "frame_compare.render.batch.orchestrator.render_ffmpeg_batch_detailed",
+            side_effect=render_ffmpeg_group,
+        ),
+        patch(
+            "frame_compare.render.batch.orchestrator.render_frame_detailed",
+            side_effect=render_single,
+        ),
+    ):
+        results = render_batch_detailed(requests, parallelism=2)
+
+    assert sorted(batches) == [[1, 2], [4, 5]]
+    assert singletons == [3]
+    assert [result.facts.source_frame for result in results] == [1, 2, 3, 4, 5]
+
+
+def test_render_batch_parallel_failure_does_not_schedule_later_work(tmp_path: Path) -> None:
+    failing_runner = DefaultFFmpegRunner()
+    singleton_runner = _CustomFFmpegRunner()
+    requests = [
+        RenderRequest(
+            clip=Path(clip_name),
+            diagnostic_source=Path(clip_name),
+            frame_number=frame,
+            output_path=tmp_path / f"{clip_name}-{frame}.png",
+            overlay=None,
+            encoder_settings=EncoderSettings(),
+            ffmpeg_runner=runner,
+        )
+        for clip_name, frames, runner in (
+            ("failing.mkv", [0, 1], failing_runner),
+            ("in-flight.mkv", [2], singleton_runner),
+            ("later.mkv", [3], singleton_runner),
+        )
+        for frame in frames
+    ]
+    failure_reported = Event()
+    in_flight_started = Event()
+    release_in_flight = Event()
+    exceptions: list[BaseException] = []
+    invoked_singletons: list[int] = []
+
+    def render_failing_group(_group: list[RenderRequest]) -> list[RenderedFrameResult]:
+        assert in_flight_started.wait(timeout=1.0)
+        failure_reported.set()
+        raise RuntimeError("failed batch")
+
+    def render_single(request: RenderRequest) -> RenderedFrameResult:
+        invoked_singletons.append(request.frame_number)
+        if request.frame_number == 2:
+            in_flight_started.set()
+            assert release_in_flight.wait(timeout=1.0)
+        return _rendered(request)
+
+    def run_render() -> None:
+        try:
+            render_batch_detailed(requests, parallelism=2)
+        except BaseException as exc:
+            exceptions.append(exc)
+
+    with (
+        patch(
+            "frame_compare.render.batch.orchestrator.render_ffmpeg_batch_detailed",
+            side_effect=render_failing_group,
+        ),
+        patch(
+            "frame_compare.render.batch.orchestrator.render_frame_detailed",
+            side_effect=render_single,
+        ),
+    ):
+        thread = Thread(target=run_render, daemon=True)
+        thread.start()
+        try:
+            assert failure_reported.wait(timeout=1.0)
+            assert in_flight_started.wait(timeout=1.0)
+            assert 3 not in invoked_singletons
+        finally:
+            release_in_flight.set()
+            thread.join(timeout=1.0)
+
+    assert not thread.is_alive()
+    assert len(exceptions) == 1
+    assert isinstance(exceptions[0], RuntimeError)
+    assert str(exceptions[0]) == "failed batch"
+    assert 3 not in invoked_singletons

@@ -4,6 +4,7 @@ import pytest
 from PIL import Image
 
 from frame_compare.config.schema import ColorConfig, ConfigSchema
+from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 from frame_compare.render.batch.orchestrator import (
     render_screenshots_from_batch,
     render_screenshots_from_batch_detailed,
@@ -11,6 +12,12 @@ from frame_compare.render.batch.orchestrator import (
 from frame_compare.render.types import BatchRenderOptions, ScreenshotBatchRequest
 from frame_compare.utils.media_facts import ActivePictureFacts, SourceSignalFacts
 from frame_compare.utils.subproc import run_subprocess
+
+
+class _NonBatchingFFmpegRunner(DefaultFFmpegRunner):
+    """Force the compatibility path so parity tests retain a real per-frame baseline."""
+
+    pass
 
 
 @pytest.fixture
@@ -90,7 +97,9 @@ def test_ffmpeg_one_pass_batch_matches_per_frame_pixels_and_facts(
         [request],
         tmp_path / "per-frame",
         integration_config,
-        BatchRenderOptions(renderer="ffmpeg", parallelism=2),
+        BatchRenderOptions(
+            renderer="ffmpeg", parallelism=2, ffmpeg_runner=_NonBatchingFFmpegRunner()
+        ),
     )
 
     batched_paths = batched.screenshots_by_label["TestLabel"]
@@ -141,7 +150,9 @@ def test_ffmpeg_one_pass_batch_matches_per_frame_hdr_pixels_and_facts(
         [request],
         tmp_path / "hdr-per-frame",
         integration_config,
-        BatchRenderOptions(renderer="ffmpeg", parallelism=2),
+        BatchRenderOptions(
+            renderer="ffmpeg", parallelism=2, ffmpeg_runner=_NonBatchingFFmpegRunner()
+        ),
     )
 
     batched_paths = batched.screenshots_by_label["HDR"]

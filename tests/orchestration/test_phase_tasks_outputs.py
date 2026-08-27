@@ -121,6 +121,7 @@ def test_run_render_phase_maps_comparison_and_source_frames_and_preserves_facts(
     assert requests[0].filename_label == "reference"
     assert captured["output_dir"] == ctx.workspace.screenshots_dir
     assert captured["options"].overlay_mode == OverlayMode.NONE
+    assert captured["options"].parallelism == 2
     assert output.render.frame_facts_by_label["Reference"] == [
         RenderedFrameFacts(source_frame=4, picture_type="B")
     ]

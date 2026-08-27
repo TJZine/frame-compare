@@ -45,13 +45,54 @@ def _record_render_progress(
     reporter.advance(1)
 
 
-def _submit_render_request(
+type _RenderWorkUnit = tuple[int, tuple[RenderRequest, ...]]
+
+
+def _render_work_units(requests: list[RenderRequest]) -> list[_RenderWorkUnit]:
+    """Group compatible adjacent requests into indivisible render work units."""
+    units: list[_RenderWorkUnit] = []
+    index = 0
+    while index < len(requests):
+        end = _ffmpeg_batch_end(requests, index)
+        units.append((index, tuple(requests[index:end])))
+        index = end
+    return units
+
+
+def _render_work_unit(requests: tuple[RenderRequest, ...]) -> list[RenderedFrameResult]:
+    """Render one logical unit, preserving FFmpeg batches as a single operation."""
+    if len(requests) > 1:
+        rendered = render_ffmpeg_batch_detailed(list(requests))
+    else:
+        request = next(iter(requests), None)
+        if request is None:
+            raise RuntimeError("render work unit cannot be empty")
+        rendered = [render_frame_detailed(request)]
+    if len(rendered) != len(requests):
+        raise RuntimeError("render work unit completed without one result per request")
+    return rendered
+
+
+def _record_work_unit_results(
+    unit: _RenderWorkUnit,
+    rendered: list[RenderedFrameResult],
+    results: list[RenderedFrameResult | None],
+    reporter: ProgressReporter | None,
+) -> None:
+    start, requests = unit
+    for offset, (request, result) in enumerate(zip(requests, rendered, strict=True)):
+        results[start + offset] = result
+        _record_render_progress(reporter, request)
+
+
+def _submit_render_work_unit(
     executor: ThreadPoolExecutor,
-    requests: list[RenderRequest],
-    futures: dict[Future[RenderedFrameResult], int],
+    units: list[_RenderWorkUnit],
+    futures: dict[Future[list[RenderedFrameResult]], _RenderWorkUnit],
     index: int,
 ) -> None:
-    futures[executor.submit(render_frame_detailed, requests[index])] = index
+    unit = units[index]
+    futures[executor.submit(_render_work_unit, unit[1])] = unit
 
 
 def _render_batch_sequential(
@@ -59,19 +100,13 @@ def _render_batch_sequential(
     results: list[RenderedFrameResult | None],
     reporter: ProgressReporter | None,
 ) -> None:
-    index = 0
-    while index < len(requests):
-        batch_end = _ffmpeg_batch_end(requests, index)
-        if batch_end - index > 1:
-            rendered = render_ffmpeg_batch_detailed(requests[index:batch_end])
-            for offset, result in enumerate(rendered):
-                request_index = index + offset
-                results[request_index] = result
-                _record_render_progress(reporter, requests[request_index])
-        else:
-            results[index] = render_frame_detailed(requests[index])
-            _record_render_progress(reporter, requests[index])
-        index = batch_end
+    for unit in _render_work_units(requests):
+        _record_work_unit_results(
+            unit,
+            _render_work_unit(unit[1]),
+            results,
+            reporter,
+        )
 
 
 def _ffmpeg_batch_end(requests: list[RenderRequest], start: int) -> int:
@@ -108,29 +143,29 @@ def _render_batch_parallel(
     parallelism: int,
     reporter: ProgressReporter | None,
 ) -> None:
-    futures: dict[Future[RenderedFrameResult], int] = {}
-    next_index = 0
+    units = _render_work_units(requests)
+    futures: dict[Future[list[RenderedFrameResult]], _RenderWorkUnit] = {}
+    next_unit_index = 0
     first_exception: Exception | None = None
 
     with ThreadPoolExecutor(max_workers=parallelism) as executor:
-        while next_index < min(parallelism, len(requests)):
-            _submit_render_request(executor, requests, futures, next_index)
-            next_index += 1
+        while next_unit_index < min(parallelism, len(units)):
+            _submit_render_work_unit(executor, units, futures, next_unit_index)
+            next_unit_index += 1
 
         while futures:
             done, _ = wait(futures.keys(), return_when=FIRST_COMPLETED)
-            completed: list[tuple[int, RenderedFrameResult]] = []
+            completed: list[tuple[_RenderWorkUnit, list[RenderedFrameResult]]] = []
             for future in done:
-                index = futures.pop(future)
+                unit = futures.pop(future)
                 try:
-                    completed.append((index, future.result()))
+                    completed.append((unit, future.result()))
                 except Exception as exc:
                     if first_exception is None:
                         first_exception = exc
 
-            for index, rendered_path in completed:
-                results[index] = rendered_path
-                _record_render_progress(reporter, requests[index])
+            for unit, rendered in sorted(completed, key=lambda item: item[0][0]):
+                _record_work_unit_results(unit, rendered, results, reporter)
 
             if first_exception is not None:
                 # Do not start new work after a failure. Cancel any futures that
@@ -141,11 +176,11 @@ def _render_batch_parallel(
 
             while (
                 first_exception is None
-                and next_index < len(requests)
+                and next_unit_index < len(units)
                 and len(futures) < parallelism
             ):
-                _submit_render_request(executor, requests, futures, next_index)
-                next_index += 1
+                _submit_render_work_unit(executor, units, futures, next_unit_index)
+                next_unit_index += 1
 
     if first_exception is not None:
         raise first_exception
