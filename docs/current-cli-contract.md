@@ -502,9 +502,12 @@ unchanged.
   evidence. When a current-interpreter readiness check detects a missing optional
   module, normal mode emits one sanitized warning and continues with the computed
   audio alignment; forced interactive failure remains fatal. A successful VSPreview
-  child continues to inherit its native stdout and stderr diagnostics, except for one
-  known non-actionable `vstools.enums.color` `SyntaxWarning` suppressed through the
-  child-only Python warning environment.
+  child continues to inherit its native stdout and stderr diagnostics. One known
+  non-actionable `vstools.enums.color` `SyntaxWarning` is suppressed through the
+  child-only Python warning environment. When Frame Compare reports missing,
+  unspecified, or malformed preview color properties, the generated session applies
+  the same explicit BT.709 preview defaults that VSPreview would otherwise assume;
+  this avoids VSPreview's redundant per-output frame-property warnings.
 - The known slow.pics upload start/complete lifecycle events are DEBUG evidence in
   normal TTY runs because the product progress stream already represents the same
   lifecycle. Retry, rate-limit, server, timeout, and network warnings remain
@@ -1153,19 +1156,25 @@ diagnostic order is:
 Normal VSPreview labels reuse the release-aware presentation identities prepared by
 the typed alignment request. Paths and stems remain the internal source, suggested
 offset, confirmation, manual-override, and alignment-result identities. Confirmation
-uses untrimmed source-frame indices and calculates the offset as reference minus
-comparison. Generated and parent no-color output retain the literal lifecycle markers.
-Native source/index diagnostics remain inherited without buffering; only the known
-non-actionable `vstools.enums.color` `SyntaxWarning` is suppressed in the child.
+asks the operator to find the same visible moment, then enter its untrimmed reference
+and comparison source-frame indices in that order. The prompt shows the audio-derived
+matching pair and which source it would trim; `skip` leaves the current audio result
+unchanged when one is available.
+Confirmation calculates the offset as reference minus comparison. Generated and parent
+no-color output retain the literal lifecycle markers. Native source/index diagnostics
+remain inherited without buffering; the known non-actionable `vstools.enums.color`
+`SyntaxWarning` is suppressed in the child.
 
 Generated VSPreview assumptions are preview-only diagnostics derived from
 Frame Compare's existing clip probe metadata and serialized into the generated
 session script. Missing, unspecified, malformed, or unparseable `_Matrix`,
 `_Transfer`, or `_Primaries` frame properties are collected and shown in the
 `VSPreview Assumptions` section before output rows and before `VSPreview Ready`.
-The generated session does not decode source frames just to collect these
-assumptions. These assumptions do not change render, report, analysis, or
-alignment semantics.
+For those properties only, the generated session sets explicit BT.709 values on the
+preview clip so VSPreview does not repeat its equivalent warning for every output.
+The generated session does not decode source frames just to collect these assumptions.
+These preview-only defaults do not change render, report, analysis, or alignment
+semantics.
 
 ## Config-Only Screenshot Surface
 

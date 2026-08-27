@@ -351,6 +351,7 @@ def test_prompt_for_confirmed_offsets_writes_to_stderr(
     )
 
     captured = capsys.readouterr()
+    normalized = " ".join(captured.err.split())
     assert confirmed == {"ref:comp": 12}
     assert captured.out == ""
     lines = captured.err.splitlines()
@@ -358,14 +359,27 @@ def test_prompt_for_confirmed_offsets_writes_to_stderr(
     assert wait_line == "  [WAIT] VSPreview Confirmation"
     assert "ref" in captured.err
     assert "Comparison 1 | comp" in captured.err
-    for key in ("reference", "domain", "enter", "offset", "skip", "comparison", "frames"):
+    for key in (
+        "reference",
+        "domain",
+        "task",
+        "enter",
+        "result",
+        "skip",
+        "comparison",
+        "audio hint",
+        "match frames",
+    ):
         matching_line = next(line for line in lines if line.lstrip().startswith(key))
         assert matching_line.startswith(f"    {key}")
     assert "    domain       Untrimmed source-frame indices" in captured.err
-    assert "    enter        reference_frame comparison_frame" in captured.err
-    assert "    offset       reference - comparison" in captured.err
-    assert "    skip         'skip' or 's'" in captured.err
-    assert "    frames       [+4f] >" in captured.err
+    assert "Find the same visible moment in both VSPreview outputs" in normalized
+    assert "reference_frame comparison_frame" in normalized
+    assert "reference first; e.g. 120 108" in normalized
+    assert "Frame Compare calculates the offset and required trim" in normalized
+    assert "'skip' or 's' leaves the audio result unchanged (if any)" in normalized
+    assert "+4f | Reference 4 <-> Comparison 0 | trim 4 from reference" in normalized
+    assert "    match frames reference comparison >" in captured.err
     assert captured.err.endswith("\n")
     assert "\x1b[" not in captured.err
     assert "[bold cyan]" not in captured.err
@@ -389,8 +403,30 @@ def test_prompt_for_confirmed_offsets_does_not_show_numeric_hint_when_absent(
     assert confirmed == {"ref:comp": 12}
     assert "comp" in captured.err
     assert "+0" not in captured.err
-    assert "frames" in captured.err
-    assert "[no trusted audio hint] >" in captured.err
+    assert "audio hint   no trusted audio hint" in captured.err
+    assert "match frames reference comparison >" in captured.err
+
+
+@pytest.mark.parametrize(
+    ("suggested_offset", "expected_fragments"),
+    [
+        (-147, ("-147f", "Reference 0 <->", "Comparison 147", "trim 147 from comparison")),
+        (0, ("+0f", "Reference 0 <-> Comparison 0", "no trim")),
+    ],
+)
+def test_vspreview_prompt_explains_audio_hint_direction(
+    suggested_offset: int,
+    expected_fragments: tuple[str, ...],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    vspreview_output.write_vspreview_prompt(
+        label="Comparison 1 | Encode",
+        suggested_offset=suggested_offset,
+        no_color=True,
+    )
+
+    output = " ".join(capsys.readouterr().err.split())
+    assert all(fragment in output for fragment in expected_fragments)
 
 
 def test_prompt_for_confirmed_offsets_uses_prepared_names_but_keeps_stem_keys(

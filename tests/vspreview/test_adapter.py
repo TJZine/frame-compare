@@ -415,6 +415,8 @@ def _execute_generated_script(
     presentation_names_by_stem: dict[str, str] | None = None,
     native_loader_output: bool = False,
     load_failure_stems: set[str] | None = None,
+    applied_frame_props: dict[str, dict[str, int]] | None = None,
+    overlay_text_by_stem: dict[str, str] | None = None,
 ) -> tuple[
     dict[str, list[tuple[int | None, int | None, int | None]]],
     list[int],
@@ -474,13 +476,20 @@ def _execute_generated_script(
             return clips[stem]
 
     class FakeText:
-        def Text(self, clip: FakeClip, _text: str, *, alignment: int) -> FakeClip:
+        def Text(self, clip: FakeClip, text: str, *, alignment: int) -> FakeClip:
             if clip.stem in resolved_overlay_failure_stems:
                 raise RuntimeError("overlay failed")
+            if overlay_text_by_stem is not None:
+                overlay_text_by_stem[clip.stem] = text
             return clip
 
     class FakeStd:
         def AssumeFPS(self, clip: FakeClip, *, fpsnum: int, fpsden: int) -> FakeClip:
+            return clip
+
+        def SetFrameProps(self, clip: FakeClip, **props: int) -> FakeClip:
+            if applied_frame_props is not None:
+                applied_frame_props[clip.stem] = props
             return clip
 
     class FakeCore:
@@ -1051,7 +1060,7 @@ def test_generated_script_collects_preview_assumptions_before_outputs_and_ready(
     assert "VSPreview Assumptions" in captured.err
     for token in ("ref", "b", "_Matrix", "_Transfer", "_Primaries"):
         assert token in captured.err
-    assert "display-safe defaults" in captured.err
+    assert "display-safe BT.709 defaults" in captured.err
     assert "preview only" in captured.err
     assert "render/report semantics" in captured.err
     assert "a missing" not in captured.err
@@ -1080,6 +1089,38 @@ def test_generated_script_serializes_non_finite_preview_props_as_assumptions(
     assert "_Matrix" in captured.err
     assert "_Transfer" in captured.err
     assert "a missing" not in captured.err
+
+
+def test_generated_script_applies_reported_preview_defaults_and_explains_hint_direction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    applied_frame_props: dict[str, dict[str, int]] = {}
+    overlay_text_by_stem: dict[str, str] = {}
+
+    _execute_generated_script(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        suggested_offsets_by_key={"ref:a": 147, "ref:b": -3, "ref:c": 0},
+        comparison_stems=("a", "b", "c"),
+        frame_props_by_stem={
+            "ref": {"_Matrix": 2, "_Transfer": 2, "_Primaries": 2},
+            "b": {"_Matrix": "bad"},
+        },
+        applied_frame_props=applied_frame_props,
+        overlay_text_by_stem=overlay_text_by_stem,
+    )
+
+    assert applied_frame_props == {
+        "ref": {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1},
+        "b": {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1},
+    }
+    assert "Suggested match: REF 147 <-> CMP 0" in overlay_text_by_stem["a"]
+    assert "If confirmed: trim 147f from reference" in overlay_text_by_stem["a"]
+    assert "Suggested match: REF 0 <-> CMP 3" in overlay_text_by_stem["b"]
+    assert "If confirmed: trim 3f from comparison" in overlay_text_by_stem["b"]
+    assert "Suggested match: REF 0 <-> CMP 0" in overlay_text_by_stem["c"]
+    assert "If confirmed: no trim" in overlay_text_by_stem["c"]
 
 
 def test_generated_script_does_not_slice_source_clips_from_suggested_offsets(

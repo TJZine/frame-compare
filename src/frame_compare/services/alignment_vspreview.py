@@ -174,20 +174,10 @@ def _present_optional_launch_failed(
     )
 
 
-def _format_signed_frames(value: int) -> str:
-    return f"{value:+d}f"
-
-
-def _format_suggested_offset(value: int | None) -> str:
-    if value is None:
-        return "no trusted audio hint"
-    return _format_signed_frames(value)
-
-
 def _read_vspreview_prompt(
     *,
     label: str,
-    suggested_offset: str,
+    suggested_offset: int | None,
     no_color: bool,
 ) -> str:
     write_vspreview_prompt(
@@ -230,7 +220,7 @@ def _prompt_for_confirmed_offsets(
     confirmed: dict[str, int] = {}
     for comparison_number, comparison in enumerate(comparisons, start=1):
         key = f"{reference.stem}:{comparison.stem}"
-        suggested_offset = _format_suggested_offset(offsets_by_key.get(key))
+        suggested_offset = offsets_by_key.get(key)
         while True:
             try:
                 raw_value = _read_vspreview_prompt(

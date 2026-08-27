@@ -296,9 +296,27 @@ def collect_preview_assumption(label, display_name):
 
     return (
         f"{display_name} {'; '.join(details)}; "
-        "assuming display-safe defaults for preview only; "
+        "using display-safe BT.709 defaults for preview only; "
         "render/report semantics unchanged"
     )
+
+
+def apply_preview_defaults(core, clip, label):
+    props = FRAME_PROPS_BY_LABEL.get(label)
+    if props is None:
+        return clip
+
+    defaults = {}
+    for key in FRAME_PROP_ALIASES:
+        try:
+            parsed_value = _parse_frame_prop_int(_read_prop(props, key))
+        except Exception:
+            parsed_value = None
+        if parsed_value is None or parsed_value == UNSPECIFIED_FRAME_PROP:
+            defaults[key] = 1
+    if not defaults:
+        return clip
+    return core.std.SetFrameProps(clip, **defaults)
 '''
 
 
@@ -415,6 +433,7 @@ def main():
     )
     if ref_assumption is not None:
         preview_assumptions.append(ref_assumption)
+    ref_clip = apply_preview_defaults(core, ref_clip, REFERENCE["label"])
 
     safe_print(f"    {_key('fps')}           {_hint(f'{ref_fps_num}/{ref_fps_den}')}")
 
@@ -451,30 +470,36 @@ def main():
 
         # FPS harmonization: apply AssumeFPS to match reference
         comp_clip = core.std.AssumeFPS(comp_clip, fpsnum=ref_fps_num, fpsden=ref_fps_den)
+        comp_clip = apply_preview_defaults(core, comp_clip, label)
 
         key = f"{REFERENCE['label']}:{label}"
         suggested_offset = suggested_offsets_by_key.get(key)
         if suggested_offset is None:
             audio_hint = "no trusted audio hint"
-            hint_pair = "confirm source frames manually"
-        elif suggested_offset >= 0:
+            hint_pair = "Suggested match: unavailable"
+            trim_hint = "Find matching source frames manually"
+        elif suggested_offset > 0:
             audio_hint = f"+{suggested_offset}f"
-            hint_pair = f"hint pair: ref frame {suggested_offset} ~= comparison frame 0"
-        else:
+            hint_pair = f"Suggested match: REF {suggested_offset} <-> CMP 0"
+            trim_hint = f"If confirmed: trim {suggested_offset}f from reference"
+        elif suggested_offset < 0:
             audio_hint = f"{suggested_offset}f"
-            hint_pair = f"hint pair: ref frame 0 ~= comparison frame {-suggested_offset}"
+            comparison_frame = -suggested_offset
+            hint_pair = f"Suggested match: REF 0 <-> CMP {comparison_frame}"
+            trim_hint = f"If confirmed: trim {comparison_frame}f from comparison"
+        else:
+            audio_hint = "+0f"
+            hint_pair = "Suggested match: REF 0 <-> CMP 0"
+            trim_hint = "If confirmed: no trim"
 
         # Apply overlay with the audio-derived hint only (best-effort)
         try:
             overlay_text = (
                 f"CMP: {display_name}\\n"
                 f"Audio hint: {audio_hint}\\n"
-                f"{hint_pair}"
+                f"{hint_pair}\\n"
+                f"{trim_hint}"
             )
-            if suggested_offset is not None and suggested_offset > 0:
-                overlay_text += "\\n(+N would trim reference after confirmation)"
-            elif suggested_offset is not None and suggested_offset < 0:
-                overlay_text += "\\n(-N would trim comparison after confirmation)"
             comp_clip = core.text.Text(comp_clip, overlay_text, alignment=7)
         except Exception:
             safe_print(_status_line("[WARN]", "Could not apply comparison text overlay"))

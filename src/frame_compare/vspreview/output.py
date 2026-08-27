@@ -101,9 +101,16 @@ def print_vspreview_confirmation_header(
     table = _group_table()
     table.add_row("reference", f"[{STYLE_VALUE}]{escape(reference_name)}[/]")
     table.add_row("domain", "Untrimmed source-frame indices")
-    table.add_row("enter", f"[{STYLE_HINT}]reference_frame comparison_frame[/]")
-    table.add_row("offset", "reference - comparison")
-    table.add_row("skip", f"[{STYLE_HINT}]'skip'[/] or [{STYLE_HINT}]'s'[/]")
+    table.add_row("task", "Find the same visible moment in both VSPreview outputs")
+    table.add_row(
+        "enter",
+        f"[{STYLE_HINT}]reference_frame comparison_frame[/] (reference first; e.g. 120 108)",
+    )
+    table.add_row("result", "Frame Compare calculates the offset and required trim")
+    table.add_row(
+        "skip",
+        f"[{STYLE_HINT}]'skip'[/] or [{STYLE_HINT}]'s'[/] leaves the audio result unchanged (if any)",
+    )
 
     console = _console(no_color=no_color)
     console.print()
@@ -120,16 +127,32 @@ def print_vspreview_confirmation_header(
 def write_vspreview_prompt(
     *,
     label: str,
-    suggested_offset: str,
+    suggested_offset: int | None,
     no_color: bool = False,
 ) -> None:
     """Write a single interactive confirmation prompt to stderr."""
     console = _console(no_color=no_color)
     table = _group_table()
     table.add_row("comparison", f"[{STYLE_VALUE}]{escape(label)}[/]")
+    if suggested_offset is None:
+        audio_hint = "no trusted audio hint"
+    elif suggested_offset > 0:
+        audio_hint = (
+            f"{suggested_offset:+d}f | Reference {suggested_offset} <-> Comparison 0 | "
+            f"trim {suggested_offset} from reference"
+        )
+    elif suggested_offset < 0:
+        comparison_frame = -suggested_offset
+        audio_hint = (
+            f"{suggested_offset:+d}f | Reference 0 <-> Comparison {comparison_frame} | "
+            f"trim {comparison_frame} from comparison"
+        )
+    else:
+        audio_hint = "+0f | Reference 0 <-> Comparison 0 | no trim"
+    table.add_row("audio hint", f"[{STYLE_HINT}]{escape(audio_hint)}[/]")
     console.print(Padding(table, (0, 0, 0, _CONTENT_INDENT)))
-    prompt = Text(f"{' ' * _CONTENT_INDENT}frames       ", style=STYLE_KEY)
-    prompt.append(f"[{suggested_offset}]", style=STYLE_HINT)
+    prompt = Text(f"{' ' * _CONTENT_INDENT}match frames ", style=STYLE_KEY)
+    prompt.append("reference comparison", style=STYLE_HINT)
     prompt.append(" > ", style="bright_white")
     console.print(prompt, end="")
     sys.stderr.flush()

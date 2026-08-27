@@ -77,12 +77,17 @@ the internal alignment and override identities. These literal markers remain pre
 with color disabled. Ready gives a directly nested next action, and the confirmation
 instructions and prompts are visibly nested beneath the blocking `[WAIT]` state. One
 known non-actionable vendor `SyntaxWarning` is suppressed in the VSPreview child;
-other child and native diagnostics remain inherited.
+when Frame Compare reports incomplete preview color properties, it applies the same
+explicit BT.709 preview defaults that VSPreview would otherwise assume, avoiding the
+redundant warning once per output. Other child and native diagnostics remain inherited.
 
-Confirmation uses untrimmed source-frame indices. Enter the reference source frame
-followed by the comparison source frame; the confirmed offset is reference minus
-comparison. Native decoder and index diagnostics remain visible between Frame
-Compare-owned status rows.
+Confirmation uses untrimmed source-frame indices. Find the same visible moment in the
+reference and comparison, then enter the reference frame followed by the comparison
+frame; Frame Compare calculates the offset and required trim. The audio hint shows an
+equivalent source-frame pair and the source it would trim. `skip` leaves the current
+audio result unchanged when one is available. Every signed offset is reference minus
+comparison: positive trims the reference, negative trims the comparison. Native decoder
+and index diagnostics remain visible between Frame Compare-owned status rows.
 
 <figure class="fc-doc-figure">
   <img src="../images/vspreview-alignment.webp" alt="VSPreview showing EBU DVB PQ10 Reference beside EBU DVB HLG10 Comparison at frame 1000 with a zero-frame offset hint and timeline controls.">

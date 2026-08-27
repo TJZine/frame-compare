@@ -7,6 +7,14 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 
 ## Unreleased
 
+### Fixed
+
+- Correct computed audio-alignment offsets to use the documented
+  `reference - comparison` sign convention. The pre-MVP shared alignment cache
+  format is reset to schema v1.
+- Clarify VSPreview matching-frame confirmation and avoid duplicate preview
+  frame-property warnings after Frame Compare reports and applies the same defaults.
+
 ## [0.2.0]
 
 ### Added
