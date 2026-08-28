@@ -521,6 +521,29 @@ def test_load_malformed_nested_payload_returns_corrupted(
     assert result.reason == "corrupted"
 
 
+def test_load_nested_metadata_without_version_returns_corrupted(tmp_path: Path) -> None:
+    config = AnalysisConfig()
+    metadata = valid_cache_metadata_payload(config, frame_count=1)
+    del metadata["version"]
+    cache_file(tmp_path, "fp").write_text(
+        json.dumps(
+            {
+                "version": CACHE_VERSION,
+                "fingerprint": "fp",
+                "luminance": [0.1],
+                "motion": [0.0],
+                "metadata": metadata,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = load_cached_metrics(tmp_path, "fp", [])
+
+    assert result.success is False
+    assert result.reason == "corrupted"
+
+
 def _set_payload_field(payload: dict[str, object], field: str, value: object) -> None:
     current: object = payload
     parts = field.split(".")

@@ -280,9 +280,7 @@ def _license_inventory(bundle_root: Path) -> list[JsonObject]:
 def _promote_bundled_inter_license(bundle_root: Path) -> None:
     source = bundle_root / _INTER_LICENSE_SOURCE
     if not source.is_file():
-        raise ValueError(
-            f"bundled Inter OFL notice is missing: {_INTER_LICENSE_SOURCE.as_posix()}"
-        )
+        raise ValueError(f"bundled Inter OFL notice is missing: {_INTER_LICENSE_SOURCE.as_posix()}")
     if _sha256(source) != _INTER_LICENSE_SHA256:
         raise ValueError("bundled Inter OFL notice SHA-256 mismatch")
 

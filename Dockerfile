@@ -1,7 +1,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 0: Pinned Python dependency tooling
 # ─────────────────────────────────────────────────────────────────────────────
-FROM ghcr.io/astral-sh/uv:0.12.5@sha256:e85be844203885286c60ffad8a858d48afb6c5a5c237ca0e67f12e74b8f174b1 AS uv
+FROM ghcr.io/astral-sh/uv:0.12.7@sha256:95f2aa1fe59274951cfe9b0cbc7972e879ff1004bc8945d130a32eb0dbd85945 AS uv
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 1: Build supplemental VapourSynth plugins
@@ -15,8 +15,8 @@ ARG VAPOURSYNTH_SOURCE_COMMIT=acabf605b2205b32d65859bb2736405719d2fafd
 ARG VAPOURSYNTH_SOURCE_TREE_SHA256=f7c7081a875dbb07487ed94a819385228794ef106d042949313a9ed71a655527
 ARG VAPOURSYNTH_X86_64_WHEEL_SHA256=6f1e37f0ed8eb73e61c3c231fd7f7a0f7acfa893e98d026686e9c81e52c9ce06
 ARG VAPOURSYNTH_AARCH64_WHEEL_SHA256=50d031d07b1839ba362cf314e212edb0760c7ca2a7625a051a0bcbf22aaf9d1c
-ARG AKARIN_SOURCE_COMMIT=0b4a71d30572aa04b56686d4deff8c9c3fd9e6cc
-ARG AKARIN_SOURCE_TREE_SHA256=981232f33e332c1557cc8eeda362234b61f387f8b451a679d16dc07b2b53d1e6
+ARG AKARIN_SOURCE_COMMIT=a72584a969972b4cfd1b1fd11a4b0e3350f83432
+ARG AKARIN_SOURCE_TREE_SHA256=e8fe3c7dd69447f5515d53060472a42c5301ee927a4bb407e4420d165296d71b
 ARG AKARIN_ZSTD_SOURCE_COMMIT=97a3da1df009d4dc67251de0c4b1c9d7fe286fc1
 ARG AKARIN_ZSTD_SOURCE_TREE_SHA256=2093b98cdd49f10e86fd493c6ba822109965ebe40c6e69d42cfa5c358e074a68
 ARG VSZIP_SOURCE_COMMIT=beb7a0ab0e4166580b76560ae3f7c7f5e376ac90
@@ -25,12 +25,12 @@ ARG VAPOURSYNTH_ZIG_SOURCE_COMMIT=b87ff61ce680fa5a4cf7d44a9cb4b605c5037432
 ARG VAPOURSYNTH_ZIG_SOURCE_TREE_SHA256=d54db13419ef61e5f9a7ef3d357c41972bdf59e71536f2787fdddc38736c3f50
 ARG ZIGIMG_SOURCE_COMMIT=0bbe201a5591219177f2444371c2897746b47774
 ARG ZIGIMG_SOURCE_TREE_SHA256=5e6162fe73af4df0e1faba425dd7ff7e15a3ffe5449aebea63c45723899f034a
-ARG LSMASH_COMMIT=84740c5d960ab622f4c08b971dc59192bc27ef74
-ARG LSMASH_SOURCE_TREE_SHA256=b1553e40907e57240fd19a08642b3bc548dbdeda3750948ebbc1c5634af901b7
+ARG LSMASH_COMMIT=d186eb95388710a7a91f6fd353169b457ebbb9db
+ARG LSMASH_SOURCE_TREE_SHA256=89c0277c1533c3958fd16f093c2b0bd13a51fcacb748bf88e36f40eff2a7f651
 ARG OBUPARSE_COMMIT=a67fcab9cd9d56c866a7a860f8c4aeb91b8817e8
 ARG OBUPARSE_SOURCE_TREE_SHA256=f82de7a5f007a4e89441e7ff4b470a00eddc4dfedb22faa46f633acfeefde178
-ARG LSMASH_WORKS_COMMIT=a83318210c183c8ebbe703d975ffc76fb499ef07
-ARG LSMASH_WORKS_SOURCE_TREE_SHA256=7845a6a6d823046c6b0bbe617ae88e304ee117f466961aabceea931831d8f9e3
+ARG LSMASH_WORKS_COMMIT=7e65185d3f08ba4ad191e9a5cbba3e2c6fd3bb67
+ARG LSMASH_WORKS_SOURCE_TREE_SHA256=da14d5b7df9ff7cee19d1b9e9051e55697c4e6e46d82f1bbcba276097336840d
 ARG FFMS2_COMMIT=7ed5e4d039ca9a6236bd2ebdfdd656c4304fbe04
 ARG FFMS2_SOURCE_TREE_SHA256=5be86d5f8f103f8e0b25aaed0b69b7afc06f1b6cd548a6c81160fcd14ea6e8d7
 ARG VS_PLACEBO_SOURCE_COMMIT=3cfd23f257ecb62b0cbd81eaaca092e18ae8e579
@@ -121,10 +121,10 @@ RUN bash /usr/local/bin/checkout_source_commit.sh \
     cd /build && \
     rm -rf /build/obuparse
 
-# Build the exact L-SMASH commit tested by L-SMASH-Works 1296.
+# Build the exact maintainer-fork L-SMASH commit tested by L-SMASH-Works 1310.
 # This commit is intentionally not described as a formal L-SMASH release.
 RUN bash /usr/local/bin/checkout_source_commit.sh \
-        https://github.com/l-smash/l-smash.git \
+        https://github.com/HomeOfAviSynthPlusEvolution/l-smash.git \
         "${LSMASH_COMMIT}" \
         "${LSMASH_SOURCE_TREE_SHA256}" \
         /build/l-smash && \
@@ -138,7 +138,7 @@ RUN bash /usr/local/bin/checkout_source_commit.sh \
     cd /build && \
     rm -rf /build/l-smash
 
-# Build L-SMASH-Works 1296 against the R79 API R4.2 wheel headers and
+# Build L-SMASH-Works 1310 against the R79 API R4.2 wheel headers and
 # Debian Trixie's runtime-matched FFmpeg development libraries. Upstream's
 # Meson path is deprecated, but remains the narrow VapourSynth-only build and
 # avoids pulling unrelated optional dependencies into the runtime baseline.
@@ -252,14 +252,14 @@ RUN bash /usr/local/bin/checkout_source_commit.sh \
         '  "components": [' \
         "    {\"name\":\"VapourSynth\",\"version\":\"R${VAPOURSYNTH_VERSION}\",\"source_commit\":\"${VAPOURSYNTH_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/vapoursynth/vapoursynth.git\",\"source_tree_sha256\":\"${VAPOURSYNTH_SOURCE_TREE_SHA256}\",\"license\":\"LGPL-2.1-or-later\"}," \
         "    {\"name\":\"OBUParse\",\"version\":\"commit ${OBUPARSE_COMMIT}\",\"source_commit\":\"${OBUPARSE_COMMIT}\",\"source_url\":\"https://github.com/HomeOfAviSynthPlusEvolution/obuparse.git\",\"source_tree_sha256\":\"${OBUPARSE_SOURCE_TREE_SHA256}\",\"license\":\"ISC\",\"selection_kind\":\"commit\",\"linkage\":\"shared\",\"soname\":\"libobuparse.so.2\"}," \
-        "    {\"name\":\"L-SMASH\",\"version\":\"commit ${LSMASH_COMMIT}\",\"source_commit\":\"${LSMASH_COMMIT}\",\"source_url\":\"https://github.com/l-smash/l-smash.git\",\"source_tree_sha256\":\"${LSMASH_SOURCE_TREE_SHA256}\",\"license\":\"ISC\",\"selection_kind\":\"commit\"}," \
-        "    {\"name\":\"L-SMASH-Works\",\"version\":\"1296.0.0.0\",\"source_commit\":\"${LSMASH_WORKS_COMMIT}\",\"source_url\":\"https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works.git\",\"source_tree_sha256\":\"${LSMASH_WORKS_SOURCE_TREE_SHA256}\",\"license\":\"ISC AND LGPL-2.1-or-later\"}," \
+        "    {\"name\":\"L-SMASH\",\"version\":\"commit ${LSMASH_COMMIT}\",\"source_commit\":\"${LSMASH_COMMIT}\",\"source_url\":\"https://github.com/HomeOfAviSynthPlusEvolution/l-smash.git\",\"source_tree_sha256\":\"${LSMASH_SOURCE_TREE_SHA256}\",\"license\":\"ISC\",\"selection_kind\":\"commit\"}," \
+        "    {\"name\":\"L-SMASH-Works\",\"version\":\"1310.0.0.0\",\"source_commit\":\"${LSMASH_WORKS_COMMIT}\",\"source_url\":\"https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works.git\",\"source_tree_sha256\":\"${LSMASH_WORKS_SOURCE_TREE_SHA256}\",\"license\":\"ISC AND LGPL-2.1-or-later\"}," \
         "    {\"name\":\"FFMS2\",\"version\":\"5.0\",\"source_commit\":\"${FFMS2_COMMIT}\",\"source_url\":\"https://github.com/FFMS/ffms2.git\",\"source_tree_sha256\":\"${FFMS2_SOURCE_TREE_SHA256}\",\"license\":\"MIT\"}," \
         "    {\"name\":\"Debian FFmpeg\",\"version\":\"${DEBIAN_FFMPEG_PACKAGE_VERSION}\",\"distribution\":\"trixie\",\"selection_kind\":\"debian-package\",\"license\":\"GPL-2.0-or-later\",\"license_path\":\"/usr/local/share/licenses/frame-compare-media-runtime/Debian-FFmpeg-copyright\"}," \
         "    {\"name\":\"vs-placebo\",\"version\":\"2.0.4\",\"source_ref\":\"2.0.4\",\"source_commit\":\"${VS_PLACEBO_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/Lypheo/vs-placebo.git\",\"source_tree_sha256\":\"${VS_PLACEBO_SOURCE_TREE_SHA256}\",\"license\":\"LGPL-2.1-only\",\"selection_kind\":\"tag\"}," \
         "    {\"name\":\"libplacebo\",\"version\":\"commit ${LIBPLACEBO_SOURCE_COMMIT}\",\"source_commit\":\"${LIBPLACEBO_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/haasn/libplacebo.git\",\"source_tree_sha256\":\"${LIBPLACEBO_SOURCE_TREE_SHA256}\",\"license\":\"LGPL-2.1-or-later\",\"selection_kind\":\"commit\"}," \
         "    {\"name\":\"libdovi\",\"version\":\"3.3.2\",\"source_ref\":\"libdovi-3.3.2\",\"source_commit\":\"${LIBDOVI_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/quietvoid/dovi_tool.git\",\"source_tree_sha256\":\"${LIBDOVI_SOURCE_TREE_SHA256}\",\"license\":\"MIT\",\"selection_kind\":\"tag\"}," \
-        "    {\"name\":\"Akarin\",\"version\":\"1.4.1\",\"source_ref\":\"v1.4.1\",\"source_commit\":\"${AKARIN_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/Jaded-Encoding-Thaumaturgy/akarin-vapoursynth-plugin.git\",\"source_tree_sha256\":\"${AKARIN_SOURCE_TREE_SHA256}\",\"license\":\"LGPL-3.0-only AND BSD-3-Clause\",\"selection_kind\":\"tag\"}," \
+        "    {\"name\":\"Akarin\",\"version\":\"1.5.0\",\"source_ref\":\"v1.5.0\",\"source_commit\":\"${AKARIN_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/Jaded-Encoding-Thaumaturgy/akarin-vapoursynth-plugin.git\",\"source_tree_sha256\":\"${AKARIN_SOURCE_TREE_SHA256}\",\"license\":\"LGPL-3.0-only AND BSD-3-Clause\",\"selection_kind\":\"tag\"}," \
         "    {\"name\":\"Akarin zstd\",\"version\":\"1.4.8+dfsg-3build1\",\"source_ref\":\"v1.4.8\",\"source_commit\":\"${AKARIN_ZSTD_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/facebook/zstd.git\",\"source_tree_sha256\":\"${AKARIN_ZSTD_SOURCE_TREE_SHA256}\",\"license\":\"BSD-3-Clause\",\"selection_kind\":\"auditwheel-sbom-package\"}," \
         "    {\"name\":\"VSZip\",\"version\":\"22.1.0\",\"source_ref\":\"22.1.0\",\"source_commit\":\"${VSZIP_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/dnjulek/vapoursynth-zip.git\",\"source_tree_sha256\":\"${VSZIP_SOURCE_TREE_SHA256}\",\"license\":\"MIT AND LGPL-2.1-only\",\"selection_kind\":\"tag\"}," \
         "    {\"name\":\"vapoursynth-zig\",\"version\":\"4.0.0\",\"source_commit\":\"${VAPOURSYNTH_ZIG_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/dnjulek/vapoursynth-zig.git\",\"source_tree_sha256\":\"${VAPOURSYNTH_ZIG_SOURCE_TREE_SHA256}\",\"license\":\"LGPL-2.1-only\",\"selection_kind\":\"commit\"}," \
@@ -284,14 +284,14 @@ FROM python:3.13.15-slim-trixie@sha256:ffb752e139c0a19692a43af8d8523b274222dd68e
 
 ARG VAPOURSYNTH_VERSION=79
 ARG VS_PLACEBO_VERSION=2.0.4
-ARG AKARIN_VERSION=1.4.1
+ARG AKARIN_VERSION=1.5.0
 ARG VSZIP_VERSION=22.1.0
 ARG VAPOURSYNTH_X86_64_WHEEL_SHA256=6f1e37f0ed8eb73e61c3c231fd7f7a0f7acfa893e98d026686e9c81e52c9ce06
 ARG VAPOURSYNTH_AARCH64_WHEEL_SHA256=50d031d07b1839ba362cf314e212edb0760c7ca2a7625a051a0bcbf22aaf9d1c
 ARG VS_PLACEBO_X86_64_WHEEL_SHA256=d38796b739ae231e12e7b4f9449b3cb29cc4a5fa9cd50e8147fdd9a202797fff
 ARG VS_PLACEBO_AARCH64_WHEEL_SHA256=eb025cb3f8d723eeaa64dc19b26fa1a0a05b948eb0cedeb8645680d9695ba97d
-ARG AKARIN_X86_64_WHEEL_SHA256=fd04642fe9d23b012ddacfe0021a4b8f2571c6a6c56feb5f1657d772dab52cd6
-ARG AKARIN_AARCH64_WHEEL_SHA256=28a221867667ba70ed0df69da43413dd5b6a79511f66a878646bb81d710fd888
+ARG AKARIN_X86_64_WHEEL_SHA256=3e4473096d4fce9426e40ef7451e87bc96724c24982c82c7f9a268c3f1f875b8
+ARG AKARIN_AARCH64_WHEEL_SHA256=d07965fa5d64eb246fad6a3fefd69712e5923eda5b91f6471128a48635231ec0
 ARG VSZIP_X86_64_WHEEL_SHA256=08650c2b83391301f602dade914c1e698142f8f17b3e0e92bdb3f73c4a805040
 ARG VSZIP_AARCH64_WHEEL_SHA256=dd13b3234d993bafc4ec1333b576cf7e4ee66d8f83b7af0252d6040fd8d908f9
 ARG DEBIAN_FFMPEG_PACKAGE_VERSION=7:7.1.5-0+deb13u1
@@ -335,7 +335,7 @@ RUN ldconfig && \
 ENV VAPOURSYNTH_EXTRA_PLUGIN_PATH=/opt/vapoursynth-extra-plugins \
     LD_LIBRARY_PATH=/home/framecompare/.local/lib/python3.13/site-packages/vapoursynth:/usr/local/lib \
     LIBGL_ALWAYS_SOFTWARE=1 \
-    FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT=32f99e23e1df4a45427736084b6330739bb5f59fee1bf8b2b55a124897375e60 \
+    FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT=47b602d51fb1016f51ea98075063615f763d3dd9f9c44226d3bf64d519de1926 \
     FRAME_COMPARE_RUNTIME_KIND=docker \
     FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED=1 \
     FRAME_COMPARE_FFMPEG_EXECUTABLE=/usr/bin/ffmpeg \

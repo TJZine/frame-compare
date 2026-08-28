@@ -555,6 +555,7 @@ const ReportViewer = {
         this.dom.modeBtns.forEach(btn => {
             btn.addEventListener('click', () => this.setMode(btn.dataset.mode));
         });
+        this.bindRadioGroup(this.dom.modeBtns, btn => this.setMode(btn.dataset.mode));
         this.dom.btnOverlays.addEventListener('click', () => {
             this.setOverlaysHidden(!this.state.overlaysHidden);
         });
@@ -610,6 +611,7 @@ const ReportViewer = {
         this.dom.fitBtns.forEach(btn => {
             btn.addEventListener('click', () => this.viewport.setFitMode(btn.dataset.fit));
         });
+        this.bindRadioGroup(this.dom.fitBtns, btn => this.viewport.setFitMode(btn.dataset.fit));
         this.dom.sizerImg.addEventListener('load', () => this.viewport.applyFitMode());
         window.addEventListener('resize', () => this.viewport.applyFitMode());
         document.addEventListener('fullscreenchange', () => {
@@ -840,12 +842,73 @@ const ReportViewer = {
         this.dom.filmstripSizeBtns.forEach(btn => {
             btn.addEventListener('click', () => this.setFilmstripSize(btn.dataset.filmstripSize));
         });
+        this.bindRadioGroup(
+            this.dom.filmstripSizeBtns,
+            btn => this.setFilmstripSize(btn.dataset.filmstripSize),
+        );
         this.dom.filmstrip.addEventListener('click', (e) => {
             const item = e.target.closest('.rv-filmstrip-item');
             if (item) this.setFrame(parseInt(item.dataset.idx));
         });
+        this.dom.filmstrip.addEventListener('keydown', (e) => {
+            const item = e.target.closest('.rv-filmstrip-item');
+            if (!item || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+
+            const visibleIndexes = this.visibleFrameIndexes();
+            const position = visibleIndexes.indexOf(parseInt(item.dataset.idx));
+            if (position === -1) return;
+
+            let nextPosition = position;
+            if (e.key === 'ArrowLeft') nextPosition = Math.max(0, position - 1);
+            if (e.key === 'ArrowRight') nextPosition = Math.min(visibleIndexes.length - 1, position + 1);
+            if (e.key === 'Home') nextPosition = 0;
+            if (e.key === 'End') nextPosition = visibleIndexes.length - 1;
+
+            e.preventDefault();
+            e.stopPropagation();
+            this.setFrame(visibleIndexes[nextPosition]);
+            this.dom.filmstrip.querySelector(
+                `.rv-filmstrip-item[data-idx="${this.state.currentFrameIdx}"]`
+            )?.focus();
+        });
         this.dom.filterChips.forEach(btn => {
             btn.addEventListener('click', () => this.setFrameFilter(btn.dataset.categoryKey));
+        });
+    },
+
+    bindRadioGroup(buttons, activate) {
+        Array.from(buttons).forEach(button => {
+            button.addEventListener('keydown', e => {
+                const direction = {
+                    ArrowLeft: -1,
+                    ArrowUp: -1,
+                    ArrowRight: 1,
+                    ArrowDown: 1,
+                }[e.key];
+                const candidates = Array.from(buttons).filter(item => !item.disabled && !item.hidden);
+                if (direction === undefined && e.key !== 'Home' && e.key !== 'End') return;
+                if (candidates.length === 0) return;
+
+                const current = Math.max(0, candidates.indexOf(button));
+                const next = e.key === 'Home'
+                    ? candidates[0]
+                    : e.key === 'End'
+                        ? candidates[candidates.length - 1]
+                        : candidates[(current + direction + candidates.length) % candidates.length];
+                e.preventDefault();
+                e.stopPropagation();
+                activate(next);
+                next.focus();
+            });
+        });
+    },
+
+    syncRadioGroupTabStops(buttons) {
+        const candidates = Array.from(buttons).filter(button => !button.disabled && !button.hidden);
+        const selected = candidates.find(button => button.getAttribute('aria-checked') === 'true')
+            || candidates[0];
+        Array.from(buttons).forEach(button => {
+            button.tabIndex = button === selected ? 0 : -1;
         });
     },
 
@@ -1018,12 +1081,6 @@ const ReportViewer = {
         }
         this.ensureDistinctPairSelection();
         this.state.pairAlignments = this.viewport.normalizedPairAlignments(saved.pairAlignments);
-        if (!this.state.pairAlignments[this.viewport.currentPairAlignmentKey()]) {
-            const legacyAlignment = this.viewport.normalizedAlignmentState(saved);
-            if (legacyAlignment) {
-                this.state.pairAlignments[this.viewport.currentPairAlignmentKey()] = legacyAlignment;
-            }
-        }
         this.viewport.loadCurrentPairAlignment();
         this.normalizeCurrentFrameForFilter();
         if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
@@ -1149,6 +1206,7 @@ const ReportViewer = {
             btn.classList.toggle('active', isActive);
             btn.setAttribute('aria-checked', isActive ? 'true' : 'false');
         });
+        this.syncRadioGroupTabStops(this.dom.filmstripSizeBtns);
     },
 
     setPaletteOrientation(orientation, options = {}) {
@@ -1597,21 +1655,35 @@ const ReportViewer = {
             return;
         }
         switch(e.key) {
-            case 'ArrowLeft': this.prevFrame(); break;
-            case 'ArrowRight': this.nextFrame(); break;
+            case 'ArrowLeft':
+                e.preventDefault();
+                this.prevFrame();
+                break;
+            case 'ArrowRight':
+                e.preventDefault();
+                this.nextFrame();
+                break;
             case 'Home': {
+                e.preventDefault();
                 const visible = this.visibleFrameIndexes();
                 if (visible.length > 0) this.setFrame(visible[0]);
                 break;
             }
             case 'End': {
+                e.preventDefault();
                 const visible = this.visibleFrameIndexes();
                 if (visible.length > 0) this.setFrame(visible[visible.length - 1]);
                 break;
             }
 
-            case 'ArrowUp': this.cycleClip(1); break;
-            case 'ArrowDown': this.cycleClip(-1); break;
+            case 'ArrowUp':
+                e.preventDefault();
+                this.cycleClip(1);
+                break;
+            case 'ArrowDown':
+                e.preventDefault();
+                this.cycleClip(-1);
+                break;
 
             case 's': case 'S': this.setMode('slider'); break;
             case 'o': case 'O': this.setMode('overlay'); break;
@@ -1671,6 +1743,7 @@ const ReportViewer = {
             btn.classList.toggle('active', isActive);
             btn.setAttribute('aria-checked', isActive);
         });
+        this.syncRadioGroupTabStops(this.dom.modeBtns);
 
         this.dom.stage.classList.remove(
             'rv-mode-slider',
@@ -2122,6 +2195,7 @@ const ReportViewer = {
             el.hidden = !isVisible;
             el.classList.toggle('active', isActive);
             el.setAttribute('aria-current', isActive ? 'true' : 'false');
+            el.tabIndex = isVisible && isActive ? 0 : -1;
         });
         this.scrollActiveFilmstripItem();
         this.preloadImages();

@@ -39,7 +39,7 @@ class TestRunDoctor:
     def test_run_doctor_core_failure(self) -> None:
         """Given core check fails → DoctorReport(all_passed=False, critical_failures=[name])."""
         failing_check = DoctorCheck(
-            name="python_version",
+            name="vapoursynth",
             category="core",
             check_fn=lambda: CheckResult(passed=False, message="Failed"),
         )
@@ -47,7 +47,7 @@ class TestRunDoctor:
         report = run_doctor(checks=[failing_check])
 
         assert report.all_passed is False
-        assert "python_version" in report.critical_failures
+        assert "vapoursynth" in report.critical_failures
 
     def test_run_doctor_optional_failure_not_critical(self) -> None:
         """Given optional check fails but core passes → all_passed=False, critical_failures=[]."""
@@ -113,7 +113,6 @@ class TestCollectChecks:
 
         # Verify exact count and order for the current doctor contract.
         assert [check.name for check in checks] == [
-            "python_version",
             "vapoursynth",
             "lsmas",
             "vs_placebo",

@@ -117,3 +117,20 @@ def test_generated_root_junction_alias_is_allowed(
     )
 
     assert workspace.generated_root == generated_root.resolve()
+
+
+def test_workspace_paths_keeps_tmdb_cache_at_shared_generated_root_after_run_reservation(
+    tmp_path: Path,
+) -> None:
+    from frame_compare.config.schema import ConfigSchema, PathsConfig
+    from frame_compare.orchestration.preflight import resolve_paths
+
+    workspace = resolve_paths(
+        ConfigSchema(paths=PathsConfig(generated_dir="generated")),
+        tmp_path,
+    )
+    reserved = workspace.with_run_dir(workspace.generated_root / "run")
+
+    expected = (tmp_path / "generated" / "cache" / "tmdb.toml").resolve()
+    assert workspace.shared_tmdb_cache_path == expected
+    assert reserved.shared_tmdb_cache_path == expected

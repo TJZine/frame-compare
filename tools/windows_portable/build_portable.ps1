@@ -585,7 +585,7 @@ function Install-PythonWheelArtifacts([string]$BundleRoot, [pscustomobject[]]$Ar
     Assert-LastExitCode -CommandLabel "uv pip install $artifactId"
   }
 
-  $akarinArtifact = $Artifacts | Where-Object { $_.id -eq "vs-plugin-akarin-1.4.1-win-amd64-wheel" }
+  $akarinArtifact = $Artifacts | Where-Object { $_.id -eq "vs-plugin-akarin-1.5.0-win-amd64-wheel" }
   $zstd = @(Get-RequiredProperty -Object $akarinArtifact -Name "bundled_dependencies" -Context "Akarin artifact") |
     Where-Object { $_.name -eq "zstd" }
   if ($zstd.Count -ne 1) {

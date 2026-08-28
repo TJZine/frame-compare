@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, staging]
   pull_request:
-    branches: [main, cleanup, staging, dev/v0.2.0]
+    branches: [main, cleanup, staging]
   workflow_dispatch:
 
 permissions:
@@ -33,7 +33,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
-          version: "0.12.5"
+          version: "0.12.7"
 
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}
@@ -62,7 +62,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
-          version: "0.12.5"
+          version: "0.12.7"
 
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}
@@ -89,7 +89,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
-          version: "0.12.5"
+          version: "0.12.7"
 
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}
@@ -127,7 +127,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
-          version: "0.12.5"
+          version: "0.12.7"
 
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}
@@ -156,7 +156,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
-          version: "0.12.5"
+          version: "0.12.7"
 
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}
@@ -185,7 +185,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
-          version: "0.12.5"
+          version: "0.12.7"
 
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}
@@ -207,7 +207,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
-          version: "0.12.5"
+          version: "0.12.7"
 
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}
@@ -239,7 +239,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
-          version: "0.12.5"
+          version: "0.12.7"
 
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}

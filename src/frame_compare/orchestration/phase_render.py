@@ -88,6 +88,7 @@ def run_render_phase(
             overlay_mode=ctx.config.screenshots.overlay_mode,
             ffmpeg_runner=runner,
             reporter=ctx.reporter,
+            parallelism=2,
         ),
     )
     for label, expected in expected_frames.items():

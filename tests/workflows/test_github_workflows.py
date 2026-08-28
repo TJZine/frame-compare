@@ -142,11 +142,12 @@ def test_ci_and_docker_workflows_keep_required_triggers_and_permissions(
     assert ci["permissions"] == {"contents": "read"}
     assert {"pull_request", "workflow_dispatch"} <= set(docker["on"])
     assert docker["permissions"] == {"contents": "read"}
-    assert {"main", "cleanup", "staging", "dev/v0.2.0"} <= set(
-        docker["on"]["pull_request"]["branches"]
-    )
-    assert "dev/v0.2.0" not in ci["on"]["push"]["branches"]
-    assert "dev/v0.2.0" in ci["on"]["pull_request"]["branches"]
+    assert docker["concurrency"] == {
+        "group": "${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}",
+        "cancel-in-progress": "true",
+    }
+    assert {"main", "cleanup", "staging"} <= set(docker["on"]["pull_request"]["branches"])
+    assert set(ci["on"]["pull_request"]["branches"]) == {"main", "cleanup", "staging"}
     workflow_paths = docker["on"]["pull_request"]["paths"]
     assert {
         "uv.lock",
@@ -179,9 +180,7 @@ def test_release_please_remains_guarded_and_non_merging(repo_root: Path) -> None
     release = workflow["jobs"]["release_please"]
     action = next(step for step in release["steps"] if "uses" in step)
     checkout = next(
-        step
-        for step in guard["steps"]
-        if str(step.get("uses", "")).startswith("actions/checkout@")
+        step for step in guard["steps"] if str(step.get("uses", "")).startswith("actions/checkout@")
     )
     guard_step = next(step for step in guard["steps"] if step.get("id") == "guard")
     guard_run = str(guard_step["run"])

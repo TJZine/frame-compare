@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from pathlib import Path
 
 import anyio
 import httpx
@@ -7,6 +8,7 @@ import pytest
 
 import frame_compare.services.tmdb_resolution as tmdb_resolution
 from frame_compare.services.metadata import resolve_metadata
+from frame_compare.services.tmdb_cache import TmdbCache
 from frame_compare.services.tmdb_resolution import resolve_tmdb_match
 from frame_compare.services.types import MetadataConfig, ParsedMetadata
 
@@ -109,6 +111,31 @@ async def test_resolve_metadata_prefers_vvitch_alias_release(
 
     assert result is not None
     assert result.tmdb_id == 310131
+
+
+@pytest.mark.anyio
+async def test_resolve_metadata_keeps_match_when_alias_enrichment_is_rate_limited(
+    async_client_factory: AsyncClientFactory,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/movie/329865/alternative_titles"):
+            return httpx.Response(429)
+        if path.endswith("/search/tv"):
+            return httpx.Response(200, json={"results": []})
+        if path.endswith("/search/multi") or path.endswith("/search/movie"):
+            return httpx.Response(
+                200,
+                json={"results": [_movie_result(329865, "Arrival", "2016-11-10")]},
+            )
+        return httpx.Response(200, json={"results": []})
+
+    config = MetadataConfig(api_key="a" * 32)
+    async with async_client_factory(httpx.MockTransport(handler)) as client:
+        result = await resolve_metadata(["Arrival.2016.2160p.mkv"], config, client)
+
+    assert result is not None
+    assert result.tmdb_id == 329865
 
 
 @pytest.mark.anyio
@@ -386,3 +413,38 @@ async def test_resolve_tmdb_match_searches_variants_with_bounded_concurrency(
     assert outcome.candidates == []
     assert request_count > tmdb_resolution.MAX_CONCURRENT_SEARCH_REQUESTS
     assert 1 < max_active_requests <= tmdb_resolution.MAX_CONCURRENT_SEARCH_REQUESTS
+
+
+@pytest.mark.anyio
+async def test_resolver_cache_replays_candidates_and_aliases_without_network(
+    tmp_path: Path,
+    async_client_factory: AsyncClientFactory,
+) -> None:
+    candidate = _movie_result(
+        329865,
+        "Arrival",
+        "2016-11-10",
+        popularity=25.0,
+    )
+
+    def first_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/alternative_titles"):
+            return httpx.Response(200, json={"titles": []})
+        if request.url.path.endswith("/search/tv"):
+            return httpx.Response(200, json={"results": []})
+        return httpx.Response(200, json={"results": [candidate]})
+
+    config = MetadataConfig(api_key="a" * 32, category_preference="movie")
+    parsed = ParsedMetadata(title="Arrival", year=2016)
+    cache = TmdbCache(tmp_path / "tmdb.toml")
+
+    async with async_client_factory(httpx.MockTransport(first_handler)) as client:
+        first = await resolve_tmdb_match(parsed, config, client, cache=cache)
+
+    def unexpected_network(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"unexpected TMDB request: {request.url}")
+
+    async with async_client_factory(httpx.MockTransport(unexpected_network)) as client:
+        second = await resolve_tmdb_match(parsed, config, client, cache=cache)
+
+    assert second == first

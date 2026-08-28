@@ -7,11 +7,7 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 
 ## Unreleased
 
-### Fixed
-
-
-
-## [0.2.0]
+## [0.5.0]
 
 ### Added
 
@@ -37,9 +33,9 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 
 ### Changed
 
-- Bump Frame Compare to 0.2.0 and refresh the managed stack to Python 3.13.15,
-  uv 0.12.5, VapourSynth R79/API R4.2, L-SMASH-Works 1296, vs-placebo 2.0.4,
-  Akarin 1.4.1, and VSZip 22.1.0. Docker includes FFMS2 5.0; Windows portable
+- Bump Frame Compare to 0.5.0 and refresh the managed stack to Python 3.13.15,
+  uv 0.12.5, VapourSynth R79/API R4.2, L-SMASH-Works 1310, vs-placebo 2.0.4,
+  Akarin 1.5.0, and VSZip 22.1.0. Docker includes FFMS2 5.0; Windows portable
   intentionally excludes FFMS2.
 - Make random, dark, bright, and motion frame selection deterministic and temporally
   stratified while preserving seed reproducibility, minimum-gap behavior, sparse
@@ -57,6 +53,9 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 
 ### Fixed
 
+- Correct computed audio-alignment offsets to use the documented
+  `reference - comparison` sign convention. The pre-MVP shared alignment cache
+  format is reset to schema v1.
 - Merge FFprobe HDR color metadata field-by-field only when VapourSynth frame
   properties are missing, malformed, or H.273-unspecified.
 - Capture FFmpeg picture type from the same exact-frame extraction process used to
@@ -65,9 +64,6 @@ Frame Compare follows Conventional Commits, and Release Please turns the
   post-retry fatal error behavior.
 - Harden VSPreview startup compatibility checks and redact inherited credential
   values from surfaced startup diagnostics.
-  - Correct computed audio-alignment offsets to use the documented
-  `reference - comparison` sign convention. The pre-MVP shared alignment cache
-  format is reset to schema v1.
 - Clarify VSPreview matching-frame confirmation and replace duplicate or malformed
   preview frame-property warnings with Frame Compare's styled assumption details.
 
@@ -85,7 +81,7 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 
 ### Upgrade notes
 
-- Windows v0.1.0 portable installations require the complete v0.2.0 bundle because
+- Windows v0.1.0 portable installations require the complete v0.5.0 bundle because
   the managed media-runtime fingerprint changed; the code-only updater refuses
   incompatible runtimes.
 - Analysis, probe, alignment, and source-index caches include updated runtime

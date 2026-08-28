@@ -9,11 +9,13 @@ import pytest
 from PIL import Image
 
 from frame_compare.config.schema_enums import VsScreenshotWriter
+from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 from frame_compare.render.encoders import (
     _clip_to_rgb24_for_pillow,
     _map_fpng_compression,
     _maybe_expand_tonemapped_video_range,
     apply_overlay_to_file,
+    render_ffmpeg_batch_detailed,
     render_frame,
     render_frame_detailed,
 )
@@ -592,6 +594,76 @@ def test_render_frame_ffmpeg_wraps_unrepresentable_geometry_as_render_error() ->
         render_frame(request, renderer="ffmpeg")
 
     assert "scale dimensions must be positive" in exc_info.value.context.message
+
+
+def _ffmpeg_batch_requests(
+    tmp_path: Path,
+    frame_numbers: tuple[int, ...],
+) -> tuple[DefaultFFmpegRunner, list[RenderRequest]]:
+    runner = DefaultFFmpegRunner()
+    return runner, [
+        RenderRequest(
+            clip=Path("test.mp4"),
+            diagnostic_source=Path("test.mp4"),
+            frame_number=frame,
+            output_path=tmp_path / f"out_{index}.png",
+            overlay=None,
+            encoder_settings=EncoderSettings(),
+            ffmpeg_runner=runner,
+        )
+        for index, frame in enumerate(frame_numbers)
+    ]
+
+
+@pytest.mark.parametrize("frame_numbers", [(-1, 0), (2, 2), (2, 1)])
+def test_render_ffmpeg_batch_rejects_invalid_frame_order(
+    frame_numbers: tuple[int, ...],
+    tmp_path: Path,
+) -> None:
+    _, requests = _ffmpeg_batch_requests(tmp_path, frame_numbers)
+
+    with pytest.raises(ValueError, match="compatible and strictly ordered"):
+        render_ffmpeg_batch_detailed(requests)
+
+
+def test_render_ffmpeg_batch_wraps_output_failure_with_active_request(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runner, requests = _ffmpeg_batch_requests(tmp_path, (10, 20))
+
+    def extract_frames(
+        _video: Path,
+        frame_nums: list[int],
+        output_dir: Path,
+        *,
+        geometry_plan: RenderGeometryPlan | None = None,
+    ) -> list[RenderedFrameFacts]:
+        _ = geometry_plan
+        for index in range(len(frame_nums)):
+            (output_dir / f"{index:09d}.png").touch()
+        return [RenderedFrameFacts(source_frame=frame) for frame in frame_nums]
+
+    original_replace = Path.replace
+
+    def replace(path: Path, target: Path) -> Path:
+        if target == requests[1].output_path:
+            raise OSError("second output failed")
+        return original_replace(path, target)
+
+    monkeypatch.setattr(runner, "extract_frames", extract_frames)
+    monkeypatch.setattr(Path, "replace", replace)
+
+    with pytest.raises(RenderError) as exc_info:
+        render_ffmpeg_batch_detailed(requests)
+
+    assert isinstance(exc_info.value.__cause__, OSError)
+    assert exc_info.value.context.details == {
+        "renderer": "auto",
+        "frame": 20,
+        "output_path": str(requests[1].output_path),
+        "clip": "test.mp4",
+    }
 
 
 def test_apply_overlay_to_file_none_mode_is_noop(monkeypatch) -> None:

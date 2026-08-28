@@ -377,6 +377,7 @@ const Viewport = {
             btn.classList.toggle('active', isActive);
             btn.setAttribute('aria-checked', isActive);
         });
+        this.viewer.syncRadioGroupTabStops(this.viewer.dom.fitBtns);
     },
 
     baseCanvasSize() {

@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from frame_compare.utils.atomic_write import write_text_atomic
+from frame_compare.vs.source import INDEX_CONSTRUCTION_FAILURE_MARKER, source_index_path
 
 
 def write_vspreview_session_script(
@@ -150,7 +151,10 @@ for _raw_path in _BOOTSTRAP_PATHS:
 
 
 def _build_helpers_section() -> str:
-    return '''\
+    marker = json.dumps(INDEX_CONSTRUCTION_FAILURE_MARKER)
+    return (
+        f"INDEX_CONSTRUCTION_FAILURE_MARKER = {marker}\n\n"
+        + '''\
 # ─── Safe Print Helper ────────────────────────────────────────────────────────
 def _reconfigure_text_stream(stream):
     reconfigure = getattr(stream, "reconfigure", None)
@@ -243,12 +247,29 @@ def install_vspreview_warning_filter():
 
 
 def resolve_lwlibavsource(core):
-    """Resolve LWLibavSource using Frame Compare's lsmas-then-lw contract."""
+    """Resolve LWLibavSource from the VapourSynth R79 core.lsmas namespace."""
     if hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource"):
-        return core.lsmas.LWLibavSource
-    if hasattr(core, "lw") and hasattr(core.lw, "LWLibavSource"):
-        return core.lw.LWLibavSource
-    raise RuntimeError("LWLibavSource not found on core.lsmas or core.lw")
+        return core.lsmas
+    raise RuntimeError("LWLibavSource not found on core.lsmas")
+
+
+def load_preview_source(loader, path, index_path, display_name):
+    try:
+        return loader.LWLibavSource(str(path), cachefile=str(index_path))
+    except Exception as original_error:
+        if INDEX_CONSTRUCTION_FAILURE_MARKER not in str(original_error).casefold():
+            raise
+
+        safe_print(
+            _status_line(
+                "[WARN]",
+                f"Retrying {display_name} without an L-SMASH index cache after index construction failed",
+            )
+        )
+        try:
+            return loader.LWLibavSource(str(path), cache=0)
+        except Exception as fallback_error:
+            raise original_error from fallback_error
 
 
 FRAME_PROP_ALIASES = {
@@ -344,6 +365,7 @@ def apply_preview_defaults(core, clip, label):
         return clip
     return core.std.SetFrameProps(clip, **defaults)
 '''
+    )
 
 
 def _build_clip_data_section(
@@ -359,6 +381,7 @@ def _build_clip_data_section(
         targets_lines.append(
             f"    {json.dumps(comp.stem)}: {{"
             f'"path": {json.dumps(str(comp))}, '
+            f'"index_path": {json.dumps(str(source_index_path(comp)))}, '
             f'"display_name": {json.dumps(presentation_names.get(comp.stem, comp.stem))}'
             "},"
         )
@@ -383,6 +406,7 @@ def _build_clip_data_section(
 REFERENCE = {{
     "label": {json.dumps(reference.stem)},
     "path": {json.dumps(str(reference))},
+    "index_path": {json.dumps(str(source_index_path(reference)))},
     "display_name": {json.dumps(presentation_names.get(reference.stem, reference.stem))},
 }}
 
@@ -428,7 +452,6 @@ def main():
     except ImportError:
         safe_print(_status_line("[FAIL]", "VapourSynth is unavailable"))
         sys.exit(1)
-
     core = vs.core
     install_vspreview_warning_filter()
     try:
@@ -447,7 +470,12 @@ def main():
     safe_print(f"    {_key('reference')}     {_value(REFERENCE['display_name'])}")
 
     try:
-        ref_clip = load_source(str(ref_path))
+        ref_clip = load_preview_source(
+            load_source,
+            ref_path,
+            Path(REFERENCE["index_path"]),
+            REFERENCE["display_name"],
+        )
     except Exception as e:
         safe_print(_status_line("[FAIL]", f"Reference source could not be loaded: {e}"))
         sys.exit(1)
@@ -486,7 +514,12 @@ def main():
             continue
 
         try:
-            comp_clip = load_source(str(comp_path))
+            comp_clip = load_preview_source(
+                load_source,
+                comp_path,
+                Path(target["index_path"]),
+                display_name,
+            )
         except Exception as e:
             safe_print(_status_line("[WARN]", f"Comparison source could not be loaded: {e}"))
             continue

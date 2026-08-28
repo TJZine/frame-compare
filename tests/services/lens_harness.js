@@ -269,6 +269,8 @@ function makeEnvironment({ failingWrites = false, coarse = false, autoLoadClones
         clipAccessibleName(clip) { return clip.display.primary; },
         referenceClipIndex() { return 0; },
         viewport: { sliderCanvasRect() { return activeImage.getBoundingClientRect(); } },
+        bindRadioGroup() {},
+        syncRadioGroupTabStops() {},
         announce(message) { announcements.push(message); },
         gridView: { entries() { return []; } },
     };

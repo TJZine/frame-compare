@@ -66,6 +66,7 @@ from frame_compare.services.slowpics_upload_plan import (
     SlowpicsUploadClip,
     build_slowpics_upload_plan,
 )
+from frame_compare.services.tmdb_cache import TmdbCache
 from frame_compare.services.types import MetadataConfig, TmdbMetadata
 
 log = structlog.get_logger()
@@ -102,11 +103,20 @@ async def resolve_run_metadata(
     filenames: list[str],
     config: ConfigSchema,
     client: httpx.AsyncClient,
+    cache: TmdbCache | None = None,
 ) -> TmdbMetadata | None:
+    metadata_config = build_metadata_config(config)
+    if cache is None:
+        return await resolve_metadata(
+            filenames=filenames,
+            config=metadata_config,
+            client=client,
+        )
     return await resolve_metadata(
         filenames=filenames,
-        config=build_metadata_config(config),
+        config=metadata_config,
         client=client,
+        cache=cache,
     )
 
 
@@ -125,6 +135,7 @@ async def run_metadata_phase(
         filenames=[ctx.reference.path.name],
         config=ctx.config,
         client=client,
+        cache=TmdbCache(ctx.workspace.shared_tmdb_cache_path),
     )
     return MetadataPhaseOutput(resolved_metadata=metadata)
 

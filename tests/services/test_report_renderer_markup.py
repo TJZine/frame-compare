@@ -241,6 +241,18 @@ def test_build_html_renders_frame_metadata_and_category_filters(
     )
 
 
+def test_build_html_keeps_shortcut_help_and_omits_redundant_footer(
+    report_payload: ReportPayload,
+) -> None:
+    html = build_html(report_payload)
+
+    assert 'id="help-modal"' in html
+    assert "Viewer Shortcuts" in html
+    assert 'class="rv-footer"' not in html
+    assert "Use arrow keys to navigate" not in html
+    assert html.count('id="report-data"') == 1
+
+
 def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> None:
     html = build_html(report_payload)
     tags = parse_start_tags(html)

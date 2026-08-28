@@ -251,11 +251,18 @@ def test_windows_portable_manifest_tracks_coordinated_media_runtime_artifacts(
         "042ce026e552a31c5c4b89f637fcb5841f69f807babc7e11f11f863a194d9da7"
     )
 
-    lsmas = artifacts["vs-plugin-lsmas-1296.0.0.1-win-amd64-wheel"]
-    assert lsmas["version"] == "1296.0.0.1"
+    lsmas = artifacts["vs-plugin-lsmas-1310.0.0.0-win-amd64-wheel"]
+    assert lsmas["version"] == "1310.0.0.0"
     assert lsmas["install"]["type"] == "copy_file"
     assert lsmas["install"]["source_path"] == "vapoursynth/plugins/LSMASHSource.dll"
-    assert lsmas["url"].endswith("vapoursynth_lsmas-1296.0.0.1-py3-none-win_amd64.whl")
+    assert lsmas["url"].endswith("vapoursynth_lsmas-1310.0.0.0-py3-none-win_amd64.whl")
+    assert lsmas["bytes"] == 11530241
+    assert lsmas["sha256"] == ("8197e2c901ff7b9ac651a66819986bfd993767a0b656a8d11c8f5b53829d2f6b")
+    assert lsmas["source_bytes"] == 19063403
+    assert lsmas["source_sha256"] == (
+        "d529128e2d13763cbb56c21f0fd534191380530de6042907cbdae366b23ba2e5"
+    )
+    assert lsmas["source_commit"] == "7e65185d3f08ba4ad191e9a5cbba3e2c6fd3bb67"
     assert lsmas["install"]["destination"] == "vs/extra-plugins/lsmas/libvslsmashsource.dll"
     assert lsmas["install"]["manifest"] == "libvslsmashsource"
 
@@ -264,11 +271,18 @@ def test_windows_portable_manifest_tracks_coordinated_media_runtime_artifacts(
     assert placebo["install"]["type"] == "python_wheel"
     assert placebo["url"].endswith("-win_amd64.whl")
 
-    akarin = artifacts["vs-plugin-akarin-1.4.1-win-amd64-wheel"]
-    assert akarin["version"] == "1.4.1"
+    akarin = artifacts["vs-plugin-akarin-1.5.0-win-amd64-wheel"]
+    assert akarin["version"] == "1.5.0"
     assert akarin["license"]["spdx"] == "LGPL-3.0-only AND BSD-3-Clause"
     assert akarin["install"]["type"] == "python_wheel"
-    assert akarin["url"].endswith("vapoursynth_akarin-1.4.1-py3-none-win_amd64.whl")
+    assert akarin["url"].endswith("vapoursynth_akarin-1.5.0-py3-none-win_amd64.whl")
+    assert akarin["bytes"] == 25910614
+    assert akarin["sha256"] == ("66ba011c36f2c0a630c6a6662a40ca62d992b266ea36a0c1bf3c988e1738d7ae")
+    assert akarin["source_bytes"] == 538666
+    assert akarin["source_sha256"] == (
+        "68720c5163163fa59624eb72054564fef3375438ca266efe455a7882f1a07849"
+    )
+    assert akarin["source_commit"] == "a72584a969972b4cfd1b1fd11a4b0e3350f83432"
     assert akarin["bundled_dependencies"] == [
         {
             "name": "zstd",
@@ -301,6 +315,12 @@ def test_windows_portable_manifest_tracks_coordinated_media_runtime_artifacts(
     assert ffmpeg["version"].startswith("n8.1.2-34-g9b6c8969e0")
     assert ffmpeg["license"]["spdx"] == "LGPL-2.1-or-later"
     assert not any(artifact_id.startswith("ffms2") for artifact_id in artifacts)
+
+    sources = {source["name"]: source for source in manifest["corresponding_sources"]}
+    lsmash = sources["L-SMASH"]
+    assert lsmash["source_commit"] == "d186eb95388710a7a91f6fd353169b457ebbb9db"
+    assert lsmash["bytes"] == 503436
+    assert lsmash["sha256"] == ("a58cf7fb8314d8422257b9f0a4cabe117aa2fb8a8488b4e9a31f4b6d05c8e00c")
 
     for artifact in (python, vapoursynth, lsmas, placebo, akarin, vszip, ffmpeg):
         assert artifact["bytes"] > 0
@@ -1697,7 +1717,7 @@ def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
         "PyQt6-Qt6": ("6.10.2", "LGPL-3.0-only"),
         "PyQt6-sip": ("13.10.3", "BSD-2-Clause"),
         "VapourSynth": ("79", "LGPL-2.1-or-later"),
-        "vapoursynth-akarin": ("1.4.1", "LGPL-3.0-only"),
+        "vapoursynth-akarin": ("1.5.0", "LGPL-3.0-only"),
         "vapoursynth-vszip": ("22.1.0", "MIT"),
         "vs-placebo": ("2.0.4", "LGPL-2.1-only"),
         "VSPreview": ("0.20.1", "Apache-2.0"),
@@ -1967,7 +1987,7 @@ def test_windows_portable_bundle_inventory_uses_packaged_runtime_contract(
     "relative_path",
     [
         "runtime-smoke.mp4.lwi",
-        "runtime-smoke.mp4.frame-compare-lsw1296-deadbeefcafe.lwi",
+        "runtime-smoke.mp4.frame-compare-lsw1310-deadbeefcafe.lwi",
         "app/src/frame_compare/__pycache__/module.pyc",
         "config/local.toml",
         "comparison_videos/input.mkv",

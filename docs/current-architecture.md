@@ -252,13 +252,21 @@ recovery requirement.
   entries may also retain the computed
   audio alignment result that produced the preview suggestion so a later run can
   decline the human-confirmed offset without rerunning deterministic audio
-  alignment. Cache version 2 requires a bounded scalar stability summary for computed
+  alignment. Cache schema v1 requires a bounded scalar stability summary for computed
   entries and embedded computed results; no per-window evidence or audio is persisted.
   Unreadable, corrupt, unsupported-version, malformed source-table, or
   invalid-entry shared reuse data degrades to the normal alignment path with a
   warning log event. Ordinary no-match, incomplete, or stale source-set misses
   can silently return no reusable set and continue through the normal alignment
   path.
+- `<resolved paths.generated_dir>/cache/tmdb.toml`: shared low-level TMDB response
+  cache owned by `frame_compare.services.tmdb_cache`. It stores ordered normalized
+  search results and alternative-title lists, never the resolver's selected match or
+  the API key. Request keys are opaque hashes rather than plain query text. Positive
+  responses expire after 30 days, valid empty responses after 24 hours, and the cache
+  is capped at 2,000 entries and 5 MiB with deterministic oldest-first eviction.
+  Corrupt, unsupported, malformed, unreadable, unwritable, or lock-blocked cache
+  state degrades to the normal network path; external request failures are not cached.
 - `generated/clip_probe.toml` or `<resolved paths.generated_dir>/clip_probe.toml`:
   shared clip probe cache used by `--from-cache-only` prevalidation before
   run-folder reservation. The file format remains version 1, while each probe key
@@ -266,16 +274,19 @@ recovery requirement.
   selected decoder or standalone FFmpeg/ffprobe lineage change in the managed Windows
   portable or Debian/Docker profiles misses without invalidating unrelated file-format
   data.
-- `<media>.frame-compare-lsw1296-<12-hex-index-fingerprint>.lwi`: Frame
+- `<media>.frame-compare-lsw1310-<12-hex-index-fingerprint>.lwi`: Frame
   Compare-owned L-SMASH-Works index. The token is profile scoped (currently
-  `lsw1296-72386a70c626` on managed/portable Windows,
-  `lsw1296-57e30773738f` on unmanaged Windows, and `lsw1296-597792352e35`
+  `lsw1310-56c451f754fd` on managed/portable Windows,
+  `lsw1310-a619e5ff5505` on unmanaged Windows, and `lsw1310-b86875cb61bd`
   on Debian/Docker). Managed Windows portable and Debian/Docker tokens isolate
   their packaged decoder ABIs; unmanaged profile tokens do not verify native ABI
   changes. Legacy adjacent `<media>.lwi` files are ignored,
   not deleted. A corrupt owned index is removed and rebuilt once; removal/rebuild
   failure is warned and an unusable index location falls back to a cache-free source
-  open.
+  open. Generated VSPreview sessions reuse this exact owned path for reference and
+  comparison source loads, allowing L-SMASH-Works to create it there when missing.
+  The self-contained external preview child leaves rejected parent-owned indexes
+  untouched and retries only index-construction failures cache-free.
 - `<run-folder>/run_info.toml`: root-level, write-only run identity metadata version 2 written
   immediately after every run-folder reservation. It stores creation time, final
   folder name, naming source, source filenames, Frame Compare version, the full
@@ -319,14 +330,15 @@ symlinked config leaf that resolves elsewhere.
 
 `WorkspacePaths` resolves the runtime path set and switches into a reserved run folder
 so screenshots and generated files live inside a fresh directory beneath the resolved
-`paths.generated_dir`, never beneath an external media input. The
-analysis and shared alignment reuse caches are the exceptions:
+`paths.generated_dir`, never beneath an external media input. The analysis,
+shared alignment reuse, and TMDB response caches are the exceptions:
 `WorkspacePaths.cache_dir` and `WorkspacePaths.shared_analysis_cache_dir` remain
 the shared workspace-level `<resolved paths.generated_dir>/cache/analysis` path,
 and `WorkspacePaths.shared_alignment_cache_dir` remains the shared
-workspace-level `<resolved paths.generated_dir>/cache/alignment` path, even after
-`with_run_dir()` moves `generated_dir` and `screenshots_dir` into a fresh run
-folder.
+workspace-level `<resolved paths.generated_dir>/cache/alignment` path. The
+`WorkspacePaths.shared_tmdb_cache_path` file remains at
+`<resolved paths.generated_dir>/cache/tmdb.toml`. All three stay shared after
+`with_run_dir()` moves `generated_dir` and `screenshots_dir` into a fresh run folder.
 
 Normal runs and cache-only runs that proceed reserve a fresh run folder beneath the
 resolved `paths.generated_dir`. Existing run folders are not reused for analysis cache
@@ -424,7 +436,8 @@ Keep these integrations at their current owners:
 
 - metadata lookups: `frame_compare.services.metadata` remains the facade owner;
   `frame_compare.services.tmdb_resolution` owns resolver policy and
-  `frame_compare.services.tmdb_lookup` owns low-level TMDB HTTP and response mapping
+  `frame_compare.services.tmdb_lookup` owns low-level TMDB HTTP and response mapping,
+  while `frame_compare.services.tmdb_cache` owns bounded durable response reuse
 - publishing: `frame_compare.services.publishers`
 - slow.pics post-upload shortcut/webhook policy and action aggregation:
   `frame_compare.services.slowpics_post_upload`
@@ -585,7 +598,12 @@ Review, and Export tabs; fullscreen support; viewport pan, zoom,
 actual/width/height fit, reveal, and adjacent-frame preloading. The toolbar owner uses
 CSS Grid to keep frame, mode, and context/alignment zones stable at wide widths, then
 reflows them to two rows and a narrow stack without JavaScript measurement or DOM
-reordering. One responsive Inspector width token owns both desktop drawer width and
+reordering. Frame arrow shortcuts select the adjacent visible frame while suppressing
+native document and filmstrip scrolling; the selected filmstrip item owns its roving
+tab stop. Custom view-mode, fit, timeline-size, and lens-option radio groups use
+standard arrow and Home/End selection. The header Help dialog is the single persistent
+shortcut reference; the timeline is the final visible report region. One responsive
+Inspector width token owns both desktop drawer width and
 stage reservation; the existing tablet/phone overlay boundary keeps stage margin at
 zero.
 
@@ -727,6 +745,12 @@ static geometry inference; render does not sample content. Native screenshot
 render remains full-frame. The FFmpeg backend applies geometry filters after
 exact frame selection, and the VapourSynth path chooses between the Pillow writer
 and eligible `core.fpng.Write` output without changing CLI import-time behavior.
+The render batch scheduler treats each clip as one production work unit and runs at
+most two clip units at once. Compatible ordered FFmpeg requests within a clip use one
+decode pass; VapourSynth, custom-runner, and non-PNG frames within one clip render
+sequentially while a second clip may overlap. Results remain in request order, and
+overlay/color processing is unchanged. Nested screenshot progress advances after each
+serialized frame completes, or for all FFmpeg frames when their batch completes.
 
 Runtime ownership matrix:
 

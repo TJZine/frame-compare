@@ -422,6 +422,7 @@ def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
             "active_rect_source",
             "active_rect_detection_mode",
             "active_rect_algorithm_id",
+            "version",
         },
     )
 
@@ -481,7 +482,7 @@ def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
         data["active_rect_detection_mode"]
     )
     active_rect_algorithm_id = _parse_active_rect_algorithm_id(data["active_rect_algorithm_id"])
-    metadata_version = _parse_cache_version(data.get("version", CACHE_VERSION))
+    metadata_version = _parse_cache_version(data["version"])
     if metadata_version != CACHE_VERSION:
         raise _CacheParseError
 

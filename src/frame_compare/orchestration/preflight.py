@@ -165,6 +165,7 @@ def _validate_generated_descendants(generated_root: Path) -> None:
         for managed_path in (
             generated_root / "cache" / "analysis",
             generated_root / "cache" / "alignment",
+            generated_root / "cache" / "tmdb.toml",
             generated_root / "clip_probe.toml",
         ):
             require_managed_descendant(generated_root, managed_path)

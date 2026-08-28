@@ -15,12 +15,12 @@ def test_vspreview_extra_pins_supported_native_windows_media_stack(repo_root: Pa
     dependencies = set(project["optional-dependencies"]["vspreview"])
 
     assert "vapoursynth==79" in dependencies
-    assert "vapoursynth-lsmas==1296.0.0.1; sys_platform == 'win32'" in dependencies
+    assert "vapoursynth-lsmas==1310.0.0.0; sys_platform == 'win32'" in dependencies
     assert "vs-placebo==2.0.4; sys_platform == 'win32'" in dependencies
 
     native_install = _read_text_or_fail(repo_root / "docs" / "getting-started" / "native.md")
     assert "pins the repository-managed VapourSynth Python package to R79" in native_install
-    assert "`vapoursynth-lsmas 1296.0.0.1`" in native_install
+    assert "`vapoursynth-lsmas 1310.0.0.0`" in native_install
     assert "`vs-placebo 2.0.4`" in native_install
 
 
@@ -76,4 +76,6 @@ def test_docker_workflow_invokes_canonical_runtime_gate(repo_root: Path) -> None
     )
 
     steps = workflow["jobs"]["docker-integration"]["steps"]
-    assert any(step.get("run") == "bash tools/verify_docker_integration.sh" for step in steps)
+    assert any(
+        step.get("run") == "bash tools/verify_docker_integration.sh --no-cache" for step in steps
+    )

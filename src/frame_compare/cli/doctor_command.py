@@ -19,7 +19,6 @@ if TYPE_CHECKING:
     from frame_compare.utils.progress_protocol import ProgressReporter
 
 _DOCTOR_DISPLAY_LABELS = {
-    "python_version": "Python version",
     "vapoursynth": "VapourSynth",
     "lsmas": "L-SMASH-Works",
     "vs_placebo": "vs-placebo",

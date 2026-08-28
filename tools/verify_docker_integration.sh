@@ -226,6 +226,7 @@ from pathlib import Path
 
 import vapoursynth as vs
 
+from frame_compare.config.schema import ToneCurve
 from frame_compare.vs.props import get_optional_int_prop, props_indicate_limited_range
 from frame_compare.vs.runtime_contract import (
     AKARIN_DEBIAN_ZSTD_RELEASE,
@@ -638,13 +639,30 @@ with tempfile.TemporaryDirectory(prefix="frame-compare-media-fixtures-") as fixt
         )
         tonemapped_hdr = apply_tonemap(
             untagged_hdr_clip,
-            TonemapSettings(target_nits=203),
+            TonemapSettings(tone_curve=ToneCurve.BT2390, target_nits=203),
+            hdr_lsw.hdr_metadata,
+        )
+        spline_hdr = apply_tonemap(
+            untagged_hdr_clip,
+            TonemapSettings(tone_curve=ToneCurve.SPLINE, target_nits=203),
             hdr_lsw.hdr_metadata,
         )
         tonemapped_hdr_frame = tonemapped_hdr.get_frame(0)
         assert_true(
             tonemapped_hdr_frame.props.get("_Tonemapped") == 1,
             "production tonemap did not render the classified untagged HDR source",
+        )
+        curve_diff_clips = [
+            core.std.PlaneStats(tonemapped_hdr, spline_hdr, plane=plane) for plane in range(3)
+        ]
+        curve_diffs = [
+            float(diff_clip.get_frame(frame_index).props["PlaneStatsDiff"])
+            for diff_clip in curve_diff_clips
+            for frame_index in range(tonemapped_hdr.num_frames)
+        ]
+        assert_true(
+            any(difference > 0 for difference in curve_diffs),
+            "BT2390 output matched spline across the HDR fixture",
         )
         for props, loader_name in ((hdr_props, "LWLibavSource"), (hdr_ffms_props, "FFMS2")):
             assert_true(
@@ -727,7 +745,7 @@ checks = {
     for entry in doctor["checks"]
     if isinstance(entry, dict) and isinstance(entry.get("id"), str)
 }
-for required_check in ("python_version", "vapoursynth", "lsmas", "vs_placebo", "ffms2", "ffmpeg"):
+for required_check in ("vapoursynth", "lsmas", "vs_placebo", "ffms2", "ffmpeg"):
     assert_true(required_check in checks, f"doctor required check missing: {required_check}")
     assert_true(
         checks[required_check]["status"] == "pass",
@@ -817,10 +835,10 @@ required_proof_markers=(
   "DOCKER_PROOF plugin_dir="
   "DOCKER_PROOF extra_plugin_path=/opt/vapoursynth-extra-plugins"
   "DOCKER_PROOF core_plugins="
-  "DOCKER_PROOF bundled_native_plugins=ok akarin=1.4.1:"
+  "DOCKER_PROOF bundled_native_plugins=ok akarin=1.5.0:"
   "zstd=1.4.8+dfsg-3build1"
   "vszip=22.1.0:"
-  "DOCKER_PROOF lsmash_works=ok release=1296.0.0.0"
+  "DOCKER_PROOF lsmash_works=ok release=1310.0.0.0"
   "DOCKER_PROOF ffms2=ok release=5.0"
   "DOCKER_PROOF vs_placebo=ok version=2.0.4"
   "DOCKER_PROOF debian_ffmpeg="

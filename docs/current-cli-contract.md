@@ -479,9 +479,9 @@ unchanged.
   durable output by one blank line and report completed/total work with a labeled
   `ETA` once Rich has an estimate; before then, only completed/total work is shown.
   Indeterminate activity uses an ASCII spinner after its description, while
-  one-step phases remain simple activity lines without a bar. Live render descriptions
-  use compact source identity followed by an ASCII `- frame N` suffix; constrained
-  terminals may visually ellipsize the description without changing its stored value.
+  one-step phases remain simple activity lines without a bar. The nested screenshot
+  bar uses the stable aggregate description `Screenshots` and advances as each
+  screenshot completes; an FFmpeg batch advances together when the batch completes.
   A successful top-level phase leaves a durable ASCII status line with elapsed time
   when it runs for at least 10.0 seconds. Successful nested tasks remain transient,
   while skipped,
@@ -639,15 +639,32 @@ recovery requirement.
   fingerprint. In the managed Windows portable and Debian/Docker profiles, a
   selected supported FFmpeg lineage change cannot reuse an offset computed under the
   previous tool build.
+- Successful low-level TMDB search and alternative-title responses are reused from
+  `<resolved paths.generated_dir>/cache/tmdb.toml`. Ordered normalized response data
+  is cached rather than the final ranked match, so current resolver policy always
+  reruns. Opaque request keys exclude the API key and do not store plain query text;
+  cached response values can still reveal media-title history. Positive entries
+  expire after 30 days, valid empty entries after 24 hours, and deterministic
+  oldest-first eviction limits the file to 2,000 entries and 5 MiB. Authentication,
+  rate-limit, timeout, transport, HTTP, JSON, and malformed-response failures are not
+  cached. Corrupt, unsupported, malformed, unreadable, unwritable, or lock-blocked
+  cache state produces a sanitized warning and continues through the network path.
+  Deleting this file clears durable TMDB history and forces fresh successful lookups.
 - Frame Compare-owned L-SMASH-Works indexes use
-  `<media>.frame-compare-lsw1296-<12-hex-index-fingerprint>.lwi`. The token is
-  profile scoped (currently `lsw1296-72386a70c626` on managed/portable Windows,
-  `lsw1296-57e30773738f` on unmanaged Windows, and `lsw1296-597792352e35`
+  `<media>.frame-compare-lsw1310-<12-hex-index-fingerprint>.lwi`. The token is
+  profile scoped (currently `lsw1310-56c451f754fd` on managed/portable Windows,
+  `lsw1310-a619e5ff5505` on unmanaged Windows, and `lsw1310-b86875cb61bd`
   on Debian/Docker). Managed Windows portable and Debian/Docker tokens isolate
   their packaged decoder ABIs; unmanaged profile tokens do not verify native ABI
   changes. Legacy adjacent `<media>.lwi` files are ignored rather than deleted. A
   corrupt owned index is removed and rebuilt once; removal/rebuild failure produces
   a warning and an unusable index location retries source loading without an index.
+  Generated VSPreview sessions pass this same owned, runtime-versioned path as the
+  `cachefile` for the reference and every comparison; a missing index may be created
+  there by L-SMASH-Works instead of creating a second adjacent index. When L-SMASH
+  rejects that index location during preview loading, the external preview child does
+  not remove or rebuild the parent-owned index; it retries that source cache-free and
+  preserves the original construction error if the fallback also fails.
 - Analysis is skipped automatically when `dark_frame_count`, `bright_frame_count`,
   and `motion_frame_count` are all `0`; `frame_plan` still selects configured
   user/random frames. Every run that proceeds reserves a fresh run folder beneath
@@ -695,12 +712,15 @@ recovery requirement.
   metric algorithm identity, and analysis settings before continuing. It does
   not clear unrelated shared analysis entries and does not delete shared
   previous-offset reuse entries under
-  `<resolved paths.generated_dir>/cache/alignment/`.
+  `<resolved paths.generated_dir>/cache/alignment/` or the shared TMDB response file.
 - `--from-cache-only` is analysis-cache-only. When analysis is not skipped, it validates
   the matching shared analysis cache entry for the exact current performance mode
   and metric algorithm identity before metadata prefetch and before run-folder
   reservation, so a missing, wrong-mode, or invalid entry does not leave an empty
   run folder.
+- `--from-cache-only` does not require or prohibit TMDB network access after analysis
+  cache prevalidation succeeds. `--skip-metadata`, disabled TMDB, and a missing API
+  key perform no TMDB cache reads or writes.
 - When the exact all-source selection-domain token requires probe data and the
   probe cache is missing, `--from-cache-only` fails before metadata prefetch and
   before run-folder reservation rather than validating a weaker fingerprint.
@@ -1494,14 +1514,16 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 
 - `doctor` runs dependency diagnostics through `run_doctor`.
 - `doctor --json` writes a single JSON object to stdout through the doctor command owner.
+- Python compatibility remains enforced by package metadata, runtime manifests, and build
+  validation; `doctor` does not emit a separate Python-version check.
 - `doctor.baseline_version` is the supported VapourSynth release (`R79`).
   `doctor.media_runtime` contains the code-owned component contract, scoped
   fingerprints, and index token. `doctor.runtime_environment` reports the
   deployment kind, expected and declared full fingerprints, declaration syntax,
   match state, and whether the current runtime declares FFMS2 mandatory.
 - Media checks report public observable state only: VapourSynth release/API fields;
-  L-SMASH-Works namespace and required functions (its native version is not exposed
-  by the plugin API and is reported as unverifiable at runtime); vs-placebo
+  L-SMASH-Works `core.lsmas` namespace and required functions (its native version is
+  not exposed by the plugin API and is reported as unverifiable at runtime); vs-placebo
   distribution version and `placebo.Tonemap`; FFMS2 policy and `ffms2.Source`; and
   resolved FFmpeg/ffprobe paths plus their first `-version` lines. Managed Windows
   portable and Docker runtimes require both FFmpeg tools to match the selected

@@ -157,6 +157,7 @@ function fakeElement() {
         focus() {
             if (activeDocument) activeDocument.activeElement = this;
         },
+        scrollIntoView() {},
         replaceChildren(...children) {
             this.children = children;
         },
@@ -363,6 +364,7 @@ function loadViewer({ clipCount, savedState = null }) {
             ...fakeElement(),
             dataset: { filmstripSize: size },
         })),
+        filmstrip: fakeElement(),
         activeFilterBadge: fakeElement(),
         alignPopover: {
             ...fakeElement(),
@@ -489,6 +491,9 @@ const summary = {};
             panX: 12,
             panY: -5,
             revealPercent: 120,
+            alignmentPreset: 'custom',
+            alignX: 77,
+            alignY: -88,
             pairAlignments: {
                 '0:1': { alignmentPreset: 'custom', alignX: 5, alignY: -2 },
                 '1:0': { alignmentPreset: 'custom', alignX: -7, alignY: 3 },
@@ -518,6 +523,37 @@ const summary = {};
         currentAlignment: [viewer.state.alignX, viewer.state.alignY],
         alignmentStatus: viewer.dom.alignmentStatus.textContent,
     };
+}
+
+{
+    const { viewer } = loadViewer({
+        clipCount: 2,
+        savedState: {
+            alignmentPreset: 'custom',
+            alignX: 77,
+            alignY: -88,
+        },
+    });
+
+    assert.deepEqual(Object.keys(viewer.state.pairAlignments), []);
+    assert.equal(viewer.state.alignmentPreset, 'none');
+    assert.equal(viewer.state.alignX, 0);
+    assert.equal(viewer.state.alignY, 0);
+
+    const malformedStorage = loadViewer({
+        clipCount: 2,
+        savedState: {
+            pairAlignments: {
+                '0:1': { alignmentPreset: 'custom', alignX: 6, alignY: -7 },
+            },
+        },
+    });
+    malformedStorage.storage.set(malformedStorage.storageKey, '{malformed');
+    malformedStorage.viewer.restorePersistedState();
+    assert.deepEqual(Object.keys(malformedStorage.viewer.state.pairAlignments), ['0:1']);
+    assert.equal(malformedStorage.viewer.state.alignmentPreset, 'custom');
+    assert.equal(malformedStorage.viewer.state.alignX, 6);
+    assert.equal(malformedStorage.viewer.state.alignY, -7);
 }
 
 {
@@ -993,6 +1029,102 @@ const summary = {};
         contentEditable: viewer.isShortcutEditableTarget(contentEditable),
         nestedInButton: viewer.isShortcutEditableTarget(nestedInButton),
         plain: viewer.isShortcutEditableTarget(plain),
+    };
+}
+
+{
+    const { viewer, document } = loadViewer({ clipCount: 4 });
+    const buttons = ['first', 'second', 'third'].map(value => ({
+        ...fakeElement(),
+        dataset: { value },
+    }));
+    buttons[0].setAttribute('aria-checked', 'true');
+    buttons[1].setAttribute('aria-checked', 'false');
+    buttons[2].setAttribute('aria-checked', 'false');
+    let selected = 'first';
+    viewer.bindRadioGroup(buttons, button => {
+        selected = button.dataset.value;
+        buttons.forEach(item => item.setAttribute('aria-checked', item === button ? 'true' : 'false'));
+        viewer.syncRadioGroupTabStops(buttons);
+    });
+    viewer.syncRadioGroupTabStops(buttons);
+
+    let prevented = false;
+    let stopped = false;
+    buttons[0].dispatch('keydown', {
+        key: 'ArrowLeft',
+        preventDefault() { prevented = true; },
+        stopPropagation() { stopped = true; },
+    });
+
+    assert.equal(selected, 'third');
+    assert.equal(document.activeElement, buttons[2]);
+    assert.deepEqual(buttons.map(button => button.tabIndex), [-1, -1, 0]);
+    assert.equal(prevented, true);
+    assert.equal(stopped, true);
+    summary.radioGroupKeyboard = {
+        wrapsAndSelects: selected === 'third',
+        rovingTabStop: buttons[2].tabIndex === 0,
+        preventsNativeScroll: prevented,
+        stopsGlobalShortcut: stopped,
+    };
+}
+
+{
+    const { viewer } = loadViewer({ clipCount: 4 });
+    let prevented = false;
+    viewer.dom.modal.classList.remove('open');
+    viewer.dom.infoModal.classList.remove('open');
+    viewer.handleKey({
+        key: 'ArrowRight',
+        target: { tagName: 'DIV', isContentEditable: false, closest() { return null; } },
+        preventDefault() { prevented = true; },
+    });
+    assert.equal(viewer.state.currentFrameIdx, 1);
+    assert.equal(prevented, true);
+    summary.frameKeyboard = {
+        selectedNextFrame: viewer.state.currentFrameIdx === 1,
+        preventsNativeScroll: prevented,
+    };
+}
+
+{
+    const { viewer, document } = loadViewer({ clipCount: 4 });
+    const items = [0, 1].map(idx => ({
+        ...fakeElement(),
+        dataset: { idx: String(idx) },
+        closest(selector) {
+            return selector === '.rv-filmstrip-item' ? this : null;
+        },
+    }));
+    const filmstrip = fakeElement();
+    filmstrip.children = items;
+    filmstrip.querySelector = selector => {
+        const match = selector.match(/data-idx="(\d+)"/);
+        return match ? items[Number(match[1])] : null;
+    };
+    viewer.dom.filmstrip = filmstrip;
+    viewer.dom.filterChips = [];
+    viewer.bindFilmstripEvents();
+
+    let prevented = false;
+    let stopped = false;
+    filmstrip.dispatch('keydown', {
+        key: 'ArrowRight',
+        target: items[0],
+        preventDefault() { prevented = true; },
+        stopPropagation() { stopped = true; },
+    });
+
+    assert.equal(viewer.state.currentFrameIdx, 1);
+    assert.equal(document.activeElement, items[1]);
+    assert.equal(prevented, true);
+    assert.equal(stopped, true);
+    summary.filmstripKeyboard = {
+        selectedNextFrame: viewer.state.currentFrameIdx === 1,
+        focusedSelection: document.activeElement === items[1],
+        preventsNativeScroll: prevented,
+        stopsGlobalShortcut: stopped,
     };
 }
 

@@ -14,13 +14,9 @@ from frame_compare.vs.runtime_contract import media_runtime_fingerprint
 from .cli_helpers import runner
 
 _AUDITED_HINTS = (
-    (
-        "Run Frame Compare with Python 3.13+; see "
-        "https://github.com/TJZine/frame-compare#requirements"
-    ),
     "Make VapourSynth importable; see https://github.com/TJZine/frame-compare#quick-start",
     (
-        "Make L-SMASH-Works available to VapourSynth; see "
+        "Make L-SMASH-Works available under core.lsmas; see "
         "https://github.com/TJZine/frame-compare#quick-start"
     ),
     (
@@ -56,7 +52,6 @@ _AUDITED_HINTS = (
     "Fix config/config.toml syntax, then rerun doctor",
     "Fix the reported config/environment validation errors, then rerun doctor",
     "Replace the TMDB credential with a 32-character hexadecimal API key",
-    "Move the credential to FRAME_COMPARE_TMDB__API_KEY and remove TMDB_API_KEY",
 )
 
 
@@ -77,7 +72,7 @@ def test_doctor_json_conforms_to_schema_shape(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "1")
     checks = [
         DoctorCheck(
-            name="python_version",
+            name="vapoursynth",
             category="core",
             check_fn=lambda: CheckResult(passed=True, message="ok"),
         ),
@@ -128,7 +123,7 @@ def test_doctor_json_conforms_to_schema_shape(monkeypatch: MonkeyPatch) -> None:
     assert len(payload["doctor"]["checks"]) == 2
     first = payload["doctor"]["checks"][0]
     second = payload["doctor"]["checks"][1]
-    assert first["id"] == "python_version"
+    assert first["id"] == "vapoursynth"
     assert first["category"] == "core"
     assert first["status"] == "pass"
     assert "message" in first
@@ -169,9 +164,9 @@ def test_doctor_exit_code_is_3_on_core_failure(monkeypatch: MonkeyPatch) -> None
 def test_doctor_human_output_is_readiness_first_and_grouped(monkeypatch: MonkeyPatch) -> None:
     checks = [
         DoctorCheck(
-            name="python_version",
+            name="vapoursynth",
             category="core",
-            check_fn=lambda: CheckResult(passed=True, message="Python 3.13.0"),
+            check_fn=lambda: CheckResult(passed=True, message="VapourSynth available"),
         ),
         DoctorCheck(
             name="ffmpeg",
@@ -220,7 +215,7 @@ def test_doctor_human_output_is_readiness_first_and_grouped(monkeypatch: MonkeyP
     assert (
         lines.index("Required") < lines.index("Optional") < lines.index("Network and credentials")
     )
-    assert "[OK] Python version — Python 3.13.0" in result.stdout
+    assert "[OK] VapourSynth — VapourSynth available" in result.stdout
     assert "[WARN] FFmpeg — FFmpeg not found" in result.stdout
     assert "[SKIP] VSPreview — VSPreview not installed" in result.stdout
     assert "[OK] slow.pics — slow.pics reachable" in result.stdout

@@ -497,14 +497,6 @@ def test_detect_plugins_none_present() -> None:
     assert all(not v for v in plugins.values())
 
 
-def test_detect_plugins_lsmas_alias() -> None:
-    """Verify lsmas alias detection (lw)."""
-    core = SimpleNamespace()
-    core.lw = SimpleNamespace(LWLibavSource=lambda: None)
-    plugins = detect_plugins(core)  # type: ignore
-    assert plugins["lsmas"] is True
-
-
 def test_require_plugin_missing_raises_error() -> None:
     """Verify error raised for missing plugin."""
     core = make_mock_core()

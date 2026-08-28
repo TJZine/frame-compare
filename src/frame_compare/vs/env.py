@@ -343,8 +343,7 @@ def detect_plugins(core: vs.Core) -> dict[str, bool]:
     """
     return {
         # L-SMASH Works (lsmas) - source loading
-        "lsmas": (hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource"))
-        or (hasattr(core, "lw") and hasattr(core.lw, "LWLibavSource")),
+        "lsmas": hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource"),
         # libplacebo - tonemapping
         "libplacebo": hasattr(core, "placebo") and hasattr(core.placebo, "Tonemap"),
     }

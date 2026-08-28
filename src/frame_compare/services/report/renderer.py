@@ -12,7 +12,6 @@ from frame_compare.services.report.category_display import (
     humanize_category,
     label_repeats_category,
 )
-from frame_compare.services.report.payload import REPORT_VERSION
 from frame_compare.services.report.viewer import get_css, get_js
 
 ALL_CATEGORY_FILTER_KEY = "__fc_all__"
@@ -243,9 +242,9 @@ def _render_bottom_panel(
         </div>
         <div class="rv-filmstrip-controls">
             <div class="rv-filmstrip-size-control" role="radiogroup" aria-label="Filmstrip size">
-                <button type="button" data-filmstrip-size="compact" role="radio" aria-checked="false"{disabled_attr}>Compact</button>
+                <button type="button" data-filmstrip-size="compact" role="radio" aria-checked="false" tabindex="-1"{disabled_attr}>Compact</button>
                 <button type="button" data-filmstrip-size="normal" class="active" role="radio" aria-checked="true"{disabled_attr}>Normal</button>
-                <button type="button" data-filmstrip-size="large" role="radio" aria-checked="false"{disabled_attr}>Large</button>
+                <button type="button" data-filmstrip-size="large" role="radio" aria-checked="false" tabindex="-1"{disabled_attr}>Large</button>
             </div>
             <button id="btn-filmstrip-toggle" type="button" aria-expanded="{aria_expanded}" aria-label="{aria_label}" title="{title}"{disabled_attr}>{expanded_label}</button>
         </div>
@@ -474,10 +473,10 @@ def _render_controls(
 
         <div class="rv-control-group rv-mode-controls" role="radiogroup" aria-label="View mode">
             <button data-mode="slider" class="active" role="radio" aria-checked="true" aria-label="Slider mode" title="Slider (S)">Slider</button>
-            <button data-mode="overlay" role="radio" aria-checked="false" aria-label="Single clip view" title="Single clip view (O)">Single</button>
-            <button data-mode="diff" role="radio" aria-checked="false" aria-label="Difference mode" title="Difference (D)">Diff</button>
-            <button data-mode="blink" role="radio" aria-checked="false" aria-label="Blink mode" title="Blink (B)">Blink</button>
-            <button data-mode="grid" role="radio" aria-checked="false" aria-label="Grid mode" title="Grid comparison">Grid</button>
+            <button data-mode="overlay" role="radio" aria-checked="false" tabindex="-1" aria-label="Single clip view" title="Single clip view (O)">Single</button>
+            <button data-mode="diff" role="radio" aria-checked="false" tabindex="-1" aria-label="Difference mode" title="Difference (D)">Diff</button>
+            <button data-mode="blink" role="radio" aria-checked="false" tabindex="-1" aria-label="Blink mode" title="Blink (B)">Blink</button>
+            <button data-mode="grid" role="radio" aria-checked="false" tabindex="-1" aria-label="Grid mode" title="Grid comparison">Grid</button>
         </div>
 
         <div class="rv-context-zone">
@@ -517,17 +516,17 @@ def _render_lens_settings() -> str:
             <fieldset>
                 <legend>Size</legend>
                 <div class="rv-lens-setting-options" role="radiogroup" aria-label="Lens size">
-                    <button type="button" role="radio" data-lens-size="small" aria-checked="false">Small</button>
+                    <button type="button" role="radio" data-lens-size="small" aria-checked="false" tabindex="-1">Small</button>
                     <button type="button" role="radio" data-lens-size="medium" aria-checked="true">Medium</button>
-                    <button type="button" role="radio" data-lens-size="large" aria-checked="false">Large</button>
+                    <button type="button" role="radio" data-lens-size="large" aria-checked="false" tabindex="-1">Large</button>
                 </div>
             </fieldset>
             <fieldset>
                 <legend>Sample marker</legend>
                 <div class="rv-lens-setting-options" role="radiogroup" aria-label="Sample marker style">
                     <button type="button" role="radio" data-lens-marker="off" aria-checked="true">Off</button>
-                    <button type="button" role="radio" data-lens-marker="ring" aria-checked="false">Ring</button>
-                    <button type="button" role="radio" data-lens-marker="brackets" aria-checked="false">Brackets</button>
+                    <button type="button" role="radio" data-lens-marker="ring" aria-checked="false" tabindex="-1">Ring</button>
+                    <button type="button" role="radio" data-lens-marker="brackets" aria-checked="false" tabindex="-1">Brackets</button>
                 </div>
             </fieldset>
             <div data-lens-comparison-settings hidden>
@@ -560,8 +559,8 @@ def _render_viewport_palette() -> str:
 
         <div class="rv-palette-group" role="radiogroup" aria-label="Fit mode">
             <button data-fit="actual" class="active" role="radio" aria-checked="true" aria-label="Actual size" title="Actual size (1:1)">1:1</button>
-            <button data-fit="width" role="radio" aria-checked="false" aria-label="Fit width" title="Fit width (↔)">↔</button>
-            <button data-fit="height" role="radio" aria-checked="false" aria-label="Fit height" title="Fit height (↕)">↕</button>
+            <button data-fit="width" role="radio" aria-checked="false" tabindex="-1" aria-label="Fit width" title="Fit width (↔)">↔</button>
+            <button data-fit="height" role="radio" aria-checked="false" tabindex="-1" aria-label="Fit height" title="Fit height (↕)">↕</button>
         </div>
 
         <div class="rv-palette-group rv-alignment-group">
@@ -800,13 +799,8 @@ def _render_help_modal() -> str:
     </div>"""
 
 
-def _render_footer(json_str: str) -> str:
-    return f"""    <footer class="rv-footer">
-        <div>Frame Compare v{REPORT_VERSION}</div>
-        <div>Use arrow keys to navigate • S/O/D/B to change mode</div>
-    </footer>
-
-    <script type="application/json" id="report-data">{json_str}</script>
+def _render_scripts(json_str: str) -> str:
+    return f"""    <script type="application/json" id="report-data">{json_str}</script>
     <script>{get_js()}</script>"""
 
 
@@ -873,7 +867,7 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
         left_clip_index=left_clip_index,
         right_clip_index=right_clip_index,
     )
-    footer_html = _render_footer(json_str)
+    scripts_html = _render_scripts(json_str)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -893,6 +887,6 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
 {modal_html}
 {info_modal_html}
 {bottom_panel}
-{footer_html}
+{scripts_html}
 </body>
 </html>"""

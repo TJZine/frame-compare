@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from pathlib import Path
-from subprocess import CalledProcessError, TimeoutExpired
+from subprocess import CalledProcessError, CompletedProcess, TimeoutExpired
 from typing import TYPE_CHECKING, Protocol
 
-from frame_compare.render.backend._ffmpeg_frame import build_extract_frame_argv
+from frame_compare.render.backend._ffmpeg_frame import (
+    build_extract_frame_argv,
+    build_extract_frames_argv,
+)
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 from frame_compare.utils.media_facts import PictureType, RenderedFrameFacts, normalize_picture_type
 from frame_compare.utils.subproc import run_subprocess
@@ -71,18 +75,57 @@ class DefaultFFmpegRunner:
             overwrite=True,
             geometry_plan=geometry_plan,
         )
-        try:
-            completed = run_subprocess(argv, timeout_seconds=self._extraction_timeout_seconds)
-        except FileNotFoundError as exc:
-            raise FFmpegNotFoundError() from exc
-        except TimeoutExpired as exc:
-            raise FFmpegError("ffmpeg timed out while extracting frame", 124) from exc
-        except CalledProcessError as exc:
-            raise FFmpegError(exc.stderr.decode(errors="replace"), exc.returncode) from exc
+        completed = self._run_extraction(
+            argv,
+            timeout_message="ffmpeg timed out while extracting frame",
+        )
         return RenderedFrameFacts(
             source_frame=frame_num,
             picture_type=parse_showinfo_picture_type(completed.stderr),
         )
+
+    def extract_frames(
+        self,
+        video: Path,
+        frame_nums: Sequence[int],
+        output_dir: Path,
+        *,
+        geometry_plan: RenderGeometryPlan | None = None,
+    ) -> list[RenderedFrameFacts]:
+        """Extract ordered frames in one decode pass into numbered staging files."""
+        output_dir.mkdir(parents=True, exist_ok=True)
+        argv = build_extract_frames_argv(
+            video=video,
+            frame_nums=frame_nums,
+            output_pattern=output_dir / "%09d.png",
+            overwrite=True,
+            geometry_plan=geometry_plan,
+        )
+        completed = self._run_extraction(
+            argv,
+            timeout_message="ffmpeg timed out while extracting frames",
+        )
+        picture_types = parse_showinfo_picture_types(completed.stderr, len(frame_nums))
+        return [
+            RenderedFrameFacts(source_frame=frame_num, picture_type=picture_type)
+            for frame_num, picture_type in zip(frame_nums, picture_types, strict=True)
+        ]
+
+    def _run_extraction(
+        self,
+        argv: list[str],
+        *,
+        timeout_message: str,
+    ) -> CompletedProcess[bytes]:
+        try:
+            return run_subprocess(argv, timeout_seconds=self._extraction_timeout_seconds)
+        except FileNotFoundError as exc:
+            raise FFmpegNotFoundError() from exc
+        except TimeoutExpired as exc:
+            raise FFmpegError(timeout_message, 124) from exc
+        except CalledProcessError as exc:
+            stderr = exc.stderr.decode(errors="replace")
+            raise FFmpegError(stderr, exc.returncode) from exc
 
     def probe_hdr(self, video: Path) -> HDRMetadata | None:
         metadata = probe_hdr_metadata(video)
@@ -96,21 +139,18 @@ class DefaultFFmpegRunner:
 
 
 _SHOWINFO_TYPE_RE = re.compile(rb"\[Parsed_showinfo_[^]]+\].*?\btype\s*[:=]\s*([^\s,\]]+)")
+_SHOWINFO_INDEXED_TYPE_RE = re.compile(
+    rb"\[Parsed_showinfo_[^]]+\][^\r\n]*?\bn\s*[:=]\s*(\d+)"
+    rb"[^\r\n]*?\btype\s*[:=]\s*([^\s,\]]+)"
+)
 
 
-def parse_showinfo_picture_type(stderr: bytes | str) -> PictureType | None:
-    """Return one unambiguous picture type from selected-frame ``showinfo`` output.
-
-    ``showinfo`` is intentionally parsed only on its own ``Parsed_showinfo_*``
-    diagnostics. Duplicate identical records are harmless; a missing, unknown,
-    or contradictory value is represented as ``None``.
-    """
-    raw = stderr.encode() if isinstance(stderr, str) else stderr
+def _resolve_picture_type_tokens(tokens: Sequence[bytes]) -> PictureType | None:
     values: set[PictureType] = set()
     saw_unknown = False
     saw_invalid = False
-    for match in _SHOWINFO_TYPE_RE.finditer(raw):
-        token = match.group(1).rstrip(b".;")
+    for raw_token in tokens:
+        token = raw_token.rstrip(b".;")
         if token == b"?":
             saw_unknown = True
             continue
@@ -122,3 +162,31 @@ def parse_showinfo_picture_type(stderr: bytes | str) -> PictureType | None:
     if saw_unknown or saw_invalid or len(values) != 1:
         return None
     return values.pop()
+
+
+def parse_showinfo_picture_type(stderr: bytes | str) -> PictureType | None:
+    """Return one unambiguous picture type from selected-frame ``showinfo`` output.
+
+    ``showinfo`` is intentionally parsed only on its own ``Parsed_showinfo_*``
+    diagnostics. Duplicate identical records are harmless; a missing, unknown,
+    or contradictory value is represented as ``None``.
+    """
+    raw = stderr.encode() if isinstance(stderr, str) else stderr
+    return _resolve_picture_type_tokens(
+        [match.group(1) for match in _SHOWINFO_TYPE_RE.finditer(raw)]
+    )
+
+
+def parse_showinfo_picture_types(
+    stderr: bytes | str, expected_count: int
+) -> list[PictureType | None]:
+    """Return picture types keyed by selected-frame output index."""
+    if expected_count < 0:
+        raise ValueError("expected_count must be non-negative")
+    raw = stderr.encode() if isinstance(stderr, str) else stderr
+    tokens_by_index: list[list[bytes]] = [[] for _ in range(expected_count)]
+    for match in _SHOWINFO_INDEXED_TYPE_RE.finditer(raw):
+        index = int(match.group(1))
+        if index < expected_count:
+            tokens_by_index[index].append(match.group(2))
+    return [_resolve_picture_type_tokens(tokens) for tokens in tokens_by_index]
