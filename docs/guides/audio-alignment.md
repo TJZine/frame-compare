@@ -79,7 +79,10 @@ instructions and prompts are visibly nested beneath the blocking `[WAIT]` state.
 known non-actionable vendor `SyntaxWarning` is suppressed in the VSPreview child;
 when Frame Compare reports incomplete preview color properties, it applies the same
 explicit BT.709 preview defaults that VSPreview would otherwise assume, avoiding the
-redundant warning once per output. Other child and native diagnostics remain inherited.
+redundant warning once per output. Missing modern `_Range` is reported once but remains
+unset, preserving VSPreview's native range inference. VSPreview 0.20's malformed empty
+`<>` duplicate is filtered; warnings with actual property details and other native
+diagnostics remain inherited.
 
 Confirmation uses untrimmed source-frame indices. Find the same visible moment in the
 reference and comparison, then enter the reference frame followed by the comparison

@@ -6,6 +6,7 @@ These tests do NOT require VSPreview, VapourSynth, FFmpeg, or any display.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -32,6 +33,7 @@ from frame_compare.vspreview.errors import VSPreviewError
 from frame_compare.vspreview.session_script import (
     _build_helpers_section,
     _build_script_content,
+    _build_script_header,
     write_vspreview_session_script,
 )
 
@@ -441,7 +443,8 @@ def _execute_generated_script(
     output_indices: list[int] = []
     output_stems: list[str] = []
     resolved_frame_props = {
-        stem: {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1} for stem in ("ref", *comparison_stems)
+        stem: {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1, "_Range": 0}
+        for stem in ("ref", *comparison_stems)
     }
     if frame_props_by_stem is not None:
         resolved_frame_props.update(frame_props_by_stem)
@@ -803,7 +806,7 @@ def test_generated_stream_reconfigure_helper_is_best_effort_for_known_stream_fai
         stderr=StreamWithEncodingFailure(),
     )
 
-    exec(_build_helpers_section(), {"sys": fake_sys})
+    exec(_build_helpers_section(), {"sys": fake_sys, "logging": logging})
 
 
 def test_build_script_content_resolves_lwlibavsource_from_lsmas_namespace(
@@ -1094,7 +1097,7 @@ def test_generated_script_current_human_output_organization_without_launching_vs
     ) in captured.err
     assert "next" not in captured.err
     assert "          Inspect the untrimmed clips" not in captured.err
-    assert "VSPreview Assumptions" not in captured.err
+    assert "VSPreview Display Assumptions" not in captured.err
     assert "a" in captured.err
     assert "b" in captured.err
 
@@ -1145,7 +1148,8 @@ def test_generated_assumptions_use_prepared_names_not_internal_stems(
     )
 
     output = capsys.readouterr().err
-    assert "ATV WEB-DL | DV HDR10+ | Kitsune missing" in output
+    assert "source      ATV WEB-DL | DV HDR10+ | Kitsune" in output
+    assert "Color metadata incomplete" in output
     assert "very-long-raw-comparison-stem" not in output
 
 
@@ -1201,20 +1205,21 @@ def test_generated_script_collects_preview_assumptions_before_outputs_and_ready(
         comparison_stems=("a", "b"),
         frame_props_by_stem={
             "ref": {"_Transfer": 2, "_Primaries": "oops"},
-            "a": {"_Matrix": "9", "_Transfer": "16", "_Primaries": 9},
+            "a": {"_Matrix": "9", "_Transfer": "16", "_Primaries": 9, "_Range": 0},
             "b": {"_Matrix": "not-an-int", "_Transfer": 1},
         },
     )
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "VSPreview Assumptions" in captured.err
-    for token in ("ref", "b", "_Matrix", "_Transfer", "_Primaries"):
+    assert "[WARN] VSPreview Display Assumptions" in captured.err
+    for token in ("ref", "b", "Color metadata incomplete"):
         assert token in captured.err
-    assert "display-safe BT.709 defaults" in captured.err
-    assert "preview only" in captured.err
-    assert "render/report semantics" in captured.err
-    assert "a missing" not in captured.err
+    for raw_property in ("_Matrix", "_Transfer", "_Primaries", "_Range"):
+        assert raw_property not in captured.err
+    assert "standard display defaults (BT.709)" in captured.err
+    assert "Preview only; source, render, and report unchanged" in captured.err
+    assert "source      a" not in captured.err
 
 
 def test_generated_script_serializes_non_finite_preview_props_as_assumptions(
@@ -1229,17 +1234,18 @@ def test_generated_script_serializes_non_finite_preview_props_as_assumptions(
         comparison_stems=("a",),
         frame_props_by_stem={
             "ref": {"_Matrix": float("nan"), "_Transfer": float("inf"), "_Primaries": 1},
-            "a": {"_Matrix": 1.0, "_Transfer": 1, "_Primaries": 1},
+            "a": {"_Matrix": 1.0, "_Transfer": 1, "_Primaries": 1, "_Range": 0},
         },
     )
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "VSPreview Assumptions" in captured.err
+    assert "VSPreview Display Assumptions" in captured.err
     assert "ref" in captured.err
-    assert "_Matrix" in captured.err
-    assert "_Transfer" in captured.err
-    assert "a missing" not in captured.err
+    assert "Color metadata incomplete" in captured.err
+    assert "_Matrix" not in captured.err
+    assert "_Transfer" not in captured.err
+    assert "source      a" not in captured.err
 
 
 def test_generated_script_applies_reported_preview_defaults_and_explains_hint_direction(
@@ -1272,6 +1278,62 @@ def test_generated_script_applies_reported_preview_defaults_and_explains_hint_di
     assert "If confirmed: trim 3f from comparison" in overlay_text_by_stem["b"]
     assert "Suggested match: REF 0 <-> CMP 0" in overlay_text_by_stem["c"]
     assert "If confirmed: no trim" in overlay_text_by_stem["c"]
+
+
+def test_generated_script_reports_missing_range_without_setting_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    applied_frame_props: dict[str, dict[str, int]] = {}
+
+    _execute_generated_script(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        suggested_offsets_by_key={"ref:a": 0},
+        comparison_stems=("a",),
+        frame_props_by_stem={
+            "ref": {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1},
+            "a": {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1, "_Range": 0},
+        },
+        applied_frame_props=applied_frame_props,
+    )
+
+    output = capsys.readouterr().err
+    assert "[WARN] VSPreview Display Assumptions" in output
+    assert "source      ref" in output
+    assert "Color-range metadata missing; VSPreview infers preview range" in output
+    assert "Preview only; source, render, and report unchanged" in output
+    assert "_Range" not in output
+    assert "ref" not in applied_frame_props
+
+
+def test_generated_warning_filter_only_hides_exact_empty_vspreview_warning() -> None:
+    namespace: dict[str, object] = {}
+    exec(_build_script_header() + _build_helpers_section(), namespace)
+    warning_filter = namespace["_VSPreviewWarningFilter"]()
+    exact_body = namespace["_EMPTY_FRAME_ASSUMPTION_BODY"]
+
+    def _record(
+        message: str,
+        *,
+        name: str = "root",
+        level: int = logging.WARNING,
+    ) -> logging.LogRecord:
+        return logging.LogRecord(name, level, "", 0, message, (), None)
+
+    exact = _record(f"Video Node 0: {exact_body}")
+    named = _record(
+        "Video Node 0: The following frame properties had to be assumed for previewing: "
+        "<_Matrix=1 (BT.709)>"
+    )
+
+    assert warning_filter.filter(exact) is False
+    assert warning_filter.filter(_record(f"Video Node 0: {exact_body} extra")) is True
+    assert warning_filter.filter(_record(f"Video Node 0: {exact_body}", level=logging.INFO)) is True
+    assert warning_filter.filter(_record(f"Video Node 0: {exact_body}", name="vendor")) is True
+    assert warning_filter.filter(named) is True
+    assert warning_filter.filter(_record("decoder warning")) is True
 
 
 def test_generated_script_does_not_slice_source_clips_from_suggested_offsets(

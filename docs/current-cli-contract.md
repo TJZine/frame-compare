@@ -507,7 +507,10 @@ unchanged.
   child-only Python warning environment. When Frame Compare reports missing,
   unspecified, or malformed preview color properties, the generated session applies
   the same explicit BT.709 preview defaults that VSPreview would otherwise assume;
-  this avoids VSPreview's redundant per-output frame-property warnings.
+  this avoids VSPreview's redundant per-output frame-property warnings. Missing modern
+  `_Range` remains unset and is reported once in Frame Compare's styled assumptions;
+  VSPreview 0.20's malformed empty `<>` duplicate is filtered without changing preview
+  range behavior or suppressing warnings that name actual properties.
 - The known slow.pics upload start/complete lifecycle events are DEBUG evidence in
   normal TTY runs because the product progress stream already represents the same
   lifecycle. Retry, rate-limit, server, timeout, and network warnings remain
@@ -1169,7 +1172,7 @@ diagnostic order is:
    first source load can emit native indexing diagnostics
 3. generated reference FPS plus prepared `Comparison N` identities, audio hints, and
    paired truthful output-slot mappings
-4. generated `VSPreview Assumptions`, only when assumptions exist
+4. generated `[WARN] VSPreview Display Assumptions`, only when assumptions exist
 5. generated `[OK] VSPreview Ready` with a directly nested operator action
 6. parent `[WAIT] VSPreview Confirmation` with nested instructions and prompts
 
@@ -1185,13 +1188,17 @@ no-color output retain the literal lifecycle markers. Native source/index diagno
 remain inherited without buffering; the known non-actionable `vstools.enums.color`
 `SyntaxWarning` is suppressed in the child.
 
-Generated VSPreview assumptions are preview-only diagnostics derived from
+Generated VSPreview display assumptions are preview-only diagnostics derived from
 Frame Compare's existing clip probe metadata and serialized into the generated
 session script. Missing, unspecified, malformed, or unparseable `_Matrix`,
 `_Transfer`, or `_Primaries` frame properties are collected and shown in the
-`VSPreview Assumptions` section before output rows and before `VSPreview Ready`.
+styled assumptions section after output rows and before `VSPreview Ready`. Normal
+output identifies the source and describes the preview behavior without exposing raw
+frame-property names.
 For those properties only, the generated session sets explicit BT.709 values on the
 preview clip so VSPreview does not repeat its equivalent warning for every output.
+Missing modern `_Range` is reported separately but remains unset so VSPreview retains
+its native range inference and display behavior.
 The generated session does not decode source frames just to collect these assumptions.
 These preview-only defaults do not change render, report, analysis, or alignment
 semantics.
