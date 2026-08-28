@@ -142,11 +142,10 @@ def test_ci_and_docker_workflows_keep_required_triggers_and_permissions(
     assert ci["permissions"] == {"contents": "read"}
     assert {"pull_request", "workflow_dispatch"} <= set(docker["on"])
     assert docker["permissions"] == {"contents": "read"}
-    assert {"main", "cleanup", "staging", "dev/v0.2.0"} <= set(
+    assert {"main", "cleanup", "staging"} <= set(
         docker["on"]["pull_request"]["branches"]
     )
-    assert "dev/v0.2.0" not in ci["on"]["push"]["branches"]
-    assert "dev/v0.2.0" in ci["on"]["pull_request"]["branches"]
+    assert set(ci["on"]["pull_request"]["branches"]) == {"main", "cleanup", "staging"}
     workflow_paths = docker["on"]["pull_request"]["paths"]
     assert {
         "uv.lock",

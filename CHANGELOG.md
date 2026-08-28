@@ -7,15 +7,7 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 
 ## Unreleased
 
-### Fixed
-
-- Correct computed audio-alignment offsets to use the documented
-  `reference - comparison` sign convention. The pre-MVP shared alignment cache
-  format is reset to schema v1.
-- Clarify VSPreview matching-frame confirmation and avoid duplicate preview
-  frame-property warnings after Frame Compare reports and applies the same defaults.
-
-## [0.2.0]
+## [0.5.0]
 
 ### Added
 
@@ -41,7 +33,7 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 
 ### Changed
 
-- Bump Frame Compare to 0.2.0 and refresh the managed stack to Python 3.13.15,
+- Bump Frame Compare to 0.5.0 and refresh the managed stack to Python 3.13.15,
   uv 0.12.5, VapourSynth R79/API R4.2, L-SMASH-Works 1296, vs-placebo 2.0.4,
   Akarin 1.4.1, and VSZip 22.1.0. Docker includes FFMS2 5.0; Windows portable
   intentionally excludes FFMS2.
@@ -61,6 +53,11 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 
 ### Fixed
 
+- Correct computed audio-alignment offsets to use the documented
+  `reference - comparison` sign convention. The pre-MVP shared alignment cache
+  format is reset to schema v1.
+- Clarify VSPreview matching-frame confirmation and avoid duplicate preview
+  frame-property warnings after Frame Compare reports and applies the same defaults.
 - Merge FFprobe HDR color metadata field-by-field only when VapourSynth frame
   properties are missing, malformed, or H.273-unspecified.
 - Capture FFmpeg picture type from the same exact-frame extraction process used to
@@ -84,7 +81,7 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 
 ### Upgrade notes
 
-- Windows v0.1.0 portable installations require the complete v0.2.0 bundle because
+- Windows v0.1.0 portable installations require the complete v0.5.0 bundle because
   the managed media-runtime fingerprint changed; the code-only updater refuses
   incompatible runtimes.
 - Analysis, probe, alignment, and source-index caches include updated runtime

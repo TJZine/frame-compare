@@ -2,7 +2,7 @@ name: Docker Integration (VS + FFmpeg)
 
 on:
   pull_request:
-    branches: [main, cleanup, staging, dev/v0.2.0]
+    branches: [main, cleanup, staging]
     paths:
       - Dockerfile
       - docker-compose*.yml

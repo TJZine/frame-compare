@@ -56,7 +56,6 @@ def test_staging_check_triggers_do_not_change_release_please_scope(repo_root: Pa
         "main",
         "cleanup",
         "staging",
-        "dev/v0.2.0",
     ]
     assert docs["on"]["push"]["branches"] == ["main", "staging"]
     assert docs["on"]["pull_request"]["branches"] == ["main", "cleanup", "staging"]
@@ -64,6 +63,5 @@ def test_staging_check_triggers_do_not_change_release_please_scope(repo_root: Pa
         "main",
         "cleanup",
         "staging",
-        "dev/v0.2.0",
     ]
     assert release_please["on"]["push"]["branches"] == ["main"]
