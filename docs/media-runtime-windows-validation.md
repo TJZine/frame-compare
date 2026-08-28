@@ -31,14 +31,14 @@ The expected candidate profile is:
 | --- | --- |
 | Python | 3.13.15 |
 | VapourSynth | R79, API R4.2 |
-| L-SMASH-Works | `vapoursynth-lsmas` 1296.0.0.1 / native lineage 1296.0.0.0 |
+| L-SMASH-Works | `vapoursynth-lsmas` 1310.0.0.0 / native lineage 1310.0.0.0 |
 | FFMS2 | Absent from the Windows baseline |
 | vs-placebo | 2.0.4 |
-| Akarin | 1.4.1, `akarin` namespace loaded |
+| Akarin | 1.5.0, `akarin` namespace loaded |
 | VSZip | 22.1.0, `vszip` namespace loaded |
 | FFmpeg | `n8.1.2-34-g9b6c8969e0`, BtbN win64 LGPL 8.1 build |
-| Full runtime fingerprint | `59c875f1d2a3eb3df541ed6c7a434eea6ebe40473666920699b698e8738840dd` |
-| L-SMASH index token | `lsw1296-72386a70c626` |
+| Full runtime fingerprint | `2c043dabb96a4ad68d51fa46eff7504f9200fe781fe2705a6cbb384d13c18974` |
+| L-SMASH index token | `lsw1310-56c451f754fd` |
 
 ## 1. Exact source and repository gates
 
@@ -297,7 +297,7 @@ Verify all of the following:
 
 - A legacy adjacent `<media>.lwi` is ignored and not deleted.
 - The candidate creates
-  `<media>.frame-compare-lsw1296-72386a70c626.lwi`.
+  `<media>.frame-compare-lsw1310-56c451f754fd.lwi`.
 - A second run reuses the candidate-owned index.
 - A corrupt candidate-owned index is removed and regenerated once.
 - A missing index is created normally.
@@ -319,7 +319,9 @@ Verify with old and newly generated data:
 
 ## 8. Portable update boundary
 
-Keep one untouched installation of the previous R78 bundle.
+Keep one untouched installation of the immediate predecessor to this 1310 candidate:
+the R79 / L-SMASH-Works 1296 / Akarin 1.4.1 bundle with full runtime fingerprint
+`59c875f1d2a3eb3df541ed6c7a434eea6ebe40473666920699b698e8738840dd`.
 
 Required cases:
 

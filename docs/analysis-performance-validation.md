@@ -120,7 +120,7 @@ $AnimeComparison = (Resolve-Path -LiteralPath `
 
 Prepare probe data and warm Frame Compare-owned, runtime-versioned L-SMASH-Works
 `.lwi` source indexes through a normal application run before timing. The current
-filename suffix is `.frame-compare-lsw1296-72386a70c626.lwi`; an unrelated legacy
+filename suffix is `.frame-compare-lsw1310-56c451f754fd.lwi`; an unrelated legacy
 adjacent `<media>.lwi` is intentionally not a warm-cache input. Point `--input` at a directory containing
 only the fixed case under test:
 

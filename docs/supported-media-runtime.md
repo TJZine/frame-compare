@@ -13,12 +13,12 @@ A version shown here is supported only as part of the complete profile described
 | VSPreview | 0.20.1 | **0.20.1** | 2026-07-17 | Stable Python release | The UI release is unchanged; Frame Compare's launcher restores the three VSJetPack 1.x APIs it still uses before starting it with the locked graph below. |
 | VSJetEngine | 1.2.0 | **1.7.0** | 2026-08-21 | Stable Python release | Current locked VSPreview dependency resolution. |
 | VSJetPack | 1.5.0 | **2.2.2** | 2026-08-18 | Stable Python release | Current locked resolution; Frame Compare provides a bounded VSPreview compatibility bootstrap for the removed `vs_object`, `set_output`, and `DitherType.is_fmtc` APIs. |
-| Akarin | Not bundled | **vapoursynth-akarin 1.4.1**, commit `0b4a71d30572aa04b56686d4deff8c9c3fd9e6cc` | 2026-05-12 | Official PyPI wheels and upstream tag | Bundled native plugin surface with Windows x64 and Linux x86_64/aarch64 wheels. The Windows wheel's zstd DLL matches MSYS2 CLANG64 zstd 1.5.7-2 exactly; Linux wheel SBOMs identify Ubuntu libzstd1 1.4.8+dfsg-3build1. Namespace loading, source provenance, and the combined LGPL-3.0-only/BSD-3-Clause license surface are verified. |
+| Akarin | 1.4.1 | **vapoursynth-akarin 1.5.0**, commit `a72584a969972b4cfd1b1fd11a4b0e3350f83432` | 2026-08-27 | Official PyPI wheels and upstream tag | Bundled native plugin surface with Windows x64 and Linux x86_64/aarch64 wheels. The Windows wheel's zstd DLL still matches MSYS2 CLANG64 zstd 1.5.7-2 exactly; Linux wheel SBOMs still identify Ubuntu libzstd1 1.4.8+dfsg-3build1. Namespace loading, source provenance, and the combined LGPL-3.0-only/BSD-3-Clause license surface are verified. |
 | VSZip | Not bundled | **vapoursynth-vszip 22.1.0**, commit `beb7a0ab0e4166580b76560ae3f7c7f5e376ac90` | 2026-07-16 | Official PyPI wheels and upstream tag | Bundled native plugin surface with Windows x64 and Linux x86_64/aarch64 wheels. Its build manifest pins statically compiled vapoursynth-zig commit `b87ff61ce680fa5a4cf7d44a9cb4b605c5037432` and zigimg commit `0bbe201a5591219177f2444371c2897746b47774`; loading, provenance, and the combined MIT/LGPL-2.1-only license surface are verified. |
 | VSJetPack support graph | jetpytools 2.2.7; psutil absent | **jetpytools 3.1.1; psutil 7.2.2** | Resolved 2026-08-15 | Locked Python resolution | Accepted current dependency graph; these versions are hash-locked on every supported Python platform. |
-| L-SMASH-Works | 1282.0.0.0 | **1296.0.0.0**, commit `a83318210c183c8ebbe703d975ffc76fb499ef07` | 2026-07-07 | Formal native release | Latest stable native release and first selected lineage using the VapourSynth API 4 implementation. |
-| Windows L-SMASH-Works package | 1282 lineage | **vapoursynth-lsmas 1296.0.0.1** | 2026-07-08 | Non-yanked official PyPI wheel | Packaging follow-up for the 1296 native lineage. Its plugin DLL does not require a separately bundled MSVC redistributable DLL, unlike the release archive DLL inspected during this refresh. |
-| L-SMASH | v2.14.5 | commit **`84740c5d960ab622f4c08b971dc59192bc27ef74`** | 2025-07-05 | Pinned commit, not a release | Exact L-SMASH revision selected and tested by L-SMASH-Works 1296. No newer appropriate formal stable tag supersedes it. |
+| L-SMASH-Works | 1296.0.0.0 | **1310.0.0.0**, commit `7e65185d3f08ba4ad191e9a5cbba3e2c6fd3bb67` | 2026-08-23 | Formal native release | Latest stable native release. It preserves the API 4 video source surface and adds audio source filters plus audio-gap corrections. |
+| Windows L-SMASH-Works package | 1296.0.0.1 | **vapoursynth-lsmas 1310.0.0.0** | 2026-08-23 | Non-yanked official PyPI wheel | Official wheel for the 1310 native lineage. Its plugin DLL imports only Windows/UCRT system libraries; unlike the release archive DLL, it does not require external MSVCP140 or VCRUNTIME140 DLLs. |
+| L-SMASH | commit `84740c5d960ab622f4c08b971dc59192bc27ef74` | commit **`d186eb95388710a7a91f6fd353169b457ebbb9db`** | 2026-07-28 | Pinned maintainer-fork commit, not a release | Exact L-SMASH revision selected and tested by L-SMASH-Works 1310. No newer appropriate formal stable tag supersedes it. |
 | OBUParse (Docker) | Not present | commit **`a67fcab9cd9d56c866a7a860f8c4aeb91b8817e8`** | 2026-06-22 | Pinned commit, shared library | Required directly by the selected L-SMASH revision (`obuparse.h` and `-lobuparse`). Docker builds the shared target and preserves `libobuparse.so.2` plus its unversioned symlink. |
 | FFMS2 | 5.0 | **5.0**, commit `7ed5e4d039ca9a6236bd2ebdfdd656c4304fbe04` | 2024-05-28 | Formal stable release | 5.0 remains the latest formal stable release. It is rebuilt for Docker against the selected VapourSynth and Debian FFmpeg stack and remains excluded from Windows. |
 | vs-placebo | 2.0.2 | **2.0.4**, commit `3cfd23f257ecb62b0cbd81eaaca092e18ae8e579` | 2026-07-14 | Non-yanked stable release | Latest non-yanked stable wheel; 2.0.3 is yanked. Requires Python 3.12+ and VapourSynth R74+. |
@@ -50,11 +50,11 @@ and Frame Compare-owned indexes before reuse.
 ### Windows x64 portable
 
 - VapourSynth R79 portable runtime and CPython 3.13 wheel layout.
-- L-SMASH-Works 1296 through the official `vapoursynth-lsmas 1296.0.0.1`
+- L-SMASH-Works 1310 through the official `vapoursynth-lsmas 1310.0.0.0`
   Windows wheel.
 - vs-placebo 2.0.4 Windows wheel with its selected libplacebo and libdovi
   lineages.
-- Akarin 1.4.1 and VSZip 22.1.0 Windows wheels, including their native plugin
+- Akarin 1.5.0 and VSZip 22.1.0 Windows wheels, including their native plugin
   payloads, bundled zstd/vapoursynth-zig/zigimg lineages, license files, and
   upstream source provenance.
 - Retained BtbN FFmpeg 8.1-branch Windows x64 LGPL-only artifact.
@@ -66,14 +66,14 @@ and Frame Compare-owned indexes before reuse.
 ### Debian Trixie / Docker
 
 - VapourSynth R79 manylinux wheel.
-- L-SMASH-Works 1296 built from source against VapourSynth API 4 and the Debian
+- L-SMASH-Works 1310 built from source against VapourSynth API 4 and the Debian
   FFmpeg development ABI.
 - OBUParse built as `libobuparse.so.2` from the pinned commit required by the
   selected L-SMASH source; the runtime image preserves the SONAME/symlink and
   verifies actual L-SMASH linkage.
 - FFMS2 5.0 built from source against the same VapourSynth and Debian FFmpeg stack.
 - vs-placebo 2.0.4 manylinux wheel.
-- Akarin 1.4.1 and VSZip 22.1.0 manylinux wheels, loaded and inspected through
+- Akarin 1.5.0 and VSZip 22.1.0 manylinux wheels, loaded and inspected through
   their VapourSynth namespaces by the Docker integration gate; the gate also
   verifies Akarin's auditwheel zstd SBOM and the statically compiled VSZip inputs.
 - Debian Trixie FFmpeg runtime package `7:7.1.5-0+deb13u1`.
@@ -98,12 +98,13 @@ CPython 3.13-compatible ABI3 wheel and C++20 native-build requirements. Runtime
 diagnostics read the public release identity from `vapoursynth.__version__` and the
 API identity separately from `vapoursynth.__api_version__`.
 
-### L-SMASH-Works 1296
+### L-SMASH-Works 1310
 
-The selected release moves the VapourSynth plugin implementation to API 4. Relevant
-upstream changes include alpha-format handling, `av_sync=true` undefined-behavior
-fixes, aspect-ratio behavior, MPEG-1 repeated-field/duration behavior, and source/index
-handling. Both supported functions must register under `lsmas`:
+The selected release preserves the VapourSynth API 4 implementation and the video
+source/index behavior established by 1296. It adds `LibavSMASHAudioSource` and
+`LWLibavAudioSource` and fixes partial audio-gap rendering, post-resampling gap
+coordinates, and lossy-audio pre-roll. Frame Compare does not consume the new audio
+filters; its two required video functions must remain registered under `lsmas`:
 
 - `LibavSMASHSource`
 - `LWLibavSource`
@@ -115,6 +116,14 @@ frame-property helper before comparing loader results.
 A changed frame count, duration, or frame property is not automatically treated as a
 Frame Compare regression; it must be classified against the upstream correction and
 the media specification.
+
+### Akarin 1.5.0
+
+The selected release adds floating-point precision formatting to `akarin.Text`, fixes
+numeric-prefix parsing, and changes JIT allocation to named anonymous mappings. The
+`akarin` namespace remains compatible with the runtime proof. The Windows wheel keeps
+the exact zstd 1.5.7-2 DLL used by 1.4.1, and both Linux wheels retain the same
+auditwheel-recorded Ubuntu zstd lineage.
 
 ### FFMS2 5.0
 
@@ -152,12 +161,12 @@ without discarding L-SMASH-Works indexes.
 Frame Compare-owned L-SMASH-Works indexes use a profile-scoped filename:
 
 ```text
-<media>.frame-compare-lsw1296-<12-hex-index-fingerprint>.lwi
+<media>.frame-compare-lsw1310-<12-hex-index-fingerprint>.lwi
 ```
 
-The current managed/portable Windows token is `lsw1296-72386a70c626`; the unmanaged
-Windows token is `lsw1296-57e30773738f`; and the Debian/Docker token is
-`lsw1296-597792352e35`. Legacy `<media>.lwi` files adjacent to the media file
+The current managed/portable Windows token is `lsw1310-56c451f754fd`; the unmanaged
+Windows token is `lsw1310-a619e5ff5505`; and the Debian/Docker token is
+`lsw1310-b86875cb61bd`. Legacy `<media>.lwi` files adjacent to the media file
 are ignored rather than deleted. A corrupt Frame Compare-owned index is removed and
 rebuilt once, with a warning when removal or rebuilding fails and a cache-free source
 open as the last recovery path for an unusable index location.
@@ -170,10 +179,10 @@ installed bundle's full runtime fingerprint with the signed update manifest befo
 changing files. A missing, legacy, malformed, or different fingerprint fails closed,
 even when an unsafe Python-dependency override was requested.
 
-Crossing from R78 to the selected R79/1296/2.0.4/Akarin/VSZip runtime requires a
-complete portable bundle reinstall because the runtime fingerprints and Frame
-Compare-owned index tokens change. Generated data should remain outside the bundle
-when it must survive replacement.
+Crossing from the previous R79/1296/2.0.4/Akarin 1.4.1/VSZip runtime to the selected
+R79/1310/2.0.4/Akarin 1.5.0/VSZip runtime requires a complete portable bundle reinstall
+because the runtime fingerprints and Frame Compare-owned index tokens change.
+Generated data should remain outside the bundle when it must survive replacement.
 
 ## Licensing and corresponding source
 

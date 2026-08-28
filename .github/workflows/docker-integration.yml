@@ -30,4 +30,4 @@ jobs:
           persist-credentials: false
 
       - name: Run canonical Docker verification
-        run: bash tools/verify_docker_integration.sh
+        run: bash tools/verify_docker_integration.sh --no-cache

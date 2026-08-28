@@ -138,7 +138,7 @@ def test_windows_and_debian_decoder_profiles_do_not_share_cache_identity() -> No
     linux = media_runtime_identity("analysis", profile="debian-trixie")
     windows_lsw = windows["components"]["decoder"]["l_smash_works"]
     linux_lsw = linux["components"]["decoder"]["l_smash_works"]
-    assert windows_lsw["distribution_version"] == "1296.0.0.1"
+    assert windows_lsw["distribution_version"] == "1310.0.0.0"
     assert linux_lsw["decoder_ffmpeg"]["package_version"] == DEBIAN_FFMPEG_PACKAGE_VERSION
 
 
@@ -276,11 +276,11 @@ def test_supported_report_contains_observable_component_contract() -> None:
     report = supported_media_runtime_report(profile="debian-trixie")
 
     assert report["components"]["decoder"]["vapoursynth"]["release"] == "R79"
-    assert report["components"]["decoder"]["l_smash_works"]["native_release"] == ("1296.0.0.0")
+    assert report["components"]["decoder"]["l_smash_works"]["native_release"] == ("1310.0.0.0")
     assert report["components"]["decoder"]["obuparse"]["soname"] == "libobuparse.so.2"
     assert report["components"]["ffms2"]["included"] is True
     assert report["components"]["tone_mapping"]["vs_placebo"]["release"] == "2.0.4"
-    assert report["components"]["bundled_native_plugins"]["akarin"]["release"] == "1.4.1"
+    assert report["components"]["bundled_native_plugins"]["akarin"]["release"] == "1.5.0"
     assert report["components"]["bundled_native_plugins"]["vszip"]["release"] == "22.1.0"
     assert (
         report["components"]["bundled_native_plugins"]["akarin"]["bundled_dependencies"]["zstd"][
@@ -339,7 +339,7 @@ def test_docker_contract_matches_debian_profile(repo_root: Path) -> None:
     for source_url in (
         "https://github.com/vapoursynth/vapoursynth.git",
         "https://github.com/HomeOfAviSynthPlusEvolution/obuparse.git",
-        "https://github.com/l-smash/l-smash.git",
+        "https://github.com/HomeOfAviSynthPlusEvolution/l-smash.git",
         "https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works.git",
         "https://github.com/FFMS/ffms2.git",
         "https://github.com/Lypheo/vs-placebo.git",

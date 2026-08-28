@@ -274,10 +274,10 @@ recovery requirement.
   selected decoder or standalone FFmpeg/ffprobe lineage change in the managed Windows
   portable or Debian/Docker profiles misses without invalidating unrelated file-format
   data.
-- `<media>.frame-compare-lsw1296-<12-hex-index-fingerprint>.lwi`: Frame
+- `<media>.frame-compare-lsw1310-<12-hex-index-fingerprint>.lwi`: Frame
   Compare-owned L-SMASH-Works index. The token is profile scoped (currently
-  `lsw1296-72386a70c626` on managed/portable Windows,
-  `lsw1296-57e30773738f` on unmanaged Windows, and `lsw1296-597792352e35`
+  `lsw1310-56c451f754fd` on managed/portable Windows,
+  `lsw1310-a619e5ff5505` on unmanaged Windows, and `lsw1310-b86875cb61bd`
   on Debian/Docker). Managed Windows portable and Debian/Docker tokens isolate
   their packaged decoder ABIs; unmanaged profile tokens do not verify native ABI
   changes. Legacy adjacent `<media>.lwi` files are ignored,

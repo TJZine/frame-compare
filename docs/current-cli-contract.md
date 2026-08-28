@@ -648,9 +648,9 @@ recovery requirement.
   cache state produces a sanitized warning and continues through the network path.
   Deleting this file clears durable TMDB history and forces fresh successful lookups.
 - Frame Compare-owned L-SMASH-Works indexes use
-  `<media>.frame-compare-lsw1296-<12-hex-index-fingerprint>.lwi`. The token is
-  profile scoped (currently `lsw1296-72386a70c626` on managed/portable Windows,
-  `lsw1296-57e30773738f` on unmanaged Windows, and `lsw1296-597792352e35`
+  `<media>.frame-compare-lsw1310-<12-hex-index-fingerprint>.lwi`. The token is
+  profile scoped (currently `lsw1310-56c451f754fd` on managed/portable Windows,
+  `lsw1310-a619e5ff5505` on unmanaged Windows, and `lsw1310-b86875cb61bd`
   on Debian/Docker). Managed Windows portable and Debian/Docker tokens isolate
   their packaged decoder ABIs; unmanaged profile tokens do not verify native ABI
   changes. Legacy adjacent `<media>.lwi` files are ignored rather than deleted. A
