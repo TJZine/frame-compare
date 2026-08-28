@@ -1081,12 +1081,6 @@ const ReportViewer = {
         }
         this.ensureDistinctPairSelection();
         this.state.pairAlignments = this.viewport.normalizedPairAlignments(saved.pairAlignments);
-        if (!this.state.pairAlignments[this.viewport.currentPairAlignmentKey()]) {
-            const legacyAlignment = this.viewport.normalizedAlignmentState(saved);
-            if (legacyAlignment) {
-                this.state.pairAlignments[this.viewport.currentPairAlignmentKey()] = legacyAlignment;
-            }
-        }
         this.viewport.loadCurrentPairAlignment();
         this.normalizeCurrentFrameForFilter();
         if (this.state.mode === 'blink') this.keepBlinkActiveInPair();

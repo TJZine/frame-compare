@@ -491,6 +491,9 @@ const summary = {};
             panX: 12,
             panY: -5,
             revealPercent: 120,
+            alignmentPreset: 'custom',
+            alignX: 77,
+            alignY: -88,
             pairAlignments: {
                 '0:1': { alignmentPreset: 'custom', alignX: 5, alignY: -2 },
                 '1:0': { alignmentPreset: 'custom', alignX: -7, alignY: 3 },
@@ -520,6 +523,37 @@ const summary = {};
         currentAlignment: [viewer.state.alignX, viewer.state.alignY],
         alignmentStatus: viewer.dom.alignmentStatus.textContent,
     };
+}
+
+{
+    const { viewer } = loadViewer({
+        clipCount: 2,
+        savedState: {
+            alignmentPreset: 'custom',
+            alignX: 77,
+            alignY: -88,
+        },
+    });
+
+    assert.deepEqual(Object.keys(viewer.state.pairAlignments), []);
+    assert.equal(viewer.state.alignmentPreset, 'none');
+    assert.equal(viewer.state.alignX, 0);
+    assert.equal(viewer.state.alignY, 0);
+
+    const malformedStorage = loadViewer({
+        clipCount: 2,
+        savedState: {
+            pairAlignments: {
+                '0:1': { alignmentPreset: 'custom', alignX: 6, alignY: -7 },
+            },
+        },
+    });
+    malformedStorage.storage.set(malformedStorage.storageKey, '{malformed');
+    malformedStorage.viewer.restorePersistedState();
+    assert.deepEqual(Object.keys(malformedStorage.viewer.state.pairAlignments), ['0:1']);
+    assert.equal(malformedStorage.viewer.state.alignmentPreset, 'custom');
+    assert.equal(malformedStorage.viewer.state.alignX, 6);
+    assert.equal(malformedStorage.viewer.state.alignY, -7);
 }
 
 {
