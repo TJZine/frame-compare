@@ -105,8 +105,7 @@ def test_windows_portable_inventory_documents_inter_source_and_license(
     source_urls = (bundle / "licenses/SOURCE_URLS.txt").read_text(encoding="utf-8")
     notices = (bundle / "licenses/THIRD_PARTY_NOTICES.txt").read_text(encoding="utf-8")
     assert (
-        "Bundled application assets:\n"
-        "- Inter 4.1: https://github.com/rsms/inter/releases/tag/v4.1"
+        "Bundled application assets:\n- Inter 4.1: https://github.com/rsms/inter/releases/tag/v4.1"
     ) in source_urls
     assert "Bundled application assets:\n- Inter 4.1 (OFL-1.1)" in notices
     assert "source pointers in\nSOURCE_URLS.txt." in notices

@@ -57,7 +57,7 @@ packages = ["src/frame_compare"]
 # ─── Dependency Groups (PEP 735) ───────────────────────────────────────────────
 [dependency-groups]
 docs = [
-    "zensical==0.0.56",
+    "zensical==0.0.57",
 ]
 docker-test = [
     "pytest==9.1.1",
@@ -73,7 +73,7 @@ dev = [
     "pyyaml>=6.0.3",
     "pyright>=1.1.411",
     "nodejs-wheel-binaries>=24.16.0",
-    "ruff>=0.16.3",
+    "ruff>=0.16.5",
     "respx>=0.22.0",
     "pip-audit==2.10.1",
 ]

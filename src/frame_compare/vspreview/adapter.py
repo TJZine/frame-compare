@@ -29,9 +29,7 @@ log = structlog.get_logger()
 
 _STARTUP_PROBE_TIMEOUT_SECONDS = 10.0
 _STARTUP_STDERR_LIMIT = 4000
-_VSTOOLS_COLOR_SYNTAX_WARNING_FILTER = (
-    "ignore:Starting from R74:SyntaxWarning:vstools.enums.color"
-)
+_VSTOOLS_COLOR_SYNTAX_WARNING_FILTER = "ignore:Starting from R74:SyntaxWarning:vstools.enums.color"
 _MISSING_MODULE_PATTERN = re.compile(
     r"ModuleNotFoundError:\s+No module named ['\"]([A-Za-z0-9_.]+)['\"]"
 )

@@ -179,9 +179,7 @@ def test_release_please_remains_guarded_and_non_merging(repo_root: Path) -> None
     release = workflow["jobs"]["release_please"]
     action = next(step for step in release["steps"] if "uses" in step)
     checkout = next(
-        step
-        for step in guard["steps"]
-        if str(step.get("uses", "")).startswith("actions/checkout@")
+        step for step in guard["steps"] if str(step.get("uses", "")).startswith("actions/checkout@")
     )
     guard_step = next(step for step in guard["steps"] if step.get("id") == "guard")
     guard_run = str(guard_step["run"])
