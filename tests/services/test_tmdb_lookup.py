@@ -425,6 +425,32 @@ async def test_search_tmdb_cache_hit_reuses_ordered_response_across_api_keys(
 
 
 @pytest.mark.anyio
+async def test_search_tmdb_invalid_utf8_cache_falls_back_to_network(tmp_path: Path) -> None:
+    cache_path = tmp_path / "tmdb.toml"
+    cache_path.write_bytes(b"\xff")
+    request_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        return httpx.Response(
+            200,
+            json={"results": [{"id": 1, "title": "Known", "release_date": "2020-01-01"}]},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await tmdb_lookup.search_tmdb_movie(
+            ParsedMetadata(title="Known"),
+            MetadataConfig(api_key="a" * 32),
+            client,
+            cache=TmdbCache(cache_path),
+        )
+
+    assert [item.tmdb_id for item in result] == [1]
+    assert request_count == 1
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize(
     "malformed_result",
     [

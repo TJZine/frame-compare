@@ -275,7 +275,7 @@ class TmdbCache:
                 data = tomllib.load(handle)
         except FileNotFoundError:
             return {}
-        except (OSError, tomllib.TOMLDecodeError):
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
             log.warning(
                 "tmdb_cache_read_failed",
                 cache_path=str(self.path),
