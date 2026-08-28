@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from pathlib import Path
+from threading import Lock
 from typing import TYPE_CHECKING
 
 from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
@@ -80,17 +81,30 @@ def _render_work_units(
     return units
 
 
-def _render_work_unit(requests: tuple[RenderRequest, ...]) -> list[RenderedFrameResult]:
+def _render_work_unit(
+    requests: tuple[RenderRequest, ...],
+    on_progress: Callable[[int], None] | None = None,
+) -> list[RenderedFrameResult]:
     """Render one logical unit, batching FFmpeg or serializing its other frames."""
     request_list = list(requests)
     if not request_list:
         raise RuntimeError("render work unit cannot be empty")
-    if len(request_list) > 1 and _ffmpeg_batch_end(request_list, 0) == len(request_list):
+    is_ffmpeg_batch = (
+        len(request_list) > 1 and _ffmpeg_batch_end(request_list, 0) == len(request_list)
+    )
+    rendered: list[RenderedFrameResult]
+    if is_ffmpeg_batch:
         rendered = render_ffmpeg_batch_detailed(request_list)
     else:
-        rendered = [render_frame_detailed(request) for request in request_list]
+        rendered = []
+        for request in request_list:
+            rendered.append(render_frame_detailed(request))
+            if on_progress is not None:
+                on_progress(1)
     if len(rendered) != len(requests):
         raise RuntimeError("render work unit completed without one result per request")
+    if on_progress is not None and is_ffmpeg_batch:
+        on_progress(len(rendered))
     return rendered
 
 
@@ -123,9 +137,10 @@ def _submit_render_work_unit(
     units: list[_RenderWorkUnit],
     futures: dict[Future[list[RenderedFrameResult]], _RenderWorkUnit],
     index: int,
+    on_progress: Callable[[int], None] | None,
 ) -> None:
     unit = units[index]
-    futures[executor.submit(_render_work_unit, unit[1])] = unit
+    futures[executor.submit(_render_work_unit, unit[1], on_progress)] = unit
 
 
 def _render_batch_sequential(
@@ -133,20 +148,22 @@ def _render_batch_sequential(
     results: list[RenderedFrameResult | None],
     reporter: ProgressReporter | None,
     work_unit_ranges: Sequence[range] | None,
+    on_progress: Callable[[int], None] | None,
 ) -> None:
     next_progress_index = 0
     for unit in _render_work_units(requests, work_unit_ranges):
         _store_work_unit_results(
             unit,
-            _render_work_unit(unit[1]),
+            _render_work_unit(unit[1], on_progress),
             results,
         )
-        next_progress_index = _record_ready_progress(
-            requests,
-            results,
-            reporter,
-            next_progress_index,
-        )
+        if on_progress is None:
+            next_progress_index = _record_ready_progress(
+                requests,
+                results,
+                reporter,
+                next_progress_index,
+            )
 
 
 def _ffmpeg_batch_end(requests: list[RenderRequest], start: int) -> int:
@@ -183,6 +200,7 @@ def _render_batch_parallel(
     parallelism: int,
     reporter: ProgressReporter | None,
     work_unit_ranges: Sequence[range] | None,
+    on_progress: Callable[[int], None] | None,
 ) -> None:
     units = _render_work_units(requests, work_unit_ranges)
     futures: dict[Future[list[RenderedFrameResult]], _RenderWorkUnit] = {}
@@ -192,7 +210,7 @@ def _render_batch_parallel(
 
     with ThreadPoolExecutor(max_workers=parallelism) as executor:
         while next_unit_index < min(parallelism, len(units)):
-            _submit_render_work_unit(executor, units, futures, next_unit_index)
+            _submit_render_work_unit(executor, units, futures, next_unit_index, on_progress)
             next_unit_index += 1
 
         while futures:
@@ -208,12 +226,13 @@ def _render_batch_parallel(
 
             for unit, rendered in sorted(completed, key=lambda item: item[0][0]):
                 _store_work_unit_results(unit, rendered, results)
-            next_progress_index = _record_ready_progress(
-                requests,
-                results,
-                reporter,
-                next_progress_index,
-            )
+            if on_progress is None:
+                next_progress_index = _record_ready_progress(
+                    requests,
+                    results,
+                    reporter,
+                    next_progress_index,
+                )
 
             if first_exception is not None:
                 # Do not start new work after a failure. Cancel any futures that
@@ -227,13 +246,14 @@ def _render_batch_parallel(
                 and next_unit_index < len(units)
                 and len(futures) < parallelism
             ):
-                _submit_render_work_unit(executor, units, futures, next_unit_index)
+                _submit_render_work_unit(executor, units, futures, next_unit_index, on_progress)
                 next_unit_index += 1
 
     if first_exception is not None:
-        for index in range(next_progress_index, len(results)):
-            if results[index] is not None:
-                _record_render_progress(reporter, requests[index])
+        if on_progress is None:
+            for index in range(next_progress_index, len(results)):
+                if results[index] is not None:
+                    _record_render_progress(reporter, requests[index])
         raise first_exception
 
 
@@ -278,14 +298,32 @@ def render_batch_detailed(
         return []
 
     results: list[RenderedFrameResult | None] = [None] * len(requests)
+    completion_callback: Callable[[int], None] | None = None
 
     if reporter:
-        reporter.start_phase("Rendering", len(requests))
+        reporter.start_phase(
+            "Screenshots" if work_unit_ranges is not None else "Rendering",
+            len(requests),
+        )
+        if work_unit_ranges is not None:
+            progress_lock = Lock()
+
+            def advance_screenshot_progress(amount: int) -> None:
+                with progress_lock:
+                    reporter.advance(amount)
+
+            completion_callback = advance_screenshot_progress
 
     phase_status = ProgressPhaseStatus.COMPLETED
     try:
         if parallelism <= 1:
-            _render_batch_sequential(requests, results, reporter, work_unit_ranges)
+            _render_batch_sequential(
+                requests,
+                results,
+                reporter,
+                work_unit_ranges,
+                completion_callback,
+            )
         else:
             _render_batch_parallel(
                 requests,
@@ -293,6 +331,7 @@ def render_batch_detailed(
                 parallelism,
                 reporter,
                 work_unit_ranges,
+                completion_callback,
             )
     except Exception:
         phase_status = ProgressPhaseStatus.FAILED

@@ -400,7 +400,12 @@ def test_render_batch_parallel_overlaps_ffmpeg_groups_and_preserves_order_and_pr
         ) as render_batch,
         patch("frame_compare.render.batch.orchestrator.render_frame_detailed") as render_frame,
     ):
-        results = render_batch_detailed(requests, parallelism=2, reporter=reporter)
+        results = render_batch_detailed(
+            requests,
+            parallelism=2,
+            reporter=reporter,
+            work_unit_ranges=[range(0, 2), range(2, 5)],
+        )
 
     assert sorted(
         tuple(request.frame_number for request in call.args[0])
@@ -409,10 +414,9 @@ def test_render_batch_parallel_overlaps_ffmpeg_groups_and_preserves_order_and_pr
     render_frame.assert_not_called()
     assert [result.path for result in results] == [request.output_path for request in requests]
     assert [result.facts.source_frame for result in results] == [10, 20, 30, 40, 50]
-    assert [call.args[0] for call in reporter.set_description.call_args_list] == [
-        f"frame {request.frame_number}" for request in requests
-    ]
-    assert reporter.advance.call_count == len(requests)
+    reporter.start_phase.assert_called_once_with("Screenshots", len(requests))
+    reporter.set_description.assert_not_called()
+    assert sorted(call.args[0] for call in reporter.advance.call_args_list) == [2, 3]
 
 
 def test_render_batch_parallelizes_clip_units_but_serializes_each_clip(
@@ -466,6 +470,162 @@ def test_render_batch_parallelizes_clip_units_but_serializes_each_clip(
         Path("comparison.mkv"): [30, 40],
     }
     assert [result.facts.source_frame for result in results] == [10, 20, 30, 40]
+
+
+def test_clip_unit_progress_advances_before_the_unit_finishes(tmp_path: Path) -> None:
+    release_units = Event()
+    progress_advanced = Event()
+    requests = [
+        RenderRequest(
+            clip=Path(clip_name),
+            diagnostic_source=Path(clip_name),
+            frame_number=frame,
+            output_path=tmp_path / f"{clip_name}-{frame}.jpg",
+            overlay=None,
+            encoder_settings=EncoderSettings(),
+        )
+        for clip_name, frames in (("reference.mkv", [10, 20]), ("comparison.mkv", [30, 40]))
+        for frame in frames
+    ]
+    reporter = MagicMock(spec=ProgressReporter)
+    reporter.advance.side_effect = lambda _amount=1: progress_advanced.set()
+    exceptions: list[BaseException] = []
+
+    def render_single(request: RenderRequest) -> RenderedFrameResult:
+        if request.frame_number in {20, 30}:
+            assert release_units.wait(timeout=2.0)
+        return _rendered(request)
+
+    def run_render() -> None:
+        try:
+            render_batch_detailed(
+                requests,
+                parallelism=2,
+                reporter=reporter,
+                work_unit_ranges=[range(0, 2), range(2, 4)],
+            )
+        except BaseException as exc:
+            exceptions.append(exc)
+
+    with patch(
+        "frame_compare.render.batch.orchestrator.render_frame_detailed",
+        side_effect=render_single,
+    ):
+        thread = Thread(target=run_render, daemon=True)
+        thread.start()
+        try:
+            assert progress_advanced.wait(timeout=1.0)
+        finally:
+            release_units.set()
+            thread.join(timeout=2.0)
+
+    assert not thread.is_alive()
+    assert exceptions == []
+    reporter.start_phase.assert_called_once_with("Screenshots", 4)
+    reporter.set_description.assert_not_called()
+    assert reporter.advance.call_count == 4
+
+
+def test_clip_unit_failure_preserves_partial_serialized_progress_and_admission(
+    tmp_path: Path,
+) -> None:
+    first_advance_started = Event()
+    release_first_advance = Event()
+    second_clip_started = Event()
+    second_clip_blocked = Event()
+    release_second_clip = Event()
+    failure_reported = Event()
+    progress_state_lock = Lock()
+    active_advances = 0
+    max_active_advances = 0
+    invoked_frames: list[int] = []
+    exceptions: list[BaseException] = []
+    requests = [
+        RenderRequest(
+            clip=Path(clip_name),
+            diagnostic_source=Path(clip_name),
+            frame_number=frame,
+            output_path=tmp_path / f"{clip_name}-{frame}.jpg",
+            overlay=None,
+            encoder_settings=EncoderSettings(),
+        )
+        for clip_name, frames in (
+            ("failing.mkv", [0, 1]),
+            ("in-flight.mkv", [2, 3]),
+            ("later.mkv", [4]),
+        )
+        for frame in frames
+    ]
+    reporter = MagicMock(spec=ProgressReporter)
+
+    def advance(_amount: int = 1) -> None:
+        nonlocal active_advances, max_active_advances
+        with progress_state_lock:
+            active_advances += 1
+            max_active_advances = max(max_active_advances, active_advances)
+            first = reporter.advance.call_count == 1
+        try:
+            if first:
+                first_advance_started.set()
+                assert release_first_advance.wait(timeout=2.0)
+        finally:
+            with progress_state_lock:
+                active_advances -= 1
+
+    reporter.advance.side_effect = advance
+
+    def render_single(request: RenderRequest) -> RenderedFrameResult:
+        invoked_frames.append(request.frame_number)
+        if request.frame_number == 1:
+            assert second_clip_blocked.wait(timeout=2.0)
+            failure_reported.set()
+            raise RuntimeError("failed after one screenshot")
+        if request.frame_number == 2:
+            second_clip_started.set()
+            assert first_advance_started.wait(timeout=2.0)
+        elif request.frame_number == 3:
+            second_clip_blocked.set()
+            assert release_second_clip.wait(timeout=2.0)
+        return _rendered(request)
+
+    def run_render() -> None:
+        try:
+            render_batch_detailed(
+                requests,
+                parallelism=2,
+                reporter=reporter,
+                work_unit_ranges=[range(0, 2), range(2, 4), range(4, 5)],
+            )
+        except BaseException as exc:
+            exceptions.append(exc)
+
+    with patch(
+        "frame_compare.render.batch.orchestrator.render_frame_detailed",
+        side_effect=render_single,
+    ):
+        thread = Thread(target=run_render, daemon=True)
+        thread.start()
+        try:
+            assert second_clip_started.wait(timeout=2.0)
+            assert first_advance_started.wait(timeout=2.0)
+            release_first_advance.set()
+            assert failure_reported.wait(timeout=2.0)
+            assert 4 not in invoked_frames
+        finally:
+            release_first_advance.set()
+            release_second_clip.set()
+            thread.join(timeout=2.0)
+
+    assert not thread.is_alive()
+    assert len(exceptions) == 1
+    assert isinstance(exceptions[0], RuntimeError)
+    assert str(exceptions[0]) == "failed after one screenshot"
+    assert set(invoked_frames) == {0, 1, 2, 3}
+    assert invoked_frames.index(0) < invoked_frames.index(1)
+    assert invoked_frames.index(2) < invoked_frames.index(3)
+    assert reporter.advance.call_count == 3
+    assert max_active_advances == 1
+    reporter.complete_phase.assert_called_once_with(ProgressPhaseStatus.FAILED)
 
 
 def test_render_batch_parallel_mixes_indivisible_ffmpeg_groups_and_singletons(

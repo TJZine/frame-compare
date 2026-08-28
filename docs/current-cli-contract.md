@@ -479,9 +479,9 @@ unchanged.
   durable output by one blank line and report completed/total work with a labeled
   `ETA` once Rich has an estimate; before then, only completed/total work is shown.
   Indeterminate activity uses an ASCII spinner after its description, while
-  one-step phases remain simple activity lines without a bar. Live render descriptions
-  use compact source identity followed by an ASCII `- frame N` suffix; constrained
-  terminals may visually ellipsize the description without changing its stored value.
+  one-step phases remain simple activity lines without a bar. The nested screenshot
+  bar uses the stable aggregate description `Screenshots` and advances as each
+  screenshot completes; an FFmpeg batch advances together when the batch completes.
   A successful top-level phase leaves a durable ASCII status line with elapsed time
   when it runs for at least 10.0 seconds. Successful nested tasks remain transient,
   while skipped,

@@ -744,7 +744,8 @@ The render batch scheduler treats each clip as one production work unit and runs
 most two clip units at once. Compatible ordered FFmpeg requests within a clip use one
 decode pass; VapourSynth, custom-runner, and non-PNG frames within one clip render
 sequentially while a second clip may overlap. Results remain in request order, and
-overlay/color processing is unchanged.
+overlay/color processing is unchanged. Nested screenshot progress advances after each
+serialized frame completes, or for all FFmpeg frames when their batch completes.
 
 Runtime ownership matrix:
 
