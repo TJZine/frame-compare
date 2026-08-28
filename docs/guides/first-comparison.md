@@ -77,8 +77,8 @@ the features you intend to use. Optional integrations can remain disabled, but a
 FFmpeg, VapourSynth, source-plugin, or Vulkan failure can block the corresponding
 rendering or alignment path.
 
-The doctor command confirms the core portable runtime before the first comparison;
-the optional TMDB integration can remain unconfigured.
+The doctor command confirms the core runtime for the selected route before the first
+comparison; the optional TMDB integration can remain unconfigured.
 
 ### 3. Dry run
 

@@ -56,8 +56,6 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 - Correct computed audio-alignment offsets to use the documented
   `reference - comparison` sign convention. The pre-MVP shared alignment cache
   format is reset to schema v1.
-- Clarify VSPreview matching-frame confirmation and avoid duplicate preview
-  frame-property warnings after Frame Compare reports and applies the same defaults.
 - Merge FFprobe HDR color metadata field-by-field only when VapourSynth frame
   properties are missing, malformed, or H.273-unspecified.
 - Capture FFmpeg picture type from the same exact-frame extraction process used to
@@ -66,9 +64,6 @@ Frame Compare follows Conventional Commits, and Release Please turns the
   post-retry fatal error behavior.
 - Harden VSPreview startup compatibility checks and redact inherited credential
   values from surfaced startup diagnostics.
-  - Correct computed audio-alignment offsets to use the documented
-  `reference - comparison` sign convention. The pre-MVP shared alignment cache
-  format is reset to schema v1.
 - Clarify VSPreview matching-frame confirmation and replace duplicate or malformed
   preview frame-property warnings with Frame Compare's styled assumption details.
 
