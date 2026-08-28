@@ -283,7 +283,10 @@ recovery requirement.
   changes. Legacy adjacent `<media>.lwi` files are ignored,
   not deleted. A corrupt owned index is removed and rebuilt once; removal/rebuild
   failure is warned and an unusable index location falls back to a cache-free source
-  open.
+  open. Generated VSPreview sessions reuse this exact owned path for reference and
+  comparison source loads, allowing L-SMASH-Works to create it there when missing.
+  The self-contained external preview child leaves rejected parent-owned indexes
+  untouched and retries only index-construction failures cache-free.
 - `<run-folder>/run_info.toml`: root-level, write-only run identity metadata version 2 written
   immediately after every run-folder reservation. It stores creation time, final
   folder name, naming source, source filenames, Frame Compare version, the full

@@ -35,7 +35,7 @@ class _VideoNodeWithFps(Protocol):
     fps: Fraction
 
 
-_INDEX_CONSTRUCTION_FAILURE_MARKER = "failed to construct index"
+INDEX_CONSTRUCTION_FAILURE_MARKER = "failed to construct index"
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,7 +219,7 @@ def _load_lwlibav_source(
 
 def _is_index_construction_failure(error: Exception) -> bool:
     """Return whether L-SMASH-Works reported an index-construction failure."""
-    return _INDEX_CONSTRUCTION_FAILURE_MARKER in str(error).casefold()
+    return INDEX_CONSTRUCTION_FAILURE_MARKER in str(error).casefold()
 
 
 def apply_trim(source: SourceInfo, start: int, end: int | None = None) -> vs.VideoNode:

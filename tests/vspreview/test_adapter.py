@@ -17,6 +17,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from frame_compare.vs.source import source_index_path
 from frame_compare.vspreview.adapter import (
     VSPreviewAvailability,
     VSPreviewAvailabilityStatus,
@@ -417,6 +418,10 @@ def _execute_generated_script(
     load_failure_stems: set[str] | None = None,
     applied_frame_props: dict[str, dict[str, int]] | None = None,
     overlay_text_by_stem: dict[str, str] | None = None,
+    loader_cachefiles: list[str | None] | None = None,
+    loader_calls: list[tuple[str, str | None, int | None]] | None = None,
+    unusable_index_stems: set[str] | None = None,
+    cache_free_failure_stems: set[str] | None = None,
 ) -> tuple[
     dict[str, list[tuple[int | None, int | None, int | None]]],
     list[int],
@@ -442,6 +447,8 @@ def _execute_generated_script(
         resolved_frame_props.update(frame_props_by_stem)
     resolved_overlay_failure_stems = overlay_failure_stems or set()
     resolved_load_failure_stems = load_failure_stems or set()
+    resolved_unusable_index_stems = unusable_index_stems or set()
+    resolved_cache_free_failure_stems = cache_free_failure_stems or set()
 
     class FakeClip:
         def __init__(self, stem: str, num_frames: int) -> None:
@@ -467,12 +474,26 @@ def _execute_generated_script(
     }
 
     class FakeLsmas:
-        def LWLibavSource(self, path: str) -> FakeClip:
+        def LWLibavSource(
+            self,
+            path: str,
+            *,
+            cachefile: str | None = None,
+            cache: int | None = None,
+        ) -> FakeClip:
+            stem = Path(path).stem
+            if loader_cachefiles is not None:
+                loader_cachefiles.append(cachefile)
+            if loader_calls is not None:
+                loader_calls.append((stem, cachefile, cache))
             if native_loader_output:
                 print("NATIVE INDEX OUTPUT", file=sys.stderr)
-            stem = Path(path).stem
             if stem in resolved_load_failure_stems:
                 raise RuntimeError("load failed")
+            if cache == 0 and stem in resolved_cache_free_failure_stems:
+                raise RuntimeError("cache-free fallback failed")
+            if cachefile is not None and stem in resolved_unusable_index_stems:
+                raise RuntimeError("failed to construct index")
             return clips[stem]
 
     class FakeText:
@@ -818,7 +839,10 @@ def test_build_script_content_resolves_lwlibavsource_preference_and_fallback(
         def __init__(self, name: str) -> None:
             self.name = name
 
-        def LWLibavSource(self, _path: str) -> FakeClip:  # noqa: N802
+        def LWLibavSource(  # noqa: N802
+            self, _path: str, *, cachefile: str | None = None
+        ) -> FakeClip:
+            assert cachefile is not None
             loader_calls.append(self.name)
             return FakeClip()
 
@@ -867,6 +891,143 @@ def test_generated_script_sets_outputs_when_loaded_as_vspreview_module(
     assert output_stems == ["ref", "a"]
     assert slice_history["ref"] == []
     assert slice_history["a"] == []
+
+
+def test_generated_script_reuses_frame_compare_owned_indexes_for_every_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cachefiles: list[str | None] = []
+
+    _execute_generated_script(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        suggested_offsets_by_key={"ref:a": 0, "ref:b": 0},
+        comparison_stems=("a", "b"),
+        loader_cachefiles=cachefiles,
+    )
+
+    assert cachefiles == [
+        str(source_index_path(tmp_path / "ref.mkv")),
+        str(source_index_path(tmp_path / "a.mkv")),
+        str(source_index_path(tmp_path / "b.mkv")),
+    ]
+
+
+def test_generated_script_falls_back_cache_free_for_rejected_owned_indexes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    reference_index = source_index_path(tmp_path / "ref.mkv")
+    comparison_index = source_index_path(tmp_path / "a.mkv")
+    reference_index.touch()
+    comparison_index.touch()
+    loader_calls: list[tuple[str, str | None, int | None]] = []
+
+    _execute_generated_script(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        suggested_offsets_by_key={"ref:a": 0},
+        comparison_stems=("a",),
+        loader_calls=loader_calls,
+        unusable_index_stems={"ref", "a"},
+        presentation_names_by_stem={
+            "ref": "Reference Release",
+            "a": "Comparison Release",
+        },
+    )
+
+    assert loader_calls == [
+        ("ref", str(reference_index), None),
+        ("ref", None, 0),
+        ("a", str(comparison_index), None),
+        ("a", None, 0),
+    ]
+    assert reference_index.is_file()
+    assert comparison_index.is_file()
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.count("without an L-SMASH index cache") == 2
+    assert "Reference Release" in captured.err
+    assert "Comparison Release" in captured.err
+    assert str(tmp_path / "ref.mkv") not in captured.err
+    assert str(tmp_path / "a.mkv") not in captured.err
+
+
+def test_generated_script_does_not_retry_unrelated_loader_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    loader_calls: list[tuple[str, str | None, int | None]] = []
+
+    _execute_generated_script(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        suggested_offsets_by_key={"ref:a": 0, "ref:b": 0},
+        comparison_stems=("a", "b"),
+        loader_calls=loader_calls,
+        load_failure_stems={"a"},
+    )
+
+    assert [call for call in loader_calls if call[0] == "a"] == [
+        ("a", str(source_index_path(tmp_path / "a.mkv")), None)
+    ]
+    assert "Comparison source could not be loaded: load failed" in capsys.readouterr().err
+
+
+def test_generated_script_preserves_original_index_error_when_fallback_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _execute_generated_script(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        suggested_offsets_by_key={"ref:a": 0, "ref:b": 0},
+        comparison_stems=("a", "b"),
+        unusable_index_stems={"a"},
+        cache_free_failure_stems={"a"},
+    )
+
+    captured = capsys.readouterr()
+    assert "Comparison source could not be loaded: failed to construct index" in captured.err
+    assert "cache-free fallback failed" not in captured.err
+    assert "[OK] VSPreview Ready" in captured.err
+
+
+def test_generated_reference_preserves_original_index_error_when_fallback_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        _execute_generated_script(
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+            suggested_offsets_by_key={"ref:a": 0},
+            comparison_stems=("a",),
+            unusable_index_stems={"ref"},
+            cache_free_failure_stems={"ref"},
+        )
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "Reference source could not be loaded: failed to construct index" in captured.err
+    assert "cache-free fallback failed" not in captured.err
+
+
+def test_generated_script_has_no_runtime_frame_compare_import() -> None:
+    script = _build_script_content(
+        reference=Path("ref.mkv"),
+        comparisons=[Path("a.mkv")],
+        suggested_offsets_by_key={},
+        bootstrap_paths=[Path("/workspace")],
+    )
+
+    assert "from frame_compare" not in script
+    assert "import frame_compare" not in script
 
 
 def test_generated_script_uses_untrimmed_outputs_for_mixed_sign_offset_hints(

@@ -656,6 +656,12 @@ recovery requirement.
   changes. Legacy adjacent `<media>.lwi` files are ignored rather than deleted. A
   corrupt owned index is removed and rebuilt once; removal/rebuild failure produces
   a warning and an unusable index location retries source loading without an index.
+  Generated VSPreview sessions pass this same owned, runtime-versioned path as the
+  `cachefile` for the reference and every comparison; a missing index may be created
+  there by L-SMASH-Works instead of creating a second adjacent index. When L-SMASH
+  rejects that index location during preview loading, the external preview child does
+  not remove or rebuild the parent-owned index; it retries that source cache-free and
+  preserves the original construction error if the fallback also fails.
 - Analysis is skipped automatically when `dark_frame_count`, `bright_frame_count`,
   and `motion_frame_count` are all `0`; `frame_plan` still selects configured
   user/random frames. Every run that proceeds reserves a fresh run folder beneath
