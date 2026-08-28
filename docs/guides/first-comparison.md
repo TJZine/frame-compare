@@ -77,10 +77,8 @@ the features you intend to use. Optional integrations can remain disabled, but a
 FFmpeg, VapourSynth, source-plugin, or Vulkan failure can block the corresponding
 rendering or alignment path.
 
-<figure class="fc-doc-figure">
-  <img src="../images/first-run-doctor.png" alt="Frame Compare doctor output showing passing Python, VapourSynth, L-SMASH-Works, vs-placebo, FFmpeg, VSPreview, and slow.pics checks, with the optional TMDB key noted as unconfigured.">
-  <figcaption>The doctor command confirms the core portable runtime before the first comparison; the optional TMDB integration can remain unconfigured.</figcaption>
-</figure>
+The doctor command confirms the core portable runtime before the first comparison;
+the optional TMDB integration can remain unconfigured.
 
 ### 3. Dry run
 

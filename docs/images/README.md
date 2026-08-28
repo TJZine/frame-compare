@@ -161,7 +161,6 @@ information is never rendered into the image.
 | `report-grid.webp` | Three-source triage |
 | `report-inspector.webp` | Metadata and review controls |
 | `vspreview-alignment.webp` | Interactive alignment verification |
-| `first-run-doctor.png` | Successful runtime diagnosis |
 | `first-run-dry-run.png` | Pre-render intent validation |
 | `first-run-complete.png` | Cropped final run summary |
 | `windows-portable-install.png` | Checksum and shim installation |
