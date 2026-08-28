@@ -25,13 +25,6 @@ if TYPE_CHECKING:
 _H273_UNSPECIFIED = 2
 
 
-def _fps_mode_option_is_unavailable(stderr: str) -> bool:
-    normalized = stderr.casefold()
-    return "fps_mode" in normalized and (
-        "unrecognized option" in normalized or "option not found" in normalized
-    )
-
-
 class FFmpegRunner(Protocol):
     """Protocol for FFmpeg-based frame extraction and probing."""
 
@@ -108,18 +101,9 @@ class DefaultFFmpegRunner:
             overwrite=True,
             geometry_plan=geometry_plan,
         )
-        legacy_argv = build_extract_frames_argv(
-            video=video,
-            frame_nums=frame_nums,
-            output_pattern=output_dir / "%09d.png",
-            overwrite=True,
-            geometry_plan=geometry_plan,
-            legacy_vsync=True,
-        )
         completed = self._run_extraction(
             argv,
             timeout_message="ffmpeg timed out while extracting frames",
-            unsupported_fps_mode_fallback=legacy_argv,
         )
         picture_types = parse_showinfo_picture_types(completed.stderr, len(frame_nums))
         return [
@@ -132,7 +116,6 @@ class DefaultFFmpegRunner:
         argv: list[str],
         *,
         timeout_message: str,
-        unsupported_fps_mode_fallback: list[str] | None = None,
     ) -> CompletedProcess[bytes]:
         try:
             return run_subprocess(argv, timeout_seconds=self._extraction_timeout_seconds)
@@ -142,13 +125,6 @@ class DefaultFFmpegRunner:
             raise FFmpegError(timeout_message, 124) from exc
         except CalledProcessError as exc:
             stderr = exc.stderr.decode(errors="replace")
-            if unsupported_fps_mode_fallback is not None and _fps_mode_option_is_unavailable(
-                stderr
-            ):
-                return self._run_extraction(
-                    unsupported_fps_mode_fallback,
-                    timeout_message=timeout_message,
-                )
             raise FFmpegError(stderr, exc.returncode) from exc
 
     def probe_hdr(self, video: Path) -> HDRMetadata | None:

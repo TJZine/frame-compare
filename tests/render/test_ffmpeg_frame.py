@@ -21,7 +21,6 @@ from frame_compare.render.geometry import (
     SourceGeometry,
 )
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
-from frame_compare.utils.media_facts import RenderedFrameFacts
 from frame_compare.vs.types import HDRMetadata
 
 
@@ -144,15 +143,6 @@ def test_build_extract_frames_argv_selects_ordered_frames_in_one_pass() -> None:
         str(Path("staging") / "%09d.png"),
     ]
 
-    legacy = build_extract_frames_argv(
-        video=Path("clip.mkv"),
-        frame_nums=[10, 20, 42],
-        output_pattern=Path("staging/%09d.png"),
-        overwrite=True,
-        legacy_vsync=True,
-    )
-    assert legacy[legacy.index("-vsync") : legacy.index("-vsync") + 2] == ["-vsync", "0"]
-
 
 @pytest.mark.parametrize("frame_nums", [[], [2, 2], [2, 1], [-1, 2]])
 def test_build_extract_frames_argv_rejects_unsafe_frame_sequences(
@@ -244,41 +234,6 @@ def test_default_ffmpeg_runner_extract_frames_preserves_indexed_picture_types(
     ]
     assert run_subprocess.call_args.args[0][-1] == str(output_dir / "%09d.png")
     assert run_subprocess.call_args.kwargs["timeout_seconds"] == 30.0
-
-
-def test_default_ffmpeg_runner_extract_frames_retries_legacy_vsync_when_required(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    run_subprocess = MagicMock(
-        side_effect=[
-            subprocess.CalledProcessError(
-                1,
-                ["ffmpeg"],
-                stderr=b"Unrecognized option 'fps_mode'. Error splitting: Option not found",
-            ),
-            subprocess.CompletedProcess(
-                args=[],
-                returncode=0,
-                stdout=b"",
-                stderr=b"[Parsed_showinfo_1 @ 0x1] n:0 type:I",
-            ),
-        ]
-    )
-    monkeypatch.setattr("frame_compare.render.backend.ffmpeg.run_subprocess", run_subprocess)
-
-    facts = DefaultFFmpegRunner().extract_frames(Path("clip.mkv"), [10], tmp_path)
-
-    assert facts == [RenderedFrameFacts(source_frame=10, picture_type="I")]
-    modern_argv = run_subprocess.call_args_list[0].args[0]
-    legacy_argv = run_subprocess.call_args_list[1].args[0]
-    assert modern_argv[modern_argv.index("-fps_mode") : modern_argv.index("-fps_mode") + 2] == [
-        "-fps_mode",
-        "passthrough",
-    ]
-    assert legacy_argv[legacy_argv.index("-vsync") : legacy_argv.index("-vsync") + 2] == [
-        "-vsync",
-        "0",
-    ]
 
 
 @pytest.mark.parametrize(

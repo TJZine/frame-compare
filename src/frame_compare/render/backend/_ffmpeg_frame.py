@@ -96,7 +96,6 @@ def build_extract_frames_argv(
     output_pattern: Path,
     overwrite: bool,
     geometry_plan: RenderGeometryPlan | None = None,
-    legacy_vsync: bool = False,
 ) -> list[str]:
     """Build FFmpeg argv for one-pass extraction of ordered exact frames."""
     if not frame_nums:
@@ -124,8 +123,8 @@ def build_extract_frames_argv(
             str(video),
             "-vf",
             ",".join(filters),
-            "-vsync" if legacy_vsync else "-fps_mode",
-            "0" if legacy_vsync else "passthrough",
+            "-fps_mode",
+            "passthrough",
             "-frames:v",
             str(len(frame_nums)),
             "-q:v",
