@@ -367,6 +367,87 @@ def test_render_batch_sequential_does_not_batch_non_png_outputs(tmp_path: Path) 
     render_ffmpeg_batch.assert_not_called()
 
 
+def test_render_batch_sequential_does_not_batch_negative_frame(tmp_path: Path) -> None:
+    runner = DefaultFFmpegRunner()
+    requests = [
+        RenderRequest(
+            clip=Path("video.mkv"),
+            diagnostic_source=Path("video.mkv"),
+            frame_number=frame,
+            output_path=tmp_path / f"out_{index}.png",
+            overlay=None,
+            encoder_settings=EncoderSettings(),
+            ffmpeg_runner=runner,
+        )
+        for index, frame in enumerate((-1, 0))
+    ]
+
+    with (
+        patch(
+            "frame_compare.render.batch.orchestrator.render_frame_detailed",
+            side_effect=RuntimeError("single-frame path"),
+        ) as render_frame,
+        patch(
+            "frame_compare.render.batch.orchestrator.render_ffmpeg_batch_detailed"
+        ) as render_ffmpeg_batch,
+        pytest.raises(RuntimeError, match="single-frame path"),
+    ):
+        render_batch_detailed(requests, parallelism=1)
+
+    render_frame.assert_called_once_with(requests[0])
+    render_ffmpeg_batch.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "incompatibility",
+    ["clip", "runner", "geometry", "output-directory", "duplicate", "decreasing"],
+)
+def test_render_batch_sequential_splits_incompatible_ffmpeg_requests(
+    incompatibility: str,
+    tmp_path: Path,
+) -> None:
+    runner = DefaultFFmpegRunner()
+    requests = [
+        RenderRequest(
+            clip=Path("video.mkv"),
+            diagnostic_source=Path("video.mkv"),
+            frame_number=frame,
+            output_path=tmp_path / f"out_{frame}.png",
+            overlay=None,
+            encoder_settings=EncoderSettings(),
+            ffmpeg_runner=runner,
+        )
+        for frame in (1, 2)
+    ]
+    if incompatibility == "clip":
+        requests[1].clip = Path("other.mkv")
+    elif incompatibility == "runner":
+        requests[1].ffmpeg_runner = DefaultFFmpegRunner()
+    elif incompatibility == "geometry":
+        requests[0].geometry_plan = MagicMock()
+        requests[1].geometry_plan = MagicMock()
+    elif incompatibility == "output-directory":
+        requests[1].output_path = tmp_path / "other" / "out_2.png"
+    elif incompatibility == "duplicate":
+        requests[1].frame_number = requests[0].frame_number
+    elif incompatibility == "decreasing":
+        requests[0].frame_number = 3
+
+    with (
+        patch(
+            "frame_compare.render.batch.orchestrator.render_frame_detailed",
+            side_effect=_rendered,
+        ) as render_frame,
+        patch(
+            "frame_compare.render.batch.orchestrator.render_ffmpeg_batch_detailed"
+        ) as render_ffmpeg_batch,
+    ):
+        render_batch_detailed(requests, parallelism=1)
+
+    assert render_frame.call_count == len(requests)
+    render_ffmpeg_batch.assert_not_called()
+
+
 def test_render_batch_parallel_overlaps_ffmpeg_groups_and_preserves_order_and_progress(
     tmp_path: Path,
 ) -> None:

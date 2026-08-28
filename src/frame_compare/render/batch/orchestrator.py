@@ -6,7 +6,6 @@ from pathlib import Path
 from threading import Lock
 from typing import TYPE_CHECKING
 
-from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 from frame_compare.render.batch.expansion import (
     expand_batch_render_requests,
     render_batch_results_by_label,
@@ -15,7 +14,11 @@ from frame_compare.render.batch.expansion import (
     validate_batch_requests,
     validate_ffmpeg_batch_tonemap_gate,
 )
-from frame_compare.render.encoders import render_ffmpeg_batch_detailed, render_frame_detailed
+from frame_compare.render.encoders import (
+    is_ffmpeg_batch_compatible,
+    render_ffmpeg_batch_detailed,
+    render_frame_detailed,
+)
 from frame_compare.render.types import (
     BatchRenderOptions,
     RenderedBatchResult,
@@ -89,8 +92,8 @@ def _render_work_unit(
     request_list = list(requests)
     if not request_list:
         raise RuntimeError("render work unit cannot be empty")
-    is_ffmpeg_batch = (
-        len(request_list) > 1 and _ffmpeg_batch_end(request_list, 0) == len(request_list)
+    is_ffmpeg_batch = len(request_list) > 1 and _ffmpeg_batch_end(request_list, 0) == len(
+        request_list
     )
     rendered: list[RenderedFrameResult]
     if is_ffmpeg_batch:
@@ -168,11 +171,10 @@ def _render_batch_sequential(
 
 def _ffmpeg_batch_end(requests: list[RenderRequest], start: int) -> int:
     first = requests[start]
-    runner = first.ffmpeg_runner
-    if (
-        not isinstance(first.clip, Path)
-        or type(runner) is not DefaultFFmpegRunner
-        or first.output_path.suffix.casefold() != ".png"
+    if not is_ffmpeg_batch_compatible(
+        first,
+        first,
+        previous_frame=-1,
     ):
         return start + 1
 
@@ -180,13 +182,10 @@ def _ffmpeg_batch_end(requests: list[RenderRequest], start: int) -> int:
     previous_frame = first.frame_number
     while end < len(requests):
         candidate = requests[end]
-        if (
-            candidate.clip != first.clip
-            or candidate.ffmpeg_runner is not runner
-            or candidate.geometry_plan is not first.geometry_plan
-            or candidate.output_path.parent != first.output_path.parent
-            or candidate.output_path.suffix.casefold() != ".png"
-            or candidate.frame_number <= previous_frame
+        if not is_ffmpeg_batch_compatible(
+            first,
+            candidate,
+            previous_frame=previous_frame,
         ):
             break
         previous_frame = candidate.frame_number

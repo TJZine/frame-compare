@@ -122,34 +122,46 @@ def render_frame_detailed(
     return RenderedFrameResult(path=request.output_path, facts=facts)
 
 
+def is_ffmpeg_batch_compatible(
+    first: RenderRequest,
+    candidate: RenderRequest,
+    *,
+    previous_frame: int,
+) -> bool:
+    """Return whether a request can join one ordered FFmpeg decode pass."""
+    runner = first.ffmpeg_runner
+    return (
+        isinstance(first.clip, Path)
+        and type(runner) is DefaultFFmpegRunner
+        and candidate.clip == first.clip
+        and candidate.ffmpeg_runner is runner
+        and candidate.geometry_plan is first.geometry_plan
+        and candidate.output_path.parent == first.output_path.parent
+        and candidate.output_path.suffix.casefold() == ".png"
+        and candidate.frame_number > previous_frame
+    )
+
+
 def render_ffmpeg_batch_detailed(requests: list[RenderRequest]) -> list[RenderedFrameResult]:
     """Render one clip's ordered FFmpeg requests through a single decode pass."""
     if not requests:
         return []
 
     first = requests[0]
-    clip = first.clip
     runner = first.ffmpeg_runner
-    if (
-        not isinstance(clip, Path)
-        or type(runner) is not DefaultFFmpegRunner
-        or first.output_path.suffix.casefold() != ".png"
-    ):
-        raise ValueError("FFmpeg batch rendering requires compatible PNG requests")
-    batch_runner = cast(DefaultFFmpegRunner, runner)
     previous_frame = -1
     for request in requests:
-        if (
-            request.clip != clip
-            or request.ffmpeg_runner is not runner
-            or request.geometry_plan is not first.geometry_plan
-            or request.output_path.parent != first.output_path.parent
-            or request.output_path.suffix.casefold() != ".png"
-            or request.frame_number <= previous_frame
+        if not is_ffmpeg_batch_compatible(
+            first,
+            request,
+            previous_frame=previous_frame,
         ):
             raise ValueError("FFmpeg batch requests must be compatible and strictly ordered")
         previous_frame = request.frame_number
+    clip = cast(Path, first.clip)
+    batch_runner = cast(DefaultFFmpegRunner, runner)
 
+    active_request = first
     try:
         output_parent = first.output_path.parent
         output_parent.mkdir(parents=True, exist_ok=True)
@@ -166,6 +178,7 @@ def render_ffmpeg_batch_detailed(requests: list[RenderRequest]) -> list[Rendered
 
             rendered: list[RenderedFrameResult] = []
             for index, (request, frame_facts) in enumerate(zip(requests, facts, strict=True)):
+                active_request = request
                 staged_path = staging_dir / f"{index:09d}.png"
                 if not staged_path.is_file():
                     raise FrameExtractionError(request.frame_number, str(clip))
@@ -177,7 +190,7 @@ def render_ffmpeg_batch_detailed(requests: list[RenderRequest]) -> list[Rendered
     except (EncodingError, FrameExtractionError, RenderError, SourceLoadError):
         raise
     except Exception as exc:
-        details = _render_error_details(first, "auto", False)
+        details = _render_error_details(active_request, "auto", False)
         raise RenderError(reason=_render_error_reason(exc), details=details) from exc
 
 
