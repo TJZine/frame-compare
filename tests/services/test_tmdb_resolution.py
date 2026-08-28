@@ -114,6 +114,31 @@ async def test_resolve_metadata_prefers_vvitch_alias_release(
 
 
 @pytest.mark.anyio
+async def test_resolve_metadata_keeps_match_when_alias_enrichment_is_rate_limited(
+    async_client_factory: AsyncClientFactory,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/movie/329865/alternative_titles"):
+            return httpx.Response(429)
+        if path.endswith("/search/tv"):
+            return httpx.Response(200, json={"results": []})
+        if path.endswith("/search/multi") or path.endswith("/search/movie"):
+            return httpx.Response(
+                200,
+                json={"results": [_movie_result(329865, "Arrival", "2016-11-10")]},
+            )
+        return httpx.Response(200, json={"results": []})
+
+    config = MetadataConfig(api_key="a" * 32)
+    async with async_client_factory(httpx.MockTransport(handler)) as client:
+        result = await resolve_metadata(["Arrival.2016.2160p.mkv"], config, client)
+
+    assert result is not None
+    assert result.tmdb_id == 329865
+
+
+@pytest.mark.anyio
 async def test_resolve_metadata_plain_title_alias_case_prefers_vvitch_release(
     async_client_factory: AsyncClientFactory,
 ) -> None:

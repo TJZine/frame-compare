@@ -151,7 +151,9 @@ for _raw_path in _BOOTSTRAP_PATHS:
 
 def _build_helpers_section() -> str:
     marker = json.dumps(INDEX_CONSTRUCTION_FAILURE_MARKER)
-    return f"INDEX_CONSTRUCTION_FAILURE_MARKER = {marker}\n\n" + '''\
+    return (
+        f"INDEX_CONSTRUCTION_FAILURE_MARKER = {marker}\n\n"
+        + '''\
 # ─── Safe Print Helper ────────────────────────────────────────────────────────
 def _reconfigure_text_stream(stream):
     reconfigure = getattr(stream, "reconfigure", None)
@@ -218,12 +220,10 @@ def safe_print(*args, **kwargs):
 
 
 def resolve_lwlibavsource(core):
-    """Resolve LWLibavSource using Frame Compare's lsmas-then-lw contract."""
+    """Resolve LWLibavSource from the VapourSynth R79 core.lsmas namespace."""
     if hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource"):
         return core.lsmas
-    if hasattr(core, "lw") and hasattr(core.lw, "LWLibavSource"):
-        return core.lw
-    raise RuntimeError("LWLibavSource not found on core.lsmas or core.lw")
+    raise RuntimeError("LWLibavSource not found on core.lsmas")
 
 
 def load_preview_source(loader, path, index_path, display_name):
@@ -339,6 +339,7 @@ def apply_preview_defaults(core, clip, label):
         return clip
     return core.std.SetFrameProps(clip, **defaults)
 '''
+    )
 
 
 def _build_clip_data_section(

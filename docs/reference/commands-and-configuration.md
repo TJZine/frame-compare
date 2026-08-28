@@ -11,7 +11,7 @@ persistence, JSON, stream, or exit behavior matters.
 | --- | --- |
 | `frame-compare version` | Print the installed application version |
 | `frame-compare wizard` | Create or review configuration interactively |
-| `frame-compare doctor` | Diagnose the selected Python, media, UI, and optional integration runtime |
+| `frame-compare doctor` | Diagnose the selected media, UI, and optional integration runtime |
 | `frame-compare run` | Validate and execute a comparison |
 | `frame-compare history list` | List persisted run results under the selected generated-data root |
 | `frame-compare history open RUN_NAME` | Open one exact recorded run |

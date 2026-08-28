@@ -31,10 +31,10 @@ def _uses_hdr_defaults(primaries: int, transfer: int) -> bool:
 
 
 def _bt2020_matrix_constant() -> int:
-    # Prefer the non-constant-luminance matrix used by BT.2020 video signals.
+    """Return the R79 non-constant-luminance BT.2020 matrix constant."""
     import vapoursynth as vs
 
-    return getattr(vs, "MATRIX_BT2020_NCL", getattr(vs, "MATRIX_BT2020_CL", _BT2020))
+    return vs.MATRIX_BT2020_NCL
 
 
 def _height_default(clip: vs.VideoNode) -> int:

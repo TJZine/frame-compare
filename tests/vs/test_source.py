@@ -61,14 +61,11 @@ class MockClip:
         )
 
 
-def make_mock_core(
-    with_lsmas: bool = True, use_lw_namespace: bool = False, fail_load: bool = False
-) -> SimpleNamespace:
+def make_mock_core(with_lsmas: bool = True, fail_load: bool = False) -> SimpleNamespace:
     """Create mock VS core with optional lsmas plugin.
 
     Args:
         with_lsmas: Whether lsmas plugin is available
-        use_lw_namespace: If True, use core.lw instead of core.lsmas
         fail_load: If True, LWLibavSource raises Exception
     """
     core = SimpleNamespace()
@@ -81,11 +78,7 @@ def make_mock_core(
     loader = SimpleNamespace(LWLibavSource=mock_loader)
 
     if with_lsmas:
-        if use_lw_namespace:
-            core.lw = loader
-        else:
-            core.lsmas = loader
-            # Detect plugins checks both, so if we put it in lsmas, we're good.
+        core.lsmas = loader
     return core
 
 
@@ -113,12 +106,6 @@ def test_load_source_extracts_dimensions():
     source = load_source("video.mkv", core)  # type: ignore
     assert source.width == 1920
     assert source.height == 1080
-
-
-def test_load_source_uses_lw_namespace_fallback():
-    core = make_mock_core(with_lsmas=True, use_lw_namespace=True)
-    source = load_source("video.mkv", core)  # type: ignore
-    assert source.num_frames == 1000
 
 
 def test_load_source_default_does_not_forward_decoder_kwargs():

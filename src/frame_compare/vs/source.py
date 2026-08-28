@@ -160,7 +160,7 @@ def validate_source_index(path: Path, core: vs.Core | None = None) -> None:
 def _resolve_lwlibav_loader(core: vs.Core) -> _LWLibavSourcePlugin:
     if hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource"):
         return cast(_LWLibavSourcePlugin, core.lsmas)
-    return cast(_LWLibavSourcePlugin, core.lw)
+    raise PluginNotFoundError("lsmas")
 
 
 def _file_sha256(path: Path) -> str:

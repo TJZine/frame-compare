@@ -87,14 +87,14 @@ def _resolve_matrix_in(
     if detected_is_hdr is None:
         detected_is_hdr, _ = detect_hdr(props)
     if detected_is_hdr:
-        return int(getattr(vs, "MATRIX_BT2020_NCL", 9))
-    return int(getattr(vs, "MATRIX_BT709", 1))
+        return vs.MATRIX_BT2020_NCL
+    return vs.MATRIX_BT709
 
 
 def _resolve_range_in(props: Mapping[str, object]) -> int:
     import vapoursynth as vs
 
-    range_limited = int(getattr(vs, "RANGE_LIMITED", 0))
+    range_limited = vs.RANGE_LIMITED
     normalized_range = get_optional_range_prop(props)
     return range_limited if normalized_range is None else normalized_range
 

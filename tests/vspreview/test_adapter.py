@@ -806,18 +806,9 @@ def test_generated_stream_reconfigure_helper_is_best_effort_for_known_stream_fai
     exec(_build_helpers_section(), {"sys": fake_sys})
 
 
-@pytest.mark.parametrize(
-    ("core_attrs", "expected_loader"),
-    [
-        (("lsmas", "lw"), "lsmas"),
-        (("lw",), "lw"),
-    ],
-)
-def test_build_script_content_resolves_lwlibavsource_preference_and_fallback(
+def test_build_script_content_resolves_lwlibavsource_from_lsmas_namespace(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    core_attrs: tuple[str, ...],
-    expected_loader: str,
 ) -> None:
     reference = tmp_path / "ref.mkv"
     comparison = tmp_path / "a.mkv"
@@ -855,8 +846,7 @@ def test_build_script_content_resolves_lwlibavsource_preference_and_fallback(
             return clip
 
     fake_core = SimpleNamespace(text=FakeText(), std=FakeStd())
-    for attr in core_attrs:
-        setattr(fake_core, attr, FakeLoaderNamespace(attr))
+    fake_core.lsmas = FakeLoaderNamespace("lsmas")
     fake_vapoursynth = types.ModuleType("vapoursynth")
     fake_vapoursynth.core = fake_core
     monkeypatch.setitem(sys.modules, "vapoursynth", fake_vapoursynth)
@@ -873,7 +863,7 @@ def test_build_script_content_resolves_lwlibavsource_preference_and_fallback(
         {"__name__": "vspreview_loaded_script", "__file__": str(tmp_path / "session.py")},
     )
 
-    assert loader_calls == [expected_loader, expected_loader]
+    assert loader_calls == ["lsmas", "lsmas"]
 
 
 def test_generated_script_sets_outputs_when_loaded_as_vspreview_module(
@@ -1358,7 +1348,7 @@ core = _Core()
     assert result.returncode == 1
     assert result.stdout == ""
     assert "[FAIL] Failed to resolve LWLibavSource loader:" in result.stderr
-    assert "LWLibavSource not found on core.lsmas or core.lw" in result.stderr
+    assert "LWLibavSource not found on core.lsmas" in result.stderr
     assert "Traceback" not in result.stderr
 
 

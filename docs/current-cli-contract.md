@@ -1507,14 +1507,16 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 
 - `doctor` runs dependency diagnostics through `run_doctor`.
 - `doctor --json` writes a single JSON object to stdout through the doctor command owner.
+- Python compatibility remains enforced by package metadata, runtime manifests, and build
+  validation; `doctor` does not emit a separate Python-version check.
 - `doctor.baseline_version` is the supported VapourSynth release (`R79`).
   `doctor.media_runtime` contains the code-owned component contract, scoped
   fingerprints, and index token. `doctor.runtime_environment` reports the
   deployment kind, expected and declared full fingerprints, declaration syntax,
   match state, and whether the current runtime declares FFMS2 mandatory.
 - Media checks report public observable state only: VapourSynth release/API fields;
-  L-SMASH-Works namespace and required functions (its native version is not exposed
-  by the plugin API and is reported as unverifiable at runtime); vs-placebo
+  L-SMASH-Works `core.lsmas` namespace and required functions (its native version is
+  not exposed by the plugin API and is reported as unverifiable at runtime); vs-placebo
   distribution version and `placebo.Tonemap`; FFMS2 policy and `ffms2.Source`; and
   resolved FFmpeg/ffprobe paths plus their first `-version` lines. Managed Windows
   portable and Docker runtimes require both FFmpeg tools to match the selected

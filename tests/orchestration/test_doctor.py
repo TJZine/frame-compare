@@ -52,7 +52,8 @@ class TestCheckLsmas:
 
         assert result.passed is True
         assert "L-SMASH-Works" in result.message
-        assert "native version is not observable" in result.message
+        assert "(core.lsmas; native version is not observable)" in result.message
+        assert result.details["namespace"] == "lsmas"
         assert result.details["runtime_identity_status"] == "unverifiable"
 
     @pytest.mark.parametrize("missing_function", ["LibavSMASHSource", "LWLibavSource"])
@@ -118,10 +119,49 @@ class TestCheckLsmas:
             {"source": "bundle_vs_plugins", "path": "/bundle/vs/plugins/libvslsmashsource.so"},
         ]
         assert result.hint == (
-            "Make L-SMASH-Works available to VapourSynth; see "
+            "Make L-SMASH-Works available under core.lsmas; see "
             "https://github.com/TJZine/frame-compare#quick-start"
         )
         assert "install" not in result.hint.lower()
+
+    def test_check_lsmas_rejects_legacy_lw_namespace(self) -> None:
+        plugin = SimpleNamespace(
+            LibavSMASHSource=lambda *_args, **_kwargs: object(),
+            LWLibavSource=lambda *_args, **_kwargs: object(),
+            functions=lambda: [
+                SimpleNamespace(name="LibavSMASHSource"),
+                SimpleNamespace(name="LWLibavSource"),
+            ],
+        )
+        mock_core = SimpleNamespace(lw=plugin)
+        mock_vs = SimpleNamespace(core=mock_core)
+        check = next(candidate for candidate in collect_checks() if candidate.name == "lsmas")
+
+        with (
+            patch(
+                "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
+                return_value=mock_vs,
+            ),
+            patch(
+                "frame_compare.orchestration.doctor_checks.try_load_lsmas_plugin",
+                return_value=None,
+            ) as load_plugin,
+            patch(
+                "frame_compare.orchestration.doctor_checks.candidate_lsmas_plugin_path_details",
+                return_value=[],
+            ),
+        ):
+            result = check.check_fn()
+
+        assert result.passed is False
+        assert result.available is None
+        assert result.message == "L-SMASH-Works plugin not found in core.lsmas namespace"
+        assert result.details == {"checked_plugin_paths": []}
+        assert result.hint == (
+            "Make L-SMASH-Works available under core.lsmas; see "
+            "https://github.com/TJZine/frame-compare#quick-start"
+        )
+        load_plugin.assert_called_once_with(mock_core)
 
     def test_check_lsmas_plugin_fallback_loads_from_nested_extra_plugin_root(
         self,
@@ -243,36 +283,6 @@ class TestCheckLsmas:
 
         assert report.all_passed is False
         assert "lsmas" in report.critical_failures
-
-
-class TestCheckPythonVersion:
-    """Tests for python_version check via run_doctor."""
-
-    def test_check_python_version_passes(self) -> None:
-        """Mock sys.version_info to (3, 13, 0) → check passes."""
-        checks = collect_checks()
-        python_check = next(c for c in checks if c.name == "python_version")
-
-        with patch.object(sys, "version_info", (3, 13, 0)):
-            result = python_check.check_fn()
-
-        assert result.passed is True
-        assert "3.13" in result.message
-
-    def test_check_python_version_fails(self) -> None:
-        """Mock sys.version_info to (3, 12, 0) → check fails with hint."""
-        checks = collect_checks()
-        python_check = next(c for c in checks if c.name == "python_version")
-
-        with patch.object(sys, "version_info", (3, 12, 0)):
-            result = python_check.check_fn()
-
-        assert result.passed is False
-        assert "3.12" in result.message
-        assert result.hint == (
-            "Run Frame Compare with Python 3.13+; see "
-            "https://github.com/TJZine/frame-compare#requirements"
-        )
 
 
 class TestCheckVapoursynth:
@@ -965,7 +975,6 @@ class TestCheckFFmpeg:
 
 def test_collect_checks_has_canonical_media_runtime_order() -> None:
     assert [check.name for check in collect_checks()] == [
-        "python_version",
         "vapoursynth",
         "lsmas",
         "vs_placebo",

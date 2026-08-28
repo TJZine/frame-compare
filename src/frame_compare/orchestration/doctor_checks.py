@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import importlib.metadata
-import os
 import subprocess
-import sys
 from collections.abc import Callable, Iterable, Mapping
 from typing import cast
 
@@ -45,7 +43,6 @@ __all__ = ["SLOWPICS_HEALTHCHECK_URL", "collect_checks"]
 
 # Canonical check ordering
 _CHECK_ORDER: list[tuple[str, str]] = [
-    ("python_version", "core"),
     ("vapoursynth", "core"),
     ("lsmas", "core"),
     ("vs_placebo", "optional"),
@@ -62,26 +59,6 @@ _LSMAS_REQUIRED_FUNCTIONS = ("LibavSMASHSource", "LWLibavSource")
 # registers the public function as Version. Keep the registered name here.
 _FFMS2_REQUIRED_FUNCTIONS = ("Source", "Version")
 _VS_PLACEBO_REQUIRED_FUNCTIONS = ("Tonemap",)
-
-
-def _check_python_version() -> CheckResult:
-    """Check Python version is >= 3.13 per ADR-001."""
-    version = sys.version_info
-    version_str = f"{version[0]}.{version[1]}.{version[2]}"
-    if version >= (3, 13):
-        return CheckResult(
-            passed=True,
-            message=f"Python {version_str}",
-        )
-    return CheckResult(
-        passed=False,
-        message=f"Python {version_str} (requires 3.13+)",
-        hint=(
-            "Run Frame Compare with Python 3.13+; see "
-            "https://github.com/TJZine/frame-compare#requirements"
-        ),
-        details={"current": version_str},
-    )
 
 
 def _check_vapoursynth() -> CheckResult:
@@ -192,18 +169,18 @@ def _check_lsmas() -> CheckResult:
 
     try:
         core = vs.core
-        namespace = "lsmas" if hasattr(core, "lsmas") else "lw" if hasattr(core, "lw") else None
+        namespace = "lsmas" if hasattr(core, "lsmas") else None
         loaded_path: str | None = None
         if namespace is None:
             loaded_path = try_load_lsmas_plugin(core)
-            namespace = "lsmas" if hasattr(core, "lsmas") else "lw" if hasattr(core, "lw") else None
+            namespace = "lsmas" if hasattr(core, "lsmas") else None
 
         if namespace is None:
             return CheckResult(
                 passed=False,
-                message="L-SMASH-Works plugin not found",
+                message="L-SMASH-Works plugin not found in core.lsmas namespace",
                 hint=(
-                    "Make L-SMASH-Works available to VapourSynth; see "
+                    "Make L-SMASH-Works available under core.lsmas; see "
                     "https://github.com/TJZine/frame-compare#quick-start"
                 ),
                 details=_lsmas_plugin_path_details(),
@@ -230,7 +207,7 @@ def _check_lsmas() -> CheckResult:
             available=True,
             message=(
                 "L-SMASH-Works required source functions available "
-                f"({namespace}; native version is not observable)"
+                f"(core.{namespace}; native version is not observable)"
             ),
             details=details,
         )
@@ -651,7 +628,6 @@ def _check_slowpics() -> CheckResult:
 
 def _check_tmdb_api_key() -> CheckResult:
     """Check TMDB API key is configured through the normal runtime config chain."""
-    legacy_tmdb_env_var = "_".join(("TMDB", "API", "KEY"))
     tmdb_enabled, resolved_api_key, config_error = _resolve_tmdb_config()
 
     if config_error is not None:
@@ -679,13 +655,6 @@ def _check_tmdb_api_key() -> CheckResult:
         return CheckResult(
             passed=True,
             message="TMDB API key configured",
-        )
-
-    if os.environ.get(legacy_tmdb_env_var):
-        return CheckResult(
-            passed=False,
-            message="TMDB API key configured via legacy variable",
-            hint=("Move the credential to FRAME_COMPARE_TMDB__API_KEY and remove TMDB_API_KEY"),
         )
 
     return CheckResult(
@@ -732,18 +701,16 @@ def collect_checks() -> list[DoctorCheck]:
 
     Returns:
         List of DoctorCheck in canonical order:
-        1. python_version (core)
-        2. vapoursynth (core)
-        3. lsmas (core)
-        4. vs_placebo (optional)
-        5. ffms2 (optional)
-        6. ffmpeg (optional)
-        7. vspreview (optional)
-        8. slowpics (network)
-        9. tmdb_api_key (network)
+        1. vapoursynth (core)
+        2. lsmas (core)
+        3. vs_placebo (optional)
+        4. ffms2 (optional)
+        5. ffmpeg (optional)
+        6. vspreview (optional)
+        7. slowpics (network)
+        8. tmdb_api_key (network)
     """
     check_fns: dict[str, Callable[[], CheckResult]] = {
-        "python_version": _check_python_version,
         "vapoursynth": _check_vapoursynth,
         "lsmas": _check_lsmas,
         "vs_placebo": _check_vs_placebo,

@@ -213,25 +213,6 @@ def test_check_tmdb_api_key_fails_with_malformed_workspace_config(
     assert result.hint == ("Replace the TMDB credential with a 32-character hexadecimal API key")
 
 
-def test_check_tmdb_api_key_legacy_alias_remains_warning_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Legacy TMDB_API_KEY alone should fail with guidance to use the canonical path."""
-    tmdb_check = next(c for c in collect_checks() if c.name == "tmdb_api_key")
-
-    monkeypatch.chdir(tmp_path)
-    _clear_tmdb_env(monkeypatch)
-
-    monkeypatch.setenv("TMDB_API_KEY", "legacy_key")
-    legacy_result = tmdb_check.check_fn()
-
-    assert legacy_result.passed is False
-    assert legacy_result.message == "TMDB API key configured via legacy variable"
-    assert legacy_result.hint == (
-        "Move the credential to FRAME_COMPARE_TMDB__API_KEY and remove TMDB_API_KEY"
-    )
-
-
 def test_check_tmdb_api_key_disabled_without_key_is_non_failing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

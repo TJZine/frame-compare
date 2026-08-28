@@ -543,10 +543,6 @@ def _detect_fpng_writer() -> _FpngWriter | None:
         return None
 
     core = getattr(vs_module, "core", None)
-    if core is None:
-        get_core = getattr(vs_module, "get_core", None)
-        if callable(get_core):
-            core = get_core()
     fpng = getattr(core, "fpng", None) if core is not None else None
     writer = getattr(fpng, "Write", None) if fpng is not None else None
     if not callable(writer):

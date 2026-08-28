@@ -25,29 +25,10 @@ if TYPE_CHECKING:
 
 log = structlog.get_logger()
 
-TONE_CURVE_MAP: dict[ToneCurve, int] = {
-    ToneCurve.BT2390: 2,
-    ToneCurve.SPLINE: 1,
-    ToneCurve.REINHARD: 4,
-}
-
 TONE_CURVE_STRING_MAP: dict[ToneCurve, str] = {
-    ToneCurve.BT2390: "bt.2390",
+    ToneCurve.BT2390: "bt2390",
     ToneCurve.SPLINE: "spline",
     ToneCurve.REINHARD: "reinhard",
-}
-_TONE_CURVE_STRING_TO_NUMERIC = {
-    value: TONE_CURVE_MAP[key] for key, value in TONE_CURVE_STRING_MAP.items()
-}
-
-_BASELINE_COMPAT_KEYS = {
-    "src_max",
-    "dst_max",
-    "tone_mapping_function",
-    "tone_mapping_function_s",
-    "dst_csp",
-    "dst_prim",
-    "src_csp",
 }
 
 
@@ -124,60 +105,6 @@ def build_libplacebo_tonemap_kwargs(
     return tm_kwargs
 
 
-def _parse_rejected_tonemap_kwargs(message: str) -> set[str]:
-    unexpected = "unexpected keyword argument "
-    if unexpected in message:
-        raw = message.split(unexpected, 1)[1].split(" ", 1)[0]
-        return {raw.strip().strip("'\"")} if raw.strip() else set()
-
-    marker = "named "
-    if marker not in message:
-        return set()
-
-    raw = message.split(marker, 1)[1]
-    raw = raw.split(":", 1)[0]
-    raw = raw.replace(" and ", ",")
-    return {part.strip().strip("'\"") for part in raw.split(",") if part.strip()}
-
-
-def _add_numeric_tone_curve_fallback(kwargs: dict[str, object]) -> None:
-    if "tone_mapping_function" in kwargs or "tone_mapping_function_s" not in kwargs:
-        return
-    tone_curve = kwargs.get("tone_mapping_function_s")
-    if not isinstance(tone_curve, str):
-        return
-    numeric = _TONE_CURVE_STRING_TO_NUMERIC.get(tone_curve)
-    if numeric is not None:
-        kwargs["tone_mapping_function"] = numeric
-
-
-def call_libplacebo_with_compat_retry(
-    core: vs.Core,
-    clip: vs.VideoNode,
-    tm_kwargs: dict[str, object],
-) -> vs.VideoNode:
-    try:
-        return core.placebo.Tonemap(clip, **tm_kwargs)  # type: ignore[misc]
-    except TypeError as e:
-        rejected = _parse_rejected_tonemap_kwargs(str(e))
-        if rejected:
-            minimal_kwargs = {key: value for key, value in tm_kwargs.items() if key not in rejected}
-            if "tone_mapping_function_s" in rejected:
-                _add_numeric_tone_curve_fallback(tm_kwargs)
-                if "tone_mapping_function" in tm_kwargs:
-                    minimal_kwargs["tone_mapping_function"] = tm_kwargs["tone_mapping_function"]
-        else:
-            minimal_kwargs = {
-                key: value for key, value in tm_kwargs.items() if key in _BASELINE_COMPAT_KEYS
-            }
-        log.debug(
-            "libplacebo_tonemap_retry_dropped_kwargs",
-            error=str(e),
-            dropped=sorted(set(tm_kwargs.keys()) - set(minimal_kwargs.keys())),
-        )
-        return core.placebo.Tonemap(clip, **minimal_kwargs)  # type: ignore[misc]
-
-
 def apply_libplacebo(
     clip: vs.VideoNode,
     settings: TonemapSettings,
@@ -189,7 +116,7 @@ def apply_libplacebo(
 
     target_nits = validate_target_nits(settings)
 
-    if settings.tone_curve not in TONE_CURVE_MAP:
+    if settings.tone_curve not in TONE_CURVE_STRING_MAP:
         raise TonemapError(
             reason=f"Unsupported tone curve '{settings.tone_curve}'",
             hint="Supported: bt2390, spline, reinhard",
@@ -209,7 +136,9 @@ def apply_libplacebo(
             target_nits=target_nits,
             inputs=inputs,
         )
-        clip = call_libplacebo_with_compat_retry(core, clip, tm_kwargs)
+        clip = core.placebo.Tonemap(clip, **tm_kwargs)  # type: ignore[misc]
+    except TypeError as e:
+        raise TonemapError(reason=f"Invalid libplacebo Tonemap arguments: {e}") from e
     except Exception as e:
         if isinstance(e, TonemapError | AttributeError | KeyError | AssertionError):
             raise

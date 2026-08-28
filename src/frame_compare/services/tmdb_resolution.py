@@ -5,11 +5,10 @@ from __future__ import annotations
 import asyncio
 import re
 import unicodedata
-from collections.abc import Awaitable
 from dataclasses import dataclass, replace
 from difflib import SequenceMatcher
 from functools import lru_cache
-from typing import Literal, Protocol, cast
+from typing import Literal
 
 import httpx
 import structlog
@@ -26,18 +25,6 @@ log = structlog.get_logger()
 type MediaType = Literal["movie", "tv"]
 type SearchEndpoint = Literal["movie", "tv", "multi"]
 type CandidateKey = tuple[MediaType, int]
-
-
-class AltTitlesCallable(Protocol):
-    def __call__(
-        self,
-        tmdb_id: int,
-        media_type: MediaType,
-        config: MetadataConfig,
-        client: httpx.AsyncClient,
-        *,
-        cache: TmdbCache | None = None,
-    ) -> Awaitable[list[str]]: ...
 
 
 type _IndexedSearchResults = tuple[int, list[TmdbMetadata]]
@@ -573,32 +560,24 @@ def _select_alt_title_pool(ranked_candidates: list[_ScoredCandidate]) -> list[_S
     return pool[:MAX_ALT_TITLE_REQUESTS]
 
 
-def _fetch_alt_titles_fn() -> object | None:
-    return getattr(tmdb_lookup, "fetch_tmdb_alternative_titles", None)
-
-
 async def _fetch_candidate_aliases(
     candidate: _ScoredCandidate,
     config: MetadataConfig,
     client: httpx.AsyncClient,
     cache: TmdbCache | None,
 ) -> tuple[CandidateKey, tuple[str, ...]]:
-    fetch_fn = _fetch_alt_titles_fn()
     key: CandidateKey = (candidate.metadata.media_type, candidate.metadata.tmdb_id)
-    if not callable(fetch_fn):
-        return key, ()
 
     try:
-        typed_fetch = cast(AltTitlesCallable, fetch_fn)
         if cache is None:
-            aliases = await typed_fetch(
+            aliases = await tmdb_lookup.fetch_tmdb_alternative_titles(
                 candidate.metadata.tmdb_id,
                 candidate.metadata.media_type,
                 config,
                 client,
             )
         else:
-            aliases = await typed_fetch(
+            aliases = await tmdb_lookup.fetch_tmdb_alternative_titles(
                 candidate.metadata.tmdb_id,
                 candidate.metadata.media_type,
                 config,

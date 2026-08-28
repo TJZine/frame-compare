@@ -28,10 +28,8 @@ _resolve_hdr_tonemap_inputs = _conversion.resolve_hdr_tonemap_inputs
 _to_rgbs = _conversion.to_rgbs
 _validate_target_nits = _conversion.validate_target_nits
 _fallback_tonemap = fallback_tonemap
-_TONE_CURVE_MAP = _libplacebo.TONE_CURVE_MAP
 _apply_libplacebo = _libplacebo.apply_libplacebo
 _build_libplacebo_tonemap_kwargs = _libplacebo.build_libplacebo_tonemap_kwargs
-_call_libplacebo_with_compat_retry = _libplacebo.call_libplacebo_with_compat_retry
 _convert_for_libplacebo = _libplacebo.convert_for_libplacebo
 _TONEMAP_PRESETS = TONEMAP_PRESETS
 _LibplaceboRuntimeState = LibplaceboRuntimeState
@@ -76,11 +74,9 @@ __all__ = [
     "_LIBPLACEBO_RUNTIME_STATE",
     "_LibplaceboRuntimeState",
     "_TONEMAP_PRESETS",
-    "_TONE_CURVE_MAP",
     "_apply_libplacebo",
     "_apply_post_processing",
     "_build_libplacebo_tonemap_kwargs",
-    "_call_libplacebo_with_compat_retry",
     "_convert_for_libplacebo",
     "_convert_non_rgb_with_matrix_hint",
     "_deduce_src_csp_hint",
