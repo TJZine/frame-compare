@@ -94,6 +94,7 @@ function makeViewer() {
             return Number.isFinite(number) ? number : fallback;
         },
         clipCount() { return this.state.data.clips.length; },
+        syncRadioGroupTabStops() {},
         persistViewportState() {
             persistence.calls += 1;
             this.viewport.storeCurrentPairAlignment();

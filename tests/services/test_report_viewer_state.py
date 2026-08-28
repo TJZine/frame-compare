@@ -93,6 +93,22 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
         "nestedInButton": True,
         "plain": False,
     }
+    assert summary["radioGroupKeyboard"] == {
+        "wrapsAndSelects": True,
+        "rovingTabStop": True,
+        "preventsNativeScroll": True,
+        "stopsGlobalShortcut": True,
+    }
+    assert summary["frameKeyboard"] == {
+        "selectedNextFrame": True,
+        "preventsNativeScroll": True,
+    }
+    assert summary["filmstripKeyboard"] == {
+        "selectedNextFrame": True,
+        "focusedSelection": True,
+        "preventsNativeScroll": True,
+        "stopsGlobalShortcut": True,
+    }
     assert summary["directionalFourClip"]["swappedAlignment"] == [6, 7]
     assert summary["directionalFourClip"]["reversePairAlignment"] == [-6, -7]
     assert summary["paletteOrientationState"] == {

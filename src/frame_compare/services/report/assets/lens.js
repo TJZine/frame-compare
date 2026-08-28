@@ -931,6 +931,8 @@ const Lens = (() => {
                 button.classList.toggle('active', active);
                 button.setAttribute('aria-checked', active ? 'true' : 'false');
             });
+            viewer.syncRadioGroupTabStops(dom.sizeButtons);
+            viewer.syncRadioGroupTabStops(dom.markerButtons);
             if (dom.comparisonToggle) dom.comparisonToggle.checked = state.report.comparisonEnabled;
             if (dom.comparisonSettings) {
                 const available = viewer.state.mode === 'overlay' && clipCount() > 1;
@@ -1060,9 +1062,14 @@ const Lens = (() => {
             dom.sizeButtons.forEach(button => button.addEventListener('click', () => {
                 setSize(button.dataset.lensSize);
             }));
+            viewer.bindRadioGroup(dom.sizeButtons, button => setSize(button.dataset.lensSize));
             dom.markerButtons.forEach(button => button.addEventListener('click', () => {
                 setMarkerStyle(button.dataset.lensMarker);
             }));
+            viewer.bindRadioGroup(
+                dom.markerButtons,
+                button => setMarkerStyle(button.dataset.lensMarker),
+            );
             dom.comparisonToggle?.addEventListener('change', event => setComparisonEnabled(event.target.checked));
             dom.comparisonTarget?.addEventListener('change', event => setComparisonTarget(event.target.value));
             dom.reset?.addEventListener('click', reset);

@@ -2244,20 +2244,7 @@ body.rv-inspector-open .rv-viewer-stage {
     margin-top: 1.5rem;
 }
 
-/* 11. Footer */
-.rv-footer {
-    padding: 0.35rem 1.5rem;
-    background: var(--bg-surface);
-    border-top: 1px solid var(--border);
-    font-size: var(--text-xs);
-    color: var(--text-muted);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    min-height: 28px;
-}
-
-/* 12. Responsive adaptation */
+/* 11. Responsive adaptation */
 @media (max-width: 70rem) {
     .rv-primary-controls {
         grid-template-columns: minmax(0, 1fr) auto;

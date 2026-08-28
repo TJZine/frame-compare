@@ -598,7 +598,12 @@ Review, and Export tabs; fullscreen support; viewport pan, zoom,
 actual/width/height fit, reveal, and adjacent-frame preloading. The toolbar owner uses
 CSS Grid to keep frame, mode, and context/alignment zones stable at wide widths, then
 reflows them to two rows and a narrow stack without JavaScript measurement or DOM
-reordering. One responsive Inspector width token owns both desktop drawer width and
+reordering. Frame arrow shortcuts select the adjacent visible frame while suppressing
+native document and filmstrip scrolling; the selected filmstrip item owns its roving
+tab stop. Custom view-mode, fit, timeline-size, and lens-option radio groups use
+standard arrow and Home/End selection. The header Help dialog is the single persistent
+shortcut reference; the timeline is the final visible report region. One responsive
+Inspector width token owns both desktop drawer width and
 stage reservation; the existing tablet/phone overlay boundary keeps stage margin at
 zero.
 
