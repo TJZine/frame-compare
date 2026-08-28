@@ -252,7 +252,7 @@ recovery requirement.
   entries may also retain the computed
   audio alignment result that produced the preview suggestion so a later run can
   decline the human-confirmed offset without rerunning deterministic audio
-  alignment. Cache version 2 requires a bounded scalar stability summary for computed
+  alignment. Cache schema v1 requires a bounded scalar stability summary for computed
   entries and embedded computed results; no per-window evidence or audio is persisted.
   Unreadable, corrupt, unsupported-version, malformed source-table, or
   invalid-entry shared reuse data degrades to the normal alignment path with a

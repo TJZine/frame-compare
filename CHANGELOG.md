@@ -34,8 +34,8 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 ### Changed
 
 - Bump Frame Compare to 0.5.0 and refresh the managed stack to Python 3.13.15,
-  uv 0.12.5, VapourSynth R79/API R4.2, L-SMASH-Works 1296, vs-placebo 2.0.4,
-  Akarin 1.4.1, and VSZip 22.1.0. Docker includes FFMS2 5.0; Windows portable
+  uv 0.12.5, VapourSynth R79/API R4.2, L-SMASH-Works 1310, vs-placebo 2.0.4,
+  Akarin 1.5.0, and VSZip 22.1.0. Docker includes FFMS2 5.0; Windows portable
   intentionally excludes FFMS2.
 - Make random, dark, bright, and motion frame selection deterministic and temporally
   stratified while preserving seed reproducibility, minimum-gap behavior, sparse
