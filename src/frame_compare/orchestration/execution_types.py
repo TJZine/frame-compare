@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from frame_compare.analysis.types import (
     FrameMetrics,
     SelectionBreakdown,
+    SelectionDetail,
     SelectionDetailsByFrame,
 )
 from frame_compare.analysis.window import SelectionWindow
@@ -29,29 +30,13 @@ if TYPE_CHECKING:
     from frame_compare.orchestration.phases import Phase
 
 
-def _empty_str_list() -> list[str]:
-    return []
-
-
-def _empty_phase_timings() -> dict[str, float]:
-    return {}
-
-
-def _empty_frame_list() -> list[int]:
-    return []
-
-
-def _empty_selection_details_by_source_frame() -> SelectionDetailsByFrame:
-    return {}
-
-
 @dataclass
 class RenderArtifacts:
     screenshots_by_label: dict[str, list[Path]]
     frame_facts_by_label: dict[str, list[RenderedFrameFacts]]
     clip_facts_by_label: dict[str, RenderedClipFacts]
     screenshot_dir: Path | None
-    warnings: list[str] = field(default_factory=_empty_str_list)
+    warnings: list[str] = field(default_factory=list[str])
 
     def __post_init__(self) -> None:
         labels = set(self.screenshots_by_label)
@@ -72,9 +57,9 @@ class FramePlanPhaseOutput:
     selected_frames: list[int]
     selection_breakdown: SelectionBreakdown = field(default_factory=SelectionBreakdown)
     selection_details_by_source_frame: SelectionDetailsByFrame = field(
-        default_factory=_empty_selection_details_by_source_frame
+        default_factory=dict[int, SelectionDetail]
     )
-    warnings: list[str] = field(default_factory=_empty_str_list)
+    warnings: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True)
@@ -84,9 +69,9 @@ class AnalyzePhaseOutput:
     metrics_cache_hit: bool
     analysis_metrics: FrameMetrics
     selection_details_by_source_frame: SelectionDetailsByFrame = field(
-        default_factory=_empty_selection_details_by_source_frame
+        default_factory=dict[int, SelectionDetail]
     )
-    warnings: list[str] = field(default_factory=_empty_str_list)
+    warnings: list[str] = field(default_factory=list[str])
     replaces_frame_plan_selection: bool = False
 
 
@@ -97,7 +82,7 @@ class AlignPhaseOutput:
     selected_frames: list[int]
     selection_breakdown: SelectionBreakdown | None = None
     selection_details_by_source_frame: SelectionDetailsByFrame | None = None
-    warnings: list[str] = field(default_factory=_empty_str_list)
+    warnings: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True)
@@ -126,12 +111,12 @@ class ReportPhaseOutput:
 @dataclass(frozen=True)
 class ConfirmSlowpicsUploadPhaseOutput:
     status: SlowpicsUploadConfirmationStatus
-    warnings: list[str] = field(default_factory=_empty_str_list)
+    warnings: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True)
 class PostReportCleanupPhaseOutput:
-    warnings: list[str] = field(default_factory=_empty_str_list)
+    warnings: list[str] = field(default_factory=list[str])
 
 
 type PhaseOutput = (
@@ -196,9 +181,9 @@ class ExecutionState:
     """Mutable execution state shared explicitly by phase construction."""
 
     artifacts: RunArtifacts = field(default_factory=RunArtifacts)
-    selected_frames: list[int] = field(default_factory=_empty_frame_list)
-    frame_plan_warnings: list[str] = field(default_factory=_empty_str_list)
-    phase_timings: dict[str, float] = field(default_factory=_empty_phase_timings)
+    selected_frames: list[int] = field(default_factory=list[int])
+    frame_plan_warnings: list[str] = field(default_factory=list[str])
+    phase_timings: dict[str, float] = field(default_factory=dict[str, float])
 
     @property
     def warnings(self) -> list[str]:
@@ -226,7 +211,7 @@ class PrepState:
     selection_window: SelectionWindow
     analysis_clip: ClipState | None = None
     full_window_retry_override: FullWindowRetryOverride | None = None
-    load_source_diagnostics: list[str] = field(default_factory=_empty_str_list)
+    load_source_diagnostics: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True)

@@ -68,14 +68,6 @@ class RunRequest:
         return cli_config_overrides_from(self)
 
 
-def _empty_str_list() -> list[str]:
-    return []
-
-
-def _empty_phase_timings() -> dict[str, float]:
-    return {}
-
-
 def _utc_now() -> datetime:
     return datetime.now(UTC)
 
@@ -157,9 +149,9 @@ class RunResult:
     metrics_cache_status: MetricsCacheStatus = "skipped"
 
     # Diagnostics
-    errors: list[str] = field(default_factory=_empty_str_list)
-    warnings: list[str] = field(default_factory=_empty_str_list)
-    phase_timings: dict[str, float] = field(default_factory=_empty_phase_timings)
+    errors: list[str] = field(default_factory=list[str])
+    warnings: list[str] = field(default_factory=list[str])
+    phase_timings: dict[str, float] = field(default_factory=dict[str, float])
 
 
 @dataclass

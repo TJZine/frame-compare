@@ -37,10 +37,6 @@ from frame_compare.config.text_validation import reject_control_characters
 _EFFECTIVE_FPS_PATTERN = re.compile(r"^[0-9]+/[0-9]+$")
 
 
-def _empty_user_frames() -> list[int]:
-    return []
-
-
 class PathsConfig(BaseModel):
     """Filesystem paths relative to the workspace root."""
 
@@ -56,7 +52,7 @@ class AnalysisConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    user_frames: list[int] = Field(default_factory=_empty_user_frames)
+    user_frames: list[int] = Field(default_factory=list[int])
     random_frame_count: int = Field(default=10, ge=0)
     dark_frame_count: int = Field(default=0, ge=0)
     bright_frame_count: int = Field(default=0, ge=0)

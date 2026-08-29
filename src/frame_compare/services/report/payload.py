@@ -28,10 +28,6 @@ from frame_compare.vs.types import TonemapSettings
 REPORT_VERSION = "1.2"
 
 
-def _empty_frame_details() -> list[FrameDetail]:
-    return []
-
-
 class ClipFingerprintProtocol(Protocol):
     @property
     def path(self) -> Path: ...
@@ -273,7 +269,7 @@ class ReportData:
     rendering: ReportRenderingInfo
     metadata: TmdbMetadata | None = None
     slowpics_url: str | None = None
-    frame_details: list[FrameDetail] = field(default_factory=_empty_frame_details)
+    frame_details: list[FrameDetail] = field(default_factory=list[FrameDetail])
 
     def __post_init__(self) -> None:
         if self.frame_details and len(self.frame_details) != len(self.frames):

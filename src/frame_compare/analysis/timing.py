@@ -12,15 +12,11 @@ type AnalysisCacheState = Literal["hit", "miss"]
 type AnalysisCacheWriteState = Literal["not_attempted", "written", "failed"]
 
 
-def _empty_timing_spans() -> dict[str, float]:
-    return {}
-
-
 @dataclass(slots=True)
 class AnalysisTimingRecorder:
     """Collect additive timing spans without affecting normal analysis callers."""
 
-    spans_seconds: dict[str, float] = field(default_factory=_empty_timing_spans)
+    spans_seconds: dict[str, float] = field(default_factory=dict[str, float])
     cache_state: AnalysisCacheState = "miss"
     cache_write_state: AnalysisCacheWriteState = "not_attempted"
 
