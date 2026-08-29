@@ -11,10 +11,6 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 
 ### Added
 
-- Add previous-offset reuse controls (`disabled`, `prompt`, and `always`) with
-  shared-cache identity, provenance, stability validation, interactive acceptance,
-  and structured CLI errors.
-- Add post-report slow.pics upload confirmation for interactive runs.
 - Add a consent-gated, run-only full-window retry when configured lead/trail
   exclusions leave too little eligible media; authored configuration remains
   unchanged.
@@ -28,9 +24,6 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 - Add code-owned media-runtime identities and scoped fingerprints for analysis,
   probing, alignment, source indexing, cache invalidation, Docker, Windows portable,
   and code-only update compatibility.
-- Add a guarded immutable release workflow with exact version, tag, and SHA
-  validation; collision checks; draft and asset verification; remote digest checks;
-  and artifact provenance attestations.
 - Bundle Inter Regular under the SIL Open Font License 1.1 for deterministic overlay
   typography.
 
@@ -52,8 +45,9 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 - Make random, dark, bright, and motion frame selection deterministic and temporally
   stratified while preserving seed reproducibility, minimum-gap behavior, sparse
   source coordinates, category counts, and selection diagnostics.
-- Classify alignment stability and strengthen shared reuse-cache identity, schema
-  validation, and previous-offset presentation.
+- Classify alignment stability and harden the existing `disabled`, `prompt`, and
+  `always` previous-offset reuse policies with source/runtime identity, provenance,
+  schema validation, interactive evidence, and clearer presentation.
 - Improve CLI help, wizard, side-effect-free dry-run planning, chronological human
   progress output on stderr, JSON output contracts, warnings, and success summaries.
 - Improve offline viewer keyboard navigation, focus management, radio-group and
@@ -70,6 +64,9 @@ Frame Compare follows Conventional Commits, and Release Please turns the
   reuse, invalid-index recovery, and cache-free fallback behavior.
 - Expand deterministic Docker and Windows portable runtime, packaging, installer,
   updater, rollback, provenance, license, and extracted-bundle verification.
+- Strengthen the guarded immutable release workflow with exact version, tag, channel,
+  and SHA validation; collision checks; draft and asset verification; remote digest
+  checks; provenance attestations; and final publication-state verification.
 
 ### Fixed
 
@@ -110,6 +107,9 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 - Windows v0.1.0 portable installations require the complete v0.5.0 bundle because
   the managed media-runtime fingerprint changed; the code-only updater refuses
   incompatible runtimes.
+- The former `paths.screenshots_dir` and `paths.use_run_folders` settings are no
+  longer part of the configuration surface; generated artifacts now follow the sole
+  configured `paths.generated_dir` layout.
 - Analysis, probe, alignment, and source-index caches include updated runtime
   identities and may be invalidated or rebuilt.
 - Clear any shared alignment reuse cache produced by an intermediate v0.5.0 build
