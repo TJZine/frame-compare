@@ -107,9 +107,11 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 - Windows v0.1.0 portable installations require the complete v0.5.0 bundle because
   the managed media-runtime fingerprint changed; the code-only updater refuses
   incompatible runtimes.
-- The former `paths.screenshots_dir` and `paths.use_run_folders` settings are no
-  longer part of the configuration surface; generated artifacts now follow the sole
-  configured `paths.generated_dir` layout.
+- Existing v0.1.0 configurations must remove `paths.screenshots_dir`,
+  `paths.use_run_folders`, and `report.output_dir` or be regenerated. Generated
+  artifacts now follow the sole configured `paths.generated_dir` layout. The former
+  top-level `[diagnostics]` section is no longer a supported config surface and is
+  ignored.
 - Analysis, probe, alignment, and source-index caches include updated runtime
   identities and may be invalidated or rebuilt.
 - Clear any shared alignment reuse cache produced by an intermediate v0.5.0 build
