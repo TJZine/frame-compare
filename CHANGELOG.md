@@ -42,6 +42,10 @@ Frame Compare follows Conventional Commits, and Release Please turns the
   VSPreview 0.20.1. Windows portable uses the LGPL FFmpeg
   `n8.1.2-34-g9b6c8969e0` build. Docker uses Debian FFmpeg 7.1.5 and includes
   FFMS2 5.0; Windows portable intentionally excludes FFMS2.
+- Unify screenshots, reports, run records, and reusable caches under one configured
+  generated-data root. Every run that proceeds to output reservation receives a
+  self-contained artifact folder, while shared caches remain outside individual run
+  folders for reuse and history discovery.
 - Batch compatible FFmpeg frame requests through one ordered decode pass and render
   independent source batches concurrently while preserving deterministic output
   order, exact per-frame facts, failure behavior, and progress reporting.
