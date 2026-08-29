@@ -7,6 +7,11 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 
 ## Unreleased
 
+### Fixed
+
+- Populate guarded GitHub releases from the matching validated changelog section
+  instead of a placeholder, and verify the release body through publication.
+
 ## [0.5.0]
 
 ### Added
