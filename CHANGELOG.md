@@ -43,8 +43,14 @@ Frame Compare follows Conventional Commits, and Release Please turns the
   independent source batches concurrently while preserving deterministic output
   order, exact per-frame facts, failure behavior, and progress reporting.
 - Make random, dark, bright, and motion frame selection deterministic and temporally
-  stratified while preserving seed reproducibility, minimum-gap behavior, sparse
-  source coordinates, category counts, and selection diagnostics.
+  stratified, and derive the preferred automatic separation from the effective
+  reference FPS as `ceil(FPS / 2)` for an approximately half-second target. Preserve
+  exact user frames, global `User`/`Dark`/`Bright`/`Motion`/`Random` precedence,
+  seed reproducibility, sparse source coordinates, and category counts while
+  progressively relaxing automatic spacing down to one-frame uniqueness when needed.
+  Propagate the reference-domain FPS through initial random selection, metric
+  selection, post-alignment reselection, and alignment fallback, and skip unattainable
+  gap thresholds so fallback cost does not scale with numeric FPS.
 - Classify alignment stability and harden the existing `disabled`, `prompt`, and
   `always` previous-offset reuse policies with source/runtime identity, provenance,
   schema validation, interactive evidence, and clearer presentation.
