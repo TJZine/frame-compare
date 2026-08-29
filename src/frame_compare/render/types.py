@@ -89,28 +89,16 @@ class RenderedFrameResult:
     facts: RenderedFrameFacts
 
 
-def _empty_screenshots_by_label() -> dict[str, list[Path]]:
-    return {}
-
-
-def _empty_frame_facts_by_label() -> dict[str, list[RenderedFrameFacts]]:
-    return {}
-
-
-def _empty_clip_facts_by_label() -> dict[str, RenderedClipFacts]:
-    return {}
-
-
 @dataclass(frozen=True, slots=True)
 class RenderedBatchResult:
     """One-to-one screenshot, frame-fact, and clip-fact mappings."""
 
-    screenshots_by_label: dict[str, list[Path]] = field(default_factory=_empty_screenshots_by_label)
+    screenshots_by_label: dict[str, list[Path]] = field(default_factory=dict[str, list[Path]])
     frame_facts_by_label: dict[str, list[RenderedFrameFacts]] = field(
-        default_factory=_empty_frame_facts_by_label
+        default_factory=dict[str, list[RenderedFrameFacts]]
     )
     clip_facts_by_label: dict[str, RenderedClipFacts] = field(
-        default_factory=_empty_clip_facts_by_label
+        default_factory=dict[str, RenderedClipFacts]
     )
 
     def __post_init__(self) -> None:

@@ -108,9 +108,13 @@ window and are not restricted to sampled metric frames.
 Automatic selection divides that whole window into deterministic integer-coordinate
 temporal strata. Dark, bright, and motion candidates retain their existing metric
 rankings, while random candidates retain stable seed-derived ordering; all categories
-prefer five-frame separation, globally backfill empty strata, and relax spacing—but
-never uniqueness—when distinct candidates can otherwise satisfy the requested count.
-Sparse performance samples remain in source-frame coordinates during this allocation.
+prefer a half-second separation, represented by `ceil(selection-domain effective FPS / 2)`
+frames, globally backfill empty strata, and use bounded gap relaxation that skips
+unreachable integer gaps by advancing to the next reachable occupied-frame distance,
+down to one-frame uniqueness when distinct candidates can otherwise satisfy the requested
+count. The selection-domain FPS is the effective reference FPS, even when metric arrays
+come from another analysis source. Sparse performance samples remain in source-frame
+coordinates during this allocation.
 
 `frame_compare.orchestration.source_labels` resolves presentation labels after
 selector/override resolution and before probing or run-folder reservation.

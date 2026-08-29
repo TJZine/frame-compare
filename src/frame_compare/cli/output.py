@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Literal
 
 from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
+
+from frame_compare.utils.post_upload_actions import PostUploadActionResult, PostUploadActionResults
 
 if TYPE_CHECKING:
     from frame_compare.config.overrides import TonemapCliOverrides
@@ -33,44 +35,8 @@ STYLE_HEADER = "bold cyan"
 STYLE_SUBHEADER = "bold bright_cyan"
 STYLE_METRIC_KEY = "dim"
 
-type PostUploadActionPresentationKind = Literal["clipboard", "browser", "shortcut", "webhook"]
 type WarningPresentationSeverity = Literal["warning", "skipped"]
 type StatusPresentation = Literal["OK", "WARN", "SKIP", "FAIL", "WAIT"]
-
-
-class PostUploadActionPresentation(Protocol):
-    @property
-    def kind(self) -> PostUploadActionPresentationKind: ...
-
-    @property
-    def success(self) -> bool: ...
-
-    @property
-    def detail(self) -> str | None: ...
-
-    @property
-    def path(self) -> Path | None: ...
-
-    @property
-    def message(self) -> str | None: ...
-
-    @property
-    def warning(self) -> str | None: ...
-
-
-@dataclass(frozen=True)
-class PostUploadActionPresentationResult:
-    """CLI-local presentation state for optional post-upload side effects."""
-
-    kind: PostUploadActionPresentationKind
-    success: bool
-    detail: str | None = None
-    path: Path | None = None
-    message: str | None = None
-    warning: str | None = None
-
-
-type PostUploadActionPresentationResults = tuple[PostUploadActionPresentation, ...]
 
 
 @dataclass(frozen=True)
@@ -486,7 +452,7 @@ def print_result_summary(
     *,
     result: RunResult,
     quiet: bool,
-    post_upload_actions: PostUploadActionPresentationResults = (),
+    post_upload_actions: PostUploadActionResults = (),
     root: Path | None = None,
     verbose: bool = False,
 ) -> None:
@@ -497,7 +463,7 @@ def print_result_summary(
             console.print(f"Screenshots: {escape(screenshot_dir)}", soft_wrap=True)
         return
 
-    all_post_upload_actions: PostUploadActionPresentationResults = (
+    all_post_upload_actions: PostUploadActionResults = (
         *result.post_upload_actions,
         *post_upload_actions,
     )
@@ -618,7 +584,7 @@ def print_result_summary(
 
 
 def _post_upload_action_detail(
-    action: PostUploadActionPresentation,
+    action: PostUploadActionResult,
     *,
     root: Path | None,
     verbose: bool,
@@ -634,7 +600,7 @@ def _post_upload_action_detail(
 
 def _warning_presentations(
     warnings: list[str],
-    actions: PostUploadActionPresentationResults,
+    actions: PostUploadActionResults,
 ) -> list[WarningPresentation]:
     candidates: list[WarningPresentation] = []
     seen: set[tuple[str, WarningPresentationSeverity, str, str | None]] = set()
@@ -665,7 +631,7 @@ def _warning_presentations(
 
 
 def _post_upload_warning_presentation(
-    action: PostUploadActionPresentation,
+    action: PostUploadActionResult,
 ) -> WarningPresentation:
     warning = action.warning
     if warning is None:

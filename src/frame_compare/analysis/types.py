@@ -25,14 +25,6 @@ ActiveRectAlgorithmId = Literal["active_rect_resolution_v2"]
 type SelectionDetailsByFrame = dict[int, SelectionDetail]
 
 
-def _empty_int_list() -> list[int]:
-    return []
-
-
-def _empty_selection_detail_map() -> SelectionDetailsByFrame:
-    return {}
-
-
 @dataclass(frozen=True, slots=True)
 class ClipIdentity:
     """Unique identity of a video clip for caching purposes.
@@ -229,11 +221,11 @@ class SelectionBreakdown:
         random: Frames selected for uniform distribution
     """
 
-    user: Sequence[int] = field(default_factory=_empty_int_list)
-    quantile_dark: Sequence[int] = field(default_factory=_empty_int_list)
-    quantile_bright: Sequence[int] = field(default_factory=_empty_int_list)
-    motion: Sequence[int] = field(default_factory=_empty_int_list)
-    random: Sequence[int] = field(default_factory=_empty_int_list)
+    user: Sequence[int] = field(default_factory=list[int])
+    quantile_dark: Sequence[int] = field(default_factory=list[int])
+    quantile_bright: Sequence[int] = field(default_factory=list[int])
+    motion: Sequence[int] = field(default_factory=list[int])
+    random: Sequence[int] = field(default_factory=list[int])
 
 
 @dataclass(frozen=True, slots=True)
@@ -263,7 +255,7 @@ class FrameSelection:
     frames: Sequence[int]
     seed: int
     breakdown: SelectionBreakdown
-    selection_details: SelectionDetailsByFrame = field(default_factory=_empty_selection_detail_map)
+    selection_details: SelectionDetailsByFrame = field(default_factory=dict[int, "SelectionDetail"])
 
 
 @dataclass(frozen=True, slots=True)

@@ -23,10 +23,11 @@ silently replaced.
 Automatic selections divide the eligible timeline into deterministic temporal regions.
 Random selection chooses a seeded candidate from each region, while dark, bright, and
 motion selection chooses that region's strongest available metric candidate before
-globally backfilling any missing choices. Frame Compare prefers five-frame separation
-from all earlier evidence, but relaxes that spacing deterministically when a short clip
-still has enough distinct frames to satisfy the request. User frames remain exact and
-take precedence over every automatic category.
+globally backfilling any missing choices. Frame Compare prefers a half-second separation
+from all earlier evidence, rounded up to `ceil(selection-domain effective FPS / 2)`
+frames using the effective reference FPS. If the preferred gap cannot satisfy a category,
+the selector relaxes it by one frame at a time down to one-frame uniqueness. User frames
+remain exact and take precedence over every automatic category.
 
 ## Quality versus performance analysis
 

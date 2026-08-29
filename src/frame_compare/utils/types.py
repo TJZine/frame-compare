@@ -17,10 +17,6 @@ type AlignmentSelectedReferenceRelationship = Literal["auto", "configured"]
 type PreservedFrameProps = dict[str, str | int | float]
 
 
-def _empty_preserved_frame_props() -> PreservedFrameProps:
-    return {}
-
-
 @dataclass(frozen=True, slots=True)
 class WorkspacePaths:
     """Resolved absolute paths for a workspace.
@@ -158,7 +154,7 @@ class AlignmentClipRequest:
     effective_fps_num: int
     effective_fps_den: int
     selected_audio_stream: int | None = None
-    preserved_frame_props: PreservedFrameProps = field(default_factory=_empty_preserved_frame_props)
+    preserved_frame_props: PreservedFrameProps = field(default_factory=dict[str, str | int | float])
     presentation_name: str | None = None
 
 

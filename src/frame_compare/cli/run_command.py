@@ -20,8 +20,6 @@ from rich.table import Table
 
 from frame_compare.cli.errors import ExitCode, format_error_json, get_exit_code
 from frame_compare.cli.output import (
-    PostUploadActionPresentationResult,
-    PostUploadActionPresentationResults,
     print_at_a_glance,
     print_result_summary,
 )
@@ -40,6 +38,7 @@ from frame_compare.orchestration.preflight import (
     resolve_selected_config_path,
     validate_and_normalize_config_paths,
 )
+from frame_compare.utils.post_upload_actions import PostUploadActionResult, PostUploadActionResults
 
 from .cli_helpers import HandleErrorFn, LoadConfigFn, WriteConfigFn, format_enum_expected
 from .run_contracts import (
@@ -712,13 +711,13 @@ def collect_interactive_slowpics_actions(
     args: RunCliRawArgs,
     deps: RunCommandDeps,
     config: ConfigSchema,
-) -> PostUploadActionPresentationResults:
+) -> PostUploadActionResults:
     """Run enabled interactive slow.pics URL actions and collect presentation state."""
     url = result.slowpics_url
     if url is None or args.json_output or args.quiet or not deps.stdout_is_tty:
         return ()
 
-    actions: list[PostUploadActionPresentationResult] = []
+    actions: list[PostUploadActionResult] = []
     if config.slowpics.copy_url_to_clipboard:
         actions.append(_copy_slowpics_url(url, copy_to_clipboard=deps.copy_to_clipboard))
     if config.slowpics.open_in_browser:
@@ -730,7 +729,7 @@ def _copy_slowpics_url(
     url: str,
     *,
     copy_to_clipboard: CopyToClipboardFn,
-) -> PostUploadActionPresentationResult:
+) -> PostUploadActionResult:
     try:
         copy_to_clipboard(url)
     except Exception as exc:
@@ -739,12 +738,12 @@ def _copy_slowpics_url(
             exception_type=type(exc).__name__,
             exc_info=True,
         )
-        return PostUploadActionPresentationResult(
+        return PostUploadActionResult(
             kind="clipboard",
             success=False,
             warning="slow.pics clipboard: failed to copy URL",
         )
-    return PostUploadActionPresentationResult(
+    return PostUploadActionResult(
         kind="clipboard",
         success=True,
         detail="slow.pics URL copied to clipboard",
@@ -755,7 +754,7 @@ def _open_slowpics_url(
     url: str,
     *,
     open_url: OpenUrlFn,
-) -> PostUploadActionPresentationResult:
+) -> PostUploadActionResult:
     try:
         opened = open_url(url)
     except Exception as exc:
@@ -764,18 +763,18 @@ def _open_slowpics_url(
             exception_type=type(exc).__name__,
             exc_info=True,
         )
-        return PostUploadActionPresentationResult(
+        return PostUploadActionResult(
             kind="browser",
             success=False,
             warning="slow.pics browser: failed to open URL",
         )
     if not opened:
-        return PostUploadActionPresentationResult(
+        return PostUploadActionResult(
             kind="browser",
             success=False,
             warning="slow.pics browser: failed to open URL: no browser accepted the request",
         )
-    return PostUploadActionPresentationResult(
+    return PostUploadActionResult(
         kind="browser",
         success=True,
         detail="slow.pics URL opened in browser",
@@ -783,7 +782,7 @@ def _open_slowpics_url(
 
 
 def slowpics_browser_open_attempted(
-    actions: PostUploadActionPresentationResults,
+    actions: PostUploadActionResults,
 ) -> bool:
     return any(action.kind == "browser" for action in actions)
 

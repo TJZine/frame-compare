@@ -25,10 +25,6 @@ type AlignmentWriteProvenance = Literal[
 ]
 
 
-def _empty_comparison_streams() -> dict[str, int]:
-    return {}
-
-
 @dataclass(frozen=True)
 class AlignmentWindowEvidence:
     """One bounded correlation estimate used only for stability diagnostics."""
@@ -113,7 +109,7 @@ class AlignmentConfig:
     refinement_mode: AlignmentRefinementMode = "disabled"
     refinement_sample_rate: int | None = None
     reference_stream: int | None = None
-    comparison_streams: dict[str, int] = field(default_factory=_empty_comparison_streams)
+    comparison_streams: dict[str, int] = field(default_factory=dict[str, int])
     no_color: bool = False
 
 
