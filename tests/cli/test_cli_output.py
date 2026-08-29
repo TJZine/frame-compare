@@ -9,11 +9,7 @@ import pytest
 from _pytest.monkeypatch import MonkeyPatch
 from rich.console import Console
 
-from frame_compare.cli.output import (
-    PostUploadActionPresentationResult,
-    print_at_a_glance,
-    print_result_summary,
-)
+from frame_compare.cli.output import print_at_a_glance, print_result_summary
 from frame_compare.config.loader import get_default_config
 from frame_compare.config.schema import AnalysisPerformanceMode, ConfigSchema
 from frame_compare.config.schema_enums import (
@@ -23,6 +19,7 @@ from frame_compare.config.schema_enums import (
     Visibility,
 )
 from frame_compare.orchestration import RunRequest, RunResult
+from frame_compare.utils.post_upload_actions import PostUploadActionResult
 
 
 def _console() -> Console:
@@ -518,7 +515,7 @@ def test_result_summary_uses_result_hierarchy_and_relative_paths() -> None:
             duration_seconds=62.0,
             metrics_cache_status="hit",
             post_upload_actions=(
-                PostUploadActionPresentationResult(
+                PostUploadActionResult(
                     kind="shortcut",
                     success=True,
                     path=root / "generated" / "run-1" / "Example.url",
@@ -742,7 +739,7 @@ def test_result_summary_groups_warning_sources_with_severity_detail_and_action()
         ),
         quiet=False,
         post_upload_actions=(
-            PostUploadActionPresentationResult(
+            PostUploadActionResult(
                 kind="clipboard",
                 success=False,
                 warning="slow.pics clipboard: failed to copy URL",
