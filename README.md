@@ -71,7 +71,7 @@ The exact commands and expected output are in
 
 ## Project status
 
-Frame Compare is an alpha project. The CLI, documented configuration behavior, and
+Frame Compare is a beta project. The CLI, documented configuration behavior, and
 published release artifacts are the supported surfaces. Importable modules are
 conveniences unless the project explicitly documents a compatibility promise.
 
