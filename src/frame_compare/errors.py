@@ -5,7 +5,6 @@ from __future__ import annotations
 from frame_compare.error_categories import (
     DependencyError,
     InputError,
-    InternalError,
     NetworkError,
     ProcessingError,
 )
@@ -24,7 +23,6 @@ __all__ = [
     "ErrorDetails",
     "FrameCompareError",
     "InputError",
-    "InternalError",
     "JSONValue",
     "NetworkError",
     "PathEscapesRootError",
