@@ -459,6 +459,7 @@ def _reselect_frames_for_trimmed_overlap(
                 local_user_frames=local_user_frames,
             )
         ),
+        selection_fps=reference.effective_fps,
     )
     local_user_frame_set = set(local_user_frames)
     return _TrimmedOverlapSelection(

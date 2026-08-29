@@ -299,12 +299,15 @@ def _select_stratified(
 
     selected: list[int] = []
 
+    def distance_to_occupied(frame: int) -> int:
+        return min(abs(frame - other) for other in (*exclude, *selected))
+
     def available(frame: int, *, required_gap: int) -> bool:
         if frame in exclude or frame in selected:
             return False
-        return all(abs(frame - other) >= required_gap for other in exclude) and all(
-            abs(frame - other) >= required_gap for other in selected
-        )
+        if not exclude and not selected:
+            return True
+        return distance_to_occupied(frame) >= required_gap
 
     strata: list[list[int]] = [[] for _ in range(count)]
     for frame in ranked_candidates:
@@ -319,12 +322,27 @@ def _select_stratified(
         if candidate is not None:
             selected.append(candidate)
 
-    for required_gap in range(preferred_gap, 0, -1):
+    # A candidate can become eligible only when the gap reaches its nearest
+    # occupied-frame distance; skip the unchanged integer gaps between those
+    # thresholds while retaining the original descending-pass order.
+    required_gap = preferred_gap
+    while required_gap > 0:
         for frame in ranked_candidates:
             if len(selected) >= count:
                 return sorted(selected)
             if available(frame, required_gap=required_gap):
                 selected.append(frame)
+
+        if len(selected) >= count:
+            return sorted(selected)
+        required_gap = max(
+            (
+                min(required_gap - 1, distance_to_occupied(frame))
+                for frame in ranked_candidates
+                if frame not in exclude and frame not in selected
+            ),
+            default=0,
+        )
 
     return sorted(selected)
 

@@ -192,6 +192,31 @@ def test_progressive_spacing_finally_selects_close_unique_frame() -> None:
     assert result.breakdown.motion == [1]
 
 
+def test_very_high_selection_fps_completes_with_small_frame_domain() -> None:
+    motion = [0.0, 1.0, 0.9, 0.8]
+    config = AnalysisConfig(
+        user_frames=[0],
+        random_frame_count=0,
+        motion_frame_count=3,
+    )
+
+    result1 = select_frames(
+        make_metrics([0.5] * 4, motion),
+        config,
+        selection_fps=Fraction(10**12),
+    )
+    result2 = select_frames(
+        make_metrics([0.5] * 4, motion),
+        config,
+        selection_fps=Fraction(10**12),
+    )
+
+    assert result1.frames == [0, 1, 2, 3]
+    assert result1.frames == result2.frames
+    assert len(result1.frames) == 4
+    assert len(set(result1.frames)) == 4
+
+
 def test_metric_categories_choose_best_candidate_per_temporal_stratum() -> None:
     luminance = [0.5] * 40
     motion = [0.1] * 40
