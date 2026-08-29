@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Sequence
 from fractions import Fraction
+from math import ceil
 
 from frame_compare.analysis.errors import SelectionError
 from frame_compare.analysis.types import (
@@ -16,7 +17,16 @@ from frame_compare.analysis.types import (
 )
 from frame_compare.config.schema import AnalysisConfig
 
-MIN_GAP: int = 5
+PREFERRED_GAP_SECONDS = Fraction(1, 2)
+
+
+def preferred_frame_gap(fps: Fraction) -> int:
+    """Return the preferred frame separation for an effective selection FPS.
+
+    The half-second target is rounded up exactly to a whole frame and clamped
+    to one frame so automatic selections always remain unique.
+    """
+    return max(1, ceil(fps * PREFERRED_GAP_SECONDS))
 
 
 def select_random_frames(
@@ -24,19 +34,38 @@ def select_random_frames(
     count: int,
     seed: int,
     exclude: set[int] | None = None,
+    *,
+    selection_fps: Fraction,
 ) -> list[int]:
-    """Select deterministic random frames across the eligible temporal domain."""
-    return _select_random(total_frames, count, seed, exclude or set(), MIN_GAP)
+    """Select deterministic random frames using the reference-domain FPS."""
+    return _select_random(
+        total_frames,
+        count,
+        seed,
+        exclude or set(),
+        preferred_frame_gap(selection_fps),
+    )
 
 
-def select_frames(metrics: FrameMetrics, config: AnalysisConfig) -> FrameSelection:
-    """Select frames from explicit user/random/dark/bright/motion requests."""
+def select_frames(
+    metrics: FrameMetrics,
+    config: AnalysisConfig,
+    *,
+    selection_fps: Fraction | None = None,
+) -> FrameSelection:
+    """Select frames from explicit and automatic requests.
+
+    ``selection_fps`` identifies the frame domain that will be rendered. When
+    omitted, the metric metadata FPS is used for direct analysis-domain calls.
+    """
 
     total_frames = metrics.eligible_frame_count
     if total_frames == 0:
         raise SelectionError(reason="empty_metrics", requested=_requested_count(config), found=0)
 
     seed = config.random_seed
+    effective_selection_fps = metrics.metadata.fps if selection_fps is None else selection_fps
+    preferred_gap = preferred_frame_gap(effective_selection_fps)
 
     selected_set: set[int] = set()
     user_frames = sorted({frame for frame in config.user_frames if 0 <= frame < total_frames})
@@ -54,6 +83,7 @@ def select_frames(metrics: FrameMetrics, config: AnalysisConfig) -> FrameSelecti
         config.dark_frame_count,
         selected_set,
         total_frames=total_frames,
+        preferred_gap=preferred_gap,
         dark_quantile=config.dark_quantile,
     )
     selected_set.update(dark)
@@ -63,6 +93,7 @@ def select_frames(metrics: FrameMetrics, config: AnalysisConfig) -> FrameSelecti
         config.bright_frame_count,
         selected_set,
         total_frames=total_frames,
+        preferred_gap=preferred_gap,
         bright_quantile=config.bright_quantile,
     )
     selected_set.update(bright)
@@ -72,7 +103,7 @@ def select_frames(metrics: FrameMetrics, config: AnalysisConfig) -> FrameSelecti
         config.motion_frame_count,
         selected_set,
         total_frames,
-        MIN_GAP,
+        preferred_gap,
     )
     selected_set.update(motion_frames)
 
@@ -81,6 +112,7 @@ def select_frames(metrics: FrameMetrics, config: AnalysisConfig) -> FrameSelecti
         config.random_frame_count,
         seed,
         selected_set,
+        selection_fps=effective_selection_fps,
     )
     selected_set.update(random_frames)
 
@@ -109,6 +141,7 @@ def select_frames(metrics: FrameMetrics, config: AnalysisConfig) -> FrameSelecti
         selection_details=_build_selection_details_by_frame(
             metrics=metrics,
             breakdown=breakdown,
+            fps=effective_selection_fps,
         ),
     )
 
@@ -135,6 +168,7 @@ def _build_selection_details_by_frame(
     *,
     metrics: FrameMetrics,
     breakdown: SelectionBreakdown,
+    fps: Fraction,
 ) -> SelectionDetailsByFrame:
     details_by_frame: SelectionDetailsByFrame = {}
     luminance_scores = {
@@ -163,7 +197,7 @@ def _build_selection_details_by_frame(
                 frame_index=frame_index,
                 label=label,
                 source="analysis",
-                timecode=_format_selection_timecode(frame_index, metrics.metadata.fps),
+                timecode=_format_selection_timecode(frame_index, fps),
                 score=score,
                 clip_role="analyze",
                 notes=category_note,
@@ -214,6 +248,7 @@ def _select_dark_frames(
     exclude: set[int],
     *,
     total_frames: int,
+    preferred_gap: int,
     dark_quantile: float,
 ) -> list[int]:
     if count <= 0:
@@ -226,7 +261,7 @@ def _select_dark_frames(
     dark_pool = [idx for idx, _ in indexed[:dark_cut] if idx not in exclude]
     if len(dark_pool) < count:
         dark_pool = [idx for idx, _ in indexed if idx not in exclude]
-    return _select_stratified(dark_pool, count, exclude, total_frames, MIN_GAP)
+    return _select_stratified(dark_pool, count, exclude, total_frames, preferred_gap)
 
 
 def _select_bright_frames(
@@ -235,6 +270,7 @@ def _select_bright_frames(
     exclude: set[int],
     *,
     total_frames: int,
+    preferred_gap: int,
     bright_quantile: float,
 ) -> list[int]:
     if count <= 0:
@@ -247,7 +283,7 @@ def _select_bright_frames(
     bright_pool = [idx for idx, _ in indexed[:bright_count] if idx not in exclude]
     if len(bright_pool) < count:
         bright_pool = [idx for idx, _ in indexed if idx not in exclude]
-    return _select_stratified(bright_pool, count, exclude, total_frames, MIN_GAP)
+    return _select_stratified(bright_pool, count, exclude, total_frames, preferred_gap)
 
 
 def _select_stratified(
@@ -255,21 +291,19 @@ def _select_stratified(
     count: int,
     exclude: set[int],
     total_frames: int,
-    min_gap: int,
+    preferred_gap: int,
 ) -> list[int]:
-    """Select ranked candidates across deterministic temporal strata."""
+    """Select ranked candidates across strata with progressive gap relaxation."""
     if count <= 0:
         return []
 
     selected: list[int] = []
 
-    def available(frame: int, *, require_gap: bool) -> bool:
+    def available(frame: int, *, required_gap: int) -> bool:
         if frame in exclude or frame in selected:
             return False
-        if not require_gap:
-            return True
-        return all(abs(frame - other) >= min_gap for other in exclude) and all(
-            abs(frame - other) >= min_gap for other in selected
+        return all(abs(frame - other) >= required_gap for other in exclude) and all(
+            abs(frame - other) >= required_gap for other in selected
         )
 
     strata: list[list[int]] = [[] for _ in range(count)]
@@ -279,17 +313,17 @@ def _select_stratified(
 
     for candidates in strata:
         candidate = next(
-            (frame for frame in candidates if available(frame, require_gap=True)),
+            (frame for frame in candidates if available(frame, required_gap=preferred_gap)),
             None,
         )
         if candidate is not None:
             selected.append(candidate)
 
-    for require_gap in (True, False):
+    for required_gap in range(preferred_gap, 0, -1):
         for frame in ranked_candidates:
             if len(selected) >= count:
                 return sorted(selected)
-            if available(frame, require_gap=require_gap):
+            if available(frame, required_gap=required_gap):
                 selected.append(frame)
 
     return sorted(selected)
@@ -300,19 +334,19 @@ def _select_by_motion(
     count: int,
     exclude: set[int],
     total_frames: int,
-    min_gap: int,
+    preferred_gap: int,
 ) -> list[int]:
     """Select temporally stratified frames ranked by descending motion."""
     candidates = [idx for idx, _ in sorted(motion, key=lambda item: (-item[1], item[0]))]
-    return _select_stratified(candidates, count, exclude, total_frames, min_gap)
+    return _select_stratified(candidates, count, exclude, total_frames, preferred_gap)
 
 
 def _select_random(
-    total_frames: int, count: int, seed: int, exclude: set[int], min_gap: int
+    total_frames: int, count: int, seed: int, exclude: set[int], preferred_gap: int
 ) -> list[int]:
     """Select temporally stratified frames via a stable seeded ordering."""
     candidates = sorted(range(total_frames), key=lambda idx: _stable_seeded_order(seed, idx))
-    return _select_stratified(candidates, count, exclude, total_frames, min_gap)
+    return _select_stratified(candidates, count, exclude, total_frames, preferred_gap)
 
 
 def _stable_seeded_order(seed: int, frame_index: int) -> bytes:

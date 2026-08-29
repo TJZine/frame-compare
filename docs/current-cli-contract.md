@@ -1026,10 +1026,14 @@ Each automatic category distributes its requested count across deterministic
 integer-coordinate temporal strata before globally backfilling. Random uses the
 configured stable seed-derived order; dark, bright, and motion retain their metric
 rankings, including sparse performance-mode source coordinates. Automatic choices
-prefer five-frame separation from all higher-precedence evidence, then relax spacing
-deterministically when enough distinct frames exist. Uniqueness and the precedence
-`User`, `Dark`, `Bright`, `Motion`, `Random` are never relaxed. Exact automatic frame
-choices may therefore differ from releases that predate temporal stratification.
+prefer a half-second separation from all higher-precedence evidence, represented by
+`ceil(selection-domain effective FPS / 2)` frames. The selection-domain FPS is the
+effective reference FPS, not necessarily the source used to calculate metric arrays.
+When that preferred gap cannot fill a category, the required gap is reduced by one frame
+at a time until one-frame uniqueness permits the requested distinct frames. Uniqueness
+and the precedence `User`, `Dark`, `Bright`, `Motion`, `Random` are never relaxed. Exact
+automatic frame choices may therefore differ from releases that predate temporal
+stratification.
 
 ## Config-Only slow.pics Surface
 

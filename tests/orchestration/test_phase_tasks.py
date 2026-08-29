@@ -142,7 +142,11 @@ def test_run_analyze_phase_records_cache_hit_and_selection_breakdown(
     assert ctx.selection_details_by_source_frame is None
     assert calls["calculate"]["video_paths"] == input_videos
     assert calls["calculate"]["cache_dir"] == ctx.workspace.cache_dir
-    assert calls["select"] == {"metrics": metrics, "config": ctx.config.analysis}
+    assert calls["select"] == {
+        "metrics": metrics,
+        "config": ctx.config.analysis,
+        "selection_fps": ctx.reference.effective_fps,
+    }
 
 
 def _metrics_for_range(*, start: int, end: int, source_frame_count: int = 100) -> FrameMetrics:
@@ -949,6 +953,7 @@ def test_run_analyze_phase_uses_analysis_clip_metrics_but_reference_frame_domain
 ) -> None:
     ctx = _context(tmp_path)
     analysis_clip = ctx.reference.with_trim(trim_start_frames=20, trim_end_frame_inclusive=80)
+    analysis_clip = replace(analysis_clip, effective_fps=Fraction(60, 1))
     ctx.reference = ctx.reference.with_trim(trim_start_frames=10, trim_end_frame_inclusive=70)
     ctx.analysis_clip = analysis_clip
     ctx.selection_window = SelectionWindow(start_frame=5, end_frame_exclusive=15)
@@ -958,7 +963,7 @@ def test_run_analyze_phase_uses_analysis_clip_metrics_but_reference_frame_domain
         motion=[float(frame) / 10.0 for frame in range(25, 35)],
         metadata=MetricsMetadata(
             frame_count=10,
-            fps=Fraction(24, 1),
+            fps=Fraction(60, 1),
             config_fingerprint="fingerprint",
             clips=[],
             source_frame_count=100,
@@ -970,7 +975,10 @@ def test_run_analyze_phase_uses_analysis_clip_metrics_but_reference_frame_domain
     def _fake_load_cached_metrics(*_args: object, **_kwargs: object) -> CacheLoadResult:
         return CacheLoadResult(success=True, metrics=metrics)
 
+    calls: dict[str, object] = {}
+
     def _fake_select_frames(**kwargs: object) -> FrameSelection:
+        calls.update(kwargs)
         received_metrics = kwargs["metrics"]
         assert received_metrics.luminance == [float(frame) for frame in range(25, 35)]
         return FrameSelection(
@@ -1002,6 +1010,7 @@ def test_run_analyze_phase_uses_analysis_clip_metrics_but_reference_frame_domain
     assert output.selected_frames == [5]
     assert output.selection_breakdown.quantile_dark == [15]
     assert set(output.selection_details_by_source_frame) == {15}
+    assert calls["selection_fps"] == ctx.reference.effective_fps
 
 
 @pytest.mark.unit
@@ -1205,6 +1214,31 @@ def test_select_initial_frame_plan_uses_effective_selection_domain(tmp_path: Pat
     assert selected_frames == []
     assert len(output.selected_frames) == 3
     assert all(0 <= frame < 10 for frame in output.selected_frames)
+
+
+def test_select_initial_frame_plan_passes_reference_fps_to_random_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _context(tmp_path)
+    captured: dict[str, object] = {}
+
+    def _fake_select_random_frames(
+        _total_frames: int,
+        _count: int,
+        _seed: int,
+        _exclude: set[int] | None = None,
+        *,
+        selection_fps: Fraction,
+    ) -> list[int]:
+        captured["selection_fps"] = selection_fps
+        return [1, 2, 3]
+
+    monkeypatch.setattr(phase_selection, "select_random_frames", _fake_select_random_frames)
+
+    output = phase_selection.select_initial_frame_plan(ctx)
+
+    assert output.selected_frames == [1, 2, 3]
+    assert captured["selection_fps"] == ctx.reference.effective_fps
 
 
 def test_select_initial_frame_plan_uses_global_selection_window(tmp_path: Path) -> None:

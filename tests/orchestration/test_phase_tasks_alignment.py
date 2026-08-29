@@ -281,6 +281,25 @@ def test_run_align_phase_labels_skipped_analysis_fallback_random_frame(
     ctx.config.analysis = ctx.config.analysis.model_copy(
         update={"user_frames": [0], "random_frame_count": 1, "random_seed": 42}
     )
+    captured: dict[str, object] = {}
+    real_select_random_frames = phase_alignment.select_random_frames
+
+    def _capture_select_random_frames(
+        total_frames: int,
+        count: int,
+        seed: int,
+        exclude: set[int] | None = None,
+        *,
+        selection_fps: Fraction,
+    ) -> list[int]:
+        captured["selection_fps"] = selection_fps
+        return real_select_random_frames(
+            total_frames,
+            count,
+            seed,
+            exclude,
+            selection_fps=selection_fps,
+        )
 
     def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
         return [
@@ -296,6 +315,11 @@ def test_run_align_phase_labels_skipped_analysis_fallback_random_frame(
         ]
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
+    monkeypatch.setattr(
+        phase_alignment,
+        "select_random_frames",
+        _capture_select_random_frames,
+    )
 
     output = phase_alignment.run_align_phase(ctx, selected_frames=[0, 66])
 
@@ -307,6 +331,7 @@ def test_run_align_phase_labels_skipped_analysis_fallback_random_frame(
     assert output.selection_details_by_source_frame is not None
     assert output.selection_details_by_source_frame[96].label == "Random"
     assert output.selection_details_by_source_frame[96].notes == "random"
+    assert captured["selection_fps"] == ctx.reference.effective_fps
     assert output.warnings == [
         "frame selection: dropped user frame(s) outside aligned renderable range: 0"
     ]

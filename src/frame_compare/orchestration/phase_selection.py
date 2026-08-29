@@ -102,6 +102,7 @@ def _select_initial_frame_plan_once(ctx: RunContext) -> FramePlanPhaseOutput:
             random_count,
             ctx.config.analysis.random_seed,
             excluded_random_indices,
+            selection_fps=ctx.reference.effective_fps,
         )
     ]
     random_source_frames = [ctx.reference.trim.trim_start_frames + frame for frame in random_frames]
@@ -402,6 +403,7 @@ def _select_frames_for_selection_domain(
             window_start=window_start,
             frame_count=frame_count,
         ),
+        selection_fps=reference.effective_fps,
     )
     return FrameSelection(
         frames=[frame + window_start for frame in selection.frames],

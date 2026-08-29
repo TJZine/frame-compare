@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from fractions import Fraction
 from pathlib import Path
 
 import structlog
@@ -588,6 +589,7 @@ def _normalize_selected_frames_for_trimmed_domain(
             selectable_length=selectable_length,
             selectable_start=selectable_start,
             reference_trim_start=reference.trim.trim_start_frames,
+            selection_fps=reference.effective_fps,
             seed=seed,
             count=generated_target_count,
             excluded_frames={
@@ -639,6 +641,7 @@ def _fallback_generated_frames_for_aligned_window(
     selectable_length: int,
     selectable_start: int,
     reference_trim_start: int,
+    selection_fps: Fraction,
     seed: int,
     count: int,
     excluded_frames: set[int],
@@ -658,6 +661,7 @@ def _fallback_generated_frames_for_aligned_window(
             count,
             seed,
             local_exclusions,
+            selection_fps=selection_fps,
         )
     ]
 
