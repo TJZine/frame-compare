@@ -36,9 +36,9 @@ Frame Compare follows Conventional Commits, and Release Please turns the
   `n8.1.2-34-g9b6c8969e0` build. Docker uses Debian FFmpeg 7.1.5 and includes
   FFMS2 5.0; Windows portable intentionally excludes FFMS2.
 - Unify screenshots, reports, run records, and reusable caches under one configured
-  generated-data root. Every run that proceeds to output reservation receives a
-  self-contained artifact folder, while shared caches remain outside individual run
-  folders for reuse and history discovery.
+  generated-data root, which may be a normal external directory. Every
+  output-producing run receives a self-contained artifact folder, while shared
+  caches remain outside individual run folders for reuse and history discovery.
 - Batch compatible FFmpeg frame requests through one ordered decode pass and render
   independent source batches concurrently while preserving deterministic output
   order, exact per-frame facts, failure behavior, and progress reporting.
@@ -48,6 +48,9 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 - Classify alignment stability and harden the existing `disabled`, `prompt`, and
   `always` previous-offset reuse policies with source/runtime identity, provenance,
   schema validation, interactive evidence, and clearer presentation.
+- Use prepared release identities for collision-safe compact live progress labels,
+  full slow.pics column labels, and constrained report controls while preserving
+  explicit labels and exact filenames on the appropriate review surfaces.
 - Improve CLI help, wizard, side-effect-free dry-run planning, chronological human
   progress output on stderr, JSON output contracts, warnings, and success summaries.
 - Improve offline viewer keyboard navigation, focus management, radio-group and
@@ -67,6 +70,10 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 - Strengthen the guarded immutable release workflow with exact version, tag, channel,
   and SHA validation; collision checks; draft and asset verification; remote digest
   checks; provenance attestations; and final publication-state verification.
+- Reorganize the user documentation into route-based onboarding and focused guides
+  for sources, analysis, alignment, HDR, reports, generated data, configuration, and
+  troubleshooting, with current screenshots for the first run, VSPreview, report
+  modes, HDR diagnostics, and Windows installation.
 
 ### Fixed
 
@@ -109,9 +116,9 @@ Frame Compare follows Conventional Commits, and Release Please turns the
   incompatible runtimes.
 - Existing v0.1.0 configurations must remove `paths.screenshots_dir`,
   `paths.use_run_folders`, and `report.output_dir` or be regenerated. Generated
-  artifacts now follow the sole configured `paths.generated_dir` layout. The former
-  top-level `[diagnostics]` section is no longer a supported config surface and is
-  ignored.
+  artifacts now follow the sole configured `paths.generated_dir` layout, which may
+  point to a normal external directory. The former top-level `[diagnostics]` section
+  is no longer a supported config surface and is ignored.
 - Analysis, probe, alignment, and source-index caches include updated runtime
   identities and may be invalidated or rebuilt.
 - Clear any shared alignment reuse cache produced by an intermediate v0.5.0 build
